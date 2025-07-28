@@ -1,0 +1,37 @@
+"""Configuration centralisée du projet"""
+import os
+from pathlib import Path
+
+# Chemins du projet
+BASE_DIR = Path(__file__).parent.parent
+DATA_DIR = BASE_DIR / "data"
+ARTISTS_DIR = DATA_DIR / "artists"
+LOGS_DIR = DATA_DIR / "logs"
+
+# Créer les dossiers s'ils n'existent pas
+ARTISTS_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Configuration API
+GENIUS_API_KEY = os.getenv("GENIUS_API_KEY")
+DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
+LAST_FM_API_KEY = os.getenv("LAST_FM_API_KEY")
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+
+# Configuration de l'application
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Configuration du scraping
+SELENIUM_TIMEOUT = 30  # Timeout en secondes
+MAX_RETRIES = 3  # Nombre de tentatives en cas d'erreur
+DELAY_BETWEEN_REQUESTS = 1  # Délai entre les requêtes (en secondes)
+
+# Configuration de la base de données
+DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"
+
+# Configuration de l'interface
+WINDOW_WIDTH = 1200
+WINDOW_HEIGHT = 800
+THEME = "dark"  # "dark" ou "light"

@@ -9,6 +9,7 @@ from src.config import WINDOW_WIDTH, WINDOW_HEIGHT, THEME
 from src.api.genius_api import GeniusAPI
 from src.scrapers.genius_scraper import GeniusScraper
 from src.utils.data_manager import DataManager
+from src.utils.data_enricher import DataEnricher
 from src.utils.logger import get_logger
 from src.models import Artist, Track
 
@@ -31,6 +32,7 @@ class MainWindow:
         # Services
         self.genius_api = GeniusAPI()
         self.data_manager = DataManager()
+        self.data_enricher = DataEnricher()
         self.current_artist: Optional[Artist] = None
         self.tracks: List[Track] = []
         
@@ -262,6 +264,7 @@ class MainWindow:
             self.get_tracks_button.configure(state="normal")
             if self.current_artist.tracks:
                 self.scrape_button.configure(state="normal")
+                self.enrich_button.configure(state="normal")
                 self.export_button.configure(state="normal")
     
     def _get_tracks(self):
@@ -518,3 +521,106 @@ class MainWindow:
     def run(self):
         """Lance l'application"""
         self.root.mainloop()
+        
+    def _start_enrichment(self):
+        """Lance lenrichissement des données depuis toutes les sources"""
+        if not self.current_artist or not self.current_artist.tracks:
+            return
+        
+        # Dialogue pour choisir les sources
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Sources d'enrichissement")
+        dialog.geometry("400x300")
+        
+        ctk.CTkLabel(dialog, text="Sélectionnez les sources à utiliser:", 
+                    font=("Arial", 14)).pack(pady=10)
+        
+        # Variables pour les checkboxes
+        sources_vars = {}
+        sources_info = {
+            'rapedia': 'Rapedia.fr (BPM prioritaire pour le rap FR)',
+            'spotify': 'Spotify (BPM, durée, popularité)',
+            'discogs': 'Discogs (crédits supplémentaires, labels)',
+            'lastfm': 'Last.fm (genres, tags)'
+        }
+        
+        available = self.data_enricher.get_available_sources()
+        
+        for source, description in sources_info.items():
+            var = ctk.BooleanVar(value=source in available)
+            sources_vars[source] = var
+            
+            frame = ctk.CTkFrame(dialog)
+            frame.pack(fill="x", padx=20, pady=5)
+            
+            checkbox = ctk.CTkCheckBox(
+                frame, 
+                text=description,
+                variable=var,
+                state="normal" if source in available else "disabled"
+            )
+            checkbox.pack(anchor="w")
+            
+            if source not in available:
+                ctk.CTkLabel(frame, text="(API non configurée)", 
+                           text_color="gray").pack(anchor="w", padx=25)
+        
+        def start_enrichment():
+            selected_sources = [s for s, var in sources_vars.items() if var.get()]
+            if not selected_sources:
+                messagebox.showwarning("Attention", "Sélectionnez au moins une source")
+                return
+            
+            dialog.destroy()
+            self._run_enrichment(selected_sources)
+        
+        ctk.CTkButton(dialog, text="Démarrer", command=start_enrichment).pack(pady=20)
+    
+    def _run_enrichment(self, sources: List[str]):
+        """Exécute l'enrichissement avec les sources sélectionnées"""
+        self.enrich_button.configure(state="disabled", text="Enrichissement...")
+        self.progress_bar.set(0)
+        
+        def update_progress(current, total, info):
+            """Callback de progression"""
+            progress = current / total
+            self.root.after(0, lambda: self.progress_var.set(progress))
+            self.root.after(0, lambda: self.progress_label.configure(text=info))
+        
+        def enrich():
+            try:
+                stats = self.data_enricher.enrich_tracks(
+                    self.current_artist.tracks,
+                    sources=sources,
+                    progress_callback=update_progress,
+                    use_threading=False  # Pour éviter les problèmes de rate limit
+                )
+                
+                # Sauvegarder les données enrichies
+                for track in self.current_artist.tracks:
+                    self.data_manager.save_track(track)
+                
+                # Préparer le message de résumé
+                summary = "Enrichissement terminé!\n\n"
+                summary += f"Morceaux traités: {stats['processed']}/{stats['total']}\n"
+                summary += f"Morceaux avec BPM: {stats['tracks_with_bpm']}\n"
+                summary += f"Durée: {stats['duration_seconds']:.1f} secondes\n\n"
+                
+                summary += "Résultats par source:\n"
+                for source, results in stats['by_source'].items():
+                    if results['success'] + results['failed'] > 0:
+                        summary += f"- {source.capitalize()}: {results['success']} réussis, {results['failed']} échoués\n"
+                
+                self.root.after(0, lambda: messagebox.showinfo("Enrichissement terminé", summary))
+                self.root.after(0, self._update_artist_info)
+                self.root.after(0, self._update_statistics)
+                
+            except Exception as e:
+                logger.error(f"Erreur lors de l'enrichissement: {e}")
+                self.root.after(0, lambda: messagebox.showerror("Erreur", f"Erreur lors de l'enrichissement: {str(e)}"))
+            finally:
+                self.root.after(0, lambda: self.enrich_button.configure(state="normal", text="Enrichir les données"))
+                self.root.after(0, lambda: self.progress_bar.set(0))
+                self.root.after(0, lambda: self.progress_label.configure(text=""))
+        
+        threading.Thread(target=enrich, daemon=True).start()

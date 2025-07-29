@@ -1,6 +1,12 @@
 """Configuration centralisée du projet"""
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement depuis .env seulement si elles n'existent pas dans Windows
+# Cela privilégie les variables Windows mais permet le fallback sur .env pour le dev
+if not os.getenv("GENIUS_API_KEY"):
+    load_dotenv()
 
 # Chemins du projet
 BASE_DIR = Path(__file__).parent.parent

@@ -38,6 +38,7 @@ class MainWindow:
         
         # Variables
         self.is_scraping = False
+        self.selected_tracks = set()  # Pour stocker les morceaux sélectionnés
         
         self._create_widgets()
         self._update_statistics()
@@ -132,13 +133,34 @@ class MainWindow:
         table_frame = ctk.CTkFrame(main_frame)
         table_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
+        # Frame pour les boutons de sélection
+        selection_frame = ctk.CTkFrame(table_frame)
+        selection_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkButton(
+            selection_frame,
+            text="Tout sélectionner",
+            command=self._select_all_tracks,
+            width=120
+        ).pack(side="left", padx=5)
+        
+        ctk.CTkButton(
+            selection_frame,
+            text="Tout désélectionner",
+            command=self._deselect_all_tracks,
+            width=120
+        ).pack(side="left", padx=5)
+        
+        self.selected_count_label = ctk.CTkLabel(selection_frame, text="")
+        self.selected_count_label.pack(side="left", padx=20)
+        
         # Créer le Treeview
         columns = ("Titre", "Album", "Crédits", "BPM", "Statut")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="tree headings", height=15)
         
-        # Définir les colonnes
-        self.tree.heading("#0", text="ID")
-        self.tree.column("#0", width=50)
+        # Ajouter une colonne pour les checkboxes
+        self.tree.heading("#0", text="✓")
+        self.tree.column("#0", width=30, stretch=False)
         
         for col in columns:
             self.tree.heading(col, text=col)
@@ -150,15 +172,17 @@ class MainWindow:
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         
         # Pack
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        
-        table_frame.grid_rowconfigure(0, weight=1)
-        table_frame.grid_columnconfigure(0, weight=1)
+        tree_container = ctk.CTkFrame(table_frame)
+        tree_container.pack(fill="both", expand=True)
+
+        self.tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        hsb.pack(side="bottom", fill="x")
         
         # Double-clic pour voir les détails
         self.tree.bind("<Double-Button-1>", self._show_track_details)
+        # Simple clic pour sélectionner/désélectionner
+        self.tree.bind("<Button-1>", self._toggle_track_selection)
         
         # === Section statistiques ===
         stats_frame = ctk.CTkFrame(main_frame)
@@ -323,10 +347,18 @@ class MainWindow:
             messagebox.showwarning("Attention", "Un scraping est déjà en cours")
             return
         
+        # Vérifier qu'il y a des morceaux sélectionnés
+        if not self.selected_tracks:
+            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
+            return
+        
+        # Filtrer les morceaux sélectionnés
+        selected_tracks_list = [self.current_artist.tracks[i] for i in sorted(self.selected_tracks)]
+        
         # Confirmation
         result = messagebox.askyesno(
             "Confirmation",
-            f"Voulez-vous scraper les crédits de {len(self.current_artist.tracks)} morceaux ?\n"
+            f"Voulez-vous scraper les crédits de {len(selected_tracks_list)} morceaux sélectionnés ?\n"
             "Cela peut prendre plusieurs minutes."
         )
         
@@ -351,12 +383,12 @@ class MainWindow:
             try:
                 with GeniusScraper(headless=True) as scraper:
                     results = scraper.scrape_multiple_tracks(
-                        self.current_artist.tracks,
+                        selected_tracks_list,
                         progress_callback=update_progress
                     )
                 
                 # Sauvegarder les données mises à jour
-                for track in self.current_artist.tracks:
+                for track in selected_tracks_list:
                     self.data_manager.save_track(track)
                 
                 # Afficher le résumé
@@ -395,6 +427,9 @@ class MainWindow:
         for item in self.tree.get_children():
             self.tree.delete(item)
         
+        # Réinitialiser les sélections
+        self.selected_tracks.clear()
+        
         # Ajouter les morceaux
         for i, track in enumerate(tracks):
             status = "✓" if track.has_complete_credits() else "⚠" if track.credits else "✗"
@@ -405,7 +440,53 @@ class MainWindow:
                 track.bpm or "-",
                 status
             )
-            self.tree.insert("", "end", text=str(i+1), values=values)
+            item = self.tree.insert("", "end", text="☐", values=values, tags=(str(i),))
+            # Sélectionner par défaut
+            self.selected_tracks.add(i)
+            self.tree.item(item, text="☑")
+        
+        self._update_selection_count()
+    
+    def _toggle_track_selection(self, event):
+        """Bascule la sélection d'un morceau"""
+        region = self.tree.identify_region(event.x, event.y)
+        if region == "tree":
+            item = self.tree.identify_row(event.y)
+            if item:
+                tags = self.tree.item(item)["tags"]
+                if tags:
+                    index = int(tags[0])
+                    if index in self.selected_tracks:
+                        self.selected_tracks.remove(index)
+                        self.tree.item(item, text="☐")
+                    else:
+                        self.selected_tracks.add(index)
+                        self.tree.item(item, text="☑")
+                    self._update_selection_count()
+    
+    def _select_all_tracks(self):
+        """Sélectionne tous les morceaux"""
+        self.selected_tracks.clear()
+        for item in self.tree.get_children():
+            tags = self.tree.item(item)["tags"]
+            if tags:
+                index = int(tags[0])
+                self.selected_tracks.add(index)
+                self.tree.item(item, text="☑")
+        self._update_selection_count()
+    
+    def _deselect_all_tracks(self):
+        """Désélectionne tous les morceaux"""
+        self.selected_tracks.clear()
+        for item in self.tree.get_children():
+            self.tree.item(item, text="☐")
+        self._update_selection_count()
+    
+    def _update_selection_count(self):
+        """Met à jour le compteur de sélection"""
+        total = len(self.current_artist.tracks) if self.current_artist else 0
+        selected = len(self.selected_tracks)
+        self.selected_count_label.configure(text=f"{selected}/{total} sélectionnés")
     
     def _update_track_in_table(self, track_name: str):
         """Met à jour une ligne spécifique du tableau"""
@@ -433,7 +514,11 @@ class MainWindow:
             return
         
         item = selection[0]
-        track_index = int(self.tree.item(item)["text"]) - 1
+        tags = self.tree.item(item)["tags"]
+        if not tags:
+            return
+            
+        track_index = int(tags[0])
         
         if 0 <= track_index < len(self.current_artist.tracks):
             track = self.current_artist.tracks[track_index]
@@ -450,8 +535,25 @@ class MainWindow:
             ctk.CTkLabel(info_frame, text=f"Titre: {track.title}", font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=2)
             ctk.CTkLabel(info_frame, text=f"Album: {track.album or 'N/A'}").pack(anchor="w", padx=5, pady=2)
             ctk.CTkLabel(info_frame, text=f"BPM: {track.bpm or 'N/A'}").pack(anchor="w", padx=5, pady=2)
+            
+            # URL Genius cliquable
             if track.genius_url:
-                ctk.CTkLabel(info_frame, text=f"URL Genius: {track.genius_url}").pack(anchor="w", padx=5, pady=2)
+                url_frame = ctk.CTkFrame(info_frame)
+                url_frame.pack(anchor="w", padx=5, pady=2)
+                
+                ctk.CTkLabel(url_frame, text="URL Genius: ").pack(side="left")
+                
+                url_label = ctk.CTkLabel(
+                    url_frame, 
+                    text=track.genius_url,
+                    text_color="blue",
+                    cursor="hand2"
+                )
+                url_label.pack(side="left")
+                
+                # Rendre le label cliquable
+                import webbrowser
+                url_label.bind("<Button-1>", lambda e: webbrowser.open(track.genius_url))
             
             # Crédits
             credits_frame = ctk.CTkFrame(details_window)
@@ -521,9 +623,9 @@ class MainWindow:
     def run(self):
         """Lance l'application"""
         self.root.mainloop()
-        
+    
     def _start_enrichment(self):
-        """Lance lenrichissement des données depuis toutes les sources"""
+        """Lance l'enrichissement des données depuis toutes les sources"""
         if not self.current_artist or not self.current_artist.tracks:
             return
         
@@ -578,6 +680,14 @@ class MainWindow:
     
     def _run_enrichment(self, sources: List[str]):
         """Exécute l'enrichissement avec les sources sélectionnées"""
+        # Vérifier qu'il y a des morceaux sélectionnés
+        if not self.selected_tracks:
+            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
+            return
+        
+        # Filtrer les morceaux sélectionnés
+        selected_tracks_list = [self.current_artist.tracks[i] for i in sorted(self.selected_tracks)]
+        
         self.enrich_button.configure(state="disabled", text="Enrichissement...")
         self.progress_bar.set(0)
         
@@ -590,14 +700,14 @@ class MainWindow:
         def enrich():
             try:
                 stats = self.data_enricher.enrich_tracks(
-                    self.current_artist.tracks,
+                    selected_tracks_list,
                     sources=sources,
                     progress_callback=update_progress,
                     use_threading=False  # Pour éviter les problèmes de rate limit
                 )
                 
                 # Sauvegarder les données enrichies
-                for track in self.current_artist.tracks:
+                for track in selected_tracks_list:
                     self.data_manager.save_track(track)
                 
                 # Préparer le message de résumé

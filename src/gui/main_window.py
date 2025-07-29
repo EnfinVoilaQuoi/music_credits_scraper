@@ -111,6 +111,15 @@ class MainWindow:
         )
         self.scrape_button.pack(side="left", padx=5)
         
+        self.enrich_button = ctk.CTkButton(
+            control_frame,
+            text="Enrichir les données",
+            command=self._start_enrichment,
+            state="disabled",
+            width=150
+        )
+        self.enrich_button.pack(side="left", padx=5)
+        
         self.export_button = ctk.CTkButton(
             control_frame,
             text="Exporter JSON",
@@ -154,9 +163,16 @@ class MainWindow:
         self.selected_count_label = ctk.CTkLabel(selection_frame, text="")
         self.selected_count_label.pack(side="left", padx=20)
         
-        # Créer le Treeview
+        # Créer le Treeview dans un conteneur approprié
+        tree_container = ctk.CTkFrame(table_frame)
+        tree_container.pack(fill="both", expand=True)
+        
+        # Frame pour le tree et la scrollbar verticale
+        tree_scroll_frame = ctk.CTkFrame(tree_container)
+        tree_scroll_frame.pack(fill="both", expand=True)
+        
         columns = ("Titre", "Album", "Crédits", "BPM", "Statut")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="tree headings", height=15)
+        self.tree = ttk.Treeview(tree_scroll_frame, columns=columns, show="tree headings", height=15)
         
         # Ajouter une colonne pour les checkboxes
         self.tree.heading("#0", text="✓")
@@ -166,18 +182,21 @@ class MainWindow:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=150)
         
-        # Scrollbars
-        vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        
-        # Pack
-        tree_container = ctk.CTkFrame(table_frame)
-        tree_container.pack(fill="both", expand=True)
-
-        self.tree.pack(side="left", fill="both", expand=True)
+        # Scrollbar verticale
+        vsb = ttk.Scrollbar(tree_scroll_frame, orient="vertical", command=self.tree.yview)
         vsb.pack(side="right", fill="y")
-        hsb.pack(side="bottom", fill="x")
+        
+        # Le Treeview
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.configure(yscrollcommand=vsb.set)
+        
+        # Scrollbar horizontale dans un frame séparé
+        hsb_frame = ctk.CTkFrame(tree_container)
+        hsb_frame.pack(fill="x")
+        
+        hsb = ttk.Scrollbar(hsb_frame, orient="horizontal", command=self.tree.xview)
+        hsb.pack(fill="x")
+        self.tree.configure(xscrollcommand=hsb.set)
         
         # Double-clic pour voir les détails
         self.tree.bind("<Double-Button-1>", self._show_track_details)
@@ -288,7 +307,8 @@ class MainWindow:
             self.get_tracks_button.configure(state="normal")
             if self.current_artist.tracks:
                 self.scrape_button.configure(state="normal")
-                self.enrich_button.configure(state="normal")
+                if hasattr(self, 'enrich_button'):
+                    self.enrich_button.configure(state="normal")
                 self.export_button.configure(state="normal")
     
     def _get_tracks(self):
@@ -380,12 +400,14 @@ class MainWindow:
             self.root.after(0, lambda: self._update_track_in_table(track_name))
         
         def scrape():
+            scraper = None
             try:
-                with GeniusScraper(headless=True) as scraper:
-                    results = scraper.scrape_multiple_tracks(
-                        selected_tracks_list,
-                        progress_callback=update_progress
-                    )
+                logger.info(f"Début du scraping de {len(selected_tracks_list)} morceaux")
+                scraper = GeniusScraper(headless=True)
+                results = scraper.scrape_multiple_tracks(
+                    selected_tracks_list,
+                    progress_callback=update_progress
+                )
                 
                 # Sauvegarder les données mises à jour
                 for track in selected_tracks_list:
@@ -404,13 +426,21 @@ class MainWindow:
                 self.root.after(0, self._update_artist_info)
                 self.root.after(0, self._update_statistics)
                 
-            except Exception as e:
-                logger.error(f"Erreur lors du scraping: {e}")
+            except Exception as err:
+                error_msg = str(err) if str(err) != "None" else "Erreur inconnue lors du scraping"
+                logger.error(f"Erreur lors du scraping: {error_msg}", exc_info=True)
                 self.root.after(0, lambda: messagebox.showerror(
                     "Erreur",
-                    f"Erreur lors du scraping: {str(e)}"
+                    f"Erreur lors du scraping: {error_msg}"
                 ))
             finally:
+                # S'assurer que le scraper est fermé
+                if scraper:
+                    try:
+                        scraper.close()
+                    except:
+                        pass
+                
                 self.is_scraping = False
                 self.root.after(0, lambda: self.scrape_button.configure(
                     state="normal",
@@ -623,7 +653,7 @@ class MainWindow:
     def run(self):
         """Lance l'application"""
         self.root.mainloop()
-    
+
     def _start_enrichment(self):
         """Lance l'enrichissement des données depuis toutes les sources"""
         if not self.current_artist or not self.current_artist.tracks:

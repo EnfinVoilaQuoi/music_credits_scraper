@@ -7,7 +7,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
@@ -34,7 +34,7 @@ class GeniusScraper:
         try:
             options = Options()
             if self.headless:
-                options.add_argument('--headless')
+                options.add_argument('--headless=new')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
@@ -45,11 +45,27 @@ class GeniusScraper:
             prefs = {"profile.managed_default_content_settings.images": 2}
             options.add_experimental_option("prefs", prefs)
             
-            service = Service(ChromeDriverManager().install())
+            # Essayer d'abord le driver local
+            from pathlib import Path
+            local_driver = Path(__file__).parent.parent.parent / "drivers" / "chromedriver.exe"
+            
+            # Chercher aussi dans un sous-dossier (pour les nouvelles versions)
+            if not local_driver.exists():
+                for path in (Path(__file__).parent.parent.parent / "drivers").rglob("chromedriver.exe"):
+                    local_driver = path
+                    break
+            
+            if local_driver.exists():
+                logger.info(f"Utilisation du ChromeDriver local: {local_driver}")
+                service = ChromeService(r"C:\Users\g78re\Documents\Python\GitHub\music_credits_scraper\drivers\chromedriver-win64\chromedriver.exe")
+            else:
+                logger.info("ChromeDriver local non trouvé, utilisation de webdriver-manager")
+                service = ChromeService(ChromeDriverManager().install())
+            
             self.driver = webdriver.Chrome(service=service, options=options)
             self.wait = WebDriverWait(self.driver, SELENIUM_TIMEOUT)
             
-            logger.info("Driver Selenium initialisé")
+            logger.info("Driver Selenium initialisé avec succès")
             
         except Exception as e:
             logger.error(f"Erreur lors de l'initialisation du driver: {e}")

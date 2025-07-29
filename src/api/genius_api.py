@@ -30,23 +30,44 @@ class GeniusAPI:
         """Recherche un artiste sur Genius"""
         try:
             logger.info(f"Recherche de l'artiste: {artist_name}")
-            genius_artist = self.genius.search_artist(
-                artist_name, 
-                max_songs=0,  # On ne veut que l'info de l'artiste
-                get_full_info=False
-            )
             
-            if genius_artist:
-                artist = Artist(
-                    name=genius_artist.name,
-                    genius_id=genius_artist.id
-                )
-                log_api("Genius", f"artist/{genius_artist.id}", True)
-                logger.info(f"Artiste trouvé: {artist.name} (ID: {artist.genius_id})")
-                return artist
-            else:
-                logger.warning(f"Artiste non trouvé: {artist_name}")
-                return None
+            # Utiliser la méthode search() qui fonctionne
+            search_response = self.genius.search(artist_name)
+            
+            if search_response and 'hits' in search_response:
+                # Chercher l'artiste dans les résultats
+                for hit in search_response['hits']:
+                    result = hit['result']
+                    primary_artist = result.get('primary_artist', {})
+                    
+                    # Vérifier si c'est le bon artiste (comparaison insensible à la casse)
+                    if primary_artist.get('name', '').lower() == artist_name.lower():
+                        artist = Artist(
+                            name=primary_artist['name'],
+                            genius_id=primary_artist['id']
+                        )
+                        log_api("Genius", f"artist/{artist.genius_id}", True)
+                        logger.info(f"Artiste trouvé: {artist.name} (ID: {artist.genius_id})")
+                        return artist
+                
+                # Si pas de correspondance exacte, prendre le premier artiste qui contient le nom
+                for hit in search_response['hits']:
+                    result = hit['result']
+                    primary_artist = result.get('primary_artist', {})
+                    artist_name_lower = artist_name.lower()
+                    
+                    if (artist_name_lower in primary_artist.get('name', '').lower() or 
+                        primary_artist.get('name', '').lower() in artist_name_lower):
+                        artist = Artist(
+                            name=primary_artist['name'],
+                            genius_id=primary_artist['id']
+                        )
+                        log_api("Genius", f"artist/{artist.genius_id}", True)
+                        logger.info(f"Artiste trouvé (correspondance partielle): {artist.name} (ID: {artist.genius_id})")
+                        return artist
+            
+            logger.warning(f"Artiste non trouvé: {artist_name}")
+            return None
                 
         except Exception as e:
             logger.error(f"Erreur lors de la recherche d'artiste: {e}")
@@ -60,47 +81,58 @@ class GeniusAPI:
         try:
             logger.info(f"Récupération des morceaux de {artist.name}")
             
-            # Rechercher l'artiste avec ses morceaux
-            genius_artist = self.genius.search_artist(
-                artist.name,
-                max_songs=max_songs,
-                sort="popularity",
-                get_full_info=False
-            )
-            
-            if not genius_artist:
-                logger.error(f"Impossible de récupérer les morceaux de {artist.name}")
+            if not artist.genius_id:
+                logger.error(f"Pas d'ID Genius pour {artist.name}")
                 return tracks
             
-            # Mettre à jour l'ID Genius si nécessaire
-            if not artist.genius_id:
-                artist.genius_id = genius_artist.id
+            # Utiliser l'API directement pour récupérer les chansons
+            page = 1
+            per_page = 50  # Maximum par page
             
-            # Parcourir les morceaux
-            for genius_song in genius_artist.songs:
-                try:
+            while len(tracks) < max_songs:
+                # Récupérer les chansons de l'artiste page par page
+                response = self.genius.artist_songs(
+                    artist.genius_id, 
+                    sort='popularity', 
+                    per_page=per_page,
+                    page=page
+                )
+                
+                if not response or 'songs' not in response:
+                    break
+                
+                songs = response['songs']
+                if not songs:
+                    break
+                
+                for song in songs:
                     # Vérifier que c'est bien une chanson de l'artiste principal
-                    if genius_song.artist.lower() != artist.name.lower():
+                    if song['primary_artist']['id'] != artist.genius_id:
                         continue
                     
                     track = Track(
-                        title=genius_song.title,
+                        title=song.get('title', ''),
                         artist=artist,
-                        genius_id=genius_song.id,
-                        genius_url=genius_song.url,
-                        album=genius_song.album,
-                        release_date=genius_song.release_date_for_display
+                        genius_id=song.get('id'),
+                        genius_url=song.get('url'),
+                        release_date=song.get('release_date_for_display')
                     )
                     
                     tracks.append(track)
                     logger.debug(f"Morceau ajouté: {track.title}")
                     
+                    if len(tracks) >= max_songs:
+                        break
+                    
                     # Respecter le rate limit
                     time.sleep(DELAY_BETWEEN_REQUESTS)
-                    
-                except Exception as e:
-                    logger.error(f"Erreur sur le morceau {genius_song.title}: {e}")
-                    continue
+                
+                # Passer à la page suivante
+                page += 1
+                
+                # S'il y a moins de chansons que per_page, on a atteint la fin
+                if len(songs) < per_page:
+                    break
             
             logger.info(f"{len(tracks)} morceaux récupérés pour {artist.name}")
             log_api("Genius", f"artist/{artist.genius_id}/songs", True)

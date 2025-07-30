@@ -126,16 +126,39 @@ class Credit:
             'source': self.source
         }
     
+    @staticmethod
     def from_role_and_names(role: str, names: List[str]) -> List["Credit"]:
-        """Crée une liste de crédits à partir d’un rôle (texte) et de noms"""
+        """Crée une liste de crédits à partir d'un rôle (texte) et de noms"""
         credits = []
+        
+        # Mapper le rôle texte vers l'enum
         try:
-            credit_role = CreditRole(role)
-        except ValueError:
+            # Essayer de trouver le rôle exact
+            credit_role = None
+            for role_enum in CreditRole:
+                if role_enum.value.lower() == role.lower():
+                    credit_role = role_enum
+                    break
+            
+            if not credit_role:
+                # Si pas trouvé, utiliser OTHER
+                credit_role = CreditRole.OTHER
+                
+        except (ValueError, AttributeError):
             credit_role = CreditRole.OTHER
 
+        # Créer un crédit pour chaque nom
         for name in names:
-            credits.append(Credit(name=name, role=credit_role))
+            name = name.strip()
+            if name:  # S'assurer que le nom n'est pas vide
+                credit = Credit(
+                    name=name,
+                    role=credit_role,
+                    role_detail=role if credit_role == CreditRole.OTHER else None,
+                    source="genius"
+                )
+                credits.append(credit)
+        
         return credits
 
 

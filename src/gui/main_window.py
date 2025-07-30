@@ -339,7 +339,6 @@ class MainWindow:
                 if tracks:
                     # Sauvegarder dans la base
                     for track in tracks:
-                        print(f"[DEBUG] Crédit 0 type = {type(track.credits[0])}")  # ou logger.debug(...)
                         self.data_manager.save_track(track)
                     
                     self.current_artist.tracks = tracks
@@ -425,7 +424,6 @@ class MainWindow:
                 # Sauvegarder les données mises à jour
                 for track in selected_tracks_list:
                     track.artist = self.current_artist
-                    print(f"[DEBUG] Crédit 0 type = {type(track.credits[0])}")  # ou logger.debug(...)
                     self.data_manager.save_track(track)
                 
                 # Afficher le résumé
@@ -753,7 +751,6 @@ class MainWindow:
                 
                 # Sauvegarder les données enrichies
                 for track in selected_tracks_list:
-                    print(f"[DEBUG] Crédit 0 type = {type(track.credits[0])}")  # ou logger.debug(...)
                     self.data_manager.save_track(track)
                 
                 # Préparer le message de résumé

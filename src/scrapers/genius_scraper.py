@@ -115,15 +115,18 @@ class GeniusScraper:
             logger.info(f"Scraping des crédits pour: {track.title}")
             self.driver.get(track.genius_url)
 
+            # Initialiser les variables pour les métadonnées
+            self._current_release_date = None
+            self._current_album = None
+            self._current_genre = None
+
             # Log l'URL effective
             logger.debug(f"URL visitée : {self.driver.current_url}")
 
-            # Attendre la banniere de cookies
+            # Gestion des cookies
             WebDriverWait(self.driver, 5).until(
                 EC.presence_of_element_located((By.ID, "onetrust-banner-sdk"))
             )
-
-            # Accepter les cookies
             try:
                 accept_btn = WebDriverWait(self.driver, 5).until(
                     EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
@@ -134,29 +137,70 @@ class GeniusScraper:
             except TimeoutException:
                 logger.debug("⚠️ Pas de bannière cookies")
 
-            # Trouver l'élément "Credits"
-            credits_header = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((
-                    By.XPATH, "//div[contains(@class, 'SongInfo__Title') and text()='Credits']"
-                ))
+            # Aller a "Credits"
+            credits_header = WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'SongInfo__Title') and text()='Credits']"))
             )
+            if not credits_header:
+                logger.error("❌ Aucun header Credits trouvé")
+                return credits
             self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", credits_header)
+            time.sleep(2)
 
-            time.sleep(1)
-
-            # Cliquer sur le bouton Expand
+            # Bouton "Expand"
             expand_button = self._find_expand_button()
             if expand_button:
+                # Scroller vers le bouton pour s'assurer qu'il est visible
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", expand_button)
+                time.sleep(1)
+            
+                # Cliquer sur le bouton
                 self.driver.execute_script("arguments[0].click();", expand_button)
-                WebDriverWait(self.driver, 10).until(
-                    EC.visibility_of_element_located((By.CSS_SELECTOR, ".credits-expanded"))
-                )
                 logger.debug("✅ Bouton Expand cliqué")
+            
+                # Attendre que le contenu étendu soit visible
+                try:
+                    WebDriverWait(self.driver, 10).until(
+                        lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "div[class*='SongInfo__Credit']")) > 0
+                    )
+                    time.sleep(2)
+                    logger.debug("Bouton Expand cliqué")
+                except TimeoutException:
+                    logger.warning("Timeout en attendant le contenu étendu")
             else:
-                logger.debug("⚠️ Aucun bouton Expand trouvé")
+                logger.debug("Aucun bouton Expand trouvé")
 
             # Extraire les crédits
             credits = self._extract_credits()
+
+            # Mettre à jour les métadonnées si elles ont été capturées
+            if hasattr(self, '_current_release_date') and self._current_release_date:
+                if not track.release_date:  # Ne pas écraser si déjà définie
+                    track.release_date = self._current_release_date
+                    logger.debug(f"📅 Date de sortie ajoutée au track: {self._current_release_date.strftime('%Y-%m-%d')}")
+        
+            if hasattr(self, '_current_album') and self._current_album:
+                if not track.album:  # Ne pas écraser si déjà défini
+                    track.album = self._current_album
+                    logger.debug(f"💿 Album ajouté au track: {self._current_album}")
+        
+            if hasattr(self, '_current_genre') and self._current_genre:
+                if not track.genre:  # Ne pas écraser si déjà défini
+                    track.genre = self._current_genre
+                    logger.debug(f"🎵 Genre ajouté au track: {self._current_genre}")
+
+            # Debug : afficher le HTML de la zone des crédits
+            if not credits:
+                logger.debug("Aucun crédit extrait, analyse du HTML...")
+                try:
+                    soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                    credits_areas = soup.find_all('div', class_=lambda x: x and 'SongInfo' in x)
+                    logger.debug(f"Trouvé {len(credits_areas)} zones SongInfo")
+                
+                    for i, area in enumerate(credits_areas[:3]):  # Limiter à 3 pour ne pas spammer
+                        logger.debug(f"Zone {i}: {area.get_text()[:200]}...")
+                except Exception as e:
+                    logger.debug(f"Erreur lors de l'analyse debug: {e}")
 
             # Mettre à jour le track
             track.last_scraped = datetime.now()
@@ -183,32 +227,124 @@ class GeniusScraper:
         return credits
     
     def _find_expand_button(self) -> Optional[Any]:
-        """Trouve le bouton pour afficher tous les crédits"""
-        button_selectors = [
-            "//button[contains(text(), 'Expand')]",
-            "//button[contains(text(), 'Show all credits')]",
-            "//button[contains(@class, 'ExpandableContent__Button')]",
-            "//div[@class='SongInfo__Columns']//button",
-            "//button[contains(text(), 'Show Credits')]"
-        ]
-        
-        for selector in button_selectors:
-            try:
-                button = self.driver.find_element(By.XPATH, selector)
-                if button and button.is_displayed():
-                    return button
-            except NoSuchElementException:
-                continue
-        
-        logger.debug("Bouton Expand non trouvé")
-        return None
+        """Trouve le bouton Expand spécifiquement dans la section Credits"""
     
+        # Stratégie 1: Chercher le bouton Expand dans le conteneur Credits spécifique
+        credits_expand_selectors = [
+            # Sélecteur très spécifique basé sur la structure complète
+            "div.About__Container-sc-6e5dc9c5-1 div.ExpandableContent__ButtonContainer-sc-8775ac96-3 button",
+
+            # Alternatifs avec classes partielles
+            "div[class*='About__Container'] div[class*='ExpandableContent__ButtonContainer'] button",
+            "div[class*='ExpandableContent__Container'] div[class*='ExpandableContent__ButtonContainer'] button",
+
+            # XPath pour chercher après avoir trouvé "Credits"
+            "//div[contains(@class, 'SongInfo__Title') and text()='Credits']/ancestor::div[contains(@class, 'ExpandableContent')]//button",
+            "//div[text()='Credits']/following-sibling::*//button[contains(@class, 'ExpandableContent')]",
+            "//div[text()='Credits']/ancestor::*[contains(@class, 'ExpandableContent')]//button",
+
+            # Chercher dans le conteneur qui contient "Credits"
+            "//div[.//div[text()='Credits']]//button[contains(@class, 'ExpandableContent')]",
+            "//div[.//div[text()='Credits']]//div[contains(@class, 'ButtonContainer')]//button",
+        ]
+
+        for i, selector in enumerate(credits_expand_selectors):
+            try:
+                if selector.startswith("//"):
+                    # XPath selector
+                    buttons = self.driver.find_elements(By.XPATH, selector)
+                else:
+                    # CSS selector
+                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+
+                logger.debug(f"Sélecteur Credits {i+1} ({selector}): {len(buttons)} boutons trouvés")
+
+                for button in buttons:
+                    try:
+                        if button.is_displayed() and button.is_enabled():
+                            button_text = button.text.strip()
+                            logger.debug(f"Bouton Credits trouvé: '{button_text}'")
+
+                            # Vérifier que le bouton est dans la bonne zone (près de Credits)
+                            if self._is_button_near_credits(button):
+                                logger.debug(f"✅ Bouton Expand Credits sélectionné: '{button_text}'")
+                                return button
+                            else:
+                                logger.debug(f"⚠️ Bouton ignoré (pas près de Credits): '{button_text}'")
+
+                    except Exception as e:
+                        logger.debug(f"Erreur lors de la vérification du bouton Credits: {e}")
+                        continue
+
+            except Exception as e:
+                logger.debug(f"Erreur avec sélecteur Credits {i+1}: {e}")
+                continue
+    
+        # Stratégie 2: Si pas trouvé, chercher tous les boutons Expand et prendre le 2ème
+        logger.debug("Recherche du 2ème bouton Expand (fallback)")
+        try:
+            all_expand_buttons = self.driver.find_elements(
+                By.XPATH, 
+                "//button[contains(@class, 'ExpandableContent') or contains(text(), 'Expand')]"
+            )
+
+            logger.debug(f"Trouvé {len(all_expand_buttons)} boutons Expand au total")
+
+            if len(all_expand_buttons) >= 2:
+                second_button = all_expand_buttons[1]  # Index 1 = 2ème bouton
+                if second_button.is_displayed() and second_button.is_enabled():
+                    logger.debug("✅ Utilisation du 2ème bouton Expand trouvé")
+                    return second_button
+
+        except Exception as e:
+            logger.debug(f"Erreur lors de la recherche du 2ème bouton: {e}")
+
+        logger.debug("❌ Aucun bouton Expand Credits trouvé")
+        return None
+
+    def _is_button_near_credits(self, button) -> bool:
+        """Vérifie si un bouton est proche de la section Credits"""
+        try:
+            # Chercher si le bouton est dans un conteneur qui contient "Credits"
+            parent = button.find_element(By.XPATH, "./ancestor-or-self::*[contains(., 'Credits')]")
+            if parent:
+                parent_text = parent.text
+                # Vérifier que c'est bien la section Credits et pas juste un mot "credits" ailleurs
+                if 'Credits' in parent_text and ('Producer' in parent_text or 'Writer' in parent_text or 'Label' in parent_text):
+                    logger.debug("Bouton trouvé dans la section Credits")
+                    return True
+        except:
+            pass
+            
+        try:
+            # Alternative: vérifier la position relative par rapport au header Credits
+            credits_header = self.driver.find_element(
+                By.XPATH, 
+                "//div[contains(@class, 'SongInfo__Title') and text()='Credits']"
+            )
+
+            # Calculer les positions
+            button_location = button.location['y']
+            credits_location = credits_header.location['y']
+
+            # Le bouton doit être après le header Credits (position Y plus grande)
+            # et pas trop loin (maximum 500px de différence)
+            if credits_location < button_location < credits_location + 500:
+                logger.debug(f"Bouton positionné après Credits (Credits: {credits_location}, Bouton: {button_location})")
+                return True
+
+        except Exception as e:
+            logger.debug(f"Erreur lors de la vérification de position: {e}")
+
+        return False
+        
     def _extract_credits(self) -> List[Credit]:
         """Extrait les crédits de la page"""
         credits = []
         
         try:
             # Attendre que les crédits soient visibles
+            time.sleep(1)
             self.wait.until(
                 EC.presence_of_element_located((By.CLASS_NAME, "SongInfo__Credit"))
             )
@@ -216,21 +352,41 @@ class GeniusScraper:
             # Obtenir le HTML de la page
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             
-            # Méthode 1: Chercher les éléments de crédit
-            credit_elements = soup.find_all(class_=re.compile(r'Credit|credit'))
+            # 1. MÉTHODE PRINCIPALE : Structure HTML exacte de Genius
+            # Chercher le conteneur principal des crédits
+            credits_container = soup.find('div', class_='SongInfo__Columns-sc-4162678b-2')
             
-            for element in credit_elements:
-                credit = self._parse_credit_element(element)
-                if credit:
-                    credits.append(credit)
-            
-            # Méthode 2: Chercher dans les sections spécifiques
-            sections = soup.find_all(['div', 'section'], class_=re.compile(r'SongInfo|song-info'))
-            
-            for section in sections:
-                # Chercher les patterns de crédits
-                credits.extend(self._extract_credits_from_section(section))
-            
+            if not credits_container:
+                # Fallback avec classes partielles
+                credits_container = soup.find('div', class_=lambda x: x and 'SongInfo__Columns' in x)
+
+            if credits_container:
+                logger.debug("✅ Conteneur de crédits trouvé")
+                credits.extend(self._extract_from_genius_structure(credits_container))
+            else:
+                logger.warning("❌ Conteneur de crédits non trouvé")
+
+            # 2. MÉTHODE ALTERNATIVE : Si pas de conteneur, chercher les crédits individuels
+            if not credits:
+                logger.debug("Recherche des crédits individuels...")
+                credit_elements = soup.find_all('div', class_=lambda x: x and 'SongInfo__Credit' in x)
+
+                if credit_elements:
+                    logger.debug(f"Trouvé {len(credit_elements)} éléments de crédit individuels")
+                    for element in credit_elements:
+                        credit = self._parse_genius_credit_element(element)
+                        if credit:
+                            credits.append(credit)
+        
+            # Dédoublonner les crédits
+            credits = self._deduplicate_credits(credits)
+        
+            logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
+        
+            # Debug si aucun crédit trouvé
+            if not credits:
+                self._debug_no_credits_found(soup)
+
         except TimeoutException:
             logger.warning("Timeout en attendant les crédits")
         except Exception as e:
@@ -238,321 +394,342 @@ class GeniusScraper:
         
         return credits
     
-    def _parse_credit_element(self, element) -> Optional[Credit]:
-        """Parse un élément de crédit"""
-        try:
-            text = element.get_text(strip=True)
-            
-            # Patterns pour identifier les rôles (mis à jour avec tous les rôles Genius)
-            role_patterns = {
-                # Rôles d'écriture
-                CreditRole.WRITER: [r'Written by', r'Writer'],
-                CreditRole.COMPOSER: [r'Composed by', r'Composer'],
-                CreditRole.LYRICIST: [r'Lyrics by', r'Lyricist'],
-                CreditRole.TRANSLATOR: [r'Translated by', r'Translator'],
-                
-                # Rôles de production musicale
-                CreditRole.PRODUCER: [r'Produced by', r'Producer(?!.*(?:Co-|Executive|Vocal))'],
-                CreditRole.CO_PRODUCER: [r'Co-Produced by', r'Co-Producer'],
-                CreditRole.EXECUTIVE_PRODUCER: [r'Executive Producer'],
-                CreditRole.VOCAL_PRODUCER: [r'Vocal Producer', r'Vocal Production'],
-                CreditRole.ADDITIONAL_PRODUCTION: [r'Additional Production'],
-                CreditRole.PROGRAMMER: [r'Programming(?!.*Drum)', r'Programmer(?!.*Drum)'],
-                CreditRole.DRUM_PROGRAMMER: [r'Drum Programming', r'Drum Programmer'],
-                CreditRole.ARRANGER: [r'Arranged by', r'Arranger', r'Arrangement'],
-                
-                # Rôles studio
-                CreditRole.MIXING_ENGINEER: [r'Mixed by', r'Mixing Engineer(?!.*Assistant)'],
-                CreditRole.MASTERING_ENGINEER: [r'Mastered by', r'Mastering Engineer(?!.*Assistant)'],
-                CreditRole.RECORDING_ENGINEER: [r'Recorded by', r'Recording Engineer(?!.*Assistant)'],
-                CreditRole.ENGINEER: [r'Engineered by', r'Engineer(?!.*(?:Mixing|Mastering|Recording|Assistant))'],
-                CreditRole.ASSISTANT_MIXING_ENGINEER: [r'Assistant Mixing Engineer'],
-                CreditRole.ASSISTANT_MASTERING_ENGINEER: [r'Assistant Mastering Engineer'],
-                CreditRole.ASSISTANT_RECORDING_ENGINEER: [r'Assistant Recording Engineer'],
-                CreditRole.ASSISTANT_ENGINEER: [r'Assistant Engineer'],
-                CreditRole.STUDIO_PERSONNEL: [r'Studio Personnel'],
-                CreditRole.ADDITIONAL_MIXING: [r'Additional Mixing'],
-                CreditRole.ADDITIONAL_MASTERING: [r'Additional Mastering'],
-                CreditRole.ADDITIONAL_RECORDING: [r'Additional Recording'],
-                CreditRole.ADDITIONAL_ENGINEERING: [r'Additional Engineering'],
-                CreditRole.PREPARER: [r'Prepared by', r'Preparer'],
-                
-                # Rôles liés au chant
-                CreditRole.VOCALS: [r'Vocals(?!.*(?:Lead|Background|Additional))'],
-                CreditRole.LEAD_VOCALS: [r'Lead Vocals'],
-                CreditRole.BACKGROUND_VOCALS: [r'Background Vocals', r'Backing Vocals'],
-                CreditRole.ADDITIONAL_VOCALS: [r'Additional Vocals'],
-                CreditRole.CHOIR: [r'Choir', r'Chorus'],
-                CreditRole.AD_LIBS: [r'Ad-Libs', r'Ad Libs'],
-                
-                # Label / Édition
-                CreditRole.LABEL: [r'Label(?!.*Publisher)'],
-                CreditRole.PUBLISHER: [r'Publisher', r'Publishing'],
-                CreditRole.DISTRIBUTOR: [r'Distributed by', r'Distributor'],
-                CreditRole.COPYRIGHT: [r'Copyright ©', r'© '],
-                CreditRole.PHONOGRAPHIC_COPYRIGHT: [r'Phonographic Copyright ℗', r'℗ '],
-                CreditRole.MANUFACTURER: [r'Manufactured by', r'Manufacturer'],
-                
-                # Instruments
-                CreditRole.GUITAR: [r'Guitar(?!.*(?:Bass|Acoustic|Electric|Rhythm))'],
-                CreditRole.BASS_GUITAR: [r'Bass Guitar'],
-                CreditRole.ACOUSTIC_GUITAR: [r'Acoustic Guitar'],
-                CreditRole.ELECTRIC_GUITAR: [r'Electric Guitar'],
-                CreditRole.RHYTHM_GUITAR: [r'Rhythm Guitar'],
-                CreditRole.CELLO: [r'Cello'],
-                CreditRole.DRUMS: [r'Drums'],
-                CreditRole.BASS: [r'Bass(?!.*Guitar)'],
-                CreditRole.KEYBOARD: [r'Keyboard', r'Keyboards'],
-                CreditRole.PERCUSSION: [r'Percussion'],
-                CreditRole.PIANO: [r'Piano'],
-                CreditRole.VIOLIN: [r'Violin'],
-                CreditRole.ORGAN: [r'Organ'],
-                CreditRole.SYNTHESIZER: [r'Synthesizer', r'Synth'],
-                CreditRole.STRINGS: [r'Strings'],
-                CreditRole.TRUMPET: [r'Trumpet'],
-                CreditRole.VIOLA: [r'Viola'],
-                CreditRole.SAXOPHONE: [r'Saxophone', r'Sax'],
-                CreditRole.TROMBONE: [r'Trombone'],
-                CreditRole.SCRATCHES: [r'Scratches', r'Turntables'],
-                CreditRole.INSTRUMENTATION: [r'Instrumentation'],
-                
-                # Lieux
-                CreditRole.RECORDED_AT: [r'Recorded at'],
-                CreditRole.MASTERED_AT: [r'Mastered at'],
-                CreditRole.MIXED_AT: [r'Mixed at'],
-                
-                # Jaquette
-                CreditRole.ARTWORK: [r'Artwork(?!.*Direction)'],
-                CreditRole.ART_DIRECTION: [r'Art Direction'],
-                CreditRole.GRAPHIC_DESIGN: [r'Graphic Design'],
-                CreditRole.ILLUSTRATION: [r'Illustration'],
-                CreditRole.LAYOUT: [r'Layout'],
-                CreditRole.PHOTOGRAPHY: [r'Photography', r'Photo'],
-                
-                # Vidéo
-                CreditRole.VIDEO_DIRECTOR: [r'Video Director'],
-                CreditRole.VIDEO_PRODUCER: [r'Video Producer'],
-                CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY: [r'Video Director of Photography', r'Video DOP'],
-                CreditRole.VIDEO_CINEMATOGRAPHER: [r'Video Cinematographer'],
-                CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN: [r'Video Digital Imaging Technician', r'Video DIT'],
-                CreditRole.VIDEO_CAMERA_OPERATOR: [r'Video Camera Operator'],
-                
-                # Album
-                CreditRole.A_AND_R: [r'A&R', r'A & R'],
-                
-                # Autres
-                CreditRole.FEATURED: [r'Featuring', r'feat\.', r'ft\.'],
-                CreditRole.SAMPLE: [r'Contains sample', r'Samples', r'Sample from'],
-                CreditRole.INTERPOLATION: [r'Interpolation', r'Interpolates', r'Based on']
-            }
-            
-            # Identifier le rôle
-            for role, patterns in role_patterns.items():
-                for pattern in patterns:
-                    if re.search(pattern, text, re.IGNORECASE):
-                        # Extraire le nom
-                        name = self._extract_name_from_credit(text, pattern)
-                        if name:
-                            # Extraire le détail du rôle si applicable
-                            role_detail = None
-                            if role == CreditRole.MUSICIAN:
-                                # Extraire l'instrument
-                                role_detail = self._extract_instrument(text)
-                            
-                            return Credit(
-                                name=name,
-                                role=role,
-                                role_detail=role_detail,
-                                source="genius"
-                            )
-            
-        except Exception as e:
-            logger.debug(f"Erreur lors du parsing d'un crédit: {e}")
-        
-        return None
-    
-    def _extract_credits_from_section(self, section) -> List[Credit]:
-        """Extrait les crédits d'une section de la page"""
+    def _extract_from_genius_structure(self, container) -> List[Credit]:
+        """Extrait les crédits depuis le conteneur Genius avec la structure HTML réelle"""
         credits = []
-        
+    
         try:
-            # Chercher les listes de crédits
-            credit_lists = section.find_all(['ul', 'div'], class_=re.compile(r'credit|Credit'))
-            
-            for credit_list in credit_lists:
-                items = credit_list.find_all(['li', 'div', 'span'])
-                
-                current_role = None
-                for item in items:
-                    text = item.get_text(strip=True)
-                    
-                    # Vérifier si c'est un titre de rôle
-                    role = self._identify_role_from_text(text)
-                    if role:
-                        current_role = role
-                    elif current_role and text:
-                        # C'est un nom sous le rôle actuel
-                        credit = Credit(
-                            name=text,
-                            role=current_role,
-                            source="genius"
-                        )
-                        credits.append(credit)
-            
-        except Exception as e:
-            logger.debug(f"Erreur lors de l'extraction d'une section: {e}")
+            # Chercher tous les éléments de crédit dans le conteneur
+            credit_elements = container.find_all('div', class_=lambda x: x and 'SongInfo__Credit' in x)
         
+            logger.debug(f"Trouvé {len(credit_elements)} éléments de crédit dans le conteneur")
+        
+            for element in credit_elements:
+                credit = self._parse_genius_credit_element(element)
+                if credit:
+                    credits.append(credit)
+                    logger.debug(f"Crédit ajouté: {credit.name} - {credit.role.value}")
+    
+        except Exception as e:
+            logger.error(f"Erreur dans _extract_from_genius_structure: {e}")
+    
         return credits
-    
-    def _extract_name_from_credit(self, text: str, pattern: str) -> Optional[str]:
-        """Extrait le nom depuis un texte de crédit"""
+
+    def _parse_genius_credit_element(self, element) -> Optional[Credit]:
+        """Parse un élément de crédit selon la structure HTML de Genius"""
         try:
-            # Retirer le pattern du texte
-            name = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
-            # Retirer les caractères indésirables
-            name = name.strip(':,')
-            return name if name else None
-        except:
-            return None
+            # Chercher le label (rôle)
+            label_element = element.find('div', class_=lambda x: x and 'SongInfo__Label' in x)
+            if not label_element:
+                return None
+        
+            role_text = label_element.get_text(strip=True)
+        
+            # Chercher le contenu (nom/valeur)
+            # Le contenu est dans le div suivant le label
+            content_divs = element.find_all('div')
+            content_element = None
+        
+            # Trouver le div qui contient le contenu (pas le label)
+            for div in content_divs:
+                if div != label_element:
+                    div_text = div.get_text(strip=True)
+                    if div_text and div_text != role_text:  # S'assurer que ce n'est pas le label
+                        content_element = div
+                        break
+        
+            if not content_element:
+                logger.debug(f"Pas de contenu trouvé pour le rôle: {role_text}")
+                return None
+        
+            # Extraire le nom/valeur
+            content_text = content_element.get_text(strip=True)
+        
+            # Nettoyer le contenu (enlever &amp; etc.)
+            content_text = content_text.replace('&amp;', '&').replace('&', ',')
+        
+            logger.debug(f"Parsing crédit: {role_text} = {content_text}")
+        
+            # Traiter les cas spéciaux (métadonnées utiles)
+            if role_text.lower() == 'released on':
+                # Capturer la date de sortie et l'ajouter au track si possible
+                self._handle_release_date(content_text)
+                return None  # Ne pas créer de crédit pour la date
+
+            if role_text.lower() == 'album':
+                # Capturer l'info d'album si disponible
+                self._handle_album_info(content_text)
+                return None
+
+            if role_text.lower() == 'genre':
+                # Capturer l'info de genre si disponible
+                self._handle_genre_info(content_text)
+                return None
+
+            # Mapper le rôle Genius vers notre enum
+            role = self._map_genius_role_to_enum(role_text)
+            
+            if not role:
+                logger.debug(f"Rôle non mappé: {role_text}")
+                # Créer un crédit avec rôle OTHER pour ne pas perdre l'info
+                role = CreditRole.OTHER
+
+            # Extraire les noms (peut y en avoir plusieurs séparés par &, virgules, etc.)
+            names = self._extract_names_from_genius_content(content_text)
+        
+            # Créer des crédits pour tous les noms trouvés
+            created_credits = []
+            for name in names:
+                if name:  # S'assurer que le nom n'est pas vide
+                    credit = Credit(
+                        name=name,
+                        role=role,
+                        role_detail=role_text if role == CreditRole.OTHER else None,
+                        source="genius"
+                    )
+                    created_credits.append(credit)
+                    logger.debug(f"Crédit créé: {name} - {role.value}")
+
+            # Retourner le premier crédit (les autres seront traités dans la boucle principale)
+            return created_credits[0] if created_credits else None
     
-    def _extract_instrument(self, text: str) -> Optional[str]:
-        """Extrait l'instrument joué"""
-        instruments = [
-            'Guitar', 'Bass Guitar', 'Acoustic Guitar', 'Electric Guitar', 'Rhythm Guitar',
-            'Cello', 'Drums', 'Bass', 'Keyboard', 'Keyboards', 'Percussion',
-            'Piano', 'Violin', 'Organ', 'Synthesizer', 'Synth', 'Strings',
-            'Trumpet', 'Viola', 'Saxophone', 'Sax', 'Trombone', 'Scratches',
-            'Turntables', 'Flute', 'Clarinet', 'Harmonica', 'Accordion',
-            'Banjo', 'Mandolin', 'Ukulele', 'Harp'
-        ]
-        
-        text_lower = text.lower()
-        for instrument in instruments:
-            if instrument.lower() in text_lower:
-                return instrument
-        
-        return None
-    
-    def _identify_role_from_text(self, text: str) -> Optional[CreditRole]:
-        """Identifie un rôle à partir d'un texte"""
-        role_keywords = {
-            # Écriture
-            CreditRole.WRITER: ['writer', 'written', 'wrote'],
-            CreditRole.COMPOSER: ['composer', 'composed'],
-            CreditRole.LYRICIST: ['lyricist', 'lyrics'],
-            CreditRole.TRANSLATOR: ['translator', 'translated'],
-            
-            # Production
-            CreditRole.PRODUCER: ['producer', 'produced', 'production'],
-            CreditRole.CO_PRODUCER: ['co-producer', 'co-produced'],
-            CreditRole.EXECUTIVE_PRODUCER: ['executive producer'],
-            CreditRole.VOCAL_PRODUCER: ['vocal producer', 'vocal production'],
-            CreditRole.ADDITIONAL_PRODUCTION: ['additional production'],
-            CreditRole.PROGRAMMER: ['programmer', 'programming'],
-            CreditRole.DRUM_PROGRAMMER: ['drum programmer', 'drum programming'],
-            CreditRole.ARRANGER: ['arranger', 'arranged', 'arrangement'],
-            
-            # Studio
-            CreditRole.MIXING_ENGINEER: ['mixing engineer', 'mixed by', 'mixing'],
-            CreditRole.MASTERING_ENGINEER: ['mastering engineer', 'mastered by', 'mastering'],
-            CreditRole.RECORDING_ENGINEER: ['recording engineer', 'recorded by', 'recording'],
-            CreditRole.ENGINEER: ['engineer', 'engineered'],
-            
-            # Chant
-            CreditRole.VOCALS: ['vocals', 'vocal'],
-            CreditRole.LEAD_VOCALS: ['lead vocals', 'lead vocal'],
-            CreditRole.BACKGROUND_VOCALS: ['background vocals', 'backing vocals'],
-            CreditRole.ADDITIONAL_VOCALS: ['additional vocals'],
-            CreditRole.CHOIR: ['choir', 'chorus'],
-            CreditRole.AD_LIBS: ['ad-libs', 'ad libs'],
-            
-            # Instruments
-            CreditRole.GUITAR: ['guitar'],
-            CreditRole.BASS_GUITAR: ['bass guitar'],
-            CreditRole.DRUMS: ['drums', 'drummer'],
-            CreditRole.PIANO: ['piano', 'pianist'],
-            CreditRole.KEYBOARD: ['keyboard', 'keyboards'],
-            CreditRole.SYNTHESIZER: ['synthesizer', 'synth'],
-            
-            # Autres
-            CreditRole.FEATURED: ['featuring', 'feat.', 'ft.'],
-            CreditRole.SAMPLE: ['sample', 'samples', 'sampled'],
-            CreditRole.INTERPOLATION: ['interpolation', 'interpolates']
-        }
-        
-        text_lower = text.lower()
-        
-        # Vérifier d'abord les rôles les plus spécifiques
-        if 'co-producer' in text_lower or 'co-produced' in text_lower:
-            return CreditRole.CO_PRODUCER
-        elif 'executive producer' in text_lower:
-            return CreditRole.EXECUTIVE_PRODUCER
-        elif 'vocal producer' in text_lower or 'vocal production' in text_lower:
-            return CreditRole.VOCAL_PRODUCER
-        elif 'drum program' in text_lower:
-            return CreditRole.DRUM_PROGRAMMER
-        elif 'bass guitar' in text_lower:
-            return CreditRole.BASS_GUITAR
-        elif 'lead vocal' in text_lower:
-            return CreditRole.LEAD_VOCALS
-        elif 'background vocal' in text_lower or 'backing vocal' in text_lower:
-            return CreditRole.BACKGROUND_VOCALS
-        elif 'additional vocal' in text_lower:
-            return CreditRole.ADDITIONAL_VOCALS
-        
-        # Ensuite vérifier les rôles généraux
-        for role, keywords in role_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
-                return role
-        
-        return None
-    
-    def scrape_album_credits(self, album_url: str) -> List[Credit]:
-        """Scrape les crédits d'un album (Executive Producer, Artwork, etc.)"""
-        credits = []
-        
-        try:
-            logger.info(f"Scraping des crédits d'album: {album_url}")
-            self.driver.get(album_url)
-            
-            # Attendre que la page se charge
-            time.sleep(2)
-            
-            # Chercher et cliquer sur le bouton "Expand" si présent
-            expand_button = self._find_expand_button()
-            if expand_button:
-                self.driver.execute_script("arguments[0].click();", expand_button)
-                time.sleep(1)
-            
-            # Extraire les crédits spécifiques à l'album
-            credits = self._extract_credits()
-            
-            # Filtrer seulement les crédits niveau album
-            album_level_roles = [
-                CreditRole.EXECUTIVE_PRODUCER,
-                CreditRole.ARTWORK,
-                CreditRole.ART_DIRECTION,
-                CreditRole.GRAPHIC_DESIGN,
-                CreditRole.ILLUSTRATION,
-                CreditRole.LAYOUT,
-                CreditRole.PHOTOGRAPHY,
-                CreditRole.A_AND_R,
-                CreditRole.LABEL,
-                CreditRole.PUBLISHER,
-                CreditRole.DISTRIBUTOR,
-                CreditRole.COPYRIGHT,
-                CreditRole.PHONOGRAPHIC_COPYRIGHT
-            ]
-            
-            album_credits = [c for c in credits if c.role in album_level_roles]
-            logger.info(f"{len(album_credits)} crédits d'album extraits")
-            
-            return album_credits
-            
         except Exception as e:
-            logger.error(f"Erreur lors du scraping de l'album: {e}")
-            return []
+            logger.debug(f"Erreur lors du parsing d'un élément de crédit: {e}")
     
+        return None
+
+    def _map_genius_role_to_enum(self, genius_role: str) -> Optional[CreditRole]:
+        """Mappe un rôle Genius vers notre énumération"""
+        role_mapping = {
+            # Production
+            'Producer': CreditRole.PRODUCER,
+            'Co-Producer': CreditRole.CO_PRODUCER,
+            'Executive Producer': CreditRole.EXECUTIVE_PRODUCER,
+            'Vocal Producer': CreditRole.VOCAL_PRODUCER,
+            'Additional Production': CreditRole.ADDITIONAL_PRODUCTION,
+        
+            # Écriture
+            'Writer': CreditRole.WRITER,
+            'Songwriter': CreditRole.WRITER,
+            'Composer': CreditRole.COMPOSER,
+            'Lyricist': CreditRole.LYRICIST,
+        
+            # Studio
+            'Mixing Engineer': CreditRole.MIXING_ENGINEER,
+            'Mix Engineer': CreditRole.MIXING_ENGINEER,
+            'Mastering Engineer': CreditRole.MASTERING_ENGINEER,
+            'Recording Engineer': CreditRole.RECORDING_ENGINEER,
+            'Engineer': CreditRole.ENGINEER,
+        
+            # Chant
+            'Vocals': CreditRole.VOCALS,
+            'Lead Vocals': CreditRole.LEAD_VOCALS,
+            'Background Vocals': CreditRole.BACKGROUND_VOCALS,
+            'Additional Vocals': CreditRole.ADDITIONAL_VOCALS,
+            'Choir': CreditRole.CHOIR,
+        
+            # Label et édition
+            'Label': CreditRole.LABEL,
+            'Publisher': CreditRole.PUBLISHER,
+            'Distributor': CreditRole.DISTRIBUTOR,
+
+            # Instruments
+            'Guitar': CreditRole.GUITAR,
+            'Bass Guitar': CreditRole.BASS_GUITAR,
+            'Acoustic Guitar': CreditRole.ACOUSTIC_GUITAR,
+            'Electric Guitar': CreditRole.ELECTRIC_GUITAR,
+            'Drums': CreditRole.DRUMS,
+            'Piano': CreditRole.PIANO,
+            'Keyboard': CreditRole.KEYBOARD,
+            'Synthesizer': CreditRole.SYNTHESIZER,
+            'Bass': CreditRole.BASS,
+
+            # Artwork
+            'Art Direction': CreditRole.ART_DIRECTION,
+            'Artwork': CreditRole.ARTWORK,
+            'Graphic Design': CreditRole.GRAPHIC_DESIGN,
+            'Photography': CreditRole.PHOTOGRAPHY,
+            'Illustration': CreditRole.ILLUSTRATION,
+
+            # Autres
+            'Featuring': CreditRole.FEATURED,
+            'Sample': CreditRole.SAMPLE,
+            'A&R': CreditRole.A_AND_R,
+        }
+    
+        # Recherche exacte d'abord
+        if genius_role in role_mapping:
+            return role_mapping[genius_role]
+    
+        # Recherche insensible à la casse
+        genius_role_lower = genius_role.lower()
+        for key, value in role_mapping.items():
+            if key.lower() == genius_role_lower:
+                return value
+    
+        # Recherche partielle pour les rôles complexes
+        if 'producer' in genius_role_lower:
+            if 'co' in genius_role_lower:
+                return CreditRole.CO_PRODUCER
+            elif 'executive' in genius_role_lower:
+                return CreditRole.EXECUTIVE_PRODUCER
+            elif 'vocal' in genius_role_lower:
+                return CreditRole.VOCAL_PRODUCER
+            else:
+                return CreditRole.PRODUCER
+    
+        if 'engineer' in genius_role_lower:
+            if 'mix' in genius_role_lower:
+                return CreditRole.MIXING_ENGINEER
+            elif 'master' in genius_role_lower:
+                return CreditRole.MASTERING_ENGINEER
+            elif 'record' in genius_role_lower:
+                return CreditRole.RECORDING_ENGINEER
+            else:
+                return CreditRole.ENGINEER
+    
+        if 'vocal' in genius_role_lower:
+            if 'lead' in genius_role_lower:
+                return CreditRole.LEAD_VOCALS
+            elif 'background' in genius_role_lower or 'backing' in genius_role_lower:
+                return CreditRole.BACKGROUND_VOCALS
+            elif 'additional' in genius_role_lower:
+                return CreditRole.ADDITIONAL_VOCALS
+            else:
+                return CreditRole.VOCALS
+
+        if 'guitar' in genius_role_lower:
+            if 'bass' in genius_role_lower:
+                return CreditRole.BASS_GUITAR
+            elif 'acoustic' in genius_role_lower:
+                return CreditRole.ACOUSTIC_GUITAR
+            elif 'electric' in genius_role_lower:
+                return CreditRole.ELECTRIC_GUITAR
+            else:
+                return CreditRole.GUITAR
+
+        # Si aucune correspondance, retourner OTHER
+        logger.debug(f"Rôle non reconnu: {genius_role}")
+        return CreditRole.OTHER
+
+    def _extract_names_from_genius_content(self, content: str) -> List[str]:
+        """Extrait les noms depuis le contenu d'un crédit Genius"""
+        if not content:
+            return []
+
+        names = []
+
+        # Séparer par différents délimiteurs
+        separators = [' & ', ', ', ' and ', ' + ', ' / ']
+        current_parts = [content]
+
+        for sep in separators:
+            new_parts = []
+            for part in current_parts:
+                new_parts.extend(part.split(sep))
+            current_parts = new_parts
+
+        # Nettoyer chaque nom
+        for part in current_parts:
+            cleaned = part.strip()
+            if cleaned and len(cleaned) > 1:
+                # Enlever les caractères HTML résiduels
+                cleaned = cleaned.replace('&amp;', '&')
+                names.append(cleaned)
+
+        return names
+
+    def _debug_no_credits_found(self, soup):
+        """Debug quand aucun crédit n'est trouvé"""
+        logger.debug("🔍 DEBUG: Aucun crédit trouvé, analyse de la structure...")
+
+        # Chercher tous les éléments qui pourraient contenir des crédits
+        potential_containers = [
+            soup.find_all('div', class_=lambda x: x and 'SongInfo' in x),
+            soup.find_all('div', class_=lambda x: x and 'Credit' in x),
+            soup.find_all('div', class_=lambda x: x and 'ExpandableContent' in x)
+        ]
+
+        for i, containers in enumerate(potential_containers):
+            logger.debug(f"Méthode {i+1}: Trouvé {len(containers)} éléments potentiels")
+            for j, container in enumerate(containers[:3]):  # Limiter à 3 pour éviter le spam
+                text = container.get_text(strip=True)[:100]
+                classes = container.get('class', [])
+                logger.debug(f"  Élément {j+1}: classes={classes}, texte='{text}...'")
+
+    def _handle_album_info(self, album_text: str):
+        """Traite et stocke l'info d'album trouvée dans les crédits"""
+        try:
+            album_name = album_text.strip()
+            if album_name:
+                self._current_album = album_name
+                logger.debug(f"💿 Info album capturée: {album_name}")
+        except Exception as e:
+            logger.debug(f"Erreur lors du traitement de l'album: {e}")
+
+    def _handle_genre_info(self, genre_text: str):
+        """Traite et stocke l'info de genre trouvée dans les crédits"""
+        try:
+            genre_name = genre_text.strip()
+            if genre_name:
+                self._current_genre = genre_name
+                logger.debug(f"🎵 Info genre capturée: {genre_name}")
+        except Exception as e:
+            logger.debug(f"Erreur lors du traitement du genre: {e}")
+
+    def _handle_release_date(self, date_text: str):
+        """Traite et stocke la date de sortie trouvée dans les crédits"""
+        try:
+            from datetime import datetime
+
+            # Patterns de dates courants
+            date_patterns = [
+                "%B %d, %Y",      # September 14, 2018
+                "%b %d, %Y",      # Sep 14, 2018
+                "%Y-%m-%d",       # 2018-09-14
+                "%d/%m/%Y",       # 14/09/2018
+                "%m/%d/%Y",       # 09/14/2018
+                "%Y",             # 2018 (année seule)
+            ]
+
+            date_text = date_text.strip()
+            parsed_date = None
+
+            for pattern in date_patterns:
+                try:
+                    parsed_date = datetime.strptime(date_text, pattern)
+                    break
+                except ValueError:
+                    continue
+                    
+            if parsed_date:
+                # Stocker dans une variable d'instance pour l'utiliser dans scrape_track_credits
+                self._current_release_date = parsed_date
+                logger.debug(f"📅 Date de sortie capturée: {date_text} -> {parsed_date.strftime('%Y-%m-%d')}")
+            else:
+                logger.debug(f"⚠️ Format de date non reconnu: {date_text}")
+
+        except Exception as e:
+            logger.debug(f"Erreur lors du parsing de la date: {e}")
+
+    def _deduplicate_credits(self, credits: List[Credit]) -> List[Credit]:
+        """Supprime les doublons de crédits"""
+        seen = set()
+        unique_credits = []
+    
+        for credit in credits:
+            # Créer une clé unique basée sur nom + rôle
+            key = (credit.name.lower().strip(), credit.role.value)
+        
+            if key not in seen:
+                seen.add(key)
+                unique_credits.append(credit)
+            else:
+                logger.debug(f"Doublon ignoré: {credit.name} - {credit.role.value}")
+    
+        return unique_credits
+
+
     def get_album_url_from_track(self, track_url: str) -> Optional[str]:
         """Récupère l'URL de l'album depuis une page de morceau"""
         try:

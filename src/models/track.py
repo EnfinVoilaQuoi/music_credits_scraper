@@ -125,6 +125,18 @@ class Credit:
             'role_detail': self.role_detail,
             'source': self.source
         }
+    
+    def from_role_and_names(role: str, names: List[str]) -> List["Credit"]:
+        """Crée une liste de crédits à partir d’un rôle (texte) et de noms"""
+        credits = []
+        try:
+            credit_role = CreditRole(role)
+        except ValueError:
+            credit_role = CreditRole.OTHER
+
+        for name in names:
+            credits.append(Credit(name=name, role=credit_role))
+        return credits
 
 
 @dataclass

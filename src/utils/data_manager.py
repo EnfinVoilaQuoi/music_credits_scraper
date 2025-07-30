@@ -7,7 +7,7 @@ from datetime import datetime
 from contextlib import contextmanager
 
 from src.config import DATABASE_URL, ARTISTS_DIR
-from src.models import Artist, Track, Credit, CreditRole
+from src.models import Artist, Track, Credit
 from src.utils.logger import get_logger
 
 

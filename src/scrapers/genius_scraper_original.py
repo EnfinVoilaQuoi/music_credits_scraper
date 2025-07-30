@@ -373,43 +373,83 @@ class GeniusScraper:
             # Attendre que les crédits soient visibles
             time.sleep(1)
             self.wait.until(
-                EC.presence_of_element_located((By.CLASS_NAME, "SongInfo__Credit"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[class*='SongInfo__Credit']"))
             )
-            
-            # Obtenir le HTML de la page
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             
-            # 1. MÉTHODE PRINCIPALE : Structure HTML exacte de Genius
-            # Chercher le conteneur principal des crédits
-            credits_container = soup.find('div', class_='SongInfo__Columns-sc-4162678b-2')
+            # Parcourir tous les éléments de crédit
+            for credit_element in soup.select("div[class*='SongInfo__Credit']"):
+                # Trouver le label (rôle)
+                label_div = credit_element.find("div", class_=re.compile(r"SongInfo__Label"))
+                if not label_div:
+                    continue
+                    
+                role_text = label_div.get_text(strip=True)
+                
+                # Trouver le conteneur des valeurs (noms)
+                container_div = label_div.find_next_sibling("div")
+                if not container_div:
+                    continue
+                
+                # Extraire tous les noms depuis les liens et le texte
+                names = []
+                
+                # Récupérer les noms depuis les liens <a>
+                for link in container_div.select("a"):
+                    name = link.get_text(strip=True)
+                    if name and name not in names:
+                        names.append(name)
+                
+                # Récupérer le texte brut (hors liens) et le nettoyer
+                for text_node in container_div.find_all(text=True, recursive=False):
+                    text = text_node.strip()
+                    if text and text not in names:
+                        # Séparer par différents délimiteurs
+                        for separator in [' & ', ', ', ' and ', ' + ', ' / ']:
+                            if separator in text:
+                                parts = text.split(separator)
+                                for part in parts:
+                                    clean_part = part.strip()
+                                    if clean_part and clean_part not in names:
+                                        names.append(clean_part)
+                                break
+                        else:
+                            # Pas de séparateur trouvé, ajouter le texte tel quel
+                            if text not in names:
+                                names.append(text)
+                
+                # Traiter les cas spéciaux (métadonnées)
+                if role_text.lower() == 'released on':
+                    self._handle_release_date(' '.join(names))
+                    continue
+                elif role_text.lower() == 'album':
+                    self._handle_album_info(' '.join(names))
+                    continue
+                elif role_text.lower() == 'genre':
+                    self._handle_genre_info(' '.join(names))
+                    continue
+                
+                # Créer les objets Credit pour chaque nom
+                role_enum = self._map_genius_role_to_enum(role_text)
+                if not role_enum:
+                    role_enum = CreditRole.OTHER
+                
+                for name in names:
+                    if name and len(name.strip()) > 0:
+                        credit = Credit(
+                            name=name.strip(),
+                            role=role_enum,
+                            role_detail=role_text if role_enum == CreditRole.OTHER else None,
+                            source="genius"
+                        )
+                        credits.append(credit)
+                        logger.debug(f"Crédit créé: {name.strip()} - {role_enum.value}")
             
-            if not credits_container:
-                # Fallback avec classes partielles
-                credits_container = soup.find('div', class_=lambda x: x and 'SongInfo__Columns' in x)
-
-            if credits_container:
-                logger.debug("✅ Conteneur de crédits trouvé")
-                credits.extend(self._extract_from_genius_structure(credits_container))
-            else:
-                logger.warning("❌ Conteneur de crédits non trouvé")
-
-            # 2. MÉTHODE ALTERNATIVE : Si pas de conteneur, chercher les crédits individuels
-            if not credits:
-                logger.debug("Recherche des crédits individuels...")
-                credit_elements = soup.find_all('div', class_=lambda x: x and 'SongInfo__Credit' in x)
-
-                if credit_elements:
-                    logger.debug(f"Trouvé {len(credit_elements)} éléments de crédit individuels")
-                    for element in credit_elements:
-                        credit = self._parse_genius_credit_element(element)
-                        if credit:
-                            credits.append(credit)
-        
             # Dédoublonner les crédits
             credits = self._deduplicate_credits(credits)
-        
+            
             logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
-        
+            
             # Debug si aucun crédit trouvé
             if not credits:
                 self._debug_no_credits_found(soup)
@@ -418,6 +458,9 @@ class GeniusScraper:
             logger.warning("Timeout en attendant les crédits")
         except Exception as e:
             logger.error(f"Erreur lors de l'extraction des crédits: {e}")
+            # Log plus détaillé pour debug
+            import traceback
+            logger.debug(f"Traceback complet: {traceback.format_exc()}")
         
         return credits
     
@@ -793,30 +836,41 @@ class GeniusScraper:
         
         for i, track in enumerate(tracks):
             try:
+                logger.info(f"Scraping du morceau {i+1}/{total}: {track.title}")
+                
                 # Scraper les crédits du morceau
                 credits = self.scrape_track_credits(track)
                 
-                # Scraper l'album si pas déjà fait
+                # Les crédits sont déjà ajoutés au track par scrape_track_credits
+                # via track.add_credit() dans la méthode
+                
+                # Scraper l'album si pas déjà fait (optionnel, seulement si nécessaire)
                 if track.album and track.album not in album_credits_cache:
                     album_url = self.get_album_url_from_track(track.genius_url)
                     if album_url:
-                        album_credits = self.scrape_album_credits(album_url)
-                        album_credits_cache[track.album] = album_credits
-                        results['albums_scraped'].add(track.album)
-                        
-                        # Ajouter les crédits d'album au track
-                        for credit in album_credits:
-                            track.add_credit(credit)
+                        try:
+                            album_credits = self.scrape_album_credits(album_url)
+                            album_credits_cache[track.album] = album_credits
+                            results['albums_scraped'].add(track.album)
+                            
+                            # Ajouter les crédits d'album au track
+                            for credit in album_credits:
+                                track.add_credit(credit)
+                        except Exception as album_error:
+                            logger.warning(f"Erreur lors du scraping de l'album {track.album}: {album_error}")
                 
                 # Si l'album a déjà été scrapé, ajouter les crédits du cache
                 elif track.album in album_credits_cache:
                     for credit in album_credits_cache[track.album]:
                         track.add_credit(credit)
                 
-                if credits:
+                # Vérifier le succès
+                if len(track.credits) > 0:
                     results['success'] += 1
+                    logger.info(f"✅ {len(track.credits)} crédits extraits pour {track.title}")
                 else:
                     results['failed'] += 1
+                    logger.warning(f"❌ Aucun crédit extrait pour {track.title}")
                 
                 # Callback de progression
                 if progress_callback:
@@ -824,11 +878,17 @@ class GeniusScraper:
                     
             except Exception as e:
                 results['failed'] += 1
+                error_msg = f"Erreur sur {track.title}: {str(e)}"
                 results['errors'].append({
                     'track': track.title,
                     'error': str(e)
                 })
-                logger.error(f"Erreur sur {track.title}: {e}")
+                logger.error(error_msg)
+                
+                # Ajouter l'erreur au track
+                track.scraping_errors.append(str(e))
         
-        logger.info(f"Albums scrapés: {len(results['albums_scraped'])}")
+        logger.info(f"Scraping terminé: {results['success']} réussis, {results['failed']} échoués")
+        if results['albums_scraped']:
+            logger.info(f"Albums scrapés: {len(results['albums_scraped'])}")
         return results

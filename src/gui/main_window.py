@@ -255,6 +255,18 @@ class MainWindow:
         dialog.title("Charger un artiste")
         dialog.geometry("400x500")
         
+        # Centrer la fenêtre sur l'écran
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (500 // 2)
+        dialog.geometry(f"400x500+{x}+{y}")
+        
+        # Forcer la fenêtre au premier plan et la garder
+        dialog.lift()
+        dialog.attributes("-topmost", True)
+        dialog.focus_force()
+        dialog.grab_set()  # Rendre la fenêtre modale
+        
         # Liste des artistes
         listbox_frame = ctk.CTkFrame(dialog)
         listbox_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -403,7 +415,7 @@ class MainWindow:
             scraper = None
             try:
                 logger.info(f"Début du scraping de {len(selected_tracks_list)} morceaux")
-                scraper = GeniusScraper(headless=True)
+                scraper = GeniusScraper(headless=False)
                 results = scraper.scrape_multiple_tracks(
                     selected_tracks_list,
                     progress_callback=update_progress
@@ -411,6 +423,7 @@ class MainWindow:
                 
                 # Sauvegarder les données mises à jour
                 for track in selected_tracks_list:
+                    track.artist = self.current_artist
                     self.data_manager.save_track(track)
                 
                 # Afficher le résumé

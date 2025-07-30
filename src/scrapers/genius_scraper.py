@@ -1,6 +1,7 @@
 """Scraper pour récupérer les crédits complets sur Genius"""
 import time
 import re
+import subprocess
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from selenium import webdriver
@@ -41,8 +42,24 @@ class GeniusScraper:
             options.add_argument('--window-size=1920,1080')
             options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
             
+            # Options pour réduire les messages d'erreur
+            options.add_argument('--log-level=3')  # Ne montrer que les erreurs fatales
+            options.add_argument('--disable-logging')
+            options.add_argument('--silent')
+            options.add_experimental_option('excludeSwitches', ['enable-logging'])
+            options.add_experimental_option('useAutomationExtension', False)
+            
+            # Désactiver les fonctionnalités inutiles
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--disable-features=VizDisplayCompositor')
+            options.add_argument('--disable-background-networking')
+            
             # Désactiver les images pour accélérer
-            prefs = {"profile.managed_default_content_settings.images": 2}
+            prefs = {
+                "profile.managed_default_content_settings.images": 2,
+                "profile.default_content_setting_values.notifications": 2,
+                "profile.default_content_settings.popups": 0
+            }
             options.add_experimental_option("prefs", prefs)
             
             # Essayer d'abord le driver local
@@ -57,10 +74,13 @@ class GeniusScraper:
             
             if local_driver.exists():
                 logger.info(f"Utilisation du ChromeDriver local: {local_driver}")
-                service = ChromeService(r"C:\Users\g78re\Documents\Python\GitHub\music_credits_scraper\drivers\chromedriver-win64\chromedriver.exe")
+                service = ChromeService(str(local_driver))
             else:
                 logger.info("ChromeDriver local non trouvé, utilisation de webdriver-manager")
                 service = ChromeService(ChromeDriverManager().install())
+            
+            # Configurer le service pour être silencieux
+            service.log_output = subprocess.DEVNULL
             
             self.driver = webdriver.Chrome(service=service, options=options)
             self.wait = WebDriverWait(self.driver, SELENIUM_TIMEOUT)
@@ -88,48 +108,78 @@ class GeniusScraper:
         if not track.genius_url:
             logger.warning(f"Pas d'URL Genius pour {track.title}")
             return []
-        
+    
         credits = []
-        
+    
         try:
             logger.info(f"Scraping des crédits pour: {track.title}")
             self.driver.get(track.genius_url)
-            
-            # Attendre que la page se charge
-            time.sleep(2)
-            
-            # Chercher et cliquer sur le bouton "Expand" ou "Show all credits"
+
+            # Log l'URL effective
+            logger.debug(f"URL visitée : {self.driver.current_url}")
+
+            # Attendre la banniere de cookies
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.ID, "onetrust-banner-sdk"))
+            )
+
+            # Accepter les cookies
+            try:
+                accept_btn = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+                )
+                accept_btn.click()
+                logger.debug("✅ Cookies acceptés")
+                time.sleep(1)
+            except TimeoutException:
+                logger.debug("⚠️ Pas de bannière cookies")
+
+            # Trouver l'élément "Credits"
+            credits_header = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((
+                    By.XPATH, "//div[contains(@class, 'SongInfo__Title') and text()='Credits']"
+                ))
+            )
+            self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", credits_header)
+
+            time.sleep(1)
+
+            # Cliquer sur le bouton Expand
             expand_button = self._find_expand_button()
             if expand_button:
                 self.driver.execute_script("arguments[0].click();", expand_button)
-                time.sleep(1)
-                logger.debug("Bouton Expand cliqué")
-            
+                WebDriverWait(self.driver, 10).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, ".credits-expanded"))
+                )
+                logger.debug("✅ Bouton Expand cliqué")
+            else:
+                logger.debug("⚠️ Aucun bouton Expand trouvé")
+
             # Extraire les crédits
             credits = self._extract_credits()
-            
+
             # Mettre à jour le track
             track.last_scraped = datetime.now()
             for credit in credits:
                 track.add_credit(credit)
-            
+
             logger.info(f"{len(credits)} crédits extraits pour {track.title}")
-            
+
         except TimeoutException:
             error_msg = f"Timeout lors du scraping de {track.title}"
             logger.error(error_msg)
             track.scraping_errors.append(error_msg)
             log_error(track.title, error_msg, "genius_scraper")
-            
+
         except Exception as e:
             error_msg = f"Erreur lors du scraping: {str(e)}"
             logger.error(f"{error_msg} pour {track.title}")
             track.scraping_errors.append(error_msg)
             log_error(track.title, error_msg, "genius_scraper")
-        
+
         # Respecter le rate limit
         time.sleep(DELAY_BETWEEN_REQUESTS)
-        
+
         return credits
     
     def _find_expand_button(self) -> Optional[Any]:
@@ -524,3 +574,57 @@ class GeniusScraper:
             logger.error(f"Erreur lors de la récupération de l'URL album: {e}")
         
         return None
+    
+    def scrape_multiple_tracks(self, tracks: List[Track], progress_callback=None) -> Dict[str, Any]:
+        """Scrape plusieurs morceaux avec rapport de progression"""
+        results = {
+            'success': 0,
+            'failed': 0,
+            'errors': [],
+            'albums_scraped': set()
+        }
+        
+        total = len(tracks)
+        album_credits_cache = {}  # Cache pour éviter de scraper le même album plusieurs fois
+        
+        for i, track in enumerate(tracks):
+            try:
+                # Scraper les crédits du morceau
+                credits = self.scrape_track_credits(track)
+                
+                # Scraper l'album si pas déjà fait
+                if track.album and track.album not in album_credits_cache:
+                    album_url = self.get_album_url_from_track(track.genius_url)
+                    if album_url:
+                        album_credits = self.scrape_album_credits(album_url)
+                        album_credits_cache[track.album] = album_credits
+                        results['albums_scraped'].add(track.album)
+                        
+                        # Ajouter les crédits d'album au track
+                        for credit in album_credits:
+                            track.add_credit(credit)
+                
+                # Si l'album a déjà été scrapé, ajouter les crédits du cache
+                elif track.album in album_credits_cache:
+                    for credit in album_credits_cache[track.album]:
+                        track.add_credit(credit)
+                
+                if credits:
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
+                
+                # Callback de progression
+                if progress_callback:
+                    progress_callback(i + 1, total, track.title)
+                    
+            except Exception as e:
+                results['failed'] += 1
+                results['errors'].append({
+                    'track': track.title,
+                    'error': str(e)
+                })
+                logger.error(f"Erreur sur {track.title}: {e}")
+        
+        logger.info(f"Albums scrapés: {len(results['albums_scraped'])}")
+        return results

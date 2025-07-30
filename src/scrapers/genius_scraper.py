@@ -150,23 +150,30 @@ class GeniusScraper:
             # Bouton "Expand"
             expand_button = self._find_expand_button()
             if expand_button:
-                # Scroller vers le bouton pour s'assurer qu'il est visible
-                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", expand_button)
-                time.sleep(1)
-            
-                # Cliquer sur le bouton
-                self.driver.execute_script("arguments[0].click();", expand_button)
-                logger.debug("✅ Bouton Expand cliqué")
-            
-                # Attendre que le contenu étendu soit visible
                 try:
-                    WebDriverWait(self.driver, 10).until(
-                        lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "div[class*='SongInfo__Credit']")) > 0
-                    )
-                    time.sleep(2)
+                    # Log des détails du bouton sélectionné
+                    button_text = expand_button.text.strip()
+                    button_location = expand_button.location
+                    logger.debug(f"📍 Bouton sélectionné: '{button_text}' à position {button_location}")
+                    # Scroller vers le bouton pour s'assurer qu'il est visible
+                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", expand_button)
+                    time.sleep(1)
+                
+                    # Cliquer sur le bouton
+                    self.driver.execute_script("arguments[0].click();", expand_button)
                     logger.debug("Bouton Expand cliqué")
-                except TimeoutException:
-                    logger.warning("Timeout en attendant le contenu étendu")
+                
+                    # Attendre que le contenu étendu soit visible
+                    try:
+                        WebDriverWait(self.driver, 10).until(
+                            lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "div[class*='SongInfo__Credit']")) > 0
+                        )
+                        time.sleep(2)
+                        logger.debug("Bouton Expand cliqué")
+                    except TimeoutException:
+                        logger.warning("Timeout en attendant le contenu étendu")
+                except Exception as e:
+                    logger.error(f"Erreur lors du clic sur le bouton Expand: {e}")
             else:
                 logger.debug("Aucun bouton Expand trouvé")
 
@@ -189,15 +196,22 @@ class GeniusScraper:
                     track.genre = self._current_genre
                     logger.debug(f"🎵 Genre ajouté au track: {self._current_genre}")
 
-            # Debug : afficher le HTML de la zone des crédits
+            # Debug si aucun crédit trouvé
             if not credits:
                 logger.debug("Aucun crédit extrait, analyse du HTML...")
                 try:
                     soup = BeautifulSoup(self.driver.page_source, 'html.parser')
                     credits_areas = soup.find_all('div', class_=lambda x: x and 'SongInfo' in x)
                     logger.debug(f"Trouvé {len(credits_areas)} zones SongInfo")
-                
-                    for i, area in enumerate(credits_areas[:3]):  # Limiter à 3 pour ne pas spammer
+                    
+                    # Sauvegarder le HTML pour debug si nécessaire
+                    if logger.level <= 10:  # DEBUG level
+                        debug_file = f"debug_credits_{track.title.replace(' ', '_')}.html"
+                        with open(debug_file, 'w', encoding='utf-8') as f:
+                            f.write(self.driver.page_source)
+                        logger.debug(f"HTML sauvegardé dans {debug_file}")
+                        
+                    for i, area in enumerate(credits_areas[:3]):
                         logger.debug(f"Zone {i}: {area.get_text()[:200]}...")
                 except Exception as e:
                     logger.debug(f"Erreur lors de l'analyse debug: {e}")
@@ -228,171 +242,184 @@ class GeniusScraper:
     
     def _find_expand_button(self) -> Optional[Any]:
         """Trouve le bouton Expand spécifiquement dans la section Credits"""
-    
-        # Stratégie 1: Chercher le bouton Expand dans le conteneur Credits spécifique
-        credits_expand_selectors = [
-            # Sélecteur très spécifique basé sur la structure complète
-            "div.About__Container-sc-6e5dc9c5-1 div.ExpandableContent__ButtonContainer-sc-8775ac96-3 button",
-
-            # Alternatifs avec classes partielles
-            "div[class*='About__Container'] div[class*='ExpandableContent__ButtonContainer'] button",
-            "div[class*='ExpandableContent__Container'] div[class*='ExpandableContent__ButtonContainer'] button",
-
-            # XPath pour chercher après avoir trouvé "Credits"
-            "//div[contains(@class, 'SongInfo__Title') and text()='Credits']/ancestor::div[contains(@class, 'ExpandableContent')]//button",
-            "//div[text()='Credits']/following-sibling::*//button[contains(@class, 'ExpandableContent')]",
-            "//div[text()='Credits']/ancestor::*[contains(@class, 'ExpandableContent')]//button",
-
-            # Chercher dans le conteneur qui contient "Credits"
-            "//div[.//div[text()='Credits']]//button[contains(@class, 'ExpandableContent')]",
-            "//div[.//div[text()='Credits']]//div[contains(@class, 'ButtonContainer')]//button",
-        ]
-
-        for i, selector in enumerate(credits_expand_selectors):
-            try:
-                if selector.startswith("//"):
-                    # XPath selector
-                    buttons = self.driver.find_elements(By.XPATH, selector)
-                else:
-                    # CSS selector
-                    buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
-
-                logger.debug(f"Sélecteur Credits {i+1} ({selector}): {len(buttons)} boutons trouvés")
-
-                for button in buttons:
-                    try:
-                        if button.is_displayed() and button.is_enabled():
-                            button_text = button.text.strip()
-                            logger.debug(f"Bouton Credits trouvé: '{button_text}'")
-
-                            # Vérifier que le bouton est dans la bonne zone (près de Credits)
-                            if self._is_button_near_credits(button):
-                                logger.debug(f"✅ Bouton Expand Credits sélectionné: '{button_text}'")
-                                return button
-                            else:
-                                logger.debug(f"⚠️ Bouton ignoré (pas près de Credits): '{button_text}'")
-
-                    except Exception as e:
-                        logger.debug(f"Erreur lors de la vérification du bouton Credits: {e}")
-                        continue
-
-            except Exception as e:
-                logger.debug(f"Erreur avec sélecteur Credits {i+1}: {e}")
-                continue
-    
-        # Stratégie 2: Si pas trouvé, chercher tous les boutons Expand et prendre le 2ème
-        logger.debug("Recherche du 2ème bouton Expand (fallback)")
+        
         try:
-            all_expand_buttons = self.driver.find_elements(
-                By.XPATH, 
-                "//button[contains(@class, 'ExpandableContent') or contains(text(), 'Expand')]"
-            )
-
-            logger.debug(f"Trouvé {len(all_expand_buttons)} boutons Expand au total")
-
-            if len(all_expand_buttons) >= 2:
-                second_button = all_expand_buttons[1]  # Index 1 = 2ème bouton
-                if second_button.is_displayed() and second_button.is_enabled():
-                    logger.debug("✅ Utilisation du 2ème bouton Expand trouvé")
-                    return second_button
-
+            # STRATÉGIE DIRECTE: Chercher tous les boutons Expand et prendre le 2ème
+            logger.debug("Recherche de tous les boutons Expand...")
+            
+            # Sélecteurs pour trouver tous les boutons Expand
+            expand_selectors = [
+                "//button[contains(@class, 'ExpandableContent')]",
+                "//div[contains(@class, 'ExpandableContent')]//button",
+                "//button[contains(text(), 'Expand')]",
+                "div[class*='ExpandableContent'] button",
+                "button[class*='ExpandableContent']"
+            ]
+            
+            all_buttons = []
+            
+            for selector in expand_selectors:
+                try:
+                    if selector.startswith("//"):
+                        # XPath selector
+                        buttons = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        # CSS selector
+                        buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for button in buttons:
+                        if button.is_displayed() and button.is_enabled():
+                            if button not in all_buttons:  # Éviter les doublons
+                                all_buttons.append(button)
+                            
+                except Exception as e:
+                    logger.debug(f"Erreur avec sélecteur {selector}: {e}")
+                    continue
+            
+            logger.debug(f"Trouvé {len(all_buttons)} boutons Expand au total")
+            
+            # Afficher les détails de chaque bouton pour debug
+            for i, button in enumerate(all_buttons):
+                try:
+                    button_text = button.text.strip()
+                    button_location = button.location['y']
+                    logger.debug(f"Bouton {i+1}: '{button_text}' (Y: {button_location})")
+                except:
+                    logger.debug(f"Bouton {i+1}: [erreur d'accès]")
+            
+            # STRATÉGIE 1: Si on a au moins 2 boutons, prendre le 2ème
+            if len(all_buttons) >= 2:
+                second_button = all_buttons[1]  # Index 1 = 2ème bouton
+                logger.debug("✅ Utilisation du 2ème bouton Expand trouvé")
+                return second_button
+            
+            # STRATÉGIE 2: Chercher spécifiquement après le header "Credits"
+            logger.debug("Recherche du bouton après le header Credits...")
+            try:
+                credits_header = self.driver.find_element(
+                    By.XPATH, 
+                    "//div[contains(@class, 'SongInfo__Title') and text()='Credits']"
+                )
+                
+                credits_y = credits_header.location['y']
+                logger.debug(f"Header Credits trouvé à Y: {credits_y}")
+                
+                # Chercher le bouton le plus proche après le header Credits
+                best_button = None
+                best_distance = float('inf')
+                
+                for button in all_buttons:
+                    try:
+                        button_y = button.location['y']
+                        # Le bouton doit être après (Y plus grand) et pas trop loin
+                        if button_y > credits_y:
+                            distance = button_y - credits_y
+                            if distance < best_distance and distance < 500:  # Max 500px
+                                best_distance = distance
+                                best_button = button
+                    except:
+                        continue
+                
+                if best_button:
+                    logger.debug(f"✅ Bouton le plus proche après Credits sélectionné (distance: {best_distance}px)")
+                    return best_button
+                    
+            except Exception as e:
+                logger.debug(f"Erreur lors de la recherche par position: {e}")
+            
+            # STRATÉGIE 3: Si un seul bouton, le vérifier
+            if len(all_buttons) == 1:
+                logger.debug("⚠️ Un seul bouton Expand trouvé, utilisation par défaut")
+                return all_buttons[0]
+            
+            logger.debug("❌ Aucun bouton Expand Credits approprié trouvé")
+            return None
+            
         except Exception as e:
-            logger.debug(f"Erreur lors de la recherche du 2ème bouton: {e}")
-
-        logger.debug("❌ Aucun bouton Expand Credits trouvé")
-        return None
+            logger.error(f"Erreur lors de la recherche du bouton Expand: {e}")
+            return None
 
     def _is_button_near_credits(self, button) -> bool:
-        """Vérifie si un bouton est proche de la section Credits"""
+        """Vérifie si un bouton est proche de la section Credits - VERSION SIMPLIFIÉE"""
         try:
-            # Chercher si le bouton est dans un conteneur qui contient "Credits"
-            parent = button.find_element(By.XPATH, "./ancestor-or-self::*[contains(., 'Credits')]")
-            if parent:
-                parent_text = parent.text
-                # Vérifier que c'est bien la section Credits et pas juste un mot "credits" ailleurs
-                if 'Credits' in parent_text and ('Producer' in parent_text or 'Writer' in parent_text or 'Label' in parent_text):
-                    logger.debug("Bouton trouvé dans la section Credits")
-                    return True
-        except:
-            pass
-            
-        try:
-            # Alternative: vérifier la position relative par rapport au header Credits
+            # Vérifier la position relative par rapport au header Credits
             credits_header = self.driver.find_element(
                 By.XPATH, 
                 "//div[contains(@class, 'SongInfo__Title') and text()='Credits']"
             )
-
+            
             # Calculer les positions
             button_location = button.location['y']
             credits_location = credits_header.location['y']
-
+            
             # Le bouton doit être après le header Credits (position Y plus grande)
-            # et pas trop loin (maximum 500px de différence)
-            if credits_location < button_location < credits_location + 500:
+            # et pas trop loin (maximum 300px de différence pour être plus strict)
+            if credits_location < button_location < credits_location + 300:
                 logger.debug(f"Bouton positionné après Credits (Credits: {credits_location}, Bouton: {button_location})")
                 return True
-
+            else:
+                logger.debug(f"Bouton trop loin de Credits (Credits: {credits_location}, Bouton: {button_location})")
+                return False
+                
         except Exception as e:
             logger.debug(f"Erreur lors de la vérification de position: {e}")
-
-        return False
-        
-    def _extract_credits(self) -> List[Credit]:
-        """Extrait les crédits de la page"""
-        credits = []
-        
-        try:
-            # Attendre que les crédits soient visibles
-            time.sleep(1)
-            self.wait.until(
-                EC.presence_of_element_located((By.CLASS_NAME, "SongInfo__Credit"))
-            )
+            return False
             
-            # Obtenir le HTML de la page
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        def _extract_credits(self) -> List[Credit]:
+            """Extrait les crédits de la page"""
+            credits = []
             
-            # 1. MÉTHODE PRINCIPALE : Structure HTML exacte de Genius
-            # Chercher le conteneur principal des crédits
-            credits_container = soup.find('div', class_='SongInfo__Columns-sc-4162678b-2')
+            try:
+                # Attendre que les crédits soient visibles
+                time.sleep(1)
+                self.wait.until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "SongInfo__Credit"))
+                )
+                
+                # Obtenir le HTML de la page
+                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                
+                # 1. MÉTHODE PRINCIPALE : Structure HTML exacte de Genius
+                # Chercher le conteneur principal des crédits
+                credits_container = soup.find('div', class_='SongInfo__Columns-sc-4162678b-2')
+                
+                if not credits_container:
+                    # Fallback avec classes partielles
+                    credits_container = soup.find('div', class_=lambda x: x and 'SongInfo__Columns' in x)
+
+                if credits_container:
+                    logger.debug("✅ Conteneur de crédits trouvé")
+                    credits.extend(self._extract_from_genius_structure(credits_container))
+                else:
+                    logger.warning("❌ Conteneur de crédits non trouvé")
+
+                # 2. MÉTHODE ALTERNATIVE : Si pas de conteneur, chercher les crédits individuels
+                if not credits:
+                    logger.debug("Recherche des crédits individuels...")
+                    credit_elements = soup.find_all('div', class_=lambda x: x and 'SongInfo__Credit' in x)
+
+                    if credit_elements:
+                        logger.debug(f"Trouvé {len(credit_elements)} éléments de crédit individuels")
+                        for element in credit_elements:
+                            credit = self._parse_genius_credit_element(element)
+                            if credit:
+                                credits.append(credit)
             
-            if not credits_container:
-                # Fallback avec classes partielles
-                credits_container = soup.find('div', class_=lambda x: x and 'SongInfo__Columns' in x)
+                # Dédoublonner les crédits
+                credits = self._deduplicate_credits(credits)
+            
+                logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
+            
+                # Debug si aucun crédit trouvé
+                if not credits:
+                    self._debug_no_credits_found(soup)
 
-            if credits_container:
-                logger.debug("✅ Conteneur de crédits trouvé")
-                credits.extend(self._extract_from_genius_structure(credits_container))
-            else:
-                logger.warning("❌ Conteneur de crédits non trouvé")
-
-            # 2. MÉTHODE ALTERNATIVE : Si pas de conteneur, chercher les crédits individuels
-            if not credits:
-                logger.debug("Recherche des crédits individuels...")
-                credit_elements = soup.find_all('div', class_=lambda x: x and 'SongInfo__Credit' in x)
-
-                if credit_elements:
-                    logger.debug(f"Trouvé {len(credit_elements)} éléments de crédit individuels")
-                    for element in credit_elements:
-                        credit = self._parse_genius_credit_element(element)
-                        if credit:
-                            credits.append(credit)
-        
-            # Dédoublonner les crédits
-            credits = self._deduplicate_credits(credits)
-        
-            logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
-        
-            # Debug si aucun crédit trouvé
-            if not credits:
-                self._debug_no_credits_found(soup)
-
-        except TimeoutException:
-            logger.warning("Timeout en attendant les crédits")
-        except Exception as e:
-            logger.error(f"Erreur lors de l'extraction des crédits: {e}")
-        
-        return credits
+            except TimeoutException:
+                logger.warning("Timeout en attendant les crédits")
+            except Exception as e:
+                logger.error(f"Erreur lors de l'extraction des crédits: {e}")
+            
+            return credits
     
     def _extract_from_genius_structure(self, container) -> List[Credit]:
         """Extrait les crédits depuis le conteneur Genius avec la structure HTML réelle"""

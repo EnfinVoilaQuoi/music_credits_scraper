@@ -27,3 +27,15 @@ data/logs/*
 # OS
 .DS_Store
 Thumbs.db
+
+#Lancer VenV
+Lancer_Venv_Admin.bat
+Lancer_Venv_Admin.ps1
+
+# Script, Fix & Driver
+/test*\.py
+/*test\.py
+/debug*\.py
+/*debug\.py
+/download*\.py
+/*download\.py

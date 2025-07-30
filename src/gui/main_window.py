@@ -176,11 +176,16 @@ class MainWindow:
         
         # Ajouter une colonne pour les checkboxes
         self.tree.heading("#0", text="✓")
-        self.tree.column("#0", width=30, stretch=False)
+        self.tree.column("#0", width=50, stretch=False)
         
         for col in columns:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=150)
+            if col == "Titre":
+                self.tree.column(col, width=200)  # Plus large pour les titres avec 🎤
+            elif col == "Album":
+                self.tree.column(col, width=150)
+            else:
+                self.tree.column(col, width=100)
         
         # Scrollbar verticale
         vsb = ttk.Scrollbar(tree_scroll_frame, orient="vertical", command=self.tree.yview)
@@ -209,6 +214,28 @@ class MainWindow:
         
         self.stats_label = ctk.CTkLabel(stats_frame, text="", font=("Arial", 12))
         self.stats_label.pack()
+
+        self.tree.bind("<Button-1>", self._toggle_track_selection)
+
+    def _toggle_track_selection(self, event):
+        """Gère la sélection/désélection des morceaux via les checkboxes"""
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "tree":
+            return
+
+        item_id = self.tree.identify_row(event.y)
+        if not item_id:
+            return
+
+        # Tu peux stocker la sélection dans un set/dict selon ta logique
+        if item_id in self.selected_track_ids:
+            self.selected_track_ids.remove(item_id)
+            self.tree.item(item_id, image=self.unchecked_image)
+        else:
+            self.selected_track_ids.add(item_id)
+            self.tree.item(item_id, image=self.checked_image)
+
+        self._update_selected_count()
     
     def _search_artist(self):
         """Recherche un artiste"""
@@ -249,68 +276,279 @@ class MainWindow:
         threading.Thread(target=search, daemon=True).start()
     
     def _load_existing_artist(self):
-        """Charge un artiste existant depuis la base de données"""
-        # Créer une fenêtre de sélection
+        """Charge un artiste existant depuis la base de données - VERSION AVEC GESTION"""
+        # Créer une fenêtre de gestion des artistes
         dialog = ctk.CTkToplevel(self.root)
-        dialog.title("Charger un artiste")
-        dialog.geometry("400x500")
+        dialog.title("Gestionnaire d'artistes")
+        dialog.geometry("600x650")
         
         # Centrer la fenêtre sur l'écran
         dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (500 // 2)
-        dialog.geometry(f"400x500+{x}+{y}")
+        x = (dialog.winfo_screenwidth() // 2) - (300)
+        y = (dialog.winfo_screenheight() // 2) - (325)
+        dialog.geometry(f"600x650+{x}+{y}")
         
-        # Forcer la fenêtre au premier plan et la garder
         dialog.lift()
-        dialog.attributes("-topmost", True)
         dialog.focus_force()
-        dialog.grab_set()  # Rendre la fenêtre modale
+        dialog.grab_set()
         
-        # Liste des artistes
-        listbox_frame = ctk.CTkFrame(dialog)
-        listbox_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Titre
+        ctk.CTkLabel(dialog, text="Gestionnaire d'artistes", 
+                    font=("Arial", 18, "bold")).pack(pady=15)
         
-        # Récupérer les statistiques pour avoir la liste des artistes
-        with self.data_manager._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM artists ORDER BY name")
-            artists = [row[0] for row in cursor.fetchall()]
+        # Frame pour la liste et les boutons
+        main_frame = ctk.CTkFrame(dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=10)
         
-        if not artists:
-            messagebox.showinfo("Information", "Aucun artiste dans la base de données")
-            dialog.destroy()
+        # Liste des artistes avec informations
+        list_frame = ctk.CTkFrame(main_frame)
+        list_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        ctk.CTkLabel(list_frame, text="Artistes en base de données:", 
+                    font=("Arial", 14, "bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # Récupérer les artistes avec leurs statistiques
+        artists_data = self._get_artists_with_stats()
+        
+        if not artists_data:
+            ctk.CTkLabel(list_frame, text="Aucun artiste dans la base de données",
+                        text_color="gray").pack(pady=20)
+            ctk.CTkButton(dialog, text="Fermer", command=dialog.destroy).pack(pady=10)
             return
         
-        # Listbox
-        from tkinter import Listbox, SINGLE
-        listbox = Listbox(listbox_frame, selectmode=SINGLE)
-        listbox.pack(fill="both", expand=True)
+        # Scrollable frame pour la liste
+        scrollable_frame = ctk.CTkScrollableFrame(list_frame, height=300)
+        scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        for artist in artists:
-            listbox.insert("end", artist)
+        # Variable pour stocker l'artiste sélectionné
+        selected_artist = {"name": None, "widget": None}
+        
+        # Créer les éléments de la liste
+        artist_widgets = []
+        for artist_info in artists_data:
+            # Frame pour chaque artiste
+            artist_frame = ctk.CTkFrame(scrollable_frame)
+            artist_frame.pack(fill="x", padx=5, pady=5)
+            
+            # Fonction pour sélectionner un artiste
+            def select_artist(name, widget, frame=artist_frame):
+                # Désélectionner l'ancien
+                if selected_artist["widget"]:
+                    selected_artist["widget"].configure(fg_color="transparent")
+                
+                # Sélectionner le nouveau
+                selected_artist["name"] = name
+                selected_artist["widget"] = frame
+                frame.configure(fg_color=("gray70", "gray30"))
+            
+            # Informations de l'artiste
+            info_text = f"🎤 {artist_info['name']}\n"
+            info_text += f"   📀 {artist_info['tracks_count']} morceaux"
+            if artist_info['credits_count'] > 0:
+                info_text += f" • 🏷️ {artist_info['credits_count']} crédits"
+            if artist_info['last_update']:
+                info_text += f"\n   📅 Mis à jour: {artist_info['last_update']}"
+            
+            # Bouton cliquable pour sélectionner
+            artist_button = ctk.CTkButton(
+                artist_frame,
+                text=info_text,
+                command=lambda n=artist_info['name'], w=artist_frame: select_artist(n, w),
+                fg_color="transparent",
+                text_color=("black", "white"),
+                hover_color=("gray80", "gray40"),
+                anchor="w",
+                height=60
+            )
+            artist_button.pack(fill="x", padx=5, pady=5)
+            
+            artist_widgets.append({
+                'name': artist_info['name'],
+                'frame': artist_frame,
+                'button': artist_button
+            })
+        
+        # Frame pour les boutons d'action
+        action_frame = ctk.CTkFrame(main_frame)
+        action_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(action_frame, text="Actions:", 
+                    font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # Boutons d'action
+        buttons_frame = ctk.CTkFrame(action_frame)
+        buttons_frame.pack(fill="x", padx=10, pady=15)
         
         def load_selected():
-            selection = listbox.curselection()
-            if selection:
-                artist_name = listbox.get(selection[0])
-                self.artist_entry.delete(0, "end")
-                self.artist_entry.insert(0, artist_name)
-                dialog.destroy()
-                self._search_artist()
+            if not selected_artist["name"]:
+                messagebox.showwarning("Attention", "Veuillez sélectionner un artiste")
+                return
+            
+            # Charger l'artiste sélectionné
+            self.artist_entry.delete(0, "end")
+            self.artist_entry.insert(0, selected_artist["name"])
+            dialog.destroy()
+            self._search_artist()
         
-        ctk.CTkButton(dialog, text="Charger", command=load_selected).pack(pady=10)
+        def delete_selected():
+            if not selected_artist["name"]:
+                messagebox.showwarning("Attention", "Veuillez sélectionner un artiste à supprimer")
+                return
+            
+            artist_name = selected_artist["name"]
+            
+            # Confirmation de suppression
+            result = messagebox.askyesno(
+                "Confirmation de suppression",
+                f"Êtes-vous sûr de vouloir supprimer l'artiste '{artist_name}' ?\n\n"
+                "⚠️ Cette action supprimera :\n"
+                "• L'artiste\n"
+                "• Tous ses morceaux\n"
+                "• Tous les crédits associés\n"
+                "• Toutes les données de scraping\n\n"
+                "Cette action est IRRÉVERSIBLE !",
+                icon="warning"
+            )
+            
+            if result:
+                try:
+                    # Supprimer l'artiste et toutes ses données
+                    success = self.data_manager.delete_artist(artist_name)
+                    
+                    if success:
+                        messagebox.showinfo("Succès", f"Artiste '{artist_name}' supprimé avec succès")
+                        dialog.destroy()
+                        # Rafraîchir la liste en rouvrant le dialog
+                        self._load_existing_artist()
+                    else:
+                        messagebox.showerror("Erreur", "Impossible de supprimer l'artiste")
+                        
+                except Exception as e:
+                    logger.error(f"Erreur lors de la suppression: {e}")
+                    messagebox.showerror("Erreur", f"Erreur lors de la suppression:\n{str(e)}")
+        
+        def refresh_list():
+            """Rafraîchit la liste des artistes"""
+            dialog.destroy()
+            self._load_existing_artist()
+        
+        def show_artist_details():
+            """Affiche les détails de l'artiste sélectionné"""
+            if not selected_artist["name"]:
+                messagebox.showwarning("Attention", "Veuillez sélectionner un artiste")
+                return
+            
+            # Récupérer les détails complets
+            details = self.data_manager.get_artist_details(selected_artist["name"])
+            
+            # Créer une fenêtre de détails
+            details_dialog = ctk.CTkToplevel(dialog)
+            details_dialog.title(f"Détails - {selected_artist['name']}")
+            details_dialog.geometry("600x500")
+            
+            text_widget = ctk.CTkTextbox(details_dialog, width=580, height=450)
+            text_widget.pack(padx=10, pady=10)
+            
+            details_text = f"""🎤 ARTISTE: {details['name']}
+    {'='*50}
+
+    📊 STATISTIQUES:
+    • Morceaux: {details['tracks_count']}
+    • Crédits: {details['credits_count']}
+    • Créé le: {details['created_at']}
+    • Mis à jour: {details['updated_at']}
+
+    🎵 MORCEAUX LES PLUS RÉCENTS:
+    """
+            
+            for track in details['recent_tracks'][:10]:  # 10 morceaux les plus récents
+                details_text += f"• {track['title']}"
+                if track['album']:
+                    details_text += f" ({track['album']})"
+                if track['release_date']:
+                    details_text += f" - {track['release_date'][:4]}"
+                details_text += f" - {track['credits_count']} crédits\n"
+            
+            if details['tracks_count'] > 10:
+                details_text += f"... et {details['tracks_count'] - 10} autres morceaux\n"
+            
+            details_text += f"""
+    🏷️ CRÉDITS PAR RÔLE:
+    """
+            for role, count in details['credits_by_role'].items():
+                details_text += f"• {role}: {count}\n"
+            
+            text_widget.insert("0.0", details_text)
+            text_widget.configure(state="disabled")
+        
+        # Rangée de boutons
+        ctk.CTkButton(buttons_frame, text="📂 Charger", 
+                 command=load_selected, width=120).pack(side="left", padx=8)  # ✅ 100→120, padx 5→8
+    
+        ctk.CTkButton(buttons_frame, text="🗑️ Supprimer", 
+                 command=delete_selected, width=120,  # ✅ 100→120
+                 fg_color="red", hover_color="darkred").pack(side="left", padx=8)
+    
+        ctk.CTkButton(buttons_frame, text="ℹ️ Détails", 
+                 command=show_artist_details, width=120).pack(side="left", padx=8)  # ✅ 100→120
+    
+        ctk.CTkButton(buttons_frame, text="🔄 Actualiser", 
+                 command=refresh_list, width=120).pack(side="left", padx=8)  # ✅ 100→120
+        
+        # Bouton fermer
+        ctk.CTkButton(dialog, text="Fermer", command=dialog.destroy, width=100).pack(pady=10)
+
+    def _get_artists_with_stats(self):
+        """Récupère la liste des artistes avec leurs statistiques"""
+        try:
+            with self.data_manager._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT 
+                        a.name,
+                        COUNT(DISTINCT t.id) as tracks_count,
+                        COUNT(DISTINCT c.id) as credits_count,
+                        MAX(t.updated_at) as last_update,
+                        a.created_at
+                    FROM artists a
+                    LEFT JOIN tracks t ON a.id = t.artist_id
+                    LEFT JOIN credits c ON t.id = c.track_id
+                    GROUP BY a.id, a.name, a.created_at
+                    ORDER BY a.name
+                """)
+                
+                artists_data = []
+                for row in cursor.fetchall():
+                    artists_data.append({
+                        'name': row[0],
+                        'tracks_count': row[1] or 0,
+                        'credits_count': row[2] or 0,
+                        'last_update': row[3][:10] if row[3] else None,
+                        'created_at': row[4][:10] if row[4] else None
+                    })
+                
+                return artists_data
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des artistes: {e}")
+            return []
     
     def _update_artist_info(self):
-        """Met à jour les informations de l'artiste"""
+        """Met à jour les informations de l'artiste - VERSION AVEC FEATURES"""
         if self.current_artist:
             self.artist_info_label.configure(text=f"Artiste: {self.current_artist.name}")
             
             if self.current_artist.tracks:
                 total_credits = sum(len(t.credits) for t in self.current_artist.tracks)
-                self.tracks_info_label.configure(
-                    text=f"{len(self.current_artist.tracks)} morceaux - {total_credits} crédits au total"
-                )
+                
+                # NOUVEAU : Compter les features
+                featuring_count = sum(1 for t in self.current_artist.tracks if hasattr(t, 'is_featuring') and t.is_featuring)
+                
+                info_text = f"{len(self.current_artist.tracks)} morceaux - {total_credits} crédits au total"
+                if featuring_count > 0:
+                    info_text += f" (dont {featuring_count} en featuring)"
+                
+                self.tracks_info_label.configure(text=info_text)
                 self._populate_tracks_table(self.current_artist.tracks)
             else:
                 self.tracks_info_label.configure(text="Aucun morceau chargé")
@@ -324,42 +562,164 @@ class MainWindow:
                 self.export_button.configure(state="normal")
     
     def _get_tracks(self):
-        """Récupère les morceaux de l'artiste"""
+        """Récupère les morceaux de l'artiste - VERSION AVEC FEATURES"""
         if not self.current_artist:
             return
         
+        # Inclure les features
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Options de récupération")
+        dialog.geometry("450x500")
+        
+        # Centrer la fenêtre
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (225)
+        y = (dialog.winfo_screenheight() // 2) - (250)
+        dialog.geometry(f"450x500+{x}+{y}")
+        
+        dialog.lift()
+        dialog.focus_force()
+        dialog.grab_set()
+        
+        # Variables pour les options
+        include_features_var = ctk.BooleanVar(value=True)  # Par défaut, inclure les features
+        max_songs_var = ctk.IntVar(value=200)
+        
+        # Interface
+        ctk.CTkLabel(dialog, text="Options de récupération des morceaux", 
+                    font=("Arial", 16, "bold")).pack(pady=15)
+        
+        # Checkbox pour les features
+        features_frame = ctk.CTkFrame(dialog)
+        features_frame.pack(fill="x", padx=20, pady=15)
+        
+        ctk.CTkCheckBox(
+            features_frame,
+            text="Inclure les morceaux où l'artiste est en featuring",
+            variable=include_features_var,
+            font=("Arial", 12)
+        ).pack(anchor="w", padx=15, pady=12)
+        
+        ctk.CTkLabel(features_frame, 
+                    text="✓ Recommandé : permet de récupérer plus de morceaux",
+                    text_color="gray",
+                    font=("Arial", 10)).pack(anchor="w", padx=15, pady=(0, 8))
+        
+        # Nombre maximum de morceaux
+        max_songs_frame = ctk.CTkFrame(dialog)
+        max_songs_frame.pack(fill="x", padx=20, pady=15)
+        
+        ctk.CTkLabel(max_songs_frame, text="Nombre maximum de morceaux:", 
+                    font=("Arial", 12)).pack(anchor="w", padx=15, pady=(12, 5))
+        
+        max_songs_entry = ctk.CTkEntry(max_songs_frame, width=100, placeholder_text="200")
+        max_songs_entry.pack(anchor="w", padx=15, pady=(0, 12))
+        max_songs_entry.insert(0, "200")
+        
+        # Info supplémentaire
+        info_frame = ctk.CTkFrame(dialog)
+        info_frame.pack(fill="x", padx=20, pady=15)
+        
+        info_text = """ℹ️ Les morceaux en featuring seront marqués avec 🎤
+    ⚡ L'album et la date seront récupérés automatiquement via l'API
+    🔍 Le scraping ne sera utilisé que pour les crédits détaillés"""
+        
+        ctk.CTkLabel(info_frame, text=info_text, 
+                    font=("Arial", 9), 
+                    text_color="gray",
+                    justify="left").pack(anchor="w", padx=15, pady=10)
+        
+        # Boutons
+        button_frame = ctk.CTkFrame(dialog)
+        button_frame.pack(fill="x", padx=20, pady=20)
+        
+        def start_retrieval():
+            try:
+                max_songs = int(max_songs_entry.get())
+                if max_songs <= 0:
+                    max_songs = 300
+            except ValueError:
+                max_songs = 300
+            
+            include_features = include_features_var.get()
+            dialog.destroy()
+            self._start_track_retrieval(max_songs, include_features)
+        
+        def cancel():
+            dialog.destroy()
+        
+        ctk.CTkButton(button_frame, text="🎵 Récupérer", 
+                 command=start_retrieval, width=130, height=35).pack(side="left", padx=10)
+        ctk.CTkButton(button_frame, text="❌ Annuler", 
+                 command=cancel, width=130, height=35).pack(side="right", padx=10)
+
+    def _start_track_retrieval(self, max_songs: int, include_features: bool):
+        """Lance la récupération des morceaux avec les options choisies"""
         self.get_tracks_button.configure(state="disabled", text="Récupération...")
-        self.progress_label.configure(text="Récupération des morceaux...")
+        
+        # Message de progression plus informatif
+        features_text = "avec features" if include_features else "sans features"
+        self.progress_label.configure(
+            text=f"Récupération de max {max_songs} morceaux ({features_text})..."
+        )
         
         def get_tracks():
             try:
-                # Récupérer les morceaux via l'API
-                tracks = self.genius_api.get_artist_songs(self.current_artist, max_songs=200)
+                logger.info(f"Début récupération: max_songs={max_songs}, include_features={include_features}")
+                
+                # Récupérer les morceaux via l'API avec l'option features
+                tracks = self.genius_api.get_artist_songs(
+                    self.current_artist, 
+                    max_songs=max_songs,
+                    include_features=include_features
+                )
                 
                 if tracks:
                     # Sauvegarder dans la base
+                    saved_count = 0
                     for track in tracks:
-                        self.data_manager.save_track(track)
+                        try:
+                            self.data_manager.save_track(track)
+                            saved_count += 1
+                        except Exception as e:
+                            logger.warning(f"Erreur sauvegarde {track.title}: {e}")
                     
                     self.current_artist.tracks = tracks
                     self.tracks = tracks
                     
+                    # Analyser les résultats
+                    featuring_count = sum(1 for t in tracks if hasattr(t, 'is_featuring') and t.is_featuring)
+                    api_albums = sum(1 for t in tracks if t.album)
+                    api_dates = sum(1 for t in tracks if t.release_date)
+                    
+                    # Message de succès détaillé
+                    success_msg = f"✅ {len(tracks)} morceaux récupérés pour {self.current_artist.name}"
+                    
+                    if featuring_count > 0:
+                        success_msg += f"\n🎤 {featuring_count} morceaux en featuring"
+                    
+                    success_msg += f"\n💿 {api_albums} albums récupérés via l'API"
+                    success_msg += f"\n📅 {api_dates} dates de sortie récupérées via l'API"
+                    success_msg += f"\n💾 {saved_count} morceaux sauvegardés en base"
+                    
                     self.root.after(0, self._update_artist_info)
-                    self.root.after(0, lambda: messagebox.showinfo(
-                        "Succès", 
-                        f"{len(tracks)} morceaux récupérés pour {self.current_artist.name}"
-                    ))
+                    self.root.after(0, lambda: messagebox.showinfo("Succès", success_msg))
+                    
+                    logger.info(f"Récupération terminée avec succès: {len(tracks)} morceaux")
+                    
                 else:
                     self.root.after(0, lambda: messagebox.showwarning(
                         "Attention", 
-                        "Aucun morceau trouvé"
+                        "Aucun morceau trouvé.\n\nVérifiez le nom de l'artiste ou essayez avec les features activées."
                     ))
+                    logger.warning("Aucun morceau trouvé")
                     
             except Exception as e:
-                logger.error(f"Erreur lors de la récupération des morceaux: {e}")
+                error_msg = str(e) if str(e) else "Erreur inconnue lors de la récupération"
+                logger.error(f"Erreur lors de la récupération des morceaux: {error_msg}")
                 self.root.after(0, lambda: messagebox.showerror(
                     "Erreur", 
-                    f"Erreur lors de la récupération: {str(e)}"
+                    f"Erreur lors de la récupération:\n{error_msg}"
                 ))
             finally:
                 self.root.after(0, lambda: self.get_tracks_button.configure(
@@ -465,7 +825,7 @@ class MainWindow:
         threading.Thread(target=scrape, daemon=True).start()
     
     def _populate_tracks_table(self, tracks: List[Track]):
-        """Remplit le tableau avec les morceaux"""
+        """Remplit le tableau avec les morceaux - VERSION AVEC SUPPORT FEATURES"""
         # Effacer le tableau
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -475,18 +835,31 @@ class MainWindow:
         
         # Ajouter les morceaux
         for i, track in enumerate(tracks):
-            status = "✓" if track.has_complete_credits() else "⚠" if track.credits else "✗"
+            is_selected = True
+            symbol = "☑" if is_selected else "☐"
+            title_display = f"🎤 {track.get_display_title()}" if track.is_featuring else track.get_display_title()
+            
             values = (
-                track.title,
+                title_display,
+                track.get_display_artist() if track.is_featuring else "",
                 track.album or "-",
                 len(track.credits),
                 track.bpm or "-",
-                status
+                "✓" if track.has_complete_credits() else "⚠" if track.credits else "✗"
             )
-            item = self.tree.insert("", "end", text="☐", values=values, tags=(str(i),))
+
+            item = self.tree.insert("", "end", text=symbol, values=values, tags=(str(i),))
+            if is_selected:
+                self.selected_tracks.add(i)
+
             # Sélectionner par défaut
             self.selected_tracks.add(i)
             self.tree.item(item, text="☑")
+            
+            # NOUVEAU : Couleur différente pour les features
+            symbol = "☑" if track.is_featuring else "☐"
+            item = self.tree.insert("", "end", text=symbol, values=values, tags=(str(i),))
+            self.selected_tracks.add(i)
         
         self._update_selection_count()
     

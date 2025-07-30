@@ -334,3 +334,362 @@ class DataManager:
             stats['recent_errors'] = cursor.fetchone()[0]
             
             return stats
+    
+    def get_scraping_analytics(self, artist_name: str) -> Dict[str, Any]:
+        """Analyse l'efficacité du scraping vs API"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Récupérer les tracks de l'artiste
+            cursor.execute("""
+                SELECT t.*, a.name as artist_name
+                FROM tracks t 
+                JOIN artists a ON t.artist_id = a.id 
+                WHERE a.name = ?
+            """, (artist_name,))
+            
+            tracks = cursor.fetchall()
+            
+            analytics = {
+                'total_tracks': len(tracks),
+                'api_coverage': {
+                    'album': 0,
+                    'release_date': 0,
+                    'genre': 0,
+                    'bpm': 0
+                },
+                'scraping_needed': {
+                    'album': 0,
+                    'release_date': 0,
+                    'genre': 0,
+                    'credits': 0
+                },
+                'data_completeness': {
+                    'complete_tracks': 0,
+                    'missing_album': 0,
+                    'missing_date': 0,
+                    'missing_genre': 0,
+                    'missing_credits': 0
+                },
+                'time_savings_estimate': 0
+            }
+            
+            if not tracks:
+                return analytics
+            
+            for track in tracks:
+                # Analyser la complétude
+                if track['album']:
+                    analytics['api_coverage']['album'] += 1
+                else:
+                    analytics['scraping_needed']['album'] += 1
+                    analytics['data_completeness']['missing_album'] += 1
+                
+                if track['release_date']:
+                    analytics['api_coverage']['release_date'] += 1
+                else:
+                    analytics['scraping_needed']['release_date'] += 1
+                    analytics['data_completeness']['missing_date'] += 1
+                
+                if track['genre']:
+                    # Le genre vient toujours du scraping
+                    analytics['scraping_needed']['genre'] += 1
+                else:
+                    analytics['data_completeness']['missing_genre'] += 1
+                
+                if track['bpm']:
+                    analytics['api_coverage']['bpm'] += 1
+                
+                # Compter les crédits
+                cursor.execute("SELECT COUNT(*) FROM credits WHERE track_id = ?", (track['id'],))
+                credit_count = cursor.fetchone()[0]
+                
+                if credit_count > 0:
+                    analytics['scraping_needed']['credits'] += 1
+                else:
+                    analytics['data_completeness']['missing_credits'] += 1
+                
+                # Track complet = album + date + genre + crédits
+                if (track['album'] and track['release_date'] and 
+                    track['genre'] and credit_count > 0):
+                    analytics['data_completeness']['complete_tracks'] += 1
+            
+            # Calculer les pourcentages
+            total = analytics['total_tracks']
+            for category in ['api_coverage', 'scraping_needed', 'data_completeness']:
+                for key in analytics[category]:
+                    if total > 0:
+                        percentage = (analytics[category][key] / total) * 100
+                        analytics[category][f'{key}_percentage'] = round(percentage, 1)
+            
+            # Estimation du gain de temps (basé sur 2s par morceau scraped complètement vs 0.5s pour métadonnées partielles)
+            full_scraping_time = total * 2  # 2 secondes par track complet
+            partial_scraping_time = (
+                analytics['scraping_needed']['album'] * 0.1 +  # 0.1s pour scraper juste l'album
+                analytics['scraping_needed']['release_date'] * 0.1 +  # 0.1s pour la date
+                analytics['scraping_needed']['genre'] * 0.2 +  # 0.2s pour le genre
+                analytics['scraping_needed']['credits'] * 1.5  # 1.5s pour les crédits (toujours nécessaire)
+            )
+            
+            analytics['time_savings_estimate'] = max(0, full_scraping_time - partial_scraping_time)
+            analytics['efficiency_gain_percentage'] = round(
+                (analytics['time_savings_estimate'] / full_scraping_time * 100) if full_scraping_time > 0 else 0, 1
+            )
+            
+            return analytics
+
+    # Utilisation dans l'interface graphique
+    def show_scraping_analytics(self):
+        """Affiche les analytics de scraping"""
+        if not self.current_artist:
+            return
+        
+        analytics = self.data_manager.get_scraping_analytics(self.current_artist.name)
+        
+        # Créer une fenêtre d'analytics
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Analytics de scraping")
+        dialog.geometry("600x500")
+        
+        # Affichage des résultats
+        text_widget = ctk.CTkTextbox(dialog, width=580, height=450)
+        text_widget.pack(padx=10, pady=10)
+        
+        report = f"""
+    📊 ANALYTICS DE SCRAPING - {self.current_artist.name}
+    {'='*50}
+
+    📈 COUVERTURE PAR L'API GENIUS:
+    • Albums: {analytics['api_coverage']['album']}/{analytics['total_tracks']} ({analytics['api_coverage'].get('album_percentage', 0)}%)
+    • Dates de sortie: {analytics['api_coverage']['release_date']}/{analytics['total_tracks']} ({analytics['api_coverage'].get('release_date_percentage', 0)}%)
+    • BPM: {analytics['api_coverage']['bpm']}/{analytics['total_tracks']} ({analytics['api_coverage'].get('bpm_percentage', 0)}%)
+
+    🔍 SCRAPING NÉCESSAIRE:
+    • Albums manquants: {analytics['scraping_needed']['album']} ({analytics['scraping_needed'].get('album_percentage', 0)}%)
+    • Dates manquantes: {analytics['scraping_needed']['release_date']} ({analytics['scraping_needed'].get('release_date_percentage', 0)}%)
+    • Genres (toujours): {analytics['total_tracks']} (100%)
+    • Crédits: {analytics['scraping_needed']['credits']} ({analytics['scraping_needed'].get('credits_percentage', 0)}%)
+
+    ✅ COMPLÉTUDE DES DONNÉES:
+    • Morceaux complets: {analytics['data_completeness']['complete_tracks']}/{analytics['total_tracks']} ({analytics['data_completeness'].get('complete_tracks_percentage', 0)}%)
+
+    ⚡ OPTIMISATION:
+    • Gain de temps estimé: {analytics['time_savings_estimate']:.1f} secondes
+    • Efficacité améliorée de: {analytics['efficiency_gain_percentage']}%
+
+    💡 RECOMMANDATION:
+    La stratégie hybride (API + scraping ciblé) est {'TRÈS EFFICACE' if analytics['efficiency_gain_percentage'] > 50 else 'EFFICACE' if analytics['efficiency_gain_percentage'] > 20 else 'MOYENNEMENT EFFICACE'} !
+        """
+        
+        text_widget.insert("0.0", report)
+        text_widget.configure(state="disabled")
+
+    def delete_artist(self, artist_name: str) -> bool:
+        """Supprime un artiste et toutes ses données associées"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Récupérer l'ID de l'artiste
+                cursor.execute("SELECT id FROM artists WHERE name = ?", (artist_name,))
+                artist_row = cursor.fetchone()
+                
+                if not artist_row:
+                    logger.warning(f"Artiste non trouvé: {artist_name}")
+                    return False
+                
+                artist_id = artist_row[0]
+                
+                # Supprimer dans l'ordre (contraintes de clés étrangères)
+                
+                # 1. Supprimer les erreurs de scraping
+                cursor.execute("DELETE FROM scraping_errors WHERE track_id IN (SELECT id FROM tracks WHERE artist_id = ?)", (artist_id,))
+                deleted_errors = cursor.rowcount
+                
+                # 2. Supprimer les crédits
+                cursor.execute("DELETE FROM credits WHERE track_id IN (SELECT id FROM tracks WHERE artist_id = ?)", (artist_id,))
+                deleted_credits = cursor.rowcount
+                
+                # 3. Supprimer les morceaux
+                cursor.execute("DELETE FROM tracks WHERE artist_id = ?", (artist_id,))
+                deleted_tracks = cursor.rowcount
+                
+                # 4. Supprimer l'artiste
+                cursor.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+                deleted_artist = cursor.rowcount
+                
+                conn.commit()
+                
+                logger.info(f"Artiste '{artist_name}' supprimé avec succès:")
+                logger.info(f"  - {deleted_tracks} morceaux")
+                logger.info(f"  - {deleted_credits} crédits")
+                logger.info(f"  - {deleted_errors} erreurs de scraping")
+                
+                return deleted_artist > 0
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la suppression de l'artiste: {e}")
+            return False
+
+    def get_artist_details(self, artist_name: str) -> Dict[str, Any]:
+        """Récupère les détails complets d'un artiste"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Informations de base de l'artiste
+                cursor.execute("""
+                    SELECT id, name, genius_id, spotify_id, discogs_id, created_at, updated_at
+                    FROM artists WHERE name = ?
+                """, (artist_name,))
+                
+                artist_row = cursor.fetchone()
+                if not artist_row:
+                    return {}
+                
+                artist_id = artist_row[0]
+                
+                # Compter les morceaux et crédits
+                cursor.execute("""
+                    SELECT 
+                        COUNT(DISTINCT t.id) as tracks_count,
+                        COUNT(DISTINCT c.id) as credits_count
+                    FROM tracks t
+                    LEFT JOIN credits c ON t.id = c.track_id
+                    WHERE t.artist_id = ?
+                """, (artist_id,))
+                
+                counts = cursor.fetchone()
+                
+                # Morceaux récents
+                cursor.execute("""
+                    SELECT 
+                        t.title, 
+                        t.album, 
+                        t.release_date,
+                        COUNT(c.id) as credits_count
+                    FROM tracks t
+                    LEFT JOIN credits c ON t.id = c.track_id
+                    WHERE t.artist_id = ?
+                    GROUP BY t.id, t.title, t.album, t.release_date
+                    ORDER BY t.updated_at DESC
+                    LIMIT 20
+                """, (artist_id,))
+                
+                recent_tracks = []
+                for row in cursor.fetchall():
+                    recent_tracks.append({
+                        'title': row[0],
+                        'album': row[1],
+                        'release_date': row[2],
+                        'credits_count': row[3]
+                    })
+                
+                # Crédits par rôle
+                cursor.execute("""
+                    SELECT role, COUNT(*) as count
+                    FROM credits c
+                    JOIN tracks t ON c.track_id = t.id
+                    WHERE t.artist_id = ?
+                    GROUP BY role
+                    ORDER BY count DESC
+                """, (artist_id,))
+                
+                credits_by_role = {}
+                for row in cursor.fetchall():
+                    credits_by_role[row[0]] = row[1]
+                
+                return {
+                    'name': artist_row[1],
+                    'genius_id': artist_row[2],
+                    'spotify_id': artist_row[3],
+                    'discogs_id': artist_row[4],
+                    'created_at': artist_row[5],
+                    'updated_at': artist_row[6],
+                    'tracks_count': counts[0] if counts else 0,
+                    'credits_count': counts[1] if counts else 0,
+                    'recent_tracks': recent_tracks,
+                    'credits_by_role': credits_by_role
+                }
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des détails: {e}")
+            return {}
+
+    def clean_orphaned_data(self) -> Dict[str, int]:
+        """Nettoie les données orphelines dans la base"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Supprimer les crédits orphelins (sans track)
+                cursor.execute("""
+                    DELETE FROM credits 
+                    WHERE track_id NOT IN (SELECT id FROM tracks)
+                """)
+                orphaned_credits = cursor.rowcount
+                
+                # Supprimer les erreurs orphelines (sans track)
+                cursor.execute("""
+                    DELETE FROM scraping_errors 
+                    WHERE track_id NOT IN (SELECT id FROM tracks)
+                """)
+                orphaned_errors = cursor.rowcount
+                
+                # Supprimer les tracks orphelins (sans artiste)
+                cursor.execute("""
+                    DELETE FROM tracks 
+                    WHERE artist_id NOT IN (SELECT id FROM artists)
+                """)
+                orphaned_tracks = cursor.rowcount
+                
+                conn.commit()
+                
+                cleaned = {
+                    'orphaned_credits': orphaned_credits,
+                    'orphaned_errors': orphaned_errors,
+                    'orphaned_tracks': orphaned_tracks
+                }
+                
+                if sum(cleaned.values()) > 0:
+                    logger.info(f"Nettoyage terminé: {cleaned}")
+                
+                return cleaned
+                
+        except Exception as e:
+            logger.error(f"Erreur lors du nettoyage: {e}")
+            return {'orphaned_credits': 0, 'orphaned_errors': 0, 'orphaned_tracks': 0}
+
+    def get_database_size_info(self) -> Dict[str, Any]:
+        """Retourne des informations sur la taille de la base de données"""
+        try:
+            import os
+            
+            db_file_path = self.db_path
+            
+            info = {
+                'file_exists': os.path.exists(db_file_path),
+                'file_size_bytes': 0,
+                'file_size_mb': 0,
+                'file_path': db_file_path
+            }
+            
+            if info['file_exists']:
+                info['file_size_bytes'] = os.path.getsize(db_file_path)
+                info['file_size_mb'] = round(info['file_size_bytes'] / (1024 * 1024), 2)
+            
+            # Statistiques des tables
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                tables = ['artists', 'tracks', 'credits', 'scraping_errors']
+                for table in tables:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    count = cursor.fetchone()[0]
+                    info[f'{table}_count'] = count
+            
+            return info
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des infos de taille: {e}")
+            return {}

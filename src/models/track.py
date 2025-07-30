@@ -170,6 +170,10 @@ class Track:
     artist: Optional['Artist'] = None
     album: Optional[str] = None
     release_date: Optional[datetime] = None
+
+    # Champs internes de marquage
+    _album_from_api: bool = field(default=False, repr=False)
+    _release_date_from_api: bool = field(default=False, repr=False)
     
     # IDs externes
     genius_id: Optional[int] = None
@@ -180,6 +184,16 @@ class Track:
     bpm: Optional[int] = None
     duration: Optional[int] = None  # En secondes
     genre: Optional[str] = None
+    track_number: Optional[int] = None  # NOUVEAU : Numéro de piste
+    
+    # NOUVEAU : Support des features
+    is_featuring: bool = False  # True si l'artiste est en featuring
+    featured_artists: Optional[str] = None  # Liste des artistes en featuring
+    primary_artist_name: Optional[str] = None  # Nom de l'artiste principal si différent
+    
+    # Métadonnées supplémentaires
+    popularity: Optional[int] = None  # Nombre de vues sur Genius
+    artwork_url: Optional[str] = None  # URL de la pochette
     
     # Crédits
     credits: List[Credit] = field(default_factory=list)
@@ -218,16 +232,30 @@ class Track:
     
     def has_complete_credits(self) -> bool:
         """Vérifie si les crédits semblent complets"""
-        # Au minimum, on devrait avoir des producteurs et auteurs
         return bool(self.get_producers() and self.get_writers())
+    
+    def get_display_title(self) -> str:
+        """Retourne le titre à afficher (avec indication featuring si applicable)"""
+        if self.is_featuring and self.primary_artist_name:
+            return f"{self.title} (feat. {self.artist.name if self.artist else 'Unknown'})"
+        return self.title
+    
+    def get_display_artist(self) -> str:
+        """Retourne l'artiste à afficher (principal si featuring)"""
+        if self.is_featuring and self.primary_artist_name:
+            return self.primary_artist_name
+        return self.artist.name if self.artist else "Unknown"
     
     def to_dict(self) -> dict:
         """Convertit le morceau en dictionnaire"""
         return {
             'id': self.id,
             'title': self.title,
+            'display_title': self.get_display_title(),
             'artist': self.artist.name if self.artist else None,
+            'display_artist': self.get_display_artist(),
             'album': self.album,
+            'track_number': self.track_number,
             'release_date': self.release_date.isoformat() if self.release_date else None,
             'genius_id': self.genius_id,
             'spotify_id': self.spotify_id,
@@ -235,6 +263,11 @@ class Track:
             'bpm': self.bpm,
             'duration': self.duration,
             'genre': self.genre,
+            'is_featuring': self.is_featuring,
+            'featured_artists': self.featured_artists,
+            'primary_artist_name': self.primary_artist_name,
+            'popularity': self.popularity,
+            'artwork_url': self.artwork_url,
             'credits': [c.to_dict() for c in self.credits],
             'credits_count': len(self.credits),
             'has_complete_credits': self.has_complete_credits(),

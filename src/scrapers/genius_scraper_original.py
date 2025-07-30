@@ -373,43 +373,46 @@ class GeniusScraper:
             # Attendre que les crédits soient visibles
             time.sleep(1)
             self.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div[class*='SongInfo__Credit']"))
+                EC.presence_of_element_located((By.CLASS_NAME, "SongInfo__Credit"))
             )
+            
+            # Obtenir le HTML de la page
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             
-            raw_credits = []
-            for credit in soup.select("div[class*='SongInfo__Credit']"):
-                label_div = credit.find("div", class_=re.compile(r"SongInfo__Label"))
-                role = label_div.get_text(strip=True) if label_div else "Unknown"
-
-                container_div = label_div.find_next_sibling("div") if label_div else None
-                values = []
-
-                # Liens (<a>)
-                if container_div:
-                    values.extend([a.get_text(strip=True) for a in container_div.select("a")])
-
-                    # Textes bruts hors liens
-                    for txt in container_div.find_all(text=True, recursive=False):
-                        t = txt.strip()
-                        if t and t not in values:
-                            values.append(t)
-
-                raw_credits += Credit.from_role_and_names(role, values)
-
-                # Afficher
-                for c in credits:
-                    for role, names in c.items():
-                        print(f"{role}: {', '.join(names)}")
-                        
-                # Dédoublonner les crédits
-                credits = self._deduplicate_credits(raw_credits)
+            # 1. MÉTHODE PRINCIPALE : Structure HTML exacte de Genius
+            # Chercher le conteneur principal des crédits
+            credits_container = soup.find('div', class_='SongInfo__Columns-sc-4162678b-2')
             
-                logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
-            
-                # Debug si aucun crédit trouvé
-                if not credits:
-                    self._debug_no_credits_found(soup)
+            if not credits_container:
+                # Fallback avec classes partielles
+                credits_container = soup.find('div', class_=lambda x: x and 'SongInfo__Columns' in x)
+
+            if credits_container:
+                logger.debug("✅ Conteneur de crédits trouvé")
+                credits.extend(self._extract_from_genius_structure(credits_container))
+            else:
+                logger.warning("❌ Conteneur de crédits non trouvé")
+
+            # 2. MÉTHODE ALTERNATIVE : Si pas de conteneur, chercher les crédits individuels
+            if not credits:
+                logger.debug("Recherche des crédits individuels...")
+                credit_elements = soup.find_all('div', class_=lambda x: x and 'SongInfo__Credit' in x)
+
+                if credit_elements:
+                    logger.debug(f"Trouvé {len(credit_elements)} éléments de crédit individuels")
+                    for element in credit_elements:
+                        credit = self._parse_genius_credit_element(element)
+                        if credit:
+                            credits.append(credit)
+        
+            # Dédoublonner les crédits
+            credits = self._deduplicate_credits(credits)
+        
+            logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
+        
+            # Debug si aucun crédit trouvé
+            if not credits:
+                self._debug_no_credits_found(soup)
 
         except TimeoutException:
             logger.warning("Timeout en attendant les crédits")
@@ -792,7 +795,6 @@ class GeniusScraper:
             try:
                 # Scraper les crédits du morceau
                 credits = self.scrape_track_credits(track)
-                track.credits = credits
                 
                 # Scraper l'album si pas déjà fait
                 if track.album and track.album not in album_credits_cache:

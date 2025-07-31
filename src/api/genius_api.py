@@ -30,12 +30,12 @@ class GeniusAPI:
     def search_artist(self, artist_name: str) -> Optional[Artist]:
         """Recherche un artiste sur Genius"""
         try:
-            logger.info(f"Recherche de l'artiste: {artist_name}")
-            
-            # Utiliser la méthode search() qui fonctionne
+            logger.info(f"🔍 Recherche API Genius pour: '{artist_name}'")
             search_response = self.genius.search(artist_name)
+            logger.info(f"📦 Réponse API reçue: {type(search_response)}")
             
             if search_response and 'hits' in search_response:
+                logger.info(f"🎯 {len(search_response['hits'])} résultats trouvés")
                 # Chercher l'artiste dans les résultats
                 for hit in search_response['hits']:
                     result = hit['result']

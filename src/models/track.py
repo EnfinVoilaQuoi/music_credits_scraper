@@ -98,6 +98,10 @@ class CreditRole(Enum):
     VIDEO_CINEMATOGRAPHER = "Video Cinematographer"
     VIDEO_DIGITAL_IMAGING_TECHNICIAN = "Video Digital Imaging Technician"
     VIDEO_CAMERA_OPERATOR = "Video Camera Operator"
+    VIDEO_DRONE_OPERATOR = "Video Drone Operator"
+    VIDEO_SET_DECORATOR = "Video Set Decorator"
+    VIDEO_EDITOR = "Video Editor"
+    VIDEO_COLORIST = "Video Colorist"
     
     # Rôles liés à l'album
     A_AND_R = "A&R"
@@ -184,9 +188,9 @@ class Track:
     bpm: Optional[int] = None
     duration: Optional[int] = None  # En secondes
     genre: Optional[str] = None
-    track_number: Optional[int] = None  # NOUVEAU : Numéro de piste
+    track_number: Optional[int] = None  # Numéro de piste
     
-    # NOUVEAU : Support des features
+    # Support des features
     is_featuring: bool = False  # True si l'artiste est en featuring
     featured_artists: Optional[str] = None  # Liste des artistes en featuring
     primary_artist_name: Optional[str] = None  # Nom de l'artiste principal si différent
@@ -223,25 +227,96 @@ class Track:
         return [c for c in self.credits if c.role == role]
     
     def get_producers(self) -> List[str]:
-        """Retourne la liste des producteurs"""
-        return [c.name for c in self.get_credits_by_role(CreditRole.PRODUCER)]
+        """Retourne la liste des producteurs (tous types confondus)"""
+        producer_roles = [
+            CreditRole.PRODUCER,
+            CreditRole.CO_PRODUCER,
+            CreditRole.EXECUTIVE_PRODUCER,
+            CreditRole.VOCAL_PRODUCER,
+            CreditRole.ADDITIONAL_PRODUCTION
+        ]
+        producers = []
+        for role in producer_roles:
+            producers.extend([c.name for c in self.get_credits_by_role(role)])
+        return producers
     
     def get_writers(self) -> List[str]:
-        """Retourne la liste des auteurs"""
-        return [c.name for c in self.get_credits_by_role(CreditRole.WRITER)]
+        """Retourne la liste des auteurs (tous types confondus)"""
+        writer_roles = [
+            CreditRole.WRITER,
+            CreditRole.COMPOSER,
+            CreditRole.LYRICIST
+        ]
+        writers = []
+        for role in writer_roles:
+            writers.extend([c.name for c in self.get_credits_by_role(role)])
+        return writers
     
     def has_complete_credits(self) -> bool:
-        """Vérifie si les crédits semblent complets"""
-        return bool(self.get_producers() and self.get_writers())
+        """Vérifie si les crédits semblent complets - VERSION CORRIGÉE"""
+        # Un morceau est considéré comme complet s'il a au moins :
+        # - Un producteur OU un auteur (certains morceaux n'ont qu'un des deux)
+        # - Au moins 3 crédits au total (pour éviter les morceaux avec juste un crédit isolé)
+        
+        has_producer = bool(self.get_producers())
+        has_writer = bool(self.get_writers())
+        total_music_credits = len(self.get_music_credits())  # Exclure les crédits vidéo
+        
+        return (has_producer or has_writer) and total_music_credits >= 3
     
+    def get_music_credits(self) -> List[Credit]:
+        """Retourne seulement les crédits musicaux (pas les crédits vidéo)"""
+        video_roles = [
+            CreditRole.VIDEO_DIRECTOR,
+            CreditRole.VIDEO_PRODUCER,
+            CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY,
+            CreditRole.VIDEO_CINEMATOGRAPHER,
+            CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN,
+            CreditRole.VIDEO_CAMERA_OPERATOR,
+            CreditRole.VIDEO_DRONE_OPERATOR,
+            CreditRole.VIDEO_SET_DECORATOR,
+            CreditRole.VIDEO_EDITOR,
+            CreditRole.VIDEO_COLORIST,
+            CreditRole.PHOTOGRAPHY  # Considéré comme vidéo selon votre demande
+        ]
+        
+        return [c for c in self.credits if c.role not in video_roles]
+    
+    def get_video_credits(self) -> List[Credit]:
+        """Retourne seulement les crédits vidéo"""
+        video_roles = [
+            CreditRole.VIDEO_DIRECTOR,
+            CreditRole.VIDEO_PRODUCER,
+            CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY,
+            CreditRole.VIDEO_CINEMATOGRAPHER,
+            CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN,
+            CreditRole.VIDEO_CAMERA_OPERATOR,
+            CreditRole.VIDEO_DRONE_OPERATOR,
+            CreditRole.VIDEO_SET_DECORATOR,
+            CreditRole.VIDEO_EDITOR,
+            CreditRole.VIDEO_COLORIST,
+            CreditRole.PHOTOGRAPHY
+        ]
+        
+        # Inclure aussi les rôles OTHER qui contiennent "video" dans le role_detail
+        video_credits = [c for c in self.credits if c.role in video_roles]
+        
+        # Ajouter les rôles OTHER qui sont liés à la vidéo
+        for credit in self.credits:
+            if (credit.role == CreditRole.OTHER and 
+                credit.role_detail and 
+                any(keyword in credit.role_detail.lower() for keyword in ['video', 'drone', 'camera', 'cinemat', 'photography'])):
+                video_credits.append(credit)
+        
+        return video_credits
     
     def get_display_title(self) -> str:
-            """Retourne le titre à afficher (avec indication featuring si applicable)"""
-            if hasattr(self, 'is_featuring') and self.is_featuring:
-                # Pour les features : garder le titre original (il contient déjà "feat.")
-                return self.title
+        """Retourne le titre à afficher (avec indication featuring si applicable)"""
+        if hasattr(self, 'is_featuring') and self.is_featuring:
+            # Pour les features : garder le titre original (il contient déjà "feat.")
             return self.title
-        
+        return self.title
+    
     def get_display_artist(self) -> str:
         """Retourne l'artiste à afficher (principal si featuring)"""
         if hasattr(self, 'is_featuring') and self.is_featuring:
@@ -267,8 +342,11 @@ class Track:
         return not (hasattr(self, 'is_featuring') and self.is_featuring)
     
     def to_dict(self) -> dict:
-        """Convertit le morceau en dictionnaire - VERSION CORRIGÉE"""
+        """Convertit le morceau en dictionnaire - VERSION AVEC SÉPARATION VIDÉO"""
         is_featuring = hasattr(self, 'is_featuring') and self.is_featuring
+        
+        music_credits = self.get_music_credits()
+        video_credits = self.get_video_credits()
         
         return {
             'id': self.id,
@@ -290,9 +368,18 @@ class Track:
             'primary_artist_name': getattr(self, 'primary_artist_name', None),
             'popularity': getattr(self, 'popularity', None),
             'artwork_url': getattr(self, 'artwork_url', None),
-            'credits': [c.to_dict() for c in self.credits],
-            'credits_count': len(self.credits),
+            
+            # ✅ SÉPARATION DES CRÉDITS
+            'music_credits': [c.to_dict() for c in music_credits],
+            'video_credits': [c.to_dict() for c in video_credits],
+            'all_credits': [c.to_dict() for c in self.credits],  # Garde la compatibilité
+            
+            # Statistiques
+            'music_credits_count': len(music_credits),
+            'video_credits_count': len(video_credits),
+            'total_credits_count': len(self.credits),
             'has_complete_credits': self.has_complete_credits(),
+            
             'genius_url': self.genius_url,
             'spotify_url': self.spotify_url,
             'created_at': self.created_at.isoformat(),

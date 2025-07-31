@@ -1,4 +1,4 @@
-"""Interface avec l'API Genius - Version avec support des features"""
+"""Interface avec l'API Genius - Version corrigée pour les erreurs de clés"""
 import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -28,50 +28,141 @@ class GeniusAPI:
         logger.info("API Genius initialisée")
     
     def search_artist(self, artist_name: str) -> Optional[Artist]:
-        """Recherche un artiste sur Genius"""
+        """Recherche un artiste sur Genius - VERSION SÉCURISÉE"""
         try:
             logger.info(f"🔍 Recherche API Genius pour: '{artist_name}'")
-            search_response = self.genius.search(artist_name)
-            logger.info(f"📦 Réponse API reçue: {type(search_response)}")
             
-            if search_response and 'hits' in search_response:
-                logger.info(f"🎯 {len(search_response['hits'])} résultats trouvés")
-                # Chercher l'artiste dans les résultats
-                for hit in search_response['hits']:
-                    result = hit['result']
-                    primary_artist = result.get('primary_artist', {})
+            # ✅ CORRECTION 1: Vérifier d'abord dans la base de données locale
+            try:
+                # Importer ici pour éviter la dépendance circulaire
+                from src.utils.data_manager import DataManager
+                data_manager = DataManager()
+                existing_artist = data_manager.get_artist_by_name(artist_name)
+                
+                if existing_artist:
+                    logger.info(f"✅ Artiste trouvé en base: {existing_artist.name}")
+                    return existing_artist
                     
-                    # Vérifier si c'est le bon artiste (comparaison insensible à la casse)
-                    if primary_artist.get('name', '').lower() == artist_name.lower():
+            except Exception as db_error:
+                logger.warning(f"Erreur lors de la vérification en base: {db_error}")
+                # Continuer avec la recherche API
+            
+            # ✅ CORRECTION 2: Recherche API avec gestion d'erreurs robuste
+            search_response = self.genius.search(artist_name)
+            logger.debug(f"📦 Réponse API reçue: {type(search_response)}")
+            
+            # ✅ CORRECTION 3: Vérifications strictes de la structure
+            if not search_response:
+                logger.warning(f"Réponse API vide pour '{artist_name}'")
+                return None
+            
+            if not isinstance(search_response, dict):
+                logger.warning(f"Réponse API n'est pas un dict: {type(search_response)}")
+                return None
+                
+            if 'hits' not in search_response:
+                logger.warning(f"Clé 'hits' manquante dans la réponse API")
+                return None
+            
+            hits = search_response['hits']
+            if not isinstance(hits, list) or len(hits) == 0:
+                logger.warning(f"Aucun résultat dans 'hits' pour '{artist_name}'")
+                return None
+            
+            logger.info(f"🎯 {len(hits)} résultats trouvés")
+            
+            # ✅ CORRECTION 4: Parsing sécurisé des résultats
+            for i, hit in enumerate(hits):
+                try:
+                    # Vérifier la structure du hit
+                    if not isinstance(hit, dict):
+                        logger.debug(f"Hit {i} n'est pas un dict: {type(hit)}")
+                        continue
+                        
+                    if 'result' not in hit:
+                        logger.debug(f"Hit {i} n'a pas de clé 'result'")
+                        continue
+                    
+                    result = hit['result']
+                    if not isinstance(result, dict):
+                        logger.debug(f"Hit {i} result n'est pas un dict: {type(result)}")
+                        continue
+                    
+                    # Vérifier primary_artist
+                    if 'primary_artist' not in result:
+                        logger.debug(f"Hit {i} n'a pas de 'primary_artist'")
+                        continue
+                    
+                    primary_artist = result['primary_artist']
+                    if not isinstance(primary_artist, dict):
+                        logger.debug(f"Hit {i} primary_artist n'est pas un dict: {type(primary_artist)}")
+                        continue
+                    
+                    # Vérifier les champs requis
+                    if 'name' not in primary_artist or 'id' not in primary_artist:
+                        logger.debug(f"Hit {i} primary_artist manque name ou id")
+                        continue
+                    
+                    artist_found_name = primary_artist['name']
+                    artist_found_id = primary_artist['id']
+                    
+                    # Vérification de correspondance (insensible à la casse)
+                    if artist_found_name.lower() == artist_name.lower():
                         artist = Artist(
-                            name=primary_artist['name'],
-                            genius_id=primary_artist['id']
+                            name=artist_found_name,
+                            genius_id=artist_found_id
                         )
                         log_api("Genius", f"artist/{artist.genius_id}", True)
-                        logger.info(f"Artiste trouvé: {artist.name} (ID: {artist.genius_id})")
+                        logger.info(f"✅ Artiste trouvé (correspondance exacte): {artist.name} (ID: {artist.genius_id})")
                         return artist
                 
-                # Si pas de correspondance exacte, prendre le premier artiste qui contient le nom
-                for hit in search_response['hits']:
-                    result = hit['result']
-                    primary_artist = result.get('primary_artist', {})
-                    artist_name_lower = artist_name.lower()
-                    
-                    if (artist_name_lower in primary_artist.get('name', '').lower() or 
-                        primary_artist.get('name', '').lower() in artist_name_lower):
-                        artist = Artist(
-                            name=primary_artist['name'],
-                            genius_id=primary_artist['id']
-                        )
-                        log_api("Genius", f"artist/{artist.genius_id}", True)
-                        logger.info(f"Artiste trouvé (correspondance partielle): {artist.name} (ID: {artist.genius_id})")
-                        return artist
+                except Exception as hit_error:
+                    logger.debug(f"Erreur lors du traitement du hit {i}: {hit_error}")
+                    continue
             
-            logger.warning(f"Artiste non trouvé: {artist_name}")
+            # ✅ CORRECTION 5: Correspondance partielle en dernier recours
+            logger.debug("Recherche de correspondance partielle...")
+            for i, hit in enumerate(hits):
+                try:
+                    if (isinstance(hit, dict) and 
+                        'result' in hit and 
+                        isinstance(hit['result'], dict) and
+                        'primary_artist' in hit['result'] and
+                        isinstance(hit['result']['primary_artist'], dict)):
+                        
+                        primary_artist = hit['result']['primary_artist']
+                        if 'name' in primary_artist and 'id' in primary_artist:
+                            artist_found_name = primary_artist['name']
+                            artist_found_id = primary_artist['id']
+                            
+                            artist_name_lower = artist_name.lower()
+                            artist_found_lower = artist_found_name.lower()
+                            
+                            # Correspondance partielle
+                            if (artist_name_lower in artist_found_lower or 
+                                artist_found_lower in artist_name_lower):
+                                
+                                artist = Artist(
+                                    name=artist_found_name,
+                                    genius_id=artist_found_id
+                                )
+                                log_api("Genius", f"artist/{artist.genius_id}", True)
+                                logger.info(f"✅ Artiste trouvé (correspondance partielle): {artist.name} (ID: {artist.genius_id})")
+                                return artist
+                
+                except Exception as partial_error:
+                    logger.debug(f"Erreur lors de la correspondance partielle {i}: {partial_error}")
+                    continue
+            
+            logger.warning(f"Aucun artiste correspondant trouvé pour '{artist_name}'")
             return None
                 
         except Exception as e:
             logger.error(f"Erreur lors de la recherche d'artiste: {e}")
+            logger.error(f"Type d'erreur: {type(e).__name__}")
+            # Log plus de détails pour debug
+            import traceback
+            logger.debug(f"Traceback complet: {traceback.format_exc()}")
             log_api("Genius", f"search/artist/{artist_name}", False)
             return None
     

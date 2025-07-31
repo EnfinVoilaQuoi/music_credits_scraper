@@ -215,27 +215,98 @@ class DataManager:
             logger.debug(f"Erreur lors de la sauvegarde du crédit {credit.name}: {e}")
     
     def get_artist_by_name(self, name: str) -> Optional[Artist]:
-        """Récupère un artiste par son nom"""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM artists WHERE name = ?", (name,))
-            row = cursor.fetchone()
+        """Récupère un artiste par son nom - VERSION SÉCURISÉE"""
+        try:
+            logger.debug(f"🔍 Recherche de l'artiste: '{name}'")
             
-            if row:
-                artist = Artist(
-                    id=row['id'],
-                    name=row['name'],
-                    genius_id=row['genius_id'],
-                    spotify_id=row['spotify_id'],
-                    discogs_id=row['discogs_id']
-                )
-                # Charger les morceaux
-                artist.tracks = self.get_artist_tracks(artist.id)
-                return artist
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM artists WHERE name = ?", (name,))
+                row = cursor.fetchone()
+                
+                if not row:
+                    logger.debug(f"❌ Aucun artiste trouvé pour: '{name}'")
+                    return None
+                
+                logger.debug(f"✅ Artiste trouvé en base: {dict(row)}")
+                
+                # ✅ CORRECTION: Accès sécurisé aux colonnes
+                try:
+                    # Vérifier que toutes les colonnes requises existent
+                    required_columns = ['id', 'name', 'genius_id', 'spotify_id', 'discogs_id']
+                    available_columns = row.keys()
+                    
+                    logger.debug(f"📋 Colonnes disponibles: {list(available_columns)}")
+                    
+                    # Extraire les données de manière sécurisée
+                    artist_data = {}
+                    for col in required_columns:
+                        if col in available_columns:
+                            artist_data[col] = row[col]
+                            logger.debug(f"  ✅ {col}: {row[col]}")
+                        else:
+                            logger.warning(f"  ⚠️ Colonne manquante: {col}")
+                            artist_data[col] = None
+                    
+                    # Créer l'objet Artist avec les données extraites
+                    artist = Artist(
+                        id=artist_data.get('id'),
+                        name=artist_data.get('name', 'Unknown'),
+                        genius_id=artist_data.get('genius_id'),
+                        spotify_id=artist_data.get('spotify_id'),
+                        discogs_id=artist_data.get('discogs_id')
+                    )
+                    
+                    logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
+                    
+                    # ✅ CORRECTION: Chargement sécurisé des morceaux
+                    try:
+                        artist.tracks = self.get_artist_tracks(artist.id) if artist.id else []
+                        logger.debug(f"🎵 {len(artist.tracks)} morceaux chargés")
+                    except Exception as tracks_error:
+                        logger.warning(f"⚠️ Erreur lors du chargement des morceaux: {tracks_error}")
+                        artist.tracks = []
+                    
+                    return artist
+                    
+                except KeyError as key_error:
+                    logger.error(f"❌ Clé manquante dans la base: {key_error}")
+                    logger.error(f"📋 Colonnes disponibles: {list(row.keys()) if hasattr(row, 'keys') else 'N/A'}")
+                    
+                    # Tentative de récupération avec les données disponibles
+                    try:
+                        artist = Artist(
+                            id=getattr(row, 'id', None) if hasattr(row, 'id') else row[0] if len(row) > 0 else None,
+                            name=getattr(row, 'name', name) if hasattr(row, 'name') else row[1] if len(row) > 1 else name,
+                            genius_id=getattr(row, 'genius_id', None) if hasattr(row, 'genius_id') else row[2] if len(row) > 2 else None,
+                            spotify_id=getattr(row, 'spotify_id', None) if hasattr(row, 'spotify_id') else row[3] if len(row) > 3 else None,
+                            discogs_id=getattr(row, 'discogs_id', None) if hasattr(row, 'discogs_id') else row[4] if len(row) > 4 else None
+                        )
+                        logger.warning(f"⚠️ Artiste créé en mode récupération: {artist.name}")
+                        artist.tracks = []
+                        return artist
+                    except Exception as recovery_error:
+                        logger.error(f"❌ Impossible de récupérer les données: {recovery_error}")
+                        return None
+                
+                except Exception as row_error:
+                    logger.error(f"❌ Erreur lors du traitement de la ligne: {row_error}")
+                    logger.error(f"📋 Type de row: {type(row)}")
+                    logger.error(f"📋 Contenu de row: {row}")
+                    return None
+                
+        except sqlite3.Error as db_error:
+            logger.error(f"❌ Erreur de base de données: {db_error}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Erreur inattendue dans get_artist_by_name: {e}")
+            logger.error(f"📋 Type d'erreur: {type(e).__name__}")
+            import traceback
+            logger.debug(f"📜 Traceback complet: {traceback.format_exc()}")
             return None
     
     def get_artist_tracks(self, artist_id: int) -> List[Track]:
-        """Récupère tous les morceaux d'un artiste"""
+        """Récupère tous les morceaux d'un artiste - VERSION CORRIGÉE"""
         tracks = []
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -245,26 +316,35 @@ class DataManager:
             """, (artist_id,))
             
             for row in cursor.fetchall():
-                track = Track(
-                    id=row['id'],
-                    title=row['title'],
-                    album=row['album'],
-                    track_number=row['track_number'],
-                    release_date=row['release_date'],
-                    genius_id=row['genius_id'],
-                    spotify_id=row['spotify_id'],
-                    discogs_id=row['discogs_id'],
-                    bpm=row['bpm'],
-                    duration=row['duration'],
-                    genre=row['genre'],
-                    genius_url=row['genius_url'],
-                    spotify_url=row['spotify_url'],
-                    last_scraped=row['last_scraped']
-                )
-                
-                # Charger les crédits
-                track.credits = self._get_track_credits(cursor, track.id)
-                tracks.append(track)
+                try:
+                    # ✅ CORRECTION: Vérifier que les colonnes existent avant d'y accéder
+                    available_keys = list(row.keys()) if hasattr(row, 'keys') else []
+                    
+                    track = Track(
+                        id=row['id'],
+                        title=row['title'],
+                        album=row['album'],
+                        # ✅ CORRECTION: Accès sécurisé à track_number
+                        track_number=row['track_number'] if 'track_number' in available_keys else None,
+                        release_date=row['release_date'],
+                        genius_id=row['genius_id'],
+                        spotify_id=row['spotify_id'],
+                        discogs_id=row['discogs_id'],
+                        bpm=row['bpm'],
+                        duration=row['duration'],
+                        genre=row['genre'],
+                        genius_url=row['genius_url'],
+                        spotify_url=row['spotify_url'],
+                        last_scraped=row['last_scraped']
+                    )
+                    
+                    # Charger les crédits
+                    track.credits = self._get_track_credits(cursor, track.id)
+                    tracks.append(track)
+                    
+                except Exception as track_error:
+                    logger.warning(f"⚠️ Erreur lors du chargement du track {row.get('title', 'Unknown')}: {track_error}")
+                    continue
         
         return tracks
     
@@ -668,3 +748,109 @@ class DataManager:
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des infos de taille: {e}")
             return {}
+        
+    def force_update_track_credits(self, track: Track) -> int:
+        """Force la mise à jour complète des crédits d'un morceau (efface les anciens)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # ✅ ÉTAPE 1: Supprimer TOUS les anciens crédits
+                cursor.execute("DELETE FROM credits WHERE track_id = ?", (track.id,))
+                deleted_count = cursor.rowcount
+                logger.info(f"🗑️ {deleted_count} anciens crédits supprimés pour '{track.title}'")
+                
+                # ✅ ÉTAPE 2: Supprimer les anciennes erreurs de scraping
+                cursor.execute("DELETE FROM scraping_errors WHERE track_id = ?", (track.id,))
+                deleted_errors = cursor.rowcount
+                if deleted_errors > 0:
+                    logger.info(f"🗑️ {deleted_errors} anciennes erreurs supprimées")
+                
+                # ✅ ÉTAPE 3: Remettre à zéro les métadonnées de scraping
+                cursor.execute("""
+                    UPDATE tracks 
+                    SET last_scraped = NULL,
+                        genre = CASE 
+                            WHEN genre IS NOT NULL AND genre != '' THEN genre 
+                            ELSE NULL 
+                        END
+                    WHERE id = ?
+                """, (track.id,))
+                
+                # ✅ ÉTAPE 4: Sauvegarder les nouveaux crédits
+                for credit in track.credits:
+                    self._save_credit(cursor, track.id, credit)
+                
+                # ✅ ÉTAPE 5: Mettre à jour le track complet
+                cursor.execute("""
+                    UPDATE tracks 
+                    SET album = ?, track_number = ?, release_date = ?, 
+                        genius_id = ?, spotify_id = ?, discogs_id = ?,
+                        bpm = ?, duration = ?, genre = ?,
+                        genius_url = ?, spotify_url = ?,
+                        updated_at = ?, last_scraped = ?
+                    WHERE id = ?
+                """, (track.album, getattr(track, 'track_number', None), track.release_date,
+                    track.genius_id, track.spotify_id, track.discogs_id,
+                    track.bpm, track.duration, track.genre,
+                    track.genius_url, track.spotify_url,
+                    datetime.now(), track.last_scraped, track.id))
+                
+                # ✅ ÉTAPE 6: Sauvegarder les nouvelles erreurs s'il y en a
+                for error in track.scraping_errors:
+                    cursor.execute("""
+                        INSERT INTO scraping_errors (track_id, error_message, error_time)
+                        VALUES (?, ?, ?)
+                    """, (track.id, error, datetime.now()))
+                
+                conn.commit()
+                
+                new_credits_count = len(track.credits)
+                logger.info(f"✅ Mise à jour forcée terminée pour '{track.title}': {new_credits_count} nouveaux crédits")
+                
+                return new_credits_count
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la mise à jour forcée: {e}")
+            return 0
+
+    def force_update_multiple_tracks(self, tracks: List[Track], progress_callback=None) -> Dict[str, int]:
+        """Force la mise à jour de plusieurs morceaux"""
+        results = {
+            'updated': 0,
+            'failed': 0,
+            'total_credits_before': 0,
+            'total_credits_after': 0
+        }
+        
+        total = len(tracks)
+        
+        for i, track in enumerate(tracks):
+            try:
+                # Compter les crédits avant
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM credits WHERE track_id = ?", (track.id,))
+                    credits_before = cursor.fetchone()[0]
+                    results['total_credits_before'] += credits_before
+                
+                # Mise à jour forcée
+                new_credits = self.force_update_track_credits(track)
+                
+                if new_credits >= 0:  # Succès (même si 0 crédits)
+                    results['updated'] += 1
+                    results['total_credits_after'] += new_credits
+                else:
+                    results['failed'] += 1
+                
+                if progress_callback:
+                    progress_callback(i + 1, total, f"Mise à jour: {track.title}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Erreur sur {track.title}: {e}")
+                results['failed'] += 1
+        
+        logger.info(f"🔄 Mise à jour forcée terminée: {results['updated']} réussis, {results['failed']} échoués")
+        logger.info(f"📊 Crédits: {results['total_credits_before']} → {results['total_credits_after']}")
+        
+        return results

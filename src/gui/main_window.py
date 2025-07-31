@@ -111,6 +111,17 @@ class MainWindow:
         )
         self.scrape_button.pack(side="left", padx=5)
         
+        self.force_update_button = ctk.CTkButton(
+            control_frame,
+            text="🔄 Mise à jour forcée",
+            command=self._force_update_selected,
+            state="disabled",
+            width=150,
+            fg_color="orange",
+            hover_color="darkorange"
+        )
+        self.force_update_button.pack(side="left", padx=5)
+
         self.enrich_button = ctk.CTkButton(
             control_frame,
             text="Enrichir les données",
@@ -222,6 +233,146 @@ class MainWindow:
         
         self.stats_label = ctk.CTkLabel(stats_frame, text="", font=("Arial", 12))
         self.stats_label.pack()
+
+    def _force_update_selected(self):
+        """Force la mise à jour des morceaux sélectionnés (efface les anciens crédits)"""
+        if not self.current_artist or not self.current_artist.tracks:
+            return
+        
+        if not self.selected_tracks:
+            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
+            return
+        
+        # Filtrer les morceaux sélectionnés
+        selected_tracks_list = [self.current_artist.tracks[i] for i in sorted(self.selected_tracks)]
+        
+        # Confirmation avec avertissement
+        result = messagebox.askyesno(
+            "⚠️ Confirmation de mise à jour forcée",
+            f"🔄 MISE À JOUR FORCÉE de {len(selected_tracks_list)} morceaux\n\n"
+            "⚠️ ATTENTION: Cette opération va :\n"
+            "• Supprimer TOUS les anciens crédits\n"
+            "• Supprimer les anciennes erreurs\n"
+            "• Re-scraper complètement les morceaux\n\n"
+            "✨ Bénéfices :\n"
+            "• Sépare les crédits vidéo des crédits musicaux\n"
+            "• Applique les dernières améliorations du scraper\n"
+            "• Nettoie les doublons\n\n"
+            "Continuer ?",
+            icon="warning"
+        )
+        
+        if not result:
+            return
+        
+        # Confirmer encore une fois
+        final_confirm = messagebox.askyesno(
+            "Dernière confirmation",
+            f"Êtes-vous VRAIMENT sûr ?\n\n"
+            f"Cette action va effacer les crédits existants de {len(selected_tracks_list)} morceaux.\n"
+            "Cette action est IRRÉVERSIBLE.",
+            icon="warning"
+        )
+        
+        if not final_confirm:
+            return
+        
+        self.is_scraping = True
+        self.force_update_button.configure(state="disabled", text="🔄 Mise à jour...")
+        self.scrape_button.configure(state="disabled")
+        self.progress_bar.set(0)
+        
+        def update_progress(current, total, track_name):
+            """Callback de progression"""
+            progress = current / total
+            self.root.after(0, lambda: self.progress_var.set(progress))
+            self.root.after(0, lambda: self.progress_label.configure(
+                text=f"🔄 {current}/{total} - {track_name[:30]}..."
+            ))
+            # Mettre à jour la ligne dans le tableau
+            self.root.after(0, lambda: self._update_track_in_table(track_name))
+        
+        def force_update():
+            scraper = None
+            try:
+                logger.info(f"🔄 Début de la mise à jour forcée de {len(selected_tracks_list)} morceaux")
+                
+                # ✅ ÉTAPE 1: Nettoyer les anciens crédits
+                self.root.after(0, lambda: self.progress_label.configure(text="🧹 Nettoyage des anciens crédits..."))
+                
+                cleanup_results = self.data_manager.force_update_multiple_tracks(
+                    selected_tracks_list, 
+                    progress_callback=lambda i, t, n: self.root.after(0, lambda: self.progress_label.configure(text=f"🧹 Nettoyage {i}/{t}"))
+                )
+                
+                # ✅ ÉTAPE 2: Re-scraper les morceaux
+                self.root.after(0, lambda: self.progress_label.configure(text="🔍 Re-scraping des crédits..."))
+                
+                scraper = GeniusScraper(headless=True)
+                scraping_results = scraper.scrape_multiple_tracks(
+                    selected_tracks_list,
+                    progress_callback=update_progress
+                )
+                
+                # ✅ ÉTAPE 3: Sauvegarder les nouveaux crédits
+                for track in selected_tracks_list:
+                    track.artist = self.current_artist
+                    self.data_manager.force_update_track_credits(track)
+                
+                # Préparer le résumé
+                total_before = cleanup_results['total_credits_before']
+                total_after = cleanup_results['total_credits_after']
+                
+                # Compter les nouveaux crédits après scraping
+                final_credits = sum(len(t.credits) for t in selected_tracks_list)
+                music_credits = sum(len(t.get_music_credits()) for t in selected_tracks_list)
+                video_credits = sum(len(t.get_video_credits()) for t in selected_tracks_list)
+                
+                # Afficher le résumé détaillé
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "🎉 Mise à jour forcée terminée",
+                    f"✅ Mise à jour forcée terminée avec succès !\n\n"
+                    f"📊 RÉSULTATS:\n"
+                    f"• Morceaux traités: {cleanup_results['updated']}/{len(selected_tracks_list)}\n"
+                    f"• Scraping réussi: {scraping_results['success']}\n"
+                    f"• Scraping échoué: {scraping_results['failed']}\n\n"
+                    f"🏷️ CRÉDITS:\n"
+                    f"• Avant: {total_before} crédits\n"
+                    f"• Après: {final_credits} crédits\n"
+                    f"• 🎵 Musicaux: {music_credits}\n"
+                    f"• 🎬 Vidéo: {video_credits}\n\n"
+                    f"✨ Les crédits sont maintenant séparés correctement !"
+                ))
+                
+                # Mettre à jour l'affichage
+                self.root.after(0, self._update_artist_info)
+                self.root.after(0, self._update_statistics)
+                
+            except Exception as err:
+                error_msg = str(err) if str(err) != "None" else "Erreur inconnue lors de la mise à jour forcée"
+                logger.error(f"❌ Erreur lors de la mise à jour forcée: {error_msg}", exc_info=True)
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Erreur",
+                    f"❌ Erreur lors de la mise à jour forcée:\n{error_msg}"
+                ))
+            finally:
+                # S'assurer que le scraper est fermé
+                if scraper:
+                    try:
+                        scraper.close()
+                    except:
+                        pass
+                
+                self.is_scraping = False
+                self.root.after(0, lambda: self.force_update_button.configure(
+                    state="normal",
+                    text="🔄 Mise à jour forcée"
+                ))
+                self.root.after(0, lambda: self.scrape_button.configure(state="normal"))
+                self.root.after(0, lambda: self.progress_bar.set(0))
+                self.root.after(0, lambda: self.progress_label.configure(text=""))
+        
+        threading.Thread(target=force_update, daemon=True).start()
 
     def _sort_column(self, col):
         """Trie les morceaux selon la colonne sélectionnée"""
@@ -512,7 +663,7 @@ class MainWindow:
                     ctk.CTkLabel(error_frame, text=f"• {error}", text_color="red").pack(anchor="w", padx=15)
     
     def _search_artist(self):
-        """Recherche un artiste"""
+        """Recherche un artiste - VERSION CORRIGÉE POUR CHARGEMENT EXISTANT"""
         artist_name = self.artist_entry.get().strip()
         if not artist_name:
             messagebox.showwarning("Attention", "Veuillez entrer un nom d'artiste")
@@ -523,27 +674,79 @@ class MainWindow:
         
         def search():
             try:
-                # Vérifier d'abord dans la base de données
+                logger.info(f"🔍 Recherche de l'artiste: '{artist_name}'")
+                
+                # ✅ CORRECTION 1: Vérifier d'abord dans la base de données locale
                 artist = self.data_manager.get_artist_by_name(artist_name)
                 
-                if not artist:
-                    # Rechercher sur Genius
-                    artist = self.genius_api.search_artist(artist_name)
-                    if artist:
-                        # Sauvegarder dans la base
-                        self.data_manager.save_artist(artist)
-                
                 if artist:
+                    logger.info(f"✅ Artiste trouvé en base: {artist.name} avec {len(artist.tracks)} morceaux")
+                    
+                    # Artiste trouvé en base, l'utiliser directement
                     self.current_artist = artist
                     self.root.after(0, self._update_artist_info)
-                    self.root.after(0, lambda: messagebox.showinfo("Succès", f"Artiste trouvé: {artist.name}"))
-                else:
-                    self.root.after(0, lambda: messagebox.showwarning("Non trouvé", f"Aucun artiste trouvé pour '{artist_name}'"))
+                    self.root.after(0, lambda: messagebox.showinfo(
+                        "Artiste chargé", 
+                        f"✅ Artiste '{artist.name}' chargé depuis la base de données\n"
+                        f"📀 {len(artist.tracks)} morceaux disponibles\n"
+                        f"🎤 ID Genius: {artist.genius_id}\n\n"
+                        "Vous pouvez maintenant scraper ou enrichir les données."
+                    ))
+                    return
+                
+                # ✅ CORRECTION 2: Seulement si pas trouvé en base, chercher sur Genius
+                logger.info(f"🌐 Artiste non trouvé en base, recherche sur Genius...")
+                
+                # Rechercher sur Genius avec gestion d'erreur robuste
+                try:
+                    genius_artist = self.genius_api.search_artist(artist_name)
+                    
+                    if genius_artist:
+                        # Sauvegarder le nouvel artiste dans la base
+                        self.data_manager.save_artist(genius_artist)
+                        self.current_artist = genius_artist
+                        
+                        self.root.after(0, self._update_artist_info)
+                        self.root.after(0, lambda: messagebox.showinfo(
+                            "Nouvel artiste trouvé", 
+                            f"✅ Nouvel artiste trouvé: '{genius_artist.name}'\n"
+                            f"🎤 ID Genius: {genius_artist.genius_id}\n\n"
+                            "Cliquez sur 'Récupérer les morceaux' pour commencer."
+                        ))
+                    else:
+                        self.root.after(0, lambda: messagebox.showwarning(
+                            "Non trouvé", 
+                            f"❌ Aucun artiste trouvé pour '{artist_name}'\n\n"
+                            "Vérifiez l'orthographe ou essayez un autre nom."
+                        ))
+                        
+                except Exception as api_error:
+                    logger.error(f"❌ Erreur API Genius: {api_error}")
+                    
+                    # ✅ CORRECTION 3: Message d'erreur plus utile
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Erreur API", 
+                        f"❌ Problème avec l'API Genius:\n{str(api_error)}\n\n"
+                        "Solutions possibles:\n"
+                        "• Vérifiez votre connexion internet\n"
+                        "• Vérifiez votre clé API GENIUS_API_KEY\n"
+                        "• Réessayez dans quelques minutes"
+                    ))
 
             except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Erreur lors de la recherche: {error_msg}")
-                self.root.after(0, lambda: messagebox.showerror("Erreur", f"Erreur lors de la recherche: {error_msg}"))
+                error_msg = str(e) if str(e) else "Erreur inconnue lors de la recherche"
+                logger.error(f"❌ Erreur lors de la recherche: {error_msg}")
+                logger.error(f"Type d'erreur: {type(e).__name__}")
+                
+                # ✅ CORRECTION 4: Log détaillé pour debug
+                import traceback
+                logger.debug(f"Traceback complet: {traceback.format_exc()}")
+                
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Erreur", 
+                    f"❌ Erreur lors de la recherche:\n{error_msg}\n\n"
+                    "Consultez les logs pour plus de détails."
+                ))
             finally:
                 self.root.after(0, lambda: self.search_button.configure(state="normal", text="Rechercher"))
         

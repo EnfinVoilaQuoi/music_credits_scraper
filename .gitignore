@@ -39,3 +39,5 @@ Lancer_Venv_Admin.ps1
 /*debug\.py
 /download*\.py
 /*download\.py
+/fix*\.py
+/*fix\.py

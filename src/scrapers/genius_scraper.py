@@ -104,7 +104,7 @@ class GeniusScraper:
             logger.info("Driver Selenium fermé")
     
     def scrape_track_credits(self, track: Track) -> List[Credit]:
-        """Scrape les crédits complets d'un morceau"""
+        """Scrape les crédits complets d'un morceau - VERSION CORRIGÉE"""
         if not track.genius_url:
             logger.warning(f"Pas d'URL Genius pour {track.title}")
             return []
@@ -115,7 +115,6 @@ class GeniusScraper:
             logger.info(f"Scraping des crédits pour: {track.title}")
             self.driver.get(track.genius_url)
 
-            # Log l'URL effective
             logger.debug(f"URL visitée : {self.driver.current_url}")
 
             # Gestion des cookies
@@ -131,12 +130,6 @@ class GeniusScraper:
                 time.sleep(1)
             except TimeoutException:
                 logger.debug("⚠️ Pas de bannière cookies")
-
-            # NOUVEAU: Extraire d'abord les métadonnées du header (album, numéro de piste)
-            self._extract_header_metadata(track)
-
-            # NOUVEAU: Extraire les genres depuis la section des tags
-            self._extract_genre_tags(track)
 
             # Aller à la section "Credits"
             credits_header = WebDriverWait(self.driver, 5).until(
@@ -175,7 +168,7 @@ class GeniusScraper:
             else:
                 logger.debug("Aucun bouton Expand trouvé")
 
-            # Extraire les crédits
+            # ✅ CORRECTION : Extraire les crédits avec la bonne signature de méthode
             credits = self._extract_credits(track)
 
             # Mettre à jour le track
@@ -340,7 +333,7 @@ class GeniusScraper:
             return None
             
     def _extract_credits(self, track: Track) -> List[Credit]:
-        """Extrait les crédits de la page - VERSION OPTIMISÉE"""
+        """Extrait les crédits de la page - VERSION CORRIGÉE basée sur l'ancien code"""
         credits = []
         
         try:
@@ -350,47 +343,46 @@ class GeniusScraper:
             )
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             
+            # Parcourir tous les éléments de crédit
             for credit_element in soup.select("div[class*='SongInfo__Credit']"):
+                # Trouver le label (rôle)
                 label_div = credit_element.find("div", class_=re.compile(r"SongInfo__Label"))
                 if not label_div:
                     continue
                     
                 role_text = label_div.get_text(strip=True)
+                
+                # Trouver le conteneur des valeurs (noms)
                 container_div = label_div.find_next_sibling("div")
                 if not container_div:
                     continue
                 
+                # MÉTHODE CORRIGÉE : Extraire les noms intelligemment
                 names = self._extract_names_intelligently(container_div)
                 
-                # STRATÉGIE OPTIMISÉE : Scraper seulement si manquant
+                # Traiter les cas spéciaux (métadonnées) - SEULEMENT SI MANQUANT
                 if role_text.lower() == 'released on':
-                    if names and not track.release_date:  # ✅ Seulement si manquant
+                    if names and not track.release_date:  # Seulement si manquant de l'API
                         date_text = ' '.join(names)
                         parsed_date = self._parse_release_date(date_text)
                         if parsed_date:
                             track.release_date = parsed_date
-                            logger.debug(f"📅 Date de sortie scrapée (manquante dans API): {date_text}")
-                        else:
-                            logger.debug(f"⚠️ Date déjà présente depuis l'API: {track.release_date}")
+                            logger.debug(f"📅 Date de sortie scrapée: {date_text}")
                     continue
                     
                 elif role_text.lower() == 'album':
-                    if names and not track.album:  # ✅ Seulement si manquant
+                    if names and not track.album:  # Seulement si manquant de l'API
                         track.album = ' '.join(names)
-                        logger.debug(f"💿 Album scrapé (manquant dans API): {track.album}")
-                    else:
-                        logger.debug(f"💿 Album déjà présent depuis l'API: {track.album}")
+                        logger.debug(f"💿 Album scrapé: {track.album}")
                     continue
                     
                 elif role_text.lower() == 'genre':
-                    if names and not track.genre:  # ✅ Seulement si manquant
+                    if names and not track.genre:  # Seulement si manquant de l'API
                         track.genre = ', '.join(names)
-                        logger.debug(f"🎵 Genre scrapé (manquant dans API): {track.genre}")
-                    else:
-                        logger.debug(f"🎵 Genre déjà présent: {track.genre}")
+                        logger.debug(f"🎵 Genre scrapé: {track.genre}")
                     continue
                 
-                # Créer les crédits normalement (toujours nécessaire)
+                # Créer les objets Credit pour chaque nom
                 role_enum = self._map_genius_role_to_enum(role_text)
                 if not role_enum:
                     role_enum = CreditRole.OTHER
@@ -404,13 +396,23 @@ class GeniusScraper:
                             source="genius"
                         )
                         credits.append(credit)
+                        logger.debug(f"Crédit créé: {name.strip()} - {role_enum.value}")
             
-            # Dédoublonner
+            # Dédoublonner les crédits
             credits = self._deduplicate_credits(credits)
+            
             logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
+            
+            # Debug si aucun crédit trouvé
+            if not credits:
+                self._debug_no_credits_found(soup)
 
+        except TimeoutException:
+            logger.warning("Timeout en attendant les crédits")
         except Exception as e:
             logger.error(f"Erreur lors de l'extraction des crédits: {e}")
+            import traceback
+            logger.debug(f"Traceback complet: {traceback.format_exc()}")
         
         return credits
     
@@ -431,6 +433,48 @@ class GeniusScraper:
             sources.append(f"Genre: {source}")
         
         logger.info(f"Sources de données pour {track.title}: {', '.join(sources) if sources else 'Aucune métadonnée'}")
+
+    def _extract_names_intelligently(self, container_div) -> List[str]:
+        """Extrait les noms depuis le conteneur de manière intelligente - MÉTHODE RESTAURÉE"""
+        names = []
+        
+        try:
+            # Récupérer les noms depuis les liens <a>
+            for link in container_div.select("a"):
+                name = link.get_text(strip=True)
+                if name and name not in names:
+                    names.append(name)
+            
+            # Récupérer le texte brut (hors liens) et le nettoyer
+            for text_node in container_div.find_all(text=True, recursive=False):
+                text = text_node.strip()
+                if text and text not in names:
+                    # Séparer par différents délimiteurs
+                    for separator in [' & ', ', ', ' and ', ' + ', ' / ']:
+                        if separator in text:
+                            parts = text.split(separator)
+                            for part in parts:
+                                clean_part = part.strip()
+                                if clean_part and clean_part not in names:
+                                    names.append(clean_part)
+                            break
+                    else:
+                        # Pas de séparateur trouvé, ajouter le texte tel quel
+                        if text not in names:
+                            names.append(text)
+            
+            # Nettoyer les noms (enlever &amp; etc.)
+            cleaned_names = []
+            for name in names:
+                cleaned = name.replace('&amp;', '&').strip()
+                if cleaned and len(cleaned) > 1:
+                    cleaned_names.append(cleaned)
+            
+            return cleaned_names
+            
+        except Exception as e:
+            logger.debug(f"Erreur lors de l'extraction intelligente des noms: {e}")
+            return []
 
     def _parse_release_date(self, date_text: str) -> Optional[datetime]:
         """Parse une date de sortie depuis le texte"""

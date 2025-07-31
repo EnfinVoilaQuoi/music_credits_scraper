@@ -130,7 +130,7 @@ class DataManager:
             return artist.id
     
     def save_track(self, track: Track) -> int:
-        """Sauvegarde ou met à jour un morceau"""
+        """Sauvegarde ou met à jour un morceau - VERSION CORRIGÉE POUR CONTRAINTE UNIQUE"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -138,23 +138,36 @@ class DataManager:
             if not track.artist or not track.artist.id:
                 raise ValueError("Le morceau doit avoir un artiste avec un ID")
             
-            if track.id:
-                # Mise à jour
+            # ✅ CORRECTION : Vérifier si le track existe déjà AVANT d'essayer de l'insérer
+            cursor.execute("""
+                SELECT id FROM tracks 
+                WHERE title = ? AND artist_id = ?
+            """, (track.title, track.artist.id))
+            
+            existing_track = cursor.fetchone()
+            
+            if existing_track:
+                # Le track existe déjà, mettre à jour
+                track.id = existing_track[0]
+                logger.debug(f"Track existant trouvé (ID: {track.id}), mise à jour...")
+                
                 cursor.execute("""
                     UPDATE tracks 
-                    SET title = ?, album = ?, release_date = ?, 
+                    SET album = ?, release_date = ?, 
                         genius_id = ?, spotify_id = ?, discogs_id = ?,
                         bpm = ?, duration = ?, genre = ?,
                         genius_url = ?, spotify_url = ?,
                         updated_at = ?, last_scraped = ?
                     WHERE id = ?
-                """, (track.title, track.album, track.release_date,
+                """, (track.album, track.release_date,
                       track.genius_id, track.spotify_id, track.discogs_id,
                       track.bpm, track.duration, track.genre,
                       track.genius_url, track.spotify_url,
                       datetime.now(), track.last_scraped, track.id))
             else:
-                # Insertion
+                # Nouveau track, insérer
+                logger.debug(f"Nouveau track, insertion...")
+                
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, release_date,
@@ -169,9 +182,13 @@ class DataManager:
                       datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
             
-            # Sauvegarder les crédits
-            for credit in track.credits:
-                self._save_credit(cursor, track.id, credit)
+            # ✅ AMÉLIORATION : Supprimer les anciens crédits avant d'ajouter les nouveaux (pour éviter les doublons)
+            if track.id:
+                cursor.execute("DELETE FROM credits WHERE track_id = ?", (track.id,))
+                
+                # Sauvegarder les nouveaux crédits
+                for credit in track.credits:
+                    self._save_credit(cursor, track.id, credit)
             
             # Sauvegarder les erreurs
             for error in track.scraping_errors:
@@ -183,18 +200,19 @@ class DataManager:
             conn.commit()
             logger.info(f"Morceau sauvegardé: {track.title} (ID: {track.id})")
             return track.id
+
     
     def _save_credit(self, cursor, track_id: int, credit: Credit):
-        """Sauvegarde un crédit"""
+        """Sauvegarde un crédit - VERSION SIMPLIFIÉE SANS VÉRIFICATION UNIQUE"""
         try:
             cursor.execute("""
                 INSERT INTO credits (track_id, name, role, role_detail, source)
                 VALUES (?, ?, ?, ?, ?)
             """, (track_id, credit.name, credit.role.value, 
                   credit.role_detail, credit.source))
-        except sqlite3.IntegrityError:
-            # Le crédit existe déjà, on ignore
-            pass
+        except Exception as e:
+            # Log mais ne pas arrêter le processus pour un crédit
+            logger.debug(f"Erreur lors de la sauvegarde du crédit {credit.name}: {e}")
     
     def get_artist_by_name(self, name: str) -> Optional[Artist]:
         """Récupère un artiste par son nom"""

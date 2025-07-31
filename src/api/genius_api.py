@@ -136,7 +136,7 @@ class GeniusAPI:
             return tracks
     
     def _create_track_from_genius_song(self, song, artist: Artist) -> Optional[Track]:
-        """Crée un objet Track depuis un song object de lyricsgenius - AVEC MARQUAGE"""
+        """Crée un objet Track depuis un song object de lyricsgenius - VERSION CORRIGÉE"""
         try:
             track_data = {
                 'title': song.title,
@@ -145,26 +145,60 @@ class GeniusAPI:
                 'genius_url': song.url,
             }
             
+            # Déterminer si c'est un featuring
+            is_featuring = False
+            primary_artist_name = None
+            
+            # Vérifier si l'artiste principal du morceau est différent de l'artiste recherché
+            if hasattr(song, 'primary_artist') and song.primary_artist:
+                primary_artist_id = getattr(song.primary_artist, 'id', None)
+                primary_artist_name = getattr(song.primary_artist, 'name', None)
+                
+                if primary_artist_id and primary_artist_id != artist.genius_id:
+                    is_featuring = True
+                    track_data['primary_artist_name'] = primary_artist_name
+                    logger.debug(f"Featuring détecté: {song.title} (artiste principal: {primary_artist_name})")
+            
+            track_data['is_featuring'] = is_featuring
+            
             # Album depuis lyricsgenius + marquage
             if hasattr(song, 'album') and song.album:
-                track_data['album'] = song.album
-                track_data['_album_from_api'] = True  # ✅ Marquer la source
+                album_name = song.album
+                # Nettoyer le nom d'album s'il s'agit d'un objet
+                if hasattr(album_name, 'name'):
+                    album_name = album_name.name
+                elif isinstance(album_name, dict) and 'name' in album_name:
+                    album_name = album_name['name']
+                
+                if album_name:
+                    track_data['album'] = str(album_name)
+                    track_data['_album_from_api'] = True
+                    logger.debug(f"Album depuis API: {album_name}")
             
             # Date de sortie depuis lyricsgenius + marquage
             if hasattr(song, 'year') and song.year:
                 try:
                     track_data['release_date'] = datetime(int(song.year), 1, 1)
-                    track_data['_release_date_from_api'] = True  # ✅ Marquer la source
+                    track_data['_release_date_from_api'] = True
+                    logger.debug(f"Date depuis API: {song.year}")
                 except (ValueError, TypeError):
                     pass
             
             # Récupérer des métadonnées supplémentaires depuis l'API raw
             if hasattr(song, '_body') and song._body:
                 additional_data = self._extract_additional_metadata_from_raw(song._body)
-                track_data.update(additional_data)
+                # Fusionner sans écraser les données existantes
+                for key, value in additional_data.items():
+                    if key not in track_data and value:
+                        track_data[key] = value
             
             track = Track(**track_data)
-            logger.debug(f"Track créé: {track.title} (Album: {track.album or 'N/A'} depuis {'API' if track_data.get('_album_from_api') else 'N/A'})")
+            
+            # Log pour debug
+            status = "featuring" if is_featuring else "principal"
+            album_source = "API" if track_data.get('_album_from_api') else "N/A"
+            logger.debug(f"Track créé ({status}): {track.title} | Album: {track.album or 'N/A'} ({album_source})")
+            
             return track
             
         except Exception as e:
@@ -172,15 +206,16 @@ class GeniusAPI:
             return None
     
     def _extract_additional_metadata_from_raw(self, raw_data: dict) -> dict:
-        """Extrait des métadonnées supplémentaires depuis les données brutes"""
+        """Extrait des métadonnées supplémentaires depuis les données brutes - VERSION CORRIGÉE"""
         metadata = {}
         
         try:
             # Album depuis les données brutes si pas déjà présent
-            if not metadata.get('album') and raw_data.get('album'):
+            if raw_data.get('album'):
                 album_data = raw_data['album']
                 if isinstance(album_data, dict) and album_data.get('name'):
                     metadata['album'] = album_data['name']
+                    metadata['_album_from_api'] = True
             
             # Date de sortie plus précise
             release_components = raw_data.get('release_date_components')
@@ -192,11 +227,19 @@ class GeniusAPI:
                 if year:
                     try:
                         metadata['release_date'] = datetime(year, month, day)
+                        metadata['_release_date_from_api'] = True
+                        logger.debug(f"Date complète depuis API: {year}-{month:02d}-{day:02d}")
                     except (ValueError, TypeError):
                         try:
                             metadata['release_date'] = datetime(year, 1, 1)
+                            metadata['_release_date_from_api'] = True
                         except (ValueError, TypeError):
                             pass
+            
+            # Artiste principal pour les features
+            primary_artist = raw_data.get('primary_artist')
+            if primary_artist and isinstance(primary_artist, dict):
+                metadata['primary_artist_name'] = primary_artist.get('name')
             
             # Artistes en featuring
             featured_artists = raw_data.get('featured_artists', [])

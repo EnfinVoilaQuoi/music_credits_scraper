@@ -234,20 +234,42 @@ class Track:
         """Vérifie si les crédits semblent complets"""
         return bool(self.get_producers() and self.get_writers())
     
-    def get_display_title(self) -> str:
-        """Retourne le titre à afficher (avec indication featuring si applicable)"""
-        if self.is_featuring and self.primary_artist_name:
-            return f"{self.title} (feat. {self.artist.name if self.artist else 'Unknown'})"
-        return self.title
     
+    def get_display_title(self) -> str:
+            """Retourne le titre à afficher (avec indication featuring si applicable)"""
+            if hasattr(self, 'is_featuring') and self.is_featuring:
+                # Pour les features : garder le titre original (il contient déjà "feat.")
+                return self.title
+            return self.title
+        
     def get_display_artist(self) -> str:
         """Retourne l'artiste à afficher (principal si featuring)"""
-        if self.is_featuring and self.primary_artist_name:
-            return self.primary_artist_name
+        if hasattr(self, 'is_featuring') and self.is_featuring:
+            # Pour les features : retourner l'artiste principal si disponible
+            if hasattr(self, 'primary_artist_name') and self.primary_artist_name:
+                return self.primary_artist_name
+            # Sinon, extraire l'artiste principal du titre s'il contient "feat."
+            if " feat. " in self.title:
+                # Le titre est probablement "ArtistePrincipal - Titre feat. ArtisteCherché"
+                parts = self.title.split(" feat. ")
+                if len(parts) > 1:
+                    # Extraire l'artiste principal du début
+                    artist_and_title = parts[0]
+                    if " - " in artist_and_title:
+                        return artist_and_title.split(" - ")[0].strip()
+            return "Artiste principal inconnu"
+        
+        # Pour les morceaux principaux
         return self.artist.name if self.artist else "Unknown"
     
+    def is_main_track(self) -> bool:
+        """Retourne True si c'est un morceau principal (pas un featuring)"""
+        return not (hasattr(self, 'is_featuring') and self.is_featuring)
+    
     def to_dict(self) -> dict:
-        """Convertit le morceau en dictionnaire"""
+        """Convertit le morceau en dictionnaire - VERSION CORRIGÉE"""
+        is_featuring = hasattr(self, 'is_featuring') and self.is_featuring
+        
         return {
             'id': self.id,
             'title': self.title,
@@ -255,7 +277,7 @@ class Track:
             'artist': self.artist.name if self.artist else None,
             'display_artist': self.get_display_artist(),
             'album': self.album,
-            'track_number': self.track_number,
+            'track_number': getattr(self, 'track_number', None),
             'release_date': self.release_date.isoformat() if self.release_date else None,
             'genius_id': self.genius_id,
             'spotify_id': self.spotify_id,
@@ -263,11 +285,11 @@ class Track:
             'bpm': self.bpm,
             'duration': self.duration,
             'genre': self.genre,
-            'is_featuring': self.is_featuring,
-            'featured_artists': self.featured_artists,
-            'primary_artist_name': self.primary_artist_name,
-            'popularity': self.popularity,
-            'artwork_url': self.artwork_url,
+            'is_featuring': is_featuring,
+            'featured_artists': getattr(self, 'featured_artists', None),
+            'primary_artist_name': getattr(self, 'primary_artist_name', None),
+            'popularity': getattr(self, 'popularity', None),
+            'artwork_url': getattr(self, 'artwork_url', None),
             'credits': [c.to_dict() for c in self.credits],
             'credits_count': len(self.credits),
             'has_complete_credits': self.has_complete_credits(),

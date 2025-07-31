@@ -44,7 +44,7 @@ class MainWindow:
         self._update_statistics()
     
     def _create_widgets(self):
-        """Crée tous les widgets de l'interface"""
+        """Crée tous les widgets de l'interface - VERSION AVEC TRI ET DATE"""
         # Frame principale
         main_frame = ctk.CTkFrame(self.root)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -138,7 +138,7 @@ class MainWindow:
         self.progress_label = ctk.CTkLabel(control_frame, text="")
         self.progress_label.pack(side="left")
         
-        # === Tableau des morceaux ===
+        # === Tableau des morceaux avec DATE et TRI ===
         table_frame = ctk.CTkFrame(main_frame)
         table_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
@@ -167,35 +167,44 @@ class MainWindow:
         tree_container = ctk.CTkFrame(table_frame)
         tree_container.pack(fill="both", expand=True)
         
-        # Frame pour le tree et la scrollbar verticale
         tree_scroll_frame = ctk.CTkFrame(tree_container)
         tree_scroll_frame.pack(fill="both", expand=True)
         
-        columns = ("Titre", "Album", "Crédits", "BPM", "Statut")
+        # COLONNES AVEC DATE DE SORTIE ET TRI
+        columns = ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "BPM", "Statut")
         self.tree = ttk.Treeview(tree_scroll_frame, columns=columns, show="tree headings", height=15)
         
-        # Ajouter une colonne pour les checkboxes
+        # Configuration des colonnes avec tri
         self.tree.heading("#0", text="✓")
         self.tree.column("#0", width=50, stretch=False)
         
-        for col in columns:
-            self.tree.heading(col, text=col)
-            if col == "Titre":
-                self.tree.column(col, width=200)  # Plus large pour les titres avec 🎤
-            elif col == "Album":
-                self.tree.column(col, width=150)
-            else:
-                self.tree.column(col, width=100)
+        # Variable pour suivre l'ordre de tri
+        self.sort_reverse = {}
         
-        # Scrollbar verticale
+        for col in columns:
+            self.tree.heading(col, text=col, command=lambda c=col: self._sort_column(c))
+            if col == "Titre":
+                self.tree.column(col, width=220)  # Titre
+            elif col == "Artiste principal":
+                self.tree.column(col, width=130)  # Artiste principal
+            elif col == "Album":
+                self.tree.column(col, width=130)  # Album
+            elif col == "Date sortie":
+                self.tree.column(col, width=90)   # Date
+            elif col == "Crédits":
+                self.tree.column(col, width=70)   # Crédits
+            elif col == "BPM":
+                self.tree.column(col, width=70)   # BPM
+            else:  # Statut
+                self.tree.column(col, width=70)   # Statut
+        
+        # Scrollbars
         vsb = ttk.Scrollbar(tree_scroll_frame, orient="vertical", command=self.tree.yview)
         vsb.pack(side="right", fill="y")
         
-        # Le Treeview
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.configure(yscrollcommand=vsb.set)
         
-        # Scrollbar horizontale dans un frame séparé
         hsb_frame = ctk.CTkFrame(tree_container)
         hsb_frame.pack(fill="x")
         
@@ -203,9 +212,8 @@ class MainWindow:
         hsb.pack(fill="x")
         self.tree.configure(xscrollcommand=hsb.set)
         
-        # Double-clic pour voir les détails
+        # Bindings
         self.tree.bind("<Double-Button-1>", self._show_track_details)
-        # Simple clic pour sélectionner/désélectionner
         self.tree.bind("<Button-1>", self._toggle_track_selection)
         
         # === Section statistiques ===
@@ -215,7 +223,65 @@ class MainWindow:
         self.stats_label = ctk.CTkLabel(stats_frame, text="", font=("Arial", 12))
         self.stats_label.pack()
 
-        self.tree.bind("<Button-1>", self._toggle_track_selection)
+    def _sort_column(self, col):
+        """Trie les morceaux selon la colonne sélectionnée"""
+        if not self.current_artist or not self.current_artist.tracks:
+            return
+        
+        # Basculer l'ordre de tri pour cette colonne
+        reverse = self.sort_reverse.get(col, False)
+        self.sort_reverse[col] = not reverse
+        
+        # Créer une liste des morceaux avec leur index original
+        tracks_with_index = [(i, track) for i, track in enumerate(self.current_artist.tracks)]
+        
+        # Fonction de tri selon la colonne
+        def sort_key(item):
+            index, track = item
+            
+            if col == "Titre":
+                return track.get_display_title().lower()
+            elif col == "Artiste principal":
+                return track.get_display_artist().lower()
+            elif col == "Album":
+                return (track.album or "zzz").lower()  # Albums vides à la fin
+            elif col == "Date sortie":
+                # Trier par date (plus récent en premier si reverse=True)
+                if track.release_date:
+                    return track.release_date
+                else:
+                    return datetime.min if reverse else datetime.max
+            elif col == "Crédits":
+                return len(track.credits)
+            elif col == "BPM":
+                return track.bpm or 0
+            elif col == "Statut":
+                # Ordre: ✓ (complet), ⚠ (partiel), ✗ (vide)
+                if track.has_complete_credits():
+                    return 0
+                elif track.credits:
+                    return 1
+                else:
+                    return 2
+            return ""
+        
+        # Trier
+        tracks_with_index.sort(key=sort_key, reverse=reverse)
+        
+        # Réorganiser la liste des morceaux
+        self.current_artist.tracks = [track for index, track in tracks_with_index]
+        
+        # Recréer l'affichage
+        self._populate_tracks_table(self.current_artist.tracks)
+        
+        # Mettre à jour l'en-tête pour indiquer le tri
+        direction = "↓" if reverse else "↑"
+        self.tree.heading(col, text=f"{col} {direction}")
+        
+        # Réinitialiser les autres en-têtes
+        for other_col in ["Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "BPM", "Statut"]:
+            if other_col != col:
+                self.tree.heading(other_col, text=other_col)
 
     def _toggle_track_selection(self, event):
         """Gère la sélection/désélection des morceaux via les checkboxes"""
@@ -534,19 +600,22 @@ class MainWindow:
             return []
     
     def _update_artist_info(self):
-        """Met à jour les informations de l'artiste - VERSION AVEC FEATURES"""
+        """Met à jour les informations de l'artiste - VERSION CORRIGÉE"""
         if self.current_artist:
             self.artist_info_label.configure(text=f"Artiste: {self.current_artist.name}")
             
             if self.current_artist.tracks:
                 total_credits = sum(len(t.credits) for t in self.current_artist.tracks)
                 
-                # NOUVEAU : Compter les features
-                featuring_count = sum(1 for t in self.current_artist.tracks if hasattr(t, 'is_featuring') and t.is_featuring)
+                # Compter les features et morceaux principaux
+                featuring_count = sum(1 for t in self.current_artist.tracks 
+                                    if hasattr(t, 'is_featuring') and t.is_featuring)
+                main_tracks = len(self.current_artist.tracks) - featuring_count
                 
-                info_text = f"{len(self.current_artist.tracks)} morceaux - {total_credits} crédits au total"
+                info_text = f"{len(self.current_artist.tracks)} morceaux au total"
                 if featuring_count > 0:
-                    info_text += f" (dont {featuring_count} en featuring)"
+                    info_text += f" ({main_tracks} principaux + {featuring_count} en featuring)"
+                info_text += f" - {total_credits} crédits"
                 
                 self.tracks_info_label.configure(text=info_text)
                 self._populate_tracks_table(self.current_artist.tracks)
@@ -775,7 +844,7 @@ class MainWindow:
             scraper = None
             try:
                 logger.info(f"Début du scraping de {len(selected_tracks_list)} morceaux")
-                scraper = GeniusScraper(headless=False)
+                scraper = GeniusScraper(headless=True)
                 results = scraper.scrape_multiple_tracks(
                     selected_tracks_list,
                     progress_callback=update_progress
@@ -825,7 +894,7 @@ class MainWindow:
         threading.Thread(target=scrape, daemon=True).start()
     
     def _populate_tracks_table(self, tracks: List[Track]):
-        """Remplit le tableau avec les morceaux - VERSION AVEC SUPPORT FEATURES"""
+        """Remplit le tableau avec les morceaux - VERSION AVEC DATE ET CORRECTION DU DÉCALAGE"""
         # Effacer le tableau
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -835,30 +904,43 @@ class MainWindow:
         
         # Ajouter les morceaux
         for i, track in enumerate(tracks):
-            is_selected = True
-            symbol = "☑" if is_selected else "☐"
-            title_display = f"🎤 {track.get_display_title()}" if track.is_featuring else track.get_display_title()
+            # Déterminer l'affichage du titre et de l'artiste
+            if hasattr(track, 'is_featuring') and track.is_featuring:
+                # Pour les features : afficher "Titre (feat. Artiste recherché)"
+                title_display = f"{track.title} (feat. {track.artist.name})"
+                # Afficher l'artiste principal
+                artist_display = getattr(track, 'primary_artist_name', 'Artiste principal inconnu')
+                title_prefix = "🎤 "
+            else:
+                # Pour les morceaux principaux
+                title_display = track.title
+                artist_display = track.artist.name if track.artist else ""
+                title_prefix = ""
             
+            # Formater la date de sortie
+            date_display = "-"
+            if track.release_date:
+                if hasattr(track.release_date, 'strftime'):
+                    date_display = track.release_date.strftime('%Y-%m-%d')
+                else:
+                    date_display = str(track.release_date)[:10]  # Prendre les 10 premiers caractères
+            
+            # ✅ CORRECTION : Préparer les valeurs dans l'ordre EXACT des colonnes
+            # Colonnes: ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "BPM", "Statut")
             values = (
-                title_display,
-                track.get_display_artist() if track.is_featuring else "",
-                track.album or "-",
-                len(track.credits),
-                track.bpm or "-",
-                "✓" if track.has_complete_credits() else "⚠" if track.credits else "✗"
+                title_prefix + title_display,    # Titre avec préfixe
+                artist_display,                  # Artiste principal
+                track.album or "-",              # Album
+                date_display,                    # Date sortie
+                len(track.credits),              # Crédits (nombre)
+                track.bpm or "-",                # BPM
+                "✓" if track.has_complete_credits() else "⚠" if track.credits else "✗"  # Statut
             )
-
-            item = self.tree.insert("", "end", text=symbol, values=values, tags=(str(i),))
-            if is_selected:
-                self.selected_tracks.add(i)
-
-            # Sélectionner par défaut
-            self.selected_tracks.add(i)
-            self.tree.item(item, text="☑")
             
-            # NOUVEAU : Couleur différente pour les features
-            symbol = "☑" if track.is_featuring else "☐"
-            item = self.tree.insert("", "end", text=symbol, values=values, tags=(str(i),))
+            # Créer l'item dans le treeview
+            item = self.tree.insert("", "end", text="☑", values=values, tags=(str(i),))
+            
+            # Sélectionner par défaut
             self.selected_tracks.add(i)
         
         self._update_selection_count()
@@ -905,26 +987,51 @@ class MainWindow:
         self.selected_count_label.configure(text=f"{selected}/{total} sélectionnés")
     
     def _update_track_in_table(self, track_name: str):
-        """Met à jour une ligne spécifique du tableau"""
+        """Met à jour une ligne spécifique du tableau - VERSION CORRIGÉE"""
+        if not self.current_artist:
+            return
+            
         for item in self.tree.get_children():
-            if self.tree.item(item)["values"][0] == track_name:
-                # Retrouver le track
-                for track in self.current_artist.tracks:
-                    if track.title == track_name:
-                        status = "✓" if track.has_complete_credits() else "⚠" if track.credits else "✗"
-                        values = (
-                            track.title,
-                            track.album or "-",
-                            len(track.credits),
-                            track.bpm or "-",
-                            status
+            item_values = self.tree.item(item)["values"]
+            if item_values and len(item_values) > 0:
+                # Comparer le titre (première colonne, en enlevant le préfixe emoji)
+                item_title = item_values[0].replace("🎤 ", "")
+                
+                # Retrouver le track correspondant
+                for i, track in enumerate(self.current_artist.tracks):
+                    track_display = track.get_display_title()
+                    if hasattr(track, 'is_featuring') and track.is_featuring:
+                        track_display = f"{track.title} (feat. {track.artist.name})"
+                    
+                    if track_display == item_title or track.title in item_title:
+                        # Mettre à jour les valeurs - ORDRE CORRECT
+                        title_prefix = "🎤 " if (hasattr(track, 'is_featuring') and track.is_featuring) else ""
+                        artist_display = track.get_display_artist()
+                        
+                        # Date de sortie
+                        date_display = "-"
+                        if track.release_date:
+                            if hasattr(track.release_date, 'strftime'):
+                                date_display = track.release_date.strftime('%Y-%m-%d')
+                            else:
+                                date_display = str(track.release_date)[:10]
+                        
+                        updated_values = (
+                            title_prefix + track_display,     # Titre
+                            artist_display,                   # Artiste principal  
+                            track.album or "-",               # Album
+                            date_display,                     # Date sortie
+                            len(track.credits),               # Crédits
+                            track.bpm or "-",                 # BPM
+                            "✓" if track.has_complete_credits() else "⚠" if track.credits else "✗"  # Statut
                         )
-                        self.tree.item(item, values=values)
+                        
+                        self.tree.item(item, values=updated_values)
                         break
                 break
     
     def _show_track_details(self, event):
-        """Affiche les détails d'un morceau"""
+        """Affiche les détails d'un morceau - VERSION AVEC DATE"""
         selection = self.tree.selection()
         if not selection:
             return
@@ -944,12 +1051,29 @@ class MainWindow:
             details_window.title(f"Détails - {track.title}")
             details_window.geometry("600x700")
             
-            # Informations générales
+            # Informations générales avec DATE
             info_frame = ctk.CTkFrame(details_window)
             info_frame.pack(fill="x", padx=10, pady=10)
             
             ctk.CTkLabel(info_frame, text=f"Titre: {track.title}", font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=2)
+            
+            # Affichage différent selon si c'est un featuring
+            if hasattr(track, 'is_featuring') and track.is_featuring:
+                ctk.CTkLabel(info_frame, text=f"Artiste principal: {track.get_display_artist()}", font=("Arial", 12)).pack(anchor="w", padx=5, pady=2)
+                ctk.CTkLabel(info_frame, text=f"En featuring: {track.artist.name}", font=("Arial", 12)).pack(anchor="w", padx=5, pady=2)
+            else:
+                ctk.CTkLabel(info_frame, text=f"Artiste: {track.artist.name}", font=("Arial", 12)).pack(anchor="w", padx=5, pady=2)
+            
             ctk.CTkLabel(info_frame, text=f"Album: {track.album or 'N/A'}").pack(anchor="w", padx=5, pady=2)
+            
+            # ✅ AJOUT : Date de sortie
+            if track.release_date:
+                if hasattr(track.release_date, 'strftime'):
+                    date_str = track.release_date.strftime('%d/%m/%Y')
+                else:
+                    date_str = str(track.release_date)[:10]
+                ctk.CTkLabel(info_frame, text=f"Date de sortie: {date_str}").pack(anchor="w", padx=5, pady=2)
+            
             ctk.CTkLabel(info_frame, text=f"BPM: {track.bpm or 'N/A'}").pack(anchor="w", padx=5, pady=2)
             
             # URL Genius cliquable

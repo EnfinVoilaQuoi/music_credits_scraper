@@ -1,4 +1,4 @@
-"""Scraper pour récupérer les crédits complets sur Genius - Version améliorée"""
+"""Scraper pour récupérer les crédits complets sur Genius - Version corrigée"""
 import time
 import re
 import subprocess
@@ -66,7 +66,6 @@ class GeniusScraper:
             from pathlib import Path
             local_driver = Path(__file__).parent.parent.parent / "drivers" / "chromedriver.exe"
             
-            # Chercher aussi dans un sous-dossier (pour les nouvelles versions)
             if not local_driver.exists():
                 for path in (Path(__file__).parent.parent.parent / "drivers").rglob("chromedriver.exe"):
                     local_driver = path
@@ -79,7 +78,6 @@ class GeniusScraper:
                 logger.info("ChromeDriver local non trouvé, utilisation de webdriver-manager")
                 service = ChromeService(ChromeDriverManager().install())
             
-            # Configurer le service pour être silencieux
             service.log_output = subprocess.DEVNULL
             
             self.driver = webdriver.Chrome(service=service, options=options)
@@ -130,6 +128,9 @@ class GeniusScraper:
                 time.sleep(1)
             except TimeoutException:
                 logger.debug("⚠️ Pas de bannière cookies")
+
+            # NOUVEAU: Extraire d'abord les métadonnées du header (album, numéro de piste)
+            self._extract_header_metadata(track)
 
             # Aller à la section "Credits"
             credits_header = WebDriverWait(self.driver, 5).until(
@@ -194,63 +195,6 @@ class GeniusScraper:
         time.sleep(DELAY_BETWEEN_REQUESTS)
 
         return credits
-
-    def _extract_header_metadata(self, track: Track):
-        """Extrait les métadonnées depuis le header de la page (album, numéro de piste)"""
-        try:
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
-            # Chercher l'info album dans le header selon votre structure HTML
-            album_container = soup.find('div', class_=lambda x: x and 'HeaderCredit__Container' in x)
-            
-            if album_container:
-                # Extraire le numéro de piste
-                track_label = album_container.find('span', class_=lambda x: x and 'HeaderCredit__Label' in x)
-                if track_label:
-                    track_text = track_label.get_text(strip=True)
-                    # Extraire le numéro de la piste (ex: "Track 14 on")
-                    track_match = re.search(r'Track (\d+)', track_text)
-                    if track_match:
-                        track.track_number = int(track_match.group(1))
-                        logger.debug(f"🔢 Numéro de piste: {track.track_number}")
-                
-                # Extraire le nom de l'album
-                album_link = album_container.find('a', class_=lambda x: x and 'StyledLink' in x)
-                if album_link and not track.album:  # Ne pas écraser si déjà défini
-                    album_name = album_link.get_text(strip=True)
-                    # Nettoyer le nom (enlever les symboles de flèche)
-                    album_name = re.sub(r'\s*[\u2192\u2190\u2191\u2193→←↑↓]\s*', '', album_name).strip()
-                    track.album = album_name
-                    logger.debug(f"💿 Album extrait du header: {album_name}")
-                    
-        except Exception as e:
-            logger.debug(f"Erreur lors de l'extraction des métadonnées du header: {e}")
-
-    def _extract_genre_tags(self, track: Track):
-        """Extrait les genres depuis la section des tags"""
-        try:
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
-            # Chercher le conteneur des tags selon votre structure HTML
-            tags_container = soup.find('div', class_=lambda x: x and 'SongTags__Container' in x)
-            
-            if tags_container and not track.genre:  # Ne pas écraser si déjà défini
-                # Extraire tous les tags
-                tag_links = tags_container.find_all('a', class_=lambda x: x and 'SongTags__Tag' in x)
-                
-                if tag_links:
-                    genres = []
-                    for tag_link in tag_links[:3]:  # Limiter aux 3 premiers tags
-                        tag_text = tag_link.get_text(strip=True)
-                        if tag_text:
-                            genres.append(tag_text)
-                    
-                    if genres:
-                        track.genre = ', '.join(genres)
-                        logger.debug(f"🎵 Genres extraits: {track.genre}")
-                        
-        except Exception as e:
-            logger.debug(f"Erreur lors de l'extraction des genres: {e}")
     
     def _find_expand_button(self) -> Optional[Any]:
         """Trouve le bouton Expand spécifiquement dans la section Credits"""
@@ -331,6 +275,37 @@ class GeniusScraper:
         except Exception as e:
             logger.error(f"Erreur lors de la recherche du bouton Expand: {e}")
             return None
+
+    def _extract_header_metadata(self, track: Track):
+        """Extrait les métadonnées depuis le header de la page (album, numéro de piste)"""
+        try:
+            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            
+            # Chercher l'info album dans le header
+            album_container = soup.find('div', class_=lambda x: x and 'HeaderCredit__Container' in x)
+            
+            if album_container:
+                # Extraire le numéro de piste
+                track_label = album_container.find('span', class_=lambda x: x and 'HeaderCredit__Label' in x)
+                if track_label:
+                    track_text = track_label.get_text(strip=True)
+                    # Extraire le numéro de la piste (ex: "Track 14 on")
+                    track_match = re.search(r'Track (\d+)', track_text)
+                    if track_match:
+                        track.track_number = int(track_match.group(1))
+                        logger.debug(f"🔢 Numéro de piste: {track.track_number}")
+                
+                # Extraire le nom de l'album
+                album_link = album_container.find('a', class_=lambda x: x and 'StyledLink' in x)
+                if album_link and not track.album:  # Ne pas écraser si déjà défini
+                    album_name = album_link.get_text(strip=True)
+                    # Nettoyer le nom (enlever les symboles de flèche)
+                    album_name = re.sub(r'\s*[\u2192\u2190\u2191\u2193→←↑↓]\s*', '', album_name).strip()
+                    track.album = album_name
+                    logger.debug(f"💿 Album extrait du header: {album_name}")
+                    
+        except Exception as e:
+            logger.debug(f"Erreur lors de l'extraction des métadonnées du header: {e}")
             
     def _extract_credits(self, track: Track) -> List[Credit]:
         """Extrait les crédits de la page - VERSION CORRIGÉE basée sur l'ancien code"""
@@ -416,24 +391,6 @@ class GeniusScraper:
         
         return credits
     
-    def _log_data_completeness(self, track: Track):
-        """Log la complétude des données pour analyse"""
-        sources = []
-        
-        if track.album:
-            source = "API" if hasattr(track, '_album_from_api') else "Scraping"
-            sources.append(f"Album: {source}")
-        
-        if track.release_date:
-            source = "API" if hasattr(track, '_release_date_from_api') else "Scraping"
-            sources.append(f"Date: {source}")
-        
-        if track.genre:
-            source = "API" if hasattr(track, '_genre_from_api') else "Scraping"
-            sources.append(f"Genre: {source}")
-        
-        logger.info(f"Sources de données pour {track.title}: {', '.join(sources) if sources else 'Aucune métadonnée'}")
-
     def _extract_names_intelligently(self, container_div) -> List[str]:
         """Extrait les noms depuis le conteneur de manière intelligente - MÉTHODE RESTAURÉE"""
         names = []
@@ -475,7 +432,7 @@ class GeniusScraper:
         except Exception as e:
             logger.debug(f"Erreur lors de l'extraction intelligente des noms: {e}")
             return []
-
+    
     def _parse_release_date(self, date_text: str) -> Optional[datetime]:
         """Parse une date de sortie depuis le texte"""
         try:
@@ -556,6 +513,18 @@ class GeniusScraper:
             'Photography': CreditRole.PHOTOGRAPHY,
             'Illustration': CreditRole.ILLUSTRATION,
 
+            # Crédits vidéo
+            'Video Director': CreditRole.VIDEO_DIRECTOR,
+            'Video Producer': CreditRole.VIDEO_PRODUCER,
+            'Video Director of Photography': CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY,
+            'Video Cinematographer': CreditRole.VIDEO_CINEMATOGRAPHER,
+            'Video Digital Imaging Technician': CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN,
+            'Video Camera Operator': CreditRole.VIDEO_CAMERA_OPERATOR,
+            'Video Drone Operator': CreditRole.VIDEO_DRONE_OPERATOR,
+            'Video Set Decorator': CreditRole.VIDEO_SET_DECORATOR,
+            'Video Editor': CreditRole.VIDEO_EDITOR,
+            'Video Colorist': CreditRole.VIDEO_COLORIST,
+
             # Autres
             'Featuring': CreditRole.FEATURED,
             'Sample': CreditRole.SAMPLE,
@@ -613,6 +582,27 @@ class GeniusScraper:
             else:
                 return CreditRole.GUITAR
 
+        # Gestion spéciale des rôles vidéo
+        if 'video' in genius_role_lower:
+            if 'director' in genius_role_lower and 'photography' in genius_role_lower:
+                return CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY
+            elif 'director' in genius_role_lower:
+                return CreditRole.VIDEO_DIRECTOR
+            elif 'producer' in genius_role_lower:
+                return CreditRole.VIDEO_PRODUCER
+            elif 'cinematographer' in genius_role_lower:
+                return CreditRole.VIDEO_CINEMATOGRAPHER
+            elif 'camera' in genius_role_lower:
+                return CreditRole.VIDEO_CAMERA_OPERATOR
+            elif 'drone' in genius_role_lower:
+                return CreditRole.VIDEO_DRONE_OPERATOR
+            elif 'editor' in genius_role_lower:
+                return CreditRole.VIDEO_EDITOR
+            elif 'colorist' in genius_role_lower:
+                return CreditRole.VIDEO_COLORIST
+            elif 'set decorator' in genius_role_lower:
+                return CreditRole.VIDEO_SET_DECORATOR
+
         return CreditRole.OTHER
 
     def _deduplicate_credits(self, credits: List[Credit]) -> List[Credit]:
@@ -630,6 +620,24 @@ class GeniusScraper:
                 logger.debug(f"Doublon ignoré: {credit.name} - {credit.role.value}")
     
         return unique_credits
+
+    def _debug_no_credits_found(self, soup):
+        """Debug quand aucun crédit n'est trouvé"""
+        logger.debug("🔍 DEBUG: Aucun crédit trouvé, analyse de la structure...")
+
+        # Chercher tous les éléments qui pourraient contenir des crédits
+        potential_containers = [
+            soup.find_all('div', class_=lambda x: x and 'SongInfo' in x),
+            soup.find_all('div', class_=lambda x: x and 'Credit' in x),
+            soup.find_all('div', class_=lambda x: x and 'ExpandableContent' in x)
+        ]
+
+        for i, containers in enumerate(potential_containers):
+            logger.debug(f"Méthode {i+1}: Trouvé {len(containers)} éléments potentiels")
+            for j, container in enumerate(containers[:3]):  # Limiter à 3 pour éviter le spam
+                text = container.get_text(strip=True)[:100]
+                classes = container.get('class', [])
+                logger.debug(f"  Élément {j+1}: classes={classes}, texte='{text}...'")
 
     def get_album_url_from_track(self, track_url: str) -> Optional[str]:
         """Récupère l'URL de l'album depuis une page de morceau"""

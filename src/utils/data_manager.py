@@ -7,7 +7,7 @@ from datetime import datetime
 from contextlib import contextmanager
 
 from src.config import DATABASE_URL, ARTISTS_DIR
-from src.models import Artist, Track, Credit
+from src.models import Artist, Track, Credit, CreditRole
 from src.utils.logger import get_logger
 
 
@@ -39,13 +39,14 @@ class DataManager:
                 )
             """)
             
-            # Table des morceaux
+            # Table des morceaux avec track_number
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS tracks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
                     artist_id INTEGER NOT NULL,
                     album TEXT,
+                    track_number INTEGER,
                     release_date TIMESTAMP,
                     genius_id INTEGER,
                     spotify_id TEXT,
@@ -153,13 +154,13 @@ class DataManager:
                 
                 cursor.execute("""
                     UPDATE tracks 
-                    SET album = ?, release_date = ?, 
+                    SET album = ?, track_number = ?, release_date = ?, 
                         genius_id = ?, spotify_id = ?, discogs_id = ?,
                         bpm = ?, duration = ?, genre = ?,
                         genius_url = ?, spotify_url = ?,
                         updated_at = ?, last_scraped = ?
                     WHERE id = ?
-                """, (track.album, track.release_date,
+                """, (track.album, getattr(track, 'track_number', None), track.release_date,
                       track.genius_id, track.spotify_id, track.discogs_id,
                       track.bpm, track.duration, track.genre,
                       track.genius_url, track.spotify_url,
@@ -170,12 +171,12 @@ class DataManager:
                 
                 cursor.execute("""
                     INSERT INTO tracks (
-                        title, artist_id, album, release_date,
+                        title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
                         bpm, duration, genre, genius_url, spotify_url,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (track.title, track.artist.id, track.album, track.release_date,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                       track.genius_id, track.spotify_id, track.discogs_id,
                       track.bpm, track.duration, track.genre,
                       track.genius_url, track.spotify_url,
@@ -201,7 +202,6 @@ class DataManager:
             logger.info(f"Morceau sauvegardé: {track.title} (ID: {track.id})")
             return track.id
 
-    
     def _save_credit(self, cursor, track_id: int, credit: Credit):
         """Sauvegarde un crédit - VERSION SIMPLIFIÉE SANS VÉRIFICATION UNIQUE"""
         try:
@@ -249,6 +249,7 @@ class DataManager:
                     id=row['id'],
                     title=row['title'],
                     album=row['album'],
+                    track_number=row['track_number'],
                     release_date=row['release_date'],
                     genius_id=row['genius_id'],
                     spotify_id=row['spotify_id'],
@@ -303,7 +304,9 @@ class DataManager:
             'tracks': [track.to_dict() for track in artist.tracks],
             'export_date': datetime.now().isoformat(),
             'total_tracks': len(artist.tracks),
-            'total_credits': sum(len(t.credits) for t in artist.tracks)
+            'total_music_credits': sum(len(t.get_music_credits()) for t in artist.tracks),
+            'total_video_credits': sum(len(t.get_video_credits()) for t in artist.tracks),
+            'total_all_credits': sum(len(t.credits) for t in artist.tracks)
         }
         
         # Sauvegarder
@@ -455,52 +458,6 @@ class DataManager:
             )
             
             return analytics
-
-    # Utilisation dans l'interface graphique
-    def show_scraping_analytics(self):
-        """Affiche les analytics de scraping"""
-        if not self.current_artist:
-            return
-        
-        analytics = self.data_manager.get_scraping_analytics(self.current_artist.name)
-        
-        # Créer une fenêtre d'analytics
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.title("Analytics de scraping")
-        dialog.geometry("600x500")
-        
-        # Affichage des résultats
-        text_widget = ctk.CTkTextbox(dialog, width=580, height=450)
-        text_widget.pack(padx=10, pady=10)
-        
-        report = f"""
-    📊 ANALYTICS DE SCRAPING - {self.current_artist.name}
-    {'='*50}
-
-    📈 COUVERTURE PAR L'API GENIUS:
-    • Albums: {analytics['api_coverage']['album']}/{analytics['total_tracks']} ({analytics['api_coverage'].get('album_percentage', 0)}%)
-    • Dates de sortie: {analytics['api_coverage']['release_date']}/{analytics['total_tracks']} ({analytics['api_coverage'].get('release_date_percentage', 0)}%)
-    • BPM: {analytics['api_coverage']['bpm']}/{analytics['total_tracks']} ({analytics['api_coverage'].get('bpm_percentage', 0)}%)
-
-    🔍 SCRAPING NÉCESSAIRE:
-    • Albums manquants: {analytics['scraping_needed']['album']} ({analytics['scraping_needed'].get('album_percentage', 0)}%)
-    • Dates manquantes: {analytics['scraping_needed']['release_date']} ({analytics['scraping_needed'].get('release_date_percentage', 0)}%)
-    • Genres (toujours): {analytics['total_tracks']} (100%)
-    • Crédits: {analytics['scraping_needed']['credits']} ({analytics['scraping_needed'].get('credits_percentage', 0)}%)
-
-    ✅ COMPLÉTUDE DES DONNÉES:
-    • Morceaux complets: {analytics['data_completeness']['complete_tracks']}/{analytics['total_tracks']} ({analytics['data_completeness'].get('complete_tracks_percentage', 0)}%)
-
-    ⚡ OPTIMISATION:
-    • Gain de temps estimé: {analytics['time_savings_estimate']:.1f} secondes
-    • Efficacité améliorée de: {analytics['efficiency_gain_percentage']}%
-
-    💡 RECOMMANDATION:
-    La stratégie hybride (API + scraping ciblé) est {'TRÈS EFFICACE' if analytics['efficiency_gain_percentage'] > 50 else 'EFFICACE' if analytics['efficiency_gain_percentage'] > 20 else 'MOYENNEMENT EFFICACE'} !
-        """
-        
-        text_widget.insert("0.0", report)
-        text_widget.configure(state="disabled")
 
     def delete_artist(self, artist_name: str) -> bool:
         """Supprime un artiste et toutes ses données associées"""

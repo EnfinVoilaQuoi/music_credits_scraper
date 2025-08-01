@@ -131,7 +131,7 @@ class DataManager:
             return artist.id
     
     def save_track(self, track: Track) -> int:
-        """Sauvegarde ou met à jour un morceau - VERSION PRÉSERVANT LES FEATURES"""
+        """Sauvegarde ou met à jour un morceau - VERSION PRÉSERVANT LES FEATURES ET PAROLES"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -141,7 +141,8 @@ class DataManager:
             
             # Vérifier si le track existe déjà
             cursor.execute("""
-                SELECT id, is_featuring, primary_artist_name, featured_artists FROM tracks 
+                SELECT id, is_featuring, primary_artist_name, featured_artists, 
+                    lyrics, has_lyrics, lyrics_scraped_at FROM tracks 
                 WHERE title = ? AND artist_id = ?
             """, (track.title, track.artist.id))
             
@@ -151,13 +152,20 @@ class DataManager:
                 # Le track existe déjà
                 track.id = existing_track[0]
                 
-                # ✅ CORRECTION CRITIQUE: Préserver les infos de featuring existantes
+                # ✅ CORRECTION CRITIQUE: Préserver les infos de featuring ET paroles existantes
                 # Si les infos de featuring existent en base mais pas sur l'objet track, les restaurer
                 if existing_track[1] and not hasattr(track, 'is_featuring'):  # is_featuring en base
                     track.is_featuring = bool(existing_track[1])
                     track.primary_artist_name = existing_track[2]
                     track.featured_artists = existing_track[3]
                     logger.info(f"🔒 Préservation des infos featuring pour: {track.title}")
+                
+                # ✅ NOUVEAU: Préserver les paroles existantes si pas nouvelles
+                if existing_track[4] and not hasattr(track, 'lyrics'):  # lyrics en base
+                    track.lyrics = existing_track[4]
+                    track.has_lyrics = bool(existing_track[5])
+                    track.lyrics_scraped_at = existing_track[6]
+                    logger.info(f"📝 Préservation des paroles pour: {track.title}")
                 
                 logger.debug(f"Track existant trouvé (ID: {track.id}), mise à jour...")
                 
@@ -168,6 +176,7 @@ class DataManager:
                         bpm = ?, duration = ?, genre = ?,
                         genius_url = ?, spotify_url = ?,
                         is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
+                        lyrics = ?, lyrics_scraped_at = ?, has_lyrics = ?,
                         updated_at = ?, last_scraped = ?
                     WHERE id = ?
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
@@ -177,6 +186,9 @@ class DataManager:
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),
                     getattr(track, 'featured_artists', None),
+                    getattr(track, 'lyrics', None),
+                    getattr(track, 'lyrics_scraped_at', None),
+                    bool(getattr(track, 'lyrics', None)),
                     datetime.now(), track.last_scraped, track.id))
             else:
                 # Nouveau track, insérer
@@ -188,8 +200,9 @@ class DataManager:
                         genius_id, spotify_id, discogs_id,
                         bpm, duration, genre, genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
+                        lyrics, lyrics_scraped_at, has_lyrics,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
                     track.bpm, track.duration, track.genre,
@@ -197,6 +210,9 @@ class DataManager:
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),
                     getattr(track, 'featured_artists', None),
+                    getattr(track, 'lyrics', None),
+                    getattr(track, 'lyrics_scraped_at', None),
+                    bool(getattr(track, 'lyrics', None)),
                     datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
             
@@ -216,7 +232,9 @@ class DataManager:
                 """, (track.id, error, datetime.now()))
             
             conn.commit()
-            logger.info(f"Morceau sauvegardé: {track.title} (ID: {track.id}, Featuring: {getattr(track, 'is_featuring', False)})")
+            
+            lyrics_info = f", Paroles: {bool(getattr(track, 'lyrics', None))}" if hasattr(track, 'lyrics') else ""
+            logger.info(f"Morceau sauvegardé: {track.title} (ID: {track.id}, Featuring: {getattr(track, 'is_featuring', False)}{lyrics_info})")
             return track.id
 
     def _save_credit(self, cursor, track_id: int, credit: Credit):
@@ -323,7 +341,7 @@ class DataManager:
             return None
     
     def get_artist_tracks(self, artist_id: int) -> List[Track]:
-        """Récupère tous les morceaux d'un artiste - VERSION FINALE CORRIGÉE"""
+        """Récupère tous les morceaux d'un artiste - VERSION FINALE CORRIGÉE AVEC PAROLES"""
         tracks = []
         
         try:
@@ -340,7 +358,7 @@ class DataManager:
                 
                 logger.debug(f"📊 {track_count} tracks trouvés pour artist_id {artist_id}")
                 
-                # Récupérer les tracks
+                # Récupérer les tracks AVEC les nouvelles colonnes paroles
                 cursor.execute("""
                     SELECT * FROM tracks WHERE artist_id = ?
                     ORDER BY title
@@ -373,6 +391,20 @@ class DataManager:
                         track.is_featuring = bool(row['is_featuring']) if row['is_featuring'] else False
                         track.primary_artist_name = row['primary_artist_name']
                         track.featured_artists = row['featured_artists']
+                        
+                        # ✅ NOUVEAU: Attributs de paroles
+                        available_keys = row.keys() if hasattr(row, 'keys') else []
+                        
+                        # Charger les paroles si disponibles
+                        if 'lyrics' in available_keys and row['lyrics']:
+                            track.lyrics = row['lyrics']
+                            track.has_lyrics = bool(row.get('has_lyrics', False))
+                            track.lyrics_scraped_at = row.get('lyrics_scraped_at')
+                            logger.debug(f"📝 Paroles chargées pour: {track.title}")
+                        else:
+                            track.lyrics = None
+                            track.has_lyrics = False
+                            track.lyrics_scraped_at = None
                         
                         # Log pour debug des features
                         if track.is_featuring:

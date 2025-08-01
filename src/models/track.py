@@ -253,37 +253,35 @@ class Track:
         return writers
     
     def has_complete_credits(self) -> bool:
-        """Vérifie si les crédits semblent complets - VERSION CORRIGÉE"""
-        # Un morceau est considéré comme complet s'il a au moins :
-        # - Un producteur OU un auteur (certains morceaux n'ont qu'un des deux)
-        # - Au moins 3 crédits au total (pour éviter les morceaux avec juste un crédit isolé)
+        """Vérifie si les crédits semblent complets - VERSION AMÉLIORÉE"""
+        music_credits = self.get_music_credits()
+        
+        if not music_credits:
+            return False
+        
+        # Un morceau est considéré comme complet s'il a :
+        # - Au moins 4 crédits musicaux (plus strict)
+        # - ET au moins un producteur OU un auteur
         
         has_producer = bool(self.get_producers())
         has_writer = bool(self.get_writers())
-        total_music_credits = len(self.get_music_credits())  # Exclure les crédits vidéo
+        has_enough_credits = len(music_credits) >= 4
         
-        return (has_producer or has_writer) and total_music_credits >= 3
+        return has_enough_credits and (has_producer or has_writer)
     
     def get_music_credits(self) -> List[Credit]:
-        """Retourne seulement les crédits musicaux (pas les crédits vidéo)"""
-        video_roles = [
-            CreditRole.VIDEO_DIRECTOR,
-            CreditRole.VIDEO_PRODUCER,
-            CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY,
-            CreditRole.VIDEO_CINEMATOGRAPHER,
-            CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN,
-            CreditRole.VIDEO_CAMERA_OPERATOR,
-            CreditRole.VIDEO_DRONE_OPERATOR,
-            CreditRole.VIDEO_SET_DECORATOR,
-            CreditRole.VIDEO_EDITOR,
-            CreditRole.VIDEO_COLORIST,
-            CreditRole.PHOTOGRAPHY  # Considéré comme vidéo selon votre demande
-        ]
+        """Retourne seulement les crédits musicaux - VERSION AMÉLIORÉE"""
+        # Obtenir d'abord tous les crédits vidéo
+        video_credits = self.get_video_credits()
+        video_credits_set = set(video_credits)
         
-        return [c for c in self.credits if c.role not in video_roles]
+        # Retourner tous les crédits qui ne sont PAS vidéo
+        music_credits = [c for c in self.credits if c not in video_credits_set]
+        
+        return music_credits
     
     def get_video_credits(self) -> List[Credit]:
-        """Retourne seulement les crédits vidéo"""
+        """Retourne seulement les crédits vidéo - VERSION AMÉLIORÉE"""
         video_roles = [
             CreditRole.VIDEO_DIRECTOR,
             CreditRole.VIDEO_PRODUCER,
@@ -295,18 +293,56 @@ class Track:
             CreditRole.VIDEO_SET_DECORATOR,
             CreditRole.VIDEO_EDITOR,
             CreditRole.VIDEO_COLORIST,
-            CreditRole.PHOTOGRAPHY
+            CreditRole.PHOTOGRAPHY  # Considéré comme vidéo
         ]
         
-        # Inclure aussi les rôles OTHER qui contiennent "video" dans le role_detail
         video_credits = [c for c in self.credits if c.role in video_roles]
         
-        # Ajouter les rôles OTHER qui sont liés à la vidéo
+        # ✅ AMÉLIORATION: Vérifier les rôles OTHER avec mots-clés vidéo
+        video_keywords = [
+            # Rôles techniques vidéo
+            'video', 'vidéo', 'clip', 'director', 'réalisateur', 'cinematographer',
+            'camera', 'caméra', 'drone', 'steadicam', 'gimbal',
+            
+            # Éclairage et technique
+            'electrician', 'électricien', 'lighting', 'éclairage', 'gaffer',
+            'grip', 'focus puller', 'assistant camera', 'camera operator',
+            
+            # Maquillage et costume pour vidéo
+            'makeup artist', 'maquilleur', 'maquilleuse', 'hair', 'coiffeur',
+            'costume', 'wardrobe', 'styliste', 'styling',
+            
+            # Post-production
+            'editor', 'monteur', 'monteuse', 'colorist', 'étalonnage',
+            'motion graphics', 'vfx', 'visual effects', 'effets visuels',
+            
+            # Décors et accessoires
+            'set decorator', 'décorateur', 'props', 'accessoires',
+            'location', 'repérage', 'casting director',
+            
+            # Production vidéo
+            'video producer', 'production manager', 'assistant director',
+            'script supervisor', 'continuity'
+        ]
+        
+        # Ajouter les rôles OTHER qui contiennent des mots-clés vidéo
         for credit in self.credits:
-            if (credit.role == CreditRole.OTHER and 
-                credit.role_detail and 
-                any(keyword in credit.role_detail.lower() for keyword in ['video', 'drone', 'camera', 'cinemat', 'photography'])):
-                video_credits.append(credit)
+            if credit.role == CreditRole.OTHER and credit.role_detail:
+                role_detail_lower = credit.role_detail.lower()
+                
+                # Vérifier si c'est un rôle vidéo
+                if any(keyword in role_detail_lower for keyword in video_keywords):
+                    # Double vérification : ne pas prendre les rôles purement musicaux
+                    music_exclusions = [
+                        'songwriter', 'composer', 'producer', 'mix', 'master',
+                        'guitar', 'piano', 'drums', 'bass', 'vocal', 'engineer'
+                    ]
+                    
+                    is_music_role = any(exclusion in role_detail_lower for exclusion in music_exclusions)
+                    
+                    if not is_music_role and credit not in video_credits:
+                        video_credits.append(credit)
+                        logger.debug(f"🎬 Crédit vidéo détecté: {credit.name} - {credit.role_detail}")
         
         return video_credits
     
@@ -387,3 +423,91 @@ class Track:
             'last_scraped': self.last_scraped.isoformat() if self.last_scraped else None,
             'scraping_errors': self.scraping_errors
         }
+    
+    def _start_lyrics_scraping(self):
+        """Lance le scraping des paroles pour les morceaux sélectionnés"""
+        if not self.current_artist or not self.current_artist.tracks:
+            return
+        
+        if not self.selected_tracks:
+            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
+            return
+        
+        # Filtrer les morceaux sélectionnés
+        selected_tracks_list = [self.current_artist.tracks[i] for i in sorted(self.selected_tracks)]
+        
+        # Confirmation
+        result = messagebox.askyesno(
+            "Scraping des paroles",
+            f"Voulez-vous scraper les paroles de {len(selected_tracks_list)} morceaux sélectionnés ?\n\n"
+            "📝 Cela récupérera :\n"
+            "• Les paroles complètes\n"
+            "• L'analyse de structure (intro, couplets, refrain...)\n"
+            "• Estimation de durée par section\n\n"
+            "⏱️ Temps estimé : ~{} minutes".format(len(selected_tracks_list) * 0.5)
+        )
+        
+        if not result:
+            return
+        
+        self.lyrics_button.configure(state="disabled", text="📝 Scraping paroles...")
+        self.progress_bar.set(0)
+        
+        def update_progress(current, total, track_name):
+            progress = current / total
+            self.root.after(0, lambda: self.progress_var.set(progress))
+            self.root.after(0, lambda: self.progress_label.configure(
+                text=f"📝 {current}/{total} - {track_name[:25]}..."
+            ))
+        
+        def scrape_lyrics():
+            scraper = None
+            try:
+                scraper = GeniusScraper(headless=True)
+                results = scraper.scrape_multiple_tracks_with_lyrics(
+                    selected_tracks_list,
+                    progress_callback=update_progress,
+                    include_lyrics=True
+                )
+                
+                # Sauvegarder les données avec paroles
+                for track in selected_tracks_list:
+                    track.artist = self.current_artist
+                    self.data_manager.save_track(track)
+                
+                # Afficher le résumé
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "📝 Paroles récupérées",
+                    f"✅ Scraping des paroles terminé !\n\n"
+                    f"📊 Résultats :\n"
+                    f"• Morceaux traités : {results['success']}\n"
+                    f"• Paroles récupérées : {results['lyrics_scraped']}\n"
+                    f"• Structures analysées : {results['structures_analyzed']}\n"
+                    f"• Échecs : {results['failed']}\n\n"
+                    f"💡 Les paroles sont maintenant disponibles dans les détails des morceaux"
+                ))
+                
+                self.root.after(0, self._update_artist_info)
+                
+            except Exception as err:
+                error_msg = str(err) if str(err) != "None" else "Erreur inconnue"
+                logger.error(f"Erreur scraping paroles: {error_msg}", exc_info=True)
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Erreur",
+                    f"Erreur lors du scraping des paroles :\n{error_msg}"
+                ))
+            finally:
+                if scraper:
+                    try:
+                        scraper.close()
+                    except:
+                        pass
+                
+                self.root.after(0, lambda: self.lyrics_button.configure(
+                    state="normal",
+                    text="📝 Scraper paroles"
+                ))
+                self.root.after(0, lambda: self.progress_bar.set(0))
+                self.root.after(0, lambda: self.progress_label.configure(text=""))
+        
+        threading.Thread(target=scrape_lyrics, daemon=True).start()

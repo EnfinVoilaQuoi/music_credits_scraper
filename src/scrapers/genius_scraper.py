@@ -61,6 +61,27 @@ class GeniusScraper:
                 "profile.default_content_settings.popups": 0
             }
             options.add_experimental_option("prefs", prefs)
+
+            # Masquer les messages WebGL et GPU
+            options.add_argument('--disable-web-security')
+            options.add_argument('--disable-features=VizDisplayCompositor')
+            options.add_argument('--disable-software-rasterizer')
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            options.add_argument('--disable-ipc-flooding-protection')
+            
+            # Masquer spécifiquement les messages WebGL
+            options.add_experimental_option('excludeSwitches', ['enable-logging'])
+            options.add_experimental_option('useAutomationExtension', False)
+            
+            # Logs seulement pour les erreurs critiques
+            options.add_argument('--log-level=3')
+            options.add_argument('--silent')
+            
+            # Désactiver WebGL complètement si pas nécessaire
+            options.add_argument('--disable-webgl')
+            options.add_argument('--disable-webgl2')
             
             # Essayer d'abord le driver local
             from pathlib import Path
@@ -769,17 +790,13 @@ class GeniusScraper:
         return lyrics
 
     def _clean_lyrics(self, lyrics: str) -> str:
-        """Nettoie les paroles en préservant la structure mais supprimant la pub"""
+        """Nettoie les paroles en préservant la structure mais supprimant la pub - VERSION CORRIGÉE"""
         if not lyrics:
             return ""
         
         import re
         
-        # ✅ PRÉSERVER les indications de structure [Intro], [Couplet 1], etc.
-        # ✅ PRÉSERVER les mentions d'artistes *Artiste*
-        # ❌ SUPPRIMER les suggestions "You might also like" et pubs
-        
-        # Supprimer les sections de suggestions/publicité
+        # ✅ ÉTAPE 1: Supprimer les sections de suggestions/publicité
         pub_patterns = [
             r'You might also like\n.*?\n.*?\n.*?\n',  # "You might also like" + 3 lignes suivantes
             r'You might also like.*?(?=\[|$)',        # Tout après "You might also like" jusqu'à la prochaine section
@@ -791,21 +808,50 @@ class GeniusScraper:
         for pattern in pub_patterns:
             lyrics = re.sub(pattern.replace('\\n', '\n'), '', lyrics, flags=re.MULTILINE | re.DOTALL)
         
-        # ✅ AJOUTER des retours à la ligne appropriés pour la lisibilité
+        # ✅ ÉTAPE 2: Réparer les annotations cassées [Section : Artiste]
+        # Rechercher les patterns d'annotations cassées sur plusieurs lignes
         
-        # Ajouter retour à la ligne avant chaque nouvelle section [...]
-        lyrics = re.sub(r'(\S)\s*(\[)', r'\1\n\n\2', lyrics)
+        # Pattern 1: [Section :\nArtiste\nNom] -> [Section : Artiste Nom]
+        lyrics = re.sub(
+            r'\[([^\]]+?)\s*:\s*\n([^\]]+?)\n([^\]]*?)\]',
+            r'[\1 : \2 \3]',
+            lyrics,
+            flags=re.MULTILINE | re.DOTALL
+        )
         
-        # Ajouter retour à la ligne après chaque section [...]
-        lyrics = re.sub(r'(\])\s*(\w)', r'\1\n\2', lyrics)
+        # Pattern 2: [Section\nArtiste] -> [Section Artiste]
+        lyrics = re.sub(
+            r'\[([^\]]+?)\n([^\]]+?)\]',
+            r'[\1 \2]',
+            lyrics,
+            flags=re.MULTILINE
+        )
         
-        # Séparer les phrases par des retours à la ligne (chaque phrase = une ligne)
-        # Détecter les fins de phrases/rimes en rap
+        # Pattern 3: Nettoyer les espaces multiples dans les annotations
+        lyrics = re.sub(
+            r'\[([^\]]+?)\s+:\s+([^\]]+?)\s+([^\]]+?)\]',
+            r'[\1 : \2 \3]',
+            lyrics
+        )
+        
+        # ✅ ÉTAPE 3: Ajouter des retours à la ligne appropriés pour la lisibilité
+        
+        # Ajouter retour à la ligne avant chaque nouvelle section [...] (mais pas pour les réparations)
+        lyrics = re.sub(r'(\S)\s*(\[[^\]]+\])', r'\1\n\n\2', lyrics)
+        
+        # Ajouter retour à la ligne après chaque section [...] 
+        lyrics = re.sub(r'(\[[^\]]+\])\s*(\w)', r'\1\n\2', lyrics)
+        
+        # ✅ ÉTAPE 4: Séparer les phrases par des retours à la ligne appropriés
+        
+        # Séparer les phrases qui se terminent par des signes de ponctuation
         lyrics = re.sub(r'([.!?])\s+(?=[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ])', r'\1\n', lyrics)
         
-        # Ajouter des retours à la ligne pour les rimes typiques du rap français
+        # Pour le rap français: ajouter des retours à la ligne pour les rimes 
         # (détection basée sur les patterns de ponctuation et majuscules)
         lyrics = re.sub(r'([^.\[!?])\s+(?=[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ][a-zàáâãäåæçèéêëìíîïðñòóôõö])', r'\1\n', lyrics)
+        
+        # ✅ ÉTAPE 5: Nettoyer les retours à la ligne multiples et les espaces
         
         # Nettoyer les retours à la ligne multiples (max 2)
         lyrics = re.sub(r'\n\s*\n\s*\n+', '\n\n', lyrics)
@@ -818,7 +864,44 @@ class GeniusScraper:
         # Supprimer les lignes vides en début et fin
         lyrics = lyrics.strip()
         
-        return lyrics
+        # ✅ ÉTAPE 6: Validation finale des annotations
+        # S'assurer qu'aucune annotation n'est cassée
+        lines = lyrics.split('\n')
+        final_lines = []
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            # Si la ligne commence par [ mais ne se termine pas par ], 
+            # chercher la suite sur les lignes suivantes
+            if line.startswith('[') and not line.endswith(']'):
+                annotation_parts = [line]
+                j = i + 1
+                
+                # Chercher jusqu'à trouver la fermeture ]
+                while j < len(lines) and not any(part.endswith(']') for part in annotation_parts):
+                    if j < len(lines):
+                        annotation_parts.append(lines[j])
+                        if lines[j].endswith(']'):
+                            break
+                    j += 1
+                
+                # Fusionner l'annotation sur une seule ligne
+                if any(part.endswith(']') for part in annotation_parts):
+                    merged_annotation = ' '.join(annotation_parts).strip()
+                    # Nettoyer les espaces multiples
+                    merged_annotation = re.sub(r'\s+', ' ', merged_annotation)
+                    final_lines.append(merged_annotation)
+                    i = j + 1
+                else:
+                    final_lines.append(line)
+                    i += 1
+            else:
+                final_lines.append(line)
+                i += 1
+        
+        return '\n'.join(final_lines)
 
     def scrape_multiple_tracks_with_lyrics(self, tracks: List[Track], progress_callback=None, include_lyrics=True) -> Dict[str, Any]:
         """Scrape plusieurs morceaux avec option paroles - VERSION SIMPLIFIÉE"""

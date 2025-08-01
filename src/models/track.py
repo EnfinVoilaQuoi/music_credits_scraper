@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+
 from enum import Enum
 
 
@@ -121,15 +122,6 @@ class Credit:
     role_detail: Optional[str] = None  # Ex: "Guitar", "Piano", etc.
     source: str = "genius"  # Source de l'information
     
-    def to_dict(self) -> dict:
-        """Convertit le crédit en dictionnaire"""
-        return {
-            'name': self.name,
-            'role': self.role.value,
-            'role_detail': self.role_detail,
-            'source': self.source
-        }
-    
     @staticmethod
     def from_role_and_names(role: str, names: List[str]) -> List["Credit"]:
         """Crée une liste de crédits à partir d'un rôle (texte) et de noms"""
@@ -194,6 +186,11 @@ class Track:
     is_featuring: bool = False  # True si l'artiste est en featuring
     featured_artists: Optional[str] = None  # Liste des artistes en featuring
     primary_artist_name: Optional[str] = None  # Nom de l'artiste principal si différent
+
+    # Support des paroles
+    lyrics: Optional[str] = None  # Paroles complètes
+    has_lyrics: bool = False  # Indicateur si les paroles sont disponibles
+    lyrics_scraped_at: Optional[datetime] = None  # Date de récupération des paroles
     
     # Métadonnées supplémentaires
     popularity: Optional[int] = None  # Nombre de vues sur Genius
@@ -270,13 +267,22 @@ class Track:
         return has_enough_credits and (has_producer or has_writer)
     
     def get_music_credits(self) -> List[Credit]:
-        """Retourne seulement les crédits musicaux - VERSION AMÉLIORÉE"""
+        """Retourne seulement les crédits musicaux - VERSION CORRIGÉE"""
         # Obtenir d'abord tous les crédits vidéo
         video_credits = self.get_video_credits()
-        video_credits_set = set(video_credits)
+        
+        # Créer une liste des identifiants uniques des crédits vidéo
+        video_credit_ids = []
+        for credit in video_credits:
+            credit_id = (credit.name, credit.role.value, credit.role_detail, credit.source)
+            video_credit_ids.append(credit_id)
         
         # Retourner tous les crédits qui ne sont PAS vidéo
-        music_credits = [c for c in self.credits if c not in video_credits_set]
+        music_credits = []
+        for credit in self.credits:
+            credit_id = (credit.name, credit.role.value, credit.role_detail, credit.source)
+            if credit_id not in video_credit_ids:
+                music_credits.append(credit)
         
         return music_credits
     
@@ -342,7 +348,7 @@ class Track:
                     
                     if not is_music_role and credit not in video_credits:
                         video_credits.append(credit)
-                        logger.debug(f"🎬 Crédit vidéo détecté: {credit.name} - {credit.role_detail}")
+                        # print(f"🎬 Crédit vidéo détecté: {credit.name} - {credit.role_detail}")
         
         return video_credits
     
@@ -378,11 +384,28 @@ class Track:
         return not (hasattr(self, 'is_featuring') and self.is_featuring)
     
     def to_dict(self) -> dict:
-        """Convertit le morceau en dictionnaire - VERSION AVEC SÉPARATION VIDÉO"""
+        """Convertit le morceau en dictionnaire - VERSION AVEC SÉPARATION VIDÉO ET PAROLES"""
         is_featuring = hasattr(self, 'is_featuring') and self.is_featuring
         
         music_credits = self.get_music_credits()
         video_credits = self.get_video_credits()
+        
+        # ✅ NOUVEAU: Informations sur les paroles
+        lyrics_info = {}
+        if hasattr(self, 'lyrics') and self.lyrics:
+            lyrics_info = {
+                'has_lyrics': True,
+                'lyrics_word_count': len(self.lyrics.split()) if self.lyrics else 0,
+                'lyrics_char_count': len(self.lyrics) if self.lyrics else 0,
+                'lyrics_scraped_at': self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None
+            }
+        else:
+            lyrics_info = {
+                'has_lyrics': False,
+                'lyrics_word_count': 0,
+                'lyrics_char_count': 0,
+                'lyrics_scraped_at': None
+            }
         
         return {
             'id': self.id,
@@ -404,6 +427,9 @@ class Track:
             'primary_artist_name': getattr(self, 'primary_artist_name', None),
             'popularity': getattr(self, 'popularity', None),
             'artwork_url': getattr(self, 'artwork_url', None),
+            
+            # ✅ NOUVEAU: Informations paroles
+            **lyrics_info,
             
             # ✅ SÉPARATION DES CRÉDITS
             'music_credits': [c.to_dict() for c in music_credits],

@@ -245,6 +245,373 @@ class MainWindow:
         
         self.stats_label = ctk.CTkLabel(stats_frame, text="", font=("Arial", 12))
         self.stats_label.pack()
+    def _get_track_status_icon(self, track):
+        """Retourne l'icône de statut selon le niveau de complétude des données"""
+        try:
+            # Vérifier la présence des crédits
+            has_credits = False
+            try:
+                music_credits = track.get_music_credits()
+                has_credits = len(music_credits) > 0 if music_credits else False
+            except:
+                has_credits = False
+            
+            # Vérifier la présence des paroles
+            has_lyrics = False
+            try:
+                has_lyrics = (hasattr(track, 'lyrics') and 
+                             track.lyrics is not None and 
+                             isinstance(track.lyrics, str) and 
+                             len(track.lyrics.strip()) > 0)
+            except:
+                has_lyrics = False
+            
+            # Vérifier la présence du BPM
+            has_bpm = False
+            try:
+                has_bpm = (track.bpm is not None and 
+                          isinstance(track.bpm, (int, float)) and 
+                          track.bpm > 0)
+            except:
+                has_bpm = False
+            
+            # Compter le nombre de types de données disponibles
+            data_count = 0
+            if has_credits:
+                data_count += 1
+            if has_lyrics:
+                data_count += 1
+            if has_bpm:
+                data_count += 1
+            
+            if data_count == 0:
+                return "❌"  # Aucune donnée
+            elif data_count >= 3:
+                return "✅"  # Données complètes
+            else:
+                return "⚠️"  # Données partielles
+                
+        except Exception as e:
+            print(f"Erreur dans _get_track_status_icon: {e}")
+            return "❓"
+
+    def _get_track_status_details(self, track):
+        """Retourne les détails du statut pour le tooltip/debug"""
+        details = []
+        
+        try:
+            # Vérifier les crédits
+            try:
+                music_credits = track.get_music_credits()
+                if music_credits and len(music_credits) > 0:
+                    details.append(f"🏷️ {len(music_credits)} crédits")
+            except:
+                pass
+            
+            # Vérifier les paroles
+            try:
+                if (hasattr(track, 'lyrics') and 
+                    track.lyrics is not None and 
+                    isinstance(track.lyrics, str) and 
+                    len(track.lyrics.strip()) > 0):
+                    word_count = len(track.lyrics.split())
+                    details.append(f"📝 {word_count} mots")
+            except:
+                pass
+            
+            # Vérifier le BPM
+            try:
+                if (track.bpm is not None and 
+                    isinstance(track.bpm, (int, float)) and 
+                    track.bpm > 0):
+                    details.append(f"🎼 {int(track.bpm)} BPM")
+            except:
+                pass
+            
+            if not details:
+                return "Aucune donnée disponible"
+            
+            return " • ".join(details)
+        except Exception as e:
+            return f"Erreur: {str(e)}"
+
+    def _populate_tracks_table(self, tracks):
+        """Remplit le tableau avec les morceaux - VERSION CORRIGÉE"""
+        # Effacer le tableau
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Réinitialiser les sélections
+        self.selected_tracks.clear()
+        
+        # Ajouter les morceaux
+        for i, track in enumerate(tracks):
+            try:
+                # Gestion des features
+                is_featuring = getattr(track, 'is_featuring', False)
+                primary_artist = getattr(track, 'primary_artist_name', None)
+                
+                if is_featuring and primary_artist:
+                    title_display = track.title
+                    artist_display = primary_artist
+                    title_prefix = "🎤 "
+                elif is_featuring:
+                    artist_name = track.artist.name if track.artist else 'Unknown'
+                    title_display = f"{track.title} (feat. {artist_name})"
+                    artist_display = "Artiste principal inconnu"
+                    title_prefix = "🎤 "
+                else:
+                    title_display = track.title or "Titre inconnu"
+                    artist_display = track.artist.name if track.artist else "Artiste inconnu"
+                    title_prefix = ""
+                
+                # Date de sortie
+                date_display = "-"
+                try:
+                    if track.release_date:
+                        if hasattr(track.release_date, 'strftime'):
+                            date_display = track.release_date.strftime('%Y-%m-%d')
+                        else:
+                            date_display = str(track.release_date)[:10]
+                except:
+                    date_display = "-"
+                
+                # Statut
+                try:
+                    status_icon = self._get_track_status_icon(track)
+                    status_details = self._get_track_status_details(track)
+                except Exception as e:
+                    status_icon = "❓"
+                    status_details = f"Erreur: {str(e)}"
+                
+                # Crédits
+                try:
+                    music_credits = track.get_music_credits()
+                    credits_count = len(music_credits) if music_credits else 0
+                except:
+                    credits_count = 0
+                
+                # BPM
+                bmp_display = track.bpm if track.bpm is not None else "-"
+                
+                # Valeurs pour le tableau
+                values = (
+                    title_prefix + title_display,    # Titre
+                    artist_display,                  # Artiste
+                    track.album or "-",              # Album
+                    date_display,                    # Date
+                    credits_count,                   # Crédits
+                    bmp_display,                     # BPM
+                    status_icon                      # Statut
+                )
+                
+                # Créer l'item
+                item = self.tree.insert("", "end", text="☑", values=values, tags=(str(i), status_details))
+                
+                # Sélectionner par défaut
+                self.selected_tracks.add(i)
+                
+            except Exception as e:
+                print(f"Erreur ajout track {i}: {e}")
+                # Ligne d'erreur
+                error_values = (
+                    f"ERREUR: {getattr(track, 'title', 'Track inconnu')}",
+                    "Erreur", "-", "-", "0", "-", "❓"
+                )
+                self.tree.insert("", "end", text="☐", values=error_values, tags=(str(i), f"Erreur: {str(e)}"))
+        
+        self._update_selection_count()
+
+    def _sort_column(self, col):
+        """Trie les morceaux selon la colonne sélectionnée - VERSION CORRIGÉE"""
+        if not self.current_artist or not self.current_artist.tracks:
+            return
+        
+        try:
+            # Sauvegarder les sélections
+            selected_track_ids = set()
+            for track_index in self.selected_tracks:
+                if 0 <= track_index < len(self.current_artist.tracks):
+                    track = self.current_artist.tracks[track_index]
+                    if hasattr(track, 'id') and track.id:
+                        selected_track_ids.add(track.id)
+            
+            # Basculer l'ordre de tri
+            reverse = self.sort_reverse.get(col, False)
+            self.sort_reverse[col] = not reverse
+            
+            # Créer liste avec index
+            tracks_with_index = [(i, track) for i, track in enumerate(self.current_artist.tracks)]
+            
+            # Fonction de tri
+            def sort_key(item):
+                index, track = item
+                
+                try:
+                    if col == "Titre":
+                        if hasattr(track, 'get_display_title'):
+                            return track.get_display_title().lower()
+                        return (track.title or "").lower()
+                    elif col == "Artiste principal":
+                        if hasattr(track, 'get_display_artist'):
+                            return track.get_display_artist().lower()
+                        return (track.artist.name if track.artist else "").lower()
+                    elif col == "Album":
+                        return (track.album or "zzz").lower()
+                    elif col == "Date sortie":
+                        if track.release_date:
+                            return track.release_date
+                        from datetime import datetime
+                        return datetime.min if reverse else datetime.max
+                    elif col == "Crédits":
+                        try:
+                            music_credits = track.get_music_credits()
+                            return len(music_credits) if music_credits else 0
+                        except:
+                            return 0
+                    elif col == "BPM":
+                        return track.bpm if track.bpm is not None else 0
+                    elif col == "Statut":
+                        try:
+                            # Logique de tri par statut
+                            has_credits = False
+                            has_lyrics = False
+                            has_bpm = False
+                            
+                            try:
+                                music_credits = track.get_music_credits()
+                                has_credits = len(music_credits) > 0 if music_credits else False
+                            except:
+                                pass
+                            
+                            try:
+                                has_lyrics = (hasattr(track, 'lyrics') and 
+                                            track.lyrics is not None and 
+                                            len(str(track.lyrics).strip()) > 0)
+                            except:
+                                pass
+                            
+                            try:
+                                has_bpm = (track.bpm is not None and track.bpm > 0)
+                            except:
+                                pass
+                            
+                            data_count = sum([has_credits, has_lyrics, has_bpm])
+                            
+                            if data_count == 0:
+                                return 0  # ❌
+                            elif data_count >= 3:
+                                return 2  # ✅
+                            else:
+                                return 1  # ⚠️
+                        except:
+                            return -1  # Erreur
+                except Exception as e:
+                    print(f"Erreur tri colonne {col}: {e}")
+                    return ""
+                
+                return ""
+            
+            # Trier
+            tracks_with_index.sort(key=sort_key, reverse=reverse)
+            
+            # Réorganiser
+            self.current_artist.tracks = [track for index, track in tracks_with_index]
+            
+            # Restaurer sélections
+            self.selected_tracks.clear()
+            for new_index, track in enumerate(self.current_artist.tracks):
+                if hasattr(track, 'id') and track.id and track.id in selected_track_ids:
+                    self.selected_tracks.add(new_index)
+            
+            # Recréer affichage
+            self._populate_tracks_table(self.current_artist.tracks)
+            
+            # Mettre à jour en-tête
+            direction = "↓" if reverse else "↑"
+            self.tree.heading(col, text=f"{col} {direction}")
+            
+            # Réinitialiser autres en-têtes
+            for other_col in ["Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "BPM", "Statut"]:
+                if other_col != col:
+                    self.tree.heading(other_col, text=other_col)
+                    
+        except Exception as e:
+            print(f"Erreur générale dans _sort_column: {e}")
+
+    def _update_track_in_table(self, track_name):
+        """Met à jour une ligne spécifique du tableau - VERSION CORRIGÉE"""
+        if not self.current_artist:
+            return
+            
+        for item in self.tree.get_children():
+            try:
+                item_values = self.tree.item(item)["values"]
+                if item_values and len(item_values) > 0:
+                    # Comparer le titre
+                    item_title = item_values[0].replace("🎤 ", "")
+                    
+                    # Retrouver le track
+                    for i, track in enumerate(self.current_artist.tracks):
+                        try:
+                            track_display = track.title
+                            if hasattr(track, 'is_featuring') and track.is_featuring:
+                                artist_name = track.artist.name if track.artist else 'Unknown'
+                                track_display = f"{track.title} (feat. {artist_name})"
+                            
+                            if track_display == item_title or (track.title and track.title in item_title):
+                                # Mettre à jour
+                                title_prefix = "🎤 " if (hasattr(track, 'is_featuring') and track.is_featuring) else ""
+                                
+                                if hasattr(track, 'get_display_artist'):
+                                    artist_display = track.get_display_artist()
+                                else:
+                                    artist_display = track.artist.name if track.artist else "Inconnu"
+                                
+                                # Date
+                                date_display = "-"
+                                try:
+                                    if track.release_date and hasattr(track.release_date, 'strftime'):
+                                        date_display = track.release_date.strftime('%Y-%m-%d')
+                                except:
+                                    pass
+                                
+                                # Statut
+                                try:
+                                    status_icon = self._get_track_status_icon(track)
+                                    status_details = self._get_track_status_details(track)
+                                except:
+                                    status_icon = "❓"
+                                    status_details = "Erreur de calcul"
+                                
+                                # Crédits
+                                try:
+                                    music_credits = track.get_music_credits()
+                                    credits_count = len(music_credits) if music_credits else 0
+                                except:
+                                    credits_count = 0
+                                
+                                updated_values = (
+                                    title_prefix + track_display,
+                                    artist_display,
+                                    track.album or "-",
+                                    date_display,
+                                    credits_count,
+                                    track.bpm or "-",
+                                    status_icon
+                                )
+                                
+                                self.tree.item(item, values=updated_values, tags=(str(i), status_details))
+                                break
+                        except Exception as track_error:
+                            print(f"Erreur maj track {i}: {track_error}")
+                            continue
+                    break
+            except Exception as item_error:
+                print(f"Erreur maj item: {item_error}")
+                continue
+
+
 
     def _force_update_selected(self):
         """Force la mise à jour des morceaux sélectionnés (efface les anciens crédits)"""
@@ -385,28 +752,103 @@ class MainWindow:
                 self.root.after(0, lambda: self.progress_label.configure(text=""))
         
         threading.Thread(target=force_update, daemon=True).start()
-
-    def _sort_column(self, col):
-        """Trie les morceaux selon la colonne sélectionnée - VERSION CORRIGÉE"""
-        if not self.current_artist or not self.current_artist.tracks:
+            
+        def sort_key(item):
+            index, track = item
+            
+            try:
+                if col == "Titre":
+                    return track.get_display_title().lower() if hasattr(track, 'get_display_title') else (track.title or "").lower()
+                elif col == "Artiste principal":
+                    return track.get_display_artist().lower() if hasattr(track, 'get_display_artist') else ""
+                elif col == "Album":
+                    return (track.album or "zzz").lower()
+                elif col == "Date sortie":
+                    if track.release_date:
+                        return track.release_date
+                    else:
+                        return datetime.min if reverse else datetime.max
+                elif col == "Crédits":
+                    try:
+                        music_credits = track.get_music_credits()
+                        return len(music_credits) if music_credits else 0
+                    except Exception:
+                        return 0
+                elif col == "BPM":
+                    return track.bpm if track.bpm is not None else 0
+                elif col == "Statut":
+                    # ✅ CORRECTION : Tri par niveau de complétude avec gestion d'erreur
+                    try:
+                        # Vérifications sécurisées
+                        try:
+                            music_credits = track.get_music_credits()
+                            has_credits = len(music_credits) > 0 if music_credits else False
+                        except Exception:
+                            has_credits = False
+                        
+                        try:
+                            has_lyrics = (hasattr(track, 'lyrics') and 
+                                        track.lyrics is not None and 
+                                        isinstance(track.lyrics, str) and 
+                                        track.lyrics.strip() != "")
+                        except Exception:
+                            has_lyrics = False
+                        
+                        try:
+                            has_bpm = (track.bpm is not None and 
+                                    isinstance(track.bpm, (int, float)) and 
+                                    track.bpm > 0)
+                        except Exception:
+                            has_bpm = False
+                        
+                        # Conversion sécurisée
+                        data_types_count = int(bool(has_credits)) + int(bool(has_lyrics)) + int(bool(has_bpm))
+                        
+                        if data_types_count == 0:
+                            return 0  # ❌ Aucune donnée (priorité haute pour tri croissant)
+                        elif data_types_count >= 3:
+                            return 2  # ✅ Données complètes
+                        else:
+                            return 1  # ⚠️ Données partielles
+                            
+                    except Exception as e:
+                        logger.error(f"Erreur lors du tri par statut: {e}")
+                        return -1  # Erreur = priorité très haute
+                        
+            except Exception as e:
+                logger.error(f"Erreur lors du tri de la colonne {col}: {e}")
+                return ""
+            
+            return ""
+        
+        # Trier avec gestion d'erreur
+        try:
+            tracks_with_index.sort(key=sort_key, reverse=reverse)
+        except Exception as e:
+            logger.error(f"Erreur lors du tri: {e}")
             return
         
-        # ✅ CORRECTION: Sauvegarder les sélections AVANT le tri
-        selected_track_ids = set()
-        for track_index in self.selected_tracks:
-            if 0 <= track_index < len(self.current_artist.tracks):
-                track = self.current_artist.tracks[track_index]
-                if track.id:
-                    selected_track_ids.add(track.id)
+        # Réorganiser la liste des morceaux
+        self.current_artist.tracks = [track for index, track in tracks_with_index]
         
-        # Basculer l'ordre de tri pour cette colonne
-        reverse = self.sort_reverse.get(col, False)
-        self.sort_reverse[col] = not reverse
+        # Restaurer les sélections après le tri
+        self.selected_tracks.clear()
+        for new_index, track in enumerate(self.current_artist.tracks):
+            if hasattr(track, 'id') and track.id and track.id in selected_track_ids:
+                self.selected_tracks.add(new_index)
         
-        # Créer une liste des morceaux avec leur index original
-        tracks_with_index = [(i, track) for i, track in enumerate(self.current_artist.tracks)]
+        # Recréer l'affichage
+        self._populate_tracks_table(self.current_artist.tracks)
         
-        # Fonction de tri selon la colonne (code existant...)
+        # Mettre à jour l'en-tête pour indiquer le tri
+        direction = "↓" if reverse else "↑"
+        self.tree.heading(col, text=f"{col} {direction}")
+        
+        # Réinitialiser les autres en-têtes
+        for other_col in ["Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "BPM", "Statut"]:
+            if other_col != col:
+                self.tree.heading(other_col, text=other_col)
+
         def sort_key(item):
             index, track = item
             
@@ -426,12 +868,19 @@ class MainWindow:
             elif col == "BPM":
                 return track.bpm or 0
             elif col == "Statut":
-                if track.has_complete_credits():
-                    return 0
-                elif track.get_music_credits():
-                    return 1
+                # ✅ NOUVEAU : Tri par niveau de complétude
+                has_credits = len(track.get_music_credits()) > 0
+                has_lyrics = hasattr(track, 'lyrics') and track.lyrics and track.lyrics.strip()
+                has_bpm = track.bpm is not None and track.bpm > 0
+                
+                data_types_count = sum([has_credits, has_lyrics, has_bpm])
+                
+                if data_types_count == 0:
+                    return 0  # ❌ Aucune donnée (priorité haute pour tri croissant)
+                elif data_types_count >= 3:
+                    return 2  # ✅ Données complètes
                 else:
-                    return 2
+                    return 1  # ⚠️ Données partielles
             return ""
         
         # Trier
@@ -440,7 +889,7 @@ class MainWindow:
         # Réorganiser la liste des morceaux
         self.current_artist.tracks = [track for index, track in tracks_with_index]
         
-        # ✅ CORRECTION: Restaurer les sélections après le tri
+        # Restaurer les sélections après le tri
         self.selected_tracks.clear()
         for new_index, track in enumerate(self.current_artist.tracks):
             if track.id and track.id in selected_track_ids:
@@ -458,70 +907,92 @@ class MainWindow:
             if other_col != col:
                 self.tree.heading(other_col, text=other_col)
 
-    def _populate_tracks_table(self, tracks: List[Track]):
-        """Remplit le tableau avec les morceaux - VERSION CORRIGÉE FEATURING"""
-        # Effacer le tableau
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+
+    def _get_track_status_icon(self, track: Track) -> str:
+        """Retourne l'icône de statut selon le niveau de complétude des données - VERSION CORRIGÉE"""
         
-        # Réinitialiser les sélections
-        self.selected_tracks.clear()
+        # ✅ CORRECTION : Vérifications plus robustes avec gestion des None
         
-        # Ajouter les morceaux
-        for i, track in enumerate(tracks):
-            # ✅ CORRECTION: Vérifier les attributs de featuring
-            is_featuring = getattr(track, 'is_featuring', False)
-            primary_artist = getattr(track, 'primary_artist_name', None)
-            
-            if is_featuring and primary_artist:
-                # Pour les features avec artiste principal connu
-                title_display = f"{track.title}"
-                artist_display = primary_artist
-                title_prefix = "🎤 "
-                
-                logger.debug(f"🎤 Featuring affiché: {track.title} par {primary_artist} (feat. {track.artist.name if track.artist else 'Unknown'})")
-                
-            elif is_featuring:
-                # Pour les features sans artiste principal défini
-                title_display = f"{track.title} (feat. {track.artist.name if track.artist else 'Unknown'})"
-                artist_display = "Artiste principal inconnu"
-                title_prefix = "🎤 "
-                
-            else:
-                # Pour les morceaux principaux
-                title_display = track.title
-                artist_display = track.artist.name if track.artist else "Artiste inconnu"
-                title_prefix = ""
-            
-            # Formater la date de sortie
-            date_display = "-"
-            if track.release_date:
-                if hasattr(track.release_date, 'strftime'):
-                    date_display = track.release_date.strftime('%Y-%m-%d')
-                else:
-                    date_display = str(track.release_date)[:10]
-            
-            # Préparer les valeurs dans l'ordre EXACT des colonnes
-            values = (
-                title_prefix + title_display,    # Titre avec préfixe
-                artist_display,                  # Artiste principal
-                track.album or "-",              # Album
-                date_display,                    # Date sortie
-                len(track.get_music_credits()),  # Crédits MUSICAUX seulement
-                track.bpm or "-",                # BPM
-                "✓" if track.has_complete_credits() else "⚠" if track.get_music_credits() else "✗"  # Statut
-            )
-            
-            # Créer l'item dans le treeview
-            item = self.tree.insert("", "end", text="☑", values=values, tags=(str(i),))
-            
-            # Sélectionner par défaut
-            self.selected_tracks.add(i)
+        # Vérifier la présence des crédits
+        try:
+            music_credits = track.get_music_credits()
+            has_credits = len(music_credits) > 0 if music_credits else False
+        except Exception:
+            has_credits = False
         
-        self._update_selection_count()
+        # Vérifier la présence des paroles
+        try:
+            has_lyrics = (hasattr(track, 'lyrics') and 
+                         track.lyrics is not None and 
+                         isinstance(track.lyrics, str) and 
+                         track.lyrics.strip() != "")
+        except Exception:
+            has_lyrics = False
+        
+        # Vérifier la présence du BPM
+        try:
+            has_bpm = (track.bpm is not None and 
+                      isinstance(track.bpm, (int, float)) and 
+                      track.bpm > 0)
+        except Exception:
+            has_bpm = False
+        
+        # ✅ CORRECTION : Conversion explicite en bool pour éviter les None
+        has_credits = bool(has_credits)
+        has_lyrics = bool(has_lyrics)
+        has_bpm = bool(has_bpm)
+        
+        # Compter le nombre de types de données disponibles
+        data_types_count = int(has_credits) + int(has_lyrics) + int(has_bpm)
+        
+        if data_types_count == 0:
+            return "❌"  # Aucune donnée
+        elif data_types_count >= 3:
+            return "✅"  # Données complètes (crédits + paroles + BPM)
+        else:
+            return "⚠️"  # Données partielles
+
+    def _get_track_status_details(self, track: Track) -> str:
+        """Retourne les détails du statut pour le tooltip/debug - VERSION CORRIGÉE"""
+        
+        details = []
+        
+        # Vérifier les crédits
+        try:
+            music_credits = track.get_music_credits()
+            if music_credits and len(music_credits) > 0:
+                details.append(f"🏷️ {len(music_credits)} crédits")
+        except Exception:
+            pass
+        
+        # Vérifier les paroles
+        try:
+            if (hasattr(track, 'lyrics') and 
+                track.lyrics is not None and 
+                isinstance(track.lyrics, str) and 
+                track.lyrics.strip()):
+                word_count = len(track.lyrics.split())
+                details.append(f"📝 {word_count} mots")
+        except Exception:
+            pass
+        
+        # Vérifier le BPM
+        try:
+            if (track.bpm is not None and 
+                isinstance(track.bpm, (int, float)) and 
+                track.bpm > 0):
+                details.append(f"🎼 {int(track.bpm)} BPM")
+        except Exception:
+            pass
+        
+        if not details:
+            return "Aucune donnée disponible"
+        
+        return " • ".join(details)
+
 
     def _show_track_details(self, event):
-        """Affiche les détails d'un morceau - VERSION CORRIGÉE FEATURING"""
+        """Affiche les détails d'un morceau - VERSION CORRIGÉE AVEC ONGLETS PROPRES"""
         selection = self.tree.selection()
         if not selection:
             return
@@ -544,73 +1015,79 @@ class MainWindow:
             # Créer une fenêtre de détails
             details_window = ctk.CTkToplevel(self.root)
             details_window.title(f"Détails - {track.title}")
-            details_window.geometry("600x750")
-
-            # Agrandir la fenêtre si il y a des paroles
+            
+            # Agrandir la fenêtre selon le contenu
             has_lyrics = hasattr(track, 'lyrics') and track.lyrics
             window_height = "900" if has_lyrics else "700"
-            details_window.geometry(f"800x{window_height}")
+            details_window.geometry(f"900x{window_height}")
             
-            # Informations générales
+            # === SECTION INFORMATIONS GÉNÉRALES (EN HAUT) ===
             info_frame = ctk.CTkFrame(details_window)
             info_frame.pack(fill="x", padx=10, pady=10)
             
-            ctk.CTkLabel(info_frame, text=f"Titre: {track.title}", font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=2)
+            # Titre principal
+            ctk.CTkLabel(info_frame, text=f"🎵 {track.title}", 
+                        font=("Arial", 16, "bold")).pack(anchor="w", padx=10, pady=(10, 5))
             
-            # Créer un notebook (système d'onglets)
-            notebook = tkinter_ttv.Notebook(details_window)
-            notebook.pack(fill="both", expand=True, padx=10, pady=10)
+            # Informations de base sur deux colonnes
+            basic_info_frame = ctk.CTkFrame(info_frame)
+            basic_info_frame.pack(fill="x", padx=10, pady=5)
             
-            # ✅ ONGLET 1: CRÉDITS (code existant)
-            credits_frame = ctk.CTkFrame(notebook)
-            notebook.add(credits_frame, text="🏷️ Crédits")
-
-            # ✅ CORRECTION: Affichage basé sur les vrais attributs
+            # Colonne gauche
+            left_column = ctk.CTkFrame(basic_info_frame, fg_color="transparent")
+            left_column.pack(side="left", fill="both", expand=True, padx=(5, 10))
+            
+            # Gestion des features
             is_featuring = getattr(track, 'is_featuring', False)
             primary_artist = getattr(track, 'primary_artist_name', None)
             featured_artists = getattr(track, 'featured_artists', None)
             
             if is_featuring:
-                # Pour les features
-                ctk.CTkLabel(info_frame, text=f"🎤 MORCEAU EN FEATURING", font=("Arial", 12, "bold"), text_color="orange").pack(anchor="w", padx=5, pady=2)
-                
+                ctk.CTkLabel(left_column, text="🎤 MORCEAU EN FEATURING", 
+                            font=("Arial", 12, "bold"), text_color="orange").pack(anchor="w", pady=2)
                 if primary_artist:
-                    ctk.CTkLabel(info_frame, text=f"Artiste principal: {primary_artist}", font=("Arial", 12)).pack(anchor="w", padx=5, pady=2)
-                else:
-                    ctk.CTkLabel(info_frame, text=f"Artiste principal: Inconnu", font=("Arial", 12)).pack(anchor="w", padx=5, pady=2)
-                
+                    ctk.CTkLabel(left_column, text=f"Artiste principal: {primary_artist}").pack(anchor="w", pady=1)
                 featuring_name = featured_artists or (track.artist.name if track.artist else self.current_artist.name)
-                ctk.CTkLabel(info_frame, text=f"En featuring: {featuring_name}", font=("Arial", 12)).pack(anchor="w", padx=5, pady=2)
-                
+                ctk.CTkLabel(left_column, text=f"En featuring: {featuring_name}").pack(anchor="w", pady=1)
             else:
-                # Pour les morceaux principaux
                 artist_name = track.artist.name if track.artist else 'Artiste inconnu'
-                ctk.CTkLabel(info_frame, text=f"🎵 MORCEAU PRINCIPAL", font=("Arial", 12, "bold"), text_color="green").pack(anchor="w", padx=5, pady=2)
-                ctk.CTkLabel(info_frame, text=f"Artiste: {artist_name}", font=("Arial", 12)).pack(anchor="w", padx=5, pady=2)
+                ctk.CTkLabel(left_column, text="🎵 MORCEAU PRINCIPAL", 
+                            font=("Arial", 12, "bold"), text_color="green").pack(anchor="w", pady=2)
+                ctk.CTkLabel(left_column, text=f"Artiste: {artist_name}").pack(anchor="w", pady=1)
             
-            # Reste des informations...
-            ctk.CTkLabel(info_frame, text=f"Album: {track.album or 'N/A'}").pack(anchor="w", padx=5, pady=2)
+            # Album et numéro de piste
+            if track.album:
+                album_text = f"Album: {track.album}"
+                if hasattr(track, 'track_number') and track.track_number:
+                    album_text += f" (Piste {track.track_number})"
+                ctk.CTkLabel(left_column, text=album_text).pack(anchor="w", pady=1)
             
-            # Numéro de piste
-            if hasattr(track, 'track_number') and track.track_number:
-                ctk.CTkLabel(info_frame, text=f"Piste n°: {track.track_number}").pack(anchor="w", padx=5, pady=2)
+            # Colonne droite
+            right_column = ctk.CTkFrame(basic_info_frame, fg_color="transparent")
+            right_column.pack(side="right", fill="both", expand=True, padx=(10, 5))
             
-            # Date de sortie
+            # Date, BPM, durée
             if track.release_date:
-                if hasattr(track.release_date, 'strftime'):
-                    date_str = track.release_date.strftime('%d/%m/%Y')
-                else:
-                    date_str = str(track.release_date)[:10]
-                ctk.CTkLabel(info_frame, text=f"Date de sortie: {date_str}").pack(anchor="w", padx=5, pady=2)
+                date_str = track.release_date.strftime('%d/%m/%Y') if hasattr(track.release_date, 'strftime') else str(track.release_date)[:10]
+                ctk.CTkLabel(right_column, text=f"📅 Date: {date_str}").pack(anchor="w", pady=1)
             
-            ctk.CTkLabel(info_frame, text=f"BPM: {track.bpm or 'N/A'}").pack(anchor="w", padx=5, pady=2)
+            if track.bpm:
+                ctk.CTkLabel(right_column, text=f"🎼 BPM: {track.bpm}").pack(anchor="w", pady=1)
             
-            # URL Genius cliquable
+            if track.duration:
+                minutes = track.duration // 60
+                seconds = track.duration % 60
+                ctk.CTkLabel(right_column, text=f"⏱️ Durée: {minutes}:{seconds:02d}").pack(anchor="w", pady=1)
+            
+            if track.genre:
+                ctk.CTkLabel(right_column, text=f"🎭 Genre: {track.genre}").pack(anchor="w", pady=1)
+            
+            # URL Genius (cliquable)
             if track.genius_url:
-                url_frame = ctk.CTkFrame(info_frame)
-                url_frame.pack(anchor="w", padx=5, pady=2)
+                url_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+                url_frame.pack(anchor="w", padx=10, pady=5)
                 
-                ctk.CTkLabel(url_frame, text="URL Genius: ").pack(side="left")
+                ctk.CTkLabel(url_frame, text="🔗 Genius: ").pack(side="left")
                 
                 url_label = ctk.CTkLabel(
                     url_frame, 
@@ -623,122 +1100,136 @@ class MainWindow:
                 import webbrowser
                 url_label.bind("<Button-1>", lambda e: webbrowser.open(track.genius_url))
             
-            # ✅ DEBUG: Afficher les infos de featuring pour vérification
-            debug_frame = ctk.CTkFrame(info_frame)
-            debug_frame.pack(fill="x", padx=5, pady=5)
+            # === SYSTÈME D'ONGLETS ===
+            notebook = tkinter_ttv.Notebook(details_window)
+            notebook.pack(fill="both", expand=True, padx=10, pady=10)
             
-            debug_text = f"🔧 DEBUG FEATURING:\n"
-            debug_text += f"• is_featuring: {is_featuring}\n"
-            debug_text += f"• primary_artist_name: {primary_artist}\n"
-            debug_text += f"• featured_artists: {featured_artists}\n"
-            debug_text += f"• track.artist.name: {track.artist.name if track.artist else 'N/A'}\n"
-            
-            ctk.CTkLabel(debug_frame, text=debug_text, font=("Courier", 9), text_color="gray").pack(anchor="w", padx=5, pady=2)
-            
-            # Crédits (reste identique)
-            credits_frame = ctk.CTkFrame(details_window)
-            credits_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            # === ONGLET 1: CRÉDITS MUSICAUX ===
+            music_credits_frame = ctk.CTkFrame(notebook)
+            notebook.add(music_credits_frame, text=f"🎵 Crédits musicaux")
             
             music_credits = track.get_music_credits()
-            video_credits = track.get_video_credits()
             
-            ctk.CTkLabel(credits_frame, 
-                        text=f"Crédits musicaux ({len(music_credits)}):", 
-                        font=("Arial", 12, "bold")).pack(anchor="w", padx=5, pady=5)
+            # En-tête avec statistiques
+            music_header = ctk.CTkFrame(music_credits_frame)
+            music_header.pack(fill="x", padx=10, pady=10)
             
-            from collections import defaultdict
-            music_credits_by_role = defaultdict(list)
-            for credit in music_credits:
-                music_credits_by_role[credit.role.value].append(credit)
+            ctk.CTkLabel(music_header, 
+                        text=f"🎵 Crédits musicaux ({len(music_credits)})", 
+                        font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=5)
             
-            music_textbox = ctk.CTkTextbox(credits_frame, width=550, height=200)
-            music_textbox.pack(fill="both", expand=True, padx=5, pady=5)
-            
-            if music_credits_by_role:
-                for role, credits in sorted(music_credits_by_role.items()):
-                    music_textbox.insert("end", f"\n{role}:\n", "bold")
-                    for credit in credits:
-                        detail = f" ({credit.role_detail})" if credit.role_detail else ""
-                        music_textbox.insert("end", f"  • {credit.name}{detail}\n")
+            if track.has_complete_credits():
+                status_color = "green"
+                status_text = "✅ Crédits complets"
+            elif music_credits:
+                status_color = "orange"
+                status_text = "⚠️ Crédits partiels"
             else:
-                music_textbox.insert("end", "Aucun crédit musical trouvé.\n")
+                status_color = "red"
+                status_text = "❌ Aucun crédit"
+            
+            ctk.CTkLabel(music_header, text=status_text, text_color=status_color).pack(anchor="w", padx=5)
+            
+            # Zone de crédits musicaux
+            music_textbox = ctk.CTkTextbox(music_credits_frame, width=850, height=400)
+            music_textbox.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            if music_credits:
+                from collections import defaultdict
+                music_credits_by_role = defaultdict(list)
+                for credit in music_credits:
+                    music_credits_by_role[credit.role.value].append(credit)
+                
+                for role, credits in sorted(music_credits_by_role.items()):
+                    music_textbox.insert("end", f"\n━━━ {role} ━━━\n", "bold")
+                    for credit in credits:
+                        source_emoji = {"genius": "🎤", "spotify": "🎧", "discogs": "💿", "lastfm": "📻"}.get(credit.source, "🔗")
+                        detail = f" ({credit.role_detail})" if credit.role_detail else ""
+                        music_textbox.insert("end", f"{source_emoji} {credit.name}{detail}\n")
+            else:
+                music_textbox.insert("end", "❌ Aucun crédit musical trouvé.\n\n")
+                music_textbox.insert("end", "💡 Utilisez le bouton 'Scraper les crédits' pour récupérer les informations depuis Genius.")
             
             music_textbox.configure(state="disabled")
             
+            # === ONGLET 2: CRÉDITS VIDÉO ===
+            video_credits = track.get_video_credits()
+            
             if video_credits:
-                ctk.CTkLabel(credits_frame, 
-                            text=f"Crédits vidéo ({len(video_credits)}):", 
-                            font=("Arial", 12, "bold")).pack(anchor="w", padx=5, pady=(15, 5))
+                video_credits_frame = ctk.CTkFrame(notebook)
+                notebook.add(video_credits_frame, text=f"🎬 Crédits vidéo ({len(video_credits)})")
+                
+                # En-tête vidéo
+                video_header = ctk.CTkFrame(video_credits_frame)
+                video_header.pack(fill="x", padx=10, pady=10)
+                
+                ctk.CTkLabel(video_header, 
+                            text=f"🎬 Crédits vidéo ({len(video_credits)})", 
+                            font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=5)
+                
+                ctk.CTkLabel(video_header, 
+                            text="Équipe technique du clip vidéo", 
+                            text_color="gray").pack(anchor="w", padx=5)
+                
+                # Zone de crédits vidéo
+                video_textbox = ctk.CTkTextbox(video_credits_frame, width=850, height=450)
+                video_textbox.pack(fill="both", expand=True, padx=10, pady=10)
                 
                 video_credits_by_role = defaultdict(list)
                 for credit in video_credits:
                     video_credits_by_role[credit.role.value].append(credit)
                 
-                video_textbox = ctk.CTkTextbox(credits_frame, width=550, height=100)
-                video_textbox.pack(fill="x", padx=5, pady=5)
-                
                 for role, credits in sorted(video_credits_by_role.items()):
-                    video_textbox.insert("end", f"\n{role}:\n", "bold")
+                    video_textbox.insert("end", f"\n━━━ {role} ━━━\n", "bold")
                     for credit in credits:
+                        source_emoji = {"genius": "🎤", "spotify": "🎧", "discogs": "💿", "lastfm": "📻"}.get(credit.source, "🔗")
                         detail = f" ({credit.role_detail})" if credit.role_detail else ""
-                        video_textbox.insert("end", f"  • {credit.name}{detail}\n")
+                        video_textbox.insert("end", f"{source_emoji} {credit.name}{detail}\n")
                 
                 video_textbox.configure(state="disabled")
             
-            if track.scraping_errors:
-                error_frame = ctk.CTkFrame(details_window)
-                error_frame.pack(fill="x", padx=10, pady=10)
-                
-                ctk.CTkLabel(error_frame, text="Erreurs:", font=("Arial", 12, "bold")).pack(anchor="w", padx=5)
-                for error in track.scraping_errors:
-                    ctk.CTkLabel(error_frame, text=f"• {error}", text_color="red").pack(anchor="w", padx=15)
-
-            # ✅ ONGLET 2: PAROLES (simplifié)
+            # === ONGLET 3: PAROLES ===
+            lyrics_frame = ctk.CTkFrame(notebook)
             if has_lyrics:
-                lyrics_frame = ctk.CTkFrame(notebook)
                 notebook.add(lyrics_frame, text="📝 Paroles")
                 
-                # Header simple avec info de base
+                # Header avec statistiques des paroles
                 lyrics_header = ctk.CTkFrame(lyrics_frame)
                 lyrics_header.pack(fill="x", padx=10, pady=10)
                 
-                # Info simple sur les paroles
                 words_count = len(track.lyrics.split()) if track.lyrics else 0
                 chars_count = len(track.lyrics) if track.lyrics else 0
                 
-                info_text = f"📊 {words_count} mots • {chars_count} caractères"
+                ctk.CTkLabel(lyrics_header, 
+                            text=f"📝 Paroles complètes", 
+                            font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=5)
                 
-                # Ajouter la date de scraping si disponible
+                info_text = f"📊 {words_count} mots • {chars_count} caractères"
                 if hasattr(track, 'lyrics_scraped_at') and track.lyrics_scraped_at:
-                    if hasattr(track.lyrics_scraped_at, 'strftime'):
-                        date_str = track.lyrics_scraped_at.strftime('%d/%m/%Y à %H:%M')
-                    else:
-                        date_str = str(track.lyrics_scraped_at)[:16]
+                    date_str = track.lyrics_scraped_at.strftime('%d/%m/%Y à %H:%M') if hasattr(track.lyrics_scraped_at, 'strftime') else str(track.lyrics_scraped_at)[:16]
                     info_text += f" • Récupérées le {date_str}"
                 
-                ctk.CTkLabel(lyrics_header, text=info_text, font=("Arial", 11)).pack(anchor="w", padx=5)
+                ctk.CTkLabel(lyrics_header, text=info_text, text_color="gray").pack(anchor="w", padx=5)
                 
-                # Zone de texte pour les paroles avec scroll
+                # Zone de texte pour les paroles
                 lyrics_textbox = ctk.CTkTextbox(
                     lyrics_frame, 
-                    width=750, 
-                    height=650,
-                    font=("Consolas", 11)  # Police monospace pour meilleur alignement
+                    width=850, 
+                    height=450,
+                    font=("Consolas", 11)
                 )
                 lyrics_textbox.pack(fill="both", expand=True, padx=10, pady=10)
                 
-                # Formater et insérer les paroles
                 formatted_lyrics = self._format_lyrics_for_display(track.lyrics)
                 lyrics_textbox.insert("0.0", formatted_lyrics)
                 lyrics_textbox.configure(state="disabled")
                 
                 # Boutons d'action pour les paroles
                 lyrics_actions = ctk.CTkFrame(lyrics_frame)
-                lyrics_actions.pack(fill="x", padx=10, pady=5)
+                lyrics_actions.pack(fill="x", padx=10, pady=10)
                 
                 def copy_lyrics():
                     """Copie les paroles dans le presse-papier"""
-                    import tkinter as tk
                     details_window.clipboard_clear()
                     details_window.clipboard_append(track.lyrics)
                     messagebox.showinfo("Copié", "Paroles copiées dans le presse-papier")
@@ -769,68 +1260,99 @@ class MainWindow:
                         "Cela remplacera les paroles actuelles."
                     )
                     if result:
-                        # Lancer le scraping d'un seul morceau
                         threading.Thread(target=lambda: self._rescrape_single_lyrics(track, details_window), daemon=True).start()
                 
                 ctk.CTkButton(lyrics_actions, text="📋 Copier", command=copy_lyrics, width=100).pack(side="left", padx=5)
                 ctk.CTkButton(lyrics_actions, text="💾 Sauvegarder", command=save_lyrics, width=100).pack(side="left", padx=5)
                 ctk.CTkButton(lyrics_actions, text="🔄 Re-scraper", command=research_lyrics, width=100).pack(side="left", padx=5)
-            
-            # Note si pas de paroles
+                
             else:
-                no_lyrics_frame = ctk.CTkFrame(notebook)
-                notebook.add(no_lyrics_frame, text="📝 Paroles")
+                # Onglet paroles vide avec message
+                notebook.add(lyrics_frame, text="📝 Paroles")
+                
+                empty_lyrics_container = ctk.CTkFrame(lyrics_frame)
+                empty_lyrics_container.pack(fill="both", expand=True, padx=50, pady=50)
                 
                 ctk.CTkLabel(
-                    no_lyrics_frame, 
-                    text="📝 Aucunes paroles disponibles\n\nUtilisez le bouton 'Scraper paroles' pour les récupérer",
-                    font=("Arial", 14),
+                    empty_lyrics_container, 
+                    text="📝 Aucunes paroles disponibles",
+                    font=("Arial", 18, "bold"),
                     text_color="gray"
-                ).pack(expand=True)
-
-    def _update_track_in_table(self, track_name: str):
-        """Met à jour une ligne spécifique du tableau - VERSION CORRIGÉE"""
-        if not self.current_artist:
-            return
-            
-        for item in self.tree.get_children():
-            item_values = self.tree.item(item)["values"]
-            if item_values and len(item_values) > 0:
-                # Comparer le titre (première colonne, en enlevant le préfixe emoji)
-                item_title = item_values[0].replace("🎤 ", "")
+                ).pack(expand=True, pady=(0, 10))
                 
-                # Retrouver le track correspondant
-                for i, track in enumerate(self.current_artist.tracks):
-                    track_display = track.get_display_title()
-                    if hasattr(track, 'is_featuring') and track.is_featuring:
-                        track_display = f"{track.title} (feat. {track.artist.name})"
-                    
-                    if track_display == item_title or track.title in item_title:
-                        # Mettre à jour les valeurs - ORDRE CORRECT
-                        title_prefix = "🎤 " if (hasattr(track, 'is_featuring') and track.is_featuring) else ""
-                        artist_display = track.get_display_artist()
-                        
-                        # Date de sortie
-                        date_display = "-"
-                        if track.release_date:
-                            if hasattr(track.release_date, 'strftime'):
-                                date_display = track.release_date.strftime('%Y-%m-%d')
-                            else:
-                                date_display = str(track.release_date)[:10]
-                        
-                        updated_values = (
-                            title_prefix + track_display,     # Titre
-                            artist_display,                   # Artiste principal  
-                            track.album or "-",               # Album
-                            date_display,                     # Date sortie
-                            len(track.get_music_credits()),   # ✅ Crédits MUSICAUX
-                            track.bpm or "-",                 # BPM
-                            "✓" if track.has_complete_credits() else "⚠" if track.get_music_credits() else "✗"  # Statut
-                        )
-                        
-                        self.tree.item(item, values=updated_values)
-                        break
-                break
+                ctk.CTkLabel(
+                    empty_lyrics_container, 
+                    text="Utilisez le bouton 'Scraper paroles' dans l'interface principale\npour récupérer les paroles de ce morceau",
+                    font=("Arial", 12),
+                    text_color="gray",
+                    justify="center"
+                ).pack(expand=True)
+            
+            # === ONGLET 4: INFORMATIONS TECHNIQUES (si nécessaire) ===
+            if (track.scraping_errors or 
+                hasattr(track, 'popularity') or 
+                track.spotify_id or 
+                track.discogs_id or
+                getattr(track, 'artwork_url', None)):
+                
+                tech_frame = ctk.CTkFrame(notebook)
+                notebook.add(tech_frame, text="🔧 Technique")
+                
+                tech_textbox = ctk.CTkTextbox(tech_frame, width=850, height=450)
+                tech_textbox.pack(fill="both", expand=True, padx=10, pady=10)
+                
+                tech_textbox.insert("end", "🔧 INFORMATIONS TECHNIQUES\n")
+                tech_textbox.insert("end", "=" * 50 + "\n\n")
+                
+                # IDs externes
+                if track.genius_id:
+                    tech_textbox.insert("end", f"🎤 Genius ID: {track.genius_id}\n")
+                if track.spotify_id:
+                    tech_textbox.insert("end", f"🎧 Spotify ID: {track.spotify_id}\n")
+                if track.discogs_id:
+                    tech_textbox.insert("end", f"💿 Discogs ID: {track.discogs_id}\n")
+                
+                # Popularité
+                if hasattr(track, 'popularity') and track.popularity:
+                    tech_textbox.insert("end", f"📈 Popularité: {track.popularity}\n")
+                
+                # Artwork
+                if getattr(track, 'artwork_url', None):
+                    tech_textbox.insert("end", f"🖼️ Artwork: {track.artwork_url}\n")
+                
+                # Métadonnées de scraping
+                tech_textbox.insert("end", f"\n📅 HISTORIQUE:\n")
+                if track.last_scraped:
+                    tech_textbox.insert("end", f"• Dernier scraping: {track.last_scraped}\n")
+                if track.created_at:
+                    tech_textbox.insert("end", f"• Créé le: {track.created_at}\n")
+                if track.updated_at:
+                    tech_textbox.insert("end", f"• Mis à jour le: {track.updated_at}\n")
+                
+                # Debug featuring
+                if is_featuring:
+                    tech_textbox.insert("end", f"\n🎤 DEBUG FEATURING:\n")
+                    tech_textbox.insert("end", f"• is_featuring: {is_featuring}\n")
+                    tech_textbox.insert("end", f"• primary_artist_name: {primary_artist}\n")
+                    tech_textbox.insert("end", f"• featured_artists: {featured_artists}\n")
+                
+                # Erreurs de scraping
+                if track.scraping_errors:
+                    tech_textbox.insert("end", f"\n❌ ERREURS DE SCRAPING:\n")
+                    for i, error in enumerate(track.scraping_errors, 1):
+                        tech_textbox.insert("end", f"{i}. {error}\n")
+                
+                tech_textbox.configure(state="disabled")
+            
+            # Bouton de fermeture
+            close_button = ctk.CTkButton(
+                details_window, 
+                text="Fermer", 
+                command=details_window.destroy,
+                width=100
+            )
+            close_button.pack(pady=10)
+
     
     def _search_artist(self):
         """Recherche un artiste - VERSION CORRIGÉE POUR CHARGEMENT EXISTANT"""
@@ -1892,3 +2414,60 @@ class MainWindow:
                 self.root.after(0, lambda: self.progress_label.configure(text=""))
         
         threading.Thread(target=scrape_lyrics, daemon=True).start()
+
+    def _get_track_status_icon(self, track: Track) -> str:
+        """Retourne l'icône de statut selon le niveau de complétude des données"""
+        
+        # Vérifier la présence des différents types de données
+        has_credits = len(track.get_music_credits()) > 0
+        has_lyrics = hasattr(track, 'lyrics') and track.lyrics and track.lyrics.strip()
+        has_bpm = track.bpm is not None and track.bpm > 0
+        
+        # Compter le nombre de types de données disponibles
+        data_types_count = sum([has_credits, has_lyrics, has_bpm])
+        
+        if data_types_count == 0:
+            return "❌"  # Aucune donnée
+        elif data_types_count >= 3:
+            return "✅"  # Données complètes (crédits + paroles + BPM)
+        else:
+            return "⚠️"  # Données partielles
+
+    def _get_track_status_details(self, track: Track) -> str:
+        """Retourne les détails du statut pour le tooltip/debug"""
+        
+        has_credits = len(track.get_music_credits()) > 0
+        has_lyrics = hasattr(track, 'lyrics') and track.lyrics and track.lyrics.strip()
+        has_bpm = track.bpm is not None and track.bpm > 0
+        
+        details = []
+        if has_credits:
+            details.append(f"🏷️ {len(track.get_music_credits())} crédits")
+        if has_lyrics:
+            word_count = len(track.lyrics.split()) if track.lyrics else 0
+            details.append(f"📝 {word_count} mots")
+        if has_bpm:
+            details.append(f"🎼 {track.bpm} BPM")
+        
+        if not details:
+            return "Aucune donnée disponible"
+        
+        return " • ".join(details)
+    
+    def _get_simple_status(self, track):
+        """Calcule le statut simple d'un track"""
+        try:
+            has_credits = len(track.get_music_credits() or []) > 0
+            has_lyrics = bool(getattr(track, 'lyrics', None) and len(str(track.lyrics).strip()) > 0)
+            has_bpm = bool(track.bpm and track.bmp > 0)
+            
+            data_count = sum([has_credits, has_lyrics, has_bpm])
+            
+            if data_count == 0:
+                return "❌"
+            elif data_count >= 3:
+                return "✅"
+            else:
+                return "⚠️"
+        except:
+            return "❓"

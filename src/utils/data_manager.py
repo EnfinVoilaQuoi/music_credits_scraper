@@ -131,7 +131,7 @@ class DataManager:
             return artist.id
     
     def save_track(self, track: Track) -> int:
-        """Sauvegarde ou met à jour un morceau - VERSION CORRIGÉE POUR CONTRAINTE UNIQUE"""
+        """Sauvegarde ou met à jour un morceau - VERSION PRÉSERVANT LES FEATURES"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -139,17 +139,26 @@ class DataManager:
             if not track.artist or not track.artist.id:
                 raise ValueError("Le morceau doit avoir un artiste avec un ID")
             
-            # ✅ CORRECTION : Vérifier si le track existe déjà AVANT d'essayer de l'insérer
+            # Vérifier si le track existe déjà
             cursor.execute("""
-                SELECT id FROM tracks 
+                SELECT id, is_featuring, primary_artist_name, featured_artists FROM tracks 
                 WHERE title = ? AND artist_id = ?
             """, (track.title, track.artist.id))
             
             existing_track = cursor.fetchone()
             
             if existing_track:
-                # Le track existe déjà, mettre à jour
+                # Le track existe déjà
                 track.id = existing_track[0]
+                
+                # ✅ CORRECTION CRITIQUE: Préserver les infos de featuring existantes
+                # Si les infos de featuring existent en base mais pas sur l'objet track, les restaurer
+                if existing_track[1] and not hasattr(track, 'is_featuring'):  # is_featuring en base
+                    track.is_featuring = bool(existing_track[1])
+                    track.primary_artist_name = existing_track[2]
+                    track.featured_artists = existing_track[3]
+                    logger.info(f"🔒 Préservation des infos featuring pour: {track.title}")
+                
                 logger.debug(f"Track existant trouvé (ID: {track.id}), mise à jour...")
                 
                 cursor.execute("""
@@ -158,13 +167,17 @@ class DataManager:
                         genius_id = ?, spotify_id = ?, discogs_id = ?,
                         bpm = ?, duration = ?, genre = ?,
                         genius_url = ?, spotify_url = ?,
+                        is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
                         updated_at = ?, last_scraped = ?
                     WHERE id = ?
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
-                      track.genius_id, track.spotify_id, track.discogs_id,
-                      track.bpm, track.duration, track.genre,
-                      track.genius_url, track.spotify_url,
-                      datetime.now(), track.last_scraped, track.id))
+                    track.genius_id, track.spotify_id, track.discogs_id,
+                    track.bpm, track.duration, track.genre,
+                    track.genius_url, track.spotify_url,
+                    getattr(track, 'is_featuring', False),
+                    getattr(track, 'primary_artist_name', None),
+                    getattr(track, 'featured_artists', None),
+                    datetime.now(), track.last_scraped, track.id))
             else:
                 # Nouveau track, insérer
                 logger.debug(f"Nouveau track, insertion...")
@@ -174,16 +187,20 @@ class DataManager:
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
                         bpm, duration, genre, genius_url, spotify_url,
+                        is_featuring, primary_artist_name, featured_artists,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
-                      track.genius_id, track.spotify_id, track.discogs_id,
-                      track.bpm, track.duration, track.genre,
-                      track.genius_url, track.spotify_url,
-                      datetime.now(), datetime.now(), track.last_scraped))
+                    track.genius_id, track.spotify_id, track.discogs_id,
+                    track.bpm, track.duration, track.genre,
+                    track.genius_url, track.spotify_url,
+                    getattr(track, 'is_featuring', False),
+                    getattr(track, 'primary_artist_name', None),
+                    getattr(track, 'featured_artists', None),
+                    datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
             
-            # ✅ AMÉLIORATION : Supprimer les anciens crédits avant d'ajouter les nouveaux (pour éviter les doublons)
+            # Supprimer les anciens crédits avant d'ajouter les nouveaux (pour éviter les doublons)
             if track.id:
                 cursor.execute("DELETE FROM credits WHERE track_id = ?", (track.id,))
                 
@@ -199,7 +216,7 @@ class DataManager:
                 """, (track.id, error, datetime.now()))
             
             conn.commit()
-            logger.info(f"Morceau sauvegardé: {track.title} (ID: {track.id})")
+            logger.info(f"Morceau sauvegardé: {track.title} (ID: {track.id}, Featuring: {getattr(track, 'is_featuring', False)})")
             return track.id
 
     def _save_credit(self, cursor, track_id: int, credit: Credit):
@@ -306,47 +323,106 @@ class DataManager:
             return None
     
     def get_artist_tracks(self, artist_id: int) -> List[Track]:
-        """Récupère tous les morceaux d'un artiste - VERSION CORRIGÉE"""
+        """Récupère tous les morceaux d'un artiste - VERSION FINALE CORRIGÉE"""
         tracks = []
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM tracks WHERE artist_id = ?
-                ORDER BY title
-            """, (artist_id,))
-            
-            for row in cursor.fetchall():
-                try:
-                    # ✅ CORRECTION: Vérifier que les colonnes existent avant d'y accéder
-                    available_keys = list(row.keys()) if hasattr(row, 'keys') else []
-                    
-                    track = Track(
-                        id=row['id'],
-                        title=row['title'],
-                        album=row['album'],
-                        # ✅ CORRECTION: Accès sécurisé à track_number
-                        track_number=row['track_number'] if 'track_number' in available_keys else None,
-                        release_date=row['release_date'],
-                        genius_id=row['genius_id'],
-                        spotify_id=row['spotify_id'],
-                        discogs_id=row['discogs_id'],
-                        bpm=row['bpm'],
-                        duration=row['duration'],
-                        genre=row['genre'],
-                        genius_url=row['genius_url'],
-                        spotify_url=row['spotify_url'],
-                        last_scraped=row['last_scraped']
-                    )
-                    
-                    # Charger les crédits
-                    track.credits = self._get_track_credits(cursor, track.id)
-                    tracks.append(track)
-                    
-                except Exception as track_error:
-                    logger.warning(f"⚠️ Erreur lors du chargement du track {row.get('title', 'Unknown')}: {track_error}")
-                    continue
+        
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Vérifier d'abord si l'artiste a des tracks
+                cursor.execute("SELECT COUNT(*) FROM tracks WHERE artist_id = ?", (artist_id,))
+                track_count = cursor.fetchone()[0]
+                
+                if track_count == 0:
+                    logger.warning(f"⚠️ Aucun track trouvé pour artist_id {artist_id}")
+                    return tracks
+                
+                logger.debug(f"📊 {track_count} tracks trouvés pour artist_id {artist_id}")
+                
+                # Récupérer les tracks
+                cursor.execute("""
+                    SELECT * FROM tracks WHERE artist_id = ?
+                    ORDER BY title
+                """, (artist_id,))
+                
+                rows = cursor.fetchall()
+                logger.debug(f"📦 {len(rows)} lignes récupérées de la base")
+                
+                for row in rows:
+                    try:
+                        # Accès direct aux colonnes (votre base fonctionne parfaitement)
+                        track = Track(
+                            id=row['id'],
+                            title=row['title'],
+                            album=row['album'],
+                            track_number=row['track_number'],
+                            release_date=row['release_date'],
+                            genius_id=row['genius_id'],
+                            spotify_id=row['spotify_id'],
+                            discogs_id=row['discogs_id'],
+                            bpm=row['bpm'],
+                            duration=row['duration'],
+                            genre=row['genre'],
+                            genius_url=row['genius_url'],
+                            spotify_url=row['spotify_url'],
+                            last_scraped=row['last_scraped']
+                        )
+                        
+                        # ✅ AJOUT: Attributs de featuring
+                        track.is_featuring = bool(row['is_featuring']) if row['is_featuring'] else False
+                        track.primary_artist_name = row['primary_artist_name']
+                        track.featured_artists = row['featured_artists']
+                        
+                        # Log pour debug des features
+                        if track.is_featuring:
+                            logger.debug(f"🎤 Featuring chargé: {track.title} (principal: {track.primary_artist_name})")
+                        
+                        # Charger les crédits
+                        try:
+                            track.credits = self._get_track_credits(cursor, track.id)
+                        except Exception as credits_error:
+                            logger.warning(f"⚠️ Erreur chargement crédits pour {track.title}: {credits_error}")
+                            track.credits = []
+                        
+                        tracks.append(track)
+                        
+                    except Exception as track_error:
+                        logger.error(f"❌ Erreur lors du traitement du track {row['title']}: {track_error}")
+                        import traceback
+                        logger.debug(f"Traceback: {traceback.format_exc()}")
+                        continue
+                
+                logger.info(f"✅ {len(tracks)} tracks chargés avec succès pour artist_id {artist_id}")
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur générale dans get_artist_tracks: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
         
         return tracks
+    
+    def _safe_get(self, row, column_name: str, available_columns: list, default=None):
+        """Accès sécurisé à une colonne de la base de données"""
+        try:
+            if column_name in available_columns:
+                if hasattr(row, 'keys') and callable(row.keys):
+                    # sqlite3.Row
+                    return row[column_name]
+                elif hasattr(row, '__getitem__'):
+                    # Tuple/List - utiliser l'index
+                    column_index = available_columns.index(column_name)
+                    if column_index < len(row):
+                        return row[column_index]
+                    else:
+                        return default
+                else:
+                    return default
+            else:
+                return default
+        except Exception as e:
+            logger.debug(f"⚠️ Erreur _safe_get pour {column_name}: {e}")
+            return default
     
     def _get_track_credits(self, cursor, track_id: int) -> List[Credit]:
         """Récupère les crédits d'un morceau"""
@@ -750,23 +826,40 @@ class DataManager:
             return {}
         
     def force_update_track_credits(self, track: Track) -> int:
-        """Force la mise à jour complète des crédits d'un morceau (efface les anciens)"""
+        """Force la mise à jour complète des crédits d'un morceau - VERSION PRÉSERVANT FEATURES"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # ✅ ÉTAPE 1: Supprimer TOUS les anciens crédits
+                # ✅ CORRECTION: Récupérer les infos featuring AVANT suppression
+                cursor.execute("""
+                    SELECT is_featuring, primary_artist_name, featured_artists 
+                    FROM tracks WHERE id = ?
+                """, (track.id,))
+                
+                featuring_info = cursor.fetchone()
+                
+                if featuring_info:
+                    # Préserver les infos featuring sur l'objet track
+                    track.is_featuring = bool(featuring_info[0]) if featuring_info[0] else False
+                    track.primary_artist_name = featuring_info[1]
+                    track.featured_artists = featuring_info[2]
+                    logger.info(f"🔒 Infos featuring préservées pour {track.title}")
+                else:
+                    track.is_featuring = False
+                
+                # Supprimer TOUS les anciens crédits
                 cursor.execute("DELETE FROM credits WHERE track_id = ?", (track.id,))
                 deleted_count = cursor.rowcount
                 logger.info(f"🗑️ {deleted_count} anciens crédits supprimés pour '{track.title}'")
                 
-                # ✅ ÉTAPE 2: Supprimer les anciennes erreurs de scraping
+                # Supprimer les anciennes erreurs de scraping
                 cursor.execute("DELETE FROM scraping_errors WHERE track_id = ?", (track.id,))
                 deleted_errors = cursor.rowcount
                 if deleted_errors > 0:
                     logger.info(f"🗑️ {deleted_errors} anciennes erreurs supprimées")
                 
-                # ✅ ÉTAPE 3: Remettre à zéro les métadonnées de scraping
+                # Remettre à zéro les métadonnées de scraping (MAIS PRÉSERVER FEATURING)
                 cursor.execute("""
                     UPDATE tracks 
                     SET last_scraped = NULL,
@@ -777,26 +870,30 @@ class DataManager:
                     WHERE id = ?
                 """, (track.id,))
                 
-                # ✅ ÉTAPE 4: Sauvegarder les nouveaux crédits
+                # Sauvegarder les nouveaux crédits
                 for credit in track.credits:
                     self._save_credit(cursor, track.id, credit)
                 
-                # ✅ ÉTAPE 5: Mettre à jour le track complet
+                # Mettre à jour le track complet (EN PRÉSERVANT LES FEATURES)
                 cursor.execute("""
                     UPDATE tracks 
                     SET album = ?, track_number = ?, release_date = ?, 
                         genius_id = ?, spotify_id = ?, discogs_id = ?,
                         bpm = ?, duration = ?, genre = ?,
                         genius_url = ?, spotify_url = ?,
+                        is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
                         updated_at = ?, last_scraped = ?
                     WHERE id = ?
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
                     track.bpm, track.duration, track.genre,
                     track.genius_url, track.spotify_url,
+                    getattr(track, 'is_featuring', False),
+                    getattr(track, 'primary_artist_name', None),
+                    getattr(track, 'featured_artists', None),
                     datetime.now(), track.last_scraped, track.id))
                 
-                # ✅ ÉTAPE 6: Sauvegarder les nouvelles erreurs s'il y en a
+                # Sauvegarder les nouvelles erreurs s'il y en a
                 for error in track.scraping_errors:
                     cursor.execute("""
                         INSERT INTO scraping_errors (track_id, error_message, error_time)
@@ -806,7 +903,7 @@ class DataManager:
                 conn.commit()
                 
                 new_credits_count = len(track.credits)
-                logger.info(f"✅ Mise à jour forcée terminée pour '{track.title}': {new_credits_count} nouveaux crédits")
+                logger.info(f"✅ Mise à jour forcée terminée pour '{track.title}': {new_credits_count} nouveaux crédits (Featuring préservé: {getattr(track, 'is_featuring', False)})")
                 
                 return new_credits_count
                 

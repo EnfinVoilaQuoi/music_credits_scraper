@@ -704,3 +704,183 @@ class GeniusScraper:
         
         logger.info(f"Scraping terminé: {results['success']} réussis, {results['failed']} échoués")
         return results
+    
+    def scrape_track_lyrics(self, track: Track) -> str:
+        """Scrape les paroles d'un morceau"""
+        if not track.genius_url:
+            logger.warning(f"Pas d'URL Genius pour {track.title}")
+            return ""
+
+        lyrics = ""
+
+        try:
+            logger.info(f"Scraping des paroles pour: {track.title}")
+            self.driver.get(track.genius_url)
+
+            # Gestion des cookies (si nécessaire)
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.ID, "onetrust-banner-sdk"))
+                )
+                accept_btn = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+                )
+                accept_btn.click()
+                time.sleep(1)
+            except TimeoutException:
+                pass
+
+            # Attendre que les paroles se chargent
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-lyrics-container='true']"))
+            )
+
+            # Récupérer les paroles
+            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            
+            # Chercher les conteneurs de paroles
+            lyrics_containers = soup.find_all('div', {'data-lyrics-container': 'true'})
+            
+            if lyrics_containers:
+                lyrics_parts = []
+                for container in lyrics_containers:
+                    # Extraire le texte en préservant les sauts de ligne
+                    text = container.get_text(separator='\n', strip=True)
+                    if text:
+                        lyrics_parts.append(text)
+                
+                lyrics = '\n\n'.join(lyrics_parts)
+                
+                # Nettoyer les paroles
+                lyrics = self._clean_lyrics(lyrics)
+                
+                logger.info(f"✅ Paroles récupérées pour {track.title} ({len(lyrics.split())} mots)")
+            else:
+                logger.warning(f"⚠️ Conteneur de paroles non trouvé pour {track.title}")
+
+            # Respecter le rate limit
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+
+        except TimeoutException:
+            logger.warning(f"Timeout lors du scraping des paroles de {track.title}")
+        except Exception as e:
+            logger.error(f"Erreur lors du scraping des paroles: {e}")
+
+        return lyrics
+
+    def _clean_lyrics(self, lyrics: str) -> str:
+        """Nettoie les paroles en préservant la structure mais supprimant la pub"""
+        if not lyrics:
+            return ""
+        
+        import re
+        
+        # ✅ PRÉSERVER les indications de structure [Intro], [Couplet 1], etc.
+        # ✅ PRÉSERVER les mentions d'artistes *Artiste*
+        # ❌ SUPPRIMER les suggestions "You might also like" et pubs
+        
+        # Supprimer les sections de suggestions/publicité
+        pub_patterns = [
+            r'You might also like\n.*?\n.*?\n.*?\n',  # "You might also like" + 3 lignes suivantes
+            r'You might also like.*?(?=\[|$)',        # Tout après "You might also like" jusqu'à la prochaine section
+            r'\n\d+Embed$',                           # Lignes comme "123Embed"
+            r'\nEmbed$',                              # Ligne "Embed" seule
+            r'\nSee.*?Translations$',                 # "See [Langue] Translations"
+        ]
+        
+        for pattern in pub_patterns:
+            lyrics = re.sub(pattern.replace('\\n', '\n'), '', lyrics, flags=re.MULTILINE | re.DOTALL)
+        
+        # ✅ AJOUTER des retours à la ligne appropriés pour la lisibilité
+        
+        # Ajouter retour à la ligne avant chaque nouvelle section [...]
+        lyrics = re.sub(r'(\S)\s*(\[)', r'\1\n\n\2', lyrics)
+        
+        # Ajouter retour à la ligne après chaque section [...]
+        lyrics = re.sub(r'(\])\s*(\w)', r'\1\n\2', lyrics)
+        
+        # Séparer les phrases par des retours à la ligne (chaque phrase = une ligne)
+        # Détecter les fins de phrases/rimes en rap
+        lyrics = re.sub(r'([.!?])\s+(?=[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ])', r'\1\n', lyrics)
+        
+        # Ajouter des retours à la ligne pour les rimes typiques du rap français
+        # (détection basée sur les patterns de ponctuation et majuscules)
+        lyrics = re.sub(r'([^.\[!?])\s+(?=[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ][a-zàáâãäåæçèéêëìíîïðñòóôõö])', r'\1\n', lyrics)
+        
+        # Nettoyer les retours à la ligne multiples (max 2)
+        lyrics = re.sub(r'\n\s*\n\s*\n+', '\n\n', lyrics)
+        
+        # Nettoyer les espaces en début et fin de lignes
+        lines = lyrics.split('\n')
+        cleaned_lines = [line.strip() for line in lines]
+        lyrics = '\n'.join(cleaned_lines)
+        
+        # Supprimer les lignes vides en début et fin
+        lyrics = lyrics.strip()
+        
+        return lyrics
+
+    def scrape_multiple_tracks_with_lyrics(self, tracks: List[Track], progress_callback=None, include_lyrics=True) -> Dict[str, Any]:
+        """Scrape plusieurs morceaux avec option paroles - VERSION SIMPLIFIÉE"""
+        results = {
+            'success': 0,
+            'failed': 0,
+            'errors': [],
+            'albums_scraped': set(),
+            'lyrics_scraped': 0
+        }
+        
+        total = len(tracks)
+        
+        for i, track in enumerate(tracks):
+            try:
+                logger.info(f"Scraping du morceau {i+1}/{total}: {track.title}")
+                
+                # Scraper les crédits (méthode existante)
+                credits = self.scrape_track_credits(track)
+                
+                # Scraper les paroles si demandé
+                if include_lyrics:
+                    try:
+                        lyrics = self.scrape_track_lyrics(track)
+                        if lyrics:
+                            track.lyrics = lyrics
+                            track.has_lyrics = True
+                            track.lyrics_scraped_at = datetime.now()
+                            results['lyrics_scraped'] += 1
+                            logger.info(f"✅ Paroles récupérées pour {track.title}")
+                        else:
+                            track.has_lyrics = False
+                            
+                    except Exception as lyrics_error:
+                        logger.warning(f"Erreur paroles pour {track.title}: {lyrics_error}")
+                        track.has_lyrics = False
+                
+                # Vérifier le succès
+                if len(track.credits) > 0:
+                    results['success'] += 1
+                    logger.info(f"✅ {len(track.credits)} crédits extraits pour {track.title}")
+                else:
+                    results['failed'] += 1
+                    logger.warning(f"❌ Aucun crédit extrait pour {track.title}")
+                
+                # Callback de progression
+                if progress_callback:
+                    status = f"Crédits + paroles: {track.title}" if include_lyrics else f"Crédits: {track.title}"
+                    progress_callback(i + 1, total, status)
+                    
+            except Exception as e:
+                results['failed'] += 1
+                error_msg = f"Erreur sur {track.title}: {str(e)}"
+                results['errors'].append({
+                    'track': track.title,
+                    'error': str(e)
+                })
+                logger.error(error_msg)
+                track.scraping_errors.append(str(e))
+        
+        logger.info(f"Scraping terminé: {results['success']} réussis, {results['failed']} échoués")
+        if include_lyrics:
+            logger.info(f"Paroles: {results['lyrics_scraped']} récupérées")
+        
+        return results

@@ -202,6 +202,7 @@ class Track:
     # URLs
     genius_url: Optional[str] = None
     spotify_url: Optional[str] = None
+    youtube_url: Optional[str] = None
     
     # Métadonnées système
     created_at: datetime = field(default_factory=datetime.now)
@@ -220,137 +221,256 @@ class Track:
         self.credits.append(credit)
     
     def get_credits_by_role(self, role: CreditRole) -> List[Credit]:
-        """Retourne tous les crédits d'un rôle spécifique"""
-        return [c for c in self.credits if c.role == role]
+        """Retourne tous les crédits d'un rôle spécifique - VERSION ROBUSTE"""
+        try:
+            if not hasattr(self, 'credits') or not self.credits:
+                return []
+                
+            matching_credits = []
+            for credit in self.credits:
+                try:
+                    if hasattr(credit, 'role') and credit.role == role:
+                        matching_credits.append(credit)
+                except Exception:
+                    continue
+                    
+            return matching_credits
+            
+        except Exception as e:
+            logger.debug(f"Erreur get_credits_by_role: {e}")
+            return []
     
     def get_producers(self) -> List[str]:
-        """Retourne la liste des producteurs (tous types confondus)"""
-        producer_roles = [
-            CreditRole.PRODUCER,
-            CreditRole.CO_PRODUCER,
-            CreditRole.EXECUTIVE_PRODUCER,
-            CreditRole.VOCAL_PRODUCER,
-            CreditRole.ADDITIONAL_PRODUCTION
-        ]
-        producers = []
-        for role in producer_roles:
-            producers.extend([c.name for c in self.get_credits_by_role(role)])
-        return producers
-    
+        """Retourne la liste des producteurs (tous types confondus) - VERSION ROBUSTE"""
+        try:
+            if not hasattr(self, 'credits') or not self.credits:
+                return []
+                
+            producer_roles = [
+                CreditRole.PRODUCER,
+                CreditRole.CO_PRODUCER,
+                CreditRole.EXECUTIVE_PRODUCER,
+                CreditRole.VOCAL_PRODUCER,
+                CreditRole.ADDITIONAL_PRODUCTION
+            ]
+            
+            producers = []
+            for role in producer_roles:
+                try:
+                    role_credits = self.get_credits_by_role(role)
+                    producers.extend([c.name for c in role_credits if hasattr(c, 'name')])
+                except Exception:
+                    continue
+                    
+            return producers
+            
+        except Exception as e:
+            logger.debug(f"Erreur get_producers: {e}")
+            return []
+
     def get_writers(self) -> List[str]:
-        """Retourne la liste des auteurs (tous types confondus)"""
-        writer_roles = [
-            CreditRole.WRITER,
-            CreditRole.COMPOSER,
-            CreditRole.LYRICIST
-        ]
-        writers = []
-        for role in writer_roles:
-            writers.extend([c.name for c in self.get_credits_by_role(role)])
-        return writers
-    
+        """Retourne la liste des auteurs (tous types confondus) - VERSION ROBUSTE"""
+        try:
+            if not hasattr(self, 'credits') or not self.credits:
+                return []
+                
+            writer_roles = [
+                CreditRole.WRITER,
+                CreditRole.COMPOSER,
+                CreditRole.LYRICIST
+            ]
+            
+            writers = []
+            for role in writer_roles:
+                try:
+                    role_credits = self.get_credits_by_role(role)
+                    writers.extend([c.name for c in role_credits if hasattr(c, 'name')])
+                except Exception:
+                    continue
+
+            return writers
+        
+        except Exception as e:
+            logger.debug(f"Erreur get_writers: {e}")
+            return []
+        
     def has_complete_credits(self) -> bool:
-        """Vérifie si les crédits semblent complets - VERSION AMÉLIORÉE"""
-        music_credits = self.get_music_credits()
-        
-        if not music_credits:
+        """Vérifie si les crédits semblent complets - VERSION ROBUSTE"""
+        try:
+            # CORRECTION 1: Obtenir les crédits musicaux de manière sécurisée
+            try:
+                music_credits = self.get_music_credits()
+            except Exception:
+                music_credits = getattr(self, 'credits', [])
+            
+            if not music_credits:
+                return False
+            
+            # CORRECTION 2: Obtenir les producteurs et auteurs de manière sécurisée
+            try:
+                producers = self.get_producers()
+            except Exception:
+                producers = []
+                
+            try:
+                writers = self.get_writers()
+            except Exception:
+                writers = []
+            
+            # Un morceau est considéré comme complet s'il a :
+            # - Au moins 4 crédits musicaux (plus strict)
+            # - ET au moins un producteur OU un auteur
+            
+            has_producer = bool(producers)
+            has_writer = bool(writers)
+            has_enough_credits = len(music_credits) >= 4
+            
+            return has_enough_credits and (has_producer or has_writer)
+            
+        except Exception as e:
+            logger.error(f"Erreur dans has_complete_credits pour {getattr(self, 'title', 'track inconnu')}: {e}")
             return False
-        
-        # Un morceau est considéré comme complet s'il a :
-        # - Au moins 4 crédits musicaux (plus strict)
-        # - ET au moins un producteur OU un auteur
-        
-        has_producer = bool(self.get_producers())
-        has_writer = bool(self.get_writers())
-        has_enough_credits = len(music_credits) >= 4
-        
-        return has_enough_credits and (has_producer or has_writer)
     
     def get_music_credits(self) -> List[Credit]:
-        """Retourne seulement les crédits musicaux - VERSION CORRIGÉE"""
-        # Obtenir d'abord tous les crédits vidéo
-        video_credits = self.get_video_credits()
+        """Retourne seulement les crédits musicaux - VERSION CORRIGÉE ROBUSTE"""
+        try:
+            # CORRECTION 1: Vérification de l'existence des crédits
+            if not hasattr(self, 'credits') or not self.credits:
+                return []
+            
+            # CORRECTION 2: Obtenir les crédits vidéo de manière sécurisée
+            try:
+                video_credits = self.get_video_credits()
+            except Exception as video_error:
+                logger.debug(f"Erreur get_video_credits: {video_error}")
+                video_credits = []
+            
+            # CORRECTION 3: Créer les identifiants uniques de manière robuste
+            video_credit_ids = set()
+            for credit in video_credits:
+                try:
+                    if hasattr(credit, 'name') and hasattr(credit, 'role'):
+                        credit_id = (
+                            str(credit.name).strip(),
+                            str(credit.role.value) if hasattr(credit.role, 'value') else str(credit.role),
+                            str(getattr(credit, 'role_detail', '')) if hasattr(credit, 'role_detail') else '',
+                            str(getattr(credit, 'source', '')) if hasattr(credit, 'source') else ''
+                        )
+                        video_credit_ids.add(credit_id)
+                except Exception as id_error:
+                    logger.debug(f"Erreur création ID crédit vidéo: {id_error}")
+                    continue
+            
+            # CORRECTION 4: Filtrer les crédits musicaux de manière robuste
+            music_credits = []
+            for credit in self.credits:
+                try:
+                    if hasattr(credit, 'name') and hasattr(credit, 'role'):
+                        credit_id = (
+                            str(credit.name).strip(),
+                            str(credit.role.value) if hasattr(credit.role, 'value') else str(credit.role),
+                            str(getattr(credit, 'role_detail', '')) if hasattr(credit, 'role_detail') else '',
+                            str(getattr(credit, 'source', '')) if hasattr(credit, 'source') else ''
+                        )
+                        
+                        # Si ce n'est pas un crédit vidéo, c'est un crédit musical
+                        if credit_id not in video_credit_ids:
+                            music_credits.append(credit)
+                            
+                except Exception as credit_error:
+                    logger.debug(f"Erreur traitement crédit musical: {credit_error}")
+                    # En cas d'erreur, considérer comme musical par défaut
+                    music_credits.append(credit)
+                    continue
+            
+            return music_credits
         
-        # Créer une liste des identifiants uniques des crédits vidéo
-        video_credit_ids = []
-        for credit in video_credits:
-            credit_id = (credit.name, credit.role.value, credit.role_detail, credit.source)
-            video_credit_ids.append(credit_id)
-        
-        # Retourner tous les crédits qui ne sont PAS vidéo
-        music_credits = []
-        for credit in self.credits:
-            credit_id = (credit.name, credit.role.value, credit.role_detail, credit.source)
-            if credit_id not in video_credit_ids:
-                music_credits.append(credit)
-        
-        return music_credits
+        except Exception as e:
+            logger.error(f"Erreur générale dans get_music_credits pour {getattr(self, 'title', 'track inconnu')}: {e}")
+            # En cas d'erreur totale, retourner tous les crédits
+            return getattr(self, 'credits', [])
     
     def get_video_credits(self) -> List[Credit]:
-        """Retourne seulement les crédits vidéo - VERSION AMÉLIORÉE"""
-        video_roles = [
-            CreditRole.VIDEO_DIRECTOR,
-            CreditRole.VIDEO_PRODUCER,
-            CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY,
-            CreditRole.VIDEO_CINEMATOGRAPHER,
-            CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN,
-            CreditRole.VIDEO_CAMERA_OPERATOR,
-            CreditRole.VIDEO_DRONE_OPERATOR,
-            CreditRole.VIDEO_SET_DECORATOR,
-            CreditRole.VIDEO_EDITOR,
-            CreditRole.VIDEO_COLORIST,
-            CreditRole.PHOTOGRAPHY  # Considéré comme vidéo
-        ]
-        
-        video_credits = [c for c in self.credits if c.role in video_roles]
-        
-        # ✅ AMÉLIORATION: Vérifier les rôles OTHER avec mots-clés vidéo
-        video_keywords = [
-            # Rôles techniques vidéo
-            'video', 'vidéo', 'clip', 'director', 'réalisateur', 'cinematographer',
-            'camera', 'caméra', 'drone', 'steadicam', 'gimbal',
+        """Retourne seulement les crédits vidéo - VERSION CORRIGÉE ROBUSTE"""
+        try:
+            # CORRECTION 1: Vérification de l'existence des crédits
+            if not hasattr(self, 'credits') or not self.credits:
+                return []
             
-            # Éclairage et technique
-            'electrician', 'électricien', 'lighting', 'éclairage', 'gaffer',
-            'grip', 'focus puller', 'assistant camera', 'camera operator',
+            video_credits = []
             
-            # Maquillage et costume pour vidéo
-            'makeup artist', 'maquilleur', 'maquilleuse', 'hair', 'coiffeur',
-            'costume', 'wardrobe', 'styliste', 'styling',
+            # CORRECTION 2: Liste des rôles vidéo avec gestion d'erreur
+            try:
+                video_roles = [
+                    CreditRole.VIDEO_DIRECTOR,
+                    CreditRole.VIDEO_PRODUCER,
+                    CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY,
+                    CreditRole.VIDEO_CINEMATOGRAPHER,
+                    CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN,
+                    CreditRole.VIDEO_CAMERA_OPERATOR,
+                    CreditRole.VIDEO_DRONE_OPERATOR,
+                    CreditRole.VIDEO_SET_DECORATOR,
+                    CreditRole.VIDEO_EDITOR,
+                    CreditRole.VIDEO_COLORIST,
+                    CreditRole.PHOTOGRAPHY  # Considéré comme vidéo
+                ]
+            except Exception:
+                # Si CreditRole n'est pas accessible, utiliser des strings
+                video_roles = []
             
-            # Post-production
-            'editor', 'monteur', 'monteuse', 'colorist', 'étalonnage',
-            'motion graphics', 'vfx', 'visual effects', 'effets visuels',
-            
-            # Décors et accessoires
-            'set decorator', 'décorateur', 'props', 'accessoires',
-            'location', 'repérage', 'casting director',
-            
-            # Production vidéo
-            'video producer', 'production manager', 'assistant director',
-            'script supervisor', 'continuity'
-        ]
-        
-        # Ajouter les rôles OTHER qui contiennent des mots-clés vidéo
-        for credit in self.credits:
-            if credit.role == CreditRole.OTHER and credit.role_detail:
-                role_detail_lower = credit.role_detail.lower()
-                
-                # Vérifier si c'est un rôle vidéo
-                if any(keyword in role_detail_lower for keyword in video_keywords):
-                    # Double vérification : ne pas prendre les rôles purement musicaux
-                    music_exclusions = [
-                        'songwriter', 'composer', 'producer', 'mix', 'master',
-                        'guitar', 'piano', 'drums', 'bass', 'vocal', 'engineer'
-                    ]
-                    
-                    is_music_role = any(exclusion in role_detail_lower for exclusion in music_exclusions)
-                    
-                    if not is_music_role and credit not in video_credits:
+            # CORRECTION 3: Filtrer par rôles vidéo explicites
+            for credit in self.credits:
+                try:
+                    if hasattr(credit, 'role') and credit.role in video_roles:
                         video_credits.append(credit)
-                        # print(f"🎬 Crédit vidéo détecté: {credit.name} - {credit.role_detail}")
-        
-        return video_credits
+                except Exception:
+                    continue
+            
+            # CORRECTION 4: Vérifier les rôles OTHER avec mots-clés vidéo
+            video_keywords = [
+                'video', 'vidéo', 'clip', 'director', 'réalisateur', 'cinematographer',
+                'camera', 'caméra', 'drone', 'steadicam', 'gimbal', 'electrician', 
+                'électricien', 'lighting', 'éclairage', 'gaffer', 'grip', 'focus puller',
+                'makeup artist', 'maquilleur', 'maquilleuse', 'hair', 'coiffeur',
+                'costume', 'wardrobe', 'styliste', 'styling', 'editor', 'monteur',
+                'monteuse', 'colorist', 'étalonnage', 'motion graphics', 'vfx',
+                'visual effects', 'effets visuels', 'set decorator', 'décorateur',
+                'props', 'accessoires', 'location', 'repérage', 'casting director',
+                'video producer', 'production manager', 'assistant director',
+                'script supervisor', 'continuity'
+            ]
+            
+            # Exclusions pour éviter les faux positifs
+            music_exclusions = [
+                'songwriter', 'composer', 'producer', 'mix', 'master',
+                'guitar', 'piano', 'drums', 'bass', 'vocal', 'engineer'
+            ]
+            
+            for credit in self.credits:
+                try:
+                    if (hasattr(credit, 'role') and 
+                        hasattr(credit.role, 'value') and 
+                        str(credit.role.value).lower() == 'other' and
+                        hasattr(credit, 'role_detail') and 
+                        credit.role_detail):
+                        
+                        role_detail_lower = str(credit.role_detail).lower()
+                        
+                        # Vérifier si c'est un rôle vidéo
+                        is_video = any(keyword in role_detail_lower for keyword in video_keywords)
+                        is_music = any(exclusion in role_detail_lower for exclusion in music_exclusions)
+                        
+                        if is_video and not is_music and credit not in video_credits:
+                            video_credits.append(credit)
+                            
+                except Exception:
+                    continue
+            
+            return video_credits
+            
+        except Exception as e:
+            logger.error(f"Erreur générale dans get_video_credits pour {getattr(self, 'title', 'track inconnu')}: {e}")
+            return []
     
     def get_display_title(self) -> str:
         """Retourne le titre à afficher (avec indication featuring si applicable)"""
@@ -444,6 +564,7 @@ class Track:
             
             'genius_url': self.genius_url,
             'spotify_url': self.spotify_url,
+            'youtube_url': self.youtube_url,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'last_scraped': self.last_scraped.isoformat() if self.last_scraped else None,

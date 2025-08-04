@@ -298,7 +298,7 @@ class GeniusScraper:
             return None
 
     def _extract_header_metadata(self, track: Track):
-        """Extrait les métadonnées depuis le header de la page (album, numéro de piste)"""
+        """Extrait les métadonnées depuis le header de la page - VERSION CORRIGÉE"""
         try:
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             
@@ -316,20 +316,108 @@ class GeniusScraper:
                         track.track_number = int(track_match.group(1))
                         logger.debug(f"🔢 Numéro de piste: {track.track_number}")
                 
-                # Extraire le nom de l'album
+                # CORRECTION: Extraire l'album avec validation
                 album_link = album_container.find('a', class_=lambda x: x and 'StyledLink' in x)
                 if album_link and not track.album:  # Ne pas écraser si déjà défini
-                    album_name = album_link.get_text(strip=True)
+                    potential_album = album_link.get_text(strip=True)
                     # Nettoyer le nom (enlever les symboles de flèche)
-                    album_name = re.sub(r'\s*[\u2192\u2190\u2191\u2193→←↑↓]\s*', '', album_name).strip()
-                    track.album = album_name
-                    logger.debug(f"💿 Album extrait du header: {album_name}")
+                    potential_album = re.sub(r'\s*[\u2192\u2190\u2191\u2193→←↑↓]\s*', '', potential_album).strip()
                     
+                    # CORRECTION: Vérifier que ce n'est pas un nom de producteur
+                    # Liste de producteurs connus qui sont souvent confondus avec des albums
+                    known_producers = [
+                        'easy dew', 'easydew', 'pyroman', 'the beatmaker', 'dj bellek',
+                        'mike dean', 'metro boomin', 'pi\'erre bourne', 'wheezy',
+                        'southside', 'tm88', 'zaytoven', 'lex luger', 'young chop',
+                        'dj mustard', 'hit-boy', 'boi-1da', 'noah shebib', '40',
+                        'pharrell', 'the neptunes', 'timbaland', 'dr. dre',
+                        'kanye west', 'j dilla', 'madlib', 'alchemist', 'premier'
+                    ]
+                    
+                    # Vérifier si c'est probablement un producteur
+                    is_likely_producer = any(
+                        producer.lower() in potential_album.lower() 
+                        for producer in known_producers
+                    )
+                    
+                    # Vérifications supplémentaires pour détecter un producteur
+                    producer_indicators = [
+                        'prod', 'produced', 'beats', 'beat', 'dj ', 'mc ', 
+                        'young ', 'lil ', 'big ', 'the ', '& '
+                    ]
+                    
+                    has_producer_indicators = any(
+                        indicator in potential_album.lower() 
+                        for indicator in producer_indicators
+                    )
+                    
+                    # Si c'est probablement un producteur, ne pas l'utiliser comme album
+                    if is_likely_producer or (has_producer_indicators and len(potential_album) < 30):
+                        logger.debug(f"🚫 '{potential_album}' détecté comme producteur, ignoré pour l'album")
+                    else:
+                        track.album = potential_album
+                        logger.debug(f"💿 Album extrait du header: {potential_album}")
+                        
         except Exception as e:
             logger.debug(f"Erreur lors de l'extraction des métadonnées du header: {e}")
             
+    def _is_valid_album_name(self, name: str) -> bool:
+        """Valide si un nom est bien un album et pas un producteur"""
+        
+        if not name or len(name.strip()) < 2:
+            return False
+        
+        name_lower = name.lower().strip()
+        
+        # Liste étendue de producteurs connus
+        known_producers = [
+            'easy dew', 'easydew', 'pyroman', 'the beatmaker', 'dj bellek',
+            'mike dean', 'metro boomin', 'pi\'erre bourne', 'wheezy',
+            'southside', 'tm88', 'zaytoven', 'lex luger', 'young chop',
+            'dj mustard', 'hit-boy', 'boi-1da', 'noah shebib', '40',
+            'pharrell', 'the neptunes', 'timbaland', 'dr. dre', 'scott storch',
+            'kanye west', 'j dilla', 'madlib', 'alchemist', 'dj premier',
+            'cashmoneyap', 'tay keith', 'ronnyj', 'cubeatz', 'murda beatz'
+        ]
+        
+        # Vérification directe des producteurs connus
+        if any(producer in name_lower for producer in known_producers):
+            return False
+        
+        # Indicateurs de producteurs
+        producer_indicators = [
+            'prod by', 'produced by', 'prod.', 'beats by', 'beat by',
+            'dj ', 'mc ', 'young ', 'lil ', 'big ', '$', 
+            'beatz', 'beats', 'productions', 'muzik', 'music'
+        ]
+        
+        # Si c'est court ET contient des indicateurs de producteur
+        if len(name) < 20 and any(indicator in name_lower for indicator in producer_indicators):
+            return False
+        
+        # Si ça commence par des préfixes typiques de producteurs
+        producer_prefixes = ['dj ', 'mc ', 'young ', 'lil ', 'big ', 'the ']
+        if any(name_lower.startswith(prefix) for prefix in producer_prefixes) and len(name) < 25:
+            return False
+        
+        # Si c'est probablement un album
+        album_indicators = [
+            'vol', 'volume', 'ep', 'mixtape', 'album', 'deluxe', 
+            'edition', 'part', 'chapter', 'saison', 'tome'
+        ]
+        
+        if any(indicator in name_lower for indicator in album_indicators):
+            return True
+        
+        # Si c'est assez long, probablement un album
+        if len(name) > 25:
+            return True
+        
+        # Par défaut, accepter si pas d'indicateur de producteur
+        return True
+    
     def _extract_credits(self, track: Track) -> List[Credit]:
-        """Extrait les crédits de la page - VERSION CORRIGÉE basée sur l'ancien code"""
+        """Extrait les crédits de la page - VERSION AVEC MEILLEURE GESTION ALBUM"""
         credits = []
         
         try:
@@ -353,12 +441,26 @@ class GeniusScraper:
                 if not container_div:
                     continue
                 
-                # MÉTHODE CORRIGÉE : Extraire les noms intelligemment
+                # Extraire les noms intelligemment
                 names = self._extract_names_intelligently(container_div)
                 
-                # Traiter les cas spéciaux (métadonnées) - SEULEMENT SI MANQUANT
-                if role_text.lower() == 'released on':
-                    if names and not track.release_date:  # Seulement si manquant de l'API
+                # CORRECTION: Gestion améliorée du cas "album"
+                if role_text.lower() == 'album':
+                    if names and not track.album:  # Seulement si manquant de l'API
+                        potential_album = ' '.join(names)
+                        
+                        # CORRECTION: Validation améliorée de l'album
+                        # Ne pas accepter si ça ressemble trop à un nom de producteur
+                        if self._is_valid_album_name(potential_album):
+                            track.album = potential_album
+                            logger.debug(f"💿 Album scrapé et validé: {track.album}")
+                        else:
+                            logger.debug(f"🚫 Album potentiel rejeté (probablement producteur): {potential_album}")
+                    continue
+                
+                # Traiter les autres cas spéciaux normalement
+                elif role_text.lower() == 'released on':
+                    if names and not track.release_date:
                         date_text = ' '.join(names)
                         parsed_date = self._parse_release_date(date_text)
                         if parsed_date:
@@ -366,14 +468,8 @@ class GeniusScraper:
                             logger.debug(f"📅 Date de sortie scrapée: {date_text}")
                     continue
                     
-                elif role_text.lower() == 'album':
-                    if names and not track.album:  # Seulement si manquant de l'API
-                        track.album = ' '.join(names)
-                        logger.debug(f"💿 Album scrapé: {track.album}")
-                    continue
-                    
                 elif role_text.lower() == 'genre':
-                    if names and not track.genre:  # Seulement si manquant de l'API
+                    if names and not track.genre:
                         track.genre = ', '.join(names)
                         logger.debug(f"🎵 Genre scrapé: {track.genre}")
                     continue
@@ -384,7 +480,7 @@ class GeniusScraper:
                     role_enum = CreditRole.OTHER
                 
                 for name in names:
-                    if name and len(name.strip()) > 1:
+                    if name and len(name.strip()) > 0:
                         credit = Credit(
                             name=name.strip(),
                             role=role_enum,
@@ -790,118 +886,43 @@ class GeniusScraper:
         return lyrics
 
     def _clean_lyrics(self, lyrics: str) -> str:
-        """Nettoie les paroles en préservant la structure mais supprimant la pub - VERSION CORRIGÉE"""
+        """Nettoie les paroles en gardant la mise en page originale - VERSION SIMPLIFIÉE"""
         if not lyrics:
             return ""
         
         import re
         
-        # ✅ ÉTAPE 1: Supprimer les sections de suggestions/publicité
-        pub_patterns = [
-            r'You might also like\n.*?\n.*?\n.*?\n',  # "You might also like" + 3 lignes suivantes
-            r'You might also like.*?(?=\[|$)',        # Tout après "You might also like" jusqu'à la prochaine section
-            r'\n\d+Embed$',                           # Lignes comme "123Embed"
-            r'\nEmbed$',                              # Ligne "Embed" seule
-            r'\nSee.*?Translations$',                 # "See [Langue] Translations"
-        ]
+        # ✅ ÉTAPE 1: Supprimer uniquement les éléments parasites spécifiques
         
-        for pattern in pub_patterns:
-            lyrics = re.sub(pattern.replace('\\n', '\n'), '', lyrics, flags=re.MULTILINE | re.DOTALL)
+        # Supprimer la section contributors au début
+        lyrics = re.sub(r'^.*?Contributors.*?Lyrics\s*', '', lyrics, flags=re.DOTALL | re.MULTILINE)
         
-        # ✅ ÉTAPE 2: Réparer les annotations cassées [Section : Artiste]
-        # Rechercher les patterns d'annotations cassées sur plusieurs lignes
+        # Supprimer les sections [Paroles de "titre"] au début
+        lyrics = re.sub(r'^\s*\[Paroles de[^\]]*\]\s*', '', lyrics, flags=re.MULTILINE)
         
-        # Pattern 1: [Section :\nArtiste\nNom] -> [Section : Artiste Nom]
-        lyrics = re.sub(
-            r'\[([^\]]+?)\s*:\s*\n([^\]]+?)\n([^\]]*?)\]',
-            r'[\1 : \2 \3]',
-            lyrics,
-            flags=re.MULTILINE | re.DOTALL
-        )
+        # Supprimer "You might also like" et les suggestions
+        lyrics = re.sub(r'You might also like.*?(?=\[|$)', '', lyrics, flags=re.DOTALL | re.MULTILINE)
         
-        # Pattern 2: [Section\nArtiste] -> [Section Artiste]
-        lyrics = re.sub(
-            r'\[([^\]]+?)\n([^\]]+?)\]',
-            r'[\1 \2]',
-            lyrics,
-            flags=re.MULTILINE
-        )
+        # Supprimer les lignes "123Embed" ou "Embed"
+        lyrics = re.sub(r'\n\d*Embed$', '', lyrics, flags=re.MULTILINE)
         
-        # Pattern 3: Nettoyer les espaces multiples dans les annotations
-        lyrics = re.sub(
-            r'\[([^\]]+?)\s+:\s+([^\]]+?)\s+([^\]]+?)\]',
-            r'[\1 : \2 \3]',
-            lyrics
-        )
+        # Supprimer "See [Language] Translations"
+        lyrics = re.sub(r'\nSee.*?Translations$', '', lyrics, flags=re.MULTILINE)
         
-        # ✅ ÉTAPE 3: Ajouter des retours à la ligne appropriés pour la lisibilité
+        # ✅ ÉTAPE 2: Nettoyer les espaces et retours à la ligne excessifs SEULEMENT
         
-        # Ajouter retour à la ligne avant chaque nouvelle section [...] (mais pas pour les réparations)
-        lyrics = re.sub(r'(\S)\s*(\[[^\]]+\])', r'\1\n\n\2', lyrics)
-        
-        # Ajouter retour à la ligne après chaque section [...] 
-        lyrics = re.sub(r'(\[[^\]]+\])\s*(\w)', r'\1\n\2', lyrics)
-        
-        # ✅ ÉTAPE 4: Séparer les phrases par des retours à la ligne appropriés
-        
-        # Séparer les phrases qui se terminent par des signes de ponctuation
-        lyrics = re.sub(r'([.!?])\s+(?=[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ])', r'\1\n', lyrics)
-        
-        # Pour le rap français: ajouter des retours à la ligne pour les rimes 
-        # (détection basée sur les patterns de ponctuation et majuscules)
-        lyrics = re.sub(r'([^.\[!?])\s+(?=[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ][a-zàáâãäåæçèéêëìíîïðñòóôõö])', r'\1\n', lyrics)
-        
-        # ✅ ÉTAPE 5: Nettoyer les retours à la ligne multiples et les espaces
-        
-        # Nettoyer les retours à la ligne multiples (max 2)
+        # Réduire les retours à la ligne multiples (plus de 2) à maximum 2
         lyrics = re.sub(r'\n\s*\n\s*\n+', '\n\n', lyrics)
         
-        # Nettoyer les espaces en début et fin de lignes
+        # Nettoyer les espaces en début et fin de lignes seulement
         lines = lyrics.split('\n')
-        cleaned_lines = [line.strip() for line in lines]
+        cleaned_lines = [line.rstrip() for line in lines]  # Garder les indentations
         lyrics = '\n'.join(cleaned_lines)
         
         # Supprimer les lignes vides en début et fin
         lyrics = lyrics.strip()
         
-        # ✅ ÉTAPE 6: Validation finale des annotations
-        # S'assurer qu'aucune annotation n'est cassée
-        lines = lyrics.split('\n')
-        final_lines = []
-        
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            
-            # Si la ligne commence par [ mais ne se termine pas par ], 
-            # chercher la suite sur les lignes suivantes
-            if line.startswith('[') and not line.endswith(']'):
-                annotation_parts = [line]
-                j = i + 1
-                
-                # Chercher jusqu'à trouver la fermeture ]
-                while j < len(lines) and not any(part.endswith(']') for part in annotation_parts):
-                    if j < len(lines):
-                        annotation_parts.append(lines[j])
-                        if lines[j].endswith(']'):
-                            break
-                    j += 1
-                
-                # Fusionner l'annotation sur une seule ligne
-                if any(part.endswith(']') for part in annotation_parts):
-                    merged_annotation = ' '.join(annotation_parts).strip()
-                    # Nettoyer les espaces multiples
-                    merged_annotation = re.sub(r'\s+', ' ', merged_annotation)
-                    final_lines.append(merged_annotation)
-                    i = j + 1
-                else:
-                    final_lines.append(line)
-                    i += 1
-            else:
-                final_lines.append(line)
-                i += 1
-        
-        return '\n'.join(final_lines)
+        return lyrics
 
     def scrape_multiple_tracks_with_lyrics(self, tracks: List[Track], progress_callback=None, include_lyrics=True) -> Dict[str, Any]:
         """Scrape plusieurs morceaux avec option paroles - VERSION SIMPLIFIÉE"""

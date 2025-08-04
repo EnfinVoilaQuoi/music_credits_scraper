@@ -56,6 +56,7 @@ class DataManager:
                     genre TEXT,
                     genius_url TEXT,
                     spotify_url TEXT,
+                    youtube_url TEXT,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
                     last_scraped TIMESTAMP,
@@ -131,15 +132,14 @@ class DataManager:
             return artist.id
     
     def save_track(self, track: Track) -> int:
-        """Sauvegarde ou met à jour un morceau - VERSION PRÉSERVANT LES FEATURES ET PAROLES"""
+        """Sauvegarde ou met à jour un morceau - VERSION SANS YOUTUBE_URL"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # S'assurer que l'artiste existe
             if not track.artist or not track.artist.id:
                 raise ValueError("Le morceau doit avoir un artiste avec un ID")
             
-            # Vérifier si le track existe déjà
+            # CORRECTION: Supprimer youtube_url de la requête
             cursor.execute("""
                 SELECT id, is_featuring, primary_artist_name, featured_artists, 
                     lyrics, has_lyrics, lyrics_scraped_at FROM tracks 
@@ -149,26 +149,20 @@ class DataManager:
             existing_track = cursor.fetchone()
             
             if existing_track:
-                # Le track existe déjà
                 track.id = existing_track[0]
                 
-                # ✅ CORRECTION CRITIQUE: Préserver les infos de featuring ET paroles existantes
-                # Si les infos de featuring existent en base mais pas sur l'objet track, les restaurer
-                if existing_track[1] and not hasattr(track, 'is_featuring'):  # is_featuring en base
+                # Préserver les infos existantes
+                if existing_track[1] and not hasattr(track, 'is_featuring'):
                     track.is_featuring = bool(existing_track[1])
                     track.primary_artist_name = existing_track[2]
                     track.featured_artists = existing_track[3]
-                    logger.info(f"🔒 Préservation des infos featuring pour: {track.title}")
                 
-                # ✅ NOUVEAU: Préserver les paroles existantes si pas nouvelles
-                if existing_track[4] and not hasattr(track, 'lyrics'):  # lyrics en base
+                if existing_track[4] and not hasattr(track, 'lyrics'):
                     track.lyrics = existing_track[4]
                     track.has_lyrics = bool(existing_track[5])
                     track.lyrics_scraped_at = existing_track[6]
-                    logger.info(f"📝 Préservation des paroles pour: {track.title}")
                 
-                logger.debug(f"Track existant trouvé (ID: {track.id}), mise à jour...")
-                
+                # CORRECTION: Supprimer youtube_url de l'UPDATE
                 cursor.execute("""
                     UPDATE tracks 
                     SET album = ?, track_number = ?, release_date = ?, 
@@ -191,14 +185,12 @@ class DataManager:
                     bool(getattr(track, 'lyrics', None)),
                     datetime.now(), track.last_scraped, track.id))
             else:
-                # Nouveau track, insérer
-                logger.debug(f"Nouveau track, insertion...")
-                
+                # CORRECTION: Supprimer youtube_url de l'INSERT
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
-                        bpm, duration, genre, genius_url, spotify_url,
+                        bmp, duration, genre, genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics,
                         created_at, updated_at, last_scraped
@@ -216,7 +208,7 @@ class DataManager:
                     datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
             
-            # Supprimer les anciens crédits avant d'ajouter les nouveaux (pour éviter les doublons)
+            # Supprimer les anciens crédits avant d'ajouter les nouveaux
             if track.id:
                 cursor.execute("DELETE FROM credits WHERE track_id = ?", (track.id,))
                 
@@ -250,187 +242,169 @@ class DataManager:
             logger.debug(f"Erreur lors de la sauvegarde du crédit {credit.name}: {e}")
     
     def get_artist_by_name(self, name: str) -> Optional[Artist]:
-        """Récupère un artiste par son nom - VERSION SÉCURISÉE"""
+        """Récupère un artiste par son nom - VERSION CORRIGÉE"""
         try:
             logger.debug(f"🔍 Recherche de l'artiste: '{name}'")
             
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT * FROM artists WHERE name = ?", (name,))
+                cursor.execute("SELECT id, name, genius_id, spotify_id, discogs_id FROM artists WHERE name = ?", (name,))
                 row = cursor.fetchone()
                 
                 if not row:
                     logger.debug(f"❌ Aucun artiste trouvé pour: '{name}'")
                     return None
                 
-                logger.debug(f"✅ Artiste trouvé en base: {dict(row)}")
+                # Accès par INDEX pour éviter les erreurs de clé
+                artist = Artist(
+                    id=row[0],           # id
+                    name=row[1],         # name
+                    genius_id=row[2],    # genius_id
+                    spotify_id=row[3],   # spotify_id
+                    discogs_id=row[4]    # discogs_id
+                )
                 
-                # ✅ CORRECTION: Accès sécurisé aux colonnes
+                logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
+                
+                # Charger les tracks
                 try:
-                    # Vérifier que toutes les colonnes requises existent
-                    required_columns = ['id', 'name', 'genius_id', 'spotify_id', 'discogs_id']
-                    available_columns = row.keys()
-                    
-                    logger.debug(f"📋 Colonnes disponibles: {list(available_columns)}")
-                    
-                    # Extraire les données de manière sécurisée
-                    artist_data = {}
-                    for col in required_columns:
-                        if col in available_columns:
-                            artist_data[col] = row[col]
-                            logger.debug(f"  ✅ {col}: {row[col]}")
-                        else:
-                            logger.warning(f"  ⚠️ Colonne manquante: {col}")
-                            artist_data[col] = None
-                    
-                    # Créer l'objet Artist avec les données extraites
-                    artist = Artist(
-                        id=artist_data.get('id'),
-                        name=artist_data.get('name', 'Unknown'),
-                        genius_id=artist_data.get('genius_id'),
-                        spotify_id=artist_data.get('spotify_id'),
-                        discogs_id=artist_data.get('discogs_id')
-                    )
-                    
-                    logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
-                    
-                    # ✅ CORRECTION: Chargement sécurisé des morceaux
-                    try:
-                        artist.tracks = self.get_artist_tracks(artist.id) if artist.id else []
-                        logger.debug(f"🎵 {len(artist.tracks)} morceaux chargés")
-                    except Exception as tracks_error:
-                        logger.warning(f"⚠️ Erreur lors du chargement des morceaux: {tracks_error}")
-                        artist.tracks = []
-                    
-                    return artist
-                    
-                except KeyError as key_error:
-                    logger.error(f"❌ Clé manquante dans la base: {key_error}")
-                    logger.error(f"📋 Colonnes disponibles: {list(row.keys()) if hasattr(row, 'keys') else 'N/A'}")
-                    
-                    # Tentative de récupération avec les données disponibles
-                    try:
-                        artist = Artist(
-                            id=getattr(row, 'id', None) if hasattr(row, 'id') else row[0] if len(row) > 0 else None,
-                            name=getattr(row, 'name', name) if hasattr(row, 'name') else row[1] if len(row) > 1 else name,
-                            genius_id=getattr(row, 'genius_id', None) if hasattr(row, 'genius_id') else row[2] if len(row) > 2 else None,
-                            spotify_id=getattr(row, 'spotify_id', None) if hasattr(row, 'spotify_id') else row[3] if len(row) > 3 else None,
-                            discogs_id=getattr(row, 'discogs_id', None) if hasattr(row, 'discogs_id') else row[4] if len(row) > 4 else None
-                        )
-                        logger.warning(f"⚠️ Artiste créé en mode récupération: {artist.name}")
-                        artist.tracks = []
-                        return artist
-                    except Exception as recovery_error:
-                        logger.error(f"❌ Impossible de récupérer les données: {recovery_error}")
-                        return None
+                    artist.tracks = self.get_artist_tracks(artist.id)
+                    logger.info(f"🎵 {len(artist.tracks)} morceaux chargés pour {artist.name}")
+                except Exception as tracks_error:
+                    logger.error(f"⚠️ Erreur chargement tracks: {tracks_error}")
+                    artist.tracks = []
                 
-                except Exception as row_error:
-                    logger.error(f"❌ Erreur lors du traitement de la ligne: {row_error}")
-                    logger.error(f"📋 Type de row: {type(row)}")
-                    logger.error(f"📋 Contenu de row: {row}")
-                    return None
+                return artist
                 
-        except sqlite3.Error as db_error:
-            logger.error(f"❌ Erreur de base de données: {db_error}")
-            return None
         except Exception as e:
-            logger.error(f"❌ Erreur inattendue dans get_artist_by_name: {e}")
-            logger.error(f"📋 Type d'erreur: {type(e).__name__}")
-            import traceback
-            logger.debug(f"📜 Traceback complet: {traceback.format_exc()}")
+            logger.error(f"❌ Erreur dans get_artist_by_name: {e}")
             return None
     
     def get_artist_tracks(self, artist_id: int) -> List[Track]:
-        """Récupère tous les morceaux d'un artiste - VERSION FINALE CORRIGÉE AVEC PAROLES"""
+        """Récupère tous les morceaux d'un artiste - VERSION SANS YOUTUBE_URL"""
         tracks = []
         
         try:
+            logger.info(f"🔍 Chargement des tracks pour artist_id: {artist_id}")
+            
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Vérifier d'abord si l'artiste a des tracks
+                # Vérifier le nombre total
                 cursor.execute("SELECT COUNT(*) FROM tracks WHERE artist_id = ?", (artist_id,))
-                track_count = cursor.fetchone()[0]
+                total_count = cursor.fetchone()[0]
+                logger.info(f"📊 {total_count} tracks trouvés en base")
                 
-                if track_count == 0:
-                    logger.warning(f"⚠️ Aucun track trouvé pour artist_id {artist_id}")
+                if total_count == 0:
                     return tracks
                 
-                logger.debug(f"📊 {track_count} tracks trouvés pour artist_id {artist_id}")
-                
-                # Récupérer les tracks AVEC les nouvelles colonnes paroles
+                # CORRECTION: Supprimer youtube_url de la requête SELECT
                 cursor.execute("""
-                    SELECT * FROM tracks WHERE artist_id = ?
+                    SELECT id, title, album, track_number, release_date,
+                        genius_id, spotify_id, discogs_id,
+                        bpm, duration, genre, genius_url, spotify_url,
+                        is_featuring, primary_artist_name, featured_artists,
+                        lyrics, lyrics_scraped_at, has_lyrics,
+                        created_at, updated_at, last_scraped
+                    FROM tracks 
+                    WHERE artist_id = ?
                     ORDER BY title
                 """, (artist_id,))
                 
                 rows = cursor.fetchall()
-                logger.debug(f"📦 {len(rows)} lignes récupérées de la base")
+                logger.info(f"📦 {len(rows)} lignes récupérées")
                 
-                for row in rows:
+                # Création des objets Track
+                for i, row in enumerate(rows):
                     try:
-                        # Accès direct aux colonnes (votre base fonctionne parfaitement)
+                        # Accès par index (indices ajustés sans youtube_url)
+                        track_id = row[0]    # id
+                        title = row[1]       # title
+                        album = row[2]       # album
+                        track_number = row[3] # track_number
+                        release_date = row[4] # release_date
+                        genius_id = row[5]   # genius_id
+                        spotify_id = row[6]  # spotify_id
+                        discogs_id = row[7]  # discogs_id
+                        bpm = row[8]         # bpm
+                        duration = row[9]    # duration
+                        genre = row[10]      # genre
+                        genius_url = row[11] # genius_url
+                        spotify_url = row[12] # spotify_url
+                        is_featuring = row[13] # is_featuring
+                        primary_artist_name = row[14] # primary_artist_name
+                        featured_artists = row[15] # featured_artists
+                        lyrics = row[16]     # lyrics
+                        lyrics_scraped_at = row[17] # lyrics_scraped_at
+                        has_lyrics = row[18] # has_lyrics
+                        created_at = row[19] # created_at
+                        updated_at = row[20] # updated_at
+                        last_scraped = row[21] # last_scraped
+                        
+                        # Validation
+                        if not track_id or not title:
+                            continue
+                        
+                        if str(title).strip() in ['', 'None', 'NULL']:
+                            continue
+                        
+                        # Création Track
+                        from src.models import Track
                         track = Track(
-                            id=row['id'],
-                            title=row['title'],
-                            album=row['album'],
-                            track_number=row['track_number'],
-                            release_date=row['release_date'],
-                            genius_id=row['genius_id'],
-                            spotify_id=row['spotify_id'],
-                            discogs_id=row['discogs_id'],
-                            bpm=row['bpm'],
-                            duration=row['duration'],
-                            genre=row['genre'],
-                            genius_url=row['genius_url'],
-                            spotify_url=row['spotify_url'],
-                            last_scraped=row['last_scraped']
+                            id=track_id,
+                            title=str(title).strip()
                         )
                         
-                        # ✅ AJOUT: Attributs de featuring
-                        track.is_featuring = bool(row['is_featuring']) if row['is_featuring'] else False
-                        track.primary_artist_name = row['primary_artist_name']
-                        track.featured_artists = row['featured_artists']
+                        # Assignation sécurisée
+                        def safe_assign(value, default=None):
+                            if value is None or str(value) in ['None', 'NULL', '']:
+                                return default
+                            return value
                         
-                        # ✅ NOUVEAU: Attributs de paroles
-                        available_keys = row.keys() if hasattr(row, 'keys') else []
+                        track.album = safe_assign(album)
+                        track.track_number = safe_assign(track_number)
+                        track.release_date = safe_assign(release_date)
+                        track.genius_id = safe_assign(genius_id)
+                        track.spotify_id = safe_assign(spotify_id)
+                        track.discogs_id = safe_assign(discogs_id)
+                        track.bpm = safe_assign(bpm)
+                        track.duration = safe_assign(duration)
+                        track.genre = safe_assign(genre)
+                        track.genius_url = safe_assign(genius_url)
+                        track.spotify_url = safe_assign(spotify_url)
+                        track.created_at = safe_assign(created_at)
+                        track.updated_at = safe_assign(updated_at)
+                        track.last_scraped = safe_assign(last_scraped)
                         
-                        # Charger les paroles si disponibles
-                        if 'lyrics' in available_keys and row['lyrics']:
-                            track.lyrics = row['lyrics']
-                            track.has_lyrics = bool(row.get('has_lyrics', False))
-                            track.lyrics_scraped_at = row.get('lyrics_scraped_at')
-                            logger.debug(f"📝 Paroles chargées pour: {track.title}")
-                        else:
-                            track.lyrics = None
-                            track.has_lyrics = False
-                            track.lyrics_scraped_at = None
+                        # Propriétés featuring
+                        track.is_featuring = bool(safe_assign(is_featuring, False))
+                        track.primary_artist_name = safe_assign(primary_artist_name)
+                        track.featured_artists = safe_assign(featured_artists)
                         
-                        # Log pour debug des features
-                        if track.is_featuring:
-                            logger.debug(f"🎤 Featuring chargé: {track.title} (principal: {track.primary_artist_name})")
+                        # Propriétés paroles
+                        track.lyrics = safe_assign(lyrics)
+                        track.has_lyrics = bool(safe_assign(has_lyrics, False))
+                        track.lyrics_scraped_at = safe_assign(lyrics_scraped_at)
                         
-                        # Charger les crédits
+                        # Chargement crédits
                         try:
-                            track.credits = self._get_track_credits(cursor, track.id)
-                        except Exception as credits_error:
-                            logger.warning(f"⚠️ Erreur chargement crédits pour {track.title}: {credits_error}")
+                            track.credits = self._get_track_credits(cursor, track_id)
+                        except Exception:
                             track.credits = []
                         
                         tracks.append(track)
                         
+                        if i < 5:
+                            logger.info(f"✅ Track {i+1}: {track.title}")
+                    
                     except Exception as track_error:
-                        logger.error(f"❌ Erreur lors du traitement du track {row['title']}: {track_error}")
-                        import traceback
-                        logger.debug(f"Traceback: {traceback.format_exc()}")
+                        logger.error(f"❌ Erreur track {i}: {track_error}")
                         continue
                 
-                logger.info(f"✅ {len(tracks)} tracks chargés avec succès pour artist_id {artist_id}")
+                logger.info(f"✅ {len(tracks)} tracks chargés avec succès")
                 
         except Exception as e:
-            logger.error(f"❌ Erreur générale dans get_artist_tracks: {e}")
-            import traceback
-            logger.debug(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"❌ Erreur dans get_artist_tracks: {e}")
         
         return tracks
     
@@ -457,20 +431,45 @@ class DataManager:
             return default
     
     def _get_track_credits(self, cursor, track_id: int) -> List[Credit]:
-        """Récupère les crédits d'un morceau"""
+        """Récupère les crédits d'un morceau - VERSION ROBUSTE"""
         credits = []
-        cursor.execute("""
-            SELECT * FROM credits WHERE track_id = ?
-        """, (track_id,))
         
-        for row in cursor.fetchall():
-            credit = Credit(
-                name=row['name'],
-                role=CreditRole(row['role']),
-                role_detail=row['role_detail'],
-                source=row['source']
-            )
-            credits.append(credit)
+        try:
+            cursor.execute("SELECT * FROM credits WHERE track_id = ?", (track_id,))
+            credit_rows = cursor.fetchall()
+            
+            for row in credit_rows:
+                try:
+                    # Accès par index aussi pour les crédits
+                    if len(row) >= 6:  # S'assurer qu'on a assez de colonnes
+                        name = row[2] if len(row) > 2 else None
+                        role_str = row[3] if len(row) > 3 else None
+                        role_detail = row[4] if len(row) > 4 else None
+                        source = row[5] if len(row) > 5 else "genius"
+                        
+                        if name and role_str:
+                            from src.models import Credit, CreditRole
+                            
+                            # Conversion du rôle string vers enum
+                            try:
+                                role = CreditRole(role_str)
+                            except ValueError:
+                                role = CreditRole.OTHER
+                            
+                            credit = Credit(
+                                name=str(name),
+                                role=role,
+                                role_detail=role_detail,
+                                source=str(source)
+                            )
+                            credits.append(credit)
+                            
+                except Exception as credit_error:
+                    logger.debug(f"Erreur crédit: {credit_error}")
+                    continue
+                    
+        except Exception as e:
+            logger.debug(f"Erreur _get_track_credits: {e}")
         
         return credits
     
@@ -983,3 +982,59 @@ class DataManager:
         logger.info(f"📊 Crédits: {results['total_credits_before']} → {results['total_credits_after']}")
         
         return results
+    
+    def diagnose_tracks_database(self, artist_id: int) -> Dict[str, Any]:
+        """Diagnostique les problèmes dans la base de données pour un artiste"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                diagnosis = {
+                    'total_tracks': 0,
+                    'valid_tracks': 0,
+                    'invalid_titles': [],
+                    'missing_data': {
+                        'no_credits': 0,
+                        'no_lyrics': 0,
+                        'no_bpm': 0
+                    }
+                }
+                
+                # Compter le total
+                cursor.execute("SELECT COUNT(*) FROM tracks WHERE artist_id = ?", (artist_id,))
+                diagnosis['total_tracks'] = cursor.fetchone()[0]
+                
+                # Analyser chaque track
+                cursor.execute("""
+                    SELECT id, title, bpm, 
+                        (SELECT COUNT(*) FROM credits WHERE track_id = tracks.id) as credits_count,
+                        CASE WHEN lyrics IS NULL OR lyrics = '' OR lyrics = 'None' THEN 0 ELSE 1 END as has_lyrics
+                    FROM tracks 
+                    WHERE artist_id = ?
+                """, (artist_id,))
+                
+                for row in cursor.fetchall():
+                    track_id, title, bpm, credits_count, has_lyrics = row
+                    
+                    # Vérifier le titre
+                    if not title or str(title).strip() in ['', 'None', 'NULL']:
+                        diagnosis['invalid_titles'].append({
+                            'id': track_id,
+                            'title': title
+                        })
+                    else:
+                        diagnosis['valid_tracks'] += 1
+                        
+                        # Compter les données manquantes
+                        if credits_count == 0:
+                            diagnosis['missing_data']['no_credits'] += 1
+                        if not has_lyrics:
+                            diagnosis['missing_data']['no_lyrics'] += 1
+                        if not bpm or bpm <= 0:
+                            diagnosis['missing_data']['no_bpm'] += 1
+                
+                return diagnosis
+                
+        except Exception as e:
+            logger.error(f"Erreur diagnostic: {e}")
+            return None

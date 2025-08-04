@@ -41,3 +41,13 @@ DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"
 WINDOW_WIDTH = 1200
 WINDOW_HEIGHT = 800
 THEME = "dark"  # "dark" ou "light"
+
+# Configuration YouTube
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")  # Optionnel, fallback sur ytmusicapi
+YOUTUBE_QUOTA_LIMIT = int(os.getenv("YOUTUBE_QUOTA_LIMIT", "10000"))
+YOUTUBE_CACHE_TTL_HOURS = int(os.getenv("YOUTUBE_CACHE_TTL_HOURS", "24"))
+
+# Configuration de l'intégration YouTube
+YOUTUBE_AUTO_SELECT_ALBUM_TRACKS = True  # Auto-sélection pour morceaux d'album
+YOUTUBE_VERIFY_OFFICIAL_CHANNELS = True  # Vérifier les chaînes officielles
+YOUTUBE_CONFIDENCE_THRESHOLD = 0.85      # Seuil de confiance pour auto-sélection

@@ -21,3 +21,6 @@ coloredlogs==15.0.1
 
 # Chrome driver
 webdriver-manager==4.0.1
+
+# YouTube integration
+ytmusicapi==1.8.0

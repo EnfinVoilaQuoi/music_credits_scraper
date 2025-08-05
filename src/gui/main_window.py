@@ -826,12 +826,12 @@ class MainWindow:
         
         # Obtenir le lien YouTube intelligent
         artist_name = track.artist.name if track.artist else self.current_artist.name
-        release_year = track.release_date.year if track.release_date else None
+        release_year = self.get_release_year_safely(track)
         
         youtube_result = youtube_integration.get_youtube_link_for_track(
             artist_name, track.title, track.album, release_year
         )
-        
+
         # Affichage selon le type de résultat
         if youtube_result['type'] == 'direct':
             # Lien direct trouvé automatiquement
@@ -2298,7 +2298,7 @@ class MainWindow:
         threading.Thread(target=enrich, daemon=True).start()
 
     def _format_lyrics_for_display(self, lyrics: str) -> str:
-        """Formate les paroles pour l'affichage dans l'interface"""
+        """Formate les paroles pour l'affichage dans l'interface - VERSION CORRIGÉE"""
         if not lyrics:
             return "Aucunes paroles disponibles"
         
@@ -2311,13 +2311,19 @@ class MainWindow:
                 formatted_lines.append('')
                 continue
                 
-            # Sections : mise en forme spéciale
+            # ✅ CORRECTION: TOUTES les sections entre crochets ont le même formatage
             if line.startswith('[') and line.endswith(']'):
+                # Extraire le contenu entre crochets
+                section_content = line[1:-1]  # Enlever les [ ]
+                
+                # Créer la ligne décorée
+                decorated_line = f"───────────────────────── [{section_content}] ─────────────────────────"
+                
                 formatted_lines.append('')
-                formatted_lines.append(f"{'─' * 25} {line} {'─' * 25}")
+                formatted_lines.append(decorated_line)
                 formatted_lines.append('')
             
-            # Mentions d'artistes : indentation
+            # Mentions d'artistes ou indentations spéciales
             elif '*' in line:
                 formatted_lines.append(f"        {line}")
             
@@ -2493,6 +2499,40 @@ class MainWindow:
             import webbrowser
             webbrowser.open(url)
         window.destroy()
+
+    def get_release_year_safely(self, track):
+        """Récupère l'année de sortie de manière sécurisée"""
+        if not track.release_date:
+            return None
+        
+        # Si c'est déjà un objet datetime
+        if hasattr(track.release_date, 'year'):
+            return track.release_date.year
+        
+        # Si c'est une chaîne, essayer de l'analyser
+        if isinstance(track.release_date, str):
+            try:
+                # Essayer différents formats de date
+                from datetime import datetime
+                
+                # Format YYYY-MM-DD
+                if len(track.release_date) >= 4:
+                    year_str = track.release_date[:4]
+                    if year_str.isdigit():
+                        return int(year_str)
+                
+                # Essayer de parser comme datetime
+                for fmt in ['%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%m/%d/%Y', '%Y']:
+                    try:
+                        date_obj = datetime.strptime(track.release_date, fmt)
+                        return date_obj.year
+                    except ValueError:
+                        continue
+                        
+            except Exception as e:
+                logger.debug(f"Erreur parsing date '{track.release_date}': {e}")
+        
+        return None
 
     def run(self):
         """Lance l'application"""

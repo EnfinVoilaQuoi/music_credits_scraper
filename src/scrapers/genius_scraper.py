@@ -886,13 +886,13 @@ class GeniusScraper:
         return lyrics
 
     def _clean_lyrics(self, lyrics: str) -> str:
-        """Nettoie les paroles en gardant la mise en page originale - VERSION SIMPLIFIÉE"""
+        """Nettoie les paroles en gardant la mise en page originale - VERSION CORRIGÉE"""
         if not lyrics:
             return ""
         
         import re
         
-        # ✅ ÉTAPE 1: Supprimer uniquement les éléments parasites spécifiques
+        # 1: Supprimer uniquement les éléments parasites spécifiques
         
         # Supprimer la section contributors au début
         lyrics = re.sub(r'^.*?Contributors.*?Lyrics\s*', '', lyrics, flags=re.DOTALL | re.MULTILINE)
@@ -904,19 +904,53 @@ class GeniusScraper:
         lyrics = re.sub(r'You might also like.*?(?=\[|$)', '', lyrics, flags=re.DOTALL | re.MULTILINE)
         
         # Supprimer les lignes "123Embed" ou "Embed"
-        lyrics = re.sub(r'\n\d*Embed$', '', lyrics, flags=re.MULTILINE)
+        lyrics = re.sub(r'\n\d*Embed', '', lyrics, flags=re.MULTILINE)
         
         # Supprimer "See [Language] Translations"
-        lyrics = re.sub(r'\nSee.*?Translations$', '', lyrics, flags=re.MULTILINE)
+        lyrics = re.sub(r'\nSee.*?Translations', '', lyrics, flags=re.MULTILINE)
         
-        # ✅ ÉTAPE 2: Nettoyer les espaces et retours à la ligne excessifs SEULEMENT
+        # 2: CORRECTION - Reconstituer les lignes correctement
+        
+        lines = lyrics.split('\n')
+        cleaned_lines = []
+        i = 0
+        
+        while i < len(lines):
+            current_line = lines[i].rstrip()
+            
+            # Si c'est une ligne vide, la garder
+            if not current_line.strip():
+                cleaned_lines.append('')
+                i += 1
+                continue
+            
+            # Vérifier si la ligne suivante est une annotation qui doit être rattachée
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                
+                # Cas 1: Annotations entre parenthèses (Yeah), (Fort, fort, mhh), etc.
+                if re.match(r'^\([^)]*\)$', next_line):
+                    current_line += f" {next_line}"
+                    i += 1  # Sauter la ligne suivante car fusionnée
+                
+                # Cas 2: Annotations simples comme "Yeah", "Mhh" seules sur leur ligne
+                elif re.match(r'^(Yeah|Mhh|Ahh|Oh|Wow|Ay|Ey|Hum|Hmm|Fort|Oui|Non)$', next_line, re.IGNORECASE):
+                    current_line += f" ({next_line})"
+                    i += 1  # Sauter la ligne suivante car fusionnée
+            
+            cleaned_lines.append(current_line)
+            i += 1
+        
+        lyrics = '\n'.join(cleaned_lines)
+        
+        # 3: Nettoyer les espaces et retours à la ligne excessifs
         
         # Réduire les retours à la ligne multiples (plus de 2) à maximum 2
         lyrics = re.sub(r'\n\s*\n\s*\n+', '\n\n', lyrics)
         
-        # Nettoyer les espaces en début et fin de lignes seulement
+        # Nettoyer les espaces en fin de lignes seulement
         lines = lyrics.split('\n')
-        cleaned_lines = [line.rstrip() for line in lines]  # Garder les indentations
+        cleaned_lines = [line.rstrip() for line in lines]
         lyrics = '\n'.join(cleaned_lines)
         
         # Supprimer les lignes vides en début et fin

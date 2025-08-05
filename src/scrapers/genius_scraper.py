@@ -48,6 +48,9 @@ class GeniusScraper:
             options.add_argument('--silent')
             options.add_experimental_option('excludeSwitches', ['enable-logging'])
             options.add_experimental_option('useAutomationExtension', False)
+            options.add_argument('--disable-gpu-sandbox')
+            options.add_argument('--disable-software-rasterizer')
+            options.add_argument('--disable-background-timer-throttling')
             
             # Désactiver les fonctionnalités inutiles
             options.add_argument('--disable-blink-features=AutomationControlled')
@@ -316,104 +319,109 @@ class GeniusScraper:
                         track.track_number = int(track_match.group(1))
                         logger.debug(f"🔢 Numéro de piste: {track.track_number}")
                 
-                # CORRECTION: Extraire l'album avec validation
+                # CORRECTION MAJEURE: Extraction d'album plus intelligente
                 album_link = album_container.find('a', class_=lambda x: x and 'StyledLink' in x)
                 if album_link and not track.album:  # Ne pas écraser si déjà défini
                     potential_album = album_link.get_text(strip=True)
                     # Nettoyer le nom (enlever les symboles de flèche)
                     potential_album = re.sub(r'\s*[\u2192\u2190\u2191\u2193→←↑↓]\s*', '', potential_album).strip()
                     
-                    # CORRECTION: Vérifier que ce n'est pas un nom de producteur
-                    # Liste de producteurs connus qui sont souvent confondus avec des albums
-                    known_producers = [
-                        'easy dew', 'easydew', 'pyroman', 'the beatmaker', 'dj bellek',
-                        'mike dean', 'metro boomin', 'pi\'erre bourne', 'wheezy',
-                        'southside', 'tm88', 'zaytoven', 'lex luger', 'young chop',
-                        'dj mustard', 'hit-boy', 'boi-1da', 'noah shebib', '40',
-                        'pharrell', 'the neptunes', 'timbaland', 'dr. dre',
-                        'kanye west', 'j dilla', 'madlib', 'alchemist', 'premier'
-                    ]
-                    
-                    # Vérifier si c'est probablement un producteur
-                    is_likely_producer = any(
-                        producer.lower() in potential_album.lower() 
-                        for producer in known_producers
-                    )
-                    
-                    # Vérifications supplémentaires pour détecter un producteur
-                    producer_indicators = [
-                        'prod', 'produced', 'beats', 'beat', 'dj ', 'mc ', 
-                        'young ', 'lil ', 'big ', 'the ', '& '
-                    ]
-                    
-                    has_producer_indicators = any(
-                        indicator in potential_album.lower() 
-                        for indicator in producer_indicators
-                    )
-                    
-                    # Si c'est probablement un producteur, ne pas l'utiliser comme album
-                    if is_likely_producer or (has_producer_indicators and len(potential_album) < 30):
-                        logger.debug(f"🚫 '{potential_album}' détecté comme producteur, ignoré pour l'album")
-                    else:
+                    # CORRECTION: Validation stricte - Ne PAS accepter si c'est probablement autre chose qu'un album
+                    if self._is_valid_album_name(potential_album, track.title):
                         track.album = potential_album
                         logger.debug(f"💿 Album extrait du header: {potential_album}")
+                    else:
+                        logger.debug(f"🚫 Album potentiel rejeté: '{potential_album}' (probablement artiste/producteur/titre)")
                         
         except Exception as e:
             logger.debug(f"Erreur lors de l'extraction des métadonnées du header: {e}")
+
             
-    def _is_valid_album_name(self, name: str) -> bool:
-        """Valide si un nom est bien un album et pas un producteur"""
+    def _is_valid_album_name(self, name: str, track_title: str = None) -> bool:
+        """Valide si un nom est bien un album et pas un artiste/producteur/titre - VERSION AMÉLIORÉE"""
         
         if not name or len(name.strip()) < 2:
             return False
         
         name_lower = name.lower().strip()
         
-        # Liste étendue de producteurs connus
-        known_producers = [
-            'easy dew', 'easydew', 'pyroman', 'the beatmaker', 'dj bellek',
-            'mike dean', 'metro boomin', 'pi\'erre bourne', 'wheezy',
-            'southside', 'tm88', 'zaytoven', 'lex luger', 'young chop',
-            'dj mustard', 'hit-boy', 'boi-1da', 'noah shebib', '40',
-            'pharrell', 'the neptunes', 'timbaland', 'dr. dre', 'scott storch',
-            'kanye west', 'j dilla', 'madlib', 'alchemist', 'dj premier',
-            'cashmoneyap', 'tay keith', 'ronnyj', 'cubeatz', 'murda beatz'
+        # CORRECTION 1: Liste étendue d'artistes de rap français connus
+        known_artists = [
+            # Rap français populaire
+            'sch', 'jul', 'ninho', 'niska', 'booba', 'kaaris', 'nekfeu', 'orelsan', 'pnl', 
+            'damso', 'lomepal', 'vald', 'lacrim', 'gradur', 'maes', 'soolking', 'ziak',
+            'josman', 'lefa', 'alpha wann', 'freeze corleone', 'zola', 'heuss l\'enfoiré',
+            'rim\'k', 'rohff', 'kery james', 'mc solaar', 'iam', 'ntm', 'fonky family',
+            'lunatic', 'mhd', 'ghost', 'sofiane', 'kalash', 'kalash criminel',
+            
+            # Producteurs célèbres
+            'easy dew', 'easydew', 'pyroman', 'the beatmaker', 'dj bellek', 'skread',
+            'mike dean', 'metro boomin', 'pi\'erre bourne', 'wheezy', 'southside',
+            'tm88', 'zaytoven', 'lex luger', 'young chop', 'dj mustard', 'hit-boy',
+            'boi-1da', 'noah shebib', '40', 'pharrell', 'the neptunes', 'timbaland',
+            'dr. dre', 'scott storch', 'kanye west', 'j dilla', 'madlib', 'alchemist',
+            'dj premier', 'cashmoneyap', 'tay keith', 'ronnyj', 'cubeatz', 'murda beatz'
         ]
         
-        # Vérification directe des producteurs connus
-        if any(producer in name_lower for producer in known_producers):
+        # CORRECTION 2: Vérification directe des artistes/producteurs connus
+        if any(artist in name_lower for artist in known_artists):
             return False
         
-        # Indicateurs de producteurs
-        producer_indicators = [
+        # CORRECTION 3: Si c'est identique au titre du morceau, c'est probablement pas un album
+        if track_title and name_lower == track_title.lower().strip():
+            return False
+        
+        # CORRECTION 4: Mots/phrases qui indiquent que ce n'est PAS un album
+        not_album_indicators = [
+            # Indicateurs de producteurs
             'prod by', 'produced by', 'prod.', 'beats by', 'beat by',
-            'dj ', 'mc ', 'young ', 'lil ', 'big ', '$', 
-            'beatz', 'beats', 'productions', 'muzik', 'music'
+            'beatz', 'beats', 'productions', 'muzik', 'music',
+            
+            # Phrases courtes qui sont souvent des titres de morceaux
+            'juste une minute', 'coupe plein', 'fais le vide', 'chill',
+            'en bas', 'tout seul', 'ma belle', 'dans le game', 'sur le bloc',
+            'dans la street', 'pour de vrai', 'sans limite', 'toute la nuit',
+            
+            # Mots seuls qui sont rarement des albums
+            'intro', 'outro', 'interlude', 'skit', 'freestyle'
         ]
         
-        # Si c'est court ET contient des indicateurs de producteur
-        if len(name) < 20 and any(indicator in name_lower for indicator in producer_indicators):
+        # Vérifier les indicateurs de non-album
+        if any(indicator in name_lower for indicator in not_album_indicators):
             return False
         
-        # Si ça commence par des préfixes typiques de producteurs
-        producer_prefixes = ['dj ', 'mc ', 'young ', 'lil ', 'big ', 'the ']
-        if any(name_lower.startswith(prefix) for prefix in producer_prefixes) and len(name) < 25:
-            return False
-        
-        # Si c'est probablement un album
+        # CORRECTION 5: Mots/phrases qui indiquent que c'est probablement un album
         album_indicators = [
-            'vol', 'volume', 'ep', 'mixtape', 'album', 'deluxe', 
-            'edition', 'part', 'chapter', 'saison', 'tome'
+            'vol', 'volume', 'ep', 'mixtape', 'album', 'deluxe', 'edition',
+            'part', 'partie', 'chapter', 'chapitre', 'saison', 'tome',
+            'the', 'le', 'la', 'les', 'un', 'une', 'des'
         ]
         
+        # Si contient des indicateurs d'album, probablement valide
         if any(indicator in name_lower for indicator in album_indicators):
             return True
         
-        # Si c'est assez long, probablement un album
-        if len(name) > 25:
+        # CORRECTION 6: Longueur - les vrais albums ont souvent des noms plus longs
+        if len(name) > 30:  # Albums ont souvent des noms descriptifs
             return True
         
-        # Par défaut, accepter si pas d'indicateur de producteur
+        # CORRECTION 7: Si c'est très court ET commence par un préfixe d'artiste, probablement pas un album
+        artist_prefixes = ['dj ', 'mc ', 'young ', 'lil ', 'big ', 'the ']
+        if len(name) < 15 and any(name_lower.startswith(prefix) for prefix in artist_prefixes):
+            return False
+        
+        # CORRECTION 8: Patterns de titres de morceaux typiques (courts et descriptifs)
+        track_patterns = [
+            r'^[a-z\s]{3,15}$',  # Mots simples courts
+            r'^\w+\s\w+$',       # Deux mots simples
+        ]
+        
+        if len(name) < 20:  # Seulement pour les noms courts
+            for pattern in track_patterns:
+                if re.match(pattern, name_lower):
+                    return False
+        
+        # Par défaut, accepter si aucun indicateur négatif trouvé
         return True
     
     def _extract_credits(self, track: Track) -> List[Credit]:

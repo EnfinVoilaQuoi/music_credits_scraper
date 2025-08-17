@@ -15,6 +15,7 @@ from src.utils.logger import get_logger
 from src.utils.youtube_integration import youtube_integration
 from src.models import Artist, Track
 from tkinter import ttk as tkinter_ttv
+from src.utils.disabled_tracks_manager import DisabledTracksManager
 
 
 logger = get_logger(__name__)
@@ -41,12 +42,16 @@ class MainWindow:
         
         # Variables
         self.is_scraping = False
-        self.selected_tracks = set()  # Pour stocker les morceaux sélectionnés
-        self.disabled_tracks = set()  # ✅ NOUVEAU: Pour stocker les morceaux désactivés
-        self.last_selected_index = None  # ✅ NOUVEAU: Pour la sélection multiple
+        self.selected_tracks = set()  # Stocker les morceaux sélectionnés
+        self.disabled_tracks = set()  # Stocker les morceaux désactivés
+        self.last_selected_index = None  # Sélection multiple
+        self.disabled_tracks_manager = DisabledTracksManager()
         
         self._create_widgets()
         self._update_statistics()
+
+        # Gerer la fermeture de l'application
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
     
     def _create_widgets(self):
         """Crée tous les widgets de l'interface - VERSION RÉORGANISÉE"""
@@ -279,124 +284,81 @@ class MainWindow:
         self.stats_label = ctk.CTkLabel(stats_frame, text="", font=("Arial", 12))
         self.stats_label.pack()
 
-    def _populate_tracks_table(self, tracks):
-        """Remplit le tableau avec les morceaux - VERSION SANS SÉLECTION AUTO"""
-        # Effacer le tableau
+    def _populate_tracks_table(self):
+        """Remplit le tableau avec les morceaux - VERSION AVEC MÉMOIRE"""
+        # Nettoyer le tableau
         for item in self.tree.get_children():
             self.tree.delete(item)
         
-        # ✅ MODIFIÉ: Ne plus réinitialiser les sélections et désactivations
-        # self.selected_tracks.clear()  # SUPPRIMÉ
+        if not self.current_artist or not self.current_artist.tracks:
+            return
         
-        # Ajouter les morceaux
-        for i, track in enumerate(tracks):
-            try:
-                # Gestion des features
-                is_featuring = getattr(track, 'is_featuring', False)
-                primary_artist = getattr(track, 'primary_artist_name', None)
-                
-                if is_featuring and primary_artist:
-                    title_display = track.title
-                    artist_display = primary_artist
-                    title_prefix = "🎤 "
-                elif is_featuring:
-                    artist_name = track.artist.name if track.artist else 'Unknown'
-                    title_display = f"{track.title} (feat. {artist_name})"
-                    artist_display = "Artiste principal inconnu"
-                    title_prefix = "🎤 "
-                else:
-                    title_display = track.title or "Titre inconnu"
-                    # ✅ CORRECTION: Utiliser l'artiste principal pour les morceaux non-featuring
-                    artist_display = self.current_artist.name if self.current_artist else (track.artist.name if track.artist else "Artiste inconnu")
-                    title_prefix = ""
-                
-                # Date de sortie
-                date_display = "-"
-                try:
-                    if track.release_date:
-                        if hasattr(track.release_date, 'strftime'):
-                            date_display = track.release_date.strftime('%Y-%m-%d')
-                        else:
-                            date_display = str(track.release_date)[:10]
-                except:
-                    date_display = "-"
-                
-                # Crédits
-                try:
-                    music_credits = track.get_music_credits()
-                    credits_count = len(music_credits) if music_credits else 0
-                except:
-                    credits_count = 0
-                
-                # NOUVELLE COLONNE : Paroles
-                lyrics_status = "❌"  # Par défaut
-                try:
-                    if hasattr(track, 'lyrics') and track.lyrics:
-                        lyrics_value = str(track.lyrics).strip()
-                        if lyrics_value and lyrics_value not in ['', 'None', 'NULL']:
-                            lyrics_status = "📝"  # Paroles présentes
-                except:
-                    pass
-                
-                # BPM
-                bpm_display = track.bpm if track.bpm is not None else "-"
-                
-                # Statut
-                try:
-                    status_icon = self._get_track_status_icon(track)
-                    status_details = self._get_track_status_details(track)
-                except Exception as e:
-                    status_icon = "❓"
-                    status_details = f"Erreur: {str(e)}"
-                
-                # Valeurs pour le tableau - AVEC COLONNE PAROLES
-                values = (
-                    title_prefix + title_display,    # Titre
-                    artist_display,                  # Artiste
-                    track.album or "-",              # Album
-                    date_display,                    # Date
-                    credits_count,                   # Crédits
-                    lyrics_status,                   # NOUVEAU: Paroles
-                    bpm_display,                     # BPM
-                    status_icon                      # Statut
-                )
-                
-                # ✅ MODIFIÉ: Déterminer l'état de la ligne
-                is_selected = i in self.selected_tracks
-                is_disabled = i in self.disabled_tracks
-                
-                # Déterminer le texte et les tags
-                if is_disabled:
-                    check_text = "⊘"  # Symbole désactivé
-                    tags = (str(i), status_details, "disabled")
-                elif is_selected:
-                    check_text = "☑"
-                    tags = (str(i), status_details)
-                else:
-                    check_text = "☐"
-                    tags = (str(i), status_details)
-                
-                # Créer l'item
-                item = self.tree.insert("", "end", text=check_text, values=values, tags=tags)
-                
-                # ✅ NOUVEAU: Appliquer le style grisé si désactivé
-                if is_disabled:
-                    self.tree.set(item, "Titre", f"⊘ {values[0]}")
-                    # Le grisé sera géré par la configuration des tags du treeview
-                
-            except Exception as e:
-                print(f"Erreur ajout track {i}: {e}")
-                # Ligne d'erreur
-                error_values = (
-                    f"ERREUR: {getattr(track, 'title', 'Track inconnu')}",
-                    "Erreur", "-", "-", "0", "❌", "-", "❓"
-                )
-                self.tree.insert("", "end", text="☐", values=error_values, tags=(str(i), f"Erreur: {str(e)}"))
+        # ✅ NOUVEAU: Charger les morceaux désactivés depuis la mémoire
+        self.disabled_tracks = self.disabled_tracks_manager.load_disabled_tracks(
+            self.current_artist.name
+        )
+        logger.info(f"Morceaux désactivés chargés: {len(self.disabled_tracks)} pour {self.current_artist.name}")
         
-        # ✅ NOUVEAU: Configurer les styles pour les lignes désactivées
-        self.tree.tag_configure("disabled", background="gray85", foreground="gray50")
+        # Réinitialiser la sélection
+        self.selected_tracks.clear()
+        
+        for i, track in enumerate(self.current_artist.tracks):
+            # Déterminer si le morceau est désactivé
+            is_disabled = i in self.disabled_tracks
+            
+            # Statut des paroles avec indicateur de désactivation
+            lyrics_status = ""
+            if track.lyrics:
+                lyrics_status = "✅"
+            elif track.genius_url:
+                lyrics_status = "📝"
+            else:
+                lyrics_status = "❌"
+            
+            if is_disabled:
+                lyrics_status = f"⊘ {lyrics_status}"
+            
+            # Statut d'enrichissement avec indicateur de désactivation
+            enrichment_status = self._get_enrichment_status(track)
+            if is_disabled:
+                enrichment_status = f"⊘ {enrichment_status}"
+            
+            # Définir les tags pour le style
+            tags = (str(i),)
+            if is_disabled:
+                tags = tags + ("disabled",)
+            
+            # Déterminer l'artiste principal pour l'affichage
+            if hasattr(track, 'is_featuring') and track.is_featuring:
+                artist_display = getattr(track, 'primary_artist_name', 'N/A')
+            else:
+                artist_display = track.artist.name if track.artist else self.current_artist.name
+
+            # Statut BPM
+            bpm_display = str(track.bpm) if track.bpm else "N/A"
+
+            # Ajouter la ligne au tableau avec TOUTES les colonnes
+            item_id = self.tree.insert("", "end", 
+                text="⊘" if is_disabled else "☐",
+                values=(
+                    track.title,                                                    # Titre
+                    artist_display,                                                 # Artiste principal
+                    track.album or "N/A",                                          # Album
+                    self._format_date(track.release_date) if track.release_date else "N/A",  # Date sortie
+                    self._get_credits_count(track),                                 # Crédits
+                    lyrics_status,                                                  # Paroles
+                    bpm_display,                                                    # BPM
+                    enrichment_status                                               # Statut
+                ),
+                tags=tags
+            )
+        
+        # Configurer les styles pour les morceaux désactivés
+        self.tree.tag_configure("disabled", foreground="gray", background="#2a2a2a")
         
         self._update_selection_count()
+        self._update_buttons_state()
+        logger.info(f"Tableau mis à jour: {len(self.current_artist.tracks)} morceaux, {len(self.disabled_tracks)} désactivés")
 
     def _on_tree_click(self, event):
         """Gère les clics sur le tableau avec sélection multiple - ✅ NOUVEAU"""
@@ -502,37 +464,66 @@ class MainWindow:
                     context_menu.grab_release()
 
     def _disable_selected_tracks(self):
-        """Désactive les morceaux sélectionnés - ✅ NOUVEAU"""
+        """Désactive les morceaux sélectionnés et sauvegarde"""
         if not self.selected_tracks:
             messagebox.showwarning("Attention", "Aucun morceau sélectionné")
             return
         
-        # Ajouter aux désactivés et retirer des sélectionnés
-        for index in self.selected_tracks.copy():
-            self.disabled_tracks.add(index)
-            self.selected_tracks.remove(index)
+        # Ajouter les morceaux sélectionnés aux désactivés
+        newly_disabled = set()
+        for track_index in self.selected_tracks:
+            if track_index not in self.disabled_tracks:
+                self.disabled_tracks.add(track_index)
+                newly_disabled.add(track_index)
         
-        # Mettre à jour l'affichage
-        self._refresh_selection_display()
-        self._update_selection_count()
-        
-        messagebox.showinfo("Succès", f"{len(self.disabled_tracks)} morceaux désactivés")
+        if newly_disabled:
+            # ✅ NOUVEAU: Sauvegarder automatiquement
+            if self.current_artist:
+                success = self.disabled_tracks_manager.save_disabled_tracks(
+                    self.current_artist.name, 
+                    self.disabled_tracks
+                )
+                if success:
+                    logger.info(f"Sauvegarde automatique: {len(newly_disabled)} morceaux désactivés")
+            
+            # Désélectionner tous les morceaux
+            self.selected_tracks.clear()
+            
+            # Rafraîchir l'affichage
+            self._populate_tracks_table()
+            
+            messagebox.showinfo("Succès", f"{len(newly_disabled)} morceaux désactivés et sauvegardés")
 
     def _enable_selected_tracks(self):
-        """Réactive les morceaux sélectionnés (même désactivés) - ✅ NOUVEAU"""
-        if not self.selected_tracks and not self.disabled_tracks:
-            messagebox.showwarning("Attention", "Aucun morceau désactivé")
+        """Réactive les morceaux sélectionnés et sauvegarde - ✅ MODIFIÉ"""
+        if not self.selected_tracks:
+            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
             return
         
-        # Réactiver tous les morceaux désactivés
-        count = len(self.disabled_tracks)
-        self.disabled_tracks.clear()
+        # Retirer les morceaux sélectionnés des désactivés
+        newly_enabled = set()
+        for track_index in self.selected_tracks:
+            if track_index in self.disabled_tracks:
+                self.disabled_tracks.remove(track_index)
+                newly_enabled.add(track_index)
         
-        # Mettre à jour l'affichage
-        self._refresh_selection_display()
-        self._update_selection_count()
-        
-        messagebox.showinfo("Succès", f"{count} morceaux réactivés")
+        if newly_enabled:
+            # ✅ NOUVEAU: Sauvegarder automatiquement
+            if self.current_artist:
+                success = self.disabled_tracks_manager.save_disabled_tracks(
+                    self.current_artist.name, 
+                    self.disabled_tracks
+                )
+                if success:
+                    logger.info(f"Sauvegarde automatique: {len(newly_enabled)} morceaux réactivés")
+            
+            # Désélectionner tous les morceaux
+            self.selected_tracks.clear()
+            
+            # Rafraîchir l'affichage
+            self._populate_tracks_table()
+            
+            messagebox.showinfo("Succès", f"{len(newly_enabled)} morceaux réactivés et sauvegardés")
 
     def _disable_track(self, index: int):
         """Désactive un morceau spécifique - ✅ NOUVEAU"""
@@ -682,7 +673,7 @@ class MainWindow:
                         self.disabled_tracks.add(new_index)
             
             # Recréer affichage
-            self._populate_tracks_table(self.current_artist.tracks)
+            self._populate_tracks_table()
             
             # Mettre à jour en-tête
             direction = "↓" if reverse else "↑"
@@ -1412,6 +1403,56 @@ class MainWindow:
         # Boutons d'action
         buttons_frame = ctk.CTkFrame(action_frame)
         buttons_frame.pack(fill="x", padx=10, pady=15)
+
+        def _load_artist_data(self, artist_name: str):
+            """Charge les données d'un artiste depuis les fichiers"""
+            try:
+                # Charger les données de l'artiste
+                self.current_artist = self.data_manager.load_artist_data(artist_name)
+                
+                if self.current_artist and self.current_artist.tracks:
+                    # ✅ NOUVEAU: Charger automatiquement les morceaux désactivés
+                    self.disabled_tracks = self.disabled_tracks_manager.load_disabled_tracks(
+                        self.current_artist.name
+                    )
+                    
+                    # Filtrer les indices invalides (au cas où le nombre de morceaux aurait changé)
+                    max_index = len(self.current_artist.tracks) - 1
+                    self.disabled_tracks = {i for i in self.disabled_tracks if 0 <= i <= max_index}
+                    
+                    # Si des indices ont été filtrés, sauvegarder la version nettoyée
+                    if len(self.disabled_tracks) != len(self.disabled_tracks_manager.load_disabled_tracks(self.current_artist.name)):
+                        self.disabled_tracks_manager.save_disabled_tracks(
+                            self.current_artist.name, 
+                            self.disabled_tracks
+                        )
+                        logger.info("Indices des morceaux désactivés nettoyés et sauvegardés")
+                    
+                    self._populate_tracks_table()
+                    self._update_buttons_state()
+                    
+                    # Message de confirmation avec info sur les morceaux désactivés
+                    total_tracks = len(self.current_artist.tracks)
+                    disabled_count = len(self.disabled_tracks)
+                    active_count = total_tracks - disabled_count
+                    
+                    msg = f"Artiste '{artist_name}' chargé avec succès!\n\n"
+                    msg += f"📀 {total_tracks} morceaux au total\n"
+                    msg += f"✅ {active_count} morceaux actifs\n"
+                    if disabled_count > 0:
+                        msg += f"⊘ {disabled_count} morceaux désactivés (restaurés depuis la mémoire)"
+                    
+                    messagebox.showinfo("Succès", msg)
+                    return True
+                else:
+                    messagebox.showwarning("Attention", f"Aucune donnée trouvée pour '{artist_name}'")
+                    return False
+                    
+            except Exception as e:
+                error_msg = f"Erreur lors du chargement: {str(e)}"
+                logger.error(error_msg)
+                messagebox.showerror("Erreur", error_msg)
+                return False
         
         def load_selected():
             if not selected_artist["name"]:
@@ -1648,7 +1689,7 @@ class MainWindow:
                 info_text = " - ".join(info_parts)
                 self.tracks_info_label.configure(text=info_text)
                 
-                self._populate_tracks_table(self.current_artist.tracks)
+                self._populate_tracks_table()
                 
                 # Activer les boutons
                 self.scrape_button.configure(state="normal")
@@ -2533,6 +2574,133 @@ class MainWindow:
                 logger.debug(f"Erreur parsing date '{track.release_date}': {e}")
         
         return None
+    
+    def _on_closing(self):
+        """Gère la fermeture de l'application en sauvegardant les morceaux désactivés"""
+        try:
+            # Sauvegarder les morceaux désactivés avant de fermer
+            if self.current_artist and self.disabled_tracks:
+                self.disabled_tracks_manager.save_disabled_tracks(
+                    self.current_artist.name, 
+                    self.disabled_tracks
+                )
+                logger.info(f"Morceaux désactivés sauvegardés pour {self.current_artist.name}")
+        except Exception as e:
+            logger.error(f"Erreur lors de la sauvegarde à la fermeture: {e}")
+        finally:
+            self.root.destroy()
+
+    def _get_enrichment_status(self, track):
+        """Retourne le statut d'enrichissement d'un morceau"""
+        try:
+            # Vérifier la présence des crédits
+            try:
+                music_credits = track.get_music_credits()
+                has_credits = len(music_credits) > 0 if music_credits else False
+            except Exception:
+                has_credits = False
+            
+            # Vérifier la présence des paroles
+            try:
+                has_lyrics = (hasattr(track, 'lyrics') and 
+                            track.lyrics is not None and 
+                            len(str(track.lyrics).strip()) > 0 and
+                            str(track.lyrics).strip() not in ['None', 'NULL'])
+            except Exception:
+                has_lyrics = False
+            
+            # Vérifier la présence du BPM
+            try:
+                has_bpm = (track.bpm is not None and track.bpm > 0)
+            except Exception:
+                has_bpm = False
+            
+            # Compter le nombre de types de données disponibles
+            data_count = sum([has_credits, has_lyrics, has_bpm])
+            
+            if data_count == 0:
+                return "❌"  # Aucune donnée
+            elif data_count >= 3:
+                return "✅"  # Données complètes
+            else:
+                return "⚠️"  # Données partielles
+                
+        except Exception as e:
+            logger.error(f"Erreur dans _get_enrichment_status pour {getattr(track, 'title', 'unknown')}: {e}")
+            return "❓"  # Erreur
+
+    def _format_date(self, release_date):
+        """Formate une date pour l'affichage"""
+        if not release_date:
+            return "N/A"
+        
+        try:
+            # Si c'est déjà un objet datetime
+            if hasattr(release_date, 'strftime'):
+                return release_date.strftime('%Y-%m-%d')
+            
+            # Si c'est une chaîne
+            if isinstance(release_date, str):
+                # Prendre les 10 premiers caractères pour YYYY-MM-DD
+                date_part = str(release_date)[:10]
+                if len(date_part) >= 4:
+                    return date_part
+            
+            return str(release_date)[:10]
+            
+        except Exception as e:
+            logger.debug(f"Erreur formatage date '{release_date}': {e}")
+            return "N/A"
+
+    def _update_buttons_state(self):
+        """Met à jour l'état des boutons selon le contexte"""
+        if not self.current_artist:
+            # Aucun artiste chargé
+            self.get_tracks_button.configure(state="disabled")
+            self.scrape_button.configure(state="disabled")
+            self.export_button.configure(state="disabled")
+            if hasattr(self, 'force_update_button'):
+                self.force_update_button.configure(state="disabled")
+            if hasattr(self, 'enrich_button'):
+                self.enrich_button.configure(state="disabled")
+            if hasattr(self, 'lyrics_button'):
+                self.lyrics_button.configure(state="disabled")
+        elif not self.current_artist.tracks:
+            # Artiste chargé mais pas de morceaux
+            self.get_tracks_button.configure(state="normal")
+            self.scrape_button.configure(state="disabled")
+            self.export_button.configure(state="disabled")
+            if hasattr(self, 'force_update_button'):
+                self.force_update_button.configure(state="disabled")
+            if hasattr(self, 'enrich_button'):
+                self.enrich_button.configure(state="disabled")
+            if hasattr(self, 'lyrics_button'):
+                self.lyrics_button.configure(state="disabled")
+        else:
+            # Artiste avec morceaux
+            self.get_tracks_button.configure(state="normal")
+            self.scrape_button.configure(state="normal")
+            self.export_button.configure(state="normal")
+            if hasattr(self, 'force_update_button'):
+                self.force_update_button.configure(state="normal")
+            if hasattr(self, 'enrich_button'):
+                self.enrich_button.configure(state="normal")
+            if hasattr(self, 'lyrics_button'):
+                self.lyrics_button.configure(state="normal")
+
+    def _get_credits_count(self, track):
+        """Retourne le nombre de crédits d'un morceau de manière sécurisée"""
+        try:
+            if hasattr(track, 'get_music_credits'):
+                music_credits = track.get_music_credits()
+                return len(music_credits) if music_credits else 0
+            elif hasattr(track, 'credits'):
+                return len(track.credits) if track.credits else 0
+            else:
+                return 0
+        except Exception as e:
+            logger.debug(f"Erreur comptage crédits pour {getattr(track, 'title', 'unknown')}: {e}")
+            return 0
 
     def run(self):
         """Lance l'application"""

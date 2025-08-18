@@ -301,131 +301,152 @@ class GeniusScraper:
             return None
 
     def _extract_header_metadata(self, track: Track):
-        """Extrait les métadonnées depuis le header de la page - VERSION CORRIGÉE"""
+        """Extrait les métadonnées depuis le header de la page (Track X on ALBUM)"""
         try:
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             
-            # Chercher l'info album dans le header
-            album_container = soup.find('div', class_=lambda x: x and 'HeaderCredit__Container' in x)
+            # MÉTHODE 1: Chercher le pattern "Track X on ALBUM"
+            # Rechercher dans toute la page le texte qui contient "Track" et "on"
+            track_info_pattern = re.compile(r'Track\s+(\d+)\s+on\s+(.+?)(?:\s*[\u2192→]|$)', re.IGNORECASE)
             
-            if album_container:
-                # Extraire le numéro de piste
-                track_label = album_container.find('span', class_=lambda x: x and 'HeaderCredit__Label' in x)
-                if track_label:
-                    track_text = track_label.get_text(strip=True)
-                    # Extraire le numéro de la piste (ex: "Track 14 on")
-                    track_match = re.search(r'Track (\d+)', track_text)
-                    if track_match:
-                        track.track_number = int(track_match.group(1))
-                        logger.debug(f"🔢 Numéro de piste: {track.track_number}")
+            # Chercher dans les divs du header
+            header_divs = soup.find_all('div', class_=re.compile(r'HeaderCredit|SongHeader|HeaderMetadata'))
+            
+            for div in header_divs:
+                text = div.get_text(strip=True)
+                match = track_info_pattern.search(text)
                 
-                # CORRECTION MAJEURE: Extraction d'album plus intelligente
-                album_link = album_container.find('a', class_=lambda x: x and 'StyledLink' in x)
-                if album_link and not track.album:  # Ne pas écraser si déjà défini
-                    potential_album = album_link.get_text(strip=True)
-                    # Nettoyer le nom (enlever les symboles de flèche)
-                    potential_album = re.sub(r'\s*[\u2192\u2190\u2191\u2193→←↑↓]\s*', '', potential_album).strip()
+                if match:
+                    track_number = int(match.group(1))
+                    album_name = match.group(2).strip()
                     
-                    # CORRECTION: Validation stricte - Ne PAS accepter si c'est probablement autre chose qu'un album
-                    if self._is_valid_album_name(potential_album, track.title):
-                        track.album = potential_album
-                        logger.debug(f"💿 Album extrait du header: {potential_album}")
-                    else:
-                        logger.debug(f"🚫 Album potentiel rejeté: '{potential_album}' (probablement artiste/producteur/titre)")
+                    # Nettoyer l'album (enlever les caractères parasites)
+                    album_name = re.sub(r'[\u2192\u2190\u2191\u2193→←↑↓]', '', album_name).strip()
+                    
+                    if track_number:
+                        track.track_number = track_number
+                        logger.debug(f"🔢 Numéro de piste extrait: {track_number}")
+                    
+                    if album_name and not track.album:  # Ne pas écraser si déjà présent
+                        # NE PAS valider avec _is_valid_album_name ici car on est sûr que c'est l'album
+                        # depuis le pattern "Track X on ALBUM"
+                        track.album = album_name
+                        logger.info(f"💿 Album extrait du header: '{album_name}' (Track {track_number})")
+                        return  # Sortir si trouvé
+            
+            # MÉTHODE 2: Si pas trouvé avec le pattern, chercher les liens d'album
+            album_links = soup.find_all('a', href=re.compile(r'/albums/'))
+            
+            for link in album_links:
+                # Vérifier si le lien est dans le header (pas dans les crédits)
+                parent = link.parent
+                while parent and parent.name != 'body':
+                    if 'header' in str(parent.get('class', [])).lower():
+                        album_name = link.get_text(strip=True)
+                        album_name = re.sub(r'[\u2192\u2190\u2191\u2193→←↑↓]', '', album_name).strip()
                         
+                        if album_name and not track.album:
+                            track.album = album_name
+                            logger.info(f"💿 Album extrait depuis lien header: '{album_name}'")
+                            break
+                    parent = parent.parent
+                    
         except Exception as e:
             logger.debug(f"Erreur lors de l'extraction des métadonnées du header: {e}")
 
             
     def _is_valid_album_name(self, name: str, track_title: str = None) -> bool:
-        """Valide si un nom est bien un album et pas un artiste/producteur/titre - VERSION AMÉLIORÉE"""
+        """Valide si un nom est bien un album et pas un artiste/producteur/titre - VERSION STRICTE"""
         
         if not name or len(name.strip()) < 2:
             return False
         
         name_lower = name.lower().strip()
         
-        # CORRECTION 1: Liste étendue d'artistes de rap français connus
-        known_artists = [
-            # Rap français populaire
-            'sch', 'jul', 'ninho', 'niska', 'booba', 'kaaris', 'nekfeu', 'orelsan', 'pnl', 
-            'damso', 'lomepal', 'vald', 'lacrim', 'gradur', 'maes', 'soolking', 'ziak',
-            'josman', 'lefa', 'alpha wann', 'freeze corleone', 'zola', 'heuss l\'enfoiré',
-            'rim\'k', 'rohff', 'kery james', 'mc solaar', 'iam', 'ntm', 'fonky family',
-            'lunatic', 'mhd', 'ghost', 'sofiane', 'kalash', 'kalash criminel',
-            
-            # Producteurs célèbres
+        # RÈGLE 1: Rejeter les noms de producteurs connus
+        known_producers = [
+            # Producteurs rap FR
             'easy dew', 'easydew', 'pyroman', 'the beatmaker', 'dj bellek', 'skread',
-            'mike dean', 'metro boomin', 'pi\'erre bourne', 'wheezy', 'southside',
+            'noxious', 'ponko', 'ikaz', 'kore', 'therapy', 'katrina', 'katrina squad',
+            'benjamin epps', 'epps', 'therapy 2093', 'bbp', 'azaia', 'nouvo', 'junior alaprod',
+            'hugz', 'myth syzer', 'vm the don', 'lowkey', 'hologram lo', 'bbp beats',
+            
+            # Producteurs US célèbres
+            'mike dean', 'metro boomin', 'pierre bourne', 'wheezy', 'southside',
             'tm88', 'zaytoven', 'lex luger', 'young chop', 'dj mustard', 'hit-boy',
             'boi-1da', 'noah shebib', '40', 'pharrell', 'the neptunes', 'timbaland',
-            'dr. dre', 'scott storch', 'kanye west', 'j dilla', 'madlib', 'alchemist',
-            'dj premier', 'cashmoneyap', 'tay keith', 'ronnyj', 'cubeatz', 'murda beatz'
+            'dr. dre', 'dr dre', 'scott storch', 'kanye west', 'j dilla', 'madlib', 
+            'alchemist', 'dj premier', 'cashmoneyap', 'tay keith', 'ronnyj', 
+            'cubeatz', 'murda beatz', 'london on da track', 'jetsonmade'
         ]
         
-        # CORRECTION 2: Vérification directe des artistes/producteurs connus
-        if any(artist in name_lower for artist in known_artists):
-            return False
+        # Vérifier si c'est un producteur connu (correspondance exacte ou partielle)
+        for producer in known_producers:
+            if producer in name_lower or name_lower in producer:
+                logger.debug(f"🚫 Album rejeté car producteur connu: '{name}' (match: {producer})")
+                return False
         
-        # CORRECTION 3: Si c'est identique au titre du morceau, c'est probablement pas un album
+        # RÈGLE 2: Rejeter si contient des indicateurs de production
+        production_indicators = [
+            'prod', 'beat', 'music', 'muzik', 'production', 'records',
+            'entertainment', 'ent.', 'studio', 'sound', 'audio'
+        ]
+        
+        for indicator in production_indicators:
+            if indicator in name_lower:
+                logger.debug(f"🚫 Album rejeté car indicateur de production: '{name}' (indicateur: {indicator})")
+                return False
+        
+        # RÈGLE 3: Si c'est identique au titre du morceau, probablement pas un album
         if track_title and name_lower == track_title.lower().strip():
+            logger.debug(f"🚫 Album rejeté car identique au titre: '{name}'")
             return False
         
-        # CORRECTION 4: Mots/phrases qui indiquent que ce n'est PAS un album
-        not_album_indicators = [
-            # Indicateurs de producteurs
-            'prod by', 'produced by', 'prod.', 'beats by', 'beat by',
-            'beatz', 'beats', 'productions', 'muzik', 'music',
-            
-            # Phrases courtes qui sont souvent des titres de morceaux
-            'juste une minute', 'coupe plein', 'fais le vide', 'chill',
-            'en bas', 'tout seul', 'ma belle', 'dans le game', 'sur le bloc',
-            'dans la street', 'pour de vrai', 'sans limite', 'toute la nuit',
-            
-            # Mots seuls qui sont rarement des albums
-            'intro', 'outro', 'interlude', 'skit', 'freestyle'
-        ]
+        # RÈGLE 4: Rejeter les noms trop courts qui ressemblent à des surnoms/pseudos
+        if len(name) <= 10:
+            # Sauf si contient des indicateurs d'album
+            album_indicators = ['vol', 'ep', 'lp', 'mixtape', 'deluxe', 'edition']
+            if not any(ind in name_lower for ind in album_indicators):
+                logger.debug(f"🚫 Album rejeté car nom trop court sans indicateur: '{name}'")
+                return False
         
-        # Vérifier les indicateurs de non-album
-        if any(indicator in name_lower for indicator in not_album_indicators):
-            return False
-        
-        # CORRECTION 5: Mots/phrases qui indiquent que c'est probablement un album
-        album_indicators = [
-            'vol', 'volume', 'ep', 'mixtape', 'album', 'deluxe', 'edition',
+        # RÈGLE 5: Accepter si contient des indicateurs positifs d'album
+        positive_indicators = [
+            'vol', 'volume', 'ep', 'lp', 'album', 'deluxe', 'edition',
             'part', 'partie', 'chapter', 'chapitre', 'saison', 'tome',
-            'the', 'le', 'la', 'les', 'un', 'une', 'des'
+            'tape', 'mixtape', 'collection', 'anthology'
         ]
         
-        # Si contient des indicateurs d'album, probablement valide
-        if any(indicator in name_lower for indicator in album_indicators):
-            return True
+        for indicator in positive_indicators:
+            if indicator in name_lower:
+                logger.debug(f"✅ Album accepté car indicateur positif: '{name}' (indicateur: {indicator})")
+                return True
         
-        # CORRECTION 6: Longueur - les vrais albums ont souvent des noms plus longs
-        if len(name) > 30:  # Albums ont souvent des noms descriptifs
-            return True
-        
-        # CORRECTION 7: Si c'est très court ET commence par un préfixe d'artiste, probablement pas un album
-        artist_prefixes = ['dj ', 'mc ', 'young ', 'lil ', 'big ', 'the ']
-        if len(name) < 15 and any(name_lower.startswith(prefix) for prefix in artist_prefixes):
+        # RÈGLE 6: Rejeter si commence par des préfixes typiques de producteurs
+        producer_prefixes = ['dj ', 'mc ', 'young ', 'lil ', 'big ']
+        if any(name_lower.startswith(prefix) for prefix in producer_prefixes):
+            logger.debug(f"🚫 Album rejeté car préfixe de producteur: '{name}'")
             return False
         
-        # CORRECTION 8: Patterns de titres de morceaux typiques (courts et descriptifs)
-        track_patterns = [
-            r'^[a-z\s]{3,15}$',  # Mots simples courts
-            r'^\w+\s\w+$',       # Deux mots simples
-        ]
+        # RÈGLE 7: Rejeter les patterns typiques de noms de producteurs
+        # Pattern : Nom + chiffres (ex: "Therapy 2093", "BBP 808")
+        import re
+        if re.match(r'^[a-z]+\s*\d{2,4}$', name_lower):
+            logger.debug(f"🚫 Album rejeté car pattern producteur (nom+chiffres): '{name}'")
+            return False
         
-        if len(name) < 20:  # Seulement pour les noms courts
-            for pattern in track_patterns:
-                if re.match(pattern, name_lower):
-                    return False
+        # RÈGLE 8: Si plus de 25 caractères, probablement un vrai album
+        if len(name) > 25:
+            logger.debug(f"✅ Album accepté car nom long: '{name}'")
+            return True
         
-        # Par défaut, accepter si aucun indicateur négatif trouvé
-        return True
+        # RÈGLE 9: Par défaut, rejeter si ambigu
+        logger.debug(f"⚠️ Album ambigu, rejeté par précaution: '{name}'")
+        return False
+
     
     def _extract_credits(self, track: Track) -> List[Credit]:
-        """Extrait les crédits de la page - VERSION AVEC MEILLEURE GESTION ALBUM"""
+        """Extrait les crédits de la page - VERSION SANS EXTRACTION D'ALBUM"""
         credits = []
         
         try:
@@ -444,30 +465,21 @@ class GeniusScraper:
                     
                 role_text = label_div.get_text(strip=True)
                 
-                # Trouver le conteneur des valeurs (noms)
+                # IMPORTANT: IGNORER LE CHAMP "ALBUM" DANS LES CRÉDITS
+                # Car c'est souvent le nom du producteur qui est mis là par erreur
+                if role_text.lower() == 'album':
+                    logger.debug(f"⚠️ Champ 'Album' ignoré dans les crédits (probablement erroné)")
+                    continue  # Passer au crédit suivant
+                
+                # Traiter les autres cas normalement
                 container_div = label_div.find_next_sibling("div")
                 if not container_div:
                     continue
                 
-                # Extraire les noms intelligemment
                 names = self._extract_names_intelligently(container_div)
                 
-                # CORRECTION: Gestion améliorée du cas "album"
-                if role_text.lower() == 'album':
-                    if names and not track.album:  # Seulement si manquant de l'API
-                        potential_album = ' '.join(names)
-                        
-                        # CORRECTION: Validation améliorée de l'album
-                        # Ne pas accepter si ça ressemble trop à un nom de producteur
-                        if self._is_valid_album_name(potential_album):
-                            track.album = potential_album
-                            logger.debug(f"💿 Album scrapé et validé: {track.album}")
-                        else:
-                            logger.debug(f"🚫 Album potentiel rejeté (probablement producteur): {potential_album}")
-                    continue
-                
-                # Traiter les autres cas spéciaux normalement
-                elif role_text.lower() == 'released on':
+                # Gérer la date de sortie
+                if role_text.lower() == 'released on':
                     if names and not track.release_date:
                         date_text = ' '.join(names)
                         parsed_date = self._parse_release_date(date_text)
@@ -475,14 +487,15 @@ class GeniusScraper:
                             track.release_date = parsed_date
                             logger.debug(f"📅 Date de sortie scrapée: {date_text}")
                     continue
-                    
+                
+                # Gérer le genre
                 elif role_text.lower() == 'genre':
                     if names and not track.genre:
                         track.genre = ', '.join(names)
                         logger.debug(f"🎵 Genre scrapé: {track.genre}")
                     continue
                 
-                # Créer les objets Credit pour chaque nom
+                # Créer les crédits normaux
                 role_enum = self._map_genius_role_to_enum(role_text)
                 if not role_enum:
                     role_enum = CreditRole.OTHER
@@ -498,23 +511,12 @@ class GeniusScraper:
                         credits.append(credit)
                         logger.debug(f"Crédit créé: {name.strip()} - {role_enum.value}")
             
-            # Dédoublonner les crédits
-            credits = self._deduplicate_credits(credits)
+            # Dédoublonner et retourner
+            return self._deduplicate_credits(credits)
             
-            logger.info(f"Extraction terminée : {len(credits)} crédits uniques trouvés")
-            
-            # Debug si aucun crédit trouvé
-            if not credits:
-                self._debug_no_credits_found(soup)
-
-        except TimeoutException:
-            logger.warning("Timeout en attendant les crédits")
         except Exception as e:
             logger.error(f"Erreur lors de l'extraction des crédits: {e}")
-            import traceback
-            logger.debug(f"Traceback complet: {traceback.format_exc()}")
-        
-        return credits
+            return credits
     
     def _extract_names_intelligently(self, container_div) -> List[str]:
         """Extrait les noms depuis le conteneur de manière intelligente - MÉTHODE RESTAURÉE"""

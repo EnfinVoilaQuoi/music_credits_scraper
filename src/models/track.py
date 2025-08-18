@@ -294,6 +294,38 @@ class Track:
             logger.debug(f"Erreur get_writers: {e}")
             return []
         
+    @property
+    def producers(self):
+        """Propriété pour la compatibilité avec l'interface - retourne get_producers()"""
+        return self.get_producers()
+    
+    @property
+    def writers(self):
+        """Propriété pour la compatibilité avec l'interface - retourne get_writers()"""
+        return self.get_writers()
+    
+    @property
+    def featured_artists_list(self):
+        """Retourne la liste des featured artists depuis les crédits ou le champ featured_artists"""
+        # D'abord essayer le champ featured_artists (string)
+        if hasattr(self, 'featured_artists') and self.featured_artists:
+            # Si c'est une string avec des virgules, la splitter
+            if isinstance(self.featured_artists, str):
+                return [a.strip() for a in self.featured_artists.split(',') if a.strip()]
+            return self.featured_artists
+        
+        # Sinon, extraire depuis les crédits
+        try:
+            featured_credits = self.get_credits_by_role(CreditRole.FEATURED)
+            return [c.name for c in featured_credits if hasattr(c, 'name')]
+        except Exception:
+            return []
+    
+    @property
+    def credits_scraped(self):
+        """Retourne True si le track a des crédits complets"""
+        return self.has_complete_credits()
+
     def has_complete_credits(self) -> bool:
         """Vérifie si les crédits semblent complets - VERSION ROBUSTE"""
         try:
@@ -570,7 +602,7 @@ class Track:
             'last_scraped': self.last_scraped.isoformat() if self.last_scraped else None,
             'scraping_errors': self.scraping_errors
         }
-    
+
     def _start_lyrics_scraping(self):
         """Lance le scraping des paroles pour les morceaux sélectionnés"""
         if not self.current_artist or not self.current_artist.tracks:

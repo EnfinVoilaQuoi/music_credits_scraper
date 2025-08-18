@@ -43,7 +43,7 @@ class MainWindow:
         # Variables
         self.is_scraping = False
         self.selected_tracks = set()  # Stocker les morceaux sélectionnés
-        self.disabled_track_ids = set()  # Stocker les morceaux désactivés
+        self.disabled_track = set()  # Stocker les morceaux désactivés
         self.last_selected_index = None  # Sélection multiple
         self.disabled_tracks_manager = DisabledTracksManager()
         
@@ -171,9 +171,10 @@ class MainWindow:
         # Progress bar
         self.progress_var = ctk.DoubleVar()
         self.progress_bar = ctk.CTkProgressBar(control_frame, variable=self.progress_var, width=200)
-        
+        self.progress_bar.pack(side="left", padx=10)  # IMPORTANT : faire le pack()
         self.progress_bar.set(0)
-        
+        self.progress_bar.pack_forget()  # Puis la cacher immédiatement
+
         self.progress_label = ctk.CTkLabel(control_frame, text="")
         self.progress_label.pack(side="left")
         
@@ -285,7 +286,7 @@ class MainWindow:
         self.stats_label.pack()
 
     def _populate_tracks_table(self):
-        """Remplit le tableau avec les morceaux - VERSION CORRIGÉE"""
+        """Remplit le tableau avec les morceaux"""
         # Nettoyer le tableau
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -293,7 +294,7 @@ class MainWindow:
         if not self.current_artist or not getattr(self.current_artist, 'tracks', None):
             return
 
-        # Charger les morceaux désactivés depuis la mémoire (sûr)
+        # Charger les morceaux désactivés depuis la mémoire
         try:
             self.disabled_tracks = self.disabled_tracks_manager.load_disabled_tracks(self.current_artist.name)
         except Exception:
@@ -306,76 +307,59 @@ class MainWindow:
 
         for i, track in enumerate(self.current_artist.tracks):
             try:
-                # ID unique (fallback sécurisé même si track.artist est None)
-                track_artist_name = track.artist.name if getattr(track, 'artist', None) else self.current_artist.name
-                track_id = track.id if hasattr(track, 'id') and track.id else f"{track.title}_{track_artist_name}"
-
-                # Déterminer si désactivé (on supporte indices et IDs par sécurité)
-                is_disabled = (i in getattr(self, 'disabled_tracks', set())) or (track_id in getattr(self, 'disabled_track_ids', set()))
-
-                # Statut des paroles
-                if getattr(track, 'lyrics', None):
-                    lyrics_status = "✅"
-                elif getattr(track, 'genius_url', None):
-                    lyrics_status = "📝"
-                else:
-                    lyrics_status = "❌"
-                if is_disabled:
-                    lyrics_status = f"⊘ {lyrics_status}"
-
-                # Statut d'enrichissement
-                enrichment_status = self._get_enrichment_status(track)
-                if is_disabled:
-                    enrichment_status = f"⊘ {enrichment_status}"
-
-                # Artiste affiché
-                if getattr(track, 'is_featuring', False):
-                    artist_display = getattr(track, 'primary_artist_name', track_artist_name)
-                else:
-                    artist_display = track.artist.name if getattr(track, 'artist', None) else self.current_artist.name
-
-                # BPM affiché
-                bpm_display = str(getattr(track, 'bpm', 'N/A')) if getattr(track, 'bpm', None) else "N/A"
-
-                # Tags (index obligatoire pour retrouver le track)
+                # Déterminer si désactivé PAR INDICE
+                is_disabled = i in self.disabled_tracks
+                
+                # Utiliser les propriétés du modèle Track (avec fallback sécurisé)
+                values = (
+                    track.title or "N/A",
+                    track.album or "",
+                    track.release_date or "",
+                    ", ".join(track.featured_artists_list) if hasattr(track, 'featured_artists_list') else "",
+                    ", ".join(track.producers) if hasattr(track, 'producers') else "",
+                    ", ".join(track.writers) if hasattr(track, 'writers') else "",
+                    "✓" if (hasattr(track, 'credits_scraped') and track.credits_scraped) else "",
+                    track.genius_url or ""
+                )
+                
+                # Tags
                 tags = (str(i),)
                 if is_disabled:
                     tags = (str(i), "disabled")
-
-                # Insérer la ligne avec toutes les colonnes
+                
+                # Insérer la ligne
                 self.tree.insert(
                     "", "end",
                     text="⊘" if is_disabled else "☐",
-                    values=(
-                        track.title or "N/A",
-                        artist_display,
-                        getattr(track, 'album', "N/A") or "N/A",
-                        self._format_date(getattr(track, 'release_date', None)) if getattr(track, 'release_date', None) else "N/A",
-                        self._get_credits_count(track),
-                        lyrics_status,
-                        bpm_display,
-                        enrichment_status
-                    ),
+                    values=values,
                     tags=tags
                 )
-
-                # Si actif, ajouter à la sélection par défaut (optionnel)
+                
+                # Si actif, ajouter à la sélection par défaut
                 if not is_disabled:
                     self.selected_tracks.add(i)
-
+                    
             except Exception as e:
-                logger.error(f"Erreur ajout track idx={i}, title={getattr(track, 'title', 'unknown')}: {e}", exc_info=True)
-
+                logger.error(f"Erreur ajout track idx={i}: {e}")
+                # En cas d'erreur, ajouter une ligne minimale
+                try:
+                    self.tree.insert(
+                        "", "end",
+                        text="☐",
+                        values=(
+                            getattr(track, 'title', f"Track {i}"),
+                            "", "", "", "", "", "", ""
+                        ),
+                        tags=(str(i),)
+                    )
+                except:
+                    pass
+        
         # Style pour morceaux désactivés
-        try:
-            self.tree.tag_configure("disabled", foreground="gray", background="#2a2a2a")
-        except Exception:
-            pass
-
+        self.tree.tag_configure("disabled", foreground="gray", background="#2a2a2a")
+        
         self._update_selection_count()
         self._update_buttons_state()
-        logger.info(f"Tableau mis à jour: {len(self.current_artist.tracks)} morceaux, {len(getattr(self, 'disabled_tracks', []))} désactivés")
-
 
     def _on_tree_click(self, event):
         """Gère les clics sur le tableau avec sélection multiple"""
@@ -387,15 +371,11 @@ class MainWindow:
                 if tags:
                     index = int(tags[0])
                     
-                    # Récupérer le track pour avoir son ID
-                    if 0 <= index < len(self.current_artist.tracks):
-                        track = self.current_artist.tracks[index]
-                        track_id = track.id if hasattr(track, 'id') and track.id else f"{track.title}_{track.artist.name}"
-                        
-                        # Vérifier si le track est désactivé par son ID
-                        if track_id in self.disabled_track_ids:
-                            return  # Ignorer le clic si désactivé
+                    # Vérifier si désactivé PAR INDICE
+                    if index in self.disabled_tracks:
+                        return  # Ignorer le clic si désactivé
                     
+                    # Gestion normale de la sélection
                     if event.state & 0x1:  # Shift key
                         self._handle_shift_selection(index)
                     else:
@@ -492,66 +472,66 @@ class MainWindow:
                     context_menu.grab_release()
 
     def _disable_selected_tracks(self):
-        """Désactive les morceaux sélectionnés et sauvegarde"""
+        """Désactive les morceaux sélectionnés"""
         if not self.selected_tracks:
-            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
+            messagebox.showwarning("Aucune sélection", "Veuillez sélectionner des morceaux à désactiver")
             return
         
-        # Ajouter les morceaux sélectionnés aux désactivés
-        newly_disabled = set()
-        for track_index in self.selected_tracks:
-            if track_index not in self.disabled_tracks:
-                self.disabled_tracks.add(track_index)
-                newly_disabled.add(track_index)
-        
-        if newly_disabled:
-            # ✅ NOUVEAU: Sauvegarder automatiquement
+        try:
+            # Ajouter aux morceaux désactivés (utiliser indices)
+            self.disabled_tracks.update(self.selected_tracks)
+            
+            # Sauvegarder
             if self.current_artist:
-                success = self.disabled_tracks_manager.save_disabled_tracks(
+                self.disabled_tracks_manager.save_disabled_tracks(
                     self.current_artist.name, 
                     self.disabled_tracks
                 )
-                if success:
-                    logger.info(f"Sauvegarde automatique: {len(newly_disabled)} morceaux désactivés")
             
-            # Désélectionner tous les morceaux
+            # Vider la sélection
             self.selected_tracks.clear()
             
             # Rafraîchir l'affichage
             self._populate_tracks_table()
             
-            messagebox.showinfo("Succès", f"{len(newly_disabled)} morceaux désactivés et sauvegardés")
+            logger.info(f"Morceaux désactivés: {len(self.disabled_tracks)} au total")
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la désactivation: {e}")
+            self._show_error("Erreur", f"Impossible de désactiver les morceaux: {e}")
 
     def _enable_selected_tracks(self):
-        """Réactive les morceaux sélectionnés et sauvegarde - ✅ MODIFIÉ"""
-        if not self.selected_tracks:
-            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
+        """Réactive les morceaux sélectionnés"""
+        if not self.disabled_tracks:
+            messagebox.showinfo("Info", "Aucun morceau désactivé")
             return
         
-        # Retirer les morceaux sélectionnés des désactivés
-        newly_enabled = set()
-        for track_index in self.selected_tracks:
-            if track_index in self.disabled_tracks:
-                self.disabled_tracks.remove(track_index)
-                newly_enabled.add(track_index)
-        
-        if newly_enabled:
-            # ✅ NOUVEAU: Sauvegarder automatiquement
+        try:
+            # Créer une copie pour éviter les modifications pendant l'itération
+            tracks_to_enable = set()
+            
+            # Parcourir tous les morceaux désactivés
+            for idx in self.disabled_tracks:
+                tracks_to_enable.add(idx)
+            
+            # Retirer des morceaux désactivés
+            self.disabled_tracks.clear()
+            
+            # Sauvegarder
             if self.current_artist:
-                success = self.disabled_tracks_manager.save_disabled_tracks(
+                self.disabled_tracks_manager.save_disabled_tracks(
                     self.current_artist.name, 
                     self.disabled_tracks
                 )
-                if success:
-                    logger.info(f"Sauvegarde automatique: {len(newly_enabled)} morceaux réactivés")
-            
-            # Désélectionner tous les morceaux
-            self.selected_tracks.clear()
             
             # Rafraîchir l'affichage
             self._populate_tracks_table()
             
-            messagebox.showinfo("Succès", f"{len(newly_enabled)} morceaux réactivés et sauvegardés")
+            logger.info(f"Tous les morceaux ont été réactivés")
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la réactivation: {e}")
+            self._show_error("Erreur", f"Impossible de réactiver les morceaux: {e}")
 
     def _disable_track(self, index: int):
         """Désactive un morceau spécifique - ✅ NOUVEAU"""
@@ -569,156 +549,84 @@ class MainWindow:
         self._update_selection_count()
 
     def _sort_column(self, col):
-        """Trie les morceaux selon la colonne sélectionnée - VERSION CORRIGÉE DATE"""
+        """Trie les morceaux selon la colonne"""
         if not self.current_artist or not self.current_artist.tracks:
             return
         
         try:
-            # Sauvegarder les IDs des tracks sélectionnés (pas les indices)
-            selected_track_ids = set()
-            for track_index in self.selected_tracks:
-                if 0 <= track_index < len(self.current_artist.tracks):
-                    track = self.current_artist.tracks[track_index]
-                    track_id = track.id if hasattr(track, 'id') and track.id else f"{track.title}_{track.artist.name}"
-                    selected_track_ids.add(track_id)
-
-            # Sauvegarder les sélections
-            selected_track_ids = set()
-            for track_index in self.selected_tracks:
-                if 0 <= track_index < len(self.current_artist.tracks):
-                    track = self.current_artist.tracks[track_index]
-                    if hasattr(track, 'id') and track.id:
-                        selected_track_ids.add(track.id)
+            # Sauvegarder les sélections ET désactivations PAR TITRE
+            # (car les indices vont changer après le tri)
+            selected_track_titles = set()
+            for idx in self.selected_tracks:
+                if 0 <= idx < len(self.current_artist.tracks):
+                    selected_track_titles.add(self.current_artist.tracks[idx].title)
             
-            # Sauvegarder les désactivations - ✅ NOUVEAU
-            disabled_track_ids = set()
-            for track_index in self.disabled_tracks:
-                if 0 <= track_index < len(self.current_artist.tracks):
-                    track = self.current_artist.tracks[track_index]
-                    if hasattr(track, 'id') and track.id:
-                        disabled_track_ids.add(track.id)
+            disabled_track_titles = set()
+            for idx in self.disabled_tracks:
+                if 0 <= idx < len(self.current_artist.tracks):
+                    disabled_track_titles.add(self.current_artist.tracks[idx].title)
             
-            # Basculer l'ordre de tri
-            reverse = self.sort_reverse.get(col, False)
-            self.sort_reverse[col] = not reverse
+            # Déterminer l'ordre de tri
+            reverse = False
+            if col == self.sort_column:
+                reverse = not self.sort_reverse
             
-            # Créer liste avec index
-            tracks_with_index = [(i, track) for i, track in enumerate(self.current_artist.tracks)]
+            # Fonction de tri selon la colonne
+            sort_key = None
+            if col == "Titre":
+                sort_key = lambda t: (t.title or "").lower()
+            elif col == "Album":
+                sort_key = lambda t: (t.album or "").lower()
+            elif col == "Date":
+                sort_key = lambda t: t.release_date or ""
+            elif col == "Feat.":
+                sort_key = lambda t: ", ".join(t.featured_artists) if t.featured_artists else ""
+            elif col == "Producteurs":
+                sort_key = lambda t: ", ".join(t.producers) if t.producers else ""
+            elif col == "Writers":
+                sort_key = lambda t: ", ".join(t.writers) if t.writers else ""
+            elif col == "Crédits":
+                sort_key = lambda t: t.credits_scraped
             
-            # Fonction de tri
-            def sort_key(item):
-                index, track = item
-                
-                try:
-                    if col == "Titre":
-                        if hasattr(track, 'get_display_title'):
-                            return track.get_display_title().lower()
-                        return (track.title or "").lower()
-                    elif col == "Artiste principal":
-                        if hasattr(track, 'get_display_artist'):
-                            return track.get_display_artist().lower()
-                        return (track.artist.name if track.artist else "").lower()
-                    elif col == "Album":
-                        return (track.album or "zzz").lower()
-                    elif col == "Date sortie":
-                        # ✅ CORRECTION: Améliorer le tri par date
-                        if track.release_date:
-                            # Si c'est un objet datetime, le retourner directement
-                            if hasattr(track.release_date, 'year'):
-                                return track.release_date
-                            # Si c'est une chaîne, essayer de la parser
-                            else:
-                                try:
-                                    date_str = str(track.release_date)[:10]  # YYYY-MM-DD
-                                    return datetime.strptime(date_str, '%Y-%m-%d')
-                                except:
-                                    return datetime.min if reverse else datetime.max
-                        else:
-                            return datetime.min if reverse else datetime.max
-                    elif col == "Crédits":
-                        try:
-                            music_credits = track.get_music_credits()
-                            return len(music_credits) if music_credits else 0
-                        except:
-                            return 0
-                    elif col == "Paroles":
-                        try:
-                            has_lyrics = (hasattr(track, 'lyrics') and 
-                                        track.lyrics is not None and 
-                                        len(str(track.lyrics).strip()) > 0 and
-                                        str(track.lyrics).strip() not in ['None', 'NULL'])
-                            return 1 if has_lyrics else 0
-                        except:
-                            return 0
-                    elif col == "BPM":
-                        return track.bpm if track.bpm is not None else 0
-                    elif col == "Statut":
-                        try:
-                            has_credits = False
-                            has_lyrics = False
-                            has_bpm = False
-                            
-                            try:
-                                music_credits = track.get_music_credits()
-                                has_credits = len(music_credits) > 0 if music_credits else False
-                            except:
-                                pass
-                            
-                            try:
-                                has_lyrics = (hasattr(track, 'lyrics') and 
-                                            track.lyrics is not None and 
-                                            len(str(track.lyrics).strip()) > 0)
-                            except:
-                                pass
-                            
-                            try:
-                                has_bpm = (track.bpm is not None and track.bpm > 0)
-                            except:
-                                pass
-                            
-                            data_count = sum([has_credits, has_lyrics, has_bpm])
-                            
-                            if data_count == 0:
-                                return 0  # ❌
-                            elif data_count >= 3:
-                                return 2  # ✅
-                            else:
-                                return 1  # ⚠️
-                        except:
-                            return -1  # Erreur
-                except Exception as e:
-                    print(f"Erreur tri colonne {col}: {e}")
-                    return ""
-                
-                return ""
+            if sort_key:
+                # Trier les morceaux
+                self.current_artist.tracks.sort(key=sort_key, reverse=reverse)
             
-            # Trier
-            tracks_with_index.sort(key=sort_key, reverse=reverse)
-            
-            # Réorganiser
-            self.current_artist.tracks = [track for index, track in tracks_with_index]
-            
-            # Après le tri, restaurer les sélections basées sur les IDs
+            # Après le tri, restaurer par titre
             self.selected_tracks.clear()
-            for new_index, track in enumerate(self.current_artist.tracks):
-                track_id = track.id if hasattr(track, 'id') and track.id else f"{track.title}_{track.artist.name}"
-                if track_id in selected_track_ids:
-                    self.selected_tracks.add(new_index)
+            self.disabled_tracks.clear()
             
-            # Recréer affichage
+            for new_idx, track in enumerate(self.current_artist.tracks):
+                if track.title in selected_track_titles:
+                    self.selected_tracks.add(new_idx)
+                if track.title in disabled_track_titles:
+                    self.disabled_tracks.add(new_idx)
+            
+            # Sauvegarder les nouveaux indices des morceaux désactivés
+            if self.current_artist:
+                self.disabled_tracks_manager.save_disabled_tracks(
+                    self.current_artist.name, 
+                    self.disabled_tracks
+                )
+            
+            # Mettre à jour les variables de tri
+            self.sort_column = col
+            self.sort_reverse = reverse
+            
+            # Recréer l'affichage
             self._populate_tracks_table()
             
-            # Mettre à jour en-tête
-            direction = "↓" if reverse else "↑"
-            self.tree.heading(col, text=f"{col} {direction}")
-            
-            # Réinitialiser autres en-têtes
-            for other_col in ["Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "Paroles", "BPM", "Statut"]:
-                if other_col != col:
-                    self.tree.heading(other_col, text=other_col)
+            # Mettre à jour l'indicateur de tri dans l'en-tête
+            for column in self.tree["columns"]:
+                if column == col:
+                    indicator = " ▲" if not reverse else " ▼"
+                    self.tree.heading(column, text=column + indicator)
+                else:
+                    self.tree.heading(column, text=column)
                     
         except Exception as e:
-            print(f"Erreur générale dans _sort_column: {e}")
+            logger.error(f"Erreur lors du tri: {e}")
+            self._show_error("Erreur de tri", str(e))
 
     def _show_track_details_by_index(self, index: int):
         """Affiche les détails d'un morceau par son index - ✅ NOUVEAU"""
@@ -1995,46 +1903,130 @@ class MainWindow:
             return f"Erreur: {str(e)}"
 
     def _start_scraping(self):
-        """Lance le scraping des crédits - ✅ MODIFIÉ POUR IGNORER LES DÉSACTIVÉS"""
-        if not self.current_artist or not self.current_artist.tracks:
+        """Lance le scraping pour l'artiste sélectionné"""
+        if not self.artist_var.get():
+            messagebox.showwarning("Aucun artiste", "Veuillez sélectionner un artiste")
             return
         
+        artist_name = self.artist_var.get()
+        
+        # Vérifier si déjà en cours
         if self.is_scraping:
-            messagebox.showwarning("Attention", "Un scraping est déjà en cours")
+            messagebox.showinfo("Scraping en cours", "Un scraping est déjà en cours. Veuillez patienter.")
             return
         
-        # ✅ MODIFIÉ: Filtrer les morceaux actifs seulement
-        if not self.selected_tracks:
-            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
-            return
-        
-        # Filtrer les morceaux sélectionnés ET actifs
-        selected_tracks_list = []
-        for i in sorted(self.selected_tracks):
-            if i not in self.disabled_tracks:  # ✅ NOUVEAU: Exclure les désactivés
-                selected_tracks_list.append(self.current_artist.tracks[i])
-        
-        if not selected_tracks_list:
-            messagebox.showwarning("Attention", "Tous les morceaux sélectionnés sont désactivés")
-            return
-        
-        # Confirmation
-        disabled_count = len(self.selected_tracks) - len(selected_tracks_list)
-        confirm_msg = f"Voulez-vous scraper les crédits de {len(selected_tracks_list)} morceaux sélectionnés ?\n"
-        if disabled_count > 0:
-            confirm_msg += f"\n⚠️ {disabled_count} morceaux désactivés seront ignorés.\n"
-        confirm_msg += "Cela peut prendre plusieurs minutes."
-        
-        result = messagebox.askyesno("Confirmation", confirm_msg)
-        
-        if not result:
-            return
-        
-        self.is_scraping = True
-        # Afficher la barre de progression (thread-safe)
+        # Afficher la barre de progression
         self._show_progress_bar()
-        self.root.after(0, self._hide_progress_bar)
-
+        self.is_scraping = True
+        self._update_buttons_state()
+        
+        # Lancer le scraping dans un thread séparé
+        def scraping_thread():
+            try:
+                logger.info(f"Début du scraping pour {artist_name}")
+                
+                # Créer ou récupérer l'artiste
+                artist = self.data_manager.get_or_create_artist(artist_name)
+                
+                # Initialiser le scraper
+                if not self.scraper:
+                    self.scraper = GeniusScraper(headless=self.headless_var.get())
+                
+                # Callback pour la progression
+                def progress_callback(current, total, message=""):
+                    self.root.after(0, self._update_progress, current, total, message)
+                
+                # Scraper la liste des morceaux si nécessaire
+                if not artist.tracks:
+                    self.root.after(0, lambda: self.progress_label.configure(text="Récupération de la liste des morceaux..."))
+                    tracks = self.scraper.scrape_artist_tracks(artist_name)
+                    
+                    if tracks:
+                        # Sauvegarder les morceaux
+                        for track_data in tracks:
+                            track = self.data_manager.add_track(
+                                artist_id=artist.id,
+                                title=track_data.get('title'),
+                                genius_url=track_data.get('url'),
+                                is_cover=track_data.get('is_cover', False)
+                            )
+                        
+                        # Recharger l'artiste avec les morceaux
+                        artist = self.data_manager.get_artist(artist.id)
+                        
+                        logger.info(f"{len(tracks)} morceaux trouvés pour {artist_name}")
+                    else:
+                        logger.warning(f"Aucun morceau trouvé pour {artist_name}")
+                        self.root.after(0, lambda: messagebox.showwarning("Aucun morceau", 
+                            f"Aucun morceau trouvé pour {artist_name} sur Genius"))
+                        return
+                
+                # Charger les morceaux désactivés
+                disabled_track_indices = self.disabled_tracks_manager.load_disabled_tracks(artist_name)
+                
+                # Filtrer les morceaux actifs (non désactivés)
+                active_tracks = []
+                for i, track in enumerate(artist.tracks):
+                    if i not in disabled_track_indices:
+                        active_tracks.append(track)
+                
+                if not active_tracks:
+                    self.root.after(0, lambda: messagebox.showinfo("Info", 
+                        "Tous les morceaux sont désactivés. Activez des morceaux pour les scraper."))
+                    return
+                
+                # Scraper les crédits des morceaux actifs
+                tracks_to_scrape = [t for t in active_tracks if not t.credits_scraped]
+                
+                if tracks_to_scrape:
+                    logger.info(f"Scraping des crédits pour {len(tracks_to_scrape)} morceaux")
+                    
+                    for i, track in enumerate(tracks_to_scrape):
+                        if not self.is_scraping:  # Vérifier l'annulation
+                            break
+                        
+                        # Mettre à jour la progression
+                        progress_callback(i + 1, len(tracks_to_scrape), f"Scraping: {track.title[:50]}...")
+                        
+                        # Scraper les crédits
+                        credits = self.scraper.scrape_track_credits(track)
+                        
+                        # Sauvegarder les crédits
+                        if credits:
+                            self.data_manager.save_credits(track.id, credits)
+                        
+                        # Mettre à jour le morceau
+                        self.data_manager.update_track(track)
+                        
+                        # Pause entre les requêtes
+                        if i < len(tracks_to_scrape) - 1:
+                            time.sleep(2)
+                else:
+                    logger.info(f"Tous les morceaux actifs ont déjà leurs crédits")
+                
+                # Recharger l'artiste final
+                self.current_artist = self.data_manager.get_artist(artist.id)
+                
+                # Rafraîchir l'affichage
+                self.root.after(0, self._populate_tracks_table)
+                
+                # Message de succès
+                self.root.after(0, lambda: self._show_success("Scraping terminé", 
+                    f"Scraping terminé pour {artist_name}"))
+                
+            except Exception as e:
+                logger.error(f"Erreur lors du scraping: {e}", exc_info=True)
+                self.root.after(0, lambda: self._show_error("Erreur de scraping", str(e)))
+            
+            finally:
+                self.is_scraping = False
+                # Masquer la barre de progression dans le thread principal
+                self.root.after(0, self._hide_progress_bar)
+                self.root.after(0, self._update_buttons_state)
+        
+        # Démarrer le thread
+        thread = threading.Thread(target=scraping_thread, daemon=True)
+        thread.start()
         
         def update_progress(current, total, track_name):
             """Callback de progression"""
@@ -2202,23 +2194,20 @@ class MainWindow:
         threading.Thread(target=scrape_lyrics, daemon=True).start()
 
     def _force_update_selected(self):
-        """Force la mise à jour des morceaux sélectionnés (efface les anciens crédits)"""
-        if not self.current_artist or not self.current_artist.tracks:
+        """Force la mise à jour des morceaux sélectionnés"""
+        if not self.current_artist or not self.selected_tracks:
+            messagebox.showwarning("Aucune sélection", "Veuillez sélectionner des morceaux à mettre à jour")
             return
         
-        if not self.selected_tracks:
-            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
-            return
-        
-        # Filtrer les morceaux sélectionnés ET actifs
+        # Préparer la liste des morceaux à mettre à jour (filtrer les désactivés)
         selected_tracks_list = []
         for i in sorted(self.selected_tracks):
-            track = self.current_artist.tracks[i]
-            track_id = track.id if hasattr(track, 'id') and track.id else f"{track.title}_{track.artist.name}"
-            
-            # Vérifier que le track n'est pas désactivé
-            if track_id not in self.disabled_track_ids:
-                selected_tracks_list.append(track)
+            if i not in self.disabled_tracks:  # CORRECTION: Utiliser disabled_tracks (indices) pas disabled_track_ids
+                selected_tracks_list.append(self.current_artist.tracks[i])
+        
+        if not selected_tracks_list:
+            messagebox.showwarning("Aucun morceau actif", "Tous les morceaux sélectionnés sont désactivés")
+            return
         
         # Confirmation avec avertissement
         result = messagebox.askyesno(
@@ -2251,23 +2240,29 @@ class MainWindow:
         if not final_confirm:
             return
         
-        self.is_scraping = True
-        self.force_update_button.configure(state="disabled", text="🔄 Mise à jour...")
-        self.scrape_button.configure(state="disabled")
-        self.progress_bar.set(0)
-        self._show_progress_bar()
-        self.root.after(0, self._hide_progress_bar)
+        # Vérifier si déjà en cours
+        if self.is_scraping:
+            messagebox.showinfo("Scraping en cours", "Un scraping est déjà en cours. Veuillez patienter.")
+            return
         
+        # Afficher la barre de progression CORRECTEMENT
+        self._show_progress_bar()
+        self.is_scraping = True
+        self._update_buttons_state()
+        
+        # Fonction de callback pour la progression (locale à cette méthode)
         def update_progress(current, total, track_name):
             """Callback de progression"""
-            progress = current / total
+            progress = current / total if total > 0 else 0
             self.root.after(0, lambda: self.progress_var.set(progress))
             self.root.after(0, lambda: self.progress_label.configure(
                 text=f"🔄 {current}/{total} - {track_name[:30]}..."
             ))
-            # Mettre à jour la ligne dans le tableau
-            self.root.after(0, lambda: self._update_track_in_table(track_name))
+            # Mettre à jour la ligne dans le tableau si la méthode existe
+            if hasattr(self, '_update_track_in_table'):
+                self.root.after(0, lambda: self._update_track_in_table(track_name))
         
+        # Thread de mise à jour
         def force_update():
             scraper = None
             try:
@@ -2276,79 +2271,130 @@ class MainWindow:
                 # ✅ ÉTAPE 1: Nettoyer les anciens crédits
                 self.root.after(0, lambda: self.progress_label.configure(text="🧹 Nettoyage des anciens crédits..."))
                 
-                cleanup_results = self.data_manager.force_update_multiple_tracks(
-                    selected_tracks_list, 
-                    progress_callback=lambda i, t, n: self.root.after(0, lambda: self.progress_label.configure(text=f"🧹 Nettoyage {i}/{t}"))
-                )
+                # Utiliser la méthode du data_manager si elle existe
+                if hasattr(self.data_manager, 'force_update_multiple_tracks'):
+                    cleanup_results = self.data_manager.force_update_multiple_tracks(
+                        selected_tracks_list, 
+                        progress_callback=lambda i, t, n: self.root.after(0, lambda: self.progress_label.configure(text=f"🧹 Nettoyage {i}/{t}"))
+                    )
+                    total_before = cleanup_results.get('total_credits_before', 0)
+                    total_after = cleanup_results.get('total_credits_after', 0)
+                else:
+                    # Alternative : supprimer manuellement les crédits
+                    total_before = sum(len(getattr(t, 'credits', [])) for t in selected_tracks_list)
+                    for track in selected_tracks_list:
+                        if hasattr(self.data_manager, 'delete_credits'):
+                            self.data_manager.delete_credits(track.id)
+                        track.credits_scraped = False
+                    total_after = 0
                 
                 # ✅ ÉTAPE 2: Re-scraper les morceaux
                 self.root.after(0, lambda: self.progress_label.configure(text="🔍 Re-scraping des crédits..."))
                 
-                scraper = GeniusScraper(headless=True)
-                scraping_results = scraper.scrape_multiple_tracks(
-                    selected_tracks_list,
-                    progress_callback=update_progress
-                )
+                # Initialiser le scraper
+                if not self.scraper:
+                    self.scraper = GeniusScraper(headless=self.headless_var.get())
                 
-                # ✅ ÉTAPE 3: Sauvegarder les nouveaux crédits
+                # Scraper chaque morceau
+                success_count = 0
+                failed_count = 0
+                
+                for i, track in enumerate(selected_tracks_list):
+                    if not self.is_scraping:  # Vérifier l'annulation
+                        break
+                    
+                    try:
+                        # Mettre à jour la progression
+                        update_progress(i + 1, len(selected_tracks_list), track.title)
+                        
+                        # Scraper les crédits
+                        credits = self.scraper.scrape_track_credits(track)
+                        
+                        # Sauvegarder les crédits
+                        if credits:
+                            self.data_manager.save_credits(track.id, credits)
+                            success_count += 1
+                        
+                        # Mettre à jour le morceau
+                        self.data_manager.update_track(track)
+                        
+                        # Pause entre les requêtes
+                        if i < len(selected_tracks_list) - 1:
+                            time.sleep(2)
+                            
+                    except Exception as e:
+                        logger.error(f"Erreur scraping {track.title}: {e}")
+                        failed_count += 1
+                
+                # ✅ ÉTAPE 3: Compter les résultats finaux
+                final_credits = sum(len(getattr(t, 'credits', [])) for t in selected_tracks_list)
+                
+                # Calculer les crédits musicaux et vidéo si les méthodes existent
+                music_credits = 0
+                video_credits = 0
                 for track in selected_tracks_list:
-                    track.artist = self.current_artist
-                    self.data_manager.force_update_track_credits(track)
+                    if hasattr(track, 'get_music_credits'):
+                        music_credits += len(track.get_music_credits())
+                    if hasattr(track, 'get_video_credits'):
+                        video_credits += len(track.get_video_credits())
                 
-                # Préparer le résumé
-                total_before = cleanup_results['total_credits_before']
-                total_after = cleanup_results['total_credits_after']
+                # Recharger l'artiste
+                self.current_artist = self.data_manager.get_artist(self.current_artist.id)
                 
-                # Compter les nouveaux crédits après scraping
-                final_credits = sum(len(t.credits) for t in selected_tracks_list)
-                music_credits = sum(len(t.get_music_credits()) for t in selected_tracks_list)
-                video_credits = sum(len(t.get_video_credits()) for t in selected_tracks_list)
+                # Rafraîchir l'affichage
+                self.root.after(0, self._populate_tracks_table)
                 
-                # Afficher le résumé détaillé
+                # Afficher le résumé
+                summary_message = f"✅ Mise à jour forcée terminée !\n\n"
+                summary_message += f"📊 RÉSULTATS:\n"
+                summary_message += f"• Morceaux traités: {len(selected_tracks_list)}\n"
+                summary_message += f"• Scraping réussi: {success_count}\n"
+                summary_message += f"• Scraping échoué: {failed_count}\n\n"
+                summary_message += f"🏷️ CRÉDITS:\n"
+                summary_message += f"• Avant: {total_before} crédits\n"
+                summary_message += f"• Après: {final_credits} crédits\n"
+                
+                if music_credits > 0 or video_credits > 0:
+                    summary_message += f"• 🎵 Musicaux: {music_credits}\n"
+                    summary_message += f"• 🎬 Vidéo: {video_credits}\n"
+                
                 self.root.after(0, lambda: messagebox.showinfo(
                     "🎉 Mise à jour forcée terminée",
-                    f"✅ Mise à jour forcée terminée avec succès !\n\n"
-                    f"📊 RÉSULTATS:\n"
-                    f"• Morceaux traités: {cleanup_results['updated']}/{len(selected_tracks_list)}\n"
-                    f"• Scraping réussi: {scraping_results['success']}\n"
-                    f"• Scraping échoué: {scraping_results['failed']}\n\n"
-                    f"🏷️ CRÉDITS:\n"
-                    f"• Avant: {total_before} crédits\n"
-                    f"• Après: {final_credits} crédits\n"
-                    f"• 🎵 Musicaux: {music_credits}\n"
-                    f"• 🎬 Vidéo: {video_credits}\n\n"
-                    f"✨ Les crédits sont maintenant séparés correctement !"
+                    summary_message
                 ))
                 
-                # Mettre à jour l'affichage
-                self.root.after(0, self._update_artist_info)
-                self.root.after(0, self._update_statistics)
+                # Mettre à jour les statistiques si les méthodes existent
+                if hasattr(self, '_update_artist_info'):
+                    self.root.after(0, self._update_artist_info)
+                if hasattr(self, '_update_statistics'):
+                    self.root.after(0, self._update_statistics)
+                
+                logger.info(f"Mise à jour forcée terminée: {success_count} réussis, {failed_count} échoués")
                 
             except Exception as err:
                 error_msg = str(err) if str(err) != "None" else "Erreur inconnue lors de la mise à jour forcée"
                 logger.error(f"❌ Erreur lors de la mise à jour forcée: {error_msg}", exc_info=True)
-                self.root.after(0, lambda: messagebox.showerror(
+                self.root.after(0, lambda: self._show_error(
                     "Erreur",
                     f"❌ Erreur lors de la mise à jour forcée:\n{error_msg}"
                 ))
+                
             finally:
-                # S'assurer que le scraper est fermé
-                if scraper:
+                # S'assurer que le scraper est fermé si on l'a créé localement
+                if scraper and scraper != self.scraper:
                     try:
                         scraper.close()
                     except:
                         pass
                 
                 self.is_scraping = False
-                self.root.after(0, lambda: self.force_update_button.configure(
-                    state="normal",
-                    text="🔄 Mise à jour forcée"
-                ))
-                self.root.after(0, lambda: self.scrape_button.configure(state="normal"))
-                self.root.after(0, lambda: self.progress_bar.set(0))
-                self.root.after(0, lambda: self.progress_label.configure(text=""))
+                # Masquer la barre de progression
+                self.root.after(0, self._hide_progress_bar)
+                self.root.after(0, self._update_buttons_state)
         
-        threading.Thread(target=force_update, daemon=True).start()
+        # Démarrer le thread
+        thread = threading.Thread(target=force_update, daemon=True)
+        thread.start()
 
     def _start_enrichment(self):
         """Lance l'enrichissement des données depuis toutes les sources - ✅ MODIFIÉ"""
@@ -2791,6 +2837,23 @@ class MainWindow:
 
     def _update_buttons_state(self):
         """Met à jour l'état des boutons selon le contexte"""
+        
+        # Si un scraping est en cours, désactiver certains boutons
+        if self.is_scraping:
+            self.scrape_button.configure(state="disabled")
+            if hasattr(self, 'force_update_button'):
+                self.force_update_button.configure(state="disabled")
+            if hasattr(self, 'get_tracks_button'):
+                self.get_tracks_button.configure(state="disabled")
+            if hasattr(self, 'stop_button'):
+                self.stop_button.configure(state="normal")
+            # On peut laisser export et autres boutons actifs pendant le scraping
+            return  # Sortir ici pour ne pas changer les autres états
+        
+        # Si pas de scraping en cours, appliquer la logique normale
+        if hasattr(self, 'stop_button'):
+            self.stop_button.configure(state="disabled")
+        
         if not self.current_artist:
             # Aucun artiste chargé
             self.get_tracks_button.configure(state="disabled")
@@ -2839,10 +2902,41 @@ class MainWindow:
             logger.debug(f"Erreur comptage crédits pour {getattr(track, 'title', 'unknown')}: {e}")
             return 0
 
+    def _update_progress(self, current, total, message=""):
+        """Met à jour la barre de progression"""
+        if total > 0:
+            progress = current / total
+            self.progress_bar.set(progress)
+            
+            # Texte de progression
+            if message:
+                text = f"{message} ({current}/{total})"
+            else:
+                text = f"Progression: {current}/{total}"
+            
+            self.progress_label.configure(text=text)
+
+    def _stop_scraping(self):
+        """Arrête le scraping en cours"""
+        if self.is_scraping:
+            response = messagebox.askyesno(
+                "Arrêter le scraping",
+                "Voulez-vous vraiment arrêter le scraping en cours ?"
+            )
+            
+            if response:
+                self.is_scraping = False
+                self.progress_label.configure(text="Arrêt en cours...")
+                logger.info("Arrêt du scraping demandé par l'utilisateur")
+                
+                # La barre sera cachée par le finally du thread
+
     def _show_progress_bar(self):
         """Affiche la barre de progression"""
         if not self.progress_bar.winfo_ismapped():
+            # Réafficher la barre avant le label
             self.progress_bar.pack(side="left", padx=10, before=self.progress_label)
+        self.progress_bar.set(0)
 
     def _hide_progress_bar(self):
         """Cache la barre de progression"""
@@ -2850,6 +2944,14 @@ class MainWindow:
             self.progress_bar.pack_forget()
         self.progress_bar.set(0)
         self.progress_label.configure(text="")
+
+    def _show_error(self, title, message):
+        """Affiche un message d'erreur"""
+        messagebox.showerror(title, message)
+
+    def _show_success(self, title, message):
+        """Affiche un message de succès"""
+        messagebox.showinfo(title, message)
 
     def run(self):
         """Lance l'application"""

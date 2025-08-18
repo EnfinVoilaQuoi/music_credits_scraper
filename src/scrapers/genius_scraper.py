@@ -126,99 +126,56 @@ class GeniusScraper:
             logger.info("Driver Selenium fermé")
     
     def scrape_track_credits(self, track: Track) -> List[Credit]:
-        """Scrape les crédits complets d'un morceau - VERSION CORRIGÉE"""
+        """Scrape les crédits complets d'un morceau"""
         if not track.genius_url:
             logger.warning(f"Pas d'URL Genius pour {track.title}")
             return []
-    
+        
         credits = []
-    
+        
         try:
             logger.info(f"Scraping des crédits pour: {track.title}")
             self.driver.get(track.genius_url)
-
-            logger.debug(f"URL visitée : {self.driver.current_url}")
-
-            # Gestion des cookies
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.ID, "onetrust-banner-sdk"))
-                )
-                accept_btn = WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
-                )
-                accept_btn.click()
-                logger.debug("✅ Cookies acceptés")
-                time.sleep(1)
-            except TimeoutException:
-                logger.debug("⚠️ Pas de bannière cookies")
-
-            # NOUVEAU: Extraire d'abord les métadonnées du header (album, numéro de piste)
-            self._extract_header_metadata(track)
-
-            # Aller à la section "Credits"
-            credits_header = WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'SongInfo__Title') and text()='Credits']"))
-            )
-            if not credits_header:
-                logger.error("❌ Aucun header Credits trouvé")
-                return credits
-            self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", credits_header)
+            
+            # Gérer les cookies si nécessaire
+            self._handle_cookies()
+            
+            # Attendre le chargement
             time.sleep(2)
-
-            # Bouton "Expand"
-            expand_button = self._find_expand_button()
-            if expand_button:
-                try:
-                    button_text = expand_button.text.strip()
-                    button_location = expand_button.location
-                    logger.debug(f"📍 Bouton sélectionné: '{button_text}' à position {button_location}")
-                    
-                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", expand_button)
-                    time.sleep(1)
-                
-                    self.driver.execute_script("arguments[0].click();", expand_button)
-                    logger.debug("Bouton Expand cliqué")
-                
-                    # Attendre que le contenu étendu soit visible
-                    try:
-                        WebDriverWait(self.driver, 10).until(
-                            lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "div[class*='SongInfo__Credit']")) > 0
-                        )
-                        time.sleep(2)
-                    except TimeoutException:
-                        logger.warning("Timeout en attendant le contenu étendu")
-                except Exception as e:
-                    logger.error(f"Erreur lors du clic sur le bouton Expand: {e}")
+            
+            # IMPORTANT : Extraire l'album depuis le header AVANT les crédits
+            self._extract_header_metadata(track)
+            
+            # Si on a trouvé un album dans le header, logger le succès
+            if track.album:
+                logger.info(f"✅ Album trouvé dans le header: '{track.album}'")
             else:
-                logger.debug("Aucun bouton Expand trouvé")
-
-            # ✅ CORRECTION : Extraire les crédits avec la bonne signature de méthode
+                logger.info(f"⚠️ Aucun album trouvé dans le header pour: {track.title}")
+            
+            # Ouvrir la section des crédits
+            try:
+                credits_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'ExpandableContent')]//span[contains(text(), 'Credits')]"))
+                )
+                self.driver.execute_script("arguments[0].click();", credits_button)
+                time.sleep(1)
+            except Exception as e:
+                logger.warning(f"Impossible d'ouvrir les crédits: {e}")
+                return credits
+            
+            # Extraire les crédits
             credits = self._extract_credits(track)
-
-            # Mettre à jour le track
-            track.last_scraped = datetime.now()
-            for credit in credits:
-                track.add_credit(credit)
-
-            logger.info(f"{len(credits)} crédits extraits pour {track.title}")
-
-        except TimeoutException:
-            error_msg = f"Timeout lors du scraping de {track.title}"
-            logger.error(error_msg)
-            track.scraping_errors.append(error_msg)
-            log_error(track.title, error_msg, "genius_scraper")
-
+            
+            # Marquer comme scrapé
+            track.credits_scraped = True
+            
+            logger.info(f"✅ {len(credits)} crédits trouvés pour {track.title}")
+            
+            return credits
+            
         except Exception as e:
-            error_msg = f"Erreur lors du scraping: {str(e)}"
-            logger.error(f"{error_msg} pour {track.title}")
-            track.scraping_errors.append(error_msg)
-            log_error(track.title, error_msg, "genius_scraper")
-
-        # Respecter le rate limit
-        time.sleep(DELAY_BETWEEN_REQUESTS)
-
-        return credits
+            logger.error(f"Erreur scraping crédits pour {track.title}: {e}")
+            return credits
     
     def _find_expand_button(self) -> Optional[Any]:
         """Trouve le bouton Expand spécifiquement dans la section Credits"""
@@ -300,60 +257,64 @@ class GeniusScraper:
             logger.error(f"Erreur lors de la recherche du bouton Expand: {e}")
             return None
 
-    def _extract_header_metadata(self, track: Track):
-        """Extrait les métadonnées depuis le header de la page (Track X on ALBUM)"""
-        try:
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
-            # MÉTHODE 1: Chercher le pattern "Track X on ALBUM"
-            # Rechercher dans toute la page le texte qui contient "Track" et "on"
-            track_info_pattern = re.compile(r'Track\s+(\d+)\s+on\s+(.+?)(?:\s*[\u2192→]|$)', re.IGNORECASE)
-            
-            # Chercher dans les divs du header
-            header_divs = soup.find_all('div', class_=re.compile(r'HeaderCredit|SongHeader|HeaderMetadata'))
-            
-            for div in header_divs:
-                text = div.get_text(strip=True)
-                match = track_info_pattern.search(text)
-                
-                if match:
-                    track_number = int(match.group(1))
-                    album_name = match.group(2).strip()
-                    
-                    # Nettoyer l'album (enlever les caractères parasites)
-                    album_name = re.sub(r'[\u2192\u2190\u2191\u2193→←↑↓]', '', album_name).strip()
-                    
-                    if track_number:
-                        track.track_number = track_number
-                        logger.debug(f"🔢 Numéro de piste extrait: {track_number}")
-                    
-                    if album_name and not track.album:  # Ne pas écraser si déjà présent
-                        # NE PAS valider avec _is_valid_album_name ici car on est sûr que c'est l'album
-                        # depuis le pattern "Track X on ALBUM"
-                        track.album = album_name
-                        logger.info(f"💿 Album extrait du header: '{album_name}' (Track {track_number})")
-                        return  # Sortir si trouvé
-            
-            # MÉTHODE 2: Si pas trouvé avec le pattern, chercher les liens d'album
-            album_links = soup.find_all('a', href=re.compile(r'/albums/'))
-            
-            for link in album_links:
-                # Vérifier si le lien est dans le header (pas dans les crédits)
-                parent = link.parent
-                while parent and parent.name != 'body':
-                    if 'header' in str(parent.get('class', [])).lower():
-                        album_name = link.get_text(strip=True)
-                        album_name = re.sub(r'[\u2192\u2190\u2191\u2193→←↑↓]', '', album_name).strip()
-                        
-                        if album_name and not track.album:
-                            track.album = album_name
-                            logger.info(f"💿 Album extrait depuis lien header: '{album_name}'")
-                            break
-                    parent = parent.parent
-                    
-        except Exception as e:
-            logger.debug(f"Erreur lors de l'extraction des métadonnées du header: {e}")
+    def _is_valid_date(self, text: str) -> bool:
+        """Vérifie si le texte est une date valide"""
+        import re
+        # Patterns pour les dates
+        patterns = [
+            r'\d{4}',  # Année seule
+            r'\d{1,2}/\d{1,2}/\d{4}',  # MM/DD/YYYY
+            r'\d{4}-\d{2}-\d{2}',  # YYYY-MM-DD
+            r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}'
+        ]
+        
+        for pattern in patterns:
+            if re.search(pattern, text):
+                return True
+        return False
 
+    def _extract_header_metadata(self, track: Track):
+        """Extrait les métadonnées depuis le header de la page (album, date, etc.)"""
+        try:
+            # Chercher l'album dans le header
+            album_selectors = [
+                "//a[contains(@class, 'PrimaryAlbum')]",
+                "//div[contains(@class, 'HeaderMetadata')]//a[contains(@href, '/albums/')]",
+                "//span[contains(text(), 'from')]/following-sibling::a",
+                "//div[@class='song_album']//a"
+            ]
+            
+            for selector in album_selectors:
+                try:
+                    album_element = self.driver.find_element(By.XPATH, selector)
+                    album_name = album_element.text.strip()
+                    if album_name and album_name != track.album:  # Nouvelle info ou différente
+                        track.album = album_name
+                        logger.info(f"Album trouvé dans le header: '{album_name}'")
+                        break
+                except:
+                    continue
+            
+            # Chercher la date de sortie si pas déjà présente
+            if not track.release_date:
+                date_selectors = [
+                    "//span[contains(@class, 'metadata_unit-info')]//span[contains(text(), '20')]",
+                    "//div[contains(@class, 'HeaderMetadata')]//span[contains(text(), '20')]"
+                ]
+                
+                for selector in date_selectors:
+                    try:
+                        date_element = self.driver.find_element(By.XPATH, selector)
+                        date_text = date_element.text.strip()
+                        if date_text and self._is_valid_date(date_text):
+                            track.release_date = date_text
+                            logger.info(f"Date trouvée dans le header: {date_text}")
+                            break
+                    except:
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"Erreur extraction métadonnées header: {e}")
             
     def _is_valid_album_name(self, name: str, track_title: str = None) -> bool:
         """Valide si un nom est bien un album et pas un artiste/producteur/titre - VERSION STRICTE"""
@@ -466,9 +427,9 @@ class GeniusScraper:
                 role_text = label_div.get_text(strip=True)
                 
                 # IMPORTANT: IGNORER LE CHAMP "ALBUM" DANS LES CRÉDITS
-                # Car c'est souvent le nom du producteur qui est mis là par erreur
+                # Car on l'extrait déjà depuis le header avec _extract_header_metadata
                 if role_text.lower() == 'album':
-                    logger.debug(f"⚠️ Champ 'Album' ignoré dans les crédits (probablement erroné)")
+                    logger.debug(f"⚠️ Champ 'Album' ignoré dans les crédits (déjà extrait du header)")
                     continue  # Passer au crédit suivant
                 
                 # Traiter les autres cas normalement

@@ -337,7 +337,7 @@ class MainWindow:
                     artiste_principal,                                                  # Artiste principal
                     track.album or "",                                                  # Album
                     date_str,                                                           # Date sortie
-                    "✓" if (hasattr(track, 'credits_scraped') and track.credits_scraped) else "",  # Crédits
+                    str(track.credits_scraped) if (hasattr(track, 'credits_scraped') and track.credits_scraped > 0) else "0",  # Crédits
                     "✓" if (hasattr(track, 'has_lyrics') and track.has_lyrics) else "",            # Paroles
                     str(track.bpm) if track.bpm else "",                               # BPM
                     "Désactivé" if is_disabled else "Actif"                            # Statut
@@ -602,116 +602,76 @@ class MainWindow:
             logger.error(f"Erreur lors de la réactivation: {e}")
             self._show_error("Erreur", f"Impossible de réactiver les morceaux: {e}")
 
-    def _sort_column(self, col):
-        """Trie les morceaux selon la colonne"""
+    def _sort_column(self, col: str):
+        """Trie les morceaux selon la colonne sélectionnée - CORRIGÉ"""
         if not self.current_artist or not self.current_artist.tracks:
             return
         
         try:
-            # Sauvegarder les sélections ET désactivations PAR TITRE
-            selected_track_titles = set()
+            # Sauvegarder les morceaux sélectionnés et désactivés par ID UNIQUE
+            selected_track_ids = set()
+            disabled_track_ids = set()
+            
             for idx in self.selected_tracks:
                 if 0 <= idx < len(self.current_artist.tracks):
-                    selected_track_titles.add(self.current_artist.tracks[idx].title)
+                    track = self.current_artist.tracks[idx]
+                    # Utiliser un ID plus robuste
+                    track_id = f"{track.title}_{getattr(track, 'album', 'unknown')}_{getattr(track, 'duration', '0')}"
+                    selected_track_ids.add(track_id)
             
-            disabled_track_titles = set()
             for idx in self.disabled_tracks:
                 if 0 <= idx < len(self.current_artist.tracks):
-                    disabled_track_titles.add(self.current_artist.tracks[idx].title)
+                    track = self.current_artist.tracks[idx]
+                    track_id = f"{track.title}_{getattr(track, 'album', 'unknown')}_{getattr(track, 'duration', '0')}"
+                    disabled_track_ids.add(track_id)
             
             # Déterminer l'ordre de tri
             reverse = False
-            if col == self.sort_column:
+            if self.sort_column == col:
                 reverse = not self.sort_reverse
             
-            # Fonction de tri selon la colonne
+            # Définir la fonction de tri
             sort_key = None
-            
             if col == "Titre":
-                sort_key = lambda t: self._normalize_text(t.title or "")
-            elif col == "Artiste principal":
-                if len(self.current_artist.tracks) > 0 and hasattr(self.current_artist.tracks[0], 'primary_artist_name'):
-                    sort_key = lambda t: self._normalize_text(t.primary_artist_name or "")
-                else:
-                    sort_key = lambda t: self._normalize_text(t.artist.name if hasattr(t, 'artist') and t.artist else "")
+                sort_key = lambda t: t.title.lower()
             elif col == "Album":
-                sort_key = lambda t: self._normalize_text(t.album or "")
-            elif col == "Date sortie":
-                sort_key = lambda t: t.release_date or ""
+                sort_key = lambda t: (t.album or "").lower()
+            elif col == "Année":
+                sort_key = lambda t: t.release_year or 0
+            elif col == "Durée":
+                sort_key = lambda t: t.duration_seconds or 0
+            elif col == "Featuring":
+                sort_key = lambda t: ", ".join(t.featured_artists) if t.featured_artists else ""
+            elif col == "Producteurs":
+                sort_key = lambda t: ", ".join(t.producers) if t.producers else ""
+            elif col == "Writers":
+                sort_key = lambda t: ", ".join(t.writers) if t.writers else ""
             elif col == "Crédits":
-                sort_key = lambda t: getattr(t, 'credits_scraped', False)
-            elif col == "Paroles":
-                sort_key = lambda t: getattr(t, 'has_lyrics', False)
-            elif col == "BPM":
-                sort_key = lambda t: t.bpm or 0
-            elif col == "Statut":
-                # Tri par statut : d'abord les actifs, puis les désactivés
-                # On crée une liste de tuples (track, index) pour conserver les indices
-                tracks_with_indices = list(enumerate(self.current_artist.tracks))
-                
-                # Trier par statut (actif=0, désactivé=1)
-                tracks_with_indices.sort(
-                    key=lambda x: (1 if x[0] in self.disabled_tracks else 0, self._normalize_text(x[1].title or "")),
-                    reverse=reverse
-                )
-                
-                # Réorganiser les tracks
-                self.current_artist.tracks = [track for idx, track in tracks_with_indices]
-                
-                # Restaurer les sélections et désactivations par titre
-                self.selected_tracks.clear()
-                self.disabled_tracks.clear()
-                
-                for new_idx, track in enumerate(self.current_artist.tracks):
-                    if track.title in selected_track_titles:
-                        self.selected_tracks.add(new_idx)
-                    if track.title in disabled_track_titles:
-                        self.disabled_tracks.add(new_idx)
-                
-                # Sauvegarder et actualiser
-                if self.current_artist:
-                    self.disabled_tracks_manager.save_disabled_tracks(
-                        self.current_artist.name, 
-                        self.disabled_tracks
-                    )
-                
-                # Mettre à jour les variables
-                self.sort_column = col
-                self.sort_reverse = reverse
-                
-                # Recréer l'affichage
-                self._populate_tracks_table()
-                
-                # Mettre à jour l'indicateur dans l'en-tête
-                for column in self.tree["columns"]:
-                    if column == col:
-                        indicator = " ▲" if not reverse else " ▼"
-                        self.tree.heading(column, text=column + indicator)
-                    else:
-                        self.tree.heading(column, text=column)
-                
-                return  # Sortir ici car on a déjà tout fait
+                sort_key = lambda t: t.credits_scraped
             
             if sort_key:
                 # Trier les morceaux
                 self.current_artist.tracks.sort(key=sort_key, reverse=reverse)
             
-                # Après le tri, restaurer par titre
-                self.selected_tracks.clear()
-                self.disabled_tracks.clear()
+            # Restaurer les sélections par ID après le tri
+            self.selected_tracks.clear()
+            self.disabled_tracks.clear()
+            
+            for new_idx, track in enumerate(self.current_artist.tracks):
+                track_id = f"{track.title}_{getattr(track, 'album', 'unknown')}_{getattr(track, 'duration', '0')}"
                 
-                for new_idx, track in enumerate(self.current_artist.tracks):
-                    if track.title in selected_track_titles:
-                        self.selected_tracks.add(new_idx)
-                    if track.title in disabled_track_titles:
-                        self.disabled_tracks.add(new_idx)
+                if track_id in selected_track_ids:
+                    self.selected_tracks.add(new_idx)
                 
-                # Sauvegarder les nouveaux indices des morceaux désactivés
-                if self.current_artist:
-                    self.disabled_tracks_manager.save_disabled_tracks(
-                        self.current_artist.name, 
-                        self.disabled_tracks
-                    )
+                if track_id in disabled_track_ids:
+                    self.disabled_tracks.add(new_idx)
+            
+            # Sauvegarder les nouveaux indices des morceaux désactivés
+            if self.current_artist:
+                self.disabled_tracks_manager.save_disabled_tracks(
+                    self.current_artist.name, 
+                    self.disabled_tracks
+                )
             
             # Mettre à jour les variables de tri
             self.sort_column = col

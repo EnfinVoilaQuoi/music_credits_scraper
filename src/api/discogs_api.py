@@ -42,7 +42,11 @@ class DiscogsAPI:
                     type='release'
                 )
             
-            for result in results[:5]:  # Limiter aux 5 premiers résultats
+            # Convertir en liste et limiter
+            results_list = list(results)
+            for i, result in enumerate(results_list):
+                if i >= 5:  # Limiter aux 5 premiers résultats
+                    break
                 try:
                     # Vérifier que c'est le bon artiste
                     if any(artist_name.lower() in a.name.lower() for a in result.artists):

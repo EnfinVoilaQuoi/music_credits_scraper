@@ -24,6 +24,8 @@ DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
 LAST_FM_API_KEY = os.getenv("LAST_FM_API_KEY")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+GETSONGBPM_API_KEY = os.getenv("GETSONGBPM_API_KEY")
+# AcousticBrainz n'a pas besoin de clé (open source)
 
 # Configuration de l'application
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"

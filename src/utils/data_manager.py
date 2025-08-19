@@ -290,6 +290,24 @@ class DataManager:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
+                # ✅ ÉTAPE 1: Récupérer d'abord les infos de l'artiste
+                cursor.execute("SELECT id, name, genius_id, spotify_id, discogs_id FROM artists WHERE id = ?", (artist_id,))
+                artist_row = cursor.fetchone()
+                
+                if not artist_row:
+                    logger.error(f"❌ Artiste avec ID {artist_id} non trouvé")
+                    return tracks
+                
+                # ✅ ÉTAPE 2: Créer l'objet Artist
+                from src.models import Artist
+                artist = Artist(
+                    id=artist_row[0],
+                    name=artist_row[1], 
+                    genius_id=artist_row[2],
+                    spotify_id=artist_row[3],
+                    discogs_id=artist_row[4]
+                )
+
                 # Vérifier le nombre total
                 cursor.execute("SELECT COUNT(*) FROM tracks WHERE artist_id = ?", (artist_id,))
                 total_count = cursor.fetchone()[0]
@@ -355,6 +373,9 @@ class DataManager:
                             title=str(title).strip()
                         )
                         
+                        # Assigner Artiste
+                        track.artist = artist
+
                         # Assignation sécurisée
                         def safe_assign(value, default=None):
                             if value is None or str(value) in ['None', 'NULL', '']:

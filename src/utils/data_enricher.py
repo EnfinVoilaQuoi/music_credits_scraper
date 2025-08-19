@@ -9,7 +9,9 @@ from src.api.lastfm_api import LastFmAPI
 from src.scrapers.rapedia_scraper import RapediaScraper
 from src.models import Track, Artist
 from src.utils.logger import get_logger
-from src.config import SPOTIFY_CLIENT_ID, DISCOGS_TOKEN, LAST_FM_API_KEY
+from src.config import SPOTIFY_CLIENT_ID, DISCOGS_TOKEN, LAST_FM_API_KEY, GETSONGBPM_API_KEY
+from src.api.getsongbpm_api import GetSongBPMAPI
+from src.api.acousticbrainz_api import AcousticBrainzAPI
 
 
 logger = get_logger(__name__)
@@ -60,6 +62,24 @@ class DataEnricher:
         else:
             self.apis_available['lastfm'] = False
         
+        # GetSongBPM API (priorité pour les BPM)
+        try:
+            self.getsongbpm_api = GetSongBPMAPI(api_key=GETSONGBPM_API_KEY)
+            self.apis_available['getsongbpm'] = True
+            logger.info("API GetSongBPM disponible")
+        except Exception as e:
+            logger.warning(f"API GetSongBPM non disponible: {e}")
+            self.apis_available['getsongbpm'] = False
+        
+        # AcousticBrainz API (fallback BPM + métadonnées)
+        try:
+            self.acousticbrainz_api = AcousticBrainzAPI()
+            self.apis_available['acousticbrainz'] = True
+            logger.info("API AcousticBrainz disponible")
+        except Exception as e:
+            logger.warning(f"API AcousticBrainz non disponible: {e}")
+            self.apis_available['acousticbrainz'] = False
+
         # Rapedia est toujours disponible (scraping)
         self.rapedia_scraper = RapediaScraper(use_selenium=False)
         self.apis_available['rapedia'] = True
@@ -77,32 +97,51 @@ class DataEnricher:
             Dict indiquant le succès pour chaque source
         """
         if sources is None:
-            sources = ['rapedia', 'spotify', 'discogs', 'lastfm']
+            sources = ['getsongbpm', 'acousticbrainz', 'rapedia', 'spotify', 'discogs', 'lastfm']
         
         results = {}
         
-        # 1. Rapedia en premier (prioritaire pour les BPM)
-        if 'rapedia' in sources and self.apis_available['rapedia']:
+        # 1. GetSongBPM en priorité pour les BPM
+        if 'getsongbpm' in sources and self.apis_available['getsongbpm']:
+            try:
+                success = self.getsongbpm_api.enrich_track_data(track)
+                results['getsongbpm'] = success
+                if success:
+                    logger.info(f"✅ GetSongBPM: BPM trouvé pour {track.title}")
+            except Exception as e:
+                logger.error(f"Erreur GetSongBPM: {e}")
+                results['getsongbpm'] = False
+        
+        # 2. AcousticBrainz en fallback si pas de BPM
+        if 'acousticbrainz' in sources and self.apis_available['acousticbrainz'] and not track.bpm:
+            try:
+                success = self.acousticbrainz_api.enrich_track_data(track)
+                results['acousticbrainz'] = success
+                if success:
+                    logger.info(f"✅ AcousticBrainz: Données trouvées pour {track.title}")
+            except Exception as e:
+                logger.error(f"Erreur AcousticBrainz: {e}")
+                results['acousticbrainz'] = False
+        
+        # 3. Rapedia pour les BPM rap français (si toujours pas de BPM)
+        if 'rapedia' in sources and self.apis_available['rapedia'] and not track.bpm:
             try:
                 success = self.rapedia_scraper.enrich_track_data(track)
                 results['rapedia'] = success
-                if success and track.bpm:
-                    logger.info(f"BPM trouvé sur Rapedia: {track.bpm}")
             except Exception as e:
                 logger.error(f"Erreur Rapedia: {e}")
                 results['rapedia'] = False
         
-        # 2. Spotify (seulement si pas de BPM depuis Rapedia)
+        # 4. Spotify pour les métadonnées (plus les BPM, problème de permissions)
         if 'spotify' in sources and self.apis_available['spotify']:
             try:
-                # Spotify enrichit seulement si pas de BPM
                 success = self.spotify_api.enrich_track_data(track)
                 results['spotify'] = success
             except Exception as e:
                 logger.error(f"Erreur Spotify: {e}")
                 results['spotify'] = False
         
-        # 3. Discogs pour les crédits supplémentaires
+        # 5. Discogs pour les crédits supplémentaires
         if 'discogs' in sources and self.apis_available['discogs']:
             try:
                 success = self.discogs_api.enrich_track_data(track)
@@ -111,7 +150,7 @@ class DataEnricher:
                 logger.error(f"Erreur Discogs: {e}")
                 results['discogs'] = False
         
-        # 4. Last.fm pour les genres et métadonnées
+        # 6. Last.fm pour les genres et métadonnées
         if 'lastfm' in sources and self.apis_available['lastfm']:
             try:
                 success = self.lastfm_api.enrich_track_data(track)
@@ -205,8 +244,12 @@ class DataEnricher:
             stats['tracks_with_complete_data'] += 1
     
     def get_available_sources(self) -> List[str]:
-        """Retourne la liste des sources disponibles"""
-        return [source for source, available in self.apis_available.items() if available]
+        """Retourne la liste des sources d'enrichissement disponibles"""
+        available = []
+        for source, is_available in self.apis_available.items():
+            if is_available:
+                available.append(source)
+        return available
     
     def test_all_connections(self) -> Dict[str, bool]:
         """Teste toutes les connexions aux APIs"""

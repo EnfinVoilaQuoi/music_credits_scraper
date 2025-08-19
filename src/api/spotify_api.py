@@ -69,7 +69,7 @@ class SpotifyAPI:
             if features:
                 log_api("Spotify", f"audio-features/{spotify_id}", True)
                 return {
-                    'bpm': int(features['tempo']) if features['tempo'] else None,
+                    'bmp': int(features['tempo']) if features['tempo'] else None,
                     'key': features['key'],
                     'mode': features['mode'],
                     'time_signature': features['time_signature'],
@@ -80,11 +80,17 @@ class SpotifyAPI:
                 }
             
             return None
-            
+        
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération des features: {e}")
-            log_api("Spotify", f"audio-features/{spotify_id}", False)
-            return None
+            # ✅ AJOUT : Gestion spécifique pour l'erreur 403
+            if "403" in str(e) or "Forbidden" in str(e):
+                logger.warning(f"Accès audio-features refusé (403) pour {spotify_id} - permissions insuffisantes")
+                log_api("Spotify", f"audio-features/{spotify_id}", False)
+                return None
+            else:
+                logger.error(f"Erreur lors de la récupération des features: {e}")
+                log_api("Spotify", f"audio-features/{spotify_id}", False)
+                return None
     
     def enrich_track_data(self, track: Track) -> bool:
         """Enrichit les données d'un morceau avec les infos Spotify"""

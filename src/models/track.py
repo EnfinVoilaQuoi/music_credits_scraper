@@ -323,11 +323,16 @@ class Track:
     
     @property
     def credits_scraped(self):
-        """Retourne True si le track a des crédits complets"""
-        return self.has_complete_credits()
+        """Retourne le nombre de crédits au lieu d'un booléen"""
+        try:
+            if hasattr(self, 'credits') and self.credits:
+                return len(self.credits)
+            return 0
+        except Exception:
+            return 0
 
     def has_complete_credits(self) -> bool:
-        """Vérifie si les crédits semblent complets - VERSION ROBUSTE"""
+        """Vérifie si les crédits semblent complets"""
         try:
             # CORRECTION 1: Obtenir les crédits musicaux de manière sécurisée
             try:
@@ -350,12 +355,12 @@ class Track:
                 writers = []
             
             # Un morceau est considéré comme complet s'il a :
-            # - Au moins 4 crédits musicaux (plus strict)
+            # - Au moins 2 crédits musicaux (plus strict)
             # - ET au moins un producteur OU un auteur
             
             has_producer = bool(producers)
             has_writer = bool(writers)
-            has_enough_credits = len(music_credits) >= 4
+            has_enough_credits = len(music_credits) >= 2
             
             return has_enough_credits and (has_producer or has_writer)
             

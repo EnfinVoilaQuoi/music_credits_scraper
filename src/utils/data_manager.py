@@ -20,6 +20,18 @@ class DataManager:
     def __init__(self):
         self.db_path = DATABASE_URL.replace("sqlite:///", "")
         self._init_database()
+        # Import tardif pour éviter la circularité
+        try:
+            from src.utils.certification_enricher import CertificationEnricher
+            from src.api.snep_certifications import get_snep_manager
+            
+            self.certification_enricher = CertificationEnricher()
+            self.snep_manager = get_snep_manager()
+            self._initialize_certifications()
+        except ImportError:
+            # Si les modules ne sont pas encore créés
+            self.certification_enricher = None
+            self.snep_manager = None
     
     def _init_database(self):
         """Initialise la base de données"""
@@ -93,6 +105,214 @@ class DataManager:
             conn.commit()
             logger.info("Base de données initialisée")
     
+    def _initialize_certifications(self):
+        """Initialise la base de données des certifications au premier lancement"""
+        try:
+            # Vérifier si le CSV existe et l'importer - nom exact du fichier SNEP
+            csv_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
+            if csv_path.exists():
+                logger.info("🔄 Importation initiale des certifications SNEP...")
+                success = self.snep_manager.import_from_csv(csv_path)
+                if success:
+                    logger.info("✅ Certifications SNEP importées avec succès")
+                else:
+                    logger.warning("⚠️ Problème lors de l'import des certifications")
+        except Exception as e:
+            logger.error(f"Erreur initialisation certifications: {e}")
+    
+    def save_artist_with_certifications(self, artist: Artist):
+        """Sauvegarde un artiste avec enrichissement automatique des certifications"""
+        try:
+            # Enrichir l'artiste avec ses certifications
+            artist = self.certification_enricher.enrich_artist(artist)
+            
+            # Enrichir chaque morceau avec sa certification
+            if artist.tracks:
+                artist.tracks = self.certification_enricher.enrich_tracks(artist, artist.tracks)
+                
+                # Calculer la durée d'obtention pour chaque certification
+                for track in artist.tracks:
+                    if track.has_certification:
+                        track.calculate_certification_duration()
+            
+            # Sauvegarder normalement
+            self.save_artist(artist)
+            
+            logger.info(f"✅ Artiste {artist.name} sauvegardé avec certifications")
+            
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde avec certifications: {e}")
+            # Sauvegarder sans certifications en cas d'erreur
+            self.save_artist(artist)
+    
+    def get_artist_certification_summary(self, artist_name: str) -> Dict[str, Any]:
+        """Récupère un résumé complet des certifications d'un artiste"""
+        summary = {
+            'artist': artist_name,
+            'total_certifications': 0,
+            'singles': [],
+            'albums': [],
+            'statistics': {},
+            'timeline': []
+        }
+        
+        try:
+            # Récupérer toutes les certifications
+            certifications = self.snep_manager.get_artist_certifications(artist_name)
+            
+            if not certifications:
+                return summary
+            
+            summary['total_certifications'] = len(certifications)
+            
+            # Séparer singles et albums avec détails complets
+            for cert in certifications:
+                cert_info = {
+                    'title': cert.get('title'),
+                    'level': cert.get('certification'),
+                    'date_constat': cert.get('certification_date'),  # Date de constat
+                    'date_sortie': cert.get('release_date'),  # Date de sortie
+                    'publisher': cert.get('publisher'),
+                    'duration_days': None  # Sera calculé ci-dessous
+                }
+                
+                # Calculer la durée d'obtention
+                if cert.get('release_date') and cert.get('certification_date'):
+                    try:
+                        release = datetime.fromisoformat(str(cert['release_date']))
+                        certif = datetime.fromisoformat(str(cert['certification_date']))
+                        cert_info['duration_days'] = (certif - release).days
+                    except:
+                        pass
+                
+                if cert.get('category') == 'Singles':
+                    summary['singles'].append(cert_info)
+                elif cert.get('category') == 'Albums':
+                    summary['albums'].append(cert_info)
+            
+            # Trier par date de certification
+            summary['singles'].sort(key=lambda x: x['date_constat'] or '', reverse=True)
+            summary['albums'].sort(key=lambda x: x['date_constat'] or '', reverse=True)
+            
+            # Statistiques
+            summary['statistics'] = self._calculate_certification_statistics(certifications)
+            
+            # Timeline chronologique
+            summary['timeline'] = self._create_certification_timeline(certifications)
+            
+        except Exception as e:
+            logger.error(f"Erreur récupération résumé certifications: {e}")
+        
+        return summary
+    
+    def _calculate_certification_statistics(self, certifications: List[Dict]) -> Dict[str, Any]:
+        """Calcule des statistiques détaillées sur les certifications"""
+        stats = {
+            'avg_duration_days': 0,
+            'fastest_certification': None,
+            'slowest_certification': None,
+            'certifications_by_year': {},
+            'certifications_by_level': {}
+        }
+        
+        durations = []
+        
+        for cert in certifications:
+            # Statistiques par niveau
+            level = cert.get('certification', '')
+            stats['certifications_by_level'][level] = stats['certifications_by_level'].get(level, 0) + 1
+            
+            # Statistiques par année
+            if cert.get('certification_date'):
+                try:
+                    year = datetime.fromisoformat(str(cert['certification_date'])).year
+                    stats['certifications_by_year'][year] = stats['certifications_by_year'].get(year, 0) + 1
+                except:
+                    pass
+            
+            # Calcul des durées
+            if cert.get('release_date') and cert.get('certification_date'):
+                try:
+                    release = datetime.fromisoformat(str(cert['release_date']))
+                    certif = datetime.fromisoformat(str(cert['certification_date']))
+                    duration = (certif - release).days
+                    
+                    if duration >= 0:
+                        durations.append({
+                            'title': cert['title'],
+                            'duration': duration,
+                            'level': cert['certification']
+                        })
+                except:
+                    pass
+        
+        if durations:
+            # Moyenne
+            stats['avg_duration_days'] = sum(d['duration'] for d in durations) // len(durations)
+            
+            # Plus rapide
+            fastest = min(durations, key=lambda x: x['duration'])
+            stats['fastest_certification'] = fastest
+            
+            # Plus lente
+            slowest = max(durations, key=lambda x: x['duration'])
+            stats['slowest_certification'] = slowest
+        
+        return stats
+    
+    def _create_certification_timeline(self, certifications: List[Dict]) -> List[Dict]:
+        """Crée une timeline chronologique des certifications"""
+        timeline = []
+        
+        for cert in certifications:
+            if cert.get('certification_date'):
+                timeline.append({
+                    'date': cert['certification_date'],
+                    'title': cert['title'],
+                    'level': cert['certification'],
+                    'category': cert['category']
+                })
+        
+        # Trier par date
+        timeline.sort(key=lambda x: x['date'])
+        
+        return timeline
+    
+    def match_tracks_with_certifications(self, artist: Artist) -> int:
+        """Associe automatiquement les certifications aux morceaux d'un artiste"""
+        if not artist or not artist.tracks:
+            return 0
+        
+        matched_count = 0
+        
+        for track in artist.tracks:
+            # Rechercher une certification correspondante
+            cert_data = self.snep_manager.get_track_certification(artist.name, track.title)
+            
+            if cert_data:
+                # Mettre à jour le morceau avec les données de certification
+                track.has_certification = True
+                track.certification_level = cert_data.get('certification')
+                track.certification_date = cert_data.get('certification_date')
+                track.certification_category = cert_data.get('category')
+                track.certification_publisher = cert_data.get('publisher')
+                track.certification_details = cert_data
+                
+                # Calculer la durée d'obtention
+                if track.release_date:
+                    track.calculate_certification_duration()
+                
+                matched_count += 1
+                logger.info(f"✅ Certification trouvée: {track.title} - {track.certification_level}")
+        
+        if matched_count > 0:
+            logger.info(f"🏆 {matched_count}/{len(artist.tracks)} morceaux associés à des certifications")
+            
+            # Sauvegarder les mises à jour
+            self.save_artist(artist)
+        
+        return matched_count
+
     @contextmanager
     def _get_connection(self):
         """Context manager pour les connexions à la base de données"""

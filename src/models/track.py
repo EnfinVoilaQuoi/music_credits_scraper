@@ -4,6 +4,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from enum import Enum
+from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 
 class CreditRole(Enum):
@@ -209,6 +211,15 @@ class Track:
     updated_at: datetime = field(default_factory=datetime.now)
     last_scraped: Optional[datetime] = None
     scraping_errors: List[str] = field(default_factory=list)
+
+    # Champs de certification SNEP
+    has_certification: bool = False
+    certification_level: Optional[str] = None  # "Or", "Platine", "Diamant", etc.
+    certification_date: Optional[datetime] = None  # Date de constat
+    certification_duration_days: Optional[int] = None  # Durée d'obtention en jours
+    certification_category: Optional[str] = None  # "Singles" ou "Albums"
+    certification_publisher: Optional[str] = None  # Éditeur/Distributeur
+    certification_details: Optional[Dict[str, Any]] = None  # Détails complets
     
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""
@@ -293,6 +304,84 @@ class Track:
         except Exception as e:
             logger.debug(f"Erreur get_writers: {e}")
             return []
+        
+    # Méthode pour calculer la durée d'obtention
+    def calculate_certification_duration(self) -> Optional[int]:
+        """Calcule la durée entre la sortie et la certification"""
+        if not self.certification_date or not self.release_date:
+            return None
+        
+        try:
+            cert_date = self.certification_date
+            rel_date = self.release_date
+            
+            # Convertir en datetime si nécessaire
+            if isinstance(cert_date, str):
+                cert_date = datetime.fromisoformat(cert_date)
+            if isinstance(rel_date, str):
+                rel_date = datetime.fromisoformat(rel_date)
+            
+            duration = (cert_date - rel_date).days
+            self.certification_duration_days = duration if duration >= 0 else None
+            return self.certification_duration_days
+            
+        except Exception:
+            return None
+    
+    def get_certification_emoji(self) -> str:
+        """Retourne un emoji correspondant au niveau de certification"""
+        if not self.certification_level:
+            return ""
+        
+        emoji_map = {
+            'Or': '🥇',
+            'Double Or': '🥇🥇',
+            'Triple Or': '🥇🥇🥇',
+            'Platine': '💿',
+            'Double Platine': '💿💿',
+            'Triple Platine': '💿💿💿',
+            'Diamant': '💎',
+            'Double Diamant': '💎💎',
+            'Triple Diamant': '💎💎💎',
+            'Quadruple Diamant': '💎💎💎💎'
+        }
+        
+        return emoji_map.get(self.certification_level, '🏆')
+    
+    def get_certification_info(self) -> str:
+        """Retourne une description textuelle de la certification"""
+        if not self.has_certification:
+            return "Pas de certification"
+        
+        info = f"{self.get_certification_emoji()} {self.certification_level}"
+        
+        if self.certification_date:
+            date_str = self.certification_date.strftime('%d/%m/%Y') if isinstance(self.certification_date, datetime) else str(self.certification_date)
+            info += f" (obtenue le {date_str}"
+            
+            if self.certification_duration_days is not None:
+                years = self.certification_duration_days // 365
+                months = (self.certification_duration_days % 365) // 30
+                days = self.certification_duration_days % 30
+                
+                duration_str = ""
+                if years > 0:
+                    duration_str += f"{years} an{'s' if years > 1 else ''}"
+                if months > 0:
+                    if duration_str:
+                        duration_str += ", "
+                    duration_str += f"{months} mois"
+                if days > 0 and years == 0:  # On n'affiche les jours que si moins d'un an
+                    if duration_str:
+                        duration_str += ", "
+                    duration_str += f"{days} jour{'s' if days > 1 else ''}"
+                
+                if duration_str:
+                    info += f" - durée: {duration_str}"
+            
+            info += ")"
+        
+        return info
         
     @property
     def producers(self):

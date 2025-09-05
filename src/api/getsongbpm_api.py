@@ -24,22 +24,25 @@ class GetSongBPMAPI:
     def search_track(self, track_title: str, artist_name: str) -> Optional[Dict[str, Any]]:
         """Recherche un morceau sur GetSongBPM"""
         try:
-            # Construire la requête de recherche
-            query = f"{artist_name} {track_title}".strip()
+            # Nettoyer les caractères spéciaux
+            clean_title = track_title.replace("!", "").replace("?", "").strip()
+            clean_artist = artist_name.replace("!", "").replace("?", "").strip()
             
-            # URL de l'API
+            # URL de l'API avec le bon format
             url = f"{self.base_url}/search/"
             
             params = {
                 'type': 'song',
-                'lookup': f"song:{query}"
+                'lookup': f"song:{clean_artist} {clean_title}",
+                'api_key': self.api_key  # ✅ Toujours inclure la clé
             }
             
-            # Ajouter la clé API si disponible
-            if self.api_key:
-                params['api_key'] = self.api_key
+            # Vérifier que la clé API est présente
+            if not self.api_key:
+                logger.warning("GetSongBPM: Clé API manquante")
+                return None
             
-            logger.debug(f"Recherche GetSongBPM: {query}")
+            logger.debug(f"Recherche GetSongBPM: {clean_artist} {clean_title}")
             
             headers = {
                 'User-Agent': 'MusicCreditsScraper/1.0',
@@ -81,8 +84,8 @@ class GetSongBPMAPI:
                     log_api("GetSongBPM", f"search/{query}", True)
                     return track_data
             
-            logger.warning(f"Morceau non trouvé sur GetSongBPM: {track_title} - {artist_name}")
-            log_api("GetSongBPM", f"search/{query}", False)
+            logger.warning(f"Morceau non trouvé sur GetSongBPM: {clean_title} - {clean_artist}")
+            log_api("GetSongBPM", f"search/{clean_title}", False)
             return None
             
         except Exception as e:

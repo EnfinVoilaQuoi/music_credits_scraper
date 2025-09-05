@@ -2423,7 +2423,7 @@ class MainWindow:
         # Dialogue pour choisir les sources
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Sources d'enrichissement")
-        dialog.geometry("400x300")
+        dialog.geometry("400x400")
         
         ctk.CTkLabel(dialog, text="Sélectionnez les sources à utiliser:", 
                     font=("Arial", 14)).pack(pady=10)
@@ -2431,10 +2431,12 @@ class MainWindow:
         # Variables pour les checkboxes
         sources_vars = {}
         sources_info = {
-            'rapedia': 'Rapedia.fr (BPM prioritaire pour le rap FR)',
-            'spotify': 'Spotify (BPM, durée, popularité)',
-            'discogs': 'Discogs (crédits supplémentaires, labels)',
-            'lastfm': 'Last.fm (genres, tags)'
+            'getsongbpm': 'GetSongBPM (BPM, clés musicales) 🎵',
+            'acousticbrainz': 'AcousticBrainz (BPM précis, métadonnées) 🔬',
+            'rapedia': 'Rapedia.fr (BPM prioritaire pour le rap FR) 🇫🇷',
+            'spotify': 'Spotify (métadonnées, durée) 🎧',
+            'discogs': 'Discogs (crédits supplémentaires, labels) 💿',
+            'lastfm': 'Last.fm (genres, tags) 🏷️'
         }
         
         available = self.data_enricher.get_available_sources()

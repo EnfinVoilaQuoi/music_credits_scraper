@@ -176,7 +176,7 @@ class DataEnricher:
             Statistiques d'enrichissement
         """
         if sources is None:
-            sources = ['rapedia', 'spotify', 'discogs', 'lastfm']
+            sources = ['lastfm', 'acousticbrainz', 'rapedia', 'spotify', 'discogs', 'getsongbpm']
         
         stats = {
             'total': len(tracks),

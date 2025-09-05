@@ -54,8 +54,13 @@ class AcousticBrainzAPI:
     def _get_musicbrainz_id(self, track_title: str, artist_name: str) -> Optional[str]:
         """Récupère l'ID MusicBrainz d'un morceau"""
         try:
+            # Nettoyer les caractères spéciaux
+            clean_title = track_title.replace("!", "").replace("?", "").strip()
+            clean_artist = artist_name.replace("!", "").replace("?", "").strip()
+            
             # Rechercher l'enregistrement sur MusicBrainz
-            query = f'recording:"{track_title}" AND artist:"{artist_name}"'
+            query = f'recording:"{clean_title}" AND artist:"{clean_artist}"'
+            logger.debug(f"MusicBrainz query: {query}")
             
             result = musicbrainzngs.search_recordings(
                 query=query,
@@ -64,6 +69,7 @@ class AcousticBrainzAPI:
             )
             
             recordings = result.get('recording-list', [])
+            logger.debug(f"MusicBrainz found {len(recordings)} recordings")
             
             for recording in recordings:
                 # Vérifier la correspondance de l'artiste

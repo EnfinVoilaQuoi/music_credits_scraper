@@ -16,6 +16,7 @@ ENV/
 
 # Project specific
 .env
+drivers/*
 data/artists/*
 !data/artists/.gitkeep
 data/logs/*
@@ -23,6 +24,7 @@ data/logs/*
 *.db
 *.sqlite
 *.log
+*.cache
 
 # OS
 .DS_Store

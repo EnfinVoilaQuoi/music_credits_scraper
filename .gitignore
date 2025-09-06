@@ -17,6 +17,7 @@ ENV/
 # Project specific
 .env
 drivers/*
+data/disabled_tracks/*
 data/artists/*
 !data/artists/.gitkeep
 data/logs/*

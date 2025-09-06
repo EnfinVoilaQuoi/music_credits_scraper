@@ -235,7 +235,7 @@ class MainWindow:
         tree_scroll_frame.pack(fill="both", expand=True)
         
         # COLONNES AVEC COLONNE PAROLES ENTRE CRÉDITS ET BPM
-        columns = ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "Paroles", "BPM", "Statut")
+        columns = ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "Paroles", "BPM", "Certif.", "Statut")
         self.tree = ttk.Treeview(tree_scroll_frame, columns=columns, show="tree headings", height=15)
         
         # Configuration des colonnes avec tri
@@ -261,6 +261,8 @@ class MainWindow:
                 self.tree.column(col, width=70)
             elif col == "BPM":
                 self.tree.column(col, width=70)
+            elif col == "Certif.":
+                self.tree.column(col, width=60)
             else:  # Statut
                 self.tree.column(col, width=70)
         
@@ -349,6 +351,26 @@ class MainWindow:
                 bpm = getattr(track, 'bpm', '') or ""
                 if bpm:
                     bpm = str(bpm)
+
+                # Certifications
+                certif_display = ""
+                try:
+                    from src.api.snep_certifications import get_snep_manager
+                    snep_manager = get_snep_manager()
+                    cert_data = snep_manager.get_track_certification(
+                        self.current_artist.name, 
+                        track.title
+                    )
+                    if cert_data:
+                        cert_level = cert_data.get('certification', '')
+                        emoji_map = {
+                            'Or': '🥇',
+                            'Platine': '💿',
+                            'Diamant': '💎'
+                        }
+                        certif_display = emoji_map.get(cert_level, '✓')
+                except:
+                    pass
                 
                 # Statut - Utiliser votre fonction existante _get_track_status_icon
                 status = self._get_track_status_icon(track)
@@ -368,6 +390,7 @@ class MainWindow:
                         credits_display,  # CORRECTION: Affiche le nombre
                         lyrics_display,
                         bpm,
+                        certif_display,
                         status
                     ),
                     tags=(str(i),)
@@ -647,6 +670,22 @@ class MainWindow:
                 sort_key = lambda t: getattr(t, 'has_lyrics', False)
             elif col == "BPM":
                 sort_key = lambda t: getattr(t, 'bpm', 0) or 0
+            elif col == "Certif.":
+                # Définir un ordre de priorité pour les certifications
+                cert_order = {
+                    '💎💎💎💎': 1,  # Quadruple Diamant
+                    '💎💎💎': 2,    # Triple Diamant
+                    '💎💎': 3,      # Double Diamant
+                    '💎': 4,        # Diamant
+                    '💿💿💿': 5,    # Triple Platine
+                    '💿💿': 6,      # Double Platine
+                    '💿': 7,        # Platine
+                    '🥇🥇🥇': 8,    # Triple Or
+                    '🥇🥇': 9,      # Double Or
+                    '🥇': 10,       # Or
+                    '✓': 11,       # Autre certification
+                    '': 12         # Pas de certification
+                }
             elif col == "Statut":
                 # CORRECTION: Utiliser votre fonction existante _get_track_status_icon
                 sort_key = lambda t: self._get_track_status_icon(t)
@@ -710,6 +749,37 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Erreur lors du tri: {e}")
             self._show_error("Erreur de tri", str(e))
+
+    def get_cert_value(track):
+        # Récupérer la certification du morceau
+        try:
+            from src.api.snep_certifications import get_snep_manager
+            snep_manager = get_snep_manager()
+            cert_data = snep_manager.get_track_certification(
+                self.current_artist.name, 
+                track.title
+            )
+            if cert_data:
+                cert_level = cert_data.get('certification', '')
+                emoji_map = {
+                    'Quadruple Diamant': '💎💎💎💎',
+                    'Triple Diamant': '💎💎💎',
+                    'Double Diamant': '💎💎',
+                    'Diamant': '💎',
+                    'Triple Platine': '💿💿💿',
+                    'Double Platine': '💿💿',
+                    'Platine': '💿',
+                    'Triple Or': '🥇🥇🥇',
+                    'Double Or': '🥇🥇',
+                    'Or': '🥇'
+                }
+                emoji = emoji_map.get(cert_level, '✓')
+                return cert_order.get(emoji, 12)
+            return 12  # Pas de certification
+        except:
+            return 12
+    
+    sort_key = get_cert_value
 
     def _show_track_details_by_index(self, index: int):
         """Affiche les détails d'un morceau par son index - ✅ NOUVEAU"""
@@ -1121,6 +1191,60 @@ class MainWindow:
         if track.updated_at:
             tech_textbox.insert("end", f"• Mis à jour le: {track.updated_at}\n")
         
+        # === ONGLET 5: CERTIFICATIONS ===
+        cert_frame = ctk.CTkFrame(notebook)
+        notebook.add(cert_frame, text="🏆 Certifications")
+
+        try:
+            from src.api.snep_certifications import get_snep_manager
+            snep_manager = get_snep_manager()
+            cert_data = snep_manager.get_track_certification(
+                self.current_artist.name,
+                track.title
+            )
+            
+            if cert_data:
+                # Afficher les infos de certification
+                cert_info = ctk.CTkTextbox(cert_frame, width=850, height=450)
+                cert_info.pack(fill="both", expand=True, padx=10, pady=10)
+                
+                cert_level = cert_data.get('certification', '')
+                emoji_map = {
+                    'Or': '🥇', 'Double Or': '🥇🥇',
+                    'Platine': '💿', 'Double Platine': '💿💿',
+                    'Diamant': '💎', 'Double Diamant': '💎💎'
+                }
+                emoji = emoji_map.get(cert_level, '🏆')
+                
+                cert_text = f"{emoji} CERTIFICATION {cert_level.upper()}\n"
+                cert_text += "=" * 50 + "\n\n"
+                cert_text += f"📀 Titre: {cert_data.get('title', '')}\n"
+                cert_text += f"🎤 Artiste: {cert_data.get('artist_name', '')}\n"
+                cert_text += f"📂 Catégorie: {cert_data.get('category', '')}\n"
+                cert_text += f"📅 Date de sortie: {cert_data.get('release_date', 'N/A')}\n"
+                cert_text += f"✅ Date de constat: {cert_data.get('certification_date', 'N/A')}\n"
+                cert_text += f"🏢 Éditeur: {cert_data.get('publisher', 'N/A')}\n"
+                
+                # Calculer la durée d'obtention
+                if cert_data.get('release_date') and cert_data.get('certification_date'):
+                    try:
+                        from datetime import datetime
+                        release = datetime.strptime(cert_data['release_date'], '%Y-%m-%d')
+                        certif = datetime.strptime(cert_data['certification_date'], '%Y-%m-%d')
+                        duration = (certif - release).days
+                        cert_text += f"\n⏱️ Durée d'obtention: {duration} jours"
+                    except:
+                        pass
+                
+                cert_info.insert("0.0", cert_text)
+                cert_info.configure(state="disabled")
+            else:
+                no_cert = ctk.CTkLabel(cert_frame, text="❌ Aucune certification trouvée", font=("Arial", 14))
+                no_cert.pack(expand=True)
+        except Exception as e:
+            error_label = ctk.CTkLabel(cert_frame, text=f"Erreur: {e}", text_color="red")
+            error_label.pack(expand=True)
+
         # ✅ NOUVEAU: Debug featuring détaillé
         tech_textbox.insert("end", f"\n🎤 DEBUG FEATURING:\n")
         tech_textbox.insert("end", f"• is_featuring: {getattr(track, 'is_featuring', 'Non défini')}\n")

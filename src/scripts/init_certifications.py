@@ -1,4 +1,4 @@
-"""Script d'initialisation SNEP - Version corrigée pour les dates"""
+"""Script d'initialisation SNEP"""
 import sys
 import os
 from pathlib import Path
@@ -204,14 +204,6 @@ class SimpleSNEPImporter:
                     # Normaliser
                     artist_clean = self.normalize_text(artist)
                     title_clean = self.normalize_text(title)
-
-                    cursor.execute('''
-                        UPDATE certifications 
-                        SET category = 'Singles' 
-                        WHERE category = 'Single'
-                    ''')
-                    self.conn.commit()
-                    print("✅ Catégories uniformisées (Single → Singles)")
                     
                     # Insérer dans la base
                     cursor.execute('''
@@ -244,6 +236,20 @@ class SimpleSNEPImporter:
                         print(f"  ⚠️ Erreur ligne {i}: {e}")
             
             self.conn.commit()
+            
+            # Uniformiser les catégories APRÈS l'import
+            cursor.execute('''
+                UPDATE certifications 
+                SET category = 'Singles' 
+                WHERE category = 'Single'
+            ''')
+            self.conn.commit()
+            
+            # Compter les corrections
+            cursor.execute("SELECT changes()")
+            changes = cursor.fetchone()[0]
+            if changes > 0:
+                print(f"  • Catégories uniformisées : {changes} 'Single' → 'Singles'")
             
             print(f"\n✅ Import terminé !")
             print(f"  • Nouveaux enregistrements : {new_records}")

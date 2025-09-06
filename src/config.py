@@ -53,3 +53,6 @@ YOUTUBE_CACHE_TTL_HOURS = int(os.getenv("YOUTUBE_CACHE_TTL_HOURS", "24"))
 YOUTUBE_AUTO_SELECT_ALBUM_TRACKS = True  # Auto-sélection pour morceaux d'album
 YOUTUBE_VERIFY_OFFICIAL_CHANNELS = True  # Vérifier les chaînes officielles
 YOUTUBE_CONFIDENCE_THRESHOLD = 0.85      # Seuil de confiance pour auto-sélection
+
+# Certifications
+DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')

@@ -14,4 +14,4 @@
 - [Ultratop](https://www.ultratop.be)                               - Certifications BRMA (Belgique)
 
 ## Ressources utilisées
-- [H3nrycrosby - RIAA Scraping Project](https://github.com/H3nrycrosby/riaa_scraping_project/)
+- [H3nrycrosby - RIAA Scraping Project](https://github.com/H3nrycrosby/riaa_scraping_project/) - Database Certification RIAA (USA)

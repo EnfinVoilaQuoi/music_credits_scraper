@@ -335,8 +335,12 @@ class UltratopUpdater:
         self.logger.info("=== MISE À JOUR MANUELLE ===")
         
         try:
+            # Tenter d'abord de récupérer les pages manquantes
+            new_certifications = self.retry_missing_pages()
+            
             # Mise à jour des années récentes
-            new_certifications = self.update_recent_years(years_back)
+            recent_certifications = self.update_recent_years(years_back)
+            new_certifications.extend(recent_certifications)
             
             # Sauvegarde
             self.save_updated_database(new_certifications)
@@ -351,8 +355,12 @@ class UltratopUpdater:
         self.logger.info("=== MISE À JOUR PROGRAMMÉE ===")
         
         try:
+            # Tenter d'abord de récupérer les pages manquantes
+            new_certifications = self.retry_missing_pages()
+            
             # Mise à jour de l'année en cours uniquement
-            new_certifications = self.update_current_year()
+            current_year_certifications = self.update_current_year()
+            new_certifications.extend(current_year_certifications)
             
             # Sauvegarde
             self.save_updated_database(new_certifications)

@@ -182,7 +182,9 @@ class Track:
     bpm: Optional[int] = None
     duration: Optional[int] = None  # En secondes
     genre: Optional[str] = None
-    track_number: Optional[int] = None  # Numéro de piste
+    track_number: Optional[int] = None
+    musical_key: Optional[str] = None   
+    time_signature: Optional[str] = None
     
     # Support des features
     is_featuring: bool = False  # True si l'artiste est en featuring

@@ -12,6 +12,7 @@ from src.utils.logger import get_logger
 from src.config import SPOTIFY_CLIENT_ID, DISCOGS_TOKEN, LAST_FM_API_KEY, GETSONGBPM_API_KEY
 from src.api.getsongbpm_api import GetSongBPMAPI
 from src.api.acousticbrainz_api import AcousticBrainzAPI
+from src.scrapers.songbpm_scraper import SongBPMScraper
 
 
 logger = get_logger(__name__)
@@ -37,6 +38,11 @@ class DataEnricher:
                 self.apis_available['spotify'] = False
         else:
             self.apis_available['spotify'] = False
+
+        # SongBPM Scraper (toujours disponible si le site répond)
+        self.songbpm_scraper = SongBPMScraper()
+        self.apis_available['songbpm_scraper'] = True
+        logger.info("Scraper SongBPM disponible")
         
         # Discogs
         if DISCOGS_TOKEN:
@@ -123,7 +129,18 @@ class DataEnricher:
                 logger.error(f"Erreur AcousticBrainz: {e}")
                 results['acousticbrainz'] = False
         
-        # 3. Rapedia pour les BPM rap français (si toujours pas de BPM)
+        # 3. SongBPM Scraper si toujours pas de BPM
+        if 'songbpm_scraper' in sources and self.apis_available['songbpm_scraper'] and not track.bpm:
+            try:
+                success = self.songbpm_scraper.enrich_track_data(track)
+                results['songbpm_scraper'] = success
+                if success:
+                    logger.info(f"✅ SongBPM Scraper: BPM trouvé pour {track.title}")
+            except Exception as e:
+                logger.error(f"Erreur SongBPM Scraper: {e}")
+                results['songbpm_scraper'] = False
+
+        # 4. Rapedia pour les BPM rap français (si toujours pas de BPM)
         if 'rapedia' in sources and self.apis_available['rapedia'] and not track.bpm:
             try:
                 success = self.rapedia_scraper.enrich_track_data(track)
@@ -132,7 +149,7 @@ class DataEnricher:
                 logger.error(f"Erreur Rapedia: {e}")
                 results['rapedia'] = False
         
-        # 4. Spotify pour les métadonnées (plus les BPM, problème de permissions)
+        # 5. Spotify pour les métadonnées (plus les BPM, problème de permissions)
         if 'spotify' in sources and self.apis_available['spotify']:
             try:
                 success = self.spotify_api.enrich_track_data(track)
@@ -141,7 +158,7 @@ class DataEnricher:
                 logger.error(f"Erreur Spotify: {e}")
                 results['spotify'] = False
         
-        # 5. Discogs pour les crédits supplémentaires
+        # 6. Discogs pour les crédits supplémentaires
         if 'discogs' in sources and self.apis_available['discogs']:
             try:
                 success = self.discogs_api.enrich_track_data(track)
@@ -150,7 +167,7 @@ class DataEnricher:
                 logger.error(f"Erreur Discogs: {e}")
                 results['discogs'] = False
         
-        # 6. Last.fm pour les genres et métadonnées
+        # 7. Last.fm pour les genres et métadonnées
         if 'lastfm' in sources and self.apis_available['lastfm']:
             try:
                 success = self.lastfm_api.enrich_track_data(track)

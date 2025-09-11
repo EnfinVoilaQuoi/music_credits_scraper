@@ -140,8 +140,17 @@ class AcousticBrainzAPI:
             key_scale = tonal.get('key_scale')
             if key_key and key_scale:
                 data['musical_key'] = f"{key_key} {key_scale}"
+
+            # Extraire la signature rythmique
+            meter = rhythm.get('meter')
+            if meter:
+                try:
+                    # On suppose que c’est "x/4"
+                    data['time_signature'] = f"{int(meter)}/4"
+                except (ValueError, TypeError):
+                    pass
             
-            # Extraire d'autres métadonnées utiles
+            # Extraire d'autres métadonnées utiles (durée, spectral, etc.)
             if 'lowlevel' in acoustic_data:
                 lowlevel = acoustic_data['lowlevel']
                 

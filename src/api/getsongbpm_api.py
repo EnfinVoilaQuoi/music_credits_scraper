@@ -139,9 +139,14 @@ class GetSongBPMAPI:
                 logger.info(f"BPM ajouté depuis GetSongBPM: {track.bpm} pour {track.title}")
             
             # Ajouter la clé musicale si manquante
-            if not hasattr(track, 'musical_key') and track_data.get('key'):
+            if not track.musical_key and track_data.get('key'):
                 track.musical_key = track_data['key']
                 logger.debug(f"Clé musicale ajoutée: {track.musical_key}")
+
+            # Ajouter la signature rythmique si manquante
+            if not track.time_signature and track_data.get('time_signature'):
+                track.time_signature = track_data['time_signature']
+                logger.debug(f"Signature rythmique ajoutée: {track.time_signature}")
             
             # Respecter le rate limit
             time.sleep(DELAY_BETWEEN_REQUESTS)

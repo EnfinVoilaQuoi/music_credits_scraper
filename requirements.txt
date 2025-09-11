@@ -6,9 +6,9 @@ pylast==5.2.0
 musicbrainzngs>=0.7.1
 
 # Scraping
-selenium==4.15.2
-beautifulsoup4==4.12.2
-requests==2.31.0
+selenium>=4.15.2
+beautifulsoup4>=4.12.2
+requests>=2.31.0
 
 # Interface graphique
 customtkinter==5.2.1
@@ -20,9 +20,16 @@ sqlalchemy==2.0.23
 python-dotenv==1.0.0
 coloredlogs==15.0.1
 pandas>=2.0.0
+numpy>=1.24.3
 
 # Chrome driver
 webdriver-manager==4.0.1
 
 # YouTube integration
 ytmusicapi==1.8.0
+
+# Planification de tâches
+schedule==1.2.0
+
+# Logging (optionnel, mais utile)
+python-dateutil==2.8.2

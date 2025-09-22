@@ -528,36 +528,68 @@ class RIAAScraper:
         for item in data:
             base_data = {k: v for k, v in item.items() if k != "history"}
             
-            if not item.get("history"):
-                rows.append(base_data)
+            # Si pas d'historique ou si l'historique est vide/invalide
+            if not item.get("history") or (len(item.get("history", [])) == 1 and item["history"][0].get("note")):
+                # Utiliser les données de base du tableau principal
+                # S'assurer que toutes les colonnes existent
+                row = {
+                    "artist": base_data.get("artist", ""),
+                    "title": base_data.get("title", ""),
+                    "certification_date": base_data.get("certification_date", ""),
+                    "release_date": base_data.get("release_date", ""),
+                    "certification_level": base_data.get("award_level", ""),
+                    "units": base_data.get("units", ""),
+                    "label": base_data.get("label", ""),
+                    "format": base_data.get("format", ""),
+                    "award_level": base_data.get("award_level", ""),
+                    "category": "",
+                    "type": "",
+                    "genre": "",
+                    "certified_units": ""
+                }
+                rows.append(row)
             else:
+                # Traiter l'historique détaillé
                 for hist in item["history"]:
-                    if not hist.get("note"):
+                    if not hist.get("note"):  # Skip les entrées vides
                         row = base_data.copy()
-                        row.update(hist)
+                        
+                        # Fusionner les données historiques avec les données de base
+                        # Priorité aux données historiques pour les dates
+                        row.update({
+                            "artist": base_data.get("artist", ""),
+                            "title": base_data.get("title", ""),
+                            "label": base_data.get("label", ""),
+                            "format": base_data.get("format", ""),
+                            "certification_date": hist.get("certification_date", base_data.get("certification_date", "")),
+                            "release_date": hist.get("release_date", base_data.get("release_date", "")),
+                            "certification_level": hist.get("certification_level", base_data.get("award_level", "")),
+                            "units": hist.get("units", base_data.get("units", "")),
+                            "category": hist.get("category", ""),
+                            "type": hist.get("type", ""),
+                            "genre": hist.get("genre", ""),
+                            "certified_units": hist.get("certified_units", ""),
+                            "award_level": hist.get("certification_level", base_data.get("award_level", ""))
+                        })
                         rows.append(row)
-                    else:
-                        rows.append(base_data)
-                        break
                     
-        all_keys = set()
-        for row in rows:
-            all_keys.update(row.keys())
-            
-        ordered_keys = ["artist", "title", "certification_date", "release_date", 
-                       "certification_level", "units", "label", "format", 
-                       "award_level", "category", "type", "genre", "certified_units"]
+        # Ordre des colonnes pour le CSV
+        fieldnames = [
+            "artist", "title", "certification_date", "release_date", 
+            "certification_level", "units", "label", "format", 
+            "award_level", "category", "type", "genre", "certified_units"
+        ]
         
-        for key in all_keys:
-            if key not in ordered_keys:
-                ordered_keys.append(key)
-                
-        fieldnames = [k for k in ordered_keys if k in all_keys]
-        
+        # Écrire le CSV avec encodage UTF-8 BOM pour Excel
         with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(rows)
+            
+            # Écrire chaque ligne en s'assurant que toutes les colonnes existent
+            for row in rows:
+                # Compléter les colonnes manquantes avec des chaînes vides
+                row_complete = {field: row.get(field, "") for field in fieldnames}
+                writer.writerow(row_complete)
             
         logger.info(f"✅ Sauvegardé {len(rows)} lignes dans: {filepath}")
         
@@ -620,10 +652,44 @@ def main():
             
         elif args.start_date and args.end_date:
             scraper.init_driver()
-            results = scraper.scrape_by_date_range(args.start_date, args.end_date)
-            output = args.output or f"riaa_dates_{datetime.now():%Y%m%d}.csv"
-            scraper.save_to_csv(results, output)
-            scraper.close_driver()
+            try:
+                # Convertir en objets datetime pour le découpage
+                start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
+                end_date = datetime.strptime(args.end_date, "%Y-%m-%d")
+                
+                all_results = []
+                current = start_date
+                batch = 1
+                
+                while current < end_date:
+                    next_date = min(current + timedelta(days=60), end_date)
+                    
+                    logger.info(f"\n=== Batch {batch}: {current:%Y-%m-%d} à {next_date:%Y-%m-%d} ===")
+                    
+                    results = scraper.scrape_by_date_range(
+                        current.strftime("%Y-%m-%d"),
+                        next_date.strftime("%Y-%m-%d"),
+                        "certification",
+                        True  # Toujours avec détails
+                    )
+                    
+                    if results:
+                        all_results.extend(results)
+                        logger.info(f"Batch {batch}: {len(results)} certifications")
+                    
+                    current = next_date
+                    batch += 1
+                    
+                    if current < end_date:
+                        time.sleep(5)
+                
+                # Sauvegarder tous les résultats
+                output = args.output or f"riaa_dates_{datetime.now():%Y%m%d}.csv"
+                scraper.save_to_csv(all_results, output)
+                logger.info(f"✅ Total: {len(all_results)} certifications")
+                
+            finally:
+                scraper.close_driver()
             
         else:
             # Mode interactif

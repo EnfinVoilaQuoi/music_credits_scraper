@@ -17,6 +17,7 @@ from src.utils.youtube_integration import youtube_integration
 from src.models import Artist, Track
 from tkinter import ttk as tkinter_ttv
 from src.utils.disabled_tracks_manager import DisabledTracksManager
+from certification_update_gui import CertificationUpdateDialog
 
 
 logger = get_logger(__name__)
@@ -104,15 +105,14 @@ class MainWindow:
         self.tracks_info_label = ctk.CTkLabel(info_frame, text="")
         self.tracks_info_label.pack()
         
-        # === Section contrôles - ORDRE RÉORGANISÉ ===
+        # === Section contrôles ===
         control_frame = ctk.CTkFrame(main_frame)
         control_frame.pack(fill="x", padx=5, pady=5)
         
-        # ORDRE SOUHAITÉ :
         # 1. Récupérer les morceaux
         self.get_tracks_button = ctk.CTkButton(
             control_frame,
-            text="Récupérer les morceaux",
+            text="Récupérer les Morceaux",
             command=self._get_tracks,
             state="disabled",
             width=150
@@ -122,7 +122,7 @@ class MainWindow:
         # 2. Scraper crédits
         self.scrape_button = ctk.CTkButton(
             control_frame,
-            text="Scraper crédits",
+            text="Scraper les Crédits",
             command=self._start_scraping,
             state="disabled",
             width=150
@@ -132,7 +132,7 @@ class MainWindow:
         # 3. Scraper paroles
         self.lyrics_button = ctk.CTkButton(
             control_frame,
-            text="Scraper paroles",
+            text="Scraper les Paroles",
             command=self._start_lyrics_scraping,
             state="disabled",
             width=150,
@@ -144,7 +144,7 @@ class MainWindow:
         # 4. Mise à jour forcée
         self.force_update_button = ctk.CTkButton(
             control_frame,
-            text="Mise à jour forcée",
+            text="MaJ Crédits forcée",
             command=self._force_update_selected,
             state="disabled",
             width=150,
@@ -156,14 +156,25 @@ class MainWindow:
         # 5. Enrichir données
         self.enrich_button = ctk.CTkButton(
             control_frame,
-            text="Enrichir données",
+            text="Enrichir Données",
             command=self._start_enrichment,
             state="disabled",
             width=150
         )
         self.enrich_button.pack(side="left", padx=5)
+
+        # 6. Bouton de mise à jour des certifications
+        self.update_certif_button = ctk.CTkButton(
+            control_frame,
+            text="📊 MàJ Certifs",
+            command=self._open_certification_update,
+            width=150,
+            fg_color="darkgreen",
+            hover_color="green"
+        )
+        self.update_certif_button.pack(side="left", padx=5)
         
-        # 6. Exporter
+        # 7. Exporter
         self.export_button = ctk.CTkButton(
             control_frame,
             text="Exporter",
@@ -1324,6 +1335,26 @@ class MainWindow:
                 text += f" ({disabled} désactivés)"
             
             self.selected_count_label.configure(text=text)
+
+    def _open_certification_update(self):
+        """Ouvre la fenêtre de mise à jour des certifications"""
+        try:
+            # Initialiser le gestionnaire si disponible
+            cert_manager = None
+            try:
+                from src.utils.certification_manager import CertificationManager
+                cert_manager = CertificationManager()
+            except:
+                pass
+            
+            # Ouvrir la fenêtre
+            dialog = CertificationUpdateDialog(self.root, cert_manager)
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+        except Exception as e:
+            logger.error(f"Erreur: {e}")
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir la fenêtre:\n{str(e)}")
 
     def _export_data(self):
         """Exporte les données en JSON - ✅ MODIFIÉ POUR EXCLURE LES DÉSACTIVÉS"""

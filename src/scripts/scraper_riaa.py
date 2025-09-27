@@ -1,137 +1,220 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Scraper RIAA optimisé - Version complète et fonctionnelle
-Compatible avec la structure actuelle du site RIAA (2024)
+Scraper RIAA - Version corrigée pour les sessions Chrome et les dates
 """
 
-import re
-import time
-import csv
-import json
-from urllib.parse import quote_plus
-from typing import List, Dict, Tuple, Optional
-from datetime import datetime, timedelta
-import logging
-from pathlib import Path
-
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import (
-    TimeoutException,
-    NoSuchElementException,
-    StaleElementReferenceException,
-)
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from bs4 import BeautifulSoup
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from urllib.parse import quote_plus
+import pandas as pd
+import logging
+import time
+import csv
+import argparse
+import sys
+import tempfile
+import os
+import shutil
+import uuid
 
-# ========== CONFIGURATION ==========
-HEADLESS = False
-WAIT_SECONDS = 10
-MAX_WAIT_DETAIL = 3.0
-POLL_INTERVAL = 0.2
-BASE_UNITS = {"gold": 500_000, "platinum": 1_000_000, "diamond": 10_000_000}
+# Configuration
+MAX_WAIT_DETAIL = 10
+POLL_INTERVAL = 0.5
 
-# Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Units de base pour chaque niveau
+BASE_UNITS = {
+    "gold": 500000,
+    "platinum": 1000000, 
+    "diamond": 10000000
+}
+
+# Logging
 logger = logging.getLogger(__name__)
 
-
 class RIAAScraper:
-    """Scraper optimisé pour les certifications RIAA"""
+    """Scraper pour les certifications RIAA avec gestion améliorée des sessions"""
     
-    def __init__(self, headless=HEADLESS, output_dir=None):
+    def __init__(self, headless: bool = False, output_dir: str = "data"):
         """
-        Initialise le scraper RIAA
+        Initialise le scraper
         
         Args:
             headless: Si True, lance Chrome en mode headless
-            output_dir: Répertoire de sortie pour les fichiers CSV
+            output_dir: Dossier de sortie pour les fichiers
         """
-        self.headless = headless
         self.driver = None
         self.wait = None
-        
-        # Définir le répertoire de sortie
-        if output_dir:
-            self.output_dir = Path(output_dir)
-        else:
-            # Par défaut dans data/certifications/riaa
-            self.output_dir = Path(__file__).parent.parent.parent / 'data' / 'certifications' / 'riaa'
-        
-        # Créer le répertoire s'il n'existe pas
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Fichiers seront sauvegardés dans: {self.output_dir}")
+        self.headless = headless
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(exist_ok=True)
+        self.temp_dir = None
         
     def init_driver(self):
-        """Initialise le driver Selenium avec Chrome"""
-        options = Options()
-        if self.headless:
-            options.add_argument("--headless=new")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_experimental_option("excludeSwitches", ["enable-logging"])
-        
-        # Options pour accélérer le chargement
-        options.add_argument("--disable-images")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.page_load_strategy = 'eager'
-        
-        self.driver = webdriver.Chrome(options=options)
-        self.wait = WebDriverWait(self.driver, WAIT_SECONDS)
+        """Initialise le driver Selenium avec un profil temporaire unique"""
+        try:
+            # Fermer toute session existante
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+            
+            # Créer un répertoire temporaire unique pour cette session
+            self.temp_dir = tempfile.mkdtemp(prefix="chrome_temp_")
+            user_data_dir = os.path.join(self.temp_dir, f"profile_{uuid.uuid4().hex[:8]}")
+            
+            options = Options()
+            
+            # Utiliser un profil utilisateur temporaire unique
+            options.add_argument(f"--user-data-dir={user_data_dir}")
+            options.add_argument(f"--profile-directory=Profile_{uuid.uuid4().hex[:8]}")
+            
+            if self.headless:
+                options.add_argument("--headless=new")  # Nouveau mode headless
+                options.add_argument("--window-size=1920,1080")
+            
+            # Options pour éviter les conflits
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--disable-web-security")
+            options.add_argument("--disable-features=VizDisplayCompositor")
+            options.add_argument("--disable-extensions")
+            
+            # Options pour éviter la détection
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+            
+            # Préférences pour éviter les popups
+            prefs = {
+                "profile.default_content_setting_values.notifications": 2,
+                "profile.default_content_settings.popups": 0,
+                "profile.managed_default_content_settings.images": 1
+            }
+            options.add_experimental_option("prefs", prefs)
+            
+            # Tentative avec gestion d'erreur
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                try:
+                    logger.info(f"Tentative {attempt + 1}/{max_attempts} d'initialisation du driver...")
+                    
+                    # Essayer d'abord avec Service
+                    try:
+                        from webdriver_manager.chrome import ChromeDriverManager
+                        service = Service(ChromeDriverManager().install())
+                        self.driver = webdriver.Chrome(service=service, options=options)
+                    except:
+                        # Fallback sans Service
+                        self.driver = webdriver.Chrome(options=options)
+                    
+                    self.wait = WebDriverWait(self.driver, 10)
+                    logger.info("✅ Driver Selenium initialisé avec succès")
+                    return
+                    
+                except Exception as e:
+                    logger.warning(f"Tentative {attempt + 1} échouée: {e}")
+                    if attempt < max_attempts - 1:
+                        time.sleep(2)
+                        # Nettoyer le répertoire temporaire pour la prochaine tentative
+                        if os.path.exists(user_data_dir):
+                            try:
+                                shutil.rmtree(user_data_dir)
+                            except:
+                                pass
+                        # Créer un nouveau répertoire
+                        user_data_dir = os.path.join(self.temp_dir, f"profile_{uuid.uuid4().hex[:8]}")
+                    else:
+                        raise Exception(f"Impossible d'initialiser le driver après {max_attempts} tentatives")
+                    
+        except Exception as e:
+            logger.error(f"Erreur critique lors de l'initialisation: {e}")
+            self.cleanup_temp_dir()
+            raise
+            
+    def cleanup_temp_dir(self):
+        """Nettoie le répertoire temporaire"""
+        if self.temp_dir and os.path.exists(self.temp_dir):
+            try:
+                shutil.rmtree(self.temp_dir)
+                logger.debug(f"Répertoire temporaire supprimé: {self.temp_dir}")
+            except Exception as e:
+                logger.warning(f"Impossible de supprimer le répertoire temporaire: {e}")
         
     def close_driver(self):
-        """Ferme le driver Selenium"""
+        """Ferme le driver Selenium et nettoie les ressources"""
         if self.driver:
-            self.driver.quit()
+            try:
+                self.driver.quit()
+                logger.info("Driver fermé")
+            except Exception as e:
+                logger.warning(f"Erreur lors de la fermeture du driver: {e}")
+            finally:
+                self.driver = None
+                
+        # Nettoyer le répertoire temporaire
+        self.cleanup_temp_dir()
             
-    def parse_certification_level(self, text: str) -> Tuple[str, Optional[int], Optional[int]]:
+    def parse_certification_level(self, text: str) -> tuple:
         """
         Parse le niveau de certification et calcule les unités
         
         Args:
-            text: Texte de certification (ex: "2x Platinum")
+            text: Texte de certification (ex: "2x Platinum", "Gold")
             
         Returns:
-            Tuple (label formaté, multiplicateur, unités totales)
+            Tuple (niveau, multiplicateur, unités)
         """
         if not text:
-            return ("", None, None)
+            return "", 1, None
             
-        text = text.strip()
+        text = text.strip().lower()
         
-        # Recherche multiplicateur (ex: "2x Platinum")
-        m = re.search(r"(\d+)\s*[xX]\s*([A-Za-z]+)", text, re.I)
-        if m:
-            mult = int(m.group(1))
-            level = m.group(2).lower()
-            if level in BASE_UNITS:
-                units = BASE_UNITS[level] * mult
-                return (f"{mult}x {level.title()}", mult, units)
+        # Extraction du multiplicateur
+        mult = 1
+        if "x" in text:
+            try:
+                mult = int(text.split("x")[0].strip())
+                text = text.split("x")[1].strip()
+            except (ValueError, IndexError):
+                pass
                 
-        # Recherche simple (ex: "Gold", "Platinum")
-        for level in BASE_UNITS:
-            if level.lower() in text.lower():
-                return (level.title(), 1, BASE_UNITS[level])
-                
-        # Extraction directe des millions
-        m_units = re.search(r"(\d+(?:\.\d+)?)\s*Million", text, re.I)
-        if m_units:
-            units = int(float(m_units.group(1)) * 1_000_000)
-            return (text, None, units)
+        # Détermination du niveau
+        if "diamond" in text:
+            level = "Diamond"
+            base = BASE_UNITS["diamond"]
+        elif "platinum" in text or "platine" in text:
+            level = "Platinum"
+            base = BASE_UNITS["platinum"]
+        elif "gold" in text or "or" in text:
+            level = "Gold"
+            base = BASE_UNITS["gold"]
+        else:
+            return text.title(), mult, None
             
-        return (text, None, None)
+        # Calcul des unités
+        units = base * mult
+        
+        # Format du niveau avec multiplicateur
+        if mult > 1:
+            level = f"{mult}x {level}"
+            
+        return level, mult, units
         
     def click_load_more(self) -> int:
         """
-        Clique sur LOAD MORE jusqu'à charger tous les résultats
+        Clique sur le bouton LOAD MORE jusqu'à ce qu'il n'y ait plus de résultats
         
         Returns:
             Nombre de clics effectués
@@ -142,52 +225,24 @@ class RIAAScraper:
         
         while consecutive_fails < max_consecutive_fails:
             try:
-                # Cherche le bouton LOAD MORE avec plusieurs sélecteurs
-                load_more = None
-                for selector in ["#loadmore", "a.link-arrow-gnp#loadmore", "a#loadmore"]:
-                    try:
-                        load_more = self.driver.find_element(By.CSS_SELECTOR, selector)
-                        if load_more and load_more.is_displayed():
-                            break
-                    except:
-                        continue
-                
-                if not load_more or not load_more.is_displayed():
-                    consecutive_fails += 1
-                    time.sleep(1)
-                    continue
-                    
-                # Compte actuel
                 current_count = len(self.driver.find_elements(By.CSS_SELECTOR, "tr.table_award_row"))
                 
+                # Cherche le bouton
+                load_more = self.driver.find_element(By.ID, "loadMore")
+                
+                # Vérifie si le bouton est visible et actif
+                if not load_more.is_displayed() or load_more.get_attribute("style") == "display: none;":
+                    break
+                    
                 # Scroll et clique
-                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", load_more)
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", load_more)
                 time.sleep(0.5)
-                
-                # Essaye plusieurs méthodes de clic
-                clicked = False
-                try:
-                    load_more.click()
-                    clicked = True
-                except:
-                    try:
-                        self.driver.execute_script("arguments[0].click();", load_more)
-                        clicked = True
-                    except:
-                        try:
-                            self.driver.execute_script("loadMoreSearch(document.getElementById('loadmore'));")
-                            clicked = True
-                        except:
-                            pass
-                
-                if not clicked:
-                    consecutive_fails += 1
-                    continue
+                self.driver.execute_script("arguments[0].click();", load_more)
                 
                 clicks += 1
-                consecutive_fails = 0  # Reset si succès
+                consecutive_fails = 0
                 
-                # Attente pour le chargement AJAX
+                # Attente du chargement
                 time.sleep(2.5)
                 
                 # Vérifie si nouvelles lignes
@@ -209,13 +264,14 @@ class RIAAScraper:
         logger.info(f"Fin du chargement après {clicks} clics")
         return clicks
         
-    def click_and_extract_details(self, row_element, row_id: str) -> List[Dict]:
+    def click_and_extract_details(self, row_element, row_id: str, base_cert_date: str = "") -> List[Dict]:
         """
         Clique sur MORE DETAILS et extrait les données détaillées
         
         Args:
             row_element: Element Selenium de la ligne
             row_id: ID de la ligne
+            base_cert_date: Date de certification de base extraite du tableau principal
             
         Returns:
             Liste des certifications historiques
@@ -260,9 +316,15 @@ class RIAAScraper:
                                             date_text = cells[0].text.strip()
                                             cert_text = cells[1].text.strip()
                                             
-                                            parts = cert_text.split("|") if "|" in cert_text else [cert_text]
-                                            cert_level = parts[0].strip()
-                                            cert_date = parts[1].strip() if len(parts) > 1 else ""
+                                            # Parse certification et date
+                                            if "|" in cert_text:
+                                                parts = cert_text.split("|")
+                                                cert_level = parts[0].strip()
+                                                cert_date = parts[1].strip() if len(parts) > 1 else base_cert_date
+                                            else:
+                                                cert_level = cert_text
+                                                # Utiliser la date de base si pas de date dans le détail
+                                                cert_date = base_cert_date
                                             
                                             level, mult, units = self.parse_certification_level(cert_level)
                                             
@@ -274,21 +336,23 @@ class RIAAScraper:
                                             })
                                             
                                         elif len(cells) >= 6:
-                                            # Format complet
+                                            # Format complet avec toutes les colonnes
                                             release_date = cells[0].text.strip()
-                                            prev_cert = cells[1].text.strip()
+                                            prev_cert_text = cells[1].text.strip()
                                             category = cells[2].text.strip()
                                             type_field = cells[3].text.strip()
                                             cert_units = cells[4].text.strip()
                                             genre = cells[5].text.strip() if len(cells) > 5 else ""
                                             
-                                            if "|" in prev_cert:
-                                                cert_level, cert_date = prev_cert.split("|", 1)
+                                            # Parse certification et date
+                                            if "|" in prev_cert_text:
+                                                cert_level, cert_date = prev_cert_text.split("|", 1)
                                                 cert_level = cert_level.strip()
                                                 cert_date = cert_date.strip()
                                             else:
-                                                cert_level = prev_cert
-                                                cert_date = ""
+                                                cert_level = prev_cert_text
+                                                # Utiliser la date de base si pas de date dans le détail
+                                                cert_date = base_cert_date
                                             
                                             level, mult, units = self.parse_certification_level(cert_level)
                                             if not units and cert_units:
@@ -319,14 +383,14 @@ class RIAAScraper:
         
     def extract_row_data(self, row_element, default_artist: str = "") -> Dict:
         """
-        Extrait les données principales d'une ligne
+        Extrait les données principales d'une ligne du tableau RIAA
         
         Args:
             row_element: Element Selenium de la ligne
             default_artist: Artiste par défaut si non trouvé
             
         Returns:
-            Dictionnaire avec les données de base
+            Dictionnaire avec les données de base incluant la date de certification
         """
         data = {
             "artist": default_artist,
@@ -347,12 +411,15 @@ class RIAAScraper:
             if artist_cell:
                 data["artist"] = artist_cell.get_text(strip=True) or default_artist
                 
-            # Titre et autres infos
+            # Titre, Date de certification et Label
             other_cells = soup.select("td.others_cell")
             if len(other_cells) >= 3:
                 data["title"] = other_cells[0].get_text(strip=True)
+                # Extraction correcte de la date de certification
                 data["certification_date"] = other_cells[1].get_text(strip=True)
                 data["label"] = other_cells[2].get_text(strip=True)
+                
+                logger.debug(f"Extrait: {data['title']} - Date: {data['certification_date']}")
                 
             # Format
             format_cell = soup.select_one("td.format_cell")
@@ -360,7 +427,7 @@ class RIAAScraper:
                 format_text = format_cell.get_text(strip=True)
                 data["format"] = format_text.replace("MORE DETAILS", "").strip()
                 
-            # Niveau de certification
+            # Niveau de certification depuis l'image
             award_img = soup.select_one("img.award")
             if award_img and award_img.get("src"):
                 src = award_img["src"]
@@ -378,57 +445,6 @@ class RIAAScraper:
             logger.error(f"Erreur extraction données: {e}")
             
         return data
-        
-    def scrape_by_artist(self, artist_name: str) -> List[Dict]:
-        """
-        Scrape toutes les certifications d'un artiste
-        
-        Args:
-            artist_name: Nom de l'artiste
-            
-        Returns:
-            Liste des certifications trouvées
-        """
-        results = []
-        
-        artist_query = quote_plus(artist_name)
-        url = f"https://www.riaa.com/gold-platinum/?tab_active=default-award&ar={artist_query}"
-        
-        logger.info(f"Scraping artiste: {artist_name}")
-        logger.info(f"URL: {url}")
-        
-        self.driver.get(url)
-        time.sleep(2)
-        
-        logger.info("Chargement de tous les résultats...")
-        self.click_load_more()
-        
-        rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.table_award_row")
-        logger.info(f"Trouvé {len(rows)} certifications")
-        
-        for idx, row in enumerate(rows, 1):
-            try:
-                row_data = self.extract_row_data(row, artist_name)
-                
-                row_id = row.get_attribute("id")
-                if row_id and "default_" in row_id:
-                    row_id = row_id.replace("default_", "")
-                    
-                logger.info(f"[{idx}/{len(rows)}] {row_data.get('title', 'Unknown')}")
-                
-                if row_id:
-                    details = self.click_and_extract_details(row, row_id)
-                    row_data["history"] = details
-                    if details and not details[0].get("note"):
-                        logger.debug(f"  -> {len(details)} certification(s)")
-                        
-                results.append(row_data)
-                
-            except Exception as e:
-                logger.error(f"Erreur ligne {idx}: {e}")
-                continue
-                
-        return results
         
     def scrape_by_date_range(self, start_date: str, end_date: str, 
                             date_option: str = "release", get_details: bool = False) -> List[Dict]:
@@ -464,7 +480,6 @@ class RIAAScraper:
         
         logger.info(f"Scraping par dates: {start_date} à {end_date}")
         logger.info(f"Mode: {date_option} | Détails: {'Oui' if get_details else 'Non'}")
-        logger.info(f"URL: {url}")
         
         self.driver.get(url)
         time.sleep(3)
@@ -484,6 +499,7 @@ class RIAAScraper:
         
         for idx, row in enumerate(rows, 1):
             try:
+                # Extraction des données de base
                 row_data = self.extract_row_data(row)
                 
                 if get_details:
@@ -495,7 +511,8 @@ class RIAAScraper:
                         if idx % 10 == 0 or idx == 1:
                             logger.info(f"[{idx}/{len(rows)}] Traitement avec détails...")
                         
-                        details = self.click_and_extract_details(row, row_id)
+                        # Passer la date de certification de base aux détails
+                        details = self.click_and_extract_details(row, row_id, row_data.get("certification_date", ""))
                         row_data["history"] = details
                 
                 results.append(row_data)
@@ -512,7 +529,7 @@ class RIAAScraper:
         
     def save_to_csv(self, data: List[Dict], filename: str):
         """
-        Sauvegarde les données dans un fichier CSV
+        Sauvegarde les données dans un fichier CSV avec gestion correcte des dates
         
         Args:
             data: Liste des données à sauvegarder
@@ -530,8 +547,7 @@ class RIAAScraper:
             
             # Si pas d'historique ou si l'historique est vide/invalide
             if not item.get("history") or (len(item.get("history", [])) == 1 and item["history"][0].get("note")):
-                # Utiliser les données de base du tableau principal
-                # S'assurer que toutes les colonnes existent
+                # Utiliser les données de base
                 row = {
                     "artist": base_data.get("artist", ""),
                     "title": base_data.get("title", ""),
@@ -554,14 +570,20 @@ class RIAAScraper:
                     if not hist.get("note"):  # Skip les entrées vides
                         row = base_data.copy()
                         
-                        # Fusionner les données historiques avec les données de base
-                        # Priorité aux données historiques pour les dates
+                        # Ne pas écraser la date de certification si elle est vide dans l'historique
+                        cert_date_from_hist = hist.get("certification_date", "")
+                        cert_date_from_base = base_data.get("certification_date", "")
+                        
+                        # Utiliser la date de l'historique si elle existe, sinon la date de base
+                        final_cert_date = cert_date_from_hist if cert_date_from_hist else cert_date_from_base
+                        
+                        # Fusionner les données
                         row.update({
                             "artist": base_data.get("artist", ""),
                             "title": base_data.get("title", ""),
                             "label": base_data.get("label", ""),
                             "format": base_data.get("format", ""),
-                            "certification_date": hist.get("certification_date", base_data.get("certification_date", "")),
+                            "certification_date": final_cert_date,
                             "release_date": hist.get("release_date", base_data.get("release_date", "")),
                             "certification_level": hist.get("certification_level", base_data.get("award_level", "")),
                             "units": hist.get("units", base_data.get("units", "")),
@@ -571,227 +593,109 @@ class RIAAScraper:
                             "certified_units": hist.get("certified_units", ""),
                             "award_level": hist.get("certification_level", base_data.get("award_level", ""))
                         })
+                        
                         rows.append(row)
                     
-        # Ordre des colonnes pour le CSV
-        fieldnames = [
-            "artist", "title", "certification_date", "release_date", 
-            "certification_level", "units", "label", "format", 
-            "award_level", "category", "type", "genre", "certified_units"
+        # Ordre des colonnes
+        columns = [
+            "artist", "title", "certification_date", "release_date",
+            "certification_level", "units", "label", "format", "award_level",
+            "category", "type", "genre", "certified_units"
         ]
         
-        # Écrire le CSV avec encodage UTF-8 BOM pour Excel
-        with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            # Écrire chaque ligne en s'assurant que toutes les colonnes existent
-            for row in rows:
-                # Compléter les colonnes manquantes avec des chaînes vides
-                row_complete = {field: row.get(field, "") for field in fieldnames}
-                writer.writerow(row_complete)
-            
-        logger.info(f"✅ Sauvegardé {len(rows)} lignes dans: {filepath}")
+        # Création du DataFrame et sauvegarde
+        df = pd.DataFrame(rows)
         
-    def update_database(self, months_back: int = 1):
-        """
-        Met à jour la base de données avec les certifications récentes
+        # S'assurer que toutes les colonnes existent
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+                
+        # Réorganiser les colonnes
+        df = df[columns]
         
-        Args:
-            months_back: Nombre de mois à récupérer
-            
-        Returns:
-            Liste des certifications trouvées
-        """
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30 * months_back)
-        
-        start_str = start_date.strftime("%Y-%m-%d")
-        end_str = end_date.strftime("%Y-%m-%d")
-        
-        logger.info(f"Mise à jour des certifications du {start_str} au {end_str}")
-        
-        results = self.scrape_by_date_range(start_str, end_str, "certification")
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"riaa_update_{timestamp}.csv"
-        self.save_to_csv(results, filename)
-        
-        return results
+        # Sauvegarde
+        df.to_csv(filepath, index=False, encoding='utf-8-sig')
+        logger.info(f"✅ Données sauvegardées: {filepath} ({len(df)} lignes)")
+
+
+def setup_logging(verbose: bool = False):
+    """Configure le système de logging"""
+    level = logging.DEBUG if verbose else logging.INFO
+    
+    formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    
+    console = logging.StreamHandler()
+    console.setFormatter(formatter)
+    
+    logger.setLevel(level)
+    logger.addHandler(console)
+    
+    # Logger pour Selenium en mode warning seulement
+    logging.getLogger('selenium').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 
 def main():
-    """Fonction principale avec interface en ligne de commande"""
-    import argparse
+    """Point d'entrée principal avec gestion améliorée des erreurs"""
     
-    parser = argparse.ArgumentParser(description="Scraper RIAA pour certifications musicales")
-    parser.add_argument("--artist", type=str, help="Nom de l'artiste à rechercher")
-    parser.add_argument("--update", type=int, help="Met à jour les X derniers mois")
-    parser.add_argument("--start-date", type=str, help="Date de début (YYYY-MM-DD)")
-    parser.add_argument("--end-date", type=str, help="Date de fin (YYYY-MM-DD)")
-    parser.add_argument("--output", type=str, help="Fichier de sortie")
-    parser.add_argument("--output-dir", type=str, help="Répertoire de sortie")
-    parser.add_argument("--headless", action="store_true", help="Mode headless")
+    # Configuration du logging avant tout
+    setup_logging(False)
     
-    args = parser.parse_args()
-    
-    scraper = RIAAScraper(headless=args.headless, output_dir=args.output_dir)
+    scraper = None
     
     try:
-        if args.artist:
+        # Mode interactif simple pour le test
+        print("\n=== Scraper RIAA ===")
+        print("1. Rechercher par artiste")
+        print("2. Rechercher par dates")
+        print("3. Quitter")
+        
+        choice = input("\nVotre choix: ").strip()
+        
+        if choice == "1":
+            artist = input("Nom de l'artiste: ").strip()
+            scraper = RIAAScraper(headless=False, output_dir="data")
             scraper.init_driver()
-            results = scraper.scrape_by_artist(args.artist)
-            output = args.output or f"riaa_{args.artist.replace(' ', '_')}.csv"
-            scraper.save_to_csv(results, output)
-            scraper.close_driver()
             
-        elif args.update:
-            scraper.init_driver()
-            results = scraper.update_database(args.update)
-            scraper.close_driver()
-            
-        elif args.start_date and args.end_date:
-            scraper.init_driver()
             try:
-                # Convertir en objets datetime pour le découpage
-                start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
-                end_date = datetime.strptime(args.end_date, "%Y-%m-%d")
-                
-                all_results = []
-                current = start_date
-                batch = 1
-                
-                while current < end_date:
-                    next_date = min(current + timedelta(days=60), end_date)
-                    
-                    logger.info(f"\n=== Batch {batch}: {current:%Y-%m-%d} à {next_date:%Y-%m-%d} ===")
-                    
-                    results = scraper.scrape_by_date_range(
-                        current.strftime("%Y-%m-%d"),
-                        next_date.strftime("%Y-%m-%d"),
-                        "certification",
-                        True  # Toujours avec détails
-                    )
-                    
-                    if results:
-                        all_results.extend(results)
-                        logger.info(f"Batch {batch}: {len(results)} certifications")
-                    
-                    current = next_date
-                    batch += 1
-                    
-                    if current < end_date:
-                        time.sleep(5)
-                
-                # Sauvegarder tous les résultats
-                output = args.output or f"riaa_dates_{datetime.now():%Y%m%d}.csv"
-                scraper.save_to_csv(all_results, output)
-                logger.info(f"✅ Total: {len(all_results)} certifications")
-                
+                results = scraper.scrape_by_artist(artist)
+                output = f"riaa_{artist.replace(' ', '_')}.csv"
+                scraper.save_to_csv(results, output)
             finally:
                 scraper.close_driver()
             
-        else:
-            # Mode interactif
-            print("\n=== Scraper RIAA ===")
-            print("1. Rechercher par artiste")
-            print("2. Rechercher par dates")
-            print("3. Mise à jour mensuelle")
-            print("4. Scraper période complète (2017-09 à aujourd'hui)")
+        elif choice == "2":
+            start = input("Date début (YYYY-MM-DD): ").strip()
+            end = input("Date fin (YYYY-MM-DD): ").strip()
+            details = input("Récupérer les détails ? (oui/non, défaut: non): ").strip().lower()
+            get_details = details == "oui"
             
-            choice = input("\nVotre choix: ").strip()
+            scraper = RIAAScraper(headless=False, output_dir="data")
+            scraper.init_driver()
             
-            if choice == "1":
-                artist = input("Nom de l'artiste: ").strip()
-                scraper.init_driver()
-                try:
-                    results = scraper.scrape_by_artist(artist)
-                    output = f"riaa_{artist.replace(' ', '_')}.csv"
-                    scraper.save_to_csv(results, output)
-                finally:
-                    scraper.close_driver()
+            try:
+                results = scraper.scrape_by_date_range(start, end, "certification", get_details)
+                scraper.save_to_csv(results, f"riaa_dates_{datetime.now():%Y%m%d}.csv")
+            finally:
+                scraper.close_driver()
                 
-            elif choice == "2":
-                start = input("Date début (YYYY-MM-DD): ").strip()
-                end = input("Date fin (YYYY-MM-DD): ").strip()
-                details = input("Récupérer les détails ? (oui/non, défaut: non): ").strip().lower()
-                get_details = details == "oui"
+        elif choice == "3":
+            print("Au revoir!")
+            sys.exit(0)
                 
-                scraper.init_driver()
-                try:
-                    results = scraper.scrape_by_date_range(start, end, "certification", get_details)
-                    scraper.save_to_csv(results, f"riaa_dates_{datetime.now():%Y%m%d}.csv")
-                finally:
-                    scraper.close_driver()
-                
-            elif choice == "3":
-                months = int(input("Nombre de mois à récupérer: ") or "1")
-                scraper.init_driver()
-                try:
-                    results = scraper.update_database(months)
-                finally:
-                    scraper.close_driver()
-                    
-            elif choice == "4":
-                print("\n⚠️  ATTENTION: Cela va scraper TOUTES les certifications depuis Sept 2017")
-                print("Cela peut prendre plusieurs heures...")
-                details = input("Récupérer les détails pour chaque certification ? (oui/non, défaut: non): ").strip().lower()
-                get_details = details == "oui"
-                
-                if get_details:
-                    print("⚠️  ATTENTION: Avec les détails, cela prendra BEAUCOUP plus de temps!")
-                    
-                confirm = input("Confirmer (oui/non): ").strip().lower()
-                
-                if confirm == "oui":
-                    scraper.init_driver()
-                    try:
-                        all_results = []
-                        start = datetime(2017, 9, 1)
-                        end = datetime.now()
-                        
-                        current = start
-                        batch = 1
-                        while current < end:
-                            next_date = min(current + timedelta(days=60), end)
-                            
-                            logger.info(f"\n=== Batch {batch}: {current:%Y-%m-%d} à {next_date:%Y-%m-%d} ===")
-                            
-                            results = scraper.scrape_by_date_range(
-                                current.strftime("%Y-%m-%d"),
-                                next_date.strftime("%Y-%m-%d"),
-                                "certification",
-                                get_details
-                            )
-                            
-                            if results:
-                                all_results.extend(results)
-                                logger.info(f"Batch {batch}: {len(results)} certifications ajoutées")
-                                scraper.save_to_csv(all_results, f"riaa_complete_{datetime.now():%Y%m%d}.csv")
-                            else:
-                                logger.warning(f"Batch {batch}: Aucune certification trouvée")
-                            
-                            current = next_date
-                            batch += 1
-                            
-                            if current < end:
-                                logger.info("Pause de 5 secondes avant le prochain batch...")
-                                time.sleep(5)
-                            
-                        logger.info(f"\n✅ Terminé! Total: {len(all_results)} certifications")
-                        
-                    finally:
-                        scraper.close_driver()
-                    
     except KeyboardInterrupt:
-        print("\nInterruption utilisateur")
-        if scraper.driver:
+        print("\n\n⚠️ Interruption utilisateur")
+        if scraper and scraper.driver:
             scraper.close_driver()
     except Exception as e:
-        logger.error(f"Erreur: {e}")
-        if scraper.driver:
+        logger.error(f"❌ Erreur: {e}")
+        if scraper and scraper.driver:
             scraper.close_driver()
-        raise
+        sys.exit(1)
 
 
 if __name__ == "__main__":

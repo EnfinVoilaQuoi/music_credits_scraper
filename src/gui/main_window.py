@@ -17,7 +17,7 @@ from src.utils.youtube_integration import youtube_integration
 from src.models import Artist, Track
 from tkinter import ttk as tkinter_ttv
 from src.utils.disabled_tracks_manager import DisabledTracksManager
-from certification_update_gui import CertificationUpdateDialog
+from src.gui.certification_update_gui import CertificationUpdateDialog
 
 
 logger = get_logger(__name__)
@@ -2586,12 +2586,9 @@ class MainWindow:
         # Variables pour les checkboxes
         sources_vars = {}
         sources_info = {
-            'getsongbpm': 'GetSongBPM (BPM, clés musicales) 🎵',
-            'acousticbrainz': 'AcousticBrainz (BPM précis, métadonnées) 🔬',
-            'rapedia': 'Rapedia.fr (BPM prioritaire pour le rap FR) 🇫🇷',
-            'spotify': 'Spotify (métadonnées, durée) 🎧',
-            'discogs': 'Discogs (crédits supplémentaires, labels) 💿',
-            'lastfm': 'Last.fm (genres, tags) 🏷️'
+            'reccobeats': 'ReccoBeats (BPM, features audio complètes) 🎵',
+            'songbpm': 'SongBPM (BPM de fallback) 🎼',
+            'discogs': 'Discogs (crédits supplémentaires, labels) 💿'
         }
         
         available = self.data_enricher.get_available_sources()

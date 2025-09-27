@@ -21,8 +21,8 @@ import sys
 class UltratopUpdater:
     """Scraper pour mettre à jour la base de données des certifications Ultratop"""
     
-    def __init__(self, database_path='./data/ultratop/ultratop_historical_database.csv', 
-                 output_dir='./data/ultratop', delay_min=2, delay_max=5):
+    def __init__(self, database_path='./data/certifications/brma/certif_brma.csv', 
+                 output_dir='./data/certifications/brma', delay_min=2, delay_max=5):
         """
         Initialisation du scraper de mise à jour
         
@@ -131,6 +131,49 @@ class UltratopUpdater:
             self.logger.error(f"Erreur lors de la récupération de {url}: {e}")
             return None
             
+    def fetch_page_with_retry(self, year, category, max_retries=3):
+        """
+        Récupère une page avec plusieurs tentatives en cas d'erreur 500
+        
+        Args:
+            year: Année
+            category: 'albums' ou 'singles'  
+            max_retries: Nombre maximum de tentatives
+            
+        Returns:
+            BeautifulSoup object ou None
+        """
+        url = f"{self.base_url}/{year}/{category}"
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.info(f"Tentative {attempt + 1}/{max_retries}: {url}")
+                
+                # Délai progressif entre les tentatives
+                if attempt > 0:
+                    wait_time = attempt * 10  # 10s, 20s, 30s...
+                    self.logger.info(f"Attente de {wait_time}s avant nouvelle tentative...")
+                    time.sleep(wait_time)
+                
+                response = self.session.get(url, timeout=30)
+                
+                if response.status_code == 200:
+                    return BeautifulSoup(response.content, 'html.parser')
+                elif response.status_code == 500:
+                    self.logger.warning(f"Erreur 500 pour {url} (tentative {attempt + 1})")
+                    continue
+                else:
+                    self.logger.warning(f"Code HTTP {response.status_code} pour {url}")
+                    response.raise_for_status()
+                    
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Erreur réseau tentative {attempt + 1}: {e}")
+                if attempt == max_retries - 1:
+                    return None
+                    
+        self.logger.error(f"❌ Échec après {max_retries} tentatives pour {url}")
+        return None
+
     def parse_certification_date(self, text):
         """Parse les dates et niveaux de certification"""
         certifications = []
@@ -202,7 +245,7 @@ class UltratopUpdater:
                 continue
                 
         return certifications
-        
+
     def update_current_year(self):
         """Met à jour les certifications de l'année en cours"""
         current_year = datetime.now().year
@@ -330,6 +373,71 @@ class UltratopUpdater:
                 
         self.logger.info(f"Rapport généré: {report_file}")
         
+    def retry_missing_pages(self):
+        """
+        Tente de récupérer les pages qui ont retourné des erreurs 500
+        Basé sur votre description des années problématiques
+        
+        Returns:
+            List[Dict]: Liste des certifications récupérées
+        """
+        self.logger.info("=== RÉCUPÉRATION DES PAGES MANQUANTES ===")
+        
+        # Années connues pour avoir des problèmes (erreur 500)
+        # Ajustez cette liste selon vos observations
+        problematic_years = []
+        
+        # Vérifier quelles années ont des données manquantes ou incomplètes
+        if hasattr(self, 'existing_db') and not self.existing_db.empty:
+            # Analyser la base existante pour détecter les années avec peu de données
+            year_counts = self.existing_db.groupby('year_page').size()
+            avg_count = year_counts.mean()
+            
+            # Identifier les années avec moins de 50% des données moyennes
+            for year, count in year_counts.items():
+                if count < avg_count * 0.5:
+                    problematic_years.append(int(year))
+                    
+            self.logger.info(f"Années avec données incomplètes détectées: {problematic_years}")
+        else:
+            # Si pas de base existante, essayer les années récentes qui posent souvent problème
+            current_year = datetime.now().year
+            problematic_years = [current_year - 1, current_year - 2]
+            self.logger.info(f"Tentative sur les années récentes: {problematic_years}")
+        
+        all_recovered = []
+        categories = ['albums', 'singles']
+        
+        for year in problematic_years:
+            for category in categories:
+                self.logger.info(f"Tentative de récupération: {year}/{category}")
+                
+                # Délai plus long pour les pages problématiques
+                time.sleep(random.uniform(5, 10))
+                
+                try:
+                    # Récupérer la page avec retry
+                    soup = self.fetch_page_with_retry(year, category, max_retries=3)
+                    
+                    if soup:
+                        # Extraire les certifications
+                        certifications = self.extract_certifications_from_soup(soup, year, category)
+                        
+                        if certifications:
+                            self.logger.info(f"✅ Récupéré {len(certifications)} certifications pour {year}/{category}")
+                            all_recovered.extend(certifications)
+                        else:
+                            self.logger.warning(f"⚠️ Aucune certification trouvée pour {year}/{category}")
+                    else:
+                        self.logger.error(f"❌ Impossible de récupérer {year}/{category}")
+                        
+                except Exception as e:
+                    self.logger.error(f"❌ Erreur lors de la récupération {year}/{category}: {e}")
+                    continue
+        
+        self.logger.info(f"Total pages manquantes récupérées: {len(all_recovered)} certifications")
+        return all_recovered
+
     def run_manual_update(self, years_back=2):
         """Lance une mise à jour manuelle"""
         self.logger.info("=== MISE À JOUR MANUELLE ===")
@@ -398,9 +506,9 @@ def main():
     parser.add_argument('--years-back', type=int, default=2,
                        help='Nombre d\'années à vérifier en arrière (défaut: 2)')
     parser.add_argument('--database', type=str, 
-                       default='./data/ultratop/ultratop_historical_database.csv',
+                       default='./data/certifications/brma/certif_brma.csv',
                        help='Chemin vers la base de données')
-    parser.add_argument('--output-dir', type=str, default='./data/ultratop',
+    parser.add_argument('--output-dir', type=str, default='./data/certifications/brma',
                        help='Répertoire de sortie')
     parser.add_argument('--delay-min', type=float, default=2,
                        help='Délai minimum entre requêtes (secondes)')

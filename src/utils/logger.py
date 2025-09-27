@@ -19,7 +19,7 @@ class Logger:
         
         # Créer le logger
         logger = logging.getLogger(name)
-        logger.setLevel(getattr(logging, LOG_LEVEL))
+        logger.setLevel(logging.DEBUG)  # Force DEBUG temporairement
         
         # Formatter
         formatter = logging.Formatter(

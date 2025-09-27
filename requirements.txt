@@ -29,7 +29,7 @@ webdriver-manager==4.0.1
 ytmusicapi==1.8.0
 
 # Planification de tâches
-schedule==1.2.0
+schedule
 
 # Logging (optionnel, mais utile)
 python-dateutil==2.8.2

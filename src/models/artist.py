@@ -38,3 +38,19 @@ class Artist:
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
+
+
+@dataclass
+class ArtistDetail:
+    """ Métadonnées statiques d’un artiste """
+    artist_id: str
+    name: str
+    spotify_href: Optional[str] = None
+    # tu peux ajouter d’autres attributs (genres, popularité, etc.)
+
+    def to_dict(self):
+        return {
+            "artist_id": self.artist_id,
+            "name": self.name,
+            "spotify_href": self.spotify_href
+        }

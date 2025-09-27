@@ -185,6 +185,7 @@ class Track:
     track_number: Optional[int] = None
     musical_key: Optional[str] = None   
     time_signature: Optional[str] = None
+    audio_features: Optional[Dict[str, Any]] = field(default_factory=dict)
     
     # Support des features
     is_featuring: bool = False  # True si l'artiste est en featuring

@@ -29,7 +29,7 @@ GETSONGBPM_API_KEY = os.getenv("GETSONGBPM_API_KEY")
 
 # Configuration de l'application
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_LEVEL = "DEBUG"  # Au lieu de os.getenv("LOG_LEVEL", "INFO")
 
 # Configuration du scraping
 SELENIUM_TIMEOUT = 30  # Timeout en secondes

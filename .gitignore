@@ -22,10 +22,15 @@ data/artists/*
 !data/artists/.gitkeep
 data/logs/*
 !data/logs/.gitkeep
+data/ultratop/*
+data\certifications\brma\backups/*
+data\certifications\brma\logs/*
+data\certifications\brma\reports/*
 *.db
 *.sqlite
 *.log
 *.cache
+*.json
 
 # OS
 .DS_Store

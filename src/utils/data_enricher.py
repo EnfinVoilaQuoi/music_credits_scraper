@@ -6,9 +6,8 @@ import time
 
 from src.models import Track
 from src.utils.logger import get_logger
-from src.scrapers.songbpm import SongBPMScraper
-from src.api.discogs_api import DiscogsAPI
-from src.api.reccobeats_api import ReccoBeatsClient
+from src.scrapers.songbpm_scraper import SongBPMScraper
+from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 
 logger = get_logger(__name__)
 
@@ -22,7 +21,7 @@ class DataEnricher:
         
         # Initialiser ReccoBeats
         try:
-            self.reccobeats_client = ReccoBeatsClient()
+            self.reccobeats_client = ReccoBeatsIntegratedClient()
             self.apis_available['reccobeats'] = True
             logger.info("✅ ReccoBeats client initialisé")
         except Exception as e:
@@ -30,25 +29,15 @@ class DataEnricher:
             self.apis_available['reccobeats'] = False
             self.reccobeats_client = None
         
-        # Initialiser GetSongBPM scraper
+        # Initialiser SongBPM scraper
         try:
-            self.getsongbpm_scraper = GetSongBPMScraper()
+            self.songbpm_scraper = SongBPMScraper()
             self.apis_available['getsongbpm'] = True
             logger.info("✅ GetSongBPM scraper initialisé")
         except Exception as e:
             logger.error(f"Erreur initialisation GetSongBPM: {e}")
             self.apis_available['getsongbpm'] = False
             self.getsongbpm_scraper = None
-        
-        # Initialiser Discogs
-        try:
-            self.discogs_api = DiscogsAPI()
-            self.apis_available['discogs'] = True
-            logger.info("✅ Discogs API initialisée")
-        except Exception as e:
-            logger.error(f"Erreur initialisation Discogs: {e}")
-            self.apis_available['discogs'] = False
-            self.discogs_api = None
         
         logger.info(f"Sources disponibles: {list(self.apis_available.keys())}")
     
@@ -64,7 +53,7 @@ class DataEnricher:
             Dict avec le statut de chaque source
         """
         if sources is None:
-            sources = ['reccobeats', 'getsongbpm', 'discogs']
+            sources = ['reccobeats', 'getsongbpm']
         
         results = {}
         
@@ -91,17 +80,6 @@ class DataEnricher:
             except Exception as e:
                 logger.error(f"Erreur GetSongBPM pour {track.title}: {e}")
                 results['getsongbpm'] = False
-        
-        # 3. Discogs pour crédits supplémentaires
-        if 'discogs' in sources and self.apis_available['discogs']:
-            try:
-                success = self._enrich_with_discogs(track)
-                results['discogs'] = success
-                if success:
-                    logger.debug(f"✅ Discogs: crédits enrichis")
-            except Exception as e:
-                logger.error(f"Erreur Discogs pour {track.title}: {e}")
-                results['discogs'] = False
         
         return results
     
@@ -186,20 +164,6 @@ class DataEnricher:
             logger.error(f"Erreur GetSongBPM: {e}")
             return False
     
-    def _enrich_with_discogs(self, track: Track) -> bool:
-        """Enrichit un morceau avec Discogs"""
-        try:
-            if not self.discogs_api:
-                return False
-            
-            # Utiliser l'API Discogs pour enrichir les données
-            success = self.discogs_api.enrich_track_data(track)
-            return success
-            
-        except Exception as e:
-            logger.error(f"Erreur Discogs: {e}")
-            return False
-    
     def enrich_tracks(self, tracks: List[Track], sources: Optional[List[str]] = None,
                      progress_callback=None, use_threading: bool = False) -> Dict[str, Any]:
         """
@@ -215,7 +179,7 @@ class DataEnricher:
             Statistiques d'enrichissement
         """
         if sources is None:
-            sources = ['reccobeats', 'getsongbpm', 'discogs']
+            sources = ['reccobeats', 'getsongbpm']
         
         stats = {
             'total': len(tracks),
@@ -309,13 +273,9 @@ class DataEnricher:
                 logger.error(f"Test ReccoBeats échoué: {e}")
                 results['reccobeats'] = False
         
-        # Test Discogs
-        if self.apis_available['discogs']:
-            results['discogs'] = self.discogs_api.test_connection()
-        
-        # GetSongBPM est toujours OK si initialisé
-        if self.apis_available['getsongbpm']:
-            results['getsongbpm'] = True
+        # SongBPM est toujours OK si initialisé
+        if self.apis_available['songbpm']:
+            results['songbpm'] = True
         
         return results
     

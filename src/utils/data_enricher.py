@@ -1,4 +1,4 @@
-"""Enrichissement des données de morceaux avec diverses sources - VERSION NETTOYÉE"""
+"""Enrichissement des données de morceaux avec diverses sources - VERSION CORRIGÉE"""
 import concurrent.futures
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -19,9 +19,13 @@ class DataEnricher:
         """Initialise l'enrichisseur de données"""
         self.apis_available = {}
         
-        # Initialiser ReccoBeats
+        # Initialiser ReccoBeats avec la nouvelle API
         try:
-            self.reccobeats_client = ReccoBeatsIntegratedClient()
+            # Important: mode headless pour l'utilisation en production
+            self.reccobeats_client = ReccoBeatsIntegratedClient(headless=False)
+            # Vider le cache des erreurs précédentes si nécessaire
+            if hasattr(self.reccobeats_client, 'clear_old_errors'):
+                self.reccobeats_client.clear_old_errors()
             self.apis_available['reccobeats'] = True
             logger.info("✅ ReccoBeats client initialisé")
         except Exception as e:
@@ -32,14 +36,27 @@ class DataEnricher:
         # Initialiser SongBPM scraper
         try:
             self.songbpm_scraper = SongBPMScraper()
-            self.apis_available['getsongbpm'] = True
+            self.apis_available['songbpm'] = True  # Utiliser 'songbpm' pour correspondre à l'interface
+            self.apis_available['getsongbpm'] = True  # Garder aussi l'ancien nom pour compatibilité
             logger.info("✅ GetSongBPM scraper initialisé")
         except Exception as e:
             logger.error(f"Erreur initialisation GetSongBPM: {e}")
+            self.apis_available['songbpm'] = False
             self.apis_available['getsongbpm'] = False
-            self.getsongbpm_scraper = None
+            self.songbpm_scraper = None
         
-        logger.info(f"Sources disponibles: {list(self.apis_available.keys())}")
+        # Discogs n'est pas implémenté mais on le marque comme non disponible
+        self.apis_available['discogs'] = False
+        
+        logger.info(f"Sources disponibles: {[k for k, v in self.apis_available.items() if v]}")
+    
+    def get_available_sources(self) -> List[str]:
+        """Retourne la liste des sources disponibles"""
+        return [k for k, v in self.apis_available.items() if v]
+    
+    def get_available_sources(self) -> List[str]:
+        """Retourne la liste des sources disponibles"""
+        return [k for k, v in self.apis_available.items() if v]
     
     def enrich_track(self, track: Track, sources: Optional[List[str]] = None) -> Dict[str, bool]:
         """
@@ -53,14 +70,14 @@ class DataEnricher:
             Dict avec le statut de chaque source
         """
         if sources is None:
-            sources = ['reccobeats', 'getsongbpm']
+            sources = ['reccobeats', 'songbpm']
         
         results = {}
         
         logger.debug(f"Enrichissement de '{track.title}' avec sources: {sources}")
         
         # 1. ReccoBeats pour BPM et features audio
-        if 'reccobeats' in sources and self.apis_available['reccobeats']:
+        if 'reccobeats' in sources and self.apis_available.get('reccobeats'):
             try:
                 success = self._enrich_with_reccobeats(track)
                 results['reccobeats'] = success
@@ -70,78 +87,129 @@ class DataEnricher:
                 logger.error(f"Erreur ReccoBeats pour {track.title}: {e}")
                 results['reccobeats'] = False
         
-        # 2. GetSongBPM scraper (fallback pour BPM)
-        if 'getsongbpm' in sources and self.apis_available['getsongbpm'] and not track.bpm:
+        # 2. GetSongBPM scraper (fallback pour BPM) - accepter 'songbpm' ou 'getsongbpm'
+        if ('songbpm' in sources or 'getsongbpm' in sources) and \
+           self.apis_available.get('songbpm') and not track.bpm:
             try:
                 success = self._enrich_with_getsongbpm(track)
-                results['getsongbpm'] = success
+                # Utiliser le nom de la source qui était dans la liste
+                source_name = 'songbpm' if 'songbpm' in sources else 'getsongbpm'
+                results[source_name] = success
                 if success:
                     logger.debug(f"✅ GetSongBPM: BPM={track.bpm}")
             except Exception as e:
                 logger.error(f"Erreur GetSongBPM pour {track.title}: {e}")
-                results['getsongbpm'] = False
+                source_name = 'songbpm' if 'songbpm' in sources else 'getsongbpm'
+                results[source_name] = False
+        
+        # 3. Discogs (non implémenté pour l'instant)
+        if 'discogs' in sources:
+            logger.debug("Discogs n'est pas encore implémenté")
+            results['discogs'] = False
+        
+        # Marquer comme enrichi si au moins une source a réussi
+        if any(results.values()):
+            track.enriched = True
+            track.enrichment_date = datetime.now()
         
         return results
     
     def _enrich_with_reccobeats(self, track: Track) -> bool:
-        """Enrichit un morceau avec ReccoBeats"""
+        """
+        Enrichit un morceau avec ReccoBeats en utilisant la NOUVELLE API
+        """
         try:
             if not self.reccobeats_client:
                 logger.error("ReccoBeats client non initialisé")
                 return False
             
-            logger.info(f"ReccoBeats: Recherche pour '{track.artist.name if hasattr(track.artist, 'name') else str(track.artist)}' - '{track.title}'")
+            # Extraire le nom de l'artiste correctement
+            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
             
-            # Rechercher les features pour le morceau
-            features_list = self.reccobeats_client.fetch_discography(
-                track.artist.name if hasattr(track.artist, 'name') else str(track.artist), 
-                [track.title]
+            logger.info(f"ReccoBeats: Recherche pour '{artist_name}' - '{track.title}'")
+            
+            # IMPORTANT: Utiliser la nouvelle méthode get_track_info() au lieu de fetch_discography()
+            track_info = self.reccobeats_client.get_track_info(
+                artist=artist_name,
+                title=track.title,
+                use_cache=True  # Utiliser le cache mais éviter les erreurs en cache
             )
             
-            logger.debug(f"ReccoBeats: Réponse brute - {features_list}")
-            
-            if features_list and len(features_list) > 0:
-                features = features_list[0]
-                logger.debug(f"ReccoBeats: Features extraites - {features}")
+            if track_info and track_info.get('success'):
+                logger.debug(f"ReccoBeats: Données récupérées - {track_info.get('spotify_id')}")
                 
-                # Vérifier si on a des données valides
-                if 'error' not in features:
-                    # Enrichir avec les données audio
-                    if features.get('tempo'):
-                        track.bpm = int(round(features['tempo']))
-                        logger.info(f"ReccoBeats: BPM trouvé {track.bpm} pour '{track.title}'")
-                    else:
-                        logger.warning(f"ReccoBeats: Pas de tempo dans la réponse pour '{track.title}'")
-                    
-                    # Ajouter d'autres features audio si disponibles
-                    if not hasattr(track, 'audio_features') or track.audio_features is None:
-                        track.audio_features = {}
-                        
-                    track.audio_features.update({
-                        'energy': features.get('energy'),
-                        'danceability': features.get('danceability'),
-                        'acousticness': features.get('acousticness'),
-                        'instrumentalness': features.get('instrumentalness'),
-                        'liveness': features.get('liveness'),
-                        'loudness': features.get('loudness'),
-                        'speechiness': features.get('speechiness'),
-                        'valence': features.get('valence'),
-                        'key': features.get('key'),
-                        'mode': features.get('mode'),
-                        'time_signature': features.get('time_signature'),
-                        'duration_ms': features.get('duration_ms'),
-                    })
-                    
-                    logger.info(f"ReccoBeats: Succès pour '{track.title}' - BPM: {track.bpm}")
-                    return True
+                # Extraire le BPM
+                bpm = None
+                
+                # Chercher le BPM dans différents endroits possibles
+                if 'bpm' in track_info:
+                    bpm = track_info['bpm']
+                elif 'audio_features' in track_info:
+                    features = track_info['audio_features']
+                    if isinstance(features, dict) and 'tempo' in features:
+                        bpm = features['tempo']
+                
+                # Appliquer le BPM si trouvé
+                if bpm and isinstance(bpm, (int, float)) and bpm > 0:
+                    track.bpm = int(round(bpm))
+                    logger.info(f"ReccoBeats: BPM trouvé {track.bpm} pour '{track.title}'")
                 else:
-                    error_msg = features.get('error', 'Erreur inconnue')
-                    logger.warning(f"ReccoBeats: Erreur pour '{track.title}': {error_msg}")
-                    return False
+                    logger.warning(f"ReccoBeats: Pas de BPM valide dans la réponse pour '{track.title}'")
+                
+                # Enrichir avec les autres features audio si disponibles
+                if not hasattr(track, 'audio_features') or track.audio_features is None:
+                    track.audio_features = {}
+                
+                # Extraire toutes les features audio disponibles
+                if 'audio_features' in track_info:
+                    features = track_info['audio_features']
+                    if isinstance(features, dict):
+                        track.audio_features.update({
+                            'energy': features.get('energy'),
+                            'danceability': features.get('danceability'),
+                            'acousticness': features.get('acousticness'),
+                            'instrumentalness': features.get('instrumentalness'),
+                            'liveness': features.get('liveness'),
+                            'loudness': features.get('loudness'),
+                            'speechiness': features.get('speechiness'),
+                            'valence': features.get('valence'),
+                            'key': features.get('key'),
+                            'mode': features.get('mode'),
+                            'time_signature': features.get('time_signature'),
+                            'duration_ms': features.get('duration_ms'),
+                        })
+                
+                # Ajouter également les infos directement au niveau du track_info
+                for key in ['energy', 'danceability', 'key', 'mode', 'valence']:
+                    if key in track_info:
+                        track.audio_features[key] = track_info[key]
+                
+                # Stocker l'ID Spotify si disponible
+                if 'spotify_id' in track_info:
+                    if not hasattr(track, 'spotify_id'):
+                        track.spotify_id = track_info['spotify_id']
+                
+                logger.info(f"ReccoBeats: ✅ Succès pour '{track.title}' - BPM: {track.bpm}")
+                return True
+                
             else:
-                logger.warning(f"ReccoBeats: Aucune réponse pour '{track.title}'")
+                # Gérer les différents types d'erreur
+                if track_info and 'error' in track_info:
+                    error_type = track_info['error']
+                    if error_type == 'spotify_id_not_found':
+                        logger.warning(f"ReccoBeats: ID Spotify non trouvé pour '{track.title}'")
+                    elif error_type == 'reccobeats_not_found':
+                        logger.warning(f"ReccoBeats: Données non disponibles dans ReccoBeats pour '{track.title}'")
+                    else:
+                        logger.warning(f"ReccoBeats: Erreur {error_type} pour '{track.title}'")
+                else:
+                    logger.warning(f"ReccoBeats: Aucune donnée retournée pour '{track.title}'")
+                
                 return False
-            
+                
+        except AttributeError as e:
+            logger.error(f"ReccoBeats: Erreur d'attribut pour '{track.title}': {e}")
+            return False
         except Exception as e:
             logger.error(f"ReccoBeats: Exception pour '{track.title}': {e}", exc_info=True)
             return False
@@ -149,10 +217,13 @@ class DataEnricher:
     def _enrich_with_getsongbpm(self, track: Track) -> bool:
         """Enrichit un morceau avec GetSongBPM (fallback)"""
         try:
-            if not self.getsongbpm_scraper:
+            if not self.songbpm_scraper:
                 return False
             
-            bpm = self.getsongbpm_scraper.get_bpm(track.artist, track.title)
+            # Extraire le nom de l'artiste
+            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+            
+            bpm = self.songbpm_scraper.get_bpm(artist_name, track.title)
             if bpm:
                 track.bpm = bpm
                 logger.debug(f"GetSongBPM: trouvé BPM {bpm} pour {track.title}")
@@ -179,110 +250,89 @@ class DataEnricher:
             Statistiques d'enrichissement
         """
         if sources is None:
-            sources = ['reccobeats', 'getsongbpm']
+            sources = ['reccobeats', 'songbpm']
         
         stats = {
             'total': len(tracks),
             'processed': 0,
             'by_source': {source: {'success': 0, 'failed': 0} for source in sources},
             'tracks_with_bpm': 0,
-            'tracks_with_complete_data': 0
+            'tracks_with_complete_data': 0,
+            'start_time': datetime.now()
         }
         
-        start_time = datetime.now()
+        logger.info(f"Début enrichissement de {len(tracks)} morceaux avec sources: {sources}")
         
-        if use_threading and len(tracks) > 10:
-            # Utiliser le threading pour les grandes listes
-            # Attention: ReccoBeats a des rate limits!
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                futures = []
-                for i, track in enumerate(tracks):
-                    future = executor.submit(self.enrich_track, track, sources)
-                    futures.append((i, track, future))
-                
-                for i, track, future in futures:
-                    try:
-                        results = future.result(timeout=30)
-                        self._update_stats(stats, results, track)
-                        stats['processed'] += 1
-                        
-                        if progress_callback:
-                            progress_callback(stats['processed'], stats['total'], 
-                                            f"Enrichissement: {track.title}")
-                    except Exception as e:
-                        logger.error(f"Erreur lors de l'enrichissement de {track.title}: {e}")
-        else:
-            # Mode séquentiel (recommandé pour éviter les rate limits)
-            for i, track in enumerate(tracks):
-                results = self.enrich_track(track, sources)
-                self._update_stats(stats, results, track)
-                stats['processed'] += 1
-                
+        for i, track in enumerate(tracks, 1):
+            try:
+                # Callback de progression
                 if progress_callback:
-                    progress_callback(stats['processed'], stats['total'], 
-                                    f"Enrichissement: {track.title}")
+                    progress_info = f"Traitement: {track.title[:30]}..."
+                    progress_callback(i, len(tracks), progress_info)
                 
-                # Délai entre les requêtes pour respecter les rate limits
-                if 'reccobeats' in sources and self.apis_available['reccobeats']:
-                    time.sleep(0.1)  # Petit délai pour ReccoBeats
+                # Enrichir le morceau
+                results = self.enrich_track(track, sources)
+                
+                # Mettre à jour les stats
+                stats['processed'] += 1
+                for source, success in results.items():
+                    if success:
+                        stats['by_source'][source]['success'] += 1
+                    else:
+                        stats['by_source'][source]['failed'] += 1
+                
+                # Compter les morceaux avec BPM
+                if hasattr(track, 'bpm') and track.bpm:
+                    stats['tracks_with_bpm'] += 1
+                
+                # Compter les morceaux avec données complètes
+                if (hasattr(track, 'bpm') and track.bpm and 
+                    hasattr(track, 'audio_features') and track.audio_features):
+                    stats['tracks_with_complete_data'] += 1
+                
+                # Délai entre les requêtes pour éviter le rate limiting
+                if i < len(tracks):
+                    time.sleep(0.5)  # Délai de 500ms entre chaque requête
+                    
+            except Exception as e:
+                logger.error(f"Erreur lors de l'enrichissement du morceau {track.title}: {e}")
+                stats['processed'] += 1
         
-        # Calculer le temps total
-        elapsed = (datetime.now() - start_time).total_seconds()
-        stats['duration_seconds'] = elapsed
-        stats['average_time_per_track'] = elapsed / len(tracks) if tracks else 0
+        # Durée totale
+        stats['duration'] = (datetime.now() - stats['start_time']).total_seconds()
         
-        logger.info(f"Enrichissement terminé: {stats['processed']} morceaux en {elapsed:.1f}s")
+        # Logs finaux
+        logger.info(f"Enrichissement terminé en {stats['duration']:.1f}s")
+        logger.info(f"Morceaux traités: {stats['processed']}/{stats['total']}")
         logger.info(f"Morceaux avec BPM: {stats['tracks_with_bpm']}")
+        logger.info(f"Morceaux avec données complètes: {stats['tracks_with_complete_data']}")
+        
+        for source in sources:
+            if source in stats['by_source']:
+                source_stats = stats['by_source'][source]
+                logger.info(f"{source}: {source_stats['success']} succès, {source_stats['failed']} échecs")
         
         return stats
     
-    def _update_stats(self, stats: Dict, results: Dict[str, bool], track: Track):
-        """Met à jour les statistiques"""
-        for source, success in results.items():
-            if success:
-                stats['by_source'][source]['success'] += 1
-            else:
-                stats['by_source'][source]['failed'] += 1
-        
-        if track.bpm:
-            stats['tracks_with_bpm'] += 1
-        
-        # Vérifier si le track a des données complètes
-        if track.bpm and track.genre and len(track.credits) > 5:
-            stats['tracks_with_complete_data'] += 1
-    
-    def get_available_sources(self) -> List[str]:
-        """Retourne la liste des sources d'enrichissement disponibles"""
-        available = []
-        for source, is_available in self.apis_available.items():
-            if is_available:
-                available.append(source)
-        return available
-    
-    def test_all_connections(self) -> Dict[str, bool]:
-        """Teste toutes les connexions aux APIs"""
-        results = {}
-        
-        # Test ReccoBeats
-        if self.apis_available['reccobeats']:
-            try:
-                # Test simple avec un artiste connu
-                test_result = self.reccobeats_client.fetch_discography("Daft Punk", ["Get Lucky"])
-                results['reccobeats'] = bool(test_result)
-            except Exception as e:
-                logger.error(f"Test ReccoBeats échoué: {e}")
-                results['reccobeats'] = False
-        
-        # SongBPM est toujours OK si initialisé
-        if self.apis_available['songbpm']:
-            results['songbpm'] = True
-        
-        return results
-    
     def close(self):
-        """Ferme les connexions si nécessaire"""
-        if hasattr(self.getsongbpm_scraper, 'close'):
-            self.getsongbpm_scraper.close()
+        """Ferme toutes les connexions"""
+        if self.reccobeats_client:
+            try:
+                self.reccobeats_client.close()
+                logger.info("ReccoBeats client fermé")
+            except:
+                pass
         
-        # ReccoBeats utilise requests.Session, pas besoin de fermeture explicite
-        logger.info("Connexions fermées")
+        if self.songbpm_scraper:
+            try:
+                if hasattr(self.songbpm_scraper, 'close'):
+                    self.songbpm_scraper.close()
+                logger.info("GetSongBPM scraper fermé")
+            except:
+                pass
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()

@@ -2666,7 +2666,7 @@ class MainWindow:
                 summary = "Enrichissement terminé!\n\n"
                 summary += f"Morceaux traités: {stats['processed']}/{stats['total']}\n"
                 summary += f"Morceaux avec BPM: {stats['tracks_with_bpm']}\n"
-                summary += f"Durée: {stats['duration_seconds']:.1f} secondes\n\n"
+                summary += f"Durée: {stats['duration']:.1f} secondes\n\n"
                 
                 summary += "Résultats par source:\n"
                 for source, results in stats['by_source'].items():

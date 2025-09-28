@@ -1,6 +1,6 @@
 """
 ReccoBeats API intégré avec scraper Spotify ID amélioré
-Version robuste avec Selenium et webdriver_manager
+Version robuste avec Selenium et webdriver_manager - ÉDITION COMPLÈTE CORRIGÉE
 """
 import requests
 import json
@@ -170,136 +170,226 @@ class ReccoBeatsIntegratedClient:
                 self.wait = None
 
     def _handle_cookies(self):
-        """Gère les popups de cookies"""
+        """Gère les popups de cookies - VERSION SANS FAUX POSITIFS"""
         try:
-            # Essayer plusieurs sélecteurs courants pour les boutons de cookies
-            cookie_selectors = [
+            logger.debug("Vérification des popups de cookies...")
+            
+            # Attendre un peu que la page se charge
+            time.sleep(2)
+            
+            # Détecter le site actuel
+            current_url = self.driver.current_url.lower()
+            is_google = 'google.' in current_url
+            is_spotify = 'spotify.' in current_url
+            
+            # Sélecteurs spécifiques par site
+            cookie_selectors = []
+            
+            if is_google:
+                # GOOGLE - Sélecteurs spécifiques
+                cookie_selectors.extend([
+                    "//div[contains(@class, 'QS5gu') and contains(text(), 'Tout accepter')]",
+                    "//div[contains(text(), 'Tout accepter')]",
+                    "//div[contains(text(), 'Accept all')]",
+                    "//div[contains(text(), 'J'accepte')]",
+                    "div.QS5gu.sy4vM",
+                    "div[class*='QS5gu']",
+                    "div[role='button'][aria-label*='Accept']",
+                    "div[role='button'][aria-label*='Accepter']",
+                    "button[aria-label*='Accept all']",
+                    "button[aria-label*='Tout accepter']",
+                    "#L2AGLb",
+                    ".sy4vM",
+                ])
+                
+            elif is_spotify:
+                # SPOTIFY - Sélecteurs spécifiques 
+                cookie_selectors.extend([
+                    "button[data-testid='accept-all-cookies']",
+                    "button[id='onetrust-accept-btn-handler']",
+                    "button[class*='accept-all']",
+                    "#onetrust-accept-btn-handler",
+                    "button.onetrust-close-btn-handler",
+                    "button.ot-sdk-btn-primary",
+                ])
+            
+            # Sélecteurs génériques (fallback pour tous les sites)
+            cookie_selectors.extend([
                 "button[id*='accept']",
                 "button[class*='accept']",
                 "button[class*='consent']",
                 "button[class*='agree']",
-                "button[aria-label*='accept']",
-                "button[aria-label*='consent']"
-            ]
-            
-            for selector in cookie_selectors:
-                try:
-                    cookie_button = self.driver.find_element(By.CSS_SELECTOR, selector)
-                    if cookie_button.is_displayed():
-                        cookie_button.click()
-                        time.sleep(1)
-                        logger.debug("Cookies acceptés")
-                        break
-                except NoSuchElementException:
-                    continue
-        except Exception:
-            pass  # Pas grave si pas de cookies
-
-    def _search_google_selenium(self, artist: str, title: str) -> Optional[str]:
-        """Recherche Google améliorée avec Selenium"""
-        logger.info(f"Recherche Google Selenium pour: {artist} - {title}")
+                "//button[contains(text(), 'Accept all')]",
+                "//button[contains(text(), 'Accepter tout')]",
+                "//button[contains(text(), 'Tout accepter')]",
+                "//div[contains(text(), 'Accept all')]",
+                "//div[contains(text(), 'Accepter tout')]", 
+                "//div[contains(text(), 'Tout accepter')]",
+            ])
         
-        try:
-            if not self.driver:
-                self._init_selenium_driver()
+            cookies_handled = False
             
-            if not self.driver:
-                logger.error("Driver Selenium non disponible")
-                return None
+            # Essayer chaque sélecteur
+            for i, selector in enumerate(cookie_selectors):
+                try:
+                    if selector.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            try:
+                                self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                                time.sleep(0.5)
+                                
+                                try:
+                                    element.click()
+                                except Exception:
+                                    self.driver.execute_script("arguments[0].click();", element)
+                                
+                                logger.info(f"✅ Cookies acceptés avec: {selector}")
+                                logger.info(f"   Element: {element.tag_name} - Text: '{element.text[:50]}'")
+                                cookies_handled = True
+                                time.sleep(3)
+                                break
+                                
+                            except Exception as click_error:
+                                logger.debug(f"Erreur clic cookie: {click_error}")
+                                continue
+                    
+                    if cookies_handled:
+                        break
+                        
+                except Exception as selector_error:
+                    logger.debug(f"Sélecteur {selector} non trouvé: {selector_error}")
+                    continue
             
-            # Construire plusieurs variantes de requêtes
-            queries = [
-                f'"{artist}" "{title}" site:open.spotify.com',
-                f'{artist} {title} spotify',
-                f'spotify track {artist} {title}'
+            if not cookies_handled:
+                logger.debug("Aucun popup de cookies détecté")
+        
+            # NOUVELLE LOGIQUE: Vérification plus intelligente des cookies
+            time.sleep(2)
+            page_source = self.driver.page_source.lower()
+            current_url = self.driver.current_url.lower()
+            
+            # Pour Spotify: vérifier si on est sur une vraie page de résultats
+            if is_spotify:
+                # Si on est sur /search/ avec des résultats, les cookies sont OK
+                if '/search/' in current_url and any(keyword in page_source for keyword in [
+                    'data-testid', 'tracklist', 'search-results', 'track-list'
+                ]):
+                    logger.debug("✅ Spotify: Page de résultats détectée, cookies OK")
+                    return
+            
+            # Vérification générale: chercher des indicateurs de popup actif
+            cookie_popup_indicators = [
+                'cookie consent',
+                'accept cookies',
+                'cookie policy',
+                'privacy settings',
+                'data-testid="accept',
+                'onetrust-banner'
             ]
             
-            for query in queries:
-                logger.debug(f"Tentative avec requête: {query}")
-                
-                try:
-                    # Naviguer vers Google
-                    google_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
-                    self.driver.get(google_url)
-                    
-                    # Gérer les cookies
-                    self._handle_cookies()
-                    
-                    # Attendre le chargement
-                    time.sleep(2)
-                    
-                    # Vérifier s'il y a un CAPTCHA
-                    page_source = self.driver.page_source.lower()
-                    if any(sign in page_source for sign in ['captcha', 'unusual traffic', 'verify']):
-                        logger.warning("CAPTCHA détecté sur Google")
-                        if not self.headless:
-                            input("Résolvez le CAPTCHA et appuyez sur Entrée...")
-                        else:
-                            continue
-                    
-                    # Chercher les liens Spotify de plusieurs façons
-                    spotify_links = []
-                    
-                    # Méthode 1: Liens directs
-                    try:
-                        links = self.driver.find_elements(By.PARTIAL_LINK_TEXT, "Spotify")
-                        spotify_links.extend([l.get_attribute('href') for l in links if l.get_attribute('href')])
-                    except:
-                        pass
-                    
-                    # Méthode 2: Par sélecteur CSS
-                    try:
-                        links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='spotify.com']")
-                        spotify_links.extend([l.get_attribute('href') for l in links if l.get_attribute('href')])
-                    except:
-                        pass
-                    
-                    # Méthode 3: Par XPath
-                    try:
-                        links = self.driver.find_elements(By.XPATH, "//a[contains(@href, 'spotify.com/track')]")
-                        spotify_links.extend([l.get_attribute('href') for l in links if l.get_attribute('href')])
-                    except:
-                        pass
-                    
-                    # Méthode 4: Chercher dans tout le HTML
-                    try:
-                        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                        for link in soup.find_all('a', href=True):
-                            href = link['href']
-                            if 'spotify.com' in href:
-                                # Nettoyer les URLs Google
-                                if '/url?q=' in href:
-                                    href = urllib.parse.unquote(href.split('/url?q=')[1].split('&')[0])
-                                spotify_links.append(href)
-                    except:
-                        pass
-                    
-                    # Traiter les liens trouvés
-                    spotify_links = list(set(spotify_links))  # Dédupliquer
-                    logger.debug(f"Liens Spotify trouvés: {len(spotify_links)}")
-                    
-                    for link in spotify_links:
-                        if link:
-                            spotify_id = self.extract_spotify_id_from_url(link)
-                            if spotify_id:
-                                logger.info(f"✅ ID Spotify trouvé via Google Selenium: {spotify_id}")
-                                return spotify_id
-                    
-                except Exception as e:
-                    logger.debug(f"Erreur avec la requête {query}: {e}")
-                    continue
-                
-                # Petit délai entre les requêtes
-                time.sleep(random.uniform(2, 4))
+            active_popup = False
+            for indicator in cookie_popup_indicators:
+                if indicator in page_source:
+                    active_popup = True
+                    break
+            
+            if active_popup:
+                logger.warning("⚠️ Popup de cookies potentiellement encore actif")
+                if not self.headless:
+                    logger.info("Mode debug: Vérifiez manuellement si nécessaire")
+                    time.sleep(3)
+            else:
+                logger.debug("✅ Aucun popup de cookies actif détecté")
             
         except Exception as e:
-            logger.error(f"Erreur Google Selenium: {e}")
-        
-        return None
+            logger.debug(f"Erreur gestion cookies: {e}")
 
-    def _search_spotify_direct_selenium(self, artist: str, title: str) -> Optional[str]:
-        """Recherche directe sur Spotify Web avec Selenium"""
-        logger.info(f"Recherche directe Spotify pour: {artist} - {title}")
+    def _debug_cookie_elements(self):
+        """Méthode de debug pour identifier les éléments de cookies"""
+        try:
+            logger.info("🔍 DEBUG: Recherche d'éléments de cookies...")
+            
+            # Chercher tous les éléments contenant "accept", "consent", etc.
+            debug_selectors = [
+                "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+                "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+                "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'tout')]",
+                "//div[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'tout')]",
+                "*[class*='accept']",
+                "*[class*='consent']",
+                "*[class*='cookie']",
+            ]
+            
+            found_elements = []
+            for selector in debug_selectors:
+                try:
+                    if selector.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for elem in elements[:3]:  # Limiter à 3 par sélecteur
+                        if elem.is_displayed():
+                            found_elements.append({
+                                'tag': elem.tag_name,
+                                'text': elem.text[:100],
+                                'class': elem.get_attribute('class'),
+                                'id': elem.get_attribute('id'),
+                                'selector_used': selector
+                            })
+                except:
+                    continue
+        
+            if found_elements:
+                logger.info(f"🔍 Éléments trouvés ({len(found_elements)}):")
+                for i, elem in enumerate(found_elements[:5]):  # Afficher max 5
+                    logger.info(f"  {i+1}. {elem['tag']} - '{elem['text']}' - class='{elem['class']}' - id='{elem['id']}'")
+            else:
+                logger.info("🔍 Aucun élément de cookies trouvé")
+                
+        except Exception as e:
+            logger.error(f"Erreur debug cookies: {e}")
+
+    def _calculate_relevance(self, artist: str, title: str, text: str) -> float:
+        """Calcule la pertinence d'un résultat"""
+        if not text:
+            return 0.5
+        
+        score = 0.0
+        artist_lower = artist.lower()
+        title_lower = title.lower()
+        text_lower = text.lower()
+        
+        # Bonus pour correspondance exacte
+        if artist_lower in text_lower:
+            score += 0.4
+        if title_lower in text_lower:
+            score += 0.4
+        
+        # Bonus pour correspondance partielle
+        artist_words = artist_lower.split()
+        title_words = title_lower.split()
+        
+        for word in artist_words:
+            if word in text_lower:
+                score += 0.1
+        
+        for word in title_words:
+            if word in text_lower:
+                score += 0.1
+        
+        return min(score, 1.0)
+
+    # ========== NOUVELLES MÉTHODES DE RECHERCHE AMÉLIORÉES ==========
+
+    def _search_duckduckgo_selenium(self, artist: str, title: str) -> Optional[str]:
+        """Recherche DuckDuckGo avec Selenium - Alternative à Google"""
+        logger.info(f"Recherche DuckDuckGo Selenium pour: {artist} - {title}")
         
         try:
             if not self.driver:
@@ -308,52 +398,435 @@ class ReccoBeatsIntegratedClient:
             if not self.driver:
                 return None
             
-            # URL de recherche Spotify
-            query = f"{artist} {title}"
-            spotify_url = f"https://open.spotify.com/search/{urllib.parse.quote(query)}"
+            # Construire la requête DuckDuckGo
+            query = f'"{artist}" "{title}" site:open.spotify.com'
+            ddg_url = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}"
             
-            logger.debug(f"Navigation vers: {spotify_url}")
-            self.driver.get(spotify_url)
+            logger.debug(f"Navigation vers DuckDuckGo: {ddg_url}")
+            self.driver.get(ddg_url)
             
-            # Attendre le chargement
+            # DuckDuckGo a généralement moins de cookies que Google
             time.sleep(3)
             
-            # Chercher le premier résultat de type "track"
-            try:
-                # Attendre que les résultats se chargent
-                self.wait.until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid*='track']"))
-                )
-                
-                # Récupérer l'URL actuelle après navigation
-                current_url = self.driver.current_url
-                
-                # Chercher les liens vers des tracks
-                track_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/track/']")
-                
-                for link in track_links[:5]:  # Vérifier les 5 premiers
-                    href = link.get_attribute('href')
-                    if href:
-                        spotify_id = self.extract_spotify_id_from_url(href)
-                        if spotify_id:
-                            # Vérifier si le titre correspond approximativement
-                            try:
-                                link_text = link.text.lower()
-                                if title.lower() in link_text or artist.lower() in link_text:
-                                    logger.info(f"✅ ID Spotify trouvé via recherche directe: {spotify_id}")
-                                    return spotify_id
-                            except:
-                                # Retourner le premier ID trouvé si on ne peut pas vérifier
-                                logger.info(f"✅ ID Spotify trouvé (premier résultat): {spotify_id}")
+            # Chercher les résultats avec plusieurs sélecteurs
+            result_selectors = [
+                "a[href*='open.spotify.com/track/']",
+                "a[href*='spotify.com/track/']",
+                ".result__url[href*='spotify']",
+                ".result a[href*='spotify']"
+            ]
+            
+            for selector in result_selectors:
+                try:
+                    links = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for link in links[:5]:  # Vérifier les 5 premiers
+                        href = link.get_attribute('href')
+                        if href and 'spotify.com' in href:
+                            spotify_id = self.extract_spotify_id_from_url(href)
+                            if spotify_id:
+                                logger.info(f"✅ ID trouvé via DuckDuckGo Selenium: {spotify_id}")
                                 return spotify_id
-                
-            except TimeoutException:
-                logger.warning("Timeout lors de la recherche Spotify directe")
+                except Exception as e:
+                    logger.debug(f"Erreur sélecteur {selector}: {e}")
+                    continue
+            
+            # Si pas de résultats directs, cliquer sur "More results" si disponible
+            try:
+                more_button = self.driver.find_element(By.CSS_SELECTOR, ".btn--more")
+                if more_button.is_displayed():
+                    more_button.click()
+                    time.sleep(2)
+                    
+                    # Re-chercher après avoir chargé plus de résultats
+                    for selector in result_selectors:
+                        links = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for link in links[:5]:
+                            href = link.get_attribute('href')
+                            if href and 'spotify.com' in href:
+                                spotify_id = self.extract_spotify_id_from_url(href)
+                                if spotify_id:
+                                    logger.info(f"✅ ID trouvé via DuckDuckGo (more results): {spotify_id}")
+                                    return spotify_id
+            except:
+                pass
+            
+            logger.warning("Aucun ID trouvé via DuckDuckGo Selenium")
+            return None
             
         except Exception as e:
-            logger.error(f"Erreur recherche directe Spotify: {e}")
+            logger.error(f"Erreur DuckDuckGo Selenium: {e}")
+            return None
+
+    def get_track_info(self, artist: str, title: str, use_cache: bool = True, force_refresh: bool = False) -> Optional[Dict]:
+        """Méthode principale avec FERMETURE SELENIUM pour éviter blocages"""
         
-        return None
+        logger.info(f"🎵 DÉBUT get_track_info: {artist} - {title}")
+        
+        try:
+            cache_key = self._get_cache_key(artist, title)
+            
+            # Force refresh = nettoyer le cache
+            if force_refresh and cache_key in self.cache:
+                del self.cache[cache_key]
+                logger.info(f"Force refresh pour: {artist} - {title}")
+            
+            # Vérifier le cache
+            if use_cache and not force_refresh and cache_key in self.cache:
+                cached = self.cache[cache_key]
+                if isinstance(cached, dict):
+                    if cached.get('success') or cached.get('spotify_id'):
+                        logger.info(f"Données trouvées dans le cache pour: {artist} - {title}")
+                        return cached
+                    elif 'timestamp' in cached:
+                        age_hours = (time.time() - cached['timestamp']) / 3600
+                        if age_hours > 24:
+                            del self.cache[cache_key]
+                            logger.info(f"Cache d'erreur expiré, nouvelle tentative")
+            
+            # Étape 1: Rechercher l'ID Spotify
+            logger.info(f"🔍 Recherche ID Spotify pour: {artist} - {title}")
+            spotify_id = self.search_spotify_id(artist, title)
+            
+            # NOUVEAU: FERMER SELENIUM IMMÉDIATEMENT après récupération ID
+            if self.driver:
+                logger.info("🔧 Fermeture Selenium après récupération ID")
+                self._close_selenium_driver()
+            
+            if not spotify_id:
+                logger.warning(f"❌ Aucun ID Spotify trouvé pour: {artist} - {title}")
+                self.cache[cache_key] = {'error': 'spotify_id_not_found', 'timestamp': time.time()}
+                self._save_cache()
+                return None
+            
+            logger.info(f"✅ ID Spotify trouvé: {spotify_id}")
+            
+            # Réponse minimale garantie
+            minimal_response = {
+                'search_artist': artist,
+                'search_title': title,
+                'spotify_id': spotify_id,
+                'source': 'reccobeats_integrated',
+                'success': True,
+                'timestamp': time.time(),
+            }
+            
+            # Étape 2: ReccoBeats avec timeout plus court
+            logger.info(f"🎵 Récupération ReccoBeats Multi-tracks pour ID: {spotify_id}")
+            
+            # Timeout de sécurité pour ReccoBeats
+            import threading
+            import time
+            
+            track_data = None
+            api_error = None
+            
+            def recco_thread():
+                nonlocal track_data, api_error
+                try:
+                    track_data = self.get_track_from_reccobeats(spotify_id)
+                except Exception as e:
+                    api_error = e
+            
+            # Lancer ReccoBeats dans un thread avec timeout
+            thread = threading.Thread(target=recco_thread)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=30)  # 30 secondes max pour ReccoBeats
+            
+            if thread.is_alive():
+                logger.warning("⏰ Timeout ReccoBeats, abandon de cette requête")
+                track_data = None
+            elif api_error:
+                logger.error(f"❌ Erreur ReccoBeats: {api_error}")
+                track_data = None
+            
+            if track_data:
+                logger.info("✅ Données ReccoBeats récupérées avec succès")
+                enriched_data = {**minimal_response, **track_data}
+                
+                # Audio features (timeout plus court)
+                reccobeats_id = track_data.get('id')
+                if reccobeats_id:
+                    logger.debug(f"🎼 Audio features pour ID: {reccobeats_id}")
+                    
+                    def audio_thread():
+                        nonlocal enriched_data
+                        try:
+                            audio_features = self.get_track_audio_features(reccobeats_id)
+                            if audio_features:
+                                enriched_data['audio_features'] = audio_features
+                        except:
+                            pass
+                    
+                    audio_t = threading.Thread(target=audio_thread)
+                    audio_t.daemon = True
+                    audio_t.start()
+                    audio_t.join(timeout=10)  # 10 secondes max pour audio features
+                
+                # Extraire BPM
+                if 'audio_features' in enriched_data:
+                    features = enriched_data['audio_features']
+                    enriched_data['bpm'] = features.get('tempo')
+                    enriched_data['key'] = features.get('key')
+                    enriched_data['mode'] = features.get('mode')
+                    enriched_data['energy'] = features.get('energy')
+                    enriched_data['danceability'] = features.get('danceability')
+                    enriched_data['valence'] = features.get('valence')
+                
+                self.cache[cache_key] = enriched_data
+                self._save_cache()
+                
+                logger.info(f"✅ FIN SUCCÈS COMPLET: {artist} - {title}")
+                return enriched_data
+                
+            else:
+                # Succès partiel avec ID seulement
+                logger.warning(f"⚠️ ID Spotify trouvé mais ReccoBeats échoué pour: {spotify_id}")
+                minimal_response['warning'] = 'reccobeats_not_found'
+                minimal_response['message'] = 'ID Spotify récupéré mais données ReccoBeats indisponibles'
+                
+                self.cache[cache_key] = minimal_response
+                self._save_cache()
+                
+                logger.info(f"⚠️ FIN SUCCÈS PARTIEL: {artist} - {title}")
+                return minimal_response
+        
+        except Exception as e:
+            logger.error(f"❌ Erreur générale get_track_info: {e}")
+            return None
+        
+        finally:
+            # S'assurer que Selenium est fermé
+            if self.driver:
+                logger.info("🔧 Fermeture Selenium en finally")
+                self._close_selenium_driver()
+            
+            logger.info(f"🏁 FIN get_track_info: {artist} - {title}")
+
+    def test_quick_enrichment(self, artist: str, title: str) -> Dict:
+        """Test rapide d'enrichissement avec timeout strict"""
+        logger.info(f"🧪 TEST RAPIDE: {artist} - {title}")
+        
+        start_time = time.time()
+        result = {
+            'artist': artist,
+            'title': title,
+            'success': False,
+            'spotify_id': None,
+            'duration_seconds': 0,
+            'steps_completed': [],
+            'errors': []
+        }
+        
+        try:
+            # Étape 1: ID Spotify (max 30s)
+            logger.info("1️⃣ Recherche ID Spotify...")
+            step_start = time.time()
+            
+            spotify_id = self.search_spotify_id(artist, title)
+            step_duration = time.time() - step_start
+            
+            if spotify_id:
+                result['spotify_id'] = spotify_id
+                result['steps_completed'].append(f"spotify_id ({step_duration:.1f}s)")
+                logger.info(f"✅ ID trouvé en {step_duration:.1f}s: {spotify_id}")
+                
+                # Fermer Selenium immédiatement
+                if self.driver:
+                    self._close_selenium_driver()
+                
+                # Étape 2: ReccoBeats (max 20s)
+                logger.info("2️⃣ Test ReccoBeats...")
+                step_start = time.time()
+                
+                track_data = self.get_track_from_reccobeats(spotify_id)
+                step_duration = time.time() - step_start
+                
+                if track_data:
+                    result['steps_completed'].append(f"reccobeats ({step_duration:.1f}s)")
+                    result['success'] = True
+                    logger.info(f"✅ ReccoBeats OK en {step_duration:.1f}s")
+                else:
+                    result['steps_completed'].append(f"reccobeats_failed ({step_duration:.1f}s)")
+                    logger.warning(f"⚠️ ReccoBeats échoué en {step_duration:.1f}s")
+                    # Mais c'est quand même un succès partiel car on a l'ID
+                    result['success'] = True
+            else:
+                result['errors'].append(f"No Spotify ID found ({step_duration:.1f}s)")
+                logger.error(f"❌ Pas d'ID Spotify en {step_duration:.1f}s")
+        
+        except Exception as e:
+            result['errors'].append(f"Exception: {e}")
+            logger.error(f"❌ Exception: {e}")
+        
+        finally:
+            # Toujours fermer Selenium
+            if self.driver:
+                self._close_selenium_driver()
+            
+            result['duration_seconds'] = time.time() - start_time
+            
+            # Résumé
+            status = "✅" if result['success'] else "❌"
+            logger.info(f"{status} Test terminé en {result['duration_seconds']:.1f}s")
+            logger.info(f"  Étapes: {result['steps_completed']}")
+            if result['errors']:
+                logger.warning(f"  Erreurs: {result['errors']}")
+        
+        return result
+
+    def _search_spotify_direct_selenium(self, artist: str, title: str) -> Optional[str]:
+        """Recherche directe Spotify avec LOGS DÉTAILLÉS"""
+        logger.info(f"🎵 Recherche directe Spotify pour: {artist} - {title}")
+        
+        try:
+            if not self.driver:
+                self._init_selenium_driver()
+            
+            if not self.driver:
+                logger.error("❌ Driver Selenium non disponible")
+                return None
+            
+            # Essayer plusieurs variantes de requête
+            search_queries = [
+                f"{artist} {title}",
+                f"{title} {artist}",
+                f'"{artist}" "{title}"'
+            ]
+            
+            for query_idx, query in enumerate(search_queries):
+                logger.info(f"📝 Essai {query_idx + 1}/3 avec requête: '{query}'")
+                
+                try:
+                    # URL de recherche Spotify
+                    spotify_url = f"https://open.spotify.com/search/{urllib.parse.quote(query)}"
+                    
+                    logger.info(f"🌐 Navigation vers: {spotify_url}")
+                    self.driver.get(spotify_url)
+                    
+                    # Gérer les cookies
+                    logger.info("🍪 Gestion des cookies...")
+                    self._handle_cookies()
+                    
+                    # Attendre que la page se charge
+                    logger.info("⏳ Attente du chargement de la page...")
+                    try:
+                        WebDriverWait(self.driver, 20).until(
+                            lambda driver: any([
+                                driver.find_elements(By.CSS_SELECTOR, "[data-testid*='track']"),
+                                driver.find_elements(By.CSS_SELECTOR, "a[href*='/track/']"),
+                                driver.find_elements(By.CSS_SELECTOR, ".tracklist"),
+                                driver.find_elements(By.CSS_SELECTOR, "[role='row']")
+                            ])
+                        )
+                        logger.info("✅ Page chargée avec succès")
+                    except TimeoutException:
+                        logger.warning(f"⏰ Timeout pour la requête: {query}")
+                        continue
+                    
+                    # Vérifier l'URL actuelle
+                    current_url = self.driver.current_url
+                    logger.info(f"📍 URL actuelle: {current_url}")
+                    
+                    if 'search' not in current_url:
+                        logger.warning("🔄 Redirection inattendue de Spotify")
+                        continue
+                    
+                    # Chercher les liens tracks avec logs détaillés
+                    track_selectors = [
+                        "a[href*='/track/'][data-testid]",
+                        "div[data-testid*='track'] a[href*='/track/']",
+                        "[role='row'] a[href*='/track/']",
+                        "a[href*='/track/']",
+                        ".tracklist-row a[href*='/track/']",
+                        ".track a[href*='/track/']",
+                    ]
+                    
+                    logger.info(f"🔍 Recherche de tracks avec {len(track_selectors)} sélecteurs...")
+                    
+                    found_tracks = []
+                    
+                    for selector_idx, selector in enumerate(track_selectors):
+                        try:
+                            track_links = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            logger.info(f"  📌 Sélecteur {selector_idx + 1}: '{selector}' → {len(track_links)} liens trouvés")
+                            
+                            for link_idx, link in enumerate(track_links[:10]):
+                                try:
+                                    href = link.get_attribute('href')
+                                    if href and '/track/' in href:
+                                        spotify_id = self.extract_spotify_id_from_url(href)
+                                        if spotify_id and spotify_id not in [t['id'] for t in found_tracks]:
+                                            
+                                            # Récupérer le texte pour validation
+                                            try:
+                                                link_text = link.text.lower()
+                                                parent_text = link.find_element(By.XPATH, "./..").text.lower()
+                                                combined_text = f"{link_text} {parent_text}"
+                                                
+                                                relevance = self._calculate_relevance(artist, title, combined_text)
+                                                
+                                                found_tracks.append({
+                                                    'id': spotify_id,
+                                                    'text': combined_text,
+                                                    'relevance': relevance,
+                                                    'href': href
+                                                })
+                                                
+                                                logger.info(f"    🎯 Track {link_idx + 1}: ID={spotify_id}, relevance={relevance:.2f}")
+                                                logger.debug(f"       Text: '{combined_text[:100]}'")
+                                                
+                                            except Exception as text_error:
+                                                # Ajouter sans texte
+                                                found_tracks.append({
+                                                    'id': spotify_id,
+                                                    'text': '',
+                                                    'relevance': 0.5,
+                                                    'href': href
+                                                })
+                                                logger.info(f"    🎯 Track {link_idx + 1}: ID={spotify_id}, relevance=0.5 (no text)")
+                                                
+                                except Exception as link_error:
+                                    logger.debug(f"    ❌ Erreur lien {link_idx + 1}: {link_error}")
+                                    continue
+                                
+                        except Exception as selector_error:
+                            logger.debug(f"  ❌ Erreur sélecteur '{selector}': {selector_error}")
+                            continue
+                    
+                    # Analyser les résultats
+                    logger.info(f"📊 Analyse: {len(found_tracks)} tracks trouvés au total")
+                    
+                    if found_tracks:
+                        # Trier par pertinence
+                        found_tracks.sort(key=lambda x: x['relevance'], reverse=True)
+                        
+                        logger.info("🏆 Top 3 des résultats:")
+                        for i, track in enumerate(found_tracks[:3]):
+                            logger.info(f"  {i+1}. ID={track['id']} (relevance={track['relevance']:.2f})")
+                        
+                        best_track = found_tracks[0]
+                        logger.info(f"✅ SÉLECTIONNÉ: {best_track['id']} (relevance: {best_track['relevance']:.2f})")
+                        return best_track['id']
+                    else:
+                        logger.warning(f"❌ Aucun track trouvé pour la requête: '{query}'")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Erreur avec la requête '{query}': {e}")
+                    continue
+                
+                # Délai entre les requêtes
+                if query_idx < len(search_queries) - 1:
+                    logger.info("⏳ Délai entre requêtes...")
+                    time.sleep(2)
+            
+            logger.warning("❌ Aucun track trouvé via recherche directe Spotify")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche directe Spotify: {e}")
+            return None
 
     # ========== MÉTHODES SCRAPING CLASSIQUE (SANS SELENIUM) ==========
 
@@ -428,11 +901,11 @@ class ReccoBeatsIntegratedClient:
         
         return None
 
-    # ========== MÉTHODE PRINCIPALE DE RECHERCHE ==========
+    # ========== MÉTHODE PRINCIPALE DE RECHERCHE CORRIGÉE ==========
 
     def search_spotify_id(self, artist: str, title: str, force_selenium: bool = False) -> Optional[str]:
         """
-        Recherche l'ID Spotify d'un track avec stratégie multiple
+        Recherche l'ID Spotify - VERSION ANTI-GOOGLE (contournement)
         
         Args:
             artist: Nom de l'artiste
@@ -452,22 +925,26 @@ class ReccoBeatsIntegratedClient:
         
         spotify_id = None
         
-        # Stratégie de recherche
+        # NOUVELLE STRATÉGIE : ÉVITER GOOGLE
         if self.use_selenium or force_selenium:
-            # 1. Essayer Google avec Selenium
-            spotify_id = self._search_google_selenium(artist, title)
+            # 1. PRIORITÉ 1: Recherche directe Spotify (plus fiable)
+            logger.info("Tentative recherche directe Spotify...")
+            spotify_id = self._search_spotify_direct_selenium(artist, title)
             
-            # 2. Si échec, essayer la recherche directe Spotify
+            # 2. PRIORITÉ 2: DuckDuckGo avec Selenium (pas de détection bot)
             if not spotify_id:
-                spotify_id = self._search_spotify_direct_selenium(artist, title)
+                logger.info("Tentative DuckDuckGo avec Selenium...")
+                spotify_id = self._search_duckduckgo_selenium(artist, title)
         
-        # 3. Si Selenium échoue ou est désactivé, utiliser les méthodes classiques
+        # 3. PRIORITÉ 3: Méthodes classiques sans Selenium
         if not spotify_id:
-            spotify_id = self._search_google_requests(artist, title)
-        
-        # 4. Dernière tentative avec DuckDuckGo
-        if not spotify_id:
+            logger.info("Tentative DuckDuckGo classique...")
             spotify_id = self._search_duckduckgo(artist, title)
+        
+        # 4. DERNIER RECOURS: Google requests (sans Selenium)
+        if not spotify_id:
+            logger.info("Dernier recours: Google requests...")
+            spotify_id = self._search_google_requests(artist, title)
         
         # Sauvegarder en cache
         if spotify_id:
@@ -481,36 +958,103 @@ class ReccoBeatsIntegratedClient:
         
         return spotify_id
 
-    # ========== MÉTHODES RECCOBEATS API ==========
+    # ========== MÉTHODES RECCOBEATS API CORRIGÉES ==========
 
     def get_track_from_reccobeats(self, spotify_id: str) -> Optional[Dict]:
-        """Récupère les données d'un track depuis ReccoBeats via son ID Spotify"""
+        """Récupère les données ReccoBeats avec l'endpoint MULTI-TRACKS (corrigé)"""
         try:
-            url = f"{self.recco_base_url}/track"
-            params = {'ids': spotify_id}
+            # NOUVEAU: Utiliser l'endpoint /tracks (multi-tracks) au lieu de /track
+            url = f"{self.recco_base_url}/tracks"
+            params = {'ids': spotify_id}  # Même paramètre mais endpoint différent
+            
+            logger.info(f"🎵 ReccoBeats Multi-tracks: Requête pour ID {spotify_id}")
+            logger.debug(f"   URL: {url}")
+            logger.debug(f"   Params: {params}")
             
             response = self.recco_session.get(url, params=params, timeout=15)
             
+            logger.info(f"📡 ReccoBeats Response: Status {response.status_code}")
+            
             if response.status_code == 200:
-                data = response.json()
+                try:
+                    data = response.json()
+                    logger.info(f"📦 ReccoBeats Data: Type={type(data)}")
+                    logger.debug(f"   Contenu: {str(data)[:300]}...")
+                    
+                    # L'endpoint multi-tracks retourne généralement une liste ou un dict avec liste
+                    if isinstance(data, list):
+                        logger.info(f"📋 Structure list avec {len(data)} éléments")
+                        if len(data) > 0:
+                            logger.info(f"✅ Track trouvé dans liste[0]")
+                            logger.debug(f"   Premier élément: {str(data[0])[:200]}...")
+                            return data[0]
+                        else:
+                            logger.warning("❌ Liste vide")
+                    
+                    elif isinstance(data, dict):
+                        logger.info(f"📋 Structure dict avec clés: {list(data.keys())}")
+                        
+                        # Structures possibles pour multi-tracks
+                        if 'tracks' in data:
+                            tracks = data['tracks']
+                            logger.info(f"   'tracks' trouvé: type={type(tracks)}, len={len(tracks) if isinstance(tracks, list) else 'N/A'}")
+                            if isinstance(tracks, list) and len(tracks) > 0:
+                                logger.info(f"✅ Track trouvé dans tracks[0]")
+                                return tracks[0]
+                            else:
+                                logger.warning(f"❌ Tracks vide ou invalide")
+                        
+                        elif 'data' in data:
+                            track_data = data['data']
+                            logger.info(f"   'data' trouvé: type={type(track_data)}")
+                            if isinstance(track_data, list) and len(track_data) > 0:
+                                logger.info(f"✅ Track trouvé dans data[0]")
+                                return track_data[0]
+                            elif isinstance(track_data, dict):
+                                logger.info(f"✅ Track trouvé dans data")
+                                return track_data
+                        
+                        elif 'content' in data:
+                            content = data['content']
+                            logger.info(f"   'content' trouvé: type={type(content)}, len={len(content) if isinstance(content, list) else 'N/A'}")
+                            if isinstance(content, list) and len(content) > 0:
+                                logger.info(f"✅ Track trouvé dans content[0]")
+                                return content[0]
+                            else:
+                                logger.warning(f"❌ Content vide ou invalide")
+                        
+                        # Structure directe
+                        elif any(key in data for key in ['id', 'name', 'title', 'tempo']):
+                            logger.info(f"✅ Track trouvé en structure directe")
+                            logger.debug(f"   Clés pertinentes: {[k for k in data.keys() if k in ['id', 'name', 'title', 'tempo', 'bpm']]}")
+                            return data
+                        
+                        else:
+                            logger.warning(f"❌ Structure inconnue. Toutes les clés: {list(data.keys())}")
+                    
+                    else:
+                        logger.warning(f"❌ Type de réponse inattendu: {type(data)}")
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Erreur parsing JSON: {e}")
+                    logger.debug(f"   Contenu brut: {response.text[:500]}")
+            
+            elif response.status_code == 404:
+                logger.warning(f"❌ Track non trouvé dans ReccoBeats multi-tracks (404)")
+            elif response.status_code == 429:
+                logger.warning("⏰ Rate limit ReccoBeats")
+            else:
+                logger.warning(f"❌ Erreur ReccoBeats {response.status_code}")
+                logger.debug(f"   Réponse: {response.text[:200]}")
                 
-                # Gérer les différentes structures de réponse ReccoBeats
-                if isinstance(data, dict) and 'content' in data:
-                    content = data['content']
-                    if isinstance(content, list) and len(content) > 0:
-                        return content[0]
-                elif isinstance(data, list) and len(data) > 0:
-                    return data[0]
-                elif isinstance(data, dict):
-                    return data
-                
-                logger.warning("Format de réponse ReccoBeats inattendu")
-                
+        except requests.exceptions.Timeout:
+            logger.error("⏰ Timeout ReccoBeats API")
         except requests.exceptions.RequestException as e:
-            logger.error(f"Erreur API ReccoBeats: {e}")
-        except json.JSONDecodeError as e:
-            logger.error(f"Erreur parsing JSON ReccoBeats: {e}")
+            logger.error(f"🌐 Erreur réseau ReccoBeats: {e}")
+        except Exception as e:
+            logger.error(f"❌ Erreur inattendue ReccoBeats: {e}")
         
+        logger.warning("❌ ReccoBeats Multi-tracks: Aucune donnée retournée")
         return None
 
     def get_track_audio_features(self, reccobeats_id: str) -> Optional[Dict]:
@@ -534,88 +1078,98 @@ class ReccoBeatsIntegratedClient:
         
         return None
 
+    def clear_error_cache(self, artist: str = None, title: str = None):
+        """Nettoie les erreurs du cache pour permettre de nouvelles tentatives"""
+        if artist and title:
+            cache_key = self._get_cache_key(artist, title)
+            if cache_key in self.cache:
+                cached = self.cache[cache_key]
+                if isinstance(cached, dict) and ('error' in cached or not cached.get('success')):
+                    del self.cache[cache_key]
+                    logger.info(f"Cache d'erreur supprimé pour: {artist} - {title}")
+                    self._save_cache()
+                    return True
+            return False
+        else:
+            # Nettoyer toutes les erreurs
+            errors_removed = 0
+            keys_to_remove = []
+            
+            for key, value in self.cache.items():
+                if isinstance(value, dict) and ('error' in value or not value.get('success')):
+                    keys_to_remove.append(key)
+            
+            for key in keys_to_remove:
+                del self.cache[key]
+                errors_removed += 1
+            
+            if errors_removed > 0:
+                logger.info(f"{errors_removed} entrées d'erreur supprimées du cache")
+                self._save_cache()
+            
+            return errors_removed > 0
+    
     # ========== MÉTHODE PRINCIPALE INTÉGRÉE ==========
 
-    def get_track_info(self, artist: str, title: str, use_cache: bool = True) -> Optional[Dict]:
-        """
-        Méthode principale : récupère toutes les infos d'un track
+    def test_spotify_id_storage(self, artist: str, title: str) -> Dict:
+        """Test spécifique pour vérifier que l'ID Spotify est bien stocké"""
+        logger.info(f"🧪 TEST STOCKAGE SPOTIFY ID: {artist} - {title}")
         
-        Args:
-            artist: Nom de l'artiste
-            title: Titre du morceau
-            use_cache: Utiliser le cache si disponible
-            
-        Returns:
-            Dict avec toutes les infos (Spotify ID, features ReccoBeats, etc.)
-        """
-        # Vérifier le cache complet
-        cache_key = self._get_cache_key(artist, title)
-        if use_cache and cache_key in self.cache:
-            cached = self.cache[cache_key]
-            if isinstance(cached, dict) and 'success' in cached and cached['success']:
-                logger.info(f"Données complètes trouvées dans le cache pour: {artist} - {title}")
-                return cached
-        
-        # Étape 1: Rechercher l'ID Spotify
-        logger.info(f"Recherche de l'ID Spotify pour: {artist} - {title}")
-        spotify_id = self.search_spotify_id(artist, title)
-        
-        if not spotify_id:
-            logger.warning(f"Aucun ID Spotify trouvé pour: {artist} - {title}")
-            self.cache[cache_key] = {'error': 'spotify_id_not_found', 'timestamp': time.time()}
-            self._save_cache()
-            return None
-        
-        # Étape 2: Récupérer les données ReccoBeats
-        logger.info(f"Récupération des données ReccoBeats pour ID: {spotify_id}")
-        track_data = self.get_track_from_reccobeats(spotify_id)
-        
-        if not track_data:
-            logger.warning(f"Données ReccoBeats non trouvées pour ID: {spotify_id}")
-            self.cache[cache_key] = {
-                'error': 'reccobeats_not_found',
-                'spotify_id': spotify_id,
-                'timestamp': time.time()
-            }
-            self._save_cache()
-            return None
-        
-        # Étape 3: Enrichir avec audio features si possible
-        reccobeats_id = track_data.get('id')
-        if reccobeats_id:
-            logger.debug(f"Récupération des audio features pour ID ReccoBeats: {reccobeats_id}")
-            audio_features = self.get_track_audio_features(reccobeats_id)
-            if audio_features:
-                track_data['audio_features'] = audio_features
-                logger.info("Audio features ajoutées aux données")
-        
-        # Construire la réponse complète
-        enriched_data = {
-            'search_artist': artist,
-            'search_title': title,
-            'spotify_id': spotify_id,
-            'source': 'reccobeats_integrated',
-            'success': True,
-            'timestamp': time.time(),
-            **track_data
+        result = {
+            'artist': artist,
+            'title': title,
+            'spotify_id_found': False,
+            'spotify_id': None,
+            'stored_successfully': False,
+            'reccobeats_success': False,
+            'final_bpm': None,
+            'errors': []
         }
         
-        # Extraire les infos importantes si disponibles
-        if 'audio_features' in enriched_data:
-            features = enriched_data['audio_features']
-            enriched_data['bpm'] = features.get('tempo')
-            enriched_data['key'] = features.get('key')
-            enriched_data['mode'] = features.get('mode')
-            enriched_data['energy'] = features.get('energy')
-            enriched_data['danceability'] = features.get('danceability')
-            enriched_data['valence'] = features.get('valence')
+        try:
+            # Créer un Track temporaire pour test
+            from src.models.track import Track
+            from src.models.artist import Artist
+            
+            test_artist = Artist(name=artist)
+            test_track = Track(title=title, artist=test_artist)
+            
+            # Test enrichissement
+            from src.utils.data_enricher import DataEnricher
+            enricher = DataEnricher()
+            
+            # Enrichir avec ReccoBeats
+            success = enricher._enrich_with_reccobeats(test_track)
+            
+            # Vérifier les résultats
+            result['stored_successfully'] = hasattr(test_track, 'spotify_id') and test_track.spotify_id
+            result['spotify_id'] = getattr(test_track, 'spotify_id', None)
+            result['spotify_id_found'] = result['spotify_id'] is not None
+            result['reccobeats_success'] = success
+            result['final_bpm'] = getattr(test_track, 'bpm', None)
+            
+            if not result['spotify_id_found']:
+                result['errors'].append("Spotify ID not found")
+            if not result['stored_successfully']:
+                result['errors'].append("Spotify ID not stored in track")
+            
+        except Exception as e:
+            result['errors'].append(f"Exception: {e}")
+            logger.error(f"❌ Exception: {e}")
         
-        # Sauvegarder en cache
-        self.cache[cache_key] = enriched_data
-        self._save_cache()
+        # Résumé
+        logger.info("📊 RÉSUMÉ DU TEST STOCKAGE:")
+        logger.info(f"  🎵 ID Spotify trouvé: {result['spotify_id_found']}")
+        if result['spotify_id']:
+            logger.info(f"     ID: {result['spotify_id']}")
+        logger.info(f"  💾 Stocké dans Track: {result['stored_successfully']}")
+        logger.info(f"  🎼 ReccoBeats succès: {result['reccobeats_success']}")
+        if result['final_bpm']:
+            logger.info(f"     BPM: {result['final_bpm']}")
+        if result['errors']:
+            logger.warning(f"  ❌ Erreurs: {result['errors']}")
         
-        logger.info(f"✅ Données complètes récupérées pour: {artist} - {title}")
-        return enriched_data
+        return result
 
     def process_multiple_tracks(self, track_list: List[Dict[str, str]]) -> List[Dict]:
         """
@@ -647,6 +1201,152 @@ class ReccoBeatsIntegratedClient:
                 time.sleep(delay)
         
         logger.info(f"Traitement terminé: {len(results)}/{total} tracks traités avec succès")
+        return results
+
+    # ========== MÉTHODES DE TEST ET DIAGNOSTIC ==========
+
+    def test_spotify_direct_only(self, artist: str, title: str) -> Dict:
+        """Test uniquement Spotify direct avec logs ultra-détaillés"""
+        logger.info(f"🧪 TEST SPOTIFY DIRECT SEULEMENT: {artist} - {title}")
+        
+        result = {
+            'artist': artist,
+            'title': title,
+            'spotify_found': False,
+            'spotify_id': None,
+            'reccobeats_found': False,
+            'reccobeats_data': None,
+            'final_bpm': None,
+            'errors': []
+        }
+        
+        try:
+            # Étape 1: Test Spotify direct uniquement
+            logger.info("🎵 Étape 1: Test Spotify direct...")
+            spotify_id = self._search_spotify_direct_selenium(artist, title)
+            
+            result['spotify_found'] = spotify_id is not None
+            result['spotify_id'] = spotify_id
+            
+            if not spotify_id:
+                result['errors'].append("Spotify direct failed")
+                logger.error("❌ Échec Spotify direct")
+                return result
+            
+            logger.info(f"✅ Spotify ID trouvé: {spotify_id}")
+            
+            # Étape 2: Test ReccoBeats avec cet ID
+            logger.info("🎵 Étape 2: Test ReccoBeats...")
+            reccobeats_data = self.get_track_from_reccobeats(spotify_id)
+            
+            result['reccobeats_found'] = reccobeats_data is not None
+            result['reccobeats_data'] = reccobeats_data
+        
+            if reccobeats_data:
+                logger.info("✅ Données ReccoBeats trouvées")
+                
+                # Chercher le BPM
+                bpm = None
+                if 'tempo' in reccobeats_data:
+                    bpm = reccobeats_data['tempo']
+                    logger.info(f"🎼 BPM trouvé dans 'tempo': {bpm}")
+                elif 'bpm' in reccobeats_data:
+                    bpm = reccobeats_data['bpm']
+                    logger.info(f"🎼 BPM trouvé dans 'bpm': {bpm}")
+                else:
+                    logger.warning("❌ Aucun BPM trouvé dans les données")
+                
+                result['final_bpm'] = bpm
+            else:
+                result['errors'].append("ReccoBeats data not found")
+                logger.error("❌ Aucune donnée ReccoBeats")
+            
+        except Exception as e:
+            result['errors'].append(f"Exception: {e}")
+            logger.error(f"❌ Exception: {e}")
+        
+        # Résumé
+        logger.info("📊 RÉSUMÉ DU TEST:")
+        logger.info(f"  🎵 Spotify trouvé: {result['spotify_found']}")
+        if result['spotify_id']:
+            logger.info(f"     ID: {result['spotify_id']}")
+        logger.info(f"  🎼 ReccoBeats trouvé: {result['reccobeats_found']}")
+        if result['final_bpm']:
+            logger.info(f"     BPM: {result['final_bpm']}")
+        if result['errors']:
+            logger.warning(f"  ❌ Erreurs: {result['errors']}")
+        
+        return result
+
+    def test_single_track(self, artist: str, title: str) -> Dict:
+        """Test complet d'un track avec diagnostics détaillés"""
+        logger.info(f"🧪 TEST COMPLET: {artist} - {title}")
+        
+        results = {
+            'artist': artist,
+            'title': title,
+            'steps': {},
+            'final_result': None,
+            'errors': []
+        }
+        
+        try:
+            # Étape 1: Recherche ID Spotify
+            logger.info("🔍 Étape 1: Recherche ID Spotify")
+            spotify_id = self.search_spotify_id(artist, title)
+            results['steps']['spotify_search'] = {
+                'success': spotify_id is not None,
+                'spotify_id': spotify_id
+            }
+            
+            if not spotify_id:
+                results['errors'].append("Aucun ID Spotify trouvé")
+                return results
+            
+            # Étape 2: Test ReccoBeats direct
+            logger.info(f"🎵 Étape 2: Test ReccoBeats avec ID {spotify_id}")
+            track_data = self.get_track_from_reccobeats(spotify_id)
+            results['steps']['reccobeats_track'] = {
+                'success': track_data is not None,
+                'data_type': type(track_data).__name__ if track_data else None,
+                'has_bpm': track_data.get('tempo') is not None if track_data else False
+            }
+            
+            if not track_data:
+                results['errors'].append("Données ReccoBeats non trouvées")
+                return results
+            
+            # Étape 3: Test audio features
+            reccobeats_id = track_data.get('id')
+            if reccobeats_id:
+                logger.info(f"🎼 Étape 3: Audio features pour {reccobeats_id}")
+                audio_features = self.get_track_audio_features(reccobeats_id)
+                results['steps']['audio_features'] = {
+                    'success': audio_features is not None,
+                    'has_tempo': audio_features.get('tempo') is not None if audio_features else False
+                }
+            
+            # Construire le résultat final
+            final_result = self.get_track_info(artist, title, use_cache=False)
+            results['final_result'] = {
+                'success': final_result is not None and final_result.get('success'),
+                'bpm': final_result.get('bpm') if final_result else None,
+                'spotify_id': final_result.get('spotify_id') if final_result else None
+            }
+            
+        except Exception as e:
+            results['errors'].append(f"Erreur générale: {e}")
+            logger.error(f"Erreur test: {e}")
+        
+        # Afficher le résumé
+        logger.info("📊 RÉSUMÉ DU TEST:")
+        for step, data in results['steps'].items():
+            status = "✅" if data['success'] else "❌"
+            logger.info(f"  {status} {step}: {data}")
+        
+        if results['errors']:
+            logger.warning(f"⚠️ Erreurs: {results['errors']}")
+        
         return results
 
     # ========== MÉTHODES UTILITAIRES ==========
@@ -700,11 +1400,22 @@ class ReccoBeatsIntegratedClient:
         }
 
     def close(self):
-        """Ferme toutes les connexions"""
-        self._close_selenium_driver()
-        self.scraper_session.close()
-        self.recco_session.close()
-        logger.info("Toutes les connexions fermées")
+        """Ferme toutes les connexions - VERSION AMÉLIORÉE"""
+        try:
+            # Fermer le driver Selenium
+            self._close_selenium_driver()
+            
+            # Fermer les sessions
+            if hasattr(self, 'recco_session'):
+                self.recco_session.close()
+            
+            if hasattr(self, 'scraper_session'):
+                self.scraper_session.close()
+            
+            logger.info("✅ ReccoBeats client fermé proprement")
+            
+        except Exception as e:
+            logger.error(f"Erreur fermeture ReccoBeats client: {e}")
 
     def __enter__(self):
         return self
@@ -730,8 +1441,13 @@ if __name__ == "__main__":
         print("\n=== Test des connexions ===")
         test_results = client.test_connection()
         for key, value in test_results.items():
-            status = "✅" if value else "❌" if value is False else "⏭️"
+            status = "✅" if value else "❌" if value is False else "⭕"
             print(f"{status} {key}: {value}")
+        
+        # Test diagnostique complet
+        print("\n=== Test diagnostique ===")
+        result = client.test_single_track("Drake", "God's Plan")
+        print("Résultat:", result)
         
         # Exemples de recherches
         tracks = [

@@ -117,6 +117,7 @@ class DataEnricher:
     def _enrich_with_reccobeats(self, track: Track) -> bool:
         """
         Enrichit avec ReccoBeats + TIMEOUTS STRICTS pour éviter blocages
+        VERSION COMPLÈTE CORRIGÉE - Appelle vraiment ReccoBeats même si spotify_id existe
         """
         try:
             if not self.reccobeats_client:
@@ -126,6 +127,16 @@ class DataEnricher:
             artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
             
             logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
+            
+            # =====================================================
+            # ÉTAPE 1 : Vérifier si le track a déjà un spotify_id
+            # =====================================================
+            existing_spotify_id = None
+            if hasattr(track, 'spotify_id') and track.spotify_id:
+                existing_spotify_id = track.spotify_id
+                logger.info(f"✅ Track a déjà un spotify_id: {existing_spotify_id}")
+            else:
+                logger.info(f"🔍 Pas de spotify_id, recherche nécessaire")
             
             # NOUVEAU: Timeout strict de 60 secondes maximum par track
             import signal
@@ -138,60 +149,114 @@ class DataEnricher:
                 signal.signal(signal.SIGALRM, timeout_handler)
                 signal.alarm(60)  # 60 secondes max
             except AttributeError:
-                # Windows ne supporte pas signal.alarm, utiliser une approche différente
+                # Windows ne supporte pas signal.alarm
                 logger.debug("Windows détecté, pas de timeout signal")
             
             try:
                 # Nettoyer le cache d'erreur
                 self.reccobeats_client.clear_error_cache(artist_name, track.title)
                 
-                # NOUVEAU: Utiliser un timeout plus court
+                # =====================================================
+                # ÉTAPE 2 : TOUJOURS APPELER get_track_info
+                # Passer le spotify_id s'il existe pour éviter le scraping
+                # =====================================================
+                logger.info(f"🎵 Appel ReccoBeats API pour '{track.title}'")
                 track_info = self.reccobeats_client.get_track_info(
                     artist=artist_name,
                     title=track.title,
                     use_cache=True,
-                    force_refresh=False
+                    force_refresh=False,
+                    spotify_id=existing_spotify_id  # ← Passe le spotify_id s'il existe
                 )
                 
-                # TOUJOURS désactiver l'alarme après succès
+                # Désactiver l'alarme après succès
                 try:
                     signal.alarm(0)
                 except AttributeError:
                     pass
                 
-                # Traitement des résultats (même logique qu'avant)
-                if track_info and (track_info.get('success') or track_info.get('spotify_id')):
-                    logger.debug(f"ReccoBeats: Données récupérées")
+                # =====================================================
+                # ÉTAPE 3 : VÉRIFIER que track_info contient vraiment des données
+                # =====================================================
+                if not track_info:
+                    logger.warning(f"ReccoBeats: ❌ Aucune donnée retournée pour '{track.title}'")
+                    return False
+                
+                # Vérifier qu'on a au moins un spotify_id (minimum requis)
+                if not track_info.get('spotify_id'):
+                    logger.warning(f"ReccoBeats: ❌ Pas de spotify_id dans la réponse pour '{track.title}'")
+                    return False
+                
+                logger.debug(f"ReccoBeats: ✅ Données récupérées pour '{track.title}'")
+                
+                # =====================================================
+                # ÉTAPE 4 : STOCKER les données dans le track
+                # =====================================================
+                
+                # 4.1 - Stocker l'ID Spotify
+                if 'spotify_id' in track_info:
+                    track.spotify_id = track_info['spotify_id']
+                    logger.info(f"✅ ID Spotify stocké: {track.spotify_id}")
+                
+                # 4.2 - Extraire et stocker le BPM
+                bpm = None
+                if 'bpm' in track_info:
+                    bpm = track_info['bpm']
+                    logger.debug(f"BPM trouvé dans 'bpm': {bpm}")
+                elif 'tempo' in track_info:
+                    bpm = track_info['tempo']
+                    logger.debug(f"BPM trouvé dans 'tempo': {bpm}")
+                elif 'audio_features' in track_info:
+                    features = track_info['audio_features']
+                    if isinstance(features, dict) and 'tempo' in features:
+                        bpm = features['tempo']
+                        logger.debug(f"BPM trouvé dans 'audio_features.tempo': {bpm}")
+                
+                # Valider et appliquer le BPM
+                if bpm and isinstance(bpm, (int, float)) and 50 <= bpm <= 200:
+                    track.bpm = round(float(bpm))
+                    logger.info(f"ReccoBeats: ✅ BPM mis à jour: {track.bpm}")
+                else:
+                    if bpm:
+                        logger.warning(f"ReccoBeats: ⚠️ BPM invalide: {bpm} (hors plage 50-200)")
+                    else:
+                        logger.warning(f"ReccoBeats: ⚠️ Aucun BPM trouvé dans la réponse")
+                
+                # Stocker Key et Mode 
+                if 'key' in track_info and track_info['key'] is not None:
+                    key_value = track_info['key']
+                    mode_value = track_info.get('mode', 1)  # Par défaut majeur si absent
                     
-                    # TOUJOURS stocker l'ID Spotify
-                    if 'spotify_id' in track_info:
-                        track.spotify_id = track_info['spotify_id']
-                        logger.info(f"✅ ID Spotify stocké: {track.spotify_id}")
+                    # Stocker dans audio_features pour référence
+                    if not hasattr(track, 'audio_features') or track.audio_features is None:
+                        track.audio_features = {}
+                    track.audio_features['key'] = key_value
+                    track.audio_features['mode'] = mode_value
                     
-                    # Extraire le BPM
-                    bpm = None
-                    if 'bpm' in track_info:
-                        bpm = track_info['bpm']
-                    elif 'tempo' in track_info:
-                        bpm = track_info['tempo']
-                    elif 'audio_features' in track_info:
-                        features = track_info['audio_features']
-                        if isinstance(features, dict) and 'tempo' in features:
-                            bpm = features['tempo']
-                    
-                    # Appliquer le BPM si valide
-                    if bpm and isinstance(bpm, (int, float)) and 50 <= bpm <= 200:
-                        track.bpm = round(float(bpm))
-                        logger.info(f"ReccoBeats: BPM mis à jour: {track.bpm}")
-                    
-                    # Durée si disponible
-                    if 'duration_ms' in track_info and not hasattr(track, 'duration'):
-                        duration_seconds = track_info['duration_ms'] / 1000
-                        track.duration = int(duration_seconds)
-                        logger.debug(f"ReccoBeats: Durée ajoutée: {track.duration}s")
-                    
-                    logger.info(f"ReccoBeats: ✅ FIN SUCCÈS '{track.title}' - ID: {getattr(track, 'spotify_id', 'N/A')}")
+                    # Convertir en notation française
+                    from src.utils.music_theory import key_mode_to_french
+                    track.musical_key = key_mode_to_french(key_value, mode_value)
+                    logger.info(f"ReccoBeats: Tonalité: {track.musical_key}")
+
+                # Stocker time_signature si disponible
+                if 'time_signature' in track_info:
+                    track.time_signature = str(track_info['time_signature'])
+                    logger.debug(f"ReccoBeats: Time signature: {track.time_signature}")
+                
+                # =====================================================
+                # ÉTAPE 5 : DÉTERMINER le succès
+                # On considère un succès si on a au moins un spotify_id
+                # Un succès COMPLET si on a aussi le BPM
+                # =====================================================
+                has_spotify_id = hasattr(track, 'spotify_id') and track.spotify_id
+                has_bpm = hasattr(track, 'bpm') and track.bpm
+                
+                if has_bpm:
+                    logger.info(f"ReccoBeats: ✅ FIN SUCCÈS COMPLET '{track.title}' - ID: {track.spotify_id}, BPM: {track.bpm}")
                     return True
+                elif has_spotify_id:
+                    logger.info(f"ReccoBeats: ⚠️ FIN SUCCÈS PARTIEL '{track.title}' - ID: {track.spotify_id}, Pas de BPM")
+                    return True  # On considère quand même comme succès si on a l'ID
                 else:
                     logger.warning(f"ReccoBeats: ❌ FIN ÉCHEC '{track.title}'")
                     return False
@@ -205,7 +270,9 @@ class DataEnricher:
                 return False
                 
             except Exception as e:
-                logger.error(f"ReccoBeats: Exception pour '{track.title}': {e}")
+                logger.error(f"ReccoBeats: ❌ Exception pour '{track.title}': {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 try:
                     signal.alarm(0)
                 except AttributeError:
@@ -213,7 +280,9 @@ class DataEnricher:
                 return False
             
         except Exception as e:
-            logger.error(f"ReccoBeats: Erreur générale pour '{getattr(track, 'title', 'unknown')}': {e}")
+            logger.error(f"ReccoBeats: ❌ Erreur générale pour '{getattr(track, 'title', 'unknown')}': {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
         
         finally:
@@ -223,7 +292,7 @@ class DataEnricher:
             except AttributeError:
                 pass
             
-            logger.info(f"ReccoBeats: FIN traitement '{getattr(track, 'title', 'unknown')}'")
+            logger.info(f"ReccoBeats: 🏁 FIN traitement '{getattr(track, 'title', 'unknown')}'")
     
     def _enrich_with_songbpm(self, track: Track) -> bool:
         """Enrichit un morceau avec GetSongBPM (fallback)"""

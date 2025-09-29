@@ -458,10 +458,25 @@ class ReccoBeatsIntegratedClient:
             logger.error(f"Erreur DuckDuckGo Selenium: {e}")
             return None
 
-    def get_track_info(self, artist: str, title: str, use_cache: bool = True, force_refresh: bool = False) -> Optional[Dict]:
-        """Méthode principale avec FERMETURE SELENIUM pour éviter blocages"""
+    def get_track_info(self, artist: str, title: str, use_cache: bool = True, 
+                   force_refresh: bool = False, spotify_id: str = None) -> Optional[Dict]:
+        """
+        Récupère les infos complètes d'un track depuis ReccoBeats
+        VERSION CORRIGÉE - avec vérification spotify_id et sans conflit time
         
-        logger.info(f"🎵 DÉBUT get_track_info: {artist} - {title}")
+        Args:
+            artist: Nom de l'artiste
+            title: Titre du morceau
+            use_cache: Utiliser le cache
+            force_refresh: Forcer un rafraîchissement
+            spotify_id: ID Spotify fourni (évite le scraping si présent)
+            
+        Returns:
+            Dictionnaire avec les données du track ou None
+        """
+        import threading  # OK - import dans la fonction
+        
+        logger.info(f"🎵 get_track_info: {artist} - {title}")
         
         try:
             cache_key = self._get_cache_key(artist, title)
@@ -475,23 +490,46 @@ class ReccoBeatsIntegratedClient:
             if use_cache and not force_refresh and cache_key in self.cache:
                 cached = self.cache[cache_key]
                 if isinstance(cached, dict):
-                    if cached.get('success') or cached.get('spotify_id'):
-                        logger.info(f"Données trouvées dans le cache pour: {artist} - {title}")
+                    # Vérifier que le cache contient des données COMPLÈTES
+                    has_spotify_id = cached.get('spotify_id') is not None
+                    has_bpm = cached.get('bpm') is not None or cached.get('tempo') is not None
+                    has_audio_features = cached.get('audio_features') is not None
+                    
+                    # Cache complet = spotify_id + BPM
+                    cache_is_complete = has_spotify_id and (has_bpm or has_audio_features)
+                    
+                    if cache_is_complete:
+                        logger.info(f"✅ Données COMPLÈTES trouvées dans le cache pour: {artist} - {title}")
                         return cached
+                    elif has_spotify_id:
+                        logger.info(f"⚠️ Cache INCOMPLET pour {artist} - {title} (pas de BPM)")
+                        logger.info(f"🔄 Nouvelle tentative pour récupérer le BPM...")
+                        # Ne pas retourner, continuer pour refaire l'appel API
+                    elif 'timestamp' in cached:
+                        age_hours = (time.time() - cached['timestamp']) / 3600
+                        if age_hours > 24:
+                            del self.cache[cache_key]
+                            logger.info(f"Cache d'erreur expiré, nouvelle tentative")
                     elif 'timestamp' in cached:
                         age_hours = (time.time() - cached['timestamp']) / 3600
                         if age_hours > 24:
                             del self.cache[cache_key]
                             logger.info(f"Cache d'erreur expiré, nouvelle tentative")
             
-            # Étape 1: Rechercher l'ID Spotify
-            logger.info(f"🔍 Recherche ID Spotify pour: {artist} - {title}")
-            spotify_id = self.search_spotify_id(artist, title)
-            
-            # NOUVEAU: FERMER SELENIUM IMMÉDIATEMENT après récupération ID
-            if self.driver:
-                logger.info("🔧 Fermeture Selenium après récupération ID")
-                self._close_selenium_driver()
+            # =====================================================
+            # CORRECTION 1 : Vérifier si spotify_id est déjà fourni
+            # =====================================================
+            if not spotify_id:
+                # Étape 1: Rechercher l'ID Spotify seulement s'il n'est pas fourni
+                logger.info(f"🔍 Recherche ID Spotify pour: {artist} - {title}")
+                spotify_id = self.search_spotify_id(artist, title)
+                
+                # Fermer Selenium immédiatement après récupération ID
+                if self.driver:
+                    logger.info("🔧 Fermeture Selenium après récupération ID")
+                    self._close_selenium_driver()
+            else:
+                logger.info(f"✅ ID Spotify fourni: {spotify_id} (pas de scraping nécessaire)")
             
             if not spotify_id:
                 logger.warning(f"❌ Aucun ID Spotify trouvé pour: {artist} - {title}")
@@ -499,7 +537,7 @@ class ReccoBeatsIntegratedClient:
                 self._save_cache()
                 return None
             
-            logger.info(f"✅ ID Spotify trouvé: {spotify_id}")
+            logger.info(f"✅ ID Spotify: {spotify_id}")
             
             # Réponse minimale garantie
             minimal_response = {
@@ -511,12 +549,14 @@ class ReccoBeatsIntegratedClient:
                 'timestamp': time.time(),
             }
             
-            # Étape 2: ReccoBeats avec timeout plus court
-            logger.info(f"🎵 Récupération ReccoBeats Multi-tracks pour ID: {spotify_id}")
+            # =====================================================
+            # CORRECTION 2 : Éviter le conflit de variable 'time'
+            # =====================================================
+            # Ne JAMAIS créer de variable locale nommée 'time' !
+            # Utiliser 'start_time', 'current_time', etc.
             
-            # Timeout de sécurité pour ReccoBeats
-            import threading
-            import time
+            # Étape 2: ReccoBeats avec timeout via threading
+            logger.info(f"🎵 Récupération ReccoBeats pour ID: {spotify_id}")
             
             track_data = None
             api_error = None
@@ -550,19 +590,22 @@ class ReccoBeatsIntegratedClient:
                 if reccobeats_id:
                     logger.debug(f"🎼 Audio features pour ID: {reccobeats_id}")
                     
+                    audio_features = None
+                    
                     def audio_thread():
-                        nonlocal enriched_data
+                        nonlocal audio_features
                         try:
                             audio_features = self.get_track_audio_features(reccobeats_id)
-                            if audio_features:
-                                enriched_data['audio_features'] = audio_features
                         except:
                             pass
                     
                     audio_t = threading.Thread(target=audio_thread)
                     audio_t.daemon = True
                     audio_t.start()
-                    audio_t.join(timeout=10)  # 10 secondes max pour audio features
+                    audio_t.join(timeout=10)  # 10 secondes max
+                    
+                    if audio_features:
+                        enriched_data['audio_features'] = audio_features
                 
                 # Extraire BPM
                 if 'audio_features' in enriched_data:
@@ -594,6 +637,8 @@ class ReccoBeatsIntegratedClient:
         
         except Exception as e:
             logger.error(f"❌ Erreur générale get_track_info: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
         
         finally:
@@ -961,122 +1006,113 @@ class ReccoBeatsIntegratedClient:
     # ========== MÉTHODES RECCOBEATS API CORRIGÉES ==========
 
     def get_track_from_reccobeats(self, spotify_id: str) -> Optional[Dict]:
-        """Récupère les données ReccoBeats avec l'endpoint MULTI-TRACKS (corrigé)"""
+        """Récupère les données ReccoBeats - VERSION CORRIGÉE"""
         try:
-            # NOUVEAU: Utiliser l'endpoint /tracks (multi-tracks) au lieu de /track
-            url = f"{self.recco_base_url}/tracks"
-            params = {'ids': spotify_id}  # Même paramètre mais endpoint différent
+            # URL CORRECTE avec /track (singulier)
+            url = f"{self.recco_base_url}/track"
+            params = {'ids': spotify_id}
             
-            logger.info(f"🎵 ReccoBeats Multi-tracks: Requête pour ID {spotify_id}")
-            logger.debug(f"   URL: {url}")
-            logger.debug(f"   Params: {params}")
+            logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
+            logger.debug(f"   URL: {url}?ids={spotify_id}")
             
             response = self.recco_session.get(url, params=params, timeout=15)
             
-            logger.info(f"📡 ReccoBeats Response: Status {response.status_code}")
-            
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    logger.info(f"📦 ReccoBeats Data: Type={type(data)}")
-                    logger.debug(f"   Contenu: {str(data)[:300]}...")
-                    
-                    # L'endpoint multi-tracks retourne généralement une liste ou un dict avec liste
-                    if isinstance(data, list):
-                        logger.info(f"📋 Structure list avec {len(data)} éléments")
-                        if len(data) > 0:
-                            logger.info(f"✅ Track trouvé dans liste[0]")
-                            logger.debug(f"   Premier élément: {str(data[0])[:200]}...")
-                            return data[0]
-                        else:
-                            logger.warning("❌ Liste vide")
-                    
-                    elif isinstance(data, dict):
-                        logger.info(f"📋 Structure dict avec clés: {list(data.keys())}")
-                        
-                        # Structures possibles pour multi-tracks
-                        if 'tracks' in data:
-                            tracks = data['tracks']
-                            logger.info(f"   'tracks' trouvé: type={type(tracks)}, len={len(tracks) if isinstance(tracks, list) else 'N/A'}")
-                            if isinstance(tracks, list) and len(tracks) > 0:
-                                logger.info(f"✅ Track trouvé dans tracks[0]")
-                                return tracks[0]
-                            else:
-                                logger.warning(f"❌ Tracks vide ou invalide")
-                        
-                        elif 'data' in data:
-                            track_data = data['data']
-                            logger.info(f"   'data' trouvé: type={type(track_data)}")
-                            if isinstance(track_data, list) and len(track_data) > 0:
-                                logger.info(f"✅ Track trouvé dans data[0]")
-                                return track_data[0]
-                            elif isinstance(track_data, dict):
-                                logger.info(f"✅ Track trouvé dans data")
-                                return track_data
-                        
-                        elif 'content' in data:
-                            content = data['content']
-                            logger.info(f"   'content' trouvé: type={type(content)}, len={len(content) if isinstance(content, list) else 'N/A'}")
-                            if isinstance(content, list) and len(content) > 0:
-                                logger.info(f"✅ Track trouvé dans content[0]")
-                                return content[0]
-                            else:
-                                logger.warning(f"❌ Content vide ou invalide")
-                        
-                        # Structure directe
-                        elif any(key in data for key in ['id', 'name', 'title', 'tempo']):
-                            logger.info(f"✅ Track trouvé en structure directe")
-                            logger.debug(f"   Clés pertinentes: {[k for k in data.keys() if k in ['id', 'name', 'title', 'tempo', 'bpm']]}")
-                            return data
-                        
-                        else:
-                            logger.warning(f"❌ Structure inconnue. Toutes les clés: {list(data.keys())}")
-                    
-                    else:
-                        logger.warning(f"❌ Type de réponse inattendu: {type(data)}")
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ Erreur parsing JSON: {e}")
-                    logger.debug(f"   Contenu brut: {response.text[:500]}")
-            
-            elif response.status_code == 404:
-                logger.warning(f"❌ Track non trouvé dans ReccoBeats multi-tracks (404)")
-            elif response.status_code == 429:
-                logger.warning("⏰ Rate limit ReccoBeats")
-            else:
-                logger.warning(f"❌ Erreur ReccoBeats {response.status_code}")
-                logger.debug(f"   Réponse: {response.text[:200]}")
-                
-        except requests.exceptions.Timeout:
-            logger.error("⏰ Timeout ReccoBeats API")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"🌐 Erreur réseau ReccoBeats: {e}")
-        except Exception as e:
-            logger.error(f"❌ Erreur inattendue ReccoBeats: {e}")
-        
-        logger.warning("❌ ReccoBeats Multi-tracks: Aucune donnée retournée")
-        return None
-
-    def get_track_audio_features(self, reccobeats_id: str) -> Optional[Dict]:
-        """Récupère les audio features depuis ReccoBeats"""
-        try:
-            url = f"{self.recco_base_url}/audio-features"
-            params = {'ids': reccobeats_id}
-            
-            response = self.recco_session.get(url, params=params, timeout=15)
+            logger.info(f"📡 Response: Status {response.status_code}")
             
             if response.status_code == 200:
                 data = response.json()
                 
+                # Gérer différents formats de réponse
+                track = None
+                
                 if isinstance(data, list) and len(data) > 0:
-                    return data[0]
+                    # Format liste directe
+                    track = data[0]
+                    logger.info(f"✅ Track trouvé (liste): {track.get('trackTitle', 'N/A')}")
                 elif isinstance(data, dict):
-                    return data
+                    # Format dict avec 'content'
+                    if 'content' in data and isinstance(data['content'], list) and len(data['content']) > 0:
+                        track = data['content'][0]
+                        logger.info(f"✅ Track trouvé (dict.content): {track.get('trackTitle', 'N/A')}")
+                    # Ou dict direct (le track lui-même)
+                    elif 'id' in data or 'trackTitle' in data:
+                        track = data
+                        logger.info(f"✅ Track trouvé (dict direct): {track.get('trackTitle', 'N/A')}")
+                    else:
+                        logger.warning(f"❌ Structure dict inconnue. Clés: {list(data.keys())}")
+                else:
+                    logger.warning(f"❌ Format de réponse inattendu: {type(data)}")
+                
+                return track
+
+            elif response.status_code == 404:
+                logger.warning(f"❌ Track {spotify_id} non trouvé (404)")
+            elif response.status_code == 429:
+                logger.warning("⏰ Rate limit atteint")
+            else:
+                logger.error(f"❌ Erreur {response.status_code}: {response.text[:200]}")
                 
         except Exception as e:
-            logger.error(f"Erreur récupération audio features: {e}")
+            logger.error(f"❌ Exception ReccoBeats: {e}")
         
         return None
+
+    def get_track_audio_features(self, reccobeats_id: str) -> Optional[Dict]:
+        """Récupère le BPM via audio features - VERSION CORRIGÉE"""
+        try:
+            url = f"{self.recco_base_url}/track/{reccobeats_id}/audio-features"
+            
+            logger.debug(f"🎼 Audio features: {url}")
+            
+            response = self.recco_session.get(url, timeout=15)
+            
+            if response.status_code == 200:
+                features = response.json()
+                logger.info(f"✅ BPM récupéré: {features.get('tempo', 'N/A')}")
+                return features
+            else:
+                logger.warning(f"❌ Audio features erreur {response.status_code}")
+                    
+        except Exception as e:
+            logger.error(f"❌ Exception audio features: {e}")
+        
+        return None
+
+    def get_multiple_tracks_with_bpm(self, spotify_ids: List[str]) -> List[Dict]:
+        """Récupère plusieurs tracks + BPM en batch (max 50 IDs)"""
+        try:
+            # Limiter à 50 IDs par requête (bonne pratique)
+            spotify_ids = spotify_ids[:50]
+            
+            # Étape 1: Récupérer tous les tracks
+            url = f"{self.recco_base_url}/track"
+            params = {'ids': ','.join(spotify_ids)}  # CSV format
+            
+            logger.info(f"🎵 Batch request pour {len(spotify_ids)} tracks")
+            
+            response = self.recco_session.get(url, params=params, timeout=30)
+            
+            if response.status_code != 200:
+                logger.error(f"❌ Batch request failed: {response.status_code}")
+                return []
+            
+            tracks = response.json()
+            
+            # Étape 2: Récupérer les BPM pour chaque track
+            for track in tracks:
+                reccobeats_id = track.get('id')
+                if reccobeats_id:
+                    features = self.get_track_audio_features(reccobeats_id)
+                    if features:
+                        track['bpm'] = features.get('tempo')
+                        track['audio_features'] = features
+            
+            logger.info(f"✅ {len(tracks)} tracks enrichis avec BPM")
+            return tracks
+            
+        except Exception as e:
+            logger.error(f"❌ Batch processing error: {e}")
+            return []
 
     def clear_error_cache(self, artist: str = None, title: str = None):
         """Nettoie les erreurs du cache pour permettre de nouvelles tentatives"""

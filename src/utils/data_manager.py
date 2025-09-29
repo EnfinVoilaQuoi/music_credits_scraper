@@ -352,14 +352,13 @@ class DataManager:
             return artist.id
     
     def save_track(self, track: Track) -> int:
-        """Sauvegarde ou met à jour un morceau - VERSION SANS YOUTUBE_URL"""
+        """Sauvegarde ou met à jour un morceau avec musical_key et time_signature"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
             if not track.artist or not track.artist.id:
                 raise ValueError("Le morceau doit avoir un artiste avec un ID")
             
-            # CORRECTION: Supprimer youtube_url de la requête
             cursor.execute("""
                 SELECT id, is_featuring, primary_artist_name, featured_artists, 
                     lyrics, has_lyrics, lyrics_scraped_at FROM tracks 
@@ -382,12 +381,13 @@ class DataManager:
                     track.has_lyrics = bool(existing_track[5])
                     track.lyrics_scraped_at = existing_track[6]
                 
-                # CORRECTION: Supprimer youtube_url de l'UPDATE
+                # UPDATE avec musical_key et time_signature
                 cursor.execute("""
                     UPDATE tracks 
                     SET album = ?, track_number = ?, release_date = ?, 
                         genius_id = ?, spotify_id = ?, discogs_id = ?,
                         bpm = ?, duration = ?, genre = ?,
+                        musical_key = ?, time_signature = ?,
                         genius_url = ?, spotify_url = ?,
                         is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
                         lyrics = ?, lyrics_scraped_at = ?, has_lyrics = ?,
@@ -396,6 +396,7 @@ class DataManager:
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
                     track.bpm, track.duration, track.genre,
+                    getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),
@@ -405,19 +406,21 @@ class DataManager:
                     bool(getattr(track, 'lyrics', None)),
                     datetime.now(), track.last_scraped, track.id))
             else:
-                # CORRECTION: Supprimer youtube_url de l'INSERT
+                # INSERT avec musical_key et time_signature
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
-                        bmp, duration, genre, genius_url, spotify_url,
+                        bpm, duration, genre, musical_key, time_signature,
+                        genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
-                    track.bpm, track.duration, track.genre,
+                    track.bpm, track.duration, track.genre, 
+                    getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),

@@ -176,6 +176,7 @@ class Track:
     # IDs externes
     genius_id: Optional[int] = None
     spotify_id: Optional[str] = None
+    spotify_ids: List[str] = field(default_factory=list)
     discogs_id: Optional[int] = None
     
     # Métadonnées
@@ -787,3 +788,53 @@ class Track:
                 self.root.after(0, lambda: self.progress_label.configure(text=""))
         
         threading.Thread(target=scrape_lyrics, daemon=True).start()
+
+@property
+def primary_spotify_id(self) -> Optional[str]:
+    """Retourne l'ID Spotify principal"""
+    if self.spotify_ids and len(self.spotify_ids) > 0:
+        return self.spotify_ids[0]
+    return self.spotify_id
+
+def add_spotify_id(self, new_id: str) -> bool:
+    """
+    Ajoute un Spotify ID à la liste (sans doublons)
+    
+    Returns:
+        bool: True si l'ID a été ajouté, False s'il existait déjà
+    """
+    if not new_id:
+        return False
+    
+    # Initialiser la liste si nécessaire
+    if not hasattr(self, 'spotify_ids') or self.spotify_ids is None:
+        self.spotify_ids = []
+    
+    # Éviter les doublons
+    if new_id in self.spotify_ids:
+        return False
+    
+    # Ajouter le nouvel ID
+    self.spotify_ids.append(new_id)
+    
+    # Mettre à jour spotify_id (compatibilité)
+    if not self.spotify_id:
+        self.spotify_id = new_id
+    
+    return True
+
+def get_all_spotify_ids(self) -> List[str]:
+    """Retourne tous les Spotify IDs du track"""
+    ids = []
+    
+    # Ajouter spotify_id legacy
+    if self.spotify_id and self.spotify_id not in ids:
+        ids.append(self.spotify_id)
+    
+    # Ajouter tous les IDs de la liste
+    if hasattr(self, 'spotify_ids') and self.spotify_ids:
+        for id in self.spotify_ids:
+            if id not in ids:
+                ids.append(id)
+    
+    return ids

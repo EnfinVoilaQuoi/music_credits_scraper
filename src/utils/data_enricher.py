@@ -168,6 +168,8 @@ class DataEnricher:
                     force_refresh=False,
                     spotify_id=existing_spotify_id  # ← Passe le spotify_id s'il existe
                 )
+                logger.info(f"🔍 DEBUG track_info keys: {list(track_info.keys()) if track_info else None}")
+                logger.info(f"🔍 DEBUG track_info key={track_info.get('key') if track_info else None}, mode={track_info.get('mode') if track_info else None}")
                 
                 # Désactiver l'alarme après succès
                 try:
@@ -243,6 +245,15 @@ class DataEnricher:
                     track.time_signature = str(track_info['time_signature'])
                     logger.debug(f"ReccoBeats: Time signature: {track.time_signature}")
                 
+                # Stocker la durée si disponible (durationMs -> secondes)
+                if 'durationMs' in track_info and track_info['durationMs']:
+                    try:
+                        duration_ms = track_info['durationMs']
+                        track.duration = round(duration_ms / 1000)  # Convertir ms en secondes
+                        logger.debug(f"ReccoBeats: Durée: {track.duration}s")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"ReccoBeats: Erreur conversion durée: {e}")
+                        
                 # =====================================================
                 # ÉTAPE 5 : DÉTERMINER le succès
                 # On considère un succès si on a au moins un spotify_id

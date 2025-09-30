@@ -63,13 +63,14 @@ class DataEnricher:
         """Retourne la liste des sources disponibles"""
         return [k for k, v in self.apis_available.items() if v]
     
-    def enrich_track(self, track: Track, sources: Optional[List[str]] = None) -> Dict[str, bool]:
+    def enrich_track(self, track: Track, sources: Optional[List[str]] = None, force_update: bool = False) -> Dict[str, bool]:
         """
         Enrichit un morceau avec les sources spécifiées
         
         Args:
             track: Le morceau à enrichir
             sources: Liste des sources à utiliser
+            force_update: Si True, met à jour même si les données existent déjà
             
         Returns:
             Dict avec le statut de chaque source
@@ -79,7 +80,8 @@ class DataEnricher:
         
         results = {}
         
-        logger.debug(f"Enrichissement de '{track.title}' avec sources: {sources}")
+        logger.info(f"🔍 DEBUG enrich_track: track='{track.title}', sources={sources}, force_update={force_update}")
+        logger.info(f"🔍 DEBUG track.bpm actuel: {getattr(track, 'bpm', None)}")
         
         # 1. ReccoBeats pour BPM et features audio
         if 'reccobeats' in sources and self.apis_available.get('reccobeats'):
@@ -92,27 +94,22 @@ class DataEnricher:
                 logger.error(f"Erreur ReccoBeats pour {track.title}: {e}")
                 results['reccobeats'] = False
         
-        # 2. SongBPM scraper (fallback pour BPM/Key/Duration)
-        # N'utiliser que si ReccoBeats n'a pas trouvé le BPM
-        if 'songbpm' in sources and self.apis_available.get('songbpm') and not track.bpm:
-            try:
-                success = self._enrich_with_songbpm(track)
-                results['songbpm'] = success
-                if success:
-                    logger.debug(f"✅ SongBPM: BPM={track.bpm}, Mode={getattr(track, 'mode', 'N/A')}")
-            except Exception as e:
-                logger.error(f"❌ Erreur SongBPM pour {track.title}: {e}")
-                results['songbpm'] = False
-        
-        # 3. Discogs (non implémenté pour l'instant)
-        if 'discogs' in sources:
-            logger.debug("Discogs n'est pas encore implémenté")
-            results['discogs'] = False
-        
-        # Marquer comme enrichi si au moins une source a réussi
-        if any(results.values()):
-            track.enriched = True
-            track.enrichment_date = datetime.now()
+        # 2. SongBPM scraper
+        # Utiliser si : force_update OU (pas de BPM ET songbpm dans les sources)
+        if 'songbpm' in sources and self.apis_available.get('songbpm'):
+            # Si force_update, toujours exécuter
+            # Sinon, exécuter seulement si pas de BPM
+            should_use_songbpm = force_update or not track.bpm
+            
+            if should_use_songbpm:
+                try:
+                    success = self._enrich_with_songbpm(track, force_update=force_update)
+                    results['songbpm'] = success
+                    if success:
+                        logger.debug(f"✅ SongBPM: BPM={track.bpm}, Mode={getattr(track, 'mode', 'N/A')}")
+                except Exception as e:
+                    logger.error(f"❌ Erreur SongBPM pour {track.title}: {e}")
+                    results['songbpm'] = False
         
         return results
     
@@ -307,33 +304,28 @@ class DataEnricher:
             
             logger.info(f"ReccoBeats: 🏁 FIN traitement '{getattr(track, 'title', 'unknown')}'")
     
-    def _enrich_with_songbpm(self, track: Track) -> bool:
+    def _enrich_with_songbpm(self, track: Track, force_update: bool = False) -> bool:
         """
-        Enrichit un morceau avec SongBPM (scraper Selenium - fallback)
+        Enrichit avec SongBPM scraper
         
         Args:
             track: Le track à enrichir
+            force_update: Si True, met à jour même si les données existent
             
         Returns:
-            True si l'enrichissement a réussi
+            bool: True si succès
         """
+        if not self.songbpm_scraper:
+            return False
+        
         try:
-            if not self.songbpm_scraper:
-                logger.debug("SongBPM scraper non disponible")
-                return False
-            
-            # Utiliser la méthode enrich_track_data du scraper
-            success = self.songbpm_scraper.enrich_track_data(track)
-            
+            # Passer le paramètre force_update au scraper
+            success = self.songbpm_scraper.enrich_track_data(track, force_update=force_update)
             if success:
                 logger.info(f"✅ SongBPM: Données enrichies pour '{track.title}'")
-            else:
-                logger.debug(f"❌ SongBPM: Aucune donnée trouvée pour '{track.title}'")
-            
             return success
-            
         except Exception as e:
-            logger.error(f"❌ Erreur SongBPM pour '{track.title}': {e}")
+            logger.error(f"Erreur SongBPM pour {track.title}: {e}")
             return False
     
     def enrich_tracks(self, tracks: List[Track], sources: Optional[List[str]] = None,

@@ -1,9 +1,7 @@
 # APIs
 lyricsgenius==3.0.1
-spotipy==2.23.0
 discogs-client==2.3.0
 pylast==5.2.0
-musicbrainzngs>=0.7.1
 
 # Scraping
 selenium>=4.15.2

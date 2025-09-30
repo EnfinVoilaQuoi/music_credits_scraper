@@ -252,20 +252,12 @@ class SongBPMScraper:
         return " ".join(s.lower().strip().split())
 
     def _match_track(self, result_title: str, result_artist: str, 
-                     search_title: str, search_artist: str,
-                     result_spotify_id: Optional[str] = None,
-                     search_spotify_id: Optional[str] = None) -> bool:
+                 search_title: str, search_artist: str,
+                 result_spotify_id: Optional[str] = None,
+                 search_spotify_id: Optional[str] = None) -> bool:
         """
         Vérifie si un résultat correspond au morceau recherché
         
-        Args:
-            result_title: Titre du résultat
-            result_artist: Artiste du résultat
-            search_title: Titre recherché
-            search_artist: Artiste recherché
-            result_spotify_id: ID Spotify du résultat (optionnel)
-            search_spotify_id: ID Spotify recherché (optionnel)
-            
         Returns:
             True si le résultat correspond
         """
@@ -276,25 +268,30 @@ class SongBPMScraper:
             if spotify_match:
                 logger.info(f"✅ MATCH PARFAIT via Spotify ID: {search_spotify_id}")
                 return True
+            else:
+                # Si on a les deux IDs mais qu'ils ne correspondent pas, c'est un REJET
+                logger.info(f"❌ REJET: Spotify IDs différents")
+                return False
         
-        # PRIORITÉ 2 : Matching par nom (fallback si pas de Spotify ID)
+        # PRIORITÉ 2 : Matching par nom (fallback si pas les DEUX Spotify IDs)
         norm_result_title = self._normalize_string(result_title)
         norm_result_artist = self._normalize_string(result_artist)
         norm_search_title = self._normalize_string(search_title)
         norm_search_artist = self._normalize_string(search_artist)
         
-        # Vérification stricte : titre ET artiste doivent correspondre
+        # Vérification stricte : titre ET artiste doivent correspondre EXACTEMENT
         title_match = norm_result_title == norm_search_title
         artist_match = norm_result_artist == norm_search_artist
         
-        logger.debug(f"📝 Comparaison noms: '{norm_result_title}' vs '{norm_search_title}' | "
-                    f"'{norm_result_artist}' vs '{norm_search_artist}'")
-        logger.debug(f"Match: title={title_match}, artist={artist_match}")
+        logger.debug(f"🔍 Comparaison noms:")
+        logger.debug(f"   Titres: '{norm_result_title}' vs '{norm_search_title}' → {title_match}")
+        logger.debug(f"   Artistes: '{norm_result_artist}' vs '{norm_search_artist}' → {artist_match}")
         
         if title_match and artist_match:
             logger.info(f"✅ Match par nom/artiste")
             return True
         
+        logger.info(f"❌ REJET: Titre ou artiste ne correspond pas")
         return False
 
     def _extract_track_details(self, detail_url: str) -> Dict[str, Any]:
@@ -580,79 +577,76 @@ class SongBPMScraper:
         
         try:
             logger.debug("🔍 Début extraction des résultats...")
+            time.sleep(1)
             
-            # NE PAS utiliser wait.until qui peut timeout
-            # À la place, vérifier directement si les éléments sont présents
-            time.sleep(1)  # Petit délai pour laisser le DOM se stabiliser
+            # Stratégie : Trouver d'abord tous les conteneurs de résultats (div.bg-card)
+            # Chaque conteneur contient TOUT : le lien track + le lien Spotify
+            result_containers = self.driver.find_elements(By.CSS_SELECTOR, "div.bg-card")
             
-            # Stratégie : Chercher les liens <a> qui entourent les cartouches
-            # Structure : <a href="/@artiste/titre-slug"> ... </a>
-            track_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/@']")
+            logger.debug(f"📋 Trouvé {len(result_containers)} conteneurs de résultats")
             
-            logger.debug(f"📋 Trouvé {len(track_links)} liens potentiels")
-            
-            if not track_links:
-                logger.warning("⚠️ Aucun lien de track trouvé sur la page")
+            if not result_containers:
+                logger.warning("⚠️ Aucun conteneur de résultat trouvé")
                 return []
             
-            for link in track_links:
+            for container_idx, container in enumerate(result_containers, 1):
                 try:
-                    href = link.get_attribute('href')
+                    result = {}
                     
-                    # Vérifier que c'est bien un lien vers une page de track
-                    # Format attendu : /@artiste/titre-slug ou /@artiste/titre-slug-id
+                    # 1. Extraire le lien principal du track (/@artiste/titre)
+                    track_links = container.find_elements(By.CSS_SELECTOR, "a[href*='/@']")
+                    if not track_links:
+                        logger.debug(f"Conteneur {container_idx}: Pas de lien track, skip")
+                        continue
+                    
+                    track_link = track_links[0]
+                    href = track_link.get_attribute('href')
+                    
+                    # Vérifier la structure
                     if not href or '/@' not in href:
                         continue
                     
-                    # Compter les slashes pour vérifier la structure
                     path = href.split('songbpm.com')[-1] if 'songbpm.com' in href else href
-                    if path.count('/') < 2:  # Doit avoir au moins /@artiste/titre
+                    if path.count('/') < 2:
                         continue
                     
-                    # Éviter les liens vers des services externes (apple-music, spotify, amazon)
+                    # Éviter les liens vers des services externes
                     if any(service in href.lower() for service in ['/apple-music', '/spotify', '/amazon', '/youtube']):
                         continue
                     
-                    result = {'detail_url': href}
+                    result['detail_url'] = href
+                    logger.debug(f"📦 Conteneur {container_idx}: {href}")
                     
-                    logger.debug(f"🔗 Analyse du lien: {href}")
-                    
-                    # Extraire les infos depuis le contenu du lien
+                    # 2. Extraire titre et artiste
                     try:
-                        # Chercher les div.flex-1 qui contiennent artiste et titre
-                        info_divs = link.find_elements(By.CSS_SELECTOR, "div.flex-1")
+                        info_divs = track_link.find_elements(By.CSS_SELECTOR, "div.flex-1")
                         
                         for info_div in info_divs:
                             paragraphs = info_div.find_elements(By.TAG_NAME, "p")
                             
                             if len(paragraphs) >= 2:
-                                # Premier <p> = Artiste (text-sm)
-                                # Deuxième <p> = Titre (text-lg)
                                 artist_p = paragraphs[0]
                                 title_p = paragraphs[1]
                                 
-                                # Vérifier les classes pour être sûr
                                 artist_class = artist_p.get_attribute('class') or ''
                                 title_class = title_p.get_attribute('class') or ''
                                 
                                 if 'text-sm' in artist_class and ('text-lg' in title_class or 'text-2xl' in title_class):
                                     result['artist'] = artist_p.text.strip()
                                     result['title'] = title_p.text.strip()
-                                    logger.debug(f"   👤 Artiste: {result['artist']}")
-                                    logger.debug(f"   🎵 Titre: {result['title']}")
+                                    logger.debug(f"   👤 {result['artist']} - 🎵 {result['title']}")
                                     break
                     except Exception as e:
-                        logger.debug(f"   ⚠️ Erreur extraction artiste/titre: {e}")
+                        logger.debug(f"   Erreur extraction titre/artiste: {e}")
                         continue
                     
-                    # Si on n'a pas trouvé de titre/artiste, passer au suivant
                     if 'title' not in result or 'artist' not in result:
-                        logger.debug(f"   ⏭️ Pas de titre/artiste trouvé, skip")
+                        logger.debug(f"   Pas de titre/artiste, skip")
                         continue
                     
-                    # Extraire BPM, Key, Duration depuis le lien
+                    # 3. Extraire BPM, Key, Duration
                     try:
-                        metrics_divs = link.find_elements(
+                        metrics_divs = track_link.find_elements(
                             By.CSS_SELECTOR, 
                             "div.flex.flex-1.flex-col.items-center"
                         )
@@ -676,41 +670,35 @@ class SongBPMScraper:
                                     elif label == "DURATION":
                                         result['duration'] = value
                                         logger.debug(f"   ⏱️ Duration: {result['duration']}")
-                            except Exception as e:
-                                logger.debug(f"   ⚠️ Erreur extraction métrique: {e}")
+                            except:
                                 continue
                     except Exception as e:
-                        logger.debug(f"   ⚠️ Erreur extraction métriques: {e}")
+                        logger.debug(f"   Erreur extraction métriques: {e}")
                     
-                    # Ajouter le résultat s'il contient au minimum titre, artiste et URL
+                    # 4. ⬇️ CORRECTION : Extraire Spotify ID depuis le CONTENEUR (pas le lien track)
+                    try:
+                        # Chercher le lien Spotify dans CE conteneur spécifique
+                        spotify_links = container.find_elements(By.CSS_SELECTOR, "a[href*='spotify.com/track/']")
+                        if spotify_links:
+                            spotify_url = spotify_links[0].get_attribute('href')
+                            spotify_id = self._extract_spotify_id_from_url(spotify_url)
+                            if spotify_id:
+                                result['spotify_id'] = spotify_id
+                                result['spotify_url'] = spotify_url
+                                logger.debug(f"   🎵 Spotify ID: {spotify_id}")
+                    except Exception as e:
+                        logger.debug(f"   Erreur extraction Spotify: {e}")
+                    
+                    # Ajouter le résultat
                     if 'title' in result and 'artist' in result and 'detail_url' in result:
                         results.append(result)
                         logger.info(f"✅ Résultat #{len(results)}: {result['artist']} - {result['title']}")
-                        logger.info(f"   🔗 URL: {result['detail_url']}")
+                        if result.get('spotify_id'):
+                            logger.info(f"   🎵 Spotify ID: {result['spotify_id']}")
                     
                 except Exception as e:
-                    logger.debug(f"⚠️ Erreur analyse lien: {e}")
+                    logger.debug(f"Erreur conteneur {container_idx}: {e}")
                     continue
-            
-            # Maintenant extraire les Spotify IDs depuis les boutons en dehors des liens principaux
-            # Chercher tous les liens Spotify sur la page
-            try:
-                spotify_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='spotify.com/track/']")
-                logger.debug(f"🎵 Trouvé {len(spotify_links)} liens Spotify")
-                
-                # Associer les Spotify IDs aux résultats par ordre (même ordre d'affichage)
-                for i, (result, spotify_link) in enumerate(zip(results, spotify_links)):
-                    try:
-                        spotify_url = spotify_link.get_attribute('href')
-                        spotify_id = self._extract_spotify_id_from_url(spotify_url)
-                        if spotify_id:
-                            result['spotify_id'] = spotify_id
-                            result['spotify_url'] = spotify_url
-                            logger.debug(f"   Résultat #{i+1}: Spotify ID = {spotify_id}")
-                    except:
-                        continue
-            except Exception as e:
-                logger.debug(f"⚠️ Erreur extraction Spotify IDs: {e}")
             
             logger.info(f"📊 Total: {len(results)} résultat(s) extrait(s)")
             return results
@@ -720,13 +708,14 @@ class SongBPMScraper:
             import traceback
             logger.debug(f"Stacktrace: {traceback.format_exc()}")
             return []
-
-    def enrich_track_data(self, track: Track) -> bool:
+    
+    def enrich_track_data(self, track: Track, force_update: bool = False) -> bool:
         """
         Enrichit un track avec les données depuis SongBPM
         
         Args:
             track: Le track à enrichir
+            force_update: Si True, met à jour même si les données existent déjà
             
         Returns:
             True si l'enrichissement a réussi
@@ -745,60 +734,87 @@ class SongBPMScraper:
             # Enrichir avec les données trouvées
             updated = False
             
-            if not track.bpm and track_data.get('bpm'):
+            # BPM
+            if (force_update or not track.bpm) and track_data.get('bpm'):
                 track.bpm = track_data['bpm']
                 logger.info(f"📊 BPM ajouté depuis SongBPM: {track.bpm} pour {track.title}")
                 updated = True
             
-            if not hasattr(track, 'key') or not track.key:
-                if track_data.get('key'):
-                    track.key = track_data['key']
+            # ====== GESTION KEY ET MODE ENSEMBLE ======
+            key_value = track_data.get('key')
+            mode_value = track_data.get('mode')
+            
+            if key_value and mode_value:
+                # Stocker les valeurs brutes
+                if force_update or not hasattr(track, 'key') or not track.key:
+                    track.key = key_value
                     logger.info(f"🎵 Key ajoutée depuis SongBPM: {track.key} pour {track.title}")
                     updated = True
-            
-            # NOUVEAU : Enrichir avec le mode (major/minor)
-            if not hasattr(track, 'mode') or not track.mode:
-                if track_data.get('mode'):
-                    track.mode = track_data['mode']
+                
+                if force_update or not hasattr(track, 'mode') or not track.mode:
+                    track.mode = mode_value
                     logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
                     updated = True
+                
+                # NOUVEAU : Convertir en musical_key pour la base de données
+                if force_update or not hasattr(track, 'musical_key') or not track.musical_key:
+                    try:
+                        from src.utils.music_theory import key_mode_to_french_from_string
+                        track.musical_key = key_mode_to_french_from_string(key_value, mode_value)
+                        logger.info(f"🎼 Musical key ajoutée depuis SongBPM: {track.musical_key} pour {track.title}")
+                        updated = True
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
             
-            if not hasattr(track, 'duration') or not track.duration:
+            # Duration - CONVERSION DE "MM:SS" EN SECONDES
+            if (force_update or not hasattr(track, 'duration') or not track.duration):
                 if track_data.get('duration'):
-                    track.duration = track_data['duration']
-                    logger.info(f"⏱️ Duration ajoutée depuis SongBPM: {track.duration} pour {track.title}")
-                    updated = True
+                    duration_str = track_data['duration']
+                    try:
+                        # Convertir "3:53" en secondes (233)
+                        if isinstance(duration_str, str) and ':' in duration_str:
+                            parts = duration_str.split(':')
+                            if len(parts) == 2:
+                                minutes = int(parts[0])
+                                seconds = int(parts[1])
+                                track.duration = minutes * 60 + seconds
+                                logger.info(f"⏱️ Duration ajoutée depuis SongBPM: {track.duration}s ({duration_str}) pour {track.title}")
+                                updated = True
+                        elif isinstance(duration_str, (int, float)):
+                            # Si c'est déjà un nombre, l'utiliser directement
+                            track.duration = int(duration_str)
+                            logger.info(f"⏱️ Duration ajoutée depuis SongBPM: {track.duration}s pour {track.title}")
+                            updated = True
+                    except ValueError as e:
+                        logger.warning(f"⚠️ Erreur conversion duration '{duration_str}': {e}")
             
-            # Stocker le Spotify ID si on ne l'avait pas et qu'on l'a trouvé
-            if not spotify_id and track_data.get('spotify_id'):
-                track.spotify_id = track_data['spotify_id']
-                logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id} pour {track.title}")
-                updated = True
-            
-            # Enrichir avec les métadonnées supplémentaires si disponibles
-            if track_data.get('energy'):
-                if not hasattr(track, 'energy') or not track.energy:
+            # Energy
+            if (force_update or not hasattr(track, 'energy') or not track.energy):
+                if track_data.get('energy'):
                     track.energy = track_data['energy']
                     logger.info(f"⚡ Energy ajoutée depuis SongBPM: {track.energy} pour {track.title}")
                     updated = True
             
-            if track_data.get('danceability'):
-                if not hasattr(track, 'danceability') or not track.danceability:
+            # Danceability
+            if (force_update or not hasattr(track, 'danceability') or not track.danceability):
+                if track_data.get('danceability'):
                     track.danceability = track_data['danceability']
                     logger.info(f"💃 Danceability ajoutée depuis SongBPM: {track.danceability} pour {track.title}")
                     updated = True
             
-            if track_data.get('time_signature'):
-                if not hasattr(track, 'time_signature') or not track.time_signature:
-                    track.time_signature = track_data['time_signature']
-                    logger.info(f"🎼 Time signature ajoutée depuis SongBPM: {track.time_signature}/4 pour {track.title}")
+            # Time signature
+            if (force_update or not hasattr(track, 'time_signature') or not track.time_signature):
+                if track_data.get('time_signature'):
+                    track.time_signature = f"{track_data['time_signature']}/4"
+                    logger.info(f"🎼 Time signature ajoutée depuis SongBPM: {track.time_signature} pour {track.title}")
                     updated = True
-
-            time.sleep(DELAY_BETWEEN_REQUESTS)
+            
             return updated
-
+            
         except Exception as e:
-            logger.error(f"❌ Erreur enrichissement SongBPM pour {track.title}: {e}")
+            logger.error(f"❌ Erreur enrichissement SongBPM: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return False
 
     def close(self):

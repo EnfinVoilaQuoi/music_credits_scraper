@@ -15,8 +15,13 @@ logger = get_logger(__name__)
 class DataEnricher:
     """Enrichit les données de morceaux avec diverses sources"""
     
-    def __init__(self):
-        """Initialise l'enrichisseur de données"""
+    def __init__(self, headless_songbpm: bool = False):
+        """
+        Initialise l'enrichisseur de données
+        
+        Args:
+            headless_songbpm: Si True, lance SongBPM en mode headless (sans interface)
+        """
         self.apis_available = {}
         
         # Initialiser ReccoBeats avec la nouvelle API
@@ -35,12 +40,12 @@ class DataEnricher:
         
         # Initialiser SongBPM scraper
         try:
-            self.songbpm_scraper = SongBPMScraper()
-            self.apis_available['songbpm'] = True  # Utiliser 'songbpm' pour correspondre à l'interface
-            self.apis_available['getsongbpm'] = True  # Garder aussi l'ancien nom pour compatibilité
-            logger.info("✅ GetSongBPM scraper initialisé")
+            self.songbpm_scraper = SongBPMScraper(headless=headless_songbpm)
+            self.apis_available['songbpm'] = True
+            self.apis_available['getsongbpm'] = True  # Compatibilité ancien nom
+            logger.info("✅ SongBPM scraper initialisé (Selenium)")
         except Exception as e:
-            logger.error(f"Erreur initialisation GetSongBPM: {e}")
+            logger.error(f"❌ Erreur initialisation SongBPM: {e}")
             self.apis_available['songbpm'] = False
             self.apis_available['getsongbpm'] = False
             self.songbpm_scraper = None
@@ -87,20 +92,17 @@ class DataEnricher:
                 logger.error(f"Erreur ReccoBeats pour {track.title}: {e}")
                 results['reccobeats'] = False
         
-        # 2. GetSongBPM scraper (fallback pour BPM) - accepter 'songbpm' ou 'getsongbpm'
-        if ('songbpm' in sources or 'getsongbpm' in sources) and \
-           self.apis_available.get('songbpm') and not track.bpm:
+        # 2. SongBPM scraper (fallback pour BPM/Key/Duration)
+        # N'utiliser que si ReccoBeats n'a pas trouvé le BPM
+        if 'songbpm' in sources and self.apis_available.get('songbpm') and not track.bpm:
             try:
-                success = self._enrich_with_getsongbpm(track)
-                # Utiliser le nom de la source qui était dans la liste
-                source_name = 'songbpm' if 'songbpm' in sources else 'getsongbpm'
-                results[source_name] = success
+                success = self._enrich_with_songbpm(track)
+                results['songbpm'] = success
                 if success:
-                    logger.debug(f"✅ GetSongBPM: BPM={track.bpm}")
+                    logger.debug(f"✅ SongBPM: BPM={track.bpm}, Mode={getattr(track, 'mode', 'N/A')}")
             except Exception as e:
-                logger.error(f"Erreur GetSongBPM pour {track.title}: {e}")
-                source_name = 'songbpm' if 'songbpm' in sources else 'getsongbpm'
-                results[source_name] = False
+                logger.error(f"❌ Erreur SongBPM pour {track.title}: {e}")
+                results['songbpm'] = False
         
         # 3. Discogs (non implémenté pour l'instant)
         if 'discogs' in sources:
@@ -253,7 +255,7 @@ class DataEnricher:
                         logger.debug(f"ReccoBeats: Durée: {track.duration}s")
                     except (ValueError, TypeError) as e:
                         logger.warning(f"ReccoBeats: Erreur conversion durée: {e}")
-                        
+
                 # =====================================================
                 # ÉTAPE 5 : DÉTERMINER le succès
                 # On considère un succès si on a au moins un spotify_id
@@ -306,24 +308,32 @@ class DataEnricher:
             logger.info(f"ReccoBeats: 🏁 FIN traitement '{getattr(track, 'title', 'unknown')}'")
     
     def _enrich_with_songbpm(self, track: Track) -> bool:
-        """Enrichit un morceau avec GetSongBPM (fallback)"""
+        """
+        Enrichit un morceau avec SongBPM (scraper Selenium - fallback)
+        
+        Args:
+            track: Le track à enrichir
+            
+        Returns:
+            True si l'enrichissement a réussi
+        """
         try:
             if not self.songbpm_scraper:
+                logger.debug("SongBPM scraper non disponible")
                 return False
             
-            # Extraire le nom de l'artiste
-            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+            # Utiliser la méthode enrich_track_data du scraper
+            success = self.songbpm_scraper.enrich_track_data(track)
             
-            bpm = self.songbpm_scraper.get_bpm(artist_name, track.title)
-            if bpm:
-                track.bpm = bpm
-                logger.debug(f"GetSongBPM: trouvé BPM {bpm} pour {track.title}")
-                return True
+            if success:
+                logger.info(f"✅ SongBPM: Données enrichies pour '{track.title}'")
+            else:
+                logger.debug(f"❌ SongBPM: Aucune donnée trouvée pour '{track.title}'")
             
-            return False
+            return success
             
         except Exception as e:
-            logger.error(f"Erreur GetSongBPM: {e}")
+            logger.error(f"❌ Erreur SongBPM pour '{track.title}': {e}")
             return False
     
     def enrich_tracks(self, tracks: List[Track], sources: Optional[List[str]] = None,
@@ -411,16 +421,15 @@ class DataEnricher:
             try:
                 self.reccobeats_client.close()
                 logger.info("ReccoBeats client fermé")
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Erreur fermeture ReccoBeats: {e}")
         
         if self.songbpm_scraper:
             try:
-                if hasattr(self.songbpm_scraper, 'close'):
-                    self.songbpm_scraper.close()
-                logger.info("GetSongBPM scraper fermé")
-            except:
-                pass
+                self.songbpm_scraper.close()  # Ferme le driver Selenium
+                logger.info("SongBPM scraper fermé")
+            except Exception as e:
+                logger.error(f"Erreur fermeture SongBPM: {e}")
     
     def __enter__(self):
         return self

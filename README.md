@@ -2,19 +2,19 @@
 ### Contruis une Base de Données pour un artiste donné.
 
 ## Fonctionnement
-- Récupère la Discographie complète (en tant qu'artiste principal et secondaire)
-- Récupère Credits complets (Producteur, Invité, Voix et Instrument Additionnel, Sample et Interpolation, Album, Numéro de Piste, Album associé), Paroles structurés et Date de Sortie
-- Associe automatiquement les Certifications RIAA, SNEP et BRMA
-- Récupère Données Techniques (BPM, Durée, Key et Mode)
-- Exporte en plusieurs formats selon besoin (.csv, SQL)
+- Récupère la **Discographie complète** (en tant qu'artiste principal et secondaire)
+- Récupère **Credits complets** (**Producteur**, **Invité**, **Voix et Instrument Additionnel**, **Sample** et **Interpolation**, **Album associé**, **Numéro de Piste**), **Paroles structurés** et Date de Sortie
+- Associe automatiquement les **Certifications RIAA**, **SNEP** et **BRMA**
+- Récupère **Données Techniques** (**BPM**, **Durée**, **Key** et **Mode**)
+- **Exporte** en plusieurs formats selon besoin (**.csv**, **SQL**)
 
 ## Fonctionnalités
-- Gestion de plusieurs Base de Données (une par artiste)
-- Fenetre principale : Tableau rassemblant tous les morceaux et leurs informations (systeme de tri par colonne)
-- Fenetres secondaires : Page de Detail pour chaque morceau (Crédits, Paroles, Données Techniques, Certifications), Page de Gestion des MaJ des Certifications
-- Gestion de morceau "exclu" (freestyle, émission)
-- Récuperation automatique de liens YouTube pour chaque morceau, avec système de fiabilité
-- Base de Données des Certifications Mise à Jour Automatiquement chaque début de mois (delai de MaJ de la SNEP) et Manuelle
+- **Gestion** de **plusieurs Base de Données** (une par artiste)
+- **Fenetre principale** : Tableau rassemblant tous les morceaux et leurs informations (Artiste Principal, Date de Sortie, Album, Credits, Paroles, BPM, Certifications et Statut, avec **systeme de tri par colonne**)
+- **Fenetres secondaires** : Page de Detail pour chaque morceau (Crédits, Paroles, Données Techniques, Certifications), Page de Gestion des MaJ des Certifications
+- **Gestion** de **morceau "exclu"** (freestyle, émission)
+- Récuperation automatique de **liens YouTube** pour chaque morceau, avec **système de fiabilité**
+- **Base de Données** des **Certifications** Mise à Jour Automatiquement chaque début de mois (delai de MaJ de la SNEP) et Manuelle
 
 ## APIs utilisées
 - [GetSongBPM](https://getsongbpm.com/)                             - ~~Données BPM~~ (non utilisé ATM)

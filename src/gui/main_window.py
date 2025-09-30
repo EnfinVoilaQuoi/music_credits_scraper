@@ -889,9 +889,34 @@ class MainWindow:
             ctk.CTkLabel(right_column, text=bpm_text).pack(anchor="w", pady=1)
         
         if track.duration:
-            minutes = track.duration // 60
-            seconds = track.duration % 60
-            ctk.CTkLabel(right_column, text=f"⏱️ Durée: {minutes}:{seconds:02d}").pack(anchor="w", pady=1)
+            try:
+                # Gérer différents formats de duration
+                if isinstance(track.duration, str):
+                    # Format "MM:SS"
+                    if ':' in track.duration:
+                        parts = track.duration.split(':')
+                        minutes = int(parts[0])
+                        seconds = int(parts[1])
+                    else:
+                        # String représentant des secondes
+                        total_seconds = int(track.duration)
+                        minutes = total_seconds // 60
+                        seconds = total_seconds % 60
+                elif isinstance(track.duration, (int, float)):
+                    # Format numérique (secondes)
+                    total_seconds = int(track.duration)
+                    minutes = total_seconds // 60
+                    seconds = total_seconds % 60
+                else:
+                    # Type inattendu, skip
+                    minutes = 0
+                    seconds = 0
+                
+                if minutes > 0 or seconds > 0:
+                    ctk.CTkLabel(right_column, text=f"⏱️ Durée: {minutes}:{seconds:02d}").pack(anchor="w", pady=1)
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.warning(f"Erreur affichage durée pour '{track.title}': {e}")
+                # Ne pas crasher, juste skip l'affichage de la durée
         
         if track.genre:
             ctk.CTkLabel(right_column, text=f"🎭 Genre: {track.genre}").pack(anchor="w", pady=1)
@@ -2582,7 +2607,7 @@ class MainWindow:
         # Dialogue pour choisir les sources
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Sources d'enrichissement")
-        dialog.geometry("400x400")
+        dialog.geometry("400x500")
         
         ctk.CTkLabel(dialog, text="Sélectionnez les sources à utiliser:", 
                     font=("Arial", 14)).pack(pady=10)
@@ -2615,19 +2640,66 @@ class MainWindow:
             if source not in available:
                 ctk.CTkLabel(frame, text="(API non configurée)", 
                            text_color="gray").pack(anchor="w", padx=25)
+                
+        separator = ctk.CTkFrame(dialog, height=2, fg_color="gray")
+        separator.pack(fill="x", padx=20, pady=15)
         
+        force_frame = ctk.CTkFrame(dialog)
+        force_frame.pack(fill="x", padx=20, pady=5)
+        
+        force_var = ctk.BooleanVar(value=False)
+        force_checkbox = ctk.CTkCheckBox(
+            force_frame,
+            text="🔄 Forcer la mise à jour des données existantes",
+            variable=force_var,
+            font=("Arial", 12)
+        )
+        force_checkbox.pack(anchor="w", pady=5)
+        
+        info_label = ctk.CTkLabel(
+            force_frame,
+            text="Cochez pour re-scraper même si BPM/Key/Mode/Duration\nexistent déjà (utile pour corriger des données)",
+            font=("Arial", 9),
+            text_color="gray"
+        )
+        info_label.pack(anchor="w", padx=25, pady=2)
+        
+        # Séparateur
+        ctk.CTkLabel(force_frame, text="", height=10).pack()
+
+        # Checkbox pour reset Spotify ID
+        reset_spotify_var = ctk.BooleanVar(value=False)
+        reset_spotify_checkbox = ctk.CTkCheckBox(
+            force_frame,
+            text="🔄 Réinitialiser les Spotify IDs",
+            variable=reset_spotify_var,
+            font=("Arial", 12)
+        )
+        reset_spotify_checkbox.pack(anchor="w", pady=5)
+
+        reset_info_label = ctk.CTkLabel(
+            force_frame,
+            text="Efface les Spotify IDs existants pour permettre\nleur re-scraping (utile si IDs incorrects)",
+            font=("Arial", 9),
+            text_color="gray"
+        )
+        reset_info_label.pack(anchor="w", padx=25, pady=2)
+
         def start_enrichment():
             selected_sources = [s for s, var in sources_vars.items() if var.get()]
             if not selected_sources:
                 messagebox.showwarning("Attention", "Sélectionnez au moins une source")
                 return
             
+            force_update = force_var.get()
+            reset_spotify_id = reset_spotify_var.get()
+
             dialog.destroy()
-            self._run_enrichment(selected_sources)
+            self._run_enrichment(selected_sources, force_update=force_update, reset_spotify_id=reset_spotify_id)
         
         ctk.CTkButton(dialog, text="Démarrer", command=start_enrichment).pack(pady=20)
     
-    def _run_enrichment(self, sources: List[str]):
+    def _run_enrichment(self, sources: List[str], force_update: bool = False, reset_spotify_id: bool = False):
         """Exécute l'enrichissement avec les sources sélectionnées - ✅ MODIFIÉ"""
         # ✅ MODIFIÉ: Filtrer les morceaux sélectionnés ET actifs
         if not self.selected_tracks:
@@ -2643,6 +2715,14 @@ class MainWindow:
             messagebox.showwarning("Attention", "Tous les morceaux sélectionnés sont désactivés")
             return
         
+        # Reset des Spotify IDs si demandé
+        if reset_spotify_id:
+            for track in selected_tracks_list:
+                if hasattr(track, 'spotify_id') and track.spotify_id:
+                    old_id = track.spotify_id
+                    track.spotify_id = None
+                    logger.info(f"🔄 Spotify ID reset pour '{track.title}' (ancien: {old_id})")
+        
         self.enrich_button.configure(state="disabled", text="Enrichissement...")
         self.progress_bar.set(0)
         
@@ -2654,28 +2734,30 @@ class MainWindow:
         
         def enrich():
             try:
-                stats = self.data_enricher.enrich_tracks(
-                    selected_tracks_list,
-                    sources=sources,
-                    progress_callback=update_progress,
-                    use_threading=False  # Pour éviter les problèmes de rate limit
-                )
-                
-                # Sauvegarder les données enrichies
-                for track in selected_tracks_list:
+                # Enrichir chaque track individuellement avec force_update
+                for i, track in enumerate(selected_tracks_list):
+                    update_progress(i, len(selected_tracks_list), f"Enrichissement: {track.title}")
+                    
+                    # Enrichir avec force_update
+                    self.data_enricher.enrich_track(
+                        track,
+                        sources=sources,
+                        force_update=force_update
+                    )
+                    
+                    # Sauvegarder après chaque enrichissement
                     self.data_manager.save_track(track)
                 
-                # Préparer le message de résumé
+                # Message de fin
                 disabled_count = len(self.selected_tracks) - len(selected_tracks_list)
                 summary = "Enrichissement terminé!\n\n"
-                summary += f"Morceaux traités: {stats['processed']}/{stats['total']}\n"
-                summary += f"Morceaux avec BPM: {stats['tracks_with_bpm']}\n"
-                summary += f"Durée: {stats['duration']:.1f} secondes\n\n"
+                summary += f"Morceaux traités: {len(selected_tracks_list)}\n"
                 
-                summary += "Résultats par source:\n"
-                for source, results in stats['by_source'].items():
-                    if results['success'] + results['failed'] > 0:
-                        summary += f"- {source.capitalize()}: {results['success']} réussis, {results['failed']} échoués\n"
+                if force_update:
+                    summary += "✅ Mode force update activé\n"
+
+                if reset_spotify_id:
+                    summary += "🔄 Spotify IDs réinitialisés\n"
                 
                 if disabled_count > 0:
                     summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
@@ -2683,6 +2765,7 @@ class MainWindow:
                 self.root.after(0, lambda: messagebox.showinfo("Enrichissement terminé", summary))
                 self.root.after(0, self._update_artist_info)
                 self.root.after(0, self._update_statistics)
+                self.root.after(0, self._populate_tracks_table)  # ⬅️ CORRECTION ICI
                 
             except Exception as e:
                 error_msg = str(e)

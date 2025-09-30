@@ -35,6 +35,47 @@ def key_mode_to_french(key: int, mode: int) -> str:
     return f"{note} {mode_fr}"
 
 
+def key_mode_to_french_from_string(key_str: str, mode_str: str) -> str:
+    """
+    Convertit key (string comme "F", "C#") + mode (string comme "major", "minor") 
+    en notation française
+    
+    Args:
+        key_str: Note en notation anglaise (ex: "F", "C#", "Bb")
+        mode_str: Mode en anglais ("major" ou "minor")
+        
+    Returns:
+        Tonalité en français (ex: "Fa majeur", "Ré mineur")
+    """
+    # Mapping des notes anglaises vers françaises
+    notes_mapping = {
+        "C": "Do",
+        "C#": "Do#", "Db": "Réb",
+        "D": "Ré",
+        "D#": "Ré#", "Eb": "Mib",
+        "E": "Mi",
+        "F": "Fa",
+        "F#": "Fa#", "Gb": "Solb",
+        "G": "Sol",
+        "G#": "Sol#", "Ab": "Lab",
+        "A": "La",
+        "A#": "La#", "Bb": "Sib",
+        "B": "Si"
+    }
+    
+    # Nettoyer la key
+    key_clean = key_str.strip()
+    
+    # Trouver la note française
+    note_fr = notes_mapping.get(key_clean, key_clean)
+    
+    # Convertir le mode
+    mode_clean = mode_str.strip().lower()
+    mode_fr = "majeur" if mode_clean == "major" else "mineur"
+    
+    return f"{note_fr} {mode_fr}"
+
+
 def key_mode_to_english(key: int, mode: int) -> str:
     """Version anglaise pour référence"""
     notes_en = {

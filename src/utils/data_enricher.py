@@ -97,32 +97,39 @@ class DataEnricher:
     
     # ================== NOUVEAU: VALIDATION SPOTIFY ID ==================
     
-    def validate_spotify_id_unique(self, spotify_id: str, current_track: Track, artist_tracks: List[Track]) -> bool:
+    def validate_spotify_id_unique(self, spotify_id: str, current_track: Track, 
+                                   artist_tracks: List[Track]) -> bool:
         """
-        Vérifie qu'un Spotify ID n'est pas déjà utilisé par un autre track
-        
-        Args:
-            spotify_id: L'ID Spotify à vérifier
-            current_track: Le track actuel (pour l'exclure de la vérification)
-            artist_tracks: Liste de tous les tracks de l'artiste
-            
-        Returns:
-            bool: True si l'ID est unique, False s'il est déjà utilisé
+        Valide qu'un Spotify ID n'est pas utilisé par un AUTRE titre
+        VERSION AMÉLIORÉE: Accepte plusieurs IDs pour le MÊME titre
         """
         if not spotify_id or not artist_tracks:
             return True
         
+        current_title_normalized = self._normalize_title(current_track.title)
+        
         for track in artist_tracks:
-            # Ignorer le track actuel
-            if track.title == current_track.title:
-                continue
+            # Récupérer tous les IDs de ce track
+            if hasattr(track, 'get_all_spotify_ids'):
+                track_ids = track.get_all_spotify_ids()
+            elif hasattr(track, 'spotify_id') and track.spotify_id:
+                track_ids = [track.spotify_id]
+            else:
+                track_ids = []
             
-            # Vérifier si un autre track utilise déjà cet ID
-            if hasattr(track, 'spotify_id') and track.spotify_id == spotify_id:
-                logger.warning(f"⚠️ SPOTIFY ID DÉJÀ UTILISÉ: {spotify_id}")
-                logger.warning(f"   ❌ Déjà attribué à: '{track.title}'")
-                logger.warning(f"   🚫 Refus attribution à: '{current_track.title}'")
-                return False
+            # Vérifier si cet ID est déjà utilisé
+            if spotify_id in track_ids:
+                track_title_normalized = self._normalize_title(track.title)
+                
+                # ✅ C'est le MÊME morceau : OK
+                if track_title_normalized == current_title_normalized:
+                    logger.info(f"✅ ID déjà utilisé par le même titre (version alternative)")
+                    return True
+                
+                # ❌ C'est un AUTRE morceau : REJET
+                else:
+                    logger.warning(f"❌ ID déjà utilisé par un autre titre: '{track.title}'")
+                    return False
         
         return True
     
@@ -279,6 +286,35 @@ class DataEnricher:
         logger.info(f"✅ {cleaned_count}/{len(tracks)} track(s) nettoyé(s)")
         return cleaned_count
     
+    def _normalize_title(self, title: str) -> str:
+        """
+        Normalise un titre pour comparaison
+        """
+        import unicodedata
+        import re
+        
+        title = title.lower()
+        
+        # Supprimer les accents
+        title = ''.join(
+            c for c in unicodedata.normalize('NFD', title)
+            if unicodedata.category(c) != 'Mn'
+        )
+        
+        # Supprimer feat., parenthèses, etc.
+        title = re.sub(r'\(.*?\)', '', title)
+        title = re.sub(r'\[.*?\]', '', title)
+        title = re.sub(r'feat\..*$', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'ft\..*$', '', title, flags=re.IGNORECASE)
+        
+        # Supprimer la ponctuation
+        title = re.sub(r'[^\w\s]', '', title)
+        
+        # Supprimer les espaces multiples
+        title = ' '.join(title.split())
+        
+        return title.strip()
+
     # ================================================================
     
     def get_available_sources(self) -> List[str]:
@@ -328,25 +364,6 @@ class DataEnricher:
                     getattr(track, 'spotify_id', None), track, artist_tracks
                 ))
             )
-            
-            # NOUVEAU: Skip le scraper Spotify_ID si ReccoBeats est disponible et sélectionné
-            # ReccoBeats a son propre système de recherche Spotify ID plus fiable
-            if should_use_spotify_scraper and 'reccobeats' not in sources:
-                try:
-                    spotify_id = self.get_unique_spotify_id(track, artist_tracks or [], force_scraper=True)
-                    if spotify_id:
-                        track.spotify_id = spotify_id
-                        logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
-                        results['spotify_id'] = True
-                    else:
-                        logger.warning(f"❌ Échec récupération Spotify ID via scraper")
-                        results['spotify_id'] = False
-                except Exception as e:
-                    logger.error(f"Erreur Spotify ID scraper pour {track.title}: {e}")
-                    results['spotify_id'] = False
-            elif should_use_spotify_scraper and 'reccobeats' in sources:
-                logger.info(f"⏭️ Skip Spotify ID scraper (ReccoBeats le fera)")
-                results['spotify_id'] = 'skipped'
         
         # 1. ReccoBeats pour BPM et features audio
         if 'reccobeats' in sources and self.apis_available.get('reccobeats'):
@@ -556,6 +573,32 @@ class DataEnricher:
             logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
             return False
     
+    def _enrich_with_spotify(self, track: Track, force_update: bool = False) -> bool:
+        """Enrichit avec Spotify scraper - VERSION AVEC FEATURING"""
+        if not self.spotify_id_scraper:
+            return False
+        
+        try:
+            # Si un Spotify ID existe déjà et qu'on ne force pas, le garder
+            if not force_update and hasattr(track, 'spotify_id') and track.spotify_id:
+                logger.info(f"✅ Spotify ID existant: {track.spotify_id}")
+                return True
+            
+            # Utiliser la nouvelle méthode qui gère les featurings
+            spotify_id = self.spotify_id_scraper.get_spotify_id_for_track(track)
+            
+            if spotify_id:
+                track.spotify_id = spotify_id
+                logger.info(f"✅ Spotify ID ajouté: {spotify_id} pour '{track.title}'")
+                return True
+            else:
+                logger.warning(f"❌ Aucun Spotify ID trouvé pour '{track.title}'")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur enrichissement Spotify: {e}")
+            return False
+
     def _enrich_with_songbpm(self, track: Track, force_update: bool = False, 
                             artist_tracks: Optional[List[Track]] = None) -> bool:
         """

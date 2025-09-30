@@ -235,6 +235,31 @@ class SpotifyIDScraper:
         
         return spotify_id
     
+    def get_spotify_id_for_track(self, track) -> Optional[str]:
+        """
+        Méthode améliorée pour récupérer l'ID Spotify d'un track
+        Gère automatiquement les featurings en utilisant l'artiste principal
+        
+        Args:
+            track: L'objet Track à traiter
+            
+        Returns:
+            L'ID Spotify trouvé ou None
+        """
+        # Déterminer le bon artiste à utiliser
+        if hasattr(track, 'is_featuring') and track.is_featuring:
+            # Si c'est un featuring, utiliser l'artiste principal
+            if hasattr(track, 'primary_artist_name') and track.primary_artist_name:
+                artist_name = track.primary_artist_name
+                logger.info(f"🎤 Featuring détecté pour Spotify, utilisation de l'artiste principal: {artist_name}")
+            else:
+                artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+        else:
+            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+        
+        # Utiliser la méthode existante
+        return self.get_spotify_id(artist_name, track.title)
+
     def get_multiple_spotify_ids(self, tracks: List[tuple]) -> dict:
         """
         Récupère les IDs Spotify pour plusieurs tracks

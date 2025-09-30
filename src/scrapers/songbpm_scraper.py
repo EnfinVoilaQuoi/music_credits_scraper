@@ -66,6 +66,27 @@ class SongBPMScraper:
             options.add_argument('--log-level=3')
             options.add_argument('--silent')
             options.add_experimental_option('excludeSwitches', ['enable-logging'])
+            options.add_argument('--disable-logging')
+
+            # Désactiver WebGL/WebGPU/GPU/DirectX complètement
+            options.add_argument('--disable-webgl')
+            options.add_argument('--disable-webgl2')
+            options.add_argument('--disable-webgpu')         # ⭐ NOUVEAU
+            options.add_argument('--disable-3d-apis')
+            options.add_argument('--disable-software-rasterizer')
+            options.add_argument('--disable-gpu-sandbox')
+            options.add_argument('--use-angle=disabled')     # ⭐ NOUVEAU (DirectX)
+            options.add_argument('--disable-d3d11')          # ⭐ NOUVEAU (DirectX 11)
+            options.add_argument('--disable-features=VizDisplayCompositor')
+            options.add_argument('--disable-accelerated-2d-canvas')
+            options.add_argument('--disable-accelerated-video-decode')
+
+            # Service avec redirection des logs vers NUL
+            import platform
+            if platform.system() == 'Windows':
+                service = ChromeService(ChromeDriverManager().install(), log_path='NUL')
+            else:
+                service = ChromeService(ChromeDriverManager().install(), log_path='/dev/null')
             
             # Préférences pour désactiver les popups et notifications
             prefs = {

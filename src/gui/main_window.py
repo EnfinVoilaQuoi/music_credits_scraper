@@ -883,9 +883,19 @@ class MainWindow:
         
         if track.bpm:
             bpm_text = f"🎼 BPM: {track.bpm}"
+            
             # Ajouter la tonalité si disponible
             if hasattr(track, 'musical_key') and track.musical_key:
                 bpm_text += f" ({track.musical_key})"
+            # FALLBACK : Si musical_key n'existe pas mais key et mode existent
+            elif hasattr(track, 'key') and hasattr(track, 'mode') and track.key and track.mode:
+                from src.utils.music_theory import key_mode_to_french_from_string
+                try:
+                    musical_key = key_mode_to_french_from_string(track.key, track.mode)
+                    bpm_text += f" ({musical_key})"
+                except Exception as e:
+                    logger.warning(f"Erreur conversion key/mode: {e}")
+            
             ctk.CTkLabel(right_column, text=bpm_text).pack(anchor="w", pady=1)
         
         if track.duration:
@@ -926,16 +936,16 @@ class MainWindow:
             urls_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
             urls_frame.pack(anchor="w", padx=10, pady=5)
             
-            # URL Genius
+            # URL Genius - JAUNE avec bouton "Voir"
             genius_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
             genius_frame.pack(side="left", padx=(0, 20))
             
-            ctk.CTkLabel(genius_frame, text="🎤 Genius: ").pack(side="left")
+            ctk.CTkLabel(genius_frame, text="📝 Genius: ").pack(side="left")
             
             genius_label = ctk.CTkLabel(
                 genius_frame, 
-                text=track.genius_url,
-                text_color="blue",
+                text="🔍 Voir",
+                text_color="#FFD700",  # Jaune or (comme le logo Genius)
                 cursor="hand2"
             )
             genius_label.pack(side="left")
@@ -943,36 +953,89 @@ class MainWindow:
             import webbrowser
             genius_label.bind("<Button-1>", lambda e: webbrowser.open(track.genius_url))
             
-        # URL Spotify
-        if hasattr(track, 'spotify_id') and track.spotify_id:
+        # URL Spotify - GESTION DE MULTIPLES IDs
+        if hasattr(track, 'get_all_spotify_ids'):
+            all_spotify_ids = track.get_all_spotify_ids()
+        elif hasattr(track, 'spotify_ids') and track.spotify_ids:
+            all_spotify_ids = track.spotify_ids
+        elif hasattr(track, 'spotify_id') and track.spotify_id:
+            all_spotify_ids = [track.spotify_id]
+        else:
+            all_spotify_ids = []
+
+        if all_spotify_ids:
             spotify_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
             spotify_frame.pack(side="left", padx=(0, 20))
             
+            # Label principal
             ctk.CTkLabel(spotify_frame, text="🎵 Spotify: ").pack(side="left")
             
-            spotify_url = f"https://open.spotify.com/intl-fr/track/{track.spotify_id}"
-            
-            spotify_label = ctk.CTkLabel(
-                spotify_frame, 
-                text="▶️ Écouter",
-                text_color="#1DB954",  # Couleur verte Spotify
-                cursor="hand2"
-            )
-            spotify_label.pack(side="left")
-            
-            import webbrowser
-            spotify_label.bind("<Button-1>", lambda e: webbrowser.open(spotify_url))
+            # Si plusieurs IDs, afficher un dropdown ou une liste
+            if len(all_spotify_ids) > 1:
+                import tkinter as tk
+                from tkinter import ttk
+                
+                # Créer un Combobox pour sélectionner la version
+                version_var = tk.StringVar(value=all_spotify_ids[0])
+                
+                version_combo = ttk.Combobox(
+                    spotify_frame,
+                    textvariable=version_var,
+                    values=[f"Version {i+1}" for i in range(len(all_spotify_ids))],
+                    state="readonly",
+                    width=12
+                )
+                version_combo.pack(side="left", padx=5)
+                
+                def open_selected_version():
+                    idx = version_combo.current()
+                    if 0 <= idx < len(all_spotify_ids):
+                        spotify_url = f"https://open.spotify.com/intl-fr/track/{all_spotify_ids[idx]}"
+                        import webbrowser
+                        webbrowser.open(spotify_url)
+                
+                spotify_label = ctk.CTkLabel(
+                    spotify_frame, 
+                    text="▶️ Écouter",
+                    text_color="#1DB954",
+                    cursor="hand2"
+                )
+                spotify_label.pack(side="left")
+                spotify_label.bind("<Button-1>", lambda e: open_selected_version())
+                
+                # Info tooltip
+                info_label = ctk.CTkLabel(
+                    spotify_frame,
+                    text=f"({len(all_spotify_ids)} versions)",
+                    font=("Arial", 9),
+                    text_color="gray"
+                )
+                info_label.pack(side="left", padx=5)
+            else:
+                # Un seul ID, affichage normal
+                spotify_url = f"https://open.spotify.com/intl-fr/track/{all_spotify_ids[0]}"
+                
+                spotify_label = ctk.CTkLabel(
+                    spotify_frame, 
+                    text="▶️ Écouter",
+                    text_color="#1DB954",
+                    cursor="hand2"
+                )
+                spotify_label.pack(side="left")
+                
+                import webbrowser
+                spotify_label.bind("<Button-1>", lambda e: webbrowser.open(spotify_url))
 
-        # YouTube intelligent
+        # YouTube intelligent - ROUGE
         youtube_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
         youtube_frame.pack(side="left")
-        
-        ctk.CTkLabel(youtube_frame, text="🎵 YouTube: ").pack(side="left")
-        
+
+        ctk.CTkLabel(youtube_frame, text="📺 YouTube: ").pack(side="left")
+
         # Obtenir le lien YouTube intelligent
         artist_name = track.artist.name if track.artist else self.current_artist.name
         release_year = self.get_release_year_safely(track)
-        
+
         youtube_result = youtube_integration.get_youtube_link_for_track(
             artist_name, track.title, track.album, release_year
         )
@@ -980,8 +1043,8 @@ class MainWindow:
         # Affichage selon le type de résultat
         if youtube_result['type'] == 'direct':
             # Lien direct trouvé automatiquement
-            label_text = f"▶️ Écouter (auto • {youtube_result['confidence']:.0%})"
-            label_color = "green"
+            label_text = f"▶️ Voir (auto • {youtube_result['confidence']:.0%})"
+            label_color = "#FF0000"  # Rouge YouTube
             tooltip_text = (f"Lien automatique sélectionné\n"
                             f"Titre: {youtube_result.get('title', 'N/A')}\n"
                             f"Chaîne: {youtube_result.get('channel', 'N/A')}\n"
@@ -989,11 +1052,11 @@ class MainWindow:
         else:
             # URL de recherche optimisée
             label_text = "🔍 Rechercher"
-            label_color = "orange" 
+            label_color = "#FF6B6B"  # Rouge plus clair pour différencier
             tooltip_text = (f"Recherche optimisée\n"
                             f"Type: {youtube_result.get('track_type', 'inconnu')}\n"
                             f"Requête: {youtube_result.get('query', 'N/A')}")
-        
+
         youtube_label = ctk.CTkLabel(
             youtube_frame,
             text=label_text,
@@ -1001,11 +1064,11 @@ class MainWindow:
             cursor="hand2"
         )
         youtube_label.pack(side="left")
-        
+
         # Fonction pour ouvrir YouTube
         def open_youtube():
             youtube_integration.open_youtube_link(youtube_result)
-        
+
         youtube_label.bind("<Button-1>", lambda e: open_youtube())
         
         # ✅ OPTIONNEL: Tooltip pour plus d'infos

@@ -131,7 +131,26 @@ class ReccoBeatsIntegratedClient:
             options.add_argument('--log-level=3')
             options.add_argument('--silent')
             options.add_experimental_option('excludeSwitches', ['enable-logging'])
-            
+            options.add_argument('--disable-logging')
+            options.add_argument('--disable-webgl')
+            options.add_argument('--disable-webgl2')
+            options.add_argument('--disable-3d-apis')
+            options.add_argument('--disable-software-rasterizer')
+            options.add_argument('--disable-gpu-sandbox')
+
+            # Service avec log_path='NUL' pour Windows
+            import platform
+            if platform.system() == 'Windows':
+                service = ChromeService(
+                    ChromeDriverManager().install(),
+                    log_path='NUL'  # Supprime TOUS les logs
+                )
+            else:
+                service = ChromeService(
+                    ChromeDriverManager().install(),
+                    log_path='/dev/null'
+                )
+
             # Désactiver les images pour accélérer (optionnel)
             prefs = {
                 "profile.managed_default_content_settings.images": 2,

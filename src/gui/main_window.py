@@ -943,6 +943,26 @@ class MainWindow:
             import webbrowser
             genius_label.bind("<Button-1>", lambda e: webbrowser.open(track.genius_url))
             
+        # URL Spotify
+        if hasattr(track, 'spotify_id') and track.spotify_id:
+            spotify_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
+            spotify_frame.pack(side="left", padx=(0, 20))
+            
+            ctk.CTkLabel(spotify_frame, text="🎵 Spotify: ").pack(side="left")
+            
+            spotify_url = f"https://open.spotify.com/intl-fr/track/{track.spotify_id}"
+            
+            spotify_label = ctk.CTkLabel(
+                spotify_frame, 
+                text="▶️ Écouter",
+                text_color="#1DB954",  # Couleur verte Spotify
+                cursor="hand2"
+            )
+            spotify_label.pack(side="left")
+            
+            import webbrowser
+            spotify_label.bind("<Button-1>", lambda e: webbrowser.open(spotify_url))
+
         # YouTube intelligent
         youtube_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
         youtube_frame.pack(side="left")
@@ -2601,13 +2621,9 @@ class MainWindow:
 
     def _start_enrichment(self):
         """Lance l'enrichissement des données depuis toutes les sources - ✅ MODIFIÉ"""
-        if not self.current_artist or not self.current_artist.tracks:
-            return
-        
-        # Dialogue pour choisir les sources
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Sources d'enrichissement")
-        dialog.geometry("400x500")
+        dialog.geometry("450x650")  # ← Augmenté pour plus d'espace
         
         ctk.CTkLabel(dialog, text="Sélectionnez les sources à utiliser:", 
                     font=("Arial", 14)).pack(pady=10)
@@ -2615,6 +2631,7 @@ class MainWindow:
         # Variables pour les checkboxes
         sources_vars = {}
         sources_info = {
+            'spotify_id': 'Spotify ID Scraper (Recherche les vrais Track IDs) 🎯',  # ← NOUVEAU
             'reccobeats': 'ReccoBeats (BPM, features audio complètes) 🎵',
             'songbpm': 'SongBPM (BPM de fallback) 🎼',
             'discogs': 'Discogs (crédits supplémentaires, labels) 💿'
@@ -2639,7 +2656,13 @@ class MainWindow:
             
             if source not in available:
                 ctk.CTkLabel(frame, text="(API non configurée)", 
-                           text_color="gray").pack(anchor="w", padx=25)
+                        text_color="gray").pack(anchor="w", padx=25)
+            
+            # NOUVEAU: Info supplémentaire pour spotify_id
+            if source == 'spotify_id':
+                info_text = "Utilise la recherche web pour trouver les Track IDs corrects.\nRecommandé quand des IDs incorrects ont été attribués."
+                ctk.CTkLabel(frame, text=info_text, 
+                        font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
                 
         separator = ctk.CTkFrame(dialog, height=2, fg_color="gray")
         separator.pack(fill="x", padx=20, pady=15)
@@ -2684,6 +2707,27 @@ class MainWindow:
             text_color="gray"
         )
         reset_info_label.pack(anchor="w", padx=25, pady=2)
+        
+        # Séparateur
+        ctk.CTkLabel(force_frame, text="", height=10).pack()
+        
+        # NOUVEAU: Checkbox pour nettoyer les données erronées
+        clear_on_failure_var = ctk.BooleanVar(value=True)  # Activé par défaut
+        clear_on_failure_checkbox = ctk.CTkCheckBox(
+            force_frame,
+            text="🗑️ Nettoyer les données si enrichissement échoue",
+            variable=clear_on_failure_var,
+            font=("Arial", 12)
+        )
+        clear_on_failure_checkbox.pack(anchor="w", pady=5)
+
+        clear_info_label = ctk.CTkLabel(
+            force_frame,
+            text="Efface les BPM/Key/Mode/Duration erronés quand aucune\nsource ne trouve de nouvelles données (recommandé)",
+            font=("Arial", 9),
+            text_color="gray"
+        )
+        clear_info_label.pack(anchor="w", padx=25, pady=2)
 
         def start_enrichment():
             selected_sources = [s for s, var in sources_vars.items() if var.get()]
@@ -2693,15 +2737,21 @@ class MainWindow:
             
             force_update = force_var.get()
             reset_spotify_id = reset_spotify_var.get()
+            clear_on_failure = clear_on_failure_var.get()
 
             dialog.destroy()
-            self._run_enrichment(selected_sources, force_update=force_update, reset_spotify_id=reset_spotify_id)
+            self._run_enrichment(selected_sources, force_update=force_update, 
+                            reset_spotify_id=reset_spotify_id, 
+                            clear_on_failure=clear_on_failure)
         
         ctk.CTkButton(dialog, text="Démarrer", command=start_enrichment).pack(pady=20)
     
-    def _run_enrichment(self, sources: List[str], force_update: bool = False, reset_spotify_id: bool = False):
-        """Exécute l'enrichissement avec les sources sélectionnées - ✅ MODIFIÉ"""
-        # ✅ MODIFIÉ: Filtrer les morceaux sélectionnés ET actifs
+    def _run_enrichment(self, sources: List[str], force_update: bool = False, 
+                    reset_spotify_id: bool = False, clear_on_failure: bool = True):
+        """
+        Exécute l'enrichissement avec les sources sélectionnées
+        VERSION CORRIGÉE: Passe tous les tracks pour validation Spotify ID + nettoyage des erreurs
+        """
         if not self.selected_tracks:
             messagebox.showwarning("Attention", "Aucun morceau sélectionné")
             return
@@ -2734,16 +2784,28 @@ class MainWindow:
         
         def enrich():
             try:
-                # Enrichir chaque track individuellement avec force_update
+                # NOUVEAU: Préparer la liste complète des tracks de l'artiste pour validation
+                all_artist_tracks = self.current_artist.tracks if self.current_artist else []
+                
+                # Compteurs pour le résumé
+                cleaned_count = 0
+                
+                # Enrichir chaque track individuellement
                 for i, track in enumerate(selected_tracks_list):
                     update_progress(i, len(selected_tracks_list), f"Enrichissement: {track.title}")
                     
-                    # Enrichir avec force_update
-                    self.data_enricher.enrich_track(
+                    # MODIFIÉ: Passer all_artist_tracks + clear_on_failure
+                    results = self.data_enricher.enrich_track(
                         track,
                         sources=sources,
-                        force_update=force_update
+                        force_update=force_update,
+                        artist_tracks=all_artist_tracks,  # ← Pour validation Spotify ID
+                        clear_on_failure=clear_on_failure  # ← Pour nettoyage auto
                     )
+                    
+                    # Compter les nettoyages
+                    if results.get('cleaned', False):
+                        cleaned_count += 1
                     
                     # Sauvegarder après chaque enrichissement
                     self.data_manager.save_track(track)
@@ -2759,13 +2821,16 @@ class MainWindow:
                 if reset_spotify_id:
                     summary += "🔄 Spotify IDs réinitialisés\n"
                 
+                if clear_on_failure and cleaned_count > 0:
+                    summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"
+                
                 if disabled_count > 0:
                     summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
                 
                 self.root.after(0, lambda: messagebox.showinfo("Enrichissement terminé", summary))
                 self.root.after(0, self._update_artist_info)
                 self.root.after(0, self._update_statistics)
-                self.root.after(0, self._populate_tracks_table)  # ⬅️ CORRECTION ICI
+                self.root.after(0, self._populate_tracks_table)
                 
             except Exception as e:
                 error_msg = str(e)

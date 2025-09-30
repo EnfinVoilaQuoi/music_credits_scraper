@@ -1,6 +1,6 @@
 """
 Scraper pour récupérer les IDs Spotify sans utiliser l'API Spotify
-Recherche sur le web et extrait les IDs depuis les URLs Spotify
+VERSION AMÉLIORÉE : Meilleurs délais + logs désactivés
 """
 import requests
 import re
@@ -19,8 +19,16 @@ class SpotifyIDScraper:
         self.cache_file = cache_file
         self.cache = self._load_cache()
         self.session = requests.Session()
+        
+        # Headers plus réalistes pour éviter la détection
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         })
         
         # Pattern pour extraire les IDs Spotify depuis les URLs
@@ -71,7 +79,11 @@ class SpotifyIDScraper:
         
         try:
             logger.debug(f"Recherche Google: {query}")
-            response = self.session.get(google_url, timeout=10)
+            
+            # Ajouter un délai aléatoire pour éviter la détection
+            time.sleep(1 + (hash(query) % 10) / 10)  # 1-2 secondes aléatoire
+            
+            response = self.session.get(google_url, timeout=15)
             
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
@@ -95,12 +107,12 @@ class SpotifyIDScraper:
                             logger.info(f"✅ ID Spotify trouvé via Google: {spotify_id}")
                             return spotify_id
                 
-                logger.warning("Aucun lien Spotify trouvé dans les résultats Google")
+                logger.debug("Aucun lien Spotify trouvé dans les résultats Google")
             else:
-                logger.warning(f"Erreur recherche Google: {response.status_code}")
+                logger.debug(f"Google retourne status {response.status_code}")
                 
         except Exception as e:
-            logger.error(f"Erreur recherche Google: {e}")
+            logger.debug(f"Erreur recherche Google: {e}")
         
         return None
     
@@ -113,7 +125,11 @@ class SpotifyIDScraper:
         
         try:
             logger.debug(f"Recherche DuckDuckGo: {query}")
-            response = self.session.get(ddg_url, timeout=10)
+            
+            # Délai pour éviter le rate limiting
+            time.sleep(2)
+            
+            response = self.session.get(ddg_url, timeout=15)
             
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
@@ -130,17 +146,17 @@ class SpotifyIDScraper:
                             logger.info(f"✅ ID Spotify trouvé via DuckDuckGo: {spotify_id}")
                             return spotify_id
                 
-                logger.warning("Aucun lien Spotify trouvé dans DuckDuckGo")
+                logger.debug("Aucun lien Spotify trouvé dans DuckDuckGo")
             else:
-                logger.warning(f"Erreur recherche DuckDuckGo: {response.status_code}")
+                logger.debug(f"DuckDuckGo retourne status {response.status_code}")
                 
         except Exception as e:
-            logger.error(f"Erreur recherche DuckDuckGo: {e}")
+            logger.debug(f"Erreur recherche DuckDuckGo: {e}")
         
         return None
     
     def search_direct_spotify_web(self, artist: str, title: str) -> Optional[str]:
-        """Tentative de recherche directe sur Spotify Web (plus risqué)"""
+        """Tentative de recherche directe sur Spotify Web"""
         try:
             # Construire une URL de recherche Spotify
             query = f"{artist} {title}"
@@ -149,16 +165,10 @@ class SpotifyIDScraper:
             
             logger.debug(f"Recherche directe Spotify: {spotify_search_url}")
             
-            # Headers pour imiter un navigateur
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-            }
+            # Délai
+            time.sleep(2)
             
-            response = self.session.get(spotify_search_url, headers=headers, timeout=15)
+            response = self.session.get(spotify_search_url, timeout=15, allow_redirects=True)
             
             if response.status_code == 200:
                 # Chercher les IDs Spotify dans le HTML de la page
@@ -173,44 +183,44 @@ class SpotifyIDScraper:
                     logger.info(f"✅ ID Spotify trouvé directement: {spotify_id}")
                     return spotify_id
                 else:
-                    logger.warning("Aucun ID Spotify trouvé dans la page")
+                    logger.debug("Aucun ID Spotify trouvé dans la page")
             else:
-                logger.warning(f"Erreur recherche directe Spotify: {response.status_code}")
+                logger.debug(f"Spotify retourne status {response.status_code}")
                 
         except Exception as e:
-            logger.error(f"Erreur recherche directe Spotify: {e}")
+            logger.debug(f"Erreur recherche directe Spotify: {e}")
         
         return None
     
     def get_spotify_id(self, artist: str, title: str) -> Optional[str]:
         """
         Méthode principale pour récupérer l'ID Spotify d'un track
-        Utilise plusieurs stratégies en cascade
+        Utilise plusieurs stratégies en cascade avec délais appropriés
         """
-        logger.info(f"Recherche ID Spotify pour: '{artist}' - '{title}'")
+        logger.info(f"🔍 Recherche ID Spotify pour: '{artist}' - '{title}'")
         
         # Vérifier le cache d'abord
         cache_key = self._get_cache_key(artist, title)
         if cache_key in self.cache:
             cached_id = self.cache[cache_key]
             if cached_id != 'not_found':
-                logger.debug(f"ID trouvé en cache: {cached_id}")
+                logger.info(f"✅ ID trouvé en cache: {cached_id}")
                 return cached_id
             else:
                 logger.debug("Échec précédent en cache")
                 return None
         
-        # Stratégie 1: Recherche Google
+        # Stratégie 1: Recherche Google (souvent bloqué)
         spotify_id = self.search_google_for_spotify_track(artist, title)
         
         # Stratégie 2: Recherche DuckDuckGo (si Google échoue)
         if not spotify_id:
-            time.sleep(2)  # Délai entre les recherches
+            time.sleep(3)  # Délai plus long entre les stratégies
             spotify_id = self.search_duckduckgo_for_spotify_track(artist, title)
         
         # Stratégie 3: Recherche directe Spotify (en dernier recours)
         if not spotify_id:
-            time.sleep(2)
+            time.sleep(3)
             spotify_id = self.search_direct_spotify_web(artist, title)
         
         # Mettre en cache le résultat
@@ -222,9 +232,6 @@ class SpotifyIDScraper:
             logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
         
         self._save_cache()
-        
-        # Délai respectueux entre les requêtes
-        time.sleep(1)
         
         return spotify_id
     
@@ -244,17 +251,10 @@ class SpotifyIDScraper:
             results[f"{artist}::{title}"] = spotify_id
             
             # Délai plus long entre les tracks pour éviter le rate limiting
-            if i < len(tracks) - 1:  # Pas de délai après le dernier
-                time.sleep(3)
+            if i < len(tracks) - 1:
+                time.sleep(5)  # 5 secondes entre chaque track
         
         success_count = len([v for v in results.values() if v])
         logger.info(f"Résultats: {success_count}/{len(tracks)} IDs Spotify récupérés")
         
         return results
-    
-    def test_extraction(self, test_url: str = "https://open.spotify.com/intl-fr/track/4EVMhVr6GslvST0uLx8VIJ"):
-        """Teste l'extraction d'ID depuis une URL"""
-        spotify_id = self.extract_spotify_id_from_url(test_url)
-        logger.info(f"Test extraction - URL: {test_url}")
-        logger.info(f"ID extrait: {spotify_id}")
-        return spotify_id

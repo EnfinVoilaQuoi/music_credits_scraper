@@ -607,15 +607,22 @@ class ReccoBeatsIntegratedClient:
                     if audio_features:
                         enriched_data['audio_features'] = audio_features
                 
-                # Extraire BPM
+                # Extraire BPM, Key et Mode
                 if 'audio_features' in enriched_data:
+                    logger.info(f"🔍 DEBUG: audio_features trouvés, extraction en cours...")
                     features = enriched_data['audio_features']
+                    logger.info(f"🔍 DEBUG: features keys = {list(features.keys()) if features else None}")
+                    logger.info(f"🔍 DEBUG: features tempo={features.get('tempo')}, key={features.get('key')}, mode={features.get('mode')}")
+                    
                     enriched_data['bpm'] = features.get('tempo')
                     enriched_data['key'] = features.get('key')
                     enriched_data['mode'] = features.get('mode')
                     enriched_data['energy'] = features.get('energy')
                     enriched_data['danceability'] = features.get('danceability')
                     enriched_data['valence'] = features.get('valence')
+                    
+                    logger.info(f"🔍 DEBUG: extraction terminée, enriched_data keys = {list(enriched_data.keys())}")
+                    logger.info(f"🔍 DEBUG: enriched_data bpm={enriched_data.get('bpm')}, key={enriched_data.get('key')}, mode={enriched_data.get('mode')}")
                 
                 self.cache[cache_key] = enriched_data
                 self._save_cache()
@@ -1031,15 +1038,38 @@ class ReccoBeatsIntegratedClient:
                     logger.info(f"✅ Track trouvé (liste): {track.get('trackTitle', 'N/A')}")
                 elif isinstance(data, dict):
                     # Format dict avec 'content'
-                    if 'content' in data and isinstance(data['content'], list) and len(data['content']) > 0:
-                        track = data['content'][0]
-                        logger.info(f"✅ Track trouvé (dict.content): {track.get('trackTitle', 'N/A')}")
-                    # Ou dict direct (le track lui-même)
+                    if 'content' in data:
+                        content = data['content']
+                        logger.debug(f"🔍 Trouvé clé 'content', type: {type(content)}")
+                        
+                        # Cas 1: content est une liste
+                        if isinstance(content, list):
+                            if len(content) > 0:
+                                track = content[0]
+                                logger.info(f"✅ Track trouvé (dict.content[0]): {track.get('trackTitle', 'N/A')}")
+                            else:
+                                logger.warning(f"⚠️ Liste 'content' vide")
+                        
+                        # Cas 2: content est directement un dict (le track)
+                        elif isinstance(content, dict):
+                            if 'id' in content or 'trackTitle' in content:
+                                track = content
+                                logger.info(f"✅ Track trouvé (dict.content dict): {track.get('trackTitle', 'N/A')}")
+                            else:
+                                logger.warning(f"⚠️ Dict 'content' sans 'id' ni 'trackTitle'. Clés: {list(content.keys())}")
+                        
+                        else:
+                            logger.warning(f"⚠️ 'content' n'est ni liste ni dict: {type(content)}")
+                    
+                    # Ou dict direct (le track lui-même) 
                     elif 'id' in data or 'trackTitle' in data:
                         track = data
                         logger.info(f"✅ Track trouvé (dict direct): {track.get('trackTitle', 'N/A')}")
+                    
                     else:
                         logger.warning(f"❌ Structure dict inconnue. Clés: {list(data.keys())}")
+                        # Log plus détaillé pour debug
+                        logger.debug(f"   Contenu complet: {json.dumps(data, indent=2)[:500]}")
                 else:
                     logger.warning(f"❌ Format de réponse inattendu: {type(data)}")
                 

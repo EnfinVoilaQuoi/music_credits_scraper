@@ -882,7 +882,11 @@ class MainWindow:
             ctk.CTkLabel(right_column, text=f"📅 Date: {date_str}").pack(anchor="w", pady=1)
         
         if track.bpm:
-            ctk.CTkLabel(right_column, text=f"🎼 BPM: {track.bpm}").pack(anchor="w", pady=1)
+            bpm_text = f"🎼 BPM: {track.bpm}"
+            # Ajouter la tonalité si disponible
+            if hasattr(track, 'musical_key') and track.musical_key:
+                bpm_text += f" ({track.musical_key})"
+            ctk.CTkLabel(right_column, text=bpm_text).pack(anchor="w", pady=1)
         
         if track.duration:
             minutes = track.duration // 60

@@ -461,8 +461,7 @@ class ReccoBeatsIntegratedClient:
     def get_track_info(self, artist: str, title: str, use_cache: bool = True, 
                    force_refresh: bool = False, spotify_id: str = None) -> Optional[Dict]:
         """
-        Récupère les infos complètes d'un track depuis ReccoBeats
-        VERSION CORRIGÉE - avec vérification spotify_id et sans conflit time
+        Récupère les infos complètes d'un track depuis ReccoBeats avec vérification spotify_id
         
         Args:
             artist: Nom de l'artiste

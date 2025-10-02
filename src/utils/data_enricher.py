@@ -397,18 +397,48 @@ class DataEnricher:
         # 2. SONGBPM (avec amélioration de la logique)
         # ========================================
         if 'songbpm' in sources and self.apis_available.get('songbpm'):
-            # NOUVELLE LOGIQUE: Utiliser SongBPM si :
+            # ⭐ NOUVELLE LOGIQUE AMÉLIORÉE: Utiliser SongBPM si :
             # - force_update OU
             # - pas de BPM OU
-            # - ReccoBeats a échoué (pour avoir un fallback)
+            # - ReccoBeats a échoué (pour avoir un fallback) OU
+            # - ⭐ NOUVEAU: Données manquantes (key, mode, duration) même si BPM existe
+            
+            # Vérifier si des données sont manquantes
+            missing_key = not hasattr(track, 'key') or not track.key
+            missing_mode = not hasattr(track, 'mode') or not track.mode
+            missing_duration = not hasattr(track, 'duration') or not track.duration
+            
+            has_missing_data = missing_key or missing_mode or missing_duration
+            
             should_use_songbpm = (
                 force_update or 
                 not track.bpm or
-                (not reccobeats_success and 'reccobeats' in sources)  # NOUVEAU: Fallback si ReccoBeats échoue
+                (not reccobeats_success and 'reccobeats' in sources) or
+                has_missing_data  # ⭐ NOUVEAU: Appeler SongBPM pour récupérer les données manquantes
             )
             
             if should_use_songbpm:
-                logger.info(f"🎼 Appel de SongBPM pour '{track.title}' (raison: force_update={force_update}, no_bpm={not track.bpm}, reccobeats_failed={not reccobeats_success and 'reccobeats' in sources})")
+                # Construire le message de raison pour le log
+                reasons = []
+                if force_update:
+                    reasons.append("force_update=True")
+                if not track.bpm:
+                    reasons.append("no_bpm=True")
+                if not reccobeats_success and 'reccobeats' in sources:
+                    reasons.append("reccobeats_failed=True")
+                if has_missing_data:
+                    missing_items = []
+                    if missing_key:
+                        missing_items.append("key")
+                    if missing_mode:
+                        missing_items.append("mode")
+                    if missing_duration:
+                        missing_items.append("duration")
+                    reasons.append(f"missing_data={','.join(missing_items)}")
+                
+                reason_str = ", ".join(reasons)
+                logger.info(f"🎼 Appel de SongBPM pour '{track.title}' (raison: {reason_str})")
+                
                 try:
                     songbpm_success = self._enrich_with_songbpm(track, force_update=force_update, artist_tracks=artist_tracks)
                     results['songbpm'] = songbpm_success
@@ -421,7 +451,7 @@ class DataEnricher:
                     logger.error(f"❌ Erreur SongBPM pour {track.title}: {e}")
                     results['songbpm'] = False
             else:
-                logger.info(f"⏭️ SongBPM non appelé (BPM déjà présent: {track.bpm})")
+                logger.info(f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={getattr(track, 'duration', 'N/A')})")
                 results['songbpm'] = 'not_needed'
         
         # ========================================

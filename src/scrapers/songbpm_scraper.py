@@ -36,13 +36,19 @@ class SongBPMScraper:
         
         # Pattern pour extraire l'ID Spotify depuis une URL
         self.spotify_id_pattern = re.compile(r'spotify\.com/(?:intl-[a-z]{2}/)?track/([a-zA-Z0-9]{22})')
-        
-        self._init_driver()
+
+    def _ensure_driver(self):
+        """
+        S'assure que le driver est initialisé (initialisation paresseuse)
+        Cette méthode sera appelée automatiquement avant chaque utilisation du driver
+        """
+        if self.driver is None:
+            self._init_driver()
 
     def _init_driver(self):
         """Initialise le driver Selenium avec configuration robuste"""
         try:
-            logger.info(f"Initialisation du driver Selenium (headless={self.headless})...")
+            logger.info(f"🌐 Initialisation du driver Selenium SongBPM (headless={self.headless})...")
             
             options = Options()
             
@@ -71,12 +77,12 @@ class SongBPMScraper:
             # Désactiver WebGL/WebGPU/GPU/DirectX complètement
             options.add_argument('--disable-webgl')
             options.add_argument('--disable-webgl2')
-            options.add_argument('--disable-webgpu')         # ⭐ NOUVEAU
+            options.add_argument('--disable-webgpu')
             options.add_argument('--disable-3d-apis')
             options.add_argument('--disable-software-rasterizer')
             options.add_argument('--disable-gpu-sandbox')
-            options.add_argument('--use-angle=disabled')     # ⭐ NOUVEAU (DirectX)
-            options.add_argument('--disable-d3d11')          # ⭐ NOUVEAU (DirectX 11)
+            options.add_argument('--use-angle=disabled')
+            options.add_argument('--disable-d3d11')
             options.add_argument('--disable-features=VizDisplayCompositor')
             options.add_argument('--disable-accelerated-2d-canvas')
             options.add_argument('--disable-accelerated-video-decode')
@@ -92,12 +98,9 @@ class SongBPMScraper:
             prefs = {
                 "profile.default_content_setting_values.notifications": 2,
                 "profile.default_content_settings.popups": 0,
-                "profile.managed_default_content_settings.images": 1  # Garder les images pour SongBPM
+                "profile.managed_default_content_settings.images": 1
             }
             options.add_experimental_option("prefs", prefs)
-            
-            # Utiliser webdriver_manager pour gérer ChromeDriver automatiquement
-            service = ChromeService(ChromeDriverManager().install())
             
             self.driver = webdriver.Chrome(service=service, options=options)
             self.wait = WebDriverWait(self.driver, 10)
@@ -325,6 +328,7 @@ class SongBPMScraper:
         Returns:
             Dict avec les détails (mode, energy, danceability, etc.)
         """
+        self._ensure_driver()
         details = {}
         
         try:
@@ -397,8 +401,17 @@ class SongBPMScraper:
                 logger.warning("⚠️ Mode non trouvé dans le texte")
                 logger.debug(f"🔍 Texte analysé (premiers 500 char): {clean_text[:500]}")
             
-            # Autres détails (BPM alternatifs, etc.)
-            # ... (garder le code existant)
+            # Extraire la signature temporelle
+            time_sig_match = re.search(r'(\d+)\s+beats per bar', full_text, re.IGNORECASE)
+            if time_sig_match:
+                details['time_signature'] = int(time_sig_match.group(1))
+                logger.debug(f"Time signature: {details['time_signature']}/4")
+            
+            logger.info(f"✅ Détails extraits: {len(details)} attributs")
+            if details:
+                logger.info(f"📊 Détails: {details}")
+            else:
+                logger.warning("⚠️ Aucun détail extrait de la page")
             
             return details
             
@@ -426,6 +439,7 @@ class SongBPMScraper:
         Returns:
             Dict contenant les infos du morceau ou None si non trouvé
         """
+        self._ensure_driver()
         if not self.driver:
             logger.error("❌ SongBPM: Driver non initialisé")
             return None
@@ -789,16 +803,37 @@ class SongBPMScraper:
                             track.mode = mode_value
                             logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
                             updated = True
-                        
-                        # Convertir en musical_key
+                    
+                    # ⭐ NOUVEAU: Calculer musical_key même si le mode vient de la base de données
+                    # Vérifier si on a SOIT récupéré le mode ci-dessus, SOIT s'il existe déjà
+                    final_key = getattr(track, 'key', None)
+                    final_mode = getattr(track, 'mode', None)
+                    
+                    if final_key and final_mode:
+                        # Calculer musical_key seulement si elle n'existe pas encore
                         if force_update or not hasattr(track, 'musical_key') or not track.musical_key:
                             try:
                                 from src.utils.music_theory import key_mode_to_french_from_string
-                                track.musical_key = key_mode_to_french_from_string(key_value, mode_value)
-                                logger.info(f"🎼 Musical key ajoutée depuis SongBPM: {track.musical_key} pour {track.title}")
+                                track.musical_key = key_mode_to_french_from_string(final_key, final_mode)
+                                logger.info(f"🎼 Musical key calculée: {track.musical_key} pour {track.title}")
                                 updated = True
                             except Exception as e:
                                 logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
+                    
+                except TimeoutError:
+                    logger.warning(f"⏰ Timeout lors de la récupération du mode pour '{track.title}'")
+                    # ⭐ MÊME SI TIMEOUT, calculer musical_key si on a déjà key et mode
+                    final_key = getattr(track, 'key', None)
+                    final_mode = getattr(track, 'mode', None)
+                    
+                    if final_key and final_mode and (force_update or not hasattr(track, 'musical_key') or not track.musical_key):
+                        try:
+                            from src.utils.music_theory import key_mode_to_french_from_string
+                            track.musical_key = key_mode_to_french_from_string(final_key, final_mode)
+                            logger.info(f"🎼 Musical key calculée (fallback après timeout): {track.musical_key}")
+                            updated = True
+                        except Exception as e:
+                            logger.warning(f"⚠️ Erreur conversion musical_key (fallback): {e}")
                     else:
                         logger.warning(f"⚠️ Mode non trouvé dans les détails pour '{track.title}'")
                         
@@ -815,13 +850,7 @@ class SongBPMScraper:
         except Exception as e:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
             return False
-            
-        except TimeoutError as e:
-            logger.error(f"⏰ SongBPM timeout pour {track.title}: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Erreur SongBPM pour {track.title}: {e}")
-            return False
+
 
     def close(self):
         """Ferme le driver Selenium"""

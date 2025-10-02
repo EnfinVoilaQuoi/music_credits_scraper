@@ -38,7 +38,11 @@ class MainWindow:
         # Services
         self.genius_api = GeniusAPI()
         self.data_manager = DataManager()
-        self.data_enricher = DataEnricher(headless_songbpm=False)
+        self.data_enricher = DataEnricher(
+            headless_reccobeats=False,
+            headless_songbpm=False,
+            headless_spotify_scraper=False
+        )
         self.current_artist: Optional[Artist] = None
         self.tracks: List[Track] = []
         

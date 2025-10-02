@@ -624,6 +624,15 @@ class DataManager:
                         track.created_at = safe_assign(created_at)
                         track.updated_at = safe_assign(updated_at)
                         track.last_scraped = safe_assign(last_scraped)
+
+                        # ⭐ NOUVEAU : Calculer key et mode depuis musical_key si manquants
+                        if track.musical_key and (not hasattr(track, 'key') or not track.key):
+                            try:
+                                # Si on a "Do majeur" mais pas key/mode, on peut les recalculer
+                                # Mais pour l'instant on garde juste musical_key
+                                logger.debug(f"Track '{track.title}' a musical_key='{track.musical_key}' chargé depuis DB")
+                            except Exception as e:
+                                logger.debug(f"Impossible de parser musical_key '{track.musical_key}': {e}")
                         
                         # Propriétés featuring
                         track.is_featuring = bool(safe_assign(is_featuring, False))

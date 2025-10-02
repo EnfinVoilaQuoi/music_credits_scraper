@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class DataEnricher:
     """Enrichissement des données des morceaux"""
     
-    def __init__(self, headless_reccobeats: bool = False, headless_songbpm: bool = True):
+    def __init__(self, headless_reccobeats: bool = False, headless_songbpm: bool = True, headless_spotify_scraper: bool = True):
         """
         Initialise les scrapers et APIs
         
@@ -52,10 +52,10 @@ class DataEnricher:
         except Exception as e:
             logger.error(f"❌ Erreur init SongBPM: {e}")
         
-        # NOUVEAU: Initialiser Spotify ID scraper
+        # Initialiser Spotify ID scraper
         self.spotify_id_scraper = None
         try:
-            self.spotify_id_scraper = SpotifyIDScraper()
+            self.spotify_id_scraper = SpotifyIDScraper(headless=headless_spotify_scraper)
             self.apis_available['spotify_id'] = True
             logger.info("✅ Spotify ID scraper initialisé")
         except Exception as e:
@@ -344,17 +344,17 @@ class DataEnricher:
         # 0. SCRAPER SPOTIFY ID
         # ========================================
         if 'spotify_id' in sources and self.apis_available.get('spotify_id'):
-            should_use_spotify_scraper = (
-                force_update or 
-                not hasattr(track, 'spotify_id') or 
-                not track.spotify_id or
-                (artist_tracks and not self.validate_spotify_id_unique(
-                    getattr(track, 'spotify_id', None), track, artist_tracks
-                ))
+            # Ne skip que si on a déjà un ID valide ET que force_update=False
+            has_valid_id = (
+                hasattr(track, 'spotify_id') and 
+                track.spotify_id and 
+                (not artist_tracks or self.validate_spotify_id_unique(track.spotify_id, track, artist_tracks))
             )
             
-            if should_use_spotify_scraper and 'reccobeats' not in sources:
-                logger.info(f"🎯 Appel du scraper Spotify ID pour '{track.title}'")
+            should_use_spotify_scraper = force_update or not has_valid_id
+            
+            if should_use_spotify_scraper:
+                logger.info(f"🎯 Appel du scraper Spotify ID pour '{track.title}' (force_update={force_update}, has_valid_id={has_valid_id})")
                 try:
                     spotify_id = self.get_unique_spotify_id(track, artist_tracks or [], force_scraper=True)
                     if spotify_id:
@@ -367,11 +367,8 @@ class DataEnricher:
                 except Exception as e:
                     logger.error(f"Erreur Spotify ID scraper pour {track.title}: {e}")
                     results['spotify_id'] = False
-            elif should_use_spotify_scraper and 'reccobeats' in sources:
-                logger.info(f"⏭️ Skip Spotify ID scraper car ReccoBeats est sélectionné (ReccoBeats le cherchera)")
-                results['spotify_id'] = 'skipped'
             else:
-                logger.info(f"⏭️ Scraper Spotify ID non nécessaire (ID déjà présent et valide)")
+                logger.info(f"⏭️ Scraper Spotify ID non nécessaire (ID déjà présent et valide: {track.spotify_id})")
                 results['spotify_id'] = 'not_needed'
         
         # ========================================
@@ -397,24 +394,25 @@ class DataEnricher:
         # 2. SONGBPM (avec amélioration de la logique)
         # ========================================
         if 'songbpm' in sources and self.apis_available.get('songbpm'):
-            # ⭐ NOUVELLE LOGIQUE AMÉLIORÉE: Utiliser SongBPM si :
+            # ⭐ LOGIQUE AMÉLIORÉE : Utiliser SongBPM si :
             # - force_update OU
             # - pas de BPM OU
-            # - ReccoBeats a échoué (pour avoir un fallback) OU
-            # - ⭐ NOUVEAU: Données manquantes (key, mode, duration) même si BPM existe
+            # - ReccoBeats a échoué OU
+            # - Données manquantes (key, mode, duration)
             
             # Vérifier si des données sont manquantes
-            missing_key = not hasattr(track, 'key') or not track.key
-            missing_mode = not hasattr(track, 'mode') or not track.mode
+            missing_bpm = not hasattr(track, 'bpm') or not track.bpm
+            missing_key = not hasattr(track, 'key') or track.key is None
+            missing_mode = not hasattr(track, 'mode') or track.mode is None
             missing_duration = not hasattr(track, 'duration') or not track.duration
             
-            has_missing_data = missing_key or missing_mode or missing_duration
+            has_missing_data = missing_bpm or missing_key or missing_mode or missing_duration
             
             should_use_songbpm = (
                 force_update or 
-                not track.bpm or
+                missing_bpm or
                 (not reccobeats_success and 'reccobeats' in sources) or
-                has_missing_data  # ⭐ NOUVEAU: Appeler SongBPM pour récupérer les données manquantes
+                has_missing_data
             )
             
             if should_use_songbpm:
@@ -422,11 +420,12 @@ class DataEnricher:
                 reasons = []
                 if force_update:
                     reasons.append("force_update=True")
-                if not track.bpm:
-                    reasons.append("no_bpm=True")
+                if missing_bpm:
+                    reasons.append("no_bpm")
                 if not reccobeats_success and 'reccobeats' in sources:
-                    reasons.append("reccobeats_failed=True")
-                if has_missing_data:
+                    reasons.append("reccobeats_failed")
+                if has_missing_data and not missing_bpm:
+                    # Lister les données manquantes spécifiques
                     missing_items = []
                     if missing_key:
                         missing_items.append("key")
@@ -444,7 +443,7 @@ class DataEnricher:
                     results['songbpm'] = songbpm_success
                     
                     if songbpm_success:
-                        logger.info(f"✅ SongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}")
+                        logger.info(f"✅ SongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={getattr(track, 'duration', 'N/A')}")
                     else:
                         logger.warning(f"❌ SongBPM ÉCHEC pour '{track.title}'")
                 except Exception as e:
@@ -651,11 +650,24 @@ class DataEnricher:
                 except Exception as e:
                     logger.warning(f"ReccoBeats: ⚠️ Erreur conversion musical_key: {e}")
             
+            # Stocker la Durée
+            if 'duration' in track_info and track_info['duration'] is not None:
+                duration_value = track_info['duration']
+                if isinstance(duration_value, (int, float)) and duration_value > 0:
+                    track.duration = int(duration_value)
+                    logger.info(f"ReccoBeats: ✅ Duration: {track.duration}s")
+                else:
+                    logger.warning(f"ReccoBeats: ⚠️ Duration invalide: {duration_value}")
+
+            # Mise à jour de la logique de succès
             has_spotify_id = hasattr(track, 'spotify_id') and track.spotify_id
             has_bpm = hasattr(track, 'bpm') and track.bpm
-            
+            has_duration = hasattr(track, 'duration') and track.duration  # ⭐ NOUVEAU
+
             if has_spotify_id and has_bpm:
                 logger.info(f"ReccoBeats: ✅ SUCCÈS COMPLET '{track.title}'")
+                if has_duration:
+                    logger.info(f"ReccoBeats: ✅ Duration également récupérée: {track.duration}s")
                 return True
             elif has_spotify_id:
                 logger.info(f"ReccoBeats: ⚠️ SUCCÈS PARTIEL '{track.title}' - ID mais pas BPM")

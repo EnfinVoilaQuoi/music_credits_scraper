@@ -275,12 +275,52 @@ class SongBPMScraper:
         """Normalise une chaîne pour la comparaison (minuscules, sans espaces superflus)"""
         return " ".join(s.lower().strip().split())
 
+    def _normalize_title_for_matching(self, title: str) -> str:
+        """
+        Normalise un titre pour le matching en enlevant les featurings
+        
+        Args:
+            title: Titre à normaliser
+            
+        Returns:
+            Titre normalisé sans featuring
+        """
+        import re
+        
+        # Enlever les variations de featuring
+        patterns_to_remove = [
+            r'\s*\(feat\.?\s+[^)]+\)',  # (feat. Artist)
+            r'\s*\(ft\.?\s+[^)]+\)',    # (ft. Artist)
+            r'\s*feat\.?\s+.+$',        # feat. Artist (en fin de titre)
+            r'\s*ft\.?\s+.+$',          # ft. Artist (en fin de titre)
+            r'\s*\[feat\.?\s+[^\]]+\]', # [feat. Artist]
+            r'\s*\[ft\.?\s+[^\]]+\]',   # [ft. Artist]
+        ]
+        
+        normalized = title
+        for pattern in patterns_to_remove:
+            normalized = re.sub(pattern, '', normalized, flags=re.IGNORECASE)
+        
+        return normalized.strip()
+
     def _match_track(self, result_title: str, result_artist: str, 
                  search_title: str, search_artist: str,
                  result_spotify_id: Optional[str] = None,
                  search_spotify_id: Optional[str] = None) -> bool:
         """
-        Vérifie si un résultat correspond au morceau recherché
+        Vérifie si un résultat correspond au morceau recherché - VERSION AMÉLIORÉE
+        
+        Stratégie :
+        1. Si les deux Spotify IDs sont présents → matching strict par Spotify ID
+        2. Sinon → matching par titre (sans featuring) + artiste
+        
+        Args:
+            result_title: Titre du résultat
+            result_artist: Artiste du résultat
+            search_title: Titre recherché
+            search_artist: Artiste recherché
+            result_spotify_id: ID Spotify du résultat (optionnel)
+            search_spotify_id: ID Spotify recherché (optionnel)
         
         Returns:
             True si le résultat correspond
@@ -298,52 +338,51 @@ class SongBPMScraper:
                 return False
         
         # PRIORITÉ 2 : Matching par nom (fallback si pas les DEUX Spotify IDs)
-        norm_result_title = self._normalize_string(result_title)
+        # ⭐ AMÉLIORATION : Normaliser les titres en enlevant les featurings
+        norm_result_title = self._normalize_string(self._normalize_title_for_matching(result_title))
+        norm_search_title = self._normalize_string(self._normalize_title_for_matching(search_title))
+        
         norm_result_artist = self._normalize_string(result_artist)
-        norm_search_title = self._normalize_string(search_title)
         norm_search_artist = self._normalize_string(search_artist)
         
-        # Vérification stricte : titre ET artiste doivent correspondre EXACTEMENT
+        # Vérification : titre (sans feat) ET artiste doivent correspondre
         title_match = norm_result_title == norm_search_title
         artist_match = norm_result_artist == norm_search_artist
         
         logger.debug(f"🔍 Comparaison noms:")
-        logger.debug(f"   Titres: '{norm_result_title}' vs '{norm_search_title}' → {title_match}")
+        logger.debug(f"   Titres originaux: '{result_title}' vs '{search_title}'")
+        logger.debug(f"   Titres (sans feat): '{norm_result_title}' vs '{norm_search_title}' → {title_match}")
         logger.debug(f"   Artistes: '{norm_result_artist}' vs '{norm_search_artist}' → {artist_match}")
         
+        # ⭐ AMÉLIORATION : Accepter si titre correspond (sans feat) ET (artiste correspond OU on a le même Spotify ID)
         if title_match and artist_match:
-            logger.info(f"✅ Match par nom/artiste")
+            logger.info(f"✅ Match par titre (sans featuring) + artiste")
+            return True
+        elif title_match and result_spotify_id and search_spotify_id and result_spotify_id == search_spotify_id:
+            # Cas particulier : titre identique + même Spotify ID (ex: Guy2Bezbar Figaro feat. Josman)
+            logger.info(f"✅ Match par titre + Spotify ID (featuring ignoré)")
             return True
         
-        logger.info(f"❌ REJET: Titre ou artiste ne correspond pas")
+        logger.info(f"❌ REJET: Pas de correspondance")
         return False
 
     def _extract_track_details(self, detail_url: str, timeout: int = 30) -> Dict[str, Any]:
         """
         Extrait les détails complets depuis la page de détail d'un morceau
-        
-        Args:
-            detail_url: URL de la page de détail (ex: https://songbpm.com/@josman/bambi-a9yu5)
-            
-        Returns:
-            Dict avec les détails (mode, energy, danceability, etc.)
         """
-        self._ensure_driver()
         details = {}
         
         try:
             logger.info(f"📄 Navigation vers page de détail: {detail_url}")
             
-            # NOUVEAU: Définir un timeout court pour le driver
+            # Définir un timeout court pour le driver
             self.driver.set_page_load_timeout(timeout)
             self.driver.get(detail_url)
             
             # Attendre un peu
             time.sleep(2)
             
-            logger.debug("Attente du chargement de la page de détail...")
-            
-            # Essayer plusieurs sélecteurs pour trouver le contenu principal
+            # Récupérer le contenu principal
             content_selectors = [
                 "div.lg\\:prose-xl",
                 "div[class*='prose']",
@@ -364,7 +403,6 @@ class SongBPMScraper:
                     continue
             
             if not full_text:
-                # Dernière tentative : récupérer tout le body
                 try:
                     full_text = self.driver.find_element(By.TAG_NAME, "body").text
                     logger.debug("Utilisation du body complet pour extraction")
@@ -372,74 +410,89 @@ class SongBPMScraper:
                     logger.error("❌ Impossible de récupérer le texte de la page")
                     return details
             
-            # Extraire le mode (major/minor) depuis le texte
             import re
             
-            # NOUVEAU: Nettoyer le texte d'abord
-            # Remplacer les espaces multiples, retours à la ligne, et espaces insécables
-            clean_text = re.sub(r'\s+', ' ', full_text)  # Normaliser tous les espaces
-            clean_text = clean_text.replace('\xa0', ' ')  # Espaces insécables → espaces normaux
+            # Nettoyer le texte
+            clean_text = re.sub(r'\s+', ' ', full_text)
+            clean_text = clean_text.replace('\xa0', ' ')
             
-            # NOUVEAU: Logs de debug pour voir exactement ce qu'on cherche
-            if 'key and' in clean_text.lower():
-                idx = clean_text.lower().index('key and')
-                excerpt = clean_text[max(0, idx-20):idx+50]
-                logger.debug(f"🔍 Extrait autour de 'key and': ...{excerpt}...")
+            # ⭐ AMÉLIORATION 1 : Extraction du MODE avec plusieurs patterns
+            mode = None
             
-            # Regex AMÉLIORÉE : Plus flexible sur les espaces
+            # Pattern 1 : Avec la key (ex: "with a C♯/D♭ key and a major mode")
             mode_match = re.search(
-                r'with\s+a\s+([A-G][\#b♯♭]?)\s+key\s+and\s+a\s+(\w+)\s+mode',
+                r'key\s+and\s+a\s+(major|minor)\s+mode',
                 clean_text,
                 re.IGNORECASE
             )
             
             if mode_match:
-                mode = mode_match.group(2).lower()
+                mode = mode_match.group(1).lower()
+                logger.info(f"🎵 Mode trouvé (pattern 1): {mode}")
+            else:
+                # Pattern 2 : Juste "major" ou "minor" avec "mode" (plus permissif)
+                mode_match2 = re.search(
+                    r'\b(major|minor)\s+mode\b',
+                    clean_text,
+                    re.IGNORECASE
+                )
+                if mode_match2:
+                    mode = mode_match2.group(1).lower()
+                    logger.info(f"🎵 Mode trouvé (pattern 2): {mode}")
+            
+            if mode:
                 details['mode'] = mode
-                logger.info(f"🎵 Mode trouvé: {mode}")
             else:
                 logger.warning("⚠️ Mode non trouvé dans le texte")
-                logger.debug(f"🔍 Texte analysé (premiers 500 char): {clean_text[:500]}")
+                logger.debug(f"🔍 Extrait recherché: {clean_text[max(0, clean_text.lower().find('key')-50):clean_text.lower().find('key')+100] if 'key' in clean_text.lower() else clean_text[:200]}")
             
-            # Extraire la signature temporelle
-            time_sig_match = re.search(r'(\d+)\s+beats per bar', full_text, re.IGNORECASE)
+            # ⭐ AMÉLIORATION 2 : Extraction de la KEY depuis le paragraphe (fallback)
+            # Si on n'a pas déjà la key, essayer de l'extraire du texte
+            key_match = re.search(
+                r'with\s+a\s+([A-G][\#b♯♭/]+)\s+key',
+                clean_text,
+                re.IGNORECASE
+            )
+            if key_match:
+                key_found = key_match.group(1).strip()
+                details['key_from_paragraph'] = key_found
+                logger.info(f"🎵 Key trouvée dans paragraphe: {key_found}")
+            
+            # Extraire time signature
+            time_sig_match = re.search(
+                r'time\s+signature\s+of\s+(\d+)\s+beats?\s+per\s+bar',
+                clean_text,
+                re.IGNORECASE
+            )
             if time_sig_match:
                 details['time_signature'] = int(time_sig_match.group(1))
-                logger.debug(f"Time signature: {details['time_signature']}/4")
+                logger.info(f"🎵 Time signature trouvée: {details['time_signature']}")
             
+            # Logs détaillés
             logger.info(f"✅ Détails extraits: {len(details)} attributs")
-            if details:
-                logger.info(f"📊 Détails: {details}")
-            else:
-                logger.warning("⚠️ Aucun détail extrait de la page")
+            logger.info(f"📊 Détails: {details}")
             
             return details
             
         except TimeoutError:
             logger.warning(f"⏰ Timeout ({timeout}s) lors de la récupération des détails")
-            raise  # Re-lever l'exception pour qu'elle soit gérée par enrich_track
+            raise
         except Exception as e:
             logger.error(f"❌ Erreur extraction détails: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return details
 
     def search_track(self, track_title: str, artist_name: str, 
-                    spotify_id: Optional[str] = None,
-                    max_results_to_check: int = 5,
-                    fetch_details: bool = True) -> Optional[Dict[str, Any]]:
+                spotify_id: Optional[str] = None,
+                max_results_to_check: int = 5,
+                fetch_details: bool = True) -> Optional[Dict[str, Any]]:
         """
         Recherche un morceau sur SongBPM et récupère ses informations
-        
-        Args:
-            track_title: Titre du morceau
-            artist_name: Nom de l'artiste
-            spotify_id: ID Spotify du morceau (optionnel, permet un matching précis)
-            max_results_to_check: Nombre maximum de résultats à vérifier (par défaut 5)
-            fetch_details: Si True, navigue vers la page de détail pour récupérer le mode (par défaut True)
-            
-        Returns:
-            Dict contenant les infos du morceau ou None si non trouvé
         """
+        # S'assurer que le driver est initialisé
         self._ensure_driver()
+        
         if not self.driver:
             logger.error("❌ SongBPM: Driver non initialisé")
             return None
@@ -450,44 +503,57 @@ class SongBPMScraper:
             else:
                 logger.info(f"🔍 SongBPM: Recherche '{track_title}' par {artist_name}")
             
+            # ⭐ IMPORTANT : Définir un timeout strict pour la navigation
+            self.driver.set_page_load_timeout(30)  # 30 secondes max pour charger une page
+            
             # 1. Aller sur la page d'accueil
-            self.driver.get(self.base_url)
-            time.sleep(1)
+            try:
+                self.driver.get(self.base_url)
+                time.sleep(1)
+            except TimeoutException:
+                logger.error(f"⏰ TIMEOUT lors du chargement de la page d'accueil SongBPM")
+                return None
             
             # 2. Gérer le popup de cookies
-            self._handle_cookies()
-            
-            # 3. Trouver la barre de recherche et entrer la requête
-            search_input = self.wait.until(
-                EC.presence_of_element_located((
-                    By.CSS_SELECTOR, 
-                    "input[name='query'][placeholder='type a song, get a bpm']"
-                ))
-            )
-            
-            search_query = f"{artist_name} {track_title}"
-            search_input.clear()
-            search_input.send_keys(search_query)
-            search_input.send_keys(Keys.RETURN)
-            
-            logger.debug(f"📝 SongBPM: Recherche soumise: '{search_query}'")
-            
-            # 3. Attendre que les résultats se chargent
-            # Attendre soit que l'URL change, soit que les résultats apparaissent
-            logger.debug("⏳ Attente du chargement des résultats...")
-            time.sleep(3)  # Attendre un peu plus longtemps
-            
-            # Vérifier l'URL actuelle
-            current_url = self.driver.current_url
-            logger.debug(f"📍 URL actuelle: {current_url}")
-            
-            # Vérifier si des résultats sont présents
             try:
-                # Essayer plusieurs sélecteurs pour les résultats
+                self._handle_cookies()
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur gestion cookies: {e}")
+                # On continue même si les cookies posent problème
+            
+            # 3. Recherche
+            try:
+                search_input = self.wait.until(
+                    EC.presence_of_element_located((
+                        By.CSS_SELECTOR, 
+                        "input[name='query'][placeholder='type a song, get a bpm']"
+                    ))
+                )
+                
+                search_query = f"{artist_name} {track_title}"
+                search_input.clear()
+                search_input.send_keys(search_query)
+                search_input.send_keys(Keys.RETURN)
+                
+                logger.debug(f"📝 SongBPM: Recherche soumise: '{search_query}'")
+                
+            except TimeoutException:
+                logger.error(f"⏰ TIMEOUT lors de la recherche sur SongBPM")
+                self._reset_driver_on_error()
+                return None
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de la saisie de la recherche: {e}")
+                self._reset_driver_on_error()
+                return None
+            
+            # 4. Attendre les résultats (avec timeout)
+            try:
+                time.sleep(3)  # Attendre que les résultats se chargent
+                
+                # Vérifier que des résultats sont présents
                 result_selectors = [
+                    "div.bg-card",
                     "a[href*='/@']",
-                    "div.flex-1 > p",
-                    "[class*='card']"
                 ]
                 
                 results_found = False
@@ -499,32 +565,21 @@ class SongBPMScraper:
                         break
                 
                 if not results_found:
-                    logger.error("❌ Aucun élément de résultat trouvé sur la page")
-                    # Prendre un screenshot pour debug si en mode visible
-                    if not self.headless:
-                        try:
-                            screenshot_path = "songbpm_debug.png"
-                            self.driver.save_screenshot(screenshot_path)
-                            logger.info(f"📸 Screenshot sauvegardé: {screenshot_path}")
-                        except:
-                            pass
-                    log_api("SongBPM", f"search/{track_title}", False)
+                    logger.warning(f"❌ Aucun résultat trouvé pour '{track_title}' par {artist_name}")
                     return None
-                    
+                
             except Exception as e:
-                logger.error(f"Erreur vérification résultats: {e}")
+                logger.error(f"❌ Erreur lors de la vérification des résultats: {e}")
+                return None
             
-            # 4. Récupérer les résultats (maintenant avec Spotify ID et detail_url)
+            # 5. Extraire les résultats
             results = self._get_search_results()
             
             if not results:
-                logger.warning(f"❌ SongBPM: Aucun résultat pour '{search_query}'")
-                log_api("SongBPM", f"search/{track_title}", False)
+                logger.warning(f"❌ SongBPM: Aucun résultat extrait pour '{track_title}'")
                 return None
             
-            logger.info(f"📊 SongBPM: {len(results)} résultat(s) trouvé(s)")
-            
-            # 5. Vérifier les résultats (jusqu'à max_results_to_check)
+            # 6. Vérifier les résultats (jusqu'à max_results_to_check)
             for i, result in enumerate(results[:max_results_to_check], 1):
                 logger.debug(f"Vérification résultat {i}/{min(len(results), max_results_to_check)}")
                 
@@ -717,27 +772,35 @@ class SongBPMScraper:
     def enrich_track_data(self, track: Track, force_update: bool = False, artist_tracks: Optional[List[Track]] = None) -> bool:
         """
         Enrichit un track avec les données depuis SongBPM
-        
-        Args:
-            track: Le track à enrichir
-            force_update: Si True, met à jour même si les données existent déjà
-            artist_tracks: Liste de tous les tracks de l'artiste (pour validation Spotify ID)
-            
-        Returns:
-            True si l'enrichissement a réussi
         """
         try:
-            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+            # S'assurer que le driver est initialisé
+            self._ensure_driver()
             
-            # Extraire le Spotify ID si disponible
+            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
             spotify_id = getattr(track, 'spotify_id', None)
             
-            # Rechercher avec le Spotify ID si disponible (récupérer les données de base)
-            track_data = self.search_track(track.title, artist_name, spotify_id=spotify_id, fetch_details=False)
+            # ⭐ AMÉLIORATION : Timeout plus court pour search_track (30s au lieu de défaut)
+            try:
+                # Rechercher avec timeout court
+                track_data = self.search_track(
+                    track.title, 
+                    artist_name, 
+                    spotify_id=spotify_id, 
+                    fetch_details=False
+                )
+            except TimeoutException as e:
+                logger.error(f"⏰ TIMEOUT lors de la recherche SongBPM pour '{track.title}': {e}")
+                return False
+            except Exception as e:
+                logger.error(f"❌ Erreur recherche SongBPM pour '{track.title}': {e}")
+                return False
+            
             if not track_data:
+                logger.warning(f"⚠️ Aucune donnée trouvée sur SongBPM pour '{track.title}'")
                 return False
 
-            # ÉTAPE 1 : Enrichir avec les DONNÉES DE BASE (toujours disponibles)
+            # ÉTAPE 1 : Enrichir avec les DONNÉES DE BASE
             updated = False
             
             # BPM
@@ -746,31 +809,27 @@ class SongBPMScraper:
                 logger.info(f"📊 BPM ajouté depuis SongBPM: {track.bpm} pour {track.title}")
                 updated = True
             
-            # Key (donnée de base, toujours présente)
+            # Key (donnée de base)
             key_value = track_data.get('key')
             if key_value and (force_update or not hasattr(track, 'key') or not track.key):
                 track.key = key_value
                 logger.info(f"🎵 Key ajoutée depuis SongBPM: {track.key} pour {track.title}")
                 updated = True
             
-            # Spotify ID depuis SongBPM (avec validation stricte)
+            # Spotify ID (avec validation)
             songbpm_spotify_id = track_data.get('spotify_id')
             if songbpm_spotify_id:
                 if not hasattr(track, 'spotify_id') or not track.spotify_id:
-                    # Valider l'unicité
                     if not artist_tracks or self.validate_spotify_id_unique(songbpm_spotify_id, track, artist_tracks):
                         track.spotify_id = songbpm_spotify_id
                         logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id}")
                         updated = True
-                    else:
-                        logger.warning(f"⚠️ REJET: Spotify ID de SongBPM déjà utilisé: {songbpm_spotify_id}")
             
             # Duration - CONVERSION DE "MM:SS" EN SECONDES
             if (force_update or not hasattr(track, 'duration') or not track.duration):
                 if track_data.get('duration'):
                     duration_str = track_data['duration']
                     try:
-                        # Convertir "3:53" en secondes (233)
                         if isinstance(duration_str, str) and ':' in duration_str:
                             parts = duration_str.split(':')
                             if len(parts) == 2:
@@ -786,71 +845,73 @@ class SongBPMScraper:
                     except ValueError as e:
                         logger.warning(f"⚠️ Erreur conversion duration '{duration_str}': {e}")
             
-            # ÉTAPE 2 : Essayer de récupérer le MODE (OPTIONNEL, peut timeout)
+            # ÉTAPE 2 : Essayer de récupérer le MODE (avec timeout strict de 30s)
             detail_url = track_data.get('detail_url')
             if detail_url and key_value:
                 logger.info(f"🔍 Tentative de récupération du mode pour '{track.title}'...")
                 
                 try:
-                    # Récupérer les détails avec timeout court
+                    # ⭐ IMPORTANT : Timeout strict de 30 secondes
                     details = self._extract_track_details(detail_url, timeout=30)
                     
-                    if details and details.get('mode'):
-                        mode_value = details['mode']
-                        
-                        # Stocker le mode
-                        if force_update or not hasattr(track, 'mode') or not track.mode:
-                            track.mode = mode_value
-                            logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
-                            updated = True
-                    
-                    # ⭐ NOUVEAU: Calculer musical_key même si le mode vient de la base de données
-                    # Vérifier si on a SOIT récupéré le mode ci-dessus, SOIT s'il existe déjà
-                    final_key = getattr(track, 'key', None)
-                    final_mode = getattr(track, 'mode', None)
-                    
-                    if final_key and final_mode:
-                        # Calculer musical_key seulement si elle n'existe pas encore
-                        if force_update or not hasattr(track, 'musical_key') or not track.musical_key:
-                            try:
-                                from src.utils.music_theory import key_mode_to_french_from_string
-                                track.musical_key = key_mode_to_french_from_string(final_key, final_mode)
-                                logger.info(f"🎼 Musical key calculée: {track.musical_key} pour {track.title}")
+                    if details:
+                        # Mode
+                        if details.get('mode'):
+                            mode_value = details['mode']
+                            if force_update or not hasattr(track, 'mode') or not track.mode:
+                                track.mode = mode_value
+                                logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
                                 updated = True
-                            except Exception as e:
-                                logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
-                    
-                except TimeoutError:
-                    logger.warning(f"⏰ Timeout lors de la récupération du mode pour '{track.title}'")
-                    # ⭐ MÊME SI TIMEOUT, calculer musical_key si on a déjà key et mode
-                    final_key = getattr(track, 'key', None)
-                    final_mode = getattr(track, 'mode', None)
-                    
-                    if final_key and final_mode and (force_update or not hasattr(track, 'musical_key') or not track.musical_key):
-                        try:
-                            from src.utils.music_theory import key_mode_to_french_from_string
-                            track.musical_key = key_mode_to_french_from_string(final_key, final_mode)
-                            logger.info(f"🎼 Musical key calculée (fallback après timeout): {track.musical_key}")
-                            updated = True
-                        except Exception as e:
-                            logger.warning(f"⚠️ Erreur conversion musical_key (fallback): {e}")
-                    else:
-                        logger.warning(f"⚠️ Mode non trouvé dans les détails pour '{track.title}'")
                         
-                except TimeoutError:
-                    logger.warning(f"⏰ Timeout lors de la récupération du mode pour '{track.title}' - Données de base conservées")
+                        # ⭐ NOUVEAU : Utiliser la key du paragraphe si pas encore de key
+                        if details.get('key_from_paragraph') and (force_update or not hasattr(track, 'key') or not track.key):
+                            track.key = details['key_from_paragraph']
+                            logger.info(f"🎵 Key ajoutée depuis paragraphe: {track.key} pour {track.title}")
+                            updated = True
+                        
+                        # Calculer musical_key si on a key ET mode
+                        final_key = getattr(track, 'key', None)
+                        final_mode = getattr(track, 'mode', None)
+                        
+                        if final_key and final_mode:
+                            if force_update or not hasattr(track, 'musical_key') or not track.musical_key:
+                                try:
+                                    from src.utils.music_theory import key_mode_to_french_from_string
+                                    track.musical_key = key_mode_to_french_from_string(final_key, final_mode)
+                                    logger.info(f"🎼 Musical key calculée: {track.musical_key} pour {track.title}")
+                                    updated = True
+                                except Exception as e:
+                                    logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
+                    
+                except TimeoutException:
+                    logger.warning(f"⏰ TIMEOUT (30s) lors de la récupération du mode pour '{track.title}' - Données de base conservées")
+                    # ⭐ IMPORTANT : On continue avec les données de base même si timeout
                 except Exception as e:
                     logger.warning(f"⚠️ Erreur récupération mode pour '{track.title}': {e} - Données de base conservées")
             
             return updated
             
-        except TimeoutError as e:
-            logger.error(f"⏰ SongBPM timeout pour {track.title}: {e}")
+        except TimeoutException as e:
+            logger.error(f"⏰ SongBPM TIMEOUT pour {track.title}: {e}")
             return False
         except Exception as e:
-            logger.error(f"Erreur SongBPM pour {track.title}: {e}")
+            logger.error(f"❌ SongBPM ERREUR pour {track.title}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return False
 
+    def _reset_driver_on_error(self):
+        """Réinitialise le driver en cas d'erreur"""
+        try:
+            if self.driver:
+                logger.warning("⚠️ Réinitialisation du driver après erreur")
+                self.driver.quit()
+                self.driver = None
+                self.wait = None
+                time.sleep(2)
+                self._init_driver()
+        except Exception as e:
+            logger.error(f"Erreur lors du reset du driver: {e}")
 
     def close(self):
         """Ferme le driver Selenium"""

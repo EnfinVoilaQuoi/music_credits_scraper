@@ -602,6 +602,15 @@ class ReccoBeatsIntegratedClient:
             if track_data:
                 logger.info("✅ Données ReccoBeats récupérées avec succès")
                 enriched_data = {**minimal_response, **track_data}
+
+                # ⭐ IMPORTANT : Extraire la durée
+                if 'durationMs' in track_data:
+                    duration_ms = track_data['durationMs']
+                    # Convertir millisecondes en secondes
+                    enriched_data['duration'] = int(duration_ms / 1000) if duration_ms else None
+                    logger.info(f"⏱️ Duration extraite de track_data: {enriched_data['duration']}s ({duration_ms}ms)")
+                else:
+                    logger.warning(f"⚠️ durationMs absent de track_data. Clés disponibles: {list(track_data.keys())}")
                 
                 # Audio features (timeout plus court)
                 reccobeats_id = track_data.get('id')

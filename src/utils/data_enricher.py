@@ -322,40 +322,28 @@ class DataEnricher:
         return [k for k, v in self.apis_available.items() if v]
     
     def enrich_track(self, track: Track, sources: Optional[List[str]] = None, 
-                     force_update: bool = False, artist_tracks: Optional[List[Track]] = None,
-                     clear_on_failure: bool = True) -> Dict[str, bool]:
+                 force_update: bool = False, artist_tracks: Optional[List[Track]] = None,
+                 clear_on_failure: bool = True) -> Dict[str, bool]:
         """
         Enrichit un morceau avec les sources spécifiées
-        VERSION CORRIGÉE: Avec validation Spotify ID + nettoyage des données erronées
-        
-        Args:
-            track: Le morceau à enrichir
-            sources: Liste des sources à utiliser
-            force_update: Si True, met à jour même si les données existent déjà
-            artist_tracks: NOUVEAU - Liste de tous les tracks de l'artiste (pour validation Spotify ID)
-            clear_on_failure: NOUVEAU - Si True, efface les données erronées quand toutes les sources échouent
-            
-        Returns:
-            Dict avec le statut de chaque source
+        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM
         """
         if sources is None:
-            sources = ['spotify_id', 'reccobeats', 'songbpm']  # MODIFIÉ: spotify_id en premier
+            sources = ['spotify_id', 'reccobeats', 'songbpm']
         
         results = {}
         
         logger.info(f"🔍 Enrichissement: track='{track.title}', sources={sources}, force_update={force_update}")
         logger.info(f"🔍 État actuel: spotify_id={getattr(track, 'spotify_id', None)}, bpm={getattr(track, 'bpm', None)}")
         
-        # NOUVEAU: Sauvegarder l'état initial pour détecter si des données ont été trouvées
+        # Sauvegarder l'état initial
         initial_spotify_id = getattr(track, 'spotify_id', None)
         initial_bpm = getattr(track, 'bpm', None)
         
-        # NOUVEAU: 0. Spotify ID scraper en PREMIER (si pas de Spotify ID ou si force_update)
+        # ========================================
+        # 0. SCRAPER SPOTIFY ID
+        # ========================================
         if 'spotify_id' in sources and self.apis_available.get('spotify_id'):
-            # Utiliser le scraper si:
-            # - Pas de Spotify ID existant OU
-            # - Force update demandé OU
-            # - Spotify ID existant mais invalide (dupliqué)
             should_use_spotify_scraper = (
                 force_update or 
                 not hasattr(track, 'spotify_id') or 
@@ -364,37 +352,88 @@ class DataEnricher:
                     getattr(track, 'spotify_id', None), track, artist_tracks
                 ))
             )
+            
+            if should_use_spotify_scraper and 'reccobeats' not in sources:
+                logger.info(f"🎯 Appel du scraper Spotify ID pour '{track.title}'")
+                try:
+                    spotify_id = self.get_unique_spotify_id(track, artist_tracks or [], force_scraper=True)
+                    if spotify_id:
+                        track.spotify_id = spotify_id
+                        logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
+                        results['spotify_id'] = True
+                    else:
+                        logger.warning(f"❌ Échec récupération Spotify ID via scraper")
+                        results['spotify_id'] = False
+                except Exception as e:
+                    logger.error(f"Erreur Spotify ID scraper pour {track.title}: {e}")
+                    results['spotify_id'] = False
+            elif should_use_spotify_scraper and 'reccobeats' in sources:
+                logger.info(f"⏭️ Skip Spotify ID scraper car ReccoBeats est sélectionné (ReccoBeats le cherchera)")
+                results['spotify_id'] = 'skipped'
+            else:
+                logger.info(f"⏭️ Scraper Spotify ID non nécessaire (ID déjà présent et valide)")
+                results['spotify_id'] = 'not_needed'
         
-        # 1. ReccoBeats pour BPM et features audio
+        # ========================================
+        # 1. RECCOBEATS
+        # ========================================
+        reccobeats_success = False
         if 'reccobeats' in sources and self.apis_available.get('reccobeats'):
+            logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
             try:
-                # MODIFIÉ: Passer artist_tracks pour validation
-                success = self._enrich_with_reccobeats(track, artist_tracks)
-                results['reccobeats'] = success
-                if success:
-                    logger.debug(f"✅ ReccoBeats: BPM={track.bpm}")
+                reccobeats_success = self._enrich_with_reccobeats(track, artist_tracks)
+                results['reccobeats'] = reccobeats_success
+                
+                if reccobeats_success:
+                    logger.info(f"✅ ReccoBeats SUCCÈS: BPM={getattr(track, 'bpm', 'N/A')}, Spotify ID={getattr(track, 'spotify_id', 'N/A')}")
+                else:
+                    logger.warning(f"❌ ReccoBeats ÉCHEC pour '{track.title}' - On tentera SongBPM en fallback")
             except Exception as e:
-                logger.error(f"Erreur ReccoBeats pour {track.title}: {e}")
+                logger.error(f"❌ Erreur ReccoBeats pour {track.title}: {e}")
                 results['reccobeats'] = False
+                reccobeats_success = False
         
-        # 2. SongBPM scraper
+        # ========================================
+        # 2. SONGBPM (avec amélioration de la logique)
+        # ========================================
         if 'songbpm' in sources and self.apis_available.get('songbpm'):
-            should_use_songbpm = force_update or not track.bpm
+            # NOUVELLE LOGIQUE: Utiliser SongBPM si :
+            # - force_update OU
+            # - pas de BPM OU
+            # - ReccoBeats a échoué (pour avoir un fallback)
+            should_use_songbpm = (
+                force_update or 
+                not track.bpm or
+                (not reccobeats_success and 'reccobeats' in sources)  # NOUVEAU: Fallback si ReccoBeats échoue
+            )
             
             if should_use_songbpm:
+                logger.info(f"🎼 Appel de SongBPM pour '{track.title}' (raison: force_update={force_update}, no_bpm={not track.bpm}, reccobeats_failed={not reccobeats_success and 'reccobeats' in sources})")
                 try:
-                    # MODIFIÉ: Passer artist_tracks pour validation
-                    success = self._enrich_with_songbpm(track, force_update=force_update, artist_tracks=artist_tracks)
-                    results['songbpm'] = success
-                    if success:
-                        logger.debug(f"✅ SongBPM: BPM={track.bpm}, Mode={getattr(track, 'mode', 'N/A')}")
+                    songbpm_success = self._enrich_with_songbpm(track, force_update=force_update, artist_tracks=artist_tracks)
+                    results['songbpm'] = songbpm_success
+                    
+                    if songbpm_success:
+                        logger.info(f"✅ SongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}")
+                    else:
+                        logger.warning(f"❌ SongBPM ÉCHEC pour '{track.title}'")
                 except Exception as e:
                     logger.error(f"❌ Erreur SongBPM pour {track.title}: {e}")
                     results['songbpm'] = False
+            else:
+                logger.info(f"⏭️ SongBPM non appelé (BPM déjà présent: {track.bpm})")
+                results['songbpm'] = 'not_needed'
         
-        # NOUVEAU: Nettoyage des données erronées si toutes les sources ont échoué
+        # ========================================
+        # 3. NETTOYAGE SI ÉCHEC COMPLET
+        # ========================================
         if clear_on_failure and force_update:
-            all_failed = all(not success for success in results.values())
+            # Vérifier si toutes les sources ont échoué
+            all_failed = all(
+                result is False 
+                for result in results.values() 
+                if result not in ['skipped', 'not_needed']
+            )
             
             # Vérifier si aucune nouvelle donnée n'a été trouvée
             new_spotify_id = getattr(track, 'spotify_id', None)
@@ -402,14 +441,12 @@ class DataEnricher:
             
             no_new_data = (
                 (new_spotify_id == initial_spotify_id or new_spotify_id is None) and
-                (new_bpm == initial_bpm)
+                (new_bpm == initial_bpm or new_bpm is None)
             )
             
             if all_failed or no_new_data:
-                # Si force_update et aucune source n'a trouvé de nouvelles données,
-                # effacer les anciennes données potentiellement erronées
                 if force_update and initial_bpm is not None:
-                    # VÉRIFICATION DE SÉCURITÉ: Ne jamais toucher aux données essentielles
+                    # Vérifications de sécurité
                     if not hasattr(track, 'title') or not track.title:
                         logger.error(f"❌ ERREUR: Track sans titre, annulation du nettoyage")
                         return results
@@ -420,7 +457,6 @@ class DataEnricher:
                     
                     logger.warning(f"⚠️ NETTOYAGE: Aucune source n'a trouvé de données pour '{track.title}'")
                     logger.warning(f"⚠️ Effacement des anciennes valeurs potentiellement erronées...")
-                    logger.info(f"   ℹ️ PROTECTION: Title et Artist seront préservés")
                     
                     # Effacer UNIQUEMENT les données musicales
                     if hasattr(track, 'bpm'):
@@ -448,15 +484,25 @@ class DataEnricher:
                         track.musical_key = None
                         logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
                     
-                    # VÉRIFICATION POST-NETTOYAGE
+                    # Vérification post-nettoyage
                     if not hasattr(track, 'title') or not track.title:
                         logger.error(f"❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
                     elif not hasattr(track, 'artist') or not track.artist:
                         logger.error(f"❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
                     else:
                         logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
-                        logger.info(f"   ✅ VÉRIFICATION: Artiste intact = {track.artist}")
                         results['cleaned'] = True
+        
+        # ========================================
+        # RÉSUMÉ FINAL
+        # ========================================
+        logger.info(f"📊 RÉSUMÉ enrichissement '{track.title}':")
+        logger.info(f"   • Résultats: {results}")
+        logger.info(f"   • Spotify ID: {getattr(track, 'spotify_id', 'N/A')}")
+        logger.info(f"   • BPM: {getattr(track, 'bpm', 'N/A')}")
+        logger.info(f"   • Key: {getattr(track, 'key', 'N/A')}, Mode: {getattr(track, 'mode', 'N/A')}")
+        logger.info(f"   • Musical Key: {getattr(track, 'musical_key', 'N/A')}")
+        logger.info(f"   • Duration: {getattr(track, 'duration', 'N/A')}")
         
         return results
     
@@ -520,6 +566,8 @@ class DataEnricher:
             
             logger.debug(f"ReccoBeats: ✅ Données récupérées")
             
+            new_spotify_id = None
+
             # Stocker l'ID Spotify (avec validation)
             if 'spotify_id' in track_info:
                 new_spotify_id = track_info['spotify_id']
@@ -527,6 +575,15 @@ class DataEnricher:
                 # Valider avant de stocker
                 if artist_tracks and not self.validate_spotify_id_unique(new_spotify_id, track, artist_tracks):
                     logger.error(f"❌ REJET: Spotify ID de ReccoBeats déjà utilisé: {new_spotify_id}")
+                    # Logs de debug
+                    logger.info(f"🔍 DEBUG: Spotify ID dupliqué détecté")
+                    logger.info(f"🔍 DEBUG: ID rejeté: {new_spotify_id}")
+                    logger.info(f"🔍 DEBUG: Track concerné: '{track.title}'")
+                    # Chercher quel track a déjà cet ID
+                    for other_track in artist_tracks:
+                        if other_track != track and getattr(other_track, 'spotify_id', None) == new_spotify_id:
+                            logger.info(f"🔍 DEBUG: ID déjà utilisé par: '{other_track.title}'")
+                            break
                     return False
                 
                 track.spotify_id = new_spotify_id
@@ -555,6 +612,14 @@ class DataEnricher:
             if 'mode' in track_info and track_info['mode'] is not None:
                 track.mode = track_info['mode']
                 logger.info(f"ReccoBeats: ✅ Mode: {track.mode}")
+
+            if hasattr(track, 'key') and hasattr(track, 'mode') and track.key is not None and track.mode is not None:
+                try:
+                    from src.utils.music_theory import key_mode_to_french
+                    track.musical_key = key_mode_to_french(track.key, track.mode)
+                    logger.info(f"ReccoBeats: ✅ Musical Key: {track.musical_key}")
+                except Exception as e:
+                    logger.warning(f"ReccoBeats: ⚠️ Erreur conversion musical_key: {e}")
             
             has_spotify_id = hasattr(track, 'spotify_id') and track.spotify_id
             has_bpm = hasattr(track, 'bpm') and track.bpm

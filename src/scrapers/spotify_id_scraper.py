@@ -15,9 +15,10 @@ logger = logging.getLogger('SpotifyIDScraper')
 class SpotifyIDScraper:
     """Scraper pour récupérer les IDs Spotify via recherche web"""
     
-    def __init__(self, cache_file: str = "spotify_ids_cache.json"):
+    def __init__(self, cache_file: str = "spotify_ids_cache.json", headless: bool = False):
         self.cache_file = cache_file
         self.cache = self._load_cache()
+        self.headless = headless
         self.session = requests.Session()
         
         # Headers plus réalistes pour éviter la détection

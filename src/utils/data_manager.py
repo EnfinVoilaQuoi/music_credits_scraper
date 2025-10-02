@@ -543,7 +543,8 @@ class DataManager:
                 cursor.execute("""
                     SELECT id, title, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
-                        bpm, duration, genre, genius_url, spotify_url,
+                        bpm, duration, genre, musical_key, time_signature,
+                        genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics,
                         created_at, updated_at, last_scraped
@@ -570,17 +571,19 @@ class DataManager:
                         bpm = row[8]         # bpm
                         duration = row[9]    # duration
                         genre = row[10]      # genre
-                        genius_url = row[11] # genius_url
-                        spotify_url = row[12] # spotify_url
-                        is_featuring = row[13] # is_featuring
-                        primary_artist_name = row[14] # primary_artist_name
-                        featured_artists = row[15] # featured_artists
-                        lyrics = row[16]     # lyrics
-                        lyrics_scraped_at = row[17] # lyrics_scraped_at
-                        has_lyrics = row[18] # has_lyrics
-                        created_at = row[19] # created_at
-                        updated_at = row[20] # updated_at
-                        last_scraped = row[21] # last_scraped
+                        musical_key = row[11] # musical_key - NOUVEAU
+                        time_signature = row[12] # time_signature - NOUVEAU
+                        genius_url = row[13] # genius_url (décalé de 2)
+                        spotify_url = row[14] # spotify_url (décalé de 2)
+                        is_featuring = row[15] # is_featuring (décalé de 2)
+                        primary_artist_name = row[16] # primary_artist_name (décalé de 2)
+                        featured_artists = row[17] # featured_artists (décalé de 2)
+                        lyrics = row[18]     # lyrics (décalé de 2)
+                        lyrics_scraped_at = row[19] # lyrics_scraped_at (décalé de 2)
+                        has_lyrics = row[20] # has_lyrics (décalé de 2)
+                        created_at = row[21] # created_at (décalé de 2)
+                        updated_at = row[22] # updated_at (décalé de 2)
+                        last_scraped = row[23] # last_scraped (décalé de 2)
                         
                         # Validation
                         if not track_id or not title:
@@ -614,6 +617,8 @@ class DataManager:
                         track.bpm = safe_assign(bpm)
                         track.duration = safe_assign(duration)
                         track.genre = safe_assign(genre)
+                        track.musical_key = safe_assign(musical_key)
+                        track.time_signature = safe_assign(time_signature)
                         track.genius_url = safe_assign(genius_url)
                         track.spotify_url = safe_assign(spotify_url)
                         track.created_at = safe_assign(created_at)

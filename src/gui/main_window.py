@@ -359,9 +359,14 @@ class MainWindow:
                 lyrics_display = "✓" if getattr(track, 'has_lyrics', False) else ""
                 
                 # BPM
-                bpm = getattr(track, 'bpm', '') or ""
-                if bpm:
-                    bpm = str(bpm)
+                if hasattr(track, 'bpm') and track.bpm:
+                    bpm_display = str(track.bpm)
+                    # Ajouter la tonalité si disponible
+                    if hasattr(track, 'musical_key') and track.musical_key:
+                        bpm_display = f"{track.bpm} ({track.musical_key})"
+                    bpm = bpm_display
+                else:
+                    bpm = ""
 
                 # Certifications
                 certif_display = ""

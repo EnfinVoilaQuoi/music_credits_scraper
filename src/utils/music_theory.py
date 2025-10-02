@@ -41,12 +41,16 @@ def key_mode_to_french_from_string(key_str: str, mode_str: str) -> str:
     en notation française
     
     Args:
-        key_str: Note en notation anglaise (ex: "F", "C#", "Bb")
-        mode_str: Mode en anglais ("major" ou "minor")
+        key_str: Note en notation anglaise (ex: "F", "C#", "Bb") ou entier
+        mode_str: Mode en anglais ("major" ou "minor") ou entier
         
     Returns:
         Tonalité en français (ex: "Fa majeur", "Ré mineur")
     """
+    # NOUVEAU: Gérer le cas où on reçoit des entiers
+    if isinstance(key_str, (int, float)) and isinstance(mode_str, (int, float)):
+        return key_mode_to_french(int(key_str), int(mode_str))
+    
     # Mapping des notes anglaises vers françaises
     notes_mapping = {
         "C": "Do",
@@ -63,15 +67,15 @@ def key_mode_to_french_from_string(key_str: str, mode_str: str) -> str:
         "B": "Si"
     }
     
-    # Nettoyer la key
-    key_clean = key_str.strip()
+    # Nettoyer la key - CORRECTION: vérifier le type avant strip()
+    key_clean = str(key_str).strip() if isinstance(key_str, str) else str(key_str)
     
     # Trouver la note française
     note_fr = notes_mapping.get(key_clean, key_clean)
     
-    # Convertir le mode
-    mode_clean = mode_str.strip().lower()
-    mode_fr = "majeur" if mode_clean == "major" else "mineur"
+    # Convertir le mode - CORRECTION: vérifier le type avant strip()
+    mode_clean = str(mode_str).strip().lower() if isinstance(mode_str, str) else str(mode_str)
+    mode_fr = "majeur" if mode_clean in ["major", "1"] else "mineur"
     
     return f"{note_fr} {mode_fr}"
 

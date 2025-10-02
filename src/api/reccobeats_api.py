@@ -638,6 +638,17 @@ class ReccoBeatsIntegratedClient:
                     enriched_data['energy'] = features.get('energy')
                     enriched_data['danceability'] = features.get('danceability')
                     enriched_data['valence'] = features.get('valence')
+
+                    if enriched_data.get('key') is not None and enriched_data.get('mode') is not None:
+                        try:
+                            from src.utils.music_theory import key_mode_to_french
+                            enriched_data['musical_key'] = key_mode_to_french(
+                                enriched_data['key'],
+                                enriched_data['mode']
+                            )
+                            logger.info(f"✅ Musical key convertie: {enriched_data['musical_key']}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
                     
                     logger.info(f"🔍 DEBUG: extraction terminée, enriched_data keys = {list(enriched_data.keys())}")
                     logger.info(f"🔍 DEBUG: enriched_data bpm={enriched_data.get('bpm')}, key={enriched_data.get('key')}, mode={enriched_data.get('mode')}")

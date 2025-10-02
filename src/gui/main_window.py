@@ -38,7 +38,7 @@ class MainWindow:
         # Services
         self.genius_api = GeniusAPI()
         self.data_manager = DataManager()
-        self.data_enricher = DataEnricher()
+        self.data_enricher = DataEnricher(headless_songbpm=False)
         self.current_artist: Optional[Artist] = None
         self.tracks: List[Track] = []
         
@@ -358,15 +358,33 @@ class MainWindow:
                 # Paroles
                 lyrics_display = "✓" if getattr(track, 'has_lyrics', False) else ""
                 
-                # BPM
+                # BPM avec tonalité - VERSION AMÉLIORÉE
+                bpm = ""  # ⭐ IMPORTANT : Initialiser la variable
                 if hasattr(track, 'bpm') and track.bpm:
-                    bpm_display = str(track.bpm)
-                    # Ajouter la tonalité si disponible
+                    bpm = str(track.bpm)
+                    
+                    # ⭐ LOGIQUE AMÉLIORÉE pour afficher la tonalité
+                    musical_key = None
+                    
+                    # 1. Essayer musical_key directement
                     if hasattr(track, 'musical_key') and track.musical_key:
-                        bpm_display = f"{track.bpm} ({track.musical_key})"
-                    bpm = bpm_display
-                else:
-                    bpm = ""
+                        musical_key = track.musical_key
+                    
+                    # 2. FALLBACK : Calculer à partir de key et mode
+                    elif hasattr(track, 'key') and hasattr(track, 'mode') and track.key and track.mode:
+                        try:
+                            from src.utils.music_theory import key_mode_to_french_from_string
+                            musical_key = key_mode_to_french_from_string(track.key, track.mode)
+                            
+                            # ⭐ BONUS : Stocker le résultat pour la prochaine fois
+                            track.musical_key = musical_key
+                            logger.debug(f"Musical key calculée et stockée pour '{track.title}': {musical_key}")
+                        except Exception as e:
+                            logger.warning(f"Erreur conversion key/mode pour '{track.title}': {e}")
+                    
+                    # Ajouter la tonalité au BPM si disponible
+                    if musical_key:
+                        bpm = f"{track.bpm} ({musical_key})"
 
                 # Certifications
                 certif_display = ""
@@ -889,17 +907,28 @@ class MainWindow:
         if track.bpm:
             bpm_text = f"🎼 BPM: {track.bpm}"
             
-            # Ajouter la tonalité si disponible
+            # ⭐ LOGIQUE AMÉLIORÉE pour afficher la tonalité
+            musical_key = None
+            
+            # 1. Ajouter la tonalité si disponible directement
             if hasattr(track, 'musical_key') and track.musical_key:
-                bpm_text += f" ({track.musical_key})"
-            # FALLBACK : Si musical_key n'existe pas mais key et mode existent
+                musical_key = track.musical_key
+            
+            # 2. FALLBACK : Si musical_key n'existe pas mais key et mode existent
             elif hasattr(track, 'key') and hasattr(track, 'mode') and track.key and track.mode:
-                from src.utils.music_theory import key_mode_to_french_from_string
                 try:
+                    from src.utils.music_theory import key_mode_to_french_from_string
                     musical_key = key_mode_to_french_from_string(track.key, track.mode)
-                    bpm_text += f" ({musical_key})"
+                    
+                    # ⭐ BONUS : Stocker le résultat calculé pour éviter de recalculer
+                    track.musical_key = musical_key
+                    logger.debug(f"Musical key calculée et stockée pour '{track.title}': {musical_key}")
                 except Exception as e:
                     logger.warning(f"Erreur conversion key/mode: {e}")
+            
+            # Ajouter la tonalité au texte BPM si disponible
+            if musical_key:
+                bpm_text += f" ({musical_key})"
             
             ctk.CTkLabel(right_column, text=bpm_text).pack(anchor="w", pady=1)
         

@@ -1,9 +1,16 @@
 """Script de mise à jour automatique des certifications SNEP"""
 import sys
+import io
 import requests
 from pathlib import Path
 from datetime import datetime
 import shutil
+
+# Configurer l'encodage UTF-8 pour la console Windows
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from src.api.snep_certifications import SNEPCertificationManager

@@ -24,34 +24,34 @@ class DisabledTracksManager:
         safe_name = safe_name.replace(' ', '_').lower()
         return self.disabled_tracks_dir / f"{safe_name}_disabled.json"
     
-    def save_disabled_tracks(self, artist_name: str, disabled_tracks: Set[int]) -> bool:
+    def save_disabled_tracks(self, artist_name: str, disabled_track_ids: Set[int]) -> bool:
         """
         Sauvegarde les morceaux désactivés pour un artiste
-        
+
         Args:
             artist_name: Nom de l'artiste
-            disabled_tracks: Set des indices des morceaux désactivés
-            
+            disabled_track_ids: Set des IDs des morceaux désactivés (track.id)
+
         Returns:
             bool: True si la sauvegarde a réussi
         """
         try:
             file_path = self._get_artist_file(artist_name)
-            
+
             # Convertir le set en liste pour la sérialisation JSON
             data = {
                 "artist_name": artist_name,
-                "disabled_tracks": list(disabled_tracks),
+                "disabled_track_ids": list(disabled_track_ids),
                 "last_updated": str(datetime.now()),
-                "version": "1.0"
+                "version": "2.0"  # Version 2.0 utilise des IDs au lieu d'indices
             }
-            
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Morceaux désactivés sauvegardés pour {artist_name}: {len(disabled_tracks)} morceaux")
+
+            logger.info(f"Morceaux désactivés sauvegardés pour {artist_name}: {len(disabled_track_ids)} morceaux")
             return True
-            
+
         except Exception as e:
             logger.error(f"Erreur lors de la sauvegarde des morceaux désactivés pour {artist_name}: {e}")
             return False
@@ -59,32 +59,40 @@ class DisabledTracksManager:
     def load_disabled_tracks(self, artist_name: str) -> Set[int]:
         """
         Charge les morceaux désactivés pour un artiste
-        
+
         Args:
             artist_name: Nom de l'artiste
-            
+
         Returns:
-            Set[int]: Set des indices des morceaux désactivés
+            Set[int]: Set des IDs des morceaux désactivés (track.id)
         """
         try:
             file_path = self._get_artist_file(artist_name)
-            
+
             if not file_path.exists():
                 logger.debug(f"Aucun fichier de morceaux désactivés trouvé pour {artist_name}")
                 return set()
-            
+
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
-            # Vérifier la structure du fichier
-            if not isinstance(data, dict) or "disabled_tracks" not in data:
-                logger.warning(f"Structure invalide dans le fichier pour {artist_name}")
+
+            # Vérifier la version et migrer si nécessaire
+            version = data.get("version", "1.0")
+
+            if version == "2.0":
+                # Version 2.0 utilise des IDs
+                if "disabled_track_ids" not in data:
+                    logger.warning(f"Structure invalide dans le fichier v2.0 pour {artist_name}")
+                    return set()
+                disabled_track_ids = set(data["disabled_track_ids"])
+                logger.info(f"Morceaux désactivés chargés pour {artist_name}: {len(disabled_track_ids)} morceaux")
+                return disabled_track_ids
+            else:
+                # Version 1.0 utilisait des indices - ne peut pas être converti automatiquement
+                # car on ne connaît pas l'ordre des tracks au moment du chargement
+                logger.warning(f"Fichier v1.0 détecté pour {artist_name} - migration nécessaire (impossible automatiquement)")
                 return set()
-            
-            disabled_tracks = set(data["disabled_tracks"])
-            logger.info(f"Morceaux désactivés chargés pour {artist_name}: {len(disabled_tracks)} morceaux")
-            return disabled_tracks
-            
+
         except Exception as e:
             logger.error(f"Erreur lors du chargement des morceaux désactivés pour {artist_name}: {e}")
             return set()
@@ -115,29 +123,35 @@ class DisabledTracksManager:
     def get_all_artists_with_disabled_tracks(self) -> Dict[str, int]:
         """
         Retourne tous les artistes ayant des morceaux désactivés
-        
+
         Returns:
             Dict[str, int]: Dictionnaire {nom_artiste: nombre_morceaux_désactivés}
         """
         artists = {}
-        
+
         try:
             for file_path in self.disabled_tracks_dir.glob("*_disabled.json"):
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    
-                    if isinstance(data, dict) and "artist_name" in data and "disabled_tracks" in data:
+
+                    if isinstance(data, dict) and "artist_name" in data:
                         artist_name = data["artist_name"]
-                        count = len(data["disabled_tracks"])
+                        # Support des versions 1.0 et 2.0
+                        if "disabled_track_ids" in data:
+                            count = len(data["disabled_track_ids"])
+                        elif "disabled_tracks" in data:
+                            count = len(data["disabled_tracks"])
+                        else:
+                            continue
                         artists[artist_name] = count
-                        
+
                 except Exception as e:
                     logger.warning(f"Erreur lors de la lecture de {file_path}: {e}")
                     continue
-            
+
             return artists
-            
+
         except Exception as e:
             logger.error(f"Erreur lors de l'énumération des artistes: {e}")
             return {}

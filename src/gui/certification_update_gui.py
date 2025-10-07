@@ -249,17 +249,19 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         def run_script():
             try:
                 self._set_progress(f"Mise à jour {source_name} en cours...")
-                
-                script_path = Path(__file__).parent.parent / 'scripts' / script_name
+
+                script_path = Path(__file__).parent.parent / 'utils' / script_name
                 
                 if not script_path.exists():
                     raise FileNotFoundError(f"Script non trouvé: {script_path}")
                 
-                # Lancer le script
+                # Lancer le script avec encodage UTF-8
                 result = subprocess.run(
                     [sys.executable, str(script_path)],
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     cwd=Path(__file__).parent.parent.parent
                 )
                 
@@ -283,7 +285,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
     
     def _run_script_sync(self, script_name: str):
         """Lance un script de façon synchrone"""
-        script_path = Path(__file__).parent.parent / 'scripts' / script_name
+        script_path = Path(__file__).parent.parent / 'utils' / script_name
         
         if not script_path.exists():
             raise FileNotFoundError(f"Script non trouvé: {script_path}")
@@ -292,6 +294,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             [sys.executable, str(script_path)],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             cwd=Path(__file__).parent.parent.parent
         )
         

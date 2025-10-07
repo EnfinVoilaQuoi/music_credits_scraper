@@ -3,6 +3,8 @@ Scraper pour les certifications musicales belges Ultratop.be
 Script 2: Mise à jour automatique et manuelle de la base de données
 """
 
+import sys
+import io
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -16,7 +18,11 @@ from urllib.parse import urljoin
 import json
 import schedule
 import argparse
-import sys
+
+# Configurer l'encodage UTF-8 pour la console Windows
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 class UltratopUpdater:
     """Scraper pour mettre à jour la base de données des certifications Ultratop"""

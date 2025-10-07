@@ -26,6 +26,7 @@ data/ultratop/*
 data\certifications\brma\backups/*
 data\certifications\brma\logs/*
 data\certifications\brma\reports/*
+src/scripts/*
 *.db
 *.sqlite
 *.log

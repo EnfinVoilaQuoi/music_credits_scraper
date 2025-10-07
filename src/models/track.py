@@ -197,7 +197,8 @@ class Track:
     lyrics: Optional[str] = None  # Paroles complètes
     has_lyrics: bool = False  # Indicateur si les paroles sont disponibles
     lyrics_scraped_at: Optional[datetime] = None  # Date de récupération des paroles
-    
+    anecdotes: Optional[str] = None  # Anecdotes et informations supplémentaires
+
     # Métadonnées supplémentaires
     popularity: Optional[int] = None  # Nombre de vues sur Genius
     artwork_url: Optional[str] = None  # URL de la pochette
@@ -233,12 +234,86 @@ class Track:
         """Ajoute un crédit au morceau"""
         # Éviter les doublons
         for existing in self.credits:
-            if (existing.name == credit.name and 
+            if (existing.name == credit.name and
                 existing.role == credit.role and
                 existing.role_detail == credit.role_detail):
                 return
         self.credits.append(credit)
-    
+
+    def update_release_date(self, new_date, source: str = "unknown", force: bool = False) -> bool:
+        """
+        Met à jour la date de sortie de manière intelligente
+
+        Args:
+            new_date: Nouvelle date (datetime, str, ou None)
+            source: Source de la date ("api", "scraper", "manual")
+            force: Si True, écrase la date existante même si elle est plus ancienne
+
+        Returns:
+            bool: True si la date a été mise à jour, False sinon
+
+        Logique:
+        - Garde toujours la date la PLUS ANCIENNE (singles sortis avant l'album)
+        - Si force=True, écrase sans vérifier
+        - Si pas de date existante, met à jour
+        """
+        from datetime import datetime
+        from src.utils.logger import get_logger
+        logger = get_logger(__name__)
+
+        # Convertir new_date en datetime si c'est une string
+        if isinstance(new_date, str):
+            try:
+                # Format ISO (YYYY-MM-DD ou YYYY-MM-DDTHH:MM:SS)
+                if 'T' in new_date:
+                    new_date = datetime.fromisoformat(new_date.replace('Z', '+00:00'))
+                else:
+                    new_date = datetime.strptime(new_date[:10], '%Y-%m-%d')
+            except Exception as e:
+                logger.debug(f"Impossible de parser la date '{new_date}': {e}")
+                return False
+
+        # Si new_date n'est pas un datetime valide, abandonner
+        if not isinstance(new_date, datetime):
+            return False
+
+        # Si pas de date existante, mettre à jour
+        if not self.release_date:
+            self.release_date = new_date
+            logger.debug(f"Date de sortie définie pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})")
+            return True
+
+        # Convertir la date existante en datetime si nécessaire
+        existing_date = self.release_date
+        if isinstance(existing_date, str):
+            try:
+                if 'T' in existing_date:
+                    existing_date = datetime.fromisoformat(existing_date.replace('Z', '+00:00'))
+                else:
+                    existing_date = datetime.strptime(existing_date[:10], '%Y-%m-%d')
+            except:
+                # Si impossible de parser la date existante, la remplacer
+                self.release_date = new_date
+                logger.debug(f"Date existante invalide remplacée pour '{self.title}': {new_date.strftime('%d/%m/%Y')}")
+                return True
+
+        # Si force=True, écraser sans vérifier
+        if force:
+            self.release_date = new_date
+            logger.debug(f"Date de sortie écrasée (force) pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})")
+            return True
+
+        # Comparer les dates et garder la plus ancienne
+        if new_date < existing_date:
+            old_date_str = existing_date.strftime('%d/%m/%Y')
+            new_date_str = new_date.strftime('%d/%m/%Y')
+            self.release_date = new_date
+            logger.info(f"✨ Date plus ancienne trouvée pour '{self.title}': {new_date_str} (remplace {old_date_str}) - Source: {source}")
+            return True
+        else:
+            logger.debug(f"Date existante conservée pour '{self.title}': {existing_date.strftime('%d/%m/%Y')} (nouvelle date {new_date.strftime('%d/%m/%Y')} ignorée)")
+            return False
+
     def get_credits_by_role(self, role: CreditRole) -> List[Credit]:
         """Retourne tous les crédits d'un rôle spécifique - VERSION ROBUSTE"""
         try:

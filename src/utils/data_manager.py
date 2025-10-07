@@ -58,7 +58,10 @@ class DataManager:
             # Liste des colonnes à ajouter
             new_columns = {
                 'certifications': 'TEXT',  # JSON array
-                'album_certifications': 'TEXT'  # JSON array
+                'album_certifications': 'TEXT',  # JSON array
+                'musical_key': 'TEXT',  # Musical key en français (ex: "Do majeur")
+                'time_signature': 'TEXT',  # Signature rythmique (ex: "4/4")
+                'anecdotes': 'TEXT'  # Anecdotes depuis Genius
             }
 
             for col_name, col_type in new_columns.items():
@@ -403,7 +406,7 @@ class DataManager:
                 certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
                 album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
 
-                # UPDATE avec musical_key, time_signature et certifications
+                # UPDATE avec musical_key, time_signature, anecdotes et certifications
                 cursor.execute("""
                     UPDATE tracks
                     SET album = ?, track_number = ?, release_date = ?,
@@ -412,7 +415,7 @@ class DataManager:
                         musical_key = ?, time_signature = ?,
                         genius_url = ?, spotify_url = ?,
                         is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
-                        lyrics = ?, lyrics_scraped_at = ?, has_lyrics = ?,
+                        lyrics = ?, lyrics_scraped_at = ?, has_lyrics = ?, anecdotes = ?,
                         certifications = ?, album_certifications = ?,
                         updated_at = ?, last_scraped = ?
                     WHERE id = ?
@@ -427,6 +430,7 @@ class DataManager:
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
                     bool(getattr(track, 'lyrics', None)),
+                    getattr(track, 'anecdotes', None),
                     certifications_json, album_certifications_json,
                     datetime.now(), track.last_scraped, track.id))
             else:
@@ -434,7 +438,7 @@ class DataManager:
                 certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
                 album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
 
-                # INSERT avec musical_key, time_signature et certifications
+                # INSERT avec musical_key, time_signature, anecdotes et certifications
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
@@ -442,10 +446,10 @@ class DataManager:
                         bpm, duration, genre, musical_key, time_signature,
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
-                        lyrics, lyrics_scraped_at, has_lyrics,
+                        lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
                     track.bpm, track.duration, track.genre,
@@ -457,6 +461,7 @@ class DataManager:
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
                     bool(getattr(track, 'lyrics', None)),
+                    getattr(track, 'anecdotes', None),
                     certifications_json, album_certifications_json,
                     datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
@@ -569,14 +574,14 @@ class DataManager:
                 if total_count == 0:
                     return tracks
                 
-                # SELECT avec les certifications JSON
+                # SELECT avec les certifications JSON et anecdotes
                 cursor.execute("""
                     SELECT id, title, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
                         bpm, duration, genre, musical_key, time_signature,
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
-                        lyrics, lyrics_scraped_at, has_lyrics,
+                        lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications,
                         created_at, updated_at, last_scraped
                     FROM tracks
@@ -602,21 +607,22 @@ class DataManager:
                         bpm = row[8]         # bpm
                         duration = row[9]    # duration
                         genre = row[10]      # genre
-                        musical_key = row[11] # musical_key - NOUVEAU
-                        time_signature = row[12] # time_signature - NOUVEAU
-                        genius_url = row[13] # genius_url (décalé de 2)
-                        spotify_url = row[14] # spotify_url (décalé de 2)
-                        is_featuring = row[15] # is_featuring (décalé de 2)
-                        primary_artist_name = row[16] # primary_artist_name (décalé de 2)
-                        featured_artists = row[17] # featured_artists (décalé de 2)
+                        musical_key = row[11] # musical_key
+                        time_signature = row[12] # time_signature
+                        genius_url = row[13] # genius_url
+                        spotify_url = row[14] # spotify_url
+                        is_featuring = row[15] # is_featuring
+                        primary_artist_name = row[16] # primary_artist_name
+                        featured_artists = row[17] # featured_artists
                         lyrics = row[18]     # lyrics
                         lyrics_scraped_at = row[19] # lyrics_scraped_at
                         has_lyrics = row[20] # has_lyrics
-                        certifications_json = row[21] # certifications JSON
-                        album_certifications_json = row[22] # album_certifications JSON
-                        created_at = row[23] # created_at
-                        updated_at = row[24] # updated_at
-                        last_scraped = row[25] # last_scraped
+                        anecdotes = row[21]  # anecdotes
+                        certifications_json = row[22] # certifications JSON
+                        album_certifications_json = row[23] # album_certifications JSON
+                        created_at = row[24] # created_at
+                        updated_at = row[25] # updated_at
+                        last_scraped = row[26] # last_scraped
                         
                         # Validation
                         if not track_id or not title:
@@ -674,6 +680,7 @@ class DataManager:
                         
                         # Propriétés paroles
                         track.lyrics = safe_assign(lyrics)
+                        track.anecdotes = safe_assign(anecdotes)
                         track.has_lyrics = bool(safe_assign(has_lyrics, False))
                         track.lyrics_scraped_at = safe_assign(lyrics_scraped_at)
 

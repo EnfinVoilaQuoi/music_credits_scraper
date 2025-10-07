@@ -5,15 +5,21 @@ Script de mise à jour automatique et manuelle des certifications RIAA
 Compatible avec le système de gestion unifié des certifications
 """
 
+import sys
+import io
 import pandas as pd
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
 import logging
-import sys
 import time
 import argparse
 from typing import Optional, List, Dict
+
+# Configurer l'encodage UTF-8 pour la console Windows
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Import du scraper principal
 from search_artist_riaa import RIAAScraper

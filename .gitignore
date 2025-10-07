@@ -32,6 +32,9 @@ data\certifications\brma\reports/*
 *.cache
 *.json
 
+# Claude
+*.md
+
 # OS
 .DS_Store
 Thumbs.db

@@ -81,6 +81,28 @@ class CertificationCategory(Enum):
     VIDEOS = "Vidéos"
     DVD = "DVD"
 
+    @classmethod
+    def from_string(cls, value: str) -> 'CertificationCategory':
+        """Convertit une string en CertificationCategory"""
+        if not value:
+            return cls.SINGLES
+
+        value_clean = value.strip().upper()
+
+        # Normaliser "Single" -> "Singles"
+        if value_clean == 'SINGLE':
+            value_clean = 'SINGLES'
+
+        mapping = {
+            'SINGLES': cls.SINGLES,
+            'ALBUMS': cls.ALBUMS,
+            'VIDÉOS': cls.VIDEOS,
+            'VIDEOS': cls.VIDEOS,
+            'DVD': cls.DVD
+        }
+
+        return mapping.get(value_clean, cls.SINGLES)
+
 
 @dataclass
 class Certification:

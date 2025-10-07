@@ -249,8 +249,8 @@ class MainWindow:
         tree_scroll_frame = ctk.CTkFrame(tree_container)
         tree_scroll_frame.pack(fill="both", expand=True)
         
-        # COLONNES AVEC COLONNE PAROLES ENTRE CRÉDITS ET BPM
-        columns = ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "Paroles", "BPM", "Certif.", "Statut")
+        # COLONNES AVEC COLONNE PAROLES ENTRE CRÉDITS ET BPM + DURÉE ENTRE BPM ET CERTIF
+        columns = ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "Paroles", "BPM", "Durée", "Certif.", "Statut")
         self.tree = ttk.Treeview(tree_scroll_frame, columns=columns, show="tree headings", height=15)
         
         # Configuration des colonnes avec tri
@@ -271,11 +271,13 @@ class MainWindow:
             elif col == "Date sortie":
                 self.tree.column(col, width=90)
             elif col == "Crédits":
-                self.tree.column(col, width=70)
-            elif col == "Paroles":  # NOUVELLE COLONNE
-                self.tree.column(col, width=70)
+                self.tree.column(col, width=70, anchor="center")  # CENTRÉ
+            elif col == "Paroles":
+                self.tree.column(col, width=70, anchor="center")  # CENTRÉ
             elif col == "BPM":
                 self.tree.column(col, width=70)
+            elif col == "Durée":
+                self.tree.column(col, width=70, anchor="center")  # CENTRÉ
             elif col == "Certif.":
                 self.tree.column(col, width=60)
             else:  # Statut
@@ -342,16 +344,20 @@ class MainWindow:
                 
                 album = getattr(track, 'album', '') or ""
                 
-                # Date de sortie
+                # Date de sortie - FORMAT FRANÇAIS (JJ/MM/AAAA)
                 release_date = ""
                 if hasattr(track, 'release_date') and track.release_date:
                     try:
                         if isinstance(track.release_date, str):
-                            release_date = track.release_date
+                            # Convertir string ISO vers datetime puis vers format français
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(track.release_date.replace('Z', '+00:00').split('T')[0])
+                            release_date = dt.strftime("%d/%m/%Y")
                         else:
-                            release_date = track.release_date.strftime("%Y-%m-%d")
+                            # Déjà un objet datetime
+                            release_date = track.release_date.strftime("%d/%m/%Y")
                     except:
-                        release_date = str(track.release_date)
+                        release_date = str(track.release_date).split('T')[0] if 'T' in str(track.release_date) else str(track.release_date)
                 
                 # CORRECTION: Obtenir le nombre de crédits directement
                 credits_count = 0
@@ -390,21 +396,33 @@ class MainWindow:
                     if musical_key:
                         bpm = f"{track.bpm} ({musical_key})"
 
-                # Certifications
+                # Durée du morceau
+                duration_display = ""
+                if hasattr(track, 'duration') and track.duration:
+                    try:
+                        # Format MM:SS ou HH:MM:SS
+                        if isinstance(track.duration, str):
+                            duration_display = track.duration
+                        elif isinstance(track.duration, int):
+                            # Durée en secondes
+                            minutes = track.duration // 60
+                            seconds = track.duration % 60
+                            duration_display = f"{minutes}:{seconds:02d}"
+                    except:
+                        pass
+
+                # Certifications - Lire depuis track.certifications au lieu de l'API
                 certif_display = ""
                 try:
-                    from src.api.snep_certifications import get_snep_manager
-                    snep_manager = get_snep_manager()
-                    cert_data = snep_manager.get_track_certification(
-                        self.current_artist.name, 
-                        track.title
-                    )
-                    if cert_data:
-                        cert_level = cert_data.get('certification', '')
+                    # Vérifier si le track a des certifications stockées
+                    if hasattr(track, 'certifications') and track.certifications:
+                        # Prendre la plus haute certification (première dans la liste déjà triée)
+                        cert_level = track.certifications[0].get('certification', '')
                         emoji_map = {
-                            'Or': '🥇',
-                            'Platine': '💿',
-                            'Diamant': '💎'
+                            'Or': '🥇', 'Double Or': '🥇🥇', 'Triple Or': '🥇🥇🥇',
+                            'Platine': '💿', 'Double Platine': '💿💿', 'Triple Platine': '💿💿💿',
+                            'Diamant': '💎', 'Double Diamant': '💎💎', 'Triple Diamant': '💎💎💎',
+                            'Quadruple Diamant': '💎💎💎💎'
                         }
                         certif_display = emoji_map.get(cert_level, '✓')
                 except:
@@ -428,6 +446,7 @@ class MainWindow:
                         credits_display,  # CORRECTION: Affiche le nombre
                         lyrics_display,
                         bpm,
+                        duration_display,  # NOUVELLE COLONNE DURÉE
                         certif_display,
                         status
                     ),
@@ -700,7 +719,17 @@ class MainWindow:
             elif col == "Artiste principal":
                 sort_key = lambda t: getattr(t, 'primary_artist_name', '') or t.artist.name if t.artist else ""
             elif col == "Date sortie":
-                sort_key = lambda t: getattr(t, 'release_date', None) or datetime.min
+                # CORRECTION: Gérer datetime ET string
+                def get_release_date(t):
+                    if not hasattr(t, 'release_date') or not t.release_date:
+                        return datetime.min
+                    if isinstance(t.release_date, str):
+                        try:
+                            return datetime.fromisoformat(t.release_date.replace('Z', '+00:00').split('T')[0])
+                        except:
+                            return datetime.min
+                    return t.release_date
+                sort_key = get_release_date
             elif col == "Crédits":
                 # CORRECTION: Trier par nombre de crédits
                 sort_key = lambda t: len(getattr(t, 'credits', []))
@@ -708,25 +737,59 @@ class MainWindow:
                 sort_key = lambda t: getattr(t, 'has_lyrics', False)
             elif col == "BPM":
                 sort_key = lambda t: getattr(t, 'bpm', 0) or 0
+            elif col == "Durée":
+                # Trier par durée en secondes
+                def get_duration_seconds(t):
+                    if not hasattr(t, 'duration') or not t.duration:
+                        return 0
+                    if isinstance(t.duration, int):
+                        return t.duration
+                    if isinstance(t.duration, str):
+                        try:
+                            parts = t.duration.split(':')
+                            if len(parts) == 2:
+                                return int(parts[0]) * 60 + int(parts[1])
+                            elif len(parts) == 3:
+                                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                        except:
+                            pass
+                    return 0
+                sort_key = get_duration_seconds
             elif col == "Certif.":
-                # Définir un ordre de priorité pour les certifications
+                # CORRECTION: Définir la fonction ET l'utiliser
                 cert_order = {
-                    '💎💎💎💎': 1,  # Quadruple Diamant
-                    '💎💎💎': 2,    # Triple Diamant
-                    '💎💎': 3,      # Double Diamant
-                    '💎': 4,        # Diamant
-                    '💿💿💿': 5,    # Triple Platine
-                    '💿💿': 6,      # Double Platine
-                    '💿': 7,        # Platine
-                    '🥇🥇🥇': 8,    # Triple Or
-                    '🥇🥇': 9,      # Double Or
-                    '🥇': 10,       # Or
-                    '✓': 11,       # Autre certification
-                    '': 12         # Pas de certification
+                    '💎💎💎💎': 1, '💎💎💎': 2, '💎💎': 3, '💎': 4,
+                    '💿💿💿': 5, '💿💿': 6, '💿': 7,
+                    '🥇🥇🥇': 8, '🥇🥇': 9, '🥇': 10,
+                    '✓': 11, '': 12
                 }
+                def get_cert_value(t):
+                    try:
+                        if hasattr(t, 'certifications') and t.certifications:
+                            cert_level = t.certifications[0].get('certification', '')
+                            emoji_map = {
+                                'Quadruple Diamant': '💎💎💎💎', 'Triple Diamant': '💎💎💎',
+                                'Double Diamant': '💎💎', 'Diamant': '💎',
+                                'Triple Platine': '💿💿💿', 'Double Platine': '💿💿', 'Platine': '💿',
+                                'Triple Or': '🥇🥇🥇', 'Double Or': '🥇🥇', 'Or': '🥇'
+                            }
+                            emoji = emoji_map.get(cert_level, '✓')
+                            return cert_order.get(emoji, 12)
+                        return 12
+                    except:
+                        return 12
+                sort_key = get_cert_value
             elif col == "Statut":
-                # CORRECTION: Utiliser votre fonction existante _get_track_status_icon
-                sort_key = lambda t: self._get_track_status_icon(t)
+                # CORRECTION: Trier par ordre de priorité (Complet > Incomplet > Désactivé)
+                status_order = {
+                    '✅': 1,  # Complet en premier
+                    '⚠️': 2,  # Incomplet au milieu
+                    '❌': 3   # Désactivé en dernier
+                }
+                def get_status_value(t):
+                    icon = self._get_track_status_icon(t)
+                    return status_order.get(icon, 4)  # 4 pour les icônes inconnues
+                sort_key = get_status_value
             
             if sort_key:
                 # Créer une liste d'indices et de tracks pour garder la correspondance
@@ -787,37 +850,6 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Erreur lors du tri: {e}")
             self._show_error("Erreur de tri", str(e))
-
-    def get_cert_value(track):
-        # Récupérer la certification du morceau
-        try:
-            from src.api.snep_certifications import get_snep_manager
-            snep_manager = get_snep_manager()
-            cert_data = snep_manager.get_track_certification(
-                self.current_artist.name, 
-                track.title
-            )
-            if cert_data:
-                cert_level = cert_data.get('certification', '')
-                emoji_map = {
-                    'Quadruple Diamant': '💎💎💎💎',
-                    'Triple Diamant': '💎💎💎',
-                    'Double Diamant': '💎💎',
-                    'Diamant': '💎',
-                    'Triple Platine': '💿💿💿',
-                    'Double Platine': '💿💿',
-                    'Platine': '💿',
-                    'Triple Or': '🥇🥇🥇',
-                    'Double Or': '🥇🥇',
-                    'Or': '🥇'
-                }
-                emoji = emoji_map.get(cert_level, '✓')
-                return cert_order.get(emoji, 12)
-            return 12  # Pas de certification
-        except:
-            return 12
-    
-    sort_key = get_cert_value
 
     def _show_track_details_by_index(self, index: int):
         """Affiche les détails d'un morceau par son index - ✅ NOUVEAU"""
@@ -1359,50 +1391,109 @@ class MainWindow:
         try:
             from src.api.snep_certifications import get_snep_manager
             snep_manager = get_snep_manager()
-            cert_data = snep_manager.get_track_certification(
+
+            # Récupérer TOUTES les certifications du morceau
+            track_certs = snep_manager.get_track_certifications(
                 self.current_artist.name,
                 track.title
             )
-            
-            if cert_data:
+
+            # Récupérer les certifications de l'album si disponible
+            album_certs = []
+            if track.album:
+                album_certs = snep_manager.get_album_certifications(
+                    self.current_artist.name,
+                    track.album
+                )
+
+            if track_certs or album_certs:
                 # Afficher les infos de certification
                 cert_info = ctk.CTkTextbox(cert_frame, width=850, height=450)
                 cert_info.pack(fill="both", expand=True, padx=10, pady=10)
-                
-                cert_level = cert_data.get('certification', '')
+
                 emoji_map = {
-                    'Or': '🥇', 'Double Or': '🥇🥇',
-                    'Platine': '💿', 'Double Platine': '💿💿',
-                    'Diamant': '💎', 'Double Diamant': '💎💎'
+                    'Or': '🥇', 'Double Or': '🥇🥇', 'Triple Or': '🥇🥇🥇',
+                    'Platine': '💿', 'Double Platine': '💿💿', 'Triple Platine': '💿💿💿',
+                    'Diamant': '💎', 'Double Diamant': '💎💎', 'Triple Diamant': '💎💎💎',
+                    'Quadruple Diamant': '💎💎💎💎'
                 }
-                emoji = emoji_map.get(cert_level, '🏆')
-                
-                cert_text = f"{emoji} CERTIFICATION {cert_level.upper()}\n"
-                cert_text += "=" * 50 + "\n\n"
-                cert_text += f"📀 Titre: {cert_data.get('title', '')}\n"
-                cert_text += f"🎤 Artiste: {cert_data.get('artist_name', '')}\n"
-                cert_text += f"📂 Catégorie: {cert_data.get('category', '')}\n"
-                cert_text += f"📅 Date de sortie: {cert_data.get('release_date', 'N/A')}\n"
-                cert_text += f"✅ Date de constat: {cert_data.get('certification_date', 'N/A')}\n"
-                cert_text += f"🏢 Éditeur: {cert_data.get('publisher', 'N/A')}\n"
-                
-                # Calculer la durée d'obtention
-                if cert_data.get('release_date') and cert_data.get('certification_date'):
-                    try:
-                        from datetime import datetime
-                        release = datetime.strptime(cert_data['release_date'], '%Y-%m-%d')
-                        certif = datetime.strptime(cert_data['certification_date'], '%Y-%m-%d')
-                        duration = (certif - release).days
-                        cert_text += f"\n⏱️ Durée d'obtention: {duration} jours"
-                    except:
-                        pass
-                
+
+                cert_text = ""
+
+                # SECTION 1: Certifications du morceau
+                if track_certs:
+                    cert_text += "🎵 CERTIFICATIONS DU MORCEAU\n"
+                    cert_text += "=" * 60 + "\n\n"
+
+                    for i, cert_data in enumerate(track_certs, 1):
+                        cert_level = cert_data.get('certification', '')
+                        emoji = emoji_map.get(cert_level, '🏆')
+
+                        cert_text += f"{emoji} CERTIFICATION #{i}: {cert_level.upper()}\n"
+                        cert_text += "-" * 60 + "\n"
+                        cert_text += f"📀 Titre: {cert_data.get('title', '')}\n"
+                        cert_text += f"🎤 Artiste: {cert_data.get('artist_name', '')}\n"
+                        cert_text += f"📂 Catégorie: {cert_data.get('category', '')}\n"
+                        cert_text += f"📅 Date de sortie: {cert_data.get('release_date', 'N/A')}\n"
+                        cert_text += f"✅ Date de constat: {cert_data.get('certification_date', 'N/A')}\n"
+                        cert_text += f"🏢 Éditeur: {cert_data.get('publisher', 'N/A')}\n"
+
+                        # Calculer la durée d'obtention
+                        if cert_data.get('release_date') and cert_data.get('certification_date'):
+                            try:
+                                from datetime import datetime
+                                release_str = str(cert_data['release_date'])[:10]
+                                certif_str = str(cert_data['certification_date'])[:10]
+                                release = datetime.strptime(release_str, '%Y-%m-%d')
+                                certif = datetime.strptime(certif_str, '%Y-%m-%d')
+                                duration = (certif - release).days
+                                cert_text += f"⏱️ Durée d'obtention: {duration} jours ({duration // 365} ans, {(duration % 365) // 30} mois)\n"
+                            except Exception as e:
+                                logger.debug(f"Erreur calcul durée: {e}")
+
+                        cert_text += "\n"
+
+                # SECTION 2: Certifications de l'album
+                if album_certs:
+                    cert_text += "\n💿 CERTIFICATIONS DE L'ALBUM\n"
+                    cert_text += "=" * 60 + "\n"
+                    cert_text += f"📂 Album: {track.album}\n\n"
+
+                    for i, cert_data in enumerate(album_certs, 1):
+                        cert_level = cert_data.get('certification', '')
+                        emoji = emoji_map.get(cert_level, '🏆')
+
+                        cert_text += f"{emoji} CERTIFICATION #{i}: {cert_level.upper()}\n"
+                        cert_text += "-" * 60 + "\n"
+                        cert_text += f"💿 Album: {cert_data.get('title', '')}\n"
+                        cert_text += f"🎤 Artiste: {cert_data.get('artist_name', '')}\n"
+                        cert_text += f"📂 Catégorie: {cert_data.get('category', '')}\n"
+                        cert_text += f"📅 Date de sortie: {cert_data.get('release_date', 'N/A')}\n"
+                        cert_text += f"✅ Date de constat: {cert_data.get('certification_date', 'N/A')}\n"
+                        cert_text += f"🏢 Éditeur: {cert_data.get('publisher', 'N/A')}\n"
+
+                        # Calculer la durée d'obtention pour l'album
+                        if cert_data.get('release_date') and cert_data.get('certification_date'):
+                            try:
+                                from datetime import datetime
+                                release_str = str(cert_data['release_date'])[:10]
+                                certif_str = str(cert_data['certification_date'])[:10]
+                                release = datetime.strptime(release_str, '%Y-%m-%d')
+                                certif = datetime.strptime(certif_str, '%Y-%m-%d')
+                                duration = (certif - release).days
+                                cert_text += f"⏱️ Durée d'obtention: {duration} jours ({duration // 365} ans, {(duration % 365) // 30} mois)\n"
+                            except Exception as e:
+                                logger.debug(f"Erreur calcul durée album: {e}")
+
+                        cert_text += "\n"
+
                 cert_info.insert("0.0", cert_text)
                 cert_info.configure(state="disabled")
             else:
-                no_cert = ctk.CTkLabel(cert_frame, text="❌ Aucune certification trouvée", font=("Arial", 14))
+                no_cert = ctk.CTkLabel(cert_frame, text="❌ Aucune certification trouvée pour ce morceau ou son album", font=("Arial", 14))
                 no_cert.pack(expand=True)
         except Exception as e:
+            logger.error(f"Erreur affichage certifications: {e}", exc_info=True)
             error_label = ctk.CTkLabel(cert_frame, text=f"Erreur: {e}", text_color="red")
             error_label.pack(expand=True)
 
@@ -1755,6 +1846,33 @@ class MainWindow:
                 self.current_artist = self.data_manager.load_artist_data(artist_name)
 
                 if self.current_artist and self.current_artist.tracks:
+                    # Enrichir les certifications si elles ne sont pas déjà chargées
+                    try:
+                        from src.utils.certification_enricher import CertificationEnricher
+                        cert_enricher = CertificationEnricher()
+
+                        # Vérifier si les tracks ont besoin d'enrichissement
+                        needs_enrichment = False
+                        for track in self.current_artist.tracks[:5]:  # Vérifier les 5 premiers
+                            if not hasattr(track, 'certifications') or not track.certifications:
+                                needs_enrichment = True
+                                break
+
+                        if needs_enrichment:
+                            logger.info(f"Enrichissement des certifications pour {artist_name}...")
+                            cert_enricher.enrich_tracks(self.current_artist, self.current_artist.tracks)
+
+                            # Sauvegarder les certifications enrichies
+                            for track in self.current_artist.tracks:
+                                try:
+                                    self.data_manager.save_track(track)
+                                except Exception as e:
+                                    logger.debug(f"Erreur sauvegarde certifications pour {track.title}: {e}")
+
+                            logger.info("Certifications enrichies et sauvegardées")
+                    except Exception as e:
+                        logger.warning(f"Erreur enrichissement certifications: {e}")
+
                     # Charger les morceaux désactivés et nettoyer les indices invalides
                     self.disabled_tracks = self.disabled_tracks_manager.load_disabled_tracks(self.current_artist.name)
                     max_index = len(self.current_artist.tracks) - 1
@@ -2220,50 +2338,82 @@ class MainWindow:
     # ✅ AJOUT DES MÉTHODES MANQUANTES POUR FONCTIONNALITÉS EXISTANTES
 
     def _get_track_status_icon(self, track: Track) -> str:
-        """Retourne l'icône de statut selon le niveau de complétude des données"""
+        """Retourne l'icône de statut selon le niveau de complétude des données
+
+        Infos nécessaires pour validation complète:
+        - Album ✓
+        - Date de sortie ✓
+        - Crédits obtenus ✓
+        - Paroles obtenues ✓
+        - BPM ✓
+        - Key et Mode ✓
+        - Durée ✓
+        - Certifications ✓ (ou validation si base à jour)
+
+        Retourne:
+        - ❌ : Morceau désactivé
+        - ⚠️ : Données incomplètes
+        - ✅ : Toutes les infos présentes
+        """
         try:
-            # Vérifier la présence des crédits
+            # Si le morceau est désactivé, retourner ❌
+            track_index = self.current_artist.tracks.index(track) if self.current_artist else -1
+            if track_index in self.disabled_tracks:
+                return "❌"
+
+            # Liste des champs requis avec leur validation
+            missing = []
+
+            # 1. Album
+            if not hasattr(track, 'album') or not track.album:
+                missing.append("Album")
+
+            # 2. Date de sortie
+            if not hasattr(track, 'release_date') or not track.release_date:
+                missing.append("Date")
+
+            # 3. Crédits obtenus
             try:
                 music_credits = track.get_music_credits()
-                has_credits = len(music_credits) > 0 if music_credits else False
-            except Exception:
-                has_credits = False
-            
-            # Vérifier la présence des paroles
-            try:
-                has_lyrics = (hasattr(track, 'lyrics') and 
-                             track.lyrics is not None and 
-                             isinstance(track.lyrics, str) and 
-                             track.lyrics.strip() != "")
-            except Exception:
-                has_lyrics = False
-            
-            # Vérifier la présence du BPM
-            try:
-                has_bpm = (track.bmp is not None and 
-                          isinstance(track.bmp, (int, float)) and 
-                          track.bmp > 0)
-            except Exception:
-                has_bpm = False
-            
-            # Conversion explicite en bool pour éviter les None
-            has_credits = bool(has_credits)
-            has_lyrics = bool(has_lyrics)
-            has_bpm = bool(has_bpm)
-            
-            # Compter le nombre de types de données disponibles
-            data_types_count = int(has_credits) + int(has_lyrics) + int(has_bpm)
-            
-            if data_types_count == 0:
-                return "❌"  # Aucune donnée
-            elif data_types_count >= 3:
-                return "✅"  # Données complètes (crédits + paroles + BPM)
+                if not music_credits or len(music_credits) == 0:
+                    missing.append("Crédits")
+            except:
+                missing.append("Crédits")
+
+            # 4. Paroles obtenues
+            if not hasattr(track, 'lyrics') or not track.lyrics or not track.lyrics.strip():
+                missing.append("Paroles")
+
+            # 5. BPM
+            if not hasattr(track, 'bpm') or not track.bpm or track.bpm == 0:
+                missing.append("BPM")
+
+            # 6. Key et Mode
+            has_key = hasattr(track, 'key') and track.key
+            has_mode = hasattr(track, 'mode') and track.mode
+            has_musical_key = hasattr(track, 'musical_key') and track.musical_key
+
+            if not (has_musical_key or (has_key and has_mode)):
+                missing.append("Key/Mode")
+
+            # 7. Durée
+            if not hasattr(track, 'duration') or not track.duration:
+                missing.append("Durée")
+
+            # 8. Certifications (validé si base à jour même sans certif)
+            # On considère que si le champ 'certifications' existe (même vide), c'est que la recherche a été faite
+            if not hasattr(track, 'certifications'):
+                missing.append("Certifications")
+
+            # Retourner le statut selon les données manquantes
+            if len(missing) == 0:
+                return "✅"  # Toutes les infos présentes
             else:
-                return "⚠️"  # Données partielles
-                
+                return "⚠️"  # Données incomplètes
+
         except Exception as e:
-            logger.error(f"Erreur générale dans _get_track_status_icon pour {getattr(track, 'title', 'unknown')}: {e}")
-            return "❓"  # Erreur
+            logger.error(f"Erreur dans _get_track_status_icon pour {getattr(track, 'title', 'unknown')}: {e}")
+            return "⚠️"  # Erreur = incomplet
 
     def _get_track_status_details(self, track):
         """Retourne les détails du statut pour le tooltip/debug"""
@@ -3239,24 +3389,36 @@ class MainWindow:
             return "❓"  # Erreur
 
     def _format_date(self, release_date):
-        """Formate une date pour l'affichage"""
+        """Formate une date pour l'affichage en format français DD/MM/YYYY"""
         if not release_date:
             return "N/A"
-        
+
         try:
             # Si c'est déjà un objet datetime
             if hasattr(release_date, 'strftime'):
-                return release_date.strftime('%Y-%m-%d')
-            
+                return release_date.strftime('%d/%m/%Y')
+
             # Si c'est une chaîne
             if isinstance(release_date, str):
-                # Prendre les 10 premiers caractères pour YYYY-MM-DD
-                date_part = str(release_date)[:10]
-                if len(date_part) >= 4:
-                    return date_part
-            
+                # Convertir de YYYY-MM-DD vers DD/MM/YYYY
+                date_str = str(release_date)[:10]  # Prendre YYYY-MM-DD
+                if len(date_str) == 10 and '-' in date_str:
+                    try:
+                        dt = datetime.strptime(date_str, '%Y-%m-%d')
+                        return dt.strftime('%d/%m/%Y')
+                    except:
+                        pass
+                # Si format ISO avec T
+                if 'T' in str(release_date):
+                    try:
+                        dt = datetime.fromisoformat(str(release_date).replace('Z', '+00:00').split('T')[0])
+                        return dt.strftime('%d/%m/%Y')
+                    except:
+                        pass
+                return date_str
+
             return str(release_date)[:10]
-            
+
         except Exception as e:
             logger.debug(f"Erreur formatage date '{release_date}': {e}")
             return "N/A"

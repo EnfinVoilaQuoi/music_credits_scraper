@@ -100,57 +100,125 @@ class SNEPCertificationManager:
         logger.info("📊 Tables de base de données créées/vérifiées")
     
     def normalize_text(self, text: str) -> str:
-        """Normalise le texte pour les comparaisons"""
+        """Normalise le texte pour les comparaisons - VERSION AMÉLIORÉE"""
         if not text:
             return ""
-        
-        # Supprimer les accents
+
+        # ÉTAPE 1: Nettoyer les espaces/tabulations (AVANT tout traitement)
+        import re
+        # Remplacer tous les espaces blancs (espaces, tabs, etc.) par un seul espace
+        text = re.sub(r'\s+', ' ', text.strip())
+
+        # ÉTAPE 2: Supprimer les accents
         text = unicodedata.normalize('NFD', text)
         text = ''.join(char for char in text if unicodedata.category(char) != 'Mn')
-        
-        # Nettoyer et mettre en majuscules
-        text = text.strip().upper()
-        
-        # Remplacer les caractères spéciaux
-        text = text.replace('&', 'AND')
-        text = text.replace('$', 'S')
-        
-        return text
+
+        # ÉTAPE 3: Mettre en majuscules
+        text = text.upper()
+
+        # ÉTAPE 4: Remplacer les caractères spéciaux et ligatures
+        replacements = {
+            '&': 'AND',
+            '$': 'S',
+            'Œ': 'OE',
+            'OE': 'OE',
+            'Æ': 'AE',
+            'AE': 'AE',
+            ''': "'",
+            ''': "'",
+            '`': "'",
+            '´': "'",
+            '"': '"',
+            '"': '"',
+            '«': '"',
+            '»': '"',
+            '–': '-',
+            '—': '-',
+            '…': '...',
+        }
+
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+
+        # ÉTAPE 5: Supprimer tous les caractères de ponctuation sauf lettres, chiffres et espaces
+        # Garder les apostrophes pour les featuring
+        text = re.sub(r'[^\w\s\'-]', '', text)
+
+        # ÉTAPE 6: Remplacer espaces multiples par un seul (final cleanup)
+        text = re.sub(r'\s+', ' ', text)
+
+        return text.strip()
     
     def load_csv(self, filepath: Optional[Path] = None) -> pd.DataFrame:
         """Charge le fichier CSV des certifications SNEP"""
         if filepath is None:
             filepath = self.csv_path
-        
+
         if not filepath.exists():
             logger.warning(f"⚠️ Fichier CSV non trouvé : {filepath}")
             return pd.DataFrame()
-        
+
         try:
-            # Charger le CSV avec les bons paramètres
-            df = pd.read_csv(
-                filepath,
-                sep=';',  # SNEP utilise le point-virgule
-                encoding='utf-8',
-                dtype={
-                    'Interprète': str,
-                    'Titre': str,
-                    'Éditeur / Distributeur': str,
-                    'Catégorie': str,
-                    'Certification': str
-                },
-                parse_dates=['Date de sortie', 'Date de constat'],
-                dayfirst=True,  # Format DD/MM/YYYY
-                date_format='%d/%m/%Y',
-                na_values=['', 'N/A', 'null', 'None']
-            )
-            
-            # Renommer les colonnes pour uniformité
-            df.columns = [col.strip() for col in df.columns]
-            
+            # Essayer différents encodages
+            encodings = ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252']
+            df = None
+
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(
+                        filepath,
+                        sep=';',  # SNEP utilise le point-virgule
+                        encoding=encoding,
+                        parse_dates=['Date de sortie', 'Date de constat'],
+                        dayfirst=True,  # Format DD/MM/YYYY
+                        date_format='%d/%m/%Y',
+                        na_values=['', 'N/A', 'null', 'None']
+                    )
+                    logger.info(f"CSV chargé avec encoding: {encoding}")
+                    break
+                except (UnicodeDecodeError, Exception):
+                    continue
+
+            if df is None:
+                logger.error("Impossible de charger le CSV avec les encodages disponibles")
+                return pd.DataFrame()
+
+            # Nettoyer les noms de colonnes (supprimer BOM, espaces, etc.)
+            df.columns = [col.strip().replace('\ufeff', '') for col in df.columns]
+
+            # Normaliser les noms de colonnes (gérer les problèmes d'encodage)
+            new_columns = []
+            for col in df.columns:
+                # Artiste/Interprète
+                if 'nterpr' in col or 'Interpr' in col:
+                    new_columns.append('Interprète')
+                # Éditeur
+                elif 'diteur' in col or 'Editeur' in col:
+                    new_columns.append('Éditeur / Distributeur')
+                # Catégorie
+                elif 'at' in col and 'gorie' in col:
+                    new_columns.append('Catégorie')
+                # Titre
+                elif col == 'Titre':
+                    new_columns.append('Titre')
+                # Certification
+                elif col == 'Certification':
+                    new_columns.append('Certification')
+                # Dates
+                elif 'sortie' in col:
+                    new_columns.append('Date de sortie')
+                elif 'constat' in col:
+                    new_columns.append('Date de constat')
+                else:
+                    new_columns.append(col)
+
+            df.columns = new_columns
+
             logger.info(f"✅ CSV chargé : {len(df)} enregistrements")
+            logger.debug(f"Colonnes: {list(df.columns)}")
+
             return df
-            
+
         except Exception as e:
             logger.error(f"❌ Erreur lors du chargement du CSV : {e}")
             return pd.DataFrame()
@@ -159,21 +227,62 @@ class SNEPCertificationManager:
         """Parse et importe les données du CSV dans la base"""
         if df.empty:
             return 0, 0
-        
+
         new_records = 0
         updated_records = 0
-        
+
         for _, row in df.iterrows():
             try:
+                # Nettoyer les valeurs (supprimer espaces, tabulations, etc.)
+                def clean_value(value):
+                    if pd.isna(value):
+                        return None
+                    # Convertir en string et supprimer tous les espaces blancs (espaces, tabs, etc.)
+                    cleaned = str(value).strip()
+                    # Remplacer les espaces/tabs multiples par un seul espace
+                    import re
+                    cleaned = re.sub(r'\s+', ' ', cleaned)
+                    return cleaned if cleaned else None
+
+                # Accès par index pour éviter les problèmes d'encodage de noms de colonnes
+                cols = list(df.columns)
+                artist_name = clean_value(row[cols[0]] if len(cols) > 0 else '')  # Interprète
+                title = clean_value(row[cols[1]] if len(cols) > 1 else '')  # Titre
+                publisher = clean_value(row[cols[2]] if len(cols) > 2 else None)  # Éditeur / Distributeur
+                category_str = clean_value(row[cols[3]] if len(cols) > 3 else 'Singles')  # Catégorie
+
+                # Normaliser la catégorie (Single -> Singles)
+                if category_str and category_str.lower() == 'single':
+                    category_str = 'Singles'
+
+                certification_str = clean_value(row[cols[4]] if len(cols) > 4 else 'Or')  # Certification
+                release_date_raw = row[cols[5]] if len(cols) > 5 else None  # Date de sortie
+                certification_date_raw = row[cols[6]] if len(cols) > 6 else None  # Date de constat
+
+                # Convertir les dates Pandas Timestamp en datetime Python
+                release_date = None
+                if pd.notna(release_date_raw):
+                    try:
+                        release_date = release_date_raw.to_pydatetime() if hasattr(release_date_raw, 'to_pydatetime') else release_date_raw
+                    except:
+                        pass
+
+                certification_date = None
+                if pd.notna(certification_date_raw):
+                    try:
+                        certification_date = certification_date_raw.to_pydatetime() if hasattr(certification_date_raw, 'to_pydatetime') else certification_date_raw
+                    except:
+                        pass
+
                 # Créer l'objet Certification
                 cert = Certification(
-                    artist_name=str(row.get('Interprète', '')).strip(),
-                    title=str(row.get('Titre', '')).strip(),
-                    publisher=str(row.get('Éditeur / Distributeur', '')).strip() if pd.notna(row.get('Éditeur / Distributeur')) else None,
-                    category=CertificationCategory.from_string(str(row.get('Catégorie', 'Singles'))),
-                    level=CertificationLevel.from_string(str(row.get('Certification', 'Or'))),
-                    release_date=row.get('Date de sortie') if pd.notna(row.get('Date de sortie')) else None,
-                    certification_date=row.get('Date de constat'),
+                    artist_name=artist_name or '',
+                    title=title or '',
+                    publisher=publisher,
+                    category=CertificationCategory.from_string(category_str),
+                    level=CertificationLevel.from_string(certification_str),
+                    release_date=release_date,
+                    certification_date=certification_date,
                     country='FR',
                     certifying_body='SNEP'
                 )
@@ -195,19 +304,24 @@ class SNEPCertificationManager:
                 
                 if existing:
                     # Mise à jour si la date est plus récente
+                    cert_date_str = cert.certification_date.isoformat() if cert.certification_date else None
                     cursor.execute('''
-                        UPDATE certifications 
+                        UPDATE certifications
                         SET certification_date = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ? AND certification_date < ?
-                    ''', (cert.certification_date, existing[0], cert.certification_date))
+                    ''', (cert_date_str, existing[0], cert_date_str))
                     
                     if cursor.rowcount > 0:
                         updated_records += 1
                 else:
                     # Nouvelle certification
+                    # Convertir les dates en string ISO pour SQLite
+                    release_date_str = cert.release_date.isoformat() if cert.release_date else None
+                    cert_date_str = cert.certification_date.isoformat() if cert.certification_date else None
+
                     cursor.execute('''
-                        INSERT INTO certifications 
-                        (artist_name, artist_clean, title, title_clean, publisher, 
+                        INSERT INTO certifications
+                        (artist_name, artist_clean, title, title_clean, publisher,
                          category, certification, release_date, certification_date,
                          country, certifying_body)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -219,15 +333,18 @@ class SNEPCertificationManager:
                         cert.publisher,
                         cert.category.value,
                         cert.level.value,
-                        cert.release_date,
-                        cert.certification_date,
+                        release_date_str,
+                        cert_date_str,
                         cert.country,
                         cert.certifying_body
                     ))
                     new_records += 1
                     
             except Exception as e:
-                logger.error(f"Erreur pour {row.get('Interprète')} - {row.get('Titre')}: {e}")
+                # Utiliser les indices car row.get ne fonctionne plus avec les noms encodés
+                artist_debug = row[cols[0]] if len(cols) > 0 else 'Unknown'
+                title_debug = row[cols[1]] if len(cols) > 1 else 'Unknown'
+                logger.error(f"Erreur pour {artist_debug} - {title_debug}: {e}")
                 continue
         
         self.conn.commit()
@@ -296,27 +413,141 @@ class SNEPCertificationManager:
         return results
     
     def get_track_certification(self, artist_name: str, track_title: str) -> Optional[Dict[str, Any]]:
-        """Récupère la certification d'un morceau spécifique"""
-        artist_clean = self.normalize_text(artist_name)
+        """Récupère la certification la plus élevée d'un morceau - OBSOLÈTE, utiliser get_track_certifications"""
+        certifications = self.get_track_certifications(artist_name, track_title)
+        return certifications[0] if certifications else None
+
+    def get_track_certifications(self, artist_name: str, track_title: str) -> List[Dict[str, Any]]:
+        """Récupère TOUTES les certifications d'un morceau spécifique - VERSION AMÉLIORÉE"""
+        results = []
+
+        # Normaliser le titre du morceau
         title_clean = self.normalize_text(track_title)
-        
+
+        # Stratégie 1: Match exact avec l'artiste fourni
+        artist_clean = self.normalize_text(artist_name)
+        exact_matches = self._search_certifications_by_artist_title(artist_clean, title_clean)
+        results.extend(exact_matches)
+
+        # Stratégie 2: Si le titre contient "feat." ou "ft.", extraire l'artiste principal
+        import re
+        feat_pattern = r'^(.+?)\s+(?:FEAT\.?|FT\.?|FEATURING)\s+(.+)$'
+        title_match = re.match(feat_pattern, title_clean, re.IGNORECASE)
+
+        if title_match:
+            # Le titre contient un featuring
+            main_part = title_match.group(1).strip()
+            featured_part = title_match.group(2).strip()
+
+            # Chercher avec juste la partie principale du titre
+            main_matches = self._search_certifications_by_artist_title(artist_clean, main_part)
+            for match in main_matches:
+                if match not in results:
+                    results.append(match)
+
+        # Stratégie 3: Chercher dans les certifications où l'artiste apparaît en featuring
+        featuring_matches = self._search_featuring_certifications(artist_name, track_title)
+        for match in featuring_matches:
+            if match not in results:
+                results.append(match)
+
+        # Trier par ordre de priorité (Diamant > Platine > Or) et date
+        cert_order = {
+            'Quadruple Diamant': 1, 'Triple Diamant': 2, 'Double Diamant': 3, 'Diamant': 4,
+            'Triple Platine': 5, 'Double Platine': 6, 'Platine': 7,
+            'Triple Or': 8, 'Double Or': 9, 'Or': 10
+        }
+
+        results.sort(key=lambda x: (
+            cert_order.get(x.get('certification', ''), 99),
+            x.get('certification_date', '') or ''
+        ))
+
+        return results
+
+    def _search_certifications_by_artist_title(self, artist_clean: str, title_clean: str) -> List[Dict[str, Any]]:
+        """Recherche les certifications pour un artiste et titre donnés"""
+        cursor = self.conn.cursor()
+
+        # Recherche exacte d'abord
         query = '''
         SELECT * FROM certifications
         WHERE artist_clean = ? AND title_clean = ?
         ORDER BY certification_date DESC
-        LIMIT 1
         '''
-        
-        cursor = self.conn.cursor()
         cursor.execute(query, (artist_clean, title_clean))
-        
-        row = cursor.fetchone()
-        if row:
-            columns = [description[0] for description in cursor.description]
-            return dict(zip(columns, row))
-        
-        return None
-    
+
+        columns = [description[0] for description in cursor.description]
+        exact_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        if exact_results:
+            return exact_results
+
+        # Si pas de résultat exact, recherche fuzzy
+        query = '''
+        SELECT * FROM certifications
+        WHERE artist_clean LIKE ? AND title_clean LIKE ?
+        ORDER BY certification_date DESC
+        '''
+        cursor.execute(query, (f'%{artist_clean}%', f'%{title_clean}%'))
+
+        fuzzy_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return fuzzy_results
+
+    def _search_featuring_certifications(self, artist_name: str, track_title: str) -> List[Dict[str, Any]]:
+        """Recherche les certifications où l'artiste apparaît en featuring"""
+        artist_clean = self.normalize_text(artist_name)
+        title_clean = self.normalize_text(track_title)
+
+        cursor = self.conn.cursor()
+
+        # Chercher les titres qui contiennent l'artiste ET le titre dans la base
+        # Ex: Si on cherche "NINHO" et "EVERY DAY", on trouvera "NINHO FEAT. GRIFF" / "EVERY DAY"
+        query = '''
+        SELECT * FROM certifications
+        WHERE artist_clean LIKE ? AND title_clean LIKE ?
+        ORDER BY certification_date DESC
+        '''
+
+        cursor.execute(query, (f'%{artist_clean}%', f'%{title_clean}%'))
+
+        columns = [description[0] for description in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        return results
+
+    def get_album_certifications(self, artist_name: str, album_name: str) -> List[Dict[str, Any]]:
+        """Récupère toutes les certifications d'un album"""
+        artist_clean = self.normalize_text(artist_name)
+        album_clean = self.normalize_text(album_name)
+
+        cursor = self.conn.cursor()
+
+        # Recherche exacte
+        query = '''
+        SELECT * FROM certifications
+        WHERE artist_clean = ? AND title_clean = ? AND category = 'Albums'
+        ORDER BY certification_date DESC
+        '''
+        cursor.execute(query, (artist_clean, album_clean))
+
+        columns = [description[0] for description in cursor.description]
+        exact_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        if exact_results:
+            return exact_results
+
+        # Recherche fuzzy
+        query = '''
+        SELECT * FROM certifications
+        WHERE artist_clean LIKE ? AND title_clean LIKE ? AND category = 'Albums'
+        ORDER BY certification_date DESC
+        '''
+        cursor.execute(query, (f'%{artist_clean}%', f'%{album_clean}%'))
+
+        fuzzy_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return fuzzy_results
+
     def get_certification_stats(self, artist_name: Optional[str] = None) -> Dict[str, Any]:
         """Récupère des statistiques sur les certifications"""
         stats = {

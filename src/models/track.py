@@ -216,14 +216,18 @@ class Track:
     last_scraped: Optional[datetime] = None
     scraping_errors: List[str] = field(default_factory=list)
 
-    # Champs de certification SNEP
+    # Champs de certification SNEP - VERSION MULTI-CERTIFICATIONS
     has_certification: bool = False
-    certification_level: Optional[str] = None  # "Or", "Platine", "Diamant", etc.
-    certification_date: Optional[datetime] = None  # Date de constat
+    certification_level: Optional[str] = None  # Plus haute certification (rétrocompatibilité)
+    certification_date: Optional[datetime] = None  # Date de la plus haute certification
     certification_duration_days: Optional[int] = None  # Durée d'obtention en jours
     certification_category: Optional[str] = None  # "Singles" ou "Albums"
     certification_publisher: Optional[str] = None  # Éditeur/Distributeur
-    certification_details: Optional[Dict[str, Any]] = None  # Détails complets
+    certification_details: Optional[Dict[str, Any]] = None  # Détails de la plus haute certification
+
+    # NOUVEAU: Support de plusieurs certifications
+    certifications: List[Dict[str, Any]] = field(default_factory=list)  # Toutes les certifications du morceau
+    album_certifications: List[Dict[str, Any]] = field(default_factory=list)  # Certifications de l'album associé
     
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""
@@ -332,11 +336,12 @@ class Track:
         except Exception:
             return None
     
-    def get_certification_emoji(self) -> str:
+    def get_certification_emoji(self, level: Optional[str] = None) -> str:
         """Retourne un emoji correspondant au niveau de certification"""
-        if not self.certification_level:
+        cert_level = level or self.certification_level
+        if not cert_level:
             return ""
-        
+
         emoji_map = {
             'Or': '🥇',
             'Double Or': '🥇🥇',
@@ -349,25 +354,25 @@ class Track:
             'Triple Diamant': '💎💎💎',
             'Quadruple Diamant': '💎💎💎💎'
         }
-        
-        return emoji_map.get(self.certification_level, '🏆')
+
+        return emoji_map.get(cert_level, '🏆')
     
     def get_certification_info(self) -> str:
-        """Retourne une description textuelle de la certification"""
+        """Retourne une description textuelle de la certification - VERSION SIMPLE"""
         if not self.has_certification:
             return "Pas de certification"
-        
+
         info = f"{self.get_certification_emoji()} {self.certification_level}"
-        
+
         if self.certification_date:
             date_str = self.certification_date.strftime('%d/%m/%Y') if isinstance(self.certification_date, datetime) else str(self.certification_date)
             info += f" (obtenue le {date_str}"
-            
+
             if self.certification_duration_days is not None:
                 years = self.certification_duration_days // 365
                 months = (self.certification_duration_days % 365) // 30
                 days = self.certification_duration_days % 30
-                
+
                 duration_str = ""
                 if years > 0:
                     duration_str += f"{years} an{'s' if years > 1 else ''}"
@@ -379,13 +384,66 @@ class Track:
                     if duration_str:
                         duration_str += ", "
                     duration_str += f"{days} jour{'s' if days > 1 else ''}"
-                
+
                 if duration_str:
                     info += f" - durée: {duration_str}"
-            
+
             info += ")"
-        
+
         return info
+
+    def get_all_certifications_info(self) -> str:
+        """Retourne une description complète de TOUTES les certifications (morceau + album)"""
+        lines = []
+
+        # Certifications du morceau
+        if hasattr(self, 'certifications') and self.certifications:
+            lines.append("🎵 Certifications du morceau:")
+            for cert in self.certifications:
+                level = cert.get('certification', '')
+                date = cert.get('certification_date', '')
+                if isinstance(date, str) and date:
+                    try:
+                        date_obj = datetime.fromisoformat(date)
+                        date_str = date_obj.strftime('%d/%m/%Y')
+                    except:
+                        date_str = date
+                else:
+                    date_str = ''
+
+                emoji = self.get_certification_emoji(level)
+                cert_line = f"  {emoji} {level}"
+                if date_str:
+                    cert_line += f" ({date_str})"
+                lines.append(cert_line)
+
+        # Certifications de l'album
+        if hasattr(self, 'album_certifications') and self.album_certifications:
+            if lines:
+                lines.append("")  # Ligne vide
+            lines.append(f"💿 Certifications de l'album '{self.album}':")
+            for cert in self.album_certifications:
+                level = cert.get('certification', '')
+                date = cert.get('certification_date', '')
+                if isinstance(date, str) and date:
+                    try:
+                        date_obj = datetime.fromisoformat(date)
+                        date_str = date_obj.strftime('%d/%m/%Y')
+                    except:
+                        date_str = date
+                else:
+                    date_str = ''
+
+                emoji = self.get_certification_emoji(level)
+                cert_line = f"  {emoji} {level}"
+                if date_str:
+                    cert_line += f" ({date_str})"
+                lines.append(cert_line)
+
+        if not lines:
+            return "Pas de certification"
+
+        return "\n".join(lines)
         
     @property
     def producers(self):

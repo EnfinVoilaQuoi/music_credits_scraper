@@ -52,43 +52,85 @@ class CertificationEnricher:
         return artist
     
     def enrich_tracks(self, artist: Artist, tracks: List[Track]) -> List[Track]:
-        """Enrichit une liste de morceaux avec leurs certifications"""
+        """Enrichit une liste de morceaux avec leurs certifications - VERSION AMÉLIORÉE"""
         if not tracks or not artist:
             return tracks
-        
+
         enriched_count = 0
-        
+        album_cache = {}  # Cache pour éviter de chercher plusieurs fois le même album
+
         for track in tracks:
             try:
-                # Rechercher la certification du morceau
-                cert_data = self.snep_manager.get_track_certification(
-                    artist.name, 
-                    track.title
+                # Normaliser le titre pour la recherche
+                # Remplacer les apostrophes Unicode courbes par des apostrophes standard
+                track_title = track.title
+                track_title = track_title.replace('\u2019', "'")  # ' (RIGHT SINGLE QUOTATION MARK)
+                track_title = track_title.replace('\u2018', "'")  # ' (LEFT SINGLE QUOTATION MARK)
+                track_title = track_title.replace('\u0153', 'œ')  # Œ (OE LIGATURE)
+                track_title = track_title.replace('\u0152', 'Œ')  # Œ (OE LIGATURE majuscule)
+
+                # 1. Rechercher TOUTES les certifications du morceau
+                track_certs = self.snep_manager.get_track_certifications(
+                    artist.name,
+                    track_title
                 )
-                
-                if cert_data:
-                    # Ajouter les données de certification au morceau
-                    track.certification = cert_data
+
+                # Stocker toutes les certifications
+                track.certifications = track_certs if track_certs else []
+
+                # Pour rétrocompatibilité, garder la plus haute certification dans les anciens champs
+                if track_certs:
+                    highest_cert = track_certs[0]  # Déjà triée par priorité
                     track.has_certification = True
-                    track.certification_level = cert_data.get('certification', '')
-                    track.certification_date = cert_data.get('certification_date', '')
-                    
+                    track.certification_level = highest_cert.get('certification', '')
+                    track.certification_date = highest_cert.get('certification_date', '')
+                    track.certification_category = highest_cert.get('category', '')
+                    track.certification_publisher = highest_cert.get('publisher', '')
+                    track.certification_details = highest_cert
+
                     enriched_count += 1
-                    logger.debug(f"✅ Certification trouvée: {track.title} - {track.certification_level}")
+                    logger.debug(f"✅ {len(track_certs)} certification(s) trouvée(s): {track.title} - {track.certification_level}")
                 else:
-                    track.certification = None
                     track.has_certification = False
                     track.certification_level = None
                     track.certification_date = None
-                    
+                    track.certification_category = None
+                    track.certification_publisher = None
+                    track.certification_details = None
+
+                # 2. Rechercher les certifications de l'album associé
+                if track.album:
+                    # Utiliser le cache si disponible
+                    if track.album not in album_cache:
+                        album_certs = self.snep_manager.get_album_certifications(
+                            artist.name,
+                            track.album
+                        )
+                        album_cache[track.album] = album_certs
+                    else:
+                        album_certs = album_cache[track.album]
+
+                    track.album_certifications = album_certs if album_certs else []
+
+                    if album_certs:
+                        logger.debug(f"✅ {len(album_certs)} certification(s) d'album trouvée(s) pour '{track.album}'")
+                else:
+                    track.album_certifications = []
+
             except Exception as e:
                 logger.error(f"Erreur enrichissement {track.title}: {e}")
-                track.certification = None
+                track.certifications = []
+                track.album_certifications = []
                 track.has_certification = False
-        
+
         if enriched_count > 0:
             logger.info(f"🏆 {enriched_count}/{len(tracks)} morceaux enrichis avec certifications")
-        
+
+        # Afficher statistiques sur les albums
+        albums_with_certs = sum(1 for t in tracks if t.album_certifications)
+        if albums_with_certs > 0:
+            logger.info(f"💿 {albums_with_certs}/{len(tracks)} morceaux ont des certifications d'album")
+
         return tracks
     
     def _calculate_artist_stats(self, certifications: List[Dict[str, Any]]) -> Dict[str, Any]:

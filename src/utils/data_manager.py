@@ -37,7 +37,7 @@ class DataManager:
         """Initialise la base de données"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Table des artistes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS artists (
@@ -50,6 +50,24 @@ class DataManager:
                     updated_at TIMESTAMP
                 )
             """)
+
+            # Vérifier et ajouter les colonnes de certifications si elles n'existent pas
+            cursor.execute("PRAGMA table_info(tracks)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+
+            # Liste des colonnes à ajouter
+            new_columns = {
+                'certifications': 'TEXT',  # JSON array
+                'album_certifications': 'TEXT'  # JSON array
+            }
+
+            for col_name, col_type in new_columns.items():
+                if col_name not in existing_columns:
+                    try:
+                        cursor.execute(f"ALTER TABLE tracks ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"✅ Colonne '{col_name}' ajoutée à la table tracks")
+                    except Exception as e:
+                        logger.debug(f"Colonne '{col_name}' déjà existante ou erreur: {e}")
             
             # Table des morceaux avec track_number
             cursor.execute("""
@@ -381,16 +399,21 @@ class DataManager:
                     track.has_lyrics = bool(existing_track[5])
                     track.lyrics_scraped_at = existing_track[6]
                 
-                # UPDATE avec musical_key et time_signature
+                # Sérialiser les certifications en JSON
+                certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
+                album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
+
+                # UPDATE avec musical_key, time_signature et certifications
                 cursor.execute("""
-                    UPDATE tracks 
-                    SET album = ?, track_number = ?, release_date = ?, 
+                    UPDATE tracks
+                    SET album = ?, track_number = ?, release_date = ?,
                         genius_id = ?, spotify_id = ?, discogs_id = ?,
                         bpm = ?, duration = ?, genre = ?,
                         musical_key = ?, time_signature = ?,
                         genius_url = ?, spotify_url = ?,
                         is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
                         lyrics = ?, lyrics_scraped_at = ?, has_lyrics = ?,
+                        certifications = ?, album_certifications = ?,
                         updated_at = ?, last_scraped = ?
                     WHERE id = ?
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
@@ -404,9 +427,14 @@ class DataManager:
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
                     bool(getattr(track, 'lyrics', None)),
+                    certifications_json, album_certifications_json,
                     datetime.now(), track.last_scraped, track.id))
             else:
-                # INSERT avec musical_key et time_signature
+                # Sérialiser les certifications en JSON
+                certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
+                album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
+
+                # INSERT avec musical_key, time_signature et certifications
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
@@ -415,11 +443,12 @@ class DataManager:
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics,
+                        certifications, album_certifications,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
-                    track.bpm, track.duration, track.genre, 
+                    track.bpm, track.duration, track.genre,
                     getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
                     getattr(track, 'is_featuring', False),
@@ -428,6 +457,7 @@ class DataManager:
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
                     bool(getattr(track, 'lyrics', None)),
+                    certifications_json, album_certifications_json,
                     datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
             
@@ -539,7 +569,7 @@ class DataManager:
                 if total_count == 0:
                     return tracks
                 
-                # CORRECTION: Supprimer youtube_url de la requête SELECT
+                # SELECT avec les certifications JSON
                 cursor.execute("""
                     SELECT id, title, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
@@ -547,8 +577,9 @@ class DataManager:
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics,
+                        certifications, album_certifications,
                         created_at, updated_at, last_scraped
-                    FROM tracks 
+                    FROM tracks
                     WHERE artist_id = ?
                     ORDER BY title
                 """, (artist_id,))
@@ -578,12 +609,14 @@ class DataManager:
                         is_featuring = row[15] # is_featuring (décalé de 2)
                         primary_artist_name = row[16] # primary_artist_name (décalé de 2)
                         featured_artists = row[17] # featured_artists (décalé de 2)
-                        lyrics = row[18]     # lyrics (décalé de 2)
-                        lyrics_scraped_at = row[19] # lyrics_scraped_at (décalé de 2)
-                        has_lyrics = row[20] # has_lyrics (décalé de 2)
-                        created_at = row[21] # created_at (décalé de 2)
-                        updated_at = row[22] # updated_at (décalé de 2)
-                        last_scraped = row[23] # last_scraped (décalé de 2)
+                        lyrics = row[18]     # lyrics
+                        lyrics_scraped_at = row[19] # lyrics_scraped_at
+                        has_lyrics = row[20] # has_lyrics
+                        certifications_json = row[21] # certifications JSON
+                        album_certifications_json = row[22] # album_certifications JSON
+                        created_at = row[23] # created_at
+                        updated_at = row[24] # updated_at
+                        last_scraped = row[25] # last_scraped
                         
                         # Validation
                         if not track_id or not title:
@@ -643,6 +676,29 @@ class DataManager:
                         track.lyrics = safe_assign(lyrics)
                         track.has_lyrics = bool(safe_assign(has_lyrics, False))
                         track.lyrics_scraped_at = safe_assign(lyrics_scraped_at)
+
+                        # Désérialiser les certifications JSON
+                        try:
+                            if certifications_json:
+                                track.certifications = json.loads(certifications_json)
+                                # Mettre à jour les champs de rétrocompatibilité
+                                if track.certifications:
+                                    highest = track.certifications[0]
+                                    track.has_certification = True
+                                    track.certification_level = highest.get('certification')
+                                    track.certification_date = highest.get('certification_date')
+                            else:
+                                track.certifications = []
+                        except:
+                            track.certifications = []
+
+                        try:
+                            if album_certifications_json:
+                                track.album_certifications = json.loads(album_certifications_json)
+                            else:
+                                track.album_certifications = []
+                        except:
+                            track.album_certifications = []
                         
                         # Chargement crédits
                         try:

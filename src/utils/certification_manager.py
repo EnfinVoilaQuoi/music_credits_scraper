@@ -29,19 +29,19 @@ class CertificationManager:
         self.paths = {
             'SNEP': {
                 'csv': self.data_dir / 'snep' / 'certif_snep.csv',
-                'script': self.base_dir / 'src' / 'scripts' / 'update_snep.py',
+                'script': self.base_dir / 'src' / 'utils' / 'update_snep.py',
                 'country': 'FR',
                 'name': 'Syndicat National de l\'Édition Phonographique'
             },
             'RIAA': {
                 'csv': self.data_dir / 'riaa' / 'riaa.csv',
-                'script': self.base_dir / 'src' / 'scripts' / 'update_riaa.py',
+                'script': self.base_dir / 'src' / 'utils' / 'update_riaa.py',
                 'country': 'US',
                 'name': 'Recording Industry Association of America'
             },
             'BRMA': {
                 'csv': self.data_dir / 'brma' / 'certif_brma.csv',
-                'script': self.base_dir / 'src' / 'scripts' / 'update_brma.py',
+                'script': self.base_dir / 'src' / 'utils' / 'update_brma.py',
                 'country': 'BE',
                 'name': 'Belgian Recorded Music Association'
             }

@@ -34,29 +34,29 @@ class GeniusScraper:
         """Initialise le driver Selenium"""
         try:
             options = Options()
+
+            # Mode headless
             if self.headless:
                 options.add_argument('--headless=new')
+
+            # Arguments de base
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
             options.add_argument('--window-size=1920,1080')
             options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-            
-            # Options pour réduire les messages d'erreur
+
+            # Supprimer les logs
             options.add_argument('--log-level=3')
-            options.add_argument('--disable-logging')
-            options.add_argument('--silent')
-            options.add_experimental_option('excludeSwitches', ['enable-logging'])
+            options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
             options.add_experimental_option('useAutomationExtension', False)
-            options.add_argument('--disable-gpu-sandbox')
-            options.add_argument('--disable-software-rasterizer')
-            options.add_argument('--disable-background-timer-throttling')
-            
-            # Désactiver les fonctionnalités inutiles
+
+            # Désactiver fonctionnalités inutiles
             options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--disable-features=VizDisplayCompositor')
             options.add_argument('--disable-background-networking')
-            
+            options.add_argument('--disable-webgl')
+            options.add_argument('--disable-webgl2')
+
             # Désactiver les images pour accélérer
             prefs = {
                 "profile.managed_default_content_settings.images": 2,
@@ -65,45 +65,28 @@ class GeniusScraper:
             }
             options.add_experimental_option("prefs", prefs)
 
-            # Masquer les messages WebGL et GPU
-            options.add_argument('--disable-web-security')
-            options.add_argument('--disable-features=VizDisplayCompositor')
-            options.add_argument('--disable-software-rasterizer')
-            options.add_argument('--disable-background-timer-throttling')
-            options.add_argument('--disable-renderer-backgrounding')
-            options.add_argument('--disable-backgrounding-occluded-windows')
-            options.add_argument('--disable-ipc-flooding-protection')
-            
-            # Masquer spécifiquement les messages WebGL
-            options.add_experimental_option('excludeSwitches', ['enable-logging'])
-            options.add_experimental_option('useAutomationExtension', False)
-            
-            # Logs seulement pour les erreurs critiques
-            options.add_argument('--log-level=3')
-            options.add_argument('--silent')
-            
-            # Désactiver WebGL complètement si pas nécessaire
-            options.add_argument('--disable-webgl')
-            options.add_argument('--disable-webgl2')
-            
             # Essayer d'abord le driver local
             from pathlib import Path
             local_driver = Path(__file__).parent.parent.parent / "drivers" / "chromedriver.exe"
-            
+
             if not local_driver.exists():
                 for path in (Path(__file__).parent.parent.parent / "drivers").rglob("chromedriver.exe"):
                     local_driver = path
                     break
-            
+
             if local_driver.exists():
                 logger.info(f"Utilisation du ChromeDriver local: {local_driver}")
-                service = ChromeService(str(local_driver))
+                service = ChromeService(
+                    str(local_driver),
+                    log_output=subprocess.DEVNULL
+                )
             else:
                 logger.info("ChromeDriver local non trouvé, utilisation de webdriver-manager")
-                service = ChromeService(ChromeDriverManager().install())
-            
-            service.log_output = subprocess.DEVNULL
-            
+                service = ChromeService(
+                    ChromeDriverManager().install(),
+                    log_output=subprocess.DEVNULL
+                )
+
             self.driver = webdriver.Chrome(service=service, options=options)
             self.wait = WebDriverWait(self.driver, SELENIUM_TIMEOUT)
             
@@ -307,8 +290,11 @@ class GeniusScraper:
                         date_element = self.driver.find_element(By.XPATH, selector)
                         date_text = date_element.text.strip()
                         if date_text and self._is_valid_date(date_text):
-                            track.release_date = date_text
-                            logger.info(f"Date trouvée dans le header: {date_text}")
+                            # Utiliser update_release_date pour garder la date la plus ancienne
+                            if track.update_release_date(date_text, source="scraper"):
+                                logger.info(f"Date mise à jour depuis header: {date_text}")
+                            else:
+                                logger.debug(f"Date depuis header ignorée (date existante plus ancienne): {date_text}")
                             break
                     except:
                         continue
@@ -441,12 +427,15 @@ class GeniusScraper:
                 
                 # Gérer la date de sortie
                 if role_text.lower() == 'released on':
-                    if names and not track.release_date:
+                    if names:
                         date_text = ' '.join(names)
                         parsed_date = self._parse_release_date(date_text)
                         if parsed_date:
-                            track.release_date = parsed_date
-                            logger.debug(f"📅 Date de sortie scrapée: {date_text}")
+                            # Utiliser update_release_date pour garder la date la plus ancienne
+                            if track.update_release_date(parsed_date, source="scraper"):
+                                logger.debug(f"📅 Date de sortie mise à jour: {date_text}")
+                            else:
+                                logger.debug(f"📅 Date de sortie ignorée (date existante plus ancienne): {date_text}")
                     continue
                 
                 # Gérer le genre
@@ -794,7 +783,7 @@ class GeniusScraper:
         return results
     
     def scrape_track_lyrics(self, track: Track) -> str:
-        """Scrape les paroles d'un morceau"""
+        """Scrape les paroles d'un morceau et les anecdotes"""
         if not track.genius_url:
             logger.warning(f"Pas d'URL Genius pour {track.title}")
             return ""
@@ -823,12 +812,25 @@ class GeniusScraper:
                 EC.presence_of_element_located((By.CSS_SELECTOR, "[data-lyrics-container='true']"))
             )
 
+            # Cliquer sur "Read More" pour les anecdotes si présent
+            try:
+                read_more_button = self.driver.find_element(
+                    By.CSS_SELECTOR,
+                    "span.SongBioPreview__ViewBio-sc-d13d64be-2, .iqEAIt"
+                )
+                if read_more_button.is_displayed():
+                    self.driver.execute_script("arguments[0].click();", read_more_button)
+                    time.sleep(1)
+                    logger.debug("Bouton 'Read More' cliqué pour anecdotes")
+            except Exception as e:
+                logger.debug(f"Bouton 'Read More' non trouvé (normal si pas d'anecdotes): {e}")
+
             # Récupérer les paroles
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
+
             # Chercher les conteneurs de paroles
             lyrics_containers = soup.find_all('div', {'data-lyrics-container': 'true'})
-            
+
             if lyrics_containers:
                 lyrics_parts = []
                 for container in lyrics_containers:
@@ -836,12 +838,20 @@ class GeniusScraper:
                     text = container.get_text(separator='\n', strip=True)
                     if text:
                         lyrics_parts.append(text)
-                
+
                 lyrics = '\n\n'.join(lyrics_parts)
-                
+
+                # Extraire et séparer les anecdotes des paroles
+                lyrics, anecdotes = self._extract_anecdotes(lyrics)
+
                 # Nettoyer les paroles
                 lyrics = self._clean_lyrics(lyrics)
-                
+
+                # Sauvegarder les anecdotes si trouvées
+                if anecdotes:
+                    track.anecdotes = anecdotes
+                    logger.info(f"📝 Anecdotes extraites pour {track.title}")
+
                 logger.info(f"✅ Paroles récupérées pour {track.title} ({len(lyrics.split())} mots)")
             else:
                 logger.warning(f"⚠️ Conteneur de paroles non trouvé pour {track.title}")
@@ -856,27 +866,82 @@ class GeniusScraper:
 
         return lyrics
 
+    def _extract_anecdotes(self, text: str) -> tuple:
+        """
+        Extrait les anecdotes et informations supplémentaires du texte des paroles
+
+        Returns:
+            tuple: (lyrics_cleaned, anecdotes)
+        """
+        import re
+
+        anecdotes = []
+        lyrics_paragraphs = []
+
+        # Séparer par double saut de ligne (paragraphes)
+        paragraphs = text.split('\n\n')
+
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+
+            # Si le paragraphe est long et ne ressemble pas à des paroles
+            if len(paragraph) > 100 and not self._is_lyrics_paragraph(paragraph):
+                anecdotes.append(paragraph)
+                logger.debug(f"📝 Anecdote détectée : {paragraph[:50]}...")
+            else:
+                lyrics_paragraphs.append(paragraph)
+
+        # Reconstruire les paroles nettoyées
+        lyrics_cleaned = '\n\n'.join(lyrics_paragraphs)
+        anecdotes_text = '\n\n'.join(anecdotes) if anecdotes else None
+
+        return lyrics_cleaned, anecdotes_text
+
+    def _is_lyrics_paragraph(self, text: str) -> bool:
+        """Détermine si un paragraphe est des paroles ou une anecdote"""
+        import re
+
+        # Indicateurs de paroles
+        lyrics_indicators = [
+            r'\[.*?\]',  # Tags comme [Couplet 1], [Refrain]
+            r'^\(',      # Commence par parenthèse (annotations)
+        ]
+
+        for indicator in lyrics_indicators:
+            if re.search(indicator, text):
+                return True
+
+        # Si le texte contient beaucoup de phrases complètes et de ponctuation
+        # c'est probablement une anecdote
+        sentences = text.count('.') + text.count('!') + text.count('?')
+        if sentences > 2:  # Plus de 2 phrases = probablement anecdote
+            return False
+
+        return True  # Par défaut, considérer comme paroles
+
     def _clean_lyrics(self, lyrics: str) -> str:
-        """Nettoie les paroles en gardant la mise en page originale - VERSION CORRIGÉE"""
+        """Nettoie les paroles en gardant la mise en page originale - VERSION AMÉLIORÉE"""
         if not lyrics:
             return ""
-        
+
         import re
-        
+
         # 1: Supprimer uniquement les éléments parasites spécifiques
-        
+
         # Supprimer la section contributors au début
         lyrics = re.sub(r'^.*?Contributors.*?Lyrics\s*', '', lyrics, flags=re.DOTALL | re.MULTILINE)
-        
-        # Supprimer les sections [Paroles de "titre"] au début
-        lyrics = re.sub(r'^\s*\[Paroles de[^\]]*\]\s*', '', lyrics, flags=re.MULTILINE)
-        
+
+        # Supprimer TOUTES les sections [Paroles de "titre"] (début ET milieu du texte)
+        lyrics = re.sub(r'\[Paroles de[^\]]*\]\s*', '', lyrics, flags=re.MULTILINE)
+
         # Supprimer "You might also like" et les suggestions
         lyrics = re.sub(r'You might also like.*?(?=\[|$)', '', lyrics, flags=re.DOTALL | re.MULTILINE)
-        
+
         # Supprimer les lignes "123Embed" ou "Embed"
         lyrics = re.sub(r'\n\d*Embed', '', lyrics, flags=re.MULTILINE)
-        
+
         # Supprimer "See [Language] Translations"
         lyrics = re.sub(r'\nSee.*?Translations', '', lyrics, flags=re.MULTILINE)
         

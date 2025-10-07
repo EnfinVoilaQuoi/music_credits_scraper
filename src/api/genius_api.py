@@ -266,10 +266,11 @@ class GeniusAPI:
                     track_data['_album_from_api'] = True
                     logger.debug(f"Album depuis API: {album_name}")
             
-            # Date de sortie depuis lyricsgenius + marquage
+            # Date de sortie depuis lyricsgenius - créer un track temporaire pour utiliser update_release_date
             if hasattr(song, 'year') and song.year:
                 try:
-                    track_data['release_date'] = datetime(int(song.year), 1, 1)
+                    year_date = datetime(int(song.year), 1, 1)
+                    track_data['release_date'] = year_date
                     track_data['_release_date_from_api'] = True
                     logger.debug(f"Date depuis API: {song.year}")
                 except (ValueError, TypeError):
@@ -278,12 +279,21 @@ class GeniusAPI:
             # Récupérer des métadonnées supplémentaires depuis l'API raw
             if hasattr(song, '_body') and song._body:
                 additional_data = self._extract_additional_metadata_from_raw(song._body)
-                # Fusionner sans écraser les données existantes
+                # Fusionner sans écraser les données existantes, SAUF pour release_date
                 for key, value in additional_data.items():
+                    if key == 'release_date' and value:
+                        # Pour les dates, utiliser la logique intelligente après création du track
+                        continue
                     if key not in track_data and value:
                         track_data[key] = value
-            
+
             track = Track(**track_data)
+
+            # Appliquer la date depuis raw_data avec la logique intelligente
+            if hasattr(song, '_body') and song._body:
+                additional_data = self._extract_additional_metadata_from_raw(song._body)
+                if 'release_date' in additional_data and additional_data['release_date']:
+                    track.update_release_date(additional_data['release_date'], source="api")
             
             # Log pour debug
             status = "featuring" if is_featuring else "principal"

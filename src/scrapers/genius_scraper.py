@@ -1,7 +1,7 @@
-"""Scraper pour récupérer les crédits complets sur Genius - Version corrigée"""
+"""Scraper pour récupérer les crédits complets sur Genius"""
 import time
 import re
-import subprocess
+import platform
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from selenium import webdriver
@@ -28,88 +28,68 @@ class GeniusScraper:
     def __init__(self, headless: bool = True):
         self.headless = headless
         self.driver = None
-        self.temp_dir = None  # Stocker le répertoire temporaire
+        self.wait = None
         self._init_driver()
-    
+
     def _init_driver(self):
-        """Initialise le driver Selenium"""
+        """Initialise le driver Selenium - COPIE EXACTE de spotify_id_scraper.py"""
         try:
+            logger.info(f"🌐 Initialisation du driver Selenium (headless={self.headless})...")
+
             options = Options()
 
             # Mode headless
             if self.headless:
                 options.add_argument('--headless=new')
 
-            # Arguments de base
+            # Options standards (EXACTEMENT comme spotify_id_scraper)
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
             options.add_argument('--window-size=1920,1080')
-            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-
-            # Supprimer les logs
-            options.add_argument('--log-level=3')
-            options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option('useAutomationExtension', False)
 
-            # Désactiver fonctionnalités inutiles
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--disable-background-networking')
-            options.add_argument('--disable-webgl')
-            options.add_argument('--disable-webgl2')
+            # User-Agent
+            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-            # Désactiver les images pour accélérer
+            # Réduire les logs
+            options.add_argument('--log-level=3')
+            options.add_argument('--silent')
+            options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+            # Service avec suppression des logs (EXACTEMENT comme spotify_id_scraper)
+            if platform.system() == 'Windows':
+                service = ChromeService(
+                    ChromeDriverManager().install(),
+                    log_path='NUL'
+                )
+            else:
+                service = ChromeService(
+                    ChromeDriverManager().install(),
+                    log_path='/dev/null'
+                )
+
+            # Désactiver images pour accélérer
             prefs = {
                 "profile.managed_default_content_settings.images": 2,
                 "profile.default_content_setting_values.notifications": 2,
-                "profile.default_content_settings.popups": 0
             }
             options.add_experimental_option("prefs", prefs)
 
-            # Créer un répertoire de données utilisateur temporaire unique
-            import tempfile
-            import uuid
-            import os
-
-            # Utiliser un identifiant unique pour éviter les conflits
-            session_id = str(uuid.uuid4())
-            self.temp_dir = os.path.join(tempfile.gettempdir(), f'chrome_session_{session_id}')
-            os.makedirs(self.temp_dir, exist_ok=True)
-
-            options.add_argument(f'--user-data-dir={self.temp_dir}')
-            options.add_argument('--disable-dev-shm-usage')  # Éviter les problèmes de mémoire partagée
-            options.add_argument('--remote-debugging-port=0')  # Port aléatoire pour éviter conflits
-
-            # Essayer d'abord le driver local
-            from pathlib import Path
-            local_driver = Path(__file__).parent.parent.parent / "drivers" / "chromedriver.exe"
-
-            if not local_driver.exists():
-                for path in (Path(__file__).parent.parent.parent / "drivers").rglob("chromedriver.exe"):
-                    local_driver = path
-                    break
-
-            if local_driver.exists():
-                logger.info(f"Utilisation du ChromeDriver local: {local_driver}")
-                service = ChromeService(
-                    str(local_driver),
-                    log_output=subprocess.DEVNULL
-                )
-            else:
-                logger.info("ChromeDriver local non trouvé, utilisation de webdriver-manager")
-                # Forcer le téléchargement de la version compatible avec Chrome 141
-                service = ChromeService(
-                    ChromeDriverManager(driver_version="141.0.7390.70").install(),
-                    log_output=subprocess.DEVNULL
-                )
-
             self.driver = webdriver.Chrome(service=service, options=options)
             self.wait = WebDriverWait(self.driver, SELENIUM_TIMEOUT)
-            
-            logger.info("Driver Selenium initialisé avec succès")
-            
+
+            # Masquer les signes d'automation
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            logger.info("✅ Driver Selenium initialisé avec succès")
+
         except Exception as e:
-            logger.error(f"Erreur lors de l'initialisation du driver: {e}")
+            logger.error(f"❌ Erreur initialisation Selenium: {e}")
+            self.driver = None
+            self.wait = None
             raise
     
     def __enter__(self):
@@ -123,22 +103,12 @@ class GeniusScraper:
         if self.driver:
             try:
                 self.driver.quit()
-                logger.info("Driver Selenium fermé")
+                logger.info("✅ GeniusScraper: Driver fermé")
             except Exception as e:
-                logger.warning(f"Erreur lors de la fermeture du driver: {e}")
-
-        # Nettoyer le répertoire temporaire
-        if self.temp_dir:
-            try:
-                import shutil
-                import time
-                import os
-                time.sleep(1)  # Attendre que Chrome libère les fichiers
-                if os.path.exists(self.temp_dir):
-                    shutil.rmtree(self.temp_dir, ignore_errors=True)
-                    logger.debug(f"Répertoire temporaire supprimé: {self.temp_dir}")
-            except Exception as e:
-                logger.debug(f"Impossible de supprimer le répertoire temporaire: {e}")
+                logger.debug(f"Erreur lors de la fermeture du driver (normale si déjà fermé): {e}")
+            finally:
+                self.driver = None
+                self.wait = None
     
     def scrape_track_credits(self, track: Track) -> List[Credit]:
         """Scrape les crédits complets d'un morceau"""
@@ -844,23 +814,50 @@ class GeniusScraper:
                 EC.presence_of_element_located((By.CSS_SELECTOR, "[data-lyrics-container='true']"))
             )
 
-            # Cliquer sur "Read More" pour les anecdotes si présent
-            try:
-                read_more_button = self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    "span.SongBioPreview__ViewBio-sc-d13d64be-2, .iqEAIt"
-                )
-                if read_more_button.is_displayed():
-                    self.driver.execute_script("arguments[0].click();", read_more_button)
-                    time.sleep(1)
-                    logger.debug("Bouton 'Read More' cliqué pour anecdotes")
-            except Exception as e:
-                logger.debug(f"Bouton 'Read More' non trouvé (normal si pas d'anecdotes): {e}")
+            # Attendre un peu pour que toute la page se charge
+            time.sleep(1)
 
-            # Récupérer les paroles
+            # Récupérer le HTML
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
-            # Chercher les conteneurs de paroles
+            # ÉTAPE 1: Extraire l'anecdote/bio depuis la section "About"
+            anecdotes_text = None
+            try:
+                # Chercher directement dans la section About (pas besoin de cliquer sur Read More)
+                # Le contenu est déjà dans le DOM
+                bio_selectors = [
+                    'div.SongDescription__Content-sc-634b42e-2',  # Sélecteur exact du HTML fourni
+                    'div.RichText__Container-sc-4013e6a2-0',
+                    'div[class*="SongDescription__Content"]',
+                    'div[class*="RichText__Container"]',
+                ]
+
+                for bio_selector in bio_selectors:
+                    bio_container = soup.select_one(bio_selector)
+                    if bio_container:
+                        # Extraire uniquement le texte (sans les iframes/embeds)
+                        # Supprimer les éléments embed avant d'extraire le texte
+                        for embed in bio_container.find_all('div', class_=lambda x: x and 'embedly' in x):
+                            embed.decompose()
+
+                        anecdotes_text = bio_container.get_text(separator='\n\n', strip=True)
+                        if anecdotes_text and len(anecdotes_text) > 50:
+                            # Nettoyer les éléments parasites
+                            import re
+                            anecdotes_text = re.sub(r'\s+', ' ', anecdotes_text)  # Normaliser les espaces
+                            anecdotes_text = anecdotes_text.strip()
+
+                            track.anecdotes = anecdotes_text
+                            logger.info(f"📝 Anecdote extraite ({len(anecdotes_text)} caractères): {anecdotes_text[:80]}...")
+                            break
+
+                if not anecdotes_text:
+                    logger.debug("⚠️ Aucune anecdote trouvée dans la section About")
+
+            except Exception as e:
+                logger.debug(f"Erreur extraction anecdote: {e}")
+
+            # ÉTAPE 2: Chercher les conteneurs de paroles
             lyrics_containers = soup.find_all('div', {'data-lyrics-container': 'true'})
 
             if lyrics_containers:
@@ -873,16 +870,33 @@ class GeniusScraper:
 
                 lyrics = '\n\n'.join(lyrics_parts)
 
-                # Extraire et séparer les anecdotes des paroles
-                lyrics, anecdotes = self._extract_anecdotes(lyrics)
-
-                # Nettoyer les paroles
+                # ÉTAPE 1: Nettoyer d'abord les artefacts (tags [Paroles de...], etc.)
                 lyrics = self._clean_lyrics(lyrics)
 
-                # Sauvegarder les anecdotes si trouvées
-                if anecdotes:
-                    track.anecdotes = anecdotes
-                    logger.info(f"📝 Anecdotes extraites pour {track.title}")
+                # ÉTAPE 2: Si on a des anecdotes, les retirer des paroles
+                if anecdotes_text:
+                    import re
+                    # Méthode 1: Chercher le premier tag de structure [Couplet], [Intro], [Partie X], etc.
+                    first_tag = re.search(r'\[(?:Intro|Couplet|Refrain|Verse|Chorus|Bridge|Hook|Pre-Chorus|Partie|Part|Outro|Interlude)', lyrics, re.IGNORECASE)
+
+                    if first_tag:
+                        # Tout avant le premier tag est considéré comme anecdote/intro
+                        lyrics = lyrics[first_tag.start():].strip()
+                        logger.debug(f"🧹 Anecdote retirée des paroles (méthode tag structure)")
+                    else:
+                        # Méthode 2: Retirer l'anecdote si elle apparaît au début
+                        # Normaliser les espaces pour comparaison
+                        anecdote_normalized = re.sub(r'\s+', ' ', anecdotes_text[:150])
+                        lyrics_normalized = re.sub(r'\s+', ' ', lyrics[:200])
+
+                        if anecdote_normalized in lyrics_normalized:
+                            # Trouver où l'anecdote se termine (après les premiers 200 caractères environ)
+                            cut_point = lyrics.find('\n\n', len(anecdotes_text) - 50)
+                            if cut_point > 0:
+                                lyrics = lyrics[cut_point + 2:].strip()
+                                logger.debug(f"🧹 Anecdote retirée des paroles (méthode texte)")
+                            else:
+                                logger.debug("⚠️ Point de coupure introuvable, anecdote conservée")
 
                 logger.info(f"✅ Paroles récupérées pour {track.title} ({len(lyrics.split())} mots)")
             else:
@@ -965,8 +979,35 @@ class GeniusScraper:
         # Supprimer la section contributors au début
         lyrics = re.sub(r'^.*?Contributors.*?Lyrics\s*', '', lyrics, flags=re.DOTALL | re.MULTILINE)
 
-        # Supprimer TOUTES les sections [Paroles de "titre"] (début ET milieu du texte)
-        lyrics = re.sub(r'\[Paroles de[^\]]*\]\s*', '', lyrics, flags=re.MULTILINE)
+        # Supprimer TOUTES les sections [Paroles de "titre"] (début ET milieu du texte, même sur plusieurs lignes)
+        # Utiliser un lookbehind négatif pour éviter de capturer les ] internes
+        # On cherche [Paroles de... jusqu'à un ] qui n'est PAS suivi d'un newline puis "ft."
+        def remove_paroles_tag(text):
+            """Supprime le tag [Paroles de...] même s'il contient des brackets internes"""
+            # Chercher le début du tag
+            start = text.find('[Paroles de')
+            if start == -1:
+                return text
+
+            # Chercher le ] de fermeture en comptant les brackets imbriqués
+            bracket_count = 1
+            i = start + len('[Paroles de')
+
+            while i < len(text) and bracket_count > 0:
+                if text[i] == '[':
+                    bracket_count += 1
+                elif text[i] == ']':
+                    bracket_count -= 1
+                i += 1
+
+            # Supprimer le tag complet
+            if bracket_count == 0:
+                logger.debug(f"🔍 Tag [Paroles de...] supprimé: {text[start:i][:80]}...")
+                return text[:start] + text[i:]
+
+            return text
+
+        lyrics = remove_paroles_tag(lyrics)
 
         # Supprimer "You might also like" et les suggestions
         lyrics = re.sub(r'You might also like.*?(?=\[|$)', '', lyrics, flags=re.DOTALL | re.MULTILINE)
@@ -976,7 +1017,15 @@ class GeniusScraper:
 
         # Supprimer "See [Language] Translations"
         lyrics = re.sub(r'\nSee.*?Translations', '', lyrics, flags=re.MULTILINE)
-        
+
+        # NOUVEAU: Fusionner les tags sur plusieurs lignes [Refrain : SDM &\nJosman\n] -> [Refrain : SDM & Josman]
+        # Approche itérative pour gérer tous les cas de newlines dans les brackets
+        while True:
+            new_lyrics = re.sub(r'\[([^\[\]]*?)\n([^\[\]]*?)\]', r'[\1 \2]', lyrics)
+            if new_lyrics == lyrics:
+                break
+            lyrics = new_lyrics
+
         # 2: CORRECTION - Reconstituer les lignes correctement
         
         lines = lyrics.split('\n')
@@ -1088,5 +1137,51 @@ class GeniusScraper:
         logger.info(f"Scraping terminé: {results['success']} réussis, {results['failed']} échoués")
         if include_lyrics:
             logger.info(f"Paroles: {results['lyrics_scraped']} récupérées")
-        
+
+        return results
+
+    def scrape_lyrics_batch(self, tracks: List[Track], progress_callback=None) -> Dict[str, Any]:
+        """Scrape uniquement les paroles de plusieurs morceaux (sans les crédits)"""
+        results = {
+            'success': 0,
+            'failed': 0,
+            'errors': [],
+            'lyrics_scraped': 0
+        }
+
+        total = len(tracks)
+
+        for i, track in enumerate(tracks):
+            try:
+                logger.info(f"Scraping des paroles {i+1}/{total}: {track.title}")
+
+                # Scraper uniquement les paroles
+                lyrics = self.scrape_track_lyrics(track)
+                if lyrics:
+                    track.lyrics = lyrics
+                    track.has_lyrics = True
+                    track.lyrics_scraped_at = datetime.now()
+                    results['lyrics_scraped'] += 1
+                    results['success'] += 1
+                    logger.info(f"✅ Paroles récupérées pour {track.title}")
+                else:
+                    track.has_lyrics = False
+                    results['failed'] += 1
+                    logger.warning(f"❌ Aucune parole trouvée pour {track.title}")
+
+                # Callback de progression
+                if progress_callback:
+                    progress_callback(i + 1, total, track.title)
+
+            except Exception as e:
+                results['failed'] += 1
+                error_msg = f"Erreur paroles sur {track.title}: {str(e)}"
+                results['errors'].append({
+                    'track': track.title,
+                    'error': str(e)
+                })
+                logger.error(error_msg)
+                track.has_lyrics = False
+
+        logger.info(f"Scraping paroles terminé: {results['lyrics_scraped']} récupérées, {results['failed']} échoués")
         return results

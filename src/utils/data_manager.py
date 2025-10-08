@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from contextlib import contextmanager
 
-from src.config import DATABASE_URL, ARTISTS_DIR
+from src.config import DATABASE_URL, ARTISTS_DIR, DATA_DIR
 from src.models import Artist, Track, Credit, CreditRole
 from src.utils.logger import get_logger
 
@@ -60,8 +60,11 @@ class DataManager:
                 'certifications': 'TEXT',  # JSON array
                 'album_certifications': 'TEXT',  # JSON array
                 'musical_key': 'TEXT',  # Musical key en français (ex: "Do majeur")
+                'key': 'TEXT',  # Key brute (ex: "C", "G#/Ab")
+                'mode': 'TEXT',  # Mode (ex: "major", "minor")
                 'time_signature': 'TEXT',  # Signature rythmique (ex: "4/4")
-                'anecdotes': 'TEXT'  # Anecdotes depuis Genius
+                'anecdotes': 'TEXT',  # Anecdotes depuis Genius
+                'spotify_page_title': 'TEXT'  # Titre de la page Spotify pour vérification
             }
 
             for col_name, col_type in new_columns.items():
@@ -130,7 +133,7 @@ class DataManager:
         """Initialise la base de données des certifications au premier lancement"""
         try:
             # Vérifier si le CSV existe et l'importer - nom exact du fichier SNEP
-            csv_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
+            csv_path = Path(DATA_DIR) / 'certifications' / 'snep' / 'certif-.csv'
             if csv_path.exists():
                 logger.info("🔄 Importation initiale des certifications SNEP...")
                 success = self.snep_manager.import_from_csv(csv_path)
@@ -214,13 +217,13 @@ class DataManager:
                 certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
                 album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
 
-                # UPDATE avec musical_key, time_signature, anecdotes et certifications
+                # UPDATE avec key, mode, musical_key, time_signature, anecdotes et certifications
                 cursor.execute("""
                     UPDATE tracks
                     SET album = ?, track_number = ?, release_date = ?,
                         genius_id = ?, spotify_id = ?, discogs_id = ?,
                         bpm = ?, duration = ?, genre = ?,
-                        musical_key = ?, time_signature = ?,
+                        key = ?, mode = ?, musical_key = ?, time_signature = ?,
                         genius_url = ?, spotify_url = ?,
                         is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
                         lyrics = ?, lyrics_scraped_at = ?, has_lyrics = ?, anecdotes = ?,
@@ -230,6 +233,7 @@ class DataManager:
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
                     track.bpm, track.duration, track.genre,
+                    getattr(track, 'key', None), getattr(track, 'mode', None),
                     getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
                     getattr(track, 'is_featuring', False),
@@ -246,21 +250,22 @@ class DataManager:
                 certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
                 album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
 
-                # INSERT avec musical_key, time_signature, anecdotes et certifications
+                # INSERT avec key, mode, musical_key, time_signature, anecdotes, certifications et spotify_page_title
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
-                        bpm, duration, genre, musical_key, time_signature,
+                        bpm, duration, genre, key, mode, musical_key, time_signature,
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
-                        certifications, album_certifications,
+                        certifications, album_certifications, spotify_page_title,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
                     track.bpm, track.duration, track.genre,
+                    getattr(track, 'key', None), getattr(track, 'mode', None),
                     getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
                     getattr(track, 'is_featuring', False),
@@ -271,6 +276,7 @@ class DataManager:
                     bool(getattr(track, 'lyrics', None)),
                     getattr(track, 'anecdotes', None),
                     certifications_json, album_certifications_json,
+                    getattr(track, 'spotify_page_title', None),
                     datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
             
@@ -382,15 +388,15 @@ class DataManager:
                 if total_count == 0:
                     return tracks
                 
-                # SELECT avec les certifications JSON et anecdotes
+                # SELECT avec key, mode, certifications JSON, anecdotes et spotify_page_title
                 cursor.execute("""
                     SELECT id, title, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id,
-                        bpm, duration, genre, musical_key, time_signature,
+                        bpm, duration, genre, key, mode, musical_key, time_signature,
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
-                        certifications, album_certifications,
+                        certifications, album_certifications, spotify_page_title,
                         created_at, updated_at, last_scraped
                     FROM tracks
                     WHERE artist_id = ?
@@ -403,7 +409,7 @@ class DataManager:
                 # Création des objets Track
                 for i, row in enumerate(rows):
                     try:
-                        # Accès par index (indices ajustés sans youtube_url)
+                        # Accès par index (indices ajustés avec key et mode)
                         track_id = row[0]    # id
                         title = row[1]       # title
                         album = row[2]       # album
@@ -415,22 +421,25 @@ class DataManager:
                         bpm = row[8]         # bpm
                         duration = row[9]    # duration
                         genre = row[10]      # genre
-                        musical_key = row[11] # musical_key
-                        time_signature = row[12] # time_signature
-                        genius_url = row[13] # genius_url
-                        spotify_url = row[14] # spotify_url
-                        is_featuring = row[15] # is_featuring
-                        primary_artist_name = row[16] # primary_artist_name
-                        featured_artists = row[17] # featured_artists
-                        lyrics = row[18]     # lyrics
-                        lyrics_scraped_at = row[19] # lyrics_scraped_at
-                        has_lyrics = row[20] # has_lyrics
-                        anecdotes = row[21]  # anecdotes
-                        certifications_json = row[22] # certifications JSON
-                        album_certifications_json = row[23] # album_certifications JSON
-                        created_at = row[24] # created_at
-                        updated_at = row[25] # updated_at
-                        last_scraped = row[26] # last_scraped
+                        key = row[11]        # key  (NOUVEAU)
+                        mode = row[12]       # mode (NOUVEAU)
+                        musical_key = row[13] # musical_key
+                        time_signature = row[14] # time_signature
+                        genius_url = row[15] # genius_url
+                        spotify_url = row[16] # spotify_url
+                        is_featuring = row[17] # is_featuring
+                        primary_artist_name = row[18] # primary_artist_name
+                        featured_artists = row[19] # featured_artists
+                        lyrics = row[20]     # lyrics
+                        lyrics_scraped_at = row[21] # lyrics_scraped_at
+                        has_lyrics = row[22] # has_lyrics
+                        anecdotes = row[23]  # anecdotes
+                        certifications_json = row[24] # certifications JSON
+                        album_certifications_json = row[25] # album_certifications JSON
+                        spotify_page_title = row[26] # spotify_page_title
+                        created_at = row[27] # created_at
+                        updated_at = row[28] # updated_at
+                        last_scraped = row[29] # last_scraped
                         
                         # Validation
                         if not track_id or not title:
@@ -464,22 +473,16 @@ class DataManager:
                         track.bpm = safe_assign(bpm)
                         track.duration = safe_assign(duration)
                         track.genre = safe_assign(genre)
+                        track.key = safe_assign(key)  # NOUVEAU
+                        track.mode = safe_assign(mode)  # NOUVEAU
                         track.musical_key = safe_assign(musical_key)
                         track.time_signature = safe_assign(time_signature)
                         track.genius_url = safe_assign(genius_url)
                         track.spotify_url = safe_assign(spotify_url)
+                        track.spotify_page_title = safe_assign(spotify_page_title)
                         track.created_at = safe_assign(created_at)
                         track.updated_at = safe_assign(updated_at)
                         track.last_scraped = safe_assign(last_scraped)
-
-                        # ⭐ NOUVEAU : Calculer key et mode depuis musical_key si manquants
-                        if track.musical_key and (not hasattr(track, 'key') or not track.key):
-                            try:
-                                # Si on a "Do majeur" mais pas key/mode, on peut les recalculer
-                                # Mais pour l'instant on garde juste musical_key
-                                logger.debug(f"Track '{track.title}' a musical_key='{track.musical_key}' chargé depuis DB")
-                            except Exception as e:
-                                logger.debug(f"Impossible de parser musical_key '{track.musical_key}': {e}")
                         
                         # Propriétés featuring
                         track.is_featuring = bool(safe_assign(is_featuring, False))
@@ -530,7 +533,9 @@ class DataManager:
                         logger.error(f"❌ Erreur track {i}: {track_error}")
                         continue
                 
-                logger.info(f"✅ {len(tracks)} tracks chargés avec succès")
+                # Compter les tracks avec musical_key
+                tracks_with_key = sum(1 for t in tracks if hasattr(t, 'musical_key') and t.musical_key)
+                logger.info(f"✅ {len(tracks)} tracks chargés avec succès ({tracks_with_key} avec musical_key)")
                 
         except Exception as e:
             logger.error(f"❌ Erreur dans get_artist_tracks: {e}")
@@ -850,4 +855,55 @@ class DataManager:
         except Exception as e:
             logger.error(f"❌ Erreur lors de la mise à jour forcée: {e}")
             return 0
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """Retourne des statistiques sur la base de données"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                stats = {}
+
+                # Nombre d'artistes
+                cursor.execute("SELECT COUNT(*) FROM artists")
+                stats['total_artists'] = cursor.fetchone()[0]
+
+                # Nombre de morceaux
+                cursor.execute("SELECT COUNT(*) FROM tracks")
+                stats['total_tracks'] = cursor.fetchone()[0]
+
+                # Nombre de crédits
+                cursor.execute("SELECT COUNT(*) FROM credits")
+                stats['total_credits'] = cursor.fetchone()[0]
+
+                # Morceaux avec crédits complets
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT t.id)
+                    FROM tracks t
+                    JOIN credits c ON t.id = c.track_id
+                    WHERE c.role IN ('Producer', 'Writer')
+                    GROUP BY t.id
+                    HAVING COUNT(DISTINCT c.role) = 2
+                """)
+                result = cursor.fetchone()
+                stats['tracks_with_complete_credits'] = result[0] if result else 0
+
+                # Erreurs récentes
+                cursor.execute("""
+                    SELECT COUNT(*) FROM scraping_errors
+                    WHERE error_time > datetime('now', '-1 day')
+                """)
+                stats['recent_errors'] = cursor.fetchone()[0]
+
+                return stats
+
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des statistiques: {e}")
+            return {
+                'total_artists': 0,
+                'total_tracks': 0,
+                'total_credits': 0,
+                'tracks_with_complete_credits': 0,
+                'recent_errors': 0
+            }
 

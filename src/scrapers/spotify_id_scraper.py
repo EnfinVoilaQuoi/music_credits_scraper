@@ -1,286 +1,488 @@
 """
-Scraper pour récupérer les IDs Spotify sans utiliser l'API Spotify
-VERSION AMÉLIORÉE : Meilleurs délais + logs désactivés
+Scraper Spotify ID avec Selenium - Version modulaire propre
+Recherche directe sur open.spotify.com/search
 """
-import requests
-import re
 import time
+import re
+import json
 import urllib.parse
-from typing import Optional, List
-from bs4 import BeautifulSoup
 import logging
+from typing import Optional
+from pathlib import Path
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
 
 logger = logging.getLogger('SpotifyIDScraper')
 
+
 class SpotifyIDScraper:
-    """Scraper pour récupérer les IDs Spotify via recherche web"""
-    
-    def __init__(self, cache_file: str = "spotify_ids_cache.json", headless: bool = False):
+    """Scraper pour récupérer les IDs Spotify via recherche directe Selenium"""
+
+    def __init__(self, cache_file: str = "spotify_ids_cache.json", headless: bool = True):
+        """
+        Initialise le scraper Spotify ID
+
+        Args:
+            cache_file: Fichier de cache JSON
+            headless: Mode headless (True par défaut)
+        """
         self.cache_file = cache_file
         self.cache = self._load_cache()
         self.headless = headless
-        self.session = requests.Session()
-        
-        # Headers plus réalistes pour éviter la détection
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
-        
-        # Pattern pour extraire les IDs Spotify depuis les URLs
+        self.driver = None
+        self.wait = None
+        self.selenium_timeout = 20
+
+        # Patterns pour extraire les IDs Spotify
         self.spotify_id_patterns = [
             r'open\.spotify\.com/(?:intl-[a-z]{2}/)?track/([a-zA-Z0-9]{22})',
+            r'spotify\.com/track/([a-zA-Z0-9]{22})',
             r'spotify:track:([a-zA-Z0-9]{22})',
+            r'/track/([a-zA-Z0-9]{22})(?:\?|$|/)',
         ]
-    
+
+        logger.info(f"SpotifyIDScraper initialisé (headless={headless})")
+
     def _load_cache(self):
         """Charge le cache depuis le fichier"""
         try:
-            import json
             with open(self.cache_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-    
+
     def _save_cache(self):
         """Sauvegarde le cache"""
         try:
-            import json
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Erreur sauvegarde cache: {e}")
-    
+
     def _get_cache_key(self, artist: str, title: str) -> str:
+        """Génère une clé de cache"""
         return f"{artist.lower().strip()}::{title.lower().strip()}"
-    
+
+    def _init_selenium_driver(self):
+        """Initialise le driver Selenium"""
+        if self.driver:
+            return  # Déjà initialisé
+
+        logger.info(f"🌐 Initialisation du driver Selenium (headless={self.headless})...")
+
+        try:
+            options = Options()
+
+            # Mode headless
+            if self.headless:
+                options.add_argument('--headless=new')
+
+            # Options standards
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+
+            # User-Agent
+            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+            # Réduire les logs
+            options.add_argument('--log-level=3')
+            options.add_argument('--silent')
+            options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+            # Service avec suppression des logs
+            import platform
+            if platform.system() == 'Windows':
+                service = ChromeService(
+                    ChromeDriverManager().install(),
+                    log_path='NUL'
+                )
+            else:
+                service = ChromeService(
+                    ChromeDriverManager().install(),
+                    log_path='/dev/null'
+                )
+
+            # Désactiver images pour accélérer
+            prefs = {
+                "profile.managed_default_content_settings.images": 2,
+                "profile.default_content_setting_values.notifications": 2,
+            }
+            options.add_experimental_option("prefs", prefs)
+
+            self.driver = webdriver.Chrome(service=service, options=options)
+            self.wait = WebDriverWait(self.driver, self.selenium_timeout)
+
+            # Masquer les signes d'automation
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            logger.info("✅ Driver Selenium initialisé avec succès")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur initialisation Selenium: {e}")
+            self.driver = None
+            self.wait = None
+            raise
+
+    def _handle_cookies(self):
+        """Gère les popups de cookies Spotify"""
+        try:
+            logger.debug("🍪 Gestion des cookies...")
+            time.sleep(2)
+
+            cookie_selectors = [
+                "button[id='onetrust-accept-btn-handler']",
+                "button[data-testid='accept-all-cookies']",
+                "button[class*='accept-all']",
+                "#onetrust-accept-btn-handler",
+            ]
+
+            for selector in cookie_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            element.click()
+                            logger.info(f"✅ Clic sur le bouton AGREE: '{element.text[:50]}'")
+                            time.sleep(2)
+                            return
+                except:
+                    continue
+
+            logger.debug("✅ Popup CMP fermé ou absent")
+
+        except Exception as e:
+            logger.debug(f"Erreur gestion cookies: {e}")
+
     def extract_spotify_id_from_url(self, url: str) -> Optional[str]:
         """Extrait l'ID Spotify depuis une URL"""
+        if not url or 'spotify' not in url.lower():
+            return None
+
+        url = url.strip()
+
         for pattern in self.spotify_id_patterns:
             match = re.search(pattern, url)
             if match:
                 spotify_id = match.group(1)
-                # Vérifier que c'est bien un ID Spotify valide (22 caractères alphanumériques)
-                if len(spotify_id) == 22 and spotify_id.isalnum():
-                    logger.debug(f"ID Spotify extrait: {spotify_id}")
+                if len(spotify_id) == 22 and re.match(r'^[a-zA-Z0-9_-]+$', spotify_id):
                     return spotify_id
         return None
-    
-    def search_google_for_spotify_track(self, artist: str, title: str) -> Optional[str]:
-        """Recherche un track sur Google et extrait l'ID Spotify"""
-        query = f'"{artist}" "{title}" site:open.spotify.com'
-        encoded_query = urllib.parse.quote_plus(query)
-        
-        google_url = f"https://www.google.com/search?q={encoded_query}"
-        
-        try:
-            logger.debug(f"Recherche Google: {query}")
-            
-            # Ajouter un délai aléatoire pour éviter la détection
-            time.sleep(1 + (hash(query) % 10) / 10)  # 1-2 secondes aléatoire
-            
-            response = self.session.get(google_url, timeout=15)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Chercher tous les liens vers Spotify
-                links = soup.find_all('a', href=True)
-                
-                for link in links:
-                    href = link.get('href', '')
-                    
-                    # Nettoyer l'URL (Google encode souvent les URLs)
-                    if 'open.spotify.com' in href:
-                        # Extraire l'URL réelle depuis les redirections Google
-                        if href.startswith('/url?q='):
-                            actual_url = urllib.parse.unquote(href.split('/url?q=')[1].split('&')[0])
-                        else:
-                            actual_url = href
-                        
-                        spotify_id = self.extract_spotify_id_from_url(actual_url)
-                        if spotify_id:
-                            logger.info(f"✅ ID Spotify trouvé via Google: {spotify_id}")
-                            return spotify_id
-                
-                logger.debug("Aucun lien Spotify trouvé dans les résultats Google")
-            else:
-                logger.debug(f"Google retourne status {response.status_code}")
-                
-        except Exception as e:
-            logger.debug(f"Erreur recherche Google: {e}")
-        
-        return None
-    
-    def search_duckduckgo_for_spotify_track(self, artist: str, title: str) -> Optional[str]:
-        """Recherche alternative avec DuckDuckGo"""
-        query = f'"{artist}" "{title}" site:open.spotify.com'
-        encoded_query = urllib.parse.quote_plus(query)
-        
-        ddg_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
-        
-        try:
-            logger.debug(f"Recherche DuckDuckGo: {query}")
-            
-            # Délai pour éviter le rate limiting
-            time.sleep(2)
-            
-            response = self.session.get(ddg_url, timeout=15)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Chercher les liens vers Spotify
-                links = soup.find_all('a', href=True)
-                
-                for link in links:
-                    href = link.get('href', '')
-                    
-                    if 'open.spotify.com' in href:
-                        spotify_id = self.extract_spotify_id_from_url(href)
-                        if spotify_id:
-                            logger.info(f"✅ ID Spotify trouvé via DuckDuckGo: {spotify_id}")
-                            return spotify_id
-                
-                logger.debug("Aucun lien Spotify trouvé dans DuckDuckGo")
-            else:
-                logger.debug(f"DuckDuckGo retourne status {response.status_code}")
-                
-        except Exception as e:
-            logger.debug(f"Erreur recherche DuckDuckGo: {e}")
-        
-        return None
-    
-    def search_direct_spotify_web(self, artist: str, title: str) -> Optional[str]:
-        """Tentative de recherche directe sur Spotify Web"""
-        try:
-            # Construire une URL de recherche Spotify
-            query = f"{artist} {title}"
-            encoded_query = urllib.parse.quote_plus(query)
-            spotify_search_url = f"https://open.spotify.com/search/{encoded_query}"
-            
-            logger.debug(f"Recherche directe Spotify: {spotify_search_url}")
-            
-            # Délai
-            time.sleep(2)
-            
-            response = self.session.get(spotify_search_url, timeout=15, allow_redirects=True)
-            
-            if response.status_code == 200:
-                # Chercher les IDs Spotify dans le HTML de la page
-                spotify_ids = []
-                for pattern in self.spotify_id_patterns:
-                    matches = re.findall(pattern, response.text)
-                    spotify_ids.extend(matches)
-                
-                if spotify_ids:
-                    # Prendre le premier ID trouvé (probablement le plus pertinent)
-                    spotify_id = spotify_ids[0]
-                    logger.info(f"✅ ID Spotify trouvé directement: {spotify_id}")
-                    return spotify_id
-                else:
-                    logger.debug("Aucun ID Spotify trouvé dans la page")
-            else:
-                logger.debug(f"Spotify retourne status {response.status_code}")
-                
-        except Exception as e:
-            logger.debug(f"Erreur recherche directe Spotify: {e}")
-        
-        return None
-    
+
+    def _calculate_relevance(self, artist: str, title: str, text: str) -> float:
+        """Calcule la pertinence d'un résultat"""
+        if not text:
+            return 0.5
+
+        score = 0.0
+        artist_lower = artist.lower()
+        title_lower = title.lower()
+        text_lower = text.lower()
+
+        # Bonus pour correspondance exacte
+        if artist_lower in text_lower:
+            score += 0.4
+        if title_lower in text_lower:
+            score += 0.4
+
+        # Bonus pour mots individuels
+        for word in artist_lower.split():
+            if len(word) > 2 and word in text_lower:
+                score += 0.1
+
+        for word in title_lower.split():
+            if len(word) > 2 and word in text_lower:
+                score += 0.1
+
+        return min(score, 1.0)
+
     def get_spotify_id(self, artist: str, title: str) -> Optional[str]:
         """
-        Méthode principale pour récupérer l'ID Spotify d'un track
-        Utilise plusieurs stratégies en cascade avec délais appropriés
+        Recherche l'ID Spotify via recherche directe open.spotify.com
+
+        Args:
+            artist: Nom de l'artiste
+            title: Titre du morceau
+
+        Returns:
+            L'ID Spotify ou None
         """
         logger.info(f"🔍 Recherche ID Spotify pour: '{artist}' - '{title}'")
-        
-        # Vérifier le cache d'abord
+
+        # Vérifier le cache
         cache_key = self._get_cache_key(artist, title)
         if cache_key in self.cache:
             cached_id = self.cache[cache_key]
-            if cached_id != 'not_found':
+            if cached_id and cached_id != 'not_found':
                 logger.info(f"✅ ID trouvé en cache: {cached_id}")
                 return cached_id
             else:
                 logger.debug("Échec précédent en cache")
                 return None
-        
-        # Stratégie 1: Recherche Google (souvent bloqué)
-        spotify_id = self.search_google_for_spotify_track(artist, title)
-        
-        # Stratégie 2: Recherche DuckDuckGo (si Google échoue)
-        if not spotify_id:
-            time.sleep(3)  # Délai plus long entre les stratégies
-            spotify_id = self.search_duckduckgo_for_spotify_track(artist, title)
-        
-        # Stratégie 3: Recherche directe Spotify (en dernier recours)
-        if not spotify_id:
-            time.sleep(3)
-            spotify_id = self.search_direct_spotify_web(artist, title)
-        
-        # Mettre en cache le résultat
-        if spotify_id:
-            self.cache[cache_key] = spotify_id
-            logger.info(f"✅ Succès: ID Spotify {spotify_id} pour '{title}'")
-        else:
-            self.cache[cache_key] = 'not_found'
-            logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
-        
-        self._save_cache()
-        
-        return spotify_id
-    
+
+        try:
+            # Initialiser Selenium si nécessaire
+            if not self.driver:
+                self._init_selenium_driver()
+
+            if not self.driver:
+                logger.error("❌ Driver Selenium non disponible")
+                return None
+
+            # Essayer plusieurs variantes de requête
+            search_queries = [
+                f"{artist} {title}",
+                f'"{artist}" "{title}"',
+                f"{title} {artist}",
+            ]
+
+            found_tracks = []
+
+            for query_idx, query in enumerate(search_queries):
+                logger.info(f"📝 Essai {query_idx + 1}/{len(search_queries)}: '{query}'")
+
+                try:
+                    # URL de recherche Spotify
+                    spotify_url = f"https://open.spotify.com/search/{urllib.parse.quote(query)}"
+
+                    logger.debug(f"🌐 Navigation vers: {spotify_url}")
+                    self.driver.get(spotify_url)
+
+                    # Gérer les cookies
+                    self._handle_cookies()
+
+                    # Attendre le chargement
+                    logger.debug("⏳ Attente du chargement...")
+                    try:
+                        WebDriverWait(self.driver, 15).until(
+                            lambda driver: any([
+                                driver.find_elements(By.CSS_SELECTOR, "[data-testid*='track']"),
+                                driver.find_elements(By.CSS_SELECTOR, "a[href*='/track/']"),
+                            ])
+                        )
+                        logger.debug("✅ Page chargée")
+                    except TimeoutException:
+                        logger.warning(f"⏰ Timeout pour: {query}")
+                        continue
+
+                    # Chercher les liens tracks
+                    track_selectors = [
+                        "a[href*='/track/'][data-testid]",
+                        "div[data-testid*='track'] a[href*='/track/']",
+                        "[role='row'] a[href*='/track/']",
+                        "a[href*='/track/']",
+                    ]
+
+                    logger.debug(f"🔍 Recherche de tracks...")
+
+                    for selector in track_selectors:
+                        try:
+                            track_links = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            logger.debug(f"  • Sélecteur '{selector}': {len(track_links)} liens")
+
+                            for link in track_links[:10]:
+                                try:
+                                    href = link.get_attribute('href')
+                                    if href and '/track/' in href:
+                                        spotify_id = self.extract_spotify_id_from_url(href)
+                                        if spotify_id and spotify_id not in [t['id'] for t in found_tracks]:
+                                            # Récupérer le texte
+                                            try:
+                                                link_text = link.text.lower()
+                                                parent_text = link.find_element(By.XPATH, "./..").text.lower()
+                                                combined_text = f"{link_text} {parent_text}"
+                                                relevance = self._calculate_relevance(artist, title, combined_text)
+                                            except:
+                                                combined_text = ''
+                                                relevance = 0.5
+
+                                            found_tracks.append({
+                                                'id': spotify_id,
+                                                'text': combined_text,
+                                                'relevance': relevance,
+                                                'href': href
+                                            })
+                                            logger.debug(f"    🎯 ID={spotify_id}, relevance={relevance:.2f}")
+
+                                except Exception as link_error:
+                                    continue
+                        except Exception as selector_error:
+                            continue
+
+                    # Si on a trouvé des tracks, arrêter
+                    if found_tracks:
+                        break
+
+                except Exception as e:
+                    logger.error(f"❌ Erreur avec requête '{query}': {e}")
+                    continue
+
+                # Délai entre requêtes
+                if query_idx < len(search_queries) - 1:
+                    time.sleep(2)
+
+            # Analyser les résultats
+            if found_tracks:
+                # Trier par pertinence
+                found_tracks.sort(key=lambda x: x['relevance'], reverse=True)
+
+                logger.info(f"📊 {len(found_tracks)} track(s) trouvé(s)")
+                logger.info(f"🏆 Top 3:")
+                for i, track in enumerate(found_tracks[:3]):
+                    logger.info(f"  {i+1}. ID={track['id']} (relevance={track['relevance']:.2f})")
+
+                best_track = found_tracks[0]
+                spotify_id = best_track['id']
+
+                logger.info(f"✅ SÉLECTIONNÉ: {spotify_id} (relevance: {best_track['relevance']:.2f})")
+
+                # Sauvegarder en cache
+                self.cache[cache_key] = spotify_id
+                self._save_cache()
+
+                return spotify_id
+            else:
+                logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
+                self.cache[cache_key] = 'not_found'
+                self._save_cache()
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Erreur recherche Spotify: {e}")
+            return None
+
+    def get_spotify_page_title(self, spotify_id: str) -> Optional[str]:
+        """
+        Récupère le titre de la page Spotify pour un ID donné
+
+        Args:
+            spotify_id: L'ID Spotify du track
+
+        Returns:
+            Le titre de la page ou None
+        """
+        try:
+            spotify_url = f"https://open.spotify.com/track/{spotify_id}"
+            logger.debug(f"📄 Récupération du titre de page pour: {spotify_url}")
+
+            # Initialiser Selenium si nécessaire
+            if not self.driver:
+                self._init_selenium_driver()
+
+            if not self.driver:
+                logger.error("❌ Driver Selenium non disponible")
+                return None
+
+            # Naviguer vers la page
+            self.driver.get(spotify_url)
+
+            # Attendre un peu que la page charge
+            time.sleep(2)
+
+            # Récupérer le titre de la page
+            page_title = self.driver.title
+
+            if page_title:
+                # Nettoyer le titre (enlever " | Spotify" à la fin)
+                if " | Spotify" in page_title:
+                    page_title = page_title.replace(" | Spotify", "")
+
+                logger.info(f"✅ Titre de page récupéré: {page_title[:50]}...")
+                return page_title
+            else:
+                logger.warning("❌ Titre de page vide")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération titre: {e}")
+            return None
+
     def get_spotify_id_for_track(self, track) -> Optional[str]:
         """
-        Méthode améliorée pour récupérer l'ID Spotify d'un track
-        Gère automatiquement les featurings en utilisant l'artiste principal
-        
+        Méthode compatible avec Track object
+        Gère automatiquement les featurings
+
         Args:
-            track: L'objet Track à traiter
-            
+            track: L'objet Track
+
         Returns:
-            L'ID Spotify trouvé ou None
+            L'ID Spotify ou None
         """
-        # Déterminer le bon artiste à utiliser
+        # Déterminer le bon artiste
         if hasattr(track, 'is_featuring') and track.is_featuring:
-            # Si c'est un featuring, utiliser l'artiste principal
             if hasattr(track, 'primary_artist_name') and track.primary_artist_name:
                 artist_name = track.primary_artist_name
-                logger.info(f"🎤 Featuring détecté pour Spotify, utilisation de l'artiste principal: {artist_name}")
+                logger.info(f"🎤 Featuring détecté, utilisation de l'artiste principal: {artist_name}")
             else:
                 artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
         else:
             artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
-        
-        # Utiliser la méthode existante
+
         return self.get_spotify_id(artist_name, track.title)
 
-    def get_multiple_spotify_ids(self, tracks: List[tuple]) -> dict:
-        """
-        Récupère les IDs Spotify pour plusieurs tracks
-        tracks: Liste de tuples (artist, title)
-        """
-        logger.info(f"Récupération de {len(tracks)} IDs Spotify")
-        
-        results = {}
-        
-        for i, (artist, title) in enumerate(tracks):
-            logger.debug(f"Traitement {i+1}/{len(tracks)}: '{artist}' - '{title}'")
-            
-            spotify_id = self.get_spotify_id(artist, title)
-            results[f"{artist}::{title}"] = spotify_id
-            
-            # Délai plus long entre les tracks pour éviter le rate limiting
-            if i < len(tracks) - 1:
-                time.sleep(5)  # 5 secondes entre chaque track
-        
-        success_count = len([v for v in results.values() if v])
-        logger.info(f"Résultats: {success_count}/{len(tracks)} IDs Spotify récupérés")
-        
-        return results
+    def close(self):
+        """Ferme le driver Selenium"""
+        if self.driver:
+            try:
+                self.driver.quit()
+                logger.info("✅ SpotifyIDScraper fermé")
+            except:
+                pass
+            finally:
+                self.driver = None
+                self.wait = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __del__(self):
+        """Cleanup automatique"""
+        try:
+            self.close()
+        except:
+            pass
+
+
+# Test rapide
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
+    scraper = SpotifyIDScraper(headless=True)
+
+    try:
+        # Test avec quelques tracks
+        tests = [
+            ("PNL", "Au DD"),
+            ("Orelsan", "La Quête"),
+            ("Nekfeu", "Énergie sombre"),
+        ]
+
+        for artist, title in tests:
+            print(f"\n{'='*60}")
+            print(f"Test: {artist} - {title}")
+            print('='*60)
+
+            spotify_id = scraper.get_spotify_id(artist, title)
+
+            if spotify_id:
+                print(f"✅ Succès: {spotify_id}")
+                print(f"URL: https://open.spotify.com/track/{spotify_id}")
+            else:
+                print(f"❌ Échec")
+
+    finally:
+        scraper.close()

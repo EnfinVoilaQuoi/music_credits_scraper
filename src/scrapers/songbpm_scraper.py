@@ -49,7 +49,13 @@ class SongBPMScraper:
         """Initialise le driver Selenium avec configuration robuste"""
         try:
             logger.info(f"🌐 Initialisation du driver Selenium SongBPM (headless={self.headless})...")
-            
+
+            # Patch urllib3 pour réduire le timeout à 30s globalement
+            import urllib3
+            from urllib3.util.timeout import Timeout
+            # Monkey-patch le timeout par défaut d'urllib3
+            urllib3.util.timeout.DEFAULT_TIMEOUT = Timeout(connect=30, read=30)
+
             options = Options()
             
             # Mode headless ou visible selon configuration
@@ -93,7 +99,7 @@ class SongBPMScraper:
                 service = ChromeService(ChromeDriverManager().install(), log_path='NUL')
             else:
                 service = ChromeService(ChromeDriverManager().install(), log_path='/dev/null')
-            
+
             # Préférences pour désactiver les popups et notifications
             prefs = {
                 "profile.default_content_setting_values.notifications": 2,
@@ -101,10 +107,14 @@ class SongBPMScraper:
                 "profile.managed_default_content_settings.images": 1
             }
             options.add_experimental_option("prefs", prefs)
-            
+
             self.driver = webdriver.Chrome(service=service, options=options)
             self.wait = WebDriverWait(self.driver, 10)
-            
+
+            # Configurer les timeouts - RÉDUITS à 30s
+            self.driver.set_page_load_timeout(30)  # Timeout de chargement de page
+            self.driver.set_script_timeout(30)  # Timeout d'exécution de scripts
+
             # Script pour masquer les signes d'automation
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
@@ -619,10 +629,18 @@ class SongBPMScraper:
 
         except TimeoutException:
             logger.error("❌ SongBPM: Timeout lors de la recherche")
+            self._reset_driver_on_error()
             log_api("SongBPM", f"search/{track_title}", False)
             return None
         except Exception as e:
-            logger.error(f"❌ SongBPM: Erreur lors de la recherche: {e}")
+            # Détecter les timeouts HTTP (ReadTimeoutError)
+            error_str = str(e)
+            if "Read timed out" in error_str or "HTTPConnectionPool" in error_str:
+                logger.error(f"❌ SongBPM: HTTP timeout détecté: {e}")
+                self._reset_driver_on_error()
+            else:
+                logger.error(f"❌ SongBPM: Erreur lors de la recherche: {e}")
+                self._reset_driver_on_error()
             log_api("SongBPM", f"search/{track_title}", False)
             return None
 

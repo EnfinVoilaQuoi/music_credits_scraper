@@ -8,6 +8,7 @@ from src.models import Track
 from src.scrapers.songbpm_scraper import SongBPMScraper
 from src.scrapers.spotify_id_scraper import SpotifyIDScraper
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
+from src.api.deezer_api import DeezerAPI
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,9 +26,10 @@ class DataEnricher:
             headless_songbpm: Si True, lance SongBPM en mode headless (True par défaut)
         """
         self.apis_available = {
-            'reccobeats': False,
-            'songbpm': False,
-            'spotify_id': False,  # NOUVEAU: Ajout du scraper Spotify_ID
+            'spotify_id': False,  # 1. Scraper Spotify_ID
+            'reccobeats': False,  # 2. ReccoBeats
+            'songbpm': False,     # 3. SongBPM
+            'deezer': False,      # 4. Deezer API
             'discogs': False
         }
         
@@ -60,7 +62,16 @@ class DataEnricher:
             logger.info("✅ Spotify ID scraper initialisé")
         except Exception as e:
             logger.error(f"❌ Erreur init Spotify ID scraper: {e}")
-        
+
+        # Initialiser Deezer API
+        self.deezer_client = None
+        try:
+            self.deezer_client = DeezerAPI()
+            self.apis_available['deezer'] = True
+            logger.info("✅ Deezer API initialisée")
+        except Exception as e:
+            logger.error(f"❌ Erreur init Deezer API: {e}")
+
         # Discogs n'est pas implémenté
         self.apis_available['discogs'] = False
         
@@ -321,15 +332,16 @@ class DataEnricher:
         """Retourne la liste des sources disponibles"""
         return [k for k, v in self.apis_available.items() if v]
     
-    def enrich_track(self, track: Track, sources: Optional[List[str]] = None, 
+    def enrich_track(self, track: Track, sources: Optional[List[str]] = None,
                  force_update: bool = False, artist_tracks: Optional[List[Track]] = None,
                  clear_on_failure: bool = True) -> Dict[str, bool]:
         """
         Enrichit un morceau avec les sources spécifiées
-        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM
+        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM + Deezer
+        ORDRE: 1. Spotify ID, 2. ReccoBeats, 3. SongBPM, 4. Deezer
         """
         if sources is None:
-            sources = ['spotify_id', 'reccobeats', 'songbpm']
+            sources = ['spotify_id', 'reccobeats', 'songbpm', 'deezer']
         
         results = {}
         
@@ -361,6 +373,16 @@ class DataEnricher:
                         track.spotify_id = spotify_id
                         logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
                         results['spotify_id'] = True
+
+                        # Récupérer le titre de la page Spotify pour vérification
+                        if self.spotify_id_scraper:
+                            try:
+                                page_title = self.spotify_id_scraper.get_spotify_page_title(spotify_id)
+                                if page_title:
+                                    track.spotify_page_title = page_title
+                                    logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
+                            except Exception as e:
+                                logger.debug(f"Impossible de récupérer le titre de page: {e}")
                     else:
                         logger.warning(f"❌ Échec récupération Spotify ID via scraper")
                         results['spotify_id'] = False
@@ -452,9 +474,27 @@ class DataEnricher:
             else:
                 logger.info(f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={getattr(track, 'duration', 'N/A')})")
                 results['songbpm'] = 'not_needed'
-        
+
         # ========================================
-        # 3. NETTOYAGE SI ÉCHEC COMPLET
+        # 3. DEEZER API
+        # ========================================
+        if 'deezer' in sources and self.apis_available.get('deezer'):
+            # Appeler Deezer pour vérification et enrichissement complémentaire
+            logger.info(f"🎵 Appel de Deezer API pour '{track.title}'")
+            try:
+                deezer_success = self._enrich_with_deezer(track, force_update=force_update)
+                results['deezer'] = deezer_success
+
+                if deezer_success:
+                    logger.info(f"✅ Deezer SUCCÈS pour '{track.title}'")
+                else:
+                    logger.warning(f"❌ Deezer ÉCHEC pour '{track.title}'")
+            except Exception as e:
+                logger.error(f"❌ Erreur Deezer pour {track.title}: {e}")
+                results['deezer'] = False
+
+        # ========================================
+        # 4. NETTOYAGE SI ÉCHEC COMPLET
         # ========================================
         if clear_on_failure and force_update:
             # Vérifier si toutes les sources ont échoué
@@ -532,91 +572,99 @@ class DataEnricher:
         logger.info(f"   • Key: {getattr(track, 'key', 'N/A')}, Mode: {getattr(track, 'mode', 'N/A')}")
         logger.info(f"   • Musical Key: {getattr(track, 'musical_key', 'N/A')}")
         logger.info(f"   • Duration: {getattr(track, 'duration', 'N/A')}")
-        
+        logger.info(f"   • Release Date: {getattr(track, 'release_date', 'N/A')}")
+        logger.info(f"   • Deezer ID: {getattr(track, 'deezer_id', 'N/A')}")
+
         return results
     
     def _enrich_with_reccobeats(self, track: Track, artist_tracks: Optional[List[Track]] = None) -> bool:
         """
         Enrichit avec ReccoBeats
-        VERSION CORRIGÉE: Avec validation Spotify ID + Compatible Windows
+        VERSION SÉPARÉE: SpotifyIDScraper → ReccoBeatsAPI (modules séparés)
         """
         try:
             if not self.reccobeats_client:
                 logger.error("ReccoBeats client non initialisé")
                 return False
-            
-            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
-            logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
-            
-            # Vérifier si le track a déjà un spotify_id
-            existing_spotify_id = None
-            if hasattr(track, 'spotify_id') and track.spotify_id:
-                existing_spotify_id = track.spotify_id
-                
-                # Valider l'unicité
-                if artist_tracks and not self.validate_spotify_id_unique(existing_spotify_id, track, artist_tracks):
-                    logger.warning(f"⚠️ Spotify ID existant est un duplicata, il sera ignoré")
-                    existing_spotify_id = None
-                    track.spotify_id = None
-                else:
-                    logger.info(f"✅ Spotify ID existant validé: {existing_spotify_id}")
-            
-            # MODIFIÉ: Timeout compatible Windows
-            import platform
-            is_windows = platform.system() == 'Windows'
-            
-            if not is_windows:
-                # Sur Unix/Linux, utiliser signal.alarm
-                import signal
-                
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("ReccoBeats timeout")
-                
-                try:
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(60)
-                    
-                    # Appeler ReccoBeats
-                    track_info = self.reccobeats_client.get_track_info(artist_name, track.title)
-                    signal.alarm(0)
-                    
-                except TimeoutError as e:
-                    logger.error(f"ReccoBeats: ⏰ TIMEOUT pour '{track.title}': {e}")
-                    signal.alarm(0)
-                    return False
-            else:
-                # Sur Windows, pas de timeout (ou utiliser threading.Timer si nécessaire)
-                logger.debug("Windows détecté, pas de timeout signal")
-                track_info = self.reccobeats_client.get_track_info(artist_name, track.title)
-            
-            if not track_info or not track_info.get('spotify_id'):
-                logger.warning(f"ReccoBeats: ❌ Pas de données pour '{track.title}'")
-                return False
-            
-            logger.debug(f"ReccoBeats: ✅ Données récupérées")
-            
-            new_spotify_id = None
 
-            # Stocker l'ID Spotify (avec validation)
-            if 'spotify_id' in track_info:
-                new_spotify_id = track_info['spotify_id']
-                
-                # Valider avant de stocker
-                if artist_tracks and not self.validate_spotify_id_unique(new_spotify_id, track, artist_tracks):
-                    logger.error(f"❌ REJET: Spotify ID de ReccoBeats déjà utilisé: {new_spotify_id}")
-                    # Logs de debug
-                    logger.info(f"🔍 DEBUG: Spotify ID dupliqué détecté")
-                    logger.info(f"🔍 DEBUG: ID rejeté: {new_spotify_id}")
-                    logger.info(f"🔍 DEBUG: Track concerné: '{track.title}'")
-                    # Chercher quel track a déjà cet ID
-                    for other_track in artist_tracks:
-                        if other_track != track and getattr(other_track, 'spotify_id', None) == new_spotify_id:
-                            logger.info(f"🔍 DEBUG: ID déjà utilisé par: '{other_track.title}'")
-                            break
-                    return False
-                
-                track.spotify_id = new_spotify_id
-                logger.info(f"✅ ID Spotify stocké: {track.spotify_id}")
+            # Déterminer l'artiste (gestion featurings)
+            if hasattr(track, 'is_featuring') and track.is_featuring:
+                if hasattr(track, 'primary_artist_name') and track.primary_artist_name:
+                    artist_name = track.primary_artist_name
+                    logger.info(f"🎤 Featuring détecté, artiste principal: {artist_name}")
+                else:
+                    artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+            else:
+                artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+
+            logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
+
+            # ============================================================
+            # ÉTAPE 1: RÉCUPÉRER LE SPOTIFY ID
+            # ============================================================
+            spotify_id = None
+
+            # 1a. Vérifier si le track a déjà un Spotify ID validé
+            if hasattr(track, 'spotify_id') and track.spotify_id:
+                # Valider l'unicité
+                if artist_tracks and self.validate_spotify_id_unique(track.spotify_id, track, artist_tracks):
+                    spotify_id = track.spotify_id
+                    logger.info(f"✅ Spotify ID existant validé: {spotify_id}")
+                else:
+                    logger.warning(f"⚠️ Spotify ID existant est un duplicata, il sera ignoré")
+                    track.spotify_id = None
+
+            # 1b. Si pas d'ID, utiliser SpotifyIDScraper
+            if not spotify_id and self.spotify_id_scraper:
+                logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
+                try:
+                    spotify_id = self.spotify_id_scraper.get_spotify_id(artist_name, track.title)
+
+                    if spotify_id:
+                        # Valider l'unicité
+                        if artist_tracks and not self.validate_spotify_id_unique(spotify_id, track, artist_tracks):
+                            logger.error(f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}")
+                            spotify_id = None
+                        else:
+                            logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
+                            track.spotify_id = spotify_id
+
+                            # Récupérer le titre de la page Spotify pour vérification
+                            try:
+                                page_title = self.spotify_id_scraper.get_spotify_page_title(spotify_id)
+                                if page_title:
+                                    track.spotify_page_title = page_title
+                                    logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
+                            except Exception as e:
+                                logger.debug(f"Impossible de récupérer le titre de page: {e}")
+                    else:
+                        logger.warning(f"❌ SpotifyIDScraper n'a pas trouvé d'ID")
+
+                except Exception as e:
+                    logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
+                    spotify_id = None
+
+            # 1c. Si toujours pas d'ID, échec
+            if not spotify_id:
+                logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
+                return False
+
+            # ============================================================
+            # ÉTAPE 2: APPELER RECCOBEATS AVEC L'ID
+            # ============================================================
+            logger.info(f"🎵 Appel ReccoBeats API avec Spotify ID: {spotify_id}")
+
+            try:
+                track_info = self.reccobeats_client.get_track_info(spotify_id)
+            except Exception as e:
+                logger.error(f"❌ Erreur ReccoBeats API: {e}")
+                return False
+
+            if not track_info or not track_info.get('success'):
+                logger.warning(f"ReccoBeats: ❌ Pas de données pour ID {spotify_id}")
+                return False
+
+            logger.debug(f"ReccoBeats: ✅ Données récupérées")
             
             # Stocker le BPM
             bpm = None
@@ -710,12 +758,12 @@ class DataEnricher:
                     logger.warning(f"⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM")
                     spotify_id = None
             
-            # MODIFIÉ: Timeout réduit à 60 secondes (au lieu de 120)
+            # MODIFIÉ: Timeout réduit à 30 secondes
             import signal
             import platform
-            
+
             is_windows = platform.system() == 'Windows'
-            timeout_seconds = 60  # ← Réduit de 120 à 60
+            timeout_seconds = 30  # ← Réduit à 30s
             
             track_data = None
             
@@ -809,4 +857,148 @@ class DataEnricher:
             return False
         except Exception as e:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
+            return False
+
+    def _enrich_with_deezer(self, track: Track, force_update: bool = False) -> bool:
+        """
+        Enrichit avec Deezer API (4ème enrichisseur)
+        Vérifie la cohérence des données avec les enrichissements précédents
+
+        Args:
+            track: Le track à enrichir
+            force_update: Si True, force la mise à jour même si les données existent
+
+        Returns:
+            bool: True si des données ont été enrichies avec succès
+        """
+        if not self.deezer_client:
+            logger.warning("❌ Deezer API non disponible")
+            return False
+
+        try:
+            # Déterminer l'artiste (gestion des featurings)
+            if hasattr(track, 'is_featuring') and track.is_featuring:
+                if hasattr(track, 'primary_artist_name') and track.primary_artist_name:
+                    artist_name = track.primary_artist_name
+                    logger.info(f"🎤 Featuring détecté, utilisation de l'artiste principal: {artist_name}")
+                else:
+                    artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+            else:
+                artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+
+            logger.info(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
+
+            # Récupérer les données existantes pour vérification
+            previous_duration = getattr(track, 'duration', None)
+            scraped_release_date = getattr(track, 'release_date', None)
+
+            # Appeler l'API Deezer avec vérifications
+            result = self.deezer_client.enrich_track(
+                artist=artist_name,
+                title=track.title,
+                previous_duration=previous_duration,
+                scraped_release_date=scraped_release_date
+            )
+
+            if not result['success']:
+                logger.warning(f"❌ Deezer: {result.get('error', 'Erreur inconnue')}")
+                return False
+
+            data = result['data']
+            verifications = result['verifications']
+            updated = False
+
+            # Logs des vérifications
+            if verifications:
+                logger.info("🔍 Deezer: Vérifications:")
+
+                if 'duration' in verifications:
+                    dur_check = verifications['duration']
+                    if dur_check['is_valid']:
+                        if dur_check.get('difference') is not None:
+                            logger.info(f"   ✅ Duration cohérente (diff: {dur_check['difference']}s)")
+                        else:
+                            logger.info(f"   ℹ️ {dur_check['message']}")
+                    else:
+                        logger.warning(f"   ⚠️ Duration incohérente! {dur_check['message']}")
+
+                if 'release_date' in verifications:
+                    date_check = verifications['release_date']
+                    if date_check['is_valid']:
+                        if date_check.get('dates_match') is True:
+                            logger.info(f"   ✅ Release date cohérente")
+                        elif date_check.get('dates_match') is False:
+                            logger.warning(f"   ⚠️ Release dates différentes: Deezer={date_check.get('deezer_date')} vs Scraping={date_check.get('scraped_date')}")
+                        else:
+                            logger.info(f"   ℹ️ {date_check['message']}")
+                    else:
+                        logger.warning(f"   ⚠️ {date_check['message']}")
+
+            # Stocker la Duration si elle est cohérente ou si on force la mise à jour
+            if data.get('deezer_duration'):
+                duration_check = verifications.get('duration', {})
+                should_update_duration = (
+                    force_update or
+                    not previous_duration or
+                    duration_check.get('is_valid', False)
+                )
+
+                if should_update_duration:
+                    track.duration = data['deezer_duration']
+                    logger.info(f"   ✅ Duration mise à jour: {track.duration}s")
+                    updated = True
+                else:
+                    logger.warning(f"   ⚠️ Duration Deezer ignorée (incohérente)")
+
+            # Stocker la Release Date si elle est cohérente ou si on force la mise à jour
+            if data.get('deezer_release_date'):
+                date_check = verifications.get('release_date', {})
+                should_update_date = (
+                    force_update or
+                    not scraped_release_date or
+                    date_check.get('dates_match', False)
+                )
+
+                if should_update_date:
+                    # Convertir au format utilisé dans la base de données
+                    track.release_date = data['deezer_release_date']
+                    logger.info(f"   ✅ Release date mise à jour: {track.release_date}")
+                    updated = True
+                elif date_check.get('dates_match') is False:
+                    logger.warning(f"   ⚠️ Release date Deezer ignorée (différente du scraping)")
+
+            # Stocker les métadonnées supplémentaires (toujours, pas de vérification nécessaire)
+            if data.get('deezer_track_id'):
+                if not hasattr(track, 'deezer_id') or force_update or not track.deezer_id:
+                    track.deezer_id = data['deezer_track_id']
+                    logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
+                    updated = True
+
+            if data.get('deezer_link'):
+                if not hasattr(track, 'deezer_url') or force_update or not track.deezer_url:
+                    track.deezer_url = data['deezer_link']
+                    logger.info(f"   ✅ Deezer URL: {track.deezer_url}")
+                    updated = True
+
+            if data.get('deezer_explicit_lyrics') is not None:
+                if not hasattr(track, 'explicit_lyrics') or force_update or track.explicit_lyrics is None:
+                    track.explicit_lyrics = data['deezer_explicit_lyrics']
+                    logger.info(f"   ✅ Explicit lyrics: {track.explicit_lyrics}")
+                    updated = True
+
+            if data.get('deezer_picture'):
+                if not hasattr(track, 'deezer_picture_url') or force_update or not track.deezer_picture_url:
+                    track.deezer_picture_url = data['deezer_picture']
+                    logger.info(f"   ✅ Deezer picture URL stockée")
+                    updated = True
+
+            if updated:
+                logger.info(f"✅ Deezer: Enrichissement réussi pour '{track.title}'")
+            else:
+                logger.info(f"ℹ️ Deezer: Aucune nouvelle donnée pour '{track.title}'")
+
+            return updated
+
+        except Exception as e:
+            logger.error(f"❌ Deezer: Erreur pour '{track.title}': {e}")
             return False

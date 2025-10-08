@@ -39,9 +39,9 @@ class MainWindow:
         self.genius_api = GeniusAPI()
         self.data_manager = DataManager()
         self.data_enricher = DataEnricher(
-            headless_reccobeats=False,
-            headless_songbpm=False,
-            headless_spotify_scraper=False
+            headless_reccobeats=True,
+            headless_songbpm=True,
+            headless_spotify_scraper=True
         )
         self.current_artist: Optional[Artist] = None
         self.tracks: List[Track] = []
@@ -54,6 +54,7 @@ class MainWindow:
         self.sort_reverse = False
         self.last_selected_index = None  # Sélection multiple
         self.disabled_tracks_manager = DisabledTracksManager()
+        self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         
         self._create_widgets()
         self._update_statistics()
@@ -827,10 +828,30 @@ class MainWindow:
         if not track.artist:
             track.artist = self.current_artist
             logger.warning(f"⚠️ track.artist était None pour '{track.title}', réparé")
-        
+
+        # Si une fenêtre de détails est déjà ouverte pour ce track, la fermer d'abord
+        if track.id in self.open_detail_windows:
+            old_window, _ = self.open_detail_windows[track.id]
+            try:
+                old_window.destroy()
+            except:
+                pass
+            del self.open_detail_windows[track.id]
+
         # Créer une fenêtre de détails
         details_window = ctk.CTkToplevel(self.root)
         details_window.title(f"Détails - {track.title}")
+
+        # Stocker la référence de la fenêtre
+        self.open_detail_windows[track.id] = (details_window, track)
+
+        # Nettoyer la référence quand la fenêtre est fermée
+        def on_close():
+            if track.id in self.open_detail_windows:
+                del self.open_detail_windows[track.id]
+            details_window.destroy()
+
+        details_window.protocol("WM_DELETE_WINDOW", on_close)
         
         # Agrandir la fenêtre selon le contenu
         has_lyrics = hasattr(track, 'lyrics') and track.lyrics
@@ -1031,17 +1052,43 @@ class MainWindow:
             else:
                 # Un seul ID, affichage normal
                 spotify_url = f"https://open.spotify.com/intl-fr/track/{all_spotify_ids[0]}"
-                
+
                 spotify_label = ctk.CTkLabel(
-                    spotify_frame, 
+                    spotify_frame,
                     text="▶️ Écouter",
                     text_color="#1DB954",
                     cursor="hand2"
                 )
                 spotify_label.pack(side="left")
-                
+
                 import webbrowser
                 spotify_label.bind("<Button-1>", lambda e: webbrowser.open(spotify_url))
+
+                # Debug: Vérifier si spotify_page_title existe
+                logger.debug(f"Track {track.title}: hasattr={hasattr(track, 'spotify_page_title')}, value={getattr(track, 'spotify_page_title', 'NOT_SET')}")
+
+                # Tooltip avec le titre de la page Spotify si disponible
+                if hasattr(track, 'spotify_page_title') and track.spotify_page_title:
+                    spotify_tooltip_text = f"Titre Spotify:\n{track.spotify_page_title[:80]}"
+                    if len(track.spotify_page_title) > 80:
+                        spotify_tooltip_text += "..."
+
+                    def show_spotify_tooltip(event):
+                        tooltip = ctk.CTkToplevel()
+                        tooltip.wm_overrideredirect(True)
+                        tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+
+                        ctk.CTkLabel(
+                            tooltip,
+                            text=spotify_tooltip_text,
+                            fg_color="gray20",
+                            corner_radius=5,
+                            font=("Arial", 9)
+                        ).pack(padx=5, pady=2)
+
+                        tooltip.after(3000, tooltip.destroy)
+
+                    spotify_label.bind("<Enter>", show_spotify_tooltip)
 
         # YouTube intelligent - ROUGE
         youtube_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
@@ -1200,88 +1247,23 @@ class MainWindow:
         lyrics_frame = ctk.CTkFrame(notebook)
         if has_lyrics:
             notebook.add(lyrics_frame, text="📝 Paroles")
-            
-            # Header avec statistiques des paroles
-            lyrics_header = ctk.CTkFrame(lyrics_frame)
-            lyrics_header.pack(fill="x", padx=10, pady=10)
-            
-            words_count = len(track.lyrics.split()) if track.lyrics else 0
-            chars_count = len(track.lyrics) if track.lyrics else 0
-            
-            ctk.CTkLabel(lyrics_header, 
-                        text=f"📝 Paroles complètes", 
-                        font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=5)
-            
-            info_text = f"📊 {words_count} mots • {chars_count} caractères"
-            if hasattr(track, 'lyrics_scraped_at') and track.lyrics_scraped_at:
-                date_str = self._format_datetime(track.lyrics_scraped_at)
-                info_text += f" • Récupérées le {date_str}"
-            
-            ctk.CTkLabel(lyrics_header, text=info_text, text_color="gray").pack(anchor="w", padx=5)
-            
-            # Zone de texte pour les paroles
-            lyrics_textbox = ctk.CTkTextbox(
-                lyrics_frame, 
-                width=850, 
-                height=450,
-                font=("Consolas", 11)
-            )
-            lyrics_textbox.pack(fill="both", expand=True, padx=10, pady=10)
-            
-            formatted_lyrics = self._format_lyrics_for_display(track.lyrics)
-            lyrics_textbox.insert("0.0", formatted_lyrics)
-            lyrics_textbox.configure(state="disabled")
-            
-            # Boutons d'action pour les paroles
-            lyrics_actions = ctk.CTkFrame(lyrics_frame)
-            lyrics_actions.pack(fill="x", padx=10, pady=10)
-            
+
+            # Créer un scrollable frame à l'intérieur du frame de l'onglet
+            lyrics_scrollable = ctk.CTkScrollableFrame(lyrics_frame, width=850, height=650)
+            lyrics_scrollable.pack(fill="both", expand=True, padx=5, pady=5)
+
+            # Fonction pour copier les paroles
             def copy_lyrics():
                 """Copie les paroles dans le presse-papier"""
                 details_window.clipboard_clear()
                 details_window.clipboard_append(track.lyrics)
                 messagebox.showinfo("Copié", "Paroles copiées dans le presse-papier")
-            
-            def save_lyrics():
-                """Sauvegarde les paroles dans un fichier"""
-                filename = f"{track.artist.name} - {track.title}.txt".replace('/', '_').replace('\\', '_')
-                filepath = filedialog.asksaveasfilename(
-                    defaultextension=".txt",
-                    filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-                    initialfile=filename
-                )
-                if filepath:
-                    try:
-                        with open(filepath, 'w', encoding='utf-8') as f:
-                            f.write(f"{track.artist.name} - {track.title}\n")
-                            f.write("=" * 50 + "\n\n")
-                            f.write(track.lyrics)
-                        messagebox.showinfo("Sauvegardé", f"Paroles sauvegardées dans:\n{filepath}")
-                    except Exception as e:
-                        messagebox.showerror("Erreur", f"Erreur lors de la sauvegarde:\n{str(e)}")
-            
-            def research_lyrics():
-                """Re-scraper les paroles de ce morceau"""
-                result = messagebox.askyesno(
-                    "Re-scraper les paroles",
-                    f"Voulez-vous re-scraper les paroles de '{track.title}' ?\n\n"
-                    "Cela remplacera les paroles actuelles."
-                )
-                if result:
-                    threading.Thread(target=lambda: self._rescrape_single_lyrics(track, details_window), daemon=True).start()
-            
-            ctk.CTkButton(lyrics_actions, text="📋 Copier", command=copy_lyrics, width=100).pack(side="left", padx=5)
-            ctk.CTkButton(lyrics_actions, text="💾 Sauvegarder", command=save_lyrics, width=100).pack(side="left", padx=5)
-            ctk.CTkButton(lyrics_actions, text="🔄 Re-scraper", command=research_lyrics, width=100).pack(side="left", padx=5)
 
-            # Section Anecdotes si disponibles
+            # Section Anecdotes EN PREMIER si disponibles
             if hasattr(track, 'anecdotes') and track.anecdotes:
-                # Séparateur
-                ctk.CTkFrame(lyrics_frame, height=2, fg_color="gray").pack(fill="x", padx=10, pady=10)
-
                 # Header anecdotes
-                anecdotes_header = ctk.CTkFrame(lyrics_frame)
-                anecdotes_header.pack(fill="x", padx=10, pady=5)
+                anecdotes_header = ctk.CTkFrame(lyrics_scrollable)
+                anecdotes_header.pack(fill="x", padx=10, pady=(10, 5))
 
                 ctk.CTkLabel(anecdotes_header,
                             text="💡 Anecdotes & Informations",
@@ -1289,15 +1271,78 @@ class MainWindow:
 
                 # Zone de texte pour les anecdotes
                 anecdotes_textbox = ctk.CTkTextbox(
-                    lyrics_frame,
-                    width=850,
-                    height=150,
+                    lyrics_scrollable,
+                    width=820,
+                    height=60,  # Hauteur divisée par 2
                     font=("Arial", 11),
                     wrap="word"
                 )
                 anecdotes_textbox.pack(fill="x", padx=10, pady=5)
                 anecdotes_textbox.insert("0.0", track.anecdotes)
                 anecdotes_textbox.configure(state="disabled")
+
+                # Séparateur après les anecdotes
+                ctk.CTkFrame(lyrics_scrollable, height=2, fg_color="gray").pack(fill="x", padx=10, pady=10)
+
+            # Header "Paroles complètes" avec stats et bouton Copier (APRÈS le séparateur)
+            words_count = len(track.lyrics.split()) if track.lyrics else 0
+            chars_count = len(track.lyrics) if track.lyrics else 0
+
+            lyrics_header = ctk.CTkFrame(lyrics_scrollable)
+            lyrics_header.pack(fill="x", padx=10, pady=(5, 10))
+
+            # Partie gauche : titre et stats
+            left_part = ctk.CTkFrame(lyrics_header, fg_color="transparent")
+            left_part.pack(side="left", fill="x", expand=True)
+
+            ctk.CTkLabel(left_part,
+                        text=f"📝 Paroles complètes",
+                        font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=(0, 2))
+
+            info_text = f"📊 {words_count} mots • {chars_count} caractères"
+            if hasattr(track, 'lyrics_scraped_at') and track.lyrics_scraped_at:
+                date_str = self._format_datetime(track.lyrics_scraped_at)
+                info_text += f" • Récupérées le {date_str}"
+
+            ctk.CTkLabel(left_part, text=info_text, text_color="gray", font=("Arial", 9)).pack(anchor="w", padx=5)
+
+            # Bouton Copier à droite
+            ctk.CTkButton(lyrics_header, text="📋 Copier", command=copy_lyrics, width=80, height=32).pack(side="right", padx=5)
+
+            # Zone de texte pour les paroles (nettoyées sans anecdote)
+            lyrics_textbox = ctk.CTkTextbox(
+                lyrics_scrollable,
+                width=820,
+                height=350,  # Hauteur encore plus réduite
+                font=("Consolas", 11)
+            )
+            lyrics_textbox.pack(fill="x", padx=10, pady=10)
+
+            # Nettoyer les paroles de l'anecdote si elle existe
+            clean_lyrics = track.lyrics
+            if hasattr(track, 'anecdotes') and track.anecdotes:
+                # Méthode robuste : retirer tout le texte jusqu'au premier tag [Couplet], [Partie], etc.
+                import re
+                # Chercher le premier tag de structure de paroles
+                first_tag_match = re.search(r'\[(?:Intro|Couplet|Refrain|Verse|Chorus|Bridge|Hook|Pre-Chorus|Partie|Part|Outro|Interlude)', clean_lyrics, re.IGNORECASE)
+
+                if first_tag_match:
+                    # Commencer à partir du premier tag
+                    clean_lyrics = clean_lyrics[first_tag_match.start():].strip()
+                    logger.debug("Anecdote retirée des paroles (méthode tag)")
+                else:
+                    # Fallback : retirer les X premiers caractères si l'anecdote est au début
+                    anecdote_length = len(track.anecdotes)
+                    if clean_lyrics[:200].strip().startswith(track.anecdotes[:100].strip()):
+                        # Chercher le prochain double saut de ligne après l'anecdote
+                        cut_point = clean_lyrics.find('\n\n', anecdote_length - 50)
+                        if cut_point > 0:
+                            clean_lyrics = clean_lyrics[cut_point + 2:].strip()
+                            logger.debug("Anecdote retirée des paroles (méthode longueur)")
+
+            formatted_lyrics = self._format_lyrics_for_display(clean_lyrics)
+            lyrics_textbox.insert("0.0", formatted_lyrics)
+            lyrics_textbox.configure(state="disabled")
 
         else:
             # Onglet paroles vide avec message
@@ -1336,6 +1381,13 @@ class MainWindow:
             tech_textbox.insert("end", f"🎤 Genius ID: {track.genius_id}\n")
         if track.spotify_id:
             tech_textbox.insert("end", f"🎧 Spotify ID: {track.spotify_id}\n")
+            # Afficher le titre de la page Spotify si disponible (pour vérification)
+            if hasattr(track, 'spotify_page_title') and track.spotify_page_title:
+                # Limiter à 50 premiers caractères pour l'affichage
+                display_title = track.spotify_page_title[:50]
+                if len(track.spotify_page_title) > 50:
+                    display_title += "..."
+                tech_textbox.insert("end", f"   📄 Titre: {display_title}\n")
         if track.discogs_id:
             tech_textbox.insert("end", f"💿 Discogs ID: {track.discogs_id}\n")
         
@@ -2097,6 +2149,94 @@ class MainWindow:
             
             self.get_tracks_button.configure(state="normal")
 
+    def _update_statistics(self):
+        """Met à jour les statistiques affichées"""
+        try:
+            stats = self.data_manager.get_statistics()
+            text = (f"Base de données: {stats['total_artists']} artistes | "
+                   f"{stats['total_tracks']} morceaux | "
+                   f"{stats['total_credits']} crédits | "
+                   f"{stats['recent_errors']} erreurs récentes")
+            self.stats_label.configure(text=text)
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour des stats: {e}")
+
+    def _format_lyrics_for_display(self, lyrics: str) -> str:
+        """Formate les paroles pour l'affichage dans l'interface - VERSION CORRIGÉE"""
+        if not lyrics:
+            return "Aucunes paroles disponibles"
+
+        lines = lyrics.split('\n')
+        formatted_lines = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                formatted_lines.append('')
+                continue
+
+            # ✅ CORRECTION: TOUTES les sections entre crochets ont le même formatage
+            if line.startswith('[') and line.endswith(']'):
+                # Extraire le contenu entre crochets
+                section_content = line[1:-1]  # Enlever les [ ]
+
+                # Créer la ligne décorée
+                decorated_line = f"───────────────────────── [{section_content}] ─────────────────────────"
+
+                formatted_lines.append('')
+                formatted_lines.append(decorated_line)
+                formatted_lines.append('')
+
+            # Mentions d'artistes ou indentations spéciales
+            elif '*' in line:
+                formatted_lines.append(f"        {line}")
+
+            # Paroles normales
+            else:
+                formatted_lines.append(line)
+
+        return '\n'.join(formatted_lines)
+
+    def _rescrape_single_lyrics(self, track: Track, parent_window):
+        """Re-scrape les paroles d'un seul morceau"""
+        try:
+            from src.scrapers.genius_scraper import GeniusScraper
+
+            scraper = GeniusScraper(headless=True)
+            lyrics = scraper.scrape_track_lyrics(track)
+
+            if lyrics:
+                track.lyrics = lyrics
+                track.has_lyrics = True
+                track.lyrics_scraped_at = datetime.now()
+
+                # Sauvegarder en base
+                track.artist = self.current_artist
+                self.data_manager.save_track(track)
+
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Succès",
+                    f"✅ Paroles re-scrapées avec succès pour '{track.title}'"
+                ))
+
+                # Fermer et rouvrir la fenêtre de détails pour rafraîchir
+                self.root.after(0, lambda: parent_window.destroy())
+            else:
+                self.root.after(0, lambda: messagebox.showwarning(
+                    "Échec",
+                    f"❌ Impossible de récupérer les paroles pour '{track.title}'"
+                ))
+
+            scraper.close()
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Erreur re-scraping paroles: {error_msg}")
+            self.root.after(0, lambda: messagebox.showerror(
+                "Erreur",
+                f"Erreur lors du re-scraping:\n{error_msg}"
+            ))
+
     def _get_tracks(self):
         """Récupère les morceaux de l'artiste - VERSION AVEC FEATURES"""
         if not self.current_artist:
@@ -2292,7 +2432,6 @@ class MainWindow:
         """Retourne l'icône de statut selon le niveau de complétude des données
 
         Infos nécessaires pour validation complète:
-        - Album ✓
         - Date de sortie ✓
         - Crédits obtenus ✓
         - Paroles obtenues ✓
@@ -2300,6 +2439,8 @@ class MainWindow:
         - Key et Mode ✓
         - Durée ✓
         - Certifications ✓ (ou validation si base à jour)
+
+        Note: Album n'est PAS obligatoire (singles, featurings hors projet)
 
         Retourne:
         - ❌ : Morceau désactivé
@@ -2314,11 +2455,7 @@ class MainWindow:
             # Liste des champs requis avec leur validation
             missing = []
 
-            # 1. Album
-            if not hasattr(track, 'album') or not track.album:
-                missing.append("Album")
-
-            # 2. Date de sortie
+            # 1. Date de sortie
             if not hasattr(track, 'release_date') or not track.release_date:
                 missing.append("Date")
 
@@ -2630,6 +2767,9 @@ class MainWindow:
                 self.root.after(0, self._update_artist_info)
                 self.root.after(0, self._update_statistics)
 
+                # Rafraîchir la fenêtre de détails si elle est ouverte
+                self.root.after(0, self._refresh_detail_window_if_open)
+
             except Exception as err:
                 error_msg = str(err) if str(err) != "None" else "Erreur inconnue lors du scraping"
                 logger.error(f"Erreur lors du scraping combiné: {error_msg}", exc_info=True)
@@ -2650,20 +2790,12 @@ class MainWindow:
                     state="normal",
                     text="Scraper Crédits & Paroles"
                 ))
-                self.root.after(0, self._hide_progress_bar())
+                self.root.after(0, self._hide_progress_bar)
                 self.root.after(0, lambda: self.progress_label.configure(text=""))
-                self.root.after(0, self._update_buttons_state())
+                self.root.after(0, self._update_buttons_state)
 
         threading.Thread(target=scrape, daemon=True).start()
 
-            command=skip_track,
-            width=100
-        ).pack(side="right", padx=5)
-        
-        # Attendre la sélection
-        verify_window.wait_window()
-        return selected_url["value"]
-    
     def get_release_year_safely(self, track):
         """Récupère l'année de sortie de manière sécurisée"""
         if not track.release_date:
@@ -2908,10 +3040,267 @@ class MainWindow:
         self.progress_bar.set(0)
         self.progress_label.configure(text="")
 
+    def _start_enrichment(self):
+        """Lance l'enrichissement des données depuis toutes les sources"""
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Sources d'enrichissement")
+        dialog.geometry("450x700")  # Augmenté pour Deezer
+
+        ctk.CTkLabel(dialog, text="Sélectionnez les sources à utiliser:",
+                    font=("Arial", 14)).pack(pady=10)
+
+        # Variables pour les checkboxes
+        sources_vars = {}
+        sources_info = {
+            'spotify_id': 'Spotify ID Scraper (Recherche les vrais Track IDs) 🎯',
+            'reccobeats': 'ReccoBeats (BPM, features audio complètes) 🎵',
+            'songbpm': 'SongBPM (BPM de fallback) 🎼',
+            'deezer': 'Deezer (Duration, Release Date - vérification) 🎶',  # NOUVEAU
+            'discogs': 'Discogs (crédits supplémentaires, labels) 💿'
+        }
+
+        available = self.data_enricher.get_available_sources()
+
+        for source, description in sources_info.items():
+            var = ctk.BooleanVar(value=source in available)
+            sources_vars[source] = var
+
+            frame = ctk.CTkFrame(dialog)
+            frame.pack(fill="x", padx=20, pady=5)
+
+            checkbox = ctk.CTkCheckBox(
+                frame,
+                text=description,
+                variable=var,
+                state="normal" if source in available else "disabled"
+            )
+            checkbox.pack(anchor="w")
+
+            if source not in available:
+                ctk.CTkLabel(frame, text="(API non configurée)",
+                        text_color="gray").pack(anchor="w", padx=25)
+
+            # Info supplémentaire pour spotify_id
+            if source == 'spotify_id':
+                info_text = "Utilise la recherche web pour trouver les Track IDs corrects.\nRecommandé quand des IDs incorrects ont été attribués."
+                ctk.CTkLabel(frame, text=info_text,
+                        font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
+
+            # NOUVEAU: Info supplémentaire pour Deezer
+            if source == 'deezer':
+                info_text = "Vérifie la cohérence des durées et dates de sortie.\nEnrichit avec les métadonnées Deezer."
+                ctk.CTkLabel(frame, text=info_text,
+                        font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
+
+        separator = ctk.CTkFrame(dialog, height=2, fg_color="gray")
+        separator.pack(fill="x", padx=20, pady=15)
+
+        force_frame = ctk.CTkFrame(dialog)
+        force_frame.pack(fill="x", padx=20, pady=5)
+
+        force_var = ctk.BooleanVar(value=False)
+        force_checkbox = ctk.CTkCheckBox(
+            force_frame,
+            text="🔄 Forcer la mise à jour des données existantes",
+            variable=force_var,
+            font=("Arial", 12)
+        )
+        force_checkbox.pack(anchor="w", pady=5)
+
+        info_label = ctk.CTkLabel(
+            force_frame,
+            text="Cochez pour re-scraper même si BPM/Key/Mode/Duration\nexistent déjà (utile pour corriger des données)",
+            font=("Arial", 9),
+            text_color="gray"
+        )
+        info_label.pack(anchor="w", padx=25, pady=2)
+
+        # Séparateur
+        ctk.CTkLabel(force_frame, text="", height=10).pack()
+
+        # Checkbox pour reset Spotify ID
+        reset_spotify_var = ctk.BooleanVar(value=False)
+        reset_spotify_checkbox = ctk.CTkCheckBox(
+            force_frame,
+            text="🔄 Réinitialiser les Spotify IDs",
+            variable=reset_spotify_var,
+            font=("Arial", 12)
+        )
+        reset_spotify_checkbox.pack(anchor="w", pady=5)
+
+        reset_info_label = ctk.CTkLabel(
+            force_frame,
+            text="Efface les Spotify IDs existants pour permettre\nleur re-scraping (utile si IDs incorrects)",
+            font=("Arial", 9),
+            text_color="gray"
+        )
+        reset_info_label.pack(anchor="w", padx=25, pady=2)
+
+        # Séparateur
+        ctk.CTkLabel(force_frame, text="", height=10).pack()
+
+        # Checkbox pour nettoyer les données erronées
+        clear_on_failure_var = ctk.BooleanVar(value=True)
+        clear_on_failure_checkbox = ctk.CTkCheckBox(
+            force_frame,
+            text="🗑️ Nettoyer les données si enrichissement échoue",
+            variable=clear_on_failure_var,
+            font=("Arial", 12)
+        )
+        clear_on_failure_checkbox.pack(anchor="w", pady=5)
+
+        clear_info_label = ctk.CTkLabel(
+            force_frame,
+            text="Efface les BPM/Key/Mode/Duration erronés quand aucune\nsource ne trouve de nouvelles données (recommandé)",
+            font=("Arial", 9),
+            text_color="gray"
+        )
+        clear_info_label.pack(anchor="w", padx=25, pady=2)
+
+        def start_enrichment():
+            selected_sources = [s for s, var in sources_vars.items() if var.get()]
+            if not selected_sources:
+                messagebox.showwarning("Attention", "Sélectionnez au moins une source")
+                return
+
+            force_update = force_var.get()
+            reset_spotify_id = reset_spotify_var.get()
+            clear_on_failure = clear_on_failure_var.get()
+
+            dialog.destroy()
+            self._run_enrichment(selected_sources, force_update=force_update,
+                            reset_spotify_id=reset_spotify_id,
+                            clear_on_failure=clear_on_failure)
+
+        ctk.CTkButton(dialog, text="Démarrer", command=start_enrichment).pack(pady=20)
+
+    def _run_enrichment(self, sources: List[str], force_update: bool = False,
+                    reset_spotify_id: bool = False, clear_on_failure: bool = True):
+        """Exécute l'enrichissement avec les sources sélectionnées"""
+        if not self.selected_tracks:
+            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
+            return
+
+        selected_tracks_list = []
+        for i in sorted(self.selected_tracks):
+            if i not in self.disabled_tracks:
+                selected_tracks_list.append(self.current_artist.tracks[i])
+
+        if not selected_tracks_list:
+            messagebox.showwarning("Attention", "Tous les morceaux sélectionnés sont désactivés")
+            return
+
+        # Reset des Spotify IDs si demandé
+        if reset_spotify_id:
+            for track in selected_tracks_list:
+                if hasattr(track, 'spotify_id') and track.spotify_id:
+                    old_id = track.spotify_id
+                    track.spotify_id = None
+                    logger.info(f"🔄 Spotify ID reset pour '{track.title}' (ancien: {old_id})")
+
+        self.enrich_button.configure(state="disabled", text="Enrichissement...")
+        self.progress_bar.set(0)
+
+        def update_progress(current, total, info):
+            """Callback de progression"""
+            progress = current / total
+            self.root.after(0, lambda: self.progress_var.set(progress))
+            self.root.after(0, lambda: self.progress_label.configure(text=info))
+
+        def enrich():
+            try:
+                # Préparer la liste complète des tracks de l'artiste pour validation
+                all_artist_tracks = self.current_artist.tracks if self.current_artist else []
+
+                # Compteurs pour le résumé
+                cleaned_count = 0
+
+                # Enrichir chaque track individuellement
+                for i, track in enumerate(selected_tracks_list):
+                    update_progress(i, len(selected_tracks_list), f"Enrichissement: {track.title}")
+
+                    results = self.data_enricher.enrich_track(
+                        track,
+                        sources=sources,
+                        force_update=force_update,
+                        artist_tracks=all_artist_tracks,
+                        clear_on_failure=clear_on_failure
+                    )
+
+                    # Compter les nettoyages
+                    if results.get('cleaned', False):
+                        cleaned_count += 1
+
+                    # Sauvegarder après chaque enrichissement
+                    self.data_manager.save_track(track)
+
+                # Message de fin
+                disabled_count = len(self.selected_tracks) - len(selected_tracks_list)
+                summary = "Enrichissement terminé!\n\n"
+                summary += f"Morceaux traités: {len(selected_tracks_list)}\n"
+
+                if force_update:
+                    summary += "✅ Mode force update activé\n"
+
+                if reset_spotify_id:
+                    summary += "🔄 Spotify IDs réinitialisés\n"
+
+                if clear_on_failure and cleaned_count > 0:
+                    summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"
+
+                if disabled_count > 0:
+                    summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
+
+                self.root.after(0, lambda: messagebox.showinfo("Enrichissement terminé", summary))
+                self.root.after(0, self._update_artist_info)
+                self.root.after(0, self._update_statistics)
+                self.root.after(0, self._populate_tracks_table)
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Erreur lors de l'enrichissement: {error_msg}")
+                self.root.after(0, lambda: messagebox.showerror("Erreur", f"Erreur lors de l'enrichissement: {error_msg}"))
+            finally:
+                self.root.after(0, lambda: self.enrich_button.configure(
+                    state="normal",
+                    text="Enrichir données"
+                ))
+                self.root.after(0, lambda: self.progress_bar.set(0))
+                self.root.after(0, lambda: self.progress_label.configure(text=""))
+
+        threading.Thread(target=enrich, daemon=True).start()
 
     def _show_error(self, title, message):
         """Affiche un message d'erreur"""
         messagebox.showerror(title, message)
+
+    def _refresh_detail_window_if_open(self):
+        """Rafraîchit les fenêtres de détails ouvertes après un scraping"""
+        if not self.open_detail_windows:
+            return
+
+        logger.info(f"🔄 Rafraîchissement de {len(self.open_detail_windows)} fenêtre(s) de détails")
+
+        # Parcourir toutes les fenêtres ouvertes
+        for track_id, (window, old_track) in list(self.open_detail_windows.items()):
+            try:
+                # Recharger le track depuis la base de données
+                if self.current_artist:
+                    refreshed_track = None
+                    for track in self.current_artist.tracks:
+                        if track.id == track_id:
+                            refreshed_track = self.data_manager.get_track_by_id(track_id)
+                            if refreshed_track:
+                                # Mettre à jour l'artiste
+                                refreshed_track.artist = self.current_artist
+                                # Fermer l'ancienne fenêtre et en ouvrir une nouvelle
+                                window.destroy()
+                                del self.open_detail_windows[track_id]
+                                self._show_track_details_for_track(refreshed_track)
+                                logger.info(f"✅ Fenêtre rafraîchie pour: {refreshed_track.title}")
+                            break
+            except Exception as e:
+                logger.warning(f"Erreur rafraîchissement fenêtre pour track_id {track_id}: {e}")
 
     def run(self):
         """Lance l'application"""

@@ -680,32 +680,6 @@ class DataEnricher:
             logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
             return False
     
-    def _enrich_with_spotify(self, track: Track, force_update: bool = False) -> bool:
-        """Enrichit avec Spotify scraper - VERSION AVEC FEATURING"""
-        if not self.spotify_id_scraper:
-            return False
-        
-        try:
-            # Si un Spotify ID existe déjà et qu'on ne force pas, le garder
-            if not force_update and hasattr(track, 'spotify_id') and track.spotify_id:
-                logger.info(f"✅ Spotify ID existant: {track.spotify_id}")
-                return True
-            
-            # Utiliser la nouvelle méthode qui gère les featurings
-            spotify_id = self.spotify_id_scraper.get_spotify_id_for_track(track)
-            
-            if spotify_id:
-                track.spotify_id = spotify_id
-                logger.info(f"✅ Spotify ID ajouté: {spotify_id} pour '{track.title}'")
-                return True
-            else:
-                logger.warning(f"❌ Aucun Spotify ID trouvé pour '{track.title}'")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Erreur enrichissement Spotify: {e}")
-            return False
-
     def _enrich_with_songbpm(self, track: Track, force_update: bool = False, 
                             artist_tracks: Optional[List[Track]] = None) -> bool:
         """

@@ -28,6 +28,7 @@ class GeniusScraper:
     def __init__(self, headless: bool = True):
         self.headless = headless
         self.driver = None
+        self.temp_dir = None  # Stocker le répertoire temporaire
         self._init_driver()
     
     def _init_driver(self):
@@ -65,6 +66,20 @@ class GeniusScraper:
             }
             options.add_experimental_option("prefs", prefs)
 
+            # Créer un répertoire de données utilisateur temporaire unique
+            import tempfile
+            import uuid
+            import os
+
+            # Utiliser un identifiant unique pour éviter les conflits
+            session_id = str(uuid.uuid4())
+            self.temp_dir = os.path.join(tempfile.gettempdir(), f'chrome_session_{session_id}')
+            os.makedirs(self.temp_dir, exist_ok=True)
+
+            options.add_argument(f'--user-data-dir={self.temp_dir}')
+            options.add_argument('--disable-dev-shm-usage')  # Éviter les problèmes de mémoire partagée
+            options.add_argument('--remote-debugging-port=0')  # Port aléatoire pour éviter conflits
+
             # Essayer d'abord le driver local
             from pathlib import Path
             local_driver = Path(__file__).parent.parent.parent / "drivers" / "chromedriver.exe"
@@ -82,8 +97,9 @@ class GeniusScraper:
                 )
             else:
                 logger.info("ChromeDriver local non trouvé, utilisation de webdriver-manager")
+                # Forcer le téléchargement de la version compatible avec Chrome 141
                 service = ChromeService(
-                    ChromeDriverManager().install(),
+                    ChromeDriverManager(driver_version="141.0.7390.70").install(),
                     log_output=subprocess.DEVNULL
                 )
 
@@ -103,10 +119,26 @@ class GeniusScraper:
         self.close()
     
     def close(self):
-        """Ferme le driver"""
+        """Ferme le driver et nettoie les ressources"""
         if self.driver:
-            self.driver.quit()
-            logger.info("Driver Selenium fermé")
+            try:
+                self.driver.quit()
+                logger.info("Driver Selenium fermé")
+            except Exception as e:
+                logger.warning(f"Erreur lors de la fermeture du driver: {e}")
+
+        # Nettoyer le répertoire temporaire
+        if self.temp_dir:
+            try:
+                import shutil
+                import time
+                import os
+                time.sleep(1)  # Attendre que Chrome libère les fichiers
+                if os.path.exists(self.temp_dir):
+                    shutil.rmtree(self.temp_dir, ignore_errors=True)
+                    logger.debug(f"Répertoire temporaire supprimé: {self.temp_dir}")
+            except Exception as e:
+                logger.debug(f"Impossible de supprimer le répertoire temporaire: {e}")
     
     def scrape_track_credits(self, track: Track) -> List[Credit]:
         """Scrape les crédits complets d'un morceau"""

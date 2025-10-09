@@ -18,7 +18,7 @@
 - **Base de Données** des **Certifications** Mise à Jour Automatiquement chaque début de mois (delai de MaJ de la SNEP) et Manuelle
 
 ## APIs utilisées
-- [GetSongBPM](https://getsongbpm.com/)                             - ~~Données BPM~~ (non utilisé ATM)
+- [GetSongBPM](https://getsongbpm.com/)                             - Données **BPM**, **Key**, **Mode** et **Time Signature**
 - [Genius](https://docs.genius.com/)                                - Liste de **Morceaux** d'un Artiste
 - [ReccoBeats](https://reccobeats.com/)                             - Données **Durée**, **BPM**, **Key** & **Mode**
 - [YouTubeMusic](https://ytmusicapi.readthedocs.io/en/stable/#)     - Lien **YouTube** pour chaque Morceau
@@ -26,7 +26,7 @@
 
 ## Données utilisées
 - [Genius](https://genius.com/)                                     - **Crédits** Complets, **Paroles** Structurées, **Date de Sortie**
-- [SongBPM](https://songbpm.com/)                                   - Données **Durée**, **BPM**, **Key** & **Mode**
+- [SongBPM](https://songbpm.com/)                                   - Données **Durée**, **BPM**, **Key**, **Mode** et **Time Signature**
 - [Rapedia](https://rapedia.fr/)                                    - Données **BPM**, **Structure** de Morceau
 - [Backpackerz](https://www.thebackpackerz.com/)                    - **Photographies**
 - [SNEP](https://snepmusique.com/)                                  - **Certifications SNEP** (France)

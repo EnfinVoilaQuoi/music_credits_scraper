@@ -40,6 +40,9 @@ src/scripts/*
 .DS_Store
 Thumbs.db
 
+# ChromeDriver logs artifact (créé par erreur au lieu d'utiliser device null)
+nul
+
 #Lancer VenV
 Lancer_Venv_Admin.bat
 Lancer_Venv_Admin.ps1

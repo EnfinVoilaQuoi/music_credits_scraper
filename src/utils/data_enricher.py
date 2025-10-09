@@ -1,6 +1,6 @@
 """
 Module d'enrichissement des données tracks
-VERSION CORRIGÉE: Empêche la duplication des Spotify IDs + Intégration Spotify_ID scraper
+VERSION CORRIGÉE: Empêche la duplication des Spotify IDs + Intégration Spotify_ID scraper + GetSongBPM API
 """
 from typing import List, Dict, Optional, Any
 from datetime import datetime
@@ -8,6 +8,7 @@ from src.models import Track
 from src.scrapers.songbpm_scraper import SongBPMScraper
 from src.scrapers.spotify_id_scraper import SpotifyIDScraper
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
+from src.api.getsongbpm_api import GetSongBPMFetcher
 from src.api.deezer_api import DeezerAPI
 from src.utils.logger import get_logger
 
@@ -28,8 +29,9 @@ class DataEnricher:
         self.apis_available = {
             'spotify_id': False,  # 1. Scraper Spotify_ID
             'reccobeats': False,  # 2. ReccoBeats
-            'songbpm': False,     # 3. SongBPM
-            'deezer': False,      # 4. Deezer API
+            'getsongbpm': False,  # 3. GetSongBPM API
+            'songbpm': False,     # 4. SongBPM scraper
+            'deezer': False,      # 5. Deezer API
             'discogs': False
         }
         
@@ -44,7 +46,16 @@ class DataEnricher:
             logger.info("✅ ReccoBeats client initialisé")
         except Exception as e:
             logger.error(f"❌ Erreur init ReccoBeats: {e}")
-        
+
+        # Initialiser GetSongBPM API
+        self.getsongbpm_fetcher = None
+        try:
+            self.getsongbpm_fetcher = GetSongBPMFetcher()
+            self.apis_available['getsongbpm'] = True
+            logger.info("✅ GetSongBPM API initialisée")
+        except Exception as e:
+            logger.warning(f"⚠️ GetSongBPM non disponible: {e}")
+
         # Initialiser SongBPM scraper
         self.songbpm_scraper = None
         try:
@@ -337,11 +348,11 @@ class DataEnricher:
                  clear_on_failure: bool = True) -> Dict[str, bool]:
         """
         Enrichit un morceau avec les sources spécifiées
-        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM + Deezer
-        ORDRE: 1. Spotify ID, 2. ReccoBeats, 3. SongBPM, 4. Deezer
+        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM + Deezer + GetSongBPM
+        ORDRE: 1. Spotify ID, 2. ReccoBeats, 3. GetSongBPM, 4. SongBPM, 5. Deezer
         """
         if sources is None:
-            sources = ['spotify_id', 'reccobeats', 'songbpm', 'deezer']
+            sources = ['spotify_id', 'reccobeats', 'getsongbpm', 'songbpm', 'deezer']
         
         results = {}
         
@@ -402,42 +413,41 @@ class DataEnricher:
             try:
                 reccobeats_success = self._enrich_with_reccobeats(track, artist_tracks)
                 results['reccobeats'] = reccobeats_success
-                
+
                 if reccobeats_success:
                     logger.info(f"✅ ReccoBeats SUCCÈS: BPM={getattr(track, 'bpm', 'N/A')}, Spotify ID={getattr(track, 'spotify_id', 'N/A')}")
                 else:
-                    logger.warning(f"❌ ReccoBeats ÉCHEC pour '{track.title}' - On tentera SongBPM en fallback")
+                    logger.warning(f"❌ ReccoBeats ÉCHEC pour '{track.title}' - On tentera GetSongBPM en fallback")
             except Exception as e:
                 logger.error(f"❌ Erreur ReccoBeats pour {track.title}: {e}")
                 results['reccobeats'] = False
                 reccobeats_success = False
-        
+
         # ========================================
-        # 2. SONGBPM (avec amélioration de la logique)
+        # 2. GETSONGBPM API
         # ========================================
-        if 'songbpm' in sources and self.apis_available.get('songbpm'):
-            # ⭐ LOGIQUE AMÉLIORÉE : Utiliser SongBPM si :
+        getsongbpm_success = False
+        if 'getsongbpm' in sources and self.apis_available.get('getsongbpm'):
+            # Utiliser GetSongBPM si :
             # - force_update OU
             # - pas de BPM OU
             # - ReccoBeats a échoué OU
-            # - Données manquantes (key, mode, duration)
-            
-            # Vérifier si des données sont manquantes
+            # - Données manquantes (key, mode)
+
             missing_bpm = not hasattr(track, 'bpm') or not track.bpm
             missing_key = not hasattr(track, 'key') or track.key is None
             missing_mode = not hasattr(track, 'mode') or track.mode is None
-            missing_duration = not hasattr(track, 'duration') or not track.duration
-            
-            has_missing_data = missing_bpm or missing_key or missing_mode or missing_duration
-            
-            should_use_songbpm = (
-                force_update or 
+
+            has_missing_data = missing_bpm or missing_key or missing_mode
+
+            should_use_getsongbpm = (
+                force_update or
                 missing_bpm or
                 (not reccobeats_success and 'reccobeats' in sources) or
                 has_missing_data
             )
-            
-            if should_use_songbpm:
+
+            if should_use_getsongbpm:
                 # Construire le message de raison pour le log
                 reasons = []
                 if force_update:
@@ -446,6 +456,67 @@ class DataEnricher:
                     reasons.append("no_bpm")
                 if not reccobeats_success and 'reccobeats' in sources:
                     reasons.append("reccobeats_failed")
+                if has_missing_data and not missing_bpm:
+                    missing_items = []
+                    if missing_key:
+                        missing_items.append("key")
+                    if missing_mode:
+                        missing_items.append("mode")
+                    reasons.append(f"missing_data={','.join(missing_items)}")
+
+                reason_str = ", ".join(reasons)
+                logger.info(f"🎼 Appel de GetSongBPM pour '{track.title}' (raison: {reason_str})")
+
+                try:
+                    getsongbpm_success = self._enrich_with_getsongbpm(track, force_update=force_update)
+                    results['getsongbpm'] = getsongbpm_success
+
+                    if getsongbpm_success:
+                        logger.info(f"✅ GetSongBPM SUCCÈS: BPM={getattr(track, 'bpm', 'N/A')}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}")
+                    else:
+                        logger.warning(f"❌ GetSongBPM ÉCHEC pour '{track.title}' - On tentera SongBPM scraper")
+                except Exception as e:
+                    logger.error(f"❌ Erreur GetSongBPM pour {track.title}: {e}")
+                    results['getsongbpm'] = False
+                    getsongbpm_success = False
+            else:
+                logger.info(f"⏭️ GetSongBPM non appelé (données déjà présentes: BPM={getattr(track, 'bpm', 'N/A')}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')})")
+                results['getsongbpm'] = 'not_needed'
+
+        # ========================================
+        # 3. SONGBPM SCRAPER (avec amélioration de la logique)
+        # ========================================
+        if 'songbpm' in sources and self.apis_available.get('songbpm'):
+            # ⭐ LOGIQUE AMÉLIORÉE : Utiliser SongBPM si :
+            # - force_update OU
+            # - pas de BPM OU
+            # - ReccoBeats ET GetSongBPM ont échoué OU
+            # - Données manquantes (key, mode, duration)
+
+            # Vérifier si des données sont manquantes
+            missing_bpm = not hasattr(track, 'bpm') or not track.bpm
+            missing_key = not hasattr(track, 'key') or track.key is None
+            missing_mode = not hasattr(track, 'mode') or track.mode is None
+            missing_duration = not hasattr(track, 'duration') or not track.duration
+
+            has_missing_data = missing_bpm or missing_key or missing_mode or missing_duration
+
+            should_use_songbpm = (
+                force_update or
+                missing_bpm or
+                (not reccobeats_success and not getsongbpm_success and ('reccobeats' in sources or 'getsongbpm' in sources)) or
+                has_missing_data
+            )
+
+            if should_use_songbpm:
+                # Construire le message de raison pour le log
+                reasons = []
+                if force_update:
+                    reasons.append("force_update=True")
+                if missing_bpm:
+                    reasons.append("no_bpm")
+                if not reccobeats_success and not getsongbpm_success and ('reccobeats' in sources or 'getsongbpm' in sources):
+                    reasons.append("reccobeats_and_getsongbpm_failed")
                 if has_missing_data and not missing_bpm:
                     # Lister les données manquantes spécifiques
                     missing_items = []
@@ -477,7 +548,7 @@ class DataEnricher:
                 results['songbpm'] = 'not_needed'
 
         # ========================================
-        # 3. DEEZER API
+        # 4. DEEZER API
         # ========================================
         if 'deezer' in sources and self.apis_available.get('deezer'):
             # Appeler Deezer pour vérification et enrichissement complémentaire
@@ -495,7 +566,7 @@ class DataEnricher:
                 results['deezer'] = False
 
         # ========================================
-        # 4. NETTOYAGE SI ÉCHEC COMPLET
+        # 5. NETTOYAGE SI ÉCHEC COMPLET
         # ========================================
         if clear_on_failure and force_update:
             # Vérifier si toutes les sources ont échoué
@@ -728,8 +799,90 @@ class DataEnricher:
         except Exception as e:
             logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
             return False
-    
-    def _enrich_with_songbpm(self, track: Track, force_update: bool = False, 
+
+    def _enrich_with_getsongbpm(self, track: Track, force_update: bool = False) -> bool:
+        """
+        Enrichit avec GetSongBPM API
+        Récupère: BPM, Key, Mode, Time Signature, Danceability, Acousticness
+        """
+        try:
+            if not self.getsongbpm_fetcher:
+                logger.debug("GetSongBPM API non disponible")
+                return False
+
+            # Déterminer l'artiste (gestion featurings)
+            if hasattr(track, 'is_featuring') and track.is_featuring:
+                if hasattr(track, 'primary_artist_name') and track.primary_artist_name:
+                    artist_name = track.primary_artist_name
+                    logger.info(f"🎤 Featuring détecté, artiste principal: {artist_name}")
+                else:
+                    artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+            else:
+                artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+
+            logger.info(f"GetSongBPM: DÉBUT traitement '{artist_name}' - '{track.title}'")
+
+            # Appeler l'API
+            song_data = self.getsongbpm_fetcher.fetch_track_bpm(artist_name, track.title)
+
+            if song_data.error:
+                logger.warning(f"GetSongBPM: ❌ {song_data.error}")
+                return False
+
+            # Enrichir le track avec les données GetSongBPM
+            updated = False
+
+            # BPM (seulement si pas déjà présent ou force_update)
+            if song_data.bpm and (force_update or not track.bpm):
+                track.bpm = song_data.bpm
+                logger.info(f"GetSongBPM: ✅ BPM: {track.bpm}")
+                updated = True
+
+            # Key (seulement si pas déjà présent ou force_update)
+            if song_data.key and (force_update or not track.key):
+                # Convertir la notation anglaise (ex: "F#m") en notation numérique
+                try:
+                    from src.utils.music_theory import convert_key_to_numeric
+                    track.key = convert_key_to_numeric(song_data.key)
+                    logger.info(f"GetSongBPM: ✅ Key: {song_data.key} → {track.key}")
+                except:
+                    logger.debug(f"GetSongBPM: Key brute stockée: {song_data.key}")
+                updated = True
+
+            # Mode (seulement si pas déjà présent ou force_update)
+            if song_data.mode and (force_update or not track.mode):
+                # Convertir "major"/"minor" en 1/0
+                track.mode = 1 if song_data.mode == "major" else 0
+                logger.info(f"GetSongBPM: ✅ Mode: {song_data.mode}")
+                updated = True
+
+            # Musical key (calculé depuis Key + Mode)
+            if hasattr(track, 'key') and hasattr(track, 'mode') and track.key is not None and track.mode is not None:
+                try:
+                    from src.utils.music_theory import key_mode_to_french
+                    track.musical_key = key_mode_to_french(track.key, track.mode)
+                    logger.info(f"GetSongBPM: ✅ Musical Key: {track.musical_key}")
+                except Exception as e:
+                    logger.debug(f"GetSongBPM: Erreur conversion musical_key: {e}")
+
+            # Time Signature (optionnel)
+            if song_data.time_signature:
+                track.time_signature = song_data.time_signature
+                logger.info(f"GetSongBPM: ✅ Time Signature: {track.time_signature}")
+                updated = True
+
+            if updated:
+                logger.info(f"GetSongBPM: ✅ SUCCÈS '{track.title}'")
+                return True
+            else:
+                logger.warning(f"GetSongBPM: ⚠️ Aucune donnée nouvelle pour '{track.title}'")
+                return False
+
+        except Exception as e:
+            logger.error(f"GetSongBPM: ❌ Erreur: {e}")
+            return False
+
+    def _enrich_with_songbpm(self, track: Track, force_update: bool = False,
                             artist_tracks: Optional[List[Track]] = None) -> bool:
         """
         Enrichit avec SongBPM scraper

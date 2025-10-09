@@ -1,5 +1,42 @@
 """Utilitaires de théorie musicale"""
 
+def convert_key_to_numeric(key_str: str) -> int:
+    """
+    Convertit une notation de tonalité anglaise en pitch class numérique (0-11)
+
+    Args:
+        key_str: Note en notation anglaise (ex: "F#", "Bb", "C", "F#m")
+
+    Returns:
+        Pitch class (0-11 où 0=C, 1=C#, 2=D, etc.)
+    """
+    # Normaliser les symboles Unicode (♯ → #, ♭ → b)
+    key_normalized = key_str.replace('♯', '#').replace('♭', 'b')
+
+    # Mapping des notes anglaises vers pitch class
+    notes_mapping = {
+        "C": 0,
+        "C#": 1, "Db": 1,
+        "D": 2,
+        "D#": 3, "Eb": 3,
+        "E": 4,
+        "F": 5,
+        "F#": 6, "Gb": 6,
+        "G": 7,
+        "G#": 8, "Ab": 8,
+        "A": 9,
+        "A#": 10, "Bb": 10,
+        "B": 11
+    }
+
+    # Nettoyer la clé (supprimer le 'm' final si mineur)
+    key_clean = key_normalized.strip()
+    if key_clean.endswith('m'):
+        key_clean = key_clean[:-1]
+
+    return notes_mapping.get(key_clean, 0)
+
+
 def key_mode_to_french(key: int, mode: int) -> str:
     """
     Convertit key (0-11) + mode (0-1) en notation française

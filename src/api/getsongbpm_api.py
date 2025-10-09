@@ -34,10 +34,10 @@ class SongData:
 
 class GetSongBPMFetcher:
     """Client API GetSongBPM - Version conforme à la documentation officielle"""
-    
-    # URLs correctes selon la documentation
-    BASE_URL = "https://api.getsongbpm.com"
-    
+
+    # URLs correctes selon la documentation (MAJ 2024)
+    BASE_URL = "https://api.getsong.co"
+
     # Rate limiting (3000 requêtes/heure max)
     RATE_LIMIT_DELAY = 1.2  # ~1.2s entre requêtes = ~3000/heure max
     MAX_RETRIES = 3
@@ -122,7 +122,8 @@ class GetSongBPMFetcher:
         """
         # Préparer la requête selon documentation
         # Pour type="both", format: lookup=song:TITRE artist:ARTISTE
-        lookup = f"song:{quote(title)} artist:{quote(artist)}"
+        # Ne PAS quoter les deux-points et l'espace entre song: et artist:
+        lookup = f"song:{title} artist:{artist}"
         
         params = {
             'api_key': self.api_key,

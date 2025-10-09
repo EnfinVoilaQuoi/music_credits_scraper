@@ -5,7 +5,7 @@
 - Récupère la **Discographie** complète (en tant qu'artiste principal et secondaire)
 - Récupère **Credits** Complets (Producteur, Invité, Voix et Instrument Additionnel, Sample et Interpolation, Album associé, Numéro de Piste), **Paroles structurés** , **Anectodes** et **Date de Sortie**
 - Associe automatiquement les **Certifications RIAA**, **SNEP** et **BRMA**
-- Récupère **Données Techniques** (**BPM**, **Durée**, **Key** et **Mode**) avec système de vérification
+- Récupère **Données Techniques** (**BPM**, **Durée**, **Key** et **Mode**) via différentes sources, avec système de vérification
 - **Exporte** en plusieurs formats selon besoin (**.csv**, **SQL**)
 
 ## Fonctionnalités

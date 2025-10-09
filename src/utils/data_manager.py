@@ -463,19 +463,89 @@ class DataManager:
                             if value is None or str(value) in ['None', 'NULL', '']:
                                 return default
                             return value
-                        
+
+                        def safe_assign_int(value, default=None, allow_string=False):
+                            """
+                            Convertit en int de manière sécurisée
+
+                            Args:
+                                value: Valeur à convertir
+                                default: Valeur par défaut si conversion impossible
+                                allow_string: Si True, retourne la string originale si non convertible
+                            """
+                            if value is None or str(value) in ['None', 'NULL', '']:
+                                return default
+                            try:
+                                return int(value)
+                            except (ValueError, TypeError):
+                                # Si allow_string et que c'est une string, la retourner telle quelle
+                                if allow_string and isinstance(value, str):
+                                    return value
+                                return default
+
+                        def safe_assign_duration(value, default=None):
+                            """
+                            Convertit une durée en secondes (int)
+                            Supporte: int, "180", "3:00" (MM:SS)
+                            """
+                            if value is None or str(value) in ['None', 'NULL', '']:
+                                return default
+
+                            # Si déjà un int, le retourner
+                            if isinstance(value, int):
+                                return value
+
+                            # Si string
+                            if isinstance(value, str):
+                                value = value.strip()
+                                if not value:
+                                    return default
+
+                                # Format MM:SS ou M:SS
+                                if ':' in value:
+                                    try:
+                                        parts = value.split(':')
+                                        if len(parts) == 2:
+                                            minutes = int(parts[0])
+                                            seconds = int(parts[1])
+                                            return minutes * 60 + seconds
+                                    except (ValueError, IndexError):
+                                        return default
+
+                                # Format numérique simple
+                                try:
+                                    return int(value)
+                                except ValueError:
+                                    return default
+
+                            # Autres types: tenter conversion
+                            try:
+                                return int(value)
+                            except (ValueError, TypeError):
+                                return default
+
                         track.album = safe_assign(album)
-                        track.track_number = safe_assign(track_number)
+                        track.track_number = safe_assign_int(track_number)
                         track.release_date = safe_assign(release_date)
                         track.genius_id = safe_assign(genius_id)
                         track.spotify_id = safe_assign(spotify_id)
                         track.discogs_id = safe_assign(discogs_id)
-                        track.bpm = safe_assign(bpm)
-                        track.duration = safe_assign(duration)
+                        track.bpm = safe_assign_int(bpm)
+                        track.duration = safe_assign_duration(duration)  # Supporte "3:48" et int
                         track.genre = safe_assign(genre)
-                        track.key = safe_assign(key)  # NOUVEAU
-                        track.mode = safe_assign(mode)  # NOUVEAU
+                        # Key/Mode peuvent être int (0-11, 0/1) OU string ("G", "major") pour rétrocompatibilité
+                        track.key = safe_assign_int(key, allow_string=True)
+                        track.mode = safe_assign_int(mode, allow_string=True)
                         track.musical_key = safe_assign(musical_key)
+
+                        # Recalculer musical_key si manquante mais que key + mode existent
+                        if not track.musical_key and track.key is not None and track.mode is not None:
+                            try:
+                                from src.utils.music_theory import key_mode_to_french_from_string
+                                track.musical_key = key_mode_to_french_from_string(track.key, track.mode)
+                            except Exception as e:
+                                logger.debug(f"Impossible de calculer musical_key pour track {track_id}: {e}")
+
                         track.time_signature = safe_assign(time_signature)
                         track.genius_url = safe_assign(genius_url)
                         track.spotify_url = safe_assign(spotify_url)

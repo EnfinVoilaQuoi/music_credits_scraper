@@ -50,19 +50,13 @@ class SongBPMScraper:
         try:
             logger.info(f"🌐 Initialisation du driver Selenium SongBPM (headless={self.headless})...")
 
-            # Patch urllib3 pour réduire le timeout à 30s globalement
-            import urllib3
-            from urllib3.util.timeout import Timeout
-            # Monkey-patch le timeout par défaut d'urllib3
-            urllib3.util.timeout.DEFAULT_TIMEOUT = Timeout(connect=30, read=30)
-
             options = Options()
-            
+
             # Mode headless ou visible selon configuration
             if self.headless:
                 options.add_argument('--headless=new')  # Nouveau mode headless
                 options.add_argument('--window-size=1920,1080')
-            
+
             # Options standards pour éviter la détection
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
@@ -70,10 +64,10 @@ class SongBPMScraper:
             options.add_argument('--disable-blink-features=AutomationControlled')
             options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option('useAutomationExtension', False)
-            
+
             # User-Agent réaliste
             options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-            
+
             # Réduire les logs
             options.add_argument('--log-level=3')
             options.add_argument('--silent')
@@ -108,18 +102,40 @@ class SongBPMScraper:
             }
             options.add_experimental_option("prefs", prefs)
 
+            # ⭐ CRÉER LE DRIVER
             self.driver = webdriver.Chrome(service=service, options=options)
             self.wait = WebDriverWait(self.driver, 10)
 
-            # Configurer les timeouts - RÉDUITS à 30s
+            # ⭐ IMPORTANT : Configurer les timeouts APRÈS création du driver
             self.driver.set_page_load_timeout(30)  # Timeout de chargement de page
             self.driver.set_script_timeout(30)  # Timeout d'exécution de scripts
 
+            # ⭐ CRITICAL : Patcher le RemoteConnection pour réduire le timeout HTTP à 30s
+            # C'est ici que se fait vraiment le timeout HTTP !
+            try:
+                from selenium.webdriver.remote.remote_connection import RemoteConnection
+                from urllib3.util.timeout import Timeout
+
+                # Remplacer le timeout par défaut dans le RemoteConnection du driver
+                if hasattr(self.driver.command_executor, '_client_config'):
+                    # Accéder au client_config et le modifier
+                    self.driver.command_executor._client_config.timeout = 30
+                    logger.debug("✅ Timeout HTTP du driver configuré à 30s via _client_config")
+
+                # Alternative : Modifier directement la pool urllib3 du driver
+                if hasattr(self.driver.command_executor, '_conn'):
+                    # Créer un nouveau timeout
+                    new_timeout = Timeout(connect=30, read=30)
+                    self.driver.command_executor._conn.timeout = new_timeout
+                    logger.debug("✅ Timeout HTTP du driver configuré à 30s via _conn")
+            except Exception as e:
+                logger.warning(f"⚠️ Impossible de patcher le timeout HTTP: {e}")
+
             # Script pour masquer les signes d'automation
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
+
             logger.info("✅ SongBPM: Driver Selenium initialisé avec succès")
-            
+
         except Exception as e:
             logger.error(f"❌ Erreur initialisation driver SongBPM: {e}")
             self.driver = None
@@ -488,9 +504,21 @@ class SongBPMScraper:
             logger.warning(f"⏰ Timeout ({timeout}s) lors de la récupération des détails")
             raise
         except Exception as e:
-            logger.error(f"❌ Erreur extraction détails: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+            error_str = str(e)
+            # Détecter les erreurs de timeout HTTP ou de session invalide
+            if "Read timed out" in error_str or "HTTPConnectionPool" in error_str:
+                logger.error(f"❌ Erreur extraction détails: HTTPConnectionPool timeout détecté: {e}")
+                # Marquer le driver comme invalide
+                self.driver = None
+                self.wait = None
+            elif "invalid session id" in error_str.lower() or "session deleted" in error_str.lower():
+                logger.warning("⚠️ Session invalide lors de l'extraction des détails")
+                self.driver = None
+                self.wait = None
+            else:
+                logger.error(f"❌ Erreur extraction détails: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
             return details
 
     def search_track(self, track_title: str, artist_name: str, 
@@ -633,11 +661,19 @@ class SongBPMScraper:
             log_api("SongBPM", f"search/{track_title}", False)
             return None
         except Exception as e:
-            # Détecter les timeouts HTTP (ReadTimeoutError)
+            # Détecter les timeouts HTTP (ReadTimeoutError) et les erreurs de connexion
             error_str = str(e)
             if "Read timed out" in error_str or "HTTPConnectionPool" in error_str:
                 logger.error(f"❌ SongBPM: HTTP timeout détecté: {e}")
-                self._reset_driver_on_error()
+                # ⭐ NE PAS réinitialiser le driver car il a déjà été fermé par le timeout
+                # Juste réinitialiser les références
+                self.driver = None
+                self.wait = None
+            elif "invalid session id" in error_str.lower() or "session deleted" in error_str.lower():
+                # Le driver a été fermé de force (par le timeout)
+                logger.warning("⚠️ Driver fermé de force, session invalide")
+                self.driver = None
+                self.wait = None
             else:
                 logger.error(f"❌ SongBPM: Erreur lors de la recherche: {e}")
                 self._reset_driver_on_error()
@@ -923,13 +959,24 @@ class SongBPMScraper:
         try:
             if self.driver:
                 logger.warning("⚠️ Réinitialisation du driver après erreur")
-                self.driver.quit()
-                self.driver = None
-                self.wait = None
-                time.sleep(2)
-                self._init_driver()
+                try:
+                    self.driver.quit()
+                except Exception as e:
+                    # Ignorer les erreurs si le driver est déjà fermé
+                    logger.debug(f"Erreur fermeture driver (déjà fermé?): {e}")
+                finally:
+                    self.driver = None
+                    self.wait = None
+
+                # Attendre un peu avant de réinitialiser
+                time.sleep(1)
+
+                # NE PAS réinitialiser automatiquement - laissez _ensure_driver le faire
+                # self._init_driver()
         except Exception as e:
             logger.error(f"Erreur lors du reset du driver: {e}")
+            self.driver = None
+            self.wait = None
 
     def close(self):
         """Ferme le driver Selenium"""

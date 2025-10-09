@@ -2079,9 +2079,9 @@ class MainWindow:
 
                 # Morceaux avec données additionnelles = BPM + Key/Mode + Durée (actifs uniquement)
                 tracks_with_additional = sum(1 for t in active_tracks
-                                            if (hasattr(t, 'bpm') and t.bpm and t.bpm > 0) and
+                                            if (hasattr(t, 'bpm') and t.bpm and (isinstance(t.bpm, (int, float)) and t.bpm > 0 or isinstance(t.bpm, str) and t.bpm.isdigit() and int(t.bpm) > 0)) and
                                             ((hasattr(t, 'musical_key') and t.musical_key) or
-                                            (hasattr(t, 'key') and t.key and hasattr(t, 'mode') and t.mode)) and
+                                            (hasattr(t, 'key') and t.key and hasattr(t, 'mode') and t.mode is not None)) and
                                             (hasattr(t, 'duration') and t.duration))
 
                 # Morceaux avec certifications (actifs uniquement)
@@ -2866,7 +2866,12 @@ class MainWindow:
             
             # Vérifier la présence du BPM
             try:
-                has_bpm = (track.bpm is not None and track.bpm > 0)
+                if isinstance(track.bpm, (int, float)):
+                    has_bpm = track.bpm > 0
+                elif isinstance(track.bpm, str):
+                    has_bpm = track.bpm.isdigit() and int(track.bpm) > 0
+                else:
+                    has_bpm = False
             except Exception:
                 has_bpm = False
             
@@ -3044,7 +3049,7 @@ class MainWindow:
         """Lance l'enrichissement des données depuis toutes les sources"""
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Sources d'enrichissement")
-        dialog.geometry("450x700")  # Augmenté pour Deezer
+        dialog.geometry("450x750")  # Augmenté pour GetSongBPM + Deezer
 
         ctk.CTkLabel(dialog, text="Sélectionnez les sources à utiliser:",
                     font=("Arial", 14)).pack(pady=10)
@@ -3054,8 +3059,9 @@ class MainWindow:
         sources_info = {
             'spotify_id': 'Spotify ID Scraper (Recherche les vrais Track IDs) 🎯',
             'reccobeats': 'ReccoBeats (BPM, features audio complètes) 🎵',
-            'songbpm': 'SongBPM (BPM de fallback) 🎼',
-            'deezer': 'Deezer (Duration, Release Date - vérification) 🎶',  # NOUVEAU
+            'getsongbpm': 'GetSongBPM API (BPM, Key, Mode - Priorité 3) 🎹',
+            'songbpm': 'SongBPM Scraper (BPM de fallback) 🎼',
+            'deezer': 'Deezer (Duration, Release Date - vérification) 🎶',
             'discogs': 'Discogs (crédits supplémentaires, labels) 💿'
         }
 
@@ -3086,7 +3092,13 @@ class MainWindow:
                 ctk.CTkLabel(frame, text=info_text,
                         font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
 
-            # NOUVEAU: Info supplémentaire pour Deezer
+            # Info supplémentaire pour GetSongBPM
+            if source == 'getsongbpm':
+                info_text = "API rapide et précise. Utilisée après ReccoBeats.\nNécessite clé API (GETSONGBPM_API_KEY)."
+                ctk.CTkLabel(frame, text=info_text,
+                        font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
+
+            # Info supplémentaire pour Deezer
             if source == 'deezer':
                 info_text = "Vérifie la cohérence des durées et dates de sortie.\nEnrichit avec les métadonnées Deezer."
                 ctk.CTkLabel(frame, text=info_text,
@@ -3289,6 +3301,18 @@ class MainWindow:
                         else:
                             rc_status = "✗"
                         sources_summary.append(f"RC:{rc_status}")
+
+                    # GetSongBPM (si demandé)
+                    if 'getsongbpm' in results:
+                        if results['getsongbpm'] is None:
+                            gs_status = "?"
+                        elif results['getsongbpm'] == 'not_needed':
+                            gs_status = "-"
+                        elif results['getsongbpm']:
+                            gs_status = "✓"
+                        else:
+                            gs_status = "✗"
+                        sources_summary.append(f"GS:{gs_status}")
 
                     # SongBPM (si demandé)
                     if 'songbpm' in results:

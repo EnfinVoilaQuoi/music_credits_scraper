@@ -102,17 +102,11 @@ class SpotifyIDScraper:
             options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
             # Service avec suppression des logs
-            import platform
-            if platform.system() == 'Windows':
-                service = ChromeService(
-                    ChromeDriverManager().install(),
-                    log_path='NUL'
-                )
-            else:
-                service = ChromeService(
-                    ChromeDriverManager().install(),
-                    log_path='/dev/null'
-                )
+            import os
+            service = ChromeService(
+                ChromeDriverManager().install(),
+                log_path=os.devnull  # Utilise le device null du système (NUL sur Windows, /dev/null sur Linux)
+            )
 
             # Désactiver images pour accélérer
             prefs = {

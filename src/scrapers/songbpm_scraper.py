@@ -88,11 +88,11 @@ class SongBPMScraper:
             options.add_argument('--disable-accelerated-video-decode')
 
             # Service avec redirection des logs vers NUL
-            import platform
-            if platform.system() == 'Windows':
-                service = ChromeService(ChromeDriverManager().install(), log_path='NUL')
-            else:
-                service = ChromeService(ChromeDriverManager().install(), log_path='/dev/null')
+            import os
+            service = ChromeService(
+                ChromeDriverManager().install(),
+                log_path=os.devnull  # Utilise le device null du système (NUL sur Windows, /dev/null sur Linux)
+            )
 
             # Préférences pour désactiver les popups et notifications
             prefs = {
@@ -142,10 +142,52 @@ class SongBPMScraper:
             self.wait = None
             raise
 
+    def _wait_for_dom_ready_and_stop(self, max_wait: int = 10):
+        """
+        Attend que le DOM soit prêt puis arrête le chargement de la page
+        pour éviter d'attendre les ressources lourdes (images, scripts tiers, etc.)
+
+        Args:
+            max_wait: Temps maximum d'attente en secondes
+        """
+        try:
+            logger.debug(f"⏳ Attente du DOM ready (max {max_wait}s)...")
+            start_time = time.time()
+
+            while time.time() - start_time < max_wait:
+                try:
+                    # Vérifier si le DOM est prêt (interactive ou complete)
+                    ready_state = self.driver.execute_script("return document.readyState")
+                    logger.debug(f"📄 Document readyState: {ready_state}")
+
+                    if ready_state in ['interactive', 'complete']:
+                        logger.info(f"✅ DOM prêt ({ready_state}) après {time.time() - start_time:.1f}s")
+
+                        # Arrêter le chargement de la page pour éviter d'attendre les ressources lourdes
+                        try:
+                            self.driver.execute_script("window.stop();")
+                            logger.info("🛑 Chargement de la page arrêté (ressources lourdes ignorées)")
+                        except Exception as e:
+                            logger.debug(f"Impossible d'arrêter le chargement: {e}")
+
+                        return True
+
+                    time.sleep(0.5)
+                except Exception as e:
+                    logger.debug(f"Erreur vérification readyState: {e}")
+                    time.sleep(0.5)
+
+            logger.warning(f"⚠️ DOM non prêt après {max_wait}s")
+            return False
+
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur lors de l'attente du DOM: {e}")
+            return False
+
     def _handle_cookies(self):
         """Gère le popup de cookies sur SongBPM"""
         try:
-            logger.debug("Vérification du popup de cookies...")
+            logger.debug("🍪 Vérification du popup de cookies...")
             
             # Attendre un peu que le popup apparaisse
             time.sleep(1.5)
@@ -546,8 +588,12 @@ class SongBPMScraper:
             
             # 1. Aller sur la page d'accueil
             try:
+                logger.info(f"🌐 Chargement de la page d'accueil SongBPM...")
                 self.driver.get(self.base_url)
-                time.sleep(1)
+
+                # Attendre que le DOM soit prêt et arrêter le chargement
+                self._wait_for_dom_ready_and_stop(max_wait=10)
+                logger.info(f"✅ Page d'accueil chargée")
             except TimeoutException:
                 logger.error(f"⏰ TIMEOUT lors du chargement de la page d'accueil SongBPM")
                 return None
@@ -561,19 +607,22 @@ class SongBPMScraper:
             
             # 3. Recherche
             try:
+                logger.info(f"🔍 Recherche du champ de saisie...")
                 search_input = self.wait.until(
                     EC.presence_of_element_located((
-                        By.CSS_SELECTOR, 
+                        By.CSS_SELECTOR,
                         "input[name='query'][placeholder='type a song, get a bpm']"
                     ))
                 )
-                
+                logger.info(f"✅ Champ de saisie trouvé")
+
                 search_query = f"{artist_name} {track_title}"
+                logger.info(f"⌨️ Saisie de la recherche: '{search_query}'")
                 search_input.clear()
                 search_input.send_keys(search_query)
                 search_input.send_keys(Keys.RETURN)
-                
-                logger.debug(f"📝 SongBPM: Recherche soumise: '{search_query}'")
+
+                logger.info(f"✅ Recherche soumise, attente des résultats...")
                 
             except TimeoutException:
                 logger.error(f"⏰ TIMEOUT lors de la recherche sur SongBPM")
@@ -586,26 +635,33 @@ class SongBPMScraper:
             
             # 4. Attendre les résultats (avec timeout)
             try:
-                time.sleep(3)  # Attendre que les résultats se chargent
-                
+                logger.info(f"⏳ Attente du chargement des résultats...")
+                time.sleep(2)  # Attente initiale réduite
+
+                # Attendre que le DOM soit prêt et arrêter le chargement
+                logger.info(f"🛑 Arrêt du chargement pour accélérer...")
+                self._wait_for_dom_ready_and_stop(max_wait=5)
+
+                logger.info(f"🔍 Vérification de la présence des résultats...")
+
                 # Vérifier que des résultats sont présents
                 result_selectors = [
                     "div.bg-card",
                     "a[href*='/@']",
                 ]
-                
+
                 results_found = False
                 for selector in result_selectors:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if elements:
-                        logger.debug(f"✅ Trouvé {len(elements)} éléments avec sélecteur: {selector}")
+                        logger.info(f"✅ Trouvé {len(elements)} éléments avec sélecteur: {selector}")
                         results_found = True
                         break
-                
+
                 if not results_found:
                     logger.warning(f"❌ Aucun résultat trouvé pour '{track_title}' par {artist_name}")
                     return None
-                
+
             except Exception as e:
                 logger.error(f"❌ Erreur lors de la vérification des résultats: {e}")
                 return None

@@ -10,7 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 
@@ -42,7 +42,7 @@ class GeniusScraper:
             if self.headless:
                 options.add_argument('--headless=new')
 
-            # Options standards (EXACTEMENT comme spotify_id_scraper)
+            # Options standards
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
@@ -59,17 +59,20 @@ class GeniusScraper:
             options.add_argument('--silent')
             options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
+            # Désactiver WebGL pour supprimer les messages d'erreur GPU
+            options.add_argument('--disable-webgl')
+            options.add_argument('--disable-webgl2')
+            options.add_argument('--disable-software-rasterizer')
+            options.add_argument('--disable-gpu-sandbox')
+            options.add_argument('--disable-accelerated-2d-canvas')
+            options.add_argument('--disable-accelerated-video-decode')
+
             # Service avec suppression des logs (EXACTEMENT comme spotify_id_scraper)
-            if platform.system() == 'Windows':
-                service = ChromeService(
-                    ChromeDriverManager().install(),
-                    log_path='NUL'
-                )
-            else:
-                service = ChromeService(
-                    ChromeDriverManager().install(),
-                    log_path='/dev/null'
-                )
+            import os
+            service = ChromeService(
+                ChromeDriverManager().install(),
+                log_path=os.devnull  # Utilise le device null du système (NUL sur Windows, /dev/null sur Linux)
+            )
 
             # Désactiver images pour accélérer
             prefs = {
@@ -169,25 +172,148 @@ class GeniusScraper:
             else:
                 logger.info(f"⚠️ Aucun album trouvé dans le header pour: {track.title}")
             
-            # Ouvrir la section des crédits
+            # Ouvrir la section des crédits - Stratégie multi-niveaux
+            credits_opened = False
+
+            # STRATÉGIE 1: Chercher le bouton "Expand" dans la section Credits via XPath
+            logger.debug("🔍 Recherche du bouton Expand dans section Credits (stratégie 1)")
             try:
-                credits_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'ExpandableContent')]//span[contains(text(), 'Credits')]"))
-                )
-                self.driver.execute_script("arguments[0].click();", credits_button)
-                time.sleep(1)
+                # Chercher le bouton Expand qui suit la section Credits
+                expand_selectors = [
+                    # Bouton Expand dans ExpandableContent__ButtonContainer après Credits
+                    "//div[contains(@class, 'SongInfo__Title') and text()='Credits']/following::button[contains(text(), 'Expand')]",
+                    "//div[contains(@class, 'ExpandableContent__ButtonContainer')]//button[contains(text(), 'Expand')]",
+                    # Bouton avec les classes spécifiques
+                    "//button[contains(@class, 'ExpandableContent__Button')]",
+                    # Fallback : chercher "Expand" dans tout button après un élément contenant Credits
+                    "//button[contains(., 'Expand')]",
+                ]
+
+                for selector in expand_selectors:
+                    try:
+                        # Attendre que l'élément soit cliquable (pas juste présent)
+                        expand_button = WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, selector))
+                        )
+
+                        logger.debug(f"✅ Bouton Expand trouvé avec: {selector[:50]}")
+
+                        # Stratégie anti-stale: Re-trouver l'élément juste avant chaque action
+                        # Retry avec backoff exponentiel en cas de StaleElementReferenceException
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            try:
+                                # Re-trouver l'élément à chaque tentative pour éviter stale reference
+                                button = self.driver.find_element(By.XPATH, selector)
+
+                                # Vérifier qu'il est visible et cliquable
+                                if button.is_displayed() and button.is_enabled():
+                                    # Scroll vers le bouton (re-trouve l'élément)
+                                    button = self.driver.find_element(By.XPATH, selector)
+                                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                                    time.sleep(0.3)
+
+                                    # Clic JavaScript (re-trouve l'élément une dernière fois)
+                                    button = self.driver.find_element(By.XPATH, selector)
+                                    button_text = button.text
+                                    self.driver.execute_script("arguments[0].click();", button)
+                                    logger.info(f"✅ Bouton Expand cliqué (texte: '{button_text}')")
+                                    time.sleep(2)
+                                    credits_opened = True
+                                    break
+                                else:
+                                    if attempt < max_retries - 1:
+                                        time.sleep(0.5 * (attempt + 1))  # Backoff exponentiel
+                                        continue
+                            except StaleElementReferenceException:
+                                if attempt < max_retries - 1:
+                                    logger.debug(f"Élément stale, tentative {attempt + 1}/{max_retries}")
+                                    time.sleep(0.5 * (attempt + 1))  # Backoff exponentiel
+                                    continue
+                                else:
+                                    raise
+
+                        if credits_opened:
+                            break
+
+                    except TimeoutException:
+                        logger.debug(f"Timeout avec sélecteur: {selector[:50]}")
+                        continue
+                    except StaleElementReferenceException as e:
+                        logger.debug(f"Élément resté stale après retries: {selector[:50]}")
+                        continue
+                    except Exception as e:
+                        logger.debug(f"Erreur avec sélecteur {selector[:50]}: {type(e).__name__}")
+                        continue
+
             except Exception as e:
-                logger.warning(f"Impossible d'ouvrir les crédits: {e}")
+                logger.debug(f"Stratégie 1 échouée: {e}")
+
+            # STRATÉGIE 2: Sélecteurs XPath spécifiques
+            if not credits_opened:
+                logger.debug("🔍 Recherche du bouton Credits (stratégie 2: sélecteurs XPath)")
+                credits_selectors = [
+                    "//button[contains(@class, 'ExpandableContent')]//span[contains(text(), 'Credits')]",
+                    "//button//span[contains(text(), 'Credits')]",
+                    "//button[contains(text(), 'Credits')]",
+                    "//*[contains(text(), 'Credits')]/ancestor::button",
+                    "//button[contains(@aria-label, 'Credits')]",
+                    "//div[contains(@class, 'credits')]//button",
+                ]
+
+                for selector in credits_selectors:
+                    try:
+                        credits_button = WebDriverWait(self.driver, 3).until(
+                            EC.element_to_be_clickable((By.XPATH, selector))
+                        )
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", credits_button)
+                        time.sleep(0.5)
+                        self.driver.execute_script("arguments[0].click();", credits_button)
+                        logger.info(f"✅ Bouton Credits cliqué avec XPath: {selector[:50]}")
+                        time.sleep(2)
+                        credits_opened = True
+                        break
+                    except:
+                        continue
+
+            # STRATÉGIE 3: Fallback - Chercher un "Expand" après la section Credits
+            if not credits_opened:
+                logger.debug("🔍 Recherche du bouton Credits (stratégie 3: bouton Expand)")
+                expand_button = self._find_expand_button()
+                if expand_button:
+                    try:
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", expand_button)
+                        time.sleep(0.5)
+                        self.driver.execute_script("arguments[0].click();", expand_button)
+                        logger.info("✅ Bouton Expand Credits cliqué (fallback)")
+                        time.sleep(2)
+                        credits_opened = True
+                    except Exception as e:
+                        logger.debug(f"Échec clic bouton Expand: {e}")
+
+            if not credits_opened:
+                logger.warning("❌ Impossible de trouver/cliquer le bouton Credits avec toutes les stratégies")
+                # Essayer de sauvegarder une capture d'écran pour debug
+                try:
+                    screenshot_path = f"debug_credits_{track.title[:20].replace('/', '_').replace('€', 'E')}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    logger.info(f"📸 Screenshot sauvegardé: {screenshot_path}")
+                except:
+                    pass
                 return credits
             
             # Extraire les crédits
             credits = self._extract_credits(track)
-            
-            # Marquer comme scrapé
-            track.credits_scraped = True
-            
+
+            # Ajouter les crédits au track
+            for credit in credits:
+                track.add_credit(credit)
+
+            # Note: track.credits_scraped est une propriété calculée automatiquement
+            # qui retourne len(track.credits), donc pas besoin de l'assigner
+
             logger.info(f"✅ {len(credits)} crédits trouvés pour {track.title}")
-            
+
             return credits
             
         except Exception as e:
@@ -549,7 +675,9 @@ class GeniusScraper:
         try:
             date_patterns = [
                 "%B %d, %Y",      # September 14, 2018
+                "%B %d %Y",       # September 14 2018 (sans virgule)
                 "%b %d, %Y",      # Sep 14, 2018
+                "%b %d %Y",       # Sep 14 2018 (sans virgule)
                 "%Y-%m-%d",       # 2018-09-14
                 "%d/%m/%Y",       # 14/09/2018
                 "%m/%d/%Y",       # 09/14/2018

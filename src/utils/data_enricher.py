@@ -463,14 +463,15 @@ class DataEnricher:
                 try:
                     songbpm_success = self._enrich_with_songbpm(track, force_update=force_update, artist_tracks=artist_tracks)
                     results['songbpm'] = songbpm_success
-                    
+
                     if songbpm_success:
                         logger.info(f"✅ SongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={getattr(track, 'duration', 'N/A')}")
                     else:
                         logger.warning(f"❌ SongBPM ÉCHEC pour '{track.title}'")
                 except Exception as e:
-                    logger.error(f"❌ Erreur SongBPM pour {track.title}: {e}")
-                    results['songbpm'] = False
+                    logger.error(f"❌ Erreur/Timeout SongBPM pour {track.title}: {e}")
+                    # Utiliser None pour indiquer un crash/timeout (différent de False = pas de données)
+                    results['songbpm'] = None
             else:
                 logger.info(f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={getattr(track, 'duration', 'N/A')})")
                 results['songbpm'] = 'not_needed'
@@ -758,23 +759,24 @@ class DataEnricher:
                     logger.warning(f"⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM")
                     spotify_id = None
             
-            # MODIFIÉ: Timeout réduit à 30 secondes
+            # MODIFIÉ: Timeout réduit à 30 secondes avec arrêt forcé du driver
             import signal
             import platform
+            import threading
 
             is_windows = platform.system() == 'Windows'
             timeout_seconds = 30  # ← Réduit à 30s
-            
+
             track_data = None
-            
+
             if not is_windows:
                 # Unix/Linux: utiliser signal.alarm
                 def signal_handler(signum, frame):
                     raise TimeoutError(f"SongBPM timeout après {timeout_seconds}s")
-                
+
                 old_handler = signal.signal(signal.SIGALRM, signal_handler)
                 signal.alarm(timeout_seconds)
-                
+
                 try:
                     track_data = self.songbpm_scraper.search_track(
                         track.title, artist_name, spotify_id=spotify_id, fetch_details=True
@@ -783,27 +785,35 @@ class DataEnricher:
                 finally:
                     signal.signal(signal.SIGALRM, old_handler)
             else:
-                # Windows: utiliser threading.Timer
-                import threading
-                
+                # Windows: utiliser threading.Timer avec arrêt forcé du driver
                 timer_expired = {'value': False}
-                
+
                 def timeout_func():
                     timer_expired['value'] = True
                     logger.error(f"⏰ SongBPM timeout après {timeout_seconds}s")
-                
+                    # ⭐ FORCER la fermeture du driver pour interrompre les requêtes HTTP bloquées
+                    try:
+                        if self.songbpm_scraper and self.songbpm_scraper.driver:
+                            logger.warning("⚠️ Fermeture forcée du driver SongBPM après timeout")
+                            self.songbpm_scraper.driver.quit()
+                            self.songbpm_scraper.driver = None
+                            self.songbpm_scraper.wait = None
+                    except Exception as e:
+                        logger.debug(f"Erreur fermeture driver: {e}")
+
                 timer = threading.Timer(timeout_seconds, timeout_func)
                 timer.start()
-                
+
                 try:
                     track_data = self.songbpm_scraper.search_track(
                         track.title, artist_name, spotify_id=spotify_id, fetch_details=True
                     )
                 finally:
                     timer.cancel()
-                    
+
                 if timer_expired['value']:
                     logger.error(f"❌ SongBPM: Timeout expiré pour '{track.title}'")
+                    # Le driver a déjà été fermé par timeout_func
                     return False
             
             if not track_data:

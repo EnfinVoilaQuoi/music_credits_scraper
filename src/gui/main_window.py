@@ -3214,6 +3214,7 @@ class MainWindow:
 
                 # Compteurs pour le résumé
                 cleaned_count = 0
+                track_results = []  # Pour stocker les résultats détaillés par track
 
                 # Enrichir chaque track individuellement
                 for i, track in enumerate(selected_tracks_list):
@@ -3231,13 +3232,19 @@ class MainWindow:
                     if results.get('cleaned', False):
                         cleaned_count += 1
 
+                    # Stocker les résultats pour ce track
+                    track_results.append({
+                        'title': track.title,
+                        'results': results
+                    })
+
                     # Sauvegarder après chaque enrichissement
                     self.data_manager.save_track(track)
 
-                # Message de fin
+                # Construire le message de fin avec détails par morceau
                 disabled_count = len(self.selected_tracks) - len(selected_tracks_list)
                 summary = "Enrichissement terminé!\n\n"
-                summary += f"Morceaux traités: {len(selected_tracks_list)}\n"
+                summary += f"Morceaux traités: {len(selected_tracks_list)}\n\n"
 
                 if force_update:
                     summary += "✅ Mode force update activé\n"
@@ -3247,6 +3254,65 @@ class MainWindow:
 
                 if clear_on_failure and cleaned_count > 0:
                     summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"
+
+                # Ajouter la légende
+                summary += "\nDÉTAIL PAR MORCEAU:\n"
+                summary += "Légende: ✓=succès | ✗=échec/absent | ?=crash/timeout | -=déjà présent\n\n"
+
+                for track_result in track_results:
+                    title = track_result['title']
+                    results = track_result['results']
+
+                    # Raccourcir le titre s'il est trop long
+                    if len(title) > 30:
+                        title = title[:27] + "..."
+
+                    # Créer le résumé des sources
+                    sources_summary = []
+
+                    # Spotify ID (si demandé) - EN PREMIER
+                    if 'spotify_id' in results:
+                        if results['spotify_id'] == 'not_needed':
+                            sp_status = "-"  # Déjà présent
+                        elif results['spotify_id']:
+                            sp_status = "✓"  # Trouvé
+                        else:
+                            sp_status = "✗"  # Échec
+                        sources_summary.append(f"SP:{sp_status}")
+
+                    # ReccoBeats (si demandé)
+                    if 'reccobeats' in results:
+                        if results['reccobeats'] is None:
+                            rc_status = "?"
+                        elif results['reccobeats']:
+                            rc_status = "✓"
+                        else:
+                            rc_status = "✗"
+                        sources_summary.append(f"RC:{rc_status}")
+
+                    # SongBPM (si demandé)
+                    if 'songbpm' in results:
+                        if results['songbpm'] is None:
+                            sb_status = "?"  # Crash/timeout
+                        elif results['songbpm'] == 'not_needed':
+                            sb_status = "-"  # Déjà présent
+                        elif results['songbpm']:
+                            sb_status = "✓"  # Succès
+                        else:
+                            sb_status = "✗"  # Pas de données
+                        sources_summary.append(f"SB:{sb_status}")
+
+                    # Deezer (si demandé)
+                    if 'deezer' in results:
+                        if results['deezer'] is None:
+                            dz_status = "?"
+                        elif results['deezer']:
+                            dz_status = "✓"
+                        else:
+                            dz_status = "✗"
+                        sources_summary.append(f"DZ:{dz_status}")
+
+                    summary += f"• {title}\n  {' | '.join(sources_summary)}\n"
 
                 if disabled_count > 0:
                     summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"

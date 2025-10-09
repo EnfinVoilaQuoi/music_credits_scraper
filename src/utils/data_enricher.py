@@ -823,7 +823,11 @@ class DataEnricher:
             logger.info(f"GetSongBPM: DÉBUT traitement '{artist_name}' - '{track.title}'")
 
             # Appeler l'API
-            song_data = self.getsongbpm_fetcher.fetch_track_bpm(artist_name, track.title)
+            try:
+                song_data = self.getsongbpm_fetcher.fetch_track_bpm(artist_name, track.title)
+            except Exception as api_error:
+                logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
+                return False
 
             if song_data.error:
                 logger.warning(f"GetSongBPM: ❌ {song_data.error}")

@@ -109,7 +109,39 @@ class GeniusScraper:
             finally:
                 self.driver = None
                 self.wait = None
-    
+
+    def _handle_cookies(self):
+        """Gère les popups de cookies Genius"""
+        try:
+            logger.debug("🍪 Gestion des cookies...")
+            time.sleep(1)
+
+            # Sélecteurs pour les popups de cookies Genius
+            cookie_selectors = [
+                "button[id='onetrust-accept-btn-handler']",
+                "button[data-testid='accept-all-cookies']",
+                "button[class*='accept-all']",
+                "#onetrust-accept-btn-handler",
+                "button[class*='CookieConsentNotice']",
+            ]
+
+            for selector in cookie_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            element.click()
+                            logger.info(f"✅ Clic sur le bouton cookies: '{element.text[:50]}'")
+                            time.sleep(1)
+                            return
+                except:
+                    continue
+
+            logger.debug("✅ Popup cookies fermé ou absent")
+
+        except Exception as e:
+            logger.debug(f"Erreur gestion cookies: {e}")
+
     def scrape_track_credits(self, track: Track) -> List[Credit]:
         """Scrape les crédits complets d'un morceau"""
         if not track.genius_url:

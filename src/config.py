@@ -36,6 +36,11 @@ SELENIUM_TIMEOUT = 30  # Timeout en secondes
 MAX_RETRIES = 3  # Nombre de tentatives en cas d'erreur
 DELAY_BETWEEN_REQUESTS = 1  # Délai entre les requêtes (en secondes)
 
+# Configuration Genius API
+GENIUS_TIMEOUT = int(os.getenv("GENIUS_TIMEOUT", "30"))  # Timeout pour requêtes Genius (secondes)
+GENIUS_RETRIES = int(os.getenv("GENIUS_RETRIES", "2"))  # Nombre de tentatives
+GENIUS_SLEEP_TIME = float(os.getenv("GENIUS_SLEEP_TIME", "0.5"))  # Délai entre requêtes API
+
 # Configuration de la base de données
 DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"
 

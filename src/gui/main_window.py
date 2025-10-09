@@ -2341,47 +2341,145 @@ class MainWindow:
         
         def get_tracks():
             try:
+                # ✅ BACKUP AUTOMATIQUE avant récupération
+                from src.utils.database_backup import get_backup_manager
+                backup_manager = get_backup_manager()
+                backup_path = backup_manager.create_backup("before_fetch_tracks")
+                if backup_path:
+                    logger.info(f"💾 Backup créé: {backup_path.name}")
+
                 logger.info(f"Début récupération: max_songs={max_songs}, include_features={include_features}")
-                
+
+                # ✅ NOUVEAU : Charger les tracks existants AVANT la récupération
+                existing_tracks = {}
+                existing_by_title = {}  # Index par titre (insensible à la casse)
+                if self.current_artist.tracks:
+                    for track in self.current_artist.tracks:
+                        # Index principal : genius_id
+                        if track.genius_id:
+                            existing_tracks[track.genius_id] = track
+
+                        # Index secondaire : (title, album) normalisé
+                        key = (track.title.lower().strip(), (track.album or "").lower().strip())
+                        existing_tracks[key] = track
+
+                        # ✅ NOUVEAU : Index par titre seul pour détecter doublons de casse
+                        title_key = track.title.lower().strip()
+                        if title_key not in existing_by_title:
+                            existing_by_title[title_key] = []
+                        existing_by_title[title_key].append(track)
+
+                logger.info(f"📦 {len(self.current_artist.tracks)} morceaux déjà en base avant récupération")
+
                 # Récupérer les morceaux via l'API avec l'option features
-                tracks = self.genius_api.get_artist_songs(
-                    self.current_artist, 
+                new_tracks = self.genius_api.get_artist_songs(
+                    self.current_artist,
                     max_songs=max_songs,
                     include_features=include_features
                 )
-                
-                if tracks:
+
+                if new_tracks:
+                    # ✅ MERGE : Combiner les nouveaux tracks avec les existants
+                    new_count = 0
+                    updated_count = 0
+                    duplicates_avoided = 0
+
+                    for track in new_tracks:
+                        # ✅ DÉTECTION MULTI-NIVEAUX DES DOUBLONS
+                        existing_track = None
+
+                        # Niveau 1 : Par genius_id (le plus fiable)
+                        if track.genius_id and track.genius_id in existing_tracks:
+                            existing_track = existing_tracks[track.genius_id]
+                            updated_count += 1
+
+                        # Niveau 2 : Par (title, album) exact
+                        elif not existing_track:
+                            key = (track.title.lower().strip(), (track.album or "").lower().strip())
+                            if key in existing_tracks:
+                                existing_track = existing_tracks[key]
+                                updated_count += 1
+
+                        # ✅ Niveau 3 : Par titre seul (détection doublons de casse)
+                        if not existing_track:
+                            title_key = track.title.lower().strip()
+                            if title_key in existing_by_title:
+                                candidates = existing_by_title[title_key]
+
+                                # Si plusieurs versions, prendre la plus complète
+                                if len(candidates) > 1:
+                                    logger.warning(f"⚠️ Doublon de casse détecté pour '{track.title}': {len(candidates)} versions")
+                                    duplicates_avoided += 1
+
+                                # Prendre la première (ou la plus complète si on veut optimiser)
+                                best_candidate = max(candidates, key=lambda t: (
+                                    bool(t.album),
+                                    bool(t.bpm),
+                                    bool(getattr(t, 'lyrics', None)),
+                                    len(t.credits)
+                                ))
+                                existing_track = best_candidate
+                                updated_count += 1
+                            else:
+                                new_count += 1
+
+                        # Si le morceau existe, fusionner les données
+                        if existing_track:
+                            # Préserver les données enrichies existantes (BPM, lyrics, crédits, etc.)
+                            if not track.bpm and existing_track.bpm:
+                                track.bpm = existing_track.bpm
+                            if not hasattr(track, 'musical_key') and hasattr(existing_track, 'musical_key'):
+                                track.musical_key = existing_track.musical_key
+                            if not hasattr(track, 'lyrics') and hasattr(existing_track, 'lyrics'):
+                                track.lyrics = existing_track.lyrics
+                                track.has_lyrics = existing_track.has_lyrics
+                            if not track.credits and existing_track.credits:
+                                track.credits = existing_track.credits
+                            if not hasattr(track, 'certifications') and hasattr(existing_track, 'certifications'):
+                                track.certifications = existing_track.certifications
+                            # Préserver l'ID de la base de données
+                            track.id = existing_track.id
+
                     # Sauvegarder dans la base
                     saved_count = 0
-                    for track in tracks:
+                    for track in new_tracks:
                         try:
                             self.data_manager.save_track(track)
                             saved_count += 1
                         except Exception as e:
                             logger.warning(f"Erreur sauvegarde {track.title}: {e}")
-                    
-                    self.current_artist.tracks = tracks
-                    self.tracks = tracks
-                    
+
+                    # ✅ CORRECTION : Recharger TOUS les tracks depuis la base après sauvegarde
+                    self.current_artist.tracks = self.data_manager.get_artist_tracks(self.current_artist.id)
+                    self.tracks = self.current_artist.tracks
+
+                    logger.info(f"✅ Merge terminé : {new_count} nouveaux, {updated_count} mis à jour, {saved_count} sauvegardés, {duplicates_avoided} doublons évités")
+
                     # Analyser les résultats
-                    featuring_count = sum(1 for t in tracks if hasattr(t, 'is_featuring') and t.is_featuring)
-                    api_albums = sum(1 for t in tracks if t.album)
-                    api_dates = sum(1 for t in tracks if t.release_date)
-                    
+                    featuring_count = sum(1 for t in self.current_artist.tracks if hasattr(t, 'is_featuring') and t.is_featuring)
+                    api_albums = sum(1 for t in new_tracks if t.album)
+                    api_dates = sum(1 for t in new_tracks if t.release_date)
+
                     # Message de succès détaillé
-                    success_msg = f"✅ {len(tracks)} morceaux récupérés pour {self.current_artist.name}"
-                    
+                    success_msg = f"✅ {len(new_tracks)} morceaux récupérés pour {self.current_artist.name}"
+                    success_msg += f"\n🆕 {new_count} nouveaux morceaux"
+                    success_msg += f"\n🔄 {updated_count} morceaux mis à jour"
+
+                    if duplicates_avoided > 0:
+                        success_msg += f"\n🚫 {duplicates_avoided} doublons évités"
+
                     if featuring_count > 0:
-                        success_msg += f"\n🎤 {featuring_count} morceaux en featuring"
-                    
+                        success_msg += f"\n🎤 {featuring_count} morceaux en featuring (total)"
+
                     success_msg += f"\n💿 {api_albums} albums récupérés via l'API"
                     success_msg += f"\n📅 {api_dates} dates de sortie récupérées via l'API"
                     success_msg += f"\n💾 {saved_count} morceaux sauvegardés en base"
-                    
+                    success_msg += f"\n📊 Total en base : {len(self.current_artist.tracks)} morceaux"
+
                     self.root.after(0, self._update_artist_info)
                     self.root.after(0, lambda: messagebox.showinfo("Succès", success_msg))
-                    
-                    logger.info(f"Récupération terminée avec succès: {len(tracks)} morceaux")
+
+                    logger.info(f"Récupération terminée avec succès: {len(new_tracks)} nouveaux, total: {len(self.current_artist.tracks)} morceaux")
                     
                 else:
                     self.root.after(0, lambda: messagebox.showwarning(

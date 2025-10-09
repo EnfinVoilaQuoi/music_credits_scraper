@@ -9,10 +9,20 @@ import requests
 import json
 import time
 import os
+import sys
+import io
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from urllib.parse import quote
 import csv
+
+# Fix encodage Windows pour les emojis
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+# Import logger
+from src.utils.logger import get_logger
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -140,12 +150,13 @@ class GetSongBPMFetcher:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    
+
                     # Structure de réponse: {"search": [...]}
-                    if 'search' in data and len(data['search']) > 0:
+                    if 'search' in data and isinstance(data['search'], list) and len(data['search']) > 0:
                         # Retourner le premier résultat
                         return data['search'][0]
                     else:
+                        # Pas de résultats ou structure inattendue
                         return None
                 
                 elif response.status_code == 429:
@@ -208,32 +219,32 @@ class GetSongBPMFetcher:
     def fetch_track_bpm(self, artist: str, title: str) -> SongData:
         """
         Récupère BPM et métadonnées pour un morceau
-        
+
         Args:
             artist: Nom de l'artiste
             title: Titre du morceau
-            
+
         Returns:
             Objet SongData avec toutes les métadonnées
         """
         # Vérifier le cache
         cache_key = self._get_cache_key(artist, title)
         if cache_key in self.cache:
-            print(f"  ✓ Cache: {artist} - {title}")
+            logger.debug(f"Cache: {artist} - {title}")
             return SongData(**self.cache[cache_key])
-        
+
         # Rechercher le morceau
         track_data = self._search_track(artist, title)
-        
+
         if track_data:
             # Extraire les données selon structure documentée
             key_of = track_data.get('key_of')
             mode = self._extract_mode_from_key(key_of)
-            
+
             # Extraire les infos artiste si disponibles
             artist_data = track_data.get('artist', {})
             genres = artist_data.get('genres', []) if isinstance(artist_data, dict) else None
-            
+
             song = SongData(
                 artist=artist,
                 title=title,
@@ -247,22 +258,22 @@ class GetSongBPMFetcher:
                 acousticness=track_data.get('acousticness'),
                 genres=genres
             )
-            
-            print(f"  ✓ Trouvé: {artist} - {title}")
-            print(f"    BPM: {song.bpm} | Key: {song.key} ({song.mode}) | Time: {song.time_signature}")
-            
+
+            logger.info(f"Trouvé: {artist} - {title}")
+            logger.debug(f"BPM: {song.bpm} | Key: {song.key} ({song.mode}) | Time: {song.time_signature}")
+
         else:
             song = SongData(
                 artist=artist,
                 title=title,
                 error="Morceau introuvable dans GetSongBPM"
             )
-            print(f"  ✗ Non trouvé: {artist} - {title}")
-        
+            logger.debug(f"Non trouvé: {artist} - {title}")
+
         # Mettre en cache
         self.cache[cache_key] = song.__dict__
         self._save_cache()
-        
+
         return song
     
     def fetch_artist_discography(self, artist: str, track_list: List[str]) -> List[SongData]:

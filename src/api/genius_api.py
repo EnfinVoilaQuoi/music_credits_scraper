@@ -4,7 +4,14 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from lyricsgenius import Genius
 
-from src.config import GENIUS_API_KEY, DELAY_BETWEEN_REQUESTS, MAX_RETRIES
+from src.config import (
+    GENIUS_API_KEY,
+    DELAY_BETWEEN_REQUESTS,
+    MAX_RETRIES,
+    GENIUS_TIMEOUT,
+    GENIUS_RETRIES,
+    GENIUS_SLEEP_TIME
+)
 from src.models import Artist, Track
 from src.utils.logger import get_logger, log_api
 
@@ -18,14 +25,20 @@ class GeniusAPI:
     def __init__(self):
         if not GENIUS_API_KEY:
             raise ValueError("GENIUS_API_KEY non configurée")
-        
-        self.genius = Genius(GENIUS_API_KEY)
+
+        # Configuration avec timeout augmenté pour les requêtes lourdes
+        self.genius = Genius(
+            GENIUS_API_KEY,
+            timeout=GENIUS_TIMEOUT,  # ✅ Configurable via .env ou config.py (défaut: 30s)
+            sleep_time=GENIUS_SLEEP_TIME,  # Délai entre requêtes (rate limiting)
+            retries=GENIUS_RETRIES  # ✅ Nombre de tentatives en cas d'échec
+        )
         self.genius.verbose = False  # Désactiver les prints de lyricsgenius
         self.genius.remove_section_headers = True
         self.genius.skip_non_songs = True
         self.genius.excluded_terms = ["(Remix)", "(Live)"]  # Optionnel
-        
-        logger.info("API Genius initialisée")
+
+        logger.info(f"API Genius initialisée (timeout: {GENIUS_TIMEOUT}s, retries: {GENIUS_RETRIES}, sleep: {GENIUS_SLEEP_TIME}s)")
     
     def search_artist(self, artist_name: str) -> Optional[Artist]:
         """Recherche un artiste sur Genius - VERSION SÉCURISÉE"""

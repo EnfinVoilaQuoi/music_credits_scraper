@@ -23,13 +23,15 @@ data/artists/*
 data/logs/*
 !data/logs/.gitkeep
 data/ultratop/*
-data\certifications\brma\backups/*
-data\certifications\brma\logs/*
-data\certifications\brma\reports/*
+data/certifications/brma/backups/*
+data/certifications/brma/logs/*
+data/certifications/brma/reports/*
+data/certifications/snep/certif-backup-*.csv
 src/scripts/*
 *.db
 *.sqlite
 *.log
+.cache
 *.cache
 *.json
 

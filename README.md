@@ -12,8 +12,8 @@
 ## Fonctionnalités
 - **Gestion** de **plusieurs Base de Données** (une par artiste)
 - **Fenetre principale** :
-  Vue "**Morceaux**" : Tableau rassemblant tous les morceaux et leurs informations (Artiste Principal, Date de Sortie, Album, Credits, Paroles, BPM, Durée, Certifications, Nb de Streams et Statut, avec **systeme de tri par colonne**)
-  Vue "**Album**" : Tableau rassemblant tous les albums et leurs informations (Durée, Certifications, Nb de Streams)
+  - Vue "**Morceaux**" : Tableau rassemblant tous les morceaux et leurs informations (Artiste Principal, Date de Sortie, Album, Credits, Paroles, BPM, Durée, Certifications, Nb de Streams et Statut, avec **systeme de tri par colonne**)
+  - Vue "**Album**" : Tableau rassemblant tous les albums et leurs informations (Durée, Certifications, Nb de Streams)
 - **Fenetres secondaires** : Page de Detail pour chaque morceau (Crédits, Paroles, Données Techniques, Certifications), Page de Gestion des MaJ des Certifications (Sources, Info MaJ, MaJ manuelle), Page de Gestion du Scrape Credit/Paroles (Sources, Mode Réécriture), Page de Gestion de l'Enrichissement (Sources, Mode Réécriture)
 - **Gestion** de **morceau "exclu"** (freestyle, émission)
 - Récupération automatique de **liens YouTube** pour chaque morceaux, avec **système de fiabilité**, infobulle preview titre et note de fiabilité

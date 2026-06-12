@@ -9,7 +9,8 @@ import unicodedata
 
 from src.config import WINDOW_WIDTH, WINDOW_HEIGHT, THEME
 from src.api.genius_api import GeniusAPI
-from src.scrapers.genius_scraper import GeniusScraper
+from src.scrapers.genius_scraper_v2 import GeniusScraper
+from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.utils.data_manager import DataManager
 from src.utils.data_enricher import DataEnricher
 from src.utils.logger import get_logger
@@ -117,45 +118,64 @@ class MainWindow:
         # 1. Récupérer les morceaux
         self.get_tracks_button = ctk.CTkButton(
             control_frame,
-            text="Récupérer les Morceaux",
+            text="Discographie",
             command=self._get_tracks,
             state="disabled",
             width=150
         )
         self.get_tracks_button.pack(side="left", padx=5)
         
-        # 2. Scraper Crédits & Paroles (menu combiné)
+        # 2. Crédits & Paroles (menu combiné)
         self.scrape_button = ctk.CTkButton(
             control_frame,
-            text="Scraper Crédits & Paroles",
+            text="Crédits & Paroles",
             command=self._show_scraping_menu,
             state="disabled",
-            width=180
+            width=180,
+            fg_color="#B8860B",  # Jaune foncé (DarkGoldenrod)
+            hover_color="#996515",  # Jaune encore plus foncé au survol
+            text_color="white"  # Texte blanc
         )
         self.scrape_button.pack(side="left", padx=5)
         
-        # 5. Enrichir données
+        # 5. Données additionnelles
         self.enrich_button = ctk.CTkButton(
             control_frame,
-            text="Enrichir Données",
+            text="Données Add.",
             command=self._start_enrichment,
             state="disabled",
-            width=150
+            width=150,
+            fg_color="#B22222",  # Rouge foncé (FireBrick)
+            hover_color="#8B0000",  # Rouge très foncé (DarkRed) au survol
+            text_color="white"  # Texte blanc
         )
         self.enrich_button.pack(side="left", padx=5)
 
         # 6. Bouton de mise à jour des certifications
         self.update_certif_button = ctk.CTkButton(
             control_frame,
-            text="📊 MàJ Certifs",
+            text="Certifications",
             command=self._open_certification_update,
             width=150,
             fg_color="darkgreen",
             hover_color="green"
         )
         self.update_certif_button.pack(side="left", padx=5)
-        
-        # 7. Exporter
+
+        # 7. Nb Streams (Spotify + YouTube Music)
+        self.streams_button = ctk.CTkButton(
+            control_frame,
+            text="Nb Streams",
+            command=self._start_streams_update,
+            state="disabled",
+            width=130,
+            fg_color="#1a237e",
+            hover_color="#283593",
+            text_color="white"
+        )
+        self.streams_button.pack(side="left", padx=5)
+
+        # 8. Exporter (aligné à droite)
         self.export_button = ctk.CTkButton(
             control_frame,
             text="Exporter",
@@ -163,7 +183,7 @@ class MainWindow:
             state="disabled",
             width=100
         )
-        self.export_button.pack(side="left", padx=5)
+        self.export_button.pack(side="right", padx=5)
         
         # Progress bar
         self.progress_var = ctk.DoubleVar()
@@ -182,7 +202,16 @@ class MainWindow:
         # Frame pour les boutons de sélection - ✅ AMÉLIORÉE
         selection_frame = ctk.CTkFrame(table_frame)
         selection_frame.pack(fill="x", padx=5, pady=5)
-        
+
+        # Bouton pour cocher les morceaux sélectionnés
+        ctk.CTkButton(
+            selection_frame,
+            text="✅",
+            command=self._check_selected_tracks,
+            width=35,
+            font=("Arial", 12)
+        ).pack(side="left", padx=(5, 2))
+
         ctk.CTkButton(
             selection_frame,
             text="Tout sélectionner",
@@ -207,18 +236,20 @@ class MainWindow:
             hover_color="darkgray"
         ).pack(side="left", padx=5)
         
-        ctk.CTkButton(
-            selection_frame,
-            text="Réactiver sélectionnés",
-            command=self._enable_selected_tracks,
-            width=140,
-            fg_color="green",
-            hover_color="darkgreen"
-        ).pack(side="left", padx=5)
-        
         self.selected_count_label = ctk.CTkLabel(selection_frame, text="")
         self.selected_count_label.pack(side="left", padx=20)
-        
+
+        # Bascule de vue Morceaux / Albums
+        self.view_mode = "tracks"
+        self.view_switch = ctk.CTkSegmentedButton(
+            selection_frame,
+            values=["Morceaux", "Albums"],
+            command=self._set_view_mode,
+            width=180
+        )
+        self.view_switch.set("Morceaux")
+        self.view_switch.pack(side="right", padx=10)
+
         # Créer le Treeview dans un conteneur approprié
         tree_container = ctk.CTkFrame(table_frame)
         tree_container.pack(fill="both", expand=True)
@@ -227,38 +258,14 @@ class MainWindow:
         tree_scroll_frame.pack(fill="both", expand=True)
         
         # COLONNES AVEC COLONNE PAROLES ENTRE CRÉDITS ET BPM + DURÉE ENTRE BPM ET CERTIF
-        columns = ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "Paroles", "BPM", "Durée", "Certif.", "Statut")
-        self.tree = ttk.Treeview(tree_scroll_frame, columns=columns, show="tree headings", height=15)
-        
-        # Configuration des colonnes avec tri
-        self.tree.heading("#0", text="✓")
-        self.tree.column("#0", width=50, stretch=False)
-        
+        self.TRACK_COLUMNS = ("Titre", "Artiste principal", "Album", "Date sortie", "Crédits", "Paroles", "BPM", "Durée", "Certif.", "Streams", "Statut")
+        self.ALBUM_COLUMNS = ("Album", "Date sortie", "Morceaux", "Crédits", "Paroles", "Durée totale", "Streams Spotify", "Streams YTM")
+        self.tree = ttk.Treeview(tree_scroll_frame, columns=self.TRACK_COLUMNS, show="tree headings", height=15)
+
         # Variable pour suivre l'ordre de tri
         self.sort_reverse = {}
-        
-        for col in columns:
-            self.tree.heading(col, text=col, command=lambda c=col: self._sort_column(c))
-            if col == "Titre":
-                self.tree.column(col, width=220)
-            elif col == "Artiste principal":
-                self.tree.column(col, width=130)
-            elif col == "Album":
-                self.tree.column(col, width=160)  # +30 pixels
-            elif col == "Date sortie":
-                self.tree.column(col, width=80)  # -10 pixels
-            elif col == "Crédits":
-                self.tree.column(col, width=70, anchor="center")  # CENTRÉ
-            elif col == "Paroles":
-                self.tree.column(col, width=60, anchor="center")  # CENTRÉ - -10 pixels
-            elif col == "BPM":
-                self.tree.column(col, width=90)  # +20 pixels
-            elif col == "Durée":
-                self.tree.column(col, width=70, anchor="center")  # CENTRÉ
-            elif col == "Certif.":
-                self.tree.column(col, width=50, anchor="center")  # -10 pixels, CENTRÉ
-            else:  # Statut
-                self.tree.column(col, width=70)
+
+        self._configure_tree_for_tracks()
         
         # Scrollbars
         vsb = ttk.Scrollbar(tree_scroll_frame, orient="vertical", command=self.tree.yview)
@@ -277,6 +284,9 @@ class MainWindow:
         # ✅ AMÉLIORÉ: Bindings pour sélection multiple et clic droit
         self.tree.bind("<Double-Button-1>", self._show_track_details)
         self.tree.bind("<Button-1>", self._on_tree_click)
+        # Cocher-glisser : maintenir le clic sur une coche et glisser
+        self.tree.bind("<B1-Motion>", self._on_tree_drag)
+        self.tree.bind("<ButtonRelease-1>", self._on_tree_release)
         self.tree.bind("<Button-3>", self._on_right_click)  # Clic droit pour menu contextuel
         
         # === Section statistiques ===
@@ -286,8 +296,155 @@ class MainWindow:
         self.stats_label = ctk.CTkLabel(stats_frame, text="", font=("Arial", 12))
         self.stats_label.pack()
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Bascule de vue Morceaux / Albums
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _configure_tree_for_tracks(self):
+        """Colonnes de la vue Morceaux (vue par défaut)"""
+        self.tree.configure(columns=self.TRACK_COLUMNS)
+        self.tree.heading("#0", text="✓")
+        self.tree.column("#0", width=50, stretch=False)
+        widths = {
+            "Titre": (220, "w"), "Artiste principal": (130, "w"),
+            "Album": (160, "w"), "Date sortie": (80, "w"),
+            "Crédits": (70, "center"), "Paroles": (60, "center"),
+            "BPM": (90, "w"), "Durée": (70, "center"),
+            "Certif.": (50, "center"), "Streams": (120, "e"),
+            "Statut": (70, "w"),
+        }
+        for col in self.TRACK_COLUMNS:
+            w, anchor = widths[col]
+            self.tree.heading(col, text=col, command=lambda c=col: self._sort_column(c))
+            self.tree.column(col, width=w, anchor=anchor)
+
+    def _configure_tree_for_albums(self):
+        """Colonnes de la vue Albums (stats agrégées)"""
+        self.tree.configure(columns=self.ALBUM_COLUMNS)
+        self.tree.heading("#0", text="💿")
+        self.tree.column("#0", width=40, stretch=False)
+        widths = {
+            "Album": (260, "w"), "Date sortie": (90, "w"),
+            "Morceaux": (80, "center"), "Crédits": (70, "center"),
+            "Paroles": (80, "center"), "Durée totale": (90, "center"),
+            "Streams Spotify": (130, "e"), "Streams YTM": (130, "e"),
+        }
+        for col in self.ALBUM_COLUMNS:
+            w, anchor = widths[col]
+            self.tree.heading(col, text=col, command="")
+            self.tree.column(col, width=w, anchor=anchor)
+
+    def _set_view_mode(self, value):
+        """Callback du sélecteur Morceaux / Albums"""
+        mode = "albums" if value == "Albums" else "tracks"
+        if mode == getattr(self, "view_mode", "tracks"):
+            return
+        self.view_mode = mode
+        if mode == "albums":
+            self._populate_albums_table()
+        else:
+            self._configure_tree_for_tracks()
+            self._populate_tracks_table()
+
+    @staticmethod
+    def _normalize_album_title(s: str) -> str:
+        for apo in ("’", "‘", "`", "´"):
+            s = s.replace(apo, "'")
+        return " ".join(s.lower().strip().split())
+
+    def _populate_albums_table(self):
+        """Remplit le tableau avec les albums et leurs stats agrégées"""
+        self._configure_tree_for_albums()
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        if not self.current_artist or not getattr(self.current_artist, 'tracks', None):
+            return
+
+        # Stats streams par album (table albums : Kworb Spotify + YTMusic)
+        albums_db = {}
+        try:
+            for a in self.data_manager.get_albums_for_artist(self.current_artist.id):
+                albums_db[self._normalize_album_title(a['title'])] = a
+        except Exception as e:
+            logger.debug(f"Albums DB indisponibles: {e}")
+
+        # Grouper les morceaux par album (clé normalisée : "d'" == "d’")
+        groups = {}
+        for track in self.current_artist.tracks:
+            album = (track.album or "").strip() or "— Singles / sans album —"
+            key = self._normalize_album_title(album)
+            if key not in groups:
+                groups[key] = [album, []]
+            groups[key][1].append(track)
+        groups = {display: tracks for display, tracks in groups.values()}
+
+        def earliest_date(tracks):
+            dates = []
+            for t in tracks:
+                d = getattr(t, 'release_date', None)
+                if isinstance(d, str):
+                    try:
+                        d = datetime.fromisoformat(d.split('T')[0])
+                    except Exception:
+                        d = None
+                if d:
+                    dates.append(d)
+            return min(dates) if dates else None
+
+        def fmt_streams(v):
+            return f"{v:,}".replace(",", " ") if v else ""
+
+        # Trier par date de sortie décroissante (singles en dernier)
+        ordered = sorted(
+            groups.items(),
+            key=lambda kv: (kv[0].startswith("—"),
+                            -(earliest_date(kv[1]) or datetime.min).timestamp())
+        )
+
+        for album, tracks in ordered:
+            n = len(tracks)
+            credits = sum(len(getattr(t, 'credits', []) or []) for t in tracks)
+            lyrics = sum(1 for t in tracks
+                         if getattr(t, 'lyrics', None) and str(t.lyrics).strip())
+            total_sec = 0
+            for t in tracks:
+                d = getattr(t, 'duration', None)
+                if isinstance(d, int):
+                    total_sec += d
+                elif isinstance(d, str) and ':' in d:
+                    try:
+                        parts = [int(p) for p in d.split(':')]
+                        total_sec += parts[-1] + parts[-2] * 60 + \
+                            (parts[-3] * 3600 if len(parts) > 2 else 0)
+                    except Exception:
+                        pass
+            if total_sec:
+                h, rem = divmod(total_sec, 3600)
+                m, s = divmod(rem, 60)
+                duree = f"{h}h{m:02d}" if h else f"{m}:{s:02d}"
+            else:
+                duree = ""
+
+            date = earliest_date(tracks)
+            date_str = date.strftime("%d/%m/%Y") if date else ""
+
+            db = albums_db.get(self._normalize_album_title(album), {})
+            sp_streams = fmt_streams(db.get('spotify_streams'))
+            ytm_streams = fmt_streams(db.get('ytm_streams'))
+
+            self.tree.insert("", "end", text="💿", values=(
+                album, date_str, n, credits, f"{lyrics}/{n}", duree,
+                sp_streams, ytm_streams
+            ))
+
     def _populate_tracks_table(self):
         """Remplit le tableau avec les morceaux - VERSION CORRIGÉE CRÉDITS"""
+        # En vue Albums, rafraîchir la vue Albums à la place
+        if getattr(self, 'view_mode', 'tracks') == 'albums':
+            self._populate_albums_table()
+            return
+
         # Nettoyer le tableau
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -407,10 +564,22 @@ class MainWindow:
                 
                 # Statut - Utiliser votre fonction existante _get_track_status_icon
                 status = self._get_track_status_icon(track)
-                
+
+                # Streams estimés
+                try:
+                    from src.utils.streams_calculator import (
+                        calculate_total_streams, streams_source_label, format_streams)
+                    sp = getattr(track, 'spotify_streams', None)
+                    yt = getattr(track, 'ytm_streams', None)
+                    streams_total = calculate_total_streams(sp, yt)
+                    streams_display = format_streams(
+                        streams_total, streams_source_label(sp, yt))
+                except Exception:
+                    streams_display = ""
+
                 # Case à cocher selon la sélection
                 checkbox = "☑" if i in self.selected_tracks else "☐"
-                
+
                 # Ajouter la ligne
                 item_id = self.tree.insert(
                     "", "end",
@@ -420,11 +589,12 @@ class MainWindow:
                         artist_display,
                         album,
                         release_date,
-                        credits_display,  # CORRECTION: Affiche le nombre
+                        credits_display,
                         lyrics_display,
                         bpm,
-                        duration_display,  # NOUVELLE COLONNE DURÉE
+                        duration_display,
                         certif_display,
+                        streams_display,
                         status
                     ),
                     tags=(str(i),)
@@ -460,6 +630,8 @@ class MainWindow:
 
     def _on_tree_click(self, event):
         """Gère les clics sur le tableau avec sélection multiple (Ctrl/Maj)"""
+        if getattr(self, 'view_mode', 'tracks') != 'tracks':
+            return
         region = self.tree.identify_region(event.x, event.y)
 
         if region == "tree":  # Clic sur la case à cocher
@@ -508,15 +680,81 @@ class MainWindow:
                         if index in self.selected_tracks:
                             self.selected_tracks.remove(index)
                             self.tree.item(item, text="☐")
+                            new_state = False
                         else:
                             self.selected_tracks.add(index)
                             self.tree.item(item, text="☑")
+                            new_state = True
                         self.last_selected_index = index
+
+                        # Armer le cocher-glisser : maintenir le clic et glisser
+                        # applique le même état aux lignes survolées
+                        self._drag_check_state = new_state
+                        self._drag_check_active = True
 
                     self._update_selection_count()
 
+    def _on_tree_drag(self, event):
+        """Cocher-glisser : applique l'état de la première coche aux lignes survolées"""
+        if getattr(self, 'view_mode', 'tracks') != 'tracks':
+            return
+        if not getattr(self, '_drag_check_active', False):
+            return
+        if self.tree.identify_region(event.x, event.y) != "tree":
+            return
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
+        tags = self.tree.item(item)["tags"]
+        if not tags:
+            return
+        index = int(tags[0])
+        if self._is_track_disabled_by_index(index):
+            return
+
+        if self._drag_check_state and index not in self.selected_tracks:
+            self.selected_tracks.add(index)
+            self.tree.item(item, text="☑")
+            self._update_selection_count()
+        elif not self._drag_check_state and index in self.selected_tracks:
+            self.selected_tracks.remove(index)
+            self.tree.item(item, text="☐")
+            self._update_selection_count()
+
+    def _on_tree_release(self, event):
+        """Fin du cocher-glisser"""
+        self._drag_check_active = False
+
+    def _delete_track_by_index(self, index):
+        """Supprime définitivement un morceau (DB + liste) après confirmation"""
+        if not self.current_artist or index >= len(self.current_artist.tracks):
+            return
+        track = self.current_artist.tracks[index]
+        if not messagebox.askyesno(
+            "Supprimer le morceau",
+            f"Supprimer définitivement '{track.title}' ?\n\n"
+            "Le morceau, ses crédits et ses données seront effacés de la base.\n"
+            "(Il pourra revenir lors d'une future récupération de discographie "
+            "s'il est encore associé à l'artiste sur Genius.)"
+        ):
+            return
+        try:
+            if track.id:
+                self.data_manager.delete_track(track.id)
+            self.current_artist.tracks.pop(index)
+            # Les indices ne sont plus valides
+            self.selected_tracks.clear()
+            self._populate_tracks_table()
+            self._update_artist_info()
+            logger.info(f"🗑️ Morceau supprimé: {track.title}")
+        except Exception as e:
+            logger.error(f"Erreur suppression morceau: {e}")
+            self._show_error("Erreur", f"Impossible de supprimer le morceau: {e}")
+
     def _on_right_click(self, event):
         """Menu contextuel sur clic droit avec actualisation immédiate"""
+        if getattr(self, 'view_mode', 'tracks') != 'tracks':
+            return
         item = self.tree.identify_row(event.y)
         if item:
             tags = self.tree.item(item)["tags"]
@@ -544,6 +782,11 @@ class MainWindow:
                 context_menu.add_command(
                     label="Voir les détails",
                     command=lambda: self._show_track_details_by_index(index)
+                )
+                context_menu.add_separator()
+                context_menu.add_command(
+                    label="🗑️ Supprimer définitivement",
+                    command=lambda: self._delete_track_by_index(index)
                 )
                 
                 # Afficher le menu
@@ -676,6 +919,8 @@ class MainWindow:
 
     def _sort_column(self, col):
         """Trie les morceaux par colonne - VERSION SANS SÉLECTION AUTOMATIQUE"""
+        if getattr(self, 'view_mode', 'tracks') != 'tracks':
+            return
         if not self.current_artist or not self.current_artist.tracks:
             return
         
@@ -807,6 +1052,8 @@ class MainWindow:
 
     def _show_track_details(self, event):
         """Affiche les détails d'un morceau - VERSION CORRIGÉE AVEC DEBUG FEATURING"""
+        if getattr(self, 'view_mode', 'tracks') != 'tracks':
+            return
         selection = self.tree.selection()
         if not selection:
             return
@@ -841,6 +1088,7 @@ class MainWindow:
         # Créer une fenêtre de détails
         details_window = ctk.CTkToplevel(self.root)
         details_window.title(f"Détails - {track.title}")
+        details_window.transient(self.root)
 
         # Stocker la référence de la fenêtre
         self.open_detail_windows[track.id] = (details_window, track)
@@ -855,7 +1103,7 @@ class MainWindow:
         
         # Agrandir la fenêtre selon le contenu
         has_lyrics = hasattr(track, 'lyrics') and track.lyrics
-        window_height = "900" if has_lyrics else "700"
+        window_height = "900" if has_lyrics else "750"
         details_window.geometry(f"900x{window_height}")
         
         # === SECTION INFORMATIONS GÉNÉRALES (EN HAUT) ===
@@ -968,7 +1216,25 @@ class MainWindow:
         
         if track.genre:
             ctk.CTkLabel(right_column, text=f"🎭 Genre: {track.genre}").pack(anchor="w", pady=1)
-        
+
+        # Streams estimés dans le header
+        try:
+            from src.utils.streams_calculator import (
+                calculate_total_streams, streams_source_label, format_streams)
+            sp = getattr(track, 'spotify_streams', None)
+            yt = getattr(track, 'ytm_streams', None)
+            total_est = calculate_total_streams(sp, yt)
+            if total_est:
+                suffix = streams_source_label(sp, yt)
+                label_text = f"📊 Streams : {format_streams(total_est)}{suffix} (estimé)"
+                ctk.CTkLabel(
+                    right_column, text=label_text,
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color="#4fc3f7"
+                ).pack(anchor="w", pady=(4, 1))
+        except Exception:
+            pass
+
         # URL Genius (cliquable)
         if track.genius_url:
             urls_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
@@ -1040,7 +1306,7 @@ class MainWindow:
                 )
                 spotify_label.pack(side="left")
                 spotify_label.bind("<Button-1>", lambda e: open_selected_version())
-                
+
                 # Info tooltip
                 info_label = ctk.CTkLabel(
                     spotify_frame,
@@ -1049,6 +1315,29 @@ class MainWindow:
                     text_color="gray"
                 )
                 info_label.pack(side="left", padx=5)
+
+                # Tooltip avec le titre de la page Spotify si disponible
+                if hasattr(track, 'spotify_page_title') and track.spotify_page_title:
+                    spotify_tooltip_text = f"Titre Spotify:\n{track.spotify_page_title[:80]}"
+                    if len(track.spotify_page_title) > 80:
+                        spotify_tooltip_text += "..."
+
+                    def show_spotify_tooltip(event):
+                        tooltip = ctk.CTkToplevel()
+                        tooltip.wm_overrideredirect(True)
+                        tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+
+                        ctk.CTkLabel(
+                            tooltip,
+                            text=spotify_tooltip_text,
+                            fg_color="gray20",
+                            corner_radius=5,
+                            font=("Arial", 9)
+                        ).pack(padx=5, pady=2)
+
+                        tooltip.after(3000, tooltip.destroy)
+
+                    spotify_label.bind("<Enter>", show_spotify_tooltip)
             else:
                 # Un seul ID, affichage normal
                 spotify_url = f"https://open.spotify.com/intl-fr/track/{all_spotify_ids[0]}"
@@ -1063,9 +1352,6 @@ class MainWindow:
 
                 import webbrowser
                 spotify_label.bind("<Button-1>", lambda e: webbrowser.open(spotify_url))
-
-                # Debug: Vérifier si spotify_page_title existe
-                logger.debug(f"Track {track.title}: hasattr={hasattr(track, 'spotify_page_title')}, value={getattr(track, 'spotify_page_title', 'NOT_SET')}")
 
                 # Tooltip avec le titre de la page Spotify si disponible
                 if hasattr(track, 'spotify_page_title') and track.spotify_page_title:
@@ -1542,7 +1828,74 @@ class MainWindow:
                 tech_textbox.insert("end", f"{i}. {error}\n")
         
         tech_textbox.configure(state="disabled")
-        
+
+        # === ONGLET STREAMS ===
+        streams_frame = ctk.CTkFrame(notebook)
+        notebook.add(streams_frame, text="📊 Streams")
+
+        try:
+            from src.utils.streams_calculator import (
+                calculate_total_streams, streams_source_label, format_streams,
+                SPOTIFY_SHARE, YTM_SHARE, COMBINED_SHARE)
+
+            sp = getattr(track, 'spotify_streams', None)
+            yt = getattr(track, 'ytm_streams', None)
+            sp_upd = getattr(track, 'spotify_streams_updated', None)
+            yt_upd = getattr(track, 'ytm_streams_updated', None)
+            total_est = calculate_total_streams(sp, yt)
+            suffix = streams_source_label(sp, yt)
+
+            streams_content = ctk.CTkFrame(streams_frame, fg_color="transparent")
+            streams_content.pack(fill="both", expand=True, padx=30, pady=20)
+
+            def row(label, value, bold=False, color=None):
+                f = ctk.CTkFrame(streams_content, fg_color="transparent")
+                f.pack(fill="x", pady=3)
+                ctk.CTkLabel(f, text=label, width=220, anchor="w",
+                             font=ctk.CTkFont(weight="bold" if bold else "normal")
+                             ).pack(side="left")
+                kw = {"text_color": color} if color else {}
+                ctk.CTkLabel(f, text=value, anchor="w",
+                             font=ctk.CTkFont(weight="bold" if bold else "normal"),
+                             **kw).pack(side="left")
+
+            row("Streams Spotify :", format_streams(sp) if sp else "—")
+            if sp_upd:
+                row("  MaJ Spotify :", self._format_datetime(sp_upd) if sp_upd else "—")
+
+            row("Streams YouTube Music :", format_streams(yt) if yt else "—")
+            if yt_upd:
+                row("  MaJ YouTube Music :", self._format_datetime(yt_upd) if yt_upd else "—")
+
+            ctk.CTkLabel(streams_content, text="─" * 60,
+                         text_color="gray").pack(fill="x", pady=(10, 4))
+
+            if total_est:
+                row("Streams totaux estimés :",
+                    f"{format_streams(total_est)}{suffix}",
+                    bold=True, color="#4fc3f7")
+                # Détail de la formule
+                if sp and yt:
+                    formula = f"({format_streams(sp)} Sp + {format_streams(yt)} YT) ÷ {COMBINED_SHARE:.0%}"
+                elif sp:
+                    formula = f"{format_streams(sp)} Sp ÷ {SPOTIFY_SHARE:.0%} (Spotify seul)"
+                else:
+                    formula = f"{format_streams(yt)} YT ÷ {YTM_SHARE:.0%} (YT Music seul)"
+                ctk.CTkLabel(streams_content, text=f"Formule : {formula}",
+                             text_color="gray", font=ctk.CTkFont(size=11)
+                             ).pack(anchor="w", pady=(0, 6))
+            else:
+                row("Streams totaux estimés :", "Données insuffisantes", color="gray")
+
+            ctk.CTkLabel(
+                streams_content,
+                text="Parts de marché FR 2025 : Spotify ~40 %  •  YT Music ~25 %  •  Ensemble ~65 %",
+                text_color="gray", font=ctk.CTkFont(size=10)
+            ).pack(anchor="w", pady=(10, 0))
+
+        except Exception as e:
+            ctk.CTkLabel(streams_frame, text=f"Erreur : {e}", text_color="red").pack(expand=True)
+
         # Bouton de fermeture
         close_button = ctk.CTkButton(
             details_window, 
@@ -1586,7 +1939,31 @@ class MainWindow:
         self.selected_tracks.clear()
         self._refresh_selection_display()
         self._update_selection_count()
-    
+
+    def _check_selected_tracks(self):
+        """Coche tous les morceaux actuellement en surbrillance (sélection visuelle)"""
+        # Récupérer les items en surbrillance dans le Treeview
+        highlighted_items = self.tree.selection()
+
+        if not highlighted_items:
+            logger.info("Aucun morceau en surbrillance")
+            return
+
+        logger.info(f"Cochage de {len(highlighted_items)} morceaux en surbrillance")
+        for item in highlighted_items:
+            tags = self.tree.item(item)["tags"]
+            if tags:
+                index = int(tags[0])
+
+                # Vérifier que le morceau n'est pas désactivé
+                if not self._is_track_disabled_by_index(index):
+                    # Ajouter à la sélection et cocher
+                    self.selected_tracks.add(index)
+                    self.tree.item(item, text="☑")
+                    logger.debug(f"Morceau {index} coché")
+
+        self._update_selection_count()
+
     def _update_selection_count(self):
         """Met à jour l'affichage du nombre de morceaux sélectionnés"""
         if hasattr(self, 'selected_count_label'):
@@ -1612,8 +1989,10 @@ class MainWindow:
             except:
                 pass
             
-            # Ouvrir la fenêtre
-            dialog = CertificationUpdateDialog(self.root, cert_manager)
+            # Ouvrir la fenêtre (pré-remplie avec l'artiste courant)
+            current_name = self.current_artist.name if self.current_artist else None
+            dialog = CertificationUpdateDialog(self.root, cert_manager,
+                                               default_artist=current_name)
             dialog.transient(self.root)
             dialog.grab_set()
             
@@ -1670,7 +2049,172 @@ class MainWindow:
                 messagebox.showerror("Erreur", f"Erreur lors de l'export: {error_msg}")
 
     # ✅ AJOUT DES MÉTHODES MANQUANTES (suite des autres méthodes existantes)
-    
+
+    @staticmethod
+    def _build_genius_slug(name: str) -> str:
+        """Construit le slug Genius depuis un nom d'artiste.
+
+        Règles :
+        - Tout en minuscules
+        - Supprime '.' et "'"
+        - Remplace les espaces par '-'
+        - Première lettre en majuscule
+
+        Ex: 'Sofiane Pamart' → 'Sofiane-pamart'
+            "L'Or du Commun" → 'Lor-du-commun'
+            'NWA'            → 'Nwa'
+        """
+        slug = name.lower()
+        for ch in (".", "'", "’"):  # point, apostrophe droite, apostrophe typographique
+            slug = slug.replace(ch, "")
+        slug = slug.replace(" ", "-")
+        if slug:
+            slug = slug[0].upper() + slug[1:]
+        return slug
+
+    def _fetch_artist_from_genius_url(self, url: str, fallback_name: str) -> "Optional[Artist]":
+        """Charge la page Genius d'un artiste via Playwright et extrait l'ID depuis le meta tag.
+
+        Utilise :
+            JSON.parse(document.querySelector('meta[itemprop="page_data"]').content).artist.id
+        """
+        scraper = None
+        try:
+            scraper = GeniusScraper(headless=True)
+            scraper.page.goto(url, wait_until="domcontentloaded", timeout=15_000)
+            result = scraper.page.evaluate("""() => {
+                const meta = document.querySelector('meta[itemprop="page_data"]');
+                if (!meta) return null;
+                try {
+                    const data = JSON.parse(meta.content);
+                    if (!data.artist || !data.artist.id) return null;
+                    return {id: data.artist.id, name: data.artist.name};
+                } catch(e) {
+                    return null;
+                }
+            }""")
+            if result and result.get('id'):
+                return Artist(
+                    name=result.get('name') or fallback_name,
+                    genius_id=result['id']
+                )
+        except Exception as e:
+            logger.debug(f"Fetch artiste depuis {url} échoué: {e}")
+        finally:
+            if scraper:
+                try:
+                    scraper.close()
+                except Exception:
+                    pass
+        return None
+
+    def _show_artist_selection_dialog(self, candidates, artist_name: str, result_queue):
+        """Dialog modal pour choisir parmi plusieurs artistes candidats Genius.
+
+        Si l'artiste n'apparaît pas dans la liste, l'utilisateur peut entrer
+        son ID Genius manuellement (visible sur genius.com/artists/NomArtiste).
+        """
+        import customtkinter as ctk
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Choisir un artiste")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.lift()
+        dialog.focus_force()
+
+        def _put(value):
+            result_queue.put(value)
+            dialog.destroy()
+
+        def _confirm_manual_id():
+            raw = id_entry.get().strip()
+            # Accepte un ID numérique ou une URL genius.com/artists/NomArtiste
+            genius_id = None
+            if raw.isdigit():
+                genius_id = int(raw)
+            elif "genius.com/artists/" in raw:
+                # Extraire le slug puis résoudre via l'API
+                slug = raw.split("genius.com/artists/")[-1].split("/")[0].split("?")[0]
+                self._resolve_genius_slug(slug, artist_name, result_queue, dialog)
+                return
+            if genius_id:
+                _put(Artist(name=artist_name, genius_id=genius_id))
+            else:
+                id_entry.configure(border_color="red")
+
+        # ── Titre ────────────────────────────────────────────────────────────
+        if candidates:
+            label_text = f"Plusieurs résultats pour « {artist_name} ».\nChoisissez l'artiste :"
+        else:
+            label_text = f"Aucun résultat automatique pour « {artist_name} »."
+        ctk.CTkLabel(
+            dialog,
+            text=label_text,
+            font=("Arial", 13),
+            justify="left"
+        ).pack(padx=20, pady=(16, 8), anchor="w")
+
+        # ── Boutons candidats ─────────────────────────────────────────────────
+        for artist in candidates:
+            ctk.CTkButton(
+                dialog,
+                text=f"{artist.name}   (ID Genius : {artist.genius_id})",
+                anchor="w",
+                command=lambda a=artist: _put(a)
+            ).pack(padx=20, pady=3, fill="x")
+
+        # ── Saisie manuelle ───────────────────────────────────────────────────
+        ctk.CTkLabel(
+            dialog,
+            text="Artiste absent ? Entrez l'ID Genius ou l'URL genius.com/artists/… :",
+            font=("Arial", 11),
+            text_color="gray"
+        ).pack(padx=20, pady=(14, 2), anchor="w")
+
+        id_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        id_frame.pack(padx=20, pady=(0, 4), fill="x")
+
+        id_entry = ctk.CTkEntry(id_frame, placeholder_text="Ex : 123456  ou  genius.com/artists/Isha")
+        id_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        id_entry.bind("<Return>", lambda e: _confirm_manual_id())
+
+        ctk.CTkButton(id_frame, text="OK", width=50, command=_confirm_manual_id).pack(side="left")
+
+        # ── Annuler ───────────────────────────────────────────────────────────
+        ctk.CTkButton(
+            dialog,
+            text="Annuler",
+            fg_color="gray",
+            command=lambda: _put(None)
+        ).pack(padx=20, pady=(8, 16))
+
+        height = 130 + len(candidates) * 46 + 90
+        dialog.geometry(f"460x{height}")
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: _put(None))
+        dialog.wait_window()
+
+    def _resolve_genius_slug(self, slug: str, artist_name: str, result_queue, parent_dialog):
+        """Charge genius.com/artists/{slug} via Playwright et extrait l'ID artiste."""
+        import threading
+
+        def fetch():
+            url = f"https://genius.com/artists/{slug}"
+            artist = self._fetch_artist_from_genius_url(url, artist_name)
+            if artist and artist.genius_id:
+                result_queue.put(artist)
+                self.root.after(0, parent_dialog.destroy)
+            else:
+                self.root.after(0, lambda: messagebox.showwarning(
+                    "Introuvable",
+                    f"Aucun artiste trouvé sur genius.com/artists/{slug}.\n"
+                    "Vérifiez l'orthographe ou entrez l'ID numérique directement."
+                ))
+
+        threading.Thread(target=fetch, daemon=True).start()
+
     def _search_artist(self):
         """Recherche un artiste - VERSION CORRIGÉE POUR CHARGEMENT EXISTANT"""
         artist_name = self.artist_entry.get().strip()
@@ -1684,73 +2228,61 @@ class MainWindow:
         def search():
             try:
                 logger.info(f"🔍 Recherche de l'artiste: '{artist_name}'")
-                
+
                 # Vérifier d'abord dans la base de données locale
                 artist = self.data_manager.get_artist_by_name(artist_name)
-                
                 if artist:
                     logger.info(f"✅ Artiste trouvé en base: {artist.name} avec {len(artist.tracks)} morceaux")
-                    
-                    # Artiste trouvé en base, l'utiliser directement
                     self.current_artist = artist
                     self.root.after(0, self._update_artist_info)
+                    self.root.after(0, self._apply_default_sort)
                     self.root.after(0, lambda: messagebox.showinfo(
-                        "Artiste chargé", 
+                        "Artiste chargé",
                         f"✅ Artiste '{artist.name}' chargé depuis la base de données\n"
                         f"📀 {len(artist.tracks)} morceaux disponibles\n"
                         f"🎤 ID Genius: {artist.genius_id}\n\n"
                         "Vous pouvez maintenant scraper ou enrichir les données."
                     ))
                     return
-                
-                # Seulement si pas trouvé en base, chercher sur Genius
-                logger.info(f"🌐 Artiste non trouvé en base, recherche sur Genius...")
-                
-                # Rechercher sur Genius avec gestion d'erreur robuste
-                try:
-                    genius_artist = self.genius_api.search_artist(artist_name)
-                    
-                    if genius_artist:
-                        # Sauvegarder le nouvel artiste dans la base
-                        self.data_manager.save_artist(genius_artist)
-                        self.current_artist = genius_artist
-                        
-                        self.root.after(0, self._update_artist_info)
-                        self.root.after(0, lambda: messagebox.showinfo(
-                            "Nouvel artiste trouvé", 
-                            f"✅ Nouvel artiste trouvé: '{genius_artist.name}'\n"
-                            f"🎤 ID Genius: {genius_artist.genius_id}\n\n"
-                            "Cliquez sur 'Récupérer les morceaux' pour commencer."
-                        ))
-                    else:
-                        self.root.after(0, lambda: messagebox.showwarning(
-                            "Non trouvé", 
-                            f"❌ Aucun artiste trouvé pour '{artist_name}'\n\n"
-                            "Vérifiez l'orthographe ou essayez un autre nom."
-                        ))
-                        
-                except Exception as api_error:
-                    logger.error(f"❌ Erreur API Genius: {api_error}")
-                    
-                    self.root.after(0, lambda: messagebox.showerror(
-                        "Erreur API", 
-                        f"❌ Problème avec l'API Genius:\n{str(api_error)}\n\n"
-                        "Solutions possibles:\n"
-                        "• Vérifiez votre connexion internet\n"
-                        "• Vérifiez votre clé API GENIUS_API_KEY\n"
-                        "• Réessayez dans quelques minutes"
+
+                # Construire l'URL Genius depuis le nom (sans appel API)
+                logger.info("🌐 Artiste non trouvé en base, recherche via URL Genius...")
+                slug = self._build_genius_slug(artist_name)
+                genius_url = f"https://genius.com/artists/{slug}"
+                logger.info(f"🔗 Tentative : {genius_url}")
+
+                genius_artist = self._fetch_artist_from_genius_url(genius_url, artist_name)
+
+                if not (genius_artist and genius_artist.genius_id):
+                    # Slug incorrect ou page inexistante → dialog de saisie manuelle
+                    logger.info(f"⚠️ Artiste non trouvé sur {genius_url}, affichage du dialog")
+                    import queue as _queue
+                    result_q = _queue.Queue()
+                    self.root.after(0, lambda: self._show_artist_selection_dialog(
+                        [], artist_name, result_q
                     ))
+                    genius_artist = result_q.get()
+                    if genius_artist is None:
+                        return  # Annulé par l'utilisateur
+
+                self.data_manager.save_artist(genius_artist)
+                self.current_artist = genius_artist
+                self.root.after(0, self._update_artist_info)
+                self.root.after(0, self._apply_default_sort)
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Artiste trouvé",
+                    f"✅ Artiste trouvé : '{genius_artist.name}'\n"
+                    f"🎤 ID Genius: {genius_artist.genius_id}\n\n"
+                    "Cliquez sur 'Récupérer les morceaux' pour commencer."
+                ))
 
             except Exception as e:
                 error_msg = str(e) if str(e) else "Erreur inconnue lors de la recherche"
                 logger.error(f"❌ Erreur lors de la recherche: {error_msg}")
-                logger.error(f"Type d'erreur: {type(e).__name__}")
-                
                 import traceback
                 logger.debug(f"Traceback complet: {traceback.format_exc()}")
-                
                 self.root.after(0, lambda: messagebox.showerror(
-                    "Erreur", 
+                    "Erreur",
                     f"❌ Erreur lors de la recherche:\n{error_msg}\n\n"
                     "Consultez les logs pour plus de détails."
                 ))
@@ -1810,28 +2342,28 @@ class MainWindow:
         
         # Créer les éléments de la liste
         artist_widgets = []
+
+        # Fonction pour sélectionner un artiste (surligne le BOUTON, pas la frame
+        # cachée derrière — sinon la sélection est invisible et les frames non
+        # sélectionnées paraissent surlignées à cause de leur couleur par défaut)
+        def select_artist(name, button):
+            if selected_artist["widget"]:
+                selected_artist["widget"].configure(fg_color="transparent")
+            selected_artist["name"] = name
+            selected_artist["widget"] = button
+            button.configure(fg_color=("#3B8ED0", "#1F6AA5"))
+
+        # Fonction pour charger directement avec double-clic
+        def load_on_double_click(name):
+            self.artist_entry.delete(0, "end")
+            self.artist_entry.insert(0, name)
+            dialog.destroy()
+            self._search_artist()
+
         for artist_info in artists_data:
-            # Frame pour chaque artiste
-            artist_frame = ctk.CTkFrame(scrollable_frame)
-            artist_frame.pack(fill="x", padx=5, pady=5)
-            
-            # Fonction pour sélectionner un artiste
-            def select_artist(name, widget, frame=artist_frame):
-                # Désélectionner l'ancien
-                if selected_artist["widget"]:
-                    selected_artist["widget"].configure(fg_color="transparent")
-
-                # Sélectionner le nouveau
-                selected_artist["name"] = name
-                selected_artist["widget"] = frame
-                frame.configure(fg_color=("gray70", "gray30"))
-
-            # Fonction pour charger directement avec double-clic
-            def load_on_double_click(name):
-                self.artist_entry.delete(0, "end")
-                self.artist_entry.insert(0, name)
-                dialog.destroy()
-                self._search_artist()
+            # Frame transparente : toutes les lignes non sélectionnées sont identiques
+            artist_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
+            artist_frame.pack(fill="x", padx=5, pady=2)
 
             # Informations de l'artiste
             info_text = f"🎤 {artist_info['name']}\n"
@@ -1845,18 +2377,20 @@ class MainWindow:
             artist_button = ctk.CTkButton(
                 artist_frame,
                 text=info_text,
-                command=lambda n=artist_info['name'], w=artist_frame: select_artist(n, w),
                 fg_color="transparent",
                 text_color=("black", "white"),
                 hover_color=("gray80", "gray40"),
                 anchor="w",
                 height=60
             )
-            artist_button.pack(fill="x", padx=5, pady=5)
+            artist_button.configure(
+                command=lambda n=artist_info['name'], b=artist_button: select_artist(n, b)
+            )
+            artist_button.pack(fill="x", padx=5, pady=2)
 
             # Double-clic pour charger directement
             artist_button.bind("<Double-Button-1>", lambda e, n=artist_info['name']: load_on_double_click(n))
-            
+
             artist_widgets.append({
                 'name': artist_info['name'],
                 'frame': artist_frame,
@@ -1941,6 +2475,7 @@ class MainWindow:
             details_dialog = ctk.CTkToplevel(dialog)
             details_dialog.title(f"Détails - {selected_artist['name']}")
             details_dialog.geometry("600x500")
+            details_dialog.transient(dialog)
             
             text_widget = ctk.CTkTextbox(details_dialog, width=580, height=450)
             text_widget.pack(padx=10, pady=10)
@@ -2049,8 +2584,29 @@ class MainWindow:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return []
 
+    def _close_all_detail_windows(self):
+        """Ferme toutes les fenêtres de détail ouvertes (appelé lors du changement d'artiste)"""
+        for track_id, (window, _) in list(self.open_detail_windows.items()):
+            try:
+                window.destroy()
+            except Exception:
+                pass
+        self.open_detail_windows.clear()
+
+    def _apply_default_sort(self):
+        """Tri par défaut : date de sortie, plus récent en haut."""
+        if not self.current_artist or not self.current_artist.tracks:
+            return
+        # Astuce : _sort_column inverse l'ordre quand on re-trie la même colonne.
+        # En pré-positionnant sort_reverse=False, l'appel produit un tri descendant.
+        self.sort_column = "Date sortie"
+        self.sort_reverse = False
+        self._sort_column("Date sortie")
+
     def _update_artist_info(self):
         """Met à jour les informations de l'artiste - VERSION AVEC DÉCOMPTES"""
+        # Fermer les fenêtres de détail de l'artiste précédent
+        self._close_all_detail_windows()
         if self.current_artist:
             self.artist_info_label.configure(text=f"Artiste: {self.current_artist.name}")
             
@@ -2122,11 +2678,38 @@ class MainWindow:
 
                 line1 = " - ".join(line1_parts)
 
-                # ✅ LIGNE 2: Données manquantes uniquement (désactivés déjà affiché dans la sélection)
+                # ✅ LIGNE 2: Données manquantes
                 line2 = f"{tracks_with_missing_data} Morceaux avec Données manquantes"
 
-                # Combiner avec retour à la ligne
+                # ✅ LIGNE 3: Streams et auditeurs mensuels
+                try:
+                    from src.utils.streams_calculator import (
+                        calculate_total_streams, calculate_total_monthly_listeners, format_streams)
+                    total_cumul = 0
+                    tracks_with_streams = 0
+                    for t in active_tracks:
+                        sp = getattr(t, 'spotify_streams', None)
+                        yt = getattr(t, 'ytm_streams', None)
+                        est = calculate_total_streams(sp, yt)
+                        if est:
+                            total_cumul += est
+                            tracks_with_streams += 1
+                    sp_ml = getattr(self.current_artist, 'spotify_monthly_listeners', None)
+                    yt_ml = getattr(self.current_artist, 'ytm_monthly_listeners', None)
+                    total_ml = calculate_total_monthly_listeners(sp_ml, yt_ml)
+
+                    line3_parts = []
+                    if total_cumul > 0:
+                        line3_parts.append(f"Streams cumulés : {format_streams(total_cumul)} (estimé, {tracks_with_streams} morceaux)")
+                    if total_ml:
+                        line3_parts.append(f"Auditeurs/mois : {format_streams(total_ml)} (estimé)")
+                    line3 = " - ".join(line3_parts) if line3_parts else ""
+                except Exception:
+                    line3 = ""
+
                 info_text = f"{line1}\n{line2}"
+                if line3:
+                    info_text += f"\n{line3}"
                 self.tracks_info_label.configure(text=info_text)
                 
                 self._populate_tracks_table()
@@ -2200,7 +2783,7 @@ class MainWindow:
     def _rescrape_single_lyrics(self, track: Track, parent_window):
         """Re-scrape les paroles d'un seul morceau"""
         try:
-            from src.scrapers.genius_scraper import GeniusScraper
+            from src.scrapers.genius_scraper_v2 import GeniusScraper
 
             scraper = GeniusScraper(headless=True)
             lyrics = scraper.scrape_track_lyrics(track)
@@ -2497,8 +3080,8 @@ class MainWindow:
                 ))
             finally:
                 self.root.after(0, lambda: self.get_tracks_button.configure(
-                    state="normal", 
-                    text="Récupérer les morceaux"
+                    state="normal",
+                    text="Discographie"
                 ))
                 self.root.after(0, lambda: self.progress_label.configure(text=""))
         
@@ -2612,8 +3195,8 @@ class MainWindow:
 
         # Créer la fenêtre popup
         dialog = ctk.CTkToplevel(self.root)
-        dialog.title("Scraper Crédits & Paroles")
-        dialog.geometry("500x400")
+        dialog.title("Crédits & Paroles")
+        dialog.geometry("500x500")
 
         ctk.CTkLabel(dialog, text="Sélectionnez les données à scraper:",
                     font=("Arial", 14, "bold")).pack(pady=15)
@@ -2623,37 +3206,49 @@ class MainWindow:
         options_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
         # Variables pour les checkboxes
-        scrape_credits_var = ctk.BooleanVar(value=False)
+        scrape_genius_var = ctk.BooleanVar(value=True)  # Genius coché par défaut
+        scrape_discogs_var = ctk.BooleanVar(value=True)  # Discogs coché par défaut
         force_credits_var = ctk.BooleanVar(value=False)
-        scrape_lyrics_var = ctk.BooleanVar(value=False)
+        scrape_lyrics_var = ctk.BooleanVar(value=True)  # Paroles cochées par défaut
         force_lyrics_var = ctk.BooleanVar(value=False)
 
         # Section Crédits
         credits_frame = ctk.CTkFrame(options_frame)
         credits_frame.pack(fill="x", padx=15, pady=10)
 
-        credits_checkbox = ctk.CTkCheckBox(
+        # Titre de section (non cliquable)
+        ctk.CTkLabel(
             credits_frame,
             text="🎵 Scraper les crédits musicaux",
-            variable=scrape_credits_var,
             font=("Arial", 13, "bold")
-        )
-        credits_checkbox.pack(anchor="w", padx=10, pady=5)
+        ).pack(anchor="w", padx=10, pady=5)
 
+        # Checkbox Genius
+        genius_checkbox = ctk.CTkCheckBox(
+            credits_frame,
+            text="   Genius (crédits détaillés)",
+            variable=scrape_genius_var,
+            font=("Arial", 11)
+        )
+        genius_checkbox.pack(anchor="w", padx=30, pady=2)
+
+        # Checkbox Discogs
+        discogs_checkbox = ctk.CTkCheckBox(
+            credits_frame,
+            text="   Discogs (crédits complémentaires)",
+            variable=scrape_discogs_var,
+            font=("Arial", 11)
+        )
+        discogs_checkbox.pack(anchor="w", padx=30, pady=2)
+
+        # Checkbox Mise à jour forcée
         force_credits_checkbox = ctk.CTkCheckBox(
             credits_frame,
             text="   🔄 Mise à jour forcée (re-scraper les crédits existants)",
             variable=force_credits_var,
             font=("Arial", 11)
         )
-        force_credits_checkbox.pack(anchor="w", padx=30, pady=2)
-
-        ctk.CTkLabel(
-            credits_frame,
-            text="Les crédits incluent : producteurs, compositeurs, etc.",
-            font=("Arial", 9),
-            text_color="gray"
-        ).pack(anchor="w", padx=30, pady=(0, 5))
+        force_credits_checkbox.pack(anchor="w", padx=30, pady=5)
 
         # Séparateur
         ctk.CTkFrame(options_frame, height=2, fg_color="gray").pack(fill="x", padx=20, pady=10)
@@ -2690,12 +3285,14 @@ class MainWindow:
         button_frame.pack(fill="x", padx=20, pady=15)
 
         def start_scraping():
-            scrape_credits = scrape_credits_var.get()
+            scrape_genius = scrape_genius_var.get()
+            scrape_discogs = scrape_discogs_var.get()
             force_credits = force_credits_var.get()
             scrape_lyrics = scrape_lyrics_var.get()
             force_lyrics = force_lyrics_var.get()
 
-            if not scrape_credits and not scrape_lyrics:
+            # Au moins une source de crédits ou les paroles doivent être sélectionnées
+            if not scrape_genius and not scrape_discogs and not scrape_lyrics:
                 messagebox.showwarning("Attention", "Sélectionnez au moins une option de scraping")
                 return
 
@@ -2703,7 +3300,8 @@ class MainWindow:
 
             # Lancer le scraping avec les options sélectionnées
             self._start_combined_scraping(
-                scrape_credits=scrape_credits,
+                scrape_genius=scrape_genius,
+                scrape_discogs=scrape_discogs,
                 force_credits=force_credits,
                 scrape_lyrics=scrape_lyrics,
                 force_lyrics=force_lyrics
@@ -2732,9 +3330,9 @@ class MainWindow:
         dialog.transient(self.root)
         dialog.grab_set()
 
-    def _start_combined_scraping(self, scrape_credits=False, force_credits=False,
+    def _start_combined_scraping(self, scrape_genius=False, scrape_discogs=False, force_credits=False,
                                   scrape_lyrics=False, force_lyrics=False):
-        """Lance le scraping combiné des crédits et/ou paroles avec options de mise à jour forcée"""
+        """Lance le scraping combiné des crédits (Genius/Discogs) et/ou paroles avec options de mise à jour forcée"""
 
         # Filtrer les morceaux sélectionnés ET actifs
         selected_tracks_list = []
@@ -2754,8 +3352,13 @@ class MainWindow:
         # Message de confirmation
         disabled_count = len(self.selected_tracks) - len(selected_tracks_list)
         tasks = []
-        if scrape_credits:
-            tasks.append(f"Crédits{'(forcé)' if force_credits else ''}")
+        if scrape_genius or scrape_discogs:
+            sources = []
+            if scrape_genius:
+                sources.append("Genius")
+            if scrape_discogs:
+                sources.append("Discogs")
+            tasks.append(f"Crédits {'/'.join(sources)}{'(forcé)' if force_credits else ''}")
         if scrape_lyrics:
             tasks.append(f"Paroles{'(forcé)' if force_lyrics else ''}")
 
@@ -2763,9 +3366,16 @@ class MainWindow:
         confirm_msg += f"📊 Morceaux: {len(selected_tracks_list)}\n"
         if disabled_count > 0:
             confirm_msg += f"⚠️ {disabled_count} désactivés ignorés\n"
-        confirm_msg += f"\n⏱️ Temps estimé : ~{len(selected_tracks_list) * (3 if scrape_credits else 0 + 2 if scrape_lyrics else 0):.0f}s"
+        time_per_track = 0
+        if scrape_genius:
+            time_per_track += 3
+        if scrape_discogs:
+            time_per_track += 2
+        if scrape_lyrics:
+            time_per_track += 2
+        confirm_msg += f"\n⏱️ Temps estimé : ~{len(selected_tracks_list) * time_per_track:.0f}s"
 
-        result = messagebox.askyesno("Scraping Crédits & Paroles", confirm_msg)
+        result = messagebox.askyesno("Crédits & Paroles", confirm_msg)
 
         if not result:
             return
@@ -2789,36 +3399,76 @@ class MainWindow:
 
         def scrape():
             scraper = None
-            credits_results = None
+            genius_credits_results = None
+            discogs_credits_results = None
             lyrics_results = None
 
             try:
                 logger.info(f"Début du scraping combiné de {len(selected_tracks_list)} morceaux")
-                scraper = GeniusScraper(headless=True)
 
-                total_tasks = (1 if scrape_credits else 0) + (1 if scrape_lyrics else 0)
+                total_tasks = (1 if scrape_genius else 0) + (1 if scrape_discogs else 0) + (1 if scrape_lyrics else 0)
                 current_task = 0
 
-                # Scraping des crédits
-                if scrape_credits:
+                # Scraping Genius crédits
+                if scrape_genius:
                     current_task += 1
-                    logger.info(f"[{current_task}/{total_tasks}] Scraping des crédits...")
+                    logger.info(f"[{current_task}/{total_tasks}] Scraping des crédits Genius...")
+
+                    scraper = GeniusScraperV3(headless=True)
 
                     if force_credits:
-                        # Effacer les crédits existants pour forcer le re-scraping
+                        # Effacer les crédits Genius existants pour forcer le re-scraping
                         for track in selected_tracks_list:
-                            track.music_credits = []
+                            # Garder les crédits Discogs, supprimer uniquement ceux de Genius
+                            track.credits = [c for c in track.credits if c.source != "genius"]
                             track.credits_scraped_at = None
 
-                    credits_results = scraper.scrape_multiple_tracks(
+                    genius_credits_results = scraper.scrape_multiple_tracks(
                         selected_tracks_list,
-                        progress_callback=lambda c, t, n: update_progress(c, t, n, "Crédits")
+                        progress_callback=lambda c, t, n: update_progress(c, t, n, "Genius")
                     )
+
+                # Scraping Discogs crédits
+                if scrape_discogs:
+                    current_task += 1
+                    logger.info(f"[{current_task}/{total_tasks}] Scraping des crédits Discogs...")
+
+                    from src.api.discogs_api import DiscogsClient
+                    import os
+
+                    discogs_token = os.getenv('DISCOGS_TOKEN') or os.getenv('DISCOGS_USER_TOKEN')
+                    discogs_client = DiscogsClient(user_token=discogs_token)
+
+                    if force_credits:
+                        # Effacer les crédits Discogs existants pour forcer le re-scraping
+                        for track in selected_tracks_list:
+                            # Garder les crédits Genius, supprimer uniquement ceux de Discogs
+                            track.credits = [c for c in track.credits if c.source != "discogs"]
+
+                    discogs_success = 0
+                    discogs_failed = 0
+                    for i, track in enumerate(selected_tracks_list, 1):
+                        try:
+                            update_progress(i, len(selected_tracks_list), track.title, "Discogs")
+
+                            if discogs_client.enrich_track_data(track, force_update=force_credits):
+                                discogs_success += 1
+                            else:
+                                discogs_failed += 1
+                        except Exception as e:
+                            logger.error(f"Erreur Discogs pour {track.title}: {e}")
+                            discogs_failed += 1
+
+                    discogs_credits_results = {'success': discogs_success, 'failed': discogs_failed}
 
                 # Scraping des paroles
                 if scrape_lyrics:
                     current_task += 1
                     logger.info(f"[{current_task}/{total_tasks}] Scraping des paroles...")
+
+                    # Le scraper n'existe pas encore si la phase Genius n'a pas été cochée
+                    if scraper is None:
+                        scraper = GeniusScraperV3(headless=True)
 
                     if force_lyrics:
                         # Effacer les paroles existantes pour forcer le re-scraping
@@ -2841,12 +3491,18 @@ class MainWindow:
                 # Afficher le résumé
                 success_msg = "Scraping terminé !\n\n"
 
-                if credits_results:
-                    success_msg += "🎵 Crédits:\n"
-                    success_msg += f"  - Réussis: {credits_results['success']}\n"
-                    success_msg += f"  - Échoués: {credits_results['failed']}\n"
-                    if credits_results.get('errors'):
-                        success_msg += f"  - Erreurs: {len(credits_results['errors'])}\n"
+                if genius_credits_results:
+                    success_msg += "🎵 Crédits Genius:\n"
+                    success_msg += f"  - Réussis: {genius_credits_results['success']}\n"
+                    success_msg += f"  - Échoués: {genius_credits_results['failed']}\n"
+                    if genius_credits_results.get('errors'):
+                        success_msg += f"  - Erreurs: {len(genius_credits_results['errors'])}\n"
+                    success_msg += "\n"
+
+                if discogs_credits_results:
+                    success_msg += "💿 Crédits Discogs:\n"
+                    success_msg += f"  - Réussis: {discogs_credits_results['success']}\n"
+                    success_msg += f"  - Échoués: {discogs_credits_results['failed']}\n"
                     success_msg += "\n"
 
                 if lyrics_results:
@@ -2886,7 +3542,7 @@ class MainWindow:
                 self.is_scraping = False
                 self.root.after(0, lambda: self.scrape_button.configure(
                     state="normal",
-                    text="Scraper Crédits & Paroles"
+                    text="Crédits & Paroles"
                 ))
                 self.root.after(0, self._hide_progress_bar)
                 self.root.after(0, lambda: self.progress_label.configure(text=""))
@@ -3096,6 +3752,8 @@ class MainWindow:
                 self.enrich_button.configure(state="disabled")
             if hasattr(self, 'lyrics_button'):
                 self.lyrics_button.configure(state="disabled")
+            if hasattr(self, 'streams_button'):
+                self.streams_button.configure(state="disabled")
         elif not self.current_artist.tracks:
             # Artiste chargé mais pas de morceaux
             self.get_tracks_button.configure(state="normal")
@@ -3107,6 +3765,8 @@ class MainWindow:
                 self.enrich_button.configure(state="disabled")
             if hasattr(self, 'lyrics_button'):
                 self.lyrics_button.configure(state="disabled")
+            if hasattr(self, 'streams_button'):
+                self.streams_button.configure(state="disabled")
         else:
             # Artiste avec morceaux
             self.get_tracks_button.configure(state="normal")
@@ -3118,6 +3778,135 @@ class MainWindow:
                 self.enrich_button.configure(state="normal")
             if hasattr(self, 'lyrics_button'):
                 self.lyrics_button.configure(state="normal")
+            if hasattr(self, 'streams_button'):
+                self.streams_button.configure(state="normal")
+
+    def _start_streams_update(self):
+        """Ouvre le dialog de récupération des streams Spotify + YouTube Music."""
+        if not self.current_artist:
+            return
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Nb Streams")
+        dialog.geometry("380x300")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ctk.CTkLabel(dialog, text="Sources de streams à récupérer :",
+                     font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(18, 8))
+
+        spotify_var = ctk.BooleanVar(value=True)
+        ytm_var = ctk.BooleanVar(value=True)
+
+        ctk.CTkCheckBox(dialog, text="Spotify (Kworb)", variable=spotify_var).pack(anchor="w", padx=40, pady=4)
+        ctk.CTkCheckBox(dialog, text="YouTube Music", variable=ytm_var).pack(anchor="w", padx=40, pady=4)
+
+        # Canal YTM épinglé (résout les homonymes : @handle, lien ou UC...)
+        ctk.CTkLabel(dialog, text="Canal YTM (optionnel — @handle, lien ou UC...) :",
+                     font=ctk.CTkFont(size=11)).pack(anchor="w", padx=40, pady=(10, 2))
+        ytm_channel_entry = ctk.CTkEntry(
+            dialog, width=290, placeholder_text="@ISHAOfficiel"
+        )
+        ytm_channel_entry.pack(padx=40, anchor="w")
+        try:
+            stored = self.data_manager.get_artist_ytm_channel(self.current_artist.id) \
+                if self.current_artist else None
+            if stored:
+                ytm_channel_entry.insert(0, stored)
+        except Exception:
+            pass
+
+        def launch():
+            fetch_spotify = spotify_var.get()
+            fetch_ytm = ytm_var.get()
+            ytm_channel_raw = ytm_channel_entry.get().strip()
+            dialog.destroy()
+            if fetch_spotify or fetch_ytm:
+                self._run_streams_update(fetch_spotify, fetch_ytm, ytm_channel_raw)
+
+        ctk.CTkButton(dialog, text="Lancer", command=launch, width=120).pack(pady=18)
+
+    def _run_streams_update(self, fetch_spotify: bool, fetch_ytm: bool,
+                            ytm_channel_raw: str = ""):
+        """Lance la récupération des streams dans un thread daemon."""
+        if hasattr(self, 'streams_button'):
+            self.streams_button.configure(state="disabled")
+
+        def run():
+            try:
+                self.root.after(0, self._show_progress_bar)
+                results = {}
+
+                if fetch_spotify:
+                    self.root.after(0, lambda: self.progress_label.configure(
+                        text="Spotify (Kworb) en cours..."))
+                    try:
+                        from src.utils.update_kworb import update_kworb_streams
+                        results['spotify'] = update_kworb_streams(
+                            self.current_artist, self.data_manager)
+                    except Exception as e:
+                        results['spotify'] = {'error': str(e)}
+
+                if fetch_ytm:
+                    self.root.after(0, lambda: self.progress_label.configure(
+                        text="YouTube Music en cours..."))
+                    try:
+                        from src.utils.update_ytmusic import update_ytmusic_streams
+                        from src.api.ytmusic_api import YTMusicAPI
+
+                        # Épingler le canal YTM saisi (@handle, lien ou UC...)
+                        if ytm_channel_raw:
+                            resolved = YTMusicAPI().resolve_channel(ytm_channel_raw)
+                            if resolved:
+                                self.data_manager.set_artist_ytm_channel(
+                                    self.current_artist.id, resolved)
+                            else:
+                                logger.warning(
+                                    f"Canal YTM non résolu: {ytm_channel_raw!r} — "
+                                    "recherche automatique utilisée")
+
+                        results['ytm'] = update_ytmusic_streams(
+                            self.current_artist, self.data_manager)
+                    except Exception as e:
+                        results['ytm'] = {'error': str(e)}
+
+                # Construire le message résumé
+                lines = ["Récupération terminée !\n"]
+                if 'spotify' in results:
+                    r = results['spotify']
+                    if 'error' in r:
+                        lines.append(f"Spotify : ❌ {r['error']}")
+                    else:
+                        lines.append(
+                            f"Spotify : {r.get('matched', 0)} matchés, "
+                            f"{r.get('unmatched', 0)} non matchés, "
+                            f"{r.get('albums_updated', 0)} albums"
+                        )
+                if 'ytm' in results:
+                    r = results['ytm']
+                    if 'error' in r:
+                        lines.append(f"YouTube Music : ❌ {r['error']}")
+                    else:
+                        lines.append(
+                            f"YouTube Music : {r.get('matched', 0)} matchés, "
+                            f"{r.get('unmatched', 0)} non matchés, "
+                            f"{r.get('albums_processed', 0)} albums"
+                        )
+                summary_msg = "\n".join(lines)
+
+                self.root.after(0, lambda: messagebox.showinfo("Nb Streams", summary_msg))
+                self.root.after(0, self._populate_tracks_table)
+            except Exception as e:
+                err_msg = f"Erreur inattendue : {e}"
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Erreur Streams", err_msg))
+            finally:
+                self.root.after(0, self._hide_progress_bar)
+                self.root.after(0, self._update_buttons_state)
+
+        import threading
+        threading.Thread(target=run, daemon=True).start()
 
     def _normalize_text(self, text: str) -> str:
         """Normalise le texte pour le tri (sans accents, minuscules)"""
@@ -3148,6 +3937,8 @@ class MainWindow:
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Sources d'enrichissement")
         dialog.geometry("450x750")  # Augmenté pour GetSongBPM + Deezer
+        dialog.transient(self.root)
+        dialog.grab_set()
 
         ctk.CTkLabel(dialog, text="Sélectionnez les sources à utiliser:",
                     font=("Arial", 14)).pack(pady=10)
@@ -3293,7 +4084,7 @@ class MainWindow:
 
         selected_tracks_list = []
         for i in sorted(self.selected_tracks):
-            if i not in self.disabled_tracks:
+            if not self._is_track_disabled_by_index(i) and i < len(self.current_artist.tracks):
                 selected_tracks_list.append(self.current_artist.tracks[i])
 
         if not selected_tracks_list:

@@ -7,7 +7,7 @@ from datetime import datetime
 from contextlib import contextmanager
 
 from src.config import DATABASE_URL, ARTISTS_DIR, DATA_DIR
-from src.models import Artist, Track, Credit, CreditRole
+from src.models import Artist, Track, Credit
 from src.utils.logger import get_logger
 
 
@@ -46,8 +46,37 @@ class DataManager:
                     genius_id INTEGER,
                     spotify_id TEXT,
                     discogs_id INTEGER,
+                    spotify_monthly_listeners INTEGER,
+                    ytm_monthly_listeners INTEGER,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP
+                )
+            """)
+
+            # Migration conditionnelle : colonnes monthly listeners sur artists
+            cursor.execute("PRAGMA table_info(artists)")
+            artist_cols = {row[1] for row in cursor.fetchall()}
+            for col, typ in [
+                ('spotify_monthly_listeners', 'INTEGER'),
+                ('ytm_monthly_listeners', 'INTEGER'),
+                ('ytm_channel_id', 'TEXT'),  # canal YTM épinglé (homonymes)
+            ]:
+                if col not in artist_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE artists ADD COLUMN {col} {typ}")
+                    except Exception:
+                        pass
+
+            # Table historique des auditeurs mensuels
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS monthly_listeners_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    artist_id INTEGER NOT NULL,
+                    spotify_listeners INTEGER,
+                    ytm_listeners INTEGER,
+                    total_estimated INTEGER,
+                    recorded_at TIMESTAMP,
+                    FOREIGN KEY (artist_id) REFERENCES artists (id)
                 )
             """)
 
@@ -64,7 +93,12 @@ class DataManager:
                 'mode': 'TEXT',  # Mode (ex: "major", "minor")
                 'time_signature': 'TEXT',  # Signature rythmique (ex: "4/4")
                 'anecdotes': 'TEXT',  # Anecdotes depuis Genius
-                'spotify_page_title': 'TEXT'  # Titre de la page Spotify pour vérification
+                'spotify_page_title': 'TEXT',  # Titre de la page Spotify pour vérification
+                'spotify_streams': 'INTEGER',  # Streams totaux Spotify (kworb.net)
+                'spotify_daily_streams': 'INTEGER',  # Streams journaliers Spotify (kworb.net)
+                'spotify_streams_updated': 'TIMESTAMP',  # Date de dernière mise à jour kworb
+                'ytm_streams': 'INTEGER',  # Streams YouTube Music
+                'ytm_streams_updated': 'TIMESTAMP',  # Date de dernière mise à jour YTMusic
             }
 
             for col_name, col_type in new_columns.items():
@@ -125,7 +159,32 @@ class DataManager:
                     FOREIGN KEY (track_id) REFERENCES tracks (id)
                 )
             """)
-            
+
+            # Table des albums (données Kworb Spotify)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS albums (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    artist_id INTEGER NOT NULL,
+                    spotify_streams INTEGER,
+                    spotify_daily_streams INTEGER,
+                    spotify_streams_updated TIMESTAMP,
+                    FOREIGN KEY (artist_id) REFERENCES artists (id),
+                    UNIQUE(title, artist_id)
+                )
+            """)
+
+            # Migration conditionnelle : colonnes YTMusic sur la table albums
+            cursor.execute("PRAGMA table_info(albums)")
+            album_cols = {row[1] for row in cursor.fetchall()}
+            for col, typ in [('ytm_streams', 'INTEGER'), ('ytm_streams_updated', 'TIMESTAMP')]:
+                if col not in album_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE albums ADD COLUMN {col} {typ}")
+                        logger.info(f"✅ Colonne '{col}' ajoutée à la table albums")
+                    except Exception as e:
+                        logger.debug(f"Colonne albums '{col}' déjà existante ou erreur: {e}")
+
             conn.commit()
             logger.info("Base de données initialisée")
     
@@ -170,14 +229,21 @@ class DataManager:
                 """, (artist.name, artist.genius_id, artist.spotify_id,
                       artist.discogs_id, datetime.now(), artist.id))
             else:
-                # Insertion
+                # Insertion (OR IGNORE si l'artiste existe déjà par contrainte UNIQUE)
                 cursor.execute("""
-                    INSERT INTO artists (name, genius_id, spotify_id, 
-                                       discogs_id, created_at, updated_at)
+                    INSERT OR IGNORE INTO artists (name, genius_id, spotify_id,
+                                                   discogs_id, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (artist.name, artist.genius_id, artist.spotify_id,
                       artist.discogs_id, datetime.now(), datetime.now()))
-                artist.id = cursor.lastrowid
+                if cursor.lastrowid:
+                    artist.id = cursor.lastrowid
+                else:
+                    # L'artiste existait déjà — récupérer son ID
+                    cursor.execute("SELECT id FROM artists WHERE name = ?", (artist.name,))
+                    row = cursor.fetchone()
+                    if row:
+                        artist.id = row[0]
             
             conn.commit()
             logger.info(f"Artiste sauvegardé: {artist.name} (ID: {artist.id})")
@@ -217,18 +283,38 @@ class DataManager:
                 certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
                 album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
 
-                # UPDATE avec key, mode, musical_key, time_signature, anecdotes et certifications
+                # UPDATE NON-DESTRUCTIF : COALESCE préserve la valeur existante
+                # quand le track entrant n'a pas la donnée (None). Évite qu'un
+                # re-fetch de discographie (API Genius, champs vides) écrase
+                # les données enrichies (lyrics, BPM, key, spotify_id...).
                 cursor.execute("""
                     UPDATE tracks
-                    SET album = ?, track_number = ?, release_date = ?,
-                        genius_id = ?, spotify_id = ?, discogs_id = ?,
-                        bpm = ?, duration = ?, genre = ?,
-                        key = ?, mode = ?, musical_key = ?, time_signature = ?,
-                        genius_url = ?, spotify_url = ?,
-                        is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
-                        lyrics = ?, lyrics_scraped_at = ?, has_lyrics = ?, anecdotes = ?,
-                        certifications = ?, album_certifications = ?,
-                        updated_at = ?, last_scraped = ?
+                    SET album = COALESCE(?, album),
+                        track_number = COALESCE(?, track_number),
+                        release_date = COALESCE(?, release_date),
+                        genius_id = COALESCE(?, genius_id),
+                        spotify_id = COALESCE(?, spotify_id),
+                        discogs_id = COALESCE(?, discogs_id),
+                        bpm = COALESCE(?, bpm),
+                        duration = COALESCE(?, duration),
+                        genre = COALESCE(?, genre),
+                        key = COALESCE(?, key),
+                        mode = COALESCE(?, mode),
+                        musical_key = COALESCE(?, musical_key),
+                        time_signature = COALESCE(?, time_signature),
+                        genius_url = COALESCE(?, genius_url),
+                        spotify_url = COALESCE(?, spotify_url),
+                        is_featuring = ?,
+                        primary_artist_name = COALESCE(?, primary_artist_name),
+                        featured_artists = COALESCE(?, featured_artists),
+                        lyrics = COALESCE(?, lyrics),
+                        lyrics_scraped_at = COALESCE(?, lyrics_scraped_at),
+                        has_lyrics = CASE WHEN ? IS NOT NULL THEN 1 ELSE has_lyrics END,
+                        anecdotes = COALESCE(?, anecdotes),
+                        certifications = CASE WHEN ? = '[]' THEN certifications ELSE ? END,
+                        album_certifications = CASE WHEN ? = '[]' THEN album_certifications ELSE ? END,
+                        updated_at = ?,
+                        last_scraped = COALESCE(?, last_scraped)
                     WHERE id = ?
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
@@ -241,9 +327,10 @@ class DataManager:
                     getattr(track, 'featured_artists', None),
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
-                    bool(getattr(track, 'lyrics', None)),
+                    getattr(track, 'lyrics', None),
                     getattr(track, 'anecdotes', None),
-                    certifications_json, album_certifications_json,
+                    certifications_json, certifications_json,
+                    album_certifications_json, album_certifications_json,
                     datetime.now(), track.last_scraped, track.id))
             else:
                 # Sérialiser les certifications en JSON
@@ -577,7 +664,8 @@ class DataManager:
                                     track.certification_date = highest.get('certification_date')
                             else:
                                 track.certifications = []
-                        except:
+                        except (ValueError, TypeError, json.JSONDecodeError):
+                            logger.debug(f"JSON certifications invalide pour track {track_id}: {certifications_json!r:.100}")
                             track.certifications = []
 
                         try:
@@ -585,7 +673,8 @@ class DataManager:
                                 track.album_certifications = json.loads(album_certifications_json)
                             else:
                                 track.album_certifications = []
-                        except:
+                        except (ValueError, TypeError, json.JSONDecodeError):
+                            logger.debug(f"JSON album_certifications invalide pour track {track_id}: {album_certifications_json!r:.100}")
                             track.album_certifications = []
                         
                         # Chargement crédits
@@ -840,6 +929,49 @@ class DataManager:
             logger.error(f"Erreur lors de la récupération des détails: {e}")
             return {}
 
+    def get_artist_ytm_channel(self, artist_id: int):
+        """Canal YTMusic épinglé pour cet artiste (UC...), ou None."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT ytm_channel_id FROM artists WHERE id = ?", (artist_id,)
+                ).fetchone()
+                return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.error(f"Erreur get_artist_ytm_channel: {e}")
+            return None
+
+    def set_artist_ytm_channel(self, artist_id: int, channel_id: str) -> bool:
+        """Épingle le canal YTMusic d'un artiste (résout les homonymes)."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE artists SET ytm_channel_id = ? WHERE id = ?",
+                    (channel_id, artist_id)
+                )
+                conn.commit()
+                logger.info(f"📌 Canal YTM épinglé pour artist_id={artist_id}: {channel_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Erreur set_artist_ytm_channel: {e}")
+            return False
+
+    def delete_track(self, track_id: int) -> bool:
+        """Supprime définitivement un morceau et ses données associées"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM credits WHERE track_id = ?", (track_id,))
+                cursor.execute("DELETE FROM scraping_errors WHERE track_id = ?", (track_id,))
+                cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+                deleted = cursor.rowcount
+                conn.commit()
+                logger.info(f"🗑️ Track {track_id} supprimé ({deleted} ligne(s))")
+                return deleted > 0
+        except Exception as e:
+            logger.error(f"Erreur suppression track {track_id}: {e}")
+            return False
+
     def force_update_track_credits(self, track: Track) -> int:
         """Force la mise à jour complète des crédits d'un morceau - VERSION PRÉSERVANT FEATURES"""
         try:
@@ -976,4 +1108,161 @@ class DataManager:
                 'tracks_with_complete_credits': 0,
                 'recent_errors': 0
             }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Kworb — streams Spotify
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def update_track_spotify_streams(self, track_id: int, streams: int, daily_streams: int) -> bool:
+        """Met à jour les streams Kworb d'un morceau."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE tracks
+                    SET spotify_streams = ?, spotify_daily_streams = ?, spotify_streams_updated = ?
+                    WHERE id = ?
+                """, (streams, daily_streams, datetime.now(), track_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur update_track_spotify_streams (track_id={track_id}): {e}")
+            return False
+
+    def upsert_album(self, artist_id: int, title: str, streams: int, daily_streams: int) -> bool:
+        """Insère ou met à jour un album avec ses données Kworb."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO albums (title, artist_id, spotify_streams, spotify_daily_streams, spotify_streams_updated)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(title, artist_id) DO UPDATE SET
+                        spotify_streams = excluded.spotify_streams,
+                        spotify_daily_streams = excluded.spotify_daily_streams,
+                        spotify_streams_updated = excluded.spotify_streams_updated
+                """, (title, artist_id, streams, daily_streams, datetime.now()))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
+            return False
+
+    def get_albums_for_artist(self, artist_id: int) -> List[Dict[str, Any]]:
+        """Retourne les albums d'un artiste triés par streams décroissants."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT title, spotify_streams, spotify_daily_streams,
+                           spotify_streams_updated, ytm_streams
+                    FROM albums WHERE artist_id = ?
+                    ORDER BY spotify_streams DESC
+                """, (artist_id,))
+                rows = cursor.fetchall()
+                return [
+                    {
+                        "title": row[0],
+                        "spotify_streams": row[1],
+                        "spotify_daily_streams": row[2],
+                        "spotify_streams_updated": row[3],
+                        "ytm_streams": row[4],
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            logger.error(f"Erreur get_albums_for_artist (artist_id={artist_id}): {e}")
+            return []
+
+    def update_track_ytm_streams(self, track_id: int, streams: int) -> bool:
+        """Met à jour les streams YouTube Music d'un morceau."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE tracks
+                    SET ytm_streams = ?, ytm_streams_updated = ?
+                    WHERE id = ?
+                """, (streams, datetime.now(), track_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")
+            return False
+
+    def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:
+        """Met à jour les streams YouTube Music d'un album."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE albums SET ytm_streams = ?, ytm_streams_updated = ?
+                    WHERE title = ? AND artist_id = ?
+                """, (streams, datetime.now(), title, artist_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur update_album_ytm_streams (artist_id={artist_id}, title={title!r}): {e}")
+            return False
+
+    def update_artist_monthly_listeners(
+        self,
+        artist_id: int,
+        spotify_listeners: Optional[int] = None,
+        ytm_listeners: Optional[int] = None,
+    ) -> bool:
+        """Met à jour les auditeurs mensuels d'un artiste et enregistre l'historique."""
+        try:
+            from src.utils.streams_calculator import calculate_total_monthly_listeners
+            total = calculate_total_monthly_listeners(spotify_listeners, ytm_listeners)
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE artists
+                    SET spotify_monthly_listeners = COALESCE(?, spotify_monthly_listeners),
+                        ytm_monthly_listeners     = COALESCE(?, ytm_monthly_listeners),
+                        updated_at = ?
+                    WHERE id = ?
+                """, (spotify_listeners, ytm_listeners, datetime.now(), artist_id))
+                conn.execute("""
+                    INSERT INTO monthly_listeners_history
+                        (artist_id, spotify_listeners, ytm_listeners, total_estimated, recorded_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (artist_id, spotify_listeners, ytm_listeners, total, datetime.now()))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Erreur update_artist_monthly_listeners (id={artist_id}): {e}")
+            return False
+
+    def get_monthly_listeners_history(self, artist_id: int) -> List[Dict[str, Any]]:
+        """Retourne l'historique des auditeurs mensuels d'un artiste."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT spotify_listeners, ytm_listeners, total_estimated, recorded_at
+                    FROM monthly_listeners_history
+                    WHERE artist_id = ?
+                    ORDER BY recorded_at DESC
+                """, (artist_id,))
+                return [
+                    {
+                        "spotify_listeners": r[0],
+                        "ytm_listeners": r[1],
+                        "total_estimated": r[2],
+                        "recorded_at": r[3],
+                    }
+                    for r in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"Erreur get_monthly_listeners_history (id={artist_id}): {e}")
+            return []
+
+    def update_artist_spotify_id(self, artist_id: int, spotify_id: str) -> bool:
+        """Met à jour le spotify_id d'un artiste."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE artists SET spotify_id = ?, updated_at = ? WHERE id = ?
+                """, (spotify_id, datetime.now(), artist_id))
+                conn.commit()
+                logger.info(f"spotify_id artiste #{artist_id} mis à jour: {spotify_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Erreur update_artist_spotify_id (artist_id={artist_id}): {e}")
+            return False
 

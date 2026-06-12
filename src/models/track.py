@@ -1,11 +1,14 @@
 """Modèles pour représenter les morceaux et crédits"""
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime
-
 from enum import Enum
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+import logging
+
+if TYPE_CHECKING:
+    from src.models.artist import Artist
+
+logger = logging.getLogger(__name__)
 
 
 class CreditRole(Enum):
@@ -229,6 +232,15 @@ class Track:
     # NOUVEAU: Support de plusieurs certifications
     certifications: List[Dict[str, Any]] = field(default_factory=list)  # Toutes les certifications du morceau
     album_certifications: List[Dict[str, Any]] = field(default_factory=list)  # Certifications de l'album associé
+
+    # Streams Spotify (kworb.net)
+    spotify_streams: Optional[int] = None
+    spotify_daily_streams: Optional[int] = None
+    spotify_streams_updated: Optional[datetime] = None
+
+    # Streams YouTube Music
+    ytm_streams: Optional[int] = None
+    ytm_streams_updated: Optional[datetime] = None
     
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""
@@ -836,6 +848,10 @@ class Track:
 
     def _start_lyrics_scraping(self):
         """Lance le scraping des paroles pour les morceaux sélectionnés"""
+        import threading
+        from tkinter import messagebox
+        from src.scrapers.genius_scraper_v2 import GeniusScraper
+
         if not self.current_artist or not self.current_artist.tracks:
             return
         
@@ -922,52 +938,52 @@ class Track:
         
         threading.Thread(target=scrape_lyrics, daemon=True).start()
 
-@property
-def primary_spotify_id(self) -> Optional[str]:
-    """Retourne l'ID Spotify principal"""
-    if self.spotify_ids and len(self.spotify_ids) > 0:
-        return self.spotify_ids[0]
-    return self.spotify_id
+    @property
+    def primary_spotify_id(self) -> Optional[str]:
+        """Retourne l'ID Spotify principal"""
+        if self.spotify_ids and len(self.spotify_ids) > 0:
+            return self.spotify_ids[0]
+        return self.spotify_id
 
-def add_spotify_id(self, new_id: str) -> bool:
-    """
-    Ajoute un Spotify ID à la liste (sans doublons)
-    
-    Returns:
-        bool: True si l'ID a été ajouté, False s'il existait déjà
-    """
-    if not new_id:
-        return False
-    
-    # Initialiser la liste si nécessaire
-    if not hasattr(self, 'spotify_ids') or self.spotify_ids is None:
-        self.spotify_ids = []
-    
-    # Éviter les doublons
-    if new_id in self.spotify_ids:
-        return False
-    
-    # Ajouter le nouvel ID
-    self.spotify_ids.append(new_id)
-    
-    # Mettre à jour spotify_id (compatibilité)
-    if not self.spotify_id:
-        self.spotify_id = new_id
-    
-    return True
+    def add_spotify_id(self, new_id: str) -> bool:
+        """
+        Ajoute un Spotify ID à la liste (sans doublons)
 
-def get_all_spotify_ids(self) -> List[str]:
-    """Retourne tous les Spotify IDs du track"""
-    ids = []
-    
-    # Ajouter spotify_id legacy
-    if self.spotify_id and self.spotify_id not in ids:
-        ids.append(self.spotify_id)
-    
-    # Ajouter tous les IDs de la liste
-    if hasattr(self, 'spotify_ids') and self.spotify_ids:
-        for id in self.spotify_ids:
-            if id not in ids:
-                ids.append(id)
-    
-    return ids
+        Returns:
+            bool: True si l'ID a été ajouté, False s'il existait déjà
+        """
+        if not new_id:
+            return False
+
+        # Initialiser la liste si nécessaire
+        if not hasattr(self, 'spotify_ids') or self.spotify_ids is None:
+            self.spotify_ids = []
+
+        # Éviter les doublons
+        if new_id in self.spotify_ids:
+            return False
+
+        # Ajouter le nouvel ID
+        self.spotify_ids.append(new_id)
+
+        # Mettre à jour spotify_id (compatibilité)
+        if not self.spotify_id:
+            self.spotify_id = new_id
+
+        return True
+
+    def get_all_spotify_ids(self) -> List[str]:
+        """Retourne tous les Spotify IDs du track"""
+        ids = []
+
+        # Ajouter spotify_id legacy
+        if self.spotify_id and self.spotify_id not in ids:
+            ids.append(self.spotify_id)
+
+        # Ajouter tous les IDs de la liste
+        if hasattr(self, 'spotify_ids') and self.spotify_ids:
+            for id in self.spotify_ids:
+                if id not in ids:
+                    ids.append(id)
+
+        return ids

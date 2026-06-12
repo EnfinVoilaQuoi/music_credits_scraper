@@ -3,7 +3,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from src.models import Artist, Track
-from src.models.certification import Certification
 from src.api.snep_certifications import get_snep_manager
 from src.utils.logger import get_logger
 

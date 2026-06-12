@@ -1,6 +1,6 @@
 """Modèles pour représenter les certifications musicales"""
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
 

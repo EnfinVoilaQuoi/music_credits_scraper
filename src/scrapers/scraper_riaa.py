@@ -6,20 +6,17 @@ Scraper RIAA - Version corrigée pour les sessions Chrome et les dates
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from bs4 import BeautifulSoup
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-from urllib.parse import quote_plus
+import re
+from datetime import datetime
+from typing import Dict, List
 import pandas as pd
 import logging
 import time
-import csv
-import argparse
 import sys
 import tempfile
 import os
@@ -443,10 +440,69 @@ class RIAAScraper:
                     
         except Exception as e:
             logger.error(f"Erreur extraction données: {e}")
-            
+
+        # Fallback LLM si les cellules n'ont pas été reconnues (DOM RIAA modifié)
+        if not data["title"] or not data["award_level"]:
+            data = self._complete_row_with_llm(row_element, data)
+
         return data
-        
-    def scrape_by_date_range(self, start_date: str, end_date: str, 
+
+    def _complete_row_with_llm(self, row_element, data: Dict) -> Dict:
+        """
+        Fallback LLM : complète les champs manquants depuis le texte brut de la ligne.
+        Valide strictement le niveau de certification (pas d'invention d'units).
+        Import paresseux : fonctionne aussi quand le script est lancé en standalone.
+        """
+        try:
+            from src.utils.llm_extractor import get_shared_extractor, build_certifications_prompt
+        except ImportError:
+            return data
+
+        llm = get_shared_extractor()
+        if not llm:
+            return data
+
+        try:
+            row_text = row_element.text.strip()
+        except Exception:
+            return data
+        if not row_text:
+            return data
+
+        logger.info("🤖 RIAA: ligne non reconnue, fallback LLM")
+        result = llm.extract_json(
+            build_certifications_prompt(row_text[:2000], source="RIAA"), max_tokens=256
+        )
+        if not result or not isinstance(result.get("certifications"), list):
+            return data
+        entries = [e for e in result["certifications"] if isinstance(e, dict)]
+        if not entries:
+            return data
+        entry = entries[0]
+
+        if not data["artist"]:
+            artist = str(entry.get("artist", "")).strip()
+            if artist and artist.lower() in row_text.lower():
+                data["artist"] = artist
+        if not data["title"]:
+            title = str(entry.get("title", "")).strip()
+            if title and title.lower() in row_text.lower():
+                data["title"] = title
+        if not data["certification_date"]:
+            date = entry.get("date")
+            if isinstance(date, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+                data["certification_date"] = date
+        if not data["award_level"]:
+            level = str(entry.get("certification", "")).strip().lower()
+            for known in ("diamond", "platinum", "gold"):
+                if known in level:
+                    data["award_level"] = known.capitalize()
+                    data["units"] = BASE_UNITS[known]
+                    break
+
+        return data
+
+    def scrape_by_date_range(self, start_date: str, end_date: str,
                             date_option: str = "release", get_details: bool = False) -> List[Dict]:
         """
         Scrape les certifications par plage de dates

@@ -2,15 +2,16 @@
 Module d'enrichissement des données tracks
 VERSION CORRIGÉE: Empêche la duplication des Spotify IDs + Intégration Spotify_ID scraper + GetSongBPM API
 """
-from typing import List, Dict, Optional, Any
-from datetime import datetime
+from typing import List, Dict, Optional
 from src.models import Track
-from src.scrapers.songbpm_scraper import SongBPMScraper
-from src.scrapers.spotify_id_scraper import SpotifyIDScraper
+from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
+from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.api.getsongbpm_api import GetSongBPMFetcher
 from src.api.deezer_api import DeezerAPI
+from src.api.discogs_api import DiscogsClient
 from src.utils.logger import get_logger
+import os
 
 logger = get_logger(__name__)
 
@@ -83,9 +84,24 @@ class DataEnricher:
         except Exception as e:
             logger.error(f"❌ Erreur init Deezer API: {e}")
 
-        # Discogs n'est pas implémenté
-        self.apis_available['discogs'] = False
-        
+        # Initialiser Discogs API
+        self.discogs_client = None
+        try:
+            # Chercher le token Discogs dans les variables d'environnement
+            discogs_token = os.getenv('DISCOGS_TOKEN') or os.getenv('DISCOGS_USER_TOKEN')
+            if discogs_token:
+                self.discogs_client = DiscogsClient(user_token=discogs_token)
+                self.apis_available['discogs'] = True
+                logger.info("✅ Discogs API initialisée avec token (60 req/min)")
+            else:
+                # Initialiser quand même sans token (limité à 25 req/min)
+                self.discogs_client = DiscogsClient()
+                self.apis_available['discogs'] = True
+                logger.info("✅ Discogs API initialisée sans token (25 req/min)")
+        except Exception as e:
+            logger.warning(f"⚠️ Discogs API non disponible: {e}")
+            self.apis_available['discogs'] = False
+
         logger.info(f"Sources disponibles: {[k for k, v in self.apis_available.items() if v]}")
     
     def close(self):
@@ -348,11 +364,11 @@ class DataEnricher:
                  clear_on_failure: bool = True) -> Dict[str, bool]:
         """
         Enrichit un morceau avec les sources spécifiées
-        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM + Deezer + GetSongBPM
-        ORDRE: 1. Spotify ID, 2. ReccoBeats, 3. GetSongBPM, 4. SongBPM, 5. Deezer
+        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM + Deezer + GetSongBPM + Discogs
+        ORDRE: 1. Spotify ID, 2. ReccoBeats, 3. GetSongBPM, 4. SongBPM, 5. Deezer, 6. Discogs
         """
         if sources is None:
-            sources = ['spotify_id', 'reccobeats', 'getsongbpm', 'songbpm', 'deezer']
+            sources = ['spotify_id', 'reccobeats', 'getsongbpm', 'songbpm', 'deezer', 'discogs']
         
         results = {}
         
@@ -566,7 +582,24 @@ class DataEnricher:
                 results['deezer'] = False
 
         # ========================================
-        # 5. NETTOYAGE SI ÉCHEC COMPLET
+        # 5. DISCOGS API (CRÉDITS COMPLÉMENTAIRES)
+        # ========================================
+        if 'discogs' in sources and self.apis_available.get('discogs'):
+            logger.info(f"💿 Appel de Discogs API pour '{track.title}'")
+            try:
+                discogs_success = self.discogs_client.enrich_track_data(track, force_update=force_update)
+                results['discogs'] = discogs_success
+
+                if discogs_success:
+                    logger.info(f"✅ Discogs SUCCÈS pour '{track.title}' - {len(track.credits)} crédits au total")
+                else:
+                    logger.warning(f"❌ Discogs ÉCHEC pour '{track.title}'")
+            except Exception as e:
+                logger.error(f"❌ Erreur Discogs pour {track.title}: {e}")
+                results['discogs'] = False
+
+        # ========================================
+        # 6. NETTOYAGE SI ÉCHEC COMPLET
         # ========================================
         if clear_on_failure and force_update:
             # Vérifier si toutes les sources ont échoué
@@ -646,6 +679,8 @@ class DataEnricher:
         logger.info(f"   • Duration: {getattr(track, 'duration', 'N/A')}")
         logger.info(f"   • Release Date: {getattr(track, 'release_date', 'N/A')}")
         logger.info(f"   • Deezer ID: {getattr(track, 'deezer_id', 'N/A')}")
+        logger.info(f"   • Discogs ID: {getattr(track, 'discogs_id', 'N/A')}")
+        logger.info(f"   • Crédits totaux: {len(track.credits) if hasattr(track, 'credits') else 0}")
 
         return results
     

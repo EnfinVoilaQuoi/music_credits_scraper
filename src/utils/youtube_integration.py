@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 from src.youtube.youtube_searcher import YouTubeSearcher
 from src.youtube.track_classifier import TrackClassifier, TrackType
-from src.config import YOUTUBE_AUTO_SELECT_ALBUM_TRACKS, YOUTUBE_CONFIDENCE_THRESHOLD
+from src.config import YOUTUBE_AUTO_SELECT_ALBUM_TRACKS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

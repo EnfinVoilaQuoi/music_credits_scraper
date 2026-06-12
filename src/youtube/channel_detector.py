@@ -1,7 +1,6 @@
 """Détection des chaînes YouTube officielles - Version simplifiée"""
 import requests
-from typing import Dict, Optional
-from bs4 import BeautifulSoup
+from typing import Dict
 
 from src.utils.logger import get_logger
 

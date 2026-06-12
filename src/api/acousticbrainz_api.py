@@ -1,7 +1,7 @@
 """Interface avec l'API AcousticBrainz"""
 import time
 import requests
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import musicbrainzngs
 
 from src.config import DELAY_BETWEEN_REQUESTS

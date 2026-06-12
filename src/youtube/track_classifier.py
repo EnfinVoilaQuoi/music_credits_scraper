@@ -1,6 +1,6 @@
 """Classification des types de morceaux pour stratégie YouTube"""
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict
 
 from src.utils.logger import get_logger
 

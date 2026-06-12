@@ -1,7 +1,6 @@
 """Système de logging centralisé"""
 import logging
 import coloredlogs
-from pathlib import Path
 from datetime import datetime
 from src.config import LOGS_DIR, LOG_LEVEL, DEBUG
 

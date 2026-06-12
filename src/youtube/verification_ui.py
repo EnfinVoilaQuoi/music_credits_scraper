@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+from typing import List, Dict, Optional
 from PIL import Image, ImageTk
 import requests
 from io import BytesIO

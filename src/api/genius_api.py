@@ -1,5 +1,7 @@
 """Interface avec l'API Genius - Version corrigée pour les erreurs de clés"""
+import re
 import time
+import requests
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from lyricsgenius import Genius
@@ -7,7 +9,6 @@ from lyricsgenius import Genius
 from src.config import (
     GENIUS_API_KEY,
     DELAY_BETWEEN_REQUESTS,
-    MAX_RETRIES,
     GENIUS_TIMEOUT,
     GENIUS_RETRIES,
     GENIUS_SLEEP_TIME
@@ -41,7 +42,14 @@ class GeniusAPI:
         logger.info(f"API Genius initialisée (timeout: {GENIUS_TIMEOUT}s, retries: {GENIUS_RETRIES}, sleep: {GENIUS_SLEEP_TIME}s)")
     
     def search_artist(self, artist_name: str) -> Optional[Artist]:
-        """Recherche un artiste sur Genius - VERSION SÉCURISÉE"""
+        """Wrapper simple : retourne le premier candidat exact, ou le premier candidat disponible."""
+        candidates = self.search_artist_candidates(artist_name, max_candidates=1)
+        if not candidates:
+            return None
+        return candidates[0]
+
+    def _search_artist_legacy(self, artist_name: str) -> Optional[Artist]:
+        """Remplacé par search_artist_candidates. Conservé temporairement, à supprimer."""
         try:
             logger.info(f"🔍 Recherche API Genius pour: '{artist_name}'")
             
@@ -61,7 +69,9 @@ class GeniusAPI:
                 # Continuer avec la recherche API
             
             # ✅ CORRECTION 2: Recherche API avec gestion d'erreurs robuste
-            search_response = self.genius.search(artist_name)
+            # Note: genius.search() utilise l'API publique (genius.com/api/search) qui retourne 403
+            # On utilise search_songs() qui passe par l'API authentifiée (api.genius.com/search)
+            search_response = self.genius.search_songs(artist_name)
             logger.debug(f"📦 Réponse API reçue: {type(search_response)}")
             
             # ✅ CORRECTION 3: Vérifications strictes de la structure
@@ -133,28 +143,47 @@ class GeniusAPI:
                     logger.debug(f"Erreur lors du traitement du hit {i}: {hit_error}")
                     continue
             
-            # ✅ CORRECTION 5: Correspondance partielle en dernier recours
-            logger.debug("Recherche de correspondance partielle...")
+            # ✅ CORRECTION 5: Correspondance partielle en dernier recours (stricte)
+            logger.debug("Recherche de correspondance partielle stricte...")
+            seen_artist_ids = set()
             for i, hit in enumerate(hits):
                 try:
-                    if (isinstance(hit, dict) and 
-                        'result' in hit and 
+                    if (isinstance(hit, dict) and
+                        'result' in hit and
                         isinstance(hit['result'], dict) and
                         'primary_artist' in hit['result'] and
                         isinstance(hit['result']['primary_artist'], dict)):
-                        
+
                         primary_artist = hit['result']['primary_artist']
                         if 'name' in primary_artist and 'id' in primary_artist:
                             artist_found_name = primary_artist['name']
                             artist_found_id = primary_artist['id']
-                            
+
+                            # Dédupliquer les artistes déjà vérifiés
+                            if artist_found_id in seen_artist_ids:
+                                continue
+                            seen_artist_ids.add(artist_found_id)
+
                             artist_name_lower = artist_name.lower()
                             artist_found_lower = artist_found_name.lower()
-                            
-                            # Correspondance partielle
-                            if (artist_name_lower in artist_found_lower or 
-                                artist_found_lower in artist_name_lower):
-                                
+
+                            # Word boundary : "isha" ne matche PAS "ishaan" (\b entre mot/non-mot)
+                            import re as _re
+                            name_word_match = bool(_re.search(
+                                r'\b' + _re.escape(artist_name_lower) + r'\b',
+                                artist_found_lower
+                            ))
+                            length_ratio = len(artist_found_lower) / max(len(artist_name_lower), 1)
+                            # Ratio plus permissif si le nom cherché est le premier mot du résultat
+                            after_idx = len(artist_name_lower)
+                            starts_as_first_word = (
+                                artist_found_lower[:after_idx] == artist_name_lower and
+                                (after_idx >= len(artist_found_lower) or
+                                 not artist_found_lower[after_idx].isalnum())
+                            )
+                            max_ratio = 3.0 if starts_as_first_word else 1.4
+
+                            if name_word_match and length_ratio <= max_ratio:
                                 artist = Artist(
                                     name=artist_found_name,
                                     genius_id=artist_found_id
@@ -162,14 +191,56 @@ class GeniusAPI:
                                 log_api("Genius", f"artist/{artist.genius_id}", True)
                                 logger.info(f"✅ Artiste trouvé (correspondance partielle): {artist.name} (ID: {artist.genius_id})")
                                 return artist
-                
+
                 except Exception as partial_error:
                     logger.debug(f"Erreur lors de la correspondance partielle {i}: {partial_error}")
                     continue
             
+            # Fallback: endpoint authentifié api.genius.com (différent du public genius.com qui retourne 403)
+            logger.debug("Fallback: recherche via api.genius.com/search?type=artist...")
+            try:
+                resp = requests.get(
+                    "https://api.genius.com/search",
+                    params={"q": artist_name, "type": "artist"},
+                    headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+                    timeout=10
+                )
+                resp.raise_for_status()
+                sections = resp.json().get("response", {}).get("sections", [])
+                for section in sections:
+                    for hit in section.get("hits", []):
+                        if hit.get("type") != "artist":
+                            continue
+                        result = hit.get("result", {})
+                        found_name = result.get("name", "")
+                        found_id = result.get("id")
+                        if not found_name or not found_id:
+                            continue
+                        artist_name_lower = artist_name.lower()
+                        found_lower = found_name.lower()
+                        length_ratio = len(found_lower) / max(len(artist_name_lower), 1)
+                        import re as _re
+                        name_word_match = bool(_re.search(
+                            r'\b' + _re.escape(artist_name_lower) + r'\b', found_lower
+                        ))
+                        after_idx = len(artist_name_lower)
+                        starts_as_first_word = (
+                            found_lower[:after_idx] == artist_name_lower and
+                            (after_idx >= len(found_lower) or not found_lower[after_idx].isalnum())
+                        )
+                        max_ratio = 3.0 if starts_as_first_word else 1.4
+                        if found_lower == artist_name_lower or \
+                                (name_word_match and length_ratio <= max_ratio):
+                            artist = Artist(name=found_name, genius_id=found_id)
+                            log_api("Genius", f"artist/{artist.genius_id}", True)
+                            logger.info(f"✅ Artiste trouvé (search type=artist): {artist.name} (ID: {artist.genius_id})")
+                            return artist
+            except Exception as sa_error:
+                logger.debug(f"Fallback type=artist échoué: {sa_error}")
+
             logger.warning(f"Aucun artiste correspondant trouvé pour '{artist_name}'")
             return None
-                
+
         except Exception as e:
             logger.error(f"Erreur lors de la recherche d'artiste: {e}")
             logger.error(f"Type d'erreur: {type(e).__name__}")
@@ -178,7 +249,57 @@ class GeniusAPI:
             logger.debug(f"Traceback complet: {traceback.format_exc()}")
             log_api("Genius", f"search/artist/{artist_name}", False)
             return None
-    
+
+    def search_artist_candidates(self, artist_name: str, max_candidates: int = 6) -> List[Artist]:
+        """
+        Retourne les artistes candidats pour une recherche par nom.
+
+        L'API Genius ne dispose pas d'endpoint de recherche d'artistes par nom.
+        GET /search retourne uniquement des chansons (hits de type "song").
+        On en extrait les primary_artist pour construire la liste de candidats.
+        """
+        candidates: List[Artist] = []
+        seen_ids: set = set()
+        artist_name_lower = artist_name.lower()
+
+        try:
+            resp = requests.get(
+                "https://api.genius.com/search",
+                params={"q": artist_name},
+                headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+                timeout=10
+            )
+            resp.raise_for_status()
+            data = resp.json().get("response", {})
+            hits = data.get("hits", [])
+            logger.debug(f"Réponse API: {len(hits)} hits, clés response: {list(data.keys())}")
+
+            for hit in hits:
+                result = hit.get("result", {})
+                primary = result.get("primary_artist", {})
+                artist_id = primary.get("id")
+                found_name = primary.get("name", "")
+                if artist_id and found_name and artist_id not in seen_ids:
+                    seen_ids.add(artist_id)
+                    candidates.append(Artist(name=found_name, genius_id=artist_id))
+        except Exception as e:
+            logger.warning(f"Recherche Genius échouée: {e}")
+
+        # Trier : correspondances exactes en premier, puis par proximité
+        def _sort_key(a: Artist) -> int:
+            n = a.name.lower()
+            if n == artist_name_lower:
+                return 0
+            if n.startswith(artist_name_lower):
+                return 1
+            if artist_name_lower in n:
+                return 2
+            return 3
+
+        candidates.sort(key=_sort_key)
+        logger.info(f"🔍 {len(candidates)} candidats trouvés pour '{artist_name}'")
+        return candidates[:max_candidates]
+
     def get_artist_songs(self, artist: Artist, max_songs: int = 200, include_features: bool = False) -> List[Track]:
         """
         Récupère la liste des morceaux d'un artiste
@@ -197,39 +318,11 @@ class GeniusAPI:
                 logger.error(f"Pas d'ID Genius pour {artist.name}")
                 return tracks
             
-            # NOUVEAU : Utiliser la méthode search_artist de lyricsgenius avec include_features
-            try:
-                # Rechercher l'artiste avec lyricsgenius pour avoir accès à include_features
-                genius_artist = self.genius.search_artist(
-                    artist.name,
-                    max_songs=max_songs,
-                    sort='popularity',
-                    get_full_info=True,  # Pour avoir plus de métadonnées
-                    include_features=include_features  # ✨ NOUVEAU : Inclure les features
-                )
-                
-                if genius_artist and genius_artist.songs:
-                    logger.info(f"Trouvé {len(genius_artist.songs)} morceaux via search_artist")
-                    
-                    for song in genius_artist.songs:
-                        # Extraire les données du song object de lyricsgenius
-                        track = self._create_track_from_genius_song(song, artist)
-                        if track:
-                            tracks.append(track)
-                            
-                            # Marquer si c'est un featuring
-                            if hasattr(song, 'primary_artist') and song.primary_artist.id != artist.genius_id:
-                                track.is_featuring = True
-                                logger.debug(f"Featuring détecté: {track.title} (artiste principal: {song.primary_artist.name})")
-                            else:
-                                track.is_featuring = False
-                
-                log_api("Genius", f"artist/{artist.genius_id}/songs_with_features", True)
-                
-            except Exception as e:
-                logger.warning(f"Erreur avec search_artist: {e}, fallback sur artist_songs")
-                # Fallback sur la méthode manuelle si search_artist échoue
-                tracks = self._get_artist_songs_manual(artist, max_songs)
+            # API officielle /artists/{id}/songs (l'ancien search_artist de
+            # lyricsgenius passait par genius.com/api, bloqué en 403 depuis 2025)
+            tracks = self._get_artist_songs_manual(artist, max_songs,
+                                                   include_features=include_features)
+            log_api("Genius", f"artist/{artist.genius_id}/songs", True)
                 
             logger.info(f"{len(tracks)} morceaux récupérés pour {artist.name}")
             return tracks
@@ -376,33 +469,74 @@ class GeniusAPI:
         
         return metadata
     
-    def _get_artist_songs_manual(self, artist: Artist, max_songs: int) -> List[Track]:
-        """Méthode manuelle de récupération (fallback)"""
+    @staticmethod
+    def _primary_is_collab_with(primary_name: str, artist_name: str) -> bool:
+        """
+        True si la page artiste principale est une collaboration incluant
+        l'artiste avec son nom EXACT (ex: "Limsa d'Aulnay & Isha" → True pour
+        Isha, mais "Vasjan & ISHA!" → False car "ISHA!" ≠ "Isha").
+        """
+        if not primary_name or not artist_name:
+            return False
+        # Découper sur les séparateurs de collaboration
+        parts = re.split(r'\s*(?:&|,|\+|\bet\b|\bx\b|\bfeat\.?\b|\bft\.?\b)\s*',
+                         primary_name, flags=re.IGNORECASE)
+        if len(parts) < 2:
+            return False
+        target = artist_name.strip().lower()
+        return any(p.strip().lower() == target for p in parts)
+
+    def _get_artist_songs_manual(self, artist: Artist, max_songs: int,
+                                 include_features: bool = False) -> List[Track]:
+        """Méthode manuelle de récupération (fallback) — gère aussi les featurings"""
         tracks = []
-        
+
         try:
             page = 1
             per_page = 50
-            
+
             while len(tracks) < max_songs:
                 response = self.genius.artist_songs(
-                    artist.genius_id, 
-                    sort='popularity', 
+                    artist.genius_id,
+                    sort='popularity',
                     per_page=per_page,
                     page=page
                 )
-                
+
                 if not response or 'songs' not in response:
                     break
-                
+
                 songs = response['songs']
                 if not songs:
                     break
-                
+
                 for song in songs:
-                    if song['primary_artist']['id'] != artist.genius_id:
+                    primary = song.get('primary_artist') or {}
+                    is_feat = primary.get('id') != artist.genius_id
+                    if is_feat and not include_features:
                         continue
-                    
+
+                    if is_feat:
+                        # L'API renvoie aussi les morceaux où l'artiste a un rôle
+                        # secondaire (writer, producer...) ou est mal tagué.
+                        # Garder seulement : 1) les VRAIS featurings (artiste dans
+                        # featured_artists), 2) les pages duo/collab dont le nom
+                        # contient l'artiste en entier (ex: "Limsa d'Aulnay & Isha"
+                        # pour un album commun — mais PAS "Vasjan & ISHA!").
+                        featured = song.get('featured_artists') or []
+                        featured_ids = {
+                            f.get('id') for f in featured if isinstance(f, dict)
+                        }
+                        is_collab_page = self._primary_is_collab_with(
+                            primary.get('name', ''), artist.name
+                        )
+                        if artist.genius_id not in featured_ids and not is_collab_page:
+                            logger.debug(
+                                f"Ignoré (rôle secondaire/tag douteux): "
+                                f"{song.get('title')} — {primary.get('name')}"
+                            )
+                            continue
+
                     track = Track(
                         title=song.get('title', ''),
                         artist=artist,
@@ -410,9 +544,13 @@ class GeniusAPI:
                         genius_url=song.get('url'),
                         album=self._extract_album_from_song(song),
                         release_date=self._extract_release_date_from_song(song),
-                        is_featuring=False  # Méthode manuelle = pas de features
+                        is_featuring=is_feat
                     )
-                    
+                    if is_feat and primary.get('name'):
+                        track.primary_artist_name = primary['name']
+                        logger.debug(f"Featuring (fallback): {track.title} "
+                                     f"(artiste principal: {primary['name']})")
+
                     tracks.append(track)
                     
                     if len(tracks) >= max_songs:

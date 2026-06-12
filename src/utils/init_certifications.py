@@ -1,6 +1,5 @@
 """Script d'initialisation SNEP"""
 import sys
-import os
 from pathlib import Path
 
 # Ajouter le dossier parent au path
@@ -11,7 +10,6 @@ sys.path.insert(0, str(parent_dir))
 DATA_PATH = parent_dir / 'data'
 
 import sqlite3
-from datetime import datetime
 import unicodedata
 
 

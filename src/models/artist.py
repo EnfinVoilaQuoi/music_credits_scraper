@@ -1,7 +1,10 @@
 """Modèle pour représenter un artiste"""
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from src.models.track import Track
 
 
 @dataclass
@@ -12,6 +15,8 @@ class Artist:
     genius_id: Optional[int] = None
     spotify_id: Optional[str] = None
     discogs_id: Optional[int] = None
+    spotify_monthly_listeners: Optional[int] = None
+    ytm_monthly_listeners: Optional[int] = None
     tracks: List['Track'] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -51,6 +56,7 @@ class ArtistDetail:
     def to_dict(self):
         return {
             "artist_id": self.artist_id,
+            
             "name": self.name,
             "spotify_href": self.spotify_href
         }

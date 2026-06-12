@@ -13,7 +13,6 @@ import sys
 import io
 from typing import Dict, List, Optional
 from dataclasses import dataclass
-from urllib.parse import quote
 import csv
 
 # Fix encodage Windows pour les emojis
@@ -133,6 +132,10 @@ class GetSongBPMFetcher:
         # Préparer la requête selon documentation
         # Pour type="both", format: lookup=song:TITRE artist:ARTISTE
         # Ne PAS quoter les deux-points et l'espace entre song: et artist:
+        # Apostrophes droites : l'API ne matche pas l'apostrophe typographique '
+        for apo in ("’", "‘", "`", "´"):
+            title = title.replace(apo, "'")
+            artist = artist.replace(apo, "'")
         lookup = f"song:{title} artist:{artist}"
         
         params = {
@@ -227,11 +230,14 @@ class GetSongBPMFetcher:
         Returns:
             Objet SongData avec toutes les métadonnées
         """
-        # Vérifier le cache
+        # Vérifier le cache (les échecs cachés ne sont PAS définitifs → on retente)
         cache_key = self._get_cache_key(artist, title)
         if cache_key in self.cache:
-            logger.debug(f"Cache: {artist} - {title}")
-            return SongData(**self.cache[cache_key])
+            cached = self.cache[cache_key]
+            if not cached.get('error'):
+                logger.debug(f"Cache: {artist} - {title}")
+                return SongData(**cached)
+            logger.debug(f"Cache (échec précédent, on retente): {artist} - {title}")
 
         # Rechercher le morceau
         track_data = self._search_track(artist, title)

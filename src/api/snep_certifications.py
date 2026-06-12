@@ -1,13 +1,10 @@
 """Gestionnaire pour les certifications SNEP"""
+import io
 import pandas as pd
 import sqlite3
 from pathlib import Path
-from datetime import datetime
-import requests
-import logging
 from typing import List, Optional, Dict, Any
 import unicodedata
-from io import StringIO
 
 from src.models.certification import Certification, CertificationLevel, CertificationCategory
 from src.utils.logger import get_logger
@@ -30,7 +27,7 @@ class SNEPCertificationManager:
         if db_path is None:
             db_path = self.data_dir / 'certifications.db'
         self.db_path = db_path
-        self.conn = sqlite3.connect(str(self.db_path))
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         
         # CSV local - nom exact du fichier téléchargé depuis SNEP
         self.csv_path = self.data_dir / 'certif-.csv'
@@ -96,6 +93,15 @@ class SNEPCertificationManager:
         )
         ''')
         
+        # Migration : ajouter les colonnes manquantes sur les DB existantes
+        # (CREATE TABLE IF NOT EXISTS ne modifie pas une table déjà créée)
+        # Note: SQLite n'accepte pas CURRENT_TIMESTAMP comme défaut dans ALTER TABLE
+        for col in ["created_at", "updated_at"]:
+            try:
+                cursor.execute(f"ALTER TABLE certifications ADD COLUMN {col} TIMESTAMP DEFAULT NULL")
+            except Exception:
+                pass  # Colonne déjà présente, ignoré
+
         self.conn.commit()
         logger.info("📊 Tables de base de données créées/vérifiées")
     
@@ -149,6 +155,37 @@ class SNEPCertificationManager:
 
         return text.strip()
     
+    @staticmethod
+    def _repair_extra_separators(text: str, sep: str = ';') -> tuple:
+        """
+        Répare les lignes ayant plus de colonnes que l'en-tête : les champs
+        excédentaires sont fusionnés dans la 3e colonne (Éditeur/Distributeur),
+        seule colonne susceptible de contenir le séparateur (noms de labels).
+        Retourne (texte_réparé, nombre_de_lignes_réparées).
+        """
+        lines = text.splitlines()
+        if not lines:
+            return text, 0
+
+        expected = lines[0].count(sep) + 1
+        repaired = 0
+        out = [lines[0]]
+
+        for line in lines[1:]:
+            fields = line.split(sep)
+            # Ne pas toucher aux lignes vides, conformes, ou contenant des quotes
+            if len(fields) > expected and '"' not in line and line.strip():
+                extra = len(fields) - expected
+                # Fusionner la colonne Éditeur avec les champs excédentaires,
+                # en QUOTANT le champ pour que le ';' interne ne re-splitte pas
+                label = sep.join(fields[2:3 + extra])
+                merged = fields[:2] + [f'"{label}"'] + fields[3 + extra:]
+                line = sep.join(merged)
+                repaired += 1
+            out.append(line)
+
+        return "\n".join(out), repaired
+
     def load_csv(self, filepath: Optional[Path] = None) -> pd.DataFrame:
         """Charge le fichier CSV des certifications SNEP"""
         if filepath is None:
@@ -159,29 +196,49 @@ class SNEPCertificationManager:
             return pd.DataFrame()
 
         try:
-            # Essayer différents encodages
+            # Essayer différents encodages — sans parse_dates pour éviter les erreurs pandas 2+
             encodings = ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252']
-            df = None
+            raw_text = None
 
             for encoding in encodings:
                 try:
-                    df = pd.read_csv(
-                        filepath,
-                        sep=';',  # SNEP utilise le point-virgule
-                        encoding=encoding,
-                        parse_dates=['Date de sortie', 'Date de constat'],
-                        dayfirst=True,  # Format DD/MM/YYYY
-                        date_format='%d/%m/%Y',
-                        na_values=['', 'N/A', 'null', 'None']
-                    )
+                    raw_text = filepath.read_text(encoding=encoding)
                     logger.info(f"CSV chargé avec encoding: {encoding}")
                     break
-                except (UnicodeDecodeError, Exception):
+                except UnicodeDecodeError:
                     continue
 
-            if df is None:
+            if raw_text is None:
                 logger.error("Impossible de charger le CSV avec les encodages disponibles")
                 return pd.DataFrame()
+
+            # Neutraliser octets nuls et lignes vides (fichiers corrompus/partiels)
+            raw_text = raw_text.replace('\x00', '')
+
+            # Réparer les lignes contenant un ';' parasite dans un champ
+            # (ex: label "REC; 118 / WARNER MUSIC FRANCE" → 8 colonnes au lieu de 7)
+            raw_text, repaired = self._repair_extra_separators(raw_text)
+            if repaired:
+                logger.warning(f"🩹 {repaired} ligne(s) CSV réparée(s) (séparateur en trop dans un champ)")
+
+            df = pd.read_csv(
+                io.StringIO(raw_text),
+                sep=';',
+                na_values=['', 'N/A', 'null', 'None'],
+                dtype=str,
+                on_bad_lines='skip',
+            )
+
+            # Nettoyer les tabulations/espaces parasites dans les valeurs
+            # (ex: "AYA NAKAMURA\t")
+            for col in df.columns:
+                if df[col].dtype == object:
+                    df[col] = df[col].str.strip()
+
+            # Parser les dates manuellement après chargement (compatible pandas 3.x)
+            for date_col in ['Date de sortie', 'Date de constat']:
+                if date_col in df.columns:
+                    df[date_col] = pd.to_datetime(df[date_col], format='%d/%m/%Y', errors='coerce')
 
             # Nettoyer les noms de colonnes (supprimer BOM, espaces, etc.)
             df.columns = [col.strip().replace('\ufeff', '') for col in df.columns]

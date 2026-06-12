@@ -12,7 +12,7 @@ import json
 import logging
 import subprocess
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 class CertificationManager:
     """Gestionnaire unifié pour toutes les certifications musicales"""
@@ -28,13 +28,13 @@ class CertificationManager:
         # Chemins des données par organisme
         self.paths = {
             'SNEP': {
-                'csv': self.data_dir / 'snep' / 'certif_snep.csv',
+                'csv': self.data_dir / 'snep' / 'certif-.csv',  # Nom du fichier téléchargé depuis SNEP
                 'script': self.base_dir / 'src' / 'utils' / 'update_snep.py',
                 'country': 'FR',
                 'name': 'Syndicat National de l\'Édition Phonographique'
             },
             'RIAA': {
-                'csv': self.data_dir / 'riaa' / 'riaa.csv',
+                'csv': self.data_dir / 'riaa' / 'certif_riaa.csv',  # Nom correct du fichier RIAA
                 'script': self.base_dir / 'src' / 'utils' / 'update_riaa.py',
                 'country': 'US',
                 'name': 'Recording Industry Association of America'

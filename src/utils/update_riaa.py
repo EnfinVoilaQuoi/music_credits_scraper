@@ -22,7 +22,8 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Import du scraper principal
-from search_artist_riaa import RIAAScraper
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from src.scrapers.scraper_riaa import RIAAScraper
 
 class RIAADatabaseUpdater:
     """Gestionnaire de mise à jour de la base de données RIAA"""

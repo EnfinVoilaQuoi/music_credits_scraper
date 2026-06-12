@@ -1,6 +1,5 @@
 """Gestionnaire de mémoire pour les morceaux désactivés"""
 import json
-import os
 from typing import Set, Dict
 from pathlib import Path
 from datetime import datetime

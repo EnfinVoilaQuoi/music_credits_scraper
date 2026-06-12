@@ -1,11 +1,9 @@
 """Recherche YouTube avec fallbacks et cache"""
-import requests
 import sqlite3
 import pickle
 import difflib
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-from pathlib import Path
 
 from src.config import DATA_DIR, YOUTUBE_CACHE_TTL_HOURS
 from src.utils.logger import get_logger

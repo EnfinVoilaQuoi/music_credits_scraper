@@ -1,6 +1,5 @@
 """Point d'entrée principal de l'application Music Credits Scraper"""
 import sys
-import os
 from pathlib import Path
 
 # Ajouter le dossier parent au path pour les imports
@@ -20,16 +19,13 @@ def check_configuration():
     
     # Vérifier les clés API
     if not GENIUS_API_KEY:
-        errors.append("GENIUS_API_KEY non configurée dans le fichier .env")
-    
-    # Vérifier que Chrome est installé (pour Selenium)
-    # Note: webdriver-manager s'occupe de télécharger le driver automatiquement
-    
+        errors.append("GENIUS_API_KEY non configurée (variable d'environnement Windows ou fichier .env)")
+
     if errors:
         print("Erreurs de configuration:")
         for error in errors:
             print(f"  - {error}")
-        print("\nVeuillez configurer le fichier .env avec vos clés API")
+        print("\nVeuillez configurer les variables d'environnement Windows ou créer un fichier .env")
         return False
     
     return True

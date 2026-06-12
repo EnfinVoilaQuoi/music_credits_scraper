@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import time
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 from pathlib import Path
 import re
@@ -23,6 +23,16 @@ import argparse
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+
+def safe_print(message: str):
+    """Print sécurisé qui ne plante pas si stdout est fermé"""
+    try:
+        print(message)
+    except (ValueError, AttributeError, OSError):
+        # stdout fermé ou non disponible - ignorer silencieusement
+        pass
+
 
 class UltratopUpdater:
     """Scraper pour mettre à jour la base de données des certifications Ultratop"""
@@ -86,8 +96,12 @@ class UltratopUpdater:
             self.logger_print("Aucune base de données existante trouvée. Création d'une nouvelle.")
             
     def logger_print(self, message):
-        """Print avec gestion d'erreur si logger pas encore initialisé"""
-        print(message)
+        """Print avec gestion d'erreur si logger pas encore initialisé ou stdout fermé"""
+        try:
+            print(message)
+        except (ValueError, AttributeError, OSError):
+            # stdout fermé ou non disponible - utiliser uniquement le logger
+            pass
         if hasattr(self, 'logger'):
             self.logger.info(message)
             
@@ -200,9 +214,10 @@ class UltratopUpdater:
     def extract_certifications(self, soup, year, category):
         """Extrait les certifications d'une page"""
         certifications = []
-        
+        error_count = 0
+
         containers = soup.find_all('div', style=lambda x: x and 'display:table-row' in x)
-        
+
         for container in containers:
             try:
                 title_div = container.find('div', class_='chart_title')
@@ -248,8 +263,12 @@ class UltratopUpdater:
                             
             except Exception as e:
                 self.logger.error(f"Erreur lors de l'extraction: {e}")
+                error_count += 1
                 continue
-                
+
+        self.logger.info(
+            f"Extraction {year}/{category}: {len(certifications)} certifications, {error_count} erreurs"
+        )
         return certifications
 
     def update_current_year(self):
@@ -317,16 +336,24 @@ class UltratopUpdater:
         updated_db = updated_db.sort_values(['certification_date', 'artist', 'title'], 
                                           ascending=[False, True, True])
         
-        # Backup de l'ancienne base
+        # Backup de l'ancienne base (avant toute écriture)
         if self.database_path.exists():
             backup_path = self.output_dir / 'backups'
             backup_path.mkdir(exist_ok=True)
             backup_file = backup_path / f'backup_{datetime.now():%Y%m%d_%H%M%S}.csv'
             self.existing_db.to_csv(backup_file, index=False, encoding='utf-8-sig')
             self.logger.info(f"Backup créé: {backup_file}")
-            
-        # Sauvegarde de la nouvelle base
-        updated_db.to_csv(self.database_path, index=False, encoding='utf-8-sig')
+
+        # Écriture atomique : temp → rename pour éviter la corruption si le write échoue
+        import os
+        tmp_path = self.database_path.with_suffix('.tmp')
+        try:
+            updated_db.to_csv(tmp_path, index=False, encoding='utf-8-sig')
+            os.replace(tmp_path, self.database_path)
+        except Exception:
+            if tmp_path.exists():
+                tmp_path.unlink()
+            raise
         self.logger.info(f"Base de données mise à jour: {self.database_path}")
         self.logger.info(f"Ajouté {len(new_certifications)} nouvelles certifications")
         
@@ -427,7 +454,7 @@ class UltratopUpdater:
                     
                     if soup:
                         # Extraire les certifications
-                        certifications = self.extract_certifications_from_soup(soup, year, category)
+                        certifications = self.extract_certifications(soup, year, category)
                         
                         if certifications:
                             self.logger.info(f"✅ Récupéré {len(certifications)} certifications pour {year}/{category}")
@@ -496,11 +523,15 @@ class UltratopUpdater:
         schedule.every().month.at(f"{hour:02d}:00").do(self.run_scheduled_update)
         
         self.logger.info(f"Mise à jour mensuelle programmée pour le {day_of_month} de chaque mois à {hour}h")
-        
-        # Boucle d'exécution
-        while True:
-            schedule.run_pending()
-            time.sleep(3600)  # Vérification toutes les heures
+        self._running = True
+
+        # Boucle d'exécution — arrêtée via self._running = False ou KeyboardInterrupt
+        try:
+            while self._running:
+                schedule.run_pending()
+                time.sleep(3600)  # Vérification toutes les heures
+        except KeyboardInterrupt:
+            self.logger.info("Mise à jour mensuelle arrêtée")
 
 
 def main():
@@ -533,12 +564,12 @@ def main():
     
     if args.mode == 'manual':
         # Mode interactif
-        print("\n=== MISE À JOUR ULTRATOP - MODE MANUEL ===")
-        print("1. Mise à jour de l'année en cours uniquement")
-        print("2. Mise à jour des 2 dernières années")
-        print("3. Mise à jour personnalisée (choisir le nombre d'années)")
-        print("4. Programmer les mises à jour mensuelles")
-        print("5. Quitter")
+        safe_print("\n=== MISE À JOUR ULTRATOP - MODE MANUEL ===")
+        safe_print("1. Mise à jour de l'année en cours uniquement")
+        safe_print("2. Mise à jour des 2 dernières années")
+        safe_print("3. Mise à jour personnalisée (choisir le nombre d'années)")
+        safe_print("4. Programmer les mises à jour mensuelles")
+        safe_print("5. Quitter")
         
         while True:
             choice = input("\nVotre choix (1-5): ").strip()
@@ -556,39 +587,39 @@ def main():
                     years = int(years)
                     updater.run_manual_update(years_back=years)
                 except ValueError:
-                    print("Nombre invalide")
-                    
+                    safe_print("Nombre invalide")
+
             elif choice == '4':
-                print("\nConfiguration des mises à jour mensuelles:")
+                safe_print("\nConfiguration des mises à jour mensuelles:")
                 day = input("Jour du mois (1-28) [défaut: 1]: ").strip() or "1"
                 hour = input("Heure (0-23) [défaut: 3]: ").strip() or "3"
-                
+
                 try:
                     day = int(day)
                     hour = int(hour)
-                    print(f"\nLancement des mises à jour mensuelles (jour {day} à {hour}h)")
-                    print("Appuyez sur Ctrl+C pour arrêter")
+                    safe_print(f"\nLancement des mises à jour mensuelles (jour {day} à {hour}h)")
+                    safe_print("Appuyez sur Ctrl+C pour arrêter")
                     updater.schedule_monthly_updates(day, hour)
                 except ValueError:
-                    print("Valeurs invalides")
+                    safe_print("Valeurs invalides")
                 except KeyboardInterrupt:
-                    print("\nArrêt des mises à jour programmées")
-                    
+                    safe_print("\nArrêt des mises à jour programmées")
+
             elif choice == '5':
-                print("Au revoir!")
+                safe_print("Au revoir!")
                 break
-                
+
             else:
-                print("Choix invalide")
+                safe_print("Choix invalide")
                 
     elif args.mode == 'scheduled':
         # Mode programmé (pour cron ou service système)
-        print("Lancement des mises à jour programmées mensuelles")
-        print("Appuyez sur Ctrl+C pour arrêter")
+        safe_print("Lancement des mises à jour programmées mensuelles")
+        safe_print("Appuyez sur Ctrl+C pour arrêter")
         try:
             updater.schedule_monthly_updates()
         except KeyboardInterrupt:
-            print("\nArrêt des mises à jour programmées")
+            safe_print("\nArrêt des mises à jour programmées")
             
     elif args.mode == 'once':
         # Mode une seule fois (pour cron ou scripts)

@@ -346,15 +346,15 @@ class SongBPMScraper:
     def _normalize_title_for_matching(self, title: str) -> str:
         """
         Normalise un titre pour le matching en enlevant les featurings
-        
+
         Args:
             title: Titre à normaliser
-            
+
         Returns:
             Titre normalisé sans featuring
         """
         import re
-        
+
         # Enlever les variations de featuring
         patterns_to_remove = [
             r'\s*\(feat\.?\s+[^)]+\)',  # (feat. Artist)
@@ -364,12 +364,31 @@ class SongBPMScraper:
             r'\s*\[feat\.?\s+[^\]]+\]', # [feat. Artist]
             r'\s*\[ft\.?\s+[^\]]+\]',   # [ft. Artist]
         ]
-        
+
         normalized = title
         for pattern in patterns_to_remove:
             normalized = re.sub(pattern, '', normalized, flags=re.IGNORECASE)
-        
+
         return normalized.strip()
+
+    def _remove_parentheses_and_brackets(self, title: str) -> str:
+        """
+        Retire tous les contenus entre parenthèses et crochets d'un titre
+        Utile pour les recherches quand le titre contient (intro), [acoustic], etc.
+
+        Args:
+            title: Titre original
+
+        Returns:
+            Titre sans parenthèses ni crochets
+        """
+        import re
+
+        # Enlever tout ce qui est entre parenthèses ou crochets
+        cleaned = re.sub(r'\s*\([^)]*\)', '', title)  # (intro), (skit), etc.
+        cleaned = re.sub(r'\s*\[[^\]]*\]', '', cleaned)  # [acoustic], [remix], etc.
+
+        return cleaned.strip()
 
     def _match_track(self, result_title: str, result_artist: str, 
                  search_title: str, search_artist: str,
@@ -439,52 +458,64 @@ class SongBPMScraper:
         Extrait les détails complets depuis la page de détail d'un morceau
         """
         details = {}
-        
+
         try:
             logger.info(f"📄 Navigation vers page de détail: {detail_url}")
-            
+
             # Définir un timeout court pour le driver
             self.driver.set_page_load_timeout(timeout)
+            logger.debug(f"⏱️ Timeout de chargement défini à {timeout}s")
+
+            # Charger la page
+            logger.info(f"🌐 Chargement de la page de détails...")
             self.driver.get(detail_url)
-            
-            # Attendre un peu
-            time.sleep(2)
+
+            # Attendre que le DOM soit prêt et arrêter le chargement
+            logger.info(f"⏳ Attente du DOM et arrêt du chargement...")
+            self._wait_for_dom_ready_and_stop(max_wait=10)
+            logger.info(f"✅ Page de détails chargée")
             
             # Récupérer le contenu principal
+            logger.info(f"🔍 Extraction du contenu de la page...")
             content_selectors = [
                 "div.lg\\:prose-xl",
                 "div[class*='prose']",
                 "main",
                 "article"
             ]
-            
+
             full_text = None
             for selector in content_selectors:
                 try:
+                    logger.debug(f"Tentative avec sélecteur: {selector}")
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if elements and elements[0].is_displayed():
                         full_text = elements[0].text
-                        logger.debug(f"✅ Contenu trouvé avec sélecteur: {selector}")
+                        logger.info(f"✅ Contenu trouvé avec sélecteur: {selector} ({len(full_text)} caractères)")
                         break
                 except Exception as e:
                     logger.debug(f"Sélecteur {selector} échoué: {e}")
                     continue
-            
+
             if not full_text:
+                logger.warning(f"⚠️ Aucun sélecteur spécifique n'a fonctionné, utilisation du body")
                 try:
                     full_text = self.driver.find_element(By.TAG_NAME, "body").text
-                    logger.debug("Utilisation du body complet pour extraction")
+                    logger.info(f"✅ Body extrait ({len(full_text)} caractères)")
                 except:
                     logger.error("❌ Impossible de récupérer le texte de la page")
                     return details
             
             import re
-            
+
+            logger.info(f"🧹 Nettoyage du texte...")
             # Nettoyer le texte
             clean_text = re.sub(r'\s+', ' ', full_text)
             clean_text = clean_text.replace('\xa0', ' ')
-            
+            logger.debug(f"Texte nettoyé: {len(clean_text)} caractères")
+
             # ⭐ AMÉLIORATION 1 : Extraction du MODE avec plusieurs patterns
+            logger.info(f"🎵 Extraction du mode musical...")
             mode = None
             
             # Pattern 1 : Avec la key (ex: "with a C♯/D♭ key and a major mode")
@@ -537,9 +568,12 @@ class SongBPMScraper:
                 logger.info(f"🎵 Time signature trouvée: {details['time_signature']}")
             
             # Logs détaillés
-            logger.info(f"✅ Détails extraits: {len(details)} attributs")
-            logger.info(f"📊 Détails: {details}")
-            
+            logger.info(f"✅ Extraction des détails terminée: {len(details)} attribut(s)")
+            if details:
+                logger.info(f"📊 Détails extraits: {', '.join(f'{k}={v}' for k, v in details.items())}")
+            else:
+                logger.warning(f"⚠️ Aucun détail extrait de la page")
+
             return details
             
         except TimeoutError:
@@ -563,47 +597,51 @@ class SongBPMScraper:
                 logger.debug(traceback.format_exc())
             return details
 
-    def search_track(self, track_title: str, artist_name: str, 
-                spotify_id: Optional[str] = None,
-                max_results_to_check: int = 5,
-                fetch_details: bool = True) -> Optional[Dict[str, Any]]:
+    def _perform_search(self, track_title: str, artist_name: str,
+                       spotify_id: Optional[str] = None,
+                       max_results_to_check: int = 5,
+                       fetch_details: bool = True,
+                       reload_homepage: bool = True) -> Optional[Dict[str, Any]]:
         """
-        Recherche un morceau sur SongBPM et récupère ses informations
-        """
-        # S'assurer que le driver est initialisé
-        self._ensure_driver()
-        
-        if not self.driver:
-            logger.error("❌ SongBPM: Driver non initialisé")
-            return None
+        Effectue une recherche sur SongBPM (logique interne)
 
+        Args:
+            track_title: Titre du morceau à rechercher
+            artist_name: Nom de l'artiste
+            spotify_id: ID Spotify optionnel pour validation
+            max_results_to_check: Nombre max de résultats à vérifier
+            fetch_details: Si True, récupère les détails (mode, etc.)
+            reload_homepage: Si True, charge la page d'accueil (défaut). Si False, réutilise la page actuelle
+
+        Returns:
+            Dictionnaire avec les données du morceau ou None
+        """
         try:
-            if spotify_id:
-                logger.info(f"🔍 SongBPM: Recherche '{track_title}' par {artist_name} (Spotify ID: {spotify_id})")
-            else:
-                logger.info(f"🔍 SongBPM: Recherche '{track_title}' par {artist_name}")
-            
+
             # ⭐ IMPORTANT : Définir un timeout strict pour la navigation
             self.driver.set_page_load_timeout(30)  # 30 secondes max pour charger une page
-            
-            # 1. Aller sur la page d'accueil
-            try:
-                logger.info(f"🌐 Chargement de la page d'accueil SongBPM...")
-                self.driver.get(self.base_url)
 
-                # Attendre que le DOM soit prêt et arrêter le chargement
-                self._wait_for_dom_ready_and_stop(max_wait=10)
-                logger.info(f"✅ Page d'accueil chargée")
-            except TimeoutException:
-                logger.error(f"⏰ TIMEOUT lors du chargement de la page d'accueil SongBPM")
-                return None
-            
-            # 2. Gérer le popup de cookies
-            try:
-                self._handle_cookies()
-            except Exception as e:
-                logger.warning(f"⚠️ Erreur gestion cookies: {e}")
-                # On continue même si les cookies posent problème
+            # 1. Aller sur la page d'accueil (seulement si demandé)
+            if reload_homepage:
+                try:
+                    logger.info(f"🌐 Chargement de la page d'accueil SongBPM...")
+                    self.driver.get(self.base_url)
+
+                    # Attendre que le DOM soit prêt et arrêter le chargement
+                    self._wait_for_dom_ready_and_stop(max_wait=10)
+                    logger.info(f"✅ Page d'accueil chargée")
+                except TimeoutException:
+                    logger.error(f"⏰ TIMEOUT lors du chargement de la page d'accueil SongBPM")
+                    return None
+
+                # 2. Gérer le popup de cookies
+                try:
+                    self._handle_cookies()
+                except Exception as e:
+                    logger.warning(f"⚠️ Erreur gestion cookies: {e}")
+                    # On continue même si les cookies posent problème
+            else:
+                logger.debug(f"♻️ Réutilisation de la page actuelle (optimisation)")
             
             # 3. Recherche
             try:
@@ -667,11 +705,14 @@ class SongBPMScraper:
                 return None
             
             # 5. Extraire les résultats
+            logger.info(f"📊 Extraction des résultats de recherche...")
             results = self._get_search_results()
-            
+
             if not results:
                 logger.warning(f"❌ SongBPM: Aucun résultat extrait pour '{track_title}'")
                 return None
+
+            logger.info(f"✅ {len(results)} résultat(s) extrait(s)")
             
             # 6. Vérifier les résultats (jusqu'à max_results_to_check)
             for i, result in enumerate(results[:max_results_to_check], 1):
@@ -708,13 +749,11 @@ class SongBPMScraper:
             # Aucune correspondance trouvée
             logger.warning(f"❌ SongBPM: Aucune correspondance exacte trouvée parmi "
                          f"{min(len(results), max_results_to_check)} résultat(s)")
-            log_api("SongBPM", f"search/{track_title}", False)
             return None
 
         except TimeoutException:
             logger.error("❌ SongBPM: Timeout lors de la recherche")
             self._reset_driver_on_error()
-            log_api("SongBPM", f"search/{track_title}", False)
             return None
         except Exception as e:
             # Détecter les timeouts HTTP (ReadTimeoutError) et les erreurs de connexion
@@ -733,8 +772,76 @@ class SongBPMScraper:
             else:
                 logger.error(f"❌ SongBPM: Erreur lors de la recherche: {e}")
                 self._reset_driver_on_error()
-            log_api("SongBPM", f"search/{track_title}", False)
             return None
+
+    def search_track(self, track_title: str, artist_name: str,
+                spotify_id: Optional[str] = None,
+                max_results_to_check: int = 5,
+                fetch_details: bool = True) -> Optional[Dict[str, Any]]:
+        """
+        Recherche un morceau sur SongBPM et récupère ses informations
+        Avec fallback automatique si le titre contient des parenthèses/crochets
+
+        Args:
+            track_title: Titre du morceau
+            artist_name: Nom de l'artiste
+            spotify_id: ID Spotify optionnel pour validation
+            max_results_to_check: Nombre max de résultats à vérifier
+            fetch_details: Si True, récupère les détails (mode, etc.)
+
+        Returns:
+            Dictionnaire avec les données du morceau ou None
+        """
+        # S'assurer que le driver est initialisé
+        self._ensure_driver()
+
+        if not self.driver:
+            logger.error("❌ SongBPM: Driver non initialisé")
+            return None
+
+        if spotify_id:
+            logger.info(f"🔍 SongBPM: Recherche '{track_title}' par {artist_name} (Spotify ID: {spotify_id})")
+        else:
+            logger.info(f"🔍 SongBPM: Recherche '{track_title}' par {artist_name}")
+
+        # TENTATIVE 1 : Recherche avec le titre original
+        result = self._perform_search(
+            track_title=track_title,
+            artist_name=artist_name,
+            spotify_id=spotify_id,
+            max_results_to_check=max_results_to_check,
+            fetch_details=fetch_details
+        )
+
+        if result:
+            log_api("SongBPM", f"search/{track_title}", True)
+            return result
+
+        # TENTATIVE 2 : Si le titre contient des parenthèses/crochets, réessayer sans
+        import re
+        if re.search(r'[\(\)\[\]]', track_title):
+            cleaned_title = self._remove_parentheses_and_brackets(track_title)
+            if cleaned_title and cleaned_title != track_title:
+                logger.info(f"🔄 Nouvelle tentative sans parenthèses/crochets: '{cleaned_title}'")
+
+                # ⚡ OPTIMISATION : Pas besoin de recharger la page, la barre de recherche est toujours là
+                result = self._perform_search(
+                    track_title=cleaned_title,
+                    artist_name=artist_name,
+                    spotify_id=spotify_id,
+                    max_results_to_check=max_results_to_check,
+                    fetch_details=fetch_details,
+                    reload_homepage=False  # ⚡ Réutiliser la page actuelle
+                )
+
+                if result:
+                    logger.info(f"✅ Trouvé avec le titre nettoyé: '{cleaned_title}'")
+                    log_api("SongBPM", f"search/{track_title}", True)
+                    return result
+
+        # Aucun résultat trouvé même après fallback
+        log_api("SongBPM", f"search/{track_title}", False)
+        return None
 
     def _get_search_results(self) -> List[Dict[str, Any]]:
         """

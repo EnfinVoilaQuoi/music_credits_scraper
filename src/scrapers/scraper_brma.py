@@ -188,8 +188,62 @@ class UltratopScraperInitial:
             except Exception as e:
                 self.logger.error(f"Erreur lors de l'extraction d'une certification: {e}")
                 continue
-                
+
+        if not certifications and containers is not None:
+            # Fallback LLM si la structure de la page Ultratop a changé
+            certifications = self._extract_with_llm(soup, year, category)
+
         self.logger.info(f"Extrait {len(certifications)} certifications de {year}/{category}")
+        return certifications
+
+    def _extract_with_llm(self, soup, year, category):
+        """
+        Fallback LLM : extrait artiste/titre/certification/date du texte de la page
+        quand les sélecteurs CSS ne trouvent plus rien. Entrées validées strictement.
+        Import paresseux : fonctionne aussi quand le script est lancé en standalone.
+        """
+        try:
+            from src.utils.llm_extractor import get_shared_extractor, build_certifications_prompt
+        except ImportError:
+            return []
+
+        llm = get_shared_extractor()
+        if not llm:
+            return []
+
+        self.logger.info("🤖 BRMA: sélecteurs sans résultat, fallback LLM")
+        page_text = soup.get_text(separator="\n", strip=True)
+        data = llm.extract_json(build_certifications_prompt(page_text[:5500], source="Ultratop Belgique"))
+        if not data or not isinstance(data.get("certifications"), list):
+            return []
+
+        certifications = []
+        for entry in data["certifications"]:
+            if not isinstance(entry, dict):
+                continue
+            artist = str(entry.get("artist", "")).strip()
+            title = str(entry.get("title", "")).strip()
+            level = str(entry.get("certification", "")).strip()
+            date = entry.get("date")
+            if not artist or not level:
+                continue
+            # Anti-hallucination : l'artiste doit apparaître dans la page
+            if artist.lower() not in page_text.lower():
+                continue
+            if not (isinstance(date, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)):
+                date = ""
+            certifications.append({
+                'artist': artist,
+                'title': title,
+                'category': category,
+                'certification_level': level,
+                'certification_date': date,
+                'year_page': year,
+                'detail_url': '',
+                'scraped_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            })
+
+        self.logger.info(f"🤖 BRMA LLM: {len(certifications)} certification(s) validée(s)")
         return certifications
         
     def scrape_year_range(self, start_year=1995, end_year=2024):

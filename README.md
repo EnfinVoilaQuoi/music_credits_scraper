@@ -14,7 +14,12 @@
 - **Fenetre principale** :
   - Vue "**Morceaux**" : Tableau rassemblant tous les morceaux et leurs informations (Artiste Principal, Date de Sortie, Album, Credits, Paroles, BPM, Durée, Certifications, Nb de Streams et Statut, avec **systeme de tri par colonne**)
   - Vue "**Album**" : Tableau rassemblant tous les albums et leurs informations (Durée, Certifications, Nb de Streams)
-- **Fenetres secondaires** : Page de Detail pour chaque morceau (Crédits, Paroles, Données Techniques, Certifications), Page de Gestion des MaJ des Certifications (Sources, Info MaJ, MaJ manuelle), Page de Gestion du Scrape Credit/Paroles (Sources, Mode Réécriture), Page de Gestion de l'Enrichissement (Sources, Mode Réécriture)
+- **Fenetres secondaires** :
+  - Page de Detail pour chaque morceau (Crédits, Paroles, Données Techniques, Certifications)
+  - Page de Gestion des MaJ des Certifications (Sources, Info MaJ, MaJ manuelle)
+  - Page de Gestion du Scrape Credit/Paroles (Sources, Mode Réécriture)
+  - Page de Gestion de l'Enrichissement (Sources, Mode Réécriture)
+  - Page de Gestion du Scrape Nb de Streams (Sources)
 - **Gestion** de **morceau "exclu"** (freestyle, émission)
 - Récupération automatique de **liens YouTube** pour chaque morceaux, avec **système de fiabilité**, infobulle preview titre et note de fiabilité
 - Récupération automatique de **liens Spotify** pour chaque morceaux, infobulle preview titre

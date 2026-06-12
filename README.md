@@ -24,26 +24,25 @@
 - Récupération automatique de **liens YouTube** pour chaque morceaux, avec **système de fiabilité**, infobulle preview titre et note de fiabilité
 - Récupération automatique de **liens Spotify** pour chaque morceaux, infobulle preview titre
 - **Base de Données** des **Certifications** Mise à Jour Automatique et Manuelle
-- Récupération du nombre de streams sur Spotify via le Spotify ID sur Kworb.et via l'ID YouTube officiel pour l'API YouTubeMusic
+- Récupération automatique du **Nombre de Streams** sur **Spotify** pour chaque morceaux
 
 ## APIs utilisées
 - [GetSongBPM](https://getsongbpm.com/)                             - Données **BPM**, **Key**, **Mode** et **Time Signature**
 - [Genius](https://docs.genius.com/)                                - Liste de **Morceaux** d'un Artiste
 - [ReccoBeats](https://reccobeats.com/)                             - Données **Durée**, **BPM**, **Key** & **Mode**
-- [YouTubeMusic](https://ytmusicapi.readthedocs.io/en/stable/#)     - Lien **YouTube** pour chaque Morceau
+- [YouTubeMusic](https://ytmusicapi.readthedocs.io/en/stable/#)     - Lien **YouTube** pour chaque Morceau et **Nb de Streams**
 - [Deezer](https://developers.deezer.com/api)                       - Données **Durée**, Explicit Lyrics, **Picture**, **Date de Sortie**
 
 ## Données utilisées
 - [Genius](https://genius.com/)                                     - **Crédits** Complets, **Paroles** Structurées, **Date de Sortie**
 - [SongBPM](https://songbpm.com/)                                   - Données **Durée**, **BPM**, **Key**, **Mode** et **Time Signature**
-- [Rapedia](https://rapedia.fr/)                                    - Données **BPM**, **Structure** de Morceau
 - [Backpackerz](https://www.thebackpackerz.com/)                    - **Photographies**
 - [SNEP](https://snepmusique.com/)                                  - **Certifications SNEP** (France)
 - [RIAA](https://www.riaa.com/gold-platinum/)                       - **Certifications RIAA** (USA)
 - [Ultratop](https://www.ultratop.be)                               - **Certifications BRMA** (Belgique)
 - [AlbumOfTheYear](https://www.albumoftheyear.org/)                 - **Notation** d'Album
 - [Spotify](https://open.spotify.com/intl-fr)                       - **Track ID** pour Reccobeats
-- [Kworb.net](https://kworb.net/)                                   - **Nb de Streams* sur Spotify
+- [Kworb.net](https://kworb.net/)                                   - **Nb de Streams** sur Spotify
 
 ## Ressources utilisées
 - [Claude - **Sonnet** (depuis 3.5), **Opus** (depuis 4.0) et Fable (depuis 5.0)

@@ -181,9 +181,13 @@ class Track:
     spotify_id: Optional[str] = None
     spotify_ids: List[str] = field(default_factory=list)
     discogs_id: Optional[int] = None
+    isrc: Optional[str] = None  # International Standard Recording Code (pivot inter-sources)
     
     # Métadonnées
-    bpm: Optional[int] = None
+    bpm: Optional[int] = None  # BPM "réel" (double-time) — valeur exportée
+    bpm_alt: Optional[int] = None  # Octave alternative (half-time), ex. 71 pour 142
+    bpm_source: Optional[str] = None  # Source(s) du BPM retenu (vote §8.3)
+    bpm_confidence: Optional[int] = None  # Nb de sources concordantes
     duration: Optional[int] = None  # En secondes
     genre: Optional[str] = None
     track_number: Optional[int] = None
@@ -814,7 +818,11 @@ class Track:
             'genius_id': self.genius_id,
             'spotify_id': self.spotify_id,
             'discogs_id': self.discogs_id,
+            'isrc': getattr(self, 'isrc', None),
             'bpm': self.bpm,
+            'bpm_alt': getattr(self, 'bpm_alt', None),
+            'bpm_source': getattr(self, 'bpm_source', None),
+            'bpm_confidence': getattr(self, 'bpm_confidence', None),
             'duration': self.duration,
             'genre': self.genre,
             'is_featuring': is_featuring,
@@ -973,7 +981,7 @@ class Track:
         return True
 
     def get_all_spotify_ids(self) -> List[str]:
-        """Retourne tous les Spotify IDs du track"""
+        """Retourne tous les Spotify IDs du track."""
         ids = []
 
         # Ajouter spotify_id legacy

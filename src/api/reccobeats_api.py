@@ -193,40 +193,8 @@ class ReccoBeatsIntegratedClient:
                 **track_data
             }
 
-            # Extraire la durée si disponible
-            if 'durationMs' in track_data:
-                duration_ms = track_data['durationMs']
-                result['duration'] = int(duration_ms / 1000) if duration_ms else None
-                logger.info(f"⏱️ Duration: {result['duration']}s ({duration_ms}ms)")
-
-            # Étape 2: Récupérer les audio features
-            reccobeats_id = track_data.get('id')
-            if reccobeats_id:
-                logger.debug(f"🎼 Récupération audio features pour ID: {reccobeats_id}")
-                audio_features = self.get_track_audio_features(reccobeats_id)
-
-                if audio_features:
-                    result['audio_features'] = audio_features
-
-                    # Extraire BPM, Key et Mode
-                    result['bpm'] = audio_features.get('tempo')
-                    result['key'] = audio_features.get('key')
-                    result['mode'] = audio_features.get('mode')
-                    result['energy'] = audio_features.get('energy')
-                    result['danceability'] = audio_features.get('danceability')
-                    result['valence'] = audio_features.get('valence')
-
-                    # Convertir en musical_key français si possible
-                    if result.get('key') is not None and result.get('mode') is not None:
-                        try:
-                            from src.utils.music_theory import key_mode_to_french
-                            result['musical_key'] = key_mode_to_french(
-                                result['key'],
-                                result['mode']
-                            )
-                            logger.info(f"✅ Musical key: {result['musical_key']}")
-                        except Exception as e:
-                            logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
+            # Durée + audio features (BPM/Key/Mode...) via helper partagé
+            result = self._enrich_result_with_features(result, track_data)
 
             # Sauvegarder en cache
             self.cache[cache_key] = result
@@ -241,24 +209,161 @@ class ReccoBeatsIntegratedClient:
             logger.error(traceback.format_exc())
             return None
 
-    def get_multiple_tracks_with_bpm(self, spotify_ids: List[str]) -> List[Dict]:
+    def _enrich_result_with_features(self, result: Dict, track_data: Dict) -> Dict:
         """
-        Récupère plusieurs tracks + BPM en batch (max 50 IDs)
+        Complète un result de base avec la durée et les audio features
+        (BPM, Key, Mode, energy, danceability, valence, musical_key).
+        Partagé entre la voie Spotify ID et la voie ISRC.
+        """
+        # Durée
+        if 'durationMs' in track_data:
+            duration_ms = track_data['durationMs']
+            result['duration'] = int(duration_ms / 1000) if duration_ms else None
+            logger.info(f"⏱️ Duration: {result['duration']}s ({duration_ms}ms)")
 
-        Args:
-            spotify_ids: Liste d'IDs Spotify
+        # Audio features
+        reccobeats_id = track_data.get('id')
+        if reccobeats_id:
+            logger.debug(f"🎼 Récupération audio features pour ID: {reccobeats_id}")
+            audio_features = self.get_track_audio_features(reccobeats_id)
+            if audio_features:
+                result['audio_features'] = audio_features
+                result['bpm'] = audio_features.get('tempo')
+                result['key'] = audio_features.get('key')
+                result['mode'] = audio_features.get('mode')
+                result['energy'] = audio_features.get('energy')
+                result['danceability'] = audio_features.get('danceability')
+                result['valence'] = audio_features.get('valence')
+                if result.get('key') is not None and result.get('mode') is not None:
+                    try:
+                        from src.utils.music_theory import key_mode_to_french
+                        result['musical_key'] = key_mode_to_french(result['key'], result['mode'])
+                        logger.info(f"✅ Musical key: {result['musical_key']}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
+        return result
 
-        Returns:
-            Liste de dictionnaires avec les données
+    def get_track_by_isrc(self, isrc: str) -> Optional[Dict]:
+        """
+        Récupère le track ReccoBeats correspondant à un ISRC.
+        L'endpoint /track?ids=<isrc> peut renvoyer PLUSIEURS entrées (pressings
+        Spotify distincts) -> on garde la plus populaire.
         """
         try:
-            # Limiter à 50 IDs par requête
-            spotify_ids = spotify_ids[:50]
+            url = f"{self.recco_base_url}/track"
+            response = self.recco_session.get(url, params={'ids': isrc}, timeout=15)
+            logger.info(f"🎵 ReccoBeats: requête ISRC {isrc} (status {response.status_code})")
+
+            if response.status_code != 200:
+                if response.status_code == 429:
+                    logger.warning("⏰ Rate limit ReccoBeats")
+                return None
+
+            content = response.json().get('content', [])
+            if not content:
+                return None
+
+            best = sorted(content, key=lambda t: t.get('popularity', 0), reverse=True)[0]
+            logger.info(f"✅ Track ISRC trouvé: {best.get('trackTitle', 'N/A')} (pop={best.get('popularity')})")
+            return best
+        except Exception as e:
+            logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
+            return None
+
+    def get_track_info_by_isrc(self, isrc: str, use_cache: bool = True,
+                               force_refresh: bool = False) -> Optional[Dict]:
+        """
+        Équivalent de get_track_info mais à partir d'un ISRC (pas de Spotify ID).
+        Même forme de retour (success, bpm, key, mode, musical_key, duration...).
+        """
+        if not isrc:
+            return None
+
+        logger.info(f"🎵 get_track_info_by_isrc pour ISRC: {isrc}")
+        try:
+            cache_key = f"isrc::{isrc}"
+
+            if force_refresh and cache_key in self.cache:
+                del self.cache[cache_key]
+
+            if use_cache and not force_refresh and cache_key in self.cache:
+                cached = self.cache[cache_key]
+                if isinstance(cached, dict) and (cached.get('bpm') is not None or
+                                                 cached.get('audio_features') is not None):
+                    logger.info("✅ Données ISRC trouvées dans le cache")
+                    return cached
+
+            track_data = self.get_track_by_isrc(isrc)
+            if not track_data:
+                logger.warning(f"❌ Aucune donnée ReccoBeats pour ISRC {isrc}")
+                self.cache[cache_key] = {'error': 'not_found', 'timestamp': time.time()}
+                self._save_cache()
+                return None
+
+            result = {
+                'isrc': isrc,
+                'spotify_id': None,
+                'source': 'reccobeats_isrc',
+                'success': True,
+                'timestamp': time.time(),
+                **track_data
+            }
+            result = self._enrich_result_with_features(result, track_data)
+
+            self.cache[cache_key] = result
+            self._save_cache()
+            logger.info(f"✅ Succès complet pour ISRC: {isrc}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Erreur get_track_info_by_isrc: {e}")
+            return None
+
+    def get_audio_features_batch(self, reccobeats_ids: List[str]) -> Dict[str, Dict]:
+        """
+        Récupère les audio features de plusieurs tracks EN UN SEUL appel
+        (GET /audio-features?ids=...), au lieu de N appels /track/{id}/audio-features.
+
+        Args:
+            reccobeats_ids: liste d'IDs ReccoBeats (max 40)
+
+        Returns:
+            Mapping { reccobeats_id: features }
+        """
+        result: Dict[str, Dict] = {}
+        if not reccobeats_ids:
+            return result
+        try:
+            url = f"{self.recco_base_url}/audio-features"
+            params = {'ids': ','.join(reccobeats_ids[:40])}
+            response = self.recco_session.get(url, params=params, timeout=30)
+            if response.status_code != 200:
+                logger.warning(f"❌ audio-features batch: status {response.status_code}")
+                return result
+            content = response.json().get('content', [])
+            for feat in content:
+                fid = feat.get('id')
+                if fid:
+                    result[fid] = feat
+        except Exception as e:
+            logger.error(f"❌ audio-features batch error: {e}")
+        return result
+
+    def get_multiple_tracks_with_bpm(self, ids: List[str]) -> List[Dict]:
+        """
+        Récupère plusieurs tracks + audio features en batch.
+        `ids` accepte Spotify IDs, ReccoBeats IDs ou ISRC (max 40 — limite API).
+
+        Returns:
+            Liste de tracks (chacun enrichi de 'bpm' + 'audio_features' si dispo).
+        """
+        try:
+            # Doc ReccoBeats : 1 à 40 valeurs par requête /track?ids=
+            ids = ids[:40]
 
             url = f"{self.recco_base_url}/track"
-            params = {'ids': ','.join(spotify_ids)}
+            params = {'ids': ','.join(ids)}
 
-            logger.info(f"🎵 Batch request pour {len(spotify_ids)} tracks")
+            logger.info(f"🎵 Batch request pour {len(ids)} tracks")
 
             response = self.recco_session.get(url, params=params, timeout=30)
 
@@ -266,18 +371,22 @@ class ReccoBeatsIntegratedClient:
                 logger.error(f"❌ Batch request failed: {response.status_code}")
                 return []
 
-            tracks = response.json()
+            # La réponse est wrappée dans {'content': [...]}
+            tracks = response.json().get('content', [])
+            if not tracks:
+                return []
 
-            # Enrichir avec les audio features
+            # Audio features en UN appel batch, puis mapping par ID ReccoBeats
+            reccobeats_ids = [t['id'] for t in tracks if t.get('id')]
+            features_map = self.get_audio_features_batch(reccobeats_ids)
+
             for track in tracks:
-                reccobeats_id = track.get('id')
-                if reccobeats_id:
-                    features = self.get_track_audio_features(reccobeats_id)
-                    if features:
-                        track['bpm'] = features.get('tempo')
-                        track['audio_features'] = features
+                feats = features_map.get(track.get('id'))
+                if feats:
+                    track['bpm'] = feats.get('tempo')
+                    track['audio_features'] = feats
 
-            logger.info(f"✅ {len(tracks)} tracks enrichis")
+            logger.info(f"✅ {len(tracks)} tracks enrichis (audio-features en 1 appel)")
             return tracks
 
         except Exception as e:

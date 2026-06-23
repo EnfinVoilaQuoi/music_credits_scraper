@@ -86,6 +86,10 @@ class DataManager:
 
             # Liste des colonnes à ajouter
             new_columns = {
+                'isrc': 'TEXT',  # ISRC (pivot inter-sources : Deezer/ReccoBeats)
+                'bpm_source': 'TEXT',  # Source(s) du BPM retenu (vote §8.3)
+                'bpm_confidence': 'INTEGER',  # Nb de sources concordantes
+                'bpm_alt': 'INTEGER',  # Octave alternative (half-time) écartée
                 'certifications': 'TEXT',  # JSON array
                 'album_certifications': 'TEXT',  # JSON array
                 'musical_key': 'TEXT',  # Musical key en français (ex: "Do majeur")
@@ -295,7 +299,11 @@ class DataManager:
                         genius_id = COALESCE(?, genius_id),
                         spotify_id = COALESCE(?, spotify_id),
                         discogs_id = COALESCE(?, discogs_id),
+                        isrc = COALESCE(?, isrc),
                         bpm = COALESCE(?, bpm),
+                        bpm_source = COALESCE(?, bpm_source),
+                        bpm_confidence = COALESCE(?, bpm_confidence),
+                        bpm_alt = COALESCE(?, bpm_alt),
                         duration = COALESCE(?, duration),
                         genre = COALESCE(?, genre),
                         key = COALESCE(?, key),
@@ -318,7 +326,11 @@ class DataManager:
                     WHERE id = ?
                 """, (track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id,
-                    track.bpm, track.duration, track.genre,
+                    getattr(track, 'isrc', None),
+                    track.bpm,
+                    getattr(track, 'bpm_source', None), getattr(track, 'bpm_confidence', None),
+                    getattr(track, 'bpm_alt', None),
+                    track.duration, track.genre,
                     getattr(track, 'key', None), getattr(track, 'mode', None),
                     getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
@@ -341,17 +353,19 @@ class DataManager:
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
-                        genius_id, spotify_id, discogs_id,
-                        bpm, duration, genre, key, mode, musical_key, time_signature,
+                        genius_id, spotify_id, discogs_id, isrc,
+                        bpm, bpm_source, bpm_confidence, bpm_alt, duration, genre, key, mode, musical_key, time_signature,
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications, spotify_page_title,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
-                    track.genius_id, track.spotify_id, track.discogs_id,
-                    track.bpm, track.duration, track.genre,
+                    track.genius_id, track.spotify_id, track.discogs_id, getattr(track, 'isrc', None),
+                    track.bpm, getattr(track, 'bpm_source', None), getattr(track, 'bpm_confidence', None),
+                    getattr(track, 'bpm_alt', None),
+                    track.duration, track.genre,
                     getattr(track, 'key', None), getattr(track, 'mode', None),
                     getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
@@ -484,7 +498,7 @@ class DataManager:
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications, spotify_page_title,
-                        created_at, updated_at, last_scraped
+                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt
                     FROM tracks
                     WHERE artist_id = ?
                     ORDER BY title
@@ -527,7 +541,11 @@ class DataManager:
                         created_at = row[27] # created_at
                         updated_at = row[28] # updated_at
                         last_scraped = row[29] # last_scraped
-                        
+                        isrc = row[30] if len(row) > 30 else None  # isrc (ajouté en fin de SELECT)
+                        bpm_source = row[31] if len(row) > 31 else None
+                        bpm_confidence = row[32] if len(row) > 32 else None
+                        bpm_alt = row[33] if len(row) > 33 else None
+
                         # Validation
                         if not track_id or not title:
                             continue
@@ -617,7 +635,11 @@ class DataManager:
                         track.genius_id = safe_assign(genius_id)
                         track.spotify_id = safe_assign(spotify_id)
                         track.discogs_id = safe_assign(discogs_id)
+                        track.isrc = safe_assign(isrc)
                         track.bpm = safe_assign_int(bpm)
+                        track.bpm_source = safe_assign(bpm_source)
+                        track.bpm_confidence = safe_assign_int(bpm_confidence)
+                        track.bpm_alt = safe_assign_int(bpm_alt)
                         track.duration = safe_assign_duration(duration)  # Supporte "3:48" et int
                         track.genre = safe_assign(genre)
                         # Key/Mode peuvent être int (0-11, 0/1) OU string ("G", "major") pour rétrocompatibilité

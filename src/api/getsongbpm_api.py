@@ -72,13 +72,26 @@ class GetSongBPMFetcher:
         self.cache = self._load_cache()
         self.session = requests.Session()
         
-        # Configuration headers selon documentation
+        # NB : l'auth passe UNIQUEMENT par le paramètre d'URL `api_key` (vérifié).
+        # Le header `X-API-KEY` seul renvoie 401 → inutile, retiré pour éviter la confusion.
         self.session.headers.update({
-            'X-API-KEY': self.api_key,
             'Accept': 'application/json',
             'User-Agent': 'GetSongBPM-Python-Client/2.0'
         })
     
+    @staticmethod
+    def _parse_tempo(value) -> Optional[int]:
+        """
+        L'API renvoie parfois `tempo` en string (ex. "220") malgré la doc qui
+        l'annonce en int → cast robuste. Retourne None si non numérique/absent.
+        """
+        if value is None:
+            return None
+        try:
+            return int(round(float(value)))
+        except (ValueError, TypeError):
+            return None
+
     def _load_cache(self) -> Dict:
         """Charge le cache depuis le fichier"""
         try:
@@ -118,16 +131,58 @@ class GetSongBPMFetcher:
         else:
             return "major"
     
+    @staticmethod
+    def _norm(s: str) -> str:
+        """Normalise pour comparaison : apostrophes, accents, casse, espaces."""
+        import unicodedata
+        s = s or ""
+        for apo in ("’", "‘", "`", "´"):
+            s = s.replace(apo, "'")
+        s = unicodedata.normalize('NFKD', s)
+        s = ''.join(c for c in s if not unicodedata.combining(c))
+        return " ".join(s.lower().strip().split())
+
+    def _select_hit(self, hits: list, artist: str, title: str) -> Optional[Dict]:
+        """
+        Choisit le meilleur hit 'song' dont l'ARTISTE correspond (ancre stricte).
+        Évite le `search[0]` aveugle : avec type='both', le 1er résultat peut être
+        un objet artiste (sans tempo) → BPM None / mauvais morceau.
+        """
+        na, nt = self._norm(artist), self._norm(title)
+        best = None
+        for h in hits:
+            if not isinstance(h, dict):
+                continue
+            # Doit être un objet 'song' : titre + (tempo ou key_of)
+            if 'title' not in h or not ('tempo' in h or 'key_of' in h):
+                continue
+            # Nom d'artiste du hit (objet, liste ou string)
+            ha = h.get('artist')
+            if isinstance(ha, dict):
+                ha_name = ha.get('name', '')
+            elif isinstance(ha, list) and ha:
+                ha_name = ha[0].get('name', '') if isinstance(ha[0], dict) else str(ha[0])
+            else:
+                ha_name = str(ha or '')
+            if self._norm(ha_name) != na:
+                continue  # artiste = ancre stricte
+            ht = self._norm(h.get('title', ''))
+            if ht == nt:
+                return h  # match parfait titre + artiste
+            if best is None and (nt in ht or ht in nt):
+                best = h  # titre contenu → candidat de repli
+        return best
+
     def _search_track(self, artist: str, title: str) -> Optional[Dict]:
         """
-        Recherche un morceau via l'endpoint /search/
-        
+        Recherche un morceau via l'endpoint /search/ et VÉRIFIE le hit.
+
         Args:
             artist: Nom de l'artiste
             title: Titre du morceau
-            
+
         Returns:
-            Données du premier résultat ou None
+            Le hit 'song' validé (artiste+titre) ou None
         """
         # Préparer la requête selon documentation
         # Pour type="both", format: lookup=song:TITRE artist:ARTISTE
@@ -155,12 +210,14 @@ class GetSongBPMFetcher:
                     data = response.json()
 
                     # Structure de réponse: {"search": [...]}
-                    if 'search' in data and isinstance(data['search'], list) and len(data['search']) > 0:
-                        # Retourner le premier résultat
-                        return data['search'][0]
-                    else:
-                        # Pas de résultats ou structure inattendue
-                        return None
+                    hits = data.get('search')
+                    if isinstance(hits, list) and hits:
+                        selected = self._select_hit(hits, artist, title)
+                        if selected is None:
+                            logger.debug(f"GetSongBPM: {len(hits)} hit(s) mais aucun match artiste+titre pour {artist} - {title}")
+                        return selected
+                    # Pas de résultats ou structure inattendue
+                    return None
                 
                 elif response.status_code == 429:
                     # Rate limit atteint
@@ -255,7 +312,7 @@ class GetSongBPMFetcher:
                 artist=artist,
                 title=title,
                 song_id=track_data.get('id'),
-                bpm=track_data.get('tempo'),
+                bpm=self._parse_tempo(track_data.get('tempo')),
                 key=key_of,
                 mode=mode,
                 time_signature=track_data.get('time_sig'),

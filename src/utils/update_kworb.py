@@ -26,6 +26,47 @@ def _normalize_title(s: str) -> str:
     return s
 
 
+def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> Optional[str]:
+    """
+    Déduit l'ID Spotify de l'ARTISTE par vote majoritaire sur les pages de
+    plusieurs de ses morceaux (un seul track peut pointer vers un homonyme,
+    ex: 'Benzo blanche' → mauvais 'Isha'). Majorité stricte exigée.
+    Secours : recherche par nom si pas assez de morceaux avec spotify_id.
+    """
+    from collections import Counter
+    try:
+        from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+    except Exception as e:
+        logger.error(f"SpotifyIDScraper indisponible: {e}")
+        return None
+
+    try:
+        tracks = data_manager.get_artist_tracks(artist.id)
+    except Exception:
+        tracks = []
+    track_ids = [t.spotify_id for t in tracks if getattr(t, 'spotify_id', None)]
+
+    votes = Counter()
+    try:
+        with SpotifyIDScraper(headless=True) as scraper:
+            for sid in track_ids[:max_pages]:
+                aid = scraper.get_artist_id_from_track(sid)
+                if aid:
+                    votes[aid] += 1
+            if votes:
+                best, count = votes.most_common(1)[0]
+                total = sum(votes.values())
+                if (count >= 2 and count > total / 2) or total == 1:
+                    logger.info(f"🗳️ ID artiste Spotify: {best} ({count}/{total} voix)")
+                    return best
+                logger.warning(f"🗳️ Vote ID artiste non concluant: {dict(votes)}")
+            # Secours : recherche par nom (ambiguïté possible)
+            return scraper.get_artist_spotify_id(artist.name)
+    except Exception as e:
+        logger.error(f"Vote ID artiste Spotify échoué: {e}")
+        return None
+
+
 def update_kworb_streams(artist, data_manager) -> Dict:
     """Scrape kworb.net et met à jour les streams des morceaux et albums de l'artiste.
 
@@ -47,24 +88,8 @@ def update_kworb_streams(artist, data_manager) -> Dict:
     spotify_artist_id: Optional[str] = getattr(artist, 'spotify_id', None)
 
     if not spotify_artist_id:
-        logger.info(f"spotify_id manquant pour '{artist.name}' — tentative via scraper Spotify")
-        try:
-            from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
-            with SpotifyIDScraper(headless=True) as scraper:
-                # 1. Méthode déterministe : déduire l'ID artiste depuis la page
-                #    d'un morceau dont on connaît déjà le Spotify ID
-                tracks = data_manager.get_artist_tracks(artist.id)
-                for t in tracks:
-                    track_sid = getattr(t, 'spotify_id', None)
-                    if track_sid:
-                        spotify_artist_id = scraper.get_artist_id_from_track(track_sid)
-                        if spotify_artist_id:
-                            break
-                # 2. Secours : recherche par nom (ambiguïté possible)
-                if not spotify_artist_id:
-                    spotify_artist_id = scraper.get_artist_spotify_id(artist.name)
-        except Exception as e:
-            logger.error(f"Impossible de récupérer l'ID Spotify artiste: {e}")
+        logger.info(f"spotify_id manquant pour '{artist.name}' — vote sur les pages tracks")
+        spotify_artist_id = _vote_artist_spotify_id(artist, data_manager)
 
         if spotify_artist_id:
             data_manager.update_artist_spotify_id(artist.id, spotify_artist_id)
@@ -80,6 +105,21 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
     # ── 2. Streams des morceaux ───────────────────────────────────────────────
     kworb_songs = scraper.scrape_songs(spotify_artist_id)
+
+    # Auto-correction : page kworb vide → l'ID stocké est probablement un
+    # homonyme. Re-dériver par vote et re-scraper une fois.
+    if not kworb_songs:
+        logger.warning(
+            f"⚠️ Page kworb vide pour {spotify_artist_id} — "
+            "re-vérification de l'ID artiste par vote"
+        )
+        revoted = _vote_artist_spotify_id(artist, data_manager)
+        if revoted and revoted != spotify_artist_id:
+            logger.info(f"🔁 ID artiste corrigé: {spotify_artist_id} → {revoted}")
+            spotify_artist_id = revoted
+            data_manager.update_artist_spotify_id(artist.id, revoted)
+            artist.spotify_id = revoted
+            kworb_songs = scraper.scrape_songs(spotify_artist_id)
 
     if kworb_songs:
         # Charger les tracks de l'artiste depuis la DB

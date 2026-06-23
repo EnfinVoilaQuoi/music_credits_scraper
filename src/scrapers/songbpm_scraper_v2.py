@@ -126,6 +126,18 @@ class SongBPMScraper:
         cleaned = re.sub(r'\s*\[[^\]]*\]', '', cleaned)
         return cleaned.strip()
 
+    def _title_key(self, title: str) -> str:
+        """
+        Clé de titre robuste pour le matching : retire le featuring et les
+        (...)/[...], puis remplace la ponctuation/tirets par des espaces.
+        Permet de rapprocher 'Booska Pogo' et 'FREESTYLE BOOSKA-POGO'.
+        """
+        t = self._normalize_title_for_matching(title)
+        t = self._remove_parentheses_and_brackets(t)
+        t = self._normalize_string(t)
+        t = re.sub(r"[\-_/.,:;!?\"'’]+", " ", t)
+        return " ".join(t.split())
+
     def _match_track(self, result_title: str, result_artist: str,
                      search_title: str, search_artist: str,
                      result_spotify_id: Optional[str] = None,
@@ -138,18 +150,33 @@ class SongBPMScraper:
                 logger.info("❌ REJET: Spotify IDs différents")
             return match
 
-        norm_result_title = self._normalize_string(self._normalize_title_for_matching(result_title))
-        norm_search_title = self._normalize_string(self._normalize_title_for_matching(search_title))
-        norm_result_artist = self._normalize_string(result_artist)
-        norm_search_artist = self._normalize_string(search_artist)
+        # 1) Artiste = ancre STRICTE (évite les faux positifs)
+        if self._normalize_string(result_artist) != self._normalize_string(search_artist):
+            logger.info("❌ REJET: artiste différent")
+            return False
 
-        title_match = norm_result_title == norm_search_title
-        artist_match = norm_result_artist == norm_search_artist
+        # 2) Titre = comparaison assouplie (égalité / inclusion / similarité)
+        rt = self._title_key(result_title)
+        st = self._title_key(search_title)
+        if not rt or not st:
+            logger.info("❌ REJET: titre vide après normalisation")
+            return False
 
-        if title_match and artist_match:
-            logger.info("✅ Match par titre (sans featuring) + artiste")
+        from difflib import SequenceMatcher
+        ratio = SequenceMatcher(None, rt, st).ratio()
+
+        if rt == st:
+            logger.info("✅ Match titre exact + artiste")
             return True
-        logger.info("❌ REJET: Pas de correspondance")
+        # Inclusion (ex. 'booska pogo' ⊂ 'freestyle booska pogo'), garde-fou longueur
+        if (st in rt or rt in st) and min(len(st), len(rt)) >= 4:
+            logger.info(f"✅ Match titre par inclusion + artiste ('{st}' ↔ '{rt}')")
+            return True
+        if ratio >= 0.85:
+            logger.info(f"✅ Match titre par similarité {ratio:.2f} + artiste")
+            return True
+
+        logger.info(f"❌ REJET: titre trop différent (sim {ratio:.2f}: '{st}' vs '{rt}')")
         return False
 
     # ──────────────────────────────────────────────────────────────────────────

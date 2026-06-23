@@ -161,6 +161,10 @@ class DeezerAPI:
         raw_bpm = track_data.get("bpm")
         deezer_bpm = raw_bpm if isinstance(raw_bpm, (int, float)) and raw_bpm and raw_bpm > 0 else None
 
+        # release_date : Deezer renvoie parfois "0000-00-00" (date inconnue) -> None
+        raw_date = track_data.get("release_date")
+        deezer_date = raw_date if (raw_date and not str(raw_date).startswith("0000")) else None
+
         enriched_data = {
             "deezer_track_id": track_data.get("id"),
             "deezer_isrc": track_data.get("isrc"),  # pivot inter-sources (présent dès la recherche)
@@ -168,7 +172,7 @@ class DeezerAPI:
             "deezer_duration": track_data.get("duration"),  # en secondes
             "deezer_explicit_lyrics": track_data.get("explicit_lyrics", False),
             "deezer_readable": track_data.get("readable", False),
-            "deezer_release_date": track_data.get("release_date"),
+            "deezer_release_date": deezer_date,
             "deezer_picture": None,
             "deezer_rank": track_data.get("rank"),
             "deezer_link": track_data.get("link"),

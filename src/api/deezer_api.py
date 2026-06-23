@@ -118,6 +118,22 @@ class DeezerAPI:
         # Retourner le premier résultat (meilleur match)
         return data["data"][0]
     
+    def get_isrc(self, artist: str, title: str) -> Optional[str]:
+        """
+        Récupère rapidement l'ISRC d'un morceau (recherche Deezer).
+        Utilisé pour alimenter ReccoBeats sans scraper de Spotify ID.
+
+        Returns:
+            L'ISRC (str) ou None si non trouvé.
+        """
+        try:
+            track_data = self.search_track(artist, title)
+            if track_data and track_data.get("isrc"):
+                return track_data["isrc"]
+        except Exception as e:
+            logger.debug(f"get_isrc échec pour {artist} - {title}: {e}")
+        return None
+
     def get_track_by_id(self, track_id: int) -> Optional[Dict]:
         """
         Récupère les informations d'un track par son ID
@@ -141,8 +157,14 @@ class DeezerAPI:
         Returns:
             Dictionnaire avec les champs d'enrichissement
         """
+        # bpm : Deezer renvoie souvent 0 (rap surtout) -> ne garder que les valeurs utiles
+        raw_bpm = track_data.get("bpm")
+        deezer_bpm = raw_bpm if isinstance(raw_bpm, (int, float)) and raw_bpm and raw_bpm > 0 else None
+
         enriched_data = {
             "deezer_track_id": track_data.get("id"),
+            "deezer_isrc": track_data.get("isrc"),  # pivot inter-sources (présent dès la recherche)
+            "deezer_bpm": deezer_bpm,               # opportuniste (souvent absent)
             "deezer_duration": track_data.get("duration"),  # en secondes
             "deezer_explicit_lyrics": track_data.get("explicit_lyrics", False),
             "deezer_readable": track_data.get("readable", False),

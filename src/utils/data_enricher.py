@@ -378,19 +378,36 @@ class DataEnricher:
         # Sauvegarder l'état initial
         initial_spotify_id = getattr(track, 'spotify_id', None)
         initial_bpm = getattr(track, 'bpm', None)
-        
+
+        # Candidats BPM collectés par chaque source → vote final (_finalize_bpm)
+        track._bpm_candidates = []
+
+        # ========================================
+        # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright)
+        # Si l'ISRC fournit BPM/Key via ReccoBeats, on évite le scraper Spotify.
+        # ========================================
+        isrc_ok = False
+        if 'reccobeats' in sources and self.apis_available.get('reccobeats'):
+            try:
+                isrc_ok = self._try_reccobeats_by_isrc(track)
+                if isrc_ok:
+                    logger.info(f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité")
+            except Exception as e:
+                logger.debug(f"Voie ISRC échec: {e}")
+
         # ========================================
         # 0. SCRAPER SPOTIFY ID
         # ========================================
         if 'spotify_id' in sources and self.apis_available.get('spotify_id'):
             # Ne skip que si on a déjà un ID valide ET que force_update=False
             has_valid_id = (
-                hasattr(track, 'spotify_id') and 
-                track.spotify_id and 
+                hasattr(track, 'spotify_id') and
+                track.spotify_id and
                 (not artist_tracks or self.validate_spotify_id_unique(track.spotify_id, track, artist_tracks))
             )
-            
-            should_use_spotify_scraper = force_update or not has_valid_id
+
+            # Si l'ISRC a déjà fourni les données audio, inutile de scraper Spotify
+            should_use_spotify_scraper = (force_update or not has_valid_id) and not isrc_ok
             
             if should_use_spotify_scraper:
                 logger.info(f"🎯 Appel du scraper Spotify ID pour '{track.title}' (force_update={force_update}, has_valid_id={has_valid_id})")
@@ -425,19 +442,32 @@ class DataEnricher:
         # ========================================
         reccobeats_success = False
         if 'reccobeats' in sources and self.apis_available.get('reccobeats'):
-            logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
-            try:
-                reccobeats_success = self._enrich_with_reccobeats(track, artist_tracks)
-                results['reccobeats'] = reccobeats_success
+            if isrc_ok:
+                # Déjà satisfait par la voie ISRC en amont : pas de second appel
+                reccobeats_success = True
+                results['reccobeats'] = True
+                logger.info(f"✅ ReccoBeats déjà satisfait via ISRC (BPM={getattr(track, 'bpm', 'N/A')})")
+            else:
+                logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
+                try:
+                    # skip_isrc=True : voie ISRC déjà tentée en amont.
+                    # allow_spotify_scrape=False si l'étape 0 (source 'spotify_id') a déjà
+                    # scrapé → évite un double scrape Playwright par morceau.
+                    reccobeats_success = self._enrich_with_reccobeats(
+                        track, artist_tracks,
+                        skip_isrc=True,
+                        allow_spotify_scrape=('spotify_id' not in sources)
+                    )
+                    results['reccobeats'] = reccobeats_success
 
-                if reccobeats_success:
-                    logger.info(f"✅ ReccoBeats SUCCÈS: BPM={getattr(track, 'bpm', 'N/A')}, Spotify ID={getattr(track, 'spotify_id', 'N/A')}")
-                else:
-                    logger.warning(f"❌ ReccoBeats ÉCHEC pour '{track.title}' - On tentera GetSongBPM en fallback")
-            except Exception as e:
-                logger.error(f"❌ Erreur ReccoBeats pour {track.title}: {e}")
-                results['reccobeats'] = False
-                reccobeats_success = False
+                    if reccobeats_success:
+                        logger.info(f"✅ ReccoBeats SUCCÈS: BPM={getattr(track, 'bpm', 'N/A')}, Spotify ID={getattr(track, 'spotify_id', 'N/A')}")
+                    else:
+                        logger.warning(f"❌ ReccoBeats ÉCHEC pour '{track.title}' - On tentera GetSongBPM en fallback")
+                except Exception as e:
+                    logger.error(f"❌ Erreur ReccoBeats pour {track.title}: {e}")
+                    results['reccobeats'] = False
+                    reccobeats_success = False
 
         # ========================================
         # 2. GETSONGBPM API
@@ -456,12 +486,9 @@ class DataEnricher:
 
             has_missing_data = missing_bpm or missing_key or missing_mode
 
-            should_use_getsongbpm = (
-                force_update or
-                missing_bpm or
-                (not reccobeats_success and 'reccobeats' in sources) or
-                has_missing_data
-            )
+            # §8.3 : GetSongBPM est une API gratuite/rapide → on l'appelle TOUJOURS
+            # pour fournir un 2ᵉ vote BPM (même si ReccoBeats a déjà répondu).
+            should_use_getsongbpm = True
 
             if should_use_getsongbpm:
                 # Construire le message de raison pour le log
@@ -510,18 +537,18 @@ class DataEnricher:
             # - Données manquantes (key, mode, duration)
 
             # Vérifier si des données sont manquantes
-            missing_bpm = not hasattr(track, 'bpm') or not track.bpm
             missing_key = not hasattr(track, 'key') or track.key is None
             missing_mode = not hasattr(track, 'mode') or track.mode is None
             missing_duration = not hasattr(track, 'duration') or not track.duration
 
-            has_missing_data = missing_bpm or missing_key or missing_mode or missing_duration
+            # §8.3 : SongBPM (scrape) = DÉPARTAGE. On l'ouvre seulement si les APIs
+            # ne donnent pas de consensus BPM, ou s'il manque key/mode/duration.
+            bpm_consensus = self._bpm_consensus_reached(track)
 
             should_use_songbpm = (
                 force_update or
-                missing_bpm or
-                (not reccobeats_success and not getsongbpm_success and ('reccobeats' in sources or 'getsongbpm' in sources)) or
-                has_missing_data
+                not bpm_consensus or
+                missing_key or missing_mode or missing_duration
             )
 
             if should_use_songbpm:
@@ -529,23 +556,20 @@ class DataEnricher:
                 reasons = []
                 if force_update:
                     reasons.append("force_update=True")
-                if missing_bpm:
-                    reasons.append("no_bpm")
-                if not reccobeats_success and not getsongbpm_success and ('reccobeats' in sources or 'getsongbpm' in sources):
-                    reasons.append("reccobeats_and_getsongbpm_failed")
-                if has_missing_data and not missing_bpm:
-                    # Lister les données manquantes spécifiques
-                    missing_items = []
-                    if missing_key:
-                        missing_items.append("key")
-                    if missing_mode:
-                        missing_items.append("mode")
-                    if missing_duration:
-                        missing_items.append("duration")
+                if not bpm_consensus:
+                    reasons.append("pas_de_consensus_bpm")
+                missing_items = []
+                if missing_key:
+                    missing_items.append("key")
+                if missing_mode:
+                    missing_items.append("mode")
+                if missing_duration:
+                    missing_items.append("duration")
+                if missing_items:
                     reasons.append(f"missing_data={','.join(missing_items)}")
-                
+
                 reason_str = ", ".join(reasons)
-                logger.info(f"🎼 Appel de SongBPM pour '{track.title}' (raison: {reason_str})")
+                logger.info(f"🎼 Appel de SongBPM (départage) pour '{track.title}' (raison: {reason_str})")
                 
                 try:
                     songbpm_success = self._enrich_with_songbpm(track, force_update=force_update, artist_tracks=artist_tracks)
@@ -580,6 +604,11 @@ class DataEnricher:
             except Exception as e:
                 logger.error(f"❌ Erreur Deezer pour {track.title}: {e}")
                 results['deezer'] = False
+
+        # ========================================
+        # VOTE BPM : réconciliation de tous les candidats (§8.3)
+        # ========================================
+        self._finalize_bpm(track)
 
         # ========================================
         # 5. DISCOGS API (CRÉDITS COMPLÉMENTAIRES)
@@ -684,10 +713,208 @@ class DataEnricher:
 
         return results
     
-    def _enrich_with_reccobeats(self, track: Track, artist_tracks: Optional[List[Track]] = None) -> bool:
+    # ──────────────────────────────────────────────────────────────────────
+    # Réconciliation BPM (§8.2 borne unique + §8.3 vote demi/double)
+    # ──────────────────────────────────────────────────────────────────────
+    _BPM_SOURCE_RANK = {'reccobeats': 3, 'getsongbpm': 2, 'songbpm': 1, 'deezer': 0}
+
+    @staticmethod
+    def _sanitize_bpm(value):
+        """Cast en int + borne unique 40–220. None si invalide/hors borne."""
+        try:
+            v = int(round(float(value)))
+        except (ValueError, TypeError):
+            return None
+        return v if 40 <= v <= 220 else None
+
+    def _add_bpm_candidate(self, track, source: str, raw):
+        """Enregistre un candidat BPM (sanitizé) pour le vote final."""
+        v = self._sanitize_bpm(raw)
+        if v is None:
+            return
+        if not getattr(track, '_bpm_candidates', None):
+            track._bpm_candidates = []
+        track._bpm_candidates.append((source, v))
+        logger.debug(f"🎚️ Candidat BPM: {source}={v}")
+
+    @staticmethod
+    def _bpm_agree(a: int, b: int, tol: int = 3) -> bool:
+        """Concordance à la tolérance près, demi/double inclus (71 ≡ 142)."""
+        return abs(a - b) <= tol or abs(a - 2 * b) <= tol or abs(2 * a - b) <= tol
+
+    # Seuil sous lequel un BPM ISOLÉ (1 seule source) est considéré half-time
+    # et remonté en double-time (logique prod rap & co.). N'agit PAS quand
+    # plusieurs sources concordent ou qu'une source confirme déjà le double.
+    _BPM_HALFTIME_THRESHOLD = 90
+
+    def _reconcile_bpm(self, candidates):
+        """
+        (bpm_real, bpm_alt, 'src1+src2', confidence) à partir des candidats.
+        bpm_real = octave retenue (double-time à l'export) ; bpm_alt = autre octave.
+
+        Résolution demi/double par ÉVIDENCE (pas de seuil aveugle) :
+          1. Deux octaves dans le cluster (74 + 145) → une source confirme le
+             double → on garde la valeur HAUTE réellement mesurée.
+          2. Une seule octave, ≥2 sources d'accord (88 + 88) → consensus = vrai
+             tempo → on NE double PAS.
+          3. Une seule octave, 1 source sous le seuil (71 seul) → aucune preuve
+             → convention rap : on double (71 → 142).
+        """
+        if not candidates:
+            return (None, None, None, 0)
+        clusters = []
+        for cand in candidates:
+            for cl in clusters:
+                if any(self._bpm_agree(cand[1], m[1]) for m in cl):
+                    cl.append(cand)
+                    break
+            else:
+                clusters.append([cand])
+        # Meilleur cluster : d'abord la taille (vote), puis la source la plus fiable
+        def rank(cl):
+            return (len(cl), max(self._BPM_SOURCE_RANK.get(s, 0) for s, _ in cl))
+        best = max(clusters, key=rank)
+        conf = len(best)
+        srcs = sorted({s for s, _ in best}, key=lambda s: -self._BPM_SOURCE_RANK.get(s, 0))
+        th = self._BPM_HALFTIME_THRESHOLD
+
+        vals = [v for _, v in best]
+        lo, hi = min(vals), max(vals)
+
+        if hi >= lo * 1.5:
+            # (1) Deux octaves : double confirmé → valeur haute la plus fiable
+            high = [(s, v) for s, v in best if v >= lo * 1.5]
+            bpm_real = max(high, key=lambda sb: self._BPM_SOURCE_RANK.get(sb[0], 0))[1]
+            bpm_alt = lo
+        else:
+            # Une seule octave : valeur de la source la plus fiable
+            V = max(best, key=lambda sb: self._BPM_SOURCE_RANK.get(sb[0], 0))[1]
+            if conf < 2 and V < th and V * 2 <= 220:
+                # (3) half-time isolé, aucune confirmation → on double
+                bpm_real, bpm_alt = V * 2, V
+            else:
+                # (2) consensus, ou déjà bande haute → on garde V
+                bpm_real = V
+                if V < th and V * 2 <= 220:
+                    bpm_alt = V * 2           # ex. 88 (consensus) → alt 176
+                else:
+                    half = V // 2
+                    bpm_alt = half if half >= 55 else None
+        return (bpm_real, bpm_alt, "+".join(srcs), conf)
+
+    def _bpm_consensus_reached(self, track) -> bool:
+        """True si ≥2 candidats concordent déjà (→ pas besoin du scrape SongBPM)."""
+        cands = getattr(track, '_bpm_candidates', None) or []
+        if len(cands) < 2:
+            return False
+        return self._reconcile_bpm(cands)[3] >= 2
+
+    def _finalize_bpm(self, track):
+        """Pose le BPM final : bpm (octave réelle) + bpm_alt + source + confiance."""
+        cands = getattr(track, '_bpm_candidates', None) or []
+        bpm, bpm_alt, src, conf = self._reconcile_bpm(cands)
+        if bpm is not None:
+            track.bpm = bpm
+            track.bpm_alt = bpm_alt
+            track.bpm_source = src
+            track.bpm_confidence = conf
+            alt_str = f" (alt half-time: {bpm_alt})" if bpm_alt else ""
+            logger.info(f"🧮 BPM réconcilié: {bpm}{alt_str} (source(s): {src}, confiance: {conf} | candidats: {cands})")
+        track._bpm_candidates = []
+
+    def _apply_reccobeats_result(self, track: Track, track_info: Dict) -> bool:
+        """
+        Applique au track les données d'un result ReccoBeats (bpm/key/mode/
+        musical_key/duration), de façon non destructive pour la durée.
+
+        Returns:
+            bool: True si au moins le BPM ou la Key a été posé.
+        """
+        applied = False
+
+        # BPM → candidat pour le vote (+ pose provisoire si manquant)
+        bpm = track_info.get('bpm')
+        if bpm is None and isinstance(track_info.get('audio_features'), dict):
+            bpm = track_info['audio_features'].get('tempo')
+        sbpm = self._sanitize_bpm(bpm)
+        if sbpm is not None:
+            self._add_bpm_candidate(track, 'reccobeats', sbpm)
+            if not getattr(track, 'bpm', None):
+                track.bpm = sbpm
+            applied = True
+
+        # Key / Mode
+        if track_info.get('key') is not None:
+            track.key = track_info['key']
+            applied = True
+        if track_info.get('mode') is not None:
+            track.mode = track_info['mode']
+
+        if getattr(track, 'key', None) is not None and getattr(track, 'mode', None) is not None:
+            try:
+                from src.utils.music_theory import key_mode_to_french
+                track.musical_key = key_mode_to_french(track.key, track.mode)
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
+
+        # Durée (ne pas écraser une durée déjà présente)
+        dur = track_info.get('duration')
+        if isinstance(dur, (int, float)) and dur > 0 and not getattr(track, 'duration', None):
+            track.duration = int(dur)
+
+        return applied
+
+    def _try_reccobeats_by_isrc(self, track: Track, artist_name: Optional[str] = None) -> bool:
+        """
+        Voie ISRC : récupère l'ISRC (track.isrc ou Deezer) puis interroge
+        ReccoBeats SANS scraper de Spotify ID. Applique BPM/Key/Mode au track.
+
+        Returns:
+            bool: True si des audio features ont été appliquées (BPM/Key).
+        """
+        if not self.reccobeats_client:
+            return False
+
+        if artist_name is None:
+            if getattr(track, 'is_featuring', False) and getattr(track, 'primary_artist_name', None):
+                artist_name = track.primary_artist_name
+            else:
+                artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+
+        isrc = getattr(track, 'isrc', None)
+        if not isrc and self.deezer_client:
+            try:
+                isrc = self.deezer_client.get_isrc(artist_name, track.title)
+                if isrc:
+                    track.isrc = isrc
+                    logger.info(f"🔑 ISRC récupéré via Deezer: {isrc}")
+            except Exception as e:
+                logger.debug(f"Deezer get_isrc échec: {e}")
+
+        if not isrc:
+            return False
+
+        try:
+            info = self.reccobeats_client.get_track_info_by_isrc(isrc)
+        except Exception as e:
+            logger.error(f"❌ ReccoBeats ISRC API: {e}")
+            info = None
+
+        if info and info.get('success') and self._apply_reccobeats_result(track, info):
+            logger.info(f"ReccoBeats: ✅ SUCCÈS via ISRC pour '{track.title}' (scrape Spotify évité)")
+            return True
+
+        logger.info(f"ReccoBeats: ISRC sans audio-features pour '{track.title}' → fallback Spotify ID")
+        return False
+
+    def _enrich_with_reccobeats(self, track: Track, artist_tracks: Optional[List[Track]] = None,
+                                skip_isrc: bool = False, allow_spotify_scrape: bool = True) -> bool:
         """
         Enrichit avec ReccoBeats
-        VERSION SÉPARÉE: SpotifyIDScraper → ReccoBeatsAPI (modules séparés)
+        VERSION SÉPARÉE: ISRC (prioritaire) → SpotifyIDScraper → ReccoBeatsAPI
+        skip_isrc=True quand la voie ISRC a déjà été tentée en amont (enrich_track).
+        allow_spotify_scrape=False quand l'étape 0 d'enrich_track a déjà scrapé le
+        Spotify ID (évite un DOUBLE scrape Playwright par morceau).
         """
         try:
             if not self.reccobeats_client:
@@ -707,7 +934,13 @@ class DataEnricher:
             logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
 
             # ============================================================
-            # ÉTAPE 1: RÉCUPÉRER LE SPOTIFY ID
+            # VOIE PRIORITAIRE : ISRC (sauf si déjà tentée en amont par enrich_track)
+            # ============================================================
+            if not skip_isrc and self._try_reccobeats_by_isrc(track, artist_name):
+                return True
+
+            # ============================================================
+            # ÉTAPE 1: RÉCUPÉRER LE SPOTIFY ID (fallback si pas d'ISRC exploitable)
             # ============================================================
             spotify_id = None
 
@@ -721,8 +954,10 @@ class DataEnricher:
                     logger.warning(f"⚠️ Spotify ID existant est un duplicata, il sera ignoré")
                     track.spotify_id = None
 
-            # 1b. Si pas d'ID, utiliser SpotifyIDScraper
-            if not spotify_id and self.spotify_id_scraper:
+            # 1b. Si pas d'ID, utiliser SpotifyIDScraper (sauf si l'étape 0 l'a déjà fait)
+            if not spotify_id and not allow_spotify_scrape:
+                logger.info(f"⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape")
+            if not spotify_id and allow_spotify_scrape and self.spotify_id_scraper:
                 logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
                 try:
                     spotify_id = self.spotify_id_scraper.get_spotify_id(artist_name, track.title)
@@ -784,10 +1019,13 @@ class DataEnricher:
                 if isinstance(features, dict) and 'tempo' in features:
                     bpm = features['tempo']
             
-            if bpm and isinstance(bpm, (int, float)) and 50 <= bpm <= 200:
-                track.bpm = round(float(bpm))
-                logger.info(f"ReccoBeats: ✅ BPM: {track.bpm}")
-            
+            sbpm = self._sanitize_bpm(bpm)
+            if sbpm is not None:
+                self._add_bpm_candidate(track, 'reccobeats', sbpm)
+                if not getattr(track, 'bpm', None):
+                    track.bpm = sbpm
+                logger.info(f"ReccoBeats: ✅ BPM: {sbpm}")
+
             # Stocker Key et Mode
             if 'key' in track_info and track_info['key'] is not None:
                 track.key = track_info['key']
@@ -871,11 +1109,14 @@ class DataEnricher:
             # Enrichir le track avec les données GetSongBPM
             updated = False
 
-            # BPM (seulement si pas déjà présent ou force_update)
-            if song_data.bpm and (force_update or not track.bpm):
-                track.bpm = song_data.bpm
-                logger.info(f"GetSongBPM: ✅ BPM: {track.bpm}")
-                updated = True
+            # BPM → candidat pour le vote (+ pose provisoire si manquant)
+            sbpm = self._sanitize_bpm(song_data.bpm)
+            if sbpm is not None:
+                self._add_bpm_candidate(track, 'getsongbpm', sbpm)
+                if force_update or not track.bpm:
+                    track.bpm = sbpm
+                    logger.info(f"GetSongBPM: ✅ BPM: {sbpm}")
+                    updated = True
 
             # Key (seulement si pas déjà présent ou force_update)
             if song_data.key and (force_update or not track.key):
@@ -1013,11 +1254,14 @@ class DataEnricher:
             
             updated = False
             
-            # BPM
-            if (force_update or not track.bpm) and track_data.get('bpm'):
-                track.bpm = track_data['bpm']
-                logger.info(f"📊 BPM ajouté depuis SongBPM: {track.bpm} pour {track.title}")
-                updated = True
+            # BPM → candidat pour le vote (+ pose provisoire si manquant)
+            sbpm = self._sanitize_bpm(track_data.get('bpm'))
+            if sbpm is not None:
+                self._add_bpm_candidate(track, 'songbpm', sbpm)
+                if force_update or not track.bpm:
+                    track.bpm = sbpm
+                    logger.info(f"📊 BPM ajouté depuis SongBPM: {sbpm} pour {track.title}")
+                    updated = True
             
             # Key et Mode
             key_value = track_data.get('key')
@@ -1174,6 +1418,22 @@ class DataEnricher:
                 if not hasattr(track, 'deezer_id') or force_update or not track.deezer_id:
                     track.deezer_id = data['deezer_track_id']
                     logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
+                    updated = True
+
+            # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
+            if data.get('deezer_isrc'):
+                if not getattr(track, 'isrc', None) or force_update:
+                    track.isrc = data['deezer_isrc']
+                    logger.info(f"   ✅ ISRC: {track.isrc}")
+                    updated = True
+
+            # BPM Deezer : candidat (souvent absent/0) — vote arbitré par _finalize_bpm
+            sbpm = self._sanitize_bpm(data.get('deezer_bpm'))
+            if sbpm is not None:
+                self._add_bpm_candidate(track, 'deezer', sbpm)
+                if not getattr(track, 'bpm', None):
+                    track.bpm = sbpm
+                    logger.info(f"   ✅ BPM (Deezer, opportuniste): {sbpm}")
                     updated = True
 
             if data.get('deezer_link'):

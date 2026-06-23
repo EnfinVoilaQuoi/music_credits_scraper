@@ -3946,11 +3946,11 @@ class MainWindow:
         # Variables pour les checkboxes
         sources_vars = {}
         sources_info = {
-            'spotify_id': 'Spotify ID Scraper (Recherche les vrais Track IDs) 🎯',
-            'reccobeats': 'ReccoBeats (BPM, features audio complètes) 🎵',
-            'getsongbpm': 'GetSongBPM API (BPM, Key, Mode - Priorité 3) 🎹',
-            'songbpm': 'SongBPM Scraper (BPM de fallback) 🎼',
-            'deezer': 'Deezer (Duration, Release Date - vérification) 🎶',
+            'spotify_id': 'Spotify ID Scraper (fallback automatique) 🎯',
+            'reccobeats': 'ReccoBeats (BPM/Key/Mode via ISRC) 🎵',
+            'getsongbpm': 'GetSongBPM API (2ᵉ vote BPM/Key/Mode) 🎹',
+            'songbpm': 'SongBPM Scraper (départage BPM/Key) 🎼',
+            'deezer': 'Deezer (ISRC, durée, date de sortie) 🎶',
             'discogs': 'Discogs (crédits supplémentaires, labels) 💿'
         }
 
@@ -3977,19 +3977,19 @@ class MainWindow:
 
             # Info supplémentaire pour spotify_id
             if source == 'spotify_id':
-                info_text = "Utilise la recherche web pour trouver les Track IDs corrects.\nRecommandé quand des IDs incorrects ont été attribués."
+                info_text = "Fallback : ReccoBeats résout d'abord via l'ISRC (Deezer).\nCe scraper n'est lancé que si aucun ISRC n'est trouvé — laisser coché suffit."
                 ctk.CTkLabel(frame, text=info_text,
                         font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
 
             # Info supplémentaire pour GetSongBPM
             if source == 'getsongbpm':
-                info_text = "API rapide et précise. Utilisée après ReccoBeats.\nNécessite clé API (GETSONGBPM_API_KEY)."
+                info_text = "API rapide. Toujours interrogée pour le 2ᵉ vote BPM (recoupe ReccoBeats).\nNécessite clé API (GETSONGBPM_API_KEY)."
                 ctk.CTkLabel(frame, text=info_text,
                         font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
 
             # Info supplémentaire pour Deezer
             if source == 'deezer':
-                info_text = "Vérifie la cohérence des durées et dates de sortie.\nEnrichit avec les métadonnées Deezer."
+                info_text = "Fournit l'ISRC (pivot pour ReccoBeats), la durée et la date.\nVérifie aussi la cohérence des métadonnées."
                 ctk.CTkLabel(frame, text=info_text,
                         font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
 

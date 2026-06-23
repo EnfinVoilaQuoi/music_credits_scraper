@@ -45,5 +45,5 @@
 - [Kworb.net](https://kworb.net/)                                   - **Nb de Streams** sur Spotify
 
 ## Ressources utilisées
-- [Claude - **Sonnet** (depuis 3.5), **Opus** (depuis 4.0) et **Fable** (depuis 5.0)](https://claude.ai/)      - Modèle de Langage développé par Anthropic
-- [**H3nrycrosby** - RIAA Scraping Project](https://github.com/H3nrycrosby/riaa_scraping_project/)             - Database **Certification RIAA** (USA)
+- [Claude - **Sonnet** (3.5, 4.0 et 4.5) et **Opus** (4.0 et 4.1) et **Fable** (depuis 5.0)](https://claude.ai/)              - Modèle de Langage développé par Anthropic
+- [**H3nrycrosby** - RIAA Scraping Project](https://github.com/H3nrycrosby/riaa_scraping_project/)  - Database **Certification RIAA** (USA)

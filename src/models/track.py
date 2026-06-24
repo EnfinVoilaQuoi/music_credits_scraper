@@ -204,6 +204,8 @@ class Track:
     lyrics: Optional[str] = None  # Paroles complètes
     has_lyrics: bool = False  # Indicateur si les paroles sont disponibles
     lyrics_scraped_at: Optional[datetime] = None  # Date de récupération des paroles
+    lyrics_source: Optional[str] = None  # Provenance des paroles (YouTube Music / genius)
+    lyrics_synced: Optional[str] = None  # Paroles synchronisées (LRC), si dispo (YTM)
     anecdotes: Optional[str] = None  # Anecdotes et informations supplémentaires
 
     # Métadonnées supplémentaires
@@ -796,7 +798,9 @@ class Track:
                 'has_lyrics': True,
                 'lyrics_word_count': len(self.lyrics.split()) if self.lyrics else 0,
                 'lyrics_char_count': len(self.lyrics) if self.lyrics else 0,
-                'lyrics_scraped_at': self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None
+                'lyrics_scraped_at': self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None,
+                'lyrics_source': getattr(self, 'lyrics_source', None),
+                'has_synced_lyrics': bool(getattr(self, 'lyrics_synced', None))
             }
         else:
             lyrics_info = {

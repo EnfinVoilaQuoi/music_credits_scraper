@@ -282,11 +282,38 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
         lyrics = self._extract_lyrics_bs4(soup)
         if lyrics:
+            # Ajoute l'artiste aux en-têtes de section sans attribution (Genius ne
+            # le met qu'en cas de feat). Ex. [Couplet 1] → [Couplet 1 : Isha].
+            if getattr(track, 'is_featuring', False) and getattr(track, 'primary_artist_name', None):
+                artist_name = track.primary_artist_name
+            elif track.artist and hasattr(track.artist, 'name'):
+                artist_name = track.artist.name
+            else:
+                artist_name = None
+            lyrics = self._inject_section_artist(lyrics, artist_name)
+
             track.lyrics = lyrics
             track.has_lyrics = True
             track.lyrics_scraped_at = datetime.now()
             logger.info(f"✅ Paroles récupérées pour '{track.title}' ({len(lyrics.split())} mots)")
         return lyrics
+
+    @staticmethod
+    def _inject_section_artist(lyrics: str, artist_name: Optional[str]) -> str:
+        """
+        Ajoute ` : <artiste>` aux en-têtes de section `[...]` qui n'ont pas déjà
+        d'attribution. N'agit que sur des en-têtes seuls sur leur ligne.
+        """
+        if not lyrics or not artist_name:
+            return lyrics
+
+        def repl(m):
+            inside = m.group(1)
+            if ':' in inside:          # déjà attribué (feat) → ne pas toucher
+                return m.group(0)
+            return f"[{inside.rstrip()} : {artist_name}]"
+
+        return re.sub(r'(?m)^\[([^\]\n]+)\]\s*$', repl, lyrics)
 
     def _extract_lyrics_bs4(self, soup) -> str:
         """
@@ -564,9 +591,16 @@ class GeniusScraperV3(CrawlAIScraperBase):
             "Vocal Producer": CreditRole.VOCAL_PRODUCER,
             "Additional Production": CreditRole.ADDITIONAL_PRODUCTION,
             "Writer": CreditRole.WRITER,
+            "Writers": CreditRole.WRITER,
             "Songwriter": CreditRole.WRITER,
+            "Songwriters": CreditRole.WRITER,
             "Composer": CreditRole.COMPOSER,
+            "Composers": CreditRole.COMPOSER,
             "Lyricist": CreditRole.LYRICIST,
+            "Lyricists": CreditRole.LYRICIST,
+            "Arranger": CreditRole.ARRANGER,
+            "Arrangers": CreditRole.ARRANGER,
+            "Producers": CreditRole.PRODUCER,
             "Mixing Engineer": CreditRole.MIXING_ENGINEER,
             "Mix Engineer": CreditRole.MIXING_ENGINEER,
             "Mastering Engineer": CreditRole.MASTERING_ENGINEER,

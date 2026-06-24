@@ -90,6 +90,8 @@ class DataManager:
                 'bpm_source': 'TEXT',  # Source(s) du BPM retenu (vote §8.3)
                 'bpm_confidence': 'INTEGER',  # Nb de sources concordantes
                 'bpm_alt': 'INTEGER',  # Octave alternative (half-time) écartée
+                'lyrics_source': 'TEXT',  # Provenance des paroles (YouTube Music / genius)
+                'lyrics_synced': 'TEXT',  # Paroles synchronisées (format LRC), si dispo
                 'certifications': 'TEXT',  # JSON array
                 'album_certifications': 'TEXT',  # JSON array
                 'musical_key': 'TEXT',  # Musical key en français (ex: "Do majeur")
@@ -317,6 +319,8 @@ class DataManager:
                         featured_artists = COALESCE(?, featured_artists),
                         lyrics = COALESCE(?, lyrics),
                         lyrics_scraped_at = COALESCE(?, lyrics_scraped_at),
+                        lyrics_source = COALESCE(?, lyrics_source),
+                        lyrics_synced = COALESCE(?, lyrics_synced),
                         has_lyrics = CASE WHEN ? IS NOT NULL THEN 1 ELSE has_lyrics END,
                         anecdotes = COALESCE(?, anecdotes),
                         certifications = CASE WHEN ? = '[]' THEN certifications ELSE ? END,
@@ -339,6 +343,8 @@ class DataManager:
                     getattr(track, 'featured_artists', None),
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
+                    getattr(track, 'lyrics_source', None),
+                    getattr(track, 'lyrics_synced', None),
                     getattr(track, 'lyrics', None),
                     getattr(track, 'anecdotes', None),
                     certifications_json, certifications_json,
@@ -357,10 +363,10 @@ class DataManager:
                         bpm, bpm_source, bpm_confidence, bpm_alt, duration, genre, key, mode, musical_key, time_signature,
                         genius_url, spotify_url,
                         is_featuring, primary_artist_name, featured_artists,
-                        lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
+                        lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, has_lyrics, anecdotes,
                         certifications, album_certifications, spotify_page_title,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id, getattr(track, 'isrc', None),
                     track.bpm, getattr(track, 'bpm_source', None), getattr(track, 'bpm_confidence', None),
@@ -374,6 +380,8 @@ class DataManager:
                     getattr(track, 'featured_artists', None),
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
+                    getattr(track, 'lyrics_source', None),
+                    getattr(track, 'lyrics_synced', None),
                     bool(getattr(track, 'lyrics', None)),
                     getattr(track, 'anecdotes', None),
                     certifications_json, album_certifications_json,
@@ -498,7 +506,7 @@ class DataManager:
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications, spotify_page_title,
-                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt
+                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt, lyrics_source, lyrics_synced
                     FROM tracks
                     WHERE artist_id = ?
                     ORDER BY title
@@ -545,6 +553,8 @@ class DataManager:
                         bpm_source = row[31] if len(row) > 31 else None
                         bpm_confidence = row[32] if len(row) > 32 else None
                         bpm_alt = row[33] if len(row) > 33 else None
+                        lyrics_source = row[34] if len(row) > 34 else None
+                        lyrics_synced = row[35] if len(row) > 35 else None
 
                         # Validation
                         if not track_id or not title:
@@ -640,6 +650,8 @@ class DataManager:
                         track.bpm_source = safe_assign(bpm_source)
                         track.bpm_confidence = safe_assign_int(bpm_confidence)
                         track.bpm_alt = safe_assign_int(bpm_alt)
+                        track.lyrics_source = safe_assign(lyrics_source)
+                        track.lyrics_synced = safe_assign(lyrics_synced)
                         track.duration = safe_assign_duration(duration)  # Supporte "3:48" et int
                         track.genre = safe_assign(genre)
                         # Key/Mode peuvent être int (0-11, 0/1) OU string ("G", "major") pour rétrocompatibilité

@@ -1586,6 +1586,10 @@ class MainWindow:
                         font=("Arial", 14, "bold")).pack(anchor="w", padx=5, pady=(0, 2))
 
             info_text = f"📊 {words_count} mots • {chars_count} caractères"
+            if getattr(track, 'lyrics_source', None):
+                info_text += f" • {track.lyrics_source}"
+            if getattr(track, 'lyrics_synced', None):
+                info_text += " • ⏱ synchronisé"
             if hasattr(track, 'lyrics_scraped_at') and track.lyrics_scraped_at:
                 date_str = self._format_datetime(track.lyrics_scraped_at)
                 info_text += f" • Récupérées le {date_str}"
@@ -1625,6 +1629,14 @@ class MainWindow:
                         if cut_point > 0:
                             clean_lyrics = clean_lyrics[cut_point + 2:].strip()
                             logger.debug("Anecdote retirée des paroles (méthode longueur)")
+
+            # Timestamps par section (si synchro YTM dispo) : injectés dans les en-têtes
+            if getattr(track, 'lyrics_synced', None):
+                try:
+                    from src.utils.lyrics_sync import annotate_sections
+                    clean_lyrics = annotate_sections(clean_lyrics, track.lyrics_synced)
+                except Exception as e:
+                    logger.debug(f"Annotation timestamps échouée: {e}")
 
             formatted_lyrics = self._format_lyrics_for_display(clean_lyrics)
             lyrics_textbox.insert("0.0", formatted_lyrics)
@@ -3209,7 +3221,9 @@ class MainWindow:
         scrape_genius_var = ctk.BooleanVar(value=True)  # Genius coché par défaut
         scrape_discogs_var = ctk.BooleanVar(value=True)  # Discogs coché par défaut
         force_credits_var = ctk.BooleanVar(value=False)
-        scrape_lyrics_var = ctk.BooleanVar(value=True)  # Paroles cochées par défaut
+        # Sources paroles (uniformisé comme les crédits)
+        lyrics_ytm_var = ctk.BooleanVar(value=True)     # YouTube Music (+ synchro) par défaut
+        lyrics_genius_var = ctk.BooleanVar(value=True)  # Genius (scrape, fallback) par défaut
         force_lyrics_var = ctk.BooleanVar(value=False)
 
         # Section Crédits
@@ -3253,29 +3267,45 @@ class MainWindow:
         # Séparateur
         ctk.CTkFrame(options_frame, height=2, fg_color="gray").pack(fill="x", padx=20, pady=10)
 
-        # Section Paroles
+        # Section Paroles (uniformisée : titre + sources, comme les crédits)
         lyrics_frame = ctk.CTkFrame(options_frame)
         lyrics_frame.pack(fill="x", padx=15, pady=10)
 
-        lyrics_checkbox = ctk.CTkCheckBox(
+        ctk.CTkLabel(
             lyrics_frame,
-            text="📝 Scraper les paroles",
-            variable=scrape_lyrics_var,
-            font=("Arial", 13, "bold"),
+            text="📝 Récupérer les paroles",
+            font=("Arial", 13, "bold")
+        ).pack(anchor="w", padx=10, pady=5)
+
+        # Source YouTube Music (primaire, + synchro)
+        lyrics_ytm_checkbox = ctk.CTkCheckBox(
+            lyrics_frame,
+            text="   YouTube Music (paroles + synchro)",
+            variable=lyrics_ytm_var,
+            font=("Arial", 11)
         )
-        lyrics_checkbox.pack(anchor="w", padx=10, pady=5)
+        lyrics_ytm_checkbox.pack(anchor="w", padx=30, pady=2)
+
+        # Source Genius (scrape, fallback)
+        lyrics_genius_checkbox = ctk.CTkCheckBox(
+            lyrics_frame,
+            text="   Genius (scrape, fallback)",
+            variable=lyrics_genius_var,
+            font=("Arial", 11)
+        )
+        lyrics_genius_checkbox.pack(anchor="w", padx=30, pady=2)
 
         force_lyrics_checkbox = ctk.CTkCheckBox(
             lyrics_frame,
-            text="   🔄 Mise à jour forcée (re-scraper les paroles existantes)",
+            text="   🔄 Mise à jour forcée (re-récupérer les paroles existantes)",
             variable=force_lyrics_var,
             font=("Arial", 11)
         )
-        force_lyrics_checkbox.pack(anchor="w", padx=30, pady=2)
+        force_lyrics_checkbox.pack(anchor="w", padx=30, pady=5)
 
         ctk.CTkLabel(
             lyrics_frame,
-            text="Les paroles complètes + anecdotes depuis Genius",
+            text="YTM en priorité (avec timestamps si dispo) ; Genius ne traite que les manquants.",
             font=("Arial", 9),
             text_color="gray"
         ).pack(anchor="w", padx=30, pady=(0, 5))
@@ -3288,10 +3318,12 @@ class MainWindow:
             scrape_genius = scrape_genius_var.get()
             scrape_discogs = scrape_discogs_var.get()
             force_credits = force_credits_var.get()
-            scrape_lyrics = scrape_lyrics_var.get()
+            lyrics_ytm = lyrics_ytm_var.get()
+            lyrics_genius = lyrics_genius_var.get()
+            scrape_lyrics = lyrics_ytm or lyrics_genius
             force_lyrics = force_lyrics_var.get()
 
-            # Au moins une source de crédits ou les paroles doivent être sélectionnées
+            # Au moins une source de crédits ou de paroles doit être sélectionnée
             if not scrape_genius and not scrape_discogs and not scrape_lyrics:
                 messagebox.showwarning("Attention", "Sélectionnez au moins une option de scraping")
                 return
@@ -3304,6 +3336,8 @@ class MainWindow:
                 scrape_discogs=scrape_discogs,
                 force_credits=force_credits,
                 scrape_lyrics=scrape_lyrics,
+                lyrics_ytm=lyrics_ytm,
+                lyrics_genius=lyrics_genius,
                 force_lyrics=force_lyrics
             )
 
@@ -3331,7 +3365,8 @@ class MainWindow:
         dialog.grab_set()
 
     def _start_combined_scraping(self, scrape_genius=False, scrape_discogs=False, force_credits=False,
-                                  scrape_lyrics=False, force_lyrics=False):
+                                  scrape_lyrics=False, force_lyrics=False,
+                                  lyrics_ytm=True, lyrics_genius=True):
         """Lance le scraping combiné des crédits (Genius/Discogs) et/ou paroles avec options de mise à jour forcée"""
 
         # Filtrer les morceaux sélectionnés ET actifs
@@ -3461,27 +3496,74 @@ class MainWindow:
 
                     discogs_credits_results = {'success': discogs_success, 'failed': discogs_failed}
 
-                # Scraping des paroles
+                # Paroles : TEXTE structuré = Genius (primaire) ; TIMESTAMPS = YTM
                 if scrape_lyrics:
                     current_task += 1
-                    logger.info(f"[{current_task}/{total_tasks}] Scraping des paroles...")
-
-                    # Le scraper n'existe pas encore si la phase Genius n'a pas été cochée
-                    if scraper is None:
-                        scraper = GeniusScraperV3(headless=True)
+                    logger.info(f"[{current_task}/{total_tasks}] Récupération des paroles...")
 
                     if force_lyrics:
-                        # Effacer les paroles existantes pour forcer le re-scraping
                         for track in selected_tracks_list:
                             track.lyrics = None
                             track.anecdotes = None
                             track.has_lyrics = False
                             track.lyrics_scraped_at = None
+                            track.lyrics_source = None
+                            track.lyrics_synced = None
 
-                    lyrics_results = scraper.scrape_lyrics_batch(
-                        selected_tracks_list,
-                        progress_callback=lambda c, t, n: update_progress(c, t, n, "Paroles")
-                    )
+                    n_tracks = len(selected_tracks_list)
+
+                    # 1) TEXTE STRUCTURÉ : Genius (sections [Couplet : artiste]). Le batch
+                    #    skippe les morceaux déjà pourvus (ex. via la phase crédits Genius).
+                    if lyrics_genius:
+                        need_text = [t for t in selected_tracks_list if not (t.has_lyrics and t.lyrics)]
+                        if need_text:
+                            if scraper is None:
+                                scraper = GeniusScraperV3(headless=True)
+                            lyrics_results = scraper.scrape_lyrics_batch(
+                                selected_tracks_list,
+                                progress_callback=lambda c, t, n: update_progress(c, t, n, "Paroles (Genius)")
+                            )
+                        for t in selected_tracks_list:
+                            if t.has_lyrics and t.lyrics and not getattr(t, 'lyrics_source', None):
+                                t.lyrics_source = 'genius'
+
+                    # 2) TIMESTAMPS : YTM, TOUJOURS tenté (même si le texte structuré existe),
+                    #    sans écraser le texte Genius. YTM sert aussi de fallback TEXTE.
+                    if lyrics_ytm:
+                        try:
+                            from src.api.ytmusic_api import YTMusicAPI
+                            ytm = YTMusicAPI()
+                            ytm_synced, ytm_text = 0, 0
+                            for i, track in enumerate(selected_tracks_list):
+                                if getattr(track, 'lyrics_synced', None):
+                                    continue  # synchro déjà présente
+                                if getattr(track, 'is_featuring', False) and getattr(track, 'primary_artist_name', None):
+                                    a_name = track.primary_artist_name
+                                elif track.artist:
+                                    a_name = track.artist.name
+                                else:
+                                    a_name = self.current_artist.name
+                                res = ytm.get_lyrics(a_name, track.title)
+                                if res:
+                                    if res.get('lyrics_synced'):
+                                        track.lyrics_synced = res['lyrics_synced']
+                                        ytm_synced += 1
+                                    # Fallback TEXTE seulement si Genius n'a rien donné
+                                    if not (track.has_lyrics and track.lyrics) and res.get('lyrics'):
+                                        track.lyrics = res['lyrics']
+                                        track.has_lyrics = True
+                                        track.lyrics_scraped_at = datetime.now()
+                                        track.lyrics_source = res.get('source') or 'YouTube Music'
+                                        ytm_text += 1
+                                update_progress(i + 1, n_tracks, track.title, "Paroles (timestamps)")
+                            logger.info(f"📝 YTM : {ytm_synced} synchro(s), {ytm_text} texte(s) fallback")
+                        except Exception as e:
+                            logger.warning(f"Passe timestamps YTM échouée: {e}")
+
+                    if lyrics_results is None:
+                        n_ok = sum(1 for t in selected_tracks_list if t.has_lyrics and t.lyrics)
+                        lyrics_results = {'success': n_ok, 'failed': n_tracks - n_ok,
+                                          'errors': [], 'lyrics_scraped': n_ok}
 
                 # Sauvegarder les données mises à jour
                 for track in selected_tracks_list:

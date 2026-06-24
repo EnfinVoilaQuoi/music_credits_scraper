@@ -299,6 +299,90 @@ class YTMusicAPI:
             logger.error(f"Erreur get_album_tracks_raw ({browse_id}): {e}")
             return []
 
+    # ── Paroles (YTMusic, sans quota, source primaire) ───────────────────────
+
+    @staticmethod
+    def _format_lrc(lines: list) -> Optional[str]:
+        """Convertit des lignes synchronisées (LyricLine) en texte LRC [mm:ss.cc]."""
+        out = []
+        any_ts = False
+        for l in lines:
+            if isinstance(l, dict):
+                text, start = l.get('text', ''), l.get('start_time')
+            else:
+                text, start = getattr(l, 'text', ''), getattr(l, 'start_time', None)
+            if start is None:
+                out.append(text)
+                continue
+            any_ts = True
+            ms = int(start)
+            m, s, cs = ms // 60000, (ms % 60000) // 1000, (ms % 1000) // 10
+            out.append(f"[{m:02d}:{s:02d}.{cs:02d}]{text}")
+        return "\n".join(out) if any_ts else None
+
+    def get_lyrics(self, artist: str, title: str) -> Optional[Dict]:
+        """
+        Récupère les paroles via YTMusic : search(songs) → videoId →
+        get_watch_playlist → browseId paroles → get_lyrics.
+        Vérifie que l'artiste correspond (évite des paroles erronées).
+        Récupère aussi la version SYNCHRONISÉE (LRC) quand la source la fournit.
+
+        Returns:
+            {'lyrics': str, 'lyrics_synced': str|None, 'source': str} ou None.
+        """
+        try:
+            results = self.yt.search(f"{artist} {title}", filter='songs', limit=3)
+            if not results:
+                return None
+
+            na = _normalize(artist)
+            chosen = None
+            for r in results:
+                if not r.get('videoId'):
+                    continue
+                arts = " ".join(a.get('name', '') for a in (r.get('artists') or []))
+                if na in _normalize(arts) or _normalize(arts) in na:
+                    chosen = r
+                    break
+            if not chosen:
+                logger.debug(f"YTM lyrics: artiste non confirmé pour '{artist} - {title}'")
+                return None
+
+            watch = self.yt.get_watch_playlist(videoId=chosen['videoId'])
+            lyrics_id = watch.get('lyrics') if isinstance(watch, dict) else None
+            if not lyrics_id:
+                return None
+
+            # Demander la version synchronisée ; fallback texte brut si indispo
+            try:
+                data = self.yt.get_lyrics(lyrics_id, timestamps=True)
+            except Exception:
+                data = self.yt.get_lyrics(lyrics_id)
+
+            raw = data.get('lyrics') if isinstance(data, dict) else None
+            synced = None
+            if isinstance(raw, list):
+                synced = self._format_lrc(raw)
+                text = "\n".join(
+                    (l.get('text', '') if isinstance(l, dict) else getattr(l, 'text', ''))
+                    for l in raw
+                )
+            else:
+                text = raw
+
+            if not text or not str(text).strip():
+                return None
+
+            source = (data.get('source') if isinstance(data, dict) else None) or 'YouTube Music'
+            logger.info(
+                f"📝 YTM paroles: '{artist} - {title}' (source: {source}"
+                f"{', synchro' if synced else ''})"
+            )
+            return {'lyrics': str(text).strip(), 'lyrics_synced': synced, 'source': source}
+        except Exception as e:
+            logger.debug(f"YTM get_lyrics échec '{artist} - {title}': {e}")
+            return None
+
     # ── Étape 2 : batch YouTube Data API v3 (quota-optimal) ───────────────────
 
     def fetch_view_counts_batch(self, video_ids: List[str]) -> Dict[str, int]:

@@ -323,7 +323,10 @@ class GeniusAPI:
             tracks = self._get_artist_songs_manual(artist, max_songs,
                                                    include_features=include_features)
             log_api("Genius", f"artist/{artist.genius_id}/songs", True)
-                
+
+            # Pré-remplissage album via l'endpoint détail (la liste ne le fournit pas)
+            self._fill_albums_via_api(tracks)
+
             logger.info(f"{len(tracks)} morceaux récupérés pour {artist.name}")
             return tracks
             
@@ -568,6 +571,39 @@ class GeniusAPI:
         
         return tracks
     
+    def _fill_albums_via_api(self, tracks: List[Track]) -> None:
+        """
+        Complète l'album des morceaux qui n'en ont pas, via l'endpoint détail
+        `GET /songs/{id}` (l'endpoint liste /artists/{id}/songs ne renvoie pas
+        l'album). Ne fetch QUE les manquants → peu d'appels en ré-import.
+        Le scrape Genius rattrapera ce qui resterait vide.
+        """
+        # Uniquement les morceaux PRIMAIRES (pas les feats : leur album attendra
+        # le scrape, ils sont déjà datés — ça suffit au départ et limite les appels).
+        missing = [
+            t for t in tracks
+            if not getattr(t, 'album', None) and t.genius_id
+            and not getattr(t, 'is_featuring', False)
+        ]
+        if not missing:
+            return
+        logger.info(f"🎫 Album via API : {len(missing)} morceau(x) primaire(s) à compléter…")
+        filled = 0
+        for t in missing:
+            try:
+                data = self.genius.song(t.genius_id)
+                song = (data or {}).get('song') or {}
+                album = song.get('album')
+                name = album.get('name') if isinstance(album, dict) else None
+                if name:
+                    t.album = str(name)
+                    t._album_from_api = True
+                    filled += 1
+            except Exception as e:
+                logger.debug(f"Album API échec pour '{t.title}': {e}")
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+        logger.info(f"🎫 Album via API : {filled}/{len(missing)} complété(s)")
+
     def _extract_album_from_song(self, song: dict) -> Optional[str]:
         """Extrait l'album depuis les données de l'API"""
         try:

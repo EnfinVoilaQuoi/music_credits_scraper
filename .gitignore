@@ -27,7 +27,6 @@ data/certifications/brma/backups/*
 data/certifications/brma/logs/*
 data/certifications/brma/reports/*
 data/certifications/snep/certif-backup-*.csv
-src/scripts/*
 *.db
 *.sqlite
 *.log
@@ -36,7 +35,9 @@ src/scripts/*
 *.json
 
 # Claude
-*.md
+.claude/
+CLAUDE.md
+JOURNAL.md
 
 # OS
 .DS_Store
@@ -50,6 +51,9 @@ Lancer_Venv_Admin.bat
 Lancer_Venv_Admin.ps1
 
 # Script, Fix & Driver
+src/scripts/*/
+scripts/
+docs/api/
 /test*\.py
 /*test\.py
 /debug*\.py
@@ -60,3 +64,4 @@ Lancer_Venv_Admin.ps1
 /*fix\.py
 /update*\.py
 /*update\.py
+archive/

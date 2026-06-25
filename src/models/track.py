@@ -188,10 +188,12 @@ class Track:
     bpm_alt: Optional[int] = None  # Octave alternative (half-time), ex. 71 pour 142
     bpm_source: Optional[str] = None  # Source(s) du BPM retenu (vote §8.3)
     bpm_confidence: Optional[int] = None  # Nb de sources concordantes
+    key_mode_source: Optional[str] = None  # Source de key/mode (peut différer du BPM)
+    reccobeats_resolution: Optional[str] = None  # 'isrc' | 'spotify_id' — voie de résolution ReccoBeats
     duration: Optional[int] = None  # En secondes
     genre: Optional[str] = None
     track_number: Optional[int] = None
-    musical_key: Optional[str] = None   
+    musical_key: Optional[str] = None
     time_signature: Optional[str] = None
     audio_features: Optional[Dict[str, Any]] = field(default_factory=dict)
     
@@ -199,6 +201,7 @@ class Track:
     is_featuring: bool = False  # True si l'artiste est en featuring
     featured_artists: Optional[str] = None  # Liste des artistes en featuring
     primary_artist_name: Optional[str] = None  # Nom de l'artiste principal si différent
+    secondary_role: Optional[str] = None  # Rôle secondaire (ex: "Additional Voices") si l'artiste n'est ni primary ni feat — rempli = contribution secondaire
 
     # Support des paroles
     lyrics: Optional[str] = None  # Paroles complètes
@@ -214,6 +217,10 @@ class Track:
     
     # Crédits
     credits: List[Credit] = field(default_factory=list)
+
+    # Relations « inspiré de » (amont) : samples/interpolations/cover_of/remix_of + trad FR
+    # Chaque entrée : {type, title, artist, url}. Source : API Genius song_relationships.
+    relationships: List[Dict[str, Any]] = field(default_factory=list)
     
     # URLs
     genius_url: Optional[str] = None
@@ -823,15 +830,19 @@ class Track:
             'spotify_id': self.spotify_id,
             'discogs_id': self.discogs_id,
             'isrc': getattr(self, 'isrc', None),
+            'relationships': getattr(self, 'relationships', []) or [],
             'bpm': self.bpm,
             'bpm_alt': getattr(self, 'bpm_alt', None),
             'bpm_source': getattr(self, 'bpm_source', None),
             'bpm_confidence': getattr(self, 'bpm_confidence', None),
+            'key_mode_source': getattr(self, 'key_mode_source', None),
+            'reccobeats_resolution': getattr(self, 'reccobeats_resolution', None),
             'duration': self.duration,
             'genre': self.genre,
             'is_featuring': is_featuring,
             'featured_artists': getattr(self, 'featured_artists', None),
             'primary_artist_name': getattr(self, 'primary_artist_name', None),
+            'secondary_role': getattr(self, 'secondary_role', None),
             'popularity': getattr(self, 'popularity', None),
             'artwork_url': getattr(self, 'artwork_url', None),
             

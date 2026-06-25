@@ -1,5 +1,5 @@
 # théRAPie - Music_Credit_Scraper
-### Contruis une Base de Données pour un artiste donné.
+## Contruis une Base de Données Complète pour un artiste donné
 
 ## Fonctionnement
 - Récupère la **Discographie** complète (en tant qu'artiste principal et secondaire)
@@ -42,7 +42,7 @@
 - [Ultratop](https://www.ultratop.be)                               - **Certifications BRMA** (Belgique)
 - [AlbumOfTheYear](https://www.albumoftheyear.org/)                 - **Notation** d'Album
 - [Spotify](https://open.spotify.com/intl-fr)                       - **Track ID** pour Reccobeats
-- [Kworb.net](https://kworb.net/)                                   - **Nb de Streams** sur Spotify
+- [Kworb](https://kworb.net/)                                   - **Nb de Streams** sur Spotify
 
 ## Ressources utilisées
 - [Claude - **Sonnet** (3.5, 4.0 et 4.5) et **Opus** (4.0 et 4.1) et **Fable** (depuis 5.0)](https://claude.ai/)              - Modèle de Langage développé par Anthropic

@@ -89,9 +89,13 @@ class DataManager:
                 'isrc': 'TEXT',  # ISRC (pivot inter-sources : Deezer/ReccoBeats)
                 'bpm_source': 'TEXT',  # Source(s) du BPM retenu (vote §8.3)
                 'bpm_confidence': 'INTEGER',  # Nb de sources concordantes
+                'key_mode_source': 'TEXT',  # Source de key/mode (peut différer du BPM)
+                'reccobeats_resolution': 'TEXT',  # 'isrc' | 'spotify_id'
+                'secondary_role': 'TEXT',  # Rôle secondaire (ex: "Additional Voices") — ni primary ni feat
                 'bpm_alt': 'INTEGER',  # Octave alternative (half-time) écartée
                 'lyrics_source': 'TEXT',  # Provenance des paroles (YouTube Music / genius)
                 'lyrics_synced': 'TEXT',  # Paroles synchronisées (format LRC), si dispo
+                'relationships': 'TEXT',  # JSON : samples/interpolations/cover/remix amont + trad FR
                 'certifications': 'TEXT',  # JSON array
                 'album_certifications': 'TEXT',  # JSON array
                 'musical_key': 'TEXT',  # Musical key en français (ex: "Do majeur")
@@ -288,6 +292,7 @@ class DataManager:
                 # Sérialiser les certifications en JSON
                 certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
                 album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
+                relationships_json = json.dumps(getattr(track, 'relationships', []) or [])
 
                 # UPDATE NON-DESTRUCTIF : COALESCE préserve la valeur existante
                 # quand le track entrant n'a pas la donnée (None). Évite qu'un
@@ -305,6 +310,8 @@ class DataManager:
                         bpm = COALESCE(?, bpm),
                         bpm_source = COALESCE(?, bpm_source),
                         bpm_confidence = COALESCE(?, bpm_confidence),
+                        key_mode_source = COALESCE(?, key_mode_source),
+                        reccobeats_resolution = COALESCE(?, reccobeats_resolution),
                         bpm_alt = COALESCE(?, bpm_alt),
                         duration = COALESCE(?, duration),
                         genre = COALESCE(?, genre),
@@ -317,6 +324,7 @@ class DataManager:
                         is_featuring = ?,
                         primary_artist_name = COALESCE(?, primary_artist_name),
                         featured_artists = COALESCE(?, featured_artists),
+                        secondary_role = COALESCE(?, secondary_role),
                         lyrics = COALESCE(?, lyrics),
                         lyrics_scraped_at = COALESCE(?, lyrics_scraped_at),
                         lyrics_source = COALESCE(?, lyrics_source),
@@ -325,6 +333,7 @@ class DataManager:
                         anecdotes = COALESCE(?, anecdotes),
                         certifications = CASE WHEN ? = '[]' THEN certifications ELSE ? END,
                         album_certifications = CASE WHEN ? = '[]' THEN album_certifications ELSE ? END,
+                        relationships = CASE WHEN ? = '[]' THEN relationships ELSE ? END,
                         updated_at = ?,
                         last_scraped = COALESCE(?, last_scraped)
                     WHERE id = ?
@@ -333,6 +342,7 @@ class DataManager:
                     getattr(track, 'isrc', None),
                     track.bpm,
                     getattr(track, 'bpm_source', None), getattr(track, 'bpm_confidence', None),
+                    getattr(track, 'key_mode_source', None), getattr(track, 'reccobeats_resolution', None),
                     getattr(track, 'bpm_alt', None),
                     track.duration, track.genre,
                     getattr(track, 'key', None), getattr(track, 'mode', None),
@@ -341,6 +351,7 @@ class DataManager:
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),
                     getattr(track, 'featured_artists', None),
+                    getattr(track, 'secondary_role', None),
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
                     getattr(track, 'lyrics_source', None),
@@ -349,27 +360,30 @@ class DataManager:
                     getattr(track, 'anecdotes', None),
                     certifications_json, certifications_json,
                     album_certifications_json, album_certifications_json,
+                    relationships_json, relationships_json,
                     datetime.now(), track.last_scraped, track.id))
             else:
                 # Sérialiser les certifications en JSON
                 certifications_json = json.dumps(getattr(track, 'certifications', [])) if hasattr(track, 'certifications') else '[]'
                 album_certifications_json = json.dumps(getattr(track, 'album_certifications', [])) if hasattr(track, 'album_certifications') else '[]'
+                relationships_json = json.dumps(getattr(track, 'relationships', []) or [])
 
                 # INSERT avec key, mode, musical_key, time_signature, anecdotes, certifications et spotify_page_title
                 cursor.execute("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id, isrc,
-                        bpm, bpm_source, bpm_confidence, bpm_alt, duration, genre, key, mode, musical_key, time_signature,
+                        bpm, bpm_source, bpm_confidence, key_mode_source, reccobeats_resolution, bpm_alt, duration, genre, key, mode, musical_key, time_signature,
                         genius_url, spotify_url,
-                        is_featuring, primary_artist_name, featured_artists,
+                        is_featuring, primary_artist_name, featured_artists, secondary_role,
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, has_lyrics, anecdotes,
-                        certifications, album_certifications, spotify_page_title,
+                        certifications, album_certifications, relationships, spotify_page_title,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id, getattr(track, 'isrc', None),
                     track.bpm, getattr(track, 'bpm_source', None), getattr(track, 'bpm_confidence', None),
+                    getattr(track, 'key_mode_source', None), getattr(track, 'reccobeats_resolution', None),
                     getattr(track, 'bpm_alt', None),
                     track.duration, track.genre,
                     getattr(track, 'key', None), getattr(track, 'mode', None),
@@ -378,13 +392,14 @@ class DataManager:
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),
                     getattr(track, 'featured_artists', None),
+                    getattr(track, 'secondary_role', None),
                     getattr(track, 'lyrics', None),
                     getattr(track, 'lyrics_scraped_at', None),
                     getattr(track, 'lyrics_source', None),
                     getattr(track, 'lyrics_synced', None),
                     bool(getattr(track, 'lyrics', None)),
                     getattr(track, 'anecdotes', None),
-                    certifications_json, album_certifications_json,
+                    certifications_json, album_certifications_json, relationships_json,
                     getattr(track, 'spotify_page_title', None),
                     datetime.now(), datetime.now(), track.last_scraped))
                 track.id = cursor.lastrowid
@@ -506,7 +521,7 @@ class DataManager:
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications, spotify_page_title,
-                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt, lyrics_source, lyrics_synced
+                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt, lyrics_source, lyrics_synced, relationships, key_mode_source, reccobeats_resolution, secondary_role
                     FROM tracks
                     WHERE artist_id = ?
                     ORDER BY title
@@ -555,6 +570,10 @@ class DataManager:
                         bpm_alt = row[33] if len(row) > 33 else None
                         lyrics_source = row[34] if len(row) > 34 else None
                         lyrics_synced = row[35] if len(row) > 35 else None
+                        relationships_raw = row[36] if len(row) > 36 else None
+                        key_mode_source = row[37] if len(row) > 37 else None
+                        reccobeats_resolution = row[38] if len(row) > 38 else None
+                        secondary_role = row[39] if len(row) > 39 else None
 
                         # Validation
                         if not track_id or not title:
@@ -649,9 +668,15 @@ class DataManager:
                         track.bpm = safe_assign_int(bpm)
                         track.bpm_source = safe_assign(bpm_source)
                         track.bpm_confidence = safe_assign_int(bpm_confidence)
+                        track.key_mode_source = safe_assign(key_mode_source)
+                        track.reccobeats_resolution = safe_assign(reccobeats_resolution)
                         track.bpm_alt = safe_assign_int(bpm_alt)
                         track.lyrics_source = safe_assign(lyrics_source)
                         track.lyrics_synced = safe_assign(lyrics_synced)
+                        try:
+                            track.relationships = json.loads(relationships_raw) if relationships_raw else []
+                        except (ValueError, TypeError):
+                            track.relationships = []
                         track.duration = safe_assign_duration(duration)  # Supporte "3:48" et int
                         track.genre = safe_assign(genre)
                         # Key/Mode peuvent être int (0-11, 0/1) OU string ("G", "major") pour rétrocompatibilité
@@ -679,6 +704,7 @@ class DataManager:
                         track.is_featuring = bool(safe_assign(is_featuring, False))
                         track.primary_artist_name = safe_assign(primary_artist_name)
                         track.featured_artists = safe_assign(featured_artists)
+                        track.secondary_role = safe_assign(secondary_role)
                         
                         # Propriétés paroles
                         track.lyrics = safe_assign(lyrics)

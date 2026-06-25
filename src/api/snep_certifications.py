@@ -280,8 +280,13 @@ class SNEPCertificationManager:
             logger.error(f"❌ Erreur lors du chargement du CSV : {e}")
             return pd.DataFrame()
     
-    def parse_and_import_csv(self, df: pd.DataFrame) -> tuple[int, int]:
-        """Parse et importe les données du CSV dans la base"""
+    def parse_and_import_csv(self, df: pd.DataFrame, source: str = 'CSV') -> tuple[int, int]:
+        """Parse et importe les données du CSV dans la base.
+
+        `source` est journalisé dans update_history pour distinguer une MàJ
+        GLOBALE d'une récupération ARTISTE (utilisé par la GUI pour afficher
+        la vraie date de dernière MàJ globale).
+        """
         if df.empty:
             return 0, 0
 
@@ -409,23 +414,49 @@ class SNEPCertificationManager:
         # Enregistrer dans l'historique
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO update_history 
+            INSERT INTO update_history
             (total_records, new_records, updated_records, status, source)
             VALUES (?, ?, ?, ?, ?)
-        ''', (len(df), new_records, updated_records, 'SUCCESS', 'CSV'))
+        ''', (len(df), new_records, updated_records, 'SUCCESS', source))
         self.conn.commit()
         
         logger.info(f"📥 Import terminé : {new_records} nouveaux, {updated_records} mis à jour")
         return new_records, updated_records
     
-    def import_from_csv(self, filepath: Optional[Path] = None) -> bool:
-        """Importe les certifications depuis le fichier CSV"""
+    def import_from_csv(self, filepath: Optional[Path] = None, source: str = 'CSV') -> bool:
+        """Importe les certifications depuis le fichier CSV.
+
+        `source` ('GLOBAL', 'ARTIST', 'SCRAPE', ...) est journalisé dans
+        update_history pour tracer l'origine de la MàJ.
+        """
         df = self.load_csv(filepath)
         if df.empty:
             return False
-        
-        new_records, updated_records = self.parse_and_import_csv(df)
+
+        new_records, updated_records = self.parse_and_import_csv(df, source=source)
         return True
+
+    def get_last_update(self, source: Optional[str] = None) -> Optional[str]:
+        """Retourne la date (ISO str) de la dernière MàJ réussie.
+
+        Si `source` est fourni (ex: 'GLOBAL'), ne considère que cette source.
+        Retourne None si aucune MàJ correspondante n'est enregistrée.
+        """
+        cursor = self.conn.cursor()
+        if source:
+            cursor.execute('''
+                SELECT update_date FROM update_history
+                WHERE status = 'SUCCESS' AND source = ?
+                ORDER BY update_date DESC LIMIT 1
+            ''', (source,))
+        else:
+            cursor.execute('''
+                SELECT update_date FROM update_history
+                WHERE status = 'SUCCESS'
+                ORDER BY update_date DESC LIMIT 1
+            ''')
+        row = cursor.fetchone()
+        return row[0] if row else None
     
     def get_artist_certifications(self, artist_name: str) -> List[Dict[str, Any]]:
         """Récupère toutes les certifications d'un artiste"""
@@ -508,6 +539,18 @@ class SNEPCertificationManager:
             if match not in results:
                 results.append(match)
 
+        # Stratégie 4: certif au titre TRONQUÉ (corruption SNEP des vieilles
+        # entrées). La certif est plus courte que le morceau et en est un
+        # préfixe (ex: "L'EMPIRE DU C" → "L'EMPIRE DU COTE OBSCUR"). En dernier
+        # recours uniquement, pour limiter les faux positifs.
+        if not results:
+            truncated_matches = self._search_truncated_certifications(
+                artist_clean, title_clean
+            )
+            for match in truncated_matches:
+                if match not in results:
+                    results.append(match)
+
         # Trier par ordre de priorité (Diamant > Platine > Or) et date
         cert_order = {
             'Quadruple Diamant': 1, 'Triple Diamant': 2, 'Double Diamant': 3, 'Diamant': 4,
@@ -550,6 +593,38 @@ class SNEPCertificationManager:
 
         fuzzy_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
         return fuzzy_results
+
+    def _search_truncated_certifications(self, artist_clean: str, title_clean: str,
+                                         min_len: int = 8) -> List[Dict[str, Any]]:
+        """Récupère les certifs dont le titre (TRONQUÉ dans la source SNEP) est
+        un préfixe du titre du morceau.
+
+        Gère la troncature des vieilles entrées SNEP (titres coupés sur les
+        caractères accentués). Gardes anti-faux-positifs :
+          - le titre du morceau doit faire au moins `min_len` caractères ;
+          - la certif doit être STRICTEMENT plus courte (donc tronquée) ;
+          - la certif doit faire au moins `min_len` caractères (pas de préfixe
+            trop court type "OR" qui matcherait n'importe quoi) ;
+          - on prend le préfixe le plus long (le plus spécifique).
+        """
+        if not title_clean or len(title_clean) < min_len:
+            return []
+
+        # Ici le titre du MORCEAU est le sujet du LIKE et le motif est la
+        # colonne `title_clean` (titre de la certif) suivie de '%'. On teste
+        # donc : « le titre du morceau commence-t-il par le titre de la certif ? »
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM certifications
+            WHERE artist_clean = ?
+              AND length(title_clean) >= ?
+              AND length(title_clean) < ?
+              AND ? LIKE title_clean || '%'
+            ORDER BY length(title_clean) DESC
+        ''', (artist_clean, min_len, len(title_clean), title_clean))
+
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def _search_featuring_certifications(self, artist_name: str, track_title: str) -> List[Dict[str, Any]]:
         """Recherche les certifications où l'artiste apparaît en featuring"""
@@ -693,6 +768,94 @@ class SNEPCertificationManager:
         
         return results
     
+    def audit_artist_certifications(self, artist_name: str,
+                                    track_titles: List[str],
+                                    album_titles: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Audite les certifs SNEP d'un artiste face à sa discographie connue.
+
+        Retourne les certifs « orphelines » (rattachées à rien), chacune avec sa
+        meilleure correspondance approximative — pour distinguer une certif
+        probablement TRONQUÉE/corrompue (proche d'un titre existant, donc
+        récupérable) d'une certif réellement ABSENTE de la discographie.
+
+        Une certif de catégorie **Albums** est comparée aux **albums** de
+        l'artiste ; une certif **Singles/Vidéos** à ses **morceaux**. Si
+        `album_titles` n'est pas fourni, on retombe sur les morceaux pour tout.
+
+        `track_titles` / `album_titles` = titres des morceaux / noms d'albums
+        (ex: current_artist.tracks et leurs `.album`).
+        """
+        import re as _re
+        import difflib
+
+        artist_clean = self.normalize_text(artist_name)
+
+        # Certifs de l'artiste : on récupère large (LIKE) PUIS on garde seulement
+        # celles où l'artiste apparaît comme MOT ENTIER (évite IAM ⊂ WILLIAMS).
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM certifications WHERE artist_clean LIKE ?',
+                       (f'%{artist_clean}%',))
+        columns = [d[0] for d in cursor.description]
+        certs = []
+        for row in cursor.fetchall():
+            d = dict(zip(columns, row))
+            if _re.search(r'\b' + _re.escape(artist_clean) + r'\b', d.get('artist_clean') or ''):
+                certs.append(d)
+
+        track_cleans = [self.normalize_text(t) for t in track_titles if t]
+        album_cleans = [self.normalize_text(a) for a in (album_titles or []) if a]
+
+        matched_tracks = 0
+        matched_albums = 0
+        orphans = []
+        for cert in certs:
+            ct = cert.get('title_clean') or ''
+            if not ct:
+                continue
+            # Référentiel selon la catégorie : Albums → albums, sinon morceaux.
+            # Repli sur les morceaux si la liste d'albums n'a pas été fournie.
+            is_album = (cert.get('category') == 'Albums')
+            ref_cleans = album_cleans if (is_album and album_cleans) else track_cleans
+            ref_set = set(ref_cleans)
+
+            is_match = (
+                ct in ref_set
+                or (len(ct) >= 8 and any(rc.startswith(ct) for rc in ref_cleans))
+                or any((ct in rc) or (rc in ct) for rc in ref_cleans if rc)
+            )
+            if is_match:
+                if is_album:
+                    matched_albums += 1
+                else:
+                    matched_tracks += 1
+                continue
+            # Meilleure correspondance approximative (diagnostic), dans le bon référentiel
+            best, best_r = None, 0.0
+            for rc in ref_cleans:
+                r = difflib.SequenceMatcher(None, ct, rc).ratio()
+                if r > best_r:
+                    best_r, best = r, rc
+            orphans.append({
+                'kind': 'album' if is_album else 'morceau',
+                'title': cert.get('title'),
+                'certification': cert.get('certification'),
+                'category': cert.get('category'),
+                'certification_date': cert.get('certification_date'),
+                'closest': best,
+                'ratio': round(best_r, 2),
+            })
+
+        orphans.sort(key=lambda o: -o['ratio'])
+        return {
+            'artist': artist_name,
+            'total': len(certs),
+            'matched': matched_tracks + matched_albums,
+            'matched_tracks': matched_tracks,
+            'matched_albums': matched_albums,
+            'orphans': orphans,
+            'has_tracks': bool(track_cleans),
+        }
+
     def close(self):
         """Ferme la connexion à la base de données"""
         self.conn.close()
@@ -708,3 +871,39 @@ def get_snep_manager() -> SNEPCertificationManager:
     if _snep_manager_instance is None:
         _snep_manager_instance = SNEPCertificationManager()
     return _snep_manager_instance
+
+
+def get_snep_last_update(source: Optional[str] = 'GLOBAL') -> Optional[str]:
+    """Lit la date de dernière MàJ depuis update_history via une connexion
+    éphémère (sûr à appeler depuis n'importe quel thread, ex: la GUI).
+
+    Retourne une chaîne ISO ou None. Par défaut, ne considère que les MàJ
+    GLOBALES (et non les récupérations par artiste qui ne reflètent pas
+    une mise à jour complète de la base).
+    """
+    db_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certifications.db'
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.cursor()
+            if source:
+                cur.execute(
+                    "SELECT update_date FROM update_history "
+                    "WHERE status='SUCCESS' AND source=? "
+                    "ORDER BY update_date DESC LIMIT 1",
+                    (source,),
+                )
+            else:
+                cur.execute(
+                    "SELECT update_date FROM update_history "
+                    "WHERE status='SUCCESS' ORDER BY update_date DESC LIMIT 1"
+                )
+            row = cur.fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"Lecture update_history impossible : {e}")
+        return None

@@ -167,45 +167,230 @@ def download_latest_snep_csv():
     return None
 
 
-_CERT_LEVELS = (
-    "Quadruple Diamant", "Triple Diamant", "Double Diamant", "Diamant",
-    "Triple Platine", "Double Platine", "Platine",
-    "Double Or", "Or",
-)
+import time
+import random
+import re as _re
 
-# Un bloc certification dans le texte de la page :
-# Catégorie \n TITRE \n ARTISTE \n LABEL \n Certification \n
-# Date de sortieJJ/MM/AAAA \n Date de constatJJ/MM/AAAA \n Durée d'obtention...
-_PAGE_ENTRY_RE = None  # construit paresseusement dans _parse_certifications_page
+try:
+    from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT
+except Exception:  # repli si config minimale
+    DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT = 1, 3, 30
+
+_SNEP_BASE = "https://snepmusique.com/les-certifications/"
+_HTTP_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Referer': _SNEP_BASE,
+}
+_CSV_HEADER = ("Interprete;Titre;Éditeur / Distributeur;Catégorie;"
+               "Certification;Date de sortie;Date de constat")
+
+
+def _get_session() -> "requests.Session":
+    """Session HTTP réutilisable (connexions keep-alive, headers communs)."""
+    s = requests.Session()
+    s.headers.update(_HTTP_HEADERS)
+    return s
+
+
+def _fetch(session, url: str, timeout: int = None) -> str:
+    """GET avec retries + backoff progressif (idée reprise du scraper Genius).
+
+    Respecte MAX_RETRIES / DELAY_BETWEEN_REQUESTS de config.py. Lève la
+    dernière exception si tous les essais échouent.
+    """
+    timeout = timeout or SELENIUM_TIMEOUT
+    last_exc = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = session.get(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp.text
+        except requests.RequestException as e:
+            last_exc = e
+            if attempt < MAX_RETRIES:
+                time.sleep(DELAY_BETWEEN_REQUESTS * attempt)
+    raise last_exc
 
 
 def _parse_certifications_page(html: str) -> list:
-    """Parse une page /les-certifications/ et retourne les lignes CSV (sans header)."""
-    import re as _re
+    """Parse une page /les-certifications/ via les sélecteurs DOM des blocs
+    `div.certification` (robuste, remplace l'ancien regex sur le texte brut).
+
+    Structure d'un bloc (inspectée en live) :
+        .certification
+          .description > .categorie / .titre / .artiste / .editeur
+          .certif.icon-XXX        (niveau : Or, Platine, Diamant…)
+          .block_dates > .date (valeur + <span> "Date de sortie/constat")
+
+    Retourne des lignes CSV (sans header) au format :
+        Interprete;Titre;Éditeur;Catégorie;Certif;Date sortie;Date constat
+    """
     from bs4 import BeautifulSoup
 
-    global _PAGE_ENTRY_RE
-    if _PAGE_ENTRY_RE is None:
-        levels = "|".join(_CERT_LEVELS)
-        _PAGE_ENTRY_RE = _re.compile(
-            r"(Singles|Albums|Vidéos)\n"
-            r"([^\n]+)\n"          # titre
-            r"([^\n]+)\n"          # artiste
-            r"([^\n]+)\n"          # label / distributeur
-            rf"({levels})\n"
-            r"Date de sortie\s*(\d{2}/\d{2}/\d{4})\n"
-            r"Date de constat\s*(\d{2}/\d{2}/\d{4})"
-        )
+    def _clean(s: str) -> str:
+        return _re.sub(r'\s+', ' ', (s or '')).strip()
 
     soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(separator="\n", strip=True)
-
     rows = []
-    for m in _PAGE_ENTRY_RE.finditer(text):
-        categorie, titre, artiste, label, certif, sortie, constat = m.groups()
-        # Même format que le CSV : Interprete;Titre;Éditeur;Catégorie;Certif;Sortie;Constat
-        rows.append(f"{artiste};{titre};{label};{categorie};{certif};{sortie};{constat}")
+
+    for block in soup.select("div.certification"):
+        desc = block.select_one(".description")
+        if desc is None:
+            continue
+
+        def field(sel):
+            el = desc.select_one(sel)
+            return _clean(el.get_text(" ", strip=True)) if el else ""
+
+        categorie = field(".categorie")
+        titre = field(".titre")
+        artiste = field(".artiste")
+        label = field(".editeur")
+
+        cert_el = block.select_one(".certif")
+        certif = _clean(cert_el.get_text(" ", strip=True)) if cert_el else ""
+
+        sortie = constat = ""
+        for d in block.select(".block_dates .date"):
+            span = d.find("span")
+            lab = span.get_text(strip=True).lower() if span else ""
+            val = d.get_text(" ", strip=True)
+            if span:
+                val = val.replace(span.get_text(" ", strip=True), "")
+            val = _clean(val)
+            if "sortie" in lab:
+                sortie = val
+            elif "constat" in lab:
+                constat = val
+
+        # Ligne valide seulement si les champs indispensables sont présents
+        if not (artiste and titre and certif and constat):
+            continue
+        rows.append(";".join([artiste, titre, label, categorie, certif, sortie, constat]))
+
     return rows
+
+
+def _row_key(fields: list) -> tuple:
+    """Clé de déduplication stable (sans le label, qui varie entre sources)."""
+    return (fields[0].strip().lower(), fields[1].strip().lower(),
+            fields[3], fields[4], fields[5], fields[6])
+
+
+def _load_existing(dest_path: Path):
+    """Charge le CSV maître : retourne (header, lignes_existantes, set_de_clés)."""
+    header = _CSV_HEADER
+    existing_lines = []
+    keys = set()
+    if dest_path.exists():
+        lines = dest_path.read_text(encoding='utf-8-sig').splitlines()
+        if lines:
+            header = lines[0]
+            existing_lines = [l for l in lines[1:] if l.strip()]
+            for line in existing_lines:
+                f = line.split(';')
+                if len(f) >= 7:
+                    keys.add((f[0].strip().lower(), f[1].strip().lower(),
+                              f[-4], f[-3], f[-2], f[-1]))
+    return header, existing_lines, keys
+
+
+def _write_merged(dest_path: Path, header: str, existing_lines: list, new_lines: list):
+    """Écrit l'union (existant + nouveautés) avec BOM UTF-8, si nouveautés."""
+    if new_lines:
+        dest_path.write_text(
+            '﻿' + header + '\n' + '\n'.join(existing_lines + new_lines) + '\n',
+            encoding='utf-8',
+        )
+
+
+def _discover_last_page(html: str) -> int:
+    """Déduit le numéro de dernière page depuis les liens de pagination.
+
+    Sur une page filtrée `?annee=YYYY`, tous les liens /page/N pointent vers
+    cette année — le max est donc la dernière page de l'année.
+    """
+    nums = [int(n) for n in _re.findall(r'/page/(\d+)', html)]
+    return max(nums) if nums else 1
+
+
+def _norm_for_match(s: str) -> str:
+    """Normalise pour comparaison : sans accents, en majuscules."""
+    import unicodedata
+    s = unicodedata.normalize('NFD', s or '')
+    s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+    return s.upper()
+
+
+def _artist_matches(artist_field: str, query: str) -> bool:
+    """Vrai si `query` apparaît comme MOT ENTIER dans le champ artiste
+    (insensible casse/accents). Évite le bruit de sous-chaîne du filtre SNEP
+    `?interprete=` (ex: 'IAM' qui matche WILLIAMS, LIAM, DIAM'S, IAMCHINO)."""
+    q = _norm_for_match(query)
+    if not q:
+        return True
+    return _re.search(r'\b' + _re.escape(q) + r'\b', _norm_for_match(artist_field)) is not None
+
+
+def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
+    """Scrape l'intégralité d'une année via le filtre serveur `?annee=YYYY`,
+    page par page, et fusionne les nouveautés dans le CSV maître.
+
+    C'est la brique de backfill / comblement de trous : contrairement au
+    rattrapage incrémental (qui s'arrête à la 1re page déjà connue), on
+    parcourt toutes les pages de l'année pour garantir la complétude.
+    Retourne le nombre de certifications ajoutées.
+    """
+    session = _get_session()
+    header, existing_lines, existing_keys = _load_existing(dest_path)
+
+    url1 = f"{_SNEP_BASE}?annee={year}"
+    try:
+        html = _fetch(session, url1)
+    except requests.RequestException as e:
+        safe_print(f"❌ Année {year} : page 1 inaccessible : {e}")
+        return 0
+
+    last_page = min(_discover_last_page(html), max_pages)
+    safe_print(f"📅 Année {year} : {last_page} page(s) à parcourir")
+
+    new_lines = []
+    page = 1
+    while page <= last_page:
+        if page == 1:
+            cur_html = html
+        else:
+            url = f"{_SNEP_BASE}page/{page}?annee={year}"
+            try:
+                cur_html = _fetch(session, url)
+            except requests.RequestException as e:
+                safe_print(f"❌ Année {year} page {page} : {e} — arrêt")
+                break
+
+        rows = _parse_certifications_page(cur_html)
+        if not rows:
+            safe_print(f"⚠️ Année {year} page {page} : aucun bloc — arrêt")
+            break
+
+        page_new = 0
+        for row in rows:
+            f = row.split(';')
+            if len(f) < 7:
+                continue
+            key = _row_key(f)
+            if key not in existing_keys:
+                existing_keys.add(key)
+                new_lines.append(row)
+                page_new += 1
+
+        safe_print(f"📄 {year} p{page}/{last_page} : {len(rows)} certifs, {page_new} nouvelle(s)")
+        page += 1
+        if page <= last_page:
+            time.sleep(random.uniform(DELAY_BETWEEN_REQUESTS, DELAY_BETWEEN_REQUESTS * 1.8))
+
+    _write_merged(dest_path, header, existing_lines, new_lines)
+    safe_print(f"🔀 Année {year} : {len(new_lines)} nouvelle(s) certification(s) fusionnée(s)")
+    return len(new_lines)
 
 
 def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
@@ -304,9 +489,9 @@ def update_snep_database():
     stats_before = manager.get_certification_stats()
     total_before = stats_before['total_certifications']
     
-    # Importer les données
-    success = manager.import_from_csv(csv_path)
-    
+    # Importer les données (MàJ GLOBALE — tracée comme telle dans update_history)
+    success = manager.import_from_csv(csv_path, source='GLOBAL')
+
     if success:
         # Obtenir les stats après mise à jour
         stats_after = manager.get_certification_stats()
@@ -417,7 +602,30 @@ def fetch_artist_certifications(artist_name: str) -> bool:
     if not lines or 'Interprete' not in lines[0]:
         safe_print("❌ Contenu CSV inattendu, abandon")
         return False
-    safe_print(f"✅ {len(lines) - 1} certification(s) pour '{artist_name}'")
+    safe_print(f"✅ {len(lines) - 1} certification(s) renvoyée(s) par le SNEP")
+
+    # Filtre mot-entier : le SNEP fait un `contains` sur ?interprete=, donc
+    # 'IAM' ramène aussi WILLIAMS, LIAM, DIAM'S… On ne garde que les lignes où
+    # l'artiste correspond réellement au terme recherché (comme mot entier).
+    header_line = lines[0]
+    kept = [header_line]
+    dropped = 0
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        artist_field = line.split(';')[0]
+        if _artist_matches(artist_field, artist_name):
+            kept.append(line)
+        else:
+            dropped += 1
+    content = '\n'.join(kept) + '\n'
+    lines = kept
+    safe_print(f"🔎 Filtre mot entier '{artist_name}' : "
+               f"{len(kept) - 1} gardée(s), {dropped} bruit écarté(s)")
+    if len(kept) <= 1:
+        safe_print("⚠️ Aucune ligne ne correspond exactement — abandon "
+                   "(artiste mal orthographié ou inconnu ?)")
+        return False
 
     # 4. Fusionner dans le CSV maître
     dest_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
@@ -440,12 +648,34 @@ def fetch_artist_certifications(artist_name: str) -> bool:
         tmp.unlink(missing_ok=True)
     safe_print(f"🔀 {added} nouvelle(s) certification(s) ajoutée(s) au CSV maître")
 
-    # 5. Réimporter en base
+    # 5. Réimporter en base (récupération ARTISTE — ne compte PAS comme MàJ globale)
     safe_print("\n📥 Import dans la base de données...")
     manager = SNEPCertificationManager()
-    success = manager.import_from_csv(dest_path)
+    success = manager.import_from_csv(dest_path, source='ARTIST')
     safe_print("✅ Import terminé" if success else "❌ Erreur d'import")
     return success
+
+
+def backfill_years(years) -> int:
+    """Scrape intégralement une ou plusieurs années (filtre ?annee=) dans le
+    CSV maître puis réimporte en base. Brique de comblement de trous.
+    """
+    dest_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    safe_print("=" * 60)
+    safe_print(f"BACKFILL SNEP — année(s) : {', '.join(str(y) for y in years)}")
+    safe_print("=" * 60)
+
+    total = 0
+    for y in years:
+        total += scrape_year(dest_path, int(y))
+
+    safe_print("\n📥 Import dans la base de données...")
+    manager = SNEPCertificationManager()
+    manager.import_from_csv(dest_path, source='SCRAPE')
+    safe_print(f"✅ Backfill terminé : {total} nouvelle(s) certification(s) au total")
+    return total
 
 
 def main():
@@ -476,10 +706,20 @@ def main():
         default=None,
         help="Récupérer le CSV complet d'un artiste (filtre ?interprete=) et le fusionner"
     )
+    parser.add_argument(
+        '--year',
+        type=int,
+        action='append',
+        default=None,
+        metavar='AAAA',
+        help="Backfill complet d'une année via ?annee= (répétable, ex: --year 2025 --year 2026)"
+    )
 
     args = parser.parse_args()
 
-    if args.artist:
+    if args.year:
+        backfill_years(args.year)
+    elif args.artist:
         fetch_artist_certifications(args.artist)
     elif args.scheduled:
         # Mode silencieux pour les tâches planifiées
@@ -496,3 +736,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+# fin — scraper SNEP : parser BS4 par sélecteurs + backfill par année (?annee=)

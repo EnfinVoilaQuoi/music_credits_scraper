@@ -102,8 +102,17 @@ class DataEnricher:
             logger.warning(f"⚠️ Discogs API non disponible: {e}")
             self.apis_available['discogs'] = False
 
+        # Client Genius (pour les feats : media/album/relations avant ReccoBeats)
+        self.genius_client = None
+        try:
+            from src.api.genius_api import GeniusAPI
+            self.genius_client = GeniusAPI()
+            logger.info("✅ Genius API initialisée (media feats)")
+        except Exception as e:
+            logger.debug(f"Genius API non disponible dans l'enricher: {e}")
+
         logger.info(f"Sources disponibles: {[k for k, v in self.apis_available.items() if v]}")
-    
+
     def close(self):
         """Ferme toutes les connexions"""
         if self.reccobeats_client:
@@ -381,6 +390,24 @@ class DataEnricher:
 
         # Candidats BPM collectés par chaque source → vote final (_finalize_bpm)
         track._bpm_candidates = []
+
+        # ========================================
+        # FEATS : media/album/relations via API Genius AVANT ReccoBeats
+        # (le Spotify ID Genius fiabilise la chaîne ; 1 appel/feat espace les requêtes).
+        # Les primaires ont déjà été traités à l'import (_prefill_via_song_api).
+        # ========================================
+        if (getattr(track, 'is_featuring', False) and self.genius_client
+                and getattr(track, 'genius_id', None)
+                and (not getattr(track, 'spotify_id', None)
+                     or not getattr(track, 'relationships', None))):
+            try:
+                if self.genius_client.apply_song_metadata(track):
+                    logger.info(
+                        f"🎫 Genius (feat) '{track.title}' : Spotify={getattr(track, 'spotify_id', None)}, "
+                        f"relations={len(getattr(track, 'relationships', []) or [])}"
+                    )
+            except Exception as e:
+                logger.debug(f"Genius media feat échec: {e}")
 
         # ========================================
         # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright)
@@ -822,15 +849,20 @@ class DataEnricher:
             logger.info(f"🧮 BPM réconcilié: {bpm}{alt_str} (source(s): {src}, confiance: {conf} | candidats: {cands})")
         track._bpm_candidates = []
 
-    def _apply_reccobeats_result(self, track: Track, track_info: Dict) -> bool:
+    def _apply_reccobeats_result(self, track: Track, track_info: Dict, resolution: Optional[str] = None) -> bool:
         """
         Applique au track les données d'un result ReccoBeats (bpm/key/mode/
         musical_key/duration), de façon non destructive pour la durée.
+
+        Args:
+            resolution: 'isrc' ou 'spotify_id' — voie de résolution (debug).
 
         Returns:
             bool: True si au moins le BPM ou la Key a été posé.
         """
         applied = False
+        if resolution:
+            track.reccobeats_resolution = resolution
 
         # BPM → candidat pour le vote (+ pose provisoire si manquant)
         bpm = track_info.get('bpm')
@@ -846,9 +878,11 @@ class DataEnricher:
         # Key / Mode
         if track_info.get('key') is not None:
             track.key = track_info['key']
+            track.key_mode_source = 'reccobeats'
             applied = True
         if track_info.get('mode') is not None:
             track.mode = track_info['mode']
+            track.key_mode_source = 'reccobeats'
 
         if getattr(track, 'key', None) is not None and getattr(track, 'mode', None) is not None:
             try:
@@ -900,7 +934,7 @@ class DataEnricher:
             logger.error(f"❌ ReccoBeats ISRC API: {e}")
             info = None
 
-        if info and info.get('success') and self._apply_reccobeats_result(track, info):
+        if info and info.get('success') and self._apply_reccobeats_result(track, info, resolution='isrc'):
             logger.info(f"ReccoBeats: ✅ SUCCÈS via ISRC pour '{track.title}' (scrape Spotify évité)")
             return True
 
@@ -1007,7 +1041,8 @@ class DataEnricher:
                 return False
 
             logger.debug(f"ReccoBeats: ✅ Données récupérées")
-            
+            track.reccobeats_resolution = 'spotify_id'
+
             # Stocker le BPM
             bpm = None
             if 'bpm' in track_info:
@@ -1029,10 +1064,12 @@ class DataEnricher:
             # Stocker Key et Mode
             if 'key' in track_info and track_info['key'] is not None:
                 track.key = track_info['key']
+                track.key_mode_source = 'reccobeats'
                 logger.info(f"ReccoBeats: ✅ Key: {track.key}")
-            
+
             if 'mode' in track_info and track_info['mode'] is not None:
                 track.mode = track_info['mode']
+                track.key_mode_source = 'reccobeats'
                 logger.info(f"ReccoBeats: ✅ Mode: {track.mode}")
 
             if hasattr(track, 'key') and hasattr(track, 'mode') and track.key is not None and track.mode is not None:
@@ -1124,6 +1161,7 @@ class DataEnricher:
                 try:
                     from src.utils.music_theory import convert_key_to_numeric
                     track.key = convert_key_to_numeric(song_data.key)
+                    track.key_mode_source = 'getsongbpm'
                     logger.info(f"GetSongBPM: ✅ Key: {song_data.key} → {track.key}")
                 except:
                     logger.debug(f"GetSongBPM: Key brute stockée: {song_data.key}")
@@ -1133,6 +1171,7 @@ class DataEnricher:
             if song_data.mode and (force_update or not track.mode):
                 # Convertir "major"/"minor" en 1/0
                 track.mode = 1 if song_data.mode == "major" else 0
+                track.key_mode_source = 'getsongbpm'
                 logger.info(f"GetSongBPM: ✅ Mode: {song_data.mode}")
                 updated = True
 
@@ -1270,11 +1309,13 @@ class DataEnricher:
             if key_value and mode_value:
                 if force_update or not hasattr(track, 'key') or not track.key:
                     track.key = key_value
+                    track.key_mode_source = 'songbpm'
                     logger.info(f"🎵 Key ajoutée depuis SongBPM: {track.key} pour {track.title}")
                     updated = True
-                
+
                 if force_update or not hasattr(track, 'mode') or not track.mode:
                     track.mode = mode_value
+                    track.key_mode_source = 'songbpm'
                     logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
                     updated = True
             

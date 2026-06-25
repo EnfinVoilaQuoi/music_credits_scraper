@@ -18,6 +18,7 @@ from src.utils.youtube_integration import youtube_integration
 from src.models import Artist, Track
 from tkinter import ttk as tkinter_ttv
 from src.utils.disabled_tracks_manager import DisabledTracksManager
+from src.utils.deleted_tracks_manager import DeletedTracksManager
 from src.gui.certification_update_gui import CertificationUpdateDialog
 
 
@@ -55,6 +56,7 @@ class MainWindow:
         self.sort_reverse = False
         self.last_selected_index = None  # Sélection multiple
         self.disabled_tracks_manager = DisabledTracksManager()
+        self.deleted_tracks_manager = DeletedTracksManager()
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         
         self._create_widgets()
@@ -475,7 +477,13 @@ class MainWindow:
                     artist_display = track.primary_artist_name
                 else:
                     artist_display = track.artist.name if track.artist else ""
-                
+
+                # Rôle secondaire (Additional Voices…) : marqueur distinct du feat
+                _sec_role = getattr(track, 'secondary_role', None)
+                if _sec_role:
+                    artist_display = f"{artist_display} · 🎙️ {_sec_role}"
+                    title = f"🎙️ {title}"
+
                 album = getattr(track, 'album', '') or ""
                 
                 # Date de sortie - FORMAT FRANÇAIS (JJ/MM/AAAA)
@@ -741,6 +749,13 @@ class MainWindow:
         try:
             if track.id:
                 self.data_manager.delete_track(track.id)
+            # Mémoriser la suppression (genius_id) pour éviter le réajout au prochain import
+            try:
+                self.deleted_tracks_manager.add_deleted(
+                    self.current_artist.name, getattr(track, 'genius_id', None), track.title
+                )
+            except Exception as e:
+                logger.debug(f"Mémo suppression échec: {e}")
             self.current_artist.tracks.pop(index)
             # Les indices ne sont plus valides
             self.selected_tracks.clear()
@@ -1126,9 +1141,17 @@ class MainWindow:
         is_featuring = getattr(track, 'is_featuring', False)
         primary_artist = getattr(track, 'primary_artist_name', None)
         featured_artists = getattr(track, 'featured_artists', None)
-        
-        if is_featuring:
-            ctk.CTkLabel(left_column, text="🎤 MORCEAU EN FEATURING", 
+        secondary_role = getattr(track, 'secondary_role', None)
+
+        if secondary_role:
+            ctk.CTkLabel(left_column, text=f"🎙️ RÔLE SECONDAIRE — {secondary_role}",
+                        font=("Arial", 12, "bold"), text_color="#C58AF0").pack(anchor="w", pady=2)
+            if primary_artist:
+                ctk.CTkLabel(left_column, text=f"Artiste principal: {primary_artist}").pack(anchor="w", pady=1)
+            who = track.artist.name if track.artist else self.current_artist.name
+            ctk.CTkLabel(left_column, text=f"Contribution de: {who}").pack(anchor="w", pady=1)
+        elif is_featuring:
+            ctk.CTkLabel(left_column, text="🎤 MORCEAU EN FEATURING",
                         font=("Arial", 12, "bold"), text_color="orange").pack(anchor="w", pady=2)
             if primary_artist:
                 ctk.CTkLabel(left_column, text=f"Artiste principal: {primary_artist}").pack(anchor="w", pady=1)
@@ -1386,16 +1409,35 @@ class MainWindow:
         artist_name = track.artist.name if track.artist else self.current_artist.name
         release_year = self.get_release_year_safely(track)
 
-        youtube_result = youtube_integration.get_youtube_link_for_track(
-            artist_name, track.title, track.album, release_year
-        )
+        # Priorité au lien YouTube fourni par Genius (media), recherche en fallback
+        _genius_yt = getattr(track, 'youtube_url', None)
+        if _genius_yt:
+            youtube_result = {
+                'type': 'direct',
+                'url': _genius_yt,
+                'confidence': 1.0,
+                'title': track.title,
+                'channel': 'Genius (media)',
+                'source': 'genius_media',
+            }
+        else:
+            youtube_result = youtube_integration.get_youtube_link_for_track(
+                artist_name, track.title, track.album, release_year
+            )
 
         # Affichage selon le type de résultat
-        if youtube_result['type'] == 'direct':
-            # Lien direct trouvé automatiquement
+        if youtube_result.get('source') == 'genius_media':
+            # Lien fourni par Genius (media) — prioritaire, distinct du fallback recherche
+            label_text = "▶️ Voir (Genius ✓)"
+            label_color = "#1DB954"  # Vert = source fiable Genius
+            tooltip_text = (f"Lien YouTube fourni par Genius (media)\n"
+                            f"Titre: {youtube_result.get('title', 'N/A')}\n"
+                            f"URL: {youtube_result.get('url', 'N/A')}")
+        elif youtube_result['type'] == 'direct':
+            # Lien direct trouvé automatiquement (recherche)
             label_text = f"▶️ Voir (auto • {youtube_result['confidence']:.0%})"
             label_color = "#FF0000"  # Rouge YouTube
-            tooltip_text = (f"Lien automatique sélectionné\n"
+            tooltip_text = (f"Lien automatique sélectionné (recherche)\n"
                             f"Titre: {youtube_result.get('title', 'N/A')}\n"
                             f"Chaîne: {youtube_result.get('channel', 'N/A')}\n"
                             f"Confiance: {youtube_result['confidence']:.1%}")
@@ -1529,7 +1571,51 @@ class MainWindow:
             
             video_textbox.configure(state="disabled")
         
-        # === ONGLET 3: PAROLES ===
+        # === ONGLET 3: SAMPLES / RELATIONS (inspiré de) ===
+        samples_frame = ctk.CTkFrame(notebook)
+        notebook.add(samples_frame, text="🎚️ Samples")
+        samples_scroll = ctk.CTkScrollableFrame(samples_frame, width=850, height=600)
+        samples_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        ctk.CTkLabel(
+            samples_scroll,
+            text="🎚️ Inspiré de (samples • interpolations • reprises • remix • trad. FR)",
+            font=("Arial", 14, "bold")
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+        _rels = getattr(track, 'relationships', None) or []
+        if not _rels:
+            ctk.CTkLabel(
+                samples_scroll,
+                text="Aucune relation détectée.\n(Re-fetch la discographie pour les primaires, ré-enrichis le feat.)",
+                text_color="gray", justify="left"
+            ).pack(anchor="w", padx=14, pady=8)
+        else:
+            import webbrowser
+            from collections import defaultdict as _dd
+            _type_label = {
+                'samples': '🎵 Sample de', 'interpolates': '🎼 Interpole',
+                'cover_of': '🎤 Reprise de', 'remix_of': '🔁 Remix de',
+                'translation_fr': '🇫🇷 Traduction FR',
+            }
+            _grouped = _dd(list)
+            for _r in _rels:
+                _grouped[_r.get('type')].append(_r)
+            for _typ in ['samples', 'interpolates', 'cover_of', 'remix_of', 'translation_fr']:
+                _items = _grouped.get(_typ) or []
+                if not _items:
+                    continue
+                ctk.CTkLabel(samples_scroll, text=f"━━━ {_type_label.get(_typ, _typ)} ━━━",
+                             font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=(8, 2))
+                for _r in _items:
+                    _txt = f"   • {_r.get('title') or '?'} — {_r.get('artist') or '?'}"
+                    _url = _r.get('url')
+                    _lbl = ctk.CTkLabel(samples_scroll, text=_txt,
+                                        text_color=("#1f6aa5", "#4aa3df") if _url else ("gray20", "gray70"),
+                                        cursor="hand2" if _url else "arrow", anchor="w", justify="left")
+                    _lbl.pack(anchor="w", padx=14, pady=1)
+                    if _url:
+                        _lbl.bind("<Button-1>", lambda e, u=_url: webbrowser.open(u))
+
+        # === ONGLET 4: PAROLES ===
         lyrics_frame = ctk.CTkFrame(notebook)
         if has_lyrics:
             notebook.add(lyrics_frame, text="📝 Paroles")
@@ -1688,17 +1774,114 @@ class MainWindow:
                 tech_textbox.insert("end", f"   📄 Titre: {display_title}\n")
         if track.discogs_id:
             tech_textbox.insert("end", f"💿 Discogs ID: {track.discogs_id}\n")
-        
+        if getattr(track, 'isrc', None):
+            tech_textbox.insert("end", f"🆔 ISRC: {track.isrc}\n")
+
         # Popularité
         if hasattr(track, 'popularity') and track.popularity:
             tech_textbox.insert("end", f"📈 Popularité: {track.popularity}\n")
-        
+
         # Artwork
         if getattr(track, 'artwork_url', None):
             tech_textbox.insert("end", f"🖼️ Artwork: {track.artwork_url}\n")
-        
+
+        # ── PROVENANCE DES MÉTADONNÉES ──────────────────────────────
+        def _yn(v):
+            return "✅" if v else "❌"
+        tech_textbox.insert("end", "\n🧭 PROVENANCE\n")
+        _album_api = getattr(track, '_album_from_api', None)
+        _album_src = "API Genius" if _album_api else ("scrape" if track.album else "—")
+        tech_textbox.insert("end", f"• Album : {track.album or 'N/A'}  ({_album_src})\n")
+        _rd_api = getattr(track, '_release_date_from_api', None)
+        _rd_src = "API Genius" if _rd_api else ("scrape" if track.release_date else "—")
+        tech_textbox.insert("end", f"• Date de sortie : {track.release_date or 'N/A'}  ({_rd_src})\n")
+        _sp_src = "Genius media" if getattr(track, '_spotify_from_api', None) else (
+            "scrape Spotify" if getattr(track, 'spotify_page_title', None) else (
+                "—" if not track.spotify_id else "Genius media?"))
+        tech_textbox.insert("end", f"• Spotify ID : {_yn(track.spotify_id)}  ({_sp_src})\n")
+        # youtube_url n'est écrit que par Genius media ; la recherche reste un fallback live (non persisté)
+        _yt_src = "Genius media" if getattr(track, 'youtube_url', None) else "recherche live (fallback)"
+        tech_textbox.insert("end", f"• YouTube : {_yn(getattr(track, 'youtube_url', None))}  ({_yt_src})\n")
+        _isrc_src = getattr(track, '_isrc_source', None) or ("Deezer/ReccoBeats" if getattr(track, 'isrc', None) else "—")
+        tech_textbox.insert("end", f"• ISRC : {_yn(getattr(track, 'isrc', None))}  ({_isrc_src})\n")
+
+        # ── PAROLES ─────────────────────────────────────────────────
+        _ly = track.lyrics or ""
+        _has_struct = any(ln.lstrip().startswith('[') for ln in _ly.splitlines())
+        _has_ts = bool(getattr(track, 'lyrics_synced', None))
+        _ly_src = getattr(track, 'lyrics_source', None) or "—"
+        tech_textbox.insert("end", "\n📝 PAROLES\n")
+        tech_textbox.insert("end", f"• Texte présent : {_yn(_ly)}  (source : {_ly_src})\n")
+        tech_textbox.insert("end", f"• Structure Genius [Couplet/Refrain] : {_yn(_has_struct)}\n")
+        tech_textbox.insert("end", f"• Timestamps YTM : {_yn(_has_ts)}\n")
+
+        # ── DONNÉES AUDIO (BPM / KEY / MODE) ────────────────────────
+        tech_textbox.insert("end", "\n🎛️ DONNÉES AUDIO\n")
+        _bpm = getattr(track, 'bpm', None)
+        _bpm_alt = getattr(track, 'bpm_alt', None)
+        _bpm_src = getattr(track, 'bpm_source', None) or "—"
+        _bpm_conf = getattr(track, 'bpm_confidence', None)
+        tech_textbox.insert("end", f"• Provenance BPM : {_bpm_src}\n")
+        _conf_txt = f"{_bpm_conf}" if _bpm_conf is not None else "—"
+        tech_textbox.insert("end", f"• Arbitrage (vote) : confiance {_conf_txt}\n")
+        if _bpm:
+            _alt_txt = f" • alt half/double-time : {_bpm_alt}" if _bpm_alt else " • pas d'octave alternative"
+            tech_textbox.insert("end", f"• BPM réel : {_bpm}{_alt_txt}\n")
+        else:
+            tech_textbox.insert("end", "• BPM réel : N/A\n")
+        _km_src = getattr(track, 'key_mode_source', None) or "—"
+        tech_textbox.insert("end", f"• Source Key/Mode : {_km_src}\n")
+        _rb_res = getattr(track, 'reccobeats_resolution', None) or "—"
+        tech_textbox.insert("end", f"• Résolution ReccoBeats : {_rb_res}\n")
+
+        # ── STREAMS & DURÉE ─────────────────────────────────────────
+        tech_textbox.insert("end", "\n📦 STREAMS & DURÉE\n")
+        _sp_streams = getattr(track, 'spotify_streams', None)
+        if _sp_streams is not None:
+            _sp_upd = getattr(track, 'spotify_streams_updated', None)
+            _sp_when = f"  (maj {self._format_datetime(_sp_upd)})" if _sp_upd else ""
+            _n = f"{_sp_streams:,}".replace(",", " ")
+            tech_textbox.insert("end", f"• Spotify : {_n}{_sp_when}\n")
+        else:
+            tech_textbox.insert("end", "• Spotify : —\n")
+        _ytm_streams = getattr(track, 'ytm_streams', None)
+        if _ytm_streams is not None:
+            _ytm_upd = getattr(track, 'ytm_streams_updated', None)
+            _ytm_when = f"  (maj {self._format_datetime(_ytm_upd)})" if _ytm_upd else ""
+            _n = f"{_ytm_streams:,}".replace(",", " ")
+            tech_textbox.insert("end", f"• YouTube Music : {_n}{_ytm_when}\n")
+        else:
+            tech_textbox.insert("end", "• YouTube Music : —\n")
+        _dur = getattr(track, 'duration', None)
+        if _dur:
+            tech_textbox.insert("end", f"• Durée : {int(_dur)//60}:{int(_dur)%60:02d}  ({int(_dur)}s)\n")
+        else:
+            tech_textbox.insert("end", "• Durée : —\n")
+
+        # ── COMPLÉTUDE (à ré-enrichir ?) ────────────────────────────
+        tech_textbox.insert("end", "\n🩺 COMPLÉTUDE\n")
+        _missing = []
+        if not getattr(track, 'bpm', None):
+            _missing.append("BPM")
+        if getattr(track, 'key', None) is None or getattr(track, 'mode', None) is None:
+            _missing.append("Key/Mode")
+        if not getattr(track, 'isrc', None):
+            _missing.append("ISRC")
+        if not (track.lyrics or ""):
+            _missing.append("paroles")
+        if not getattr(track, 'spotify_id', None):
+            _missing.append("Spotify ID")
+        if _missing:
+            tech_textbox.insert("end", "• ⚠️ Manque : " + ", ".join(_missing) + "  → à ré-enrichir\n")
+        else:
+            tech_textbox.insert("end", "• ✅ Complet\n")
+
+        # ── RELATIONS ───────────────────────────────────────────────
+        _nrel = len(getattr(track, 'relationships', None) or [])
+        tech_textbox.insert("end", f"\n🎚️ Relations : {_nrel}\n")
+
         # Métadonnées de scraping
-        tech_textbox.insert("end", f"\n📅 HISTORIQUE:\n")
+        tech_textbox.insert("end", "\n📅 HISTORIQUE\n")
         if track.last_scraped:
             tech_textbox.insert("end", f"• Dernier scraping: {self._format_datetime(track.last_scraped)}\n")
         if track.created_at:
@@ -1823,6 +2006,7 @@ class MainWindow:
         tech_textbox.insert("end", f"\n🎤 DEBUG FEATURING:\n")
         tech_textbox.insert("end", f"• is_featuring: {getattr(track, 'is_featuring', 'Non défini')}\n")
         tech_textbox.insert("end", f"• primary_artist_name: {getattr(track, 'primary_artist_name', 'Non défini')}\n")
+        tech_textbox.insert("end", f"• secondary_role: {getattr(track, 'secondary_role', None) or '—'}\n")
         tech_textbox.insert("end", f"• featured_artists: {getattr(track, 'featured_artists', 'Non défini')}\n")
         tech_textbox.insert("end", f"• track.artist.name: {track.artist.name if track.artist else 'Non défini'}\n")
         tech_textbox.insert("end", f"• current_artist.name: {self.current_artist.name if self.current_artist else 'Non défini'}\n")
@@ -1844,6 +2028,12 @@ class MainWindow:
         # === ONGLET STREAMS ===
         streams_frame = ctk.CTkFrame(notebook)
         notebook.add(streams_frame, text="📊 Streams")
+
+        # Onglet « Technique » (debug) déplacé en dernier, après Streams
+        try:
+            notebook.insert("end", tech_frame)
+        except Exception:
+            pass
 
         try:
             from src.utils.streams_calculator import (
@@ -2840,13 +3030,13 @@ class MainWindow:
         # Inclure les features
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Options de récupération")
-        dialog.geometry("450x500")
-        
+        dialog.geometry("480x820")
+
         # Centrer la fenêtre
         dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (225)
-        y = (dialog.winfo_screenheight() // 2) - (250)
-        dialog.geometry(f"450x500+{x}+{y}")
+        x = (dialog.winfo_screenwidth() // 2) - (240)
+        y = (dialog.winfo_screenheight() // 2) - (410)
+        dialog.geometry(f"480x820+{x}+{y}")
         
         dialog.lift()
         dialog.focus_force()
@@ -2854,6 +3044,9 @@ class MainWindow:
         
         # Variables pour les options
         include_features_var = ctk.BooleanVar(value=True)  # Par défaut, inclure les features
+        prefill_var = ctk.BooleanVar(value=True)  # Appel API album + Spotify/YouTube (media)
+        include_secondary_var = ctk.BooleanVar(value=False)  # Rôles secondaires (Additional Voices…)
+        respect_deleted_var = ctk.BooleanVar(value=True)  # Ne pas réajouter les morceaux supprimés
         max_songs_var = ctk.IntVar(value=200)
         
         # Interface
@@ -2871,11 +3064,71 @@ class MainWindow:
             font=("Arial", 12)
         ).pack(anchor="w", padx=15, pady=12)
         
-        ctk.CTkLabel(features_frame, 
+        ctk.CTkLabel(features_frame,
                     text="✓ Recommandé : permet de récupérer plus de morceaux",
                     text_color="gray",
                     font=("Arial", 10)).pack(anchor="w", padx=15, pady=(0, 8))
-        
+
+        # Checkbox pour l'appel API album + media (Spotify/YouTube/relations)
+        prefill_frame = ctk.CTkFrame(dialog)
+        prefill_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+        ctk.CTkCheckBox(
+            prefill_frame,
+            text="Récupérer album + Spotify/YouTube (API media)",
+            variable=prefill_var,
+            font=("Arial", 12)
+        ).pack(anchor="w", padx=15, pady=12)
+
+        ctk.CTkLabel(prefill_frame,
+                    text="⚡ Appel API détail par morceau primaire (album, Spotify ID, lien YouTube, relations).\n"
+                         "Décocher = liste seule (plus rapide, le scrape rattrapera).",
+                    text_color="gray",
+                    font=("Arial", 10),
+                    justify="left").pack(anchor="w", padx=15, pady=(0, 8))
+
+        # Checkbox pour les rôles secondaires (Additional Voices, chœurs…)
+        secondary_frame = ctk.CTkFrame(dialog)
+        secondary_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+        ctk.CTkCheckBox(
+            secondary_frame,
+            text="Inclure les rôles secondaires (chœurs, Additional Voices…)",
+            variable=include_secondary_var,
+            font=("Arial", 12)
+        ).pack(anchor="w", padx=15, pady=12)
+
+        ctk.CTkLabel(secondary_frame,
+                    text="🎙️ Vérifie chaque candidat au détail (id exact) → garde la vraie contribution\n"
+                         "avec son rôle, écarte les homonymes. Quelques appels API en plus.",
+                    text_color="gray",
+                    font=("Arial", 10),
+                    justify="left").pack(anchor="w", padx=15, pady=(0, 8))
+
+        # Checkbox : ne pas réajouter les morceaux supprimés
+        deleted_frame = ctk.CTkFrame(dialog)
+        deleted_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+        ctk.CTkCheckBox(
+            deleted_frame,
+            text="Ne pas réajouter les morceaux supprimés",
+            variable=respect_deleted_var,
+            font=("Arial", 12)
+        ).pack(anchor="w", padx=15, pady=12)
+
+        _deleted_count = 0
+        try:
+            if self.current_artist:
+                _deleted_count = len(self.deleted_tracks_manager.load_deleted_ids(self.current_artist.name))
+        except Exception:
+            _deleted_count = 0
+        ctk.CTkLabel(deleted_frame,
+                    text=f"🗂️ Respecte l'historique des suppressions ({_deleted_count} morceau(x) mémorisé(s)).\n"
+                         "Décocher = autorise leur retour à cet import.",
+                    text_color="gray",
+                    font=("Arial", 10),
+                    justify="left").pack(anchor="w", padx=15, pady=(0, 8))
+
         # Nombre maximum de morceaux
         max_songs_frame = ctk.CTkFrame(dialog)
         max_songs_frame.pack(fill="x", padx=20, pady=15)
@@ -2904,34 +3157,56 @@ class MainWindow:
         button_frame = ctk.CTkFrame(dialog)
         button_frame.pack(fill="x", padx=20, pady=20)
         
-        def start_retrieval():
+        def start_retrieval(update_only: bool = False):
             try:
                 max_songs = int(max_songs_entry.get())
                 if max_songs <= 0:
                     max_songs = 300
             except ValueError:
                 max_songs = 300
-            
+
             include_features = include_features_var.get()
+            prefill = prefill_var.get()
+            include_secondary = include_secondary_var.get()
+            respect_deleted = respect_deleted_var.get()
             dialog.destroy()
-            self._start_track_retrieval(max_songs, include_features)
-        
+            self._start_track_retrieval(max_songs, include_features,
+                                        prefill=prefill, update_only=update_only,
+                                        include_secondary=include_secondary,
+                                        respect_deleted=respect_deleted)
+
         def cancel():
             dialog.destroy()
-        
-        ctk.CTkButton(button_frame, text="🎵 Récupérer", 
-                 command=start_retrieval, width=130, height=35).pack(side="left", padx=10)
-        ctk.CTkButton(button_frame, text="❌ Annuler", 
-                 command=cancel, width=130, height=35).pack(side="right", padx=10)
 
-    def _start_track_retrieval(self, max_songs: int, include_features: bool):
-        """Lance la récupération des morceaux avec les options choisies"""
+        ctk.CTkButton(button_frame, text="🎵 Récupérer",
+                 command=lambda: start_retrieval(update_only=False),
+                 width=120, height=35).pack(side="left", padx=6)
+        ctk.CTkButton(button_frame, text="🔄 Mettre à jour",
+                 command=lambda: start_retrieval(update_only=True),
+                 fg_color="#2A8C4A", hover_color="#23733D",
+                 width=130, height=35).pack(side="left", padx=6)
+        ctk.CTkButton(button_frame, text="❌ Annuler",
+                 command=cancel, width=90, height=35).pack(side="right", padx=6)
+
+    def _start_track_retrieval(self, max_songs: int, include_features: bool,
+                               prefill: bool = True, update_only: bool = False,
+                               include_secondary: bool = False, respect_deleted: bool = True):
+        """Lance la récupération des morceaux avec les options choisies.
+
+        prefill: appeler l'API détail (album + Spotify/YouTube media + relations).
+        update_only: mode MàJ — n'appelle l'API media/album QUE pour les nouveaux
+            titres (les genius_id déjà en base sont exclus du prefill).
+        include_secondary: inclure les rôles secondaires (vérif détail + secondary_role).
+        respect_deleted: ignorer les morceaux dont le genius_id est dans l'historique
+            des suppressions (ne pas les réajouter).
+        """
         self.get_tracks_button.configure(state="disabled", text="Récupération...")
-        
+
         # Message de progression plus informatif
         features_text = "avec features" if include_features else "sans features"
+        mode_text = "MàJ" if update_only else "complet"
         self.progress_label.configure(
-            text=f"Récupération de max {max_songs} morceaux ({features_text})..."
+            text=f"Récupération {mode_text} de max {max_songs} morceaux ({features_text})..."
         )
         
         def get_tracks():
@@ -2966,12 +3241,45 @@ class MainWindow:
 
                 logger.info(f"📦 {len(self.current_artist.tracks)} morceaux déjà en base avant récupération")
 
+                # Mode MàJ : exclure du prefill (album/media) les genius_id déjà en base
+                known_genius_ids = None
+                if update_only and self.current_artist.tracks:
+                    known_genius_ids = {
+                        t.genius_id for t in self.current_artist.tracks if t.genius_id
+                    }
+                    logger.info(f"🔄 MàJ : {len(known_genius_ids)} titres connus exclus du prefill API")
+
                 # Récupérer les morceaux via l'API avec l'option features
                 new_tracks = self.genius_api.get_artist_songs(
                     self.current_artist,
                     max_songs=max_songs,
-                    include_features=include_features
+                    include_features=include_features,
+                    prefill=prefill,
+                    known_genius_ids=known_genius_ids,
+                    include_secondary=include_secondary
                 )
+
+                # Historique des suppressions : ne pas réajouter les morceaux supprimés
+                if new_tracks:
+                    deleted_ids = self.deleted_tracks_manager.load_deleted_ids(self.current_artist.name)
+                    if deleted_ids:
+                        def _gid_int(t):
+                            try:
+                                return int(t.genius_id) if t.genius_id else None
+                            except (TypeError, ValueError):
+                                return None
+                        if respect_deleted:
+                            before = len(new_tracks)
+                            new_tracks = [t for t in new_tracks if _gid_int(t) not in deleted_ids]
+                            skipped = before - len(new_tracks)
+                            if skipped:
+                                logger.info(f"🗂️ {skipped} morceau(x) supprimé(s) ignoré(s) (historique)")
+                        else:
+                            # Réautorisés à cet import → purge de l'historique
+                            for t in new_tracks:
+                                gid = _gid_int(t)
+                                if gid in deleted_ids:
+                                    self.deleted_tracks_manager.remove_deleted(self.current_artist.name, gid)
 
                 if new_tracks:
                     # ✅ MERGE : Combiner les nouveaux tracks avec les existants

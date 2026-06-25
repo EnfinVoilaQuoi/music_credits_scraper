@@ -300,14 +300,19 @@ class GeniusAPI:
         logger.info(f"🔍 {len(candidates)} candidats trouvés pour '{artist_name}'")
         return candidates[:max_candidates]
 
-    def get_artist_songs(self, artist: Artist, max_songs: int = 200, include_features: bool = False) -> List[Track]:
+    def get_artist_songs(self, artist: Artist, max_songs: int = 200, include_features: bool = False,
+                         prefill: bool = True, known_genius_ids: Optional[set] = None,
+                         include_secondary: bool = False) -> List[Track]:
         """
         Récupère la liste des morceaux d'un artiste
-        
+
         Args:
             artist: L'artiste dont récupérer les morceaux
             max_songs: Nombre maximum de morceaux à récupérer
             include_features: Si True, inclut les morceaux où l'artiste est en featuring
+            prefill: Si True, appelle l'API détail (album + Spotify/YouTube media + relations).
+            known_genius_ids: genius_id déjà en base — exclus du prefill (mode MàJ :
+                évite de renouveler les appels media/album pour les titres déjà récupérés).
         """
         tracks = []
         
@@ -321,11 +326,15 @@ class GeniusAPI:
             # API officielle /artists/{id}/songs (l'ancien search_artist de
             # lyricsgenius passait par genius.com/api, bloqué en 403 depuis 2025)
             tracks = self._get_artist_songs_manual(artist, max_songs,
-                                                   include_features=include_features)
+                                                   include_features=include_features,
+                                                   include_secondary=include_secondary)
             log_api("Genius", f"artist/{artist.genius_id}/songs", True)
 
-            # Pré-remplissage album via l'endpoint détail (la liste ne le fournit pas)
-            self._fill_albums_via_api(tracks)
+            # Pré-remplissage via l'endpoint détail : album + Spotify ID + YouTube
+            if prefill:
+                self._prefill_via_song_api(tracks, known_genius_ids=known_genius_ids)
+            else:
+                logger.info("⏭️ Prefill API (album/media) désactivé pour cette récupération")
 
             logger.info(f"{len(tracks)} morceaux récupérés pour {artist.name}")
             return tracks
@@ -473,6 +482,18 @@ class GeniusAPI:
         return metadata
     
     @staticmethod
+    def _collect_artist_ids(lst) -> set:
+        """Set des ids (int) d'une liste d'artistes Genius, robuste aux types."""
+        out = set()
+        for a in (lst or []):
+            if isinstance(a, dict) and a.get('id') is not None:
+                try:
+                    out.add(int(a['id']))
+                except (TypeError, ValueError):
+                    pass
+        return out
+
+    @staticmethod
     def _primary_is_collab_with(primary_name: str, artist_name: str) -> bool:
         """
         True si la page artiste principale est une collaboration incluant
@@ -489,9 +510,50 @@ class GeniusAPI:
         target = artist_name.strip().lower()
         return any(p.strip().lower() == target for p in parts)
 
+    def _verify_artist_credit(self, song_id, artist_id):
+        """
+        Vérifie au détail (`genius.song`) si `artist_id` (id EXACT) est crédité
+        sur le morceau, et renvoie la nature du crédit :
+            ('primary', None) | ('feat', None) | ('secondary', '<rôle>') | None
+        None = id absent des crédits (ex: 'ISHA!' ≠ notre Isha → à jeter).
+        Le détail est autoritaire : il rattrape les feats sous-déclarés par la liste,
+        et expose les rôles fins via `custom_performances` (Additional Vocals…).
+        """
+        if not song_id:
+            return None
+        try:
+            data = self.genius.song(song_id)
+        except Exception as e:
+            logger.debug(f"verify credit échec song {song_id}: {e}")
+            return None
+        song = (data or {}).get('song') or {}
+        try:
+            aid = int(artist_id)
+        except (TypeError, ValueError):
+            aid = artist_id
+        if aid in self._collect_artist_ids(song.get('primary_artists')):
+            return ('primary', None)
+        if aid in self._collect_artist_ids(song.get('featured_artists')):
+            return ('feat', None)
+        # Rôles fins (chant additionnel, chœurs, etc.)
+        for perf in (song.get('custom_performances') or []):
+            if isinstance(perf, dict) and aid in self._collect_artist_ids(perf.get('artists')):
+                return ('secondary', perf.get('label') or 'Contribution')
+        if aid in self._collect_artist_ids(song.get('producer_artists')):
+            return ('secondary', 'Producer')
+        if aid in self._collect_artist_ids(song.get('writer_artists')):
+            return ('secondary', 'Writer')
+        return None
+
     def _get_artist_songs_manual(self, artist: Artist, max_songs: int,
-                                 include_features: bool = False) -> List[Track]:
-        """Méthode manuelle de récupération (fallback) — gère aussi les featurings"""
+                                 include_features: bool = False,
+                                 include_secondary: bool = False) -> List[Track]:
+        """Méthode manuelle de récupération (fallback) — gère aussi les featurings.
+
+        include_secondary: si True, les morceaux où l'artiste n'est ni primary ni
+        feat sont VÉRIFIÉS au détail (`genius.song`) ; gardés seulement si son id
+        exact y est crédité, avec son rôle (`secondary_role`). Sinon ils sont jetés.
+        """
         tracks = []
 
         try:
@@ -519,26 +581,57 @@ class GeniusAPI:
                     if is_feat and not include_features:
                         continue
 
+                    secondary_role = None  # rempli si contribution secondaire (Additional Voices…)
+
                     if is_feat:
                         # L'API renvoie aussi les morceaux où l'artiste a un rôle
                         # secondaire (writer, producer...) ou est mal tagué.
-                        # Garder seulement : 1) les VRAIS featurings (artiste dans
-                        # featured_artists), 2) les pages duo/collab dont le nom
-                        # contient l'artiste en entier (ex: "Limsa d'Aulnay & Isha"
-                        # pour un album commun — mais PAS "Vasjan & ISHA!").
-                        featured = song.get('featured_artists') or []
-                        featured_ids = {
-                            f.get('id') for f in featured if isinstance(f, dict)
-                        }
+                        # Garder : 1) VRAIS feats (id dans featured_artists),
+                        # 2) co-primaires (id dans primary_artists), 3) collab par nom
+                        # ("Limsa d'Aulnay & Isha" — mais PAS "Vasjan & ISHA!").
+                        featured_ids = self._collect_artist_ids(song.get('featured_artists'))
+                        # primary_artists (pluriel) = co-artistes principaux (collab) ;
+                        # un co-primaire n'est PAS dans featured_artists → test par ID indispensable.
+                        primary_ids = self._collect_artist_ids(song.get('primary_artists'))
+                        try:
+                            aid = int(artist.genius_id)
+                        except (TypeError, ValueError):
+                            aid = artist.genius_id
                         is_collab_page = self._primary_is_collab_with(
                             primary.get('name', ''), artist.name
                         )
-                        if artist.genius_id not in featured_ids and not is_collab_page:
-                            logger.debug(
-                                f"Ignoré (rôle secondaire/tag douteux): "
-                                f"{song.get('title')} — {primary.get('name')}"
-                            )
-                            continue
+                        if (aid not in featured_ids
+                                and aid not in primary_ids
+                                and not is_collab_page):
+                            if not include_secondary:
+                                logger.debug(
+                                    f"Ignoré (rôle secondaire/tag douteux): "
+                                    f"{song.get('title')} — primary='{primary.get('name')}' "
+                                    f"feat_ids={featured_ids} prim_ids={primary_ids} aid={aid}"
+                                )
+                                continue
+                            # Mode rôles secondaires : on VÉRIFIE au détail que c'est
+                            # bien NOTRE artiste (id exact) et on récupère son rôle.
+                            verdict = self._verify_artist_credit(song.get('id'), artist.genius_id)
+                            time.sleep(DELAY_BETWEEN_REQUESTS)
+                            if verdict is None:
+                                logger.debug(
+                                    f"Ignoré (non crédité au détail / id ≠): {song.get('title')} "
+                                    f"— primary='{primary.get('name')}'"
+                                )
+                                continue
+                            kind, role = verdict
+                            if kind == 'primary':
+                                is_feat = False  # liste sous-déclarée → vrai primaire
+                            elif kind == 'feat':
+                                is_feat = True   # vrai feat sous-déclaré par la liste
+                            else:  # 'secondary'
+                                is_feat = True
+                                secondary_role = role
+                                logger.info(
+                                    f"🎙️ Rôle secondaire gardé: {song.get('title')} "
+                                    f"— {artist.name} = {role}"
+                                )
 
                     track = Track(
                         title=song.get('title', ''),
@@ -549,6 +642,7 @@ class GeniusAPI:
                         release_date=self._extract_release_date_from_song(song),
                         is_featuring=is_feat
                     )
+                    track.secondary_role = secondary_role
                     if is_feat and primary.get('name'):
                         track.primary_artist_name = primary['name']
                         logger.debug(f"Featuring (fallback): {track.title} "
@@ -571,38 +665,135 @@ class GeniusAPI:
         
         return tracks
     
-    def _fill_albums_via_api(self, tracks: List[Track]) -> None:
+    def _prefill_via_song_api(self, tracks: List[Track], known_genius_ids: Optional[set] = None) -> None:
         """
-        Complète l'album des morceaux qui n'en ont pas, via l'endpoint détail
-        `GET /songs/{id}` (l'endpoint liste /artists/{id}/songs ne renvoie pas
-        l'album). Ne fetch QUE les manquants → peu d'appels en ré-import.
-        Le scrape Genius rattrapera ce qui resterait vide.
+        Pré-remplit via l'endpoint détail `GET /songs/{id}` (la liste ne fournit
+        ni album ni media) : album + **Spotify ID + URL YouTube** (depuis `media`).
+        PRIMAIRES seulement, et seulement si une de ces données manque (peu
+        d'appels en ré-import). Le scrape rattrape le reste.
+        Le Spotify ID Genius fiabilise la chaîne audio (le scraper Google devient
+        un vrai fallback).
+
+        known_genius_ids : si fourni (mode MàJ), les morceaux déjà en base sont
+        exclus → on n'appelle l'API media/album que pour les NOUVEAUX titres.
         """
-        # Uniquement les morceaux PRIMAIRES (pas les feats : leur album attendra
-        # le scrape, ils sont déjà datés — ça suffit au départ et limite les appels).
-        missing = [
+        known = known_genius_ids or set()
+        targets = [
             t for t in tracks
-            if not getattr(t, 'album', None) and t.genius_id
-            and not getattr(t, 'is_featuring', False)
+            if self._needs_song_api(t) and not getattr(t, 'is_featuring', False)
+            and t.genius_id not in known
         ]
-        if not missing:
+        if not targets:
+            if known:
+                logger.info("🎫 Genius API : aucun nouveau primaire à enrichir (MàJ)")
             return
-        logger.info(f"🎫 Album via API : {len(missing)} morceau(x) primaire(s) à compléter…")
-        filled = 0
-        for t in missing:
-            try:
-                data = self.genius.song(t.genius_id)
-                song = (data or {}).get('song') or {}
-                album = song.get('album')
-                name = album.get('name') if isinstance(album, dict) else None
-                if name:
-                    t.album = str(name)
-                    t._album_from_api = True
-                    filled += 1
-            except Exception as e:
-                logger.debug(f"Album API échec pour '{t.title}': {e}")
+        logger.info(f"🎫 Genius API (album/Spotify/YouTube/relations) : {len(targets)} primaire(s)…")
+        n = 0
+        for t in targets:
+            if self.apply_song_metadata(t):
+                n += 1
             time.sleep(DELAY_BETWEEN_REQUESTS)
-        logger.info(f"🎫 Album via API : {filled}/{len(missing)} complété(s)")
+        logger.info(f"🎫 Genius API : {n}/{len(targets)} morceau(x) enrichi(s)")
+
+    @staticmethod
+    def _needs_song_api(track: 'Track') -> bool:
+        """True si album/Spotify/YouTube/relations manquent (→ un appel détail utile)."""
+        return bool(track.genius_id) and (
+            not getattr(track, 'album', None)
+            or not getattr(track, 'spotify_id', None)
+            or not getattr(track, 'youtube_url', None)
+            or not getattr(track, 'relationships', None)
+        )
+
+    # Types de relation AMONT à conserver (ce qui a inspiré le morceau)
+    _REL_UPSTREAM = {'samples', 'interpolates', 'cover_of', 'remix_of'}
+
+    @staticmethod
+    def _extract_relationships(song: dict) -> List[Dict[str, Any]]:
+        """
+        Relations « inspiré de » depuis `song_relationships` : on garde l'AMONT
+        (samples/interpolates/cover_of/remix_of) + les traductions FR. On jette
+        l'aval (sampled_in, *_by : ce que le morceau a engendré).
+        """
+        out = []
+        for rel in (song.get('song_relationships') or []):
+            rtype = rel.get('relationship_type') or rel.get('type')
+            songs = rel.get('songs') or []
+            keep_fr = (rtype == 'translations')
+            if rtype not in GeniusAPI._REL_UPSTREAM and not keep_fr:
+                continue
+            for s in songs:
+                if not isinstance(s, dict):
+                    continue
+                if keep_fr and (s.get('language') or '').lower() != 'fr':
+                    continue
+                out.append({
+                    'type': 'translation_fr' if keep_fr else rtype,
+                    'title': s.get('title') or s.get('full_title'),
+                    'artist': (s.get('primary_artist') or {}).get('name'),
+                    'url': s.get('url'),
+                })
+        return out
+
+    def apply_song_metadata(self, track: 'Track') -> bool:
+        """
+        UN appel `GET /songs/{id}` → pose album + Spotify ID + YouTube (depuis
+        `media`) + relations amont (si manquants). Réutilisé pour les primaires
+        (import) ET les feats (avant ReccoBeats, à l'enrichissement).
+        Returns True si quelque chose a été posé.
+        """
+        if not track.genius_id:
+            return False
+        try:
+            data = self.genius.song(track.genius_id)
+        except Exception as e:
+            logger.debug(f"genius.song échec '{track.title}': {e}")
+            return False
+        song = (data or {}).get('song') or {}
+        changed = False
+
+        album = song.get('album')
+        name = album.get('name') if isinstance(album, dict) else None
+        if name and not getattr(track, 'album', None):
+            track.album = str(name)
+            track._album_from_api = True
+            changed = True
+
+        sid, yt = self._extract_media(song)
+        if sid and not getattr(track, 'spotify_id', None):
+            track.spotify_id = sid
+            track._spotify_from_api = True
+            changed = True
+        if yt and not getattr(track, 'youtube_url', None):
+            track.youtube_url = yt
+            track._youtube_from_api = True
+            changed = True
+
+        rels = self._extract_relationships(song)
+        if rels and not getattr(track, 'relationships', None):
+            track.relationships = rels
+            changed = True
+
+        return changed
+
+    @staticmethod
+    def _extract_media(song: dict):
+        """(spotify_id, youtube_url) depuis le tableau `media` d'un song Genius."""
+        sid = yt = None
+        for m in (song.get('media') or []):
+            if not isinstance(m, dict):
+                continue
+            prov = (m.get('provider') or '').lower()
+            url = m.get('url') or ''
+            if prov == 'spotify' and not sid:
+                uri = m.get('native_uri') or ''
+                if 'spotify:track:' in uri:
+                    sid = uri.split('spotify:track:')[1].split('?')[0].strip()
+                elif 'open.spotify.com/track/' in url:
+                    sid = url.split('/track/')[1].split('?')[0].split('/')[0].strip()
+            elif prov == 'youtube' and not yt:
+                yt = url or None
+        return sid, yt
 
     def _extract_album_from_song(self, song: dict) -> Optional[str]:
         """Extrait l'album depuis les données de l'API"""

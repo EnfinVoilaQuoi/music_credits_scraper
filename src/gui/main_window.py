@@ -2191,10 +2191,22 @@ class MainWindow:
             except:
                 pass
             
-            # Ouvrir la fenêtre (pré-remplie avec l'artiste courant)
+            # Ouvrir la fenêtre (pré-remplie avec l'artiste courant + sa
+            # discographie, pour l'audit des certifs orphelines)
             current_name = self.current_artist.name if self.current_artist else None
+            artist_tracks = None
+            artist_albums = None
+            if self.current_artist and getattr(self.current_artist, 'tracks', None):
+                artist_tracks = [t.title for t in self.current_artist.tracks if getattr(t, 'title', None)]
+                # Noms d'albums distincts (pour l'audit des certifs d'albums)
+                artist_albums = sorted({
+                    t.album for t in self.current_artist.tracks
+                    if getattr(t, 'album', None)
+                })
             dialog = CertificationUpdateDialog(self.root, cert_manager,
-                                               default_artist=current_name)
+                                               default_artist=current_name,
+                                               artist_tracks=artist_tracks,
+                                               artist_albums=artist_albums)
             dialog.transient(self.root)
             dialog.grab_set()
             

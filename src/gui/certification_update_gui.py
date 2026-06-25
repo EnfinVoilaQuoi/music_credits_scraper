@@ -16,11 +16,14 @@ logger = get_logger(__name__)
 class CertificationUpdateDialog(ctk.CTkToplevel):
     """Fenêtre de gestion des mises à jour de certifications"""
     
-    def __init__(self, parent, cert_manager=None, default_artist=None):
+    def __init__(self, parent, cert_manager=None, default_artist=None,
+                 artist_tracks=None, artist_albums=None):
         super().__init__(parent)
 
         self.cert_manager = cert_manager
         self.default_artist = default_artist
+        self.artist_tracks = artist_tracks or []  # Morceaux pour l'audit
+        self.artist_albums = artist_albums or []  # Albums pour l'audit
         self.missing_periods = {}  # Stocke les périodes manquantes par source
         self.title("Mise à jour des certifications")
         self.geometry("600x700")
@@ -92,8 +95,16 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 10), pady=5)
         ctk.CTkButton(
             snep_frame,
-            text="Vérification",
+            text="🔎 Valider CSV",
             command=self._check_snep,
+            width=110,
+            fg_color="gray40",
+            hover_color="gray30"
+        ).pack(side="right", padx=5, pady=5)
+        ctk.CTkButton(
+            snep_frame,
+            text="🧹 Nettoyer",
+            command=self._clean_snep,
             width=100,
             fg_color="gray40",
             hover_color="gray30"
@@ -151,11 +162,19 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             artist_frame,
             text="Récupérer",
             command=self._update_snep_artist,
-            width=120,
+            width=110,
             fg_color="#1F6AA5"
         ).pack(side="right", padx=(5, 10), pady=5)
+        ctk.CTkButton(
+            artist_frame,
+            text="🔎 Audit",
+            command=self._audit_snep_artist,
+            width=90,
+            fg_color="gray40",
+            hover_color="gray30"
+        ).pack(side="right", padx=5, pady=5)
         self.artist_entry = ctk.CTkEntry(
-            artist_frame, placeholder_text="Nom de l'artiste", width=180
+            artist_frame, placeholder_text="Nom de l'artiste", width=170
         )
         self.artist_entry.pack(side="right", padx=5, pady=5)
         # Préremplir avec l'artiste courant si fourni
@@ -215,11 +234,30 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             from src.config import DATA_PATH
             data_path = Path(DATA_PATH) / 'certifications'
             
-            # SNEP
+            # SNEP — afficher la dernière MàJ GLOBALE (et non le mtime du fichier,
+            # qu'une simple récupération par artiste suffit à bumper)
             snep_path = data_path / 'snep' / 'certif-.csv'
             if snep_path.exists():
-                mod_time = datetime.fromtimestamp(snep_path.stat().st_mtime)
-                status_text += f"🇫🇷 SNEP: ✅ Dernière MàJ: {mod_time:%d/%m/%Y %H:%M}\n"
+                from src.api.snep_certifications import get_snep_last_update
+                last_global = get_snep_last_update(source='GLOBAL')
+                last_artist = get_snep_last_update(source='ARTIST')
+
+                def _fmt(iso):
+                    if not iso:
+                        return None
+                    try:
+                        return datetime.fromisoformat(iso).strftime('%d/%m/%Y %H:%M')
+                    except (ValueError, TypeError):
+                        return str(iso)[:16]
+
+                if last_global:
+                    status_text += f"🇫🇷 SNEP: ✅ Dernière MàJ globale: {_fmt(last_global)}\n"
+                else:
+                    # Aucune MàJ globale tracée : repli sur le mtime, mais on le signale
+                    mod_time = datetime.fromtimestamp(snep_path.stat().st_mtime)
+                    status_text += f"🇫🇷 SNEP: ⚠️ MàJ globale jamais tracée (fichier modifié {mod_time:%d/%m/%Y %H:%M})\n"
+                if last_artist:
+                    status_text += f"   ↳ Dernière récup. artiste: {_fmt(last_artist)}\n"
                 if 'SNEP' in self.missing_periods:
                     gaps = self.missing_periods['SNEP'].get('gaps', [])
                     if gaps:
@@ -306,8 +344,193 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self._run_update_script("update_riaa.py", "RIAA")
 
     def _check_snep(self):
-        """Vérifie les périodes manquantes pour SNEP"""
-        self._check_missing_periods("SNEP", "snep", "certif-.csv")
+        """Lance le validateur complet du CSV maître SNEP et affiche le rapport."""
+        def run():
+            try:
+                from src.config import DATA_PATH
+                from src.utils.snep_validator import validate_snep_csv, format_report
+                csv_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
+
+                if not csv_path.exists():
+                    self._set_progress("❌ SNEP : fichier introuvable")
+                    return
+
+                self._set_progress("🔎 Validation du CSV SNEP...")
+                report = validate_snep_csv(csv_path)
+                text = format_report(report)
+
+                # Synthèse courte dans le bandeau de progression
+                n_gaps = len(report.get('month_gaps', []))
+                verdict = "RAS" if report.get('ok') else "anomalies"
+                self._set_progress(
+                    f"{'✅' if report.get('ok') else '⚠️'} SNEP : {verdict}"
+                    f" — {n_gaps} mois sans certif (années actives)"
+                )
+                # Rapport détaillé dans une fenêtre dédiée
+                self.after(0, lambda: self._show_report_window("Validation CSV SNEP", text))
+            except Exception as e:
+                logger.error(f"Erreur validation SNEP : {e}")
+                self._set_progress(f"❌ Erreur validation SNEP : {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _audit_snep_artist(self):
+        """Audite les certifs SNEP de l'artiste face à sa discographie :
+        liste les certifs orphelines (rattachées à aucun morceau)."""
+        artist = self.artist_entry.get().strip()
+        if not artist:
+            messagebox.showwarning("Artiste manquant",
+                                   "Saisis un nom d'artiste.", parent=self)
+            return
+        if not self.artist_tracks:
+            messagebox.showinfo(
+                "Discographie absente",
+                "Aucune discographie chargée pour l'audit.\n"
+                "Charge d'abord l'artiste dans la fenêtre principale, puis "
+                "rouvre les certifications.", parent=self)
+            return
+
+        def run():
+            try:
+                from src.api.snep_certifications import get_snep_manager
+                self._set_progress(f"🔎 Audit des certifs de {artist}...")
+                res = get_snep_manager().audit_artist_certifications(
+                    artist, self.artist_tracks, self.artist_albums)
+
+                probable = [o for o in res['orphans'] if o['ratio'] >= 0.6]
+                absent = [o for o in res['orphans'] if o['ratio'] < 0.6]
+
+                L = []
+                L.append("=" * 50)
+                L.append(f"🔎 AUDIT CERTIFS — {res['artist']}")
+                L.append("=" * 50)
+                L.append(f"Certifs SNEP de l'artiste : {res['total']}")
+                L.append(f"Rattachées à un morceau   : {res.get('matched_tracks', 0)}")
+                L.append(f"Rattachées à un album     : {res.get('matched_albums', 0)}")
+                L.append(f"Orphelines                : {len(res['orphans'])}")
+
+                def fmt(o):
+                    d = (o['certification_date'] or '')[:10]
+                    kind = o.get('kind', 'morceau')
+                    return (f"  • {o['title']!r} ({o['certification']}, {o['category']}, {d})\n"
+                            f"      ≈ {kind} proche : {o['closest']!r}  (sim. {o['ratio']})")
+
+                if probable:
+                    L.append("")
+                    L.append(f"── Probablement tronquées/corrompues ({len(probable)}) "
+                             f"— récupérables ──")
+                    for o in probable:
+                        L.append(fmt(o))
+                if absent:
+                    L.append("")
+                    L.append(f"── Absentes de la discographie ({len(absent)}) "
+                             f"— morceau non scrapé ? ──")
+                    for o in absent:
+                        L.append(fmt(o))
+                if not res['orphans']:
+                    L.append("")
+                    L.append("✅ Toutes les certifs de l'artiste sont rattachées à un morceau.")
+                L.append("")
+                L.append("=" * 50)
+
+                text = "\n".join(L)
+                self.after(0, lambda: self._show_report_window(
+                    f"Audit certifs — {artist}", text))
+                self._set_progress(
+                    f"🔎 {artist} : {len(res['orphans'])} certif(s) orpheline(s) "
+                    f"sur {res['total']}")
+            except Exception as e:
+                logger.error(f"Erreur audit {artist} : {e}")
+                self._set_progress(f"❌ Erreur audit : {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _clean_snep(self):
+        """Aperçu (dry-run) du nettoyage du CSV maître SNEP, puis application
+        sur confirmation (un backup est créé avant écriture)."""
+        def run():
+            try:
+                from src.config import DATA_PATH
+                from src.utils.snep_cleaner import clean_snep_csv, format_report
+                csv_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
+                if not csv_path.exists():
+                    self._set_progress("❌ SNEP : fichier introuvable")
+                    return
+
+                self._set_progress("🧹 Analyse du nettoyage (aperçu)...")
+                dry = clean_snep_csv(csv_path, apply=False)
+                n_changes = (dry['levels_recased'] + dry['categories_recased']
+                             + dry['whitespace_fixed'] + dry['duplicates_removed']
+                             + dry['empty_removed'])
+
+                def ask_and_apply():
+                    self._show_report_window("Nettoyage CSV SNEP — aperçu", format_report(dry))
+                    if n_changes == 0:
+                        self._set_progress("✅ SNEP : CSV déjà propre")
+                        return
+                    msg = (f"{dry['duplicates_removed']} doublon(s), "
+                           f"{dry['empty_removed']} ligne(s) vide(s), "
+                           f"{dry['levels_recased'] + dry['categories_recased']} casse(s), "
+                           f"{dry['whitespace_fixed']} champ(s) espaces/tab.\n\n"
+                           f"Un backup horodaté sera créé. Appliquer le nettoyage ?")
+                    if messagebox.askyesno("Appliquer le nettoyage", msg, parent=self):
+                        def apply():
+                            self._set_progress("🧹 Nettoyage en cours...")
+                            res = clean_snep_csv(csv_path, apply=True)
+                            self.after(0, lambda: self._show_report_window(
+                                "Nettoyage CSV SNEP — appliqué", format_report(res)))
+                            self._set_progress(
+                                f"✅ SNEP nettoyé : {res['rows_in']}→{res['rows_out']} lignes")
+                            self.after(500, self._update_status)
+                        threading.Thread(target=apply, daemon=True).start()
+
+                self.after(0, ask_and_apply)
+            except Exception as e:
+                logger.error(f"Erreur nettoyage SNEP : {e}")
+                self._set_progress(f"❌ Erreur nettoyage SNEP : {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _show_report_window(self, title: str, text: str):
+        """Affiche un rapport texte dans une fenêtre scrollable + bouton copier."""
+        win = ctk.CTkToplevel(self)
+        win.title(title)
+        win.geometry("640x560")
+        # Rester au-dessus de la fenêtre parente (sinon CTkToplevel s'ouvre
+        # souvent DERRIÈRE la GUI). transient + topmost temporaire = passage
+        # au premier plan fiable, puis on relâche le topmost pour ne pas
+        # bloquer les autres fenêtres.
+        win.transient(self)
+        win.lift()
+        win.attributes("-topmost", True)
+
+        def _bring_to_front():
+            win.lift()
+            win.focus_force()
+            win.attributes("-topmost", False)
+        # délai court : laisse CTkToplevel finir son init avant le lift/focus
+        win.after(200, _bring_to_front)
+
+        ctk.CTkLabel(win, text=title, font=("Arial", 16, "bold")).pack(pady=10)
+
+        box = ctk.CTkTextbox(win, font=("Consolas", 12))
+        box.pack(fill="both", expand=True, padx=12, pady=8)
+        box.insert("0.0", text)
+        box.configure(state="disabled")
+
+        btns = ctk.CTkFrame(win)
+        btns.pack(fill="x", padx=12, pady=(0, 10))
+
+        def copy():
+            try:
+                self.clipboard_clear()
+                self.clipboard_append(text)
+                self._set_progress("📋 Rapport copié")
+            except Exception:
+                pass
+
+        ctk.CTkButton(btns, text="📋 Copier", command=copy, width=100).pack(side="left", padx=5)
+        ctk.CTkButton(btns, text="Fermer", command=win.destroy, width=100).pack(side="right", padx=5)
 
     def _check_brma(self):
         """Vérifie les périodes manquantes pour BRMA"""

@@ -83,18 +83,11 @@ class UltratopScraperInitial:
         Returns:
             BeautifulSoup object ou None si erreur
         """
-        url = f"{self.base_url}/{year}/{category}"
-        
-        try:
-            self.logger.info(f"Récupération: {url}")
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            
-            return BeautifulSoup(response.content, 'html.parser')
-            
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Erreur lors de la récupération de {url}: {e}")
-            return None
+        # Ultratop est passé derrière Cloudflare (403 sur requests) → on fetch
+        # via le navigateur anti-CF partagé (patchright + profil persistant).
+        from src.scrapers.ultratop_fetch import fetch_ultratop_soup
+        self.logger.info(f"Récupération (anti-CF) : {self.base_url}/{year}/{category}")
+        return fetch_ultratop_soup(year, category)
             
     def parse_certification_date(self, text):
         """
@@ -107,20 +100,22 @@ class UltratopScraperInitial:
             Liste de tuples (date, niveau)
         """
         certifications = []
-        
-        # Pattern pour capturer date et niveau
-        pattern = r'(\d{2}/\d{2}/\d{4}):\s*([A-Za-zÀ-ÿ\s]+)'
-        matches = re.findall(pattern, text)
-        
-        for date_str, level in matches:
+
+        # Le niveau peut contenir un multiplicateur ('2x Platine') → on capture
+        # tout entre ': ' et la date suivante (ou la fin). L'ancien regex
+        # `[A-Za-zÀ-ÿ\s]+` ratait ces multi-platine et créait des niveaux vides.
+        pattern = r'(\d{2}/\d{2}/\d{4})\s*:\s*(.+?)(?=\s*\d{2}/\d{2}/\d{4}\s*:|$)'
+
+        for date_str, level in re.findall(pattern, text):
+            level = level.strip()
+            if not level:
+                continue  # garde-fou : jamais de niveau vide
             try:
-                # Conversion de la date
                 date = datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
-                level = level.strip()
                 certifications.append((date, level))
             except ValueError:
                 self.logger.warning(f"Impossible de parser la date: {date_str}")
-                
+
         return certifications
         
     def extract_certifications(self, soup, year, category):

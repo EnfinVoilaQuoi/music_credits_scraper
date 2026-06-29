@@ -19,6 +19,11 @@ import json
 import schedule
 import argparse
 
+# Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
+# vaut alors src/utils/, donc `import src.*` (ajouté pour le fetch anti-Cloudflare)
+# échouerait. On ajoute la racine du projet au path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 # Configurer l'encodage UTF-8 pour la console Windows
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -85,10 +90,16 @@ class UltratopUpdater:
             self.existing_db = pd.read_csv(self.database_path, encoding='utf-8-sig')
             self.logger_print(f"Base de données chargée: {len(self.existing_db)} enregistrements")
             
-            # Création d'un index pour vérification rapide des doublons
+            # Création d'un index pour vérification rapide des doublons.
+            # Normaliser NaN→'' + strip : un titre vide stocké en blanc est lu
+            # NaN par pandas ; sans ça la clé "…|nan|…" ne matche pas le "…||…"
+            # créé par le scraper → les compilations (titre vide) se dupliquaient.
+            def _k(v):
+                return '' if pd.isna(v) else str(v).strip()
             self.existing_keys = set()
             for _, row in self.existing_db.iterrows():
-                key = f"{row['artist']}|{row['title']}|{row['certification_level']}|{row['certification_date']}"
+                key = (f"{_k(row['artist'])}|{_k(row['title'])}|"
+                       f"{_k(row['certification_level'])}|{_k(row['certification_date'])}")
                 self.existing_keys.add(key)
         else:
             self.existing_db = pd.DataFrame()
@@ -112,12 +123,14 @@ class UltratopUpdater:
         
         log_file = log_dir / f'ultratop_update_{datetime.now():%Y%m%d_%H%M%S}.log'
         
+        # encoding='utf-8' sur le FileHandler + stream stdout (déjà ré-encodé
+        # UTF-8 plus haut) : sinon les emojis (❌, →) crashent en cp1252.
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler()
+                logging.FileHandler(log_file, encoding='utf-8'),
+                logging.StreamHandler(sys.stdout)
             ]
         )
         self.logger = logging.getLogger(__name__)
@@ -129,86 +142,66 @@ class UltratopUpdater:
         
     def fetch_page(self, year, category):
         """
-        Récupère une page de certifications
-        
+        Récupère une page de certifications via le navigateur anti-Cloudflare.
+
+        Depuis la refonte d'ultratop.be (passé derrière Cloudflare), `requests`
+        prend un 403 → on passe par patchright + profil persistant (cf.
+        `src/scrapers/ultratop_fetch.py`). Le parsing reste identique.
+
         Args:
             year: Année
             category: 'albums' ou 'singles'
-            
+
         Returns:
-            BeautifulSoup object ou None si erreur
+            BeautifulSoup object ou None si erreur / Cloudflare non résolu
         """
-        url = f"{self.base_url}/{year}/{category}"
-        
-        try:
-            self.logger.info(f"Récupération: {url}")
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            
-            return BeautifulSoup(response.content, 'html.parser')
-            
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Erreur lors de la récupération de {url}: {e}")
-            return None
-            
+        from src.scrapers.ultratop_fetch import fetch_ultratop_soup
+        self.logger.info(f"Récupération (anti-CF) : {self.base_url}/{year}/{category}")
+        return fetch_ultratop_soup(year, category)
+
     def fetch_page_with_retry(self, year, category, max_retries=3):
         """
-        Récupère une page avec plusieurs tentatives en cas d'erreur 500
-        
-        Args:
-            year: Année
-            category: 'albums' ou 'singles'  
-            max_retries: Nombre maximum de tentatives
-            
+        Récupère une page avec relances. Le navigateur anti-Cloudflare
+        (`CrawlAIScraperBase`) gère déjà sa propre logique headless→visible ;
+        on rajoute juste quelques relances espacées en cas d'échec transitoire.
+
         Returns:
             BeautifulSoup object ou None
         """
-        url = f"{self.base_url}/{year}/{category}"
-        
         for attempt in range(max_retries):
-            try:
-                self.logger.info(f"Tentative {attempt + 1}/{max_retries}: {url}")
-                
-                # Délai progressif entre les tentatives
-                if attempt > 0:
-                    wait_time = attempt * 10  # 10s, 20s, 30s...
-                    self.logger.info(f"Attente de {wait_time}s avant nouvelle tentative...")
-                    time.sleep(wait_time)
-                
-                response = self.session.get(url, timeout=30)
-                
-                if response.status_code == 200:
-                    return BeautifulSoup(response.content, 'html.parser')
-                elif response.status_code == 500:
-                    self.logger.warning(f"Erreur 500 pour {url} (tentative {attempt + 1})")
-                    continue
-                else:
-                    self.logger.warning(f"Code HTTP {response.status_code} pour {url}")
-                    response.raise_for_status()
-                    
-            except requests.exceptions.RequestException as e:
-                self.logger.error(f"Erreur réseau tentative {attempt + 1}: {e}")
-                if attempt == max_retries - 1:
-                    return None
-                    
-        self.logger.error(f"❌ Échec après {max_retries} tentatives pour {url}")
+            if attempt > 0:
+                wait_time = attempt * 10  # 10s, 20s, 30s...
+                self.logger.info(f"Attente de {wait_time}s avant nouvelle tentative...")
+                time.sleep(wait_time)
+            self.logger.info(f"Tentative {attempt + 1}/{max_retries}: {year}/{category}")
+            soup = self.fetch_page(year, category)
+            if soup is not None:
+                return soup
+
+        self.logger.error(f"❌ Échec après {max_retries} tentatives pour {year}/{category}")
         return None
 
     def parse_certification_date(self, text):
-        """Parse les dates et niveaux de certification"""
+        """Parse les dates et niveaux de certification.
+
+        Le niveau peut contenir un MULTIPLICATEUR (ex: '2x Platine', '3x Platine')
+        → on capture tout entre ': ' et la date suivante (ou la fin), au lieu de
+        se limiter aux lettres. L'ancien regex `[A-Za-zÀ-ÿ\\s]+` ratait ces
+        multi-platine/or et créait des niveaux VIDES (cf. 819 lignes corrompues).
+        """
         certifications = []
-        
-        pattern = r'(\d{2}/\d{2}/\d{4}):\s*([A-Za-zÀ-ÿ\s]+)'
-        matches = re.findall(pattern, text)
-        
-        for date_str, level in matches:
+        pattern = r'(\d{2}/\d{2}/\d{4})\s*:\s*(.+?)(?=\s*\d{2}/\d{2}/\d{4}\s*:|$)'
+
+        for date_str, level in re.findall(pattern, text):
+            level = level.strip()
+            if not level:
+                continue  # garde-fou : jamais de niveau vide
             try:
                 date = datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
-                level = level.strip()
                 certifications.append((date, level))
             except ValueError:
                 self.logger.warning(f"Impossible de parser la date: {date_str}")
-                
+
         return certifications
         
     def extract_certifications(self, soup, year, category):
@@ -248,8 +241,9 @@ class UltratopUpdater:
                     for cert_date, cert_level in cert_list:
                         # Vérifier si cette certification existe déjà
                         key = f"{artist}|{title}|{cert_level}|{cert_date}"
-                        
+
                         if key not in self.existing_keys:
+                            self.existing_keys.add(key)  # anti-doublon INTRA-run
                             certifications.append({
                                 'artist': artist,
                                 'title': title,
@@ -317,6 +311,80 @@ class UltratopUpdater:
                         
         return new_certifications
         
+    def _dedup_df(self, df):
+        """Dédup clé métier + collapse niveau VIDE/RENSEIGNÉ (NaN normalisé).
+
+        1) retire les doublons exacts (artiste+titre+catégorie+niveau+date) ;
+        2) pour une même certif (artiste+titre+catégorie+date), si une ligne au
+           niveau renseigné existe, retire la(les) ligne(s) au niveau vide.
+        La normalisation NaN→'' évite que titre vide (NaN) et '' soient vus
+        comme différents.
+        """
+        key_cols = ['artist', 'title', 'category', 'certification_level', 'certification_date']
+        if df.empty or not all(c in df.columns for c in key_cols):
+            return df
+        before = len(df)
+        df = df.copy()
+        for c in key_cols:
+            df[c] = df[c].fillna('').astype(str).str.strip()
+        # Clés artiste/titre INSENSIBLES À LA CASSE : "'n Zalige kerst!" et
+        # "'N zalige kerst!" = même certif. On garde la 1re occurrence (sa casse).
+        df['_ka'] = df['artist'].str.upper()
+        df['_kt'] = df['title'].str.upper()
+
+        # 1) Doublons EXACTS (même certif scrapée 2× / variante de casse)
+        df = df.drop_duplicates(
+            ['_ka', '_kt', 'category', 'certification_level', 'certification_date'],
+            keep='first')
+
+        # 2) Collapse SÛR : on retire UNIQUEMENT les lignes au niveau VIDE qui ont
+        #    une contrepartie renseignée pour la même certif (artiste+titre+
+        #    catégorie+date). On ne supprime JAMAIS un niveau réel → un Platine
+        #    (date X) et un Double Platine (date Y) sont TOUS DEUX conservés, et
+        #    un niveau vraiment vide sans contrepartie est gardé tel quel.
+        grp = ['_ka', '_kt', 'category', 'certification_date']
+        has_filled = df.groupby(grp)['certification_level'].transform(
+            lambda s: (s.str.strip() != '').any())
+        is_empty = df['certification_level'].str.strip() == ''
+        df = df[~(is_empty & has_filled)]
+
+        df = df.drop(columns=['_ka', '_kt'])
+        removed = before - len(df)
+        if removed:
+            self.logger.info(f"Déduplication : {removed} doublon(s)/vide(s) retiré(s)")
+        return df
+
+    def dedup_database(self):
+        """Nettoie le CSV existant (dédup + collapse) SANS scraper. Backup avant."""
+        if self.existing_db.empty:
+            self.logger.info("Base vide, rien à dédupliquer")
+            return
+        before = len(self.existing_db)
+        cleaned = self._dedup_df(self.existing_db)
+        if len(cleaned) == before:
+            self.logger.info("Aucun doublon/vide à retirer")
+            return
+
+        if self.database_path.exists():
+            backup_path = self.output_dir / 'backups'
+            backup_path.mkdir(exist_ok=True)
+            bf = backup_path / f'backup_{datetime.now():%Y%m%d_%H%M%S}.csv'
+            self.existing_db.to_csv(bf, index=False, encoding='utf-8-sig')
+            self.logger.info(f"Backup créé: {bf}")
+
+        cleaned = cleaned.sort_values(['certification_date', 'artist', 'title'],
+                                      ascending=[False, True, True])
+        import os
+        tmp = self.database_path.with_suffix('.tmp')
+        try:
+            cleaned.to_csv(tmp, index=False, encoding='utf-8-sig')
+            os.replace(tmp, self.database_path)
+        except Exception:
+            if tmp.exists():
+                tmp.unlink()
+            raise
+        self.logger.info(f"Base nettoyée : {before} → {len(cleaned)} lignes")
+
     def save_updated_database(self, new_certifications):
         """Sauvegarde la base de données mise à jour"""
         if not new_certifications:
@@ -331,9 +399,12 @@ class UltratopUpdater:
             updated_db = pd.concat([self.existing_db, new_df], ignore_index=True)
         else:
             updated_db = new_df
-            
+
+        # Déduplication de sécurité (anti-doublons accumulés + collapse vide/renseigné)
+        updated_db = self._dedup_df(updated_db)
+
         # Tri par date décroissante
-        updated_db = updated_db.sort_values(['certification_date', 'artist', 'title'], 
+        updated_db = updated_db.sort_values(['certification_date', 'artist', 'title'],
                                           ascending=[False, True, True])
         
         # Backup de l'ancienne base (avant toute écriture)
@@ -551,9 +622,11 @@ def main():
                        help='Délai minimum entre requêtes (secondes)')
     parser.add_argument('--delay-max', type=float, default=5,
                        help='Délai maximum entre requêtes (secondes)')
-    
+    parser.add_argument('--dedup', action='store_true',
+                       help='Nettoie le CSV existant (dédup + collapse niveau vide) sans scraper')
+
     args = parser.parse_args()
-    
+
     # Création de l'updater
     updater = UltratopUpdater(
         database_path=args.database,
@@ -561,7 +634,11 @@ def main():
         delay_min=args.delay_min,
         delay_max=args.delay_max
     )
-    
+
+    if args.dedup:
+        updater.dedup_database()
+        sys.exit(0)
+
     if args.mode == 'manual':
         # Mode interactif
         safe_print("\n=== MISE À JOUR ULTRATOP - MODE MANUEL ===")

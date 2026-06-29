@@ -52,6 +52,20 @@ _PROFILE_DIR = str(Path.home() / ".music_credits_scraper" / "cf_profile")
 # `--remote-debugging-port=9222` puis `set GENIUS_CDP_URL=http://localhost:9222`.
 _CDP_URL = os.getenv("GENIUS_CDP_URL")
 
+# Optionnel : forcer patchright à lancer le VRAI navigateur installé
+# (channel="chrome", "msedge", "brave"…) au lieu du Chromium bundlé. Certains
+# Cloudflare (ex: ultratop.be) détectent et bouclent le Chromium d'automation,
+# alors que le vrai Chrome — sur IP résidentielle — passe le challenge comme une
+# session normale → évite la danse CDP. Profil dédié PAR canal (cookies séparés).
+_BROWSER_CHANNEL = os.getenv("SCRAPER_BROWSER_CHANNEL")
+
+
+def _profile_dir() -> str:
+    """Dossier de profil persistant ; suffixé par le canal s'il est forcé, pour
+    ne pas mélanger les cookies du Chromium bundlé et du vrai Chrome."""
+    base = str(Path.home() / ".music_credits_scraper" / "cf_profile")
+    return f"{base}_{_BROWSER_CHANNEL}" if _BROWSER_CHANNEL else base
+
 
 class CrawlAIScraperBase:
     """
@@ -188,7 +202,8 @@ class CrawlAIScraperBase:
             logger.error(f"patchright indisponible: {e} — `pip install -U crawl4ai && crawl4ai-setup`")
             return None, None, True
 
-        os.makedirs(_PROFILE_DIR, exist_ok=True)
+        profile_dir = _profile_dir()
+        os.makedirs(profile_dir, exist_ok=True)
         # Sélecteur « vraie page chargée » : conteneur paroles (présent sur toute page Genius)
         sel = wait_for[4:] if (wait_for or "").startswith("css:") else "[data-lyrics-container='true']"
 
@@ -202,11 +217,17 @@ class CrawlAIScraperBase:
                     page = await ctx.new_page()
                     logger.info(f"{self.__class__.__name__}: connecté via CDP à {_CDP_URL}")
                 else:
-                    ctx = await pw.chromium.launch_persistent_context(
-                        _PROFILE_DIR,
+                    launch_kwargs = dict(
                         headless=headless,
                         user_agent=_USER_AGENT,
                         viewport={"width": 1280, "height": 900},
+                    )
+                    # channel="chrome" → utilise le vrai Chrome installé (passe
+                    # mieux certains Cloudflare que le Chromium bundlé)
+                    if _BROWSER_CHANNEL:
+                        launch_kwargs["channel"] = _BROWSER_CHANNEL
+                    ctx = await pw.chromium.launch_persistent_context(
+                        profile_dir, **launch_kwargs
                     )
                     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 

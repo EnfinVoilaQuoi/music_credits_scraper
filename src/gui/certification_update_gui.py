@@ -124,9 +124,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 10), pady=5)
         ctk.CTkButton(
             brma_frame,
-            text="Vérification",
+            text="🔎 Valider CSV",
             command=self._check_brma,
-            width=100,
+            width=110,
             fg_color="gray40",
             hover_color="gray30"
         ).pack(side="right", padx=5, pady=5)
@@ -336,8 +336,32 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                                 extra_args=["--artist", artist])
     
     def _update_brma(self):
-        """Lance la mise à jour BRMA"""
-        self._run_update_script("update_brma.py", "BRMA")
+        """Lance la mise à jour BRMA. Ultratop est derrière un Cloudflare strict :
+        on prépare d'abord un Chrome 'debug' (route CDP) puis on passe son URL au
+        sous-processus, sinon le scraper boucle sur le challenge."""
+        def prepare_and_run():
+            try:
+                from src.scrapers.cdp_chrome import ensure_cdp_chrome
+                self._set_progress("🌐 Préparation de Chrome (Cloudflare ultratop)...")
+                cdp_url = ensure_cdp_chrome()
+            except Exception as e:
+                logger.error(f"Préparation CDP BRMA échouée : {e}")
+                cdp_url = None
+
+            env_extra = {"GENIUS_CDP_URL": cdp_url} if cdp_url else None
+            if not cdp_url:
+                self.after(0, lambda: messagebox.showwarning(
+                    "Chrome requis (Cloudflare)",
+                    "Impossible de préparer Chrome en mode debug pour contourner le "
+                    "Cloudflare d'ultratop.\nVérifie que Google Chrome est installé "
+                    "(ou définis la variable CHROME_PATH).\n\nLa mise à jour va tenter "
+                    "quand même, mais risque de boucler sur le challenge.", parent=self))
+
+            self._run_update_script("update_brma.py", "BRMA",
+                                    extra_args=["--mode", "once", "--years-back", "1"],
+                                    env_extra=env_extra)
+
+        threading.Thread(target=prepare_and_run, daemon=True).start()
     
     def _update_riaa(self):
         """Lance la mise à jour RIAA"""
@@ -533,8 +557,28 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ctk.CTkButton(btns, text="Fermer", command=win.destroy, width=100).pack(side="right", padx=5)
 
     def _check_brma(self):
-        """Vérifie les périodes manquantes pour BRMA"""
-        self._check_missing_periods("BRMA", "brma", "certif_brma.csv")
+        """Valide le CSV BRMA (Ultratop) et affiche le rapport."""
+        def run():
+            try:
+                from src.config import DATA_PATH
+                from src.utils.brma_validator import validate_brma_csv, format_report
+                csv_path = Path(DATA_PATH) / 'certifications' / 'brma' / 'certif_brma.csv'
+                if not csv_path.exists():
+                    self._set_progress("❌ BRMA : fichier introuvable")
+                    return
+                self._set_progress("🔎 Validation du CSV BRMA...")
+                report = validate_brma_csv(csv_path)
+                text = format_report(report)
+                verdict = "RAS" if report.get('ok') else "anomalies"
+                self._set_progress(
+                    f"{'✅' if report.get('ok') else '⚠️'} BRMA : {verdict} — "
+                    f"{len(report.get('month_gaps', []))} mois sans certif (années actives)")
+                self.after(0, lambda: self._show_report_window("Validation CSV BRMA", text))
+            except Exception as e:
+                logger.error(f"Erreur validation BRMA : {e}")
+                self._set_progress(f"❌ Erreur validation BRMA : {e}")
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _check_riaa(self):
         """Vérifie les périodes manquantes pour RIAA"""
@@ -568,8 +612,13 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         
         threading.Thread(target=update_all, daemon=True).start()
     
-    def _run_update_script(self, script_name: str, source_name: str, extra_args=None):
-        """Lance un script de mise à jour dans un thread"""
+    def _run_update_script(self, script_name: str, source_name: str, extra_args=None,
+                           env_extra=None):
+        """Lance un script de mise à jour dans un thread.
+
+        `env_extra` : variables d'environnement à injecter dans le sous-processus
+        (ex: GENIUS_CDP_URL pour la route CDP de BRMA).
+        """
         def run_script():
             try:
                 self._set_progress(f"Mise à jour {source_name} en cours...")
@@ -579,6 +628,12 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 if not script_path.exists():
                     raise FileNotFoundError(f"Script non trouvé: {script_path}")
 
+                run_env = None
+                if env_extra:
+                    import os
+                    run_env = {**os.environ,
+                               **{k: v for k, v in env_extra.items() if v}}
+
                 # Lancer le script avec encodage UTF-8
                 result = subprocess.run(
                     [sys.executable, str(script_path)] + list(extra_args or []),
@@ -586,7 +641,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     text=True,
                     encoding='utf-8',
                     errors='replace',
-                    cwd=Path(__file__).parent.parent.parent
+                    cwd=Path(__file__).parent.parent.parent,
+                    env=run_env,
                 )
                 
                 if result.returncode == 0:

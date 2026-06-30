@@ -145,8 +145,16 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 10), pady=5)
         ctk.CTkButton(
             riaa_frame,
-            text="Vérification",
+            text="🔎 Valider CSV",
             command=self._check_riaa,
+            width=110,
+            fg_color="gray40",
+            hover_color="gray30"
+        ).pack(side="right", padx=5, pady=5)
+        ctk.CTkButton(
+            riaa_frame,
+            text="🧹 Nettoyer",
+            command=self._clean_riaa,
             width=100,
             fg_color="gray40",
             hover_color="gray30"
@@ -157,11 +165,11 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         artist_frame = ctk.CTkFrame(buttons_frame)
         artist_frame.pack(fill="x", pady=5)
 
-        ctk.CTkLabel(artist_frame, text="🇫🇷 SNEP par artiste").pack(side="left", padx=10)
+        ctk.CTkLabel(artist_frame, text="🌍 Certifs par artiste").pack(side="left", padx=10)
         ctk.CTkButton(
             artist_frame,
             text="Récupérer",
-            command=self._update_snep_artist,
+            command=self._fetch_artist_all_sources,
             width=110,
             fg_color="#1F6AA5"
         ).pack(side="right", padx=(5, 10), pady=5)
@@ -334,6 +342,70 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             return
         self._run_update_script("update_snep.py", f"SNEP ({artist})",
                                 extra_args=["--artist", artist])
+
+    def _fetch_artist_all_sources(self):
+        """Récup UNIFIÉE des certifs d'un artiste : SNEP (?interprete=) + RIAA
+        (?ar=, via CDP). BRMA n'a pas de vraie recherche artiste (substring) →
+        on s'appuie sur les données BRMA déjà chargées. Rafraîchit le matcher."""
+        artist = self.artist_entry.get().strip()
+        if not artist:
+            messagebox.showwarning("Artiste manquant",
+                                   "Saisis un nom d'artiste.", parent=self)
+            return
+
+        def run():
+            import os
+            import subprocess
+            root = Path(__file__).parent.parent.parent
+            py = sys.executable
+            outputs = []
+
+            # 1) SNEP par artiste
+            self._set_progress(f"🇫🇷 SNEP : {artist}…")
+            try:
+                r = subprocess.run([py, str(root / 'src' / 'utils' / 'update_snep.py'),
+                                    '--artist', artist], cwd=root, capture_output=True,
+                                   text=True, encoding='utf-8', errors='replace')
+                outputs.append("SNEP : " + ((r.stdout or '').strip().splitlines()[-1:] or ['ok'])[0])
+            except Exception as e:
+                logger.error(f"SNEP artiste : {e}")
+                outputs.append(f"SNEP : erreur ({e})")
+
+            # 2) RIAA par artiste (route CDP anti-Cloudflare)
+            self._set_progress(f"🇺🇸 RIAA : préparation Chrome…")
+            env = None
+            try:
+                from src.scrapers.cdp_chrome import ensure_cdp_chrome
+                cdp = ensure_cdp_chrome()
+                if cdp:
+                    env = {**os.environ, 'GENIUS_CDP_URL': cdp}
+            except Exception as e:
+                logger.error(f"CDP RIAA : {e}")
+            self._set_progress(f"🇺🇸 RIAA : {artist}…")
+            try:
+                r = subprocess.run([py, str(root / 'src' / 'utils' / 'update_riaa.py'),
+                                    '--artist', artist], cwd=root, capture_output=True,
+                                   text=True, encoding='utf-8', errors='replace', env=env)
+                outputs.append("RIAA : " + ((r.stdout or '').strip().splitlines()[-1:] or ['ok'])[0])
+            except Exception as e:
+                logger.error(f"RIAA artiste : {e}")
+                outputs.append(f"RIAA : erreur ({e})")
+
+            # 3) rafraîchir le matcher (nouvelles certifs sur disque)
+            try:
+                from src.utils.cert_matcher import reset_cert_matcher
+                reset_cert_matcher()
+            except Exception:
+                pass
+
+            self._set_progress(f"✅ Certifs récupérées pour {artist} (SNEP + RIAA)")
+            self.after(0, lambda: messagebox.showinfo(
+                f"Certifs par artiste — {artist}",
+                "\n".join(outputs) + "\n\nRecharge l'artiste pour voir les certifs raccordées.",
+                parent=self))
+            self.after(500, self._update_status)
+
+        threading.Thread(target=run, daemon=True).start()
     
     def _update_brma(self):
         """Lance la mise à jour BRMA. Ultratop est derrière un Cloudflare strict :
@@ -364,8 +436,27 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         threading.Thread(target=prepare_and_run, daemon=True).start()
     
     def _update_riaa(self):
-        """Lance la mise à jour RIAA"""
-        self._run_update_script("update_riaa.py", "RIAA")
+        """RIAA via patchright. Comme BRMA, on prépare un Chrome debug (route CDP)
+        pour contourner Cloudflare, puis MàJ auto (mois manquants) non-interactive."""
+        def prepare_and_run():
+            try:
+                from src.scrapers.cdp_chrome import ensure_cdp_chrome
+                self._set_progress("🌐 Préparation de Chrome (RIAA / Cloudflare)...")
+                cdp_url = ensure_cdp_chrome()
+            except Exception as e:
+                logger.error(f"Préparation CDP RIAA échouée : {e}")
+                cdp_url = None
+            env_extra = {"GENIUS_CDP_URL": cdp_url} if cdp_url else None
+            if not cdp_url:
+                self.after(0, lambda: messagebox.showwarning(
+                    "Chrome requis (Cloudflare)",
+                    "Impossible de préparer Chrome debug pour RIAA.\nVérifie que Google "
+                    "Chrome est installé (ou CHROME_PATH).\nLa MàJ va tenter quand même.",
+                    parent=self))
+            self._run_update_script("update_riaa.py", "RIAA",
+                                    extra_args=["--auto"], env_extra=env_extra)
+
+        threading.Thread(target=prepare_and_run, daemon=True).start()
 
     def _check_snep(self):
         """Lance le validateur complet du CSV maître SNEP et affiche le rapport."""
@@ -581,8 +672,58 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         threading.Thread(target=run, daemon=True).start()
 
     def _check_riaa(self):
-        """Vérifie les périodes manquantes pour RIAA"""
-        self._check_missing_periods("RIAA", "riaa", "certif_riaa.csv")
+        """Valide le CSV RIAA (certif_riaa.csv) et affiche le rapport."""
+        def run():
+            try:
+                from src.config import DATA_PATH
+                from src.utils.riaa_validator import validate_riaa_csv, format_report
+                csv_path = Path(DATA_PATH) / 'certifications' / 'riaa' / 'certif_riaa.csv'
+                if not csv_path.exists():
+                    self._set_progress("❌ RIAA : fichier introuvable")
+                    return
+                self._set_progress("🔎 Validation du CSV RIAA...")
+                report = validate_riaa_csv(csv_path)
+                text = format_report(report)
+                verdict = "RAS" if report.get('ok') else "anomalies"
+                self._set_progress(
+                    f"{'✅' if report.get('ok') else '⚠️'} RIAA : {verdict} — "
+                    f"{len(report.get('month_gaps', []))} mois sans certif (années actives)")
+                self.after(0, lambda: self._show_report_window("Validation CSV RIAA", text))
+            except Exception as e:
+                logger.error(f"Erreur validation RIAA : {e}")
+                self._set_progress(f"❌ Erreur validation RIAA : {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _clean_riaa(self):
+        """Nettoie le CSV RIAA (dédup + vides) après confirmation (backup créé)."""
+        if not messagebox.askyesno(
+                "Nettoyer RIAA",
+                "Dédoublonner certif_riaa.csv (niveau normalisé) et retirer les "
+                "lignes sans artiste/titre ? Un backup sera créé.", parent=self):
+            return
+
+        def run():
+            try:
+                self._set_progress("🧹 Nettoyage du CSV RIAA...")
+                root = Path(__file__).parent.parent.parent
+                result = subprocess.run(
+                    [sys.executable, str(root / 'src' / 'utils' / 'update_riaa.py'), '--clean'],
+                    cwd=root, capture_output=True, text=True, encoding='utf-8', errors='replace')
+                summary = "\n".join((result.stdout or '').strip().splitlines()[-6:]) or "Terminé."
+                try:
+                    from src.utils.cert_matcher import reset_cert_matcher
+                    reset_cert_matcher()
+                except Exception:
+                    pass
+                self._set_progress("✅ RIAA nettoyé")
+                self.after(0, lambda: self._show_report_window("Nettoyage CSV RIAA", summary))
+                self.after(500, self._update_status)
+            except Exception as e:
+                logger.error(f"Erreur nettoyage RIAA : {e}")
+                self._set_progress(f"❌ Erreur nettoyage RIAA : {e}")
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _update_all(self):
         """Lance toutes les mises à jour"""

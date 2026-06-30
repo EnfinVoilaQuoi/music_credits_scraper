@@ -26,13 +26,17 @@ data/ultratop/*
 data/certifications/brma/backups/*
 data/certifications/brma/logs/*
 data/certifications/brma/reports/*
+data/certifications/riaa/backups/*
 data/certifications/snep/certif-backup-*.csv
+lib/*
 *.db
 *.sqlite
 *.log
 .cache
 *.cache
 *.json
+*.html
+*.txt
 
 # Claude
 .claude/

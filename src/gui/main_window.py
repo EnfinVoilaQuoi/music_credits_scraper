@@ -1894,22 +1894,23 @@ class MainWindow:
         notebook.add(cert_frame, text="🏆 Certifications")
 
         try:
-            from src.api.snep_certifications import get_snep_manager
-            snep_manager = get_snep_manager()
+            from src.utils.cert_matcher import get_cert_matcher
+            matcher = get_cert_matcher()
 
-            # Récupérer TOUTES les certifications du morceau
-            track_certs = snep_manager.get_track_certifications(
-                self.current_artist.name,
-                track.title
-            )
-
-            # Récupérer les certifications de l'album si disponible
-            album_certs = []
-            if track.album:
-                album_certs = snep_manager.get_album_certifications(
-                    self.current_artist.name,
-                    track.album
-                )
+            # Raccordement UNIFIÉ multi-pays (SNEP 🇫🇷 + BRMA 🇧🇪 + RIAA 🇺🇸)
+            _extra = []
+            _pan = getattr(track, 'primary_artist_name', None)
+            if _pan and _pan != self.current_artist.name:
+                _extra.append(_pan)
+            _fa = getattr(track, 'featured_artists', None)
+            if isinstance(_fa, str) and _fa:
+                _extra.append(_fa)
+            elif isinstance(_fa, (list, tuple)):
+                _extra.extend(str(x) for x in _fa if x)
+            track_certs = matcher.get_track_certifications(
+                self.current_artist.name, track.title, extra_artists=_extra)
+            album_certs = (matcher.get_album_certifications(
+                self.current_artist.name, track.album) if track.album else [])
 
             if track_certs or album_certs:
                 # Afficher les infos de certification
@@ -1923,74 +1924,55 @@ class MainWindow:
                     'Quadruple Diamant': '💎💎💎💎'
                 }
 
+                body_label = {'SNEP': 'SNEP (France)', 'BRMA': 'BRMA (Belgique)',
+                              'RIAA': 'RIAA (USA)'}
+
+                def _render_grouped(certs):
+                    """Rend les certifs GROUPÉES PAR PAYS (ordre du matcher : FR, BE, US)."""
+                    txt = ""
+                    bodies = []
+                    for c in certs:
+                        if c.get('body') not in bodies:
+                            bodies.append(c.get('body'))
+                    for body in bodies:
+                        group = [c for c in certs if c.get('body') == body]
+                        flag = group[0].get('flag', '🏆')
+                        txt += f"\n{flag} {body_label.get(body, body)}\n"
+                        txt += "-" * 60 + "\n"
+                        for c in group:
+                            lvl = c.get('certification', '')
+                            emoji = emoji_map.get(lvl, '🏆')
+                            line = f"{emoji} {lvl.upper()}"
+                            if c.get('title'):
+                                line += f" — {c.get('title')}"
+                            txt += line + "\n"
+                            if c.get('release_date'):
+                                txt += f"   📅 Sortie: {self._format_date(c.get('release_date'))}\n"
+                            txt += f"   ✅ Constat: {self._format_date(c.get('certification_date', 'N/A'))}\n"
+                            if c.get('publisher'):
+                                txt += f"   🏢 Éditeur: {c.get('publisher')}\n"
+                            if c.get('detail_url'):
+                                txt += f"   🔗 {c.get('detail_url')}\n"
+                            if c.get('release_date') and c.get('certification_date'):
+                                try:
+                                    from datetime import datetime
+                                    r = datetime.strptime(str(c['release_date'])[:10], '%Y-%m-%d')
+                                    cc = datetime.strptime(str(c['certification_date'])[:10], '%Y-%m-%d')
+                                    d = (cc - r).days
+                                    if d >= 0:
+                                        txt += f"   ⏱️ Obtention: {d} j ({d // 365} an(s), {(d % 365) // 30} mois)\n"
+                                except Exception:
+                                    pass
+                            txt += "\n"
+                    return txt
+
                 cert_text = ""
-
-                # SECTION 1: Certifications du morceau
                 if track_certs:
-                    cert_text += "🎵 CERTIFICATIONS DU MORCEAU\n"
-                    cert_text += "=" * 60 + "\n\n"
-
-                    for i, cert_data in enumerate(track_certs, 1):
-                        cert_level = cert_data.get('certification', '')
-                        emoji = emoji_map.get(cert_level, '🏆')
-
-                        cert_text += f"{emoji} CERTIFICATION #{i}: {cert_level.upper()}\n"
-                        cert_text += "-" * 60 + "\n"
-                        cert_text += f"📀 Titre: {cert_data.get('title', '')}\n"
-                        cert_text += f"🎤 Artiste: {cert_data.get('artist_name', '')}\n"
-                        cert_text += f"📂 Catégorie: {cert_data.get('category', '')}\n"
-                        cert_text += f"📅 Date de sortie: {self._format_date(cert_data.get('release_date', 'N/A'))}\n"
-                        cert_text += f"✅ Date de constat: {self._format_date(cert_data.get('certification_date', 'N/A'))}\n"
-                        cert_text += f"🏢 Éditeur: {cert_data.get('publisher', 'N/A')}\n"
-
-                        # Calculer la durée d'obtention
-                        if cert_data.get('release_date') and cert_data.get('certification_date'):
-                            try:
-                                from datetime import datetime
-                                release_str = str(cert_data['release_date'])[:10]
-                                certif_str = str(cert_data['certification_date'])[:10]
-                                release = datetime.strptime(release_str, '%Y-%m-%d')
-                                certif = datetime.strptime(certif_str, '%Y-%m-%d')
-                                duration = (certif - release).days
-                                cert_text += f"⏱️ Durée d'obtention: {duration} jours ({duration // 365} ans, {(duration % 365) // 30} mois)\n"
-                            except Exception as e:
-                                logger.debug(f"Erreur calcul durée: {e}")
-
-                        cert_text += "\n"
-
-                # SECTION 2: Certifications de l'album
+                    cert_text += "🎵 CERTIFICATIONS DU MORCEAU\n" + "=" * 60 + "\n"
+                    cert_text += _render_grouped(track_certs)
                 if album_certs:
-                    cert_text += "\n💿 CERTIFICATIONS DE L'ALBUM\n"
-                    cert_text += "=" * 60 + "\n"
-                    cert_text += f"📂 Album: {track.album}\n\n"
-
-                    for i, cert_data in enumerate(album_certs, 1):
-                        cert_level = cert_data.get('certification', '')
-                        emoji = emoji_map.get(cert_level, '🏆')
-
-                        cert_text += f"{emoji} CERTIFICATION #{i}: {cert_level.upper()}\n"
-                        cert_text += "-" * 60 + "\n"
-                        cert_text += f"💿 Album: {cert_data.get('title', '')}\n"
-                        cert_text += f"🎤 Artiste: {cert_data.get('artist_name', '')}\n"
-                        cert_text += f"📂 Catégorie: {cert_data.get('category', '')}\n"
-                        cert_text += f"📅 Date de sortie: {self._format_date(cert_data.get('release_date', 'N/A'))}\n"
-                        cert_text += f"✅ Date de constat: {self._format_date(cert_data.get('certification_date', 'N/A'))}\n"
-                        cert_text += f"🏢 Éditeur: {cert_data.get('publisher', 'N/A')}\n"
-
-                        # Calculer la durée d'obtention pour l'album
-                        if cert_data.get('release_date') and cert_data.get('certification_date'):
-                            try:
-                                from datetime import datetime
-                                release_str = str(cert_data['release_date'])[:10]
-                                certif_str = str(cert_data['certification_date'])[:10]
-                                release = datetime.strptime(release_str, '%Y-%m-%d')
-                                certif = datetime.strptime(certif_str, '%Y-%m-%d')
-                                duration = (certif - release).days
-                                cert_text += f"⏱️ Durée d'obtention: {duration} jours ({duration // 365} ans, {(duration % 365) // 30} mois)\n"
-                            except Exception as e:
-                                logger.debug(f"Erreur calcul durée album: {e}")
-
-                        cert_text += "\n"
+                    cert_text += f"\n💿 CERTIFICATIONS DE L'ALBUM — {track.album}\n" + "=" * 60 + "\n"
+                    cert_text += _render_grouped(album_certs)
 
                 cert_info.insert("0.0", cert_text)
                 cert_info.configure(state="disabled")

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from src.models import Artist, Track
 from src.api.snep_certifications import get_snep_manager
+from src.utils.cert_matcher import get_cert_matcher
 from src.utils.logger import get_logger
 
 
@@ -11,12 +12,17 @@ logger = get_logger(__name__)
 
 
 class CertificationEnricher:
-    """Enrichit les données d'artistes et morceaux avec les certifications"""
-    
+    """Enrichit les données d'artistes et morceaux avec les certifications.
+
+    Utilise le matcher UNIFIÉ (SNEP 🇫🇷 + BRMA 🇧🇪 + RIAA à venir) : le
+    raccordement morceau/album ↔ certif est mutualisé pour toutes les sources.
+    """
+
     def __init__(self):
         """Initialise l'enrichisseur de certifications"""
-        self.snep_manager = get_snep_manager()
-        logger.info("✅ CertificationEnricher initialisé")
+        self.snep_manager = get_snep_manager()   # conservé (compat éventuelle)
+        self.matcher = get_cert_matcher()         # raccordement multi-pays
+        logger.info("✅ CertificationEnricher initialisé (matcher unifié)")
     
     def enrich_artist(self, artist: Artist) -> Artist:
         """Enrichit un artiste avec ses certifications"""
@@ -25,7 +31,7 @@ class CertificationEnricher:
         
         try:
             # Récupérer toutes les certifications de l'artiste
-            certifications = self.snep_manager.get_artist_certifications(artist.name)
+            certifications = self.matcher.get_artist_certifications(artist.name)
             
             if certifications:
                 # Ajouter les certifications à l'artiste
@@ -55,6 +61,10 @@ class CertificationEnricher:
         if not tracks or not artist:
             return tracks
 
+        # Référence fraîche au matcher : prend en compte un reset_cert_matcher()
+        # après une récup de certifs (sinon on garderait l'ancien snapshot).
+        self.matcher = get_cert_matcher()
+
         enriched_count = 0
         album_cache = {}  # Cache pour éviter de chercher plusieurs fois le même album
 
@@ -68,10 +78,22 @@ class CertificationEnricher:
                 track_title = track_title.replace('\u0153', 'œ')  # Œ (OE LIGATURE)
                 track_title = track_title.replace('\u0152', 'Œ')  # Œ (OE LIGATURE majuscule)
 
-                # 1. Rechercher TOUTES les certifications du morceau
-                track_certs = self.snep_manager.get_track_certifications(
-                    artist.name,
-                    track_title
+                # Candidats artistes : si notre artiste est secondaire/feat sur ce
+                # morceau, la certif peut être déposée sous l'artiste PRINCIPAL →
+                # on les passe pour la rattacher quand même.
+                extra_artists = []
+                pan = getattr(track, 'primary_artist_name', None)
+                if pan and pan != artist.name:
+                    extra_artists.append(pan)
+                fa = getattr(track, 'featured_artists', None)
+                if isinstance(fa, str) and fa:
+                    extra_artists.append(fa)
+                elif isinstance(fa, (list, tuple)):
+                    extra_artists.extend(str(x) for x in fa if x)
+
+                # 1. Rechercher TOUTES les certifications du morceau (tous pays)
+                track_certs = self.matcher.get_track_certifications(
+                    artist.name, track_title, extra_artists=extra_artists
                 )
 
                 # Stocker toutes les certifications
@@ -101,7 +123,7 @@ class CertificationEnricher:
                 if track.album:
                     # Utiliser le cache si disponible
                     if track.album not in album_cache:
-                        album_certs = self.snep_manager.get_album_certifications(
+                        album_certs = self.matcher.get_album_certifications(
                             artist.name,
                             track.album
                         )
@@ -205,7 +227,7 @@ class CertificationEnricher:
     
     def get_certification_summary(self, artist_name: str) -> str:
         """Génère un résumé textuel des certifications d'un artiste"""
-        certifications = self.snep_manager.get_artist_certifications(artist_name)
+        certifications = self.matcher.get_artist_certifications(artist_name)
         
         if not certifications:
             return f"Aucune certification trouvée pour {artist_name}"

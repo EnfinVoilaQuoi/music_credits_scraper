@@ -7,6 +7,7 @@ Compatible avec le système de gestion unifié des certifications
 
 import sys
 import io
+import re
 import pandas as pd
 import sqlite3
 from pathlib import Path
@@ -21,9 +22,10 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-# Import du scraper principal
+# Import du scraper principal (patchright v2 — remplace l'ancien Selenium ;
+# API compatible : init_driver/close_driver/scrape_by_date_range/scrape_by_artist)
 sys.path.append(str(Path(__file__).parent.parent.parent))
-from src.scrapers.scraper_riaa import RIAAScraper
+from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
 
 class RIAADatabaseUpdater:
     """Gestionnaire de mise à jour de la base de données RIAA"""
@@ -120,30 +122,20 @@ class RIAADatabaseUpdater:
         self.logger.info(f"Base de données initialisée: {self.db_path}")
         
     def get_last_update_date(self) -> Optional[datetime]:
-        """Récupère la date de la dernière mise à jour"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT MAX(certification_date) FROM certifications
-            WHERE certification_date IS NOT NULL
-        ''')
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result and result[0]:
-            try:
-                # Parse la date (format MM/DD/YYYY ou YYYY-MM-DD)
-                date_str = result[0]
-                if '/' in date_str:
-                    return datetime.strptime(date_str, "%m/%d/%Y")
-                else:
-                    return datetime.strptime(date_str, "%Y-%m-%d")
-            except Exception as e:
-                self.logger.error(f"Erreur parsing date: {e}")
-                
-        # Si pas de date, retourne October 2017 (fin de la DB historique)
+        """Date de la dernière certif connue — lue depuis certif_riaa.csv (le
+        fichier canonique alimentant le matcher), pas la base sqlite."""
+        try:
+            if CERTIF_CSV.exists():
+                df = pd.read_csv(CERTIF_CSV, encoding='utf-8-sig', dtype=str)
+                dcol = next((c for c in df.columns if c.lower() == 'certification_date'), None)
+                if dcol:
+                    isod = df[dcol].map(_riaa_iso)
+                    isod = isod[isod != '']
+                    if len(isod):
+                        return datetime.strptime(isod.max(), "%Y-%m-%d")
+        except Exception as e:
+            self.logger.error(f"Lecture dernière date (certif_riaa.csv) : {e}")
+        # Repli : fin de la base historique
         return datetime(2017, 10, 1)
         
     def update_from_scraped_data(self, data: List[Dict]) -> tuple:
@@ -214,9 +206,16 @@ class RIAADatabaseUpdater:
                 
         conn.commit()
         conn.close()
-        
+
+        # CSV-centré : fusionne aussi dans certif_riaa.csv (le fichier du matcher),
+        # pour que les MàJ bulk (backfill 2017→now) alimentent le raccordement.
+        try:
+            _merge_certif_csv(_flatten_records(data))
+        except Exception as e:
+            self.logger.error(f"Fusion certif_riaa.csv : {e}")
+
         return added, updated
-        
+
     def update_recent_certifications(self, months_back: int = 1) -> bool:
         """
         Met à jour les certifications récentes
@@ -281,24 +280,30 @@ class RIAADatabaseUpdater:
             last_date = self.get_last_update_date()
             self.logger.info(f"Dernière mise à jour: {last_date:%Y-%m-%d}")
             
-            # Calcul du nombre de mois à récupérer
-            months_diff = (datetime.now() - last_date).days // 30
-            
-            if months_diff <= 0:
+            # Écart en JOURS : un trou < 30 j (ex. 28 j entre le 02/06 et fin juin)
+            # doit aussi déclencher la récup. L'ancien `//30` arrondissait à 0 et
+            # concluait à tort « déjà à jour », laissant le mois courant non scrapé.
+            gap_days = (datetime.now() - last_date).days
+
+            if gap_days <= 0:
                 self.logger.info("Base de données déjà à jour")
                 return True
-                
-            self.logger.info(f"{months_diff} mois à récupérer")
+
+            self.logger.info(f"{gap_days} jour(s) à récupérer")
             
-            # Met à jour par tranches mensuelles pour éviter timeout
+            # Met à jour par tranches mensuelles pour éviter timeout.
+            # `now` est FIGÉ ici : sinon, en fin de boucle, current_date rattrape
+            # l'instant T mais datetime.now() a déjà avancé (durée du scrape) →
+            # la condition reste vraie et on re-scrape le mois courant à l'infini.
+            now = datetime.now()
             current_date = last_date
             total_added = 0
             total_updated = 0
-            
-            while current_date < datetime.now():
+
+            while current_date < now:
                 # Période d'un mois
                 start_date = current_date
-                end_date = min(current_date + timedelta(days=30), datetime.now())
+                end_date = min(current_date + timedelta(days=30), now)
                 
                 # Format pour RIAA
                 start_str = start_date.strftime("%m/%d/%Y")
@@ -327,7 +332,10 @@ class RIAADatabaseUpdater:
                     
                 except Exception as e:
                     self.logger.error(f"Erreur période {start_str}-{end_str}: {e}")
-                    
+
+                # Garde-fou anti-stagnation : si la tranche n'avance pas, on sort.
+                if end_date <= current_date:
+                    break
                 current_date = end_date
                 
             # Ferme le scraper
@@ -468,6 +476,177 @@ class RIAADatabaseUpdater:
         return stats
 
 
+# ---------------------------------------------------------------------------
+# RIAA CSV-centré (comme BRMA) : on écrit dans certif_riaa.csv, le fichier que
+# lit le matcher unifié. Schéma compatible avec l'historique existant.
+# ---------------------------------------------------------------------------
+CERTIF_CSV = Path(__file__).parent.parent.parent / 'data' / 'certifications' / 'riaa' / 'certif_riaa.csv'
+CERTIF_COLUMNS = ['Artist', 'Title', 'Certification_Date', 'Label', 'Format_Type',
+                  'Release_Date', 'Group_Type', 'Media_Type', 'Certification_Type', 'Genre']
+
+
+def _riaa_iso(s: str) -> str:
+    """« October 17, 2017 » → « 2017-10-17 ». Tolère déjà-ISO / vide."""
+    s = (s or '').strip()
+    if not s or s.lower() == 'none':
+        return ''
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', s):
+        return s
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(s.title() if ',' in s else s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return s
+
+
+# Variantes d'orthographe d'un même format RIAA → forme canonique.
+_FORMAT_ALIASES = {
+    'SHORT FORM ALBUM': 'SHORTFORMALBUM',
+    'SHORTFORM ALBUM': 'SHORTFORMALBUM',
+}
+
+
+def _norm_format(s: str) -> str:
+    s = (s or '').strip()
+    if not s:
+        return s
+    return _FORMAT_ALIASES.get(re.sub(r'\s+', ' ', s).upper(), s)
+
+
+def _riaa_level(s: str) -> str:
+    """« 4x Multi-Platinum » → « 4x Platinum » (aligne historique et scraper)."""
+    s = (s or '').strip()
+    m = re.match(r'(\d+)\s*x\s*multi-?platinum', s, re.I)
+    if m:
+        return f"{m.group(1)}x Platinum"
+    if re.fullmatch(r'multi-?platinum', s, re.I):
+        return "Platinum"
+    return s
+
+
+def _flatten_records(records: List[Dict]) -> List[Dict]:
+    """Aplati les enregistrements scrapés (ligne principale + historique) vers
+    le schéma certif_riaa.csv. Avec MORE DETAILS, chaque palier = une ligne."""
+    rows = []
+    for rec in records:
+        base = {
+            'Artist': rec.get('artist', ''), 'Title': rec.get('title', ''),
+            'Label': rec.get('label', ''), 'Format_Type': _norm_format(rec.get('format', '')),
+            'Group_Type': '', 'Media_Type': '', 'Genre': '',
+        }
+        hist = rec.get('history') or []
+        if hist:
+            for h in hist:
+                lvl = h.get('certification_level', '')
+                if not lvl:
+                    continue
+                rows.append({**base,
+                             'Certification_Date': h.get('certification_date', '') or rec.get('certification_date', ''),
+                             'Release_Date': h.get('release_date', ''),
+                             'Media_Type': h.get('category', '') or '',
+                             'Genre': h.get('genre', '') or '',
+                             'Certification_Type': _riaa_level(lvl)})
+        else:
+            rows.append({**base,
+                         'Certification_Date': rec.get('certification_date', ''),
+                         'Release_Date': rec.get('release_date', ''),
+                         'Certification_Type': _riaa_level(rec.get('award_level') or rec.get('certification_level', ''))})
+    return rows
+
+
+def _merge_certif_csv(new_rows: List[Dict]) -> tuple:
+    """Fusionne des lignes dans certif_riaa.csv (dédup normalisée, backup avant).
+    Retourne (total_après, ajoutées)."""
+    if not new_rows:
+        return (0, 0)
+    new_df = pd.DataFrame(new_rows)
+    for c in CERTIF_COLUMNS:
+        if c not in new_df.columns:
+            new_df[c] = ''
+    new_df = new_df[CERTIF_COLUMNS]
+
+    if CERTIF_CSV.exists():
+        old = pd.read_csv(CERTIF_CSV, encoding='utf-8-sig', dtype=str).fillna('')
+        old = old[[c for c in old.columns if c in CERTIF_COLUMNS]]
+        for c in CERTIF_COLUMNS:
+            if c not in old.columns:
+                old[c] = ''
+        old = old[CERTIF_COLUMNS]
+        before_existing = len(old)
+        # backup avant écriture
+        bdir = CERTIF_CSV.parent / 'backups'
+        bdir.mkdir(exist_ok=True)
+        old.to_csv(bdir / f'certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv',
+                   index=False, encoding='utf-8-sig')
+        combined = pd.concat([old, new_df], ignore_index=True)
+    else:
+        before_existing = 0
+        combined = new_df
+
+    def norm(s):
+        return re.sub(r'\s+', ' ', str(s)).strip().upper()
+
+    combined['_k'] = (combined['Artist'].map(norm) + '|' + combined['Title'].map(norm)
+                      + '|' + combined['Certification_Type'].map(lambda x: norm(_riaa_level(x)))
+                      + '|' + combined['Certification_Date'].map(_riaa_iso))
+    combined = combined.drop_duplicates('_k', keep='first').drop(columns='_k')
+    combined.to_csv(CERTIF_CSV, index=False, encoding='utf-8-sig')
+    return (len(combined), len(combined) - before_existing)
+
+
+def fetch_artist(artist: str) -> bool:
+    """Récupère les certifs RIAA d'un artiste (avec MORE DETAILS) et les fusionne
+    dans certif_riaa.csv (CSV-centré, alimente le matcher)."""
+    from src.scrapers.riaa_scraper_v2 import RIAAScraperV2
+    print(f"=== RIAA par artiste : {artist} ===")
+    scraper = RIAAScraperV2(headless=True)
+    records = scraper.scrape_by_artist(artist, get_details=True)
+    if not records:
+        print("Aucune certification RIAA trouvée (ou Cloudflare non résolu)")
+        return False
+    rows = _flatten_records(records)
+    total, added = _merge_certif_csv(rows)
+    print(f"✅ RIAA {artist} : {added} ligne(s) ajoutée(s) (total {total})")
+    return True
+
+
+def clean_certif_csv() -> tuple:
+    """Nettoie certif_riaa.csv SANS scraper : retire artiste/titre vides,
+    dédoublonne (niveau normalisé : « 4x Multi-Platinum » = « 4x Platinum »).
+    Backup avant écriture. Retourne (avant, après)."""
+    if not CERTIF_CSV.exists():
+        print("Pas de fichier certif_riaa.csv")
+        return (0, 0)
+    df = pd.read_csv(CERTIF_CSV, encoding='utf-8-sig', dtype=str).fillna('')
+    df = df[[c for c in df.columns if c in CERTIF_COLUMNS]]
+    for c in CERTIF_COLUMNS:
+        if c not in df.columns:
+            df[c] = ''
+    df = df[CERTIF_COLUMNS]
+    before = len(df)
+
+    bdir = CERTIF_CSV.parent / 'backups'
+    bdir.mkdir(exist_ok=True)
+    df.to_csv(bdir / f'certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv',
+              index=False, encoding='utf-8-sig')
+
+    df = df[(df['Artist'].str.strip() != '') & (df['Title'].str.strip() != '')]
+    df['Format_Type'] = df['Format_Type'].map(_norm_format)   # variantes → canonique
+
+    def norm(s):
+        return re.sub(r'\s+', ' ', str(s)).strip().upper()
+
+    df['_k'] = (df['Artist'].map(norm) + '|' + df['Title'].map(norm) + '|'
+                + df['Format_Type'].map(norm) + '|'
+                + df['Certification_Type'].map(lambda x: norm(_riaa_level(x))) + '|'
+                + df['Certification_Date'].map(_riaa_iso))
+    df = df.drop_duplicates('_k', keep='first').drop(columns='_k')
+    df.to_csv(CERTIF_CSV, index=False, encoding='utf-8-sig')
+    print(f"✅ Nettoyage RIAA : {before} → {len(df)} lignes (-{before - len(df)})")
+    return (before, len(df))
+
+
 def main():
     """Fonction principale"""
     parser = argparse.ArgumentParser(description='Mise à jour des certifications RIAA')
@@ -479,9 +658,28 @@ def main():
                        help='Mode manuel interactif')
     parser.add_argument('--stats', action='store_true',
                        help='Afficher les statistiques')
-    
+    parser.add_argument('--artist', type=str, default=None,
+                       help="Récupérer les certifs RIAA d'un artiste (fusion dans certif_riaa.csv)")
+    parser.add_argument('--clean', action='store_true',
+                       help="Nettoie certif_riaa.csv (dédup + vides) sans scraper")
+
     args = parser.parse_args()
-    
+
+    if sys.platform == 'win32':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            pass
+
+    if args.clean:
+        clean_certif_csv()
+        sys.exit(0)
+
+    # Récup par artiste : CSV-centré, pas besoin de la base sqlite
+    if args.artist:
+        ok = fetch_artist(args.artist)
+        sys.exit(0 if ok else 1)
+
     # Initialise le gestionnaire
     updater = RIAADatabaseUpdater()
     

@@ -777,10 +777,11 @@ class GeniusAPI:
             track.spotify_id = sid
             track._spotify_from_api = True
             changed = True
-        # Genius est PRIORITAIRE : pose le lien si absent, et remplace aussi
-        # un lien issu de la recherche fallback ('search_auto').
-        if yt and (not getattr(track, 'youtube_url', None)
-                   or getattr(track, 'youtube_url_source', None) != 'genius_media'):
+        # Genius pose le lien si absent, et remplace un 'search_auto'. MAIS
+        # respecte un lien 'manual' (choix explicite de l'utilisateur, priorité max).
+        _yt_src = getattr(track, 'youtube_url_source', None)
+        if yt and _yt_src != 'manual' and (
+                not getattr(track, 'youtube_url', None) or _yt_src != 'genius_media'):
             track.youtube_url = yt
             track.youtube_url_source = 'genius_media'
             track._youtube_from_api = True

@@ -28,6 +28,7 @@ data/certifications/brma/logs/*
 data/certifications/brma/reports/*
 data/certifications/riaa/backups/*
 data/certifications/snep/certif-backup-*.csv
+data/audios/*
 lib/*
 *.db
 *.sqlite
@@ -37,6 +38,7 @@ lib/*
 *.json
 *.html
 *.txt
+*.mp3
 
 # Claude
 .claude/
@@ -69,3 +71,6 @@ docs/api/
 /update*\.py
 /*update\.py
 archive/
+# BPM Finder (audioaidynamics) — session Playwright + cache d'analyses
+data/.bpmfinder_session.json
+data/bpmfinder_cache.json

@@ -102,6 +102,20 @@ class DataEnricher:
             logger.warning(f"⚠️ Discogs API non disponible: {e}")
             self.apis_available['discogs'] = False
 
+        # BPM Finder (audioaidynamics) — dernier recours BPM/Key via lien YouTube
+        # Nécessite BPMFINDER_EMAIL/PASSWORD (env/.env) ou une session sauvegardée
+        self.bpmfinder_scraper = None
+        try:
+            from src.scrapers.bpmfinder_scraper import BPMFinderScraper
+            if BPMFinderScraper.credentials_or_session_available():
+                self.bpmfinder_scraper = BPMFinderScraper(headless=True)
+                self.apis_available['bpmfinder'] = True
+                logger.info("✅ BPM Finder scraper initialisé (audioaidynamics)")
+            else:
+                logger.info("⏭️ BPM Finder non configuré (BPMFINDER_EMAIL/PASSWORD ou session absents)")
+        except Exception as e:
+            logger.warning(f"⚠️ BPM Finder non disponible: {e}")
+
         # Client Genius (pour les feats : media/album/relations avant ReccoBeats)
         self.genius_client = None
         try:
@@ -115,6 +129,11 @@ class DataEnricher:
 
     def close(self):
         """Ferme toutes les connexions"""
+        if getattr(self, 'bpmfinder_scraper', None):
+            try:
+                self.bpmfinder_scraper.close()
+            except Exception:
+                pass
         if self.reccobeats_client:
             try:
                 self.reccobeats_client.close()
@@ -377,7 +396,7 @@ class DataEnricher:
         ORDRE: 1. Spotify ID, 2. ReccoBeats, 3. GetSongBPM, 4. SongBPM, 5. Deezer, 6. Discogs
         """
         if sources is None:
-            sources = ['spotify_id', 'reccobeats', 'getsongbpm', 'songbpm', 'deezer', 'discogs']
+            sources = ['spotify_id', 'reccobeats', 'getsongbpm', 'songbpm', 'bpmfinder', 'deezer', 'discogs']
         
         results = {}
         
@@ -615,6 +634,82 @@ class DataEnricher:
                 results['songbpm'] = 'not_needed'
 
         # ========================================
+        # 3bis. BPM FINDER (audioaidynamics) — DERNIER RECOURS via lien YouTube
+        # Pour les morceaux hors de portée de ReccoBeats/GetSongBPM/SongBPM
+        # (pas de Spotify ID, absents des bases BPM) mais présents sur YouTube.
+        # Comble les manques ; en force_update, ré-analyse et ÉCRASE.
+        # ========================================
+        if 'bpmfinder' in sources and self.apis_available.get('bpmfinder'):
+            # force_update : re-analyser et ÉCRASER même si BPM/key présents
+            # (sinon 'not_needed' → combiné au nettoyage, effaçait des données
+            # valides). Traité comme « manquant » pour déclencher l'analyse.
+            _missing_bpm = force_update or not getattr(track, 'bpm', None)
+            _missing_km = force_update or (getattr(track, 'key', None) is None
+                                           or getattr(track, 'mode', None) is None)
+            _yt = getattr(track, 'youtube_url', None)
+
+            # Pas de lien en base (ni Genius media ni recherche persistée) :
+            # recherche auto — utilisé ET persisté seulement si confiance ≥
+            # YOUTUBE_PERSIST_CONFIDENCE (même règle que la GUI). En dessous,
+            # on ne devine pas (un mauvais lien = un mauvais BPM en base).
+            if (_missing_bpm or _missing_km) and not _yt:
+                try:
+                    from src.config import YOUTUBE_PERSIST_CONFIDENCE
+                    from src.youtube.youtube_searcher import YouTubeSearcher
+                    if not hasattr(self, '_yt_searcher'):
+                        self._yt_searcher = YouTubeSearcher()
+                    _search_artist = (getattr(track, 'primary_artist_name', None)
+                                      if getattr(track, 'is_featuring', False) else None) \
+                        or (track.artist.name if hasattr(track.artist, 'name') else str(track.artist))
+                    _res = self._yt_searcher.search_track(_search_artist, track.title, max_results=5)
+                    _best = _res[0] if _res else None
+                    if (_best and not _best.get('is_search_url')
+                            and _best.get('relevance_score', 0) >= YOUTUBE_PERSIST_CONFIDENCE):
+                        _yt = _best['url']
+                        track.youtube_url = _yt
+                        track.youtube_url_source = 'search_auto'
+                        logger.info(
+                            f"🔗 Lien YouTube trouvé par recherche pour '{track.title}' "
+                            f"(confiance {_best['relevance_score']:.0%}) — persisté"
+                        )
+                    elif _best:
+                        logger.info(
+                            f"⏭️ BPM Finder: lien YouTube incertain pour '{track.title}' "
+                            f"({_best.get('relevance_score', 0):.0%} < "
+                            f"{YOUTUBE_PERSIST_CONFIDENCE:.0%}) — vérifier via la fiche ou saisir ✏️"
+                        )
+                except Exception as e:
+                    logger.debug(f"Recherche lien YouTube échouée '{track.title}': {e}")
+
+            if (_missing_bpm or _missing_km) and _yt:
+                logger.info(f"🎛️ BPM Finder (dernier recours) pour '{track.title}'")
+                try:
+                    bf = self.bpmfinder_scraper.analyze(_yt)
+                    if bf:
+                        applied = []
+                        if _missing_bpm and bf.get('bpm'):
+                            track.bpm = bf['bpm']
+                            track.bpm_source = 'bpmfinder'
+                            applied.append(f"BPM={bf['bpm']}")
+                        if _missing_km and bf.get('key') is not None and bf.get('mode') is not None:
+                            track.key = bf['key']
+                            track.mode = bf['mode']
+                            from src.utils.music_theory import key_mode_to_french
+                            track.musical_key = key_mode_to_french(bf['key'], bf['mode'])
+                            track.key_mode_source = 'bpmfinder'
+                            applied.append(f"key={track.musical_key}")
+                        results['bpmfinder'] = bool(applied)
+                        if applied:
+                            logger.info(f"✅ BPM Finder: {', '.join(applied)}")
+                    else:
+                        results['bpmfinder'] = False
+                except Exception as e:
+                    logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
+                    results['bpmfinder'] = None
+            else:
+                results['bpmfinder'] = 'not_needed'
+
+        # ========================================
         # 4. DEEZER API
         # ========================================
         if 'deezer' in sources and self.apis_available.get('deezer'):
@@ -658,23 +753,16 @@ class DataEnricher:
         # 6. NETTOYAGE SI ÉCHEC COMPLET
         # ========================================
         if clear_on_failure and force_update:
-            # Vérifier si toutes les sources ont échoué
-            all_failed = all(
-                result is False 
-                for result in results.values() 
-                if result not in ['skipped', 'not_needed']
-            )
-            
-            # Vérifier si aucune nouvelle donnée n'a été trouvée
-            new_spotify_id = getattr(track, 'spotify_id', None)
-            new_bpm = getattr(track, 'bpm', None)
-            
-            no_new_data = (
-                (new_spotify_id == initial_spotify_id or new_spotify_id is None) and
-                (new_bpm == initial_bpm or new_bpm is None)
-            )
-            
-            if all_failed or no_new_data:
+            # Sources ayant RÉELLEMENT tenté (ni skipped ni not_needed).
+            # ⚠️ all([]) == True en Python : si TOUTES les sources sont
+            # 'not_needed'/'skipped' (aucune n'a tourné), il ne faut PAS conclure
+            # « tout a échoué » et effacer des données valides (bug ayant vidé
+            # TOTAL 90 : 100 BPM/Do majeur légitimes). On n'efface QUE si au
+            # moins une source a tenté ET que toutes les tentatives ont échoué.
+            attempted = [r for r in results.values() if r not in ('skipped', 'not_needed')]
+            all_failed = bool(attempted) and all(r is False for r in attempted)
+
+            if all_failed:
                 if force_update and initial_bpm is not None:
                     # Vérifications de sécurité
                     if not hasattr(track, 'title') or not track.title:

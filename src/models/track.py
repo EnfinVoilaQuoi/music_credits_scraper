@@ -226,6 +226,11 @@ class Track:
     genius_url: Optional[str] = None
     spotify_url: Optional[str] = None
     youtube_url: Optional[str] = None
+    # Provenance du lien YouTube : 'genius_media' (API Genius, prioritaire)
+    # ou 'search_auto' (recherche ytmusicapi persistée si confiance ≥ YOUTUBE_PERSIST_CONFIDENCE)
+    youtube_url_source: Optional[str] = None
+    # 1 = album édité MANUELLEMENT (détaché via la vue Albums…) — l'API ne re-remplit pas
+    album_override: Optional[int] = None
     
     # Métadonnées système
     created_at: datetime = field(default_factory=datetime.now)
@@ -863,6 +868,7 @@ class Track:
             'genius_url': self.genius_url,
             'spotify_url': self.spotify_url,
             'youtube_url': self.youtube_url,
+            'youtube_url_source': self.youtube_url_source,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'last_scraped': self.last_scraped.isoformat() if self.last_scraped else None,

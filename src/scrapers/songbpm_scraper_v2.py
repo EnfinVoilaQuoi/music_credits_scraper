@@ -536,8 +536,10 @@ class SongBPMScraper:
                     if final_key and final_mode and (force_update or not getattr(track, 'musical_key', None)):
                         try:
                             from src.utils.music_theory import key_mode_to_french_from_string
-                            track.musical_key = key_mode_to_french_from_string(final_key, final_mode)
-                            updated = True
+                            _mk = key_mode_to_french_from_string(final_key, final_mode)
+                            if _mk:  # None si key/mode non interprétables
+                                track.musical_key = _mk
+                                updated = True
                         except Exception:
                             pass
                 except Exception as e:

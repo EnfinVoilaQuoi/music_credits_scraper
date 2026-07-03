@@ -241,9 +241,17 @@ class YTMusicAPI:
                 {'title': a['title'], 'browseId': a['browseId']}
                 for a in items if 'browseId' in a
             ]
-            # monthlyListeners est un int ou None selon l'artiste
+            # monthlyListeners : int, None, OU chaîne formatée ("146K", "1.2M")
+            # selon les versions de ytmusicapi — parser de façon robuste, et
+            # surtout ne jamais faire échouer la récup des albums pour ça.
             raw_ml = artist.get('monthlyListeners')
-            monthly_listeners = int(raw_ml) if raw_ml else None
+            monthly_listeners = None
+            if raw_ml is not None:
+                try:
+                    monthly_listeners = (int(raw_ml) if not isinstance(raw_ml, str)
+                                         else _parse_views(raw_ml))
+                except (ValueError, TypeError):
+                    logger.debug(f"monthlyListeners non parseable: {raw_ml!r}")
             logger.info(
                 f"YTMusic get_artist_info: {len(albums)} albums, "
                 f"auditeurs/mois={monthly_listeners}"

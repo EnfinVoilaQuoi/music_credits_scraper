@@ -7,7 +7,9 @@ import json
 import threading
 import urllib.parse
 import logging
-from typing import Optional
+from typing import Dict, List, Optional
+
+import requests
 
 from playwright.sync_api import (
     Page,
@@ -344,50 +346,94 @@ class SpotifyIDScraper:
             return found_tracks[idx]
         return None
 
-    def get_artist_id_from_track(self, track_spotify_id: str) -> Optional[str]:
+    # ── Artistes d'un track via la page EMBED (server-rendered, fiable) ───────
+    #
+    # La page track normale est une app JS : son HTML brut est une coquille dont
+    # le premier `spotify:artist:` venu appartient souvent aux recommandations
+    # (bug historique : le vote d'ID artiste élisait Limsa d'Aulnay pour des
+    # morceaux crédités ISHA seul). La page /embed/track/{id} contient un JSON
+    # __NEXT_DATA__ avec les crédits EXACTS du morceau : [{name, uri}].
+
+    @staticmethod
+    def _parse_embed_artists(html: str) -> List[Dict[str, str]]:
+        """Extrait [{'name', 'id'}] du __NEXT_DATA__ d'une page embed."""
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html or '', re.S)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group(1))
+            entity = ((((data.get('props') or {}).get('pageProps') or {})
+                       .get('state') or {}).get('data') or {}).get('entity') or {}
+            out = []
+            for a in entity.get('artists') or []:
+                uri = a.get('uri') or ''
+                if uri.startswith('spotify:artist:'):
+                    out.append({'name': (a.get('name') or '').strip(),
+                                'id': uri.rsplit(':', 1)[-1]})
+            return out
+        except (ValueError, AttributeError, TypeError) as e:
+            logger.debug(f"Parse __NEXT_DATA__ embed échoué: {e}")
+            return []
+
+    def get_track_artists(self, track_spotify_id: str) -> List[Dict[str, str]]:
+        """Artistes crédités sur un track : [{'name', 'id'}], ordre Spotify.
+
+        Voie 1 : requests sur la page embed (léger, server-rendered).
+        Voie 2 : Playwright sur la même page si requests échoue.
         """
-        Déduit l'ID Spotify de l'ARTISTE depuis la page d'un de ses morceaux.
-        Déterministe (pas de recherche par nom, donc pas d'ambiguïté).
-        """
+        url = f"https://open.spotify.com/embed/track/{track_spotify_id}"
+
+        try:
+            resp = requests.get(url, timeout=15, headers={
+                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/124.0.0.0 Safari/537.36")})
+            if resp.ok:
+                resp.encoding = 'utf-8'  # noms d'artistes accentués (anti-mojibake)
+                artists = self._parse_embed_artists(resp.text)
+                if artists:
+                    return artists
+        except requests.RequestException as e:
+            logger.debug(f"Embed via requests échoué ({track_spotify_id}): {e}")
+
         try:
             self._ensure_driver()
-        except Exception:
-            logger.error("❌ Browser non disponible")
+            self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            return self._parse_embed_artists(self.page.content())
+        except Exception as e:
+            logger.error(f"❌ Embed via Playwright échoué ({track_spotify_id}): {e}")
+            return []
+
+    def get_artist_id_from_track(self, track_spotify_id: str,
+                                 expected_name: str = None) -> Optional[str]:
+        """
+        Déduit l'ID Spotify de l'ARTISTE depuis un de ses morceaux (page embed).
+
+        expected_name : si fourni, retourne l'ID de l'artiste crédité portant CE
+        nom — et None si aucun crédité ne matche (le morceau ne vote pas).
+        Indispensable pour les projets communs : sans ça, le premier artiste
+        crédité (ex. Limsa d'Aulnay sur les albums Isha × Limsa) rafle le vote.
+        """
+        artists = self.get_track_artists(track_spotify_id)
+        if not artists:
+            logger.warning(f"❌ Aucun artiste crédité lisible pour le track {track_spotify_id}")
             return None
 
-        try:
-            url = f"https://open.spotify.com/track/{track_spotify_id}"
-            logger.info(f"🔍 ID artiste depuis le track: {url}")
-            self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            self._handle_cookies()
-            try:
-                self.page.wait_for_selector("a[href*='/artist/']", timeout=self._timeout)
-            except PlaywrightTimeoutError:
-                logger.debug("Pas de lien artiste visible — fallback HTML")
+        if expected_name:
+            exp = self._normalize_apostrophes(expected_name).lower().strip()
+            for a in artists:
+                name = self._normalize_apostrophes(a['name']).lower().strip()
+                if name and (name == exp or name in exp or exp in name):
+                    logger.info(f"✅ ID artiste (crédité '{a['name']}'): {a['id']}")
+                    return a['id']
+            logger.info(
+                f"⏭️ '{expected_name}' absent des crédités du track "
+                f"{track_spotify_id} ({[a['name'] for a in artists]}) — pas de vote"
+            )
+            return None
 
-            # 1. Liens artiste visibles
-            for link in self.page.query_selector_all("a[href*='/artist/']")[:8]:
-                href = link.get_attribute('href') or ""
-                artist_id = self.extract_artist_id_from_url(href)
-                if artist_id:
-                    logger.info(f"✅ ID artiste trouvé (lien): {artist_id}")
-                    return artist_id
-                logger.debug(f"Lien artiste non exploitable: {href[:80]}")
-
-            # 2. Fallback : regex sur le HTML complet (meta music:musician,
-            #    JSON embarqué, spotify:artist:...)
-            html = self.page.content()
-            m = re.search(
-                r'music:musician"[^>]*content="[^"]*artist/([a-zA-Z0-9]{22})', html
-            ) or re.search(r'spotify:artist:([a-zA-Z0-9]{22})', html) \
-              or re.search(r'open\.spotify\.com/(?:intl-[a-z]{2}/)?artist/([a-zA-Z0-9]{22})', html)
-            if m:
-                logger.info(f"✅ ID artiste trouvé (HTML): {m.group(1)}")
-                return m.group(1)
-            logger.warning(f"❌ Aucun ID artiste dans la page du track {track_spotify_id}")
-        except Exception as e:
-            logger.error(f"❌ Erreur ID artiste depuis track {track_spotify_id}: {e}")
-        return None
+        logger.info(f"✅ ID artiste (1er crédité '{artists[0]['name']}'): {artists[0]['id']}")
+        return artists[0]['id']
 
     def get_spotify_page_title(self, spotify_id: str) -> Optional[str]:
         try:

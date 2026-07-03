@@ -311,8 +311,9 @@ class GeniusAPI:
             max_songs: Nombre maximum de morceaux à récupérer
             include_features: Si True, inclut les morceaux où l'artiste est en featuring
             prefill: Si True, appelle l'API détail (album + Spotify/YouTube media + relations).
-            known_genius_ids: genius_id déjà en base — exclus du prefill (mode MàJ :
-                évite de renouveler les appels media/album pour les titres déjà récupérés).
+            known_genius_ids: genius_id à exclure du prefill (mode MàJ). L'appelant
+                y met les titres dont les données media (album/Spotify/YouTube) sont
+                déjà complètes en base — les connus mais incomplets sont re-tentés.
         """
         tracks = []
         
@@ -674,20 +675,26 @@ class GeniusAPI:
         Le Spotify ID Genius fiabilise la chaîne audio (le scraper Google devient
         un vrai fallback).
 
-        known_genius_ids : si fourni (mode MàJ), les morceaux déjà en base sont
-        exclus → on n'appelle l'API media/album que pour les NOUVEAUX titres.
+        known_genius_ids : si fourni (mode MàJ), ces titres (déjà complets en base)
+        sont exclus → l'API media/album n'est appelée que pour les nouveaux titres
+        et les connus incomplets.
         """
         known = known_genius_ids or set()
+        # Feats INCLUS depuis 2026-07-02 : leur media (Spotify ID / lien YouTube)
+        # est nécessaire aux streams (étape feats YTM) et à l'affichage — les
+        # attendre jusqu'à l'enrichissement laissait p.ex. Bitume Caviar 2 sans
+        # lien YouTube. L'exclusion des "déjà complets" (mode MàJ) limite le coût.
         targets = [
             t for t in tracks
-            if self._needs_song_api(t) and not getattr(t, 'is_featuring', False)
-            and t.genius_id not in known
+            if self._needs_song_api(t) and t.genius_id not in known
         ]
         if not targets:
             if known:
-                logger.info("🎫 Genius API : aucun nouveau primaire à enrichir (MàJ)")
+                logger.info("🎫 Genius API : aucun nouveau morceau à enrichir (MàJ)")
             return
-        logger.info(f"🎫 Genius API (album/Spotify/YouTube/relations) : {len(targets)} primaire(s)…")
+        n_feats = sum(1 for t in targets if getattr(t, 'is_featuring', False))
+        logger.info(f"🎫 Genius API (album/Spotify/YouTube/relations) : "
+                    f"{len(targets)} morceau(x) dont {n_feats} feat(s)…")
         n = 0
         for t in targets:
             if self.apply_song_metadata(t):
@@ -697,11 +704,16 @@ class GeniusAPI:
 
     @staticmethod
     def _needs_song_api(track: 'Track') -> bool:
-        """True si album/Spotify/YouTube/relations manquent (→ un appel détail utile)."""
+        """True si album/Spotify/YouTube/relations manquent (→ un appel détail utile).
+
+        Un lien YouTube 'search_auto' (recherche persistée) compte comme manquant :
+        Genius est prioritaire et doit pouvoir le remplacer par le lien officiel.
+        """
         return bool(track.genius_id) and (
-            not getattr(track, 'album', None)
+            (not getattr(track, 'album', None) and not getattr(track, 'album_override', None))
             or not getattr(track, 'spotify_id', None)
             or not getattr(track, 'youtube_url', None)
+            or getattr(track, 'youtube_url_source', None) == 'search_auto'
             or not getattr(track, 'relationships', None)
         )
 
@@ -754,7 +766,8 @@ class GeniusAPI:
 
         album = song.get('album')
         name = album.get('name') if isinstance(album, dict) else None
-        if name and not getattr(track, 'album', None):
+        if (name and not getattr(track, 'album', None)
+                and not getattr(track, 'album_override', None)):  # édition manuelle respectée
             track.album = str(name)
             track._album_from_api = True
             changed = True
@@ -764,8 +777,12 @@ class GeniusAPI:
             track.spotify_id = sid
             track._spotify_from_api = True
             changed = True
-        if yt and not getattr(track, 'youtube_url', None):
+        # Genius est PRIORITAIRE : pose le lien si absent, et remplace aussi
+        # un lien issu de la recherche fallback ('search_auto').
+        if yt and (not getattr(track, 'youtube_url', None)
+                   or getattr(track, 'youtube_url_source', None) != 'genius_media'):
             track.youtube_url = yt
+            track.youtube_url_source = 'genius_media'
             track._youtube_from_api = True
             changed = True
 
@@ -775,6 +792,100 @@ class GeniusAPI:
             changed = True
 
         return changed
+
+    # ── Import d'album complet via l'API WEB genius.com ───────────────────────
+    # /artists/{id}/songs OMET les morceaux aux paroles 'incomplete' (cas
+    # "Vas-y chante" : 2/14 récupérés). La page album les liste tous →
+    # genius.com/api/albums/{id}/tracks. Résolution URL→id : recherche d'album
+    # + match d'URL exact (ne PAS regexer albums/\d+ dans le HTML de la page :
+    # le premier id venu appartient aux albums recommandés).
+
+    _WEB_HEADERS = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/124.0.0.0 Safari/537.36")
+    }
+
+    def get_album_tracks_from_url(self, album_url: str) -> Optional[Dict[str, Any]]:
+        """Tracklist COMPLÈTE d'un album Genius depuis son URL publique.
+
+        Returns:
+            {'album': {id, name, artist, release_date, url},
+             'tracks': [{genius_id, title, track_number, primary_artist, url,
+                         lyrics_state}]}
+            ou None si introuvable.
+        """
+        url = (album_url or '').split('?')[0].strip().rstrip('/')
+        if '/albums/' not in url:
+            logger.error(f"URL d'album Genius invalide: {album_url!r}")
+            return None
+
+        # 1. URL → album id, via la recherche d'albums (match d'URL exact)
+        slug_query = url.rsplit('/', 1)[-1].replace('-', ' ')
+        try:
+            resp = requests.get('https://genius.com/api/search/album',
+                                params={'q': slug_query},
+                                headers=self._WEB_HEADERS, timeout=20)
+            resp.raise_for_status()
+            sections = (resp.json().get('response') or {}).get('sections') or []
+            hits = sections[0].get('hits', []) if sections else []
+        except Exception as e:
+            logger.error(f"Recherche album Genius échouée ({slug_query!r}): {e}")
+            return None
+
+        album_id = None
+        wanted = url.lower()
+        for h in hits:
+            res = h.get('result') or {}
+            if (res.get('url') or '').split('?')[0].rstrip('/').lower() == wanted:
+                album_id = res.get('id')
+                break
+        if not album_id and len(hits) == 1:
+            album_id = (hits[0].get('result') or {}).get('id')
+        if not album_id:
+            logger.error(
+                f"Album introuvable via la recherche: {url} — candidats: "
+                f"{[(h.get('result') or {}).get('url') for h in hits[:5]]}"
+            )
+            return None
+
+        # 2. Métadonnées + tracklist
+        try:
+            alb_resp = requests.get(f'https://genius.com/api/albums/{album_id}',
+                                    headers=self._WEB_HEADERS, timeout=20)
+            album = (alb_resp.json().get('response') or {}).get('album') or {}
+            tr_resp = requests.get(f'https://genius.com/api/albums/{album_id}/tracks',
+                                   headers=self._WEB_HEADERS, timeout=20)
+            raw_tracks = (tr_resp.json().get('response') or {}).get('tracks') or []
+        except Exception as e:
+            logger.error(f"Tracklist album Genius {album_id} échouée: {e}")
+            return None
+
+        tracks = []
+        for t in raw_tracks:
+            song = t.get('song') or {}
+            if not song.get('id'):
+                continue
+            tracks.append({
+                'genius_id': song['id'],
+                'title': song.get('title'),
+                'track_number': t.get('number'),
+                'primary_artist': (song.get('primary_artist') or {}).get('name'),
+                'url': song.get('url'),
+                'lyrics_state': song.get('lyrics_state'),
+            })
+
+        logger.info(
+            f"🎼 Album Genius '{album.get('name')}' (#{album_id}) : "
+            f"{len(tracks)} morceau(x), dont "
+            f"{sum(1 for t in tracks if t['lyrics_state'] != 'complete')} sans paroles complètes"
+        )
+        return {
+            'album': {'id': album_id, 'name': album.get('name'),
+                      'artist': (album.get('artist') or {}).get('name'),
+                      'release_date': album.get('release_date'), 'url': url},
+            'tracks': tracks,
+        }
 
     @staticmethod
     def _extract_media(song: dict):

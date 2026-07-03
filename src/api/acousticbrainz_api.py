@@ -139,7 +139,13 @@ class AcousticBrainzAPI:
             key_key = tonal.get('key_key')
             key_scale = tonal.get('key_scale')
             if key_key and key_scale:
-                data['musical_key'] = f"{key_key} {key_scale}"
+                # Normaliser en français canonique (AcousticBrainz renvoie "A minor")
+                try:
+                    from src.utils.music_theory import normalize_musical_key
+                    data['musical_key'] = (normalize_musical_key(f"{key_key} {key_scale}")
+                                           or f"{key_key} {key_scale}")
+                except Exception:
+                    data['musical_key'] = f"{key_key} {key_scale}"
 
             # Extraire la signature rythmique
             meter = rhythm.get('meter')

@@ -18,15 +18,32 @@ class YouTubeIntegration:
         self.searcher = YouTubeSearcher()
         self.classifier = TrackClassifier()
     
-    def get_youtube_link_for_track(self, artist: str, title: str, album: str = None, 
-                                  release_year: int = None) -> Dict[str, str]:
+    def get_youtube_link_for_track(self, artist: str, title: str, album: str = None,
+                                  release_year: int = None,
+                                  known_url: str = None,
+                                  known_source: str = None) -> Dict[str, str]:
         """
-        Retourne le lien YouTube approprié pour un morceau
-        
+        Retourne le lien YouTube approprié pour un morceau.
+
+        known_url : lien déjà en base (Genius media ou recherche persistée) —
+        s'il est fourni, AUCUNE recherche n'est lancée : la recherche live ne
+        sert plus que de fallback pour les rares cas sans lien au catalogue Genius.
+
         Returns:
-            Dict avec 'url', 'type' ('direct' ou 'search'), 'confidence', 'method'
+            Dict avec 'url', 'type' ('direct' ou 'search'), 'confidence', 'method', 'source'
         """
-        
+        if known_url:
+            source = known_source or 'genius_media'
+            return {
+                'url': known_url,
+                'type': 'direct',
+                'confidence': 1.0,
+                'method': 'stored',
+                'source': source,
+                'title': title,
+                'channel': 'Genius (media)' if source == 'genius_media' else 'Recherche (persistée)',
+            }
+
         try:
             # Étape 1: Classification du morceau
             track_type = self.classifier.classify_track(
@@ -74,6 +91,7 @@ class YouTubeIntegration:
                     'type': 'direct',
                     'confidence': confidence,
                     'method': 'auto_selected',
+                    'source': 'search_auto',
                     'track_type': track_type.value,
                     'title': best_result.get('title', title),
                     'channel': best_result.get('channel_title', 'Inconnu')

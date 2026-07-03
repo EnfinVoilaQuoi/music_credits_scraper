@@ -7,7 +7,7 @@ from typing import Optional, List
 from datetime import datetime
 import unicodedata
 
-from src.config import WINDOW_WIDTH, WINDOW_HEIGHT, THEME
+from src.config import WINDOW_WIDTH, WINDOW_HEIGHT, THEME, YOUTUBE_PERSIST_CONFIDENCE
 from src.api.genius_api import GeniusAPI
 from src.scrapers.genius_scraper_v2 import GeniusScraper
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
@@ -348,17 +348,68 @@ class MainWindow:
             self._configure_tree_for_tracks()
             self._populate_tracks_table()
 
+    # ── Préférences d'affichage de la vue Albums (classement VISUEL) ──────────
+    # Classer un album hôte dans Featurings/Singles sans toucher au champ
+    # `album` des morceaux (≠ « Retirer de l'album » qui modifie la base).
+    # Stockage : data/album_view/<artiste>.json — {clé_normalisée: {target, label}}
+
+    def _album_view_prefs_path(self):
+        import re as _re
+        from pathlib import Path as _Path
+        from src.config import DATA_DIR
+        d = _Path(DATA_DIR) / "album_view"
+        d.mkdir(parents=True, exist_ok=True)
+        safe = _re.sub(r'[^\w\- ]', '_', self.current_artist.name)
+        return d / f"{safe}.json"
+
+    def _load_album_view_prefs(self) -> dict:
+        import json as _json
+        try:
+            return _json.loads(self._album_view_prefs_path().read_text(encoding='utf-8'))
+        except Exception:
+            return {}
+
+    def _save_album_view_prefs(self, prefs: dict):
+        import json as _json
+        try:
+            self._album_view_prefs_path().write_text(
+                _json.dumps(prefs, ensure_ascii=False, indent=1), encoding='utf-8')
+        except Exception as e:
+            logger.error(f"Sauvegarde préférences vue Albums échouée: {e}")
+
+    def _set_album_view_pref(self, key: str, label: str, target: str):
+        prefs = self._load_album_view_prefs()
+        prefs[key] = {'target': target, 'label': label}
+        self._save_album_view_prefs(prefs)
+        logger.info(f"👁 Album « {label} » classé visuellement → {target}")
+        self._populate_albums_table()
+
+    def _unset_album_view_pref(self, key: str):
+        prefs = self._load_album_view_prefs()
+        removed = prefs.pop(key, None)
+        self._save_album_view_prefs(prefs)
+        if removed:
+            logger.info(f"👁 Ligne d'album rétablie : « {removed.get('label', key)} »")
+        self._populate_albums_table()
+
     @staticmethod
     def _normalize_album_title(s: str) -> str:
-        for apo in ("’", "‘", "`", "´"):
-            s = s.replace(apo, "'")
-        return " ".join(s.lower().strip().split())
+        # Normaliseur UNIFIÉ (title_matching) : l'ancien normaliseur local
+        # (apostrophes/casse) ratait "Vol.3" (Kworb) vs "Vol. 3" (Genius)
+        # → stats Kworb invisibles pour La vie augmente Vol 1/2/3.
+        from src.utils.title_matching import normalize_title
+        return normalize_title(s) or (s or "").strip().lower()
 
     def _populate_albums_table(self):
         """Remplit le tableau avec les albums et leurs stats agrégées"""
         self._configure_tree_for_albums()
         for item in self.tree.get_children():
             self.tree.delete(item)
+
+        # Mapping ligne → (album, tracks) pour le menu contextuel (clic droit)
+        self._album_rows = {}
+        # Lignes grisées quand TOUS les morceaux du groupe sont désactivés
+        self.tree.tag_configure("disabled", foreground="gray", background="#2a2a2a")
 
         if not self.current_artist or not getattr(self.current_artist, 'tracks', None):
             return
@@ -371,15 +422,52 @@ class MainWindow:
         except Exception as e:
             logger.debug(f"Albums DB indisponibles: {e}")
 
-        # Grouper les morceaux par album (clé normalisée : "d'" == "d’")
+        FEAT_LABEL = "🎤 Featurings (albums invités)"
+        SINGLES_LABEL = "— Singles / sans album —"
+
+        # Grouper les morceaux par album (clé normalisée : "d'" == "d’", "Vol.3" == "Vol. 3")
+        # Sans album : les feats vont dans la ligne Featurings, les solos dans Singles.
         groups = {}
         for track in self.current_artist.tracks:
-            album = (track.album or "").strip() or "— Singles / sans album —"
+            album = (track.album or "").strip()
+            if not album:
+                album = FEAT_LABEL if getattr(track, 'is_featuring', False) else SINGLES_LABEL
             key = self._normalize_album_title(album)
             if key not in groups:
                 groups[key] = [album, []]
             groups[key][1].append(track)
+
+        # Classement VISUEL (clic droit → 👁) : albums entiers déplacés dans
+        # Featurings/Singles sans toucher à la base (ex. album hôte avec 2
+        # feats, compilation). Réversible via clic droit sur la ligne cible.
+        view_prefs = self._load_album_view_prefs()
+        visual_feats, visual_singles = [], []
+        for key in list(groups.keys()):
+            pref = view_prefs.get(key)
+            if not pref:
+                continue
+            if pref.get('target') == 'feat':
+                visual_feats.extend(groups.pop(key)[1])
+            elif pref.get('target') == 'single':
+                visual_singles.extend(groups.pop(key)[1])
+
+        # Les apparitions isolées (1 seul morceau, en feat, sur un album hôte)
+        # sont regroupées dans la ligne Featurings au lieu d'une ligne par
+        # album invité. Les projets communs (≥2 morceaux) gardent leur ligne.
+        feat_tracks = []
+        for key in list(groups.keys()):
+            display, group_tracks = groups[key]
+            if (len(group_tracks) == 1
+                    and getattr(group_tracks[0], 'is_featuring', False)
+                    and display not in (FEAT_LABEL, SINGLES_LABEL)):
+                feat_tracks.append(group_tracks[0])
+                del groups[key]
+
         groups = {display: tracks for display, tracks in groups.values()}
+        if feat_tracks or visual_feats:
+            groups.setdefault(FEAT_LABEL, []).extend(feat_tracks + visual_feats)
+        if visual_singles:
+            groups.setdefault(SINGLES_LABEL, []).extend(visual_singles)
 
         def earliest_date(tracks):
             dates = []
@@ -397,15 +485,28 @@ class MainWindow:
         def fmt_streams(v):
             return f"{v:,}".replace(",", " ") if v else ""
 
-        # Trier par date de sortie décroissante (singles en dernier)
+        # Trier par date de sortie décroissante (Featurings puis Singles en dernier)
+        def _group_rank(name):
+            if name.startswith("—"):
+                return 2
+            if name.startswith("🎤"):
+                return 1
+            return 0
+
         ordered = sorted(
             groups.items(),
-            key=lambda kv: (kv[0].startswith("—"),
+            key=lambda kv: (_group_rank(kv[0]),
                             -(earliest_date(kv[1]) or datetime.min).timestamp())
         )
 
         for album, tracks in ordered:
             n = len(tracks)
+            # Part de morceaux désactivés visible par ligne : "12 (2❌)"
+            try:
+                n_disabled = sum(1 for t in tracks if self._is_track_disabled(t))
+            except Exception:
+                n_disabled = 0
+            n_display = f"{n} ({n_disabled}❌)" if n_disabled else n
             credits = sum(len(getattr(t, 'credits', []) or []) for t in tracks)
             lyrics = sum(1 for t in tracks
                          if getattr(t, 'lyrics', None) and str(t.lyrics).strip())
@@ -432,13 +533,40 @@ class MainWindow:
             date_str = date.strftime("%d/%m/%Y") if date else ""
 
             db = albums_db.get(self._normalize_album_title(album), {})
-            sp_streams = fmt_streams(db.get('spotify_streams'))
-            ytm_streams = fmt_streams(db.get('ytm_streams'))
+            sp = db.get('spotify_streams')
+            yt = db.get('ytm_streams')
+            # Pas de stats album Kworb (ligne Featurings, apparitions écartées,
+            # singles) → fallback : somme des streams MORCEAU du groupe
+            if not sp:
+                sp = sum(getattr(t, 'spotify_streams', None) or 0 for t in tracks) or None
+            if not yt:
+                yt = sum(getattr(t, 'ytm_streams', None) or 0 for t in tracks) or None
+            sp_streams = fmt_streams(sp)
+            ytm_streams = fmt_streams(yt)
 
-            self.tree.insert("", "end", text="💿", values=(
-                album, date_str, n, credits, f"{lyrics}/{n}", duree,
-                sp_streams, ytm_streams
-            ))
+            all_disabled = n > 0 and n_disabled == n
+            item = self.tree.insert(
+                "", "end", text="🎤" if album.startswith("🎤") else "💿",
+                values=(album, date_str, n_display, credits, f"{lyrics}/{n}", duree,
+                        sp_streams, ytm_streams),
+                tags=("disabled",) if all_disabled else ()
+            )
+            self._album_rows[item] = (album, tracks)
+
+    def _reload_tracks_and_refresh(self):
+        """Recharge les morceaux depuis la base puis réaffiche le tableau.
+
+        À utiliser après toute écriture DB faite par des objets séparés
+        (MàJ streams Kworb/YTM…) : les tracks en mémoire de la GUI ne voient
+        pas ces écritures sans reload.
+        """
+        try:
+            if self.current_artist:
+                self.current_artist.tracks = self.data_manager.get_artist_tracks(
+                    self.current_artist.id)
+        except Exception as e:
+            logger.error(f"Rechargement des morceaux échoué: {e}")
+        self._populate_tracks_table()
 
     def _populate_tracks_table(self):
         """Remplit le tableau avec les morceaux - VERSION CORRIGÉE CRÉDITS"""
@@ -766,8 +894,175 @@ class MainWindow:
             logger.error(f"Erreur suppression morceau: {e}")
             self._show_error("Erreur", f"Impossible de supprimer le morceau: {e}")
 
+    def _import_genius_album(self):
+        """Importe la tracklist COMPLÈTE d'un album Genius depuis son URL.
+
+        Récupère aussi les morceaux aux paroles incomplètes, que
+        /artists/{id}/songs omet (cas « Vas-y chante » : 2/14 récupérés).
+        """
+        from tkinter import simpledialog
+        url = simpledialog.askstring(
+            "Importer un album Genius",
+            "URL de l'album (https://genius.com/albums/…) :",
+            parent=self.root)
+        if not url or not url.strip():
+            return
+        data = self.genius_api.get_album_tracks_from_url(url.strip())
+        if not data:
+            messagebox.showerror("Import album",
+                                 "Album introuvable — vérifier l'URL (voir logs).")
+            return
+
+        album_name = data['album']['name']
+        release_date = None
+        try:
+            if data['album'].get('release_date'):
+                release_date = datetime.fromisoformat(data['album']['release_date'])
+        except Exception:
+            pass
+
+        from src.utils.title_matching import normalize_title as _nt
+        artist_key = _nt(self.current_artist.name)
+        known_ids = {int(t.genius_id) for t in self.current_artist.tracks
+                     if getattr(t, 'genius_id', None)}
+        try:
+            deleted_ids = self.deleted_tracks_manager.load_deleted_ids(self.current_artist.name)
+        except Exception:
+            deleted_ids = set()
+
+        created, skipped_known, skipped_deleted = [], 0, 0
+        for tr in data['tracks']:
+            gid = int(tr['genius_id'])
+            if gid in known_ids:
+                skipped_known += 1
+                continue
+            if gid in deleted_ids:
+                skipped_deleted += 1
+                continue
+            track = Track(title=tr['title'])
+            track.artist = self.current_artist
+            track.genius_id = gid
+            track.genius_url = tr.get('url')
+            track.album = album_name
+            track.track_number = tr.get('track_number')
+            track.release_date = release_date
+            primary = tr.get('primary_artist') or ""
+            if primary and _nt(primary) != artist_key:
+                track.is_featuring = True
+                track.primary_artist_name = primary
+            else:
+                track.is_featuring = False
+            try:
+                self.data_manager.save_track(track)
+                self.current_artist.tracks.append(track)
+                created.append(tr['title'])
+                logger.info(f"➕ Importé depuis l'album « {album_name} » : {tr['title']}")
+            except Exception as e:
+                logger.error(f"Import '{tr['title']}' échoué: {e}")
+
+        self._reload_tracks_and_refresh()
+        messagebox.showinfo(
+            "Import album",
+            f"« {album_name} » — {len(data['tracks'])} morceaux sur Genius :\n\n"
+            f"➕ {len(created)} ajoutés\n"
+            f"⏭️ {skipped_known} déjà en base\n"
+            f"🗂️ {skipped_deleted} ignorés (supprimés par toi)\n\n"
+            + ("Lance une MàJ Discographie (case media) puis l'enrichissement\n"
+               "pour compléter les nouveaux morceaux." if created else ""))
+
+    def _on_album_right_click(self, event):
+        """Menu contextuel de la vue Albums : détacher des morceaux de l'album."""
+        item = self.tree.identify_row(event.y)
+        rows = getattr(self, '_album_rows', {})
+        if not item or item not in rows:
+            # Clic dans le vide : import d'album par URL
+            context_menu = tkinter.Menu(self.root, tearoff=0)
+            context_menu.add_command(label="➕ Importer un album Genius (URL…)",
+                                     command=self._import_genius_album)
+            try:
+                context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                context_menu.grab_release()
+            return
+        album, tracks = rows[item]
+        context_menu = tkinter.Menu(self.root, tearoff=0)
+
+        if album.startswith("—") or album.startswith("🎤"):
+            # Lignes synthétiques : proposer de RÉTABLIR les albums classés
+            # visuellement vers cette ligne
+            target = 'feat' if album.startswith("🎤") else 'single'
+            prefs = self._load_album_view_prefs()
+            entries = [(k, v.get('label', k)) for k, v in prefs.items()
+                       if v.get('target') == target]
+            if not entries:
+                return
+            restore_menu = tkinter.Menu(context_menu, tearoff=0)
+            for key, label in sorted(entries, key=lambda e: e[1].lower()):
+                restore_menu.add_command(
+                    label=label[:60],
+                    command=lambda k=key: self._unset_album_view_pref(k))
+            context_menu.add_cascade(label="👁 Rétablir la ligne d'album", menu=restore_menu)
+        else:
+            key = self._normalize_album_title(album)
+            # Classement VISUEL (réversible, base intacte) — pour les albums
+            # hôtes (feats) ou compilations qu'on ne veut pas voir en ligne
+            context_menu.add_command(
+                label="👁 Classer dans Featurings (visuel, réversible)",
+                command=lambda: self._set_album_view_pref(key, album, 'feat'))
+            context_menu.add_command(
+                label="👁 Classer dans Singles (visuel, réversible)",
+                command=lambda: self._set_album_view_pref(key, album, 'single'))
+            context_menu.add_separator()
+            # Détachement DÉFINITIF (modifie la base : album retiré du morceau)
+            detach_menu = tkinter.Menu(context_menu, tearoff=0)
+            detach_menu.add_command(
+                label=f"Tous les morceaux ({len(tracks)})",
+                command=lambda: self._detach_tracks_from_album(list(tracks), album))
+            detach_menu.add_separator()
+            for t in sorted(tracks, key=lambda x: x.title.lower())[:30]:
+                detach_menu.add_command(
+                    label=t.title[:60],
+                    command=lambda tr=t: self._detach_tracks_from_album([tr], album))
+            context_menu.add_cascade(
+                label="🧹 Retirer de l'album (⚠️ modifie la base)", menu=detach_menu)
+
+        context_menu.add_separator()
+        context_menu.add_command(label="➕ Importer un album Genius (URL…)",
+                                 command=self._import_genius_album)
+
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
+    def _detach_tracks_from_album(self, tracks_to_detach, album):
+        """Détache des morceaux de leur album (édition manuelle persistante).
+
+        Le morceau rejoint la ligne « — Singles » (solo) ou « 🎤 Featurings »
+        (feat) ; `album_override=1` empêche l'API Genius de re-remplir l'album
+        au prochain prefill.
+        """
+        if not messagebox.askyesno(
+                "Retirer de l'album",
+                f"Retirer {len(tracks_to_detach)} morceau(x) de « {album} » ?\n\n"
+                "Ils rejoindront la ligne Singles (solo) ou Featurings (feat).\n"
+                "L'API ne re-remplira pas l'album (édition manuelle)."):
+            return
+        moved = 0
+        for t in tracks_to_detach:
+            if getattr(t, 'id', None) and self.data_manager.clear_track_album(t.id):
+                t.album = None
+                t.album_override = 1
+                moved += 1
+                logger.info(f"🧹 '{t.title}' détaché de l'album « {album} »")
+        if moved:
+            self._populate_albums_table()
+
     def _on_right_click(self, event):
         """Menu contextuel sur clic droit avec actualisation immédiate"""
+        if getattr(self, 'view_mode', 'tracks') == 'albums':
+            self._on_album_right_click(event)
+            return
         if getattr(self, 'view_mode', 'tracks') != 'tracks':
             return
         item = self.tree.identify_row(event.y)
@@ -798,6 +1093,10 @@ class MainWindow:
                     label="Voir les détails",
                     command=lambda: self._show_track_details_by_index(index)
                 )
+                context_menu.add_command(
+                    label="✏️ Saisir BPM / Tonalité…",
+                    command=lambda: self._manual_audio_entry(index)
+                )
                 context_menu.add_separator()
                 context_menu.add_command(
                     label="🗑️ Supprimer définitivement",
@@ -809,6 +1108,75 @@ class MainWindow:
                     context_menu.tk_popup(event.x_root, event.y_root)
                 finally:
                     context_menu.grab_release()
+
+    def _manual_audio_entry(self, index: int):
+        """Saisie manuelle du BPM, de la tonalité et/ou de la durée (source 'manual').
+
+        Pour les morceaux hors de portée des sources auto : valeurs relevées
+        sur Sonoteller/BPM Finder (quota partagé côté Sonoteller → au
+        compte-goutte), ou analyse d'un fichier local.
+        Tonalité acceptée en anglais ou français : "G# minor", "Sol# mineur",
+        "Ab minor", "Ré majeur"… Durée en "3:24" ou en secondes ("204").
+        """
+        from tkinter import simpledialog
+        try:
+            track = self.current_artist.tracks[index]
+        except (IndexError, TypeError):
+            return
+
+        bpm_str = simpledialog.askstring(
+            "BPM manuel", f"« {track.title} »\n\nBPM (vide = inchangé) :",
+            initialvalue=str(track.bpm) if getattr(track, 'bpm', None) else "",
+            parent=self.root)
+        if bpm_str is None:  # Annuler
+            return
+        key_str = simpledialog.askstring(
+            "Tonalité manuelle",
+            f"« {track.title} »\n\nTonalité, ex. \"G# minor\" ou \"Sol# mineur\"\n"
+            "(vide = inchangée) :",
+            initialvalue=getattr(track, 'musical_key', None) or "",
+            parent=self.root)
+        if key_str is None:
+            return
+
+        changed = []
+        bpm_str = (bpm_str or "").strip()
+        if bpm_str:
+            try:
+                track.bpm = int(round(float(bpm_str.replace(',', '.'))))
+                track.bpm_source = 'manual'
+                changed.append(f"BPM = {track.bpm}")
+            except ValueError:
+                messagebox.showerror("BPM manuel", f"BPM invalide : {bpm_str!r}")
+                return
+
+        key_str = (key_str or "").strip()
+        if key_str:
+            from src.utils.music_theory import (
+                normalize_musical_key, note_to_pitch_class, parse_mode, key_mode_to_french)
+            canonical = normalize_musical_key(key_str)
+            if not canonical:
+                messagebox.showerror(
+                    "Tonalité manuelle",
+                    f"Tonalité non comprise : {key_str!r}\n"
+                    "Format attendu : note + mode (ex. \"G# minor\", \"Sol# mineur\").")
+                return
+            tokens = key_str.split()
+            track.key = note_to_pitch_class(' '.join(tokens[:-1]))
+            track.mode = parse_mode(tokens[-1])
+            track.musical_key = canonical
+            track.key_mode_source = 'manual'
+            changed.append(f"Tonalité = {canonical}")
+
+        if not changed:
+            return
+        try:
+            self.data_manager.save_track(track)
+            logger.info(f"✏️ Saisie manuelle '{track.title}': {', '.join(changed)}")
+            self._populate_tracks_table()
+        except Exception as e:
+            logger.error(f"Saisie manuelle échouée: {e}")
+            messagebox.showerror("Saisie manuelle", f"Sauvegarde échouée : {e}")
 
     def _disable_track_with_refresh(self, index: int, item):
         """Désactive un morceau et actualise immédiatement l'affichage"""
@@ -1014,6 +1382,18 @@ class MainWindow:
                     except:
                         return 12
                 sort_key = get_cert_value
+            elif col == "Streams":
+                # Total estimé (même calcul que l'affichage) ; sans données → -1 (en bas)
+                def get_streams_total(t):
+                    try:
+                        from src.utils.streams_calculator import calculate_total_streams
+                        total = calculate_total_streams(
+                            getattr(t, 'spotify_streams', None),
+                            getattr(t, 'ytm_streams', None))
+                        return total if total is not None else -1
+                    except Exception:
+                        return -1
+                sort_key = get_streams_total
             elif col == "Statut":
                 # CORRECTION: Trier par ordre de priorité (Complet > Incomplet > Désactivé)
                 status_order = {
@@ -1409,29 +1789,39 @@ class MainWindow:
         artist_name = track.artist.name if track.artist else self.current_artist.name
         release_year = self.get_release_year_safely(track)
 
-        # Priorité au lien YouTube fourni par Genius (media), recherche en fallback
-        _genius_yt = getattr(track, 'youtube_url', None)
-        if _genius_yt:
-            youtube_result = {
-                'type': 'direct',
-                'url': _genius_yt,
-                'confidence': 1.0,
-                'title': track.title,
-                'channel': 'Genius (media)',
-                'source': 'genius_media',
-            }
-        else:
-            youtube_result = youtube_integration.get_youtube_link_for_track(
-                artist_name, track.title, track.album, release_year
-            )
+        # Priorité au lien en base (Genius media, ou recherche persistée) ;
+        # la recherche live ne sert que de fallback pour les rares cas sans lien Genius.
+        youtube_result = youtube_integration.get_youtube_link_for_track(
+            artist_name, track.title, track.album, release_year,
+            known_url=getattr(track, 'youtube_url', None),
+            known_source=getattr(track, 'youtube_url_source', None),
+        )
 
-        # Affichage selon le type de résultat
-        if youtube_result.get('source') == 'genius_media':
+        # Persister le lien trouvé par la recherche si la confiance est suffisante
+        if (youtube_result.get('source') == 'search_auto'
+                and youtube_result.get('confidence', 0) >= YOUTUBE_PERSIST_CONFIDENCE
+                and getattr(track, 'id', None)):
+            if self.data_manager.update_track_youtube_url(
+                    track.id, youtube_result['url'], 'search_auto'):
+                track.youtube_url = youtube_result['url']
+                track.youtube_url_source = 'search_auto'
+                youtube_result['persisted'] = True
+
+        # Affichage selon la provenance
+        _yt_source = youtube_result.get('source')
+        if _yt_source == 'genius_media':
             # Lien fourni par Genius (media) — prioritaire, distinct du fallback recherche
             label_text = "▶️ Voir (Genius ✓)"
             label_color = "#1DB954"  # Vert = source fiable Genius
             tooltip_text = (f"Lien YouTube fourni par Genius (media)\n"
                             f"Titre: {youtube_result.get('title', 'N/A')}\n"
+                            f"URL: {youtube_result.get('url', 'N/A')}")
+        elif _yt_source == 'search_auto' and youtube_result.get('method') == 'stored':
+            # Lien trouvé par recherche lors d'une session précédente, persisté en base
+            label_text = "▶️ Voir (auto ✓)"
+            label_color = "#FFA500"  # Orange = fiable mais pas Genius
+            tooltip_text = (f"Lien trouvé par recherche (persisté, confiance ≥ "
+                            f"{YOUTUBE_PERSIST_CONFIDENCE:.0%})\n"
                             f"URL: {youtube_result.get('url', 'N/A')}")
         elif youtube_result['type'] == 'direct':
             # Lien direct trouvé automatiquement (recherche)
@@ -1799,9 +2189,16 @@ class MainWindow:
             "scrape Spotify" if getattr(track, 'spotify_page_title', None) else (
                 "—" if not track.spotify_id else "Genius media?"))
         tech_textbox.insert("end", f"• Spotify ID : {_yn(track.spotify_id)}  ({_sp_src})\n")
-        # youtube_url n'est écrit que par Genius media ; la recherche reste un fallback live (non persisté)
-        _yt_src = "Genius media" if getattr(track, 'youtube_url', None) else "recherche live (fallback)"
-        tech_textbox.insert("end", f"• YouTube : {_yn(getattr(track, 'youtube_url', None))}  ({_yt_src})\n")
+        # youtube_url persisté en DB avec sa provenance : 'genius_media' (prioritaire)
+        # ou 'search_auto' (fallback recherche, persisté si confiance ≥ YOUTUBE_PERSIST_CONFIDENCE)
+        _yt_url = getattr(track, 'youtube_url', None)
+        _yt_source_raw = getattr(track, 'youtube_url_source', None)
+        if _yt_url:
+            _yt_src = {"genius_media": "Genius media",
+                       "search_auto": "recherche auto (persistée)"}.get(_yt_source_raw, _yt_source_raw or "Genius media (legacy)")
+        else:
+            _yt_src = "recherche live (fallback, non persisté)"
+        tech_textbox.insert("end", f"• YouTube : {_yn(_yt_url)}  ({_yt_src})\n")
         _isrc_src = getattr(track, '_isrc_source', None) or ("Deezer/ReccoBeats" if getattr(track, 'isrc', None) else "—")
         tech_textbox.insert("end", f"• ISRC : {_yn(getattr(track, 'isrc', None))}  ({_isrc_src})\n")
 
@@ -3235,13 +3632,26 @@ class MainWindow:
 
                 logger.info(f"📦 {len(self.current_artist.tracks)} morceaux déjà en base avant récupération")
 
-                # Mode MàJ : exclure du prefill (album/media) les genius_id déjà en base
+                # Mode MàJ : exclure du prefill (album/media) les titres dont les
+                # données media sont DÉJÀ en base. Exclure tous les genius_id connus
+                # (ancien comportement) empêchait de rattraper les titres récupérés
+                # avant la persistance de youtube_url/album (cf. JOURNAL 2026-07-02).
                 known_genius_ids = None
                 if update_only and self.current_artist.tracks:
+                    # Un lien YouTube 'search_auto' (recherche persistée) ne compte
+                    # PAS comme complet : l'appel Genius doit pouvoir le remplacer
+                    # par le lien officiel (genius_media).
                     known_genius_ids = {
-                        t.genius_id for t in self.current_artist.tracks if t.genius_id
+                        t.genius_id for t in self.current_artist.tracks
+                        if t.genius_id
+                        and (getattr(t, 'album', None) or getattr(t, 'album_override', None))
+                        and getattr(t, 'spotify_id', None)
+                        and getattr(t, 'youtube_url', None)
+                        and getattr(t, 'youtube_url_source', None) != 'search_auto'
                     }
-                    logger.info(f"🔄 MàJ : {len(known_genius_ids)} titres connus exclus du prefill API")
+                    n_retry = sum(1 for t in self.current_artist.tracks if t.genius_id) - len(known_genius_ids)
+                    logger.info(f"🔄 MàJ : {len(known_genius_ids)} titres complets exclus du prefill API, "
+                                f"{n_retry} connus mais incomplets (album/Spotify/YouTube) à re-tenter")
 
                 # Récupérer les morceaux via l'API avec l'option features
                 new_tracks = self.genius_api.get_artist_songs(
@@ -4267,6 +4677,16 @@ class MainWindow:
                             f"{r.get('unmatched', 0)} non matchés, "
                             f"{r.get('albums_updated', 0)} albums"
                         )
+                        # Morceaux présents sur Kworb mais introuvables en base :
+                        # soit un raté de matching, soit un titre absent de la
+                        # discographie — les gros streams méritent un œil.
+                        details = r.get('unmatched_details') or []
+                        if details:
+                            lines.append("\n⚠️ Sur Kworb mais pas reliés en base :")
+                            for title, streams in details[:8]:
+                                lines.append(f"   • {title} — {streams:,} streams".replace(",", " "))
+                            if len(details) > 8:
+                                lines.append(f"   … et {len(details) - 8} autre(s) (voir logs)")
                 if 'ytm' in results:
                     r = results['ytm']
                     if 'error' in r:
@@ -4280,7 +4700,10 @@ class MainWindow:
                 summary_msg = "\n".join(lines)
 
                 self.root.after(0, lambda: messagebox.showinfo("Nb Streams", summary_msg))
-                self.root.after(0, self._populate_tracks_table)
+                # RECHARGER depuis la base avant de réafficher : les MàJ streams
+                # écrivent en DB via leurs propres objets — les tracks en mémoire
+                # de la GUI ne voient rien sans reload (streams "invisibles").
+                self.root.after(0, self._reload_tracks_and_refresh)
             except Exception as e:
                 err_msg = f"Erreur inattendue : {e}"
                 self.root.after(0, lambda: messagebox.showerror(

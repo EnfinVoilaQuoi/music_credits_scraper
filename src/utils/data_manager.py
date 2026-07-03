@@ -60,6 +60,12 @@ class DataManager:
                 ('spotify_monthly_listeners', 'INTEGER'),
                 ('ytm_monthly_listeners', 'INTEGER'),
                 ('ytm_channel_id', 'TEXT'),  # canal YTM épinglé (homonymes)
+                # Totaux Kworb (tableau récap de la page artiste)
+                ('kworb_total_streams', 'INTEGER'),
+                ('kworb_daily_streams', 'INTEGER'),
+                ('kworb_lead_streams', 'INTEGER'),
+                ('kworb_feat_streams', 'INTEGER'),
+                ('kworb_updated', 'TIMESTAMP'),  # date "Last updated" de la page Kworb
             ]:
                 if col not in artist_cols:
                     try:
@@ -109,6 +115,9 @@ class DataManager:
                 'spotify_streams_updated': 'TIMESTAMP',  # Date de dernière mise à jour kworb
                 'ytm_streams': 'INTEGER',  # Streams YouTube Music
                 'ytm_streams_updated': 'TIMESTAMP',  # Date de dernière mise à jour YTMusic
+                'youtube_url': 'TEXT',  # Lien YouTube (absent des bases créées avec l'ancien schéma)
+                'youtube_url_source': 'TEXT',  # 'genius_media' (prioritaire) | 'search_auto' (fallback persisté)
+                'album_override': 'INTEGER',  # 1 = album édité MANUELLEMENT (détaché…) — ne pas re-remplir via API
             }
 
             for col_name, col_type in new_columns.items():
@@ -118,6 +127,16 @@ class DataManager:
                         logger.info(f"✅ Colonne '{col_name}' ajoutée à la table tracks")
                     except Exception as e:
                         logger.debug(f"Colonne '{col_name}' déjà existante ou erreur: {e}")
+
+            # Backfill : historiquement youtube_url n'était écrit que par Genius (media)
+            try:
+                cursor.execute(
+                    "UPDATE tracks SET youtube_url_source = 'genius_media' "
+                    "WHERE youtube_url IS NOT NULL AND youtube_url != '' "
+                    "AND (youtube_url_source IS NULL OR youtube_url_source = '')"
+                )
+            except Exception as e:
+                logger.debug(f"Backfill youtube_url_source: {e}")
             
             # Table des morceaux avec track_number
             cursor.execute("""
@@ -187,7 +206,8 @@ class DataManager:
             # Migration conditionnelle : colonnes YTMusic sur la table albums
             cursor.execute("PRAGMA table_info(albums)")
             album_cols = {row[1] for row in cursor.fetchall()}
-            for col, typ in [('ytm_streams', 'INTEGER'), ('ytm_streams_updated', 'TIMESTAMP')]:
+            for col, typ in [('ytm_streams', 'INTEGER'), ('ytm_streams_updated', 'TIMESTAMP'),
+                             ('spotify_album_ids', 'TEXT')]:  # IDs Spotify des éditions (CSV)
                 if col not in album_cols:
                     try:
                         cursor.execute(f"ALTER TABLE albums ADD COLUMN {col} {typ}")
@@ -321,6 +341,8 @@ class DataManager:
                         time_signature = COALESCE(?, time_signature),
                         genius_url = COALESCE(?, genius_url),
                         spotify_url = COALESCE(?, spotify_url),
+                        youtube_url = COALESCE(?, youtube_url),
+                        youtube_url_source = COALESCE(?, youtube_url_source),
                         is_featuring = ?,
                         primary_artist_name = COALESCE(?, primary_artist_name),
                         featured_artists = COALESCE(?, featured_artists),
@@ -348,6 +370,8 @@ class DataManager:
                     getattr(track, 'key', None), getattr(track, 'mode', None),
                     getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
+                    getattr(track, 'youtube_url', None),
+                    getattr(track, 'youtube_url_source', None),
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),
                     getattr(track, 'featured_artists', None),
@@ -374,12 +398,12 @@ class DataManager:
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id, isrc,
                         bpm, bpm_source, bpm_confidence, key_mode_source, reccobeats_resolution, bpm_alt, duration, genre, key, mode, musical_key, time_signature,
-                        genius_url, spotify_url,
+                        genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, has_lyrics, anecdotes,
                         certifications, album_certifications, relationships, spotify_page_title,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id, getattr(track, 'isrc', None),
                     track.bpm, getattr(track, 'bpm_source', None), getattr(track, 'bpm_confidence', None),
@@ -389,6 +413,8 @@ class DataManager:
                     getattr(track, 'key', None), getattr(track, 'mode', None),
                     getattr(track, 'musical_key', None), getattr(track, 'time_signature', None),
                     track.genius_url, track.spotify_url,
+                    getattr(track, 'youtube_url', None),
+                    getattr(track, 'youtube_url_source', None),
                     getattr(track, 'is_featuring', False),
                     getattr(track, 'primary_artist_name', None),
                     getattr(track, 'featured_artists', None),
@@ -521,7 +547,8 @@ class DataManager:
                         is_featuring, primary_artist_name, featured_artists,
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications, spotify_page_title,
-                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt, lyrics_source, lyrics_synced, relationships, key_mode_source, reccobeats_resolution, secondary_role
+                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt, lyrics_source, lyrics_synced, relationships, key_mode_source, reccobeats_resolution, secondary_role, youtube_url, youtube_url_source,
+                        spotify_streams, spotify_daily_streams, spotify_streams_updated, ytm_streams, ytm_streams_updated, album_override
                     FROM tracks
                     WHERE artist_id = ?
                     ORDER BY title
@@ -574,6 +601,14 @@ class DataManager:
                         key_mode_source = row[37] if len(row) > 37 else None
                         reccobeats_resolution = row[38] if len(row) > 38 else None
                         secondary_role = row[39] if len(row) > 39 else None
+                        youtube_url = row[40] if len(row) > 40 else None
+                        youtube_url_source = row[41] if len(row) > 41 else None
+                        spotify_streams = row[42] if len(row) > 42 else None
+                        spotify_daily_streams = row[43] if len(row) > 43 else None
+                        spotify_streams_updated = row[44] if len(row) > 44 else None
+                        ytm_streams = row[45] if len(row) > 45 else None
+                        ytm_streams_updated = row[46] if len(row) > 46 else None
+                        album_override = row[47] if len(row) > 47 else None
 
                         # Validation
                         if not track_id or not title:
@@ -673,6 +708,14 @@ class DataManager:
                         track.bpm_alt = safe_assign_int(bpm_alt)
                         track.lyrics_source = safe_assign(lyrics_source)
                         track.lyrics_synced = safe_assign(lyrics_synced)
+                        track.youtube_url = safe_assign(youtube_url)
+                        track.youtube_url_source = safe_assign(youtube_url_source)
+                        track.spotify_streams = safe_assign_int(spotify_streams)
+                        track.spotify_daily_streams = safe_assign_int(spotify_daily_streams)
+                        track.spotify_streams_updated = safe_assign(spotify_streams_updated)
+                        track.ytm_streams = safe_assign_int(ytm_streams)
+                        track.ytm_streams_updated = safe_assign(ytm_streams_updated)
+                        track.album_override = safe_assign_int(album_override)
                         try:
                             track.relationships = json.loads(relationships_raw) if relationships_raw else []
                         except (ValueError, TypeError):
@@ -683,6 +726,18 @@ class DataManager:
                         track.key = safe_assign_int(key, allow_string=True)
                         track.mode = safe_assign_int(mode, allow_string=True)
                         track.musical_key = safe_assign(musical_key)
+
+                        # Auto-normalisation : anciennes valeurs en notation US /
+                        # Unicode ("G♯/A♭ majeur", "A minor") → format FR canonique.
+                        # Persisté au prochain save_track (self-healing).
+                        if track.musical_key:
+                            try:
+                                from src.utils.music_theory import normalize_musical_key
+                                _norm = normalize_musical_key(track.musical_key)
+                                if _norm and _norm != track.musical_key:
+                                    track.musical_key = _norm
+                            except Exception:
+                                pass
 
                         # Recalculer musical_key si manquante mais que key + mode existent
                         if not track.musical_key and track.key is not None and track.mode is not None:
@@ -1173,33 +1228,99 @@ class DataManager:
     # Kworb — streams Spotify
     # ──────────────────────────────────────────────────────────────────────────
 
-    def update_track_spotify_streams(self, track_id: int, streams: int, daily_streams: int) -> bool:
-        """Met à jour les streams Kworb d'un morceau."""
+    def update_track_spotify_streams(self, track_id: int, streams: int, daily_streams: int,
+                                     updated_at=None) -> bool:
+        """Met à jour les streams Kworb d'un morceau.
+
+        updated_at : date "Last updated" de la page Kworb (fraîcheur réelle),
+        sinon now().
+        """
         try:
             with self._get_connection() as conn:
                 conn.execute("""
                     UPDATE tracks
                     SET spotify_streams = ?, spotify_daily_streams = ?, spotify_streams_updated = ?
                     WHERE id = ?
-                """, (streams, daily_streams, datetime.now(), track_id))
+                """, (streams, daily_streams, updated_at or datetime.now(), track_id))
                 conn.commit()
                 return True
         except Exception as e:
             logger.error(f"Erreur update_track_spotify_streams (track_id={track_id}): {e}")
             return False
 
-    def upsert_album(self, artist_id: int, title: str, streams: int, daily_streams: int) -> bool:
-        """Insère ou met à jour un album avec ses données Kworb."""
+    def update_track_spotify_id(self, track_id: int, spotify_id: str) -> bool:
+        """Backfill du Spotify Track ID (ex: depuis les liens des pages Kworb).
+        Ne remplace jamais un ID existant."""
         try:
             with self._get_connection() as conn:
                 conn.execute("""
-                    INSERT INTO albums (title, artist_id, spotify_streams, spotify_daily_streams, spotify_streams_updated)
-                    VALUES (?, ?, ?, ?, ?)
+                    UPDATE tracks SET spotify_id = ?
+                    WHERE id = ? AND (spotify_id IS NULL OR spotify_id = '')
+                """, (spotify_id, track_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur update_track_spotify_id (track_id={track_id}): {e}")
+            return False
+
+    def clear_track_album(self, track_id: int) -> bool:
+        """Détache un morceau de son album (édition MANUELLE : album_override=1
+        empêche l'API de re-remplir le champ au prochain prefill)."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE tracks SET album = NULL, album_override = 1, updated_at = ?
+                    WHERE id = ?
+                """, (datetime.now(), track_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur clear_track_album (track_id={track_id}): {e}")
+            return False
+
+    def update_artist_kworb_totals(self, artist_id: int, total: int = None,
+                                   daily: int = None, lead: int = None,
+                                   feat: int = None, kworb_date=None) -> bool:
+        """Stocke les totaux du tableau récap Kworb (page songs de l'artiste)."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE artists
+                    SET kworb_total_streams = COALESCE(?, kworb_total_streams),
+                        kworb_daily_streams = COALESCE(?, kworb_daily_streams),
+                        kworb_lead_streams  = COALESCE(?, kworb_lead_streams),
+                        kworb_feat_streams  = COALESCE(?, kworb_feat_streams),
+                        kworb_updated       = COALESCE(?, kworb_updated),
+                        updated_at = ?
+                    WHERE id = ?
+                """, (total, daily, lead, feat, kworb_date, datetime.now(), artist_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur update_artist_kworb_totals (artist_id={artist_id}): {e}")
+            return False
+
+    def upsert_album(self, artist_id: int, title: str, streams: int, daily_streams: int,
+                     spotify_album_ids: str = None, updated_at=None) -> bool:
+        """Insère ou met à jour un album avec ses données Kworb.
+
+        spotify_album_ids : IDs Spotify des éditions agrégées, séparés par des
+        virgules (un même titre peut couvrir plusieurs éditions — streams sommés
+        par l'appelant).
+        """
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO albums (title, artist_id, spotify_streams, spotify_daily_streams,
+                                        spotify_streams_updated, spotify_album_ids)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(title, artist_id) DO UPDATE SET
                         spotify_streams = excluded.spotify_streams,
                         spotify_daily_streams = excluded.spotify_daily_streams,
-                        spotify_streams_updated = excluded.spotify_streams_updated
-                """, (title, artist_id, streams, daily_streams, datetime.now()))
+                        spotify_streams_updated = excluded.spotify_streams_updated,
+                        spotify_album_ids = COALESCE(excluded.spotify_album_ids, spotify_album_ids)
+                """, (title, artist_id, streams, daily_streams,
+                      updated_at or datetime.now(), spotify_album_ids))
                 conn.commit()
                 return True
         except Exception as e:
@@ -1244,6 +1365,30 @@ class DataManager:
                 return True
         except Exception as e:
             logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")
+            return False
+
+    def update_track_youtube_url(self, track_id: int, url: str, source: str) -> bool:
+        """Persiste le lien YouTube d'un morceau + sa provenance.
+
+        source : 'genius_media' (prioritaire) ou 'search_auto' (fallback recherche,
+        persisté uniquement si confiance ≥ YOUTUBE_PERSIST_CONFIDENCE).
+        Ne remplace JAMAIS un lien 'genius_media' par un lien 'search_auto'.
+        """
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE tracks
+                    SET youtube_url = ?, youtube_url_source = ?, updated_at = ?
+                    WHERE id = ?
+                      AND (? = 'genius_media'
+                           OR youtube_url IS NULL
+                           OR youtube_url = ''
+                           OR COALESCE(youtube_url_source, '') != 'genius_media')
+                """, (url, source, datetime.now(), track_id, source))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")
             return False
 
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:

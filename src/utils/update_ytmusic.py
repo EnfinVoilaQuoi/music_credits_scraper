@@ -8,7 +8,6 @@ Architecture quota-optimisée :
 import re
 import sys
 import io
-import unicodedata
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -21,28 +20,28 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _normalize_title(s: str) -> str:
-    # Retirer les suffixes featuring : "Titre (feat. X)" → "Titre"
-    s = re.sub(r'\s*[\(\[]\s*(?:feat|ft|avec|with)\.?[^\)\]]*[\)\]]', '', s, flags=re.IGNORECASE)
-    # Unifier/supprimer les apostrophes (typographiques ou droites)
-    s = re.sub(r"['’‘`´]", '', s)
-    s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
-    return re.sub(r'\s+', ' ', s).strip().lower()
+# Normaliseur PARTAGÉ (même matching que update_kworb — cf. title_matching.py).
+# L'ancien normaliseur local ratait "MURDER INC"/"MURDER INC.", "SOAB"/"S.O.A.B",
+# "L’Augmentation - Pt. 2"/"L’augmentation, Pt. 2".
+from src.utils.title_matching import normalize_title as _normalize_title
+
+
+def _extract_video_id(url: str) -> Optional[str]:
+    m = re.search(r'(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})', url or '')
+    return m.group(1) if m else None
 
 
 def _infer_channel_from_youtube_links(api, artist, data_manager,
                                       max_votes: int = 8,
                                       max_attempts: int = 15) -> 'Optional[str]':
     """
-    Déduit le canal YTM de l'artiste en croisant les liens YouTube
-    auto-sélectionnés (confiance ≥ 0.8) : vote majoritaire sur les chaînes
+    Déduit le canal YTM de l'artiste par vote majoritaire sur les chaînes
     propriétaires des vidéos. Fiable à ~99% dès 2-3 morceaux connus.
-    """
-    try:
-        from src.utils.youtube_integration import youtube_integration
-    except Exception:
-        return None
 
+    Source des vidéos : d'abord les `youtube_url` déjà en base (Genius media,
+    prioritaire — confiance 1.0), puis, seulement s'il en manque, la recherche
+    live (ancien système, fallback pour les rares titres sans lien Genius).
+    """
     try:
         tracks = data_manager.get_artist_tracks(artist.id)
     except Exception:
@@ -51,21 +50,45 @@ def _infer_channel_from_youtube_links(api, artist, data_manager,
         return None
 
     video_ids = []
-    attempts = 0
+
+    # 1) Liens déjà en base (Genius media ou recherche persistée ≥ 0.9)
+    tracks_without_link = []
     for t in tracks:
-        if len(video_ids) >= max_votes or attempts >= max_attempts:
+        if len(video_ids) >= max_votes:
             break
-        attempts += 1
+        vid = _extract_video_id(getattr(t, 'youtube_url', None))
+        if vid:
+            video_ids.append(vid)
+        else:
+            tracks_without_link.append(t)
+
+    if video_ids:
+        logger.info(f"🎫 Inférence canal : {len(video_ids)} lien(s) YouTube depuis la base (Genius)")
+
+    # 2) Complément éventuel : recherche live (fallback, rare) — uniquement si
+    #    la base ne fournit pas assez de votes pour être fiable (< 3)
+    if len(video_ids) < 3 and tracks_without_link:
         try:
-            res = youtube_integration.get_youtube_link_for_track(
-                artist.name, t.title, album=getattr(t, 'album', None)
-            )
+            from src.utils.youtube_integration import youtube_integration
         except Exception:
-            continue
-        if res.get('type') == 'direct' and res.get('confidence', 0) >= 0.8:
-            m = re.search(r'(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})', res.get('url', ''))
-            if m:
-                video_ids.append(m.group(1))
+            youtube_integration = None
+
+        if youtube_integration:
+            attempts = 0
+            for t in tracks_without_link:
+                if len(video_ids) >= max_votes or attempts >= max_attempts:
+                    break
+                attempts += 1
+                try:
+                    res = youtube_integration.get_youtube_link_for_track(
+                        artist.name, t.title, album=getattr(t, 'album', None)
+                    )
+                except Exception:
+                    continue
+                if res.get('type') == 'direct' and res.get('confidence', 0) >= 0.8:
+                    vid = _extract_video_id(res.get('url'))
+                    if vid:
+                        video_ids.append(vid)
 
     if len(video_ids) < 2:
         logger.debug(f"Inférence canal YT: seulement {len(video_ids)} vidéo(s) fiable(s)")
@@ -91,6 +114,8 @@ def update_ytmusic_streams(artist, data_manager) -> Dict:
         'albums_processed': 0,
         'yt_api_calls': 0,
         'unmatched_titles': [],
+        'feats_covered': 0,  # feats hors canal résolus via lien YouTube (repérés Kworb)
+        'ambiguous': 0,  # titres homonymes passés à l'étape 4 (pas d'écriture au hasard)
     }
 
     api = YTMusicAPI()
@@ -176,9 +201,15 @@ def update_ytmusic_streams(artist, data_manager) -> Dict:
 
     # ── Étape 3 : matching DB + mise à jour ───────────────────────────────────
     db_tracks = data_manager.get_artist_tracks(artist.id)
-    track_index: Dict[str, object] = {
-        _normalize_title(t.title): t for t in db_tracks
-    }
+    track_index: Dict[str, list] = {}
+    for t in db_tracks:
+        track_index.setdefault(_normalize_title(t.title), []).append(t)
+
+    covered_track_ids = set()  # tracks dont les streams ont été résolus (passe albums)
+    # track_id → {videoId: count} : un morceau sur PLUSIEURS éditions d'album a
+    # des videoIds distincts → SOMME des compteurs, dédupliquée par videoId
+    # (la même vidéo listée sur deux éditions n'est comptée qu'une fois).
+    vid_counts: Dict[int, Dict[str, int]] = {}
 
     for album_title, raw_tracks in tracks_by_album.items():
         album_total_streams = 0
@@ -186,12 +217,27 @@ def update_ytmusic_streams(artist, data_manager) -> Dict:
         for entry in raw_tracks:
             streams = api.resolve_streams(entry, view_counts)
             norm = _normalize_title(entry['title'])
-            matched_track = track_index.get(norm)
+            candidates = track_index.get(norm, [])
 
+            if len(candidates) > 1:
+                # HOMONYMES en base (deux morceaux distincts au même titre, ex.
+                # "MEILLEUR" Souffrance vs "Meilleur" Goldee Money) : ne pas
+                # écrire au hasard — l'étape 4 (lien YouTube exact par morceau)
+                # couvrira chacun individuellement.
+                result['ambiguous'] += 1
+                logger.info(
+                    f"⚠️ Titre ambigu ({len(candidates)} morceaux en base), "
+                    f"passé à l'étape 4: '{entry['title']}'"
+                )
+                continue
+
+            matched_track = candidates[0] if candidates else None
             if matched_track:
                 if streams is not None:
-                    data_manager.update_track_ytm_streams(matched_track.id, streams)
+                    vid = entry.get('video_id') or f"_novid_{album_title}_{norm}"
+                    vid_counts.setdefault(matched_track.id, {})[vid] = streams
                     album_total_streams += streams
+                    covered_track_ids.add(matched_track.id)
                 result['matched'] += 1
                 logger.debug(
                     f"✅ Match YTM: '{entry['title']}' → "
@@ -207,9 +253,81 @@ def update_ytmusic_streams(artist, data_manager) -> Dict:
 
         result['albums_processed'] += 1
 
+    for track_id, vids in vid_counts.items():
+        total = sum(vids.values())
+        data_manager.update_track_ytm_streams(track_id, total)
+        if len(vids) > 1:
+            logger.debug(f"🎛️ Track #{track_id}: {len(vids)} vidéos sommées → {total:,}")
+
+    # ── Étape 4 : feats hors canal, repérés sur Kworb ─────────────────────────
+    # Les feats sortis sur les albums d'AUTRES artistes ne passent pas par le
+    # canal YTM de l'artiste. Pour ceux que Kworb a repérés (spotify_streams
+    # présent), on additionne :
+    #   · le CLIP : lien YouTube en base (Genius media / recherche persistée) ;
+    #   · la version AUDIO YTM : recherche ytmusicapi (filter=songs, avec cache),
+    #     retenue seulement si confiance ≥ YOUTUBE_CONFIDENCE_THRESHOLD.
+    # Somme dédupliquée par videoId (si le lien Genius EST l'audio, compté 1×).
+    extras = []  # (track, {videoId, ...})
+    candidates = [
+        t for t in db_tracks
+        if t.id not in covered_track_ids
+        and getattr(t, 'spotify_streams', None) is not None  # repéré sur Kworb
+    ]
+    if candidates:
+        try:
+            from src.config import YOUTUBE_CONFIDENCE_THRESHOLD
+            from src.youtube.youtube_searcher import YouTubeSearcher
+            searcher = YouTubeSearcher()
+        except Exception as e:
+            logger.warning(f"Recherche audio YTM indisponible ({e}) — clips seulement")
+            searcher, YOUTUBE_CONFIDENCE_THRESHOLD = None, 1.1
+
+        for t in candidates:
+            vids = set()
+            clip_vid = _extract_video_id(getattr(t, 'youtube_url', None))
+            if clip_vid:
+                vids.add(clip_vid)
+            if searcher:
+                try:
+                    # Pour un feat, chercher sous l'artiste PRINCIPAL (meilleur rappel)
+                    search_artist = (getattr(t, 'primary_artist_name', None)
+                                     if getattr(t, 'is_featuring', False) else None) or artist.name
+                    results = searcher.search_track(search_artist, t.title, max_results=5)
+                    best = results[0] if results else None
+                    if (best and not best.get('is_search_url')
+                            and best.get('relevance_score', 0) >= YOUTUBE_CONFIDENCE_THRESHOLD
+                            and best.get('video_id')):
+                        vids.add(best['video_id'])
+                except Exception as e:
+                    logger.debug(f"Recherche audio YTM échouée '{t.title}': {e}")
+            if vids:
+                extras.append((t, vids))
+
+    if extras:
+        all_extra_vids = sorted({v for _, vids in extras for v in vids})
+        logger.info(
+            f"🎤 Feats hors canal repérés Kworb : {len(extras)} morceau(x), "
+            f"{len(all_extra_vids)} vidéo(s) (clip + audio)"
+        )
+        extra_counts = api.fetch_view_counts_batch(all_extra_vids)
+        result['yt_api_calls'] += (len(all_extra_vids) + 49) // 50
+        for t, vids in extras:
+            counts = [extra_counts[v] for v in vids if extra_counts.get(v) is not None]
+            if counts:
+                total = sum(counts)
+                data_manager.update_track_ytm_streams(t.id, total)
+                result['feats_covered'] += 1
+                logger.debug(
+                    f"✅ Feat: '{t.title}' → {total:,} "
+                    f"({len(counts)} vidéo(s) : clip et/ou audio)"
+                )
+            else:
+                logger.debug(f"⚠️ Feat sans viewCount: '{t.title}' ({sorted(vids)})")
+
     logger.info(
         f"YTMusic terminé : {result['matched']} matchés, "
         f"{result['unmatched']} non matchés, "
+        f"{result['feats_covered']} feat(s) via lien YouTube, "
         f"{result['albums_processed']} albums, "
         f"{result['yt_api_calls']} requête(s) YouTube API"
     )
@@ -249,6 +367,7 @@ if __name__ == '__main__':
     summary = update_ytmusic_streams(artist, dm)
     print('\n── Résumé YTMusic ──────────────────────────────────')
     print(f"Morceaux matchés      : {summary['matched']}")
+    print(f"Feats via lien YouTube: {summary['feats_covered']}")
     print(f"Morceaux non matchés  : {summary['unmatched']}")
     print(f"Albums traités        : {summary['albums_processed']}")
     print(f"Requêtes YouTube API  : {summary['yt_api_calls']}")

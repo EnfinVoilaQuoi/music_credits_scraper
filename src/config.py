@@ -3,10 +3,13 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement depuis .env seulement si elles n'existent pas dans Windows
-# Cela privilégie les variables Windows mais permet le fallback sur .env pour le dev
-if not os.getenv("GENIUS_API_KEY"):
-    load_dotenv()
+# Toujours charger .env comme FALLBACK, sans écraser les variables Windows
+# (override=False) : Windows reste prioritaire, mais une clé présente seulement
+# dans .env (ex. BPMFINDER_*) est quand même lue. L'ancienne logique
+# « charger .env seulement si GENIUS_API_KEY absente de Windows » ignorait
+# silencieusement toute clé mise uniquement dans .env dès que GENIUS_API_KEY
+# était définie côté Windows.
+load_dotenv(override=False)
 
 # Chemins du projet
 BASE_DIR = Path(__file__).parent.parent
@@ -60,6 +63,12 @@ YOUTUBE_VERIFY_OFFICIAL_CHANNELS = True  # Vérifier les chaînes officielles
 YOUTUBE_CONFIDENCE_THRESHOLD = 0.85      # Seuil de confiance pour auto-sélection
 YOUTUBE_PERSIST_CONFIDENCE = 0.90        # Seuil pour PERSISTER en DB un lien trouvé par recherche
                                          # (fallback des rares cas sans lien dans le media Genius)
+
+# BPM Finder (audioaidynamics.com/music-analyzer) — BPM/Key/Camelot via lien YouTube
+# Compte email/mot de passe requis ; session Playwright persistée (reconnexion rare)
+BPMFINDER_EMAIL = os.getenv("BPMFINDER_EMAIL")
+BPMFINDER_PASSWORD = os.getenv("BPMFINDER_PASSWORD")
+BPMFINDER_SESSION_FILE = DATA_DIR / ".bpmfinder_session.json"
 
 # Certifications
 DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')

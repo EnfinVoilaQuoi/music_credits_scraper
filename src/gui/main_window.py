@@ -1094,8 +1094,16 @@ class MainWindow:
                     command=lambda: self._show_track_details_by_index(index)
                 )
                 context_menu.add_command(
-                    label="✏️ Saisir BPM / Tonalité…",
+                    label="✏️ Saisir BPM / Tonalité / Durée…",
                     command=lambda: self._manual_audio_entry(index)
+                )
+                context_menu.add_command(
+                    label="🔗 Définir / valider le lien YouTube…",
+                    command=lambda: self._manual_youtube_link(index)
+                )
+                context_menu.add_command(
+                    label="🎚️ Analyser un fichier audio local (BPM/Key)…",
+                    command=lambda: self._bpmfinder_local_file(index)
                 )
                 context_menu.add_separator()
                 context_menu.add_command(
@@ -1110,35 +1118,67 @@ class MainWindow:
                     context_menu.grab_release()
 
     def _manual_audio_entry(self, index: int):
-        """Saisie manuelle du BPM, de la tonalité et/ou de la durée (source 'manual').
+        """Saisie manuelle BPM / Tonalité / Durée (source 'manual') — UN dialogue.
 
         Pour les morceaux hors de portée des sources auto : valeurs relevées
-        sur Sonoteller/BPM Finder (quota partagé côté Sonoteller → au
-        compte-goutte), ou analyse d'un fichier local.
-        Tonalité acceptée en anglais ou français : "G# minor", "Sol# mineur",
-        "Ab minor", "Ré majeur"… Durée en "3:24" ou en secondes ("204").
+        sur Sonoteller/BPM Finder, ou analyse d'un fichier local.
+        Tonalité EN ou FR ("G# minor", "Sol# mineur"…). Durée "3:24" ou secondes.
         """
-        from tkinter import simpledialog
         try:
             track = self.current_artist.tracks[index]
         except (IndexError, TypeError):
             return
 
-        bpm_str = simpledialog.askstring(
-            "BPM manuel", f"« {track.title} »\n\nBPM (vide = inchangé) :",
-            initialvalue=str(track.bpm) if getattr(track, 'bpm', None) else "",
-            parent=self.root)
-        if bpm_str is None:  # Annuler
-            return
-        key_str = simpledialog.askstring(
-            "Tonalité manuelle",
-            f"« {track.title} »\n\nTonalité, ex. \"G# minor\" ou \"Sol# mineur\"\n"
-            "(vide = inchangée) :",
-            initialvalue=getattr(track, 'musical_key', None) or "",
-            parent=self.root)
-        if key_str is None:
+        _dur = getattr(track, 'duration', None)
+        _dur_init = f"{_dur // 60}:{_dur % 60:02d}" if isinstance(_dur, int) and _dur else ""
+
+        # Dialogue unique à 3 champs
+        dlg = ctk.CTkToplevel(self.root)
+        dlg.title("Saisie manuelle — BPM / Tonalité / Durée")
+        dlg.geometry("460x420")
+        dlg.minsize(460, 420)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        ctk.CTkLabel(dlg, text=f"« {track.title} »", font=("Arial", 13, "bold")
+                     ).pack(pady=(15, 10))
+
+        fields = ctk.CTkFrame(dlg, fg_color="transparent")
+        fields.pack(fill="x", padx=25)
+
+        def _row(label, value, hint):
+            ctk.CTkLabel(fields, text=label, anchor="w").pack(fill="x", pady=(8, 0))
+            e = ctk.CTkEntry(fields, placeholder_text=hint)
+            if value:
+                e.insert(0, value)
+            e.pack(fill="x")
+            return e
+
+        bpm_entry = _row("BPM", str(track.bpm) if getattr(track, 'bpm', None) else "", "ex. 95")
+        key_entry = _row("Tonalité", getattr(track, 'musical_key', None) or "",
+                         "ex. G# minor / Sol# mineur")
+        dur_entry = _row("Durée", _dur_init, "ex. 3:24 ou 204")
+
+        _result = {"ok": False}
+
+        def _submit():
+            _result["ok"] = True
+            _result["bpm"] = bpm_entry.get()
+            _result["key"] = key_entry.get()
+            _result["dur"] = dur_entry.get()
+            dlg.destroy()
+
+        btns = ctk.CTkFrame(dlg, fg_color="transparent")
+        btns.pack(pady=15)
+        ctk.CTkButton(btns, text="Enregistrer", command=_submit).pack(side="left", padx=5)
+        ctk.CTkButton(btns, text="Annuler", fg_color="gray",
+                      command=dlg.destroy).pack(side="left", padx=5)
+
+        dlg.wait_window()
+        if not _result["ok"]:
             return
 
+        bpm_str, key_str, duration_str = _result["bpm"], _result["key"], _result["dur"]
         changed = []
         bpm_str = (bpm_str or "").strip()
         if bpm_str:
@@ -1168,6 +1208,32 @@ class MainWindow:
             track.key_mode_source = 'manual'
             changed.append(f"Tonalité = {canonical}")
 
+        duration_str = (duration_str or "").strip()
+        if duration_str:
+            seconds = None
+            if ':' in duration_str:
+                parts = duration_str.split(':')
+                try:
+                    if len(parts) == 2:
+                        seconds = int(parts[0]) * 60 + int(parts[1])
+                    elif len(parts) == 3:
+                        seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                except ValueError:
+                    seconds = None
+            else:
+                try:
+                    seconds = int(round(float(duration_str.replace(',', '.'))))
+                except ValueError:
+                    seconds = None
+            if seconds is None or seconds <= 0:
+                messagebox.showerror(
+                    "Durée manuelle",
+                    f"Durée invalide : {duration_str!r}\n"
+                    "Format attendu : \"3:24\" ou secondes (\"204\").")
+                return
+            track.duration = seconds
+            changed.append(f"Durée = {seconds // 60}:{seconds % 60:02d}")
+
         if not changed:
             return
         try:
@@ -1177,6 +1243,135 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Saisie manuelle échouée: {e}")
             messagebox.showerror("Saisie manuelle", f"Sauvegarde échouée : {e}")
+
+    def _manual_youtube_link(self, index: int):
+        """Définit/valide manuellement le lien YouTube d'un morceau.
+
+        Propose le lien en base (Genius/persisté) ou le meilleur résultat de
+        recherche comme valeur pré-remplie ; l'utilisateur colle/valide. Stocké
+        en source 'manual' (priorité maximale : ni la recherche ni Genius ne
+        l'écrasent — choix explicite). Sert notamment aux feats dont la
+        recherche auto reste sous le seuil de confiance (ex. Lundi de Pâques).
+        """
+        from tkinter import simpledialog
+        try:
+            track = self.current_artist.tracks[index]
+        except (IndexError, TypeError):
+            return
+
+        proposed = getattr(track, 'youtube_url', None)
+        if not proposed:
+            # Proposer le meilleur résultat de recherche (même sous le seuil)
+            try:
+                artist_name = track.artist.name if track.artist else self.current_artist.name
+                res = youtube_integration.get_youtube_link_for_track(
+                    (getattr(track, 'primary_artist_name', None)
+                     if getattr(track, 'is_featuring', False) else None) or artist_name,
+                    track.title, track.album, self.get_release_year_safely(track))
+                if res.get('type') == 'direct' and res.get('url'):
+                    proposed = res['url']
+            except Exception:
+                pass
+
+        url = simpledialog.askstring(
+            "Lien YouTube",
+            f"« {track.title} »\n\nColle ou valide le lien YouTube du morceau\n"
+            "(la valeur proposée vient de la recherche auto — vérifie qu'elle\n"
+            "correspond bien AU MORCEAU avant de valider) :",
+            initialvalue=proposed or "",
+            parent=self.root)
+        if url is None:
+            return
+        url = url.strip()
+
+        if not url:
+            # Vider = repasser en recherche live (source effacée)
+            track.youtube_url = None
+            track.youtube_url_source = None
+            self.data_manager.clear_track_youtube_link(track.id)
+            logger.info(f"🔗 Lien YouTube retiré : '{track.title}'")
+        else:
+            if 'youtube.com/watch' not in url and 'youtu.be/' not in url:
+                messagebox.showerror("Lien YouTube",
+                                     f"Lien YouTube invalide : {url!r}")
+                return
+            track.youtube_url = url
+            track.youtube_url_source = 'manual'
+            self.data_manager.update_track_youtube_url(track.id, url, 'manual')
+            logger.info(f"🔗 Lien YouTube validé (manuel) : '{track.title}' → {url}")
+        self._populate_tracks_table()
+
+    def _bpmfinder_local_file(self, index: int):
+        """Analyse un fichier audio LOCAL via BPM Finder → BPM/Key (source 'bpmfinder').
+
+        Pour les morceaux absents de YouTube. Lance l'analyse dans un thread
+        (le scraper est bloquant) et écrit les manques uniquement.
+        """
+        try:
+            track = self.current_artist.tracks[index]
+        except (IndexError, TypeError):
+            return
+
+        scraper = getattr(self.data_enricher, 'bpmfinder_scraper', None)
+        if not scraper:
+            messagebox.showwarning(
+                "BPM Finder",
+                "BPM Finder non configuré (BPMFINDER_EMAIL/PASSWORD).")
+            return
+
+        path = filedialog.askopenfilename(
+            title=f"Fichier audio pour « {track.title} »",
+            filetypes=[("Audio/Vidéo", "*.wav *.mp3 *.ogg *.flac *.m4a *.mp4 *.aac"),
+                       ("Tous", "*.*")])
+        if not path:
+            return
+
+        def run():
+            try:
+                self.root.after(0, lambda: self.progress_label.configure(
+                    text=f"BPM Finder (fichier) : {track.title}…")
+                    if hasattr(self, 'progress_label') else None)
+                res = scraper.analyze_file(path)
+            except Exception as e:
+                logger.error(f"BPM Finder fichier échec '{track.title}': {e}")
+                res = None
+            finally:
+                # Fermer le navigateur DANS ce thread (évite l'EPIPE Playwright
+                # à l'arrêt de l'app, cf. batch d'enrichissement).
+                try:
+                    scraper.close()
+                except Exception:
+                    pass
+
+            def done():
+                if not res:
+                    messagebox.showerror(
+                        "BPM Finder",
+                        f"Analyse échouée pour « {track.title} » (voir logs).")
+                    return
+                applied = []
+                if not getattr(track, 'bpm', None) and res.get('bpm'):
+                    track.bpm = res['bpm']; track.bpm_source = 'bpmfinder'
+                    applied.append(f"BPM={res['bpm']}")
+                if (getattr(track, 'key', None) is None or getattr(track, 'mode', None) is None) \
+                        and res.get('key') is not None and res.get('mode') is not None:
+                    from src.utils.music_theory import key_mode_to_french
+                    track.key = res['key']; track.mode = res['mode']
+                    track.musical_key = key_mode_to_french(res['key'], res['mode'])
+                    track.key_mode_source = 'bpmfinder'
+                    applied.append(f"Tonalité={track.musical_key}")
+                if applied:
+                    self.data_manager.save_track(track)
+                    self._populate_tracks_table()
+                    messagebox.showinfo("BPM Finder",
+                                        f"« {track.title} » : {', '.join(applied)}")
+                else:
+                    messagebox.showinfo(
+                        "BPM Finder",
+                        f"« {track.title} » : rien à compléter (déjà rempli).")
+            self.root.after(0, done)
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _disable_track_with_refresh(self, index: int, item):
         """Désactive un morceau et actualise immédiatement l'affichage"""
@@ -2195,7 +2390,8 @@ class MainWindow:
         _yt_source_raw = getattr(track, 'youtube_url_source', None)
         if _yt_url:
             _yt_src = {"genius_media": "Genius media",
-                       "search_auto": "recherche auto (persistée)"}.get(_yt_source_raw, _yt_source_raw or "Genius media (legacy)")
+                       "search_auto": "recherche auto (persistée)",
+                       "manual": "saisi manuellement ✎"}.get(_yt_source_raw, _yt_source_raw or "Genius media (legacy)")
         else:
             _yt_src = "recherche live (fallback, non persisté)"
         tech_textbox.insert("end", f"• YouTube : {_yn(_yt_url)}  ({_yt_src})\n")
@@ -3784,7 +3980,8 @@ class MainWindow:
                     success_msg += f"\n📊 Total en base : {len(self.current_artist.tracks)} morceaux"
 
                     self.root.after(0, self._update_artist_info)
-                    self.root.after(0, lambda: messagebox.showinfo("Succès", success_msg))
+                    self.root.after(0, lambda m=success_msg: self._show_scrollable_report(
+                        "Récupération terminée", m))
 
                     logger.info(f"Récupération terminée avec succès: {len(new_tracks)} nouveaux, total: {len(self.current_artist.tracks)} morceaux")
                     
@@ -4309,7 +4506,8 @@ class MainWindow:
                 if disabled_count > 0:
                     success_msg += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
 
-                self.root.after(0, lambda: messagebox.showinfo("Scraping terminé", success_msg))
+                self.root.after(0, lambda m=success_msg: self._show_scrollable_report(
+                    "Scraping terminé", m))
 
                 # Mettre à jour l'affichage
                 self.root.after(0, self._update_artist_info)
@@ -4699,7 +4897,8 @@ class MainWindow:
                         )
                 summary_msg = "\n".join(lines)
 
-                self.root.after(0, lambda: messagebox.showinfo("Nb Streams", summary_msg))
+                self.root.after(0, lambda m=summary_msg: self._show_scrollable_report(
+                    "Nb Streams", m))
                 # RECHARGER depuis la base avant de réafficher : les MàJ streams
                 # écrivent en DB via leurs propres objets — les tracks en mémoire
                 # de la GUI ne voient rien sans reload (streams "invisibles").
@@ -4757,6 +4956,7 @@ class MainWindow:
             'reccobeats': 'ReccoBeats (BPM/Key/Mode via ISRC) 🎵',
             'getsongbpm': 'GetSongBPM API (2ᵉ vote BPM/Key/Mode) 🎹',
             'songbpm': 'SongBPM Scraper (départage BPM/Key) 🎼',
+            'bpmfinder': 'BPM Finder (dernier recours, via lien YouTube) 🎛️',
             'deezer': 'Deezer (ISRC, durée, date de sortie) 🎶',
             'discogs': 'Discogs (crédits supplémentaires, labels) 💿'
         }
@@ -4779,8 +4979,20 @@ class MainWindow:
             checkbox.pack(anchor="w")
 
             if source not in available:
-                ctk.CTkLabel(frame, text="(API non configurée)",
+                _msg = "(API non configurée)"
+                if source == 'bpmfinder':
+                    _msg = ("(non configuré : BPMFINDER_EMAIL/PASSWORD dans .env ou "
+                            "variables Windows, puis relancer l'app —\n"
+                            " ou lancer scripts/bpmfinder_login.py une fois)")
+                ctk.CTkLabel(frame, text=_msg,
                         text_color="gray").pack(anchor="w", padx=25)
+
+            # Info supplémentaire pour BPM Finder
+            if source == 'bpmfinder':
+                info_text = ("Dernier recours si BPM/Key manquent : analyse le lien YouTube.\n"
+                             "Compte requis (BPMFINDER_EMAIL/PASSWORD) ; session réutilisée.")
+                ctk.CTkLabel(frame, text=info_text,
+                        font=("Arial", 9), text_color="gray").pack(anchor="w", padx=25)
 
             # Info supplémentaire pour spotify_id
             if source == 'spotify_id':
@@ -4963,81 +5175,66 @@ class MainWindow:
                 if clear_on_failure and cleaned_count > 0:
                     summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"
 
-                # Ajouter la légende
+                # Étiquettes courtes des sources (générique : toute source présente
+                # dans results est affichée, y compris bpmfinder — l'ancien code
+                # ne gérait qu'un sous-ensemble en dur → ligne vide si on ne
+                # cochait que BPM Finder).
+                _src_labels = {
+                    'spotify_id': 'SP', 'reccobeats': 'RC', 'getsongbpm': 'GS',
+                    'songbpm': 'SB', 'bpmfinder': 'BF', 'deezer': 'DZ',
+                    'discogs': 'DC',
+                }
+                _meta_keys = {'cleaned'}
+
+                def _status_char(v):
+                    if v == 'not_needed':
+                        return '-'
+                    if v is None:
+                        return '?'   # crash/timeout
+                    return '✓' if v else '✗'
+
+                def _overall(results):
+                    vals = [v for k, v in results.items() if k not in _meta_keys]
+                    chars = [_status_char(v) for v in vals]
+                    if '✓' in chars:
+                        return '✓'
+                    if '?' in chars:
+                        return '?'
+                    if chars and all(c == '-' for c in chars):
+                        return '-'
+                    return '✗'
+
                 summary += "\nDÉTAIL PAR MORCEAU:\n"
                 summary += "Légende: ✓=succès | ✗=échec/absent | ?=crash/timeout | -=déjà présent\n\n"
 
+                n_ok = n_fail = 0
                 for track_result in track_results:
                     title = track_result['title']
                     results = track_result['results']
-
-                    # Raccourcir le titre s'il est trop long
                     if len(title) > 30:
                         title = title[:27] + "..."
 
-                    # Créer le résumé des sources
-                    sources_summary = []
+                    overall = _overall(results)
+                    if overall == '✓':
+                        n_ok += 1
+                    elif overall in ('✗', '?'):
+                        n_fail += 1
 
-                    # Spotify ID (si demandé) - EN PREMIER
-                    if 'spotify_id' in results:
-                        if results['spotify_id'] == 'not_needed':
-                            sp_status = "-"  # Déjà présent
-                        elif results['spotify_id']:
-                            sp_status = "✓"  # Trouvé
-                        else:
-                            sp_status = "✗"  # Échec
-                        sources_summary.append(f"SP:{sp_status}")
+                    parts = [f"{_src_labels.get(k, k)}:{_status_char(v)}"
+                             for k, v in results.items() if k not in _meta_keys]
+                    detail = f"  {' | '.join(parts)}" if parts else ""
+                    summary += f"{overall} {title}\n{detail}\n" if detail else f"{overall} {title}\n"
 
-                    # ReccoBeats (si demandé)
-                    if 'reccobeats' in results:
-                        if results['reccobeats'] is None:
-                            rc_status = "?"
-                        elif results['reccobeats']:
-                            rc_status = "✓"
-                        else:
-                            rc_status = "✗"
-                        sources_summary.append(f"RC:{rc_status}")
-
-                    # GetSongBPM (si demandé)
-                    if 'getsongbpm' in results:
-                        if results['getsongbpm'] is None:
-                            gs_status = "?"
-                        elif results['getsongbpm'] == 'not_needed':
-                            gs_status = "-"
-                        elif results['getsongbpm']:
-                            gs_status = "✓"
-                        else:
-                            gs_status = "✗"
-                        sources_summary.append(f"GS:{gs_status}")
-
-                    # SongBPM (si demandé)
-                    if 'songbpm' in results:
-                        if results['songbpm'] is None:
-                            sb_status = "?"  # Crash/timeout
-                        elif results['songbpm'] == 'not_needed':
-                            sb_status = "-"  # Déjà présent
-                        elif results['songbpm']:
-                            sb_status = "✓"  # Succès
-                        else:
-                            sb_status = "✗"  # Pas de données
-                        sources_summary.append(f"SB:{sb_status}")
-
-                    # Deezer (si demandé)
-                    if 'deezer' in results:
-                        if results['deezer'] is None:
-                            dz_status = "?"
-                        elif results['deezer']:
-                            dz_status = "✓"
-                        else:
-                            dz_status = "✗"
-                        sources_summary.append(f"DZ:{dz_status}")
-
-                    summary += f"• {title}\n  {' | '.join(sources_summary)}\n"
+                # Bilan chiffré en tête du détail
+                summary = summary.replace(
+                    "\nDÉTAIL PAR MORCEAU:\n",
+                    f"\n✅ {n_ok} réussi(s) · ❌ {n_fail} échec(s)\n\nDÉTAIL PAR MORCEAU:\n", 1)
 
                 if disabled_count > 0:
                     summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
 
-                self.root.after(0, lambda: messagebox.showinfo("Enrichissement terminé", summary))
+                self.root.after(0, lambda s=summary: self._show_scrollable_report(
+                    "Enrichissement terminé", s))
                 self.root.after(0, self._update_artist_info)
                 self.root.after(0, self._update_statistics)
                 self.root.after(0, self._populate_tracks_table)
@@ -5047,6 +5244,15 @@ class MainWindow:
                 logger.error(f"Erreur lors de l'enrichissement: {error_msg}")
                 self.root.after(0, lambda: messagebox.showerror("Erreur", f"Erreur lors de l'enrichissement: {error_msg}"))
             finally:
+                # Fermer le navigateur BPM Finder DANS ce thread (celui qui l'a
+                # créé) : sinon il survit au batch et son pipe Playwright casse
+                # à l'arrêt de l'app (EPIPE cosmétique mais alarmant).
+                try:
+                    bf = getattr(self.data_enricher, 'bpmfinder_scraper', None)
+                    if bf:
+                        bf.close()
+                except Exception:
+                    pass
                 self.root.after(0, lambda: self.enrich_button.configure(
                     state="normal",
                     text="Enrichir données"
@@ -5055,6 +5261,32 @@ class MainWindow:
                 self.root.after(0, lambda: self.progress_label.configure(text=""))
 
         threading.Thread(target=enrich, daemon=True).start()
+
+    def _show_scrollable_report(self, title: str, text: str):
+        """Fenêtre de rapport à texte DÉFILANT (taille fixe) — pour les récaps
+        longs (30+ morceaux) qui débordaient le messagebox non scrollable."""
+        dlg = ctk.CTkToplevel(self.root)
+        dlg.title(title)
+        dlg.geometry("560x620")
+        dlg.minsize(460, 400)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        box = ctk.CTkTextbox(dlg, wrap="word", font=("Consolas", 12))
+        box.pack(fill="both", expand=True, padx=12, pady=(12, 6))
+        box.insert("1.0", text)
+        box.configure(state="disabled")
+
+        btns = ctk.CTkFrame(dlg, fg_color="transparent")
+        btns.pack(pady=(0, 12))
+
+        def _copy():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+
+        ctk.CTkButton(btns, text="📋 Copier", width=90, fg_color="gray",
+                      command=_copy).pack(side="left", padx=5)
+        ctk.CTkButton(btns, text="OK", width=90, command=dlg.destroy).pack(side="left", padx=5)
 
     def _show_error(self, title, message):
         """Affiche un message d'erreur"""

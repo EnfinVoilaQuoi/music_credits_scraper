@@ -1370,9 +1370,9 @@ class DataManager:
     def update_track_youtube_url(self, track_id: int, url: str, source: str) -> bool:
         """Persiste le lien YouTube d'un morceau + sa provenance.
 
-        source : 'genius_media' (prioritaire) ou 'search_auto' (fallback recherche,
-        persisté uniquement si confiance ≥ YOUTUBE_PERSIST_CONFIDENCE).
-        Ne remplace JAMAIS un lien 'genius_media' par un lien 'search_auto'.
+        Priorité des sources : 'manual' (choix utilisateur) ≥ 'genius_media' >
+        'search_auto'. Un lien 'manual' ou 'genius_media' écrase n'importe quoi ;
+        un 'search_auto' ne remplace JAMAIS un 'genius_media' ni un 'manual'.
         """
         try:
             with self._get_connection() as conn:
@@ -1380,15 +1380,30 @@ class DataManager:
                     UPDATE tracks
                     SET youtube_url = ?, youtube_url_source = ?, updated_at = ?
                     WHERE id = ?
-                      AND (? = 'genius_media'
+                      AND (? IN ('manual', 'genius_media')
                            OR youtube_url IS NULL
                            OR youtube_url = ''
-                           OR COALESCE(youtube_url_source, '') != 'genius_media')
+                           OR COALESCE(youtube_url_source, '') NOT IN ('manual', 'genius_media'))
                 """, (url, source, datetime.now(), track_id, source))
                 conn.commit()
                 return True
         except Exception as e:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")
+            return False
+
+    def clear_track_youtube_link(self, track_id: int) -> bool:
+        """Efface le lien YouTube et sa provenance (repasse en recherche live)."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE tracks
+                    SET youtube_url = NULL, youtube_url_source = NULL, updated_at = ?
+                    WHERE id = ?
+                """, (datetime.now(), track_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur clear_track_youtube_link (track_id={track_id}): {e}")
             return False
 
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:

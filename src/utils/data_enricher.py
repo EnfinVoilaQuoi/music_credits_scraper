@@ -105,6 +105,11 @@ class DataEnricher:
         # BPM Finder (audioaidynamics) — dernier recours BPM/Key via lien YouTube
         # Nécessite BPMFINDER_EMAIL/PASSWORD (env/.env) ou une session sauvegardée
         self.bpmfinder_scraper = None
+        # Disjoncteur : 3 échecs consécutifs (timeouts site) → source coupée pour
+        # le reste du run (ré-armé par reset_bpmfinder_breaker en début de run).
+        # Sans lui, une panne site × force_update = ~90 s de pause PAR morceau.
+        self._bpmfinder_fail_streak = 0
+        self._bpmfinder_breaker_logged = False
         try:
             from src.scrapers.bpmfinder_scraper import BPMFinderScraper
             if BPMFinderScraper.credentials_or_session_available():
@@ -147,6 +152,16 @@ class DataEnricher:
                 logger.info("SongBPM scraper fermé")
             except Exception as e:
                 logger.error(f"Erreur fermeture SongBPM: {e}")
+
+        # Playwright lui aussi : sans fermeture explicite il ne mourait qu'au
+        # __del__ pendant l'arrêt de l'interpréteur → browser orphelin → EPIPE
+        # du driver Node à la fermeture de l'app.
+        if getattr(self, 'spotify_id_scraper', None):
+            try:
+                self.spotify_id_scraper.close()
+                logger.info("Spotify ID scraper fermé")
+            except Exception as e:
+                logger.error(f"Erreur fermeture Spotify ID scraper: {e}")
     
     def __enter__(self):
         return self
@@ -387,6 +402,13 @@ class DataEnricher:
         """Retourne la liste des sources disponibles"""
         return [k for k, v in self.apis_available.items() if v]
     
+    def reset_bpmfinder_breaker(self):
+        """Ré-arme le disjoncteur BPM Finder — à appeler en début de run
+        d'enrichissement (l'instance DataEnricher vit toute la session GUI,
+        « pour le reste du run » ne doit pas déborder sur le run suivant)."""
+        self._bpmfinder_fail_streak = 0
+        self._bpmfinder_breaker_logged = False
+
     def enrich_track(self, track: Track, sources: Optional[List[str]] = None,
                  force_update: bool = False, artist_tracks: Optional[List[Track]] = None,
                  clear_on_failure: bool = True) -> Dict[str, bool]:
@@ -639,7 +661,18 @@ class DataEnricher:
         # (pas de Spotify ID, absents des bases BPM) mais présents sur YouTube.
         # Comble les manques ; en force_update, ré-analyse et ÉCRASE.
         # ========================================
-        if 'bpmfinder' in sources and self.apis_available.get('bpmfinder'):
+        if ('bpmfinder' in sources and self.apis_available.get('bpmfinder')
+                and self._bpmfinder_fail_streak >= 3):
+            # Disjoncteur ouvert : le site ne répond plus, inutile de brûler
+            # 90 s par morceau — 'skipped' est exclu du calcul « attempted »
+            # (donc jamais compté comme échec pour le nettoyage).
+            if not self._bpmfinder_breaker_logged:
+                logger.warning("⛔ BPM Finder coupé pour le reste du run "
+                               "(3 échecs consécutifs — site en panne ? "
+                               "cf. data/diagnostics/ et scripts/bpmfinder_diagnose.py)")
+                self._bpmfinder_breaker_logged = True
+            results['bpmfinder'] = 'skipped'
+        elif 'bpmfinder' in sources and self.apis_available.get('bpmfinder'):
             # force_update : re-analyser et ÉCRASER même si BPM/key présents
             # (sinon 'not_needed' → combiné au nettoyage, effaçait des données
             # valides). Traité comme « manquant » pour déclencher l'analyse.
@@ -686,6 +719,7 @@ class DataEnricher:
                 try:
                     bf = self.bpmfinder_scraper.analyze(_yt)
                     if bf:
+                        self._bpmfinder_fail_streak = 0
                         applied = []
                         if _missing_bpm and bf.get('bpm'):
                             track.bpm = bf['bpm']
@@ -702,9 +736,11 @@ class DataEnricher:
                         if applied:
                             logger.info(f"✅ BPM Finder: {', '.join(applied)}")
                     else:
+                        self._bpmfinder_fail_streak += 1
                         results['bpmfinder'] = False
                 except Exception as e:
                     logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
+                    self._bpmfinder_fail_streak += 1
                     results['bpmfinder'] = None
             else:
                 results['bpmfinder'] = 'not_needed'

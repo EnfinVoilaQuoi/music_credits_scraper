@@ -29,6 +29,7 @@ data/certifications/brma/reports/*
 data/certifications/riaa/backups/*
 data/certifications/snep/certif-backup-*.csv
 data/audios/*
+data/diagnostics/*
 lib/*
 *.db
 *.sqlite
@@ -73,4 +74,6 @@ docs/api/
 archive/
 # BPM Finder (audioaidynamics) — session Playwright + cache d'analyses
 data/.bpmfinder_session.json
-data/bpmfinder_cache.json
+d
+# Décisions de rapprochement Kworb (confirmé/rejeté par artiste)
+data/kworb_links/*

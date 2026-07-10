@@ -111,18 +111,69 @@ class BPMFinderScraper:
         storage = str(BPMFINDER_SESSION_FILE) if Path(BPMFINDER_SESSION_FILE).exists() else None
         self.context = self.browser.new_context(storage_state=storage)
         self.context.add_init_script(self._CONSENT_INIT)
+        self.context.on("response", self._log_api_error)
         self.page = self.context.new_page()
         self._thread_id = cur
         logger.info(f"🌐 BPM Finder: Playwright initialisé "
                     f"(session {'reprise' if storage else 'neuve'})")
 
+    @staticmethod
+    def _log_api_error(resp):
+        """Listener réseau : rend visibles les erreurs backend (sans lui, un refus
+        de l'API se manifeste par un « pas de résultat en 90s » muet). Propriétés
+        sync uniquement — PAS de resp.text() ici (appel bloquant interdit dans un
+        handler Playwright sync)."""
+        try:
+            if 'audioaidynamics.com/api' in resp.url and resp.status >= 400:
+                logger.warning(f"BPM Finder API: HTTP {resp.status} sur {resp.url}")
+        except Exception:
+            pass
+
+    def _dump_debug_state(self, label: str):
+        """Capture d'état (screenshot + texte de la page) dans data/diagnostics/,
+        UNE fois par run pour ne pas spammer. Évite de rediagnostiquer à l'aveugle
+        (cf. panne 2026-07-10 : overlay pubs invisible dans les logs)."""
+        if getattr(self, '_debug_dumped', False):
+            return
+        self._debug_dumped = True
+        try:
+            diag = DATA_DIR / "diagnostics"
+            diag.mkdir(parents=True, exist_ok=True)
+            safe = re.sub(r'[^\w.-]', '_', label)[:60]
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            self.page.screenshot(path=str(diag / f"bpmfinder_{stamp}_{safe}.png"))
+            (diag / f"bpmfinder_{stamp}_{safe}.txt").write_text(
+                self.page.inner_text('body') or '', encoding='utf-8')
+            logger.warning(f"BPM Finder: état de la page capturé dans {diag}")
+        except Exception:
+            pass
+
     def _dismiss_cookie_overlay(self):
-        """Fallback runtime : retire l'overlay bloquant s'il apparaît malgré
-        le pré-consentement. Clique un bouton essentiel/refus si présent, sinon
-        retire le voile plein écran (le pré-consentement décline déjà le tracking)."""
+        """Fallback runtime : neutralise les overlays qui interceptent les clics.
+
+        1) Dialogue Google Funding Choices (« Unlock more content »,
+           `.fc-message-root`/`.fc-dialog-overlay`) + pubs AdSense ancrées
+           (`ins.adsbygoogle`) — apparus sur le site ~2026-07-10 : le clic
+           Upload était intercepté → aucun POST /api/yt → « pas de résultat
+           en 90s » en série. On clique un bouton de refus/fermeture si
+           présent, puis on retire le dialogue et les pubs du DOM.
+        2) Ancien voile cookies maison (« To continue using this website… »).
+        """
         try:
             self.page.evaluate("""
                 () => {
+                  const fc = document.querySelector('.fc-message-root');
+                  if (fc) {
+                    const noBtn = [...fc.querySelectorAll('button, a, .fc-button')].find(
+                      b => /do not consent|reject|refuser|no thanks|dismiss|close/i.test(b.textContent));
+                    if (noBtn) noBtn.click();
+                    document.querySelectorAll('.fc-message-root, .fc-dialog-overlay').forEach(e => e.remove());
+                    document.documentElement.style.overflow = '';
+                    document.body.style.overflow = '';
+                  }
+                  document.querySelectorAll(
+                    'ins.adsbygoogle-noablate, ins.adsbygoogle[data-anchor-status]'
+                  ).forEach(e => e.remove());
                   const btn = [...document.querySelectorAll('button, a')].find(
                     b => /essential|necessary|reject|decline|refuser|only|accept|continue/i.test(b.textContent));
                   if (btn) { btn.click(); return; }
@@ -288,9 +339,16 @@ class BPMFinderScraper:
         try:
             url_input.fill(youtube_url)
             self._dismiss_cookie_overlay()  # au cas où l'overlay surgit après la saisie
-            self.page.click("button:has-text('Upload')", timeout=15_000)
+            try:
+                self.page.click("button:has-text('Upload')", timeout=15_000)
+            except Exception:
+                # Les overlays pubs (fc-dialog/AdSense) peuvent réapparaître entre
+                # le dismiss et le clic : re-nettoyer et retenter UNE fois.
+                self._dismiss_cookie_overlay()
+                self.page.click("button:has-text('Upload')", timeout=10_000)
         except Exception as e:
             logger.error(f"BPM Finder: saisie/Upload échoué: {e}")
+            self._dump_debug_state(f"upload_{vid}")
             return None
 
         result = self._await_and_parse(before, timeout_s, label=vid)
@@ -341,6 +399,7 @@ class BPMFinderScraper:
                 break
         if not new_card:
             logger.warning(f"BPM Finder: pas de résultat en {timeout_s}s pour {label}")
+            self._dump_debug_state(f"timeout_{label}")
             return None
 
         note, mode_name, bpm, camelot = new_card

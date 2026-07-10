@@ -101,6 +101,8 @@ class DataManager:
                 'bpm_alt': 'INTEGER',  # Octave alternative (half-time) écartée
                 'lyrics_source': 'TEXT',  # Provenance des paroles (YouTube Music / genius)
                 'lyrics_synced': 'TEXT',  # Paroles synchronisées (format LRC), si dispo
+                'lyrics_synced_source': 'TEXT',  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
+                'lyrics_synced_confidence': 'INTEGER',  # Nb de sources concordantes (2=croisé, 1=unique/départage)
                 'relationships': 'TEXT',  # JSON : samples/interpolations/cover/remix amont + trad FR
                 'certifications': 'TEXT',  # JSON array
                 'album_certifications': 'TEXT',  # JSON array
@@ -351,6 +353,8 @@ class DataManager:
                         lyrics_scraped_at = COALESCE(?, lyrics_scraped_at),
                         lyrics_source = COALESCE(?, lyrics_source),
                         lyrics_synced = COALESCE(?, lyrics_synced),
+                        lyrics_synced_source = COALESCE(?, lyrics_synced_source),
+                        lyrics_synced_confidence = COALESCE(?, lyrics_synced_confidence),
                         has_lyrics = CASE WHEN ? IS NOT NULL THEN 1 ELSE has_lyrics END,
                         anecdotes = COALESCE(?, anecdotes),
                         certifications = CASE WHEN ? = '[]' THEN certifications ELSE ? END,
@@ -380,6 +384,8 @@ class DataManager:
                     getattr(track, 'lyrics_scraped_at', None),
                     getattr(track, 'lyrics_source', None),
                     getattr(track, 'lyrics_synced', None),
+                    getattr(track, 'lyrics_synced_source', None),
+                    getattr(track, 'lyrics_synced_confidence', None),
                     getattr(track, 'lyrics', None),
                     getattr(track, 'anecdotes', None),
                     certifications_json, certifications_json,
@@ -400,10 +406,10 @@ class DataManager:
                         bpm, bpm_source, bpm_confidence, key_mode_source, reccobeats_resolution, bpm_alt, duration, genre, key, mode, musical_key, time_signature,
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
-                        lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, has_lyrics, anecdotes,
+                        lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, lyrics_synced_source, lyrics_synced_confidence, has_lyrics, anecdotes,
                         certifications, album_certifications, relationships, spotify_page_title,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (track.title, track.artist.id, track.album, getattr(track, 'track_number', None), track.release_date,
                     track.genius_id, track.spotify_id, track.discogs_id, getattr(track, 'isrc', None),
                     track.bpm, getattr(track, 'bpm_source', None), getattr(track, 'bpm_confidence', None),
@@ -423,6 +429,8 @@ class DataManager:
                     getattr(track, 'lyrics_scraped_at', None),
                     getattr(track, 'lyrics_source', None),
                     getattr(track, 'lyrics_synced', None),
+                    getattr(track, 'lyrics_synced_source', None),
+                    getattr(track, 'lyrics_synced_confidence', None),
                     bool(getattr(track, 'lyrics', None)),
                     getattr(track, 'anecdotes', None),
                     certifications_json, album_certifications_json, relationships_json,
@@ -548,7 +556,8 @@ class DataManager:
                         lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
                         certifications, album_certifications, spotify_page_title,
                         created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt, lyrics_source, lyrics_synced, relationships, key_mode_source, reccobeats_resolution, secondary_role, youtube_url, youtube_url_source,
-                        spotify_streams, spotify_daily_streams, spotify_streams_updated, ytm_streams, ytm_streams_updated, album_override
+                        spotify_streams, spotify_daily_streams, spotify_streams_updated, ytm_streams, ytm_streams_updated, album_override,
+                        lyrics_synced_source, lyrics_synced_confidence
                     FROM tracks
                     WHERE artist_id = ?
                     ORDER BY title
@@ -609,6 +618,8 @@ class DataManager:
                         ytm_streams = row[45] if len(row) > 45 else None
                         ytm_streams_updated = row[46] if len(row) > 46 else None
                         album_override = row[47] if len(row) > 47 else None
+                        lyrics_synced_source = row[48] if len(row) > 48 else None
+                        lyrics_synced_confidence = row[49] if len(row) > 49 else None
 
                         # Validation
                         if not track_id or not title:
@@ -708,6 +719,8 @@ class DataManager:
                         track.bpm_alt = safe_assign_int(bpm_alt)
                         track.lyrics_source = safe_assign(lyrics_source)
                         track.lyrics_synced = safe_assign(lyrics_synced)
+                        track.lyrics_synced_source = safe_assign(lyrics_synced_source)
+                        track.lyrics_synced_confidence = safe_assign_int(lyrics_synced_confidence)
                         track.youtube_url = safe_assign(youtube_url)
                         track.youtube_url_source = safe_assign(youtube_url_source)
                         track.spotify_streams = safe_assign_int(spotify_streams)
@@ -1087,6 +1100,36 @@ class DataManager:
             logger.error(f"Erreur suppression track {track_id}: {e}")
             return False
 
+    def merge_tracks(self, keep_id: int, delete_id: int) -> bool:
+        """Fusionne delete_id dans keep_id : transfère les crédits (en écartant
+        ceux déjà présents à l'identique sur le morceau conservé) et les erreurs
+        de scraping, puis supprime la ligne en doublon. Même mécanique que
+        scripts/merge_duplicates.py + dédup. Le BACKUP est à faire par l'appelant
+        AVANT (règle projet : backup avant toute opération destructive)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # Crédits : ne transférer que ceux absents du morceau conservé
+                cursor.execute("""
+                    DELETE FROM credits WHERE track_id = ? AND EXISTS (
+                        SELECT 1 FROM credits k WHERE k.track_id = ?
+                          AND k.name = credits.name AND k.role = credits.role
+                          AND IFNULL(k.role_detail, '') = IFNULL(credits.role_detail, '')
+                    )""", (delete_id, keep_id))
+                cursor.execute("UPDATE credits SET track_id = ? WHERE track_id = ?",
+                               (keep_id, delete_id))
+                transferred = cursor.rowcount
+                cursor.execute("UPDATE scraping_errors SET track_id = ? WHERE track_id = ?",
+                               (keep_id, delete_id))
+                cursor.execute("DELETE FROM tracks WHERE id = ?", (delete_id,))
+                conn.commit()
+                logger.info(f"🔀 Track {delete_id} fusionné dans {keep_id} "
+                            f"({transferred} crédit(s) transféré(s))")
+                return True
+        except Exception as e:
+            logger.error(f"Erreur fusion track {delete_id} → {keep_id}: {e}")
+            return False
+
     def force_update_track_credits(self, track: Track) -> int:
         """Force la mise à jour complète des crédits d'un morceau - VERSION PRÉSERVANT FEATURES"""
         try:
@@ -1389,6 +1432,21 @@ class DataManager:
                 return True
         except Exception as e:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")
+            return False
+
+    def rename_track(self, track_id: int, new_title: str) -> bool:
+        """Renomme un morceau en base (ex. « Matrix (Intro) » → « Matrix » pour
+        aligner sur Kworb). Échoue si le titre existe déjà pour l'artiste
+        (contrainte UNIQUE(title, artist_id))."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE tracks SET title = ?, updated_at = ? WHERE id = ?
+                """, (new_title.strip(), datetime.now(), track_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Erreur rename_track (track_id={track_id}): {e}")
             return False
 
     def clear_track_youtube_link(self, track_id: int) -> bool:

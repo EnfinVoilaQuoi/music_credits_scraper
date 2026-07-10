@@ -208,7 +208,9 @@ class Track:
     has_lyrics: bool = False  # Indicateur si les paroles sont disponibles
     lyrics_scraped_at: Optional[datetime] = None  # Date de récupération des paroles
     lyrics_source: Optional[str] = None  # Provenance des paroles (YouTube Music / genius)
-    lyrics_synced: Optional[str] = None  # Paroles synchronisées (LRC), si dispo (YTM)
+    lyrics_synced: Optional[str] = None  # Paroles synchronisées (LRC) retenues (LRCLIB > YTM)
+    lyrics_synced_source: Optional[str] = None  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
+    lyrics_synced_confidence: Optional[int] = None  # Nb de sources concordantes (2=croisé/validé, 1=unique ou après départage durée)
     anecdotes: Optional[str] = None  # Anecdotes et informations supplémentaires
 
     # Métadonnées supplémentaires
@@ -812,7 +814,9 @@ class Track:
                 'lyrics_char_count': len(self.lyrics) if self.lyrics else 0,
                 'lyrics_scraped_at': self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None,
                 'lyrics_source': getattr(self, 'lyrics_source', None),
-                'has_synced_lyrics': bool(getattr(self, 'lyrics_synced', None))
+                'has_synced_lyrics': bool(getattr(self, 'lyrics_synced', None)),
+                'lyrics_synced_source': getattr(self, 'lyrics_synced_source', None),
+                'lyrics_synced_confidence': getattr(self, 'lyrics_synced_confidence', None)
             }
         else:
             lyrics_info = {

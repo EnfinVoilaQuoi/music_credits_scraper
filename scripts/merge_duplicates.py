@@ -14,6 +14,49 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.database_backup import get_backup_manager
+from src.utils.title_matching import normalize_title
+
+
+def find_normalized_duplicates(artist_name=None):
+    """Liste les doublons par titre NORMALISÉ (≠ LOWER exact) : attrape les
+    variantes de ponctuation/casse (« My Love (Acoustic) » ≡ « My love [acoustic] »)
+    que l'auto-clean exact rate. NE FUSIONNE RIEN — affiche les groupes + les
+    commandes --merge à lancer (tu choisis keep/delete).
+    """
+    conn = sqlite3.connect('data/music_credits.db')
+    cur = conn.cursor()
+
+    sql = ("SELECT t.id, t.title, t.album, t.release_date, t.spotify_id, t.bpm, a.name "
+           "FROM tracks t JOIN artists a ON a.id = t.artist_id")
+    params = ()
+    if artist_name:
+        sql += " WHERE a.name = ?"
+        params = (artist_name,)
+    rows = cur.execute(sql, params).fetchall()
+    conn.close()
+
+    groups = {}
+    for tid, title, album, rdate, sid, bpm, artist in rows:
+        key = (artist, normalize_title(title or ''))
+        groups.setdefault(key, []).append((tid, title, album, rdate, sid, bpm))
+
+    dups = {k: v for k, v in groups.items() if len(v) > 1}
+    if not dups:
+        print("Aucun doublon (titre normalisé) trouvé.")
+        return
+
+    print(f"\n{'='*60}\n   DOUBLONS PAR TITRE NORMALISÉ ({len(dups)} groupe(s))\n{'='*60}")
+    print("⚠️ Vérifie : ce sont peut-être des VERSIONS distinctes (Acoustic/Remix/Live)\n"
+          "   → dans ce cas NE PAS fusionner. Intro/Outro/Interlude = souvent le même.\n")
+    for (artist, norm), items in sorted(dups.items(), key=lambda x: -len(x[1])):
+        print(f"[{artist}]  « {norm} »  ({len(items)} entrées)")
+        for tid, title, album, rdate, sid, bpm in items:
+            d = (str(rdate)[:10] if rdate else '—')
+            print(f"    #{tid:>4}  {title!r}  album={album or '—'}  date={d}  "
+                  f"sid={'oui' if sid else 'non'}  bpm={bpm or '—'}")
+        ids = [str(i[0]) for i in items]
+        print(f"    → fusion (garde le 1er) : python scripts/merge_duplicates.py "
+              f"--merge {ids[0]} {ids[1]} --execute\n")
 
 
 def merge_duplicate_tracks(keep_id, delete_id, dry_run=True):
@@ -285,12 +328,14 @@ def main():
 
     if len(sys.argv) < 2:
         print("Usage:")
+        print("  python scripts/merge_duplicates.py --find [ARTISTE]")
         print("  python scripts/merge_duplicates.py --check TITRE")
         print("  python scripts/merge_duplicates.py --delete ID [--execute]")
         print("  python scripts/merge_duplicates.py --merge KEEP_ID DELETE_ID [--execute]")
         print("  python scripts/merge_duplicates.py --auto [--execute]")
         print("")
         print("Options:")
+        print("  --find [ARTISTE] : Liste les doublons par titre NORMALISÉ (recommandé)")
         print("  --check TITRE    : Analyse un doublon specifique")
         print("  --delete ID      : Supprime un track en doublon")
         print("  --merge K D      : Fusionne DELETE_ID dans KEEP_ID")
@@ -305,7 +350,14 @@ def main():
         print("\n[MODE DRY-RUN] Simulation sans modification")
         print("Ajoutez --execute pour executer reellement\n")
 
-    if mode == '--check':
+    if mode == '--find':
+        artist = None
+        extra = [a for a in sys.argv[2:] if a != '--execute']
+        if extra:
+            artist = " ".join(extra)
+        find_normalized_duplicates(artist)
+
+    elif mode == '--check':
         if len(sys.argv) < 3:
             print("Erreur: Titre manquant")
             return

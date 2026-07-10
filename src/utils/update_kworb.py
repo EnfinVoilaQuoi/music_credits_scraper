@@ -15,6 +15,7 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
 """
 import re
 import sys
+import difflib
 import logging
 from collections import defaultdict
 from pathlib import Path
@@ -149,6 +150,11 @@ def update_kworb_streams(artist, data_manager) -> Dict:
         "unmatched_details": [],  # [(titre kworb, streams)] triés desc — pour la GUI
         "matched_by_id": 0,
         "matched_by_title": 0,
+        "matched_by_fuzzy": 0,
+        "fuzzy_matched": [],  # [(titre kworb, titre base, score)] — à vérifier côté GUI
+        # Rapprochements INCERTAINS (bande sous le seuil auto) : NON écrits,
+        # à confirmer/rejeter par l'utilisateur (mémorisé ensuite).
+        "suggestions": [],  # [{kworb_title, streams, daily, track_id, db_title, score}]
         "spotify_ids_backfilled": 0,
         "albums_excluded": [],
         "artist_name": None,
@@ -243,6 +249,49 @@ def update_kworb_streams(artist, data_manager) -> Dict:
                 matches.append(cand)
         return matches[0] if len(matches) == 1 else None
 
+    def _fuzzy_unique(entry_title, threshold: float = 0.87):
+        """Rapproche un titre Kworb d'UN SEUL morceau en base par similarité
+        (difflib sur titre normalisé) — attrape les coquilles (« Rhythm » vs
+        « Rythm »). GARDE-FOUS anti-fusion : ne matche QUE s'il existe
+        exactement UN candidat au-dessus du seuil (abstention si ambigu, ex.
+        plusieurs variantes « My Love »). Ne strippe PAS les descripteurs de
+        version (Acoustic/Intro/Remix) → studio et acoustique restent distincts.
+        """
+        nk = _normalize_title(entry_title)
+        hits = []
+        for t in tracks:
+            r = difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio()
+            if r >= threshold:
+                hits.append((r, t))
+        return (hits[0][1], hits[0][0]) if len(hits) == 1 else (None, 0.0)
+
+    def _best_candidate(entry_title):
+        """Meilleur candidat unique dans la bande INCERTAINE [0.55, 0.87) — pour
+        proposer une confirmation à l'utilisateur (ex. « Matrix » vs
+        « Matrix (Intro) ») sans écrire. Unique = pas de 2e candidat proche."""
+        nk = _normalize_title(entry_title)
+        scored = sorted(
+            ((difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio(), t)
+             for t in tracks), key=lambda x: x[0], reverse=True)
+        if not scored:
+            return None, 0.0
+        best_r, best_t = scored[0]
+        if not (0.55 <= best_r < 0.87):
+            return None, 0.0
+        # écart net avec le 2e (évite de proposer quand plusieurs se valent)
+        if len(scored) > 1 and (best_r - scored[1][0]) < 0.08:
+            return None, 0.0
+        return best_t, best_r
+
+    # Décisions mémorisées (confirmé/rejeté) pour ne pas redemander
+    try:
+        from src.utils.kworb_links_manager import KworbLinksManager
+        _links = KworbLinksManager()
+        _decisions = _links.load(artist.name)
+    except Exception:
+        _decisions = {"confirmed": {}, "rejected": []}
+    _by_id = {t.id: t for t in tracks}
+
     # Accumulation par track : un morceau peut avoir PLUSIEURS lignes Kworb
     # (éditions/single) → SOMME des streams (comme les albums).
     agg: Dict[int, Dict] = {}
@@ -250,6 +299,7 @@ def update_kworb_streams(artist, data_manager) -> Dict:
     for entry in page_songs['entries']:
         track = None
         via = None
+        _suggested = False  # True → suggestion en attente, ne pas compter "non matché"
         if entry.get('spotify_id') and entry['spotify_id'] in by_spotify_id:
             track, via = by_spotify_id[entry['spotify_id']], 'id'
         else:
@@ -269,6 +319,45 @@ def update_kworb_streams(artist, data_manager) -> Dict:
                         f"⚠️ Titre ambigu NON résolu ({len(candidates)} morceaux "
                         f"en base), passé: '{entry['title']}'"
                     )
+
+            # 3ᵉ niveau : rapprochement flou (candidat unique) pour les coquilles
+            # / ponctuation. Seulement si ni ID ni titre exact n'ont abouti.
+            if track is None:
+                ftrack, fscore = _fuzzy_unique(entry['title'])
+                if ftrack:
+                    track, via = ftrack, 'fuzzy'
+                    result["fuzzy_matched"].append((entry['title'], ftrack.title, fscore))
+                    logger.info(
+                        f"≈ Match flou ({fscore:.0%}): Kworb '{entry['title']}' "
+                        f"→ base '{ftrack.title}'"
+                    )
+
+            # 4ᵉ niveau : décision mémorisée, sinon SUGGESTION à confirmer
+            if track is None:
+                _nk = _normalize_title(entry['title'])
+                if _nk in _decisions.get("confirmed", {}):
+                    track = _by_id.get(_decisions["confirmed"][_nk])
+                    if track:
+                        via = 'confirmed'
+                        logger.info(f"🔗 Kworb (confirmé mémorisé): '{entry['title']}' → '{track.title}'")
+                elif _nk not in _decisions.get("rejected", []):
+                    cand, score = _best_candidate(entry['title'])
+                    if cand:
+                        _suggested = True
+                        result["suggestions"].append({
+                            "kworb_title": entry['title'],
+                            "streams": entry["streams"],
+                            "daily": entry["daily_streams"],
+                            "track_id": cand.id,
+                            "db_title": cand.title,
+                            "score": score,
+                        })
+                        logger.info(
+                            f"❓ Suggestion ({score:.0%}): Kworb '{entry['title']}' "
+                            f"≈ base '{cand.title}' — à confirmer"
+                        )
+                # rejeté mémorisé → on laisse en non-matché silencieusement
+
             if track:
                 # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement)
                 if entry.get('spotify_id') and not getattr(track, 'spotify_id', None):
@@ -282,8 +371,11 @@ def update_kworb_streams(artist, data_manager) -> Dict:
             a["daily"] += entry["daily_streams"]
             a["n"] += 1
             result["matched"] += 1
-            result["matched_by_id" if via == 'id' else "matched_by_title"] += 1
+            _key = {'id': 'matched_by_id', 'fuzzy': 'matched_by_fuzzy'}.get(via, 'matched_by_title')
+            result[_key] += 1
             logger.debug(f"✅ Match ({via}): '{entry['title']}' → {entry['streams']:,} streams")
+        elif _suggested:
+            pass  # en attente de confirmation utilisateur — pas "non matché"
         else:
             result["unmatched"] += 1
             result["unmatched_titles"].append(entry["title"])

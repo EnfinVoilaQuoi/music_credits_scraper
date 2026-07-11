@@ -388,8 +388,10 @@ class TrackDetailsWindow:
             known_source=getattr(track, "youtube_url_source", None),
         )
 
-        # Persister le lien trouvé par la recherche si la confiance est suffisante
-        if (
+        # Persister le lien trouvé par la recherche si la confiance est suffisante.
+        # L'if interne est volontairement séparé : c'est une écriture DB dont le
+        # résultat conditionne la suite, pas une simple condition.
+        if (  # noqa: SIM102
             youtube_result.get("source") == "search_auto"
             and youtube_result.get("confidence", 0) >= YOUTUBE_PERSIST_CONFIDENCE
             and getattr(track, "id", None)

@@ -462,8 +462,7 @@ class DataEnricher:
             f"🔍 État actuel: spotify_id={getattr(track, 'spotify_id', None)}, bpm={getattr(track, 'bpm', None)}"
         )
 
-        # Sauvegarder l'état initial
-        initial_spotify_id = getattr(track, "spotify_id", None)
+        # Sauvegarder l'état initial (pour la logique force_update du BPM)
         initial_bpm = getattr(track, "bpm", None)
 
         # Candidats BPM collectés par chaque source → vote final (_finalize_bpm)
@@ -892,60 +891,57 @@ class DataEnricher:
             attempted = [r for r in results.values() if r not in ("skipped", "not_needed")]
             all_failed = bool(attempted) and all(r is False for r in attempted)
 
-            if all_failed:
-                if force_update and initial_bpm is not None:
-                    # Vérifications de sécurité
-                    if not hasattr(track, "title") or not track.title:
-                        logger.error("❌ ERREUR: Track sans titre, annulation du nettoyage")
-                        return results
+            if all_failed and force_update and initial_bpm is not None:
+                # Vérifications de sécurité
+                if not hasattr(track, "title") or not track.title:
+                    logger.error("❌ ERREUR: Track sans titre, annulation du nettoyage")
+                    return results
 
-                    if not hasattr(track, "artist"):
-                        logger.error(
-                            f"❌ ERREUR: Track '{track.title}' sans artiste, annulation du nettoyage"
-                        )
-                        return results
-
-                    logger.warning(
-                        f"⚠️ NETTOYAGE: Aucune source n'a trouvé de données pour '{track.title}'"
+                if not hasattr(track, "artist"):
+                    logger.error(
+                        f"❌ ERREUR: Track '{track.title}' sans artiste, annulation du nettoyage"
                     )
-                    logger.warning(
-                        "⚠️ Effacement des anciennes valeurs potentiellement erronées..."
-                    )
+                    return results
 
-                    # Effacer UNIQUEMENT les données musicales
-                    if hasattr(track, "bpm"):
-                        old_bpm = track.bpm
-                        track.bpm = None
-                        logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
+                logger.warning(
+                    f"⚠️ NETTOYAGE: Aucune source n'a trouvé de données pour '{track.title}'"
+                )
+                logger.warning("⚠️ Effacement des anciennes valeurs potentiellement erronées...")
 
-                    if hasattr(track, "key"):
-                        old_key = track.key
-                        track.key = None
-                        logger.info(f"   🗑️ Key effacée: {old_key} → None")
+                # Effacer UNIQUEMENT les données musicales
+                if hasattr(track, "bpm"):
+                    old_bpm = track.bpm
+                    track.bpm = None
+                    logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
 
-                    if hasattr(track, "mode"):
-                        old_mode = track.mode
-                        track.mode = None
-                        logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
+                if hasattr(track, "key"):
+                    old_key = track.key
+                    track.key = None
+                    logger.info(f"   🗑️ Key effacée: {old_key} → None")
 
-                    if hasattr(track, "duration"):
-                        old_duration = track.duration
-                        track.duration = None
-                        logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
+                if hasattr(track, "mode"):
+                    old_mode = track.mode
+                    track.mode = None
+                    logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
 
-                    if hasattr(track, "musical_key"):
-                        old_musical_key = track.musical_key
-                        track.musical_key = None
-                        logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
+                if hasattr(track, "duration"):
+                    old_duration = track.duration
+                    track.duration = None
+                    logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
 
-                    # Vérification post-nettoyage
-                    if not hasattr(track, "title") or not track.title:
-                        logger.error("❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
-                    elif not hasattr(track, "artist") or not track.artist:
-                        logger.error("❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
-                    else:
-                        logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
-                        results["cleaned"] = True
+                if hasattr(track, "musical_key"):
+                    old_musical_key = track.musical_key
+                    track.musical_key = None
+                    logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
+
+                # Vérification post-nettoyage
+                if not hasattr(track, "title") or not track.title:
+                    logger.error("❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
+                elif not hasattr(track, "artist") or not track.artist:
+                    logger.error("❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
+                else:
+                    logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
+                    results["cleaned"] = True
 
         # ========================================
         # RÉSUMÉ FINAL
@@ -1516,12 +1512,15 @@ class DataEnricher:
             spotify_id = getattr(track, "spotify_id", None)
 
             # Valider l'unicité si un ID existe
-            if spotify_id and artist_tracks:
-                if not self.validate_spotify_id_unique(spotify_id, track, artist_tracks):
-                    logger.warning(
-                        "⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM"
-                    )
-                    spotify_id = None
+            if (
+                spotify_id
+                and artist_tracks
+                and not self.validate_spotify_id_unique(spotify_id, track, artist_tracks)
+            ):
+                logger.warning(
+                    "⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM"
+                )
+                spotify_id = None
 
             # MODIFIÉ: Timeout réduit à 30 secondes avec arrêt forcé du driver
             import platform
@@ -1610,19 +1609,18 @@ class DataEnricher:
 
             # Spotify ID depuis SongBPM (avec validation stricte)
             songbpm_spotify_id = track_data.get("spotify_id")
-            if songbpm_spotify_id:
-                if not hasattr(track, "spotify_id") or not track.spotify_id:
-                    # Valider l'unicité
-                    if artist_tracks and self.validate_spotify_id_unique(
-                        songbpm_spotify_id, track, artist_tracks
-                    ):
-                        track.spotify_id = songbpm_spotify_id
-                        logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id}")
-                        updated = True
-                    else:
-                        logger.warning(
-                            f"⚠️ REJET: Spotify ID de SongBPM déjà utilisé: {songbpm_spotify_id}"
-                        )
+            if songbpm_spotify_id and (not hasattr(track, "spotify_id") or not track.spotify_id):
+                # Valider l'unicité
+                if artist_tracks and self.validate_spotify_id_unique(
+                    songbpm_spotify_id, track, artist_tracks
+                ):
+                    track.spotify_id = songbpm_spotify_id
+                    logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id}")
+                    updated = True
+                else:
+                    logger.warning(
+                        f"⚠️ REJET: Spotify ID de SongBPM déjà utilisé: {songbpm_spotify_id}"
+                    )
 
             # Duration
             if (
@@ -1758,18 +1756,18 @@ class DataEnricher:
                     logger.warning("   ⚠️ Release date Deezer ignorée (différente du scraping)")
 
             # Stocker les métadonnées supplémentaires (toujours, pas de vérification nécessaire)
-            if data.get("deezer_track_id"):
-                if not hasattr(track, "deezer_id") or force_update or not track.deezer_id:
-                    track.deezer_id = data["deezer_track_id"]
-                    logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
-                    updated = True
+            if data.get("deezer_track_id") and (
+                not hasattr(track, "deezer_id") or force_update or not track.deezer_id
+            ):
+                track.deezer_id = data["deezer_track_id"]
+                logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
+                updated = True
 
             # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
-            if data.get("deezer_isrc"):
-                if not getattr(track, "isrc", None) or force_update:
-                    track.isrc = data["deezer_isrc"]
-                    logger.info(f"   ✅ ISRC: {track.isrc}")
-                    updated = True
+            if data.get("deezer_isrc") and (not getattr(track, "isrc", None) or force_update):
+                track.isrc = data["deezer_isrc"]
+                logger.info(f"   ✅ ISRC: {track.isrc}")
+                updated = True
 
             # BPM Deezer : candidat (souvent absent/0) — vote arbitré par _finalize_bpm
             sbpm = self._sanitize_bpm(data.get("deezer_bpm"))
@@ -1780,31 +1778,30 @@ class DataEnricher:
                     logger.info(f"   ✅ BPM (Deezer, opportuniste): {sbpm}")
                     updated = True
 
-            if data.get("deezer_link"):
-                if not hasattr(track, "deezer_url") or force_update or not track.deezer_url:
-                    track.deezer_url = data["deezer_link"]
-                    logger.info(f"   ✅ Deezer URL: {track.deezer_url}")
-                    updated = True
+            if data.get("deezer_link") and (
+                not hasattr(track, "deezer_url") or force_update or not track.deezer_url
+            ):
+                track.deezer_url = data["deezer_link"]
+                logger.info(f"   ✅ Deezer URL: {track.deezer_url}")
+                updated = True
 
-            if data.get("deezer_explicit_lyrics") is not None:
-                if (
-                    not hasattr(track, "explicit_lyrics")
-                    or force_update
-                    or track.explicit_lyrics is None
-                ):
-                    track.explicit_lyrics = data["deezer_explicit_lyrics"]
-                    logger.info(f"   ✅ Explicit lyrics: {track.explicit_lyrics}")
-                    updated = True
+            if data.get("deezer_explicit_lyrics") is not None and (
+                not hasattr(track, "explicit_lyrics")
+                or force_update
+                or track.explicit_lyrics is None
+            ):
+                track.explicit_lyrics = data["deezer_explicit_lyrics"]
+                logger.info(f"   ✅ Explicit lyrics: {track.explicit_lyrics}")
+                updated = True
 
-            if data.get("deezer_picture"):
-                if (
-                    not hasattr(track, "deezer_picture_url")
-                    or force_update
-                    or not track.deezer_picture_url
-                ):
-                    track.deezer_picture_url = data["deezer_picture"]
-                    logger.info("   ✅ Deezer picture URL stockée")
-                    updated = True
+            if data.get("deezer_picture") and (
+                not hasattr(track, "deezer_picture_url")
+                or force_update
+                or not track.deezer_picture_url
+            ):
+                track.deezer_picture_url = data["deezer_picture"]
+                logger.info("   ✅ Deezer picture URL stockée")
+                updated = True
 
             if updated:
                 logger.info(f"✅ Deezer: Enrichissement réussi pour '{track.title}'")

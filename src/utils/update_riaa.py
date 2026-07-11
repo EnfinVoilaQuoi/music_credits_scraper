@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 # Configurer l'encodage UTF-8 pour la console Windows
-if sys.platform == "win32":
+if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 

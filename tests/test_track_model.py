@@ -126,6 +126,24 @@ class TestSpotifyIds:
         assert track.add_spotify_id(None) is False
 
 
+class TestToDict:
+    """P0 AUDIT §3.2 — crash historique : Credit sans to_dict → export impossible
+    dès qu'un morceau avait un crédit. (L'export lui-même sera retravaillé plus
+    tard ; on ne fige ici QUE la non-régression du crash.)"""
+
+    def test_to_dict_avec_credits_ne_crashe_pas(self):
+        track = Track(title="Test")
+        track.add_credit(Credit(name="Kore", role=CreditRole.PRODUCER))
+        d = track.to_dict()
+        assert d["all_credits"][0]["name"] == "Kore"
+        assert d["total_credits_count"] == 1
+
+    def test_to_dict_sans_credits(self):
+        d = Track(title="Test").to_dict()
+        assert d["all_credits"] == []
+        assert d["title"] == "Test"
+
+
 class TestCertificationEmoji:
     def test_paliers_connus(self):
         track = Track(title="Test")

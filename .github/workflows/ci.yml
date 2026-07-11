@@ -39,5 +39,5 @@ jobs:
       - name: Black (formatage)
         run: black --check src scripts tests
 
-      - name: Pytest (238 tests)
+      - name: Pytest
         run: pytest -q

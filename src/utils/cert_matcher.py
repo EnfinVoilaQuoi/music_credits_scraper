@@ -258,10 +258,10 @@ class CertMatcher:
 
     # ------------------------------------------------------------------ matching
     def _level_rank(self, level: str) -> float:
-        l = (level or "").strip().lower()
-        if l in _RANK:
-            return _RANK[l]
-        m = re.match(r"(\d+)\s*x\s+(platine|platinum|or|gold|diamant|diamond)", l)
+        lvl = (level or "").strip().lower()
+        if lvl in _RANK:
+            return _RANK[lvl]
+        m = re.match(r"(\d+)\s*x\s+(platine|platinum|or|gold|diamant|diamond)", lvl)
         if m:
             base = {"platine": 7, "platinum": 7, "or": 10, "gold": 10, "diamant": 4, "diamond": 4}[
                 m.group(2)

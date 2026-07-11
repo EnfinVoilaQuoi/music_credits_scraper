@@ -50,8 +50,8 @@ def _fmt(t: float) -> str:
 
 
 def _is_header(line: str) -> bool:
-    l = line.strip()
-    return l.startswith("[") and l.endswith("]")
+    stripped = line.strip()
+    return stripped.startswith("[") and stripped.endswith("]")
 
 
 def annotate_sections(structured: str, lrc: str) -> str:
@@ -107,8 +107,8 @@ def annotate_sections(structured: str, lrc: str) -> str:
     cursor = 0
     for sec in sections:
         found = None
-        for l in sec["lines"][:3]:
-            found = find_from(l, cursor)
+        for line in sec["lines"][:3]:
+            found = find_from(line, cursor)
             if found is not None:
                 break
         if found is not None:

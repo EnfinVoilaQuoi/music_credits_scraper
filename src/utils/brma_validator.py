@@ -39,8 +39,8 @@ _MULTI_LEVEL_RE = re.compile(r"^\d+\s*x\s+(or|platine|diamant)$", re.IGNORECASE)
 
 
 def _level_known(level: str, lvl_known: set) -> bool:
-    l = (level or "").strip()
-    return l.lower() in lvl_known or bool(_MULTI_LEVEL_RE.match(l))
+    lvl = (level or "").strip()
+    return lvl.lower() in lvl_known or bool(_MULTI_LEVEL_RE.match(lvl))
 
 
 MEANINGFUL_YEAR_THRESHOLD = 12
@@ -151,11 +151,11 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
 
     # Référentiel (insensible à la casse) — niveaux vides traités à part
     cats = set(c for c in category.dropna() if c)
-    lvls = set(l for l in level.dropna() if l)
+    lvls = set(lvl for lvl in level.dropna() if lvl)
     cat_known = {c.lower() for c in VALID_CATEGORIES}
-    lvl_known = {l.lower() for l in VALID_LEVELS}
+    lvl_known = {lvl.lower() for lvl in VALID_LEVELS}
     report["invalid_categories"] = sorted(c for c in cats if c.lower() not in cat_known)
-    report["invalid_levels"] = sorted(l for l in lvls if not _level_known(l, lvl_known))
+    report["invalid_levels"] = sorted(lvl for lvl in lvls if not _level_known(lvl, lvl_known))
 
     # Couverture temporelle
     if not valid_dates.empty:

@@ -317,11 +317,11 @@ class YTMusicAPI:
         """Convertit des lignes synchronisées (LyricLine) en texte LRC [mm:ss.cc]."""
         out = []
         any_ts = False
-        for l in lines:
-            if isinstance(l, dict):
-                text, start = l.get("text", ""), l.get("start_time")
+        for line in lines:
+            if isinstance(line, dict):
+                text, start = line.get("text", ""), line.get("start_time")
             else:
-                text, start = getattr(l, "text", ""), getattr(l, "start_time", None)
+                text, start = getattr(line, "text", ""), getattr(line, "start_time", None)
             if start is None:
                 out.append(text)
                 continue
@@ -375,8 +375,8 @@ class YTMusicAPI:
             if isinstance(raw, list):
                 synced = self._format_lrc(raw)
                 text = "\n".join(
-                    (l.get("text", "") if isinstance(l, dict) else getattr(l, "text", ""))
-                    for l in raw
+                    (line.get("text", "") if isinstance(line, dict) else getattr(line, "text", ""))
+                    for line in raw
                 )
             else:
                 text = raw

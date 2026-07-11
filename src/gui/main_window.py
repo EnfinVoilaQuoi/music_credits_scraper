@@ -531,7 +531,7 @@ class MainWindow:
 
     def _close_all_detail_windows(self):
         """Ferme toutes les fenêtres de détail ouvertes (appelé lors du changement d'artiste)"""
-        for track_id, (window, _) in list(self.open_detail_windows.items()):
+        for window, _ in list(self.open_detail_windows.values()):
             try:
                 window.destroy()
             except Exception:
@@ -872,7 +872,7 @@ class MainWindow:
         logger.info(f"🔄 Rafraîchissement de {len(self.open_detail_windows)} fenêtre(s) de détails")
 
         # Parcourir toutes les fenêtres ouvertes
-        for track_id, (window, old_track) in list(self.open_detail_windows.items()):
+        for track_id, (window, _old_track) in list(self.open_detail_windows.items()):
             try:
                 # Recharger le track depuis la base de données
                 if self.current_artist:

@@ -42,19 +42,19 @@ def _to_iso(s: str) -> str:
     return ""
 
 
-def _level_norm(l: str) -> str:
+def _level_norm(lvl: str) -> str:
     """« 4x Multi-Platinum » → « 4X PLATINUM » (clé de dédup/référentiel)."""
-    l = (l or "").strip()
-    m = re.match(r"(\d+)\s*x\s*multi-?platinum", l, re.I)
+    lvl = (lvl or "").strip()
+    m = re.match(r"(\d+)\s*x\s*multi-?platinum", lvl, re.I)
     if m:
         return f"{m.group(1)}X PLATINUM"
-    if re.fullmatch(r"multi-?platinum", l, re.I):
+    if re.fullmatch(r"multi-?platinum", lvl, re.I):
         return "PLATINUM"
-    return re.sub(r"\s+", " ", l).strip().upper()
+    return re.sub(r"\s+", " ", lvl).strip().upper()
 
 
-def _level_known(l: str) -> bool:
-    n = (l or "").strip().lower()
+def _level_known(lvl: str) -> bool:
+    n = (lvl or "").strip().lower()
     return n in {"gold", "platinum", "diamond", "multi-platinum", "multi platinum"} or bool(
         _MULTI_RE.match(n)
     )
@@ -165,7 +165,9 @@ def validate_riaa_csv(
         report["duplicates"] = [k.replace("  ", " ") for k in key[dup].head(12)]
 
     # Niveaux hors référentiel
-    report["invalid_levels"] = sorted(set(l for l in level.dropna() if l and not _level_known(l)))
+    report["invalid_levels"] = sorted(
+        set(lvl for lvl in level.dropna() if lvl and not _level_known(lvl))
+    )
     # Formats (info)
     report["formats"] = {k: int(v) for k, v in fmt[fmt != ""].value_counts().head(12).items()}
 

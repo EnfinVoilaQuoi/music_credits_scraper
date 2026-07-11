@@ -67,14 +67,14 @@ def _level_from_img(src: str) -> str:
 
 
 def _units_for(level: str) -> int | None:
-    l = (level or "").lower()
-    if "diamond" in l:
+    lvl = (level or "").lower()
+    if "diamond" in lvl:
         return BASE_UNITS["diamond"]
-    m = re.match(r"(\d+)\s*x", l)
+    m = re.match(r"(\d+)\s*x", lvl)
     mult = int(m.group(1)) if m else 1
-    if "platinum" in l:
+    if "platinum" in lvl:
         return BASE_UNITS["platinum"] * mult
-    if "gold" in l:
+    if "gold" in lvl:
         return BASE_UNITS["gold"]
     return None
 

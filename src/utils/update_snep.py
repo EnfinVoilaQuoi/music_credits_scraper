@@ -299,7 +299,7 @@ def _load_existing(dest_path: Path):
         lines = dest_path.read_text(encoding="utf-8-sig").splitlines()
         if lines:
             header = lines[0]
-            existing_lines = [l for l in lines[1:] if l.strip()]
+            existing_lines = [line for line in lines[1:] if line.strip()]
             for line in existing_lines:
                 f = line.split(";")
                 if len(f) >= 7:
@@ -432,7 +432,7 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
         lines = raw.splitlines()
         if lines:
             header = lines[0]
-            existing_lines = [l for l in lines[1:] if l.strip()]
+            existing_lines = [line for line in lines[1:] if line.strip()]
             for line in existing_lines:
                 f = line.split(";")
                 if len(f) >= 7:

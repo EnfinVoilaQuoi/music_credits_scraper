@@ -250,13 +250,13 @@ def validate_snep_csv(
     # (ex: "Double diamant" vs "Double Diamant", fréquent dans les vieilles
     # lignes SNEP). Les variantes de casse sont signalées à part (info).
     cat_known = {c.lower() for c in VALID_CATEGORIES}
-    lvl_known = {l.lower() for l in VALID_LEVELS}
+    lvl_known = {lvl.lower() for lvl in VALID_LEVELS}
     cats = set(category.dropna())
     lvls = set(level.dropna())
     bad_cat = sorted(c for c in cats if c.lower() not in cat_known)
-    bad_lvl = sorted(l for l in lvls if l.lower() not in lvl_known)
+    bad_lvl = sorted(lvl for lvl in lvls if lvl.lower() not in lvl_known)
     case_cat = sorted(c for c in cats if c not in VALID_CATEGORIES and c.lower() in cat_known)
-    case_lvl = sorted(l for l in lvls if l not in VALID_LEVELS and l.lower() in lvl_known)
+    case_lvl = sorted(lvl for lvl in lvls if lvl not in VALID_LEVELS and lvl.lower() in lvl_known)
     report["invalid_categories"] = bad_cat
     report["invalid_levels"] = bad_lvl
     report["casing_categories"] = case_cat

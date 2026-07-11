@@ -114,7 +114,7 @@ def merge_selected_tracks(app):
         return
 
     # Fiche gardée par défaut : la plus remplie ; à égalité, la plus ancienne (ID bas)
-    if (_score(t2), -(t2.id or 0)) > (_score(t1), -(t1.id or 0)):
+    if (_score(t2), -(t2.id or 0)) > (_score(t1), -(t1.id or 0)):  # noqa: SIM108
         default_keep = t2
     else:
         default_keep = t1

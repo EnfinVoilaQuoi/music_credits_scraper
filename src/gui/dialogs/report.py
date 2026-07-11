@@ -1,4 +1,5 @@
 """Fenêtres utilitaires : rapport scrollable et erreurs"""
+
 import customtkinter as ctk
 from tkinter import messagebox
 
@@ -25,9 +26,11 @@ def show_scrollable_report(app, title: str, text: str):
         app.root.clipboard_clear()
         app.root.clipboard_append(text)
 
-    ctk.CTkButton(btns, text="📋 Copier", width=90, fg_color="gray",
-                  command=_copy).pack(side="left", padx=5)
+    ctk.CTkButton(btns, text="📋 Copier", width=90, fg_color="gray", command=_copy).pack(
+        side="left", padx=5
+    )
     ctk.CTkButton(btns, text="OK", width=90, command=dlg.destroy).pack(side="left", padx=5)
+
 
 def show_error(app, title, message):
     """Affiche un message d'erreur"""

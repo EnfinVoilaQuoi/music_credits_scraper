@@ -16,6 +16,7 @@ Vérifications effectuées :
 Utilisable en CLI (`python -m src.utils.snep_validator [chemin.csv]`) ou depuis
 la GUI via `validate_snep_csv(path)` puis `format_report(report)`.
 """
+
 from __future__ import annotations
 
 import io
@@ -31,16 +32,28 @@ import pandas as pd
 from src.api.snep_certifications import SNEPCertificationManager
 
 HEADER_COLS = [
-    "Interprète", "Titre", "Éditeur / Distributeur", "Catégorie",
-    "Certification", "Date de sortie", "Date de constat",
+    "Interprète",
+    "Titre",
+    "Éditeur / Distributeur",
+    "Catégorie",
+    "Certification",
+    "Date de sortie",
+    "Date de constat",
 ]
 EXPECTED_NCOLS = 7
 
 VALID_CATEGORIES = {"Singles", "Albums", "Vidéos", "Single", "Album", "Vidéo"}
 VALID_LEVELS = {
-    "Or", "Double Or", "Triple Or",
-    "Platine", "Double Platine", "Triple Platine",
-    "Diamant", "Double Diamant", "Triple Diamant", "Quadruple Diamant",
+    "Or",
+    "Double Or",
+    "Triple Or",
+    "Platine",
+    "Double Platine",
+    "Triple Platine",
+    "Diamant",
+    "Double Diamant",
+    "Triple Diamant",
+    "Quadruple Diamant",
 }
 
 # Seuil en dessous duquel un mois est jugé « suspect » (possiblement incomplet).
@@ -94,6 +107,7 @@ def _load_raw_df(csv_path: Path) -> tuple[pd.DataFrame, list[str], int]:
 def csv_split(line: str):
     """Génère les champs d'une ligne CSV ';' en respectant les guillemets."""
     import csv as _csv
+
     yield from _csv.reader([line], delimiter=";", quotechar='"')
 
 
@@ -187,8 +201,9 @@ def validate_snep_csv(
     # des vieilles entrées, ex: L?empire, QU?IL). Les vrais '?' (après espace
     # ou en fin) ne matchent pas. Le nettoyeur les restaure (?→').
     apo_pat = r"[^\W\d_]\?[^\W\d_]"
-    apo_mask = (artist.fillna("").str.contains(apo_pat, regex=True, na=False)
-                | title.fillna("").str.contains(apo_pat, regex=True, na=False))
+    apo_mask = artist.fillna("").str.contains(apo_pat, regex=True, na=False) | title.fillna(
+        ""
+    ).str.contains(apo_pat, regex=True, na=False)
     report["corrupted_apostrophes_count"] = int(apo_mask.sum())
     if apo_mask.any():
         ex = (artist.fillna("") + " — " + title.fillna(""))[apo_mask].head(15).tolist()
@@ -203,9 +218,7 @@ def validate_snep_csv(
     report["date_parse_failures"] = int(constat.isna().sum() - constat_raw.isna().sum())
     valid_dates = constat.dropna()
     if not valid_dates.empty:
-        report["date_range"] = (
-            f"{valid_dates.min():%d/%m/%Y} → {valid_dates.max():%d/%m/%Y}"
-        )
+        report["date_range"] = f"{valid_dates.min():%d/%m/%Y} → {valid_dates.max():%d/%m/%Y}"
         report["latest_constat"] = f"{valid_dates.max():%d/%m/%Y}"
         days_stale = (datetime.now() - valid_dates.max().to_pydatetime()).days
         report["stats"]["days_since_latest"] = days_stale
@@ -217,9 +230,12 @@ def validate_snep_csv(
 
     # Doublons exacts (clé métier)
     key = (
-        artist.fillna("").str.upper().str.strip() + " | "
-        + title.fillna("").str.upper().str.strip() + " | "
-        + level.fillna("") + " | "
+        artist.fillna("").str.upper().str.strip()
+        + " | "
+        + title.fillna("").str.upper().str.strip()
+        + " | "
+        + level.fillna("")
+        + " | "
         + constat_raw.fillna("")
     )
     dup_mask = key.duplicated(keep="first") & (artist.fillna("") != "")
@@ -264,14 +280,14 @@ def validate_snep_csv(
         # Année à 0 dont un voisin immédiat est actif = trou notable (bord de
         # lacune ou année isolée manquante). En données continues : liste vide.
         report["missing_years"] = [
-            y for y, c in per_year.items()
+            y
+            for y, c in per_year.items()
             if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
         ]
 
         # Années à scanner pour les trous mensuels
         if full_mode:
-            scan_years = [y for y, c in per_year.items()
-                          if c >= MEANINGFUL_YEAR_THRESHOLD]
+            scan_years = [y for y, c in per_year.items() if c >= MEANINGFUL_YEAR_THRESHOLD]
         else:
             scan_years = list(target_years)
 
@@ -335,8 +351,10 @@ def format_report(report: dict) -> str:
             L.append(f"  • {y} : {s[f'count_{y}']} certifications")
 
     L.append("")
-    L.append(f"{'✅' if report['ok'] else '⚠️'} Verdict global : "
-             f"{'RAS' if report['ok'] else 'anomalies détectées'}")
+    L.append(
+        f"{'✅' if report['ok'] else '⚠️'} Verdict global : "
+        f"{'RAS' if report['ok'] else 'anomalies détectées'}"
+    )
 
     def section(title, items, limit=15):
         if items:
@@ -349,13 +367,17 @@ def format_report(report: dict) -> str:
 
     if report["tab_artifacts"]:
         L.append("")
-        L.append(f"🩹 Artefacts tabulation : {report['tab_artifacts']} ligne(s) "
-                 f"(nettoyés à l'import, mais présents dans le CSV)")
+        L.append(
+            f"🩹 Artefacts tabulation : {report['tab_artifacts']} ligne(s) "
+            f"(nettoyés à l'import, mais présents dans le CSV)"
+        )
     if report["empty_critical"]:
         L.append(f"❌ Champs critiques vides (artiste/titre) : {report['empty_critical']}")
     if report.get("corrupted_apostrophes_count"):
-        L.append(f"🩹 Caractères corrompus (?) : {report['corrupted_apostrophes_count']} "
-                 f"entrée(s) — « Nettoyer » restaure élisions/œ, le reste à vérifier")
+        L.append(
+            f"🩹 Caractères corrompus (?) : {report['corrupted_apostrophes_count']} "
+            f"entrée(s) — « Nettoyer » restaure élisions/œ, le reste à vérifier"
+        )
     if report["date_parse_failures"]:
         L.append(f"⚠️ Dates de constat illisibles : {report['date_parse_failures']}")
     if s.get("repaired_lines"):
@@ -371,13 +393,17 @@ def format_report(report: dict) -> str:
 
     # Années entièrement absentes entre deux années actives (vrais trous)
     if report.get("missing_years"):
-        section("Années ENTIÈREMENT absentes (trou)",
-                [str(y) for y in report["missing_years"]], limit=40)
+        section(
+            "Années ENTIÈREMENT absentes (trou)",
+            [str(y) for y in report["missing_years"]],
+            limit=40,
+        )
 
     # Trous mensuels groupés par année (lisible même sur tout l'historique)
     gaps = report.get("month_gaps", [])
     if gaps:
         from collections import defaultdict
+
         by_year = defaultdict(list)
         for g in gaps:
             y, mo = g.split("-")
@@ -385,8 +411,7 @@ def format_report(report: dict) -> str:
         L.append("")
         L.append(f"── Mois SANS certification ({len(gaps)} sur années actives) ──")
         for y in sorted(by_year):
-            L.append(f"  • {y} : {len(by_year[y])} mois manquant(s) — "
-                     f"{', '.join(by_year[y])}")
+            L.append(f"  • {y} : {len(by_year[y])} mois manquant(s) — " f"{', '.join(by_year[y])}")
 
     section("Mois à faible couverture (années récentes)", report["low_months"], limit=24)
 
@@ -412,6 +437,7 @@ def format_report(report: dict) -> str:
 
 def _default_csv_path() -> Path:
     from src.config import DATA_PATH
+
     return Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
 
 

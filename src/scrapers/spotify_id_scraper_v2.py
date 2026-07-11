@@ -2,6 +2,7 @@
 Scraper Spotify ID — version Playwright
 Recherche directe sur open.spotify.com/search
 """
+
 import re
 import json
 import threading
@@ -22,7 +23,7 @@ from playwright.sync_api import (
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import get_shared_extractor, build_spotify_match_prompt
 
-logger = logging.getLogger('SpotifyIDScraper')
+logger = logging.getLogger("SpotifyIDScraper")
 
 
 class SpotifyIDScraper:
@@ -39,17 +40,17 @@ class SpotifyIDScraper:
         self._timeout = 20_000  # ms
 
         self.spotify_id_patterns = [
-            r'open\.spotify\.com/(?:intl-[a-z]{2}/)?track/([a-zA-Z0-9]{22})',
-            r'spotify\.com/track/([a-zA-Z0-9]{22})',
-            r'spotify:track:([a-zA-Z0-9]{22})',
-            r'/track/([a-zA-Z0-9]{22})(?:\?|$|/)',
+            r"open\.spotify\.com/(?:intl-[a-z]{2}/)?track/([a-zA-Z0-9]{22})",
+            r"spotify\.com/track/([a-zA-Z0-9]{22})",
+            r"spotify:track:([a-zA-Z0-9]{22})",
+            r"/track/([a-zA-Z0-9]{22})(?:\?|$|/)",
         ]
 
         self.spotify_artist_id_patterns = [
-            r'open\.spotify\.com/(?:intl-[a-z]{2}/)?artist/([a-zA-Z0-9]{22})',
-            r'spotify\.com/artist/([a-zA-Z0-9]{22})',
-            r'spotify:artist:([a-zA-Z0-9]{22})',
-            r'/artist/([a-zA-Z0-9]{22})(?:\?|$|/)',
+            r"open\.spotify\.com/(?:intl-[a-z]{2}/)?artist/([a-zA-Z0-9]{22})",
+            r"spotify\.com/artist/([a-zA-Z0-9]{22})",
+            r"spotify:artist:([a-zA-Z0-9]{22})",
+            r"/artist/([a-zA-Z0-9]{22})(?:\?|$|/)",
         ]
 
         self._owner_thread: Optional[int] = None
@@ -77,16 +78,13 @@ class SpotifyIDScraper:
             self._owner_thread = threading.get_ident()
             self.browser = self._playwright.chromium.launch(
                 headless=self.headless,
-                args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
             )
             self.context = self.browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             )
-            self.context.route(
-                "**/*.{png,jpg,jpeg,gif,webp,svg,ico}",
-                lambda route: route.abort()
-            )
+            self.context.route("**/*.{png,jpg,jpeg,gif,webp,svg,ico}", lambda route: route.abort())
             self.page = self.context.new_page()
             self.page.add_init_script(
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
@@ -115,14 +113,14 @@ class SpotifyIDScraper:
 
     def _load_cache(self):
         try:
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
+            with open(self.cache_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
     def _save_cache(self):
         try:
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Erreur sauvegarde cache: {e}")
@@ -135,24 +133,24 @@ class SpotifyIDScraper:
     # ──────────────────────────────────────────────────────────────────────────
 
     def extract_artist_id_from_url(self, url: str) -> Optional[str]:
-        if not url or 'spotify' not in url.lower():
+        if not url or "spotify" not in url.lower():
             return None
         for pattern in self.spotify_artist_id_patterns:
             match = re.search(pattern, url)
             if match:
                 aid = match.group(1)
-                if len(aid) == 22 and re.match(r'^[a-zA-Z0-9_-]+$', aid):
+                if len(aid) == 22 and re.match(r"^[a-zA-Z0-9_-]+$", aid):
                     return aid
         return None
 
     def extract_spotify_id_from_url(self, url: str) -> Optional[str]:
-        if not url or 'spotify' not in url.lower():
+        if not url or "spotify" not in url.lower():
             return None
         for pattern in self.spotify_id_patterns:
             match = re.search(pattern, url)
             if match:
                 sid = match.group(1)
-                if len(sid) == 22 and re.match(r'^[a-zA-Z0-9_-]+$', sid):
+                if len(sid) == 22 and re.match(r"^[a-zA-Z0-9_-]+$", sid):
                     return sid
         return None
 
@@ -213,7 +211,7 @@ class SpotifyIDScraper:
         cache_key = self._get_cache_key(artist, title)
         if cache_key in self.cache:
             cached = self.cache[cache_key]
-            if cached and cached != 'not_found':
+            if cached and cached != "not_found":
                 logger.info(f"✅ ID trouvé en cache: {cached}")
                 return cached
             # 'not_found' n'est PAS définitif (a pu être causé par une erreur
@@ -262,11 +260,11 @@ class SpotifyIDScraper:
                     links = self.page.query_selector_all(selector)
                     for link in links[:10]:
                         try:
-                            href = link.get_attribute('href') or ""
-                            if '/track/' not in href:
+                            href = link.get_attribute("href") or ""
+                            if "/track/" not in href:
                                 continue
                             sid = self.extract_spotify_id_from_url(href)
-                            if not sid or sid in [t['id'] for t in found_tracks]:
+                            if not sid or sid in [t["id"] for t in found_tracks]:
                                 continue
                             try:
                                 link_text = link.inner_text().lower()
@@ -276,7 +274,9 @@ class SpotifyIDScraper:
                                 relevance = self._calculate_relevance(artist, title, combined)
                             except Exception:
                                 combined, relevance = "", 0.5
-                            found_tracks.append({'id': sid, 'text': combined, 'relevance': relevance, 'href': href})
+                            found_tracks.append(
+                                {"id": sid, "text": combined, "relevance": relevance, "href": href}
+                            )
                         except Exception:
                             continue
 
@@ -298,17 +298,17 @@ class SpotifyIDScraper:
                 continue
 
         if found_tracks:
-            found_tracks.sort(key=lambda x: x['relevance'], reverse=True)
+            found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
             best = found_tracks[0]
 
             # Fallback LLM : si le choix heuristique est ambigu, demander au LLM
-            if len(found_tracks) > 1 and best['relevance'] < 0.8:
+            if len(found_tracks) > 1 and best["relevance"] < 0.8:
                 llm_choice = self._select_track_with_llm(artist, title, found_tracks)
                 if llm_choice is not None:
                     best = llm_choice
                     logger.info(f"🤖 SpotifyID LLM: choix affiné → {best['id']}")
 
-            sid = best['id']
+            sid = best["id"]
             logger.info(f"✅ SÉLECTIONNÉ: {sid} (relevance: {best['relevance']:.2f})")
             self.cache[cache_key] = sid
             self._save_cache()
@@ -317,7 +317,7 @@ class SpotifyIDScraper:
             logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
             # Ne pas cacher l'échec si des erreurs techniques ont eu lieu
             if not had_errors:
-                self.cache[cache_key] = 'not_found'
+                self.cache[cache_key] = "not_found"
                 self._save_cache()
             return None
 
@@ -332,7 +332,7 @@ class SpotifyIDScraper:
             return None
 
         candidates = [
-            {"index": i, "text": (t.get('text') or '')[:150].strip() or t['id']}
+            {"index": i, "text": (t.get("text") or "")[:150].strip() or t["id"]}
             for i, t in enumerate(found_tracks[:8])
         ]
         data = llm.extract_json(
@@ -357,19 +357,22 @@ class SpotifyIDScraper:
     @staticmethod
     def _parse_embed_artists(html: str) -> List[Dict[str, str]]:
         """Extrait [{'name', 'id'}] du __NEXT_DATA__ d'une page embed."""
-        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html or '', re.S)
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html or "", re.S)
         if not m:
             return []
         try:
             data = json.loads(m.group(1))
-            entity = ((((data.get('props') or {}).get('pageProps') or {})
-                       .get('state') or {}).get('data') or {}).get('entity') or {}
+            entity = (
+                (((data.get("props") or {}).get("pageProps") or {}).get("state") or {}).get("data")
+                or {}
+            ).get("entity") or {}
             out = []
-            for a in entity.get('artists') or []:
-                uri = a.get('uri') or ''
-                if uri.startswith('spotify:artist:'):
-                    out.append({'name': (a.get('name') or '').strip(),
-                                'id': uri.rsplit(':', 1)[-1]})
+            for a in entity.get("artists") or []:
+                uri = a.get("uri") or ""
+                if uri.startswith("spotify:artist:"):
+                    out.append(
+                        {"name": (a.get("name") or "").strip(), "id": uri.rsplit(":", 1)[-1]}
+                    )
             return out
         except (ValueError, AttributeError, TypeError) as e:
             logger.debug(f"Parse __NEXT_DATA__ embed échoué: {e}")
@@ -384,12 +387,19 @@ class SpotifyIDScraper:
         url = f"https://open.spotify.com/embed/track/{track_spotify_id}"
 
         try:
-            resp = requests.get(url, timeout=15, headers={
-                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                               "AppleWebKit/537.36 (KHTML, like Gecko) "
-                               "Chrome/124.0.0.0 Safari/537.36")})
+            resp = requests.get(
+                url,
+                timeout=15,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    )
+                },
+            )
             if resp.ok:
-                resp.encoding = 'utf-8'  # noms d'artistes accentués (anti-mojibake)
+                resp.encoding = "utf-8"  # noms d'artistes accentués (anti-mojibake)
                 artists = self._parse_embed_artists(resp.text)
                 if artists:
                     return artists
@@ -404,8 +414,9 @@ class SpotifyIDScraper:
             logger.error(f"❌ Embed via Playwright échoué ({track_spotify_id}): {e}")
             return []
 
-    def get_artist_id_from_track(self, track_spotify_id: str,
-                                 expected_name: str = None) -> Optional[str]:
+    def get_artist_id_from_track(
+        self, track_spotify_id: str, expected_name: str = None
+    ) -> Optional[str]:
         """
         Déduit l'ID Spotify de l'ARTISTE depuis un de ses morceaux (page embed).
 
@@ -422,10 +433,10 @@ class SpotifyIDScraper:
         if expected_name:
             exp = self._normalize_apostrophes(expected_name).lower().strip()
             for a in artists:
-                name = self._normalize_apostrophes(a['name']).lower().strip()
+                name = self._normalize_apostrophes(a["name"]).lower().strip()
                 if name and (name == exp or name in exp or exp in name):
                     logger.info(f"✅ ID artiste (crédité '{a['name']}'): {a['id']}")
-                    return a['id']
+                    return a["id"]
             logger.info(
                 f"⏭️ '{expected_name}' absent des crédités du track "
                 f"{track_spotify_id} ({[a['name'] for a in artists]}) — pas de vote"
@@ -433,7 +444,7 @@ class SpotifyIDScraper:
             return None
 
         logger.info(f"✅ ID artiste (1er crédité '{artists[0]['name']}'): {artists[0]['id']}")
-        return artists[0]['id']
+        return artists[0]["id"]
 
     def get_spotify_page_title(self, spotify_id: str) -> Optional[str]:
         try:
@@ -457,7 +468,7 @@ class SpotifyIDScraper:
         cache_key = f"artist::{artist_name.lower().strip()}"
         if cache_key in self.cache:
             cached = self.cache[cache_key]
-            if cached and cached != 'not_found':
+            if cached and cached != "not_found":
                 logger.info(f"✅ ID artiste trouvé en cache: {cached}")
                 return cached
             # 'not_found' non définitif → on retente
@@ -469,7 +480,9 @@ class SpotifyIDScraper:
             return None
 
         try:
-            search_url = f"https://open.spotify.com/search/{urllib.parse.quote(artist_name)}/artists"
+            search_url = (
+                f"https://open.spotify.com/search/{urllib.parse.quote(artist_name)}/artists"
+            )
             self.page.goto(search_url, wait_until="domcontentloaded", timeout=30_000)
             self._handle_cookies()
 
@@ -477,7 +490,7 @@ class SpotifyIDScraper:
                 self.page.wait_for_selector("a[href*='/artist/']", timeout=self._timeout)
             except PlaywrightTimeoutError:
                 logger.warning(f"⏰ Timeout recherche artiste: {artist_name}")
-                self.cache[cache_key] = 'not_found'
+                self.cache[cache_key] = "not_found"
                 self._save_cache()
                 return None
 
@@ -486,7 +499,7 @@ class SpotifyIDScraper:
 
             for link in links[:20]:
                 try:
-                    href = link.get_attribute('href') or ""
+                    href = link.get_attribute("href") or ""
                     aid = self.extract_artist_id_from_url(href)
                     if not aid:
                         continue
@@ -505,7 +518,7 @@ class SpotifyIDScraper:
             # Fallback : premier lien artiste sans vérification de nom
             for link in links[:5]:
                 try:
-                    href = link.get_attribute('href') or ""
+                    href = link.get_attribute("href") or ""
                     aid = self.extract_artist_id_from_url(href)
                     if aid:
                         logger.warning(f"⚠️ ID artiste Spotify (fallback, sans vérif nom): {aid}")
@@ -518,19 +531,19 @@ class SpotifyIDScraper:
         except Exception as e:
             logger.error(f"❌ Erreur recherche ID artiste '{artist_name}': {e}")
 
-        self.cache[cache_key] = 'not_found'
+        self.cache[cache_key] = "not_found"
         self._save_cache()
         return None
 
     def get_spotify_id_for_track(self, track) -> Optional[str]:
-        if hasattr(track, 'is_featuring') and track.is_featuring:
+        if hasattr(track, "is_featuring") and track.is_featuring:
             artist_name = (
                 track.primary_artist_name
-                if hasattr(track, 'primary_artist_name') and track.primary_artist_name
-                else (track.artist.name if hasattr(track.artist, 'name') else str(track.artist))
+                if hasattr(track, "primary_artist_name") and track.primary_artist_name
+                else (track.artist.name if hasattr(track.artist, "name") else str(track.artist))
             )
         else:
-            artist_name = track.artist.name if hasattr(track.artist, 'name') else str(track.artist)
+            artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
         return self.get_spotify_id(artist_name, track.title)
 
     def close(self):

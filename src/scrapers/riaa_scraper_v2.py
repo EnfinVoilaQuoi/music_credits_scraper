@@ -17,6 +17,7 @@ Deux entrées :
   - scrape_by_date_range(from, to)  → bulk, ligne principale.
   - scrape_by_artist(artist)        → complet (MORE DETAILS).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,8 +35,10 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _BASE = "https://www.riaa.com/gold-platinum/"
-_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # Infra anti-Cloudflare partagée avec le reste du projet
 _CDP_URL = os.getenv("GENIUS_CDP_URL")
@@ -51,7 +54,7 @@ def _profile_dir() -> str:
 
 def _level_from_img(src: str) -> str:
     """`{N}_big.png` → niveau RIAA (multiplicateur inclus)."""
-    m = re.search(r'(\d+)_big', src or '')
+    m = re.search(r"(\d+)_big", src or "")
     if not m:
         return ""
     n = int(m.group(1))
@@ -68,7 +71,7 @@ def _units_for(level: str) -> Optional[int]:
     l = (level or "").lower()
     if "diamond" in l:
         return BASE_UNITS["diamond"]
-    m = re.match(r'(\d+)\s*x', l)
+    m = re.match(r"(\d+)\s*x", l)
     mult = int(m.group(1)) if m else 1
     if "platinum" in l:
         return BASE_UNITS["platinum"] * mult
@@ -82,7 +85,7 @@ def _to_iso(date_str: str) -> str:
     s = (date_str or "").strip()
     if not s:
         return ""
-    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', s):
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
         return s
     for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"):
         try:
@@ -99,29 +102,37 @@ class RIAAScraperV2:
         self.headless = headless
 
     # ------------------------------------------------------------------ public
-    def scrape_by_date_range(self, start_date: str, end_date: str,
-                             date_option: str = "certification",
-                             get_details: bool = False) -> List[Dict]:
+    def scrape_by_date_range(
+        self,
+        start_date: str,
+        end_date: str,
+        date_option: str = "certification",
+        get_details: bool = False,
+    ) -> List[Dict]:
         """Bulk par plage de dates (ligne principale par défaut)."""
         start, end = _norm_date(start_date), _norm_date(end_date)
-        url = (f"{_BASE}?tab_active=default-award&ar=&ti=&lab=&genre=&format="
-               f"&date_option={date_option}&from={start}&to={end}"
-               f"&award=&type=&category=&adv=SEARCH#search_section")
+        url = (
+            f"{_BASE}?tab_active=default-award&ar=&ti=&lab=&genre=&format="
+            f"&date_option={date_option}&from={start}&to={end}"
+            f"&award=&type=&category=&adv=SEARCH#search_section"
+        )
         logger.info(f"RIAA dates {start}→{end} (détails={get_details})")
         html = self._render(url, load_all=True, get_details=get_details)
         return _parse_results(html, get_details) if html else []
 
     def scrape_by_artist(self, artist: str, get_details: bool = True) -> List[Dict]:
         """Par artiste (avec MORE DETAILS = historique des paliers)."""
-        url = (f"{_BASE}?tab_active=default-award&ar={quote(artist)}&ti=&lab="
-               f"&genre=&format=&date_option=&from=&to="
-               f"&award=&type=&category=&adv=SEARCH#search_section")
+        url = (
+            f"{_BASE}?tab_active=default-award&ar={quote(artist)}&ti=&lab="
+            f"&genre=&format=&date_option=&from=&to="
+            f"&award=&type=&category=&adv=SEARCH#search_section"
+        )
         logger.info(f"RIAA artiste '{artist}' (détails={get_details})")
         html = self._render(url, load_all=True, get_details=get_details)
         return _parse_results(html, get_details) if html else []
 
     # Compat ancienne API
-    def init_driver(self):   # no-op : patchright gère le navigateur à la volée
+    def init_driver(self):  # no-op : patchright gère le navigateur à la volée
         pass
 
     def close_driver(self):
@@ -139,7 +150,9 @@ class RIAAScraperV2:
         try:
             from patchright.async_api import async_playwright
         except Exception as e:
-            logger.error(f"patchright indisponible : {e} — `pip install -U crawl4ai && crawl4ai-setup`")
+            logger.error(
+                f"patchright indisponible : {e} — `pip install -U crawl4ai && crawl4ai-setup`"
+            )
             return None
 
         async with async_playwright() as pw:
@@ -150,8 +163,11 @@ class RIAAScraperV2:
                 logger.info(f"RIAA : connecté via CDP {_CDP_URL}")
             else:
                 os.makedirs(_profile_dir(), exist_ok=True)
-                launch = dict(headless=self.headless, user_agent=_USER_AGENT,
-                              viewport={"width": 1366, "height": 900})
+                launch = dict(
+                    headless=self.headless,
+                    user_agent=_USER_AGENT,
+                    viewport={"width": 1366, "height": 900},
+                )
                 if _BROWSER_CHANNEL:
                     launch["channel"] = _BROWSER_CHANNEL
                 ctx = await pw.chromium.launch_persistent_context(_profile_dir(), **launch)
@@ -212,7 +228,7 @@ class RIAAScraperV2:
         for row in rows:
             rid = await row.get_attribute("id")
             if rid and rid.startswith("default_"):
-                num = rid[len("default_"):]
+                num = rid[len("default_") :]
                 try:
                     await page.evaluate(f"showDefaultDetail('{num}','DI');")
                 except Exception:
@@ -249,10 +265,14 @@ def _parse_main(row) -> Optional[Dict]:
     if not (artist and title):
         return None
     return {
-        "artist": artist, "title": title,
+        "artist": artist,
+        "title": title,
         "certification_date": _to_iso(cert_date),
-        "release_date": "", "label": label, "format": fmt,
-        "award_level": level, "certification_level": level,
+        "release_date": "",
+        "label": label,
+        "format": fmt,
+        "award_level": level,
+        "certification_level": level,
         "units": _units_for(level),
     }
 
@@ -277,12 +297,14 @@ def _parse_details(soup, rid: str, base: Dict) -> List[Dict]:
             continue
         if not level:
             continue
-        history.append({
-            "certification_level": level,
-            "certification_date": _to_iso(cdate),
-            "release_date": _to_iso(cells[0]) if cells else "",
-            "units": _units_for(level),
-        })
+        history.append(
+            {
+                "certification_level": level,
+                "certification_date": _to_iso(cdate),
+                "release_date": _to_iso(cells[0]) if cells else "",
+                "units": _units_for(level),
+            }
+        )
     return history
 
 

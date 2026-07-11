@@ -10,6 +10,7 @@ debug écoute déjà, sinon le lance (profil dédié, exclu du VPN côté utilis
 attend que le port réponde, et retourne l'URL CDP. Le profil persistant garde le
 cookie `cf_clearance` → après la 1ʳᵉ résolution manuelle, c'est transparent.
 """
+
 import os
 import shutil
 import subprocess
@@ -42,8 +43,16 @@ def find_chrome() -> Optional[str]:
         return env_path
 
     candidates = [
-        Path(os.getenv("PROGRAMFILES", r"C:\Program Files")) / "Google" / "Chrome" / "Application" / "chrome.exe",
-        Path(os.getenv("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(os.getenv("PROGRAMFILES", r"C:\Program Files"))
+        / "Google"
+        / "Chrome"
+        / "Application"
+        / "chrome.exe",
+        Path(os.getenv("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
+        / "Google"
+        / "Chrome"
+        / "Application"
+        / "chrome.exe",
         Path(os.getenv("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
     ]
     for c in candidates:
@@ -55,9 +64,9 @@ def find_chrome() -> Optional[str]:
     return shutil.which("chrome")
 
 
-def ensure_cdp_chrome(port: int = DEFAULT_PORT,
-                      profile: Optional[str] = None,
-                      wait_seconds: float = 15.0) -> Optional[str]:
+def ensure_cdp_chrome(
+    port: int = DEFAULT_PORT, profile: Optional[str] = None, wait_seconds: float = 15.0
+) -> Optional[str]:
     """Garantit qu'un Chrome debug écoute sur `port` et retourne son URL CDP.
 
     - Si le port répond déjà → on réutilise (retourne l'URL).

@@ -12,6 +12,7 @@ Structure des pages artiste (kworb.net/spotify/artist/{id}_{songs|albums}.html) 
     · href → Spotify track/album ID (matching exact possible)
     · daily parfois vide
 """
+
 import re
 import logging
 from datetime import datetime
@@ -22,7 +23,7 @@ from bs4 import BeautifulSoup
 
 from src.utils.llm_extractor import get_shared_extractor, build_streams_table_prompt
 
-logger = logging.getLogger('KworbScraper')
+logger = logging.getLogger("KworbScraper")
 
 _HEADERS = {
     "User-Agent": (
@@ -33,7 +34,7 @@ _HEADERS = {
 }
 _TIMEOUT = 20  # secondes
 
-_SPOTIFY_URL_RE = re.compile(r'open\.spotify\.com/(track|album)/([A-Za-z0-9]+)')
+_SPOTIFY_URL_RE = re.compile(r"open\.spotify\.com/(track|album)/([A-Za-z0-9]+)")
 
 
 class KworbScraper:
@@ -79,7 +80,7 @@ class KworbScraper:
             resp.raise_for_status()
             # Kworb sert de l'UTF-8 sans header charset → requests retombe en
             # latin-1 et mojibake les titres accentués ("FlÃ»tes recyclables")
-            resp.encoding = 'utf-8'
+            resp.encoding = "utf-8"
         except requests.RequestException as e:
             logger.error(f"Erreur HTTP Kworb ({url}): {e}")
             return None
@@ -87,16 +88,15 @@ class KworbScraper:
         try:
             soup = BeautifulSoup(resp.text, "html.parser")
             page = {
-                'artist_name': self._parse_artist_name(soup),
-                'last_updated': self._parse_last_updated(soup),
-                'summary': self._parse_summary(soup),
-                'entries': self._parse_entries(soup),
+                "artist_name": self._parse_artist_name(soup),
+                "last_updated": self._parse_last_updated(soup),
+                "summary": self._parse_summary(soup),
+                "entries": self._parse_entries(soup),
             }
 
-            if not page['entries']:
+            if not page["entries"]:
                 # Fallback LLM si la structure de la page a changé
-                page['entries'] = self._extract_with_llm(
-                    soup.get_text(separator="\n", strip=True))
+                page["entries"] = self._extract_with_llm(soup.get_text(separator="\n", strip=True))
 
             logger.info(
                 f"Kworb: {len(page['entries'])} entrées pour "
@@ -114,11 +114,11 @@ class KworbScraper:
         title = soup.title.string if soup.title else None
         if not title:
             return None
-        return re.split(r'\s+-\s+Spotify Top\b', title)[0].strip() or None
+        return re.split(r"\s+-\s+Spotify Top\b", title)[0].strip() or None
 
     @staticmethod
     def _parse_last_updated(soup) -> Optional[datetime]:
-        m = re.search(r'Last updated:\s*(\d{4})/(\d{2})/(\d{2})', soup.get_text())
+        m = re.search(r"Last updated:\s*(\d{4})/(\d{2})/(\d{2})", soup.get_text())
         if not m:
             return None
         try:
@@ -130,21 +130,23 @@ class KworbScraper:
         """Table récap (page songs) : lignes Streams/Daily/Tracks ×
         colonnes Total/As lead/Solo/As feature."""
         for table in soup.find_all("table"):
-            if 'addpos' in (table.get('class') or []):
+            if "addpos" in (table.get("class") or []):
                 continue
-            headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
-            if 'total' not in headers or 'as lead' not in headers:
+            headers = [th.get_text(strip=True).lower() for th in table.find_all("th")]
+            if "total" not in headers or "as lead" not in headers:
                 continue
             summary = {}
-            for row in table.find_all('tr'):
-                cells = row.find_all('td')
+            for row in table.find_all("tr"):
+                cells = row.find_all("td")
                 if len(cells) != 5:
                     continue
                 label = cells[0].get_text(strip=True).lower()  # streams/daily/tracks
                 values = [self._parse_number(c.get_text(strip=True)) for c in cells[1:]]
                 summary[label] = {
-                    'total': values[0], 'as_lead': values[1],
-                    'solo': values[2], 'as_feature': values[3],
+                    "total": values[0],
+                    "as_lead": values[1],
+                    "solo": values[2],
+                    "as_feature": values[3],
                 }
             return summary or None
         return None
@@ -165,23 +167,25 @@ class KworbScraper:
                 continue
             title = link.get_text(strip=True)
             # '*' avant le lien = featuring (le texte de la cellule commence par *)
-            is_feature = cells[0].get_text(strip=True).startswith('*')
+            is_feature = cells[0].get_text(strip=True).startswith("*")
 
             spotify_id = None
-            m = _SPOTIFY_URL_RE.search(link.get('href') or '')
+            m = _SPOTIFY_URL_RE.search(link.get("href") or "")
             if m:
                 spotify_id = m.group(2)
 
             streams = self._parse_number(cells[1].get_text(strip=True))
             daily = self._parse_number(cells[2].get_text(strip=True))
             if title and streams is not None:
-                results.append({
-                    "title": title,
-                    "streams": streams,
-                    "daily_streams": daily or 0,
-                    "spotify_id": spotify_id,
-                    "is_feature": is_feature,
-                })
+                results.append(
+                    {
+                        "title": title,
+                        "streams": streams,
+                        "daily_streams": daily or 0,
+                        "spotify_id": spotify_id,
+                        "is_feature": is_feature,
+                    }
+                )
         return results
 
     # ── Fallback LLM (structure de page changée) ───────────────────────────────
@@ -218,13 +222,15 @@ class KworbScraper:
                 continue
             if not (isinstance(daily, int) and str(daily) in page_numbers):
                 daily = 0
-            results.append({
-                "title": title.lstrip('* ').strip(),
-                "streams": streams,
-                "daily_streams": daily,
-                "spotify_id": None,
-                "is_feature": title.startswith('*'),
-            })
+            results.append(
+                {
+                    "title": title.lstrip("* ").strip(),
+                    "streams": streams,
+                    "daily_streams": daily,
+                    "spotify_id": None,
+                    "is_feature": title.startswith("*"),
+                }
+            )
 
         logger.info(f"🤖 Kworb LLM: {len(results)} entrée(s) validée(s)")
         return results

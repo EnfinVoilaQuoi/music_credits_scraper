@@ -1,4 +1,5 @@
 """Configuration centralisée du projet"""
+
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -60,9 +61,9 @@ YOUTUBE_CACHE_TTL_HOURS = int(os.getenv("YOUTUBE_CACHE_TTL_HOURS", "24"))
 # Configuration de l'intégration YouTube
 YOUTUBE_AUTO_SELECT_ALBUM_TRACKS = True  # Auto-sélection pour morceaux d'album
 YOUTUBE_VERIFY_OFFICIAL_CHANNELS = True  # Vérifier les chaînes officielles
-YOUTUBE_CONFIDENCE_THRESHOLD = 0.85      # Seuil de confiance pour auto-sélection
-YOUTUBE_PERSIST_CONFIDENCE = 0.90        # Seuil pour PERSISTER en DB un lien trouvé par recherche
-                                         # (fallback des rares cas sans lien dans le media Genius)
+YOUTUBE_CONFIDENCE_THRESHOLD = 0.85  # Seuil de confiance pour auto-sélection
+YOUTUBE_PERSIST_CONFIDENCE = 0.90  # Seuil pour PERSISTER en DB un lien trouvé par recherche
+# (fallback des rares cas sans lien dans le media Genius)
 
 # BPM Finder (audioaidynamics.com/music-analyzer) — BPM/Key/Camelot via lien YouTube
 # Compte email/mot de passe requis ; session Playwright persistée (reconnexion rare)
@@ -71,4 +72,4 @@ BPMFINDER_PASSWORD = os.getenv("BPMFINDER_PASSWORD")
 BPMFINDER_SESSION_FILE = DATA_DIR / ".bpmfinder_session.json"
 
 # Certifications
-DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")

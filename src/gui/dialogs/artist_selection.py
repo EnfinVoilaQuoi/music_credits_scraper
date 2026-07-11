@@ -1,4 +1,5 @@
 """Dialogue de désambiguïsation d'artiste Genius (choix parmi candidats, slug manuel)"""
+
 from tkinter import messagebox
 from typing import Optional
 
@@ -8,8 +9,10 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-               '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional[Artist]":
@@ -27,10 +30,10 @@ def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional
         pw = get_playwright()
         browser = pw.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         )
         context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
+            viewport={"width": 1920, "height": 1080},
             user_agent=_USER_AGENT,
         )
         page = context.new_page()
@@ -49,11 +52,8 @@ def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional
                 return null;
             }
         }""")
-        if result and result.get('id'):
-            return Artist(
-                name=result.get('name') or fallback_name,
-                genius_id=result['id']
-            )
+        if result and result.get("id"):
+            return Artist(name=result.get("name") or fallback_name, genius_id=result["id"])
     except Exception as e:
         logger.debug(f"Fetch artiste depuis {url} échoué: {e}")
     finally:
@@ -63,6 +63,7 @@ def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional
             except Exception:
                 pass
     return None
+
 
 def show_artist_selection_dialog(app, candidates, artist_name: str, result_queue):
     """Dialog modal pour choisir parmi plusieurs artistes candidats Genius.
@@ -105,12 +106,9 @@ def show_artist_selection_dialog(app, candidates, artist_name: str, result_queue
         label_text = f"Plusieurs résultats pour « {artist_name} ».\nChoisissez l'artiste :"
     else:
         label_text = f"Aucun résultat automatique pour « {artist_name} »."
-    ctk.CTkLabel(
-        dialog,
-        text=label_text,
-        font=("Arial", 13),
-        justify="left"
-    ).pack(padx=20, pady=(16, 8), anchor="w")
+    ctk.CTkLabel(dialog, text=label_text, font=("Arial", 13), justify="left").pack(
+        padx=20, pady=(16, 8), anchor="w"
+    )
 
     # ── Boutons candidats ─────────────────────────────────────────────────
     for artist in candidates:
@@ -118,7 +116,7 @@ def show_artist_selection_dialog(app, candidates, artist_name: str, result_queue
             dialog,
             text=f"{artist.name}   (ID Genius : {artist.genius_id})",
             anchor="w",
-            command=lambda a=artist: _put(a)
+            command=lambda a=artist: _put(a),
         ).pack(padx=20, pady=3, fill="x")
 
     # ── Saisie manuelle ───────────────────────────────────────────────────
@@ -126,7 +124,7 @@ def show_artist_selection_dialog(app, candidates, artist_name: str, result_queue
         dialog,
         text="Artiste absent ? Entrez l'ID Genius ou l'URL genius.com/artists/… :",
         font=("Arial", 11),
-        text_color="gray"
+        text_color="gray",
     ).pack(padx=20, pady=(14, 2), anchor="w")
 
     id_frame = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -139,18 +137,16 @@ def show_artist_selection_dialog(app, candidates, artist_name: str, result_queue
     ctk.CTkButton(id_frame, text="OK", width=50, command=_confirm_manual_id).pack(side="left")
 
     # ── Annuler ───────────────────────────────────────────────────────────
-    ctk.CTkButton(
-        dialog,
-        text="Annuler",
-        fg_color="gray",
-        command=lambda: _put(None)
-    ).pack(padx=20, pady=(8, 16))
+    ctk.CTkButton(dialog, text="Annuler", fg_color="gray", command=lambda: _put(None)).pack(
+        padx=20, pady=(8, 16)
+    )
 
     height = 130 + len(candidates) * 46 + 90
     dialog.geometry(f"460x{height}")
 
     dialog.protocol("WM_DELETE_WINDOW", lambda: _put(None))
     dialog.wait_window()
+
 
 def resolve_genius_slug(app, slug: str, artist_name: str, result_queue, parent_dialog):
     """Charge genius.com/artists/{slug} via Playwright et extrait l'ID artiste."""
@@ -163,10 +159,13 @@ def resolve_genius_slug(app, slug: str, artist_name: str, result_queue, parent_d
             result_queue.put(artist)
             app.root.after(0, parent_dialog.destroy)
         else:
-            app.root.after(0, lambda: messagebox.showwarning(
-                "Introuvable",
-                f"Aucun artiste trouvé sur genius.com/artists/{slug}.\n"
-                "Vérifiez l'orthographe ou entrez l'ID numérique directement."
-            ))
+            app.root.after(
+                0,
+                lambda: messagebox.showwarning(
+                    "Introuvable",
+                    f"Aucun artiste trouvé sur genius.com/artists/{slug}.\n"
+                    "Vérifiez l'orthographe ou entrez l'ID numérique directement.",
+                ),
+            )
 
     threading.Thread(target=fetch, daemon=True).start()

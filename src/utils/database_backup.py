@@ -2,6 +2,7 @@
 Module de backup automatique de la base de données
 Crée des backups avant les opérations critiques
 """
+
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -104,7 +105,7 @@ class DatabaseBackupManager:
 
             # Au minimum, on doit avoir la table artists
             # (tracks et credits peuvent être vides au début)
-            has_artists_table = 'artists' in tables
+            has_artists_table = "artists" in tables
 
             if not has_artists_table:
                 logger.debug("Table 'artists' manquante dans le backup")
@@ -149,7 +150,7 @@ class DatabaseBackupManager:
 
             # Créer un backup de sécurité de la base actuelle
             if self.db_path.exists():
-                safety_backup = self.db_path.with_suffix('.db.before_restore')
+                safety_backup = self.db_path.with_suffix(".db.before_restore")
                 self._sqlite_copy(self.db_path, safety_backup)
                 logger.info(f"Backup de sécurité créé: {safety_backup}")
 
@@ -172,21 +173,21 @@ class DatabaseBackupManager:
         """Liste tous les backups disponibles"""
         try:
             backups = sorted(
-                self.backup_dir.glob("backup_*.db"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
+                self.backup_dir.glob("backup_*.db"), key=lambda p: p.stat().st_mtime, reverse=True
             )
 
             backup_info = []
             for backup in backups:
                 stat = backup.stat()
-                backup_info.append({
-                    'path': backup,
-                    'name': backup.name,
-                    'size_mb': stat.st_size / (1024 * 1024),
-                    'created': datetime.fromtimestamp(stat.st_mtime),
-                    'operation': backup.stem.replace('backup_', '').rsplit('_', 2)[0]
-                })
+                backup_info.append(
+                    {
+                        "path": backup,
+                        "name": backup.name,
+                        "size_mb": stat.st_size / (1024 * 1024),
+                        "created": datetime.fromtimestamp(stat.st_mtime),
+                        "operation": backup.stem.replace("backup_", "").rsplit("_", 2)[0],
+                    }
+                )
 
             return backup_info
 
@@ -201,10 +202,10 @@ class DatabaseBackupManager:
             total_size = sum(b.stat().st_size for b in backups)
 
             return {
-                'count': len(backups),
-                'total_size_mb': total_size / (1024 * 1024),
-                'backup_dir': str(self.backup_dir),
-                'latest': max(backups, key=lambda p: p.stat().st_mtime).name if backups else None
+                "count": len(backups),
+                "total_size_mb": total_size / (1024 * 1024),
+                "backup_dir": str(self.backup_dir),
+                "latest": max(backups, key=lambda p: p.stat().st_mtime).name if backups else None,
             }
 
         except Exception as e:

@@ -1,4 +1,5 @@
 """Wrapper Ollama générique pour extraction de données structurées par LLM."""
+
 import json
 import re
 from typing import Optional
@@ -27,7 +28,7 @@ class LLMExtractor:
         force JSON mode via format="json".
         """
         if len(prompt) > self.max_input_chars:
-            prompt = prompt[:self.max_input_chars]
+            prompt = prompt[: self.max_input_chars]
             logger.debug(f"LLMExtractor: prompt tronqué à {self.max_input_chars} chars")
 
         try:
@@ -139,15 +140,14 @@ def get_shared_extractor(model: str = "llama3.2") -> Optional[LLMExtractor]:
         _shared_extractor = LLMExtractor(model=model)
         _shared_available = _shared_extractor.is_available()
         if not _shared_available:
-            logger.warning(
-                "LLMExtractor partagé indisponible — les fallbacks LLM seront ignorés"
-            )
+            logger.warning("LLMExtractor partagé indisponible — les fallbacks LLM seront ignorés")
     return _shared_extractor if _shared_available else None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Prompts spécialisés par scraper (fallbacks quand le parsing classique échoue)
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def build_songbpm_prompt(page_text: str) -> str:
     """Prompt pour extraire BPM/key/mode/signature depuis le texte d'une page SongBPM."""

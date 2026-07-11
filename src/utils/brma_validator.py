@@ -10,6 +10,7 @@ Vérifie : champs vides (artiste/titre/niveau), doublons, dates illisibles,
 fraîcheur, comptes par année (tout l'historique), trous mensuels sur les années
 actives, et niveaux/catégories hors référentiel (insensible à la casse).
 """
+
 from __future__ import annotations
 
 import io
@@ -25,8 +26,14 @@ import pandas as pd
 REQUIRED_COLS = ["artist", "title", "category", "certification_level", "certification_date"]
 VALID_CATEGORIES = {"singles", "albums"}
 VALID_LEVELS = {
-    "or", "platine", "double platine", "triple platine", "quadruple platine",
-    "diamant", "double diamant", "triple diamant",
+    "or",
+    "platine",
+    "double platine",
+    "triple platine",
+    "quadruple platine",
+    "diamant",
+    "double diamant",
+    "triple diamant",
 }
 # Ultratop note les multi-platine/or/diamant en multiplicateur (ex: '2x Platine',
 # '12x Platine') — niveaux VALIDES à reconnaître en plus du référentiel ci-dessus.
@@ -36,6 +43,8 @@ _MULTI_LEVEL_RE = re.compile(r"^\d+\s*x\s+(or|platine|diamant)$", re.IGNORECASE)
 def _level_known(level: str, lvl_known: set) -> bool:
     l = (level or "").strip()
     return l.lower() in lvl_known or bool(_MULTI_LEVEL_RE.match(l))
+
+
 MEANINGFUL_YEAR_THRESHOLD = 12
 LOW_MONTH_THRESHOLD = 3
 
@@ -51,8 +60,7 @@ def _load(csv_path: Path) -> pd.DataFrame:
     raise ValueError("Encodage illisible")
 
 
-def validate_brma_csv(csv_path: str | Path,
-                      recent_years: tuple[int, ...] = (2025, 2026)) -> dict:
+def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (2025, 2026)) -> dict:
     csv_path = Path(csv_path)
     report: dict = {
         "path": str(csv_path),
@@ -127,8 +135,17 @@ def validate_brma_csv(csv_path: str | Path,
     # Doublons (artiste + titre + CATÉGORIE + niveau + date). La catégorie est
     # indispensable : un même nom peut être certifié en single ET en album (ex:
     # Amy Macdonald « This Is The Life ») → ce ne sont pas des doublons.
-    key = (artist.fillna("").str.upper() + " | " + title.fillna("").str.upper()
-           + " | " + category.fillna("") + " | " + level.fillna("") + " | " + date_raw.fillna(""))
+    key = (
+        artist.fillna("").str.upper()
+        + " | "
+        + title.fillna("").str.upper()
+        + " | "
+        + category.fillna("")
+        + " | "
+        + level.fillna("")
+        + " | "
+        + date_raw.fillna("")
+    )
     dup_mask = key.duplicated(keep="first") & (artist.fillna("") != "")
     report["stats"]["duplicates"] = int(dup_mask.sum())
     if dup_mask.any():
@@ -151,7 +168,8 @@ def validate_brma_csv(csv_path: str | Path,
         per_year = {y: int((years == y).sum()) for y in range(y_min, y_max + 1)}
         report["per_year"] = per_year
         report["missing_years"] = [
-            y for y, c in per_year.items()
+            y
+            for y, c in per_year.items()
             if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
         ]
         scan_years = [y for y, c in per_year.items() if c >= MEANINGFUL_YEAR_THRESHOLD]
@@ -202,21 +220,27 @@ def format_report(report: dict) -> str:
     if report.get("date_range"):
         L.append(f"Période couverte : {report['date_range']}")
     if s.get("days_since_latest") is not None:
-        L.append(f"Certif. la plus récente : {report['latest_date']} "
-                 f"(il y a {s['days_since_latest']} j)")
+        L.append(
+            f"Certif. la plus récente : {report['latest_date']} "
+            f"(il y a {s['days_since_latest']} j)"
+        )
     for y in report["recent_years"]:
         if f"count_{y}" in s:
             L.append(f"  • {y} : {s[f'count_{y}']} certifications")
 
     L.append("")
-    L.append(f"{'✅' if report['ok'] else '⚠️'} Verdict global : "
-             f"{'RAS' if report['ok'] else 'anomalies détectées'}")
+    L.append(
+        f"{'✅' if report['ok'] else '⚠️'} Verdict global : "
+        f"{'RAS' if report['ok'] else 'anomalies détectées'}"
+    )
 
     if report["empty_critical"]:
         L.append(f"❌ Artiste vide : {report['empty_critical']} ligne(s)")
     if report.get("empty_titles"):
-        L.append(f"ℹ️ Titre vide : {report['empty_titles']} ligne(s) "
-                 f"(souvent des compilations — nom dans 'artiste')")
+        L.append(
+            f"ℹ️ Titre vide : {report['empty_titles']} ligne(s) "
+            f"(souvent des compilations — nom dans 'artiste')"
+        )
     if report["empty_levels"]:
         L.append(f"⚠️ Niveau de certification vide : {report['empty_levels']} ligne(s)")
     if report["date_parse_failures"]:
@@ -236,8 +260,11 @@ def format_report(report: dict) -> str:
     section("Niveaux hors référentiel", report["invalid_levels"])
     section("Niveaux — variantes de casse", report.get("casing_levels", []))
     if report.get("missing_years"):
-        section("Années ENTIÈREMENT absentes (trou)",
-                [str(y) for y in report["missing_years"]], limit=40)
+        section(
+            "Années ENTIÈREMENT absentes (trou)",
+            [str(y) for y in report["missing_years"]],
+            limit=40,
+        )
 
     gaps = report.get("month_gaps", [])
     if gaps:
@@ -273,6 +300,7 @@ def format_report(report: dict) -> str:
 
 def _default_csv_path() -> Path:
     from src.config import DATA_PATH
+
     return Path(DATA_PATH) / "certifications" / "brma" / "certif_brma.csv"
 
 

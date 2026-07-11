@@ -13,6 +13,7 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
     filtrés aux albums PROPRES (≥2 morceaux de l'artiste en base sur l'album —
     garde les projets communs type Bitume Caviar, écarte les simples apparitions).
 """
+
 import re
 import sys
 import difflib
@@ -43,6 +44,7 @@ def _names_match(page_name: Optional[str], artist_name: str) -> bool:
     if a == b or a in b or b in a:
         return True
     import difflib
+
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
 
 
@@ -57,6 +59,7 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> Optiona
     Secours : recherche par nom si pas assez de morceaux propres avec spotify_id.
     """
     from collections import Counter
+
     try:
         from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
     except Exception as e:
@@ -68,8 +71,9 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> Optiona
     except Exception:
         tracks = []
     track_ids = [
-        t.spotify_id for t in tracks
-        if getattr(t, 'spotify_id', None) and not getattr(t, 'is_featuring', False)
+        t.spotify_id
+        for t in tracks
+        if getattr(t, "spotify_id", None) and not getattr(t, "is_featuring", False)
     ]
 
     votes = Counter()
@@ -100,9 +104,9 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
         (page_songs, spotify_artist_id_corrigé) — page_songs=None si échec/identité fausse.
     """
     page = scraper.scrape_songs(spotify_artist_id)
-    page_name = page.get('artist_name') if page else None
+    page_name = page.get("artist_name") if page else None
 
-    if page and page['entries'] and _names_match(page_name, artist.name):
+    if page and page["entries"] and _names_match(page_name, artist.name):
         return page, spotify_artist_id
 
     if page and page_name and not _names_match(page_name, artist.name):
@@ -118,8 +122,8 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
         return None, spotify_artist_id
 
     page = scraper.scrape_songs(revoted)
-    page_name = page.get('artist_name') if page else None
-    if page and page['entries'] and _names_match(page_name, artist.name):
+    page_name = page.get("artist_name") if page else None
+    if page and page["entries"] and _names_match(page_name, artist.name):
         logger.info(f"🔁 ID artiste corrigé: {spotify_artist_id} → {revoted}")
         data_manager.update_artist_spotify_id(artist.id, revoted)
         artist.spotify_id = revoted
@@ -162,7 +166,7 @@ def update_kworb_streams(artist, data_manager) -> Dict:
     }
 
     # ── 1. S'assurer que l'ID Spotify artiste est disponible ──────────────────
-    spotify_artist_id: Optional[str] = getattr(artist, 'spotify_id', None)
+    spotify_artist_id: Optional[str] = getattr(artist, "spotify_id", None)
 
     if not spotify_artist_id:
         logger.info(f"spotify_id manquant pour '{artist.name}' — vote sur les pages tracks")
@@ -181,27 +185,28 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
     # ── 2. Page songs + VALIDATION D'IDENTITÉ ─────────────────────────────────
     page_songs, spotify_artist_id = _scrape_validated(
-        scraper, artist, data_manager, spotify_artist_id)
+        scraper, artist, data_manager, spotify_artist_id
+    )
 
     if not page_songs:
         logger.error("❌ Impossible d'obtenir une page Kworb validée. Aucune écriture.")
         return result
 
-    result["artist_name"] = page_songs['artist_name']
-    kworb_date = page_songs['last_updated']
-    result["kworb_updated"] = kworb_date.strftime('%Y-%m-%d') if kworb_date else None
+    result["artist_name"] = page_songs["artist_name"]
+    kworb_date = page_songs["last_updated"]
+    result["kworb_updated"] = kworb_date.strftime("%Y-%m-%d") if kworb_date else None
 
     # ── 3. Totaux artiste (tableau récap) ─────────────────────────────────────
-    summary = page_songs.get('summary') or {}
-    streams_sum = summary.get('streams') or {}
-    daily_sum = summary.get('daily') or {}
-    if streams_sum.get('total'):
+    summary = page_songs.get("summary") or {}
+    streams_sum = summary.get("streams") or {}
+    daily_sum = summary.get("daily") or {}
+    if streams_sum.get("total"):
         data_manager.update_artist_kworb_totals(
             artist.id,
-            total=streams_sum.get('total'),
-            daily=daily_sum.get('total'),
-            lead=streams_sum.get('as_lead'),
-            feat=streams_sum.get('as_feature'),
+            total=streams_sum.get("total"),
+            daily=daily_sum.get("total"),
+            lead=streams_sum.get("as_lead"),
+            feat=streams_sum.get("as_feature"),
             kworb_date=kworb_date,
         )
         logger.info(
@@ -211,7 +216,7 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
     # ── 4. Streams des morceaux : ID → titre unique → homonymes désambiguïsés ─
     tracks = data_manager.get_artist_tracks(artist.id)
-    by_spotify_id = {t.spotify_id: t for t in tracks if getattr(t, 'spotify_id', None)}
+    by_spotify_id = {t.spotify_id: t for t in tracks if getattr(t, "spotify_id", None)}
     by_title: Dict[str, List] = defaultdict(list)
     for t in tracks:
         by_title[_normalize_title(t.title)].append(t)
@@ -224,26 +229,30 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
     def _match_ambiguous(entry, candidates):
         nonlocal _embed_scraper
-        if not entry.get('spotify_id'):
+        if not entry.get("spotify_id"):
             return None
         if _embed_scraper is None:
             try:
                 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+
                 _embed_scraper = SpotifyIDScraper(headless=True)
             except Exception as e:
                 logger.warning(f"Désambiguïsation embed indisponible: {e}")
                 return None
         try:
-            credited = _embed_scraper.get_track_artists(entry['spotify_id'])
+            credited = _embed_scraper.get_track_artists(entry["spotify_id"])
         except Exception:
             credited = []
-        credited_norm = {_normalize_title(a['name']) for a in credited if a.get('name')}
+        credited_norm = {_normalize_title(a["name"]) for a in credited if a.get("name")}
         if not credited_norm:
             return None
         matches = []
         for cand in candidates:
-            primary = (getattr(cand, 'primary_artist_name', None)
-                       if getattr(cand, 'is_featuring', False) else None) or artist.name
+            primary = (
+                getattr(cand, "primary_artist_name", None)
+                if getattr(cand, "is_featuring", False)
+                else None
+            ) or artist.name
             p = _normalize_title(primary)
             if any(p == c or p in c or c in p for c in credited_norm):
                 matches.append(cand)
@@ -271,8 +280,13 @@ def update_kworb_streams(artist, data_manager) -> Dict:
         « Matrix (Intro) ») sans écrire. Unique = pas de 2e candidat proche."""
         nk = _normalize_title(entry_title)
         scored = sorted(
-            ((difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio(), t)
-             for t in tracks), key=lambda x: x[0], reverse=True)
+            (
+                (difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio(), t)
+                for t in tracks
+            ),
+            key=lambda x: x[0],
+            reverse=True,
+        )
         if not scored:
             return None, 0.0
         best_r, best_t = scored[0]
@@ -286,6 +300,7 @@ def update_kworb_streams(artist, data_manager) -> Dict:
     # Décisions mémorisées (confirmé/rejeté) pour ne pas redemander
     try:
         from src.utils.kworb_links_manager import KworbLinksManager
+
         _links = KworbLinksManager()
         _decisions = _links.load(artist.name)
     except Exception:
@@ -296,20 +311,20 @@ def update_kworb_streams(artist, data_manager) -> Dict:
     # (éditions/single) → SOMME des streams (comme les albums).
     agg: Dict[int, Dict] = {}
 
-    for entry in page_songs['entries']:
+    for entry in page_songs["entries"]:
         track = None
         via = None
         _suggested = False  # True → suggestion en attente, ne pas compter "non matché"
-        if entry.get('spotify_id') and entry['spotify_id'] in by_spotify_id:
-            track, via = by_spotify_id[entry['spotify_id']], 'id'
+        if entry.get("spotify_id") and entry["spotify_id"] in by_spotify_id:
+            track, via = by_spotify_id[entry["spotify_id"]], "id"
         else:
-            candidates = by_title.get(_normalize_title(entry['title']), [])
+            candidates = by_title.get(_normalize_title(entry["title"]), [])
             if len(candidates) == 1:
-                track, via = candidates[0], 'title'
+                track, via = candidates[0], "title"
             elif len(candidates) > 1:
                 track = _match_ambiguous(entry, candidates)
                 if track:
-                    via = 'title+artistes'
+                    via = "title+artistes"
                     logger.info(
                         f"🔎 Homonyme résolu par artistes crédités: '{entry['title']}' "
                         f"→ track #{track.id} ({getattr(track, 'primary_artist_name', None) or artist.name})"
@@ -323,10 +338,10 @@ def update_kworb_streams(artist, data_manager) -> Dict:
             # 3ᵉ niveau : rapprochement flou (candidat unique) pour les coquilles
             # / ponctuation. Seulement si ni ID ni titre exact n'ont abouti.
             if track is None:
-                ftrack, fscore = _fuzzy_unique(entry['title'])
+                ftrack, fscore = _fuzzy_unique(entry["title"])
                 if ftrack:
-                    track, via = ftrack, 'fuzzy'
-                    result["fuzzy_matched"].append((entry['title'], ftrack.title, fscore))
+                    track, via = ftrack, "fuzzy"
+                    result["fuzzy_matched"].append((entry["title"], ftrack.title, fscore))
                     logger.info(
                         f"≈ Match flou ({fscore:.0%}): Kworb '{entry['title']}' "
                         f"→ base '{ftrack.title}'"
@@ -334,24 +349,28 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
             # 4ᵉ niveau : décision mémorisée, sinon SUGGESTION à confirmer
             if track is None:
-                _nk = _normalize_title(entry['title'])
+                _nk = _normalize_title(entry["title"])
                 if _nk in _decisions.get("confirmed", {}):
                     track = _by_id.get(_decisions["confirmed"][_nk])
                     if track:
-                        via = 'confirmed'
-                        logger.info(f"🔗 Kworb (confirmé mémorisé): '{entry['title']}' → '{track.title}'")
+                        via = "confirmed"
+                        logger.info(
+                            f"🔗 Kworb (confirmé mémorisé): '{entry['title']}' → '{track.title}'"
+                        )
                 elif _nk not in _decisions.get("rejected", []):
-                    cand, score = _best_candidate(entry['title'])
+                    cand, score = _best_candidate(entry["title"])
                     if cand:
                         _suggested = True
-                        result["suggestions"].append({
-                            "kworb_title": entry['title'],
-                            "streams": entry["streams"],
-                            "daily": entry["daily_streams"],
-                            "track_id": cand.id,
-                            "db_title": cand.title,
-                            "score": score,
-                        })
+                        result["suggestions"].append(
+                            {
+                                "kworb_title": entry["title"],
+                                "streams": entry["streams"],
+                                "daily": entry["daily_streams"],
+                                "track_id": cand.id,
+                                "db_title": cand.title,
+                                "score": score,
+                            }
+                        )
                         logger.info(
                             f"❓ Suggestion ({score:.0%}): Kworb '{entry['title']}' "
                             f"≈ base '{cand.title}' — à confirmer"
@@ -360,18 +379,20 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
             if track:
                 # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement)
-                if entry.get('spotify_id') and not getattr(track, 'spotify_id', None):
-                    if data_manager.update_track_spotify_id(track.id, entry['spotify_id']):
-                        track.spotify_id = entry['spotify_id']
+                if entry.get("spotify_id") and not getattr(track, "spotify_id", None):
+                    if data_manager.update_track_spotify_id(track.id, entry["spotify_id"]):
+                        track.spotify_id = entry["spotify_id"]
                         result["spotify_ids_backfilled"] += 1
 
         if track:
-            a = agg.setdefault(track.id, {"streams": 0, "daily": 0, "n": 0, "title": entry["title"]})
+            a = agg.setdefault(
+                track.id, {"streams": 0, "daily": 0, "n": 0, "title": entry["title"]}
+            )
             a["streams"] += entry["streams"]
             a["daily"] += entry["daily_streams"]
             a["n"] += 1
             result["matched"] += 1
-            _key = {'id': 'matched_by_id', 'fuzzy': 'matched_by_fuzzy'}.get(via, 'matched_by_title')
+            _key = {"id": "matched_by_id", "fuzzy": "matched_by_fuzzy"}.get(via, "matched_by_title")
             result[_key] += 1
             logger.debug(f"✅ Match ({via}): '{entry['title']}' → {entry['streams']:,} streams")
         elif _suggested:
@@ -390,7 +411,8 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
     for track_id, a in agg.items():
         data_manager.update_track_spotify_streams(
-            track_id, a["streams"], a["daily"], updated_at=kworb_date)
+            track_id, a["streams"], a["daily"], updated_at=kworb_date
+        )
         if a["n"] > 1:
             logger.info(f"🎛️ '{a['title']}': {a['n']} lignes Kworb sommées → {a['streams']:,}")
 
@@ -406,23 +428,23 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
     # ── 5. Albums : agrégation des éditions + filtre albums propres ───────────
     page_albums = scraper.scrape_albums(spotify_artist_id)
-    if page_albums and page_albums['entries']:
+    if page_albums and page_albums["entries"]:
         # Albums connus en base : titre normalisé → nb de morceaux dessus
         album_track_counts = defaultdict(int)
         for t in tracks:
-            if getattr(t, 'album', None):
+            if getattr(t, "album", None):
                 album_track_counts[_normalize_title(t.album)] += 1
 
         # Agréger les éditions par titre normalisé (streams sommés, IDs conservés)
         editions = defaultdict(lambda: {"title": None, "streams": 0, "daily": 0, "ids": []})
-        for entry in page_albums['entries']:
-            key = _normalize_title(entry['title'])
+        for entry in page_albums["entries"]:
+            key = _normalize_title(entry["title"])
             agg = editions[key]
-            agg["title"] = agg["title"] or entry['title']
-            agg["streams"] += entry['streams']
-            agg["daily"] += entry['daily_streams']
-            if entry.get('spotify_id'):
-                agg["ids"].append(entry['spotify_id'])
+            agg["title"] = agg["title"] or entry["title"]
+            agg["streams"] += entry["streams"]
+            agg["daily"] += entry["daily_streams"]
+            if entry.get("spotify_id"):
+                agg["ids"].append(entry["spotify_id"])
 
         for key, agg in editions.items():
             n_tracks = album_track_counts.get(key, 0)
@@ -437,9 +459,12 @@ def update_kworb_streams(artist, data_manager) -> Dict:
                 )
                 continue
             ok = data_manager.upsert_album(
-                artist.id, agg["title"], agg["streams"], agg["daily"],
+                artist.id,
+                agg["title"],
+                agg["streams"],
+                agg["daily"],
                 spotify_album_ids=",".join(agg["ids"]) or None,
-                updated_at=page_albums['last_updated'] or kworb_date,
+                updated_at=page_albums["last_updated"] or kworb_date,
             )
             if ok:
                 result["albums_updated"] += 1
@@ -460,9 +485,9 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 # ── CLI standalone ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    if sys.platform == 'win32':
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     import argparse
 
@@ -494,11 +519,15 @@ if __name__ == "__main__":
     summary = update_kworb_streams(artist, dm)
     print("\n── Résumé ──────────────────────────────────")
     print(f"Artiste (page Kworb) : {summary['artist_name']}  (maj {summary['kworb_updated']})")
-    print(f"Morceaux matchés    : {summary['matched']} "
-          f"({summary['matched_by_id']} par ID, {summary['matched_by_title']} par titre)")
+    print(
+        f"Morceaux matchés    : {summary['matched']} "
+        f"({summary['matched_by_id']} par ID, {summary['matched_by_title']} par titre)"
+    )
     print(f"Spotify IDs backfillés : {summary['spotify_ids_backfilled']}")
     print(f"Morceaux non matchés: {summary['unmatched']}")
-    print(f"Albums mis à jour   : {summary['albums_updated']} "
-          f"(+{len(summary['albums_excluded'])} apparitions écartées)")
+    print(
+        f"Albums mis à jour   : {summary['albums_updated']} "
+        f"(+{len(summary['albums_excluded'])} apparitions écartées)"
+    )
     if summary["unmatched_titles"]:
         print(f"Titres non matchés  : {summary['unmatched_titles']}")

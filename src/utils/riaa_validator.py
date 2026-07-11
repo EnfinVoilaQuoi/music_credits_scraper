@@ -10,6 +10,7 @@ Vérifie : champs vides (artiste/titre/niveau), doublons (niveau normalisé),
 dates illisibles, fraîcheur, comptes par année, trous mensuels (années actives),
 niveaux hors référentiel.
 """
+
 from __future__ import annotations
 
 import re
@@ -25,44 +26,45 @@ REQUIRED_COLS = ["Artist", "Title", "Certification_Date", "Certification_Type"]
 MEANINGFUL_YEAR_THRESHOLD = 12
 LOW_MONTH_THRESHOLD = 3
 
-_MULTI_RE = re.compile(r'^\d+\s*x\s*(multi-?)?platinum$', re.I)
+_MULTI_RE = re.compile(r"^\d+\s*x\s*(multi-?)?platinum$", re.I)
 
 
 def _to_iso(s: str) -> str:
-    s = (s or '').strip()
-    if not s or s.lower() == 'none':
-        return ''
-    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', s):
+    s = (s or "").strip()
+    if not s or s.lower() == "none":
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
         return s
     for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"):
         try:
-            return datetime.strptime(s.title() if ',' in s else s, fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(s.title() if "," in s else s, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
-    return ''
+    return ""
 
 
 def _level_norm(l: str) -> str:
     """« 4x Multi-Platinum » → « 4X PLATINUM » (clé de dédup/référentiel)."""
-    l = (l or '').strip()
-    m = re.match(r'(\d+)\s*x\s*multi-?platinum', l, re.I)
+    l = (l or "").strip()
+    m = re.match(r"(\d+)\s*x\s*multi-?platinum", l, re.I)
     if m:
         return f"{m.group(1)}X PLATINUM"
-    if re.fullmatch(r'multi-?platinum', l, re.I):
+    if re.fullmatch(r"multi-?platinum", l, re.I):
         return "PLATINUM"
-    return re.sub(r'\s+', ' ', l).strip().upper()
+    return re.sub(r"\s+", " ", l).strip().upper()
 
 
 def _level_known(l: str) -> bool:
-    n = (l or '').strip().lower()
-    return n in {"gold", "platinum", "diamond", "multi-platinum", "multi platinum"} \
-        or bool(_MULTI_RE.match(n))
+    n = (l or "").strip().lower()
+    return n in {"gold", "platinum", "diamond", "multi-platinum", "multi platinum"} or bool(
+        _MULTI_RE.match(n)
+    )
 
 
 def _load(csv_path: Path) -> pd.DataFrame:
     for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
         try:
-            df = pd.read_csv(csv_path, encoding=enc, dtype=str).fillna('')
+            df = pd.read_csv(csv_path, encoding=enc, dtype=str).fillna("")
             df.columns = [c.strip().lstrip("﻿") for c in df.columns]
             return df
         except UnicodeDecodeError:
@@ -70,16 +72,30 @@ def _load(csv_path: Path) -> pd.DataFrame:
     raise ValueError("Encodage illisible")
 
 
-def validate_riaa_csv(csv_path: str | Path,
-                      recent_years: tuple[int, ...] = (2024, 2025, 2026)) -> dict:
+def validate_riaa_csv(
+    csv_path: str | Path, recent_years: tuple[int, ...] = (2024, 2025, 2026)
+) -> dict:
     csv_path = Path(csv_path)
     report: dict = {
-        "path": str(csv_path), "ok": False, "errors": [], "warnings": [], "stats": {},
-        "recent_years": list(recent_years), "per_year": {}, "missing_years": [],
-        "month_gaps": [], "low_months": [], "duplicates": [],
-        "empty_critical": 0, "empty_titles": 0, "empty_levels": 0,
-        "date_parse_failures": 0, "invalid_levels": [], "formats": {},
-        "date_range": None, "latest_date": None,
+        "path": str(csv_path),
+        "ok": False,
+        "errors": [],
+        "warnings": [],
+        "stats": {},
+        "recent_years": list(recent_years),
+        "per_year": {},
+        "missing_years": [],
+        "month_gaps": [],
+        "low_months": [],
+        "duplicates": [],
+        "empty_critical": 0,
+        "empty_titles": 0,
+        "empty_levels": 0,
+        "date_parse_failures": 0,
+        "invalid_levels": [],
+        "formats": {},
+        "date_range": None,
+        "latest_date": None,
     }
     if not csv_path.exists():
         report["errors"].append(f"Fichier introuvable : {csv_path}")
@@ -94,7 +110,11 @@ def validate_riaa_csv(csv_path: str | Path,
 
     def col(name: str) -> pd.Series:
         real = cmap.get(name.lower())
-        return df[real].astype("string").str.strip() if real else pd.Series([""] * len(df), dtype="string")
+        return (
+            df[real].astype("string").str.strip()
+            if real
+            else pd.Series([""] * len(df), dtype="string")
+        )
 
     missing = [c for c in REQUIRED_COLS if c.lower() not in cmap]
     if missing:
@@ -102,8 +122,10 @@ def validate_riaa_csv(csv_path: str | Path,
         return report
 
     report["stats"]["n_rows"] = int(len(df))
-    artist = col("Artist"); title = col("Title")
-    level = col("Certification_Type"); fmt = col("Format_Type")
+    artist = col("Artist")
+    title = col("Title")
+    level = col("Certification_Type")
+    fmt = col("Format_Type")
     date_raw = col("Certification_Date")
 
     report["empty_critical"] = int((artist.isna() | (artist == "")).sum())
@@ -123,20 +145,28 @@ def validate_riaa_csv(csv_path: str | Path,
         if days > 60:
             report["warnings"].append(
                 f"Certif. la plus récente il y a {days} j ({report['latest_date']}) — "
-                f"base à backfiller")
+                f"base à backfiller"
+            )
 
     # Doublons (artiste+titre+format+niveau normalisé+date)
-    key = (artist.fillna("").str.upper() + " | " + title.fillna("").str.upper() + " | "
-           + fmt.fillna("").str.upper() + " | " + level.fillna("").map(_level_norm)
-           + " | " + iso)
+    key = (
+        artist.fillna("").str.upper()
+        + " | "
+        + title.fillna("").str.upper()
+        + " | "
+        + fmt.fillna("").str.upper()
+        + " | "
+        + level.fillna("").map(_level_norm)
+        + " | "
+        + iso
+    )
     dup = key.duplicated(keep="first") & (artist.fillna("") != "")
     report["stats"]["duplicates"] = int(dup.sum())
     if dup.any():
         report["duplicates"] = [k.replace("  ", " ") for k in key[dup].head(12)]
 
     # Niveaux hors référentiel
-    report["invalid_levels"] = sorted(
-        set(l for l in level.dropna() if l and not _level_known(l)))
+    report["invalid_levels"] = sorted(set(l for l in level.dropna() if l and not _level_known(l)))
     # Formats (info)
     report["formats"] = {k: int(v) for k, v in fmt[fmt != ""].value_counts().head(12).items()}
 
@@ -148,8 +178,11 @@ def validate_riaa_csv(csv_path: str | Path,
         y0, y1 = int(years.min()), int(years.max())
         per_year = {y: int((years == y).sum()) for y in range(y0, y1 + 1)}
         report["per_year"] = per_year
-        report["missing_years"] = [y for y, c in per_year.items()
-                                   if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)]
+        report["missing_years"] = [
+            y
+            for y, c in per_year.items()
+            if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
+        ]
         for y in [y for y, c in per_year.items() if c >= MEANINGFUL_YEAR_THRESHOLD]:
             for m in range(1, 13):
                 per = pd.Period(f"{y}-{m:02d}", freq="M")
@@ -168,15 +201,17 @@ def validate_riaa_csv(csv_path: str | Path,
         for y in recent_years:
             report["stats"][f"count_{y}"] = int((years == y).sum())
 
-    report["ok"] = (not report["errors"] and report["empty_critical"] == 0
-                    and report["stats"].get("duplicates", 0) == 0
-                    and not report["invalid_levels"])
+    report["ok"] = (
+        not report["errors"]
+        and report["empty_critical"] == 0
+        and report["stats"].get("duplicates", 0) == 0
+        and not report["invalid_levels"]
+    )
     return report
 
 
 def format_report(report: dict) -> str:
-    L = ["=" * 52, "🔎 VALIDATION DU CSV RIAA (USA)", "=" * 52,
-         f"Fichier : {report['path']}"]
+    L = ["=" * 52, "🔎 VALIDATION DU CSV RIAA (USA)", "=" * 52, f"Fichier : {report['path']}"]
     if report["errors"]:
         return "\n".join(L + [f"❌ {e}" for e in report["errors"]])
     s = report["stats"]
@@ -184,13 +219,17 @@ def format_report(report: dict) -> str:
     if report.get("date_range"):
         L.append(f"Période couverte : {report['date_range']}")
     if s.get("days_since_latest") is not None:
-        L.append(f"Certif. la plus récente : {report['latest_date']} (il y a {s['days_since_latest']} j)")
+        L.append(
+            f"Certif. la plus récente : {report['latest_date']} (il y a {s['days_since_latest']} j)"
+        )
     for y in report["recent_years"]:
         if f"count_{y}" in s:
             L.append(f"  • {y} : {s[f'count_{y}']} certifications")
     L.append("")
-    L.append(f"{'✅' if report['ok'] else '⚠️'} Verdict global : "
-             f"{'RAS' if report['ok'] else 'anomalies détectées'}")
+    L.append(
+        f"{'✅' if report['ok'] else '⚠️'} Verdict global : "
+        f"{'RAS' if report['ok'] else 'anomalies détectées'}"
+    )
     if report["empty_critical"]:
         L.append(f"❌ Artiste vide : {report['empty_critical']} ligne(s)")
     if report["empty_titles"]:
@@ -212,8 +251,11 @@ def format_report(report: dict) -> str:
     section("Doublons exacts", report["duplicates"])
     section("Niveaux hors référentiel", report["invalid_levels"])
     if report.get("missing_years"):
-        section("Années ENTIÈREMENT absentes (trou)",
-                [str(y) for y in report["missing_years"]], limit=40)
+        section(
+            "Années ENTIÈREMENT absentes (trou)",
+            [str(y) for y in report["missing_years"]],
+            limit=40,
+        )
     gaps = report.get("month_gaps", [])
     if gaps:
         by_year = defaultdict(list)
@@ -237,7 +279,8 @@ def format_report(report: dict) -> str:
         for y in sorted(per_year):
             cell = f"{y}:{per_year[y]}"
             if len(line) + len(cell) + 1 > 50:
-                L.append(line); line = "  "
+                L.append(line)
+                line = "  "
             line += cell + "  "
         if line.strip():
             L.append(line)
@@ -248,6 +291,7 @@ def format_report(report: dict) -> str:
 
 def _default_csv_path() -> Path:
     from src.config import DATA_PATH
+
     return Path(DATA_PATH) / "certifications" / "riaa" / "certif_riaa.csv"
 
 

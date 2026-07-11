@@ -2,6 +2,7 @@
 Scraper Genius — VERSION 3 (Crawl4AI + Ollama/Llama 3.2)
 Remplace les sélecteurs CSS fragiles de v2 par une extraction via LLM.
 """
+
 import re
 import time
 from datetime import datetime
@@ -112,7 +113,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 logger.warning(f"GeniusScraperV3: erreur extraction paroles '{track.title}': {e}")
 
         # Nom d'album depuis la page (l'API /artists/songs ne le fournit pas)
-        if html and not getattr(track, 'album', None):
+        if html and not getattr(track, "album", None):
             try:
                 album = self._extract_album_bs4(html)
                 if album:
@@ -195,17 +196,17 @@ class GeniusScraperV3(CrawlAIScraperBase):
         time.sleep(DELAY_BETWEEN_REQUESTS)
         return lyrics
 
-    def scrape_multiple_tracks_with_lyrics(self, tracks: List[Track],
-                                           progress_callback=None,
-                                           include_lyrics: bool = True) -> Dict[str, Any]:
+    def scrape_multiple_tracks_with_lyrics(
+        self, tracks: List[Track], progress_callback=None, include_lyrics: bool = True
+    ) -> Dict[str, Any]:
         """Scrape crédits + paroles — même interface que GeniusScraper (v2)."""
         results = {
-            'success': 0,
-            'failed': 0,
-            'errors': [],
-            'albums_scraped': set(),
-            'lyrics_scraped': 0,
-            'structures_analyzed': 0,
+            "success": 0,
+            "failed": 0,
+            "errors": [],
+            "albums_scraped": set(),
+            "lyrics_scraped": 0,
+            "structures_analyzed": 0,
         }
         total = len(tracks)
         for i, track in enumerate(tracks):
@@ -213,15 +214,15 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 logger.info(f"V3: scraping {i+1}/{total}: {track.title}")
                 self.scrape_track_credits(track, include_lyrics=include_lyrics)
                 if track.has_lyrics:
-                    results['lyrics_scraped'] += 1
-                    results['structures_analyzed'] += 1
+                    results["lyrics_scraped"] += 1
+                    results["structures_analyzed"] += 1
                 if track.credits:
-                    results['success'] += 1
+                    results["success"] += 1
                 else:
-                    results['failed'] += 1
+                    results["failed"] += 1
             except Exception as e:
-                results['failed'] += 1
-                results['errors'].append({'track': track.title, 'error': str(e)})
+                results["failed"] += 1
+                results["errors"].append({"track": track.title, "error": str(e)})
                 logger.error(f"V3: erreur sur '{track.title}': {e}")
             if progress_callback:
                 progress_callback(i + 1, total, track.title)
@@ -237,27 +238,27 @@ class GeniusScraperV3(CrawlAIScraperBase):
         Optimisation v3 : les morceaux dont les paroles ont déjà été récupérées
         lors du scrape crédits (même crawl) ne sont pas re-crawlés.
         """
-        results = {'success': 0, 'failed': 0, 'errors': [], 'lyrics_scraped': 0}
+        results = {"success": 0, "failed": 0, "errors": [], "lyrics_scraped": 0}
         total = len(tracks)
         for i, track in enumerate(tracks):
             try:
                 if track.has_lyrics and track.lyrics:
                     # Déjà récupérées pendant le scrape crédits — pas de re-crawl
-                    results['success'] += 1
-                    results['lyrics_scraped'] += 1
+                    results["success"] += 1
+                    results["lyrics_scraped"] += 1
                     logger.debug(f"V3: paroles déjà présentes pour '{track.title}' — skip")
                 else:
                     lyrics = self.scrape_track_lyrics(track)
                     if lyrics:
-                        results['success'] += 1
-                        results['lyrics_scraped'] += 1
+                        results["success"] += 1
+                        results["lyrics_scraped"] += 1
                     else:
                         track.has_lyrics = False
-                        results['failed'] += 1
+                        results["failed"] += 1
                         logger.warning(f"V3: aucune parole trouvée pour '{track.title}'")
             except Exception as e:
-                results['failed'] += 1
-                results['errors'].append({'track': track.title, 'error': str(e)})
+                results["failed"] += 1
+                results["errors"].append({"track": track.title, "error": str(e)})
                 logger.error(f"V3: erreur paroles sur '{track.title}': {e}")
             if progress_callback:
                 progress_callback(i + 1, total, track.title)
@@ -284,9 +285,11 @@ class GeniusScraperV3(CrawlAIScraperBase):
         if lyrics:
             # Ajoute l'artiste aux en-têtes de section sans attribution (Genius ne
             # le met qu'en cas de feat). Ex. [Couplet 1] → [Couplet 1 : Isha].
-            if getattr(track, 'is_featuring', False) and getattr(track, 'primary_artist_name', None):
+            if getattr(track, "is_featuring", False) and getattr(
+                track, "primary_artist_name", None
+            ):
                 artist_name = track.primary_artist_name
-            elif track.artist and hasattr(track.artist, 'name'):
+            elif track.artist and hasattr(track.artist, "name"):
                 artist_name = track.artist.name
             else:
                 artist_name = None
@@ -309,11 +312,11 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
         def repl(m):
             inside = m.group(1)
-            if ':' in inside:          # déjà attribué (feat) → ne pas toucher
+            if ":" in inside:  # déjà attribué (feat) → ne pas toucher
                 return m.group(0)
             return f"[{inside.rstrip()} : {artist_name}]"
 
-        return re.sub(r'(?m)^\[([^\]\n]+)\]\s*$', repl, lyrics)
+        return re.sub(r"(?m)^\[([^\]\n]+)\]\s*$", repl, lyrics)
 
     def _extract_lyrics_bs4(self, soup) -> str:
         """
@@ -337,7 +340,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 excluded.decompose()
             # Retirer toute pub injectée dans le conteneur
             for ad in container.find_all(
-                "div", class_=re.compile(r"(InreadAd|SidebarAd|RightSidebar|LyricsHeader|Ad__Container)")
+                "div",
+                class_=re.compile(r"(InreadAd|SidebarAd|RightSidebar|LyricsHeader|Ad__Container)"),
             ):
                 ad.decompose()
             # <br> → sauts de ligne (les liens/annotations restent du texte inline)
@@ -436,13 +440,24 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
         # Stratégie 2 : densité de mots-clés crédit (quand pas de heading explicite)
         credit_keywords = [
-            "Producer", "Writer", "Engineer", "Mixing", "Mastering",
-            "Executive Producer", "Co-Producer", "Vocals", "Composer",
-            "Featuring", "Drums", "Guitar", "Piano",
+            "Producer",
+            "Writer",
+            "Engineer",
+            "Mixing",
+            "Mastering",
+            "Executive Producer",
+            "Co-Producer",
+            "Vocals",
+            "Composer",
+            "Featuring",
+            "Drums",
+            "Guitar",
+            "Piano",
         ]
         lines = markdown.split("\n")
         keyword_indices = [
-            i for i, line in enumerate(lines)
+            i
+            for i, line in enumerate(lines)
             if any(kw.lower() in line.lower() for kw in credit_keywords)
         ]
         if len(keyword_indices) >= 2:
@@ -475,12 +490,14 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 name = str(name).strip()
                 if len(name) < 2:
                     continue
-                credits.append(Credit(
-                    name=name,
-                    role=role_enum,
-                    role_detail=role_str if role_enum == CreditRole.OTHER else None,
-                    source="genius",
-                ))
+                credits.append(
+                    Credit(
+                        name=name,
+                        role=role_enum,
+                        role_detail=role_str if role_enum == CreditRole.OTHER else None,
+                        source="genius",
+                    )
+                )
                 logger.debug(f"GeniusScraperV3 LLM: {name} — {role_enum.value}")
 
         return self._deduplicate_credits(credits)
@@ -506,9 +523,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             # ── Nouveau DOM Genius (Credit__Container) ────────────────────────
             for container in soup.select("div[class*='Credit__Container']"):
                 label_div = container.find("div", class_=re.compile(r"Credit__Label"))
-                contributor_div = container.find(
-                    "div", class_=re.compile(r"Credit__Contributor")
-                )
+                contributor_div = container.find("div", class_=re.compile(r"Credit__Contributor"))
                 if not label_div or not contributor_div:
                     continue
                 role_text = label_div.get_text(strip=True)
@@ -520,9 +535,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             # ── Ancien DOM Genius (SongInfo__Credit) ──────────────────────────
             if not credits:
                 for credit_element in soup.select("div[class*='SongInfo__Credit']"):
-                    label_div = credit_element.find(
-                        "div", class_=re.compile(r"SongInfo__Label")
-                    )
+                    label_div = credit_element.find("div", class_=re.compile(r"SongInfo__Label"))
                     if not label_div:
                         continue
                     role_text = label_div.get_text(strip=True)
@@ -544,12 +557,14 @@ class GeniusScraperV3(CrawlAIScraperBase):
         for name in names:
             name = name.strip()
             if name:
-                credits.append(Credit(
-                    name=name,
-                    role=role_enum,
-                    role_detail=role_text if role_enum == CreditRole.OTHER else None,
-                    source="genius",
-                ))
+                credits.append(
+                    Credit(
+                        name=name,
+                        role=role_enum,
+                        role_detail=role_text if role_enum == CreditRole.OTHER else None,
+                        source="genius",
+                    )
+                )
 
     # -------------------------------------------------------------------------
     # Utilitaires (copiés depuis genius_scraper_v2.py — découplage volontaire)

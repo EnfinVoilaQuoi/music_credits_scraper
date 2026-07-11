@@ -39,6 +39,7 @@ lib/*
 *.json
 *.html
 *.txt
+!requirements*.txt
 *.mp3
 
 # Claude

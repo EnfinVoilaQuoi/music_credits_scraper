@@ -1,0 +1,43 @@
+# CI : rejoue les vérifications qualité sur machine vierge à chaque push.
+# Intérêt clé (AUDIT §7 point 9) : le runner part d'un checkout PROPRE — la
+# classe de bugs « ça marche chez moi car ma vieille base/mes fichiers data/
+# masquent le problème » (ex. P0 §3.1) est détectée au premier push.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    # windows-latest : mêmes conditions que le poste de dev (app Windows-only)
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -e .
+
+      - name: Ruff (lint)
+        run: ruff check src scripts tests
+
+      - name: Black (formatage)
+        run: black --check src scripts tests
+
+      - name: Pytest (238 tests)
+        run: pytest -q

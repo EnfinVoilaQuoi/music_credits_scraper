@@ -1,11 +1,9 @@
 """Script d'initialisation SNEP"""
 
-import sys
 from pathlib import Path
 
 # Ajouter le dossier parent au path
 parent_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(parent_dir))
 
 # Configuration
 DATA_PATH = parent_dir / "data"

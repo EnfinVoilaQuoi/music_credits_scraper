@@ -18,9 +18,6 @@ import difflib
 import logging
 import sys
 from collections import defaultdict
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from src.scrapers.kworb_scraper import KworbScraper
 from src.utils.logger import get_logger

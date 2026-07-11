@@ -6,13 +6,10 @@ ATTENTION : Crée un backup avant toute modification
 import io
 import sqlite3
 import sys
-from pathlib import Path
 
 # Fix encodage Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-# Ajouter le répertoire parent au path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.database_backup import get_backup_manager
 from src.utils.title_matching import normalize_title

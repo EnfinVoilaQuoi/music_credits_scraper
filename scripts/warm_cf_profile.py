@@ -20,8 +20,6 @@ import os
 import sys
 
 # Rendre `src` importable quand on lance le script directement
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from src.scrapers.crawl4ai_scraper_base import _PROFILE_DIR, _USER_AGENT  # noqa: E402
 
 DEFAULT_URL = "https://genius.com/Medine-thalys-lyrics"

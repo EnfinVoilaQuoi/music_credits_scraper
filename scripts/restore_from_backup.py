@@ -3,12 +3,6 @@ Script de restauration depuis un backup
 Permet de restaurer la base de données depuis un backup
 """
 
-import sys
-from pathlib import Path
-
-# Ajouter le répertoire parent au path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import logging
 
 from src.utils.database_backup import get_backup_manager

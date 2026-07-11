@@ -23,7 +23,6 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
 
 # Import du scraper principal (patchright v2 — remplace l'ancien Selenium ;
 # API compatible : init_driver/close_driver/scrape_by_date_range/scrape_by_artist)
-sys.path.append(str(Path(__file__).parent.parent.parent))
 from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
 
 

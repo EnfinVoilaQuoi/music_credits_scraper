@@ -10,9 +10,6 @@ import io
 import logging
 import re
 import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from src.api.ytmusic_api import YTMusicAPI
 from src.utils.logger import get_logger

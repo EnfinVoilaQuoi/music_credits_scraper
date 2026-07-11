@@ -1,6 +1,25 @@
-# Configuration Black (formateur) + Ruff (linter).
+# Configuration Black (formateur) + Ruff (linter) + pytest + packaging.
 # Décisions du 2026-07-11 : ligne 100, cible py313, périmètre élargi (E, F, I, B, UP, SIM).
 # E501 volontairement absent du linter : la longueur de ligne est gérée par Black.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "music-credits-scraper"
+version = "0.1.0"
+description = "Base de données par artiste : discographie, crédits, paroles, BPM, certifications, streams (théRAPie)"
+requires-python = ">=3.13"
+# Les dépendances restent pilotées par requirements.txt (+ requirements-dev.txt pour l'outillage).
+# Ce [project] sert au packaging local : `pip install -e .` rend `import src.*` valide partout
+# et supprime les hacks sys.path des scripts standalone.
+
+[project.scripts]
+music-credits = "src.main:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
 
 [tool.black]
 line-length = 100
@@ -28,7 +47,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Scripts lancés en standalone : sys.path.append(...) avant les imports projet.
+# Wrapper UTF-8 stdout et/ou imports tardifs volontaires avant les imports projet.
+# (Les hacks sys.path ont été supprimés le 2026-07-11 au profit de `pip install -e .`.)
 "scripts/**" = ["E402"]
 "src/utils/init_certifications.py" = ["E402"]
 "src/utils/update_kworb.py" = ["E402"]

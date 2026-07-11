@@ -5,13 +5,9 @@ Script de détection et analyse des doublons
 import io
 import sqlite3
 import sys
-from pathlib import Path
 
 # Fix encodage Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-
-# Ajouter le répertoire parent au path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def analyze_specific_duplicate(title):

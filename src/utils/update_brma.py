@@ -22,7 +22,6 @@ import schedule
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
 # vaut alors src/utils/, donc `import src.*` (ajouté pour le fetch anti-Cloudflare)
 # échouerait. On ajoute la racine du projet au path.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 # Configurer l'encodage UTF-8 pour la console Windows
 if sys.platform == "win32" and "pytest" not in sys.modules:

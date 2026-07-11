@@ -13,7 +13,6 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from src.api.snep_certifications import SNEPCertificationManager
 from src.config import DATA_PATH

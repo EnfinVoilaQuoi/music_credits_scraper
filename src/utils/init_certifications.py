@@ -230,10 +230,9 @@ class SimpleSNEPImporter:
 
                     new_records += 1
 
-                    # Debug Josman
-                    if "JOSMAN" in artist_clean:
-                        if new_records <= 5:  # Afficher les 5 premiers
-                            print(f"  ✅ Ajouté: {title} - {certification}")
+                    # Debug Josman (afficher les 5 premiers)
+                    if "JOSMAN" in artist_clean and new_records <= 5:
+                        print(f"  ✅ Ajouté: {title} - {certification}")
 
                     # Progression
                     if (i + 1) % 1000 == 0:

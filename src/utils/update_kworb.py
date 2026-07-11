@@ -375,12 +375,15 @@ def update_kworb_streams(artist, data_manager) -> dict:
                         )
                 # rejeté mémorisé → on laisse en non-matché silencieusement
 
-            if track:
-                # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement)
-                if entry.get("spotify_id") and not getattr(track, "spotify_id", None):
-                    if data_manager.update_track_spotify_id(track.id, entry["spotify_id"]):
-                        track.spotify_id = entry["spotify_id"]
-                        result["spotify_ids_backfilled"] += 1
+            # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement).
+            # L'if interne est volontairement séparé : c'est une écriture DB dont
+            # le résultat conditionne la suite, pas une simple condition.
+            if (  # noqa: SIM102
+                track and entry.get("spotify_id") and not getattr(track, "spotify_id", None)
+            ):
+                if data_manager.update_track_spotify_id(track.id, entry["spotify_id"]):
+                    track.spotify_id = entry["spotify_id"]
+                    result["spotify_ids_backfilled"] += 1
 
         if track:
             a = agg.setdefault(

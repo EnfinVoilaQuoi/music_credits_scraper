@@ -1,0 +1,9 @@
+# Commits mécaniques à ignorer dans git blame.
+# Usage : git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub le prend en compte automatiquement.)
+
+# 2026-07-11 — Formatage Black big-bang (ligne 100)
+6ce969754bf9836ef96b70249b4dc0ec60501579
+
+# 2026-07-11 — Ruff --fix : 848 corrections automatiques
+a4e69fd3a164b9e392a26ff490fe74d8d2e6e12a

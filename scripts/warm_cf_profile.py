@@ -14,6 +14,7 @@ Lancement (depuis la racine du repo) :
 Astuce extensions : pour charger une extension décompressée (ex. un solveur),
 décommente la ligne `args=[...]` ci-dessous avec son chemin.
 """
+
 import asyncio
 import os
 import sys
@@ -57,8 +58,10 @@ async def main(url: str):
         try:
             cookies = await ctx.cookies()
             has_clear = any(c.get("name") == "cf_clearance" for c in cookies)
-            print(f"🍪 cf_clearance présent : {'OUI ✅' if has_clear else 'non ❌'} "
-                  f"({len(cookies)} cookies au total)")
+            print(
+                f"🍪 cf_clearance présent : {'OUI ✅' if has_clear else 'non ❌'} "
+                f"({len(cookies)} cookies au total)"
+            )
         except Exception:
             pass
 

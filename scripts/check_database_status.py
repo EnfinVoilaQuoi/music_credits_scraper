@@ -2,13 +2,14 @@
 Script de vérification de l'état de la base de données
 Affiche un résumé des données et des backups disponibles
 """
+
 import io
 import sys
 from datetime import datetime
 from pathlib import Path
 
 # Fix encodage Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Ajouter le répertoire parent au path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -21,7 +22,7 @@ from src.utils.database_backup import get_backup_manager
 
 def format_size(size_bytes):
     """Formate une taille en bytes vers une forme lisible"""
-    for unit in ['B', 'KB', 'MB', 'GB']:
+    for unit in ["B", "KB", "MB", "GB"]:
         if size_bytes < 1024.0:
             return f"{size_bytes:.2f} {unit}"
         size_bytes /= 1024.0
@@ -30,9 +31,9 @@ def format_size(size_bytes):
 
 def main():
     """Programme principal"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("   ÉTAT DE LA BASE DE DONNÉES")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     db_path = Path("music_credits.db")
 
@@ -60,7 +61,7 @@ def main():
         print(f"  🏷️  Crédits : {stats['total_credits']}")
         print()
 
-        if stats['total_artists'] > 0:
+        if stats["total_artists"] > 0:
             # Lister les artistes avec leur nombre de morceaux
             conn = sqlite3.connect("music_credits.db")
             cursor = conn.cursor()
@@ -81,7 +82,7 @@ def main():
                 update_date = ""
                 if last_update:
                     try:
-                        dt = datetime.fromisoformat(last_update.split('.')[0])
+                        dt = datetime.fromisoformat(last_update.split(".")[0])
                         update_date = f" (MAJ : {dt.strftime('%d/%m/%Y %H:%M')})"
                     except:
                         pass
@@ -103,7 +104,7 @@ def main():
         print("💾 BACKUPS DISPONIBLES")
         print("-" * 60)
 
-        if backup_stats['count'] == 0:
+        if backup_stats["count"] == 0:
             print("  ℹ️  Aucun backup disponible")
             print("  💡 Les backups sont créés automatiquement lors de la récupération de morceaux")
         else:
@@ -140,7 +141,7 @@ def main():
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in cursor.fetchall()]
 
-        required_tables = ['artists', 'tracks', 'credits', 'scraping_errors']
+        required_tables = ["artists", "tracks", "credits", "scraping_errors"]
         missing = [t for t in required_tables if t not in tables]
 
         if missing:
@@ -163,14 +164,14 @@ def main():
         print(f"  ❌ Erreur vérification : {e}")
 
     print()
-    print("="*60)
+    print("=" * 60)
     print()
 
     # Actions recommandées
-    if backup_stats.get('count', 0) == 0:
+    if backup_stats.get("count", 0) == 0:
         print("💡 RECOMMANDATION :")
         print("  Récupérez des morceaux pour créer un premier backup automatique")
-    elif stats.get('total_artists', 0) > 0 and backup_stats.get('count', 0) > 0:
+    elif stats.get("total_artists", 0) > 0 and backup_stats.get("count", 0) > 0:
         print("✅ Tout semble OK !")
         print("  Vos données sont protégées par les backups automatiques")
 
@@ -183,4 +184,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Erreur : {e}")
         import traceback
+
         traceback.print_exc()

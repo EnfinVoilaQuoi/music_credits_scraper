@@ -2,13 +2,14 @@
 Script de fusion et suppression des doublons
 ATTENTION : Crée un backup avant toute modification
 """
+
 import io
 import sqlite3
 import sys
 from pathlib import Path
 
 # Fix encodage Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Ajouter le répertoire parent au path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,11 +24,13 @@ def find_normalized_duplicates(artist_name=None):
     que l'auto-clean exact rate. NE FUSIONNE RIEN — affiche les groupes + les
     commandes --merge à lancer (tu choisis keep/delete).
     """
-    conn = sqlite3.connect('data/music_credits.db')
+    conn = sqlite3.connect("data/music_credits.db")
     cur = conn.cursor()
 
-    sql = ("SELECT t.id, t.title, t.album, t.release_date, t.spotify_id, t.bpm, a.name "
-           "FROM tracks t JOIN artists a ON a.id = t.artist_id")
+    sql = (
+        "SELECT t.id, t.title, t.album, t.release_date, t.spotify_id, t.bpm, a.name "
+        "FROM tracks t JOIN artists a ON a.id = t.artist_id"
+    )
     params = ()
     if artist_name:
         sql += " WHERE a.name = ?"
@@ -37,7 +40,7 @@ def find_normalized_duplicates(artist_name=None):
 
     groups = {}
     for tid, title, album, rdate, sid, bpm, artist in rows:
-        key = (artist, normalize_title(title or ''))
+        key = (artist, normalize_title(title or ""))
         groups.setdefault(key, []).append((tid, title, album, rdate, sid, bpm))
 
     dups = {k: v for k, v in groups.items() if len(v) > 1}
@@ -46,17 +49,23 @@ def find_normalized_duplicates(artist_name=None):
         return
 
     print(f"\n{'='*60}\n   DOUBLONS PAR TITRE NORMALISÉ ({len(dups)} groupe(s))\n{'='*60}")
-    print("⚠️ Vérifie : ce sont peut-être des VERSIONS distinctes (Acoustic/Remix/Live)\n"
-          "   → dans ce cas NE PAS fusionner. Intro/Outro/Interlude = souvent le même.\n")
+    print(
+        "⚠️ Vérifie : ce sont peut-être des VERSIONS distinctes (Acoustic/Remix/Live)\n"
+        "   → dans ce cas NE PAS fusionner. Intro/Outro/Interlude = souvent le même.\n"
+    )
     for (artist, norm), items in sorted(dups.items(), key=lambda x: -len(x[1])):
         print(f"[{artist}]  « {norm} »  ({len(items)} entrées)")
         for tid, title, album, rdate, sid, bpm in items:
-            d = (str(rdate)[:10] if rdate else '—')
-            print(f"    #{tid:>4}  {title!r}  album={album or '—'}  date={d}  "
-                  f"sid={'oui' if sid else 'non'}  bpm={bpm or '—'}")
+            d = str(rdate)[:10] if rdate else "—"
+            print(
+                f"    #{tid:>4}  {title!r}  album={album or '—'}  date={d}  "
+                f"sid={'oui' if sid else 'non'}  bpm={bpm or '—'}"
+            )
         ids = [str(i[0]) for i in items]
-        print(f"    → fusion (garde le 1er) : python scripts/merge_duplicates.py "
-              f"--merge {ids[0]} {ids[1]} --execute\n")
+        print(
+            f"    → fusion (garde le 1er) : python scripts/merge_duplicates.py "
+            f"--merge {ids[0]} {ids[1]} --execute\n"
+        )
 
 
 def merge_duplicate_tracks(keep_id, delete_id, dry_run=True):
@@ -68,7 +77,7 @@ def merge_duplicate_tracks(keep_id, delete_id, dry_run=True):
         delete_id: ID du track à supprimer
         dry_run: Si True, simule sans modifier la base
     """
-    conn = sqlite3.connect('data/music_credits.db')
+    conn = sqlite3.connect("data/music_credits.db")
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
@@ -113,19 +122,25 @@ def merge_duplicate_tracks(keep_id, delete_id, dry_run=True):
     try:
         # 1. Transférer les crédits du track à supprimer vers celui à garder
         if delete_credits > 0:
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE credits
                 SET track_id = ?
                 WHERE track_id = ?
-            """, (keep_id, delete_id))
+            """,
+                (keep_id, delete_id),
+            )
             print(f"  Credits transferes: {delete_credits}")
 
         # 2. Transférer les erreurs de scraping
-        cursor.execute("""
+        cursor.execute(
+            """
             UPDATE scraping_errors
             SET track_id = ?
             WHERE track_id = ?
-        """, (keep_id, delete_id))
+        """,
+            (keep_id, delete_id),
+        )
 
         # 3. Supprimer le track en doublon
         cursor.execute("DELETE FROM tracks WHERE id = ?", (delete_id,))
@@ -151,7 +166,7 @@ def delete_duplicate_track(track_id, dry_run=True):
         track_id: ID du track à supprimer
         dry_run: Si True, simule sans modifier la base
     """
-    conn = sqlite3.connect('data/music_credits.db')
+    conn = sqlite3.connect("data/music_credits.db")
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
@@ -213,7 +228,7 @@ def auto_clean_duplicates(dry_run=True):
     Args:
         dry_run: Si True, simule sans modifier la base
     """
-    conn = sqlite3.connect('data/music_credits.db')
+    conn = sqlite3.connect("data/music_credits.db")
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
@@ -242,13 +257,16 @@ def auto_clean_duplicates(dry_run=True):
 
     for title_lower, count in duplicates:
         # Récupérer toutes les versions
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, title, album, genius_id, bpm, duration,
                    musical_key, spotify_id, lyrics
             FROM tracks
             WHERE LOWER(title) = ?
             ORDER BY id
-        """, (title_lower,))
+        """,
+            (title_lower,),
+        )
 
         versions = cursor.fetchall()
 
@@ -256,18 +274,26 @@ def auto_clean_duplicates(dry_run=True):
         scores = []
         for version in versions:
             score = 0
-            if version[2]: score += 1  # album
-            if version[3]: score += 2  # genius_id
-            if version[4]: score += 1  # bpm
-            if version[5]: score += 1  # duration
-            if version[6]: score += 1  # musical_key
-            if version[7]: score += 1  # spotify_id
-            if version[8]: score += 1  # lyrics
+            if version[2]:
+                score += 1  # album
+            if version[3]:
+                score += 2  # genius_id
+            if version[4]:
+                score += 1  # bpm
+            if version[5]:
+                score += 1  # duration
+            if version[6]:
+                score += 1  # musical_key
+            if version[7]:
+                score += 1  # spotify_id
+            if version[8]:
+                score += 1  # lyrics
 
             # Credits
             cursor.execute("SELECT COUNT(*) FROM credits WHERE track_id = ?", (version[0],))
             credits_count = cursor.fetchone()[0]
-            if credits_count > 0: score += 2
+            if credits_count > 0:
+                score += 2
 
             scores.append((version[0], version[1], score))
 
@@ -277,12 +303,14 @@ def auto_clean_duplicates(dry_run=True):
         # Marquer les autres pour suppression
         for track_id, track_title, score in scores:
             if track_id != best[0]:
-                actions.append({
-                    'keep_id': best[0],
-                    'keep_title': best[1],
-                    'delete_id': track_id,
-                    'delete_title': track_title
-                })
+                actions.append(
+                    {
+                        "keep_id": best[0],
+                        "keep_title": best[1],
+                        "delete_id": track_id,
+                        "delete_title": track_title,
+                    }
+                )
 
         print(f"'{best[1]}' ({count} versions):")
         print(f"  Garder: ID {best[0]} (score: {best[2]})")
@@ -308,7 +336,7 @@ def auto_clean_duplicates(dry_run=True):
     else:
         print("ATTENTION: Impossible de creer un backup!")
         confirm = input("Continuer quand meme ? (oui/non): ").strip().lower()
-        if confirm not in ['oui', 'o', 'yes', 'y']:
+        if confirm not in ["oui", "o", "yes", "y"]:
             print("Annule")
             return
 
@@ -316,7 +344,7 @@ def auto_clean_duplicates(dry_run=True):
     print(f"\nSuppression de {len(actions)} doublons...")
     success = 0
     for action in actions:
-        if delete_duplicate_track(action['delete_id'], dry_run=False):
+        if delete_duplicate_track(action["delete_id"], dry_run=False):
             success += 1
 
     print(f"\nTERMINE: {success}/{len(actions)} doublons supprimes")
@@ -344,35 +372,36 @@ def main():
         return
 
     mode = sys.argv[1]
-    dry_run = '--execute' not in sys.argv
+    dry_run = "--execute" not in sys.argv
 
     if dry_run:
         print("\n[MODE DRY-RUN] Simulation sans modification")
         print("Ajoutez --execute pour executer reellement\n")
 
-    if mode == '--find':
+    if mode == "--find":
         artist = None
-        extra = [a for a in sys.argv[2:] if a != '--execute']
+        extra = [a for a in sys.argv[2:] if a != "--execute"]
         if extra:
             artist = " ".join(extra)
         find_normalized_duplicates(artist)
 
-    elif mode == '--check':
+    elif mode == "--check":
         if len(sys.argv) < 3:
             print("Erreur: Titre manquant")
             return
-        title = " ".join(sys.argv[2:]).replace('--execute', '').strip()
+        title = " ".join(sys.argv[2:]).replace("--execute", "").strip()
         from check_duplicates import analyze_specific_duplicate
+
         analyze_specific_duplicate(title)
 
-    elif mode == '--delete':
+    elif mode == "--delete":
         if len(sys.argv) < 3:
             print("Erreur: ID manquant")
             return
         track_id = int(sys.argv[2])
         delete_duplicate_track(track_id, dry_run=dry_run)
 
-    elif mode == '--merge':
+    elif mode == "--merge":
         if len(sys.argv) < 4:
             print("Erreur: IDs manquants")
             return
@@ -380,7 +409,7 @@ def main():
         delete_id = int(sys.argv[3])
         merge_duplicate_tracks(keep_id, delete_id, dry_run=dry_run)
 
-    elif mode == '--auto':
+    elif mode == "--auto":
         auto_clean_duplicates(dry_run=dry_run)
 
     else:
@@ -395,4 +424,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nErreur: {e}")
         import traceback
+
         traceback.print_exc()

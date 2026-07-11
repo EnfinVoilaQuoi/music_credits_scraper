@@ -2,6 +2,7 @@
 Script de restauration depuis un backup
 Permet de restaurer la base de données depuis un backup
 """
+
 import sys
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import logging
 
 from src.utils.database_backup import get_backup_manager
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -20,9 +21,9 @@ def main():
     """Programme principal de restauration"""
     manager = get_backup_manager()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("   RESTAURATION DE LA BASE DE DONNÉES")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     # Lister les backups disponibles
     backups = manager.list_backups()
@@ -42,10 +43,10 @@ def main():
         print()
 
     # Demander quel backup restaurer
-    print("="*60)
+    print("=" * 60)
     choice = input("\nNuméro du backup à restaurer (ou 'q' pour quitter): ").strip()
 
-    if choice.lower() == 'q':
+    if choice.lower() == "q":
         print("Annulé")
         return
 
@@ -64,13 +65,13 @@ def main():
 
         confirm = input("\nÊtes-vous sûr ? (oui/non): ").strip().lower()
 
-        if confirm not in ['oui', 'o', 'yes', 'y']:
+        if confirm not in ["oui", "o", "yes", "y"]:
             print("Annulé")
             return
 
         # Restaurer
         print("\n🔄 Restauration en cours...")
-        success = manager.restore_backup(selected_backup['path'])
+        success = manager.restore_backup(selected_backup["path"])
 
         if success:
             print("\n✅ Restauration terminée avec succès!")

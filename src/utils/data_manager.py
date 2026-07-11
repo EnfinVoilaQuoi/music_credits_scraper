@@ -86,12 +86,56 @@ class DataManager:
                 )
             """)
 
-            # Vérifier et ajouter les colonnes de certifications si elles n'existent pas
+            # Table des morceaux — DOIT être créée AVANT le bloc de migration
+            # ci-dessous (bug historique : les ALTER s'exécutaient avant le
+            # CREATE TABLE → base neuve figée sur le vieux schéma, cf. AUDIT.md §3.1).
+            # Inclut les colonnes historiques (lyrics, is_featuring...) qui
+            # n'étaient couvertes ni par l'ancien CREATE TABLE ni par les migrations.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    artist_id INTEGER NOT NULL,
+                    album TEXT,
+                    track_number INTEGER,
+                    release_date TIMESTAMP,
+                    genius_id INTEGER,
+                    spotify_id TEXT,
+                    discogs_id INTEGER,
+                    bpm INTEGER,
+                    duration INTEGER,
+                    genre TEXT,
+                    genius_url TEXT,
+                    spotify_url TEXT,
+                    youtube_url TEXT,
+                    is_featuring BOOLEAN DEFAULT 0,
+                    primary_artist_name TEXT,
+                    featured_artists TEXT,
+                    lyrics TEXT,
+                    has_lyrics BOOLEAN DEFAULT 0,
+                    lyrics_scraped_at TIMESTAMP,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP,
+                    last_scraped TIMESTAMP,
+                    FOREIGN KEY (artist_id) REFERENCES artists (id),
+                    UNIQUE(title, artist_id)
+                )
+            """)
+
+            # Vérifier et ajouter les colonnes manquantes si elles n'existent pas
             cursor.execute("PRAGMA table_info(tracks)")
             existing_columns = {row[1] for row in cursor.fetchall()}
 
             # Liste des colonnes à ajouter
             new_columns = {
+                # Colonnes historiques — présentes dans les vieilles bases mais
+                # absentes de toute migration (filet pour les bases intermédiaires)
+                'is_featuring': 'BOOLEAN DEFAULT 0',
+                'primary_artist_name': 'TEXT',
+                'featured_artists': 'TEXT',
+                'lyrics': 'TEXT',
+                'has_lyrics': 'BOOLEAN DEFAULT 0',
+                'lyrics_scraped_at': 'TIMESTAMP',
                 'isrc': 'TEXT',  # ISRC (pivot inter-sources : Deezer/ReccoBeats)
                 'bpm_source': 'TEXT',  # Source(s) du BPM retenu (vote §8.3)
                 'bpm_confidence': 'INTEGER',  # Nb de sources concordantes
@@ -139,32 +183,6 @@ class DataManager:
                 )
             except Exception as e:
                 logger.debug(f"Backfill youtube_url_source: {e}")
-            
-            # Table des morceaux avec track_number
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tracks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    artist_id INTEGER NOT NULL,
-                    album TEXT,
-                    track_number INTEGER,
-                    release_date TIMESTAMP,
-                    genius_id INTEGER,
-                    spotify_id TEXT,
-                    discogs_id INTEGER,
-                    bpm INTEGER,
-                    duration INTEGER,
-                    genre TEXT,
-                    genius_url TEXT,
-                    spotify_url TEXT,
-                    youtube_url TEXT,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP,
-                    last_scraped TIMESTAMP,
-                    FOREIGN KEY (artist_id) REFERENCES artists (id),
-                    UNIQUE(title, artist_id)
-                )
-            """)
             
             # Table des crédits
             cursor.execute("""

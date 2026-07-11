@@ -3,10 +3,13 @@ from tkinter import messagebox
 from typing import Optional
 
 from src.models import Artist
-from src.scrapers.genius_scraper_v2 import GeniusScraper
+from src.scrapers.playwright_manager import get_playwright
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+               '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
 
 def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional[Artist]":
@@ -14,12 +17,28 @@ def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional
 
     Utilise :
         JSON.parse(document.querySelector('meta[itemprop="page_data"]').content).artist.id
+
+    NOTE : utilisait GeniusScraper v2 (supprimé) uniquement comme porte-page
+    Playwright — remplacé par un browser éphémère sur l'instance partagée,
+    avec la même config furtive (user-agent + masquage navigator.webdriver).
     """
-    scraper = None
+    browser = None
     try:
-        scraper = GeniusScraper(headless=True)
-        scraper.page.goto(url, wait_until="domcontentloaded", timeout=15_000)
-        result = scraper.page.evaluate("""() => {
+        pw = get_playwright()
+        browser = pw.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+        )
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent=_USER_AGENT,
+        )
+        page = context.new_page()
+        page.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+        page.goto(url, wait_until="domcontentloaded", timeout=15_000)
+        result = page.evaluate("""() => {
             const meta = document.querySelector('meta[itemprop="page_data"]');
             if (!meta) return null;
             try {
@@ -38,9 +57,9 @@ def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional
     except Exception as e:
         logger.debug(f"Fetch artiste depuis {url} échoué: {e}")
     finally:
-        if scraper:
+        if browser:
             try:
-                scraper.close()
+                browser.close()  # ne PAS stopper l'instance Playwright partagée
             except Exception:
                 pass
     return None

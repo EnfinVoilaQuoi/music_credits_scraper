@@ -1,11 +1,12 @@
 """Client pour l'API Discogs - Enrichissement des crédits et métadonnées"""
 
 import time
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 import discogs_client
 from discogs_client.exceptions import HTTPError
 
-from src.models import Track, Credit, CreditRole
+from src.models import Credit, CreditRole, Track
 from src.utils.logger import get_logger, log_api
 
 logger = get_logger(__name__)
@@ -14,7 +15,7 @@ logger = get_logger(__name__)
 class DiscogsClient:
     """Client pour interagir avec l'API Discogs"""
 
-    def __init__(self, user_token: Optional[str] = None):
+    def __init__(self, user_token: str | None = None):
         """
         Initialise le client Discogs
 
@@ -64,8 +65,8 @@ class DiscogsClient:
             logger.debug(f"Impossible de vérifier le rate limit: {e}")
 
     def search_track(
-        self, track_title: str, artist_name: str, album_name: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, track_title: str, artist_name: str, album_name: str | None = None
+    ) -> dict[str, Any] | None:
         """
         Recherche un morceau sur Discogs
 
@@ -105,7 +106,7 @@ class DiscogsClient:
 
             # Discogs results is a paginated object, not a list
             # We can't use len() or slice directly
-            logger.info(f"📊 Discogs: Résultats trouvés, analyse des premiers...")
+            logger.info("📊 Discogs: Résultats trouvés, analyse des premiers...")
 
             # Analyser les premiers résultats (max 5)
             checked_count = 0
@@ -150,7 +151,7 @@ class DiscogsClient:
 
     def _extract_track_from_release(
         self, release, track_title: str, artist_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Extrait les données d'un track depuis un release Discogs
 
@@ -216,7 +217,7 @@ class DiscogsClient:
             logger.debug(f"Erreur extraction track depuis release: {e}")
             return None
 
-    def _extract_credits_from_release(self, release) -> List[Dict[str, str]]:
+    def _extract_credits_from_release(self, release) -> list[dict[str, str]]:
         """
         Extrait tous les crédits depuis un release Discogs
 

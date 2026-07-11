@@ -1,25 +1,25 @@
 """Interface graphique principale de l'application - VERSION AMÉLIORÉE"""
 
-import customtkinter as ctk
-from tkinter import ttk, messagebox, filedialog
 import threading
-from typing import Optional, List
+from tkinter import filedialog, messagebox, ttk
 
-from src.config import WINDOW_WIDTH, WINDOW_HEIGHT, THEME
+import customtkinter as ctk
+
 from src.api.genius_api import GeniusAPI
-from src.utils.data_manager import DataManager
-from src.utils.data_enricher import DataEnricher
-from src.utils.logger import get_logger
-from src.models import Artist, Track
-from src.utils.disabled_tracks_manager import DisabledTracksManager
-from src.utils.deleted_tracks_manager import DeletedTracksManager
-from src.gui.certification_update_gui import CertificationUpdateDialog
+from src.config import THEME, WINDOW_HEIGHT, WINDOW_WIDTH
 from src.gui import helpers
-from src.gui.windows.track_details import TrackDetailsWindow
-from src.gui.windows import artist_loader
+from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
-from src.gui.workers import retrieval, streams, enrichment
-from src.gui.panels import tracks_table, albums_view
+from src.gui.panels import albums_view, tracks_table
+from src.gui.windows import artist_loader
+from src.gui.windows.track_details import TrackDetailsWindow
+from src.gui.workers import enrichment, retrieval, streams
+from src.models import Artist, Track
+from src.utils.data_enricher import DataEnricher
+from src.utils.data_manager import DataManager
+from src.utils.deleted_tracks_manager import DeletedTracksManager
+from src.utils.disabled_tracks_manager import DisabledTracksManager
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -42,8 +42,8 @@ class MainWindow:
         self.data_enricher = DataEnricher(
             headless_reccobeats=True, headless_songbpm=True, headless_spotify_scraper=True
         )
-        self.current_artist: Optional[Artist] = None
-        self.tracks: List[Track] = []
+        self.current_artist: Artist | None = None
+        self.tracks: list[Track] = []
 
         # Variables
         self.is_scraping = False
@@ -672,8 +672,8 @@ class MainWindow:
                 # ✅ LIGNE 3: Streams et auditeurs mensuels
                 try:
                     from src.utils.streams_calculator import (
-                        calculate_total_streams,
                         calculate_total_monthly_listeners,
+                        calculate_total_streams,
                         format_streams,
                     )
 
@@ -740,7 +740,7 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour des stats: {e}")
 
-    def _get_track_id_from_index(self, index: int) -> Optional[int]:
+    def _get_track_id_from_index(self, index: int) -> int | None:
         """Convertit un index de track en track ID"""
         if not self.current_artist or index < 0 or index >= len(self.current_artist.tracks):
             return None

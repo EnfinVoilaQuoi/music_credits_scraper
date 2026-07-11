@@ -1,13 +1,12 @@
 """Intégration YouTube simplifiée pour main_window"""
 
-from typing import Optional, Dict
 import webbrowser
 from urllib.parse import quote
 
-from src.youtube.youtube_searcher import YouTubeSearcher
-from src.youtube.track_classifier import TrackClassifier, TrackType
 from src.config import YOUTUBE_AUTO_SELECT_ALBUM_TRACKS
 from src.utils.logger import get_logger
+from src.youtube.track_classifier import TrackClassifier, TrackType
+from src.youtube.youtube_searcher import YouTubeSearcher
 
 logger = get_logger(__name__)
 
@@ -27,7 +26,7 @@ class YouTubeIntegration:
         release_year: int = None,
         known_url: str = None,
         known_source: str = None,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """
         Retourne le lien YouTube approprié pour un morceau.
 
@@ -76,7 +75,7 @@ class YouTubeIntegration:
             logger.error(f"Erreur YouTube pour {artist} - {title}: {e}")
             return self._generate_fallback_search_url(artist, title)
 
-    def _try_auto_selection(self, artist: str, title: str, track_type: TrackType) -> Optional[Dict]:
+    def _try_auto_selection(self, artist: str, title: str, track_type: TrackType) -> dict | None:
         """Tentative de sélection automatique"""
 
         try:
@@ -113,7 +112,7 @@ class YouTubeIntegration:
             logger.debug(f"Erreur auto-sélection: {e}")
             return None
 
-    def _generate_search_url(self, artist: str, title: str, track_type: TrackType) -> Dict:
+    def _generate_search_url(self, artist: str, title: str, track_type: TrackType) -> dict:
         """Génère une URL de recherche optimisée selon le type"""
 
         strategy = self.classifier.get_search_strategy(track_type)
@@ -131,7 +130,7 @@ class YouTubeIntegration:
             "query": primary_query,
         }
 
-    def _generate_fallback_search_url(self, artist: str, title: str) -> Dict:
+    def _generate_fallback_search_url(self, artist: str, title: str) -> dict:
         """Génère une URL de recherche basique en cas d'erreur"""
 
         search_term = f"{artist} {title} audio"
@@ -145,7 +144,7 @@ class YouTubeIntegration:
             "track_type": "unknown",
         }
 
-    def open_youtube_link(self, youtube_result: Dict) -> bool:
+    def open_youtube_link(self, youtube_result: dict) -> bool:
         """Ouvre le lien YouTube dans le navigateur"""
 
         try:

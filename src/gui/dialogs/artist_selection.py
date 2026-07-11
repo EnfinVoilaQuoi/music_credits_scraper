@@ -1,7 +1,6 @@
 """Dialogue de désambiguïsation d'artiste Genius (choix parmi candidats, slug manuel)"""
 
 from tkinter import messagebox
-from typing import Optional
 
 from src.models import Artist
 from src.scrapers.playwright_manager import get_playwright
@@ -15,7 +14,7 @@ _USER_AGENT = (
 )
 
 
-def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Optional[Artist]":
+def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Artist | None":
     """Charge la page Genius d'un artiste via Playwright et extrait l'ID depuis le meta tag.
 
     Utilise :

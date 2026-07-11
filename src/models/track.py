@@ -1,10 +1,10 @@
 """Modèles pour représenter les morceaux et crédits"""
 
+import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime
 from enum import Enum
-import logging
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from src.models.artist import Artist
@@ -127,7 +127,7 @@ class Credit:
 
     name: str
     role: CreditRole
-    role_detail: Optional[str] = None  # Ex: "Guitar", "Piano", etc.
+    role_detail: str | None = None  # Ex: "Guitar", "Piano", etc.
     source: str = "genius"  # Source de l'information
 
     def to_dict(self) -> dict:
@@ -140,7 +140,7 @@ class Credit:
         }
 
     @staticmethod
-    def from_role_and_names(role: str, names: List[str]) -> List["Credit"]:
+    def from_role_and_names(role: str, names: list[str]) -> list["Credit"]:
         """Crée une liste de crédits à partir d'un rôle (texte) et de noms"""
         credits = []
 
@@ -179,113 +179,113 @@ class Credit:
 class Track:
     """Représente un morceau musical"""
 
-    id: Optional[int] = None
+    id: int | None = None
     title: str = ""
     artist: Optional["Artist"] = None
-    album: Optional[str] = None
-    release_date: Optional[datetime] = None
+    album: str | None = None
+    release_date: datetime | None = None
 
     # Champs internes de marquage
     _album_from_api: bool = field(default=False, repr=False)
     _release_date_from_api: bool = field(default=False, repr=False)
 
     # IDs externes
-    genius_id: Optional[int] = None
-    spotify_id: Optional[str] = None
-    spotify_ids: List[str] = field(default_factory=list)
-    discogs_id: Optional[int] = None
-    isrc: Optional[str] = None  # International Standard Recording Code (pivot inter-sources)
+    genius_id: int | None = None
+    spotify_id: str | None = None
+    spotify_ids: list[str] = field(default_factory=list)
+    discogs_id: int | None = None
+    isrc: str | None = None  # International Standard Recording Code (pivot inter-sources)
 
     # Métadonnées
-    bpm: Optional[int] = None  # BPM "réel" (double-time) — valeur exportée
-    bpm_alt: Optional[int] = None  # Octave alternative (half-time), ex. 71 pour 142
-    bpm_source: Optional[str] = None  # Source(s) du BPM retenu (vote §8.3)
-    bpm_confidence: Optional[int] = None  # Nb de sources concordantes
-    key_mode_source: Optional[str] = None  # Source de key/mode (peut différer du BPM)
-    reccobeats_resolution: Optional[str] = (
+    bpm: int | None = None  # BPM "réel" (double-time) — valeur exportée
+    bpm_alt: int | None = None  # Octave alternative (half-time), ex. 71 pour 142
+    bpm_source: str | None = None  # Source(s) du BPM retenu (vote §8.3)
+    bpm_confidence: int | None = None  # Nb de sources concordantes
+    key_mode_source: str | None = None  # Source de key/mode (peut différer du BPM)
+    reccobeats_resolution: str | None = (
         None  # 'isrc' | 'spotify_id' — voie de résolution ReccoBeats
     )
-    duration: Optional[int] = None  # En secondes
-    genre: Optional[str] = None
-    track_number: Optional[int] = None
-    musical_key: Optional[str] = None
-    time_signature: Optional[str] = None
-    audio_features: Optional[Dict[str, Any]] = field(default_factory=dict)
+    duration: int | None = None  # En secondes
+    genre: str | None = None
+    track_number: int | None = None
+    musical_key: str | None = None
+    time_signature: str | None = None
+    audio_features: dict[str, Any] | None = field(default_factory=dict)
 
     # Support des features
     is_featuring: bool = False  # True si l'artiste est en featuring
-    featured_artists: Optional[str] = None  # Liste des artistes en featuring
-    primary_artist_name: Optional[str] = None  # Nom de l'artiste principal si différent
-    secondary_role: Optional[str] = (
+    featured_artists: str | None = None  # Liste des artistes en featuring
+    primary_artist_name: str | None = None  # Nom de l'artiste principal si différent
+    secondary_role: str | None = (
         None  # Rôle secondaire (ex: "Additional Voices") si l'artiste n'est ni primary ni feat — rempli = contribution secondaire
     )
 
     # Support des paroles
-    lyrics: Optional[str] = None  # Paroles complètes
+    lyrics: str | None = None  # Paroles complètes
     has_lyrics: bool = False  # Indicateur si les paroles sont disponibles
-    lyrics_scraped_at: Optional[datetime] = None  # Date de récupération des paroles
-    lyrics_source: Optional[str] = None  # Provenance des paroles (YouTube Music / genius)
-    lyrics_synced: Optional[str] = None  # Paroles synchronisées (LRC) retenues (LRCLIB > YTM)
-    lyrics_synced_source: Optional[str] = (
+    lyrics_scraped_at: datetime | None = None  # Date de récupération des paroles
+    lyrics_source: str | None = None  # Provenance des paroles (YouTube Music / genius)
+    lyrics_synced: str | None = None  # Paroles synchronisées (LRC) retenues (LRCLIB > YTM)
+    lyrics_synced_source: str | None = (
         None  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
     )
-    lyrics_synced_confidence: Optional[int] = (
+    lyrics_synced_confidence: int | None = (
         None  # Nb de sources concordantes (2=croisé/validé, 1=unique ou après départage durée)
     )
-    anecdotes: Optional[str] = None  # Anecdotes et informations supplémentaires
+    anecdotes: str | None = None  # Anecdotes et informations supplémentaires
 
     # Métadonnées supplémentaires
-    popularity: Optional[int] = None  # Nombre de vues sur Genius
-    artwork_url: Optional[str] = None  # URL de la pochette
+    popularity: int | None = None  # Nombre de vues sur Genius
+    artwork_url: str | None = None  # URL de la pochette
 
     # Crédits
-    credits: List[Credit] = field(default_factory=list)
+    credits: list[Credit] = field(default_factory=list)
 
     # Relations « inspiré de » (amont) : samples/interpolations/cover_of/remix_of + trad FR
     # Chaque entrée : {type, title, artist, url}. Source : API Genius song_relationships.
-    relationships: List[Dict[str, Any]] = field(default_factory=list)
+    relationships: list[dict[str, Any]] = field(default_factory=list)
 
     # URLs
-    genius_url: Optional[str] = None
-    spotify_url: Optional[str] = None
-    youtube_url: Optional[str] = None
+    genius_url: str | None = None
+    spotify_url: str | None = None
+    youtube_url: str | None = None
     # Provenance du lien YouTube : 'genius_media' (API Genius, prioritaire)
     # ou 'search_auto' (recherche ytmusicapi persistée si confiance ≥ YOUTUBE_PERSIST_CONFIDENCE)
-    youtube_url_source: Optional[str] = None
+    youtube_url_source: str | None = None
     # 1 = album édité MANUELLEMENT (détaché via la vue Albums…) — l'API ne re-remplit pas
-    album_override: Optional[int] = None
+    album_override: int | None = None
 
     # Métadonnées système
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
-    last_scraped: Optional[datetime] = None
-    scraping_errors: List[str] = field(default_factory=list)
+    last_scraped: datetime | None = None
+    scraping_errors: list[str] = field(default_factory=list)
 
     # Champs de certification SNEP - VERSION MULTI-CERTIFICATIONS
     has_certification: bool = False
-    certification_level: Optional[str] = None  # Plus haute certification (rétrocompatibilité)
-    certification_date: Optional[datetime] = None  # Date de la plus haute certification
-    certification_duration_days: Optional[int] = None  # Durée d'obtention en jours
-    certification_category: Optional[str] = None  # "Singles" ou "Albums"
-    certification_publisher: Optional[str] = None  # Éditeur/Distributeur
-    certification_details: Optional[Dict[str, Any]] = None  # Détails de la plus haute certification
+    certification_level: str | None = None  # Plus haute certification (rétrocompatibilité)
+    certification_date: datetime | None = None  # Date de la plus haute certification
+    certification_duration_days: int | None = None  # Durée d'obtention en jours
+    certification_category: str | None = None  # "Singles" ou "Albums"
+    certification_publisher: str | None = None  # Éditeur/Distributeur
+    certification_details: dict[str, Any] | None = None  # Détails de la plus haute certification
 
     # NOUVEAU: Support de plusieurs certifications
-    certifications: List[Dict[str, Any]] = field(
+    certifications: list[dict[str, Any]] = field(
         default_factory=list
     )  # Toutes les certifications du morceau
-    album_certifications: List[Dict[str, Any]] = field(
+    album_certifications: list[dict[str, Any]] = field(
         default_factory=list
     )  # Certifications de l'album associé
 
     # Streams Spotify (kworb.net)
-    spotify_streams: Optional[int] = None
-    spotify_daily_streams: Optional[int] = None
-    spotify_streams_updated: Optional[datetime] = None
+    spotify_streams: int | None = None
+    spotify_daily_streams: int | None = None
+    spotify_streams_updated: datetime | None = None
 
     # Streams YouTube Music
-    ytm_streams: Optional[int] = None
-    ytm_streams_updated: Optional[datetime] = None
+    ytm_streams: int | None = None
+    ytm_streams_updated: datetime | None = None
 
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""
@@ -317,6 +317,7 @@ class Track:
         - Si pas de date existante, met à jour
         """
         from datetime import datetime
+
         from src.utils.logger import get_logger
 
         logger = get_logger(__name__)
@@ -384,7 +385,7 @@ class Track:
             )
             return False
 
-    def get_credits_by_role(self, role: CreditRole) -> List[Credit]:
+    def get_credits_by_role(self, role: CreditRole) -> list[Credit]:
         """Retourne tous les crédits d'un rôle spécifique - VERSION ROBUSTE"""
         try:
             if not hasattr(self, "credits") or not self.credits:
@@ -404,7 +405,7 @@ class Track:
             logger.debug(f"Erreur get_credits_by_role: {e}")
             return []
 
-    def get_producers(self) -> List[str]:
+    def get_producers(self) -> list[str]:
         """Retourne la liste des producteurs (tous types confondus) - VERSION ROBUSTE"""
         try:
             if not hasattr(self, "credits") or not self.credits:
@@ -432,7 +433,7 @@ class Track:
             logger.debug(f"Erreur get_producers: {e}")
             return []
 
-    def get_writers(self) -> List[str]:
+    def get_writers(self) -> list[str]:
         """Retourne la liste des auteurs (tous types confondus) - VERSION ROBUSTE"""
         try:
             if not hasattr(self, "credits") or not self.credits:
@@ -455,7 +456,7 @@ class Track:
             return []
 
     # Méthode pour calculer la durée d'obtention
-    def calculate_certification_duration(self) -> Optional[int]:
+    def calculate_certification_duration(self) -> int | None:
         """Calcule la durée entre la sortie et la certification"""
         if not self.certification_date or not self.release_date:
             return None
@@ -477,7 +478,7 @@ class Track:
         except Exception:
             return None
 
-    def get_certification_emoji(self, level: Optional[str] = None) -> str:
+    def get_certification_emoji(self, level: str | None = None) -> str:
         """Retourne un emoji correspondant au niveau de certification"""
         cert_level = level or self.certification_level
         if not cert_level:
@@ -666,7 +667,7 @@ class Track:
             )
             return False
 
-    def get_music_credits(self) -> List[Credit]:
+    def get_music_credits(self) -> list[Credit]:
         """Retourne seulement les crédits musicaux - VERSION CORRIGÉE ROBUSTE"""
         try:
             # CORRECTION 1: Vérification de l'existence des crédits
@@ -743,7 +744,7 @@ class Track:
             # En cas d'erreur totale, retourner tous les crédits
             return getattr(self, "credits", [])
 
-    def get_video_credits(self) -> List[Credit]:
+    def get_video_credits(self) -> list[Credit]:
         """Retourne seulement les crédits vidéo - VERSION CORRIGÉE ROBUSTE"""
         try:
             # CORRECTION 1: Vérification de l'existence des crédits
@@ -993,7 +994,7 @@ class Track:
     # dans src/gui/workers/scraping.py.)
 
     @property
-    def primary_spotify_id(self) -> Optional[str]:
+    def primary_spotify_id(self) -> str | None:
         """Retourne l'ID Spotify principal"""
         if self.spotify_ids and len(self.spotify_ids) > 0:
             return self.spotify_ids[0]
@@ -1026,7 +1027,7 @@ class Track:
 
         return True
 
-    def get_all_spotify_ids(self) -> List[str]:
+    def get_all_spotify_ids(self) -> list[str]:
         """Retourne tous les Spotify IDs du track."""
         ids = []
 

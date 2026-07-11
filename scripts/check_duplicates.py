@@ -1,10 +1,10 @@
 """
 Script de détection et analyse des doublons
 """
-import sys
 import io
-from pathlib import Path
 import sqlite3
+import sys
+from pathlib import Path
 
 # Fix encodage Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -94,7 +94,7 @@ def find_all_duplicates():
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
-    print(f"   DETECTION DE TOUS LES DOUBLONS")
+    print("   DETECTION DE TOUS LES DOUBLONS")
     print(f"{'='*60}\n")
 
     # Trouver les doublons par titre (insensible à la casse)

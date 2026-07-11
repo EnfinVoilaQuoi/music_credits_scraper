@@ -26,7 +26,6 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from src.api.snep_certifications import SNEPCertificationManager
 
@@ -318,7 +317,7 @@ def format_report(report: dict) -> str:
 
     if report.get("apostrophe_examples"):
         L.append("")
-        L.append(f"── Caractères restaurés ?→ '/œ (exemples) ──")
+        L.append("── Caractères restaurés ?→ '/œ (exemples) ──")
         for ex in report["apostrophe_examples"]:
             L.append(f"  • {ex[:70]}")
 

@@ -1,12 +1,12 @@
 """Enrichissement des données (BPM, certifications, YouTube…) en thread"""
 
-import customtkinter as ctk
 import threading
 from tkinter import messagebox
-from typing import List
 
-from src.utils.logger import get_logger
+import customtkinter as ctk
+
 from src.gui.dialogs import report
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -182,7 +182,7 @@ def start_enrichment(app):
 
 def run_enrichment(
     app,
-    sources: List[str],
+    sources: list[str],
     force_update: bool = False,
     reset_spotify_id: bool = False,
     clear_on_failure: bool = True,

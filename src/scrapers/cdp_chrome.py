@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
 from urllib.request import urlopen
 
 from src.utils.logger import get_logger
@@ -36,7 +35,7 @@ def _port_alive(port: int) -> bool:
         return False
 
 
-def find_chrome() -> Optional[str]:
+def find_chrome() -> str | None:
     """Localise l'exécutable Google Chrome (pas Chromium/Brave)."""
     env_path = os.getenv("CHROME_PATH")
     if env_path and Path(env_path).exists():
@@ -65,8 +64,8 @@ def find_chrome() -> Optional[str]:
 
 
 def ensure_cdp_chrome(
-    port: int = DEFAULT_PORT, profile: Optional[str] = None, wait_seconds: float = 15.0
-) -> Optional[str]:
+    port: int = DEFAULT_PORT, profile: str | None = None, wait_seconds: float = 15.0
+) -> str | None:
     """Garantit qu'un Chrome debug écoute sur `port` et retourne son URL CDP.
 
     - Si le port répond déjà → on réutilise (retourne l'URL).

@@ -1,7 +1,8 @@
 """Fenêtre « Charger existant » : liste des artistes en base avec stats, chargement et suppression"""
 
-import customtkinter as ctk
 from tkinter import messagebox
+
+import customtkinter as ctk
 
 from src.utils.logger import get_logger
 
@@ -221,7 +222,7 @@ def load_existing_artist(app):
         if details["tracks_count"] > 10:
             details_text += f"... et {details['tracks_count'] - 10} autres morceaux\n"
 
-        details_text += f"""
+        details_text += """
 🏷️ CRÉDITS PAR RÔLE:
 """
         for role, count in details["credits_by_role"].items():

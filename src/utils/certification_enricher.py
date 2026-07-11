@@ -1,10 +1,10 @@
 """Enrichissement des données avec les certifications"""
 
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any
 
-from src.models import Artist, Track
 from src.api.snep_certifications import get_snep_manager
+from src.models import Artist, Track
 from src.utils.cert_matcher import get_cert_matcher
 from src.utils.logger import get_logger
 
@@ -56,7 +56,7 @@ class CertificationEnricher:
 
         return artist
 
-    def enrich_tracks(self, artist: Artist, tracks: List[Track]) -> List[Track]:
+    def enrich_tracks(self, artist: Artist, tracks: list[Track]) -> list[Track]:
         """Enrichit une liste de morceaux avec leurs certifications - VERSION AMÉLIORÉE"""
         if not tracks or not artist:
             return tracks
@@ -159,7 +159,7 @@ class CertificationEnricher:
 
         return tracks
 
-    def _calculate_artist_stats(self, certifications: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _calculate_artist_stats(self, certifications: list[dict[str, Any]]) -> dict[str, Any]:
         """Calcule les statistiques de certification d'un artiste"""
         stats = {
             "total": len(certifications),
@@ -263,7 +263,7 @@ class CertificationEnricher:
 
         return summary
 
-    def calculate_certification_duration(self, track: Track) -> Optional[int]:
+    def calculate_certification_duration(self, track: Track) -> int | None:
         """Calcule la durée en jours pour obtenir une certification"""
         if not track.certification or not track.release_date:
             return None

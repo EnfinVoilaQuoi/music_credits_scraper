@@ -1,12 +1,13 @@
 """Dialogues de saisie manuelle par morceau (BPM/key, lien YouTube, renommage, BPM Finder local)"""
 
-import customtkinter as ctk
 import threading
-from tkinter import messagebox, filedialog
+from tkinter import filedialog, messagebox
 
+import customtkinter as ctk
+
+from src.gui import helpers
 from src.utils.logger import get_logger
 from src.utils.youtube_integration import youtube_integration
-from src.gui import helpers
 
 logger = get_logger(__name__)
 
@@ -91,7 +92,6 @@ def manual_audio_entry(app, index: int):
             normalize_musical_key,
             note_to_pitch_class,
             parse_mode,
-            key_mode_to_french,
         )
 
         canonical = normalize_musical_key(key_str)

@@ -17,8 +17,6 @@ Le DOM aussi est inchangé : .chart_title = <B>Artiste</B><BR>Titre,
 .company = "JJ/MM/AAAA: Niveau [JJ/MM/AAAA: Niveau ...]".
 """
 
-from typing import Optional
-
 from bs4 import BeautifulSoup
 
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
@@ -29,7 +27,7 @@ logger = get_logger(__name__)
 ULTRATOP_BASE = "https://www.ultratop.be/fr/or-platine"
 
 # Singleton : le profil patchright est partagé (cookie CF réutilisé)
-_scraper: Optional[CrawlAIScraperBase] = None
+_scraper: CrawlAIScraperBase | None = None
 
 
 def _get_scraper() -> CrawlAIScraperBase:
@@ -39,7 +37,7 @@ def _get_scraper() -> CrawlAIScraperBase:
     return _scraper
 
 
-def fetch_ultratop_html(year, category: str) -> Optional[str]:
+def fetch_ultratop_html(year, category: str) -> str | None:
     """Récupère le HTML d'une page certif Ultratop via le navigateur anti-CF.
 
     `category` = 'singles' ou 'albums'. Retourne le HTML ou None si la page est
@@ -68,7 +66,7 @@ def fetch_ultratop_html(year, category: str) -> Optional[str]:
     return html
 
 
-def fetch_ultratop_soup(year, category: str) -> Optional[BeautifulSoup]:
+def fetch_ultratop_soup(year, category: str) -> BeautifulSoup | None:
     """Idem `fetch_ultratop_html` mais retourne un BeautifulSoup prêt à parser."""
     html = fetch_ultratop_html(year, category)
     return BeautifulSoup(html, "html.parser") if html else None

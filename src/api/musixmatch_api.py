@@ -46,20 +46,19 @@ Token épinglé optionnel : `MUSIXMATCH_USER_TOKEN` (env) amorce le cache ; en c
 d'auth, on retombe automatiquement sur `token.get`.
 """
 
+import json
+import logging
 import os
 import re
-import json
 import time
-import logging
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import requests
 
 try:
-    from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES, DATA_DIR
+    from src.config import DATA_DIR, DELAY_BETWEEN_REQUESTS, MAX_RETRIES
 except Exception:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
     DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -130,7 +129,7 @@ def _artist_match(a: str, b: str) -> float:
     return SequenceMatcher(None, na, nb).ratio()
 
 
-def _looks_synced(lrc: Optional[str]) -> bool:
+def _looks_synced(lrc: str | None) -> bool:
     """Un LRC exploitable contient au moins une balise `[mm:ss...]`."""
     return bool(lrc) and re.search(r"\[\d+:\d+", lrc) is not None
 
@@ -139,7 +138,7 @@ class MusixmatchAPI:
     """Client lecture seule pour l'endpoint desktop Musixmatch (paroles synchronisées)."""
 
     def __init__(
-        self, timeout: int = 12, token_file: Optional[Path] = None, enabled: Optional[bool] = None
+        self, timeout: int = 12, token_file: Path | None = None, enabled: bool | None = None
     ):
         self.timeout = timeout
         self.token_file = Path(token_file) if token_file else _TOKEN_FILE
@@ -160,7 +159,7 @@ class MusixmatchAPI:
         )
 
         # Cache token en mémoire : (token, obtained_at_epoch).
-        self._token: Optional[str] = None
+        self._token: str | None = None
         self._token_ts: float = 0.0
 
         # Token épinglé optionnel : amorce le cache, expiry gérée normalement.
@@ -169,7 +168,7 @@ class MusixmatchAPI:
             self._token, self._token_ts = pinned, time.time()
 
     # ── Gestion du token ────────────────────────────────────────────────────────
-    def _load_cached_token(self) -> Optional[str]:
+    def _load_cached_token(self) -> str | None:
         """Token encore valide (mémoire puis fichier), sinon None."""
         now = time.time()
         if self._token and (now - self._token_ts) < _TOKEN_TTL:
@@ -204,7 +203,7 @@ class MusixmatchAPI:
         except Exception:
             pass
 
-    def _fetch_new_token(self) -> Optional[str]:
+    def _fetch_new_token(self) -> str | None:
         """Appelle `token.get`, applique les gardes-fous, met en cache. None si échec."""
         status, env = self._api_get("token.get", {"user_language": "en"}, with_token=False)
         if env is None:
@@ -221,7 +220,7 @@ class MusixmatchAPI:
         logger.debug("Musixmatch: nouveau usertoken obtenu")
         return token
 
-    def _get_token(self, force_refresh: bool = False) -> Optional[str]:
+    def _get_token(self, force_refresh: bool = False) -> str | None:
         if not force_refresh:
             cached = self._load_cached_token()
             if cached:
@@ -232,8 +231,8 @@ class MusixmatchAPI:
 
     # ── HTTP ──────────────────────────────────────────────────────────────────────
     def _api_get(
-        self, action: str, params: Dict, with_token: bool = True
-    ) -> Tuple[Optional[int], Optional[dict]]:
+        self, action: str, params: dict, with_token: bool = True
+    ) -> tuple[int | None, dict | None]:
         """
         GET vers l'endpoint desktop avec retries réseau/5xx (respecte DELAY/MAX_RETRIES).
         Ajoute `app_id`, `format`, `t` (anti-cache) et le `usertoken` si demandé.
@@ -272,13 +271,13 @@ class MusixmatchAPI:
 
     # ── Extraction depuis la réponse macro ────────────────────────────────────────
     @staticmethod
-    def _macro_calls(env: dict) -> Dict[str, dict]:
+    def _macro_calls(env: dict) -> dict[str, dict]:
         body = (env.get("message") or {}).get("body") or {}
         calls = body.get("macro_calls")
         return calls if isinstance(calls, dict) else {}
 
     @staticmethod
-    def _call_body(calls: Dict[str, dict], key: str) -> Optional[dict]:
+    def _call_body(calls: dict[str, dict], key: str) -> dict | None:
         """Corps d'un sous-appel macro si son propre header est 200 et non vide."""
         call = calls.get(key)
         if not isinstance(call, dict):
@@ -289,12 +288,12 @@ class MusixmatchAPI:
         body = msg.get("body")
         return body if isinstance(body, dict) and body else None
 
-    def _matched_track(self, calls: Dict[str, dict]) -> Optional[dict]:
+    def _matched_track(self, calls: dict[str, dict]) -> dict | None:
         body = self._call_body(calls, "matcher.track.get")
         track = (body or {}).get("track") if body else None
         return track if isinstance(track, dict) else None
 
-    def _subtitle_lrc(self, calls: Dict[str, dict]) -> Optional[str]:
+    def _subtitle_lrc(self, calls: dict[str, dict]) -> str | None:
         body = self._call_body(calls, "track.subtitles.get")
         if not body:
             return None
@@ -306,7 +305,7 @@ class MusixmatchAPI:
                 return lrc
         return None
 
-    def _richsync_as_lrc(self, calls: Dict[str, dict]) -> Optional[str]:
+    def _richsync_as_lrc(self, calls: dict[str, dict]) -> str | None:
         """Richsync (mot-à-mot) → LRC ligne-à-ligne (secours si pas de subtitle)."""
         body = self._call_body(calls, "track.richsync.get")
         raw = (body or {}).get("richsync_body") if body else None
@@ -325,7 +324,7 @@ class MusixmatchAPI:
             out.append(f"{_sec_to_lrc(float(ts))}{text}")
         return "\n".join(out) if out else None
 
-    def _plain_lyrics(self, calls: Dict[str, dict]) -> Tuple[Optional[str], bool]:
+    def _plain_lyrics(self, calls: dict[str, dict]) -> tuple[str | None, bool]:
         """(texte brut, instrumental?)."""
         body = self._call_body(calls, "track.lyrics.get")
         lyr = (body or {}).get("lyrics") if body else None
@@ -335,7 +334,7 @@ class MusixmatchAPI:
         text = lyr.get("lyrics_body") or None
         return text, instrumental
 
-    def _verify_match(self, track: Optional[dict], q_track: str, q_artist: str) -> bool:
+    def _verify_match(self, track: dict | None, q_track: str, q_artist: str) -> bool:
         """Contrôle titre/artiste du morceau apparié (rejette les faux positifs)."""
         if not track:
             return True  # pas de métadonnées de match → on ne bloque pas
@@ -358,9 +357,9 @@ class MusixmatchAPI:
         self,
         track_name: str,
         artist_name: str,
-        duration: Optional[float] = None,
-        album_name: Optional[str] = None,
-    ) -> Optional[Dict]:
+        duration: float | None = None,
+        album_name: str | None = None,
+    ) -> dict | None:
         """
         Récupère les paroles synchronisées Musixmatch (SOURCE 3, dernier recours).
 
@@ -381,7 +380,7 @@ class MusixmatchAPI:
         return None if result is _AUTH_FAILURE else result
 
     def _try_fetch(
-        self, track_name: str, artist_name: str, duration: Optional[float], force_token: bool
+        self, track_name: str, artist_name: str, duration: float | None, force_token: bool
     ):
         """Une passe complète. Renvoie un dict, None, ou la sentinelle _AUTH_FAILURE."""
         if force_token and self._get_token(force_refresh=True) is None:
@@ -441,8 +440,8 @@ class MusixmatchAPI:
         }
 
     def get_synced_as_source3(
-        self, track_name: str, artist_name: str, duration: Optional[float] = None
-    ) -> Optional[Dict]:
+        self, track_name: str, artist_name: str, duration: float | None = None
+    ) -> dict | None:
         """
         Variante prête à brancher dans la branche « LRCLIB ET YTM vides » du pipeline :
         renvoie la forme de `lyrics_sync.compare_synced`
@@ -477,7 +476,7 @@ def _sec_to_lrc(total: float) -> str:
     return f"[{m:02d}:{s:02d}.{cs:02d}]"
 
 
-def _envelope_status(env: Optional[dict]) -> Optional[int]:
+def _envelope_status(env: dict | None) -> int | None:
     """status_code de l'enveloppe racine Musixmatch."""
     if not isinstance(env, dict):
         return None

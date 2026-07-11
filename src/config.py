@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Toujours charger .env comme FALLBACK, sans écraser les variables Windows

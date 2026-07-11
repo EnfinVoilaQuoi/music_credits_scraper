@@ -2,13 +2,13 @@
 Le Treeview lui-même appartient à MainWindow (widget partagé avec la vue albums)."""
 
 import tkinter
-from tkinter import messagebox
 from datetime import datetime
+from tkinter import messagebox
 
-from src.utils.logger import get_logger
 from src.gui import helpers
 from src.gui.dialogs import manual_entry, merge_tracks, report
 from src.gui.panels import albums_view
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -201,8 +201,8 @@ def populate_tracks_table(app):
             try:
                 from src.utils.streams_calculator import (
                     calculate_total_streams,
-                    streams_source_label,
                     format_streams,
+                    streams_source_label,
                 )
 
                 sp = getattr(track, "spotify_streams", None)

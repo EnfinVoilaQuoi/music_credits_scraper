@@ -13,13 +13,11 @@ actives, et niveaux/catégories hors référentiel (insensible à la casse).
 
 from __future__ import annotations
 
-import io
 import re
 import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 

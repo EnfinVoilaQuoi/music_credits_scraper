@@ -8,9 +8,8 @@ import asyncio
 import inspect
 import os
 from pathlib import Path
-from typing import Optional, Tuple
 
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 
 from src.utils.logger import get_logger
@@ -117,12 +116,12 @@ class CrawlAIScraperBase:
     def _crawl_page(
         self,
         url: str,
-        js_before_wait: Optional[str] = None,
-        wait_for: Optional[str] = None,
+        js_before_wait: str | None = None,
+        wait_for: str | None = None,
         wait_timeout: int = 15_000,
         page_timeout: int = 30_000,
         delay_before_return: float = 1.5,
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """
         Crawl synchrone d'une page. Retourne (markdown, html_brut).
         Retourne (None, None) si le crawl échoue.
@@ -206,13 +205,13 @@ class CrawlAIScraperBase:
     async def _patchright_fetch(
         self,
         url: str,
-        js_before_wait: Optional[str],
-        wait_for: Optional[str],
+        js_before_wait: str | None,
+        wait_for: str | None,
         wait_timeout: int,
         page_timeout: int,
         delay_before_return: float,
         headless: bool,
-    ) -> Tuple[Optional[str], Optional[str], bool]:
+    ) -> tuple[str | None, str | None, bool]:
         """
         Fetch via patchright (Chromium undetected) en CONTEXTE PERSISTANT.
         On contrôle nous-mêmes l'attente : la fenêtre reste ouverte jusqu'à ce que
@@ -292,7 +291,7 @@ class CrawlAIScraperBase:
             return None, None, True
 
     @staticmethod
-    def _looks_blocked(error_message: Optional[str], html: Optional[str]) -> bool:
+    def _looks_blocked(error_message: str | None, html: str | None) -> bool:
         """Détecte un blocage anti-bot (Cloudflare) sur échec OU page-défi 200."""
         err = (error_message or "").lower()
         if any(k in err for k in ("cloudflare", "anti-bot", "challenge", "403", "forbidden")):
@@ -311,14 +310,14 @@ class CrawlAIScraperBase:
     async def _async_crawl_page(
         self,
         url: str,
-        js_before_wait: Optional[str],
-        wait_for: Optional[str],
+        js_before_wait: str | None,
+        wait_for: str | None,
         wait_timeout: int,
         page_timeout: int,
         delay_before_return: float,
-        browser_config: Optional[BrowserConfig] = None,
+        browser_config: BrowserConfig | None = None,
         undetected: bool = False,
-    ) -> Tuple[Optional[str], Optional[str], bool]:
+    ) -> tuple[str | None, str | None, bool]:
         """Coroutine interne — retourne (markdown, html, blocked).
 
         undetected=True → utilise l'UndetectedAdapter (anti-bot Cloudflare).

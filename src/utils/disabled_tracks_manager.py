@@ -1,9 +1,9 @@
 """Gestionnaire de mémoire pour les morceaux désactivés"""
 
 import json
-from typing import Set, Dict
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 from src.config import DATA_DIR
 from src.utils.logger import get_logger
 
@@ -25,7 +25,7 @@ class DisabledTracksManager:
         safe_name = safe_name.replace(" ", "_").lower()
         return self.disabled_tracks_dir / f"{safe_name}_disabled.json"
 
-    def save_disabled_tracks(self, artist_name: str, disabled_track_ids: Set[int]) -> bool:
+    def save_disabled_tracks(self, artist_name: str, disabled_track_ids: set[int]) -> bool:
         """
         Sauvegarde les morceaux désactivés pour un artiste
 
@@ -61,7 +61,7 @@ class DisabledTracksManager:
             )
             return False
 
-    def load_disabled_tracks(self, artist_name: str) -> Set[int]:
+    def load_disabled_tracks(self, artist_name: str) -> set[int]:
         """
         Charge les morceaux désactivés pour un artiste
 
@@ -78,7 +78,7 @@ class DisabledTracksManager:
                 logger.debug(f"Aucun fichier de morceaux désactivés trouvé pour {artist_name}")
                 return set()
 
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             # Vérifier la version et migrer si nécessaire
@@ -131,7 +131,7 @@ class DisabledTracksManager:
             logger.error(f"Erreur lors de la suppression du fichier pour {artist_name}: {e}")
             return False
 
-    def get_all_artists_with_disabled_tracks(self) -> Dict[str, int]:
+    def get_all_artists_with_disabled_tracks(self) -> dict[str, int]:
         """
         Retourne tous les artistes ayant des morceaux désactivés
 
@@ -143,7 +143,7 @@ class DisabledTracksManager:
         try:
             for file_path in self.disabled_tracks_dir.glob("*_disabled.json"):
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(file_path, encoding="utf-8") as f:
                         data = json.load(f)
 
                     if isinstance(data, dict) and "artist_name" in data:

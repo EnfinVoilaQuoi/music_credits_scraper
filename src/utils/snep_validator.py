@@ -20,11 +20,9 @@ la GUI via `validate_snep_csv(path)` puis `format_report(report)`.
 from __future__ import annotations
 
 import io
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
@@ -120,7 +118,7 @@ def _col(df: pd.DataFrame, idx: int) -> pd.Series:
 
 def validate_snep_csv(
     csv_path: str | Path,
-    target_years: Optional[tuple[int, ...]] = None,
+    target_years: tuple[int, ...] | None = None,
     recent_years: tuple[int, ...] = (2025, 2026),
 ) -> dict:
     """Analyse le CSV maître SNEP et retourne un rapport structuré.

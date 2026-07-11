@@ -6,12 +6,11 @@ Architecture quota-optimisée :
   Étape 3 — Matching normalisé titre → DB + écriture en base
 """
 
-import re
-import sys
 import io
 import logging
+import re
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -27,14 +26,14 @@ logger = get_logger(__name__)
 from src.utils.title_matching import normalize_title as _normalize_title
 
 
-def _extract_video_id(url: str) -> Optional[str]:
+def _extract_video_id(url: str) -> str | None:
     m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url or "")
     return m.group(1) if m else None
 
 
 def _infer_channel_from_youtube_links(
     api, artist, data_manager, max_votes: int = 8, max_attempts: int = 15
-) -> "Optional[str]":
+) -> "str | None":
     """
     Déduit le canal YTM de l'artiste par vote majoritaire sur les chaînes
     propriétaires des vidéos. Fiable à ~99% dès 2-3 morceaux connus.
@@ -101,7 +100,7 @@ def _infer_channel_from_youtube_links(
     return api.infer_channel_from_videos(video_ids)
 
 
-def update_ytmusic_streams(artist, data_manager) -> Dict:
+def update_ytmusic_streams(artist, data_manager) -> dict:
     """Met à jour les streams YouTube Music des morceaux et albums de l'artiste.
 
     Args:
@@ -180,8 +179,8 @@ def update_ytmusic_streams(artist, data_manager) -> Dict:
         return result
 
     # ── Étape 1 : collecter tous les tracks via ytmusicapi (zéro quota YT) ───
-    tracks_by_album: Dict[str, List[Dict]] = {}
-    all_video_ids: List[str] = []
+    tracks_by_album: dict[str, list[dict]] = {}
+    all_video_ids: list[str] = []
 
     for album_info in albums:
         raw_tracks = api.get_album_tracks_raw(album_info["browseId"])
@@ -201,7 +200,7 @@ def update_ytmusic_streams(artist, data_manager) -> Dict:
 
     # ── Étape 3 : matching DB + mise à jour ───────────────────────────────────
     db_tracks = data_manager.get_artist_tracks(artist.id)
-    track_index: Dict[str, list] = {}
+    track_index: dict[str, list] = {}
     for t in db_tracks:
         track_index.setdefault(_normalize_title(t.title), []).append(t)
 
@@ -209,7 +208,7 @@ def update_ytmusic_streams(artist, data_manager) -> Dict:
     # track_id → {videoId: count} : un morceau sur PLUSIEURS éditions d'album a
     # des videoIds distincts → SOMME des compteurs, dédupliquée par videoId
     # (la même vidéo listée sur deux éditions n'est comptée qu'une fois).
-    vid_counts: Dict[int, Dict[str, int]] = {}
+    vid_counts: dict[int, dict[str, int]] = {}
 
     for album_title, raw_tracks in tracks_by_album.items():
         album_total_streams = 0

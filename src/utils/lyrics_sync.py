@@ -18,12 +18,11 @@ Deux rôles :
 
 import re
 from difflib import SequenceMatcher
-from typing import List, Optional, Tuple
 
 _LRC_RE = re.compile(r"\[(\d+):(\d+)(?:[.:](\d+))?\]\s*(.*)")
 
 
-def parse_lrc(lrc: str) -> List[Tuple[float, str]]:
+def parse_lrc(lrc: str) -> list[tuple[float, str]]:
     """Texte LRC → [(secondes, texte)]."""
     out = []
     for line in (lrc or "").splitlines():
@@ -104,7 +103,7 @@ def annotate_sections(structured: str, lrc: str) -> str:
     # Start de chaque section = timestamp de sa 1ʳᵉ ligne alignable (parmi les 3 premières).
     # Recherche MONOTONE : chaque section cherche APRÈS la dernière ligne alignée, ce qui
     # empêche un refrain répété de se caler sur une occurrence antérieure.
-    starts: List[Optional[float]] = []
+    starts: list[float | None] = []
     cursor = 0
     for sec in sections:
         found = None
@@ -137,13 +136,13 @@ def annotate_sections(structured: str, lrc: str) -> str:
 # ── Cross-check des sources (LRCLIB vs YTM) ─────────────────────────────────────
 
 
-def lrc_last_timestamp(lrc: str) -> Optional[float]:
+def lrc_last_timestamp(lrc: str) -> float | None:
     """Timestamp (secondes) de la dernière ligne synchronisée, ou None."""
     lines = parse_lrc(lrc)
     return lines[-1][0] if lines else None
 
 
-def sync_error(lrc: str, duration: Optional[float]) -> Optional[float]:
+def sync_error(lrc: str, duration: float | None) -> float | None:
     """
     Erreur d'une synchro vis-à-vis de la durée réelle (pour départager deux sources).
     Plus petit = meilleur. Le **dépassement** (dernier timestamp au-delà de la durée)
@@ -158,7 +157,7 @@ def sync_error(lrc: str, duration: Optional[float]) -> Optional[float]:
     return over * 2.0 + under
 
 
-def _line_offsets(lrc_a: str, lrc_b: str) -> List[float]:
+def _line_offsets(lrc_a: str, lrc_b: str) -> list[float]:
     """Décalages temporels (a - b) des lignes de texte communes aux deux LRC."""
     b_index = {}
     for tm, txt in parse_lrc(lrc_b):
@@ -174,8 +173,8 @@ def _line_offsets(lrc_a: str, lrc_b: str) -> List[float]:
 
 
 def compare_synced(
-    lrclib_lrc: Optional[str], ytm_lrc: Optional[str], duration: Optional[float] = None
-) -> Optional[dict]:
+    lrclib_lrc: str | None, ytm_lrc: str | None, duration: float | None = None
+) -> dict | None:
     """
     Croise LRCLIB (source 1) et YTM (source 2) et choisit le LRC à conserver.
 

@@ -4,15 +4,15 @@ Intègre SNEP (France), RIAA (USA) et BRMA (Belgique)
 Fichier: music_credits_scraper/src/managers/certification_manager.py
 """
 
-import pandas as pd
-import sqlite3
-from pathlib import Path
-from datetime import datetime
 import json
 import logging
+import sqlite3
 import subprocess
 import sys
-from typing import Dict, Optional
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
 
 
 class CertificationManager:
@@ -437,7 +437,7 @@ class CertificationManager:
 
         return results
 
-    def generate_update_report(self, results: Dict):
+    def generate_update_report(self, results: dict):
         """Génère un rapport de mise à jour"""
         report_dir = self.data_dir / "reports"
         report_dir.mkdir(exist_ok=True)
@@ -479,7 +479,7 @@ class CertificationManager:
 
         self.logger.info(f"Rapport généré: {report_path}")
 
-    def query_artist(self, artist_name: str, country: Optional[str] = None):
+    def query_artist(self, artist_name: str, country: str | None = None):
         """
         Recherche les certifications d'un artiste
 

@@ -6,9 +6,9 @@ from pathlib import Path
 # Ajouter le dossier parent au path pour les imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.config import DEBUG, GENIUS_API_KEY
 from src.gui.main_window import MainWindow
 from src.utils.logger import get_logger
-from src.config import GENIUS_API_KEY, DEBUG
 
 logger = get_logger(__name__)
 

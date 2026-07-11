@@ -25,7 +25,6 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
 from urllib.parse import quote
 
 from bs4 import BeautifulSoup
@@ -67,7 +66,7 @@ def _level_from_img(src: str) -> str:
     return f"{n}x Platinum"
 
 
-def _units_for(level: str) -> Optional[int]:
+def _units_for(level: str) -> int | None:
     l = (level or "").lower()
     if "diamond" in l:
         return BASE_UNITS["diamond"]
@@ -108,7 +107,7 @@ class RIAAScraperV2:
         end_date: str,
         date_option: str = "certification",
         get_details: bool = False,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Bulk par plage de dates (ligne principale par défaut)."""
         start, end = _norm_date(start_date), _norm_date(end_date)
         url = (
@@ -120,7 +119,7 @@ class RIAAScraperV2:
         html = self._render(url, load_all=True, get_details=get_details)
         return _parse_results(html, get_details) if html else []
 
-    def scrape_by_artist(self, artist: str, get_details: bool = True) -> List[Dict]:
+    def scrape_by_artist(self, artist: str, get_details: bool = True) -> list[dict]:
         """Par artiste (avec MORE DETAILS = historique des paliers)."""
         url = (
             f"{_BASE}?tab_active=default-award&ar={quote(artist)}&ti=&lab="
@@ -139,14 +138,14 @@ class RIAAScraperV2:
         pass
 
     # ------------------------------------------------------------------ rendu
-    def _render(self, url: str, load_all: bool, get_details: bool) -> Optional[str]:
+    def _render(self, url: str, load_all: bool, get_details: bool) -> str | None:
         try:
             return asyncio.run(self._render_async(url, load_all, get_details))
         except Exception as e:
             logger.error(f"RIAA: rendu patchright échoué : {e}")
             return None
 
-    async def _render_async(self, url: str, load_all: bool, get_details: bool) -> Optional[str]:
+    async def _render_async(self, url: str, load_all: bool, get_details: bool) -> str | None:
         try:
             from patchright.async_api import async_playwright
         except Exception as e:
@@ -253,7 +252,7 @@ def _txt(node, sel) -> str:
     return el.get_text(strip=True) if el else ""
 
 
-def _parse_main(row) -> Optional[Dict]:
+def _parse_main(row) -> dict | None:
     artist = _txt(row, "td.artists_cell")
     others = row.select("td.others_cell")
     title = others[0].get_text(strip=True) if others else ""
@@ -277,7 +276,7 @@ def _parse_main(row) -> Optional[Dict]:
     }
 
 
-def _parse_details(soup, rid: str, base: Dict) -> List[Dict]:
+def _parse_details(soup, rid: str, base: dict) -> list[dict]:
     """Historique des paliers depuis le détail (content_recent_table)."""
     det = soup.select_one(f"#recent_{rid}_detail") if rid else None
     history = []
@@ -308,7 +307,7 @@ def _parse_details(soup, rid: str, base: Dict) -> List[Dict]:
     return history
 
 
-def _parse_results(html: str, get_details: bool) -> List[Dict]:
+def _parse_results(html: str, get_details: bool) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     out = []
     for row in soup.select("tr.table_award_row"):

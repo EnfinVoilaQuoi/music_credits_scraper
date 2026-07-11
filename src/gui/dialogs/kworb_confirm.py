@@ -1,9 +1,9 @@
 """Confirmation des rapprochements Kworb incertains"""
 
 import re
+from tkinter import messagebox
 
 import customtkinter as ctk
-from tkinter import messagebox
 
 # Descripteurs entre parenthèses : indice « même morceau » vs « version différente »
 _SAME_HINTS = ("intro", "outro", "interlude", "skit", "prelude", "prélude")

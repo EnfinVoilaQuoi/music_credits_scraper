@@ -2,21 +2,25 @@
 
 import re
 import threading
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 from playwright.sync_api import (
-    Page,
     Browser,
     BrowserContext,
+    Page,
+)
+from playwright.sync_api import (
     Playwright as PlaywrightInstance,
+)
+from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from src.scrapers.playwright_manager import get_playwright
-from src.models import Track
-from src.utils.logger import get_logger, log_api
-from src.utils.llm_extractor import get_shared_extractor, build_songbpm_prompt
 from src.config import SELENIUM_TIMEOUT
+from src.models import Track
+from src.scrapers.playwright_manager import get_playwright
+from src.utils.llm_extractor import build_songbpm_prompt, get_shared_extractor
+from src.utils.logger import get_logger, log_api
 
 logger = get_logger(__name__)
 
@@ -29,14 +33,14 @@ class SongBPMScraper:
     def __init__(self, headless: bool = False):
         self.base_url = "https://songbpm.com/"
         self.headless = headless
-        self._playwright: Optional[PlaywrightInstance] = None
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
-        self.page: Optional[Page] = None
+        self._playwright: PlaywrightInstance | None = None
+        self.browser: Browser | None = None
+        self.context: BrowserContext | None = None
+        self.page: Page | None = None
         self.spotify_id_pattern = re.compile(
             r"spotify\.com/(?:intl-[a-z]{2}/)?track/([a-zA-Z0-9]{22})"
         )
-        self._owner_thread: Optional[int] = None
+        self._owner_thread: int | None = None
         # Init PARESSEUSE : driver créé au premier usage, dans le thread utilisateur
         logger.info(f"SongBPMScraper initialisé (headless={self.headless}, driver lazy)")
 
@@ -95,7 +99,7 @@ class SongBPMScraper:
     # Méthodes de logique pure (inchangées par rapport à v1)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _extract_spotify_id_from_url(self, url: str) -> Optional[str]:
+    def _extract_spotify_id_from_url(self, url: str) -> str | None:
         if not url:
             return None
         match = self.spotify_id_pattern.search(url)
@@ -144,8 +148,8 @@ class SongBPMScraper:
         result_artist: str,
         search_title: str,
         search_artist: str,
-        result_spotify_id: Optional[str] = None,
-        search_spotify_id: Optional[str] = None,
+        result_spotify_id: str | None = None,
+        search_spotify_id: str | None = None,
     ) -> bool:
         if result_spotify_id and search_spotify_id:
             match = result_spotify_id == search_spotify_id
@@ -215,7 +219,7 @@ class SongBPMScraper:
     # Extraction des détails (page de détail d'un morceau)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _extract_track_details(self, detail_url: str, timeout: int = 30) -> Dict[str, Any]:
+    def _extract_track_details(self, detail_url: str, timeout: int = 30) -> dict[str, Any]:
         details = {}
         try:
             # Les liens du site sont relatifs (/@artiste/titre) → URL absolue requise
@@ -277,12 +281,12 @@ class SongBPMScraper:
             logger.error(f"❌ Erreur extraction détails: {e}")
         return details
 
-    def _extract_details_with_llm(self, clean_text: str) -> Dict[str, Any]:
+    def _extract_details_with_llm(self, clean_text: str) -> dict[str, Any]:
         """
         Fallback LLM : extrait mode/key/time_signature du texte de la page
         quand les regex échouent. Valeurs validées strictement (pas d'hallucination).
         """
-        details: Dict[str, Any] = {}
+        details: dict[str, Any] = {}
         llm = get_shared_extractor()
         if not llm or not clean_text:
             return details
@@ -309,7 +313,7 @@ class SongBPMScraper:
     # Recherche sur SongBPM
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _get_search_results(self) -> List[Dict[str, Any]]:
+    def _get_search_results(self) -> list[dict[str, Any]]:
         results = []
         try:
             containers = self.page.query_selector_all("div.bg-card")
@@ -397,11 +401,11 @@ class SongBPMScraper:
         self,
         track_title: str,
         artist_name: str,
-        spotify_id: Optional[str] = None,
+        spotify_id: str | None = None,
         max_results_to_check: int = 5,
         fetch_details: bool = True,
         reload_homepage: bool = True,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         try:
             if reload_homepage:
                 logger.info("🌐 Chargement page d'accueil SongBPM...")
@@ -468,10 +472,10 @@ class SongBPMScraper:
         self,
         track_title: str,
         artist_name: str,
-        spotify_id: Optional[str] = None,
+        spotify_id: str | None = None,
         max_results_to_check: int = 5,
         fetch_details: bool = True,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         self._ensure_driver()
         if not self.page:
             logger.error("❌ SongBPM: Browser non initialisé")
@@ -510,7 +514,7 @@ class SongBPMScraper:
         return None
 
     def enrich_track_data(
-        self, track: Track, force_update: bool = False, artist_tracks: Optional[List[Track]] = None
+        self, track: Track, force_update: bool = False, artist_tracks: list[Track] | None = None
     ) -> bool:
         try:
             self._ensure_driver()

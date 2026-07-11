@@ -1,9 +1,11 @@
 """Système de logging centralisé"""
 
 import logging
-import coloredlogs
 from datetime import datetime
-from src.config import LOGS_DIR, LOG_LEVEL, DEBUG
+
+import coloredlogs
+
+from src.config import DEBUG, LOG_LEVEL, LOGS_DIR
 
 
 class Logger:

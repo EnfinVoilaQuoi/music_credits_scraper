@@ -14,13 +14,11 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
     garde les projets communs type Bitume Caviar, écarte les simples apparitions).
 """
 
-import re
-import sys
 import difflib
 import logging
+import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -34,7 +32,7 @@ logger = get_logger(__name__)
 from src.utils.title_matching import normalize_title as _normalize_title
 
 
-def _names_match(page_name: Optional[str], artist_name: str) -> bool:
+def _names_match(page_name: str | None, artist_name: str) -> bool:
     """Le nom affiché par la page Kworb correspond-il à notre artiste ?"""
     if not page_name:
         return False
@@ -48,7 +46,7 @@ def _names_match(page_name: Optional[str], artist_name: str) -> bool:
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
 
 
-def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> Optional[str]:
+def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | None:
     """
     Déduit l'ID Spotify de l'ARTISTE par vote majoritaire sur les crédits de
     plusieurs de ses morceaux (pages embed). Doubles garde-fous anti-Limsa
@@ -134,7 +132,7 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     return None, spotify_artist_id
 
 
-def update_kworb_streams(artist, data_manager) -> Dict:
+def update_kworb_streams(artist, data_manager) -> dict:
     """Scrape kworb.net et met à jour les streams des morceaux et albums de l'artiste.
 
     Args:
@@ -166,7 +164,7 @@ def update_kworb_streams(artist, data_manager) -> Dict:
     }
 
     # ── 1. S'assurer que l'ID Spotify artiste est disponible ──────────────────
-    spotify_artist_id: Optional[str] = getattr(artist, "spotify_id", None)
+    spotify_artist_id: str | None = getattr(artist, "spotify_id", None)
 
     if not spotify_artist_id:
         logger.info(f"spotify_id manquant pour '{artist.name}' — vote sur les pages tracks")
@@ -217,7 +215,7 @@ def update_kworb_streams(artist, data_manager) -> Dict:
     # ── 4. Streams des morceaux : ID → titre unique → homonymes désambiguïsés ─
     tracks = data_manager.get_artist_tracks(artist.id)
     by_spotify_id = {t.spotify_id: t for t in tracks if getattr(t, "spotify_id", None)}
-    by_title: Dict[str, List] = defaultdict(list)
+    by_title: dict[str, list] = defaultdict(list)
     for t in tracks:
         by_title[_normalize_title(t.title)].append(t)
 
@@ -309,7 +307,7 @@ def update_kworb_streams(artist, data_manager) -> Dict:
 
     # Accumulation par track : un morceau peut avoir PLUSIEURS lignes Kworb
     # (éditions/single) → SOMME des streams (comme les albums).
-    agg: Dict[int, Dict] = {}
+    agg: dict[int, dict] = {}
 
     for entry in page_songs["entries"]:
         track = None

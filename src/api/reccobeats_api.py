@@ -4,11 +4,11 @@ Responsabilité UNIQUE : Récupérer les données musicales (BPM, Key, Mode) dep
 Le scraping Spotify ID est géré par SpotifyIDScraper (module séparé)
 """
 
-import requests
 import json
-import time
 import logging
-from typing import Dict, List, Optional
+import time
+
+import requests
 
 logger = logging.getLogger("ReccoBeatsAPI")
 
@@ -34,12 +34,12 @@ class ReccoBeatsIntegratedClient:
             {"Accept": "application/json", "User-Agent": "ReccoBeats-Python-Client/3.0"}
         )
 
-        logger.info(f"ReccoBeats client initialisé")
+        logger.info("ReccoBeats client initialisé")
 
-    def _load_cache(self) -> Dict:
+    def _load_cache(self) -> dict:
         """Charge le cache depuis le fichier"""
         try:
-            with open(self.cache_file, "r", encoding="utf-8") as f:
+            with open(self.cache_file, encoding="utf-8") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
@@ -56,7 +56,7 @@ class ReccoBeatsIntegratedClient:
         """Génère une clé de cache basée sur l'ID Spotify"""
         return f"spotify_id::{spotify_id}"
 
-    def get_track_from_reccobeats(self, spotify_id: str) -> Optional[Dict]:
+    def get_track_from_reccobeats(self, spotify_id: str) -> dict | None:
         """
         Récupère les données d'un track depuis ReccoBeats
 
@@ -119,7 +119,7 @@ class ReccoBeatsIntegratedClient:
 
         return None
 
-    def get_track_audio_features(self, reccobeats_id: str) -> Optional[Dict]:
+    def get_track_audio_features(self, reccobeats_id: str) -> dict | None:
         """
         Récupère les audio features (BPM, Key, Mode, etc.)
 
@@ -150,7 +150,7 @@ class ReccoBeatsIntegratedClient:
 
     def get_track_info(
         self, spotify_id: str, use_cache: bool = True, force_refresh: bool = False
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Récupère les informations complètes d'un track (données + audio features)
 
@@ -180,7 +180,7 @@ class ReccoBeatsIntegratedClient:
                     has_audio_features = cached.get("audio_features") is not None
 
                     if has_bpm or has_audio_features:
-                        logger.info(f"✅ Données complètes trouvées dans le cache")
+                        logger.info("✅ Données complètes trouvées dans le cache")
                         return cached
 
             # Étape 1: Récupérer les données du track
@@ -218,7 +218,7 @@ class ReccoBeatsIntegratedClient:
             logger.error(traceback.format_exc())
             return None
 
-    def _enrich_result_with_features(self, result: Dict, track_data: Dict) -> Dict:
+    def _enrich_result_with_features(self, result: dict, track_data: dict) -> dict:
         """
         Complète un result de base avec la durée et les audio features
         (BPM, Key, Mode, energy, danceability, valence, musical_key).
@@ -253,7 +253,7 @@ class ReccoBeatsIntegratedClient:
                         logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
         return result
 
-    def get_track_by_isrc(self, isrc: str) -> Optional[Dict]:
+    def get_track_by_isrc(self, isrc: str) -> dict | None:
         """
         Récupère le track ReccoBeats correspondant à un ISRC.
         L'endpoint /track?ids=<isrc> peut renvoyer PLUSIEURS entrées (pressings
@@ -284,7 +284,7 @@ class ReccoBeatsIntegratedClient:
 
     def get_track_info_by_isrc(
         self, isrc: str, use_cache: bool = True, force_refresh: bool = False
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Équivalent de get_track_info mais à partir d'un ISRC (pas de Spotify ID).
         Même forme de retour (success, bpm, key, mode, musical_key, duration...).
@@ -332,7 +332,7 @@ class ReccoBeatsIntegratedClient:
             logger.error(f"❌ Erreur get_track_info_by_isrc: {e}")
             return None
 
-    def get_audio_features_batch(self, reccobeats_ids: List[str]) -> Dict[str, Dict]:
+    def get_audio_features_batch(self, reccobeats_ids: list[str]) -> dict[str, dict]:
         """
         Récupère les audio features de plusieurs tracks EN UN SEUL appel
         (GET /audio-features?ids=...), au lieu de N appels /track/{id}/audio-features.
@@ -343,7 +343,7 @@ class ReccoBeatsIntegratedClient:
         Returns:
             Mapping { reccobeats_id: features }
         """
-        result: Dict[str, Dict] = {}
+        result: dict[str, dict] = {}
         if not reccobeats_ids:
             return result
         try:
@@ -362,7 +362,7 @@ class ReccoBeatsIntegratedClient:
             logger.error(f"❌ audio-features batch error: {e}")
         return result
 
-    def get_multiple_tracks_with_bpm(self, ids: List[str]) -> List[Dict]:
+    def get_multiple_tracks_with_bpm(self, ids: list[str]) -> list[dict]:
         """
         Récupère plusieurs tracks + audio features en batch.
         `ids` accepte Spotify IDs, ReccoBeats IDs ou ISRC (max 40 — limite API).
@@ -432,7 +432,7 @@ class ReccoBeatsIntegratedClient:
 
         return errors_removed > 0
 
-    def get_cache_stats(self) -> Dict:
+    def get_cache_stats(self) -> dict:
         """Statistiques du cache"""
         total = len(self.cache)
         errors = len([v for v in self.cache.values() if isinstance(v, dict) and "error" in v])
@@ -479,7 +479,7 @@ if __name__ == "__main__":
         result = client.get_track_info(test_spotify_id)
 
         if result:
-            print(f"\n✅ Succès!")
+            print("\n✅ Succès!")
             print(f"  - Titre: {result.get('trackTitle', 'N/A')}")
             print(f"  - Artiste: {result.get('artistName', 'N/A')}")
             print(f"  - BPM: {result.get('bpm', 'N/A')}")
@@ -488,7 +488,7 @@ if __name__ == "__main__":
             print(f"  - Musical Key: {result.get('musical_key', 'N/A')}")
             print(f"  - Duration: {result.get('duration', 'N/A')}s")
         else:
-            print(f"\n❌ Échec")
+            print("\n❌ Échec")
 
         # Stats du cache
         print("\n=== Stats du cache ===")

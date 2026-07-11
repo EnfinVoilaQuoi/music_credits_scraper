@@ -22,7 +22,7 @@ class SimpleCSVReader:
         """Lit un CSV et retourne une liste de dictionnaires"""
         rows = []
 
-        with open(filepath, "r", encoding=encoding) as f:
+        with open(filepath, encoding=encoding) as f:
             # Lire la première ligne (headers)
             header_line = f.readline().strip()
             # Enlever le BOM si présent
@@ -170,7 +170,7 @@ class SimpleSNEPImporter:
                 elif "CONSTAT" in h_upper:
                     col_map["certification_date"] = h
 
-            print(f"\n📋 Colonnes identifiées :")
+            print("\n📋 Colonnes identifiées :")
             for key, value in col_map.items():
                 print(f"  {key}: {value}")
 
@@ -261,7 +261,7 @@ class SimpleSNEPImporter:
             if changes > 0:
                 print(f"  • Catégories uniformisées : {changes} 'Single' → 'Singles'")
 
-            print(f"\n✅ Import terminé !")
+            print("\n✅ Import terminé !")
             print(f"  • Nouveaux enregistrements : {new_records}")
             print(f"  • Erreurs : {errors}")
 
@@ -321,7 +321,7 @@ class SimpleSNEPImporter:
         cursor.execute("SELECT COUNT(*) FROM certifications")
         total = cursor.fetchone()[0]
 
-        print(f"\n📊 STATISTIQUES:")
+        print("\n📊 STATISTIQUES:")
         print(f"  • Total: {total} certifications")
 
         if total > 0:
@@ -369,7 +369,7 @@ def main():
     importer = SimpleSNEPImporter()
 
     if not importer.csv_path.exists():
-        print(f"\n❌ Fichier CSV non trouvé!")
+        print("\n❌ Fichier CSV non trouvé!")
         print(f"📁 Placez 'certif-.csv' dans: {importer.csv_path.parent}")
         return
 

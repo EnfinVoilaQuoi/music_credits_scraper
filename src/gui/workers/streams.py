@@ -1,10 +1,11 @@
 """Mise à jour des streams Spotify (Kworb) / YouTube Music en thread"""
 
-import customtkinter as ctk
 from tkinter import messagebox
 
-from src.utils.logger import get_logger
+import customtkinter as ctk
+
 from src.gui.dialogs import kworb_confirm, report
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -89,8 +90,8 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                     0, lambda: app.progress_label.configure(text="YouTube Music en cours...")
                 )
                 try:
-                    from src.utils.update_ytmusic import update_ytmusic_streams
                     from src.api.ytmusic_api import YTMusicAPI
+                    from src.utils.update_ytmusic import update_ytmusic_streams
 
                     # Épingler le canal YTM saisi (@handle, lien ou UC...)
                     if ytm_channel_raw:

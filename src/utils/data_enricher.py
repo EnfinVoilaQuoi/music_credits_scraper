@@ -3,16 +3,16 @@ Module d'enrichissement des données tracks
 VERSION CORRIGÉE: Empêche la duplication des Spotify IDs + Intégration Spotify_ID scraper + GetSongBPM API
 """
 
-from typing import List, Dict, Optional
+import os
+
+from src.api.deezer_api import DeezerAPI
+from src.api.discogs_api import DiscogsClient
+from src.api.getsongbpm_api import GetSongBPMFetcher
+from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.models import Track
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
-from src.api.reccobeats_api import ReccoBeatsIntegratedClient
-from src.api.getsongbpm_api import GetSongBPMFetcher
-from src.api.deezer_api import DeezerAPI
-from src.api.discogs_api import DiscogsClient
 from src.utils.logger import get_logger
-import os
 
 logger = get_logger(__name__)
 
@@ -189,7 +189,7 @@ class DataEnricher:
     # ================== NOUVEAU: VALIDATION SPOTIFY ID ==================
 
     def validate_spotify_id_unique(
-        self, spotify_id: str, current_track: Track, artist_tracks: List[Track]
+        self, spotify_id: str, current_track: Track, artist_tracks: list[Track]
     ) -> bool:
         """
         Valide qu'un Spotify ID n'est pas utilisé par un AUTRE titre
@@ -215,7 +215,7 @@ class DataEnricher:
 
                 # ✅ C'est le MÊME morceau : OK
                 if track_title_normalized == current_title_normalized:
-                    logger.info(f"✅ ID déjà utilisé par le même titre (version alternative)")
+                    logger.info("✅ ID déjà utilisé par le même titre (version alternative)")
                     return True
 
                 # ❌ C'est un AUTRE morceau : REJET
@@ -226,8 +226,8 @@ class DataEnricher:
         return True
 
     def get_unique_spotify_id(
-        self, track: Track, artist_tracks: List[Track], force_scraper: bool = False
-    ) -> Optional[str]:
+        self, track: Track, artist_tracks: list[Track], force_scraper: bool = False
+    ) -> str | None:
         """
         Récupère un Spotify ID unique pour un track
         Utilise le scraper Spotify_ID pour obtenir le bon ID
@@ -253,7 +253,7 @@ class DataEnricher:
                 return track.spotify_id
             else:
                 logger.warning(
-                    f"⚠️ Spotify ID existant invalide (dupliqué), recherche d'un nouveau..."
+                    "⚠️ Spotify ID existant invalide (dupliqué), recherche d'un nouveau..."
                 )
 
         # Utiliser le scraper Spotify_ID pour obtenir le bon ID
@@ -267,7 +267,7 @@ class DataEnricher:
         # Valider l'unicité de l'ID trouvé
         if not self.validate_spotify_id_unique(spotify_id, track, artist_tracks):
             logger.error(f"❌ ERREUR: Spotify ID trouvé par scraper est déjà utilisé: {spotify_id}")
-            logger.error(f"   Cela ne devrait pas arriver. Vérifiez la base de données.")
+            logger.error("   Cela ne devrait pas arriver. Vérifiez la base de données.")
             return None
 
         logger.info(f"✅ Spotify ID unique trouvé via scraper: {spotify_id}")
@@ -295,7 +295,7 @@ class DataEnricher:
 
         # VÉRIFICATION DE SÉCURITÉ: S'assurer que les données essentielles existent
         if not hasattr(track, "title") or not track.title:
-            logger.error(f"❌ ERREUR CRITIQUE: Track sans titre détecté! Annulation du nettoyage.")
+            logger.error("❌ ERREUR CRITIQUE: Track sans titre détecté! Annulation du nettoyage.")
             return False
 
         if not hasattr(track, "artist"):
@@ -348,11 +348,11 @@ class DataEnricher:
 
         # VÉRIFICATION POST-NETTOYAGE: S'assurer que les données essentielles sont toujours là
         if not hasattr(track, "title") or not track.title:
-            logger.error(f"❌ ERREUR CRITIQUE POST-NETTOYAGE: Le titre a disparu!")
+            logger.error("❌ ERREUR CRITIQUE POST-NETTOYAGE: Le titre a disparu!")
             return False
 
         if not hasattr(track, "artist") or not track.artist:
-            logger.error(f"❌ ERREUR CRITIQUE POST-NETTOYAGE: L'artiste a disparu!")
+            logger.error("❌ ERREUR CRITIQUE POST-NETTOYAGE: L'artiste a disparu!")
             return False
 
         if cleaned:
@@ -365,7 +365,7 @@ class DataEnricher:
         return cleaned
 
     def clear_multiple_tracks_data(
-        self, tracks: List[Track], clear_spotify_id: bool = False
+        self, tracks: list[Track], clear_spotify_id: bool = False
     ) -> int:
         """
         Nettoie les données de plusieurs tracks
@@ -392,8 +392,8 @@ class DataEnricher:
         """
         Normalise un titre pour comparaison
         """
-        import unicodedata
         import re
+        import unicodedata
 
         title = title.lower()
 
@@ -418,7 +418,7 @@ class DataEnricher:
 
     # ================================================================
 
-    def get_available_sources(self) -> List[str]:
+    def get_available_sources(self) -> list[str]:
         """Retourne la liste des sources disponibles"""
         return [k for k, v in self.apis_available.items() if v]
 
@@ -432,11 +432,11 @@ class DataEnricher:
     def enrich_track(
         self,
         track: Track,
-        sources: Optional[List[str]] = None,
+        sources: list[str] | None = None,
         force_update: bool = False,
-        artist_tracks: Optional[List[Track]] = None,
+        artist_tracks: list[Track] | None = None,
         clear_on_failure: bool = True,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """
         Enrichit un morceau avec les sources spécifiées
         VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM + Deezer + GetSongBPM + Discogs
@@ -548,7 +548,7 @@ class DataEnricher:
                             except Exception as e:
                                 logger.debug(f"Impossible de récupérer le titre de page: {e}")
                     else:
-                        logger.warning(f"❌ Échec récupération Spotify ID via scraper")
+                        logger.warning("❌ Échec récupération Spotify ID via scraper")
                         results["spotify_id"] = False
                 except Exception as e:
                     logger.error(f"Erreur Spotify ID scraper pour {track.title}: {e}")
@@ -896,7 +896,7 @@ class DataEnricher:
                 if force_update and initial_bpm is not None:
                     # Vérifications de sécurité
                     if not hasattr(track, "title") or not track.title:
-                        logger.error(f"❌ ERREUR: Track sans titre, annulation du nettoyage")
+                        logger.error("❌ ERREUR: Track sans titre, annulation du nettoyage")
                         return results
 
                     if not hasattr(track, "artist"):
@@ -909,7 +909,7 @@ class DataEnricher:
                         f"⚠️ NETTOYAGE: Aucune source n'a trouvé de données pour '{track.title}'"
                     )
                     logger.warning(
-                        f"⚠️ Effacement des anciennes valeurs potentiellement erronées..."
+                        "⚠️ Effacement des anciennes valeurs potentiellement erronées..."
                     )
 
                     # Effacer UNIQUEMENT les données musicales
@@ -940,9 +940,9 @@ class DataEnricher:
 
                     # Vérification post-nettoyage
                     if not hasattr(track, "title") or not track.title:
-                        logger.error(f"❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
+                        logger.error("❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
                     elif not hasattr(track, "artist") or not track.artist:
-                        logger.error(f"❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
+                        logger.error("❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
                     else:
                         logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
                         results["cleaned"] = True
@@ -1046,13 +1046,13 @@ class DataEnricher:
         else:
             # Une seule octave : valeur de la source la plus fiable
             V = max(best, key=lambda sb: self._BPM_SOURCE_RANK.get(sb[0], 0))[1]
-            if conf < 2 and V < th and V * 2 <= 220:
+            if conf < 2 and th > V and V * 2 <= 220:
                 # (3) half-time isolé, aucune confirmation → on double
                 bpm_real, bpm_alt = V * 2, V
             else:
                 # (2) consensus, ou déjà bande haute → on garde V
                 bpm_real = V
-                if V < th and V * 2 <= 220:
+                if th > V and V * 2 <= 220:
                     bpm_alt = V * 2  # ex. 88 (consensus) → alt 176
                 else:
                     half = V // 2
@@ -1082,7 +1082,7 @@ class DataEnricher:
         track._bpm_candidates = []
 
     def _apply_reccobeats_result(
-        self, track: Track, track_info: Dict, resolution: Optional[str] = None
+        self, track: Track, track_info: dict, resolution: str | None = None
     ) -> bool:
         """
         Applique au track les données d'un result ReccoBeats (bpm/key/mode/
@@ -1133,7 +1133,7 @@ class DataEnricher:
 
         return applied
 
-    def _try_reccobeats_by_isrc(self, track: Track, artist_name: Optional[str] = None) -> bool:
+    def _try_reccobeats_by_isrc(self, track: Track, artist_name: str | None = None) -> bool:
         """
         Voie ISRC : récupère l'ISRC (track.isrc ou Deezer) puis interroge
         ReccoBeats SANS scraper de Spotify ID. Applique BPM/Key/Mode au track.
@@ -1191,7 +1191,7 @@ class DataEnricher:
     def _enrich_with_reccobeats(
         self,
         track: Track,
-        artist_tracks: Optional[List[Track]] = None,
+        artist_tracks: list[Track] | None = None,
         skip_isrc: bool = False,
         allow_spotify_scrape: bool = True,
     ) -> bool:
@@ -1243,13 +1243,13 @@ class DataEnricher:
                     spotify_id = track.spotify_id
                     logger.info(f"✅ Spotify ID existant validé: {spotify_id}")
                 else:
-                    logger.warning(f"⚠️ Spotify ID existant est un duplicata, il sera ignoré")
+                    logger.warning("⚠️ Spotify ID existant est un duplicata, il sera ignoré")
                     track.spotify_id = None
 
             # 1b. Si pas d'ID, utiliser SpotifyIDScraper (sauf si l'étape 0 l'a déjà fait)
             if not spotify_id and not allow_spotify_scrape:
                 logger.info(
-                    f"⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
+                    "⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
                 )
             if not spotify_id and allow_spotify_scrape and self.spotify_id_scraper:
                 logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
@@ -1280,7 +1280,7 @@ class DataEnricher:
                             except Exception as e:
                                 logger.debug(f"Impossible de récupérer le titre de page: {e}")
                     else:
-                        logger.warning(f"❌ SpotifyIDScraper n'a pas trouvé d'ID")
+                        logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
 
                 except Exception as e:
                     logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
@@ -1306,7 +1306,7 @@ class DataEnricher:
                 logger.warning(f"ReccoBeats: ❌ Pas de données pour ID {spotify_id}")
                 return False
 
-            logger.debug(f"ReccoBeats: ✅ Données récupérées")
+            logger.debug("ReccoBeats: ✅ Données récupérées")
             track.reccobeats_resolution = "spotify_id"
 
             # Stocker le BPM
@@ -1485,7 +1485,7 @@ class DataEnricher:
             return False
 
     def _enrich_with_songbpm(
-        self, track: Track, force_update: bool = False, artist_tracks: Optional[List[Track]] = None
+        self, track: Track, force_update: bool = False, artist_tracks: list[Track] | None = None
     ) -> bool:
         """
         Enrichit avec SongBPM scraper
@@ -1519,13 +1519,13 @@ class DataEnricher:
             if spotify_id and artist_tracks:
                 if not self.validate_spotify_id_unique(spotify_id, track, artist_tracks):
                     logger.warning(
-                        f"⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM"
+                        "⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM"
                     )
                     spotify_id = None
 
             # MODIFIÉ: Timeout réduit à 30 secondes avec arrêt forcé du driver
-            import signal
             import platform
+            import signal
             import threading
 
             is_windows = platform.system() == "Windows"
@@ -1718,7 +1718,7 @@ class DataEnricher:
                     date_check = verifications["release_date"]
                     if date_check["is_valid"]:
                         if date_check.get("dates_match") is True:
-                            logger.info(f"   ✅ Release date cohérente")
+                            logger.info("   ✅ Release date cohérente")
                         elif date_check.get("dates_match") is False:
                             logger.warning(
                                 f"   ⚠️ Release dates différentes: Deezer={date_check.get('deezer_date')} vs Scraping={date_check.get('scraped_date')}"
@@ -1740,7 +1740,7 @@ class DataEnricher:
                     logger.info(f"   ✅ Duration mise à jour: {track.duration}s")
                     updated = True
                 else:
-                    logger.warning(f"   ⚠️ Duration Deezer ignorée (incohérente)")
+                    logger.warning("   ⚠️ Duration Deezer ignorée (incohérente)")
 
             # Stocker la Release Date si elle est cohérente ou si on force la mise à jour
             if data.get("deezer_release_date"):
@@ -1755,7 +1755,7 @@ class DataEnricher:
                     logger.info(f"   ✅ Release date mise à jour: {track.release_date}")
                     updated = True
                 elif date_check.get("dates_match") is False:
-                    logger.warning(f"   ⚠️ Release date Deezer ignorée (différente du scraping)")
+                    logger.warning("   ⚠️ Release date Deezer ignorée (différente du scraping)")
 
             # Stocker les métadonnées supplémentaires (toujours, pas de vérification nécessaire)
             if data.get("deezer_track_id"):
@@ -1803,7 +1803,7 @@ class DataEnricher:
                     or not track.deezer_picture_url
                 ):
                     track.deezer_picture_url = data["deezer_picture"]
-                    logger.info(f"   ✅ Deezer picture URL stockée")
+                    logger.info("   ✅ Deezer picture URL stockée")
                     updated = True
 
             if updated:

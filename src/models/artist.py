@@ -1,8 +1,8 @@
 """Modèle pour représenter un artiste"""
 
 from dataclasses import dataclass, field
-from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.models.track import Track
@@ -12,14 +12,14 @@ if TYPE_CHECKING:
 class Artist:
     """Représente un artiste musical"""
 
-    id: Optional[int] = None
+    id: int | None = None
     name: str = ""
-    genius_id: Optional[int] = None
-    spotify_id: Optional[str] = None
-    discogs_id: Optional[int] = None
-    spotify_monthly_listeners: Optional[int] = None
-    ytm_monthly_listeners: Optional[int] = None
-    tracks: List["Track"] = field(default_factory=list)
+    genius_id: int | None = None
+    spotify_id: str | None = None
+    discogs_id: int | None = None
+    spotify_monthly_listeners: int | None = None
+    ytm_monthly_listeners: int | None = None
+    tracks: list["Track"] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -53,7 +53,7 @@ class ArtistDetail:
 
     artist_id: str
     name: str
-    spotify_href: Optional[str] = None
+    spotify_href: str | None = None
     # tu peux ajouter d’autres attributs (genres, popularité, etc.)
 
     def to_dict(self):

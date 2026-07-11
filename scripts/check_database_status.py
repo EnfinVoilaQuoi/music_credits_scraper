@@ -2,10 +2,10 @@
 Script de vérification de l'état de la base de données
 Affiche un résumé des données et des backups disponibles
 """
-import sys
 import io
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Fix encodage Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -13,9 +13,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 # Ajouter le répertoire parent au path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import sqlite3
+
 from src.utils.data_manager import DataManager
 from src.utils.database_backup import get_backup_manager
-import sqlite3
 
 
 def format_size(size_bytes):

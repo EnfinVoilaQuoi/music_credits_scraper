@@ -1,12 +1,13 @@
 """Interface graphique pour la mise à jour des certifications musicales"""
 
-import customtkinter as ctk
-import threading
 import subprocess
 import sys
-from pathlib import Path
+import threading
 from datetime import datetime
+from pathlib import Path
 from tkinter import messagebox
+
+import customtkinter as ctk
 import pandas as pd
 
 from src.utils.logger import get_logger
@@ -256,7 +257,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     if gaps:
                         status_text += f"   ⚠️ {len(gaps)} période(s) manquante(s)\n"
             else:
-                status_text += f"🇫🇷 SNEP: ❌ Pas de données\n"
+                status_text += "🇫🇷 SNEP: ❌ Pas de données\n"
 
             # BRMA
             brma_path = data_path / "brma" / "certif_brma.csv"  # Nom correct du fichier BRMA
@@ -268,7 +269,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     if gaps:
                         status_text += f"   ⚠️ {len(gaps)} période(s) manquante(s)\n"
             else:
-                status_text += f"🇧🇪 BRMA: ❌ Pas de données\n"
+                status_text += "🇧🇪 BRMA: ❌ Pas de données\n"
 
             # RIAA
             riaa_path = data_path / "riaa" / "certif_riaa.csv"  # Nom correct du fichier RIAA
@@ -280,7 +281,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     if gaps:
                         status_text += f"   ⚠️ {len(gaps)} période(s) manquante(s)\n"
             else:
-                status_text += f"🇺🇸 RIAA: ❌ Pas de données\n"
+                status_text += "🇺🇸 RIAA: ❌ Pas de données\n"
 
             # Informations système
             status_text += f"\n📅 Vérification: {datetime.now():%d/%m/%Y %H:%M:%S}\n"
@@ -364,7 +365,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 outputs.append(f"SNEP : erreur ({e})")
 
             # 2) RIAA par artiste (route CDP anti-Cloudflare)
-            self._set_progress(f"🇺🇸 RIAA : préparation Chrome…")
+            self._set_progress("🇺🇸 RIAA : préparation Chrome…")
             env = None
             try:
                 from src.scrapers.cdp_chrome import ensure_cdp_chrome
@@ -487,7 +488,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         def run():
             try:
                 from src.config import DATA_PATH
-                from src.utils.snep_validator import validate_snep_csv, format_report
+                from src.utils.snep_validator import format_report, validate_snep_csv
 
                 csv_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
 
@@ -705,7 +706,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         def run():
             try:
                 from src.config import DATA_PATH
-                from src.utils.brma_validator import validate_brma_csv, format_report
+                from src.utils.brma_validator import format_report, validate_brma_csv
 
                 csv_path = Path(DATA_PATH) / "certifications" / "brma" / "certif_brma.csv"
                 if not csv_path.exists():
@@ -732,7 +733,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         def run():
             try:
                 from src.config import DATA_PATH
-                from src.utils.riaa_validator import validate_riaa_csv, format_report
+                from src.utils.riaa_validator import format_report, validate_riaa_csv
 
                 csv_path = Path(DATA_PATH) / "certifications" / "riaa" / "certif_riaa.csv"
                 if not csv_path.exists():

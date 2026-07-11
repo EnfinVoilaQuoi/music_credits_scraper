@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Script de mise à jour automatique et manuelle des certifications RIAA
 Compatible avec le système de gestion unifié des certifications
 """
 
-import sys
-import io
-import re
-import pandas as pd
-import sqlite3
-from pathlib import Path
-from datetime import datetime, timedelta
-import logging
-import time
 import argparse
-from typing import Optional, List, Dict
+import io
+import logging
+import re
+import sqlite3
+import sys
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import pandas as pd
 
 # Configurer l'encodage UTF-8 pour la console Windows
 if sys.platform == "win32":
@@ -122,7 +121,7 @@ class RIAADatabaseUpdater:
 
         self.logger.info(f"Base de données initialisée: {self.db_path}")
 
-    def get_last_update_date(self) -> Optional[datetime]:
+    def get_last_update_date(self) -> datetime | None:
         """Date de la dernière certif connue — lue depuis certif_riaa.csv (le
         fichier canonique alimentant le matcher), pas la base sqlite."""
         try:
@@ -139,7 +138,7 @@ class RIAADatabaseUpdater:
         # Repli : fin de la base historique
         return datetime(2017, 10, 1)
 
-    def update_from_scraped_data(self, data: List[Dict]) -> tuple:
+    def update_from_scraped_data(self, data: list[dict]) -> tuple:
         """Met à jour la base de données avec les données scrapées"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -247,7 +246,7 @@ class RIAADatabaseUpdater:
             start_str = start_date.strftime("%m/%d/%Y")
             end_str = end_date.strftime("%m/%d/%Y")
 
-            self.logger.info(f"=== MISE À JOUR RIAA ===")
+            self.logger.info("=== MISE À JOUR RIAA ===")
             self.logger.info(f"Période: {start_str} - {end_str}")
 
             # Initialise le scraper
@@ -450,7 +449,7 @@ class RIAADatabaseUpdater:
             finally:
                 self.scraper.close_driver()
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """Retourne les statistiques de la base de données"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -551,7 +550,7 @@ def _riaa_level(s: str) -> str:
     return s
 
 
-def _flatten_records(records: List[Dict]) -> List[Dict]:
+def _flatten_records(records: list[dict]) -> list[dict]:
     """Aplati les enregistrements scrapés (ligne principale + historique) vers
     le schéma certif_riaa.csv. Avec MORE DETAILS, chaque palier = une ligne."""
     rows = []
@@ -596,7 +595,7 @@ def _flatten_records(records: List[Dict]) -> List[Dict]:
     return rows
 
 
-def _merge_certif_csv(new_rows: List[Dict]) -> tuple:
+def _merge_certif_csv(new_rows: list[dict]) -> tuple:
     """Fusionne des lignes dans certif_riaa.csv (dédup normalisée, backup avant).
     Retourne (total_après, ajoutées)."""
     if not new_rows:

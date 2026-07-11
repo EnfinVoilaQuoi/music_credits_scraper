@@ -6,7 +6,7 @@ Remplace les sélecteurs CSS fragiles de v2 par une extraction via LLM.
 import re
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from bs4 import BeautifulSoup
 
@@ -86,7 +86,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
     # API publique
     # -------------------------------------------------------------------------
 
-    def scrape_track_credits(self, track: Track, include_lyrics: bool = True) -> List[Credit]:
+    def scrape_track_credits(self, track: Track, include_lyrics: bool = True) -> list[Credit]:
         """
         Point d'entrée principal — identique à GeniusScraper.scrape_track_credits().
         Bonus v3 : les paroles structurées sont extraites du MÊME crawl
@@ -122,7 +122,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             except Exception as e:
                 logger.debug(f"GeniusScraperV3: album introuvable pour '{track.title}': {e}")
 
-        credits: List[Credit] = []
+        credits: list[Credit] = []
 
         # 1. Extraction structurée du HTML (déterministe et complète)
         if html:
@@ -197,8 +197,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
         return lyrics
 
     def scrape_multiple_tracks_with_lyrics(
-        self, tracks: List[Track], progress_callback=None, include_lyrics: bool = True
-    ) -> Dict[str, Any]:
+        self, tracks: list[Track], progress_callback=None, include_lyrics: bool = True
+    ) -> dict[str, Any]:
         """Scrape crédits + paroles — même interface que GeniusScraper (v2)."""
         results = {
             "success": 0,
@@ -232,7 +232,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         )
         return results
 
-    def scrape_lyrics_batch(self, tracks: List[Track], progress_callback=None) -> Dict[str, Any]:
+    def scrape_lyrics_batch(self, tracks: list[Track], progress_callback=None) -> dict[str, Any]:
         """
         Scrape uniquement les paroles — même interface que GeniusScraper (v2).
         Optimisation v3 : les morceaux dont les paroles ont déjà été récupérées
@@ -302,7 +302,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         return lyrics
 
     @staticmethod
-    def _inject_section_artist(lyrics: str, artist_name: Optional[str]) -> str:
+    def _inject_section_artist(lyrics: str, artist_name: str | None) -> str:
         """
         Ajoute ` : <artiste>` aux en-têtes de section `[...]` qui n'ont pas déjà
         d'attribution. N'agit que sur des en-têtes seuls sur leur ligne.
@@ -359,7 +359,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         lyrics = re.sub(r"\n{3,}", "\n\n", lyrics)
         return lyrics.strip()
 
-    def _extract_album_bs4(self, html: str) -> Optional[str]:
+    def _extract_album_bs4(self, html: str) -> str | None:
         """
         Extrait le nom de l'album depuis la page Genius (lien /albums/).
         L'API /artists/{id}/songs ne fournit pas l'album — la page, si.
@@ -380,7 +380,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                     return text
         return None
 
-    def _extract_anecdotes_bs4(self, soup) -> Optional[str]:
+    def _extract_anecdotes_bs4(self, soup) -> str | None:
         """Extrait la section About/description (mêmes sélecteurs que v2)."""
         bio_selectors = [
             "div[class*='SongDescription__Content']",
@@ -401,7 +401,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
     # Extraction via LLM
     # -------------------------------------------------------------------------
 
-    def _extract_with_llm(self, markdown: str, track: Track) -> List[Credit]:
+    def _extract_with_llm(self, markdown: str, track: Track) -> list[Credit]:
         """Isole la section crédits du markdown, envoie au LLM, retourne List[Credit]."""
         credits_section = self._extract_credits_section(markdown)
         if not credits_section:
@@ -419,7 +419,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
         return self._parse_llm_response(data)
 
-    def _extract_credits_section(self, markdown: str) -> Optional[str]:
+    def _extract_credits_section(self, markdown: str) -> str | None:
         """
         Isole la section Credits du markdown Genius.
         La structure typique après Crawl4AI :
@@ -467,9 +467,9 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
         return None
 
-    def _parse_llm_response(self, data: dict) -> List[Credit]:
+    def _parse_llm_response(self, data: dict) -> list[Credit]:
         """Convertit la réponse JSON du LLM en List[Credit]."""
-        credits: List[Credit] = []
+        credits: list[Credit] = []
         raw_credits = data.get("credits", [])
 
         if not isinstance(raw_credits, list):
@@ -509,14 +509,14 @@ class GeniusScraperV3(CrawlAIScraperBase):
     # Labels Genius qui ne sont pas des crédits de personnes
     _NON_CREDIT_LABELS = ("album", "released on", "release date", "genre", "tags")
 
-    def _extract_fallback_bs4(self, html: str) -> List[Credit]:
+    def _extract_fallback_bs4(self, html: str) -> list[Credit]:
         """
         Extraction BeautifulSoup sur le HTML brut.
         Supporte les deux générations du DOM Genius :
           - nouveau : div.Credit__Container > div.Credit__Label + div.Credit__Contributor
           - ancien  : div.SongInfo__Credit > div.SongInfo__Label + sibling
         """
-        credits: List[Credit] = []
+        credits: list[Credit] = []
         try:
             soup = BeautifulSoup(html, "html.parser")
 
@@ -551,7 +551,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
         return self._deduplicate_credits(credits)
 
-    def _append_credits(self, credits: List[Credit], role_text: str, names: List[str]) -> None:
+    def _append_credits(self, credits: list[Credit], role_text: str, names: list[str]) -> None:
         """Ajoute un Credit par nom pour un rôle donné."""
         role_enum = self._map_genius_role_to_enum(role_text)
         for name in names:
@@ -570,7 +570,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
     # Utilitaires (copiés depuis genius_scraper_v2.py — découplage volontaire)
     # -------------------------------------------------------------------------
 
-    def _extract_names_intelligently(self, container_div) -> List[str]:
+    def _extract_names_intelligently(self, container_div) -> list[str]:
         names = []
         try:
             for link in container_div.select("a"):
@@ -727,7 +727,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
         return CreditRole.OTHER
 
-    def _deduplicate_credits(self, credits: List[Credit]) -> List[Credit]:
+    def _deduplicate_credits(self, credits: list[Credit]) -> list[Credit]:
         """Supprime les doublons de crédits"""
         seen = set()
         unique_credits = []

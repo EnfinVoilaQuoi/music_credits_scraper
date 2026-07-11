@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Réchauffe le profil navigateur persistant utilisé par le scraper Genius.
 

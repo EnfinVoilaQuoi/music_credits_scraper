@@ -1,9 +1,9 @@
 """Modèles pour représenter les certifications musicales"""
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
 
 
 class CertificationLevel(Enum):
@@ -111,14 +111,14 @@ class CertificationCategory(Enum):
 class Certification:
     """Représente une certification musicale"""
 
-    id: Optional[int] = None
+    id: int | None = None
     artist_name: str = ""
     title: str = ""
     category: CertificationCategory = CertificationCategory.SINGLES
     level: CertificationLevel = CertificationLevel.OR
-    certification_date: Optional[datetime] = None
-    release_date: Optional[datetime] = None
-    publisher: Optional[str] = None
+    certification_date: datetime | None = None
+    release_date: datetime | None = None
+    publisher: str | None = None
     country: str = "FR"
     certifying_body: str = "SNEP"
 
@@ -133,7 +133,7 @@ class Certification:
         """Calcule les champs dérivés après initialisation"""
         self.threshold_units = self.level.get_threshold(self.country, self.category.value)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convertit la certification en dictionnaire"""
         return {
             "id": self.id,
@@ -154,7 +154,7 @@ class Certification:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Certification":
+    def from_dict(cls, data: dict[str, Any]) -> "Certification":
         """Crée une certification depuis un dictionnaire"""
         cert = cls()
 

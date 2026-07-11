@@ -2,17 +2,18 @@
 
 import re
 import time
-import requests
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any
+
+import requests
 from lyricsgenius import Genius
 
 from src.config import (
-    GENIUS_API_KEY,
     DELAY_BETWEEN_REQUESTS,
-    GENIUS_TIMEOUT,
+    GENIUS_API_KEY,
     GENIUS_RETRIES,
     GENIUS_SLEEP_TIME,
+    GENIUS_TIMEOUT,
 )
 from src.models import Artist, Track
 from src.utils.logger import get_logger, log_api
@@ -43,14 +44,14 @@ class GeniusAPI:
             f"API Genius initialisée (timeout: {GENIUS_TIMEOUT}s, retries: {GENIUS_RETRIES}, sleep: {GENIUS_SLEEP_TIME}s)"
         )
 
-    def search_artist(self, artist_name: str) -> Optional[Artist]:
+    def search_artist(self, artist_name: str) -> Artist | None:
         """Wrapper simple : retourne le premier candidat exact, ou le premier candidat disponible."""
         candidates = self.search_artist_candidates(artist_name, max_candidates=1)
         if not candidates:
             return None
         return candidates[0]
 
-    def _search_artist_legacy(self, artist_name: str) -> Optional[Artist]:
+    def _search_artist_legacy(self, artist_name: str) -> Artist | None:
         """Remplacé par search_artist_candidates. Conservé temporairement, à supprimer."""
         try:
             logger.info(f"🔍 Recherche API Genius pour: '{artist_name}'")
@@ -87,7 +88,7 @@ class GeniusAPI:
                 return None
 
             if "hits" not in search_response:
-                logger.warning(f"Clé 'hits' manquante dans la réponse API")
+                logger.warning("Clé 'hits' manquante dans la réponse API")
                 return None
 
             hits = search_response["hits"]
@@ -263,7 +264,7 @@ class GeniusAPI:
             log_api("Genius", f"search/artist/{artist_name}", False)
             return None
 
-    def search_artist_candidates(self, artist_name: str, max_candidates: int = 6) -> List[Artist]:
+    def search_artist_candidates(self, artist_name: str, max_candidates: int = 6) -> list[Artist]:
         """
         Retourne les artistes candidats pour une recherche par nom.
 
@@ -271,7 +272,7 @@ class GeniusAPI:
         GET /search retourne uniquement des chansons (hits de type "song").
         On en extrait les primary_artist pour construire la liste de candidats.
         """
-        candidates: List[Artist] = []
+        candidates: list[Artist] = []
         seen_ids: set = set()
         artist_name_lower = artist_name.lower()
 
@@ -319,9 +320,9 @@ class GeniusAPI:
         max_songs: int = 200,
         include_features: bool = False,
         prefill: bool = True,
-        known_genius_ids: Optional[set] = None,
+        known_genius_ids: set | None = None,
         include_secondary: bool = False,
-    ) -> List[Track]:
+    ) -> list[Track]:
         """
         Récupère la liste des morceaux d'un artiste
 
@@ -366,10 +367,10 @@ class GeniusAPI:
 
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des morceaux: {e}")
-            log_api("Genius", f"artist/songs", False)
+            log_api("Genius", "artist/songs", False)
             return tracks
 
-    def _create_track_from_genius_song(self, song, artist: Artist) -> Optional[Track]:
+    def _create_track_from_genius_song(self, song, artist: Artist) -> Track | None:
         """Crée un objet Track depuis un song object de lyricsgenius - VERSION CORRIGÉE"""
         try:
             track_data = {
@@ -583,7 +584,7 @@ class GeniusAPI:
         max_songs: int,
         include_features: bool = False,
         include_secondary: bool = False,
-    ) -> List[Track]:
+    ) -> list[Track]:
         """Méthode manuelle de récupération (fallback) — gère aussi les featurings.
 
         include_secondary: si True, les morceaux où l'artiste n'est ni primary ni
@@ -703,7 +704,7 @@ class GeniusAPI:
         return tracks
 
     def _prefill_via_song_api(
-        self, tracks: List[Track], known_genius_ids: Optional[set] = None
+        self, tracks: list[Track], known_genius_ids: set | None = None
     ) -> None:
         """
         Pré-remplit via l'endpoint détail `GET /songs/{id}` (la liste ne fournit
@@ -758,7 +759,7 @@ class GeniusAPI:
     _REL_UPSTREAM = {"samples", "interpolates", "cover_of", "remix_of"}
 
     @staticmethod
-    def _extract_relationships(song: dict) -> List[Dict[str, Any]]:
+    def _extract_relationships(song: dict) -> list[dict[str, Any]]:
         """
         Relations « inspiré de » depuis `song_relationships` : on garde l'AMONT
         (samples/interpolates/cover_of/remix_of) + les traductions FR. On jette
@@ -854,7 +855,7 @@ class GeniusAPI:
         )
     }
 
-    def get_album_tracks_from_url(self, album_url: str) -> Optional[Dict[str, Any]]:
+    def get_album_tracks_from_url(self, album_url: str) -> dict[str, Any] | None:
         """Tracklist COMPLÈTE d'un album Genius depuis son URL publique.
 
         Returns:
@@ -967,7 +968,7 @@ class GeniusAPI:
                 yt = url or None
         return sid, yt
 
-    def _extract_album_from_song(self, song: dict) -> Optional[str]:
+    def _extract_album_from_song(self, song: dict) -> str | None:
         """Extrait l'album depuis les données de l'API"""
         try:
             album_data = song.get("album")
@@ -979,7 +980,7 @@ class GeniusAPI:
             logger.debug(f"Erreur lors de l'extraction de l'album: {e}")
         return None
 
-    def _extract_release_date_from_song(self, song: dict) -> Optional[datetime]:
+    def _extract_release_date_from_song(self, song: dict) -> datetime | None:
         """Extrait la date de sortie depuis les données de l'API"""
         try:
             release_components = song.get("release_date_components")
@@ -999,7 +1000,7 @@ class GeniusAPI:
 
         return None
 
-    def get_song_details(self, track: Track) -> Dict[str, Any]:
+    def get_song_details(self, track: Track) -> dict[str, Any]:
         """Récupère les détails d'un morceau (pour le scraping)"""
         if not track.genius_id:
             logger.warning(f"Pas d'ID Genius pour {track.title}")
@@ -1042,7 +1043,7 @@ class GeniusAPI:
 
         return {}
 
-    def search_song(self, title: str, artist_name: str) -> Optional[Dict[str, Any]]:
+    def search_song(self, title: str, artist_name: str) -> dict[str, Any] | None:
         """Recherche un morceau spécifique"""
         try:
             query = f"{title} {artist_name}"

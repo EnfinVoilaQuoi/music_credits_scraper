@@ -183,7 +183,7 @@ class DataEnricher:
         """Cleanup des ressources"""
         try:
             self.close()
-        except:
+        except Exception:
             pass
 
     # ================== NOUVEAU: VALIDATION SPOTIFY ID ==================
@@ -1440,7 +1440,7 @@ class DataEnricher:
                     track.key = convert_key_to_numeric(song_data.key)
                     track.key_mode_source = "getsongbpm"
                     logger.info(f"GetSongBPM: ✅ Key: {song_data.key} → {track.key}")
-                except:
+                except Exception:
                     logger.debug(f"GetSongBPM: Key brute stockée: {song_data.key}")
                 updated = True
 

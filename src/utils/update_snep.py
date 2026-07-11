@@ -245,7 +245,7 @@ def _parse_certifications_page(html: str) -> list:
         if desc is None:
             continue
 
-        def field(sel):
+        def field(sel, desc=desc):
             el = desc.select_one(sel)
             return _clean(el.get_text(" ", strip=True)) if el else ""
 

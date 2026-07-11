@@ -436,7 +436,7 @@ def start_combined_scraping(
             if scraper:
                 try:
                     scraper.close()
-                except:
+                except Exception:
                     pass
 
             app.is_scraping = False

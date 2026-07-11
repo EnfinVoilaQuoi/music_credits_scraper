@@ -84,7 +84,7 @@ def main():
                     try:
                         dt = datetime.fromisoformat(last_update.split(".")[0])
                         update_date = f" (MAJ : {dt.strftime('%d/%m/%Y %H:%M')})"
-                    except:
+                    except Exception:
                         pass
                 print(f"  {i}. {name} : {track_count} morceaux{update_date}")
 

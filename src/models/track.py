@@ -354,7 +354,7 @@ class Track:
                     existing_date = datetime.fromisoformat(existing_date.replace("Z", "+00:00"))
                 else:
                     existing_date = datetime.strptime(existing_date[:10], "%Y-%m-%d")
-            except:
+            except Exception:
                 # Si impossible de parser la date existante, la remplacer
                 self.release_date = new_date
                 logger.debug(
@@ -552,7 +552,7 @@ class Track:
                     try:
                         date_obj = datetime.fromisoformat(date)
                         date_str = date_obj.strftime("%d/%m/%Y")
-                    except:
+                    except Exception:
                         date_str = date
                 else:
                     date_str = ""
@@ -575,7 +575,7 @@ class Track:
                     try:
                         date_obj = datetime.fromisoformat(date)
                         date_str = date_obj.strftime("%d/%m/%Y")
-                    except:
+                    except Exception:
                         date_str = date
                 else:
                     date_str = ""

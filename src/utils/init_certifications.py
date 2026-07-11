@@ -133,7 +133,7 @@ class SimpleSNEPImporter:
             if len(parts) == 3:
                 day, month, year = parts
                 return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-        except:
+        except Exception:
             pass
 
         return None

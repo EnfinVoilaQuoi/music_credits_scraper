@@ -42,6 +42,10 @@ lib/*
 !requirements*.txt
 *.mp3
 
+# Tests
+.coverage
+.pytest_cache/
+
 # Claude
 .claude/
 CLAUDE.md

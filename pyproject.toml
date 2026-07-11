@@ -1,0 +1,38 @@
+# Configuration Black (formateur) + Ruff (linter).
+# Décisions du 2026-07-11 : ligne 100, cible py313, périmètre élargi (E, F, I, B, UP, SIM).
+# E501 volontairement absent du linter : la longueur de ligne est gérée par Black.
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["venv", "data"]
+
+[tool.ruff.lint]
+select = [
+    "E4",  # pycodestyle — imports
+    "E7",  # pycodestyle — instructions (except nu, noms ambigus…)
+    "E9",  # pycodestyle — erreurs de syntaxe
+    "F",   # pyflakes — imports morts, variables inutilisées…
+    "I",   # isort — tri des imports
+    "B",   # bugbear — pièges classiques (closures sur variable de boucle…)
+    "UP",  # pyupgrade — modernisation (Optional[X] → X | None…)
+    "SIM", # simplifications
+]
+ignore = [
+    "SIM105", # « utiliser contextlib.suppress » : purement stylistique, sans intérêt ici
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts lancés en standalone : sys.path.append(...) avant les imports projet.
+"scripts/**" = ["E402"]
+"src/utils/init_certifications.py" = ["E402"]
+"src/utils/update_kworb.py" = ["E402"]
+"src/utils/update_snep.py" = ["E402"]
+"src/utils/update_ytmusic.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]

@@ -12,6 +12,7 @@ Stockage : data/kworb_links/<artiste>.json
 Clé = titre Kworb normalisé (via title_matching.normalize_title) pour être
 stable entre les runs malgré ponctuation/casse.
 """
+
 import json
 import re
 from pathlib import Path
@@ -28,12 +29,12 @@ class KworbLinksManager:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, artist_name: str) -> Path:
-        safe = re.sub(r'[^\w\- ]', '_', artist_name or 'artist')
+        safe = re.sub(r"[^\w\- ]", "_", artist_name or "artist")
         return self.base_dir / f"{safe}.json"
 
     def load(self, artist_name: str) -> dict:
         try:
-            data = json.loads(self._path(artist_name).read_text(encoding='utf-8'))
+            data = json.loads(self._path(artist_name).read_text(encoding="utf-8"))
         except Exception:
             data = {}
         data.setdefault("confirmed", {})
@@ -43,7 +44,8 @@ class KworbLinksManager:
     def _save(self, artist_name: str, data: dict):
         try:
             self._path(artist_name).write_text(
-                json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+                json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
         except Exception as e:
             logger.error(f"Sauvegarde décisions Kworb échouée ({artist_name}): {e}")
 

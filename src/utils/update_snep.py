@@ -1,4 +1,5 @@
 """Script de mise à jour automatique des certifications SNEP"""
+
 import sys
 import io
 import requests
@@ -7,16 +8,15 @@ from datetime import datetime
 import shutil
 
 # Configurer l'encodage UTF-8 pour la console Windows
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from src.api.snep_certifications import SNEPCertificationManager
 from src.utils.logger import get_logger
 from src.config import DATA_PATH
-
 
 logger = get_logger(__name__)
 
@@ -37,8 +37,8 @@ def _merge_csv_history(history_path: Path, new_path: Path) -> int:
     l'union dédupliquée (historique + nouveautés), écrite dans new_path.
     Retourne le nombre de nouvelles lignes apportées par l'export.
     """
-    history_raw = history_path.read_text(encoding='utf-8-sig')
-    new_raw = new_path.read_text(encoding='utf-8-sig')
+    history_raw = history_path.read_text(encoding="utf-8-sig")
+    new_raw = new_path.read_text(encoding="utf-8-sig")
 
     history_lines = history_raw.splitlines()
     new_lines = new_raw.splitlines()
@@ -62,9 +62,7 @@ def _merge_csv_history(history_path: Path, new_path: Path) -> int:
             merged.append(line)
             added += 1
 
-    new_path.write_text(
-        '﻿' + header + '\n' + '\n'.join(merged) + '\n', encoding='utf-8'
-    )
+    new_path.write_text("﻿" + header + "\n" + "\n".join(merged) + "\n", encoding="utf-8")
     return added
 
 
@@ -73,13 +71,13 @@ def download_latest_snep_csv():
     safe_print("=" * 60)
     safe_print("MISE À JOUR DES CERTIFICATIONS SNEP")
     safe_print("=" * 60)
-    
+
     # Construire l'URL dynamiquement basée sur la date actuelle
     # Format observé : https://snepmusique.com/wp-content/uploads/YYYY/MM/certif-.csv
     current_date = datetime.now()
     year = current_date.year
     month = f"{current_date.month:02d}"
-    
+
     # Essayer plusieurs URLs possibles (mois actuel et précédent)
     prev_month_num = (current_date.month - 2) % 12 + 1  # janvier → 12, pas 0
     prev_year = year if current_date.month > 1 else year - 1
@@ -87,50 +85,53 @@ def download_latest_snep_csv():
         f"https://snepmusique.com/wp-content/uploads/{year}/{month}/certif-.csv",
         f"https://snepmusique.com/wp-content/uploads/{prev_year}/{prev_month_num:02d}/certif-.csv",
         # URL de fallback si le pattern change
-        "https://snepmusique.com/wp-content/uploads/certif-.csv"
+        "https://snepmusique.com/wp-content/uploads/certif-.csv",
     ]
-    
+
     # Chemin de destination
-    dest_dir = Path(DATA_PATH) / 'certifications' / 'snep'
+    dest_dir = Path(DATA_PATH) / "certifications" / "snep"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / 'certif-.csv'
-    
+    dest_path = dest_dir / "certif-.csv"
+
     # Backup du fichier existant si présent
     backup_path = None
     if dest_path.exists():
-        backup_path = dest_dir / f'certif-backup-{datetime.now():%Y%m%d_%H%M%S}.csv'
+        backup_path = dest_dir / f"certif-backup-{datetime.now():%Y%m%d_%H%M%S}.csv"
         shutil.copy2(dest_path, backup_path)
         safe_print(f"✅ Backup créé : {backup_path.name}")
-    
+
     # Essayer de télécharger le fichier
     for url in urls_to_try:
         if url is None:
             continue
-            
+
         safe_print(f"\n🔍 Tentative de téléchargement depuis :")
         safe_print(f"   {url}")
-        
+
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://snepmusique.com/les-certifications/',
-                'Accept': 'text/csv,application/csv,text/plain,*/*'
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://snepmusique.com/les-certifications/",
+                "Accept": "text/csv,application/csv,text/plain,*/*",
             }
-            
+
             response = requests.get(url, headers=headers, timeout=30)
-            
+
             if response.status_code == 200:
                 # Vérifier que c'est bien un CSV — bloquer si ce n'est pas le cas
-                content_type = response.headers.get('Content-Type', '')
-                if 'csv' not in content_type.lower() and 'text' not in content_type.lower():
-                    safe_print(f"⚠️ Contenu ignoré (type inattendu : {content_type}), fichier existant conservé")
+                content_type = response.headers.get("Content-Type", "")
+                if "csv" not in content_type.lower() and "text" not in content_type.lower():
+                    safe_print(
+                        f"⚠️ Contenu ignoré (type inattendu : {content_type}), fichier existant conservé"
+                    )
                     continue
 
                 # Écriture atomique : temp → rename pour éviter la corruption partielle
                 import tempfile, os
-                tmp_fd, tmp_name = tempfile.mkstemp(dir=dest_dir, suffix='.tmp')
+
+                tmp_fd, tmp_name = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
                 try:
-                    with os.fdopen(tmp_fd, 'wb') as f:
+                    with os.fdopen(tmp_fd, "wb") as f:
                         f.write(response.content)
                     os.replace(tmp_name, dest_path)
                 except Exception:
@@ -148,12 +149,14 @@ def download_latest_snep_csv():
                 # glissante — l'écraser ferait perdre les certifications anciennes
                 if backup_path and backup_path.exists():
                     added = _merge_csv_history(backup_path, dest_path)
-                    safe_print(f"🔀 Fusion avec l'historique : {added} nouvelle(s) certification(s) ajoutée(s)")
+                    safe_print(
+                        f"🔀 Fusion avec l'historique : {added} nouvelle(s) certification(s) ajoutée(s)"
+                    )
 
                 return dest_path
             else:
                 safe_print(f"❌ Erreur HTTP {response.status_code}")
-                
+
         except requests.exceptions.RequestException as e:
             safe_print(f"❌ Erreur de connexion : {e}")
         except Exception as e:
@@ -161,7 +164,7 @@ def download_latest_snep_csv():
 
     safe_print("\n⚠️ Impossible de télécharger le fichier CSV")
     safe_print("   Le fichier existant sera utilisé si disponible")
-    
+
     if dest_path.exists():
         return dest_path
     return None
@@ -178,11 +181,13 @@ except Exception:  # repli si config minimale
 
 _SNEP_BASE = "https://snepmusique.com/les-certifications/"
 _HTTP_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': _SNEP_BASE,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": _SNEP_BASE,
 }
-_CSV_HEADER = ("Interprete;Titre;Éditeur / Distributeur;Catégorie;"
-               "Certification;Date de sortie;Date de constat")
+_CSV_HEADER = (
+    "Interprete;Titre;Éditeur / Distributeur;Catégorie;"
+    "Certification;Date de sortie;Date de constat"
+)
 
 
 def _get_session() -> "requests.Session":
@@ -228,7 +233,7 @@ def _parse_certifications_page(html: str) -> list:
     from bs4 import BeautifulSoup
 
     def _clean(s: str) -> str:
-        return _re.sub(r'\s+', ' ', (s or '')).strip()
+        return _re.sub(r"\s+", " ", (s or "")).strip()
 
     soup = BeautifulSoup(html, "html.parser")
     rows = []
@@ -273,8 +278,14 @@ def _parse_certifications_page(html: str) -> list:
 
 def _row_key(fields: list) -> tuple:
     """Clé de déduplication stable (sans le label, qui varie entre sources)."""
-    return (fields[0].strip().lower(), fields[1].strip().lower(),
-            fields[3], fields[4], fields[5], fields[6])
+    return (
+        fields[0].strip().lower(),
+        fields[1].strip().lower(),
+        fields[3],
+        fields[4],
+        fields[5],
+        fields[6],
+    )
 
 
 def _load_existing(dest_path: Path):
@@ -283,15 +294,16 @@ def _load_existing(dest_path: Path):
     existing_lines = []
     keys = set()
     if dest_path.exists():
-        lines = dest_path.read_text(encoding='utf-8-sig').splitlines()
+        lines = dest_path.read_text(encoding="utf-8-sig").splitlines()
         if lines:
             header = lines[0]
             existing_lines = [l for l in lines[1:] if l.strip()]
             for line in existing_lines:
-                f = line.split(';')
+                f = line.split(";")
                 if len(f) >= 7:
-                    keys.add((f[0].strip().lower(), f[1].strip().lower(),
-                              f[-4], f[-3], f[-2], f[-1]))
+                    keys.add(
+                        (f[0].strip().lower(), f[1].strip().lower(), f[-4], f[-3], f[-2], f[-1])
+                    )
     return header, existing_lines, keys
 
 
@@ -299,8 +311,8 @@ def _write_merged(dest_path: Path, header: str, existing_lines: list, new_lines:
     """Écrit l'union (existant + nouveautés) avec BOM UTF-8, si nouveautés."""
     if new_lines:
         dest_path.write_text(
-            '﻿' + header + '\n' + '\n'.join(existing_lines + new_lines) + '\n',
-            encoding='utf-8',
+            "﻿" + header + "\n" + "\n".join(existing_lines + new_lines) + "\n",
+            encoding="utf-8",
         )
 
 
@@ -310,15 +322,16 @@ def _discover_last_page(html: str) -> int:
     Sur une page filtrée `?annee=YYYY`, tous les liens /page/N pointent vers
     cette année — le max est donc la dernière page de l'année.
     """
-    nums = [int(n) for n in _re.findall(r'/page/(\d+)', html)]
+    nums = [int(n) for n in _re.findall(r"/page/(\d+)", html)]
     return max(nums) if nums else 1
 
 
 def _norm_for_match(s: str) -> str:
     """Normalise pour comparaison : sans accents, en majuscules."""
     import unicodedata
-    s = unicodedata.normalize('NFD', s or '')
-    s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
     return s.upper()
 
 
@@ -329,7 +342,7 @@ def _artist_matches(artist_field: str, query: str) -> bool:
     q = _norm_for_match(query)
     if not q:
         return True
-    return _re.search(r'\b' + _re.escape(q) + r'\b', _norm_for_match(artist_field)) is not None
+    return _re.search(r"\b" + _re.escape(q) + r"\b", _norm_for_match(artist_field)) is not None
 
 
 def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
@@ -374,7 +387,7 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
 
         page_new = 0
         for row in rows:
-            f = row.split(';')
+            f = row.split(";")
             if len(f) < 7:
                 continue
             key = _row_key(f)
@@ -404,8 +417,8 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
     import random
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://snepmusique.com/les-certifications/',
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://snepmusique.com/les-certifications/",
     }
 
     # Lignes déjà connues (clé = champs normalisés sans le label, plus stable)
@@ -413,21 +426,26 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
     header = "Interprete;Titre;Éditeur / Distributeur;Catégorie;Certification;Date de sortie;Date de constat"
     existing_lines = []
     if dest_path.exists():
-        raw = dest_path.read_text(encoding='utf-8-sig')
+        raw = dest_path.read_text(encoding="utf-8-sig")
         lines = raw.splitlines()
         if lines:
             header = lines[0]
             existing_lines = [l for l in lines[1:] if l.strip()]
             for line in existing_lines:
-                f = line.split(';')
+                f = line.split(";")
                 if len(f) >= 7:
                     # clé sans label (le label peut différer entre export et page)
-                    existing_keys.add((f[0].strip().lower(), f[1].strip().lower(), f[-4], f[-3], f[-2], f[-1]))
+                    existing_keys.add(
+                        (f[0].strip().lower(), f[1].strip().lower(), f[-4], f[-3], f[-2], f[-1])
+                    )
 
     new_lines = []
     for page in range(1, max_pages + 1):
-        url = "https://snepmusique.com/les-certifications/" if page == 1 \
+        url = (
+            "https://snepmusique.com/les-certifications/"
+            if page == 1
             else f"https://snepmusique.com/les-certifications/page/{page}"
+        )
         try:
             resp = requests.get(url, headers=headers, timeout=30)
             resp.raise_for_status()
@@ -442,7 +460,7 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
 
         page_new = 0
         for row in rows:
-            f = row.split(';')
+            f = row.split(";")
             key = (f[0].strip().lower(), f[1].strip().lower(), f[3], f[4], f[5], f[6])
             if key not in existing_keys:
                 existing_keys.add(key)
@@ -457,8 +475,7 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
 
     if new_lines:
         dest_path.write_text(
-            '﻿' + header + '\n' + '\n'.join(existing_lines + new_lines) + '\n',
-            encoding='utf-8'
+            "﻿" + header + "\n" + "\n".join(existing_lines + new_lines) + "\n", encoding="utf-8"
         )
     return len(new_lines)
 
@@ -481,22 +498,22 @@ def update_snep_database():
         safe_print(f"⚠️ Scraping des pages impossible ({e}) — on continue avec l'export")
 
     safe_print("\n📥 Import dans la base de données...")
-    
+
     # Initialiser le manager
     manager = SNEPCertificationManager()
-    
+
     # Obtenir les stats avant mise à jour
     stats_before = manager.get_certification_stats()
-    total_before = stats_before['total_certifications']
-    
+    total_before = stats_before["total_certifications"]
+
     # Importer les données (MàJ GLOBALE — tracée comme telle dans update_history)
-    success = manager.import_from_csv(csv_path, source='GLOBAL')
+    success = manager.import_from_csv(csv_path, source="GLOBAL")
 
     if success:
         # Obtenir les stats après mise à jour
         stats_after = manager.get_certification_stats()
-        total_after = stats_after['total_certifications']
-        
+        total_after = stats_after["total_certifications"]
+
         safe_print("\n✅ MISE À JOUR TERMINÉE")
         safe_print(f"\n📊 Résumé :")
         safe_print(f"  • Certifications avant : {total_before}")
@@ -504,11 +521,13 @@ def update_snep_database():
         safe_print(f"  • Nouvelles/mises à jour : {total_after - total_before}")
 
         # Afficher les certifications récentes
-        if stats_after['recent_certifications']:
+        if stats_after["recent_certifications"]:
             safe_print(f"\n🆕 Certifications récentes :")
-            for cert in stats_after['recent_certifications'][:5]:
-                date_str = cert['certification_date'][:10] if cert['certification_date'] else 'N/A'
-                safe_print(f"  • {date_str} : {cert['artist_name']} - {cert['title']} ({cert['certification']})")
+            for cert in stats_after["recent_certifications"][:5]:
+                date_str = cert["certification_date"][:10] if cert["certification_date"] else "N/A"
+                safe_print(
+                    f"  • {date_str} : {cert['artist_name']} - {cert['title']} ({cert['certification']})"
+                )
 
         return True
     else:
@@ -528,18 +547,18 @@ def check_for_updates():
 def schedule_monthly_update():
     """Programme une mise à jour mensuelle (à utiliser avec cron ou task scheduler)"""
     import logging
-    
+
     # Configuration du logging pour le mode automatique
-    log_file = Path(DATA_PATH) / 'certifications' / 'snep' / 'update_log.txt'
+    log_file = Path(DATA_PATH) / "certifications" / "snep" / "update_log.txt"
     logging.basicConfig(
         filename=str(log_file),
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    
+
     logging.info("=" * 50)
     logging.info("Début de la mise à jour mensuelle programmée")
-    
+
     try:
         success = update_snep_database()
         if success:
@@ -548,7 +567,7 @@ def schedule_monthly_update():
             logging.error("❌ Échec de la mise à jour")
     except Exception as e:
         logging.error(f"❌ Erreur lors de la mise à jour : {e}")
-    
+
     logging.info("Fin de la mise à jour mensuelle")
     logging.info("=" * 50)
 
@@ -566,8 +585,8 @@ def fetch_artist_certifications(artist_name: str) -> bool:
     safe_print("=" * 60)
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://snepmusique.com/les-certifications/',
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://snepmusique.com/les-certifications/",
     }
 
     # 1. Charger la page filtrée (génère l'export côté serveur)
@@ -582,6 +601,7 @@ def fetch_artist_certifications(artist_name: str) -> bool:
 
     # 2. Trouver le lien "Télécharger en CSV" généré pour ce filtre
     import re as _re
+
     m = _re.search(r'href="([^"]*certif-[^"]*\.csv)"', resp.text)
     if not m:
         safe_print("❌ Lien CSV introuvable sur la page (artiste inconnu du SNEP ?)")
@@ -597,9 +617,9 @@ def fetch_artist_certifications(artist_name: str) -> bool:
         safe_print(f"❌ Téléchargement CSV impossible : {e}")
         return False
 
-    content = csv_resp.content.decode('utf-8-sig', errors='replace')
+    content = csv_resp.content.decode("utf-8-sig", errors="replace")
     lines = content.splitlines()
-    if not lines or 'Interprete' not in lines[0]:
+    if not lines or "Interprete" not in lines[0]:
         safe_print("❌ Contenu CSV inattendu, abandon")
         return False
     safe_print(f"✅ {len(lines) - 1} certification(s) renvoyée(s) par le SNEP")
@@ -613,34 +633,39 @@ def fetch_artist_certifications(artist_name: str) -> bool:
     for line in lines[1:]:
         if not line.strip():
             continue
-        artist_field = line.split(';')[0]
+        artist_field = line.split(";")[0]
         if _artist_matches(artist_field, artist_name):
             kept.append(line)
         else:
             dropped += 1
-    content = '\n'.join(kept) + '\n'
+    content = "\n".join(kept) + "\n"
     lines = kept
-    safe_print(f"🔎 Filtre mot entier '{artist_name}' : "
-               f"{len(kept) - 1} gardée(s), {dropped} bruit écarté(s)")
+    safe_print(
+        f"🔎 Filtre mot entier '{artist_name}' : "
+        f"{len(kept) - 1} gardée(s), {dropped} bruit écarté(s)"
+    )
     if len(kept) <= 1:
-        safe_print("⚠️ Aucune ligne ne correspond exactement — abandon "
-                   "(artiste mal orthographié ou inconnu ?)")
+        safe_print(
+            "⚠️ Aucune ligne ne correspond exactement — abandon "
+            "(artiste mal orthographié ou inconnu ?)"
+        )
         return False
 
     # 4. Fusionner dans le CSV maître
-    dest_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
+    dest_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
     import tempfile, os
-    fd, tmp_name = tempfile.mkstemp(suffix='.csv')
+
+    fd, tmp_name = tempfile.mkstemp(suffix=".csv")
     os.close(fd)  # Windows : fermer le descripteur sinon unlink échoue (WinError 32)
     tmp = Path(tmp_name)
-    tmp.write_text(content, encoding='utf-8')
+    tmp.write_text(content, encoding="utf-8")
     try:
         if dest_path.exists():
             # _merge_csv_history écrit l'union (historique + nouveau) dans le 2e arg
-            shutil.copy2(dest_path, tmp.with_suffix('.hist'))
-            added = _merge_csv_history(tmp.with_suffix('.hist'), tmp)
+            shutil.copy2(dest_path, tmp.with_suffix(".hist"))
+            added = _merge_csv_history(tmp.with_suffix(".hist"), tmp)
             shutil.copy2(tmp, dest_path)
-            tmp.with_suffix('.hist').unlink(missing_ok=True)
+            tmp.with_suffix(".hist").unlink(missing_ok=True)
         else:
             shutil.copy2(tmp, dest_path)
             added = len(lines) - 1
@@ -651,7 +676,7 @@ def fetch_artist_certifications(artist_name: str) -> bool:
     # 5. Réimporter en base (récupération ARTISTE — ne compte PAS comme MàJ globale)
     safe_print("\n📥 Import dans la base de données...")
     manager = SNEPCertificationManager()
-    success = manager.import_from_csv(dest_path, source='ARTIST')
+    success = manager.import_from_csv(dest_path, source="ARTIST")
     safe_print("✅ Import terminé" if success else "❌ Erreur d'import")
     return success
 
@@ -660,7 +685,7 @@ def backfill_years(years) -> int:
     """Scrape intégralement une ou plusieurs années (filtre ?annee=) dans le
     CSV maître puis réimporte en base. Brique de comblement de trous.
     """
-    dest_path = Path(DATA_PATH) / 'certifications' / 'snep' / 'certif-.csv'
+    dest_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
     safe_print("=" * 60)
@@ -673,7 +698,7 @@ def backfill_years(years) -> int:
 
     safe_print("\n📥 Import dans la base de données...")
     manager = SNEPCertificationManager()
-    manager.import_from_csv(dest_path, source='SCRAPE')
+    manager.import_from_csv(dest_path, source="SCRAPE")
     safe_print(f"✅ Backfill terminé : {total} nouvelle(s) certification(s) au total")
     return total
 
@@ -682,37 +707,31 @@ def main():
     """Point d'entrée principal du script"""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Mise à jour automatique des certifications SNEP"
+    parser = argparse.ArgumentParser(description="Mise à jour automatique des certifications SNEP")
+    parser.add_argument(
+        "--update", action="store_true", help="Télécharger et importer les dernières certifications"
     )
     parser.add_argument(
-        '--update',
-        action='store_true',
-        help="Télécharger et importer les dernières certifications"
+        "--check", action="store_true", help="Vérifier s'il y a des mises à jour disponibles"
     )
     parser.add_argument(
-        '--check',
-        action='store_true',
-        help="Vérifier s'il y a des mises à jour disponibles"
+        "--scheduled",
+        action="store_true",
+        help="Mode automatique pour tâche planifiée (cron/scheduler)",
     )
     parser.add_argument(
-        '--scheduled',
-        action='store_true',
-        help="Mode automatique pour tâche planifiée (cron/scheduler)"
-    )
-    parser.add_argument(
-        '--artist',
+        "--artist",
         type=str,
         default=None,
-        help="Récupérer le CSV complet d'un artiste (filtre ?interprete=) et le fusionner"
+        help="Récupérer le CSV complet d'un artiste (filtre ?interprete=) et le fusionner",
     )
     parser.add_argument(
-        '--year',
+        "--year",
         type=int,
-        action='append',
+        action="append",
         default=None,
-        metavar='AAAA',
-        help="Backfill complet d'une année via ?annee= (répétable, ex: --year 2025 --year 2026)"
+        metavar="AAAA",
+        help="Backfill complet d'une année via ?annee= (répétable, ex: --year 2025 --year 2026)",
     )
 
     args = parser.parse_args()

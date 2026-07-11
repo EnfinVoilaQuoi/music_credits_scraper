@@ -4,6 +4,7 @@ But : quand un morceau est supprimé définitivement, on mémorise son `genius_i
 (clé STABLE entre les ré-imports, contrairement à `track.id` qui disparaît) pour
 pouvoir, à la prochaine récupération de discographie, NE PAS le réajouter.
 """
+
 import json
 from typing import Set, Dict, List, Optional
 from pathlib import Path
@@ -23,8 +24,8 @@ class DeletedTracksManager:
         logger.info(f"Manager des morceaux supprimés initialisé: {self.deleted_tracks_dir}")
 
     def _get_artist_file(self, artist_name: str) -> Path:
-        safe_name = "".join(c for c in artist_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        safe_name = safe_name.replace(' ', '_').lower()
+        safe_name = "".join(c for c in artist_name if c.isalnum() or c in (" ", "-", "_")).rstrip()
+        safe_name = safe_name.replace(" ", "_").lower()
         return self.deleted_tracks_dir / f"{safe_name}_deleted.json"
 
     def _read(self, artist_name: str) -> Dict[str, dict]:
@@ -33,7 +34,7 @@ class DeletedTracksManager:
         if not file_path.exists():
             return {}
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             entries = data.get("deleted_tracks", [])
             out = {}
@@ -55,7 +56,7 @@ class DeletedTracksManager:
                 "last_updated": str(datetime.now()),
                 "version": "1.0",
             }
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
@@ -75,7 +76,9 @@ class DeletedTracksManager:
         }
         ok = self._write(artist_name, entries)
         if ok:
-            logger.info(f"🗂️ Mémorisé comme supprimé pour {artist_name}: {title} (genius_id={genius_id})")
+            logger.info(
+                f"🗂️ Mémorisé comme supprimé pour {artist_name}: {title} (genius_id={genius_id})"
+            )
         return ok
 
     def load_deleted_ids(self, artist_name: str) -> Set[int]:

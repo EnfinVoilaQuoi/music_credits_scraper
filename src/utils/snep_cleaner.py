@@ -16,6 +16,7 @@ CLI :
     python -m src.utils.snep_cleaner            # dry-run (rapport seulement)
     python -m src.utils.snep_cleaner --apply    # applique + réimporte en base
 """
+
 from __future__ import annotations
 
 import csv
@@ -32,17 +33,32 @@ from src.api.snep_certifications import SNEPCertificationManager
 EXPECTED_NCOLS = 7
 
 # Casse canonique des niveaux (clé = forme minuscule)
-_LVL_CANON = {lvl.lower(): lvl for lvl in (
-    "Or", "Double Or", "Triple Or",
-    "Platine", "Double Platine", "Triple Platine",
-    "Diamant", "Double Diamant", "Triple Diamant", "Quadruple Diamant",
-)}
+_LVL_CANON = {
+    lvl.lower(): lvl
+    for lvl in (
+        "Or",
+        "Double Or",
+        "Triple Or",
+        "Platine",
+        "Double Platine",
+        "Triple Platine",
+        "Diamant",
+        "Double Diamant",
+        "Triple Diamant",
+        "Quadruple Diamant",
+    )
+}
 
 # Catégories : singulier → pluriel + casse canonique
 _CAT_CANON = {
-    "single": "Singles", "singles": "Singles",
-    "album": "Albums", "albums": "Albums",
-    "vidéo": "Vidéos", "vidéos": "Vidéos", "video": "Vidéos", "videos": "Vidéos",
+    "single": "Singles",
+    "singles": "Singles",
+    "album": "Albums",
+    "albums": "Albums",
+    "vidéo": "Vidéos",
+    "vidéos": "Vidéos",
+    "video": "Vidéos",
+    "videos": "Vidéos",
 }
 
 
@@ -55,29 +71,33 @@ _CAT_CANON = {
 # "SMILE?IT", "Who… are ?") est LAISSÉ tel quel pour révision manuelle.
 
 # 1) Ligature œ : mots français connus (la liste évite les faux positifs).
-_OE_PATTERNS = [re.compile(p, re.I) for p in (
-    r'\bC\?URS?\b',      # CŒUR(S)
-    r'\bS\?URS?\b',      # SŒUR(S)
-    r'\bV\?UX?\b',       # VŒU(X)
-    r'\bB\?UFS?\b',      # BŒUF(S)
-    r'\bN\?UDS?\b',      # NŒUD(S)
-    r'\bM\?URS\b',       # MŒURS
-    r'\bF\?TUS\b',       # FŒTUS
-    r'(?<![A-Za-zÀ-ÿ])\?UVRES?\b',   # ŒUVRE(S)
-    r'(?<![A-Za-zÀ-ÿ])\?UFS?\b',     # ŒUF(S)
-    r'(?<![A-Za-zÀ-ÿ])\?IL\b',       # ŒIL
-    r'(?<![A-Za-zÀ-ÿ])\?DIPE\b',     # ŒDIPE
-)]
+_OE_PATTERNS = [
+    re.compile(p, re.I)
+    for p in (
+        r"\bC\?URS?\b",  # CŒUR(S)
+        r"\bS\?URS?\b",  # SŒUR(S)
+        r"\bV\?UX?\b",  # VŒU(X)
+        r"\bB\?UFS?\b",  # BŒUF(S)
+        r"\bN\?UDS?\b",  # NŒUD(S)
+        r"\bM\?URS\b",  # MŒURS
+        r"\bF\?TUS\b",  # FŒTUS
+        r"(?<![A-Za-zÀ-ÿ])\?UVRES?\b",  # ŒUVRE(S)
+        r"(?<![A-Za-zÀ-ÿ])\?UFS?\b",  # ŒUF(S)
+        r"(?<![A-Za-zÀ-ÿ])\?IL\b",  # ŒIL
+        r"(?<![A-Za-zÀ-ÿ])\?DIPE\b",  # ŒDIPE
+    )
+]
+
 
 def _oe_sub(m):
     g = m.group(0)
-    lig = 'Œ' if g == g.upper() else 'œ'
-    return g.replace('?', lig, 1)
+    lig = "Œ" if g == g.upper() else "œ"
+    return g.replace("?", lig, 1)
+
 
 # 2) Apostrophe : UNIQUEMENT élisions françaises et contractions anglaises.
 _ELISION_FR = re.compile(r"\b([CDJLMNST])\?(?=[A-Za-zÀ-ÿ])", re.I)
-_ELISION_FR2 = re.compile(
-    r"\b(QU|JUSQU|LORSQU|PUISQU|QUOIQU|AUJOURD)\?(?=[A-Za-zÀ-ÿ])", re.I)
+_ELISION_FR2 = re.compile(r"\b(QU|JUSQU|LORSQU|PUISQU|QUOIQU|AUJOURD)\?(?=[A-Za-zÀ-ÿ])", re.I)
 _CONTRACTION_EN = re.compile(r"([A-Za-zÀ-ÿ])\?(S|T|RE|VE|LL|D|M)\b", re.I)
 
 
@@ -90,7 +110,7 @@ def _restore_apostrophes(s: str) -> tuple[str, int]:
     """Restaure les caractères corrompus (?) en contexte sûr : ligature œ puis
     apostrophe d'élision/contraction. Retourne (texte, nb de '?' restaurés).
     Les '?' ambigus restent intacts (à signaler par le validateur)."""
-    before = s.count('?')
+    before = s.count("?")
     if not before:
         return s, 0
     for pat in _OE_PATTERNS:
@@ -98,7 +118,7 @@ def _restore_apostrophes(s: str) -> tuple[str, int]:
     s = _ELISION_FR.sub(lambda m: m.group(1) + "'", s)
     s = _ELISION_FR2.sub(lambda m: m.group(1) + "'", s)
     s = _CONTRACTION_EN.sub(lambda m: m.group(1) + "'" + m.group(2), s)
-    return s, before - s.count('?')
+    return s, before - s.count("?")
 
 
 def _canon_category(cat: str) -> str:
@@ -141,8 +161,7 @@ def _read_rows(csv_path: Path) -> tuple[str, list[list[str]]]:
     return header, rows
 
 
-def clean_snep_csv(csv_path: str | Path, apply: bool = False,
-                   reimport: bool = True) -> dict:
+def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = True) -> dict:
     """Nettoie le CSV maître SNEP. Retourne un rapport des actions.
 
     apply=False  → dry-run : compte ce qui serait modifié, n'écrit rien.
@@ -213,14 +232,16 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False,
         new_cat = _canon_category(category)
         if new_cat != category:
             report["categories_recased"] += 1
-            report["category_changes"][f"{category} → {new_cat}"] = \
+            report["category_changes"][f"{category} → {new_cat}"] = (
                 report["category_changes"].get(f"{category} → {new_cat}", 0) + 1
+            )
             cleaned[3] = new_cat
         new_lvl = _canon_level(level)
         if new_lvl != level:
             report["levels_recased"] += 1
-            report["level_changes"][f"{level} → {new_lvl}"] = \
+            report["level_changes"][f"{level} → {new_lvl}"] = (
                 report["level_changes"].get(f"{level} → {new_lvl}", 0) + 1
+            )
             cleaned[4] = new_lvl
 
         # Déduplication exacte (même clé que le validateur)
@@ -236,19 +257,17 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False,
 
     if apply:
         # Backup horodaté AVANT toute écriture (règle projet)
-        backup = csv_path.with_name(
-            f"certif-backup-{datetime.now():%Y%m%d_%H%M%S}.csv"
-        )
+        backup = csv_path.with_name(f"certif-backup-{datetime.now():%Y%m%d_%H%M%S}.csv")
         shutil.copy2(csv_path, backup)
         report["backup"] = str(backup)
 
         buf = io.StringIO()
-        writer = csv.writer(buf, delimiter=";", quotechar='"',
-                            quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
+        writer = csv.writer(
+            buf, delimiter=";", quotechar='"', quoting=csv.QUOTE_MINIMAL, lineterminator="\n"
+        )
         for fields in out_rows:
             writer.writerow(fields)
-        csv_path.write_text("﻿" + header + "\n" + buf.getvalue(),
-                            encoding="utf-8")
+        csv_path.write_text("﻿" + header + "\n" + buf.getvalue(), encoding="utf-8")
         report["applied"] = True
 
         if reimport:
@@ -261,8 +280,10 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False,
 def format_report(report: dict) -> str:
     L = []
     L.append("=" * 52)
-    L.append("🧹 NETTOYAGE DU CSV MAÎTRE SNEP" +
-             ("  (DRY-RUN)" if not report.get("applied") else "  (APPLIQUÉ)"))
+    L.append(
+        "🧹 NETTOYAGE DU CSV MAÎTRE SNEP"
+        + ("  (DRY-RUN)" if not report.get("applied") else "  (APPLIQUÉ)")
+    )
     L.append("=" * 52)
     if report.get("error"):
         L.append(f"❌ {report['error']}")
@@ -271,8 +292,10 @@ def format_report(report: dict) -> str:
     L.append(f"Fichier : {report['path']}")
     if report.get("backup"):
         L.append(f"Backup  : {report['backup']}")
-    L.append(f"Lignes : {report['rows_in']} → {report['rows_out']} "
-             f"({report['rows_out'] - report['rows_in']:+d})")
+    L.append(
+        f"Lignes : {report['rows_in']} → {report['rows_out']} "
+        f"({report['rows_out'] - report['rows_in']:+d})"
+    )
     L.append("")
     L.append(f"  • Niveaux re-cassés       : {report['levels_recased']}")
     L.append(f"  • Catégories re-cassées   : {report['categories_recased']}")
@@ -307,19 +330,23 @@ def format_report(report: dict) -> str:
 
     if not report.get("applied"):
         L.append("")
-        L.append("ℹ️  DRY-RUN : rien n'a été écrit. Relance avec --apply pour "
-                 "appliquer (un backup sera créé).")
+        L.append(
+            "ℹ️  DRY-RUN : rien n'a été écrit. Relance avec --apply pour "
+            "appliquer (un backup sera créé)."
+        )
     L.append("=" * 52)
     return "\n".join(L)
 
 
 def _default_csv_path() -> Path:
     from src.config import DATA_PATH
+
     return Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
 
 
 def main():
     import argparse
+
     # Forcer l'UTF-8 sans ré-emballer stdout (un nouveau TextIOWrapper sur
     # sys.stdout.buffer entre en conflit avec ceux posés par d'autres modules
     # → "I/O operation on closed file"). reconfigure() modifie en place.
@@ -331,10 +358,14 @@ def main():
 
     parser = argparse.ArgumentParser(description="Nettoyage du CSV maître SNEP")
     parser.add_argument("path", nargs="?", default=None, help="Chemin du CSV (défaut: CSV maître)")
-    parser.add_argument("--apply", action="store_true",
-                        help="Appliquer réellement (backup + réécriture + réimport DB)")
-    parser.add_argument("--no-reimport", action="store_true",
-                        help="Ne pas réimporter en base après nettoyage")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Appliquer réellement (backup + réécriture + réimport DB)",
+    )
+    parser.add_argument(
+        "--no-reimport", action="store_true", help="Ne pas réimporter en base après nettoyage"
+    )
     args = parser.parse_args()
 
     path = Path(args.path) if args.path else _default_csv_path()

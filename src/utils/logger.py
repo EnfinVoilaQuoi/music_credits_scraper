@@ -1,4 +1,5 @@
 """Système de logging centralisé"""
+
 import logging
 import coloredlogs
 from datetime import datetime
@@ -7,59 +8,57 @@ from src.config import LOGS_DIR, LOG_LEVEL, DEBUG
 
 class Logger:
     """Gestionnaire de logs centralisé"""
-    
+
     _loggers = {}
-    
+
     @classmethod
     def get_logger(cls, name: str) -> logging.Logger:
         """Obtient ou crée un logger"""
         if name in cls._loggers:
             return cls._loggers[name]
-        
+
         # Créer le logger
         logger = logging.getLogger(name)
         logger.setLevel(logging.DEBUG)  # Force DEBUG temporairement
-        
+
         # Formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
         # Handler console avec couleurs
         if DEBUG:
             coloredlogs.install(
                 level=LOG_LEVEL,
                 logger=logger,
-                fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+                fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             )
-        
+
         # Handler fichier
         log_file = LOGS_DIR / f"{datetime.now().strftime('%Y%m%d')}_scraper.log"
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-        
+
         # Handler pour les erreurs
         error_file = LOGS_DIR / f"{datetime.now().strftime('%Y%m%d')}_errors.log"
-        error_handler = logging.FileHandler(error_file, encoding='utf-8')
+        error_handler = logging.FileHandler(error_file, encoding="utf-8")
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(formatter)
         logger.addHandler(error_handler)
-        
+
         cls._loggers[name] = logger
         return logger
-    
+
     @classmethod
     def log_scraping_error(cls, track_title: str, error: str, source: str):
         """Log spécifique pour les erreurs de scraping"""
-        logger = cls.get_logger('scraping_errors')
+        logger = cls.get_logger("scraping_errors")
         logger.error(f"[{source}] Erreur sur '{track_title}': {error}")
-    
+
     @classmethod
     def log_api_call(cls, api_name: str, endpoint: str, success: bool):
         """Log spécifique pour les appels API"""
-        logger = cls.get_logger('api_calls')
+        logger = cls.get_logger("api_calls")
         if success:
             logger.info(f"[{api_name}] Appel réussi: {endpoint}")
         else:

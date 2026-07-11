@@ -16,6 +16,7 @@ URLs (inchangées par la refonte) : /fr/or-platine/{année}/{singles|albums}.
 Le DOM aussi est inchangé : .chart_title = <B>Artiste</B><BR>Titre,
 .company = "JJ/MM/AAAA: Niveau [JJ/MM/AAAA: Niveau ...]".
 """
+
 from typing import Optional
 
 from bs4 import BeautifulSoup
@@ -49,7 +50,7 @@ def fetch_ultratop_html(year, category: str) -> Optional[str]:
     try:
         _, html = scraper._crawl_page(
             url,
-            wait_for="css:.chart_title",   # attend les entrées de certif
+            wait_for="css:.chart_title",  # attend les entrées de certif
             wait_timeout=15_000,
             page_timeout=45_000,
             delay_before_return=1.0,

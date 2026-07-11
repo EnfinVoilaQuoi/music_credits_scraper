@@ -6,30 +6,66 @@ Toute écriture de `musical_key` doit passer par `key_mode_to_french` (ints)
 ou `key_mode_to_french_from_string` (strings), qui convergent vers ce format.
 `normalize_musical_key` re-normalise une chaîne existante (US/FR/Unicode/mixte).
 """
+
 from typing import Optional
 
 # ── Parsing robuste note → pitch class (US, FR, Unicode ♯/♭, composites X/Y) ──
 
 _NOTE_TO_PC = {
     # Notation anglaise
-    'C': 0, 'C#': 1, 'DB': 1, 'D': 2, 'D#': 3, 'EB': 3, 'E': 4, 'F': 5,
-    'F#': 6, 'GB': 6, 'G': 7, 'G#': 8, 'AB': 8, 'A': 9, 'A#': 10, 'BB': 10, 'B': 11,
+    "C": 0,
+    "C#": 1,
+    "DB": 1,
+    "D": 2,
+    "D#": 3,
+    "EB": 3,
+    "E": 4,
+    "F": 5,
+    "F#": 6,
+    "GB": 6,
+    "G": 7,
+    "G#": 8,
+    "AB": 8,
+    "A": 9,
+    "A#": 10,
+    "BB": 10,
+    "B": 11,
     # Notation française (accents retirés au préalable : Ré→RE)
-    'DO': 0, 'DO#': 1, 'REB': 1, 'RE': 2, 'RE#': 3, 'MIB': 3, 'MI': 4, 'FA': 5,
-    'FA#': 6, 'SOLB': 6, 'SOL': 7, 'SOL#': 8, 'LAB': 8, 'LA': 9, 'LA#': 10,
-    'SIB': 10, 'SI': 11,
+    "DO": 0,
+    "DO#": 1,
+    "REB": 1,
+    "RE": 2,
+    "RE#": 3,
+    "MIB": 3,
+    "MI": 4,
+    "FA": 5,
+    "FA#": 6,
+    "SOLB": 6,
+    "SOL": 7,
+    "SOL#": 8,
+    "LAB": 8,
+    "LA": 9,
+    "LA#": 10,
+    "SIB": 10,
+    "SI": 11,
 }
 
 _MODE_WORDS = {
-    'major': 1, 'majeur': 1, 'maj': 1, '1': 1,
-    'minor': 0, 'mineur': 0, 'min': 0, '0': 0,
+    "major": 1,
+    "majeur": 1,
+    "maj": 1,
+    "1": 1,
+    "minor": 0,
+    "mineur": 0,
+    "min": 0,
+    "0": 0,
 }
 
 
 def _clean_note_token(s: str) -> str:
     """Normalise un token de note : Unicode ♯/♭, accents français, casse."""
-    s = str(s).strip().replace('♯', '#').replace('♭', 'b')
-    for accented, plain in (('é', 'e'), ('è', 'e'), ('ê', 'e'), ('É', 'E'), ('È', 'E')):
+    s = str(s).strip().replace("♯", "#").replace("♭", "b")
+    for accented, plain in (("é", "e"), ("è", "e"), ("ê", "e"), ("É", "E"), ("È", "E")):
         s = s.replace(accented, plain)
     return s.upper()
 
@@ -50,10 +86,10 @@ def note_to_pitch_class(note) -> Optional[int]:
     if token.isdigit():  # entier sous forme de chaîne ("7")
         pc = int(token)
         return pc if 0 <= pc <= 11 else None
-    if '/' in token:  # composite enharmonique "X/Y" : la 1re partie suffit
-        token = token.split('/')[0].strip()
+    if "/" in token:  # composite enharmonique "X/Y" : la 1re partie suffit
+        token = token.split("/")[0].strip()
     # Suffixe mineur collé ("EM" = E minor) : retiré seulement si le reste est valide
-    if token not in _NOTE_TO_PC and token.endswith('M') and token[:-1] in _NOTE_TO_PC:
+    if token not in _NOTE_TO_PC and token.endswith("M") and token[:-1] in _NOTE_TO_PC:
         token = token[:-1]
     return _NOTE_TO_PC.get(token)
 
@@ -82,7 +118,7 @@ def normalize_musical_key(musical_key: str) -> Optional[str]:
     if len(tokens) < 2:
         return None
     mode = parse_mode(tokens[-1])
-    pc = note_to_pitch_class(' '.join(tokens[:-1]))
+    pc = note_to_pitch_class(" ".join(tokens[:-1]))
     if pc is None or mode is None:
         return None
     return key_mode_to_french(pc, mode)
@@ -127,7 +163,7 @@ def key_mode_to_french(key: int, mode: int) -> str:
         8: "Sol#/Lab",
         9: "La",
         10: "La#/Sib",
-        11: "Si"
+        11: "Si",
     }
 
     mode_fr = "majeur" if mode == 1 else "mineur"
@@ -156,9 +192,18 @@ def key_mode_to_french_from_string(key_str, mode_str) -> Optional[str]:
 def key_mode_to_english(key: int, mode: int) -> str:
     """Version anglaise pour référence"""
     notes_en = {
-        0: "C", 1: "C#/Db", 2: "D", 3: "D#/Eb",
-        4: "E", 5: "F", 6: "F#/Gb", 7: "G",
-        8: "G#/Ab", 9: "A", 10: "A#/Bb", 11: "B"
+        0: "C",
+        1: "C#/Db",
+        2: "D",
+        3: "D#/Eb",
+        4: "E",
+        5: "F",
+        6: "F#/Gb",
+        7: "G",
+        8: "G#/Ab",
+        9: "A",
+        10: "A#/Bb",
+        11: "B",
     }
 
     mode_en = "major" if mode == 1 else "minor"

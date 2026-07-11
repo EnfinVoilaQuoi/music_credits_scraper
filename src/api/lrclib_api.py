@@ -16,6 +16,7 @@ Matching :
 Politesse : User-Agent identifiable (recommandé par LRCLIB), retries réseau via config.
 Pas de rate limit annoncé, on respecte quand même DELAY_BETWEEN_REQUESTS.
 """
+
 import re
 import time
 import logging
@@ -137,20 +138,28 @@ class LRCLIBAPI:
             "instrumental": bool(obj.get("instrumental")),
         }
 
-    def get_exact(self, track_name: str, artist_name: str,
-                  album_name: str, duration: int) -> Optional[Dict]:
+    def get_exact(
+        self, track_name: str, artist_name: str, album_name: str, duration: int
+    ) -> Optional[Dict]:
         """`/get` : match sur les 4 champs (durée ±2 s). Renvoie un dict interne ou None."""
-        obj = self._request("/get", {
-            "track_name": track_name,
-            "artist_name": artist_name,
-            "album_name": album_name or "",
-            "duration": int(duration),
-        })
+        obj = self._request(
+            "/get",
+            {
+                "track_name": track_name,
+                "artist_name": artist_name,
+                "album_name": album_name or "",
+                "duration": int(duration),
+            },
+        )
         return self._pack(obj) if isinstance(obj, dict) else None
 
-    def search(self, track_name: str, artist_name: Optional[str] = None,
-               duration: Optional[int] = None,
-               require_synced: bool = True) -> Optional[Dict]:
+    def search(
+        self,
+        track_name: str,
+        artist_name: Optional[str] = None,
+        duration: Optional[int] = None,
+        require_synced: bool = True,
+    ) -> Optional[Dict]:
         """
         `/search` (titre + artiste) puis sélection du meilleur candidat :
         titre fort exigé, départage par la durée (±2 s privilégié) si connue.
@@ -171,13 +180,15 @@ class LRCLIBAPI:
             tscore = _title_match(track_name, cand.get("trackName", ""))
             if tscore < _TITLE_MATCH_MIN:
                 continue  # titre pas assez proche → écarté
-            ascore = _artist_match(artist_name or "", cand.get("artistName", "")) if artist_name else 0.5
+            ascore = (
+                _artist_match(artist_name or "", cand.get("artistName", "")) if artist_name else 0.5
+            )
             score = tscore + 0.5 * ascore
             # Départage / bonus par la durée réelle
             if duration and cand.get("duration"):
                 diff = abs(int(cand["duration"]) - int(duration))
                 if diff <= 2:
-                    score += 1.0          # match durée quasi exact = forte confiance
+                    score += 1.0  # match durée quasi exact = forte confiance
                 elif diff <= 5:
                     score += 0.3
                 else:
@@ -187,9 +198,13 @@ class LRCLIBAPI:
 
         return self._pack(best) if best else None
 
-    def get_synced(self, track_name: str, artist_name: str,
-                   album_name: Optional[str] = None,
-                   duration: Optional[int] = None) -> Optional[Dict]:
+    def get_synced(
+        self,
+        track_name: str,
+        artist_name: str,
+        album_name: Optional[str] = None,
+        duration: Optional[int] = None,
+    ) -> Optional[Dict]:
         """
         Point d'entrée principal (SOURCE 1 des timestamps).
 
@@ -205,13 +220,17 @@ class LRCLIBAPI:
         if duration and album_name:
             hit = self.get_exact(track_name, artist_name, album_name, duration)
             if hit and hit.get("lyrics_synced"):
-                logger.info(f"🎵 LRCLIB /get: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})")
+                logger.info(
+                    f"🎵 LRCLIB /get: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
+                )
                 return hit
 
         # 2) Fallback recherche (titre fort + départage durée)
         hit = self.search(track_name, artist_name, duration=duration, require_synced=True)
         if hit and hit.get("lyrics_synced"):
-            logger.info(f"🎵 LRCLIB /search: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})")
+            logger.info(
+                f"🎵 LRCLIB /search: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
+            )
             return hit
 
         # 3) Dernier recours : texte brut (pas de synchro) via /search

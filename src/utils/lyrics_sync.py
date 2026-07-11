@@ -15,11 +15,12 @@ Deux rôles :
    (recherche en avant uniquement) pour éviter qu'une ligne de refrain répétée ne se
    cale sur une occurrence antérieure → intervalles non croissants / incohérents.
 """
+
 import re
 from difflib import SequenceMatcher
 from typing import List, Optional, Tuple
 
-_LRC_RE = re.compile(r'\[(\d+):(\d+)(?:[.:](\d+))?\]\s*(.*)')
+_LRC_RE = re.compile(r"\[(\d+):(\d+)(?:[.:](\d+))?\]\s*(.*)")
 
 
 def parse_lrc(lrc: str) -> List[Tuple[float, str]]:
@@ -36,7 +37,7 @@ def parse_lrc(lrc: str) -> List[Tuple[float, str]]:
 
 
 def _norm(s: str) -> str:
-    return re.sub(r'[^a-z0-9 ]', ' ', (s or '').lower())
+    return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower())
     # collapse espaces fait dans l'appelant
 
 
@@ -51,7 +52,7 @@ def _fmt(t: float) -> str:
 
 def _is_header(line: str) -> bool:
     l = line.strip()
-    return l.startswith('[') and l.endswith(']')
+    return l.startswith("[") and l.endswith("]")
 
 
 def annotate_sections(structured: str, lrc: str) -> str:
@@ -77,10 +78,10 @@ def annotate_sections(structured: str, lrc: str) -> str:
         nt = _norm2(text)
         if len(nt) < 3:
             return None
-        for i in range(start_idx, n_lrc):   # match exact, le plus proche en avant
+        for i in range(start_idx, n_lrc):  # match exact, le plus proche en avant
             if norm_lrc[i][0] == nt:
                 return norm_lrc[i][1], i
-        for i in range(start_idx, n_lrc):   # sinon 1ʳᵉ similarité suffisante en avant
+        for i in range(start_idx, n_lrc):  # sinon 1ʳᵉ similarité suffisante en avant
             if SequenceMatcher(None, nt, norm_lrc[i][0]).ratio() >= 0.82:
                 return norm_lrc[i][1], i
         return None
@@ -113,9 +114,9 @@ def annotate_sections(structured: str, lrc: str) -> str:
                 break
         if found is not None:
             starts.append(found[0])
-            cursor = found[1] + 1     # la section suivante repart après ce point
+            cursor = found[1] + 1  # la section suivante repart après ce point
         else:
-            starts.append(None)       # non alignée : on ne recule pas le curseur
+            starts.append(None)  # non alignée : on ne recule pas le curseur
 
     last_t = lrc_lines[-1][0]
     annotated = list(lines)
@@ -126,7 +127,7 @@ def annotate_sections(structured: str, lrc: str) -> str:
             continue
         en = next((starts[j] for j in range(i + 1, len(sections)) if starts[j] is not None), last_t)
         h = lines[sec["idx"]].strip()
-        if h.endswith(']'):
+        if h.endswith("]"):
             annotated[sec["idx"]] = f"{h[:-1].rstrip()}  ⏱ {_fmt(st)} → {_fmt(en)}]"
             any_annotated = True
 
@@ -134,6 +135,7 @@ def annotate_sections(structured: str, lrc: str) -> str:
 
 
 # ── Cross-check des sources (LRCLIB vs YTM) ─────────────────────────────────────
+
 
 def lrc_last_timestamp(lrc: str) -> Optional[float]:
     """Timestamp (secondes) de la dernière ligne synchronisée, ou None."""
@@ -171,8 +173,9 @@ def _line_offsets(lrc_a: str, lrc_b: str) -> List[float]:
     return offs
 
 
-def compare_synced(lrclib_lrc: Optional[str], ytm_lrc: Optional[str],
-                   duration: Optional[float] = None) -> Optional[dict]:
+def compare_synced(
+    lrclib_lrc: Optional[str], ytm_lrc: Optional[str], duration: Optional[float] = None
+) -> Optional[dict]:
     """
     Croise LRCLIB (source 1) et YTM (source 2) et choisit le LRC à conserver.
 
@@ -189,9 +192,19 @@ def compare_synced(lrclib_lrc: Optional[str], ytm_lrc: Optional[str],
     if not has_l and not has_y:
         return None
     if has_l and not has_y:
-        return {'lrc': lrclib_lrc, 'source': 'LRCLIB', 'confidence': 1, 'note': 'source unique (LRCLIB)'}
+        return {
+            "lrc": lrclib_lrc,
+            "source": "LRCLIB",
+            "confidence": 1,
+            "note": "source unique (LRCLIB)",
+        }
     if has_y and not has_l:
-        return {'lrc': ytm_lrc, 'source': 'YouTube Music', 'confidence': 1, 'note': 'source unique (YTM)'}
+        return {
+            "lrc": ytm_lrc,
+            "source": "YouTube Music",
+            "confidence": 1,
+            "note": "source unique (YTM)",
+        }
 
     # Les deux présentes : concordance = décalage global faible + dispersion faible.
     offs = _line_offsets(lrclib_lrc, ytm_lrc)
@@ -200,19 +213,35 @@ def compare_synced(lrclib_lrc: Optional[str], ytm_lrc: Optional[str],
         median = offs_sorted[len(offs_sorted) // 2]
         spread = sum(abs(o - median) for o in offs) / len(offs)
         if abs(median) <= 2.0 and spread <= 1.5:
-            return {'lrc': lrclib_lrc, 'source': 'LRCLIB', 'confidence': 2,
-                    'note': f'concordant avec YTM ({len(offs)} lignes communes)'}
+            return {
+                "lrc": lrclib_lrc,
+                "source": "LRCLIB",
+                "confidence": 2,
+                "note": f"concordant avec YTM ({len(offs)} lignes communes)",
+            }
 
     # Divergence → départage par la durée réelle.
     el = sync_error(lrclib_lrc, duration)
     ey = sync_error(ytm_lrc, duration)
     if el is not None and ey is not None and el != ey:
         if ey < el:
-            return {'lrc': ytm_lrc, 'source': 'YouTube Music', 'confidence': 1,
-                    'note': 'divergent → durée favorise YTM'}
-        return {'lrc': lrclib_lrc, 'source': 'LRCLIB', 'confidence': 1,
-                'note': 'divergent → durée favorise LRCLIB'}
+            return {
+                "lrc": ytm_lrc,
+                "source": "YouTube Music",
+                "confidence": 1,
+                "note": "divergent → durée favorise YTM",
+            }
+        return {
+            "lrc": lrclib_lrc,
+            "source": "LRCLIB",
+            "confidence": 1,
+            "note": "divergent → durée favorise LRCLIB",
+        }
 
     # Durée indisponible ou ex-æquo → priorité à la source 1 (LRCLIB).
-    return {'lrc': lrclib_lrc, 'source': 'LRCLIB', 'confidence': 1,
-            'note': 'divergent, durée indispo → LRCLIB (source 1)'}
+    return {
+        "lrc": lrclib_lrc,
+        "source": "LRCLIB",
+        "confidence": 1,
+        "note": "divergent, durée indispo → LRCLIB (source 1)",
+    }

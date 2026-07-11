@@ -11,6 +11,7 @@ Backend observé (session Chrome 2026-07-03) : POST api.audioaidynamics.com/api/
 (~8 s), résultats en cartes ("Key: C minor / BPM: 87 / Camelot: 5A"). On pilote
 l'UI (pas d'API documentée) et on parse les cartes par diff avant/après.
 """
+
 import json
 import re
 import time
@@ -22,21 +23,24 @@ from typing import Dict, Optional, Set, Tuple
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from src.config import (
-    BPMFINDER_EMAIL, BPMFINDER_PASSWORD, BPMFINDER_SESSION_FILE, DATA_DIR,
+    BPMFINDER_EMAIL,
+    BPMFINDER_PASSWORD,
+    BPMFINDER_SESSION_FILE,
+    DATA_DIR,
 )
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.music_theory import note_to_pitch_class, parse_mode
 
-logger = logging.getLogger('BPMFinderScraper')
+logger = logging.getLogger("BPMFinderScraper")
 
 ANALYZER_URL = "https://audioaidynamics.com/music-analyzer"
 _CACHE_FILE = DATA_DIR / "bpmfinder_cache.json"
 
 # "Key: C minor … BPM: 87 … Camelot: 5A" (l'ordre des cartes suit le DOM)
 _CARD_RE = re.compile(
-    r'Key:\s*([A-G][#b♯♭]?)\s*(minor|major)'
-    r'.{0,80}?BPM:\s*(\d{2,3})'
-    r'(?:.{0,80}?Camelot:\s*(\d{1,2}[AB]))?',
+    r"Key:\s*([A-G][#b♯♭]?)\s*(minor|major)"
+    r".{0,80}?BPM:\s*(\d{2,3})"
+    r"(?:.{0,80}?Camelot:\s*(\d{1,2}[AB]))?",
     re.S | re.I,
 )
 
@@ -57,21 +61,23 @@ class BPMFinderScraper:
 
     @staticmethod
     def credentials_or_session_available() -> bool:
-        return bool((BPMFINDER_EMAIL and BPMFINDER_PASSWORD)
-                    or Path(BPMFINDER_SESSION_FILE).exists())
+        return bool(
+            (BPMFINDER_EMAIL and BPMFINDER_PASSWORD) or Path(BPMFINDER_SESSION_FILE).exists()
+        )
 
     # ── Cache (par videoId : une analyse suffit, le résultat ne change pas) ───
 
     def _load_cache(self) -> dict:
         try:
-            return json.loads(Path(_CACHE_FILE).read_text(encoding='utf-8'))
+            return json.loads(Path(_CACHE_FILE).read_text(encoding="utf-8"))
         except Exception:
             return {}
 
     def _save_cache(self):
         try:
             Path(_CACHE_FILE).write_text(
-                json.dumps(self.cache, ensure_ascii=False, indent=1), encoding='utf-8')
+                json.dumps(self.cache, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
         except Exception as e:
             logger.debug(f"Cache BPM Finder non sauvegardé: {e}")
 
@@ -81,12 +87,14 @@ class BPMFinderScraper:
     # pré-installé avant le chargement pour que la bannière bloquante
     # (« To continue using this website, please accept cookies », overlay
     # plein écran qui intercepte le clic Upload) n'apparaisse jamais.
-    _CONSENT_INIT = "try{localStorage.setItem('cookie-comply', JSON.stringify(['session']));}catch(e){}"
+    _CONSENT_INIT = (
+        "try{localStorage.setItem('cookie-comply', JSON.stringify(['session']));}catch(e){}"
+    )
 
     def _drop_driver_refs(self):
         """Abandonne les objets Playwright sans les fermer (leur thread est mort :
         toute opération dessus relèverait l'erreur thread-affine)."""
-        for attr in ('page', 'context', 'browser'):
+        for attr in ("page", "context", "browser"):
             try:
                 obj = getattr(self, attr, None)
                 if obj:
@@ -114,8 +122,10 @@ class BPMFinderScraper:
         self.context.on("response", self._log_api_error)
         self.page = self.context.new_page()
         self._thread_id = cur
-        logger.info(f"🌐 BPM Finder: Playwright initialisé "
-                    f"(session {'reprise' if storage else 'neuve'})")
+        logger.info(
+            f"🌐 BPM Finder: Playwright initialisé "
+            f"(session {'reprise' if storage else 'neuve'})"
+        )
 
     @staticmethod
     def _log_api_error(resp):
@@ -124,7 +134,7 @@ class BPMFinderScraper:
         sync uniquement — PAS de resp.text() ici (appel bloquant interdit dans un
         handler Playwright sync)."""
         try:
-            if 'audioaidynamics.com/api' in resp.url and resp.status >= 400:
+            if "audioaidynamics.com/api" in resp.url and resp.status >= 400:
                 logger.warning(f"BPM Finder API: HTTP {resp.status} sur {resp.url}")
         except Exception:
             pass
@@ -133,17 +143,18 @@ class BPMFinderScraper:
         """Capture d'état (screenshot + texte de la page) dans data/diagnostics/,
         UNE fois par run pour ne pas spammer. Évite de rediagnostiquer à l'aveugle
         (cf. panne 2026-07-10 : overlay pubs invisible dans les logs)."""
-        if getattr(self, '_debug_dumped', False):
+        if getattr(self, "_debug_dumped", False):
             return
         self._debug_dumped = True
         try:
             diag = DATA_DIR / "diagnostics"
             diag.mkdir(parents=True, exist_ok=True)
-            safe = re.sub(r'[^\w.-]', '_', label)[:60]
+            safe = re.sub(r"[^\w.-]", "_", label)[:60]
             stamp = time.strftime("%Y%m%d_%H%M%S")
             self.page.screenshot(path=str(diag / f"bpmfinder_{stamp}_{safe}.png"))
             (diag / f"bpmfinder_{stamp}_{safe}.txt").write_text(
-                self.page.inner_text('body') or '', encoding='utf-8')
+                self.page.inner_text("body") or "", encoding="utf-8"
+            )
             logger.warning(f"BPM Finder: état de la page capturé dans {diag}")
         except Exception:
             pass
@@ -196,7 +207,7 @@ class BPMFinderScraper:
             logger.warning(f"Session BPM Finder non sauvegardée: {e}")
 
     def _goto_analyzer(self, force: bool = False):
-        if force or not (self.page.url or '').startswith(ANALYZER_URL):
+        if force or not (self.page.url or "").startswith(ANALYZER_URL):
             self.page.goto(ANALYZER_URL, wait_until="domcontentloaded", timeout=45_000)
             try:
                 self.page.wait_for_load_state("networkidle", timeout=15_000)
@@ -214,9 +225,11 @@ class BPMFinderScraper:
             return loc.first
         except Exception:
             pass
-        for sel in ("input[placeholder*='YouTube' i]",
-                    "input[placeholder*='youtube' i]",
-                    "input[type='text']"):
+        for sel in (
+            "input[placeholder*='YouTube' i]",
+            "input[placeholder*='youtube' i]",
+            "input[type='text']",
+        ):
             try:
                 el = self.page.wait_for_selector(sel, state="visible", timeout=3_000)
                 if el:
@@ -232,7 +245,7 @@ class BPMFinderScraper:
         rendu DOM — vérifié en live : connecté = cookies access_token/refresh_token,
         aucun span « LOGIN »). Évite le re-login inutile à chaque run."""
         try:
-            return any(c.get('name') == 'access_token' for c in self.context.cookies())
+            return any(c.get("name") == "access_token" for c in self.context.cookies())
         except Exception:
             return False
 
@@ -251,8 +264,10 @@ class BPMFinderScraper:
         input[type=password] + bouton « Login ». Structure vérifiée en live.
         Si l'UI change : bootstrap manuel via scripts/bpmfinder_login.py."""
         if not (BPMFINDER_EMAIL and BPMFINDER_PASSWORD):
-            logger.error("BPM Finder: identifiants absents (BPMFINDER_EMAIL/PASSWORD) "
-                         "et pas de session — lancer scripts/bpmfinder_login.py")
+            logger.error(
+                "BPM Finder: identifiants absents (BPMFINDER_EMAIL/PASSWORD) "
+                "et pas de session — lancer scripts/bpmfinder_login.py"
+            )
             return False
         try:
             # Ouvrir le modal si le formulaire n'est pas déjà affiché
@@ -270,28 +285,31 @@ class BPMFinderScraper:
             # (sinon le champ YouTube n'est pas retrouvé juste après le login).
             self._goto_analyzer(force=True)
             if self._looks_logged_out():
-                logger.error("BPM Finder: login refusé (vérifier identifiants) — "
-                             "ou UI de login inattendue : scripts/bpmfinder_login.py")
+                logger.error(
+                    "BPM Finder: login refusé (vérifier identifiants) — "
+                    "ou UI de login inattendue : scripts/bpmfinder_login.py"
+                )
                 return False
             self._save_session()
             logger.info("✅ BPM Finder: connecté")
             return True
         except Exception as e:
-            logger.error(f"BPM Finder: login échoué: {e} — "
-                         "bootstrap manuel : scripts/bpmfinder_login.py")
+            logger.error(
+                f"BPM Finder: login échoué: {e} — " "bootstrap manuel : scripts/bpmfinder_login.py"
+            )
             return False
 
     # ── Analyse ────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _video_id(url: str) -> Optional[str]:
-        m = re.search(r'(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})', url or '')
+        m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url or "")
         return m.group(1) if m else None
 
     def _cards(self) -> Set[Tuple[str, str, str, str]]:
         """Cartes de résultats présentes : {(note, mode, bpm, camelot)}."""
         try:
-            text = self.page.inner_text('body') or ''
+            text = self.page.inner_text("body") or ""
         except Exception:
             return set()
         return {m.groups() for m in _CARD_RE.finditer(text)}
@@ -404,22 +422,24 @@ class BPMFinderScraper:
 
         note, mode_name, bpm, camelot = new_card
         result = {
-            'bpm': int(bpm),
-            'key': note_to_pitch_class(note),
-            'mode': parse_mode(mode_name),
-            'key_name': f"{note} {mode_name.lower()}",
-            'camelot': camelot or None,
+            "bpm": int(bpm),
+            "key": note_to_pitch_class(note),
+            "mode": parse_mode(mode_name),
+            "key_name": f"{note} {mode_name.lower()}",
+            "camelot": camelot or None,
         }
-        if result['key'] is None or result['mode'] is None:
+        if result["key"] is None or result["mode"] is None:
             logger.warning(f"BPM Finder: tonalité non parsée: {note!r} {mode_name!r}")
-        logger.info(f"✅ BPM Finder {label}: {result['bpm']} BPM, {result['key_name']}"
-                    + (f", Camelot {result['camelot']}" if result['camelot'] else ""))
+        logger.info(
+            f"✅ BPM Finder {label}: {result['bpm']} BPM, {result['key_name']}"
+            + (f", Camelot {result['camelot']}" if result["camelot"] else "")
+        )
         return result
 
     # ── Cycle de vie ───────────────────────────────────────────────────────────
 
     def close(self):
-        for attr in ('page', 'context', 'browser'):
+        for attr in ("page", "context", "browser"):
             obj = getattr(self, attr, None)
             if obj:
                 try:

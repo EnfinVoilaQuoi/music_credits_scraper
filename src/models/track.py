@@ -1,4 +1,5 @@
 """Modèles pour représenter les morceaux et crédits"""
+
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime
@@ -13,12 +14,13 @@ logger = logging.getLogger(__name__)
 
 class CreditRole(Enum):
     """Types de rôles dans les crédits"""
+
     # Rôles d'écriture
     WRITER = "Writer"
     COMPOSER = "Composer"
     LYRICIST = "Lyricist"
     TRANSLATOR = "Translator"
-    
+
     # Rôles de production musicale
     PRODUCER = "Producer"
     CO_PRODUCER = "Co-Producer"
@@ -28,7 +30,7 @@ class CreditRole(Enum):
     PROGRAMMER = "Programmer"
     DRUM_PROGRAMMER = "Drum Programmer"
     ARRANGER = "Arranger"
-    
+
     # Rôles studio
     MIXING_ENGINEER = "Mixing Engineer"
     MASTERING_ENGINEER = "Mastering Engineer"
@@ -44,7 +46,7 @@ class CreditRole(Enum):
     ADDITIONAL_RECORDING = "Additional Recording"
     ADDITIONAL_ENGINEERING = "Additional Engineering"
     PREPARER = "Preparer"
-    
+
     # Rôles liés au chant
     VOCALS = "Vocals"
     LEAD_VOCALS = "Lead Vocals"
@@ -52,7 +54,7 @@ class CreditRole(Enum):
     ADDITIONAL_VOCALS = "Additional Vocals"
     CHOIR = "Choir"
     AD_LIBS = "Ad-Libs"
-    
+
     # Label / Rôles liés à l'édition
     LABEL = "Label"
     PUBLISHER = "Publisher"
@@ -60,7 +62,7 @@ class CreditRole(Enum):
     COPYRIGHT = "Copyright ©"
     PHONOGRAPHIC_COPYRIGHT = "Phonographic Copyright ℗"
     MANUFACTURER = "Manufacturer"
-    
+
     # Rôles liés aux instruments
     GUITAR = "Guitar"
     BASS_GUITAR = "Bass Guitar"
@@ -83,12 +85,12 @@ class CreditRole(Enum):
     TROMBONE = "Trombone"
     SCRATCHES = "Scratches"
     INSTRUMENTATION = "Instrumentation"
-    
+
     # Lieux
     RECORDED_AT = "Recorded At"
     MASTERED_AT = "Mastered At"
     MIXED_AT = "Mixed At"
-    
+
     # Crédits pour la jaquette
     ARTWORK = "Artwork"
     ART_DIRECTION = "Art Direction"
@@ -96,7 +98,7 @@ class CreditRole(Enum):
     ILLUSTRATION = "Illustration"
     LAYOUT = "Layout"
     PHOTOGRAPHY = "Photography"
-    
+
     # Crédits vidéo
     VIDEO_DIRECTOR = "Video Director"
     VIDEO_PRODUCER = "Video Producer"
@@ -108,10 +110,10 @@ class CreditRole(Enum):
     VIDEO_SET_DECORATOR = "Video Set Decorator"
     VIDEO_EDITOR = "Video Editor"
     VIDEO_COLORIST = "Video Colorist"
-    
+
     # Rôles liés à l'album
     A_AND_R = "A&R"
-    
+
     # Autres
     FEATURED = "Featured Artist"
     SAMPLE = "Sample"
@@ -122,6 +124,7 @@ class CreditRole(Enum):
 @dataclass
 class Credit:
     """Représente un crédit sur un morceau"""
+
     name: str
     role: CreditRole
     role_detail: Optional[str] = None  # Ex: "Guitar", "Piano", etc.
@@ -140,7 +143,7 @@ class Credit:
     def from_role_and_names(role: str, names: List[str]) -> List["Credit"]:
         """Crée une liste de crédits à partir d'un rôle (texte) et de noms"""
         credits = []
-        
+
         # Mapper le rôle texte vers l'enum
         try:
             # Essayer de trouver le rôle exact
@@ -149,11 +152,11 @@ class Credit:
                 if role_enum.value.lower() == role.lower():
                     credit_role = role_enum
                     break
-            
+
             if not credit_role:
                 # Si pas trouvé, utiliser OTHER
                 credit_role = CreditRole.OTHER
-                
+
         except (ValueError, AttributeError):
             credit_role = CreditRole.OTHER
 
@@ -165,52 +168,57 @@ class Credit:
                     name=name,
                     role=credit_role,
                     role_detail=role if credit_role == CreditRole.OTHER else None,
-                    source="genius"
+                    source="genius",
                 )
                 credits.append(credit)
-        
+
         return credits
 
 
 @dataclass
 class Track:
     """Représente un morceau musical"""
+
     id: Optional[int] = None
     title: str = ""
-    artist: Optional['Artist'] = None
+    artist: Optional["Artist"] = None
     album: Optional[str] = None
     release_date: Optional[datetime] = None
 
     # Champs internes de marquage
     _album_from_api: bool = field(default=False, repr=False)
     _release_date_from_api: bool = field(default=False, repr=False)
-    
+
     # IDs externes
     genius_id: Optional[int] = None
     spotify_id: Optional[str] = None
     spotify_ids: List[str] = field(default_factory=list)
     discogs_id: Optional[int] = None
     isrc: Optional[str] = None  # International Standard Recording Code (pivot inter-sources)
-    
+
     # Métadonnées
     bpm: Optional[int] = None  # BPM "réel" (double-time) — valeur exportée
     bpm_alt: Optional[int] = None  # Octave alternative (half-time), ex. 71 pour 142
     bpm_source: Optional[str] = None  # Source(s) du BPM retenu (vote §8.3)
     bpm_confidence: Optional[int] = None  # Nb de sources concordantes
     key_mode_source: Optional[str] = None  # Source de key/mode (peut différer du BPM)
-    reccobeats_resolution: Optional[str] = None  # 'isrc' | 'spotify_id' — voie de résolution ReccoBeats
+    reccobeats_resolution: Optional[str] = (
+        None  # 'isrc' | 'spotify_id' — voie de résolution ReccoBeats
+    )
     duration: Optional[int] = None  # En secondes
     genre: Optional[str] = None
     track_number: Optional[int] = None
     musical_key: Optional[str] = None
     time_signature: Optional[str] = None
     audio_features: Optional[Dict[str, Any]] = field(default_factory=dict)
-    
+
     # Support des features
     is_featuring: bool = False  # True si l'artiste est en featuring
     featured_artists: Optional[str] = None  # Liste des artistes en featuring
     primary_artist_name: Optional[str] = None  # Nom de l'artiste principal si différent
-    secondary_role: Optional[str] = None  # Rôle secondaire (ex: "Additional Voices") si l'artiste n'est ni primary ni feat — rempli = contribution secondaire
+    secondary_role: Optional[str] = (
+        None  # Rôle secondaire (ex: "Additional Voices") si l'artiste n'est ni primary ni feat — rempli = contribution secondaire
+    )
 
     # Support des paroles
     lyrics: Optional[str] = None  # Paroles complètes
@@ -218,21 +226,25 @@ class Track:
     lyrics_scraped_at: Optional[datetime] = None  # Date de récupération des paroles
     lyrics_source: Optional[str] = None  # Provenance des paroles (YouTube Music / genius)
     lyrics_synced: Optional[str] = None  # Paroles synchronisées (LRC) retenues (LRCLIB > YTM)
-    lyrics_synced_source: Optional[str] = None  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
-    lyrics_synced_confidence: Optional[int] = None  # Nb de sources concordantes (2=croisé/validé, 1=unique ou après départage durée)
+    lyrics_synced_source: Optional[str] = (
+        None  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
+    )
+    lyrics_synced_confidence: Optional[int] = (
+        None  # Nb de sources concordantes (2=croisé/validé, 1=unique ou après départage durée)
+    )
     anecdotes: Optional[str] = None  # Anecdotes et informations supplémentaires
 
     # Métadonnées supplémentaires
     popularity: Optional[int] = None  # Nombre de vues sur Genius
     artwork_url: Optional[str] = None  # URL de la pochette
-    
+
     # Crédits
     credits: List[Credit] = field(default_factory=list)
 
     # Relations « inspiré de » (amont) : samples/interpolations/cover_of/remix_of + trad FR
     # Chaque entrée : {type, title, artist, url}. Source : API Genius song_relationships.
     relationships: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     # URLs
     genius_url: Optional[str] = None
     spotify_url: Optional[str] = None
@@ -242,7 +254,7 @@ class Track:
     youtube_url_source: Optional[str] = None
     # 1 = album édité MANUELLEMENT (détaché via la vue Albums…) — l'API ne re-remplit pas
     album_override: Optional[int] = None
-    
+
     # Métadonnées système
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -259,8 +271,12 @@ class Track:
     certification_details: Optional[Dict[str, Any]] = None  # Détails de la plus haute certification
 
     # NOUVEAU: Support de plusieurs certifications
-    certifications: List[Dict[str, Any]] = field(default_factory=list)  # Toutes les certifications du morceau
-    album_certifications: List[Dict[str, Any]] = field(default_factory=list)  # Certifications de l'album associé
+    certifications: List[Dict[str, Any]] = field(
+        default_factory=list
+    )  # Toutes les certifications du morceau
+    album_certifications: List[Dict[str, Any]] = field(
+        default_factory=list
+    )  # Certifications de l'album associé
 
     # Streams Spotify (kworb.net)
     spotify_streams: Optional[int] = None
@@ -270,14 +286,16 @@ class Track:
     # Streams YouTube Music
     ytm_streams: Optional[int] = None
     ytm_streams_updated: Optional[datetime] = None
-    
+
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""
         # Éviter les doublons
         for existing in self.credits:
-            if (existing.name == credit.name and
-                existing.role == credit.role and
-                existing.role_detail == credit.role_detail):
+            if (
+                existing.name == credit.name
+                and existing.role == credit.role
+                and existing.role_detail == credit.role_detail
+            ):
                 return
         self.credits.append(credit)
 
@@ -300,16 +318,17 @@ class Track:
         """
         from datetime import datetime
         from src.utils.logger import get_logger
+
         logger = get_logger(__name__)
 
         # Convertir new_date en datetime si c'est une string
         if isinstance(new_date, str):
             try:
                 # Format ISO (YYYY-MM-DD ou YYYY-MM-DDTHH:MM:SS)
-                if 'T' in new_date:
-                    new_date = datetime.fromisoformat(new_date.replace('Z', '+00:00'))
+                if "T" in new_date:
+                    new_date = datetime.fromisoformat(new_date.replace("Z", "+00:00"))
                 else:
-                    new_date = datetime.strptime(new_date[:10], '%Y-%m-%d')
+                    new_date = datetime.strptime(new_date[:10], "%Y-%m-%d")
             except Exception as e:
                 logger.debug(f"Impossible de parser la date '{new_date}': {e}")
                 return False
@@ -321,84 +340,94 @@ class Track:
         # Si pas de date existante, mettre à jour
         if not self.release_date:
             self.release_date = new_date
-            logger.debug(f"Date de sortie définie pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})")
+            logger.debug(
+                f"Date de sortie définie pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})"
+            )
             return True
 
         # Convertir la date existante en datetime si nécessaire
         existing_date = self.release_date
         if isinstance(existing_date, str):
             try:
-                if 'T' in existing_date:
-                    existing_date = datetime.fromisoformat(existing_date.replace('Z', '+00:00'))
+                if "T" in existing_date:
+                    existing_date = datetime.fromisoformat(existing_date.replace("Z", "+00:00"))
                 else:
-                    existing_date = datetime.strptime(existing_date[:10], '%Y-%m-%d')
+                    existing_date = datetime.strptime(existing_date[:10], "%Y-%m-%d")
             except:
                 # Si impossible de parser la date existante, la remplacer
                 self.release_date = new_date
-                logger.debug(f"Date existante invalide remplacée pour '{self.title}': {new_date.strftime('%d/%m/%Y')}")
+                logger.debug(
+                    f"Date existante invalide remplacée pour '{self.title}': {new_date.strftime('%d/%m/%Y')}"
+                )
                 return True
 
         # Si force=True, écraser sans vérifier
         if force:
             self.release_date = new_date
-            logger.debug(f"Date de sortie écrasée (force) pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})")
+            logger.debug(
+                f"Date de sortie écrasée (force) pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})"
+            )
             return True
 
         # Comparer les dates et garder la plus ancienne
         if new_date < existing_date:
-            old_date_str = existing_date.strftime('%d/%m/%Y')
-            new_date_str = new_date.strftime('%d/%m/%Y')
+            old_date_str = existing_date.strftime("%d/%m/%Y")
+            new_date_str = new_date.strftime("%d/%m/%Y")
             self.release_date = new_date
-            logger.info(f"✨ Date plus ancienne trouvée pour '{self.title}': {new_date_str} (remplace {old_date_str}) - Source: {source}")
+            logger.info(
+                f"✨ Date plus ancienne trouvée pour '{self.title}': {new_date_str} (remplace {old_date_str}) - Source: {source}"
+            )
             return True
         else:
-            logger.debug(f"Date existante conservée pour '{self.title}': {existing_date.strftime('%d/%m/%Y')} (nouvelle date {new_date.strftime('%d/%m/%Y')} ignorée)")
+            logger.debug(
+                f"Date existante conservée pour '{self.title}': {existing_date.strftime('%d/%m/%Y')} (nouvelle date {new_date.strftime('%d/%m/%Y')} ignorée)"
+            )
             return False
 
     def get_credits_by_role(self, role: CreditRole) -> List[Credit]:
         """Retourne tous les crédits d'un rôle spécifique - VERSION ROBUSTE"""
         try:
-            if not hasattr(self, 'credits') or not self.credits:
+            if not hasattr(self, "credits") or not self.credits:
                 return []
-                
+
             matching_credits = []
             for credit in self.credits:
                 try:
-                    if hasattr(credit, 'role') and credit.role == role:
+                    if hasattr(credit, "role") and credit.role == role:
                         matching_credits.append(credit)
                 except Exception:
                     continue
-                    
+
             return matching_credits
-            
+
         except Exception as e:
             logger.debug(f"Erreur get_credits_by_role: {e}")
             return []
-    
+
     def get_producers(self) -> List[str]:
         """Retourne la liste des producteurs (tous types confondus) - VERSION ROBUSTE"""
         try:
-            if not hasattr(self, 'credits') or not self.credits:
+            if not hasattr(self, "credits") or not self.credits:
                 return []
-                
+
             producer_roles = [
                 CreditRole.PRODUCER,
                 CreditRole.CO_PRODUCER,
                 CreditRole.EXECUTIVE_PRODUCER,
                 CreditRole.VOCAL_PRODUCER,
-                CreditRole.ADDITIONAL_PRODUCTION
+                CreditRole.ADDITIONAL_PRODUCTION,
             ]
-            
+
             producers = []
             for role in producer_roles:
                 try:
                     role_credits = self.get_credits_by_role(role)
-                    producers.extend([c.name for c in role_credits if hasattr(c, 'name')])
+                    producers.extend([c.name for c in role_credits if hasattr(c, "name")])
                 except Exception:
                     continue
-                    
+
             return producers
-            
+
         except Exception as e:
             logger.debug(f"Erreur get_producers: {e}")
             return []
@@ -406,52 +435,48 @@ class Track:
     def get_writers(self) -> List[str]:
         """Retourne la liste des auteurs (tous types confondus) - VERSION ROBUSTE"""
         try:
-            if not hasattr(self, 'credits') or not self.credits:
+            if not hasattr(self, "credits") or not self.credits:
                 return []
-                
-            writer_roles = [
-                CreditRole.WRITER,
-                CreditRole.COMPOSER,
-                CreditRole.LYRICIST
-            ]
-            
+
+            writer_roles = [CreditRole.WRITER, CreditRole.COMPOSER, CreditRole.LYRICIST]
+
             writers = []
             for role in writer_roles:
                 try:
                     role_credits = self.get_credits_by_role(role)
-                    writers.extend([c.name for c in role_credits if hasattr(c, 'name')])
+                    writers.extend([c.name for c in role_credits if hasattr(c, "name")])
                 except Exception:
                     continue
 
             return writers
-        
+
         except Exception as e:
             logger.debug(f"Erreur get_writers: {e}")
             return []
-        
+
     # Méthode pour calculer la durée d'obtention
     def calculate_certification_duration(self) -> Optional[int]:
         """Calcule la durée entre la sortie et la certification"""
         if not self.certification_date or not self.release_date:
             return None
-        
+
         try:
             cert_date = self.certification_date
             rel_date = self.release_date
-            
+
             # Convertir en datetime si nécessaire
             if isinstance(cert_date, str):
                 cert_date = datetime.fromisoformat(cert_date)
             if isinstance(rel_date, str):
                 rel_date = datetime.fromisoformat(rel_date)
-            
+
             duration = (cert_date - rel_date).days
             self.certification_duration_days = duration if duration >= 0 else None
             return self.certification_duration_days
-            
+
         except Exception:
             return None
-    
+
     def get_certification_emoji(self, level: Optional[str] = None) -> str:
         """Retourne un emoji correspondant au niveau de certification"""
         cert_level = level or self.certification_level
@@ -459,20 +484,20 @@ class Track:
             return ""
 
         emoji_map = {
-            'Or': '🥇',
-            'Double Or': '🥇🥇',
-            'Triple Or': '🥇🥇🥇',
-            'Platine': '💿',
-            'Double Platine': '💿💿',
-            'Triple Platine': '💿💿💿',
-            'Diamant': '💎',
-            'Double Diamant': '💎💎',
-            'Triple Diamant': '💎💎💎',
-            'Quadruple Diamant': '💎💎💎💎'
+            "Or": "🥇",
+            "Double Or": "🥇🥇",
+            "Triple Or": "🥇🥇🥇",
+            "Platine": "💿",
+            "Double Platine": "💿💿",
+            "Triple Platine": "💿💿💿",
+            "Diamant": "💎",
+            "Double Diamant": "💎💎",
+            "Triple Diamant": "💎💎💎",
+            "Quadruple Diamant": "💎💎💎💎",
         }
 
-        return emoji_map.get(cert_level, '🏆')
-    
+        return emoji_map.get(cert_level, "🏆")
+
     def get_certification_info(self) -> str:
         """Retourne une description textuelle de la certification - VERSION SIMPLE"""
         if not self.has_certification:
@@ -481,7 +506,11 @@ class Track:
         info = f"{self.get_certification_emoji()} {self.certification_level}"
 
         if self.certification_date:
-            date_str = self.certification_date.strftime('%d/%m/%Y') if isinstance(self.certification_date, datetime) else str(self.certification_date)
+            date_str = (
+                self.certification_date.strftime("%d/%m/%Y")
+                if isinstance(self.certification_date, datetime)
+                else str(self.certification_date)
+            )
             info += f" (obtenue le {date_str}"
 
             if self.certification_duration_days is not None:
@@ -513,19 +542,19 @@ class Track:
         lines = []
 
         # Certifications du morceau
-        if hasattr(self, 'certifications') and self.certifications:
+        if hasattr(self, "certifications") and self.certifications:
             lines.append("🎵 Certifications du morceau:")
             for cert in self.certifications:
-                level = cert.get('certification', '')
-                date = cert.get('certification_date', '')
+                level = cert.get("certification", "")
+                date = cert.get("certification_date", "")
                 if isinstance(date, str) and date:
                     try:
                         date_obj = datetime.fromisoformat(date)
-                        date_str = date_obj.strftime('%d/%m/%Y')
+                        date_str = date_obj.strftime("%d/%m/%Y")
                     except:
                         date_str = date
                 else:
-                    date_str = ''
+                    date_str = ""
 
                 emoji = self.get_certification_emoji(level)
                 cert_line = f"  {emoji} {level}"
@@ -534,21 +563,21 @@ class Track:
                 lines.append(cert_line)
 
         # Certifications de l'album
-        if hasattr(self, 'album_certifications') and self.album_certifications:
+        if hasattr(self, "album_certifications") and self.album_certifications:
             if lines:
                 lines.append("")  # Ligne vide
             lines.append(f"💿 Certifications de l'album '{self.album}':")
             for cert in self.album_certifications:
-                level = cert.get('certification', '')
-                date = cert.get('certification_date', '')
+                level = cert.get("certification", "")
+                date = cert.get("certification_date", "")
                 if isinstance(date, str) and date:
                     try:
                         date_obj = datetime.fromisoformat(date)
-                        date_str = date_obj.strftime('%d/%m/%Y')
+                        date_str = date_obj.strftime("%d/%m/%Y")
                     except:
                         date_str = date
                 else:
-                    date_str = ''
+                    date_str = ""
 
                 emoji = self.get_certification_emoji(level)
                 cert_line = f"  {emoji} {level}"
@@ -560,39 +589,39 @@ class Track:
             return "Pas de certification"
 
         return "\n".join(lines)
-        
+
     @property
     def producers(self):
         """Propriété pour la compatibilité avec l'interface - retourne get_producers()"""
         return self.get_producers()
-    
+
     @property
     def writers(self):
         """Propriété pour la compatibilité avec l'interface - retourne get_writers()"""
         return self.get_writers()
-    
+
     @property
     def featured_artists_list(self):
         """Retourne la liste des featured artists depuis les crédits ou le champ featured_artists"""
         # D'abord essayer le champ featured_artists (string)
-        if hasattr(self, 'featured_artists') and self.featured_artists:
+        if hasattr(self, "featured_artists") and self.featured_artists:
             # Si c'est une string avec des virgules, la splitter
             if isinstance(self.featured_artists, str):
-                return [a.strip() for a in self.featured_artists.split(',') if a.strip()]
+                return [a.strip() for a in self.featured_artists.split(",") if a.strip()]
             return self.featured_artists
-        
+
         # Sinon, extraire depuis les crédits
         try:
             featured_credits = self.get_credits_by_role(CreditRole.FEATURED)
-            return [c.name for c in featured_credits if hasattr(c, 'name')]
+            return [c.name for c in featured_credits if hasattr(c, "name")]
         except Exception:
             return []
-    
+
     @property
     def credits_scraped(self):
         """Retourne le nombre de crédits au lieu d'un booléen"""
         try:
-            if hasattr(self, 'credits') and self.credits:
+            if hasattr(self, "credits") and self.credits:
                 return len(self.credits)
             return 0
         except Exception:
@@ -605,104 +634,124 @@ class Track:
             try:
                 music_credits = self.get_music_credits()
             except Exception:
-                music_credits = getattr(self, 'credits', [])
-            
+                music_credits = getattr(self, "credits", [])
+
             if not music_credits:
                 return False
-            
+
             # CORRECTION 2: Obtenir les producteurs et auteurs de manière sécurisée
             try:
                 producers = self.get_producers()
             except Exception:
                 producers = []
-                
+
             try:
                 writers = self.get_writers()
             except Exception:
                 writers = []
-            
+
             # Un morceau est considéré comme complet s'il a :
             # - Au moins 2 crédits musicaux (plus strict)
             # - ET au moins un producteur OU un auteur
-            
+
             has_producer = bool(producers)
             has_writer = bool(writers)
             has_enough_credits = len(music_credits) >= 2
-            
+
             return has_enough_credits and (has_producer or has_writer)
-            
+
         except Exception as e:
-            logger.error(f"Erreur dans has_complete_credits pour {getattr(self, 'title', 'track inconnu')}: {e}")
+            logger.error(
+                f"Erreur dans has_complete_credits pour {getattr(self, 'title', 'track inconnu')}: {e}"
+            )
             return False
-    
+
     def get_music_credits(self) -> List[Credit]:
         """Retourne seulement les crédits musicaux - VERSION CORRIGÉE ROBUSTE"""
         try:
             # CORRECTION 1: Vérification de l'existence des crédits
-            if not hasattr(self, 'credits') or not self.credits:
+            if not hasattr(self, "credits") or not self.credits:
                 return []
-            
+
             # CORRECTION 2: Obtenir les crédits vidéo de manière sécurisée
             try:
                 video_credits = self.get_video_credits()
             except Exception as video_error:
                 logger.debug(f"Erreur get_video_credits: {video_error}")
                 video_credits = []
-            
+
             # CORRECTION 3: Créer les identifiants uniques de manière robuste
             video_credit_ids = set()
             for credit in video_credits:
                 try:
-                    if hasattr(credit, 'name') and hasattr(credit, 'role'):
+                    if hasattr(credit, "name") and hasattr(credit, "role"):
                         credit_id = (
                             str(credit.name).strip(),
-                            str(credit.role.value) if hasattr(credit.role, 'value') else str(credit.role),
-                            str(getattr(credit, 'role_detail', '')) if hasattr(credit, 'role_detail') else '',
-                            str(getattr(credit, 'source', '')) if hasattr(credit, 'source') else ''
+                            (
+                                str(credit.role.value)
+                                if hasattr(credit.role, "value")
+                                else str(credit.role)
+                            ),
+                            (
+                                str(getattr(credit, "role_detail", ""))
+                                if hasattr(credit, "role_detail")
+                                else ""
+                            ),
+                            str(getattr(credit, "source", "")) if hasattr(credit, "source") else "",
                         )
                         video_credit_ids.add(credit_id)
                 except Exception as id_error:
                     logger.debug(f"Erreur création ID crédit vidéo: {id_error}")
                     continue
-            
+
             # CORRECTION 4: Filtrer les crédits musicaux de manière robuste
             music_credits = []
             for credit in self.credits:
                 try:
-                    if hasattr(credit, 'name') and hasattr(credit, 'role'):
+                    if hasattr(credit, "name") and hasattr(credit, "role"):
                         credit_id = (
                             str(credit.name).strip(),
-                            str(credit.role.value) if hasattr(credit.role, 'value') else str(credit.role),
-                            str(getattr(credit, 'role_detail', '')) if hasattr(credit, 'role_detail') else '',
-                            str(getattr(credit, 'source', '')) if hasattr(credit, 'source') else ''
+                            (
+                                str(credit.role.value)
+                                if hasattr(credit.role, "value")
+                                else str(credit.role)
+                            ),
+                            (
+                                str(getattr(credit, "role_detail", ""))
+                                if hasattr(credit, "role_detail")
+                                else ""
+                            ),
+                            str(getattr(credit, "source", "")) if hasattr(credit, "source") else "",
                         )
-                        
+
                         # Si ce n'est pas un crédit vidéo, c'est un crédit musical
                         if credit_id not in video_credit_ids:
                             music_credits.append(credit)
-                            
+
                 except Exception as credit_error:
                     logger.debug(f"Erreur traitement crédit musical: {credit_error}")
                     # En cas d'erreur, considérer comme musical par défaut
                     music_credits.append(credit)
                     continue
-            
+
             return music_credits
-        
+
         except Exception as e:
-            logger.error(f"Erreur générale dans get_music_credits pour {getattr(self, 'title', 'track inconnu')}: {e}")
+            logger.error(
+                f"Erreur générale dans get_music_credits pour {getattr(self, 'title', 'track inconnu')}: {e}"
+            )
             # En cas d'erreur totale, retourner tous les crédits
-            return getattr(self, 'credits', [])
-    
+            return getattr(self, "credits", [])
+
     def get_video_credits(self) -> List[Credit]:
         """Retourne seulement les crédits vidéo - VERSION CORRIGÉE ROBUSTE"""
         try:
             # CORRECTION 1: Vérification de l'existence des crédits
-            if not hasattr(self, 'credits') or not self.credits:
+            if not hasattr(self, "credits") or not self.credits:
                 return []
-            
+
             video_credits = []
-            
+
             # CORRECTION 2: Liste des rôles vidéo avec gestion d'erreur
             try:
                 video_roles = [
@@ -716,78 +765,131 @@ class Track:
                     CreditRole.VIDEO_SET_DECORATOR,
                     CreditRole.VIDEO_EDITOR,
                     CreditRole.VIDEO_COLORIST,
-                    CreditRole.PHOTOGRAPHY  # Considéré comme vidéo
+                    CreditRole.PHOTOGRAPHY,  # Considéré comme vidéo
                 ]
             except Exception:
                 # Si CreditRole n'est pas accessible, utiliser des strings
                 video_roles = []
-            
+
             # CORRECTION 3: Filtrer par rôles vidéo explicites
             for credit in self.credits:
                 try:
-                    if hasattr(credit, 'role') and credit.role in video_roles:
+                    if hasattr(credit, "role") and credit.role in video_roles:
                         video_credits.append(credit)
                 except Exception:
                     continue
-            
+
             # CORRECTION 4: Vérifier les rôles OTHER avec mots-clés vidéo
             video_keywords = [
-                'video', 'vidéo', 'clip', 'director', 'réalisateur', 'cinematographer',
-                'camera', 'caméra', 'drone', 'steadicam', 'gimbal', 'electrician', 
-                'électricien', 'lighting', 'éclairage', 'gaffer', 'grip', 'focus puller',
-                'makeup artist', 'maquilleur', 'maquilleuse', 'hair', 'coiffeur',
-                'costume', 'wardrobe', 'styliste', 'styling', 'editor', 'monteur',
-                'monteuse', 'colorist', 'étalonnage', 'motion graphics', 'vfx',
-                'visual effects', 'effets visuels', 'set decorator', 'décorateur',
-                'props', 'accessoires', 'location', 'repérage', 'casting director',
-                'video producer', 'production manager', 'assistant director',
-                'script supervisor', 'continuity'
+                "video",
+                "vidéo",
+                "clip",
+                "director",
+                "réalisateur",
+                "cinematographer",
+                "camera",
+                "caméra",
+                "drone",
+                "steadicam",
+                "gimbal",
+                "electrician",
+                "électricien",
+                "lighting",
+                "éclairage",
+                "gaffer",
+                "grip",
+                "focus puller",
+                "makeup artist",
+                "maquilleur",
+                "maquilleuse",
+                "hair",
+                "coiffeur",
+                "costume",
+                "wardrobe",
+                "styliste",
+                "styling",
+                "editor",
+                "monteur",
+                "monteuse",
+                "colorist",
+                "étalonnage",
+                "motion graphics",
+                "vfx",
+                "visual effects",
+                "effets visuels",
+                "set decorator",
+                "décorateur",
+                "props",
+                "accessoires",
+                "location",
+                "repérage",
+                "casting director",
+                "video producer",
+                "production manager",
+                "assistant director",
+                "script supervisor",
+                "continuity",
             ]
-            
+
             # Exclusions pour éviter les faux positifs
             music_exclusions = [
-                'songwriter', 'composer', 'producer', 'mix', 'master',
-                'guitar', 'piano', 'drums', 'bass', 'vocal', 'engineer'
+                "songwriter",
+                "composer",
+                "producer",
+                "mix",
+                "master",
+                "guitar",
+                "piano",
+                "drums",
+                "bass",
+                "vocal",
+                "engineer",
             ]
-            
+
             for credit in self.credits:
                 try:
-                    if (hasattr(credit, 'role') and 
-                        hasattr(credit.role, 'value') and 
-                        str(credit.role.value).lower() == 'other' and
-                        hasattr(credit, 'role_detail') and 
-                        credit.role_detail):
-                        
+                    if (
+                        hasattr(credit, "role")
+                        and hasattr(credit.role, "value")
+                        and str(credit.role.value).lower() == "other"
+                        and hasattr(credit, "role_detail")
+                        and credit.role_detail
+                    ):
+
                         role_detail_lower = str(credit.role_detail).lower()
-                        
+
                         # Vérifier si c'est un rôle vidéo
                         is_video = any(keyword in role_detail_lower for keyword in video_keywords)
-                        is_music = any(exclusion in role_detail_lower for exclusion in music_exclusions)
-                        
+                        is_music = any(
+                            exclusion in role_detail_lower for exclusion in music_exclusions
+                        )
+
                         if is_video and not is_music and credit not in video_credits:
                             video_credits.append(credit)
-                            
+
                 except Exception:
                     continue
-            
+
             return video_credits
-            
+
         except Exception as e:
-            logger.error(f"Erreur générale dans get_video_credits pour {getattr(self, 'title', 'track inconnu')}: {e}")
+            logger.error(
+                f"Erreur générale dans get_video_credits pour {getattr(self, 'title', 'track inconnu')}: {e}"
+            )
             return []
-    
+
     def get_display_title(self) -> str:
         """Retourne le titre à afficher (avec indication featuring si applicable)"""
-        if hasattr(self, 'is_featuring') and self.is_featuring:
+        if hasattr(self, "is_featuring") and self.is_featuring:
             # Pour les features : garder le titre original (il contient déjà "feat.")
             return self.title
         return self.title
-    
+
     def get_display_artist(self) -> str:
         """Retourne l'artiste à afficher (principal si featuring)"""
-        if hasattr(self, 'is_featuring') and self.is_featuring:
+        if hasattr(self, "is_featuring") and self.is_featuring:
             # Pour les features : retourner l'artiste principal si disponible
-            if hasattr(self, 'primary_artist_name') and self.primary_artist_name:
+            if hasattr(self, "primary_artist_name") and self.primary_artist_name:
                 return self.primary_artist_name
             # Sinon, extraire l'artiste principal du titre s'il contient "feat."
             if " feat. " in self.title:
@@ -799,99 +901,96 @@ class Track:
                     if " - " in artist_and_title:
                         return artist_and_title.split(" - ")[0].strip()
             return "Artiste principal inconnu"
-        
+
         # Pour les morceaux principaux
         return self.artist.name if self.artist else "Unknown"
-    
+
     def is_main_track(self) -> bool:
         """Retourne True si c'est un morceau principal (pas un featuring)"""
-        return not (hasattr(self, 'is_featuring') and self.is_featuring)
-    
+        return not (hasattr(self, "is_featuring") and self.is_featuring)
+
     def to_dict(self) -> dict:
         """Convertit le morceau en dictionnaire - VERSION AVEC SÉPARATION VIDÉO ET PAROLES"""
-        is_featuring = hasattr(self, 'is_featuring') and self.is_featuring
-        
+        is_featuring = hasattr(self, "is_featuring") and self.is_featuring
+
         music_credits = self.get_music_credits()
         video_credits = self.get_video_credits()
-        
+
         # ✅ NOUVEAU: Informations sur les paroles
         lyrics_info = {}
-        if hasattr(self, 'lyrics') and self.lyrics:
+        if hasattr(self, "lyrics") and self.lyrics:
             lyrics_info = {
-                'has_lyrics': True,
-                'lyrics_word_count': len(self.lyrics.split()) if self.lyrics else 0,
-                'lyrics_char_count': len(self.lyrics) if self.lyrics else 0,
-                'lyrics_scraped_at': self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None,
-                'lyrics_source': getattr(self, 'lyrics_source', None),
-                'has_synced_lyrics': bool(getattr(self, 'lyrics_synced', None)),
-                'lyrics_synced_source': getattr(self, 'lyrics_synced_source', None),
-                'lyrics_synced_confidence': getattr(self, 'lyrics_synced_confidence', None)
+                "has_lyrics": True,
+                "lyrics_word_count": len(self.lyrics.split()) if self.lyrics else 0,
+                "lyrics_char_count": len(self.lyrics) if self.lyrics else 0,
+                "lyrics_scraped_at": (
+                    self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None
+                ),
+                "lyrics_source": getattr(self, "lyrics_source", None),
+                "has_synced_lyrics": bool(getattr(self, "lyrics_synced", None)),
+                "lyrics_synced_source": getattr(self, "lyrics_synced_source", None),
+                "lyrics_synced_confidence": getattr(self, "lyrics_synced_confidence", None),
             }
         else:
             lyrics_info = {
-                'has_lyrics': False,
-                'lyrics_word_count': 0,
-                'lyrics_char_count': 0,
-                'lyrics_scraped_at': None
+                "has_lyrics": False,
+                "lyrics_word_count": 0,
+                "lyrics_char_count": 0,
+                "lyrics_scraped_at": None,
             }
-        
+
         return {
-            'id': self.id,
-            'title': self.title,
-            'display_title': self.get_display_title(),
-            'artist': self.artist.name if self.artist else None,
-            'display_artist': self.get_display_artist(),
-            'album': self.album,
-            'track_number': getattr(self, 'track_number', None),
-            'release_date': self.release_date.isoformat() if self.release_date else None,
-            'genius_id': self.genius_id,
-            'spotify_id': self.spotify_id,
-            'discogs_id': self.discogs_id,
-            'isrc': getattr(self, 'isrc', None),
-            'relationships': getattr(self, 'relationships', []) or [],
-            'bpm': self.bpm,
-            'bpm_alt': getattr(self, 'bpm_alt', None),
-            'bpm_source': getattr(self, 'bpm_source', None),
-            'bpm_confidence': getattr(self, 'bpm_confidence', None),
-            'key_mode_source': getattr(self, 'key_mode_source', None),
-            'reccobeats_resolution': getattr(self, 'reccobeats_resolution', None),
-            'duration': self.duration,
-            'genre': self.genre,
-            'is_featuring': is_featuring,
-            'featured_artists': getattr(self, 'featured_artists', None),
-            'primary_artist_name': getattr(self, 'primary_artist_name', None),
-            'secondary_role': getattr(self, 'secondary_role', None),
-            'popularity': getattr(self, 'popularity', None),
-            'artwork_url': getattr(self, 'artwork_url', None),
-            
+            "id": self.id,
+            "title": self.title,
+            "display_title": self.get_display_title(),
+            "artist": self.artist.name if self.artist else None,
+            "display_artist": self.get_display_artist(),
+            "album": self.album,
+            "track_number": getattr(self, "track_number", None),
+            "release_date": self.release_date.isoformat() if self.release_date else None,
+            "genius_id": self.genius_id,
+            "spotify_id": self.spotify_id,
+            "discogs_id": self.discogs_id,
+            "isrc": getattr(self, "isrc", None),
+            "relationships": getattr(self, "relationships", []) or [],
+            "bpm": self.bpm,
+            "bpm_alt": getattr(self, "bpm_alt", None),
+            "bpm_source": getattr(self, "bpm_source", None),
+            "bpm_confidence": getattr(self, "bpm_confidence", None),
+            "key_mode_source": getattr(self, "key_mode_source", None),
+            "reccobeats_resolution": getattr(self, "reccobeats_resolution", None),
+            "duration": self.duration,
+            "genre": self.genre,
+            "is_featuring": is_featuring,
+            "featured_artists": getattr(self, "featured_artists", None),
+            "primary_artist_name": getattr(self, "primary_artist_name", None),
+            "secondary_role": getattr(self, "secondary_role", None),
+            "popularity": getattr(self, "popularity", None),
+            "artwork_url": getattr(self, "artwork_url", None),
             # ✅ NOUVEAU: Informations paroles
             **lyrics_info,
-            
             # ✅ SÉPARATION DES CRÉDITS
-            'music_credits': [c.to_dict() for c in music_credits],
-            'video_credits': [c.to_dict() for c in video_credits],
-            'all_credits': [c.to_dict() for c in self.credits],  # Garde la compatibilité
-            
+            "music_credits": [c.to_dict() for c in music_credits],
+            "video_credits": [c.to_dict() for c in video_credits],
+            "all_credits": [c.to_dict() for c in self.credits],  # Garde la compatibilité
             # Statistiques
-            'music_credits_count': len(music_credits),
-            'video_credits_count': len(video_credits),
-            'total_credits_count': len(self.credits),
-            'has_complete_credits': self.has_complete_credits(),
-            
-            'genius_url': self.genius_url,
-            'spotify_url': self.spotify_url,
-            'youtube_url': self.youtube_url,
-            'youtube_url_source': self.youtube_url_source,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
-            'last_scraped': self.last_scraped.isoformat() if self.last_scraped else None,
-            'scraping_errors': self.scraping_errors
+            "music_credits_count": len(music_credits),
+            "video_credits_count": len(video_credits),
+            "total_credits_count": len(self.credits),
+            "has_complete_credits": self.has_complete_credits(),
+            "genius_url": self.genius_url,
+            "spotify_url": self.spotify_url,
+            "youtube_url": self.youtube_url,
+            "youtube_url_source": self.youtube_url_source,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "last_scraped": self.last_scraped.isoformat() if self.last_scraped else None,
+            "scraping_errors": self.scraping_errors,
         }
 
     # (Méthode GUI _start_lyrics_scraping supprimée le 2026-07-10 : code d'interface
     # copié par erreur dans le modèle — cf. AUDIT.md §3.3. La fonctionnalité vit
     # dans src/gui/workers/scraping.py.)
-
 
     @property
     def primary_spotify_id(self) -> Optional[str]:
@@ -911,7 +1010,7 @@ class Track:
             return False
 
         # Initialiser la liste si nécessaire
-        if not hasattr(self, 'spotify_ids') or self.spotify_ids is None:
+        if not hasattr(self, "spotify_ids") or self.spotify_ids is None:
             self.spotify_ids = []
 
         # Éviter les doublons
@@ -936,7 +1035,7 @@ class Track:
             ids.append(self.spotify_id)
 
         # Ajouter tous les IDs de la liste
-        if hasattr(self, 'spotify_ids') and self.spotify_ids:
+        if hasattr(self, "spotify_ids") and self.spotify_ids:
             for id in self.spotify_ids:
                 if id not in ids:
                     ids.append(id)

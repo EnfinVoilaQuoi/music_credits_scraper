@@ -3,6 +3,7 @@ Base class pour les scrapers utilisant Crawl4AI.
 Fournit le bridge synchrone→asynchrone et la config navigateur commune.
 Les sous-classes n'ont jamais à toucher à asyncio directement.
 """
+
 import asyncio
 import inspect
 import os
@@ -21,6 +22,7 @@ logger = get_logger(__name__)
 try:
     from crawl4ai import UndetectedAdapter
     from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
+
     _UNDETECTED_OK = True
 except Exception as _e:  # pragma: no cover
     _UNDETECTED_OK = False
@@ -35,6 +37,7 @@ def _supported_kwargs(cls, **kwargs) -> dict:
         return {k: v for k, v in kwargs.items() if k in params}
     except (ValueError, TypeError):
         return {}
+
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -134,10 +137,17 @@ class CrawlAIScraperBase:
         # 0) Mode CDP : on lit via un navigateur déjà ouvert (Brave, IP résidentielle)
         if _CDP_URL:
             try:
-                _, html, blocked = asyncio.run(self._patchright_fetch(
-                    url, js_before_wait, wait_for,
-                    wait_timeout, page_timeout, delay_before_return, headless=True,
-                ))
+                _, html, blocked = asyncio.run(
+                    self._patchright_fetch(
+                        url,
+                        js_before_wait,
+                        wait_for,
+                        wait_timeout,
+                        page_timeout,
+                        delay_before_return,
+                        headless=True,
+                    )
+                )
                 if blocked:
                     logger.warning(
                         f"{self.__class__.__name__}: via CDP, page bloquée — ouvre d'abord "
@@ -152,10 +162,17 @@ class CrawlAIScraperBase:
         #    dès que le cookie cf_clearance est dans le profil.
         if self.headless:
             try:
-                _, html, blocked = asyncio.run(self._patchright_fetch(
-                    url, js_before_wait, wait_for,
-                    wait_timeout, page_timeout, delay_before_return, headless=True,
-                ))
+                _, html, blocked = asyncio.run(
+                    self._patchright_fetch(
+                        url,
+                        js_before_wait,
+                        wait_for,
+                        wait_timeout,
+                        page_timeout,
+                        delay_before_return,
+                        headless=True,
+                    )
+                )
             except Exception as e:
                 logger.error(f"{self.__class__.__name__}: patchright headless {url}: {e}")
                 html, blocked = None, True
@@ -170,11 +187,17 @@ class CrawlAIScraperBase:
         # 2) Mode VISIBLE + undetected + fenêtre longue : tu résous, on capture la
         #    vraie page (on attend le conteneur paroles, pas d'abandon prématuré).
         try:
-            _, html, _ = asyncio.run(self._patchright_fetch(
-                url, js_before_wait, wait_for,
-                max(wait_timeout, 120_000), max(page_timeout, 120_000),
-                max(delay_before_return, 2.0), headless=False,
-            ))
+            _, html, _ = asyncio.run(
+                self._patchright_fetch(
+                    url,
+                    js_before_wait,
+                    wait_for,
+                    max(wait_timeout, 120_000),
+                    max(page_timeout, 120_000),
+                    max(delay_before_return, 2.0),
+                    headless=False,
+                )
+            )
             return None, html
         except Exception as e:
             logger.error(f"{self.__class__.__name__}: patchright visible {url}: {e}")
@@ -199,13 +222,19 @@ class CrawlAIScraperBase:
         try:
             from patchright.async_api import async_playwright
         except Exception as e:
-            logger.error(f"patchright indisponible: {e} — `pip install -U crawl4ai && crawl4ai-setup`")
+            logger.error(
+                f"patchright indisponible: {e} — `pip install -U crawl4ai && crawl4ai-setup`"
+            )
             return None, None, True
 
         profile_dir = _profile_dir()
         os.makedirs(profile_dir, exist_ok=True)
         # Sélecteur « vraie page chargée » : conteneur paroles (présent sur toute page Genius)
-        sel = wait_for[4:] if (wait_for or "").startswith("css:") else "[data-lyrics-container='true']"
+        sel = (
+            wait_for[4:]
+            if (wait_for or "").startswith("css:")
+            else "[data-lyrics-container='true']"
+        )
 
         try:
             async with async_playwright() as pw:
@@ -226,9 +255,7 @@ class CrawlAIScraperBase:
                     # mieux certains Cloudflare que le Chromium bundlé)
                     if _BROWSER_CHANNEL:
                         launch_kwargs["channel"] = _BROWSER_CHANNEL
-                    ctx = await pw.chromium.launch_persistent_context(
-                        profile_dir, **launch_kwargs
-                    )
+                    ctx = await pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
                     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
                 try:
@@ -253,8 +280,8 @@ class CrawlAIScraperBase:
                     html = await page.content()
                 finally:
                     if cdp_mode:
-                        await page.close()          # on ne ferme QUE notre onglet
-                        await browser.close()        # détache (ne tue pas ton Brave)
+                        await page.close()  # on ne ferme QUE notre onglet
+                        await browser.close()  # détache (ne tue pas ton Brave)
                     else:
                         await ctx.close()
 
@@ -271,9 +298,15 @@ class CrawlAIScraperBase:
         if any(k in err for k in ("cloudflare", "anti-bot", "challenge", "403", "forbidden")):
             return True
         h = (html or "").lower()
-        return any(k in h for k in (
-            "just a moment", "challenge-platform", "cf-chl", "checking your browser",
-        ))
+        return any(
+            k in h
+            for k in (
+                "just a moment",
+                "challenge-platform",
+                "cf-chl",
+                "checking your browser",
+            )
+        )
 
     async def _async_crawl_page(
         self,
@@ -306,9 +339,7 @@ class CrawlAIScraperBase:
             delay_before_return_html=delay_before_return,
             remove_consent_popups=True,
             remove_overlay_elements=True,
-            markdown_generator=DefaultMarkdownGenerator(
-                options={"ignore_links": True}
-            ),
+            markdown_generator=DefaultMarkdownGenerator(options={"ignore_links": True}),
             cache_mode=CacheMode.BYPASS,
             verbose=False,
             **run_extras,
@@ -347,7 +378,9 @@ class CrawlAIScraperBase:
                 html = result.html or result.cleaned_html or None
                 # Parfois CF renvoie 200 avec la page « Just a moment » (défi non résolu)
                 if self._looks_blocked(None, html):
-                    logger.warning(f"{self.__class__.__name__}: page-défi Cloudflare (200) pour {url}")
+                    logger.warning(
+                        f"{self.__class__.__name__}: page-défi Cloudflare (200) pour {url}"
+                    )
                     return None, None, True
 
                 markdown = str(result.markdown) if result.markdown else None

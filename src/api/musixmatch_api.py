@@ -45,6 +45,7 @@ Coupe-circuit : `MUSIXMATCH_ENABLED=false` (env) désactive la source sans touch
 Token épinglé optionnel : `MUSIXMATCH_USER_TOKEN` (env) amorce le cache ; en cas d'échec
 d'auth, on retombe automatiquement sur `token.get`.
 """
+
 import os
 import re
 import json
@@ -137,8 +138,9 @@ def _looks_synced(lrc: Optional[str]) -> bool:
 class MusixmatchAPI:
     """Client lecture seule pour l'endpoint desktop Musixmatch (paroles synchronisées)."""
 
-    def __init__(self, timeout: int = 12, token_file: Optional[Path] = None,
-                 enabled: Optional[bool] = None):
+    def __init__(
+        self, timeout: int = 12, token_file: Optional[Path] = None, enabled: Optional[bool] = None
+    ):
         self.timeout = timeout
         self.token_file = Path(token_file) if token_file else _TOKEN_FILE
         # Coupe-circuit global (env prioritaire, argument explicite sinon).
@@ -147,13 +149,15 @@ class MusixmatchAPI:
         self.enabled = enabled
 
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": _USER_AGENT,
-            "Accept": "application/json",
-            "Accept-Language": "en",
-            # Amadoue le load-balancer AWS ; inoffensif sinon (cf. plugin de référence).
-            "Cookie": "AWSELB=0; AWSELBCORS=0",
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": _USER_AGENT,
+                "Accept": "application/json",
+                "Accept-Language": "en",
+                # Amadoue le load-balancer AWS ; inoffensif sinon (cf. plugin de référence).
+                "Cookie": "AWSELB=0; AWSELBCORS=0",
+            }
+        )
 
         # Cache token en mémoire : (token, obtained_at_epoch).
         self._token: Optional[str] = None
@@ -208,7 +212,7 @@ class MusixmatchAPI:
         if status == _STATUS_AUTH or _envelope_status(env) == _STATUS_AUTH:
             logger.warning("Musixmatch: 401 sur token.get (IP flaggée / CAPTCHA-gate ?)")
             return None
-        token = (((env.get("message") or {}).get("body") or {}).get("user_token") or "")
+        token = ((env.get("message") or {}).get("body") or {}).get("user_token") or ""
         # Garde-fou #2 : token de forme valide mais inutilisable.
         if not token or "UpgradeOnly" in token:
             logger.warning("Musixmatch: token 'UpgradeOnly'/vide rejeté (IP restreinte)")
@@ -227,8 +231,9 @@ class MusixmatchAPI:
         return self._fetch_new_token()
 
     # ── HTTP ──────────────────────────────────────────────────────────────────────
-    def _api_get(self, action: str, params: Dict,
-                 with_token: bool = True) -> Tuple[Optional[int], Optional[dict]]:
+    def _api_get(
+        self, action: str, params: Dict, with_token: bool = True
+    ) -> Tuple[Optional[int], Optional[dict]]:
         """
         GET vers l'endpoint desktop avec retries réseau/5xx (respecte DELAY/MAX_RETRIES).
         Ajoute `app_id`, `format`, `t` (anti-cache) et le `usertoken` si demandé.
@@ -268,7 +273,7 @@ class MusixmatchAPI:
     # ── Extraction depuis la réponse macro ────────────────────────────────────────
     @staticmethod
     def _macro_calls(env: dict) -> Dict[str, dict]:
-        body = ((env.get("message") or {}).get("body") or {})
+        body = (env.get("message") or {}).get("body") or {}
         calls = body.get("macro_calls")
         return calls if isinstance(calls, dict) else {}
 
@@ -330,24 +335,32 @@ class MusixmatchAPI:
         text = lyr.get("lyrics_body") or None
         return text, instrumental
 
-    def _verify_match(self, track: Optional[dict],
-                      q_track: str, q_artist: str) -> bool:
+    def _verify_match(self, track: Optional[dict], q_track: str, q_artist: str) -> bool:
         """Contrôle titre/artiste du morceau apparié (rejette les faux positifs)."""
         if not track:
             return True  # pas de métadonnées de match → on ne bloque pas
         t_ok = _title_match(q_track, track.get("track_name", "")) >= _TITLE_MATCH_MIN
-        a_ok = (not q_artist) or _artist_match(q_artist, track.get("artist_name", "")) >= _ARTIST_MATCH_MIN
+        a_ok = (not q_artist) or _artist_match(
+            q_artist, track.get("artist_name", "")
+        ) >= _ARTIST_MATCH_MIN
         if not (t_ok and a_ok):
             logger.debug(
                 "Musixmatch: match rejeté '%s - %s' vs '%s - %s'",
-                track.get("artist_name"), track.get("track_name"), q_artist, q_track,
+                track.get("artist_name"),
+                track.get("track_name"),
+                q_artist,
+                q_track,
             )
         return t_ok and a_ok
 
     # ── Point d'entrée ────────────────────────────────────────────────────────────
-    def get_synced(self, track_name: str, artist_name: str,
-                   duration: Optional[float] = None,
-                   album_name: Optional[str] = None) -> Optional[Dict]:
+    def get_synced(
+        self,
+        track_name: str,
+        artist_name: str,
+        duration: Optional[float] = None,
+        album_name: Optional[str] = None,
+    ) -> Optional[Dict]:
         """
         Récupère les paroles synchronisées Musixmatch (SOURCE 3, dernier recours).
 
@@ -367,8 +380,9 @@ class MusixmatchAPI:
             result = self._try_fetch(track_name, artist_name, duration, force_token=True)
         return None if result is _AUTH_FAILURE else result
 
-    def _try_fetch(self, track_name: str, artist_name: str,
-                   duration: Optional[float], force_token: bool):
+    def _try_fetch(
+        self, track_name: str, artist_name: str, duration: Optional[float], force_token: bool
+    ):
         """Une passe complète. Renvoie un dict, None, ou la sentinelle _AUTH_FAILURE."""
         if force_token and self._get_token(force_refresh=True) is None:
             return _AUTH_FAILURE
@@ -426,8 +440,9 @@ class MusixmatchAPI:
             "instrumental": instrumental,
         }
 
-    def get_synced_as_source3(self, track_name: str, artist_name: str,
-                              duration: Optional[float] = None) -> Optional[Dict]:
+    def get_synced_as_source3(
+        self, track_name: str, artist_name: str, duration: Optional[float] = None
+    ) -> Optional[Dict]:
         """
         Variante prête à brancher dans la branche « LRCLIB ET YTM vides » du pipeline :
         renvoie la forme de `lyrics_sync.compare_synced`

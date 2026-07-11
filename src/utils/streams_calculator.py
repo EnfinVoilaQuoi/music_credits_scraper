@@ -12,11 +12,12 @@ sa part individuelle (plus précis que diviser par 65 %).
   - YTM seul      → total = ytm    / 0.25
   - Les deux      → total = (spotify + ytm) / 0.65
 """
+
 from typing import Optional
 
 # ── Parts de marché ───────────────────────────────────────────────────────────
-SPOTIFY_SHARE  = 0.40
-YTM_SHARE      = 0.25
+SPOTIFY_SHARE = 0.40
+YTM_SHARE = 0.25
 COMBINED_SHARE = SPOTIFY_SHARE + YTM_SHARE  # 0.65
 
 
@@ -30,7 +31,7 @@ def calculate_total_streams(
         int estimé, ou None si aucune donnée disponible.
     """
     sp = spotify_streams if spotify_streams and spotify_streams > 0 else None
-    yt = ytm_streams    if ytm_streams    and ytm_streams    > 0 else None
+    yt = ytm_streams if ytm_streams and ytm_streams > 0 else None
 
     if sp and yt:
         return int((sp + yt) / COMBINED_SHARE)
@@ -51,7 +52,7 @@ def calculate_total_monthly_listeners(
         int estimé, ou None si aucune donnée disponible.
     """
     sp = spotify_listeners if spotify_listeners and spotify_listeners > 0 else None
-    yt = ytm_listeners     if ytm_listeners     and ytm_listeners     > 0 else None
+    yt = ytm_listeners if ytm_listeners and ytm_listeners > 0 else None
 
     if sp and yt:
         return int((sp + yt) / COMBINED_SHARE)
@@ -75,7 +76,7 @@ def streams_source_label(
         ""       si aucune donnée
     """
     sp = bool(spotify_streams and spotify_streams > 0)
-    yt = bool(ytm_streams    and ytm_streams    > 0)
+    yt = bool(ytm_streams and ytm_streams > 0)
     if sp and yt:
         return ""
     if sp:

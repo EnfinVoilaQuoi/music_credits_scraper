@@ -14,6 +14,7 @@ Usage dans un scraper :
     # Dans close()/_cleanup : fermer page/context/browser,
     # mais NE PAS appeler self._playwright.stop().
 """
+
 import logging
 import threading
 

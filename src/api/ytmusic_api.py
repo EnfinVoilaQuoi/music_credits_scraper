@@ -7,6 +7,7 @@ Stratégie quota-optimisée :
      → ex. 150 tracks = 3 requêtes = 3 unités (quota daily : 10 000)
   3. Fallback sur le champ `views` formaté de ytmusicapi si pas de clé ou erreur API
 """
+
 import re
 import logging
 import unicodedata
@@ -14,22 +15,24 @@ from typing import Dict, List, Optional
 
 from ytmusicapi import YTMusic
 
-logger = logging.getLogger('YTMusicAPI')
+logger = logging.getLogger("YTMusicAPI")
 
 try:
     from src.config import YOUTUBE_API_KEY
 except ImportError:
     import os
-    YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
+
+    YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 _YT_BATCH_SIZE = 50  # limite YouTube Data API v3
 
 
 # ── Utilitaires ───────────────────────────────────────────────────────────────
 
+
 def _normalize(s: str) -> str:
-    s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
-    return re.sub(r'\s+', ' ', s).strip().lower()
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", s).strip().lower()
 
 
 def _parse_views(text: str) -> Optional[int]:
@@ -38,24 +41,25 @@ def _parse_views(text: str) -> Optional[int]:
     Exemples : "1,2 M" → 1200000 | "500 k" → 500000 | "1 234 567" → 1234567
     Gère l'espace insécable (\\xa0) utilisé par YTMusic comme séparateur.
     """
-    text = text.strip().replace('\xa0', ' ')
+    text = text.strip().replace("\xa0", " ")
     for suffix, mult in [
-        ('md', 1_000_000_000),
-        ('b',  1_000_000_000),
-        ('m',  1_000_000),
-        ('k',  1_000),
+        ("md", 1_000_000_000),
+        ("b", 1_000_000_000),
+        ("m", 1_000_000),
+        ("k", 1_000),
     ]:
         if text.lower().endswith(suffix):
-            num_part = text[:-len(suffix)].strip().replace(',', '.').replace(' ', '')
+            num_part = text[: -len(suffix)].strip().replace(",", ".").replace(" ", "")
             try:
                 return int(float(num_part) * mult)
             except ValueError:
                 return None
-    cleaned = re.sub(r'[^\d]', '', text)
+    cleaned = re.sub(r"[^\d]", "", text)
     return int(cleaned) if cleaned else None
 
 
 # ── Classe principale ─────────────────────────────────────────────────────────
+
 
 class YTMusicAPI:
     """Wrapper ytmusicapi + YouTube Data API v3 pour les streams d'un artiste.
@@ -100,17 +104,17 @@ class YTMusicAPI:
         Résout un canal YTMusic depuis : un ID 'UC...', un handle '@ISHAOfficiel',
         ou une URL music.youtube.com/@handle ou /channel/UC...
         """
-        value = (value or '').strip()
+        value = (value or "").strip()
         if not value:
             return None
 
         # Déjà un channel ID
-        m = re.search(r'(UC[A-Za-z0-9_-]{22})', value)
+        m = re.search(r"(UC[A-Za-z0-9_-]{22})", value)
         if m:
             return m.group(1)
 
         # Extraire le handle (@xxx)
-        h = re.search(r'@([A-Za-z0-9._-]+)', value)
+        h = re.search(r"@([A-Za-z0-9._-]+)", value)
         if not h:
             logger.warning(f"resolve_channel: format non reconnu: {value!r}")
             return None
@@ -120,11 +124,12 @@ class YTMusicAPI:
         if self._use_yt_api:
             try:
                 from googleapiclient.discovery import build
-                yt = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-                resp = yt.channels().list(part='id', forHandle='@' + handle).execute()
-                items = resp.get('items') or []
+
+                yt = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+                resp = yt.channels().list(part="id", forHandle="@" + handle).execute()
+                items = resp.get("items") or []
                 if items:
-                    cid = items[0]['id']
+                    cid = items[0]["id"]
                     logger.info(f"✅ Handle @{handle} résolu via API: {cid}")
                     return cid
             except Exception as e:
@@ -133,9 +138,10 @@ class YTMusicAPI:
         # 2. Fallback : page music.youtube.com/@handle
         try:
             import requests as _rq
+
             r = _rq.get(
                 f"https://music.youtube.com/@{handle}",
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
                 timeout=15,
             )
             m = re.search(r'"(?:channelId|browseId)"\s*:\s*"(UC[A-Za-z0-9_-]{22})"', r.text)
@@ -159,19 +165,17 @@ class YTMusicAPI:
             from googleapiclient.discovery import build
             from collections import Counter
 
-            yt = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
-            resp = yt.videos().list(
-                part='snippet', id=','.join(video_ids[:50])
-            ).execute()
+            yt = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+            resp = yt.videos().list(part="snippet", id=",".join(video_ids[:50])).execute()
 
             votes = Counter()
             names = {}
-            for item in resp.get('items', []):
-                snip = item.get('snippet', {})
-                cid = snip.get('channelId')
+            for item in resp.get("items", []):
+                snip = item.get("snippet", {})
+                cid = snip.get("channelId")
                 if cid:
                     votes[cid] += 1
-                    names[cid] = snip.get('channelTitle', '')
+                    names[cid] = snip.get("channelTitle", "")
 
             if not votes:
                 return None
@@ -201,16 +205,18 @@ class YTMusicAPI:
         essaie les candidats jusqu'à en trouver un avec des albums.
         """
         try:
-            results = self.yt.search(artist_name, filter='artists', limit=limit)
+            results = self.yt.search(artist_name, filter="artists", limit=limit)
             if not results:
                 logger.warning(f"Aucun résultat artiste YTMusic pour '{artist_name}'")
                 return []
             norm_target = _normalize(artist_name)
-            exact = [r for r in results
-                     if r.get('browseId') and _normalize(r.get('artist', '')) == norm_target]
-            others = [r for r in results
-                      if r.get('browseId') and r not in exact]
-            candidates = [(r['browseId'], r.get('artist', '')) for r in exact + others]
+            exact = [
+                r
+                for r in results
+                if r.get("browseId") and _normalize(r.get("artist", "")) == norm_target
+            ]
+            others = [r for r in results if r.get("browseId") and r not in exact]
+            candidates = [(r["browseId"], r.get("artist", "")) for r in exact + others]
             logger.info(
                 f"YTMusic candidats pour '{artist_name}': "
                 + ", ".join(f"{n} ({b})" for b, n in candidates[:3])
@@ -233,33 +239,32 @@ class YTMusicAPI:
         """
         try:
             artist = self.yt.get_artist(channel_id)
-            items = (
-                artist.get('albums', {}).get('results', []) +
-                artist.get('singles', {}).get('results', [])
+            items = artist.get("albums", {}).get("results", []) + artist.get("singles", {}).get(
+                "results", []
             )
             albums = [
-                {'title': a['title'], 'browseId': a['browseId']}
-                for a in items if 'browseId' in a
+                {"title": a["title"], "browseId": a["browseId"]} for a in items if "browseId" in a
             ]
             # monthlyListeners : int, None, OU chaîne formatée ("146K", "1.2M")
             # selon les versions de ytmusicapi — parser de façon robuste, et
             # surtout ne jamais faire échouer la récup des albums pour ça.
-            raw_ml = artist.get('monthlyListeners')
+            raw_ml = artist.get("monthlyListeners")
             monthly_listeners = None
             if raw_ml is not None:
                 try:
-                    monthly_listeners = (int(raw_ml) if not isinstance(raw_ml, str)
-                                         else _parse_views(raw_ml))
+                    monthly_listeners = (
+                        int(raw_ml) if not isinstance(raw_ml, str) else _parse_views(raw_ml)
+                    )
                 except (ValueError, TypeError):
                     logger.debug(f"monthlyListeners non parseable: {raw_ml!r}")
             logger.info(
                 f"YTMusic get_artist_info: {len(albums)} albums, "
                 f"auditeurs/mois={monthly_listeners}"
             )
-            return {'albums': albums, 'monthly_listeners': monthly_listeners}
+            return {"albums": albums, "monthly_listeners": monthly_listeners}
         except Exception as e:
             logger.error(f"Erreur get_artist_info ({channel_id}): {e}")
-            return {'albums': [], 'monthly_listeners': None}
+            return {"albums": [], "monthly_listeners": None}
 
     def get_artist_albums(self, channel_id: str) -> List[Dict]:
         """Retourne albums + singles d'un artiste.
@@ -269,13 +274,11 @@ class YTMusicAPI:
         """
         try:
             artist = self.yt.get_artist(channel_id)
-            items = (
-                artist.get('albums', {}).get('results', []) +
-                artist.get('singles', {}).get('results', [])
+            items = artist.get("albums", {}).get("results", []) + artist.get("singles", {}).get(
+                "results", []
             )
             result = [
-                {'title': a['title'], 'browseId': a['browseId']}
-                for a in items if 'browseId' in a
+                {"title": a["title"], "browseId": a["browseId"]} for a in items if "browseId" in a
             ]
             logger.info(f"YTMusic: {len(result)} album(s)/single(s) trouvés pour {channel_id}")
             return result
@@ -297,11 +300,11 @@ class YTMusicAPI:
             album = self.yt.get_album(browse_id)
             return [
                 {
-                    'title': t.get('title', ''),
-                    'video_id': t.get('videoId'),
-                    'views_str': t.get('views'),
+                    "title": t.get("title", ""),
+                    "video_id": t.get("videoId"),
+                    "views_str": t.get("views"),
                 }
-                for t in album.get('tracks', [])
+                for t in album.get("tracks", [])
             ]
         except Exception as e:
             logger.error(f"Erreur get_album_tracks_raw ({browse_id}): {e}")
@@ -316,9 +319,9 @@ class YTMusicAPI:
         any_ts = False
         for l in lines:
             if isinstance(l, dict):
-                text, start = l.get('text', ''), l.get('start_time')
+                text, start = l.get("text", ""), l.get("start_time")
             else:
-                text, start = getattr(l, 'text', ''), getattr(l, 'start_time', None)
+                text, start = getattr(l, "text", ""), getattr(l, "start_time", None)
             if start is None:
                 out.append(text)
                 continue
@@ -339,16 +342,16 @@ class YTMusicAPI:
             {'lyrics': str, 'lyrics_synced': str|None, 'source': str} ou None.
         """
         try:
-            results = self.yt.search(f"{artist} {title}", filter='songs', limit=3)
+            results = self.yt.search(f"{artist} {title}", filter="songs", limit=3)
             if not results:
                 return None
 
             na = _normalize(artist)
             chosen = None
             for r in results:
-                if not r.get('videoId'):
+                if not r.get("videoId"):
                     continue
-                arts = " ".join(a.get('name', '') for a in (r.get('artists') or []))
+                arts = " ".join(a.get("name", "") for a in (r.get("artists") or []))
                 if na in _normalize(arts) or _normalize(arts) in na:
                     chosen = r
                     break
@@ -356,8 +359,8 @@ class YTMusicAPI:
                 logger.debug(f"YTM lyrics: artiste non confirmé pour '{artist} - {title}'")
                 return None
 
-            watch = self.yt.get_watch_playlist(videoId=chosen['videoId'])
-            lyrics_id = watch.get('lyrics') if isinstance(watch, dict) else None
+            watch = self.yt.get_watch_playlist(videoId=chosen["videoId"])
+            lyrics_id = watch.get("lyrics") if isinstance(watch, dict) else None
             if not lyrics_id:
                 return None
 
@@ -367,12 +370,12 @@ class YTMusicAPI:
             except Exception:
                 data = self.yt.get_lyrics(lyrics_id)
 
-            raw = data.get('lyrics') if isinstance(data, dict) else None
+            raw = data.get("lyrics") if isinstance(data, dict) else None
             synced = None
             if isinstance(raw, list):
                 synced = self._format_lrc(raw)
                 text = "\n".join(
-                    (l.get('text', '') if isinstance(l, dict) else getattr(l, 'text', ''))
+                    (l.get("text", "") if isinstance(l, dict) else getattr(l, "text", ""))
                     for l in raw
                 )
             else:
@@ -381,12 +384,12 @@ class YTMusicAPI:
             if not text or not str(text).strip():
                 return None
 
-            source = (data.get('source') if isinstance(data, dict) else None) or 'YouTube Music'
+            source = (data.get("source") if isinstance(data, dict) else None) or "YouTube Music"
             logger.info(
                 f"📝 YTM paroles: '{artist} - {title}' (source: {source}"
                 f"{', synchro' if synced else ''})"
             )
-            return {'lyrics': str(text).strip(), 'lyrics_synced': synced, 'source': source}
+            return {"lyrics": str(text).strip(), "lyrics_synced": synced, "source": source}
         except Exception as e:
             logger.debug(f"YTM get_lyrics échec '{artist} - {title}': {e}")
             return None
@@ -412,7 +415,9 @@ class YTMusicAPI:
         try:
             from googleapiclient.discovery import build
         except ImportError:
-            logger.warning("google-api-python-client non installé — pip install google-api-python-client")
+            logger.warning(
+                "google-api-python-client non installé — pip install google-api-python-client"
+            )
             return {}
 
         counts: Dict[str, int] = {}
@@ -424,19 +429,16 @@ class YTMusicAPI:
             f"{n_batches} requête(s) (~{n_batches} unité(s) de quota)"
         )
 
-        youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+        youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
         for i in range(0, len(unique_ids), _YT_BATCH_SIZE):
-            batch = unique_ids[i:i + _YT_BATCH_SIZE]
+            batch = unique_ids[i : i + _YT_BATCH_SIZE]
             try:
-                response = youtube.videos().list(
-                    part='statistics',
-                    id=','.join(batch)
-                ).execute()
-                for item in response.get('items', []):
-                    view_str = item.get('statistics', {}).get('viewCount')
+                response = youtube.videos().list(part="statistics", id=",".join(batch)).execute()
+                for item in response.get("items", []):
+                    view_str = item.get("statistics", {}).get("viewCount")
                     if view_str is not None:
-                        counts[item['id']] = int(view_str)
+                        counts[item["id"]] = int(view_str)
             except Exception as e:
                 logger.error(f"Erreur YouTube Data API v3 (batch {i // _YT_BATCH_SIZE + 1}): {e}")
 
@@ -453,10 +455,10 @@ class YTMusicAPI:
           1. viewCount exact (YouTube Data API v3)
           2. views_str formaté (ytmusicapi, fallback arrondi)
         """
-        vid = track_raw.get('video_id')
+        vid = track_raw.get("video_id")
         if vid and vid in view_counts:
             return view_counts[vid]
-        views_str = track_raw.get('views_str')
+        views_str = track_raw.get("views_str")
         if views_str:
             return _parse_views(views_str)
         return None

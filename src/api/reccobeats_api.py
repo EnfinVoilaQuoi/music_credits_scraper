@@ -3,13 +3,14 @@ ReccoBeats API Client - Version modulaire propre
 Responsabilité UNIQUE : Récupérer les données musicales (BPM, Key, Mode) depuis ReccoBeats
 Le scraping Spotify ID est géré par SpotifyIDScraper (module séparé)
 """
+
 import requests
 import json
 import time
 import logging
 from typing import Dict, List, Optional
 
-logger = logging.getLogger('ReccoBeatsAPI')
+logger = logging.getLogger("ReccoBeatsAPI")
 
 
 class ReccoBeatsIntegratedClient:
@@ -29,17 +30,16 @@ class ReccoBeatsIntegratedClient:
         # Configuration ReccoBeats API
         self.recco_base_url = "https://api.reccobeats.com/v1"
         self.recco_session = requests.Session()
-        self.recco_session.headers.update({
-            'Accept': 'application/json',
-            'User-Agent': 'ReccoBeats-Python-Client/3.0'
-        })
+        self.recco_session.headers.update(
+            {"Accept": "application/json", "User-Agent": "ReccoBeats-Python-Client/3.0"}
+        )
 
         logger.info(f"ReccoBeats client initialisé")
 
     def _load_cache(self) -> Dict:
         """Charge le cache depuis le fichier"""
         try:
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
+            with open(self.cache_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
@@ -47,7 +47,7 @@ class ReccoBeatsIntegratedClient:
     def _save_cache(self):
         """Sauvegarde le cache"""
         try:
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Erreur sauvegarde cache: {e}")
@@ -68,7 +68,7 @@ class ReccoBeatsIntegratedClient:
         """
         try:
             url = f"{self.recco_base_url}/track"
-            params = {'ids': spotify_id}
+            params = {"ids": spotify_id}
 
             logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
 
@@ -86,18 +86,24 @@ class ReccoBeatsIntegratedClient:
                     track = data[0]
                     logger.info(f"✅ Track trouvé (liste): {track.get('trackTitle', 'N/A')}")
                 elif isinstance(data, dict):
-                    if 'content' in data:
-                        content = data['content']
+                    if "content" in data:
+                        content = data["content"]
                         if isinstance(content, list) and len(content) > 0:
                             track = content[0]
-                            logger.info(f"✅ Track trouvé (dict.content[0]): {track.get('trackTitle', 'N/A')}")
+                            logger.info(
+                                f"✅ Track trouvé (dict.content[0]): {track.get('trackTitle', 'N/A')}"
+                            )
                         elif isinstance(content, dict):
-                            if 'id' in content or 'trackTitle' in content:
+                            if "id" in content or "trackTitle" in content:
                                 track = content
-                                logger.info(f"✅ Track trouvé (dict.content dict): {track.get('trackTitle', 'N/A')}")
-                    elif 'id' in data or 'trackTitle' in data:
+                                logger.info(
+                                    f"✅ Track trouvé (dict.content dict): {track.get('trackTitle', 'N/A')}"
+                                )
+                    elif "id" in data or "trackTitle" in data:
                         track = data
-                        logger.info(f"✅ Track trouvé (dict direct): {track.get('trackTitle', 'N/A')}")
+                        logger.info(
+                            f"✅ Track trouvé (dict direct): {track.get('trackTitle', 'N/A')}"
+                        )
 
                 return track
 
@@ -142,7 +148,9 @@ class ReccoBeatsIntegratedClient:
 
         return None
 
-    def get_track_info(self, spotify_id: str, use_cache: bool = True, force_refresh: bool = False) -> Optional[Dict]:
+    def get_track_info(
+        self, spotify_id: str, use_cache: bool = True, force_refresh: bool = False
+    ) -> Optional[Dict]:
         """
         Récupère les informations complètes d'un track (données + audio features)
 
@@ -168,8 +176,8 @@ class ReccoBeatsIntegratedClient:
             if use_cache and not force_refresh and cache_key in self.cache:
                 cached = self.cache[cache_key]
                 if isinstance(cached, dict):
-                    has_bpm = cached.get('bpm') is not None or cached.get('tempo') is not None
-                    has_audio_features = cached.get('audio_features') is not None
+                    has_bpm = cached.get("bpm") is not None or cached.get("tempo") is not None
+                    has_audio_features = cached.get("audio_features") is not None
 
                     if has_bpm or has_audio_features:
                         logger.info(f"✅ Données complètes trouvées dans le cache")
@@ -180,17 +188,17 @@ class ReccoBeatsIntegratedClient:
 
             if not track_data:
                 logger.warning(f"❌ Aucune donnée ReccoBeats pour {spotify_id}")
-                self.cache[cache_key] = {'error': 'not_found', 'timestamp': time.time()}
+                self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
                 self._save_cache()
                 return None
 
             # Réponse de base
             result = {
-                'spotify_id': spotify_id,
-                'source': 'reccobeats',
-                'success': True,
-                'timestamp': time.time(),
-                **track_data
+                "spotify_id": spotify_id,
+                "source": "reccobeats",
+                "success": True,
+                "timestamp": time.time(),
+                **track_data,
             }
 
             # Durée + audio features (BPM/Key/Mode...) via helper partagé
@@ -206,6 +214,7 @@ class ReccoBeatsIntegratedClient:
         except Exception as e:
             logger.error(f"❌ Erreur générale get_track_info: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return None
 
@@ -216,28 +225,29 @@ class ReccoBeatsIntegratedClient:
         Partagé entre la voie Spotify ID et la voie ISRC.
         """
         # Durée
-        if 'durationMs' in track_data:
-            duration_ms = track_data['durationMs']
-            result['duration'] = int(duration_ms / 1000) if duration_ms else None
+        if "durationMs" in track_data:
+            duration_ms = track_data["durationMs"]
+            result["duration"] = int(duration_ms / 1000) if duration_ms else None
             logger.info(f"⏱️ Duration: {result['duration']}s ({duration_ms}ms)")
 
         # Audio features
-        reccobeats_id = track_data.get('id')
+        reccobeats_id = track_data.get("id")
         if reccobeats_id:
             logger.debug(f"🎼 Récupération audio features pour ID: {reccobeats_id}")
             audio_features = self.get_track_audio_features(reccobeats_id)
             if audio_features:
-                result['audio_features'] = audio_features
-                result['bpm'] = audio_features.get('tempo')
-                result['key'] = audio_features.get('key')
-                result['mode'] = audio_features.get('mode')
-                result['energy'] = audio_features.get('energy')
-                result['danceability'] = audio_features.get('danceability')
-                result['valence'] = audio_features.get('valence')
-                if result.get('key') is not None and result.get('mode') is not None:
+                result["audio_features"] = audio_features
+                result["bpm"] = audio_features.get("tempo")
+                result["key"] = audio_features.get("key")
+                result["mode"] = audio_features.get("mode")
+                result["energy"] = audio_features.get("energy")
+                result["danceability"] = audio_features.get("danceability")
+                result["valence"] = audio_features.get("valence")
+                if result.get("key") is not None and result.get("mode") is not None:
                     try:
                         from src.utils.music_theory import key_mode_to_french
-                        result['musical_key'] = key_mode_to_french(result['key'], result['mode'])
+
+                        result["musical_key"] = key_mode_to_french(result["key"], result["mode"])
                         logger.info(f"✅ Musical key: {result['musical_key']}")
                     except Exception as e:
                         logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
@@ -251,7 +261,7 @@ class ReccoBeatsIntegratedClient:
         """
         try:
             url = f"{self.recco_base_url}/track"
-            response = self.recco_session.get(url, params={'ids': isrc}, timeout=15)
+            response = self.recco_session.get(url, params={"ids": isrc}, timeout=15)
             logger.info(f"🎵 ReccoBeats: requête ISRC {isrc} (status {response.status_code})")
 
             if response.status_code != 200:
@@ -259,19 +269,22 @@ class ReccoBeatsIntegratedClient:
                     logger.warning("⏰ Rate limit ReccoBeats")
                 return None
 
-            content = response.json().get('content', [])
+            content = response.json().get("content", [])
             if not content:
                 return None
 
-            best = sorted(content, key=lambda t: t.get('popularity', 0), reverse=True)[0]
-            logger.info(f"✅ Track ISRC trouvé: {best.get('trackTitle', 'N/A')} (pop={best.get('popularity')})")
+            best = sorted(content, key=lambda t: t.get("popularity", 0), reverse=True)[0]
+            logger.info(
+                f"✅ Track ISRC trouvé: {best.get('trackTitle', 'N/A')} (pop={best.get('popularity')})"
+            )
             return best
         except Exception as e:
             logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
             return None
 
-    def get_track_info_by_isrc(self, isrc: str, use_cache: bool = True,
-                               force_refresh: bool = False) -> Optional[Dict]:
+    def get_track_info_by_isrc(
+        self, isrc: str, use_cache: bool = True, force_refresh: bool = False
+    ) -> Optional[Dict]:
         """
         Équivalent de get_track_info mais à partir d'un ISRC (pas de Spotify ID).
         Même forme de retour (success, bpm, key, mode, musical_key, duration...).
@@ -288,25 +301,26 @@ class ReccoBeatsIntegratedClient:
 
             if use_cache and not force_refresh and cache_key in self.cache:
                 cached = self.cache[cache_key]
-                if isinstance(cached, dict) and (cached.get('bpm') is not None or
-                                                 cached.get('audio_features') is not None):
+                if isinstance(cached, dict) and (
+                    cached.get("bpm") is not None or cached.get("audio_features") is not None
+                ):
                     logger.info("✅ Données ISRC trouvées dans le cache")
                     return cached
 
             track_data = self.get_track_by_isrc(isrc)
             if not track_data:
                 logger.warning(f"❌ Aucune donnée ReccoBeats pour ISRC {isrc}")
-                self.cache[cache_key] = {'error': 'not_found', 'timestamp': time.time()}
+                self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
                 self._save_cache()
                 return None
 
             result = {
-                'isrc': isrc,
-                'spotify_id': None,
-                'source': 'reccobeats_isrc',
-                'success': True,
-                'timestamp': time.time(),
-                **track_data
+                "isrc": isrc,
+                "spotify_id": None,
+                "source": "reccobeats_isrc",
+                "success": True,
+                "timestamp": time.time(),
+                **track_data,
             }
             result = self._enrich_result_with_features(result, track_data)
 
@@ -334,14 +348,14 @@ class ReccoBeatsIntegratedClient:
             return result
         try:
             url = f"{self.recco_base_url}/audio-features"
-            params = {'ids': ','.join(reccobeats_ids[:40])}
+            params = {"ids": ",".join(reccobeats_ids[:40])}
             response = self.recco_session.get(url, params=params, timeout=30)
             if response.status_code != 200:
                 logger.warning(f"❌ audio-features batch: status {response.status_code}")
                 return result
-            content = response.json().get('content', [])
+            content = response.json().get("content", [])
             for feat in content:
-                fid = feat.get('id')
+                fid = feat.get("id")
                 if fid:
                     result[fid] = feat
         except Exception as e:
@@ -361,7 +375,7 @@ class ReccoBeatsIntegratedClient:
             ids = ids[:40]
 
             url = f"{self.recco_base_url}/track"
-            params = {'ids': ','.join(ids)}
+            params = {"ids": ",".join(ids)}
 
             logger.info(f"🎵 Batch request pour {len(ids)} tracks")
 
@@ -372,19 +386,19 @@ class ReccoBeatsIntegratedClient:
                 return []
 
             # La réponse est wrappée dans {'content': [...]}
-            tracks = response.json().get('content', [])
+            tracks = response.json().get("content", [])
             if not tracks:
                 return []
 
             # Audio features en UN appel batch, puis mapping par ID ReccoBeats
-            reccobeats_ids = [t['id'] for t in tracks if t.get('id')]
+            reccobeats_ids = [t["id"] for t in tracks if t.get("id")]
             features_map = self.get_audio_features_batch(reccobeats_ids)
 
             for track in tracks:
-                feats = features_map.get(track.get('id'))
+                feats = features_map.get(track.get("id"))
                 if feats:
-                    track['bpm'] = feats.get('tempo')
-                    track['audio_features'] = feats
+                    track["bpm"] = feats.get("tempo")
+                    track["audio_features"] = feats
 
             logger.info(f"✅ {len(tracks)} tracks enrichis (audio-features en 1 appel)")
             return tracks
@@ -405,7 +419,7 @@ class ReccoBeatsIntegratedClient:
         keys_to_remove = []
 
         for key, value in self.cache.items():
-            if isinstance(value, dict) and 'error' in value:
+            if isinstance(value, dict) and "error" in value:
                 keys_to_remove.append(key)
 
         for key in keys_to_remove:
@@ -421,20 +435,20 @@ class ReccoBeatsIntegratedClient:
     def get_cache_stats(self) -> Dict:
         """Statistiques du cache"""
         total = len(self.cache)
-        errors = len([v for v in self.cache.values() if isinstance(v, dict) and 'error' in v])
-        success = len([v for v in self.cache.values() if isinstance(v, dict) and v.get('success')])
+        errors = len([v for v in self.cache.values() if isinstance(v, dict) and "error" in v])
+        success = len([v for v in self.cache.values() if isinstance(v, dict) and v.get("success")])
 
         return {
-            'total_entries': total,
-            'successful_entries': success,
-            'error_entries': errors,
-            'cache_file': self.cache_file
+            "total_entries": total,
+            "successful_entries": success,
+            "error_entries": errors,
+            "cache_file": self.cache_file,
         }
 
     def close(self):
         """Ferme les connexions"""
         try:
-            if hasattr(self, 'recco_session'):
+            if hasattr(self, "recco_session"):
                 self.recco_session.close()
 
             logger.info("✅ ReccoBeats client fermé")

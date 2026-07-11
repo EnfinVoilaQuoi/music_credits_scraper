@@ -36,7 +36,6 @@ def get_tracks(app):
     prefill_var = ctk.BooleanVar(value=True)  # Appel API album + Spotify/YouTube (media)
     include_secondary_var = ctk.BooleanVar(value=False)  # Rôles secondaires (Additional Voices…)
     respect_deleted_var = ctk.BooleanVar(value=True)  # Ne pas réajouter les morceaux supprimés
-    max_songs_var = ctk.IntVar(value=200)
 
     # Interface
     ctk.CTkLabel(

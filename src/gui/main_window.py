@@ -557,11 +557,6 @@ class MainWindow:
                 )
                 main_tracks = total_tracks - featuring_count
 
-                # Compter les morceaux désactivés (utilise IDs maintenant)
-                disabled_count = (
-                    len(self.disabled_tracks) if hasattr(self, "disabled_tracks") else 0
-                )
-
                 # Compter les morceaux ACTIFS (non désactivés) pour les stats
                 # Utilise _is_track_disabled qui vérifie par ID
                 active_tracks = [

@@ -568,7 +568,6 @@ class SNEPCertificationManager:
         if title_match:
             # Le titre contient un featuring
             main_part = title_match.group(1).strip()
-            featured_part = title_match.group(2).strip()
 
             # Chercher avec juste la partie principale du titre
             main_matches = self._search_certifications_by_artist_title(artist_clean, main_part)

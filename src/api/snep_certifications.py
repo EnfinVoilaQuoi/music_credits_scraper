@@ -130,12 +130,14 @@ class SNEPCertificationManager:
             'OE': 'OE',
             'Æ': 'AE',
             'AE': 'AE',
-            ''': "'",
-            ''': "'",
+            # Échappements Unicode explicites : les guillemets courbes avaient été
+            # aplatis en ASCII par un éditeur → entrées dupliquées no-op (AUDIT.md §3.5)
+            '‘': "'",   # ‘ apostrophe ouvrante
+            '’': "'",   # ’ apostrophe fermante (la plus fréquente dans les titres)
             '`': "'",
-            '´': "'",
-            '"': '"',
-            '"': '"',
+            '´': "'",   # ´ accent aigu isolé
+            '“': '"',   # “ guillemet double ouvrant
+            '”': '"',   # ” guillemet double fermant
             '«': '"',
             '»': '"',
             '–': '-',

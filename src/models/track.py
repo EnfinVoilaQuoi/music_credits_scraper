@@ -126,7 +126,16 @@ class Credit:
     role: CreditRole
     role_detail: Optional[str] = None  # Ex: "Guitar", "Piano", etc.
     source: str = "genius"  # Source de l'information
-    
+
+    def to_dict(self) -> dict:
+        """Convertit le crédit en dictionnaire (utilisé par Track.to_dict / export JSON)"""
+        return {
+            "name": self.name,
+            "role": self.role.value,
+            "role_detail": self.role_detail,
+            "source": self.source,
+        }
+
     @staticmethod
     def from_role_and_names(role: str, names: List[str]) -> List["Credit"]:
         """Crée une liste de crédits à partir d'un rôle (texte) et de noms"""
@@ -879,97 +888,10 @@ class Track:
             'scraping_errors': self.scraping_errors
         }
 
-    def _start_lyrics_scraping(self):
-        """Lance le scraping des paroles pour les morceaux sélectionnés"""
-        import threading
-        from tkinter import messagebox
-        from src.scrapers.genius_scraper_v2 import GeniusScraper
+    # (Méthode GUI _start_lyrics_scraping supprimée le 2026-07-10 : code d'interface
+    # copié par erreur dans le modèle — cf. AUDIT.md §3.3. La fonctionnalité vit
+    # dans src/gui/workers/scraping.py.)
 
-        if not self.current_artist or not self.current_artist.tracks:
-            return
-        
-        if not self.selected_tracks:
-            messagebox.showwarning("Attention", "Aucun morceau sélectionné")
-            return
-        
-        # Filtrer les morceaux sélectionnés
-        selected_tracks_list = [self.current_artist.tracks[i] for i in sorted(self.selected_tracks)]
-        
-        # Confirmation
-        result = messagebox.askyesno(
-            "Scraping des paroles",
-            f"Voulez-vous scraper les paroles de {len(selected_tracks_list)} morceaux sélectionnés ?\n\n"
-            "📝 Cela récupérera :\n"
-            "• Les paroles complètes\n"
-            "• L'analyse de structure (intro, couplets, refrain...)\n"
-            "• Estimation de durée par section\n\n"
-            "⏱️ Temps estimé : ~{} minutes".format(len(selected_tracks_list) * 0.5)
-        )
-        
-        if not result:
-            return
-        
-        self.lyrics_button.configure(state="disabled", text="📝 Scraping paroles...")
-        self.progress_bar.set(0)
-        
-        def update_progress(current, total, track_name):
-            progress = current / total
-            self.root.after(0, lambda: self.progress_var.set(progress))
-            self.root.after(0, lambda: self.progress_label.configure(
-                text=f"📝 {current}/{total} - {track_name[:25]}..."
-            ))
-        
-        def scrape_lyrics():
-            scraper = None
-            try:
-                scraper = GeniusScraper(headless=True)
-                results = scraper.scrape_multiple_tracks_with_lyrics(
-                    selected_tracks_list,
-                    progress_callback=update_progress,
-                    include_lyrics=True
-                )
-                
-                # Sauvegarder les données avec paroles
-                for track in selected_tracks_list:
-                    track.artist = self.current_artist
-                    self.data_manager.save_track(track)
-                
-                # Afficher le résumé
-                self.root.after(0, lambda: messagebox.showinfo(
-                    "📝 Paroles récupérées",
-                    f"✅ Scraping des paroles terminé !\n\n"
-                    f"📊 Résultats :\n"
-                    f"• Morceaux traités : {results['success']}\n"
-                    f"• Paroles récupérées : {results['lyrics_scraped']}\n"
-                    f"• Structures analysées : {results['structures_analyzed']}\n"
-                    f"• Échecs : {results['failed']}\n\n"
-                    f"💡 Les paroles sont maintenant disponibles dans les détails des morceaux"
-                ))
-                
-                self.root.after(0, self._update_artist_info)
-                
-            except Exception as err:
-                error_msg = str(err) if str(err) != "None" else "Erreur inconnue"
-                logger.error(f"Erreur scraping paroles: {error_msg}", exc_info=True)
-                self.root.after(0, lambda: messagebox.showerror(
-                    "Erreur",
-                    f"Erreur lors du scraping des paroles :\n{error_msg}"
-                ))
-            finally:
-                if scraper:
-                    try:
-                        scraper.close()
-                    except:
-                        pass
-                
-                self.root.after(0, lambda: self.lyrics_button.configure(
-                    state="normal",
-                    text="📝 Scraper paroles"
-                ))
-                self.root.after(0, lambda: self.progress_bar.set(0))
-                self.root.after(0, lambda: self.progress_label.configure(text=""))
-        
-        threading.Thread(target=scrape_lyrics, daemon=True).start()
 
     @property
     def primary_spotify_id(self) -> Optional[str]:

@@ -2,23 +2,46 @@
 Module de backup automatique de la base de données
 Crée des backups avant les opérations critiques
 """
-import shutil
 import sqlite3
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 import logging
 
+from src.config import DATA_DIR, DATABASE_URL
+
 logger = logging.getLogger(__name__)
+
+# Chemins par défaut alignés sur config.py — l'ancien défaut relatif
+# ("music_credits.db" depuis le cwd) ne pointait sur rien : le backup
+# pré-fetch de retrieval.py retournait None en silence (AUDIT.md §4).
+_DEFAULT_DB_PATH = DATABASE_URL.replace("sqlite:///", "")
+_DEFAULT_BACKUP_DIR = DATA_DIR / "backups"
 
 
 class DatabaseBackupManager:
     """Gestionnaire de backups de la base de données"""
 
-    def __init__(self, db_path: str = "music_credits.db", backup_dir: str = "data/backups"):
+    def __init__(self, db_path: str = _DEFAULT_DB_PATH, backup_dir: str = _DEFAULT_BACKUP_DIR):
         self.db_path = Path(db_path)
         self.backup_dir = Path(backup_dir)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _sqlite_copy(src: Path, dest: Path) -> None:
+        """
+        Copie une base SQLite via l'API de backup native (sqlite3.Connection.backup) :
+        cohérente même si la base source est en cours d'écriture, contrairement
+        à une copie de fichier (shutil) qui peut capturer un état intermédiaire.
+        """
+        src_conn = sqlite3.connect(src)
+        dest_conn = sqlite3.connect(dest)
+        try:
+            with dest_conn:
+                src_conn.backup(dest_conn)
+        finally:
+            dest_conn.close()
+            src_conn.close()
 
     def create_backup(self, operation_name: str = "manual") -> Optional[Path]:
         """
@@ -40,8 +63,8 @@ class DatabaseBackupManager:
             backup_name = f"backup_{operation_name}_{timestamp}.db"
             backup_path = self.backup_dir / backup_name
 
-            # Copier la base de données
-            shutil.copy2(self.db_path, backup_path)
+            # Copier la base de données (API backup SQLite — safe à chaud)
+            self._sqlite_copy(self.db_path, backup_path)
 
             # Vérifier l'intégrité du backup
             if self._verify_backup(backup_path):
@@ -127,11 +150,11 @@ class DatabaseBackupManager:
             # Créer un backup de sécurité de la base actuelle
             if self.db_path.exists():
                 safety_backup = self.db_path.with_suffix('.db.before_restore')
-                shutil.copy2(self.db_path, safety_backup)
+                self._sqlite_copy(self.db_path, safety_backup)
                 logger.info(f"Backup de sécurité créé: {safety_backup}")
 
-            # Restaurer le backup
-            shutil.copy2(backup_path, self.db_path)
+            # Restaurer le backup (API backup SQLite, y compris si la base cible est ouverte)
+            self._sqlite_copy(backup_path, self.db_path)
 
             # Vérifier l'intégrité
             if self._verify_backup(self.db_path):

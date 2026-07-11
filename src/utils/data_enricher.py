@@ -1381,21 +1381,17 @@ class DataEnricher:
                 finally:
                     signal.signal(signal.SIGALRM, old_handler)
             else:
-                # Windows: utiliser threading.Timer avec arrêt forcé du driver
+                # Windows : Timer = simple garde-fou pour invalider un résultat tardif.
+                # NOTE (AUDIT.md §3.6) : l'ancien code tentait de fermer un attribut
+                # Selenium `.driver` qui n'existe plus depuis la migration Playwright
+                # (no-op silencieux). On ne force PAS la fermeture depuis le thread du
+                # Timer : l'API sync de Playwright n'est pas thread-safe, et le scraper
+                # applique déjà ses propres timeouts de navigation (goto timeout=30s).
                 timer_expired = {'value': False}
 
                 def timeout_func():
                     timer_expired['value'] = True
-                    logger.error(f"⏰ SongBPM timeout après {timeout_seconds}s")
-                    # ⭐ FORCER la fermeture du driver pour interrompre les requêtes HTTP bloquées
-                    try:
-                        if self.songbpm_scraper and self.songbpm_scraper.driver:
-                            logger.warning("⚠️ Fermeture forcée du driver SongBPM après timeout")
-                            self.songbpm_scraper.driver.quit()
-                            self.songbpm_scraper.driver = None
-                            self.songbpm_scraper.wait = None
-                    except Exception as e:
-                        logger.debug(f"Erreur fermeture driver: {e}")
+                    logger.error(f"⏰ SongBPM timeout après {timeout_seconds}s — le résultat sera ignoré")
 
                 timer = threading.Timer(timeout_seconds, timeout_func)
                 timer.start()
@@ -1409,7 +1405,6 @@ class DataEnricher:
 
                 if timer_expired['value']:
                     logger.error(f"❌ SongBPM: Timeout expiré pour '{track.title}'")
-                    # Le driver a déjà été fermé par timeout_func
                     return False
             
             if not track_data:

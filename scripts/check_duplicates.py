@@ -1,13 +1,14 @@
 """
 Script de détection et analyse des doublons
 """
+
 import io
 import sqlite3
 import sys
 from pathlib import Path
 
 # Fix encodage Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # Ajouter le répertoire parent au path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,20 +16,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def analyze_specific_duplicate(title):
     """Analyse un doublon spécifique"""
-    conn = sqlite3.connect('data/music_credits.db')
+    conn = sqlite3.connect("data/music_credits.db")
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
     print(f"   ANALYSE DU DOUBLON: {title}")
     print(f"{'='*60}\n")
 
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT id, title, album, release_date, genius_id, bpm, duration,
                musical_key, spotify_id, lyrics
         FROM tracks
         WHERE LOWER(title) = LOWER(?)
         ORDER BY title
-    """, (title,))
+    """,
+        (title,),
+    )
 
     rows = cursor.fetchall()
 
@@ -64,18 +68,26 @@ def analyze_specific_duplicate(title):
     scores = []
     for row in rows:
         score = 0
-        if row[2]: score += 1  # album
-        if row[4]: score += 2  # genius_id (important)
-        if row[5]: score += 1  # bpm
-        if row[6]: score += 1  # duration
-        if row[7]: score += 1  # musical_key
-        if row[8]: score += 1  # spotify_id
-        if row[9]: score += 1  # lyrics
+        if row[2]:
+            score += 1  # album
+        if row[4]:
+            score += 2  # genius_id (important)
+        if row[5]:
+            score += 1  # bpm
+        if row[6]:
+            score += 1  # duration
+        if row[7]:
+            score += 1  # musical_key
+        if row[8]:
+            score += 1  # spotify_id
+        if row[9]:
+            score += 1  # lyrics
 
         # Credits
         cursor.execute("SELECT COUNT(*) FROM credits WHERE track_id = ?", (row[0],))
         credits_count = cursor.fetchone()[0]
-        if credits_count > 0: score += 2
+        if credits_count > 0:
+            score += 2
 
         scores.append((row[0], score))
 
@@ -90,7 +102,7 @@ def analyze_specific_duplicate(title):
 
 def find_all_duplicates():
     """Trouve tous les doublons dans la base"""
-    conn = sqlite3.connect('data/music_credits.db')
+    conn = sqlite3.connect("data/music_credits.db")
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
@@ -117,12 +129,15 @@ def find_all_duplicates():
 
     for title_lower, count in duplicates:
         # Récupérer les versions exactes
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, title, album, bpm, duration
             FROM tracks
             WHERE LOWER(title) = ?
             ORDER BY id
-        """, (title_lower,))
+        """,
+            (title_lower,),
+        )
 
         versions = cursor.fetchall()
 
@@ -167,4 +182,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nErreur: {e}")
         import traceback
+
         traceback.print_exc()

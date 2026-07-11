@@ -100,7 +100,7 @@ def populate_tracks_table(app):
                     else:
                         # Déjà un objet datetime
                         release_date = track.release_date.strftime("%d/%m/%Y")
-                except:
+                except Exception:
                     release_date = (
                         str(track.release_date).split("T")[0]
                         if "T" in str(track.release_date)
@@ -168,7 +168,7 @@ def populate_tracks_table(app):
                         minutes = track.duration // 60
                         seconds = track.duration % 60
                         duration_display = f"{minutes}:{seconds:02d}"
-                except:
+                except Exception:
                     pass
 
             # Certifications - Lire depuis track.certifications au lieu de l'API
@@ -191,7 +191,7 @@ def populate_tracks_table(app):
                         "Quadruple Diamant": "💎💎💎💎",
                     }
                     certif_display = emoji_map.get(cert_level, "✓")
-            except:
+            except Exception:
                 pass
 
             # Statut - Utiliser votre fonction existante _get_track_status_icon
@@ -260,7 +260,7 @@ def populate_tracks_table(app):
                     ),
                     tags=(str(i),),
                 )
-            except:
+            except Exception:
                 pass
 
     # Style pour morceaux désactivés
@@ -633,7 +633,7 @@ def sort_column(app, col):
                         return datetime.fromisoformat(
                             t.release_date.replace("Z", "+00:00").split("T")[0]
                         )
-                    except:
+                    except Exception:
                         return datetime.min
                 return t.release_date
 
@@ -663,7 +663,7 @@ def sort_column(app, col):
                             return int(parts[0]) * 60 + int(parts[1])
                         elif len(parts) == 3:
                             return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-                    except:
+                    except Exception:
                         pass
                 return 0
 
@@ -704,7 +704,7 @@ def sort_column(app, col):
                         emoji = emoji_map.get(cert_level, "✓")
                         return cert_order.get(emoji, 12)
                     return 12
-                except:
+                except Exception:
                     return 12
 
             sort_key = get_cert_value

@@ -210,7 +210,7 @@ class CertificationEnricher:
                 if isinstance(cert_date, str):
                     try:
                         cert_date = datetime.fromisoformat(cert_date)
-                    except:
+                    except Exception:
                         continue
                 year = cert_date.year
                 stats["by_year"][year] = stats["by_year"].get(year, 0) + 1

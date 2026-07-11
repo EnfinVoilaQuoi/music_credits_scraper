@@ -34,7 +34,7 @@ class TrackDetailsWindow:
             old_window, _ = self.app.open_detail_windows[track.id]
             try:
                 old_window.destroy()
-            except:
+            except Exception:
                 pass
             del self.app.open_detail_windows[track.id]
 

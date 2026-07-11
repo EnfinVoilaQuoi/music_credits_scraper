@@ -963,7 +963,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             # Charger le CSV avec gestion d'encodage
             try:
                 df = pd.read_csv(csv_path, encoding="utf-8", sep=";")
-            except:
+            except Exception:
                 df = pd.read_csv(csv_path, encoding="latin1", sep=";")
 
             if df.empty:

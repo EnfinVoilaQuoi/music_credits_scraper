@@ -156,7 +156,7 @@ class ManualVerificationInterface:
                 photo = ImageTk.PhotoImage(image)
                 self.thumbnail_label.config(image=photo)
                 self.thumbnail_label.image = photo  # Garder une référence
-            except:
+            except Exception:
                 self.thumbnail_label.config(image="", text="Pas d'aperçu")
 
         # Afficher les détails

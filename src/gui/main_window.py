@@ -350,7 +350,7 @@ class MainWindow:
                 from src.utils.certification_manager import CertificationManager
 
                 cert_manager = CertificationManager()
-            except:
+            except Exception:
                 pass
 
             # Ouvrir la fenêtre (pré-remplie avec l'artiste courant + sa

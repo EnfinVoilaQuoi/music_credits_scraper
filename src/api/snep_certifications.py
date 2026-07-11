@@ -345,7 +345,7 @@ class SNEPCertificationManager:
                             if hasattr(release_date_raw, "to_pydatetime")
                             else release_date_raw
                         )
-                    except:
+                    except Exception:
                         pass
 
                 certification_date = None
@@ -356,7 +356,7 @@ class SNEPCertificationManager:
                             if hasattr(certification_date_raw, "to_pydatetime")
                             else certification_date_raw
                         )
-                    except:
+                    except Exception:
                         pass
 
                 # Créer l'objet Certification

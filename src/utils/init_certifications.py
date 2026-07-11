@@ -153,7 +153,7 @@ class SimpleSNEPImporter:
 
             # Identifier les colonnes
             col_map = {}
-            for i, h in enumerate(headers):
+            for h in headers:
                 h_upper = h.upper()
                 if "INTERPRETE" in h_upper or "ARTISTE" in h_upper:
                     col_map["artist"] = h

@@ -534,7 +534,7 @@ class SNEPCertificationManager:
         results = []
 
         for row in cursor.fetchall():
-            cert_dict = dict(zip(columns, row))
+            cert_dict = dict(zip(columns, row, strict=True))
             results.append(cert_dict)
 
         # Mettre en cache
@@ -630,7 +630,7 @@ class SNEPCertificationManager:
         cursor.execute(query, (artist_clean, title_clean))
 
         columns = [description[0] for description in cursor.description]
-        exact_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        exact_results = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
 
         if exact_results:
             return exact_results
@@ -643,7 +643,7 @@ class SNEPCertificationManager:
         """
         cursor.execute(query, (f"%{artist_clean}%", f"%{title_clean}%"))
 
-        fuzzy_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        fuzzy_results = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
         return fuzzy_results
 
     def _search_truncated_certifications(
@@ -680,7 +680,7 @@ class SNEPCertificationManager:
         )
 
         columns = [description[0] for description in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
 
     def _search_featuring_certifications(
         self, artist_name: str, track_title: str
@@ -702,7 +702,7 @@ class SNEPCertificationManager:
         cursor.execute(query, (f"%{artist_clean}%", f"%{title_clean}%"))
 
         columns = [description[0] for description in cursor.description]
-        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        results = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
 
         return results
 
@@ -722,7 +722,7 @@ class SNEPCertificationManager:
         cursor.execute(query, (artist_clean, album_clean))
 
         columns = [description[0] for description in cursor.description]
-        exact_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        exact_results = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
 
         if exact_results:
             return exact_results
@@ -735,7 +735,7 @@ class SNEPCertificationManager:
         """
         cursor.execute(query, (f"%{artist_clean}%", f"%{album_clean}%"))
 
-        fuzzy_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        fuzzy_results = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
         return fuzzy_results
 
     def get_certification_stats(self, artist_name: str | None = None) -> dict[str, Any]:
@@ -800,7 +800,9 @@ class SNEPCertificationManager:
         )
 
         columns = ["artist_name", "title", "certification", "certification_date"]
-        stats["recent_certifications"] = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        stats["recent_certifications"] = [
+            dict(zip(columns, row, strict=True)) for row in cursor.fetchall()
+        ]
 
         return stats
 
@@ -833,7 +835,7 @@ class SNEPCertificationManager:
         results = []
 
         for row in cursor.fetchall():
-            results.append(dict(zip(columns, row)))
+            results.append(dict(zip(columns, row, strict=True)))
 
         return results
 
@@ -868,7 +870,7 @@ class SNEPCertificationManager:
         columns = [d[0] for d in cursor.description]
         certs = []
         for row in cursor.fetchall():
-            d = dict(zip(columns, row))
+            d = dict(zip(columns, row, strict=True))
             if _re.search(r"\b" + _re.escape(artist_clean) + r"\b", d.get("artist_clean") or ""):
                 certs.append(d)
 

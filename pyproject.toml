@@ -24,6 +24,7 @@ select = [
 ]
 ignore = [
     "SIM105", # « utiliser contextlib.suppress » : purement stylistique, sans intérêt ici
+    "E731",   # lambdas assignées : usage idiomatique pour les clés de tri (tracks_table)
 ]
 
 [tool.ruff.lint.per-file-ignores]

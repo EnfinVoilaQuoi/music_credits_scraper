@@ -301,7 +301,7 @@ def auto_clean_duplicates(dry_run=True):
         best = max(scores, key=lambda x: x[2])
 
         # Marquer les autres pour suppression
-        for track_id, track_title, score in scores:
+        for track_id, track_title, _score in scores:
             if track_id != best[0]:
                 actions.append(
                     {
@@ -314,7 +314,7 @@ def auto_clean_duplicates(dry_run=True):
 
         print(f"'{best[1]}' ({count} versions):")
         print(f"  Garder: ID {best[0]} (score: {best[2]})")
-        for track_id, track_title, score in scores:
+        for track_id, _track_title, score in scores:
             if track_id != best[0]:
                 print(f"  Supprimer: ID {track_id} (score: {score})")
         print()

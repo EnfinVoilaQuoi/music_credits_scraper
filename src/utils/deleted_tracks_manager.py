@@ -84,7 +84,7 @@ class DeletedTracksManager:
     def load_deleted_ids(self, artist_name: str) -> set[int]:
         """Set des genius_id supprimés (int)."""
         out = set()
-        for gid in self._read(artist_name).keys():
+        for gid in self._read(artist_name):
             try:
                 out.add(int(gid))
             except (TypeError, ValueError):

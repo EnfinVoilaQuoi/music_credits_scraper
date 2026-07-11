@@ -3,16 +3,16 @@ Scraper pour les certifications musicales belges Ultratop.be
 Script 1: Création de la base de données historique (1995-2024)
 """
 
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
-import time
-import random
-from datetime import datetime
 import logging
-from pathlib import Path
+import random
 import re
+import time
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import urljoin
+
+import pandas as pd
+import requests
 
 
 class UltratopScraperInitial:
@@ -199,7 +199,7 @@ class UltratopScraperInitial:
         Import paresseux : fonctionne aussi quand le script est lancé en standalone.
         """
         try:
-            from src.utils.llm_extractor import get_shared_extractor, build_certifications_prompt
+            from src.utils.llm_extractor import build_certifications_prompt, get_shared_extractor
         except ImportError:
             return []
 

@@ -1,11 +1,12 @@
 """Script de mise à jour automatique des certifications SNEP"""
 
-import sys
 import io
-import requests
-from pathlib import Path
-from datetime import datetime
 import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import requests
 
 # Configurer l'encodage UTF-8 pour la console Windows
 if sys.platform == "win32":
@@ -15,8 +16,8 @@ if sys.platform == "win32":
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from src.api.snep_certifications import SNEPCertificationManager
-from src.utils.logger import get_logger
 from src.config import DATA_PATH
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -105,7 +106,7 @@ def download_latest_snep_csv():
         if url is None:
             continue
 
-        safe_print(f"\n🔍 Tentative de téléchargement depuis :")
+        safe_print("\n🔍 Tentative de téléchargement depuis :")
         safe_print(f"   {url}")
 
         try:
@@ -127,7 +128,8 @@ def download_latest_snep_csv():
                     continue
 
                 # Écriture atomique : temp → rename pour éviter la corruption partielle
-                import tempfile, os
+                import os
+                import tempfile
 
                 tmp_fd, tmp_name = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
                 try:
@@ -142,7 +144,7 @@ def download_latest_snep_csv():
                     raise
 
                 file_size = dest_path.stat().st_size
-                safe_print(f"✅ Fichier téléchargé avec succès !")
+                safe_print("✅ Fichier téléchargé avec succès !")
                 safe_print(f"   Taille : {file_size / 1024:.1f} KB")
 
                 # FUSION avec l'historique : l'export SNEP est une fenêtre
@@ -170,9 +172,9 @@ def download_latest_snep_csv():
     return None
 
 
-import time
 import random
 import re as _re
+import time
 
 try:
     from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT
@@ -413,8 +415,8 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
     Remplace le CSV téléchargé devenu partiel (le site ne fournit plus l'export complet).
     Retourne le nombre de certifications ajoutées.
     """
-    import time
     import random
+    import time
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -515,14 +517,14 @@ def update_snep_database():
         total_after = stats_after["total_certifications"]
 
         safe_print("\n✅ MISE À JOUR TERMINÉE")
-        safe_print(f"\n📊 Résumé :")
+        safe_print("\n📊 Résumé :")
         safe_print(f"  • Certifications avant : {total_before}")
         safe_print(f"  • Certifications après : {total_after}")
         safe_print(f"  • Nouvelles/mises à jour : {total_after - total_before}")
 
         # Afficher les certifications récentes
         if stats_after["recent_certifications"]:
-            safe_print(f"\n🆕 Certifications récentes :")
+            safe_print("\n🆕 Certifications récentes :")
             for cert in stats_after["recent_certifications"][:5]:
                 date_str = cert["certification_date"][:10] if cert["certification_date"] else "N/A"
                 safe_print(
@@ -653,7 +655,8 @@ def fetch_artist_certifications(artist_name: str) -> bool:
 
     # 4. Fusionner dans le CSV maître
     dest_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
-    import tempfile, os
+    import os
+    import tempfile
 
     fd, tmp_name = tempfile.mkstemp(suffix=".csv")
     os.close(fd)  # Windows : fermer le descripteur sinon unlink échoue (WinError 32)

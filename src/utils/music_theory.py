@@ -7,8 +7,6 @@ ou `key_mode_to_french_from_string` (strings), qui convergent vers ce format.
 `normalize_musical_key` re-normalise une chaîne existante (US/FR/Unicode/mixte).
 """
 
-from typing import Optional
-
 # ── Parsing robuste note → pitch class (US, FR, Unicode ♯/♭, composites X/Y) ──
 
 _NOTE_TO_PC = {
@@ -70,7 +68,7 @@ def _clean_note_token(s: str) -> str:
     return s.upper()
 
 
-def note_to_pitch_class(note) -> Optional[int]:
+def note_to_pitch_class(note) -> int | None:
     """
     Note (str US/FR, composite "C#/Db"/"Do#/Réb", Unicode "G♯/A♭", int 0-11
     ou chaîne "7") → pitch class (0=C/Do … 11=B/Si), ou None si non reconnue.
@@ -94,7 +92,7 @@ def note_to_pitch_class(note) -> Optional[int]:
     return _NOTE_TO_PC.get(token)
 
 
-def parse_mode(mode) -> Optional[int]:
+def parse_mode(mode) -> int | None:
     """Mode ('major'/'minor'/'majeur'/'mineur'/'0'/'1', int) → 1=majeur, 0=mineur, None sinon."""
     if mode is None:
         return None
@@ -104,7 +102,7 @@ def parse_mode(mode) -> Optional[int]:
     return _MODE_WORDS.get(str(mode).strip().lower())
 
 
-def normalize_musical_key(musical_key: str) -> Optional[str]:
+def normalize_musical_key(musical_key: str) -> str | None:
     """
     Re-normalise une chaîne `musical_key` existante vers le format canonique
     français, quelle que soit sa notation d'origine :
@@ -171,7 +169,7 @@ def key_mode_to_french(key: int, mode: int) -> str:
     return f"{note} {mode_fr}"
 
 
-def key_mode_to_french_from_string(key_str, mode_str) -> Optional[str]:
+def key_mode_to_french_from_string(key_str, mode_str) -> str | None:
     """
     Convertit key (string "F", "C#", "G♯/A♭", "Sol#", "7", ou int) + mode
     (string "major"/"minor"/"majeur"/"mineur"/"0"/"1", ou int) en notation

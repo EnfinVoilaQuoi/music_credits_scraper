@@ -13,8 +13,6 @@ sa part individuelle (plus précis que diviser par 65 %).
   - Les deux      → total = (spotify + ytm) / 0.65
 """
 
-from typing import Optional
-
 # ── Parts de marché ───────────────────────────────────────────────────────────
 SPOTIFY_SHARE = 0.40
 YTM_SHARE = 0.25
@@ -22,9 +20,9 @@ COMBINED_SHARE = SPOTIFY_SHARE + YTM_SHARE  # 0.65
 
 
 def calculate_total_streams(
-    spotify_streams: Optional[int],
-    ytm_streams: Optional[int],
-) -> Optional[int]:
+    spotify_streams: int | None,
+    ytm_streams: int | None,
+) -> int | None:
     """Estime le nombre total de streams toutes plateformes.
 
     Returns:
@@ -43,9 +41,9 @@ def calculate_total_streams(
 
 
 def calculate_total_monthly_listeners(
-    spotify_listeners: Optional[int],
-    ytm_listeners: Optional[int],
-) -> Optional[int]:
+    spotify_listeners: int | None,
+    ytm_listeners: int | None,
+) -> int | None:
     """Estime le nombre total d'auditeurs mensuels toutes plateformes.
 
     Returns:
@@ -64,8 +62,8 @@ def calculate_total_monthly_listeners(
 
 
 def streams_source_label(
-    spotify_streams: Optional[int],
-    ytm_streams: Optional[int],
+    spotify_streams: int | None,
+    ytm_streams: int | None,
 ) -> str:
     """Retourne un indicateur de complétude des données.
 
@@ -86,7 +84,7 @@ def streams_source_label(
     return ""
 
 
-def format_streams(n: Optional[int], suffix: str = "") -> str:
+def format_streams(n: int | None, suffix: str = "") -> str:
     """Formate un nombre de streams pour affichage (séparateur milliers = espace).
 
     Args:

@@ -17,12 +17,11 @@ Politesse : User-Agent identifiable (recommandé par LRCLIB), retries réseau vi
 Pas de rate limit annoncé, on respecte quand même DELAY_BETWEEN_REQUESTS.
 """
 
+import logging
 import re
 import time
-import logging
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Dict, List, Optional
 
 import requests
 
@@ -97,7 +96,7 @@ class LRCLIBAPI:
         self.timeout = timeout
 
     # ── HTTP ──────────────────────────────────────────────────────────────────
-    def _request(self, path: str, params: Dict) -> Optional[object]:
+    def _request(self, path: str, params: dict) -> object | None:
         """
         GET avec retries réseau/5xx. Renvoie le JSON parsé (dict ou list),
         None sur 404 (TrackNotFound) ou échec définitif.
@@ -121,7 +120,7 @@ class LRCLIBAPI:
         return None
 
     # ── API publique ──────────────────────────────────────────────────────────
-    def _pack(self, obj: Dict) -> Optional[Dict]:
+    def _pack(self, obj: dict) -> dict | None:
         """Objet Lyrics LRCLIB → dict interne homogène (ou None si vide/instrumental)."""
         if not isinstance(obj, dict):
             return None
@@ -140,7 +139,7 @@ class LRCLIBAPI:
 
     def get_exact(
         self, track_name: str, artist_name: str, album_name: str, duration: int
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """`/get` : match sur les 4 champs (durée ±2 s). Renvoie un dict interne ou None."""
         obj = self._request(
             "/get",
@@ -156,10 +155,10 @@ class LRCLIBAPI:
     def search(
         self,
         track_name: str,
-        artist_name: Optional[str] = None,
-        duration: Optional[int] = None,
+        artist_name: str | None = None,
+        duration: int | None = None,
         require_synced: bool = True,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         `/search` (titre + artiste) puis sélection du meilleur candidat :
         titre fort exigé, départage par la durée (±2 s privilégié) si connue.
@@ -202,9 +201,9 @@ class LRCLIBAPI:
         self,
         track_name: str,
         artist_name: str,
-        album_name: Optional[str] = None,
-        duration: Optional[int] = None,
-    ) -> Optional[Dict]:
+        album_name: str | None = None,
+        duration: int | None = None,
+    ) -> dict | None:
         """
         Point d'entrée principal (SOURCE 1 des timestamps).
 

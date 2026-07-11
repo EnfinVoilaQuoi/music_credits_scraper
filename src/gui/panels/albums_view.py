@@ -2,13 +2,13 @@
 Le Treeview lui-même appartient à MainWindow (widget partagé avec la vue morceaux)."""
 
 import tkinter
-from tkinter import messagebox
 from datetime import datetime
+from tkinter import messagebox
 
-from src.models import Track
-from src.utils.logger import get_logger
 from src.gui import helpers
 from src.gui.panels import tracks_table
+from src.models import Track
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -56,6 +56,7 @@ def set_view_mode(app, value):
 def album_view_prefs_path(app):
     import re as _re
     from pathlib import Path as _Path
+
     from src.config import DATA_DIR
 
     d = _Path(DATA_DIR) / "album_view"

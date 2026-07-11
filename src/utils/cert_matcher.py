@@ -20,12 +20,12 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 import pandas as pd
 
-from src.config import DATA_PATH
 from src.api.snep_certifications import get_snep_manager
+from src.config import DATA_PATH
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -111,7 +111,7 @@ class CertMatcher:
 
     # ------------------------------------------------------------------ chargement
     def _load_all(self) -> pd.DataFrame:
-        rows: List[dict] = []
+        rows: list[dict] = []
         rows += self._load_snep()
         rows += self._load_brma()
         rows += self._load_riaa()
@@ -137,7 +137,7 @@ class CertMatcher:
         df["title_len"] = df["title_clean"].str.len()
         return df
 
-    def _load_snep(self) -> List[dict]:
+    def _load_snep(self) -> list[dict]:
         db = Path(DATA_PATH) / "certifications" / "snep" / "certifications.db"
         if not db.exists():
             return []
@@ -173,7 +173,7 @@ class CertMatcher:
             logger.error(f"CertMatcher: chargement SNEP impossible : {e}")
             return []
 
-    def _load_brma(self) -> List[dict]:
+    def _load_brma(self) -> list[dict]:
         csv = Path(DATA_PATH) / "certifications" / "brma" / "certif_brma.csv"
         if not csv.exists():
             return []
@@ -205,7 +205,7 @@ class CertMatcher:
             )
         return rows
 
-    def _load_riaa(self) -> List[dict]:
+    def _load_riaa(self) -> list[dict]:
         """Charge les certifs RIAA (US). Fichier historique : certif_riaa.csv.
 
         Schéma toléré (insensible à la casse) : Artist, Title, Certification_Date
@@ -270,12 +270,12 @@ class CertMatcher:
             return base - min(n - 1, 9) * 0.1  # un cran au-dessus du palier simple
         return 99.0
 
-    def _track_match_indices(self, a: str, t: str) -> List[int]:
+    def _track_match_indices(self, a: str, t: str) -> list[int]:
         """Stratégies SNEP portées (exact → feat → featuring → tronqué)."""
         df = self.df
         if df.empty or not a:
             return []
-        seen: List[int] = []
+        seen: list[int] = []
         sset = set()
 
         def add(sub):
@@ -333,7 +333,7 @@ class CertMatcher:
 
     def get_track_certifications(
         self, artist: str, title: str, extra_artists=None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Toutes les certifs (tous pays) raccordées à ce morceau, triées.
 
         `extra_artists` : noms d'artistes supplémentaires à tester (ex:
@@ -356,7 +356,7 @@ class CertMatcher:
                     idx.append(i)
         return self._format(self.df.loc[idx]) if idx else []
 
-    def get_artist_certifications(self, artist: str) -> List[Dict[str, Any]]:
+    def get_artist_certifications(self, artist: str) -> list[dict[str, Any]]:
         """Toutes les certifs (tous pays) de l'artiste (match substring, comme SNEP)."""
         a = self._norm(artist)
         df = self.df
@@ -364,7 +364,7 @@ class CertMatcher:
             return []
         return self._format(df[df["artist_clean"].str.contains(a, regex=False, na=False)])
 
-    def get_album_certifications(self, artist: str, album: str) -> List[Dict[str, Any]]:
+    def get_album_certifications(self, artist: str, album: str) -> list[dict[str, Any]]:
         """Certifs d'ALBUM (catégorie album) raccordées à cet album, tous pays."""
         a = self._norm(artist)
         t = self._norm(album)
@@ -381,7 +381,7 @@ class CertMatcher:
         return self._format(exact)
 
     # ------------------------------------------------------------------ sortie
-    def _format(self, rows: pd.DataFrame) -> List[Dict[str, Any]]:
+    def _format(self, rows: pd.DataFrame) -> list[dict[str, Any]]:
         out = []
         for _, r in rows.iterrows():
             out.append(
@@ -411,7 +411,7 @@ class CertMatcher:
         return out
 
 
-_instance: Optional[CertMatcher] = None
+_instance: CertMatcher | None = None
 
 
 def get_cert_matcher() -> CertMatcher:

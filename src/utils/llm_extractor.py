@@ -2,7 +2,6 @@
 
 import json
 import re
-from typing import Optional
 
 import ollama
 
@@ -22,7 +21,7 @@ class LLMExtractor:
         self.model = model
         self.max_input_chars = max_input_chars
 
-    def extract_json(self, prompt: str, max_tokens: int = _DEFAULT_MAX_TOKENS) -> Optional[dict]:
+    def extract_json(self, prompt: str, max_tokens: int = _DEFAULT_MAX_TOKENS) -> dict | None:
         """
         Envoie un prompt à Ollama et retourne le JSON parsé, ou None si échec.
         force JSON mode via format="json".
@@ -126,11 +125,11 @@ Now extract credits from:
 # Instance partagée (évite de re-vérifier Ollama à chaque scraper)
 # ──────────────────────────────────────────────────────────────────────────────
 
-_shared_extractor: Optional[LLMExtractor] = None
-_shared_available: Optional[bool] = None
+_shared_extractor: LLMExtractor | None = None
+_shared_available: bool | None = None
 
 
-def get_shared_extractor(model: str = "llama3.2") -> Optional[LLMExtractor]:
+def get_shared_extractor(model: str = "llama3.2") -> LLMExtractor | None:
     """
     Retourne l'instance LLMExtractor partagée, ou None si Ollama/le modèle
     est indisponible. La disponibilité n'est vérifiée qu'une seule fois.

@@ -8,10 +8,9 @@ Stratégie quota-optimisée :
   3. Fallback sur le champ `views` formaté de ytmusicapi si pas de clé ou erreur API
 """
 
-import re
 import logging
+import re
 import unicodedata
-from typing import Dict, List, Optional
 
 from ytmusicapi import YTMusic
 
@@ -35,7 +34,7 @@ def _normalize(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
-def _parse_views(text: str) -> Optional[int]:
+def _parse_views(text: str) -> int | None:
     """Convertit une chaîne YTMusic formatée en entier (fallback sans API key).
 
     Exemples : "1,2 M" → 1200000 | "500 k" → 500000 | "1 234 567" → 1234567
@@ -99,7 +98,7 @@ class YTMusicAPI:
 
     # ── Recherche artiste / albums ─────────────────────────────────────────────
 
-    def resolve_channel(self, value: str) -> Optional[str]:
+    def resolve_channel(self, value: str) -> str | None:
         """
         Résout un canal YTMusic depuis : un ID 'UC...', un handle '@ISHAOfficiel',
         ou une URL music.youtube.com/@handle ou /channel/UC...
@@ -153,7 +152,7 @@ class YTMusicAPI:
 
         return None
 
-    def infer_channel_from_videos(self, video_ids: List[str]) -> Optional[str]:
+    def infer_channel_from_videos(self, video_ids: list[str]) -> str | None:
         """
         Déduit le canal artiste par VOTE MAJORITAIRE sur les chaînes des vidéos
         (les liens YT auto-sélectionnés à confiance ≥ 0.8 pointent presque
@@ -162,8 +161,9 @@ class YTMusicAPI:
         if not video_ids or not self._use_yt_api:
             return None
         try:
-            from googleapiclient.discovery import build
             from collections import Counter
+
+            from googleapiclient.discovery import build
 
             yt = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
             resp = yt.videos().list(part="snippet", id=",".join(video_ids[:50])).execute()
@@ -193,7 +193,7 @@ class YTMusicAPI:
             logger.warning(f"infer_channel_from_videos échec: {e}")
             return None
 
-    def get_artist_channel_id(self, artist_name: str) -> Optional[str]:
+    def get_artist_channel_id(self, artist_name: str) -> str | None:
         """Recherche un artiste et retourne son browseId YTMusic."""
         candidates = self.get_artist_channel_candidates(artist_name)
         return candidates[0][0] if candidates else None
@@ -226,7 +226,7 @@ class YTMusicAPI:
             logger.error(f"Erreur get_artist_channel_candidates pour '{artist_name}': {e}")
             return []
 
-    def get_artist_info(self, channel_id: str) -> Dict:
+    def get_artist_info(self, channel_id: str) -> dict:
         """Retourne les infos artiste : albums, singles et auditeurs mensuels.
 
         Un seul appel API ytmusicapi — évite de doubler les requêtes.
@@ -266,7 +266,7 @@ class YTMusicAPI:
             logger.error(f"Erreur get_artist_info ({channel_id}): {e}")
             return {"albums": [], "monthly_listeners": None}
 
-    def get_artist_albums(self, channel_id: str) -> List[Dict]:
+    def get_artist_albums(self, channel_id: str) -> list[dict]:
         """Retourne albums + singles d'un artiste.
 
         Returns:
@@ -288,7 +288,7 @@ class YTMusicAPI:
 
     # ── Étape 1 : tracks raw (ytmusicapi, zéro quota YT) ──────────────────────
 
-    def get_album_tracks_raw(self, browse_id: str) -> List[Dict]:
+    def get_album_tracks_raw(self, browse_id: str) -> list[dict]:
         """Retourne les tracks d'un album avec leur videoId et views_str.
 
         N'appelle PAS YouTube Data API — zéro consommation de quota.
@@ -313,7 +313,7 @@ class YTMusicAPI:
     # ── Paroles (YTMusic, sans quota, source primaire) ───────────────────────
 
     @staticmethod
-    def _format_lrc(lines: list) -> Optional[str]:
+    def _format_lrc(lines: list) -> str | None:
         """Convertit des lignes synchronisées (LyricLine) en texte LRC [mm:ss.cc]."""
         out = []
         any_ts = False
@@ -331,7 +331,7 @@ class YTMusicAPI:
             out.append(f"[{m:02d}:{s:02d}.{cs:02d}]{text}")
         return "\n".join(out) if any_ts else None
 
-    def get_lyrics(self, artist: str, title: str) -> Optional[Dict]:
+    def get_lyrics(self, artist: str, title: str) -> dict | None:
         """
         Récupère les paroles via YTMusic : search(songs) → videoId →
         get_watch_playlist → browseId paroles → get_lyrics.
@@ -396,7 +396,7 @@ class YTMusicAPI:
 
     # ── Étape 2 : batch YouTube Data API v3 (quota-optimal) ───────────────────
 
-    def fetch_view_counts_batch(self, video_ids: List[str]) -> Dict[str, int]:
+    def fetch_view_counts_batch(self, video_ids: list[str]) -> dict[str, int]:
         """Récupère les viewCounts exacts pour une liste de videoId.
 
         Regroupe automatiquement en batches de 50 pour minimiser les requêtes API.
@@ -420,7 +420,7 @@ class YTMusicAPI:
             )
             return {}
 
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         unique_ids = list(dict.fromkeys(video_ids))  # déduplique en préservant l'ordre
         n_batches = (len(unique_ids) + _YT_BATCH_SIZE - 1) // _YT_BATCH_SIZE
 
@@ -448,7 +448,7 @@ class YTMusicAPI:
     # ── Étape 3 : résolution streams par track ─────────────────────────────────
 
     @staticmethod
-    def resolve_streams(track_raw: Dict, view_counts: Dict[str, int]) -> Optional[int]:
+    def resolve_streams(track_raw: dict, view_counts: dict[str, int]) -> int | None:
         """Résout le nombre de streams pour un track raw.
 
         Priorité :

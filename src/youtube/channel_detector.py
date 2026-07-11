@@ -1,7 +1,6 @@
 """Détection des chaînes YouTube officielles - Version simplifiée"""
 
 import requests
-from typing import Dict
 
 from src.utils.logger import get_logger
 
@@ -17,7 +16,7 @@ class ChannelDetector:
             {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         )
 
-    def is_likely_official_channel(self, channel_id: str, artist_name: str) -> Dict[str, bool]:
+    def is_likely_official_channel(self, channel_id: str, artist_name: str) -> dict[str, bool]:
         """
         Détermine si une chaîne est probablement officielle
         Version simplifiée sans scraping complexe
@@ -51,7 +50,7 @@ class ChannelDetector:
 
         return result
 
-    def get_channel_info(self, channel_id: str) -> Dict:
+    def get_channel_info(self, channel_id: str) -> dict:
         """Récupère des informations basiques sur une chaîne"""
 
         # Version simplifiée - peut être étendue plus tard

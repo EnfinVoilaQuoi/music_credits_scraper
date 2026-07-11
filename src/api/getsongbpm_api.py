@@ -5,15 +5,15 @@ Récupère: BPM, Key, Mode, Time Signature, Danceability, Acousticness
 IMPORTANT: Backlink obligatoire vers getsongbpm.com pour usage gratuit
 """
 
-import requests
+import csv
+import io
 import json
-import time
 import os
 import sys
-import io
-from typing import Dict, List, Optional
+import time
 from dataclasses import dataclass
-import csv
+
+import requests
 
 # Fix encodage Windows pour les emojis
 if sys.platform == "win32":
@@ -31,16 +31,16 @@ class SongData:
 
     artist: str
     title: str
-    song_id: Optional[str] = None
-    bpm: Optional[int] = None
-    key: Optional[str] = None
-    mode: Optional[str] = None  # "major" ou "minor"
-    time_signature: Optional[str] = None
-    open_key: Optional[str] = None  # Notation Traktor
-    danceability: Optional[int] = None
-    acousticness: Optional[int] = None
-    genres: Optional[List[str]] = None
-    error: Optional[str] = None
+    song_id: str | None = None
+    bpm: int | None = None
+    key: str | None = None
+    mode: str | None = None  # "major" ou "minor"
+    time_signature: str | None = None
+    open_key: str | None = None  # Notation Traktor
+    danceability: int | None = None
+    acousticness: int | None = None
+    genres: list[str] | None = None
+    error: str | None = None
 
 
 class GetSongBPMFetcher:
@@ -53,7 +53,7 @@ class GetSongBPMFetcher:
     RATE_LIMIT_DELAY = 1.2  # ~1.2s entre requêtes = ~3000/heure max
     MAX_RETRIES = 3
 
-    def __init__(self, api_key: Optional[str] = None, cache_file: str = "getsongbpm_cache.json"):
+    def __init__(self, api_key: str | None = None, cache_file: str = "getsongbpm_cache.json"):
         """
         Initialise le client GetSongBPM
 
@@ -81,7 +81,7 @@ class GetSongBPMFetcher:
         )
 
     @staticmethod
-    def _parse_tempo(value) -> Optional[int]:
+    def _parse_tempo(value) -> int | None:
         """
         L'API renvoie parfois `tempo` en string (ex. "220") malgré la doc qui
         l'annonce en int → cast robuste. Retourne None si non numérique/absent.
@@ -93,10 +93,10 @@ class GetSongBPMFetcher:
         except (ValueError, TypeError):
             return None
 
-    def _load_cache(self) -> Dict:
+    def _load_cache(self) -> dict:
         """Charge le cache depuis le fichier"""
         try:
-            with open(self.cache_file, "r", encoding="utf-8") as f:
+            with open(self.cache_file, encoding="utf-8") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
@@ -144,7 +144,7 @@ class GetSongBPMFetcher:
         s = "".join(c for c in s if not unicodedata.combining(c))
         return " ".join(s.lower().strip().split())
 
-    def _select_hit(self, hits: list, artist: str, title: str) -> Optional[Dict]:
+    def _select_hit(self, hits: list, artist: str, title: str) -> dict | None:
         """
         Choisit le meilleur hit 'song' dont l'ARTISTE correspond (ancre stricte).
         Évite le `search[0]` aveugle : avec type='both', le 1er résultat peut être
@@ -175,7 +175,7 @@ class GetSongBPMFetcher:
                 best = h  # titre contenu → candidat de repli
         return best
 
-    def _search_track(self, artist: str, title: str) -> Optional[Dict]:
+    def _search_track(self, artist: str, title: str) -> dict | None:
         """
         Recherche un morceau via l'endpoint /search/ et VÉRIFIE le hit.
 
@@ -231,7 +231,7 @@ class GetSongBPMFetcher:
                     continue
 
                 elif response.status_code == 401:
-                    print(f"    ✗ API Key invalide ou expirée")
+                    print("    ✗ API Key invalide ou expirée")
                     return None
 
                 elif response.status_code == 404:
@@ -249,7 +249,7 @@ class GetSongBPMFetcher:
 
         return None
 
-    def get_song_by_id(self, song_id: str) -> Optional[Dict]:
+    def get_song_by_id(self, song_id: str) -> dict | None:
         """
         Récupère les détails complets d'un morceau via son ID
 
@@ -338,7 +338,7 @@ class GetSongBPMFetcher:
 
         return song
 
-    def fetch_artist_discography(self, artist: str, track_list: List[str]) -> List[SongData]:
+    def fetch_artist_discography(self, artist: str, track_list: list[str]) -> list[SongData]:
         """
         Récupère les métadonnées pour toute une discographie
 
@@ -352,7 +352,7 @@ class GetSongBPMFetcher:
         print(f"\n{'='*70}")
         print(f"🎵 GetSongBPM: Analyse de {artist}")
         print(f"📊 {len(track_list)} morceaux à traiter")
-        print(f"⚠️  RAPPEL: Backlink obligatoire vers getsongbpm.com")
+        print("⚠️  RAPPEL: Backlink obligatoire vers getsongbpm.com")
         print(f"{'='*70}\n")
 
         results = []
@@ -371,12 +371,12 @@ class GetSongBPMFetcher:
         successful = sum(1 for r in results if r.bpm is not None)
         print(f"\n{'='*70}")
         print(f"✅ Terminé: {successful}/{len(track_list)} morceaux avec données")
-        print(f"⚠️  N'oubliez pas d'ajouter le backlink vers getsongbpm.com!")
+        print("⚠️  N'oubliez pas d'ajouter le backlink vers getsongbpm.com!")
         print(f"{'='*70}\n")
 
         return results
 
-    def search_by_bpm(self, target_bpm: int, limit: int = 50) -> List[Dict]:
+    def search_by_bpm(self, target_bpm: int, limit: int = 50) -> list[dict]:
         """
         Recherche des morceaux par BPM
 
@@ -408,7 +408,7 @@ class GetSongBPMFetcher:
             print(f"⚠ Erreur recherche BPM: {e}")
             return []
 
-    def search_by_key(self, key_of: int, mode: int, limit: int = 50) -> List[Dict]:
+    def search_by_key(self, key_of: int, mode: int, limit: int = 50) -> list[dict]:
         """
         Recherche des morceaux par tonalité
 
@@ -438,7 +438,7 @@ class GetSongBPMFetcher:
             print(f"⚠ Erreur recherche Key: {e}")
             return []
 
-    def export_to_csv(self, results: List[SongData], output_file: str = "getsongbpm_results.csv"):
+    def export_to_csv(self, results: list[SongData], output_file: str = "getsongbpm_results.csv"):
         """
         Exporte les résultats vers un fichier CSV
 
@@ -498,7 +498,7 @@ if __name__ == "__main__":
     try:
         # Initialiser le client (charge automatiquement depuis l'environnement)
         fetcher = GetSongBPMFetcher()
-        print(f"✅ Client initialisé avec API key depuis environnement")
+        print("✅ Client initialisé avec API key depuis environnement")
     except ValueError as e:
         print(f"❌ Erreur: {e}")
         print("💡 Définissez GETSONGBPM_API_KEY dans vos variables d'environnement")

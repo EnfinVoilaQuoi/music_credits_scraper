@@ -1,7 +1,6 @@
 """Classification des types de morceaux pour stratégie YouTube"""
 
 from enum import Enum
-from typing import Dict
 
 from src.utils.logger import get_logger
 
@@ -133,7 +132,7 @@ class TrackClassifier:
 
         return thresholds.get(track_type, 0.75)
 
-    def get_search_strategy(self, track_type: TrackType) -> Dict[str, str]:
+    def get_search_strategy(self, track_type: TrackType) -> dict[str, str]:
         """Retourne la stratégie de recherche selon le type"""
 
         strategies = {

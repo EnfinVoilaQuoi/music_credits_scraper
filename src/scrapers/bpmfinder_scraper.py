@@ -13,12 +13,11 @@ l'UI (pas d'API documentée) et on parse les cartes par diff avant/après.
 """
 
 import json
-import re
-import time
 import logging
+import re
 import threading
+import time
 from pathlib import Path
-from typing import Dict, Optional, Set, Tuple
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -302,11 +301,11 @@ class BPMFinderScraper:
     # ── Analyse ────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _video_id(url: str) -> Optional[str]:
+    def _video_id(url: str) -> str | None:
         m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url or "")
         return m.group(1) if m else None
 
-    def _cards(self) -> Set[Tuple[str, str, str, str]]:
+    def _cards(self) -> set[tuple[str, str, str, str]]:
         """Cartes de résultats présentes : {(note, mode, bpm, camelot)}."""
         try:
             text = self.page.inner_text("body") or ""
@@ -314,7 +313,7 @@ class BPMFinderScraper:
             return set()
         return {m.groups() for m in _CARD_RE.finditer(text)}
 
-    def analyze(self, youtube_url: str, timeout_s: int = 90) -> Optional[Dict]:
+    def analyze(self, youtube_url: str, timeout_s: int = 90) -> dict | None:
         """Analyse un lien YouTube.
 
         Returns:
@@ -376,7 +375,7 @@ class BPMFinderScraper:
             self._save_session()  # prolonge la session (cookies rafraîchis)
         return result
 
-    def analyze_file(self, filepath: str, timeout_s: int = 120) -> Optional[Dict]:
+    def analyze_file(self, filepath: str, timeout_s: int = 120) -> dict | None:
         """Analyse un FICHIER audio/vidéo LOCAL (wav/mp3/ogg/flac/mp4…).
 
         Pour les morceaux absents de YouTube. Même retour que analyze().
@@ -405,7 +404,7 @@ class BPMFinderScraper:
             self._save_session()
         return result
 
-    def _await_and_parse(self, before, timeout_s: int, label: str) -> Optional[Dict]:
+    def _await_and_parse(self, before, timeout_s: int, label: str) -> dict | None:
         """Attend la NOUVELLE carte (diff avant/après) et la parse en dict."""
         deadline = time.time() + timeout_s
         new_card = None

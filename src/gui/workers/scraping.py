@@ -4,9 +4,9 @@ import threading
 from datetime import datetime
 from tkinter import messagebox
 
+from src.gui.dialogs import report
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.utils.logger import get_logger
-from src.gui.dialogs import report
 
 logger = get_logger(__name__)
 
@@ -156,8 +156,9 @@ def start_combined_scraping(
                 current_task += 1
                 logger.info(f"[{current_task}/{total_tasks}] Scraping des crédits Discogs...")
 
-                from src.api.discogs_api import DiscogsClient
                 import os
+
+                from src.api.discogs_api import DiscogsClient
 
                 discogs_token = os.getenv("DISCOGS_TOKEN") or os.getenv("DISCOGS_USER_TOKEN")
                 discogs_client = DiscogsClient(user_token=discogs_token)

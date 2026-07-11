@@ -3,25 +3,27 @@ Scraper Spotify ID — version Playwright
 Recherche directe sur open.spotify.com/search
 """
 
-import re
 import json
+import logging
+import re
 import threading
 import urllib.parse
-import logging
-from typing import Dict, List, Optional
 
 import requests
-
 from playwright.sync_api import (
-    Page,
     Browser,
     BrowserContext,
+    Page,
+)
+from playwright.sync_api import (
     Playwright as PlaywrightInstance,
+)
+from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
 from src.scrapers.playwright_manager import get_playwright
-from src.utils.llm_extractor import get_shared_extractor, build_spotify_match_prompt
+from src.utils.llm_extractor import build_spotify_match_prompt, get_shared_extractor
 
 logger = logging.getLogger("SpotifyIDScraper")
 
@@ -33,10 +35,10 @@ class SpotifyIDScraper:
         self.cache_file = cache_file
         self.cache = self._load_cache()
         self.headless = headless
-        self._playwright: Optional[PlaywrightInstance] = None
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
-        self.page: Optional[Page] = None
+        self._playwright: PlaywrightInstance | None = None
+        self.browser: Browser | None = None
+        self.context: BrowserContext | None = None
+        self.page: Page | None = None
         self._timeout = 20_000  # ms
 
         self.spotify_id_patterns = [
@@ -53,7 +55,7 @@ class SpotifyIDScraper:
             r"/artist/([a-zA-Z0-9]{22})(?:\?|$|/)",
         ]
 
-        self._owner_thread: Optional[int] = None
+        self._owner_thread: int | None = None
         # Init PARESSEUSE : le driver est créé au premier usage, dans le thread
         # qui l'utilise (Playwright Sync est lié au thread de création)
         logger.info(f"SpotifyIDScraper initialisé (headless={headless}, driver lazy)")
@@ -113,7 +115,7 @@ class SpotifyIDScraper:
 
     def _load_cache(self):
         try:
-            with open(self.cache_file, "r", encoding="utf-8") as f:
+            with open(self.cache_file, encoding="utf-8") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
@@ -132,7 +134,7 @@ class SpotifyIDScraper:
     # Logique pure (inchangée)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def extract_artist_id_from_url(self, url: str) -> Optional[str]:
+    def extract_artist_id_from_url(self, url: str) -> str | None:
         if not url or "spotify" not in url.lower():
             return None
         for pattern in self.spotify_artist_id_patterns:
@@ -143,7 +145,7 @@ class SpotifyIDScraper:
                     return aid
         return None
 
-    def extract_spotify_id_from_url(self, url: str) -> Optional[str]:
+    def extract_spotify_id_from_url(self, url: str) -> str | None:
         if not url or "spotify" not in url.lower():
             return None
         for pattern in self.spotify_id_patterns:
@@ -205,7 +207,7 @@ class SpotifyIDScraper:
     # Recherche principale
     # ──────────────────────────────────────────────────────────────────────────
 
-    def get_spotify_id(self, artist: str, title: str) -> Optional[str]:
+    def get_spotify_id(self, artist: str, title: str) -> str | None:
         logger.info(f"🔍 Recherche ID Spotify pour: '{artist}' - '{title}'")
 
         cache_key = self._get_cache_key(artist, title)
@@ -321,7 +323,7 @@ class SpotifyIDScraper:
                 self._save_cache()
             return None
 
-    def _select_track_with_llm(self, artist: str, title: str, found_tracks: list) -> Optional[dict]:
+    def _select_track_with_llm(self, artist: str, title: str, found_tracks: list) -> dict | None:
         """
         Fallback LLM : choisit le bon résultat parmi les candidats ambigus.
         Retourne le candidat choisi, ou None si LLM indisponible/sans réponse valide.
@@ -355,7 +357,7 @@ class SpotifyIDScraper:
     # __NEXT_DATA__ avec les crédits EXACTS du morceau : [{name, uri}].
 
     @staticmethod
-    def _parse_embed_artists(html: str) -> List[Dict[str, str]]:
+    def _parse_embed_artists(html: str) -> list[dict[str, str]]:
         """Extrait [{'name', 'id'}] du __NEXT_DATA__ d'une page embed."""
         m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html or "", re.S)
         if not m:
@@ -378,7 +380,7 @@ class SpotifyIDScraper:
             logger.debug(f"Parse __NEXT_DATA__ embed échoué: {e}")
             return []
 
-    def get_track_artists(self, track_spotify_id: str) -> List[Dict[str, str]]:
+    def get_track_artists(self, track_spotify_id: str) -> list[dict[str, str]]:
         """Artistes crédités sur un track : [{'name', 'id'}], ordre Spotify.
 
         Voie 1 : requests sur la page embed (léger, server-rendered).
@@ -416,7 +418,7 @@ class SpotifyIDScraper:
 
     def get_artist_id_from_track(
         self, track_spotify_id: str, expected_name: str = None
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Déduit l'ID Spotify de l'ARTISTE depuis un de ses morceaux (page embed).
 
@@ -446,7 +448,7 @@ class SpotifyIDScraper:
         logger.info(f"✅ ID artiste (1er crédité '{artists[0]['name']}'): {artists[0]['id']}")
         return artists[0]["id"]
 
-    def get_spotify_page_title(self, spotify_id: str) -> Optional[str]:
+    def get_spotify_page_title(self, spotify_id: str) -> str | None:
         try:
             self._ensure_driver()
         except Exception:
@@ -461,7 +463,7 @@ class SpotifyIDScraper:
             logger.error(f"❌ Erreur récupération titre: {e}")
         return None
 
-    def get_artist_spotify_id(self, artist_name: str) -> Optional[str]:
+    def get_artist_spotify_id(self, artist_name: str) -> str | None:
         """Récupère l'ID Spotify (22 chars) d'un artiste depuis la page de recherche Spotify."""
         logger.info(f"🔍 Recherche ID Spotify artiste pour: '{artist_name}'")
 
@@ -535,7 +537,7 @@ class SpotifyIDScraper:
         self._save_cache()
         return None
 
-    def get_spotify_id_for_track(self, track) -> Optional[str]:
+    def get_spotify_id_for_track(self, track) -> str | None:
         if hasattr(track, "is_featuring") and track.is_featuring:
             artist_name = (
                 track.primary_artist_name

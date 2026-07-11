@@ -13,15 +13,14 @@ Structure des pages artiste (kworb.net/spotify/artist/{id}_{songs|albums}.html) 
     · daily parfois vide
 """
 
-import re
 import logging
+import re
 from datetime import datetime
-from typing import Dict, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
 
-from src.utils.llm_extractor import get_shared_extractor, build_streams_table_prompt
+from src.utils.llm_extractor import build_streams_table_prompt, get_shared_extractor
 
 logger = logging.getLogger("KworbScraper")
 
@@ -42,7 +41,7 @@ class KworbScraper:
 
     BASE_URL = "https://kworb.net/spotify/artist/{artist_id}_{type}.html"
 
-    def scrape_songs(self, spotify_artist_id: str) -> Optional[Dict]:
+    def scrape_songs(self, spotify_artist_id: str) -> dict | None:
         """Page songs d'un artiste.
 
         Returns:
@@ -58,7 +57,7 @@ class KworbScraper:
         url = self.BASE_URL.format(artist_id=spotify_artist_id, type="songs")
         return self._fetch_and_parse(url)
 
-    def scrape_albums(self, spotify_artist_id: str) -> Optional[Dict]:
+    def scrape_albums(self, spotify_artist_id: str) -> dict | None:
         """Page albums d'un artiste. Même forme que scrape_songs (summary=None).
 
         Les 'spotify_id' sont des IDs d'ALBUM. Un même titre peut apparaître
@@ -71,7 +70,7 @@ class KworbScraper:
 
     # ── Fetch + parse ──────────────────────────────────────────────────────────
 
-    def _fetch_and_parse(self, url: str) -> Optional[Dict]:
+    def _fetch_and_parse(self, url: str) -> dict | None:
         try:
             resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
             if resp.status_code == 404:
@@ -109,7 +108,7 @@ class KworbScraper:
             return None
 
     @staticmethod
-    def _parse_artist_name(soup) -> Optional[str]:
+    def _parse_artist_name(soup) -> str | None:
         """'ISHA - Spotify Top Songs' → 'ISHA'."""
         title = soup.title.string if soup.title else None
         if not title:
@@ -117,7 +116,7 @@ class KworbScraper:
         return re.split(r"\s+-\s+Spotify Top\b", title)[0].strip() or None
 
     @staticmethod
-    def _parse_last_updated(soup) -> Optional[datetime]:
+    def _parse_last_updated(soup) -> datetime | None:
         m = re.search(r"Last updated:\s*(\d{4})/(\d{2})/(\d{2})", soup.get_text())
         if not m:
             return None
@@ -126,7 +125,7 @@ class KworbScraper:
         except ValueError:
             return None
 
-    def _parse_summary(self, soup) -> Optional[Dict]:
+    def _parse_summary(self, soup) -> dict | None:
         """Table récap (page songs) : lignes Streams/Daily/Tracks ×
         colonnes Total/As lead/Solo/As feature."""
         for table in soup.find_all("table"):
@@ -151,7 +150,7 @@ class KworbScraper:
             return summary or None
         return None
 
-    def _parse_entries(self, soup) -> List[Dict]:
+    def _parse_entries(self, soup) -> list[dict]:
         """Table class='addpos' : une ligne par morceau/album."""
         table = soup.find("table", class_="addpos")
         if not table:
@@ -190,7 +189,7 @@ class KworbScraper:
 
     # ── Fallback LLM (structure de page changée) ───────────────────────────────
 
-    def _extract_with_llm(self, page_text: str) -> List[Dict]:
+    def _extract_with_llm(self, page_text: str) -> list[dict]:
         """
         Fallback LLM : extrait les lignes titre/streams du texte de la page.
         Anti-hallucination : chaque nombre doit exister tel quel dans la page.
@@ -236,7 +235,7 @@ class KworbScraper:
         return results
 
     @staticmethod
-    def _parse_number(text: str) -> Optional[int]:
+    def _parse_number(text: str) -> int | None:
         """Convertit '20,706,079' en 20706079. Retourne None si non parseable."""
         cleaned = re.sub(r"[^\d]", "", text or "")
         return int(cleaned) if cleaned else None

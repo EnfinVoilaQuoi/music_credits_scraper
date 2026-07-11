@@ -2,10 +2,10 @@
 Script de fusion et suppression des doublons
 ATTENTION : Crée un backup avant toute modification
 """
-import sys
 import io
-from pathlib import Path
 import sqlite3
+import sys
+from pathlib import Path
 
 # Fix encodage Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -72,7 +72,7 @@ def merge_duplicate_tracks(keep_id, delete_id, dry_run=True):
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
-    print(f"   FUSION DE DOUBLONS")
+    print("   FUSION DE DOUBLONS")
     print(f"{'='*60}\n")
 
     # Récupérer les infos des deux tracks
@@ -104,11 +104,11 @@ def merge_duplicate_tracks(keep_id, delete_id, dry_run=True):
     print(f"  Credits: {delete_credits}")
 
     if dry_run:
-        print(f"\n[DRY RUN] Aucune modification effectuee")
+        print("\n[DRY RUN] Aucune modification effectuee")
         conn.close()
         return True
 
-    print(f"\nFusion en cours...")
+    print("\nFusion en cours...")
 
     try:
         # 1. Transférer les crédits du track à supprimer vers celui à garder
@@ -155,7 +155,7 @@ def delete_duplicate_track(track_id, dry_run=True):
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
-    print(f"   SUPPRESSION DE DOUBLON")
+    print("   SUPPRESSION DE DOUBLON")
     print(f"{'='*60}\n")
 
     # Récupérer les infos du track
@@ -176,11 +176,11 @@ def delete_duplicate_track(track_id, dry_run=True):
     print(f"  Credits: {credits_count}")
 
     if dry_run:
-        print(f"\n[DRY RUN] Aucune modification effectuee")
+        print("\n[DRY RUN] Aucune modification effectuee")
         conn.close()
         return True
 
-    print(f"\nSuppression en cours...")
+    print("\nSuppression en cours...")
 
     try:
         # 1. Supprimer les crédits associés
@@ -217,7 +217,7 @@ def auto_clean_duplicates(dry_run=True):
     cursor = conn.cursor()
 
     print(f"\n{'='*60}")
-    print(f"   NETTOYAGE AUTOMATIQUE DES DOUBLONS")
+    print("   NETTOYAGE AUTOMATIQUE DES DOUBLONS")
     print(f"{'='*60}\n")
 
     # Trouver tous les doublons

@@ -1,10 +1,9 @@
 """Recherche YouTube avec fallbacks et cache"""
 
-import sqlite3
-import pickle
 import difflib
+import pickle
+import sqlite3
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
 
 from src.config import DATA_DIR, YOUTUBE_CACHE_TTL_HOURS
 from src.utils.logger import get_logger
@@ -51,7 +50,7 @@ class YouTubeSearcher:
         conn.commit()
         conn.close()
 
-    def search_track(self, artist: str, title: str, max_results: int = 25) -> List[Dict]:
+    def search_track(self, artist: str, title: str, max_results: int = 25) -> list[dict]:
         """Recherche principale avec cache et fallbacks"""
 
         # Vérifier le cache d'abord
@@ -87,7 +86,7 @@ class YouTubeSearcher:
 
         return results
 
-    def _search_with_ytmusic(self, artist: str, title: str, max_results: int) -> List[Dict]:
+    def _search_with_ytmusic(self, artist: str, title: str, max_results: int) -> list[dict]:
         """Recherche avec ytmusicapi"""
 
         search_queries = [
@@ -144,7 +143,7 @@ class YouTubeSearcher:
 
     def _search_with_requests_fallback(
         self, artist: str, title: str, max_results: int
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Fallback avec requests basique (génère juste des liens de recherche)"""
 
         # Cette méthode génère des résultats "fictifs" pour tests
@@ -182,7 +181,7 @@ class YouTubeSearcher:
         return results
 
     def _calculate_relevance_score(
-        self, result: Dict, target_artist: str, target_title: str
+        self, result: dict, target_artist: str, target_title: str
     ) -> float:
         """Calcule un score de pertinence"""
 
@@ -209,7 +208,7 @@ class YouTubeSearcher:
         # Score composite (titre 60%, artiste 40%)
         return (title_similarity * 0.6) + (artist_similarity * 0.4)
 
-    def _get_best_thumbnail(self, thumbnails: List[Dict]) -> Optional[str]:
+    def _get_best_thumbnail(self, thumbnails: list[dict]) -> str | None:
         """Récupère la meilleure thumbnail disponible"""
         if not thumbnails:
             return None
@@ -218,7 +217,7 @@ class YouTubeSearcher:
         best_thumb = max(thumbnails, key=lambda x: x.get("width", 0) * x.get("height", 0))
         return best_thumb.get("url")
 
-    def _get_cached_result(self, cache_key: str) -> Optional[List[Dict]]:
+    def _get_cached_result(self, cache_key: str) -> list[dict] | None:
         """Récupération depuis le cache"""
         try:
             conn = sqlite3.connect(self.cache_db)
@@ -237,7 +236,7 @@ class YouTubeSearcher:
 
         return None
 
-    def _cache_result(self, cache_key: str, results: List[Dict]):
+    def _cache_result(self, cache_key: str, results: list[dict]):
         """Mise en cache des résultats"""
         try:
             conn = sqlite3.connect(self.cache_db)
@@ -252,7 +251,7 @@ class YouTubeSearcher:
         except Exception as e:
             logger.debug(f"Erreur mise en cache: {e}")
 
-    def get_direct_youtube_url(self, artist: str, title: str) -> Optional[str]:
+    def get_direct_youtube_url(self, artist: str, title: str) -> str | None:
         """Retourne directement le meilleur lien YouTube trouvé"""
         results = self.search_track(artist, title, max_results=5)
 

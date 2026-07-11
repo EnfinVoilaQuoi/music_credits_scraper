@@ -1,11 +1,12 @@
 """Récupération des morceaux de l'artiste (API Genius) en thread"""
 
-import customtkinter as ctk
 import threading
 from tkinter import messagebox
 
-from src.utils.logger import get_logger
+import customtkinter as ctk
+
 from src.gui.dialogs import report
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

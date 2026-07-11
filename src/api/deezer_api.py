@@ -3,11 +3,12 @@ Module d'enrichissement des données musicales via l'API Deezer
 Troisième enrichisseur dans la chaîne : Reccobeats -> SongBPM -> Deezer
 """
 
-import requests
-import time
-from typing import Dict, Optional, Any
-from datetime import datetime
 import logging
+import time
+from datetime import datetime
+from typing import Any
+
+import requests
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -49,7 +50,7 @@ class DeezerAPI:
 
         self.request_times.append(current_time)
 
-    def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    def _make_request(self, endpoint: str, params: dict | None = None) -> dict | None:
         """
         Effectue une requête à l'API Deezer avec gestion du rate limiting
 
@@ -85,7 +86,7 @@ class DeezerAPI:
             logger.error(f"Erreur de parsing JSON: {e}")
             return None
 
-    def search_track(self, artist: str, title: str, strict: bool = False) -> Optional[Dict]:
+    def search_track(self, artist: str, title: str, strict: bool = False) -> dict | None:
         """
         Recherche un track par artiste et titre
 
@@ -114,7 +115,7 @@ class DeezerAPI:
         # Retourner le premier résultat (meilleur match)
         return data["data"][0]
 
-    def get_isrc(self, artist: str, title: str) -> Optional[str]:
+    def get_isrc(self, artist: str, title: str) -> str | None:
         """
         Récupère rapidement l'ISRC d'un morceau (recherche Deezer).
         Utilisé pour alimenter ReccoBeats sans scraper de Spotify ID.
@@ -130,7 +131,7 @@ class DeezerAPI:
             logger.debug(f"get_isrc échec pour {artist} - {title}: {e}")
         return None
 
-    def get_track_by_id(self, track_id: int) -> Optional[Dict]:
+    def get_track_by_id(self, track_id: int) -> dict | None:
         """
         Récupère les informations d'un track par son ID
 
@@ -143,7 +144,7 @@ class DeezerAPI:
         data = self._make_request(f"track/{track_id}")
         return data
 
-    def extract_enrichment_data(self, track_data: Dict) -> Dict[str, Any]:
+    def extract_enrichment_data(self, track_data: dict) -> dict[str, Any]:
         """
         Extrait les données d'enrichissement depuis les données Deezer
 
@@ -189,8 +190,8 @@ class DeezerAPI:
         return enriched_data
 
     def verify_duration(
-        self, deezer_duration: int, previous_duration: Optional[int], tolerance: int = 2
-    ) -> Dict[str, Any]:
+        self, deezer_duration: int, previous_duration: int | None, tolerance: int = 2
+    ) -> dict[str, Any]:
         """
         Vérifie la cohérence de la durée avec les enrichissements précédents
 
@@ -237,8 +238,8 @@ class DeezerAPI:
         }
 
     def verify_release_date(
-        self, deezer_release_date: str, scraped_release_date: Optional[str]
-    ) -> Dict[str, Any]:
+        self, deezer_release_date: str, scraped_release_date: str | None
+    ) -> dict[str, Any]:
         """
         Vérifie la cohérence de la date de sortie avec les données scrapées
 
@@ -294,9 +295,9 @@ class DeezerAPI:
         self,
         artist: str,
         title: str,
-        previous_duration: Optional[int] = None,
-        scraped_release_date: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        previous_duration: int | None = None,
+        scraped_release_date: str | None = None,
+    ) -> dict[str, Any]:
         """
         Enrichit les données d'un track avec vérifications
 
@@ -359,7 +360,7 @@ if __name__ == "__main__":
     )
 
     if result["success"]:
-        print(f"\n✓ Track trouvé!")
+        print("\n✓ Track trouvé!")
         print(f"  ID Deezer: {result['data']['deezer_track_id']}")
         print(f"  Durée: {result['data']['deezer_duration']}s")
         print(f"  Explicit: {result['data']['deezer_explicit_lyrics']}")

@@ -3,21 +3,21 @@ Scraper pour les certifications musicales belges Ultratop.be
 Script 2: Mise à jour automatique et manuelle de la base de données
 """
 
-import sys
-import io
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
-import time
-import random
-from datetime import datetime
-import logging
-from pathlib import Path
-import re
-from urllib.parse import urljoin
-import json
-import schedule
 import argparse
+import io
+import json
+import logging
+import random
+import re
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urljoin
+
+import pandas as pd
+import requests
+import schedule
 
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
 # vaut alors src/utils/, donc `import src.*` (ajouté pour le fetch anti-Cloudflare)
@@ -459,7 +459,7 @@ class UltratopUpdater:
         metadata_path = self.output_dir / "metadata.json"
 
         if metadata_path.exists():
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 metadata = json.load(f)
         else:
             metadata = {}
@@ -483,7 +483,7 @@ class UltratopUpdater:
         report_file = report_dir / f"update_report_{datetime.now():%Y%m%d_%H%M%S}.txt"
 
         with open(report_file, "w", encoding="utf-8") as f:
-            f.write(f"RAPPORT DE MISE À JOUR ULTRATOP\n")
+            f.write("RAPPORT DE MISE À JOUR ULTRATOP\n")
             f.write(f"{'=' * 50}\n")
             f.write(f"Date: {datetime.now():%Y-%m-%d %H:%M:%S}\n")
             f.write(f"Nouvelles certifications: {len(new_certifications)}\n\n")

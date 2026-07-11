@@ -2,13 +2,13 @@
 
 import json
 import sqlite3
-from pathlib import Path
-from typing import List, Optional, Dict, Any
-from datetime import datetime
 from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
-from src.config import DATABASE_URL, ARTISTS_DIR, DATA_DIR
-from src.models import Artist, Track, Credit
+from src.config import ARTISTS_DIR, DATA_DIR, DATABASE_URL
+from src.models import Artist, Credit, Track
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,8 +22,8 @@ class DataManager:
         self._init_database()
         # Import tardif pour éviter la circularité
         try:
-            from src.utils.certification_enricher import CertificationEnricher
             from src.api.snep_certifications import get_snep_manager
+            from src.utils.certification_enricher import CertificationEnricher
 
             self.certification_enricher = CertificationEnricher()
             self.snep_manager = get_snep_manager()
@@ -582,7 +582,7 @@ class DataManager:
             # Log mais ne pas arrêter le processus pour un crédit
             logger.debug(f"Erreur lors de la sauvegarde du crédit {credit.name}: {e}")
 
-    def get_artist_by_name(self, name: str) -> Optional[Artist]:
+    def get_artist_by_name(self, name: str) -> Artist | None:
         """Récupère un artiste par son nom - VERSION CORRIGÉE"""
         try:
             logger.debug(f"🔍 Recherche de l'artiste: '{name}'")
@@ -624,7 +624,7 @@ class DataManager:
             logger.error(f"❌ Erreur dans get_artist_by_name: {e}")
             return None
 
-    def get_artist_tracks(self, artist_id: int) -> List[Track]:
+    def get_artist_tracks(self, artist_id: int) -> list[Track]:
         """Récupère tous les morceaux d'un artiste - VERSION SANS YOUTUBE_URL"""
         tracks = []
 
@@ -990,7 +990,7 @@ class DataManager:
             logger.debug(f"⚠️ Erreur _safe_get pour {column_name}: {e}")
             return default
 
-    def _get_track_credits(self, cursor, track_id: int) -> List[Credit]:
+    def _get_track_credits(self, cursor, track_id: int) -> list[Credit]:
         """Récupère les crédits d'un morceau - VERSION ROBUSTE"""
         credits = []
 
@@ -1033,7 +1033,7 @@ class DataManager:
 
         return credits
 
-    def export_to_json(self, artist_name: str, filepath: Optional[Path] = None):
+    def export_to_json(self, artist_name: str, filepath: Path | None = None):
         """Exporte les données d'un artiste en JSON"""
         artist = self.get_artist_by_name(artist_name)
         if not artist:
@@ -1116,7 +1116,7 @@ class DataManager:
             logger.error(f"Erreur lors de la suppression de l'artiste: {e}")
             return False
 
-    def get_artist_details(self, artist_name: str) -> Dict[str, Any]:
+    def get_artist_details(self, artist_name: str) -> dict[str, Any]:
         """Récupère les détails complets d'un artiste"""
         try:
             with self._get_connection() as conn:
@@ -1406,7 +1406,7 @@ class DataManager:
             logger.error(f"❌ Erreur lors de la mise à jour forcée: {e}")
             return 0
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Retourne des statistiques sur la base de données"""
         try:
             with self._get_connection() as conn:
@@ -1595,7 +1595,7 @@ class DataManager:
             logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
             return False
 
-    def get_albums_for_artist(self, artist_id: int) -> List[Dict[str, Any]]:
+    def get_albums_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
         """Retourne les albums d'un artiste triés par streams décroissants."""
         try:
             with self._get_connection() as conn:
@@ -1726,8 +1726,8 @@ class DataManager:
     def update_artist_monthly_listeners(
         self,
         artist_id: int,
-        spotify_listeners: Optional[int] = None,
-        ytm_listeners: Optional[int] = None,
+        spotify_listeners: int | None = None,
+        ytm_listeners: int | None = None,
     ) -> bool:
         """Met à jour les auditeurs mensuels d'un artiste et enregistre l'historique."""
         try:
@@ -1759,7 +1759,7 @@ class DataManager:
             logger.error(f"Erreur update_artist_monthly_listeners (id={artist_id}): {e}")
             return False
 
-    def get_monthly_listeners_history(self, artist_id: int) -> List[Dict[str, Any]]:
+    def get_monthly_listeners_history(self, artist_id: int) -> list[dict[str, Any]]:
         """Retourne l'historique des auditeurs mensuels d'un artiste."""
         try:
             with self._get_connection() as conn:

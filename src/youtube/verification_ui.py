@@ -1,10 +1,10 @@
 import tkinter as tk
-from tkinter import ttk
-from typing import List, Dict, Optional
-from PIL import Image, ImageTk
-import requests
-from io import BytesIO
 import webbrowser
+from io import BytesIO
+from tkinter import ttk
+
+import requests
+from PIL import Image, ImageTk
 
 
 class ManualVerificationInterface:
@@ -99,8 +99,8 @@ class ManualVerificationInterface:
         candidates_frame.columnconfigure(0, weight=1)
 
     def show_verification_request(
-        self, artist: str, title: str, candidates: List[Dict]
-    ) -> Optional[Dict]:
+        self, artist: str, title: str, candidates: list[dict]
+    ) -> dict | None:
         """Affiche la demande de vérification et retourne la sélection utilisateur"""
 
         self.track_info_label.config(text=f"{artist} - {title}")
@@ -143,7 +143,7 @@ class ManualVerificationInterface:
         # Afficher l'aperçu
         self._show_preview(candidate)
 
-    def _show_preview(self, candidate: Dict):
+    def _show_preview(self, candidate: dict):
         """Affiche l'aperçu d'un candidat"""
 
         # Charger et afficher la thumbnail
@@ -202,7 +202,7 @@ class ManualVerificationInterface:
         else:
             return str(count)
 
-    def _get_channel_status(self, candidate: Dict) -> str:
+    def _get_channel_status(self, candidate: dict) -> str:
         """Détermine le statut de la chaîne"""
         # Logic pour déterminer le statut basé sur verification, subscribers, etc.
         if candidate.get("is_official_artist"):

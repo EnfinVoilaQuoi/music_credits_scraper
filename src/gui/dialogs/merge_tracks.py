@@ -11,11 +11,12 @@ ne revienne pas au prochain import de discographie.
 Backup DB systématique AVANT la fusion (règle projet).
 """
 
-import customtkinter as ctk
 from tkinter import messagebox
 
-from src.utils.logger import get_logger
+import customtkinter as ctk
+
 from src.gui.dialogs import report
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

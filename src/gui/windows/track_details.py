@@ -1,17 +1,18 @@
 """Fenêtre de détails d'un morceau (extraite de MainWindow)"""
 
-import customtkinter as ctk
 from tkinter import messagebox
 
 # alias : un « from tkinter import ttk » local dans __init__ rend « ttk » local
 # à toute la fonction → le nom module-level doit être différent
 from tkinter import ttk as tkinter_ttk
 
+import customtkinter as ctk
+
 from src.config import YOUTUBE_PERSIST_CONFIDENCE
+from src.gui import helpers
 from src.models import Track
 from src.utils.logger import get_logger
 from src.utils.youtube_integration import youtube_integration
-from src.gui import helpers
 
 logger = get_logger(__name__)
 
@@ -207,8 +208,8 @@ class TrackDetailsWindow:
         try:
             from src.utils.streams_calculator import (
                 calculate_total_streams,
-                streams_source_label,
                 format_streams,
+                streams_source_label,
             )
 
             sp = getattr(track, "spotify_streams", None)
@@ -473,7 +474,7 @@ class TrackDetailsWindow:
 
         # === ONGLET 1: CRÉDITS MUSICAUX ===
         music_credits_frame = ctk.CTkFrame(notebook)
-        notebook.add(music_credits_frame, text=f"🎵 Crédits musicaux")
+        notebook.add(music_credits_frame, text="🎵 Crédits musicaux")
 
         music_credits = track.get_music_credits()
 
@@ -685,7 +686,7 @@ class TrackDetailsWindow:
             left_part = ctk.CTkFrame(lyrics_header, fg_color="transparent")
             left_part.pack(side="left", fill="x", expand=True)
 
-            ctk.CTkLabel(left_part, text=f"📝 Paroles complètes", font=("Arial", 14, "bold")).pack(
+            ctk.CTkLabel(left_part, text="📝 Paroles complètes", font=("Arial", 14, "bold")).pack(
                 anchor="w", padx=5, pady=(0, 2)
             )
 
@@ -1089,7 +1090,7 @@ class TrackDetailsWindow:
             error_label.pack(expand=True)
 
         # ✅ NOUVEAU: Debug featuring détaillé
-        tech_textbox.insert("end", f"\n🎤 DEBUG FEATURING:\n")
+        tech_textbox.insert("end", "\n🎤 DEBUG FEATURING:\n")
         tech_textbox.insert(
             "end", f"• is_featuring: {getattr(track, 'is_featuring', 'Non défini')}\n"
         )
@@ -1111,7 +1112,7 @@ class TrackDetailsWindow:
         )
 
         # Informations de la base de données
-        tech_textbox.insert("end", f"\n💾 BASE DE DONNÉES:\n")
+        tech_textbox.insert("end", "\n💾 BASE DE DONNÉES:\n")
         tech_textbox.insert("end", f"• Track ID: {getattr(track, 'id', 'Non défini')}\n")
         tech_textbox.insert(
             "end", f"• _album_from_api: {getattr(track, '_album_from_api', 'Non défini')}\n"
@@ -1123,7 +1124,7 @@ class TrackDetailsWindow:
 
         # Erreurs de scraping
         if track.scraping_errors:
-            tech_textbox.insert("end", f"\n❌ ERREURS DE SCRAPING:\n")
+            tech_textbox.insert("end", "\n❌ ERREURS DE SCRAPING:\n")
             for i, error in enumerate(track.scraping_errors, 1):
                 tech_textbox.insert("end", f"{i}. {error}\n")
 
@@ -1141,12 +1142,12 @@ class TrackDetailsWindow:
 
         try:
             from src.utils.streams_calculator import (
-                calculate_total_streams,
-                streams_source_label,
-                format_streams,
+                COMBINED_SHARE,
                 SPOTIFY_SHARE,
                 YTM_SHARE,
-                COMBINED_SHARE,
+                calculate_total_streams,
+                format_streams,
+                streams_source_label,
             )
 
             sp = getattr(track, "spotify_streams", None)

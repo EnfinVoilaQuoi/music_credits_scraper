@@ -6,9 +6,9 @@ pouvoir, à la prochaine récupération de discographie, NE PAS le réajouter.
 """
 
 import json
-from typing import Set, Dict, List, Optional
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 from src.config import DATA_DIR
 from src.utils.logger import get_logger
 
@@ -28,13 +28,13 @@ class DeletedTracksManager:
         safe_name = safe_name.replace(" ", "_").lower()
         return self.deleted_tracks_dir / f"{safe_name}_deleted.json"
 
-    def _read(self, artist_name: str) -> Dict[str, dict]:
+    def _read(self, artist_name: str) -> dict[str, dict]:
         """Retourne un dict {genius_id(str): {genius_id, title, deleted_at}}."""
         file_path = self._get_artist_file(artist_name)
         if not file_path.exists():
             return {}
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
             entries = data.get("deleted_tracks", [])
             out = {}
@@ -47,7 +47,7 @@ class DeletedTracksManager:
             logger.error(f"Erreur lecture morceaux supprimés pour {artist_name}: {e}")
             return {}
 
-    def _write(self, artist_name: str, entries: Dict[str, dict]) -> bool:
+    def _write(self, artist_name: str, entries: dict[str, dict]) -> bool:
         try:
             file_path = self._get_artist_file(artist_name)
             data = {
@@ -63,7 +63,7 @@ class DeletedTracksManager:
             logger.error(f"Erreur écriture morceaux supprimés pour {artist_name}: {e}")
             return False
 
-    def add_deleted(self, artist_name: str, genius_id: Optional[int], title: str = "") -> bool:
+    def add_deleted(self, artist_name: str, genius_id: int | None, title: str = "") -> bool:
         """Ajoute un morceau à l'historique des supprimés (no-op si pas de genius_id)."""
         if not genius_id:
             logger.debug(f"Suppression non mémorisée (pas de genius_id): {title}")
@@ -81,7 +81,7 @@ class DeletedTracksManager:
             )
         return ok
 
-    def load_deleted_ids(self, artist_name: str) -> Set[int]:
+    def load_deleted_ids(self, artist_name: str) -> set[int]:
         """Set des genius_id supprimés (int)."""
         out = set()
         for gid in self._read(artist_name).keys():
@@ -91,7 +91,7 @@ class DeletedTracksManager:
                 pass
         return out
 
-    def get_deleted_entries(self, artist_name: str) -> List[dict]:
+    def get_deleted_entries(self, artist_name: str) -> list[dict]:
         """Liste des entrées {genius_id, title, deleted_at}, plus récentes d'abord."""
         entries = list(self._read(artist_name).values())
         entries.sort(key=lambda e: e.get("deleted_at", ""), reverse=True)

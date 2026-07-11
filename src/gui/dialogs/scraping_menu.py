@@ -1,9 +1,10 @@
 """Menu combiné Crédits & Paroles (options de scraping Genius/Discogs)"""
 
+from tkinter import messagebox
+
 import customtkinter as ctk
 
 from src.gui.workers import scraping
-from tkinter import messagebox
 
 
 def show_scraping_menu(app):

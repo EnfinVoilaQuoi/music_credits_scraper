@@ -1,7 +1,8 @@
 """Fenêtres utilitaires : rapport scrollable et erreurs"""
 
-import customtkinter as ctk
 from tkinter import messagebox
+
+import customtkinter as ctk
 
 
 def show_scrollable_report(app, title: str, text: str):

@@ -3,11 +3,10 @@ Module de backup automatique de la base de données
 Crée des backups avant les opérations critiques
 """
 
-import sqlite3
-from pathlib import Path
-from datetime import datetime
-from typing import Optional
 import logging
+import sqlite3
+from datetime import datetime
+from pathlib import Path
 
 from src.config import DATA_DIR, DATABASE_URL
 
@@ -44,7 +43,7 @@ class DatabaseBackupManager:
             dest_conn.close()
             src_conn.close()
 
-    def create_backup(self, operation_name: str = "manual") -> Optional[Path]:
+    def create_backup(self, operation_name: str = "manual") -> Path | None:
         """
         Crée un backup de la base de données
 
@@ -162,7 +161,7 @@ class DatabaseBackupManager:
                 logger.info(f"✅ Backup restauré avec succès depuis: {backup_path}")
                 return True
             else:
-                logger.error(f"❌ Base restaurée corrompue")
+                logger.error("❌ Base restaurée corrompue")
                 return False
 
         except Exception as e:

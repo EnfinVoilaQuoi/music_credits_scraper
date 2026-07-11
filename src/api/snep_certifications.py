@@ -1,15 +1,16 @@
 """Gestionnaire pour les certifications SNEP"""
 
 import io
-import pandas as pd
 import sqlite3
-from pathlib import Path
-from typing import List, Optional, Dict, Any
 import unicodedata
+from pathlib import Path
+from typing import Any
 
-from src.models.certification import Certification, CertificationLevel, CertificationCategory
-from src.utils.logger import get_logger
+import pandas as pd
+
 from src.config import DATA_PATH
+from src.models.certification import Certification, CertificationCategory, CertificationLevel
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -17,7 +18,7 @@ logger = get_logger(__name__)
 class SNEPCertificationManager:
     """Gère les certifications SNEP avec mise à jour automatique"""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """Initialise le manager des certifications SNEP"""
         # Configuration des chemins
         self.data_dir = Path(DATA_PATH) / "certifications" / "snep"
@@ -191,7 +192,7 @@ class SNEPCertificationManager:
 
         return "\n".join(out), repaired
 
-    def load_csv(self, filepath: Optional[Path] = None) -> pd.DataFrame:
+    def load_csv(self, filepath: Path | None = None) -> pd.DataFrame:
         """Charge le fichier CSV des certifications SNEP"""
         if filepath is None:
             filepath = self.csv_path
@@ -461,7 +462,7 @@ class SNEPCertificationManager:
         logger.info(f"📥 Import terminé : {new_records} nouveaux, {updated_records} mis à jour")
         return new_records, updated_records
 
-    def import_from_csv(self, filepath: Optional[Path] = None, source: str = "CSV") -> bool:
+    def import_from_csv(self, filepath: Path | None = None, source: str = "CSV") -> bool:
         """Importe les certifications depuis le fichier CSV.
 
         `source` ('GLOBAL', 'ARTIST', 'SCRAPE', ...) est journalisé dans
@@ -474,7 +475,7 @@ class SNEPCertificationManager:
         new_records, updated_records = self.parse_and_import_csv(df, source=source)
         return True
 
-    def get_last_update(self, source: Optional[str] = None) -> Optional[str]:
+    def get_last_update(self, source: str | None = None) -> str | None:
         """Retourne la date (ISO str) de la dernière MàJ réussie.
 
         Si `source` est fourni (ex: 'GLOBAL'), ne considère que cette source.
@@ -499,7 +500,7 @@ class SNEPCertificationManager:
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def get_artist_certifications(self, artist_name: str) -> List[Dict[str, Any]]:
+    def get_artist_certifications(self, artist_name: str) -> list[dict[str, Any]]:
         """Récupère toutes les certifications d'un artiste"""
         artist_clean = self.normalize_text(artist_name)
 
@@ -541,14 +542,12 @@ class SNEPCertificationManager:
 
         return results
 
-    def get_track_certification(
-        self, artist_name: str, track_title: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_track_certification(self, artist_name: str, track_title: str) -> dict[str, Any] | None:
         """Récupère la certification la plus élevée d'un morceau - OBSOLÈTE, utiliser get_track_certifications"""
         certifications = self.get_track_certifications(artist_name, track_title)
         return certifications[0] if certifications else None
 
-    def get_track_certifications(self, artist_name: str, track_title: str) -> List[Dict[str, Any]]:
+    def get_track_certifications(self, artist_name: str, track_title: str) -> list[dict[str, Any]]:
         """Récupère TOUTES les certifications d'un morceau spécifique - VERSION AMÉLIORÉE"""
         results = []
 
@@ -618,7 +617,7 @@ class SNEPCertificationManager:
 
     def _search_certifications_by_artist_title(
         self, artist_clean: str, title_clean: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Recherche les certifications pour un artiste et titre donnés"""
         cursor = self.conn.cursor()
 
@@ -649,7 +648,7 @@ class SNEPCertificationManager:
 
     def _search_truncated_certifications(
         self, artist_clean: str, title_clean: str, min_len: int = 8
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Récupère les certifs dont le titre (TRONQUÉ dans la source SNEP) est
         un préfixe du titre du morceau.
 
@@ -685,7 +684,7 @@ class SNEPCertificationManager:
 
     def _search_featuring_certifications(
         self, artist_name: str, track_title: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Recherche les certifications où l'artiste apparaît en featuring"""
         artist_clean = self.normalize_text(artist_name)
         title_clean = self.normalize_text(track_title)
@@ -707,7 +706,7 @@ class SNEPCertificationManager:
 
         return results
 
-    def get_album_certifications(self, artist_name: str, album_name: str) -> List[Dict[str, Any]]:
+    def get_album_certifications(self, artist_name: str, album_name: str) -> list[dict[str, Any]]:
         """Récupère toutes les certifications d'un album"""
         artist_clean = self.normalize_text(artist_name)
         album_clean = self.normalize_text(album_name)
@@ -739,7 +738,7 @@ class SNEPCertificationManager:
         fuzzy_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
         return fuzzy_results
 
-    def get_certification_stats(self, artist_name: Optional[str] = None) -> Dict[str, Any]:
+    def get_certification_stats(self, artist_name: str | None = None) -> dict[str, Any]:
         """Récupère des statistiques sur les certifications"""
         stats = {
             "total_certifications": 0,
@@ -806,8 +805,8 @@ class SNEPCertificationManager:
         return stats
 
     def search_certifications(
-        self, query: str, category: Optional[str] = None, level: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, query: str, category: str | None = None, level: str | None = None
+    ) -> list[dict[str, Any]]:
         """Recherche des certifications avec filtres"""
         query_clean = self.normalize_text(query)
 
@@ -839,8 +838,8 @@ class SNEPCertificationManager:
         return results
 
     def audit_artist_certifications(
-        self, artist_name: str, track_titles: List[str], album_titles: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        self, artist_name: str, track_titles: list[str], album_titles: list[str] | None = None
+    ) -> dict[str, Any]:
         """Audite les certifs SNEP d'un artiste face à sa discographie connue.
 
         Retourne les certifs « orphelines » (rattachées à rien), chacune avec sa
@@ -855,8 +854,8 @@ class SNEPCertificationManager:
         `track_titles` / `album_titles` = titres des morceaux / noms d'albums
         (ex: current_artist.tracks et leurs `.album`).
         """
-        import re as _re
         import difflib
+        import re as _re
 
         artist_clean = self.normalize_text(artist_name)
 
@@ -947,7 +946,7 @@ def get_snep_manager() -> SNEPCertificationManager:
     return _snep_manager_instance
 
 
-def get_snep_last_update(source: Optional[str] = "GLOBAL") -> Optional[str]:
+def get_snep_last_update(source: str | None = "GLOBAL") -> str | None:
     """Lit la date de dernière MàJ depuis update_history via une connexion
     éphémère (sûr à appeler depuis n'importe quel thread, ex: la GUI).
 

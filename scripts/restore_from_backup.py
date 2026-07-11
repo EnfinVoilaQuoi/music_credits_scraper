@@ -8,8 +8,9 @@ from pathlib import Path
 # Ajouter le répertoire parent au path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.utils.database_backup import get_backup_manager
 import logging
+
+from src.utils.database_backup import get_backup_manager
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def main():
         selected_backup = backups[index]
 
         # Confirmation
-        print(f"\n⚠️  ATTENTION: Cette opération va remplacer la base de données actuelle")
+        print("\n⚠️  ATTENTION: Cette opération va remplacer la base de données actuelle")
         print(f"📄 Backup sélectionné: {selected_backup['name']}")
         print(f"📅 Créé le: {selected_backup['created'].strftime('%d/%m/%Y %H:%M:%S')}")
 

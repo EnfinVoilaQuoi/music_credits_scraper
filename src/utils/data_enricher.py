@@ -1522,59 +1522,39 @@ class DataEnricher:
                 )
                 spotify_id = None
 
-            # MODIFIÉ: Timeout réduit à 30 secondes avec arrêt forcé du driver
-            import platform
-            import signal
+            # Timeout de garde (30 s) : un Timer invalide un résultat trop tardif.
+            # NOTE (AUDIT.md §3.6) : l'ancien code tentait de fermer un attribut
+            # Selenium `.driver` qui n'existe plus depuis la migration Playwright
+            # (no-op silencieux). On ne force PAS la fermeture depuis le thread du
+            # Timer : l'API sync de Playwright n'est pas thread-safe, et le scraper
+            # applique déjà ses propres timeouts de navigation (goto timeout=30s).
+            # (Branche Unix `signal.alarm` supprimée le 2026-07-11 — app Windows-only.)
             import threading
 
-            is_windows = platform.system() == "Windows"
-            timeout_seconds = 30  # ← Réduit à 30s
+            timeout_seconds = 30
 
             track_data = None
+            timer_expired = {"value": False}
 
-            if not is_windows:
-                # Unix/Linux: utiliser signal.alarm
-                def signal_handler(signum, frame):
-                    raise TimeoutError(f"SongBPM timeout après {timeout_seconds}s")
+            def timeout_func():
+                timer_expired["value"] = True
+                logger.error(
+                    f"⏰ SongBPM timeout après {timeout_seconds}s — le résultat sera ignoré"
+                )
 
-                old_handler = signal.signal(signal.SIGALRM, signal_handler)
-                signal.alarm(timeout_seconds)
+            timer = threading.Timer(timeout_seconds, timeout_func)
+            timer.start()
 
-                try:
-                    track_data = self.songbpm_scraper.search_track(
-                        track.title, artist_name, spotify_id=spotify_id, fetch_details=True
-                    )
-                    signal.alarm(0)
-                finally:
-                    signal.signal(signal.SIGALRM, old_handler)
-            else:
-                # Windows : Timer = simple garde-fou pour invalider un résultat tardif.
-                # NOTE (AUDIT.md §3.6) : l'ancien code tentait de fermer un attribut
-                # Selenium `.driver` qui n'existe plus depuis la migration Playwright
-                # (no-op silencieux). On ne force PAS la fermeture depuis le thread du
-                # Timer : l'API sync de Playwright n'est pas thread-safe, et le scraper
-                # applique déjà ses propres timeouts de navigation (goto timeout=30s).
-                timer_expired = {"value": False}
+            try:
+                track_data = self.songbpm_scraper.search_track(
+                    track.title, artist_name, spotify_id=spotify_id, fetch_details=True
+                )
+            finally:
+                timer.cancel()
 
-                def timeout_func():
-                    timer_expired["value"] = True
-                    logger.error(
-                        f"⏰ SongBPM timeout après {timeout_seconds}s — le résultat sera ignoré"
-                    )
-
-                timer = threading.Timer(timeout_seconds, timeout_func)
-                timer.start()
-
-                try:
-                    track_data = self.songbpm_scraper.search_track(
-                        track.title, artist_name, spotify_id=spotify_id, fetch_details=True
-                    )
-                finally:
-                    timer.cancel()
-
-                if timer_expired["value"]:
-                    logger.error(f"❌ SongBPM: Timeout expiré pour '{track.title}'")
-                    return False
+            if timer_expired["value"]:
+                logger.error(f"❌ SongBPM: Timeout expiré pour '{track.title}'")
+                return False
 
             if not track_data:
                 return False

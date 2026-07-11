@@ -3,12 +3,11 @@ Script de fusion et suppression des doublons
 ATTENTION : Crée un backup avant toute modification
 """
 
-import io
 import sqlite3
 import sys
 
 # Fix encodage Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 from src.utils.database_backup import get_backup_manager

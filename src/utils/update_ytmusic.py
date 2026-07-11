@@ -6,7 +6,6 @@ Architecture quota-optimisée :
   Étape 3 — Matching normalisé titre → DB + écriture en base
 """
 
-import io
 import logging
 import re
 import sys
@@ -346,8 +345,8 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
 
 if __name__ == "__main__":
     if sys.platform == "win32":
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     import argparse
 

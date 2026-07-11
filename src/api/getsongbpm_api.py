@@ -6,7 +6,6 @@ IMPORTANT: Backlink obligatoire vers getsongbpm.com pour usage gratuit
 """
 
 import csv
-import io
 import json
 import os
 import sys
@@ -17,7 +16,7 @@ import requests
 
 # Fix encodage Windows pour les emojis
 if sys.platform == "win32" and "pytest" not in sys.modules:
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # Import logger
 from src.utils.logger import get_logger

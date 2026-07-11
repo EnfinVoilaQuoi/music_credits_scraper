@@ -5,7 +5,6 @@ Compatible avec le système de gestion unifié des certifications
 """
 
 import argparse
-import io
 import logging
 import re
 import sqlite3
@@ -18,8 +17,8 @@ import pandas as pd
 
 # Configurer l'encodage UTF-8 pour la console Windows
 if sys.platform == "win32" and "pytest" not in sys.modules:
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Import du scraper principal (patchright v2 — remplace l'ancien Selenium ;
 # API compatible : init_driver/close_driver/scrape_by_date_range/scrape_by_artist)

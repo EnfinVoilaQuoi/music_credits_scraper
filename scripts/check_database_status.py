@@ -3,19 +3,22 @@ Script de vérification de l'état de la base de données
 Affiche un résumé des données et des backups disponibles
 """
 
-import io
 import sys
 from datetime import datetime
 from pathlib import Path
 
 # Fix encodage Windows
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 import sqlite3
 
+from src.config import DATABASE_URL
 from src.utils.data_manager import DataManager
 from src.utils.database_backup import get_backup_manager
+
+# Chemin réel de la base (data/music_credits.db), pas relatif au cwd
+DB_PATH = Path(DATABASE_URL.replace("sqlite:///", ""))
 
 
 def format_size(size_bytes):
@@ -33,11 +36,11 @@ def main():
     print("   ÉTAT DE LA BASE DE DONNÉES")
     print("=" * 60 + "\n")
 
-    db_path = Path("music_credits.db")
+    db_path = DB_PATH
 
     # Vérifier l'existence de la base
     if not db_path.exists():
-        print("❌ Base de données introuvable : music_credits.db")
+        print(f"❌ Base de données introuvable : {db_path}")
         print("💡 Lancez l'application pour créer la base")
         return
 
@@ -61,7 +64,7 @@ def main():
 
         if stats["total_artists"] > 0:
             # Lister les artistes avec leur nombre de morceaux
-            conn = sqlite3.connect("music_credits.db")
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -132,7 +135,7 @@ def main():
     print("🔍 VÉRIFICATION D'INTÉGRITÉ")
     print("-" * 60)
     try:
-        conn = sqlite3.connect("music_credits.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
         # Vérifier les tables

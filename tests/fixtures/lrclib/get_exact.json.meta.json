@@ -1,0 +1,7 @@
+{
+  "name": "lrclib_get",
+  "url": "https://lrclib.net/api/get?track_name=Dans+le+vide&artist_name=Josman&album_name=Matrix&duration=243",
+  "method": "requests",
+  "captured_at": "2026-07-11T19:03:01",
+  "size_bytes": 6879
+}

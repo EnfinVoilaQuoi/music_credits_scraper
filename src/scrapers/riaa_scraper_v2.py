@@ -221,18 +221,35 @@ class RIAAScraperV2:
         logger.info(f"RIAA : {clicks} clic(s) LOAD MORE")
 
     async def _trigger_details(self, page) -> None:
-        """Déclenche le MORE DETAILS (AJAX) de chaque ligne pour charger l'historique."""
+        """Déclenche le MORE DETAILS (AJAX) de chaque ligne pour charger l'historique.
+
+        Le 2ᵉ argument de `showDefaultDetail(id, type)` VARIE par ligne ('ST',
+        'DI'…) — l'ancien code l'appelait avec 'DI' en dur pour toutes les
+        lignes et l'AJAX ne renvoyait rien. On clique donc le vrai lien MORE
+        DETAILS de chaque ligne (fallback : rejouer son onclick tel quel).
+        """
         rows = await page.query_selector_all("tr.table_award_row")
         logger.info(f"RIAA : chargement des détails de {len(rows)} ligne(s)…")
         for row in rows:
-            rid = await row.get_attribute("id")
-            if rid and rid.startswith("default_"):
-                num = rid[len("default_") :]
-                try:
-                    await page.evaluate(f"showDefaultDetail('{num}','DI');")
-                except Exception:
-                    pass
-                await page.wait_for_timeout(220)
+            link = await row.query_selector("a[onclick*='showDefaultDetail']")
+            if not link:
+                continue
+            try:
+                await link.click()
+            except Exception:
+                onclick = await link.get_attribute("onclick") or ""
+                m = re.search(r"showDefaultDetail\('([^']+)'\s*,\s*'([^']+)'\)", onclick)
+                if m:
+                    try:
+                        await page.evaluate(f"showDefaultDetail('{m.group(1)}','{m.group(2)}');")
+                    except Exception:
+                        pass
+            await page.wait_for_timeout(300)
+        # Attendre l'injection AJAX du premier historique (puis un délai global)
+        try:
+            await page.wait_for_selector("tr.content_recent_table", timeout=10_000)
+        except Exception:
+            logger.warning("RIAA : aucun historique MORE DETAILS injecté (AJAX)")
         await page.wait_for_timeout(1500)
 
 

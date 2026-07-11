@@ -7,9 +7,32 @@ vierge à chaque test), avec le chargement des certifications neutralisé
 Ces tests de comportement serviront de filet de sécurité pour la migration
 SQLAlchemy 2.0 + Alembic : ils ne testent que l'API publique (save/get),
 jamais le SQL.
+
+`load_fixture` / `load_fixture_json` : chargement des pages réelles
+enregistrées dans tests/fixtures/ (capture : scripts/capture_fixtures.py).
+Skip propre si la fixture n'a pas encore été capturée — la suite reste verte
+sur un clone frais.
 """
 
+import json
+from pathlib import Path
+
 import pytest
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def load_fixture(relpath: str) -> str:
+    """Contenu texte d'une fixture enregistrée (skip si absente)."""
+    path = FIXTURES_DIR / relpath
+    if not path.exists():
+        pytest.skip(f"fixture manquante: {relpath} — lancer scripts/capture_fixtures.py")
+    return path.read_text(encoding="utf-8")
+
+
+def load_fixture_json(relpath: str) -> dict:
+    """Fixture JSON parsée (skip si absente)."""
+    return json.loads(load_fixture(relpath))
 
 
 @pytest.fixture

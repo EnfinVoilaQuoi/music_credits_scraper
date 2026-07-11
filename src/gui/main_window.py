@@ -11,6 +11,7 @@ from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
 from src.gui.panels import albums_view, tracks_table
 from src.gui.windows import artist_loader
+from src.gui.windows.source_health import show_source_health
 from src.gui.windows.track_details import TrackDetailsWindow
 from src.gui.workers import enrichment, retrieval, streams
 from src.gui.workers.lifecycle import start_worker
@@ -55,6 +56,7 @@ class MainWindow:
         self.disabled_tracks_manager = DisabledTracksManager()
         self.deleted_tracks_manager = DeletedTracksManager()
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
+        self.source_health_window = None  # Fenêtre « État des sources » (singleton)
 
         self._create_widgets()
         self._update_statistics()
@@ -94,6 +96,18 @@ class MainWindow:
             width=120,
         )
         self.load_button.pack(side="left", padx=5)
+
+        # État des sources (santé des scrapers/APIs) — aligné à droite, toujours accessible
+        self.health_button = ctk.CTkButton(
+            search_frame,
+            text="État sources",
+            command=lambda: show_source_health(self),
+            width=120,
+            fg_color="#00695c",
+            hover_color="#004d40",
+            text_color="white",
+        )
+        self.health_button.pack(side="right", padx=5)
 
         # === Section infos artiste ===
         info_frame = ctk.CTkFrame(main_frame)

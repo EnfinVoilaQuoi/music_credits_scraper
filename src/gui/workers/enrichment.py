@@ -1,11 +1,11 @@
 """Enrichissement des données (BPM, certifications, YouTube…) en thread"""
 
-import threading
 from tkinter import messagebox
 
 import customtkinter as ctk
 
 from src.gui.dialogs import report
+from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -233,6 +233,11 @@ def run_enrichment(
 
             # Enrichir chaque track individuellement
             for i, track in enumerate(selected_tracks_list):
+                if stop_requested():
+                    logger.info(
+                        "⏹️ Fermeture demandée — enrichissement interrompu entre deux morceaux"
+                    )
+                    break
                 update_progress(i, len(selected_tracks_list), f"Enrichissement: {track.title}")
 
                 results = app.data_enricher.enrich_track(
@@ -366,4 +371,4 @@ def run_enrichment(
             app.root.after(0, lambda: app.progress_bar.set(0))
             app.root.after(0, lambda: app.progress_label.configure(text=""))
 
-    threading.Thread(target=enrich, daemon=True).start()
+    start_worker(enrich)

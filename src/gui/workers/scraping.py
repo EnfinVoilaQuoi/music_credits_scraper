@@ -1,10 +1,10 @@
 """Scraping combiné crédits/paroles (Genius v3, Discogs) en thread"""
 
-import threading
 from datetime import datetime
 from tkinter import messagebox
 
 from src.gui.dialogs import report
+from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.utils.logger import get_logger
 
@@ -151,6 +151,10 @@ def start_combined_scraping(
                     progress_callback=lambda c, t, n: update_progress(c, t, n, "Genius"),
                 )
 
+            if stop_requested():
+                logger.info("⏹️ Fermeture demandée — phases restantes du scraping annulées")
+                return
+
             # Scraping Discogs crédits
             if scrape_discogs:
                 current_task += 1
@@ -172,6 +176,11 @@ def start_combined_scraping(
                 discogs_success = 0
                 discogs_failed = 0
                 for i, track in enumerate(selected_tracks_list, 1):
+                    if stop_requested():
+                        logger.info(
+                            "⏹️ Fermeture demandée — Discogs interrompu entre deux morceaux"
+                        )
+                        break
                     try:
                         update_progress(i, len(selected_tracks_list), track.title, "Discogs")
 
@@ -189,6 +198,10 @@ def start_combined_scraping(
             if scrape_lyrics or scrape_sync:
                 current_task += 1
                 logger.info(f"[{current_task}/{total_tasks}] Récupération paroles/timestamps...")
+
+                if stop_requested():
+                    logger.info("⏹️ Fermeture demandée — phase paroles/synchro annulée")
+                    return
 
                 # Mise à jour forcée : TEXTE et SYNCHRO sont désormais indépendants.
                 if force_lyrics:
@@ -251,6 +264,11 @@ def start_combined_scraping(
 
                         n_lrclib, n_ytm, n_mxm, n_cross, n_review, n_text = 0, 0, 0, 0, 0, 0
                         for i, track in enumerate(selected_tracks_list):
+                            if stop_requested():
+                                logger.info(
+                                    "⏹️ Fermeture demandée — synchro interrompue entre deux morceaux"
+                                )
+                                break
                             has_sync = bool(getattr(track, "lyrics_synced", None))
                             need_sync = scrape_sync and not (has_sync and not force_sync)
                             need_text = lyrics_ytm and not (track.has_lyrics and track.lyrics)
@@ -447,4 +465,4 @@ def start_combined_scraping(
             app.root.after(0, lambda: app.progress_label.configure(text=""))
             app.root.after(0, app._update_buttons_state)
 
-    threading.Thread(target=scrape, daemon=True).start()
+    start_worker(scrape)

@@ -5,6 +5,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from src.gui.dialogs import kworb_confirm, report
+from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -74,7 +75,7 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
             app.root.after(0, app._show_progress_bar)
             results = {}
 
-            if fetch_spotify:
+            if fetch_spotify and not stop_requested():
                 app.root.after(
                     0, lambda: app.progress_label.configure(text="Spotify (Kworb) en cours...")
                 )
@@ -85,7 +86,7 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                 except Exception as e:
                     results["spotify"] = {"error": str(e)}
 
-            if fetch_ytm:
+            if fetch_ytm and not stop_requested():
                 app.root.after(
                     0, lambda: app.progress_label.configure(text="YouTube Music en cours...")
                 )
@@ -175,6 +176,4 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
             app.root.after(0, app._hide_progress_bar)
             app.root.after(0, app._update_buttons_state)
 
-    import threading
-
-    threading.Thread(target=run, daemon=True).start()
+    start_worker(run)

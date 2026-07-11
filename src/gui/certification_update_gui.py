@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-import threading
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox
@@ -10,6 +9,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 import pandas as pd
 
+from src.gui.workers.lifecycle import start_worker
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -412,7 +412,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             )
             self.after(500, self._update_status)
 
-        threading.Thread(target=run, daemon=True).start()
+        start_worker(run)
 
     def _update_brma(self):
         """Lance la mise à jour BRMA. Ultratop est derrière un Cloudflare strict :
@@ -450,7 +450,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 env_extra=env_extra,
             )
 
-        threading.Thread(target=prepare_and_run, daemon=True).start()
+        start_worker(prepare_and_run)
 
     def _update_riaa(self):
         """RIAA via patchright. Comme BRMA, on prépare un Chrome debug (route CDP)
@@ -480,7 +480,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 "update_riaa.py", "RIAA", extra_args=["--auto"], env_extra=env_extra
             )
 
-        threading.Thread(target=prepare_and_run, daemon=True).start()
+        start_worker(prepare_and_run)
 
     def _check_snep(self):
         """Lance le validateur complet du CSV maître SNEP et affiche le rapport."""
@@ -513,7 +513,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"Erreur validation SNEP : {e}")
                 self._set_progress(f"❌ Erreur validation SNEP : {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        start_worker(run)
 
     def _audit_snep_artist(self):
         """Audite les certifs SNEP de l'artiste face à sa discographie :
@@ -593,7 +593,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"Erreur audit {artist} : {e}")
                 self._set_progress(f"❌ Erreur audit : {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        start_worker(run)
 
     def _clean_snep(self):
         """Aperçu (dry-run) du nettoyage du CSV maître SNEP, puis application
@@ -647,14 +647,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                             )
                             self.after(500, self._update_status)
 
-                        threading.Thread(target=apply, daemon=True).start()
+                        start_worker(apply)
 
                 self.after(0, ask_and_apply)
             except Exception as e:
                 logger.error(f"Erreur nettoyage SNEP : {e}")
                 self._set_progress(f"❌ Erreur nettoyage SNEP : {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        start_worker(run)
 
     def _show_report_window(self, title: str, text: str):
         """Affiche un rapport texte dans une fenêtre scrollable + bouton copier."""
@@ -725,7 +725,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"Erreur validation BRMA : {e}")
                 self._set_progress(f"❌ Erreur validation BRMA : {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        start_worker(run)
 
     def _check_riaa(self):
         """Valide le CSV RIAA (certif_riaa.csv) et affiche le rapport."""
@@ -752,7 +752,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"Erreur validation RIAA : {e}")
                 self._set_progress(f"❌ Erreur validation RIAA : {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        start_worker(run)
 
     def _clean_riaa(self):
         """Nettoie le CSV RIAA (dédup + vides) après confirmation (backup créé)."""
@@ -790,7 +790,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"Erreur nettoyage RIAA : {e}")
                 self._set_progress(f"❌ Erreur nettoyage RIAA : {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        start_worker(run)
 
     def _update_all(self):
         """Lance toutes les mises à jour"""
@@ -819,7 +819,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"Erreur mise à jour globale: {e}")
                 self._set_progress(f"❌ Erreur: {e}")
 
-        threading.Thread(target=update_all, daemon=True).start()
+        start_worker(update_all)
 
     def _run_update_script(
         self, script_name: str, source_name: str, extra_args=None, env_extra=None
@@ -889,7 +889,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 self._set_progress(f"❌ Erreur: {e}")
                 self.after(3000, lambda: self._set_progress(""))
 
-        threading.Thread(target=run_script, daemon=True).start()
+        start_worker(run_script)
 
     def _run_script_sync(self, script_name: str):
         """Lance un script de façon synchrone"""
@@ -955,7 +955,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"Erreur vérification {source_name}: {e}")
                 self._set_progress(f"❌ Erreur vérification {source_name}: {e}")
 
-        threading.Thread(target=check_async, daemon=True).start()
+        start_worker(check_async)
 
     def _analyze_csv_gaps(self, csv_path: Path, source: str) -> dict:
         """Analyse un CSV pour détecter les périodes manquantes"""

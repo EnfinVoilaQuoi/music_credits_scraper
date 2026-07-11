@@ -2,6 +2,7 @@
 
 from tkinter import messagebox
 
+from src.gui.workers.lifecycle import start_worker
 from src.models import Artist
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.logger import get_logger
@@ -149,7 +150,6 @@ def show_artist_selection_dialog(app, candidates, artist_name: str, result_queue
 
 def resolve_genius_slug(app, slug: str, artist_name: str, result_queue, parent_dialog):
     """Charge genius.com/artists/{slug} via Playwright et extrait l'ID artiste."""
-    import threading
 
     def fetch():
         url = f"https://genius.com/artists/{slug}"
@@ -167,4 +167,4 @@ def resolve_genius_slug(app, slug: str, artist_name: str, result_queue, parent_d
                 ),
             )
 
-    threading.Thread(target=fetch, daemon=True).start()
+    start_worker(fetch)

@@ -1,11 +1,11 @@
 """Dialogues de saisie manuelle par morceau (BPM/key, lien YouTube, renommage, BPM Finder local)"""
 
-import threading
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
 from src.gui import helpers
+from src.gui.workers.lifecycle import start_worker
 from src.utils.logger import get_logger
 from src.utils.youtube_integration import youtube_integration
 
@@ -319,4 +319,4 @@ def bpmfinder_local_file(app, index: int):
 
         app.root.after(0, done)
 
-    threading.Thread(target=run, daemon=True).start()
+    start_worker(run)

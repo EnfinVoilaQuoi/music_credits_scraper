@@ -1,11 +1,11 @@
 """Récupération des morceaux de l'artiste (API Genius) en thread"""
 
-import threading
 from tkinter import messagebox
 
 import customtkinter as ctk
 
 from src.gui.dialogs import report
+from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -338,6 +338,9 @@ def start_track_retrieval(
                 duplicates_avoided = 0
 
                 for track in new_tracks:
+                    if stop_requested():
+                        logger.info("⏹️ Fermeture demandée — dédup interrompue")
+                        break
                     # ✅ DÉTECTION MULTI-NIVEAUX DES DOUBLONS
                     existing_track = None
 
@@ -405,6 +408,11 @@ def start_track_retrieval(
                 # Sauvegarder dans la base
                 saved_count = 0
                 for track in new_tracks:
+                    if stop_requested():
+                        logger.info(
+                            "⏹️ Fermeture demandée — sauvegarde interrompue entre deux morceaux"
+                        )
+                        break
                     try:
                         app.data_manager.save_track(track)
                         saved_count += 1
@@ -485,7 +493,7 @@ def start_track_retrieval(
             )
             app.root.after(0, lambda: app.progress_label.configure(text=""))
 
-    threading.Thread(target=get_tracks, daemon=True).start()
+    start_worker(get_tracks)
 
 
 # ✅ AJOUT DES MÉTHODES MANQUANTES POUR FONCTIONNALITÉS EXISTANTES

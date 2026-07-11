@@ -1,6 +1,5 @@
 """Interface graphique principale de l'application - VERSION AMÉLIORÉE"""
 
-import threading
 from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
@@ -14,6 +13,7 @@ from src.gui.panels import albums_view, tracks_table
 from src.gui.windows import artist_loader
 from src.gui.windows.track_details import TrackDetailsWindow
 from src.gui.workers import enrichment, retrieval, streams
+from src.gui.workers.lifecycle import start_worker
 from src.models import Artist, Track
 from src.utils.data_enricher import DataEnricher
 from src.utils.data_manager import DataManager
@@ -527,7 +527,7 @@ class MainWindow:
                 )
 
         # Lancer dans un thread
-        threading.Thread(target=search, daemon=True).start()
+        start_worker(search)
 
     def _close_all_detail_windows(self):
         """Ferme toutes les fenêtres de détail ouvertes (appelé lors du changement d'artiste)"""
@@ -757,6 +757,21 @@ class MainWindow:
 
     def _on_closing(self):
         """Gère la fermeture de l'application en sauvegardant les morceaux désactivés"""
+        # 1) Arrêt PROPRE des workers AVANT tout le reste : drapeau levé, puis
+        # join avec budget de temps — un save_track en cours se termine au lieu
+        # d'être tué net (AUDIT §4 « threads démons sans arrêt propre »).
+        try:
+            from src.gui.workers.lifecycle import shutdown_workers
+
+            try:
+                self.progress_label.configure(text="⏳ Finalisation des tâches en cours…")
+                self.root.update_idletasks()
+            except Exception:
+                pass  # feedback best-effort, la fermeture prime
+            shutdown_workers()
+        except Exception as e:
+            logger.error(f"Arrêt des workers à la fermeture: {e}")
+
         try:
             # Sauvegarder les morceaux désactivés avant de fermer
             if self.current_artist and self.disabled_tracks:

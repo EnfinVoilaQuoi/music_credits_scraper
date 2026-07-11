@@ -1,0 +1,32 @@
+{
+  "search": [
+    {
+      "id": "Z4n5J",
+      "title": "Harder, Better, Faster, Stronger",
+      "uri": "https://getsongbpm.com/song/harder-better-faster-stronger/Z4n5J",
+      "tempo": "123",
+      "time_sig": "4/4",
+      "key_of": "F♯m",
+      "open_key": "4m",
+      "danceability": 82,
+      "acousticness": 5,
+      "artist": {
+        "id": "jOB",
+        "name": "Daft Punk",
+        "uri": "https://getsongbpm.com/artist/daft-punk/jOB",
+        "genres": [
+          "electronic",
+          "funk",
+          "rock"
+        ],
+        "from": "FR",
+        "mbid": "056e4f3e-d505-4dad-8ec1-d04f521cbb56"
+      },
+      "album": {
+        "title": "Discovery",
+        "uri": "https://getsongbpm.com/album/discovery/B610k",
+        "year": "2001"
+      }
+    }
+  ]
+}

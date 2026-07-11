@@ -15,6 +15,10 @@ customtkinter==5.2.1
 # Base de données
 sqlalchemy==2.0.23
 
+# Configuration (typée/validée + .env natif)
+pydantic>=2.7
+pydantic-settings>=2.0
+
 # Utilitaires
 python-dotenv==1.0.0
 coloredlogs==15.0.1

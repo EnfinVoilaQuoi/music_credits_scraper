@@ -46,6 +46,9 @@ lib/*
 # Tests
 .coverage
 .pytest_cache/
+# Fixtures de parsers : pages réelles enregistrées (.html/.json), à VERSIONNER
+# malgré les règles *.json / *.html ci-dessus (offline, rejouées par les tests).
+!tests/fixtures/**
 
 # Claude
 .claude/
@@ -65,15 +68,24 @@ Lancer_Venv_Admin.ps1
 
 # Script, Fix & Driver
 src/scripts/
-# scripts/ : ignoré par défaut (one-shot, diagnostics), SAUF les 5 outils maintenus.
+# scripts/ : ignoré par défaut (one-shot, diagnostics), SAUF les 11 outils maintenus.
 # `scripts/*` (et non `scripts/`) pour que les négations fonctionnent, et pour que
 # Black/Ruff (qui respectent le gitignore) voient les fichiers maintenus.
 scripts/*
+# Maintenance DB
 !scripts/check_database_status.py
 !scripts/check_duplicates.py
 !scripts/merge_duplicates.py
 !scripts/restore_from_backup.py
+# Tests / santé des sources
 !scripts/warm_cf_profile.py
+!scripts/capture_fixtures.py
+!scripts/check_sources_health.py
+# Outils sources actifs (contournements documentés dans CLAUDE.md)
+!scripts/bpmfinder_login.py
+!scripts/bpmfinder_diagnose.py
+!scripts/sonoteller_worklist.py
+!scripts/run_brma.ps1
 docs/api/
 /test*\.py
 /*test\.py
@@ -88,6 +100,5 @@ docs/api/
 archive/
 # BPM Finder (audioaidynamics) — session Playwright + cache d'analyses
 data/.bpmfinder_session.json
-d
 # Décisions de rapprochement Kworb (confirmé/rejeté par artiste)
 data/kworb_links/*

@@ -373,130 +373,132 @@ class DataManager:
                     track.has_lyrics = bool(existing_track["has_lyrics"])
                     track.lyrics_scraped_at = existing_track["lyrics_scraped_at"]
 
-                # Sérialiser les certifications en JSON
-                certifications_json = (
-                    json.dumps(getattr(track, "certifications", []))
-                    if hasattr(track, "certifications")
-                    else "[]"
-                )
-                album_certifications_json = (
-                    json.dumps(getattr(track, "album_certifications", []))
-                    if hasattr(track, "album_certifications")
-                    else "[]"
-                )
-                relationships_json = json.dumps(getattr(track, "relationships", []) or [])
+            # Sérialiser les champs JSON une seule fois (partagés UPDATE/INSERT)
+            certifications_json = (
+                json.dumps(getattr(track, "certifications", []))
+                if hasattr(track, "certifications")
+                else "[]"
+            )
+            album_certifications_json = (
+                json.dumps(getattr(track, "album_certifications", []))
+                if hasattr(track, "album_certifications")
+                else "[]"
+            )
+            relationships_json = json.dumps(getattr(track, "relationships", []) or [])
 
+            # Paramètres NOMMÉS : un seul dict {colonne: valeur}, lié par nom
+            # (:col). L'ordre des ~44 valeurs ne peut plus se désynchroniser du
+            # SQL (cause de bugs positionnels). Le même dict sert à l'UPDATE et
+            # à l'INSERT ; sqlite3 ignore les clés non référencées.
+            # NB : key/mode/spotify_page_title ne sont pas des champs de la
+            # dataclass Track (posés dynamiquement) → getattr conservé ici.
+            params = {
+                "title": track.title,
+                "artist_id": track.artist.id,
+                "album": track.album,
+                "track_number": getattr(track, "track_number", None),
+                "release_date": track.release_date,
+                "genius_id": track.genius_id,
+                "spotify_id": track.spotify_id,
+                "discogs_id": track.discogs_id,
+                "isrc": getattr(track, "isrc", None),
+                "bpm": track.bpm,
+                "bpm_source": getattr(track, "bpm_source", None),
+                "bpm_confidence": getattr(track, "bpm_confidence", None),
+                "key_mode_source": getattr(track, "key_mode_source", None),
+                "reccobeats_resolution": getattr(track, "reccobeats_resolution", None),
+                "bpm_alt": getattr(track, "bpm_alt", None),
+                "duration": track.duration,
+                "genre": track.genre,
+                "key": getattr(track, "key", None),
+                "mode": getattr(track, "mode", None),
+                "musical_key": getattr(track, "musical_key", None),
+                "time_signature": getattr(track, "time_signature", None),
+                "genius_url": track.genius_url,
+                "spotify_url": track.spotify_url,
+                "youtube_url": getattr(track, "youtube_url", None),
+                "youtube_url_source": getattr(track, "youtube_url_source", None),
+                "is_featuring": getattr(track, "is_featuring", False),
+                "primary_artist_name": getattr(track, "primary_artist_name", None),
+                "featured_artists": getattr(track, "featured_artists", None),
+                "secondary_role": getattr(track, "secondary_role", None),
+                "lyrics": getattr(track, "lyrics", None),
+                "lyrics_scraped_at": getattr(track, "lyrics_scraped_at", None),
+                "lyrics_source": getattr(track, "lyrics_source", None),
+                "lyrics_synced": getattr(track, "lyrics_synced", None),
+                "lyrics_synced_source": getattr(track, "lyrics_synced_source", None),
+                "lyrics_synced_confidence": getattr(track, "lyrics_synced_confidence", None),
+                "has_lyrics": bool(getattr(track, "lyrics", None)),  # INSERT uniquement
+                "anecdotes": getattr(track, "anecdotes", None),
+                "certifications_json": certifications_json,
+                "album_certifications_json": album_certifications_json,
+                "relationships_json": relationships_json,
+                "spotify_page_title": getattr(track, "spotify_page_title", None),
+                "now": datetime.now(),
+                "last_scraped": track.last_scraped,
+            }
+
+            if existing_track:
+                params["id"] = track.id
                 # UPDATE NON-DESTRUCTIF : COALESCE préserve la valeur existante
                 # quand le track entrant n'a pas la donnée (None). Évite qu'un
                 # re-fetch de discographie (API Genius, champs vides) écrase
                 # les données enrichies (lyrics, BPM, key, spotify_id...).
+                #
+                # DÉCISION is_featuring : seul champ écrasé SANS COALESCE (le
+                # track en mémoire fait foi pour le statut featuring au moment du
+                # save). Comportement historique conservé. Les appelants qui
+                # re-sauvent depuis l'API portent is_featuring sur l'objet ; le
+                # rafraîchissement de crédits passe par force_update_track_credits
+                # qui relit et re-pose is_featuring AVANT le save.
                 cursor.execute(
                     """
                     UPDATE tracks
-                    SET album = COALESCE(?, album),
-                        track_number = COALESCE(?, track_number),
-                        release_date = COALESCE(?, release_date),
-                        genius_id = COALESCE(?, genius_id),
-                        spotify_id = COALESCE(?, spotify_id),
-                        discogs_id = COALESCE(?, discogs_id),
-                        isrc = COALESCE(?, isrc),
-                        bpm = COALESCE(?, bpm),
-                        bpm_source = COALESCE(?, bpm_source),
-                        bpm_confidence = COALESCE(?, bpm_confidence),
-                        key_mode_source = COALESCE(?, key_mode_source),
-                        reccobeats_resolution = COALESCE(?, reccobeats_resolution),
-                        bpm_alt = COALESCE(?, bpm_alt),
-                        duration = COALESCE(?, duration),
-                        genre = COALESCE(?, genre),
-                        key = COALESCE(?, key),
-                        mode = COALESCE(?, mode),
-                        musical_key = COALESCE(?, musical_key),
-                        time_signature = COALESCE(?, time_signature),
-                        genius_url = COALESCE(?, genius_url),
-                        spotify_url = COALESCE(?, spotify_url),
-                        youtube_url = COALESCE(?, youtube_url),
-                        youtube_url_source = COALESCE(?, youtube_url_source),
-                        is_featuring = ?,
-                        primary_artist_name = COALESCE(?, primary_artist_name),
-                        featured_artists = COALESCE(?, featured_artists),
-                        secondary_role = COALESCE(?, secondary_role),
-                        lyrics = COALESCE(?, lyrics),
-                        lyrics_scraped_at = COALESCE(?, lyrics_scraped_at),
-                        lyrics_source = COALESCE(?, lyrics_source),
-                        lyrics_synced = COALESCE(?, lyrics_synced),
-                        lyrics_synced_source = COALESCE(?, lyrics_synced_source),
-                        lyrics_synced_confidence = COALESCE(?, lyrics_synced_confidence),
-                        has_lyrics = CASE WHEN ? IS NOT NULL THEN 1 ELSE has_lyrics END,
-                        anecdotes = COALESCE(?, anecdotes),
-                        certifications = CASE WHEN ? = '[]' THEN certifications ELSE ? END,
-                        album_certifications = CASE WHEN ? = '[]' THEN album_certifications ELSE ? END,
-                        relationships = CASE WHEN ? = '[]' THEN relationships ELSE ? END,
-                        updated_at = ?,
-                        last_scraped = COALESCE(?, last_scraped)
-                    WHERE id = ?
+                    SET album = COALESCE(:album, album),
+                        track_number = COALESCE(:track_number, track_number),
+                        release_date = COALESCE(:release_date, release_date),
+                        genius_id = COALESCE(:genius_id, genius_id),
+                        spotify_id = COALESCE(:spotify_id, spotify_id),
+                        discogs_id = COALESCE(:discogs_id, discogs_id),
+                        isrc = COALESCE(:isrc, isrc),
+                        bpm = COALESCE(:bpm, bpm),
+                        bpm_source = COALESCE(:bpm_source, bpm_source),
+                        bpm_confidence = COALESCE(:bpm_confidence, bpm_confidence),
+                        key_mode_source = COALESCE(:key_mode_source, key_mode_source),
+                        reccobeats_resolution = COALESCE(:reccobeats_resolution, reccobeats_resolution),
+                        bpm_alt = COALESCE(:bpm_alt, bpm_alt),
+                        duration = COALESCE(:duration, duration),
+                        genre = COALESCE(:genre, genre),
+                        key = COALESCE(:key, key),
+                        mode = COALESCE(:mode, mode),
+                        musical_key = COALESCE(:musical_key, musical_key),
+                        time_signature = COALESCE(:time_signature, time_signature),
+                        genius_url = COALESCE(:genius_url, genius_url),
+                        spotify_url = COALESCE(:spotify_url, spotify_url),
+                        youtube_url = COALESCE(:youtube_url, youtube_url),
+                        youtube_url_source = COALESCE(:youtube_url_source, youtube_url_source),
+                        is_featuring = :is_featuring,
+                        primary_artist_name = COALESCE(:primary_artist_name, primary_artist_name),
+                        featured_artists = COALESCE(:featured_artists, featured_artists),
+                        secondary_role = COALESCE(:secondary_role, secondary_role),
+                        lyrics = COALESCE(:lyrics, lyrics),
+                        lyrics_scraped_at = COALESCE(:lyrics_scraped_at, lyrics_scraped_at),
+                        lyrics_source = COALESCE(:lyrics_source, lyrics_source),
+                        lyrics_synced = COALESCE(:lyrics_synced, lyrics_synced),
+                        lyrics_synced_source = COALESCE(:lyrics_synced_source, lyrics_synced_source),
+                        lyrics_synced_confidence = COALESCE(:lyrics_synced_confidence, lyrics_synced_confidence),
+                        has_lyrics = CASE WHEN :lyrics IS NOT NULL THEN 1 ELSE has_lyrics END,
+                        anecdotes = COALESCE(:anecdotes, anecdotes),
+                        certifications = CASE WHEN :certifications_json = '[]' THEN certifications ELSE :certifications_json END,
+                        album_certifications = CASE WHEN :album_certifications_json = '[]' THEN album_certifications ELSE :album_certifications_json END,
+                        relationships = CASE WHEN :relationships_json = '[]' THEN relationships ELSE :relationships_json END,
+                        updated_at = :now,
+                        last_scraped = COALESCE(:last_scraped, last_scraped)
+                    WHERE id = :id
                 """,
-                    (
-                        track.album,
-                        getattr(track, "track_number", None),
-                        track.release_date,
-                        track.genius_id,
-                        track.spotify_id,
-                        track.discogs_id,
-                        getattr(track, "isrc", None),
-                        track.bpm,
-                        getattr(track, "bpm_source", None),
-                        getattr(track, "bpm_confidence", None),
-                        getattr(track, "key_mode_source", None),
-                        getattr(track, "reccobeats_resolution", None),
-                        getattr(track, "bpm_alt", None),
-                        track.duration,
-                        track.genre,
-                        getattr(track, "key", None),
-                        getattr(track, "mode", None),
-                        getattr(track, "musical_key", None),
-                        getattr(track, "time_signature", None),
-                        track.genius_url,
-                        track.spotify_url,
-                        getattr(track, "youtube_url", None),
-                        getattr(track, "youtube_url_source", None),
-                        getattr(track, "is_featuring", False),
-                        getattr(track, "primary_artist_name", None),
-                        getattr(track, "featured_artists", None),
-                        getattr(track, "secondary_role", None),
-                        getattr(track, "lyrics", None),
-                        getattr(track, "lyrics_scraped_at", None),
-                        getattr(track, "lyrics_source", None),
-                        getattr(track, "lyrics_synced", None),
-                        getattr(track, "lyrics_synced_source", None),
-                        getattr(track, "lyrics_synced_confidence", None),
-                        getattr(track, "lyrics", None),
-                        getattr(track, "anecdotes", None),
-                        certifications_json,
-                        certifications_json,
-                        album_certifications_json,
-                        album_certifications_json,
-                        relationships_json,
-                        relationships_json,
-                        datetime.now(),
-                        track.last_scraped,
-                        track.id,
-                    ),
+                    params,
                 )
             else:
-                # Sérialiser les certifications en JSON
-                certifications_json = (
-                    json.dumps(getattr(track, "certifications", []))
-                    if hasattr(track, "certifications")
-                    else "[]"
-                )
-                album_certifications_json = (
-                    json.dumps(getattr(track, "album_certifications", []))
-                    if hasattr(track, "album_certifications")
-                    else "[]"
-                )
-                relationships_json = json.dumps(getattr(track, "relationships", []) or [])
-
-                # INSERT avec key, mode, musical_key, time_signature, anecdotes, certifications et spotify_page_title
                 cursor.execute(
                     """
                     INSERT INTO tracks (
@@ -508,54 +510,18 @@ class DataManager:
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, lyrics_synced_source, lyrics_synced_confidence, has_lyrics, anecdotes,
                         certifications, album_certifications, relationships, spotify_page_title,
                         created_at, updated_at, last_scraped
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (
+                        :title, :artist_id, :album, :track_number, :release_date,
+                        :genius_id, :spotify_id, :discogs_id, :isrc,
+                        :bpm, :bpm_source, :bpm_confidence, :key_mode_source, :reccobeats_resolution, :bpm_alt, :duration, :genre, :key, :mode, :musical_key, :time_signature,
+                        :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
+                        :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,
+                        :lyrics, :lyrics_scraped_at, :lyrics_source, :lyrics_synced, :lyrics_synced_source, :lyrics_synced_confidence, :has_lyrics, :anecdotes,
+                        :certifications_json, :album_certifications_json, :relationships_json, :spotify_page_title,
+                        :now, :now, :last_scraped
+                    )
                 """,
-                    (
-                        track.title,
-                        track.artist.id,
-                        track.album,
-                        getattr(track, "track_number", None),
-                        track.release_date,
-                        track.genius_id,
-                        track.spotify_id,
-                        track.discogs_id,
-                        getattr(track, "isrc", None),
-                        track.bpm,
-                        getattr(track, "bpm_source", None),
-                        getattr(track, "bpm_confidence", None),
-                        getattr(track, "key_mode_source", None),
-                        getattr(track, "reccobeats_resolution", None),
-                        getattr(track, "bpm_alt", None),
-                        track.duration,
-                        track.genre,
-                        getattr(track, "key", None),
-                        getattr(track, "mode", None),
-                        getattr(track, "musical_key", None),
-                        getattr(track, "time_signature", None),
-                        track.genius_url,
-                        track.spotify_url,
-                        getattr(track, "youtube_url", None),
-                        getattr(track, "youtube_url_source", None),
-                        getattr(track, "is_featuring", False),
-                        getattr(track, "primary_artist_name", None),
-                        getattr(track, "featured_artists", None),
-                        getattr(track, "secondary_role", None),
-                        getattr(track, "lyrics", None),
-                        getattr(track, "lyrics_scraped_at", None),
-                        getattr(track, "lyrics_source", None),
-                        getattr(track, "lyrics_synced", None),
-                        getattr(track, "lyrics_synced_source", None),
-                        getattr(track, "lyrics_synced_confidence", None),
-                        bool(getattr(track, "lyrics", None)),
-                        getattr(track, "anecdotes", None),
-                        certifications_json,
-                        album_certifications_json,
-                        relationships_json,
-                        getattr(track, "spotify_page_title", None),
-                        datetime.now(),
-                        datetime.now(),
-                        track.last_scraped,
-                    ),
+                    params,
                 )
                 track.id = cursor.lastrowid
 

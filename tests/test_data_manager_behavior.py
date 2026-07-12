@@ -76,6 +76,40 @@ class TestRoundtrip:
         assert lu.artist.id == artist.id
 
 
+class TestUpdateNonDestructif:
+    """save_track en paramètres nommés : la sémantique COALESCE / CASE / écrasement
+    doit rester identique après la refonte 1.4 (positionnel → nommé)."""
+
+    def test_coalesce_preserve_les_champs_enrichis(self, data_manager):
+        # Un re-save « vide » (re-fetch discographie API, champs None) ne doit
+        # PAS écraser les données enrichies.
+        artist = _artiste_sauve(data_manager)
+        data_manager.save_track(Track(title="X", artist=artist, bpm=142, lyrics="paroles"))
+        data_manager.save_track(Track(title="X", artist=artist))
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.bpm == 142
+        assert lu.lyrics == "paroles"
+
+    def test_is_featuring_ecrase_sans_coalesce(self, data_manager):
+        # Décision documentée : is_featuring est le seul champ écrasé sans COALESCE.
+        artist = _artiste_sauve(data_manager)
+        data_manager.save_track(Track(title="X", artist=artist, is_featuring=True))
+        data_manager.save_track(Track(title="X", artist=artist, is_featuring=False))
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert bool(lu.is_featuring) is False
+
+    def test_certifications_vides_ne_wipent_pas(self, data_manager):
+        # CASE WHEN :certifications_json = '[]' → conserve l'existant.
+        artist = _artiste_sauve(data_manager)
+        t = Track(title="X", artist=artist)
+        t.certifications = [{"certification": "Or", "certification_date": "2020-01-01"}]
+        data_manager.save_track(t)
+        data_manager.save_track(Track(title="X", artist=artist))
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.certifications
+        assert lu.certifications[0]["certification"] == "Or"
+
+
 class TestConversionDuree:
     """Le mapper ligne → Track doit convertir une durée texte « 3:48 » en 228 s
     (données héritées : certaines lignes historiques stockent la durée en MM:SS)."""

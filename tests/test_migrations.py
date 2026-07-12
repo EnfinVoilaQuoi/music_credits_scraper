@@ -12,7 +12,7 @@ import sqlite3
 
 import pytest
 
-from src.utils.data_manager import _MIGRATIONS, run_migrations
+from src.utils.db import _MIGRATIONS, run_migrations
 
 LATEST = _MIGRATIONS[-1][0]
 

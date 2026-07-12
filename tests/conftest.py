@@ -37,13 +37,10 @@ def load_fixture_json(relpath: str) -> dict:
 
 @pytest.fixture
 def data_manager(tmp_path, monkeypatch):
-    import src.api.snep_certifications as snep_mod
-    import src.utils.certification_enricher as ce_mod
+    # DataManager n'importe plus les certifications au démarrage (elles vivent
+    # dans certif_snep.csv) : seule la base à isoler reste à monkeypatcher.
     import src.utils.data_manager as dm_mod
 
     db_file = tmp_path / "test_music_credits.db"
     monkeypatch.setattr(dm_mod, "DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
-    monkeypatch.setattr(dm_mod.DataManager, "_initialize_certifications", lambda self: None)
-    monkeypatch.setattr(ce_mod, "CertificationEnricher", lambda: None)
-    monkeypatch.setattr(snep_mod, "get_snep_manager", lambda: None)
     return dm_mod.DataManager()

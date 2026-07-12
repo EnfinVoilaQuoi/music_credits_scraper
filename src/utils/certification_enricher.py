@@ -3,7 +3,6 @@
 from datetime import datetime
 from typing import Any
 
-from src.api.snep_certifications import get_snep_manager
 from src.models import Artist, Track
 from src.utils.cert_matcher import get_cert_matcher
 from src.utils.logger import get_logger
@@ -20,7 +19,6 @@ class CertificationEnricher:
 
     def __init__(self):
         """Initialise l'enrichisseur de certifications"""
-        self.snep_manager = get_snep_manager()  # conservé (compat éventuelle)
         self.matcher = get_cert_matcher()  # raccordement multi-pays
         logger.info("✅ CertificationEnricher initialisé (matcher unifié)")
 

@@ -1,5 +1,9 @@
 {
-  "last_update": "2026-07-12T09:34:42.029273",
+  "last_update": "2026-07-12T10:05:17.378630",
   "source": "MIGRATION",
-  "count": 11765
+  "count": 11765,
+  "last_source": "MIGRATION",
+  "updates": {
+    "MIGRATION": "2026-07-12T10:05:17.378630"
+  }
 }

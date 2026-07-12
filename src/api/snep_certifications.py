@@ -879,17 +879,27 @@ def get_snep_last_update(source: str | None = "GLOBAL") -> str | None:
     `certif_snep.meta.json` (plus de dépendance DB). Sûr à appeler depuis
     n'importe quel thread (ex: la GUI).
 
-    Le paramètre `source` est conservé pour compatibilité : ARTIST renvoie None
-    (la fraîcheur du sidecar reflète la régénération globale du clean).
+    Le suivi est PAR SOURCE (`updates`) : `source='ARTIST'` renvoie la dernière
+    récup par artiste, tout le reste ('GLOBAL' par défaut) renvoie la MàJ NON
+    artiste la plus récente — pour ne pas faire passer une recherche artiste
+    pour une MàJ globale (fix JOURNAL 2026-06-25).
     """
-    if source and source not in ("GLOBAL", "MIGRATION"):
-        return None
     meta_path = Path(DATA_PATH) / "certifications" / "snep" / "certif_snep.meta.json"
     if not meta_path.exists():
         return None
     try:
         data = json.loads(meta_path.read_text(encoding="utf-8"))
-        return data.get("last_update")
     except Exception as e:
         logger.warning(f"Lecture certif_snep.meta.json impossible : {e}")
         return None
+
+    updates = data.get("updates") or {}
+    if source == "ARTIST":
+        return updates.get("ARTIST")
+    non_artist = [t for s, t in updates.items() if s != "ARTIST"]
+    if non_artist:
+        return max(non_artist)
+    # Repli (meta ancien format sans 'updates')
+    if data.get("last_source", data.get("source")) != "ARTIST":
+        return data.get("last_update")
+    return None

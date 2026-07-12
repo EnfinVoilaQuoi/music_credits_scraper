@@ -1,5 +1,6 @@
 """Interface graphique pour la mise à jour des certifications musicales"""
 
+import json
 import subprocess
 import sys
 from datetime import datetime
@@ -123,6 +124,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             fg_color="gray40",
             hover_color="gray30",
         ).pack(side="right", padx=5, pady=5)
+        ctk.CTkButton(
+            brma_frame,
+            text="🧹 Nettoyer",
+            command=self._clean_brma,
+            width=100,
+            fg_color="gray40",
+            hover_color="gray30",
+        ).pack(side="right", padx=5, pady=5)
 
         # RIAA (USA) - Maintenant disponible
         riaa_frame = ctk.CTkFrame(buttons_frame)
@@ -216,6 +225,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self.progress_label = ctk.CTkLabel(main_frame, text="")
         self.progress_label.pack(pady=5)
 
+    def _meta_last_update(self, meta_path):
+        """Date ISO de dernière MàJ depuis un sidecar meta.json (la MàJ NON
+        artiste la plus récente si un historique `updates` est présent), sinon
+        None. Fraîcheur uniforme pour BRMA/RIAA (comme SNEP)."""
+        try:
+            if not meta_path.exists():
+                return None
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+            updates = data.get("updates") or {}
+            non_artist = [t for s, t in updates.items() if s != "ARTIST"]
+            if non_artist:
+                return max(non_artist)
+            return data.get("last_update")
+        except Exception:
+            return None
+
     def _update_status(self):
         """Met à jour l'affichage de l'état"""
         try:
@@ -259,11 +284,16 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             else:
                 status_text += "🇫🇷 SNEP: ❌ Pas de données\n"
 
-            # BRMA
-            brma_path = data_path / "brma" / "certif_brma.csv"  # Nom correct du fichier BRMA
+            # BRMA — fraîcheur via metadata.json (uniforme avec SNEP/RIAA)
+            brma_path = data_path / "brma" / "certif_brma.csv"
             if brma_path.exists():
-                mod_time = datetime.fromtimestamp(brma_path.stat().st_mtime)
-                status_text += f"🇧🇪 BRMA: ✅ Dernière MàJ: {mod_time:%d/%m/%Y %H:%M}\n"
+                last = self._meta_last_update(data_path / "brma" / "metadata.json")
+                stamp = (
+                    _fmt(last)
+                    if last
+                    else f"{datetime.fromtimestamp(brma_path.stat().st_mtime):%d/%m/%Y %H:%M} (fichier)"
+                )
+                status_text += f"🇧🇪 BRMA: ✅ Dernière MàJ: {stamp}\n"
                 if "BRMA" in self.missing_periods:
                     gaps = self.missing_periods["BRMA"].get("gaps", [])
                     if gaps:
@@ -271,11 +301,16 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             else:
                 status_text += "🇧🇪 BRMA: ❌ Pas de données\n"
 
-            # RIAA
-            riaa_path = data_path / "riaa" / "certif_riaa.csv"  # Nom correct du fichier RIAA
+            # RIAA — fraîcheur via metadata.json (uniforme avec SNEP/BRMA)
+            riaa_path = data_path / "riaa" / "certif_riaa.csv"
             if riaa_path.exists():
-                mod_time = datetime.fromtimestamp(riaa_path.stat().st_mtime)
-                status_text += f"🇺🇸 RIAA: ✅ Dernière MàJ: {mod_time:%d/%m/%Y %H:%M}\n"
+                last = self._meta_last_update(data_path / "riaa" / "metadata.json")
+                stamp = (
+                    _fmt(last)
+                    if last
+                    else f"{datetime.fromtimestamp(riaa_path.stat().st_mtime):%d/%m/%Y %H:%M} (fichier)"
+                )
+                status_text += f"🇺🇸 RIAA: ✅ Dernière MàJ: {stamp}\n"
                 if "RIAA" in self.missing_periods:
                     gaps = self.missing_periods["RIAA"].get("gaps", [])
                     if gaps:
@@ -789,6 +824,44 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             except Exception as e:
                 logger.error(f"Erreur nettoyage RIAA : {e}")
                 self._set_progress(f"❌ Erreur nettoyage RIAA : {e}")
+
+        start_worker(run)
+
+    def _clean_brma(self):
+        """Régénère le clean BRMA depuis le brut (dédup) après confirmation."""
+        if not messagebox.askyesno(
+            "Nettoyer BRMA",
+            "Régénérer certif_brma.csv depuis le brut (dédup + collapse des "
+            "niveaux vides) ? Un backup sera créé.",
+            parent=self,
+        ):
+            return
+
+        def run():
+            try:
+                self._set_progress("🧹 Nettoyage du CSV BRMA...")
+                root = Path(__file__).parent.parent.parent
+                result = subprocess.run(
+                    [sys.executable, str(root / "src" / "utils" / "update_brma.py"), "--dedup"],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                summary = "\n".join((result.stdout or "").strip().splitlines()[-6:]) or "Terminé."
+                try:
+                    from src.utils.cert_matcher import reset_cert_matcher
+
+                    reset_cert_matcher()
+                except Exception:
+                    pass
+                self._set_progress("✅ BRMA nettoyé")
+                self.after(0, lambda: self._show_report_window("Nettoyage CSV BRMA", summary))
+                self.after(500, self._update_status)
+            except Exception as e:
+                logger.error(f"Erreur nettoyage BRMA : {e}")
+                self._set_progress(f"❌ Erreur nettoyage BRMA : {e}")
 
         start_worker(run)
 

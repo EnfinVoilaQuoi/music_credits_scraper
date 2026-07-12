@@ -206,14 +206,21 @@ def write_canonical_csv(rows: list[dict], path: Path) -> None:
 
 
 def write_meta(path: Path, source: str, count: int) -> None:
-    path.write_text(
-        json.dumps(
-            {"last_update": datetime.now().isoformat(), "source": source, "count": count},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    """Écrit/met à jour le sidecar meta en gardant un historique PAR SOURCE
+    (`updates`). Indispensable pour distinguer une MàJ globale d'une récup par
+    artiste (fix JOURNAL 2026-06-25 : une recherche ARTISTE ne doit pas passer
+    pour une MàJ globale)."""
+    meta: dict = {}
+    if path.exists():
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    now = datetime.now().isoformat()
+    updates = meta.get("updates") or {}
+    updates[source] = now
+    meta.update({"last_update": now, "last_source": source, "count": count, "updates": updates})
+    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def rebuild(raw_path: Path, csv_path: Path, meta_path: Path, source: str = "GLOBAL") -> int:

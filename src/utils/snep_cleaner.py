@@ -27,7 +27,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from src.api.snep_certifications import SNEPCertificationManager
+from src.utils.cert_normalize import repair_extra_separators
 
 EXPECTED_NCOLS = 7
 
@@ -145,7 +145,7 @@ def _read_rows(csv_path: Path) -> tuple[str, list[list[str]]]:
         raise ValueError("Encodage illisible")
 
     raw = raw.replace("\x00", "")
-    raw, _ = SNEPCertificationManager._repair_extra_separators(raw)
+    raw, _ = repair_extra_separators(raw)
 
     lines = raw.splitlines()
     if not lines:
@@ -270,8 +270,19 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
         report["applied"] = True
 
         if reimport:
-            manager = SNEPCertificationManager()
-            manager.import_from_csv(csv_path, source="CLEAN")
+            # Régénère le CSV canonique (clean) depuis le brut nettoyé, puis
+            # rafraîchit le matcher — plus d'import DB (convention brut+clean).
+            from src.utils.cert_matcher import reset_cert_matcher
+            from src.utils.snep_build import rebuild
+
+            snep = Path(csv_path).parent
+            rebuild(
+                Path(csv_path),
+                snep / "certif_snep.csv",
+                snep / "certif_snep.meta.json",
+                source="CLEAN",
+            )
+            reset_cert_matcher()
 
     return report
 

@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pandas as pd
 
-# Réutilise la réparation de séparateurs déjà éprouvée du manager
-from src.api.snep_certifications import SNEPCertificationManager
+# Réutilise la réparation de séparateurs (fonction pure partagée)
+from src.utils.cert_normalize import repair_extra_separators
 
 HEADER_COLS = [
     "Interprète",
@@ -77,7 +77,7 @@ def _load_raw_df(csv_path: Path) -> tuple[pd.DataFrame, list[str], int]:
         raise ValueError("Encodage illisible")
 
     raw_text = raw_text.replace("\x00", "")
-    raw_text, repaired = SNEPCertificationManager._repair_extra_separators(raw_text)
+    raw_text, repaired = repair_extra_separators(raw_text)
 
     # Repérer les lignes encore malformées (mauvais nombre de colonnes) AVANT le parse
     malformed = []

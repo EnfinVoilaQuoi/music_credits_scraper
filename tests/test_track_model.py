@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from src.gui.formatters import certification_emoji
 from src.models.track import Credit, CreditRole, Track
 
 
@@ -146,15 +147,12 @@ class TestToDict:
 
 class TestCertificationEmoji:
     def test_paliers_connus(self):
-        track = Track(title="Test")
-        assert track.get_certification_emoji("Or") == "🥇"
-        assert track.get_certification_emoji("Diamant") == "💎"
-        assert track.get_certification_emoji("Quadruple Diamant") == "💎💎💎💎"
+        assert certification_emoji("Or") == "🥇"
+        assert certification_emoji("Diamant") == "💎"
+        assert certification_emoji("Quadruple Diamant") == "💎💎💎💎"
 
     def test_sans_certification(self):
-        track = Track(title="Test")
-        assert track.get_certification_emoji() == ""
+        assert certification_emoji(None) == ""
 
     def test_niveau_inconnu_trophee_generique(self):
-        track = Track(title="Test")
-        assert track.get_certification_emoji("Ruby") == "🏆"
+        assert certification_emoji("Ruby") == "🏆"

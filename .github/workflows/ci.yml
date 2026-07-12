@@ -39,5 +39,19 @@ jobs:
       - name: Black (formatage)
         run: black --check src scripts tests
 
+      # Garde-fou refacto Phase 4 (couche « domaine ») : le modèle et le mapper
+      # n'accèdent JAMAIS à leurs propres champs via getattr/hasattr défensif —
+      # un champ manquant doit crasher tôt, pas produire un None trois couches
+      # plus loin. Les coercitions DB→objet vivent, elles, dans track_mapper
+      # (frontière, seul habitat légal). Empêche le retour du pattern.
+      - name: Garde-fou domaine (getattr/hasattr défensif)
+        shell: bash
+        run: |
+          if grep -rnE "getattr\((self|track)|hasattr\((self|track)" src/models/ src/utils/track_mapper.py; then
+            echo "::error::getattr/hasattr défensif détecté dans le domaine (src/models ou track_mapper) — accès direct attendu."
+            exit 1
+          fi
+          echo "OK : aucun accès défensif dans le domaine."
+
       - name: Pytest
         run: pytest -q

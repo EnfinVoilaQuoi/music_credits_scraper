@@ -274,7 +274,7 @@ class Credit:
         return credits
 
 
-@dataclass
+@dataclass(eq=False)
 class Track:
     """Représente un morceau musical"""
 
@@ -385,6 +385,28 @@ class Track:
     # Streams YouTube Music
     ytm_streams: int | None = None
     ytm_streams_updated: datetime | None = None
+
+    def _identity(self) -> tuple:
+        """Clé d'identité métier d'un morceau.
+
+        Le `genius_id` prime : deux objets Track qui partagent le même
+        `genius_id` désignent le MÊME morceau, même si les autres champs
+        diffèrent (ex. version re-scrapée avec des paroles à jour). À défaut de
+        `genius_id`, on retombe sur `(titre, nom d'artiste)`. Le discriminant en
+        tête empêche un morceau « avec genius_id » d'être jugé égal à un
+        morceau « sans genius_id » (garantit la cohérence __eq__/__hash__).
+        """
+        if self.genius_id is not None:
+            return ("genius_id", self.genius_id)
+        return ("title_artist", self.title, self.artist.name if self.artist else None)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Track):
+            return NotImplemented
+        return self._identity() == other._identity()
+
+    def __hash__(self) -> int:
+        return hash(self._identity())
 
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""

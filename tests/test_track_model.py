@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from src.gui.formatters import certification_emoji
+from src.models.artist import Artist
 from src.models.track import Credit, CreditRole, Track
 
 
@@ -143,6 +144,48 @@ class TestToDict:
         d = Track(title="Test").to_dict()
         assert d["all_credits"] == []
         assert d["title"] == "Test"
+
+
+class TestTrackEquality:
+    """Égalité MÉTIER : identité = genius_id si présent, sinon (titre, artiste).
+    Corrige l'ancien add_track qui comparait tous les champs (lyrics incluses)."""
+
+    def test_meme_genius_id_meme_morceau_malgre_champs_differents(self):
+        # Une version re-scrapée (paroles, bpm mis à jour) reste LE même morceau
+        a = Track(title="Chanson", genius_id=123, lyrics="v1", bpm=90)
+        b = Track(title="Chanson (Remaster)", genius_id=123, lyrics="v2", bpm=140)
+        assert a == b
+        assert hash(a) == hash(b)
+
+    def test_genius_id_different_morceaux_distincts(self):
+        a = Track(title="Chanson", genius_id=123)
+        b = Track(title="Chanson", genius_id=456)
+        assert a != b
+
+    def test_sans_genius_id_titre_et_artiste(self):
+        artist = Artist(name="Sofiane Pamart")
+        a = Track(title="Solo", artist=artist)
+        b = Track(title="Solo", artist=artist)
+        assert a == b
+        assert hash(a) == hash(b)
+
+    def test_avec_genius_id_jamais_egal_a_sans(self):
+        # Le discriminant garantit la cohérence __eq__/__hash__
+        a = Track(title="Solo", genius_id=123)
+        b = Track(title="Solo")
+        assert a != b
+
+    def test_add_track_dedup_par_identite_metier(self):
+        artist = Artist(name="X")
+        t1 = Track(title="Song", genius_id=999, lyrics="ancienne version")
+        artist.add_track(t1)
+        # Même genius_id, paroles différentes → pas de doublon
+        t2 = Track(title="Song", genius_id=999, lyrics="nouvelle version")
+        artist.add_track(t2)
+        assert artist.get_tracks_count() == 1
+
+    def test_pas_egal_a_un_non_track(self):
+        assert Track(title="X", genius_id=1) != "pas un track"
 
 
 class TestCertificationEmoji:

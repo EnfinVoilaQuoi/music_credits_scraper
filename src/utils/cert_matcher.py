@@ -17,7 +17,6 @@ lignes au même format ; le matcher ne change pas.
 from __future__ import annotations
 
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -138,40 +137,38 @@ class CertMatcher:
         return df
 
     def _load_snep(self) -> list[dict]:
-        db = Path(DATA_PATH) / "certifications" / "snep" / "certifications.db"
-        if not db.exists():
+        # CSV canonique (brut→clean via snep_build) — lu en direct comme BRMA/RIAA,
+        # normalisation à la volée (parité assurée par cert_normalize).
+        csv = Path(DATA_PATH) / "certifications" / "snep" / "certif_snep.csv"
+        if not csv.exists():
             return []
         try:
-            conn = sqlite3.connect(str(db))
-            cur = conn.execute(
-                "SELECT artist_name, artist_clean, title, title_clean, publisher, "
-                "category, certification, release_date, certification_date "
-                "FROM certifications"
-            )
-            rows = []
-            for an, ac, ti, tc, pub, cat, lvl, rel, cdate in cur.fetchall():
-                rows.append(
-                    {
-                        "artist_clean": ac or "",
-                        "title_clean": tc or "",
-                        "cat": _norm_cat(cat),
-                        "level": lvl or "",
-                        "date": (str(cdate)[:10] if cdate else ""),
-                        "country": "FR",
-                        "body": "SNEP",
-                        "flag": "🇫🇷",
-                        "artist_name": an or "",
-                        "title": ti or "",
-                        "release_date": (str(rel)[:10] if rel else ""),
-                        "publisher": pub or "",
-                        "detail_url": "",
-                    }
-                )
-            conn.close()
-            return rows
+            df = pd.read_csv(csv, encoding="utf-8-sig", dtype=str).fillna("")
         except Exception as e:
             logger.error(f"CertMatcher: chargement SNEP impossible : {e}")
             return []
+        rows = []
+        for _, r in df.iterrows():
+            artist = str(r.get("artist", "")).strip()
+            title = str(r.get("title", "")).strip()
+            rows.append(
+                {
+                    "artist_clean": self._norm(artist),
+                    "title_clean": self._norm(title),
+                    "cat": _norm_cat(r.get("category", "")),
+                    "level": str(r.get("certification", "")).strip(),
+                    "date": str(r.get("certification_date", "")).strip()[:10],
+                    "country": "FR",
+                    "body": "SNEP",
+                    "flag": "🇫🇷",
+                    "artist_name": artist,
+                    "title": title,
+                    "release_date": str(r.get("release_date", "")).strip()[:10],
+                    "publisher": str(r.get("publisher", "")).strip(),
+                    "detail_url": "",
+                }
+            )
+        return rows
 
     def _load_brma(self) -> list[dict]:
         csv = Path(DATA_PATH) / "certifications" / "brma" / "certif_brma.csv"

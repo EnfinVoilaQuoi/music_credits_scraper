@@ -5,9 +5,10 @@ Compatible avec le système de gestion unifié des certifications
 """
 
 import argparse
+import json
 import logging
 import re
-import sqlite3
+import shutil
 import sys
 import time
 from datetime import datetime, timedelta
@@ -36,9 +37,8 @@ class RIAADatabaseUpdater:
         self.data_dir = self.base_dir / "data" / "certifications" / "riaa"
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        # Chemins des fichiers
-        self.db_path = self.data_dir / "riaa.db"
-        self.csv_path = self.data_dir / "riaa.csv"
+        # Persistance CSV : le clean certif_riaa.csv (dérivé du brut riaa_raw.csv,
+        # module-niveau) alimente le matcher. Plus de base riaa.db.
         self.log_path = self.data_dir / "update_log.txt"
 
         # Configuration du logging
@@ -46,9 +46,6 @@ class RIAADatabaseUpdater:
 
         # Initialise le scraper
         self.scraper = None
-
-        # Charge ou crée la base de données
-        self.init_database()
 
     def setup_logging(self):
         """Configure le système de logging"""
@@ -70,55 +67,6 @@ class RIAADatabaseUpdater:
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
 
-    def init_database(self):
-        """Initialise ou charge la base de données SQLite"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        # Création de la table principale
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS certifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                artist TEXT NOT NULL,
-                title TEXT NOT NULL,
-                certification_date TEXT,
-                release_date TEXT,
-                label TEXT,
-                format TEXT,
-                award_level TEXT,
-                units INTEGER,
-                previous_certifications TEXT,
-                category TEXT,
-                type TEXT,
-                genre TEXT,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(artist, title, certification_date, award_level)
-            )
-        """)
-
-        # Table de suivi des mises à jour
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS update_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                update_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                period_start TEXT,
-                period_end TEXT,
-                records_added INTEGER,
-                records_updated INTEGER,
-                status TEXT
-            )
-        """)
-
-        # Indices pour optimiser les recherches
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_artist ON certifications(artist)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_date ON certifications(certification_date)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_title ON certifications(title)")
-
-        conn.commit()
-        conn.close()
-
-        self.logger.info(f"Base de données initialisée: {self.db_path}")
-
     def get_last_update_date(self) -> datetime | None:
         """Date de la dernière certif connue — lue depuis certif_riaa.csv (le
         fichier canonique alimentant le matcher), pas la base sqlite."""
@@ -137,93 +85,15 @@ class RIAADatabaseUpdater:
         return datetime(2017, 10, 1)
 
     def update_from_scraped_data(self, data: list[dict]) -> tuple:
-        """Met à jour la base de données avec les données scrapées"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        added = 0
-        updated = 0
-
-        for record in data:
-            try:
-                # Prépare les données
-                artist = record.get("artist", "").strip()
-                title = record.get("title", "").strip()
-                cert_date = record.get("certification_date", "").strip()
-                award = record.get("award_level", "").strip()
-
-                if not all([artist, title]):
-                    continue
-
-                # Vérifie si l'enregistrement existe
-                cursor.execute(
-                    """
-                    SELECT id FROM certifications
-                    WHERE artist = ? AND title = ? 
-                    AND certification_date = ? AND award_level = ?
-                """,
-                    (artist, title, cert_date, award),
-                )
-
-                existing = cursor.fetchone()
-
-                if existing:
-                    # Mise à jour
-                    cursor.execute(
-                        """
-                        UPDATE certifications
-                        SET label = ?, format = ?, units = ?,
-                            last_updated = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    """,
-                        (
-                            record.get("label", ""),
-                            record.get("format", ""),
-                            record.get("units"),
-                            existing[0],
-                        ),
-                    )
-                    updated += 1
-                else:
-                    # Insertion
-                    cursor.execute(
-                        """
-                        INSERT INTO certifications
-                        (artist, title, certification_date, release_date,
-                         label, format, award_level, units, category, type, genre)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                        (
-                            artist,
-                            title,
-                            cert_date,
-                            record.get("release_date", ""),
-                            record.get("label", ""),
-                            record.get("format", ""),
-                            award,
-                            record.get("units"),
-                            record.get("category", ""),
-                            record.get("type", ""),
-                            record.get("genre", ""),
-                        ),
-                    )
-                    added += 1
-
-            except Exception as e:
-                self.logger.error(f"Erreur traitement record: {e}")
-                continue
-
-        conn.commit()
-        conn.close()
-
-        # CSV-centré : fusionne aussi dans certif_riaa.csv (le fichier du matcher),
-        # pour que les MàJ bulk (backfill 2017→now) alimentent le raccordement.
+        """Accumule les données scrapées dans le brut riaa_raw.csv puis dérive le
+        clean certif_riaa.csv (lu par le matcher). Plus de base riaa.db.
+        Retourne (ajoutées_au_brut, 0)."""
         try:
-            _merge_certif_csv(_flatten_records(data))
+            _total, added = _merge_certif_csv(_flatten_records(data))
         except Exception as e:
             self.logger.error(f"Fusion certif_riaa.csv : {e}")
-
-        return added, updated
+            return 0, 0
+        return added, 0
 
     def update_recent_certifications(self, months_back: int = 1) -> bool:
         """
@@ -360,46 +230,14 @@ class RIAADatabaseUpdater:
             return False
 
     def log_update(self, start: str, end: str, added: int, updated: int, status: str):
-        """Enregistre l'historique des mises à jour"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            INSERT INTO update_history
-            (period_start, period_end, records_added, records_updated, status)
-            VALUES (?, ?, ?, ?, ?)
-        """,
-            (start, end, added, updated, status),
-        )
-
-        conn.commit()
-        conn.close()
+        """Trace la fraîcheur de la MàJ dans le sidecar metadata.json (plus de
+        base riaa.db)."""
+        _write_riaa_meta(source="GLOBAL")
 
     def export_to_csv(self):
-        """Exporte la base de données vers CSV"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-
-            # Lecture de toutes les certifications
-            df = pd.read_sql_query(
-                """
-                SELECT artist, title, certification_date, release_date,
-                       label, format, award_level, units, category, type, genre
-                FROM certifications
-                ORDER BY certification_date DESC, artist, title
-            """,
-                conn,
-            )
-
-            conn.close()
-
-            # Sauvegarde
-            df.to_csv(self.csv_path, index=False, encoding="utf-8-sig")
-            self.logger.info(f"Export CSV: {self.csv_path} ({len(df)} lignes)")
-
-        except Exception as e:
-            self.logger.error(f"Erreur export CSV: {e}")
+        """Obsolète : certif_riaa.csv est écrit directement (raw→clean) par
+        _merge_certif_csv. Conservé en no-op pour les appelants du flux bulk."""
+        return
 
     def manual_update(self):
         """Interface de mise à jour manuelle"""
@@ -448,42 +286,18 @@ class RIAADatabaseUpdater:
                 self.scraper.close_driver()
 
     def get_statistics(self) -> dict:
-        """Retourne les statistiques de la base de données"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        stats = {}
-
-        # Total certifications
-        cursor.execute("SELECT COUNT(*) FROM certifications")
-        stats["total"] = cursor.fetchone()[0]
-
-        # Par niveau
-        cursor.execute("""
-            SELECT award_level, COUNT(*) 
-            FROM certifications 
-            GROUP BY award_level
-        """)
-        stats["by_level"] = dict(cursor.fetchall())
-
-        # Top artistes
-        cursor.execute("""
-            SELECT artist, COUNT(*) as count
-            FROM certifications
-            GROUP BY artist
-            ORDER BY count DESC
-            LIMIT 10
-        """)
-        stats["top_artists"] = cursor.fetchall()
-
-        # Dernière mise à jour
-        cursor.execute("""
-            SELECT MAX(last_updated) FROM certifications
-        """)
-        stats["last_updated"] = cursor.fetchone()[0]
-
-        conn.close()
-
+        """Statistiques lues depuis certif_riaa.csv (le clean) — plus de riaa.db."""
+        stats = {"total": 0, "by_level": {}, "top_artists": [], "last_updated": None}
+        if not CERTIF_CSV.exists():
+            return stats
+        df = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna("")
+        stats["total"] = len(df)
+        if "Certification_Type" in df.columns:
+            stats["by_level"] = df["Certification_Type"].value_counts().to_dict()
+        if "Artist" in df.columns:
+            stats["top_artists"] = list(df["Artist"].value_counts().head(10).items())
+        if "Certification_Date" in df.columns and not df.empty:
+            stats["last_updated"] = df["Certification_Date"].map(_riaa_iso).max()
         return stats
 
 
@@ -491,9 +305,10 @@ class RIAADatabaseUpdater:
 # RIAA CSV-centré (comme BRMA) : on écrit dans certif_riaa.csv, le fichier que
 # lit le matcher unifié. Schéma compatible avec l'historique existant.
 # ---------------------------------------------------------------------------
-CERTIF_CSV = (
-    Path(__file__).parent.parent.parent / "data" / "certifications" / "riaa" / "certif_riaa.csv"
-)
+_RIAA_DIR = Path(__file__).parent.parent.parent / "data" / "certifications" / "riaa"
+CERTIF_CSV = _RIAA_DIR / "certif_riaa.csv"  # CLEAN (lu par le matcher)
+RIAA_RAW = _RIAA_DIR / "riaa_raw.csv"  # BRUT permanent (union des scrapes)
+RIAA_META = _RIAA_DIR / "metadata.json"  # fraîcheur (sidecar)
 CERTIF_COLUMNS = [
     "Artist",
     "Title",
@@ -593,53 +408,101 @@ def _flatten_records(records: list[dict]) -> list[dict]:
     return rows
 
 
-def _merge_certif_csv(new_rows: list[dict]) -> tuple:
-    """Fusionne des lignes dans certif_riaa.csv (dédup normalisée, backup avant).
-    Retourne (total_après, ajoutées)."""
-    if not new_rows:
-        return (0, 0)
-    new_df = pd.DataFrame(new_rows)
+def _align_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Restreint/complète aux CERTIF_COLUMNS (colonnes manquantes → '')."""
+    df = df[[c for c in df.columns if c in CERTIF_COLUMNS]].copy()
     for c in CERTIF_COLUMNS:
-        if c not in new_df.columns:
-            new_df[c] = ""
-    new_df = new_df[CERTIF_COLUMNS]
+        if c not in df.columns:
+            df[c] = ""
+    return df[CERTIF_COLUMNS]
 
+
+def _load_riaa_raw() -> pd.DataFrame:
+    """Charge le brut riaa_raw.csv (union permanente). Seedé depuis le clean
+    existant au premier appel (meilleur historique dispo)."""
+    if RIAA_RAW.exists():
+        return _align_columns(pd.read_csv(RIAA_RAW, encoding="utf-8-sig", dtype=str).fillna(""))
     if CERTIF_CSV.exists():
-        old = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna("")
-        old = old[[c for c in old.columns if c in CERTIF_COLUMNS]]
-        for c in CERTIF_COLUMNS:
-            if c not in old.columns:
-                old[c] = ""
-        old = old[CERTIF_COLUMNS]
-        before_existing = len(old)
-        # backup avant écriture
-        bdir = CERTIF_CSV.parent / "backups"
+        return _align_columns(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna(""))
+    return pd.DataFrame(columns=CERTIF_COLUMNS)
+
+
+def _write_riaa_raw(df: pd.DataFrame) -> None:
+    """Écrit le brut (backup horodaté avant écriture)."""
+    if RIAA_RAW.exists():
+        bdir = _RIAA_DIR / "backups"
         bdir.mkdir(exist_ok=True)
-        old.to_csv(
-            bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv",
-            index=False,
-            encoding="utf-8-sig",
-        )
-        combined = pd.concat([old, new_df], ignore_index=True)
-    else:
-        before_existing = 0
-        combined = new_df
+        shutil.copy2(RIAA_RAW, bdir / f"riaa_raw_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    df.to_csv(RIAA_RAW, index=False, encoding="utf-8-sig")
+
+
+def _clean_from_raw(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Dérive le CLEAN depuis le brut : retire artiste/titre vides, normalise le
+    Format, dédoublonne (Artist|Title|Format|niveau normalisé|date)."""
+    df = _align_columns(raw_df)
+    df = df[(df["Artist"].str.strip() != "") & (df["Title"].str.strip() != "")]
+    df["Format_Type"] = df["Format_Type"].map(_norm_format)
 
     def norm(s):
         return re.sub(r"\s+", " ", str(s)).strip().upper()
 
-    combined["_k"] = (
-        combined["Artist"].map(norm)
+    df = df.copy()
+    df["_k"] = (
+        df["Artist"].map(norm)
         + "|"
-        + combined["Title"].map(norm)
+        + df["Title"].map(norm)
         + "|"
-        + combined["Certification_Type"].map(lambda x: norm(_riaa_level(x)))
+        + df["Format_Type"].map(norm)
         + "|"
-        + combined["Certification_Date"].map(_riaa_iso)
+        + df["Certification_Type"].map(lambda x: norm(_riaa_level(x)))
+        + "|"
+        + df["Certification_Date"].map(_riaa_iso)
     )
-    combined = combined.drop_duplicates("_k", keep="first").drop(columns="_k")
-    combined.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
-    return (len(combined), len(combined) - before_existing)
+    return df.drop_duplicates("_k", keep="first").drop(columns="_k")
+
+
+def _write_riaa_meta(source: str = "GLOBAL", count: int | None = None) -> None:
+    """Sidecar de fraîcheur (updates par source), aligné sur SNEP/BRMA."""
+    meta: dict = {}
+    if RIAA_META.exists():
+        try:
+            meta = json.loads(RIAA_META.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    now = datetime.now().isoformat()
+    updates = meta.get("updates") or {}
+    updates[source] = now
+    if count is None and CERTIF_CSV.exists():
+        try:
+            count = len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str))
+        except Exception:
+            count = meta.get("count")
+    meta.update({"last_update": now, "last_source": source, "count": count, "updates": updates})
+    RIAA_META.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _merge_certif_csv(new_rows: list[dict]) -> tuple:
+    """Accumule les lignes scrapées dans le BRUT (riaa_raw.csv, dédup EXACTE) puis
+    dérive le CLEAN certif_riaa.csv. Retourne (total_clean, ajoutées_au_brut)."""
+    if not new_rows:
+        return (0, 0)
+    new_df = _align_columns(pd.DataFrame(new_rows))
+
+    raw = _load_riaa_raw()
+    before = len(raw)
+    combined = (
+        pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
+    ).drop_duplicates(ignore_index=True)
+    _write_riaa_raw(combined)
+
+    clean = _clean_from_raw(combined)
+    if CERTIF_CSV.exists():
+        bdir = _RIAA_DIR / "backups"
+        bdir.mkdir(exist_ok=True)
+        shutil.copy2(CERTIF_CSV, bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
+    _write_riaa_meta(source="GLOBAL", count=len(clean))
+    return (len(clean), len(combined) - before)
 
 
 def fetch_artist(artist: str) -> bool:
@@ -660,49 +523,25 @@ def fetch_artist(artist: str) -> bool:
 
 
 def clean_certif_csv() -> tuple:
-    """Nettoie certif_riaa.csv SANS scraper : retire artiste/titre vides,
-    dédoublonne (niveau normalisé : « 4x Multi-Platinum » = « 4x Platinum »).
-    Backup avant écriture. Retourne (avant, après)."""
-    if not CERTIF_CSV.exists():
-        print("Pas de fichier certif_riaa.csv")
+    """« Nettoyer » : régénère certif_riaa.csv (clean) depuis le brut
+    riaa_raw.csv (retire vides, normalise Format, dédoublonne niveau normalisé).
+    Retourne (avant, après)."""
+    raw = _load_riaa_raw()
+    if raw.empty:
+        print("Brut RIAA vide, rien à nettoyer")
         return (0, 0)
-    df = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna("")
-    df = df[[c for c in df.columns if c in CERTIF_COLUMNS]]
-    for c in CERTIF_COLUMNS:
-        if c not in df.columns:
-            df[c] = ""
-    df = df[CERTIF_COLUMNS]
-    before = len(df)
-
-    bdir = CERTIF_CSV.parent / "backups"
-    bdir.mkdir(exist_ok=True)
-    df.to_csv(
-        bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv",
-        index=False,
-        encoding="utf-8-sig",
+    before = (
+        len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str)) if CERTIF_CSV.exists() else 0
     )
-
-    df = df[(df["Artist"].str.strip() != "") & (df["Title"].str.strip() != "")]
-    df["Format_Type"] = df["Format_Type"].map(_norm_format)  # variantes → canonique
-
-    def norm(s):
-        return re.sub(r"\s+", " ", str(s)).strip().upper()
-
-    df["_k"] = (
-        df["Artist"].map(norm)
-        + "|"
-        + df["Title"].map(norm)
-        + "|"
-        + df["Format_Type"].map(norm)
-        + "|"
-        + df["Certification_Type"].map(lambda x: norm(_riaa_level(x)))
-        + "|"
-        + df["Certification_Date"].map(_riaa_iso)
-    )
-    df = df.drop_duplicates("_k", keep="first").drop(columns="_k")
-    df.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
-    print(f"✅ Nettoyage RIAA : {before} → {len(df)} lignes (-{before - len(df)})")
-    return (before, len(df))
+    if CERTIF_CSV.exists():
+        bdir = _RIAA_DIR / "backups"
+        bdir.mkdir(exist_ok=True)
+        shutil.copy2(CERTIF_CSV, bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    clean = _clean_from_raw(raw)
+    clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
+    _write_riaa_meta(source="CLEAN", count=len(clean))
+    print(f"✅ Nettoyage RIAA : {before} → {len(clean)} lignes (-{before - len(clean)})")
+    return (before, len(clean))
 
 
 def main():

@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.config import ARTISTS_DIR, DATA_DIR, DATABASE_URL
+from src.config import ARTISTS_DIR, DATABASE_URL
 from src.utils.artist_repository import ArtistRepository
 from src.utils.db import Database
 from src.utils.logger import get_logger
@@ -25,19 +25,10 @@ class DataManager(ArtistRepository, TrackRepository):
     """Gère la persistance des données (façade sur Database + repositories)."""
 
     def __init__(self):
+        # Persistance pure : ouvrir la base. Les certifications ne sont PLUS
+        # importées ici (elles vivent dans certif_snep.csv, lu paresseusement par
+        # le matcher unifié) — le constructeur ne déclenche aucun import CSV.
         self._db = Database(DATABASE_URL.replace("sqlite:///", ""))
-        # Import tardif pour éviter la circularité
-        try:
-            from src.api.snep_certifications import get_snep_manager
-            from src.utils.certification_enricher import CertificationEnricher
-
-            self.certification_enricher = CertificationEnricher()
-            self.snep_manager = get_snep_manager()
-            self._initialize_certifications()
-        except ImportError:
-            # Si les modules ne sont pas encore créés
-            self.certification_enricher = None
-            self.snep_manager = None
 
     @property
     def db_path(self) -> str:
@@ -47,21 +38,6 @@ class DataManager(ArtistRepository, TrackRepository):
     def _get_connection(self):
         """Context manager de connexion — délégué à Database (compat GUI)."""
         return self._db.connect()
-
-    def _initialize_certifications(self):
-        """Initialise la base de données des certifications au premier lancement"""
-        try:
-            # Vérifier si le CSV existe et l'importer - nom exact du fichier SNEP
-            csv_path = Path(DATA_DIR) / "certifications" / "snep" / "certif-.csv"
-            if csv_path.exists():
-                logger.info("🔄 Importation initiale des certifications SNEP...")
-                success = self.snep_manager.import_from_csv(csv_path)
-                if success:
-                    logger.info("✅ Certifications SNEP importées avec succès")
-                else:
-                    logger.warning("⚠️ Problème lors de l'import des certifications")
-        except Exception as e:
-            logger.error(f"Erreur initialisation certifications: {e}")
 
     def export_to_json(self, artist_name: str, filepath: Path | None = None):
         """Exporte les données d'un artiste en JSON"""

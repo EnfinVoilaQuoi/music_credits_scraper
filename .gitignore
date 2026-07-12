@@ -50,6 +50,11 @@ lib/*
 # malgré les règles *.json / *.html ci-dessus (offline, rejouées par les tests).
 !tests/fixtures/**
 
+# Sidecars de fraîcheur des certifs (meta) : à VERSIONNER malgré *.json
+# (convention brut+clean : le clean et sa meta accompagnent la source).
+!data/certifications/**/*.meta.json
+!data/certifications/**/metadata.json
+
 # Claude
 .claude/
 CLAUDE.md
@@ -77,6 +82,7 @@ scripts/*
 !scripts/check_duplicates.py
 !scripts/merge_duplicates.py
 !scripts/restore_from_backup.py
+!scripts/migrate_snep_to_csv.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

@@ -13,7 +13,6 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-from src.api.snep_certifications import SNEPCertificationManager
 from src.config import DATA_PATH
 from src.utils.logger import get_logger
 
@@ -480,8 +479,23 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
     return len(new_lines)
 
 
+def _rebuild_canonical(source: str = "GLOBAL") -> tuple[int, int]:
+    """Régénère `certif_snep.csv` (+ meta) depuis le brut `certif-.csv` courant
+    (fusion accumulante) et rafraîchit le matcher unifié. Retourne (nb lignes
+    avant, nb lignes après)."""
+    from src.utils.cert_matcher import reset_cert_matcher
+    from src.utils.snep_build import read_canonical_csv, rebuild
+
+    snep = Path(DATA_PATH) / "certifications" / "snep"
+    csv_path = snep / "certif_snep.csv"
+    before = len(read_canonical_csv(csv_path)) if csv_path.exists() else 0
+    after = rebuild(snep / "certif-.csv", csv_path, snep / "certif_snep.meta.json", source=source)
+    reset_cert_matcher()
+    return before, after
+
+
 def update_snep_database():
-    """Met à jour la base de données avec le dernier CSV + scraping des pages récentes"""
+    """Met à jour le CSV canonique avec le dernier export + scraping des pages récentes"""
     # 1. Télécharger le dernier export CSV (fenêtre partielle, fusionné à l'historique)
     csv_path = download_latest_snep_csv()
 
@@ -497,42 +511,15 @@ def update_snep_database():
     except Exception as e:
         safe_print(f"⚠️ Scraping des pages impossible ({e}) — on continue avec l'export")
 
-    safe_print("\n📥 Import dans la base de données...")
+    safe_print("\n📄 Régénération du CSV canonique (clean)...")
+    total_before, total_after = _rebuild_canonical(source="GLOBAL")
 
-    # Initialiser le manager
-    manager = SNEPCertificationManager()
-
-    # Obtenir les stats avant mise à jour
-    stats_before = manager.get_certification_stats()
-    total_before = stats_before["total_certifications"]
-
-    # Importer les données (MàJ GLOBALE — tracée comme telle dans update_history)
-    success = manager.import_from_csv(csv_path, source="GLOBAL")
-
-    if success:
-        # Obtenir les stats après mise à jour
-        stats_after = manager.get_certification_stats()
-        total_after = stats_after["total_certifications"]
-
-        safe_print("\n✅ MISE À JOUR TERMINÉE")
-        safe_print("\n📊 Résumé :")
-        safe_print(f"  • Certifications avant : {total_before}")
-        safe_print(f"  • Certifications après : {total_after}")
-        safe_print(f"  • Nouvelles/mises à jour : {total_after - total_before}")
-
-        # Afficher les certifications récentes
-        if stats_after["recent_certifications"]:
-            safe_print("\n🆕 Certifications récentes :")
-            for cert in stats_after["recent_certifications"][:5]:
-                date_str = cert["certification_date"][:10] if cert["certification_date"] else "N/A"
-                safe_print(
-                    f"  • {date_str} : {cert['artist_name']} - {cert['title']} ({cert['certification']})"
-                )
-
-        return True
-    else:
-        safe_print("❌ Erreur lors de l'import dans la base de données")
-        return False
+    safe_print("\n✅ MISE À JOUR TERMINÉE")
+    safe_print("\n📊 Résumé :")
+    safe_print(f"  • Certifications avant : {total_before}")
+    safe_print(f"  • Certifications après : {total_after}")
+    safe_print(f"  • Nouvelles/mises à jour : {total_after - total_before}")
+    return True
 
 
 def check_for_updates():
@@ -674,12 +661,11 @@ def fetch_artist_certifications(artist_name: str) -> bool:
         tmp.unlink(missing_ok=True)
     safe_print(f"🔀 {added} nouvelle(s) certification(s) ajoutée(s) au CSV maître")
 
-    # 5. Réimporter en base (récupération ARTISTE — ne compte PAS comme MàJ globale)
-    safe_print("\n📥 Import dans la base de données...")
-    manager = SNEPCertificationManager()
-    success = manager.import_from_csv(dest_path, source="ARTIST")
-    safe_print("✅ Import terminé" if success else "❌ Erreur d'import")
-    return success
+    # 5. Régénérer le CSV canonique (récupération ARTISTE)
+    safe_print("\n📄 Régénération du CSV canonique (clean)...")
+    _, after = _rebuild_canonical(source="ARTIST")
+    safe_print(f"✅ Clean régénéré : {after} certification(s)")
+    return True
 
 
 def backfill_years(years) -> int:
@@ -697,9 +683,8 @@ def backfill_years(years) -> int:
     for y in years:
         total += scrape_year(dest_path, int(y))
 
-    safe_print("\n📥 Import dans la base de données...")
-    manager = SNEPCertificationManager()
-    manager.import_from_csv(dest_path, source="SCRAPE")
+    safe_print("\n📄 Régénération du CSV canonique (clean)...")
+    _rebuild_canonical(source="SCRAPE")
     safe_print(f"✅ Backfill terminé : {total} nouvelle(s) certification(s) au total")
     return total
 

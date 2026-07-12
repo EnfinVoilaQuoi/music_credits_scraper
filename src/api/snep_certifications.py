@@ -1,6 +1,7 @@
 """Gestionnaire pour les certifications SNEP"""
 
 import io
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -874,36 +875,21 @@ def get_snep_manager() -> SNEPCertificationManager:
 
 
 def get_snep_last_update(source: str | None = "GLOBAL") -> str | None:
-    """Lit la date de dernière MàJ depuis update_history via une connexion
-    éphémère (sûr à appeler depuis n'importe quel thread, ex: la GUI).
+    """Date ISO de dernière régénération du CSV canonique, lue depuis le sidecar
+    `certif_snep.meta.json` (plus de dépendance DB). Sûr à appeler depuis
+    n'importe quel thread (ex: la GUI).
 
-    Retourne une chaîne ISO ou None. Par défaut, ne considère que les MàJ
-    GLOBALES (et non les récupérations par artiste qui ne reflètent pas
-    une mise à jour complète de la base).
+    Le paramètre `source` est conservé pour compatibilité : ARTIST renvoie None
+    (la fraîcheur du sidecar reflète la régénération globale du clean).
     """
-    db_path = Path(DATA_PATH) / "certifications" / "snep" / "certifications.db"
-    if not db_path.exists():
+    if source and source not in ("GLOBAL", "MIGRATION"):
+        return None
+    meta_path = Path(DATA_PATH) / "certifications" / "snep" / "certif_snep.meta.json"
+    if not meta_path.exists():
         return None
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            cur = conn.cursor()
-            if source:
-                cur.execute(
-                    "SELECT update_date FROM update_history "
-                    "WHERE status='SUCCESS' AND source=? "
-                    "ORDER BY update_date DESC LIMIT 1",
-                    (source,),
-                )
-            else:
-                cur.execute(
-                    "SELECT update_date FROM update_history "
-                    "WHERE status='SUCCESS' ORDER BY update_date DESC LIMIT 1"
-                )
-            row = cur.fetchone()
-            return row[0] if row else None
-        finally:
-            conn.close()
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        return data.get("last_update")
     except Exception as e:
-        logger.warning(f"Lecture update_history impossible : {e}")
+        logger.warning(f"Lecture certif_snep.meta.json impossible : {e}")
         return None

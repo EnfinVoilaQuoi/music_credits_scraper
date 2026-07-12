@@ -534,10 +534,10 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         def run():
             try:
-                from src.api.snep_certifications import get_snep_manager
+                from src.utils.cert_matcher import get_cert_matcher
 
                 self._set_progress(f"🔎 Audit des certifs de {artist}...")
-                res = get_snep_manager().audit_artist_certifications(
+                res = get_cert_matcher().audit_artist_certifications(
                     artist, self.artist_tracks, self.artist_albums
                 )
 

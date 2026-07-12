@@ -377,6 +377,95 @@ class CertMatcher:
             ]
         return self._format(exact)
 
+    def audit_artist_certifications(
+        self, artist_name: str, track_titles: list[str], album_titles: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Audite les certifs SNEP d'un artiste face à sa discographie connue.
+
+        Porté de l'ancien SNEPCertificationManager sur le magasin unifié filtré
+        `body == 'SNEP'`. Retourne les certifs « orphelines » (rattachées à rien),
+        chacune avec sa meilleure correspondance approximative — pour distinguer
+        une certif probablement TRONQUÉE/corrompue (proche d'un titre existant)
+        d'une certif réellement ABSENTE de la discographie. Une certif d'album est
+        comparée aux albums ; une certif single/vidéo aux morceaux.
+        """
+        import difflib
+        import re as _re
+
+        a = self._norm(artist_name)
+        empty = {
+            "artist": artist_name,
+            "total": 0,
+            "matched": 0,
+            "matched_tracks": 0,
+            "matched_albums": 0,
+            "orphans": [],
+            "has_tracks": bool(track_titles),
+        }
+        if self.df.empty or not a:
+            return empty
+
+        # Certifs SNEP de l'artiste : large (substring) PUIS artiste en MOT ENTIER
+        # (évite IAM ⊂ WILLIAMS).
+        snep = self.df[self.df["body"] == "SNEP"]
+        sub = snep[snep["artist_clean"].str.contains(a, regex=False, na=False)]
+        pat = _re.compile(r"\b" + _re.escape(a) + r"\b")
+        certs = [r for _, r in sub.iterrows() if pat.search(r["artist_clean"] or "")]
+
+        track_cleans = [self._norm(t) for t in track_titles if t]
+        album_cleans = [self._norm(x) for x in (album_titles or []) if x]
+
+        matched_tracks = 0
+        matched_albums = 0
+        orphans = []
+        for cert in certs:
+            ct = cert["title_clean"] or ""
+            if not ct:
+                continue
+            is_album = cert["cat"] == "album"
+            ref_cleans = album_cleans if (is_album and album_cleans) else track_cleans
+            ref_set = set(ref_cleans)
+
+            is_match = (
+                ct in ref_set
+                or (len(ct) >= 8 and any(rc.startswith(ct) for rc in ref_cleans))
+                or any((ct in rc) or (rc in ct) for rc in ref_cleans if rc)
+            )
+            if is_match:
+                if is_album:
+                    matched_albums += 1
+                else:
+                    matched_tracks += 1
+                continue
+
+            best, best_r = None, 0.0
+            for rc in ref_cleans:
+                r = difflib.SequenceMatcher(None, ct, rc).ratio()
+                if r > best_r:
+                    best_r, best = r, rc
+            orphans.append(
+                {
+                    "kind": "album" if is_album else "morceau",
+                    "title": cert["title"],
+                    "certification": cert["level"],
+                    "category": cert["cat"],
+                    "certification_date": cert["date"],
+                    "closest": best,
+                    "ratio": round(best_r, 2),
+                }
+            )
+
+        orphans.sort(key=lambda o: -o["ratio"])
+        return {
+            "artist": artist_name,
+            "total": len(certs),
+            "matched": matched_tracks + matched_albums,
+            "matched_tracks": matched_tracks,
+            "matched_albums": matched_albums,
+            "orphans": orphans,
+            "has_tracks": bool(track_cleans),
+        }
+
     # ------------------------------------------------------------------ sortie
     def _format(self, rows: pd.DataFrame) -> list[dict[str, Any]]:
         out = []

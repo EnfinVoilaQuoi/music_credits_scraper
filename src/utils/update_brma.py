@@ -57,9 +57,12 @@ class UltratopUpdater:
             delay_max: Délai maximum entre requêtes (secondes)
         """
         self.base_url = "https://www.ultratop.be/fr/or-platine"
-        self.database_path = Path(database_path)
+        self.database_path = Path(database_path)  # CLEAN (lu par le matcher)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        # BRUT permanent (union des scrapes) — le clean en est dérivé (dédup+tri).
+        # Convention brut+clean, alignée sur SNEP/RIAA.
+        self.raw_path = self.output_dir / "brma_raw.csv"
         self.delay_min = delay_min
         self.delay_max = delay_max
 
@@ -369,87 +372,93 @@ class UltratopUpdater:
         return df
 
     def dedup_database(self):
-        """Nettoie le CSV existant (dédup + collapse) SANS scraper. Backup avant."""
-        if self.existing_db.empty:
-            self.logger.info("Base vide, rien à dédupliquer")
+        """« Nettoyer » : régénère le CLEAN (certif_brma.csv) depuis le BRUT
+        (dédup métier + tri) SANS scraper. Backup du clean avant écriture."""
+        raw = self._load_raw()
+        if raw.empty:
+            self.logger.info("Brut vide, rien à nettoyer")
             return
         before = len(self.existing_db)
-        cleaned = self._dedup_df(self.existing_db)
-        if len(cleaned) == before:
-            self.logger.info("Aucun doublon/vide à retirer")
-            return
+        cleaned = self._clean_from(raw)
+        self._write_clean(cleaned)
+        self.logger.info(f"Clean régénéré depuis le brut : {before} → {len(cleaned)} ligne(s)")
 
-        if self.database_path.exists():
-            backup_path = self.output_dir / "backups"
-            backup_path.mkdir(exist_ok=True)
-            bf = backup_path / f"backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
-            self.existing_db.to_csv(bf, index=False, encoding="utf-8-sig")
-            self.logger.info(f"Backup créé: {bf}")
+    def _load_raw(self):
+        """Charge le brut `brma_raw.csv` (union permanente des scrapes). Seedé
+        depuis le clean existant au premier appel (meilleur historique dispo)."""
+        if self.raw_path.exists():
+            return pd.read_csv(self.raw_path, encoding="utf-8-sig")
+        return self.existing_db.copy()
 
-        cleaned = cleaned.sort_values(
-            ["certification_date", "artist", "title"], ascending=[False, True, True]
-        )
+    def _write_raw(self, df):
+        """Écrit le brut (backup avant écriture, écriture atomique)."""
         import os
+        import shutil
 
-        tmp = self.database_path.with_suffix(".tmp")
+        if self.raw_path.exists():
+            bdir = self.output_dir / "backups"
+            bdir.mkdir(exist_ok=True)
+            shutil.copy2(self.raw_path, bdir / f"raw_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+        tmp = self.raw_path.with_suffix(".rawtmp")
         try:
-            cleaned.to_csv(tmp, index=False, encoding="utf-8-sig")
-            os.replace(tmp, self.database_path)
+            df.to_csv(tmp, index=False, encoding="utf-8-sig")
+            os.replace(tmp, self.raw_path)
         except Exception:
             if tmp.exists():
                 tmp.unlink()
             raise
-        self.logger.info(f"Base nettoyée : {before} → {len(cleaned)} lignes")
 
-    def save_updated_database(self, new_certifications):
-        """Sauvegarde la base de données mise à jour"""
-        if not new_certifications:
-            self.logger.info("Aucune nouvelle certification trouvée")
-            return
-
-        # Création d'un DataFrame avec les nouvelles certifications
-        new_df = pd.DataFrame(new_certifications)
-
-        # Ajout à la base existante
-        if not self.existing_db.empty:
-            updated_db = pd.concat([self.existing_db, new_df], ignore_index=True)
-        else:
-            updated_db = new_df
-
-        # Déduplication de sécurité (anti-doublons accumulés + collapse vide/renseigné)
-        updated_db = self._dedup_df(updated_db)
-
-        # Tri par date décroissante
-        updated_db = updated_db.sort_values(
-            ["certification_date", "artist", "title"], ascending=[False, True, True]
-        )
-
-        # Backup de l'ancienne base (avant toute écriture)
-        if self.database_path.exists():
-            backup_path = self.output_dir / "backups"
-            backup_path.mkdir(exist_ok=True)
-            backup_file = backup_path / f"backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
-            self.existing_db.to_csv(backup_file, index=False, encoding="utf-8-sig")
-            self.logger.info(f"Backup créé: {backup_file}")
-
-        # Écriture atomique : temp → rename pour éviter la corruption si le write échoue
+    def _write_clean(self, clean_df):
+        """Écrit le clean `certif_brma.csv` (backup du clean avant, atomique)."""
         import os
 
+        if self.database_path.exists():
+            bdir = self.output_dir / "backups"
+            bdir.mkdir(exist_ok=True)
+            bf = bdir / f"backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
+            self.existing_db.to_csv(bf, index=False, encoding="utf-8-sig")
+            self.logger.info(f"Backup créé: {bf}")
         tmp_path = self.database_path.with_suffix(".tmp")
         try:
-            updated_db.to_csv(tmp_path, index=False, encoding="utf-8-sig")
+            clean_df.to_csv(tmp_path, index=False, encoding="utf-8-sig")
             os.replace(tmp_path, self.database_path)
         except Exception:
             if tmp_path.exists():
                 tmp_path.unlink()
             raise
-        self.logger.info(f"Base de données mise à jour: {self.database_path}")
-        self.logger.info(f"Ajouté {len(new_certifications)} nouvelles certifications")
 
-        # Mise à jour du fichier de métadonnées
-        self.update_metadata(updated_db, len(new_certifications))
+    def _clean_from(self, raw_df):
+        """Dérive le clean depuis un brut : dédup métier + tri (date desc)."""
+        return self._dedup_df(raw_df).sort_values(
+            ["certification_date", "artist", "title"], ascending=[False, True, True]
+        )
 
-        # Rapport de mise à jour
+    def save_updated_database(self, new_certifications):
+        """Accumule les certifs scrapées dans le BRUT (brma_raw.csv) puis dérive
+        le CLEAN (certif_brma.csv) — convention brut+clean."""
+        if not new_certifications:
+            self.logger.info("Aucune nouvelle certification trouvée")
+            return
+
+        new_df = pd.DataFrame(new_certifications)
+
+        # 1. BRUT : union de tout ce qui a été scrapé (dédup EXACTE, aucune perte)
+        raw = self._load_raw()
+        raw_updated = (
+            pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
+        ).drop_duplicates(ignore_index=True)
+        self._write_raw(raw_updated)
+
+        # 2. CLEAN dérivé du brut : dédup métier + tri → certif_brma.csv
+        clean = self._clean_from(raw_updated)
+        self._write_clean(clean)
+
+        self.logger.info(f"Clean mis à jour: {self.database_path} ({len(clean)} lignes)")
+        self.logger.info(
+            f"Brut: {len(raw_updated)} lignes ; ajouté {len(new_certifications)} scrapée(s)"
+        )
+
+        self.update_metadata(clean, len(new_certifications))
         self.generate_update_report(new_certifications)
 
     def update_metadata(self, updated_db, new_count):

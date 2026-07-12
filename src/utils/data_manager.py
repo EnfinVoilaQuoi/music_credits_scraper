@@ -313,7 +313,7 @@ class DataManager:
                     cursor.execute("SELECT id FROM artists WHERE name = ?", (artist.name,))
                     row = cursor.fetchone()
                     if row:
-                        artist.id = row[0]
+                        artist.id = row["id"]
 
             conn.commit()
             logger.info(f"Artiste sauvegardé: {artist.name} (ID: {artist.id})")
@@ -339,18 +339,18 @@ class DataManager:
             existing_track = cursor.fetchone()
 
             if existing_track:
-                track.id = existing_track[0]
+                track.id = existing_track["id"]
 
                 # Préserver les infos existantes
-                if existing_track[1] and not hasattr(track, "is_featuring"):
-                    track.is_featuring = bool(existing_track[1])
-                    track.primary_artist_name = existing_track[2]
-                    track.featured_artists = existing_track[3]
+                if existing_track["is_featuring"] and not hasattr(track, "is_featuring"):
+                    track.is_featuring = bool(existing_track["is_featuring"])
+                    track.primary_artist_name = existing_track["primary_artist_name"]
+                    track.featured_artists = existing_track["featured_artists"]
 
-                if existing_track[4] and not hasattr(track, "lyrics"):
-                    track.lyrics = existing_track[4]
-                    track.has_lyrics = bool(existing_track[5])
-                    track.lyrics_scraped_at = existing_track[6]
+                if existing_track["lyrics"] and not hasattr(track, "lyrics"):
+                    track.lyrics = existing_track["lyrics"]
+                    track.has_lyrics = bool(existing_track["has_lyrics"])
+                    track.lyrics_scraped_at = existing_track["lyrics_scraped_at"]
 
                 # Sérialiser les certifications en JSON
                 certifications_json = (
@@ -599,13 +599,12 @@ class DataManager:
                     logger.debug(f"❌ Aucun artiste trouvé pour: '{name}'")
                     return None
 
-                # Accès par INDEX pour éviter les erreurs de clé
                 artist = Artist(
-                    id=row[0],  # id
-                    name=row[1],  # name
-                    genius_id=row[2],  # genius_id
-                    spotify_id=row[3],  # spotify_id
-                    discogs_id=row[4],  # discogs_id
+                    id=row["id"],
+                    name=row["name"],
+                    genius_id=row["genius_id"],
+                    spotify_id=row["spotify_id"],
+                    discogs_id=row["discogs_id"],
                 )
 
                 logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
@@ -649,11 +648,11 @@ class DataManager:
                 from src.models import Artist
 
                 artist = Artist(
-                    id=artist_row[0],
-                    name=artist_row[1],
-                    genius_id=artist_row[2],
-                    spotify_id=artist_row[3],
-                    discogs_id=artist_row[4],
+                    id=artist_row["id"],
+                    name=artist_row["name"],
+                    genius_id=artist_row["genius_id"],
+                    spotify_id=artist_row["spotify_id"],
+                    discogs_id=artist_row["discogs_id"],
                 )
 
                 # Vérifier le nombre total
@@ -664,23 +663,10 @@ class DataManager:
                 if total_count == 0:
                     return tracks
 
-                # SELECT avec key, mode, certifications JSON, anecdotes et spotify_page_title
+                # Accès par nom de colonne (sqlite3.Row) : l'ordre des colonnes
+                # ne compte plus, le schéma est garanti par _init_database.
                 cursor.execute(
-                    """
-                    SELECT id, title, album, track_number, release_date,
-                        genius_id, spotify_id, discogs_id,
-                        bpm, duration, genre, key, mode, musical_key, time_signature,
-                        genius_url, spotify_url,
-                        is_featuring, primary_artist_name, featured_artists,
-                        lyrics, lyrics_scraped_at, has_lyrics, anecdotes,
-                        certifications, album_certifications, spotify_page_title,
-                        created_at, updated_at, last_scraped, isrc, bpm_source, bpm_confidence, bpm_alt, lyrics_source, lyrics_synced, relationships, key_mode_source, reccobeats_resolution, secondary_role, youtube_url, youtube_url_source,
-                        spotify_streams, spotify_daily_streams, spotify_streams_updated, ytm_streams, ytm_streams_updated, album_override,
-                        lyrics_synced_source, lyrics_synced_confidence
-                    FROM tracks
-                    WHERE artist_id = ?
-                    ORDER BY title
-                """,
+                    "SELECT * FROM tracks WHERE artist_id = ? ORDER BY title",
                     (artist_id,),
                 )
 
@@ -690,57 +676,57 @@ class DataManager:
                 # Création des objets Track
                 for i, row in enumerate(rows):
                     try:
-                        # Accès par index (indices ajustés avec key et mode)
-                        track_id = row[0]  # id
-                        title = row[1]  # title
-                        album = row[2]  # album
-                        track_number = row[3]  # track_number
-                        release_date = row[4]  # release_date
-                        genius_id = row[5]  # genius_id
-                        spotify_id = row[6]  # spotify_id
-                        discogs_id = row[7]  # discogs_id
-                        bpm = row[8]  # bpm
-                        duration = row[9]  # duration
-                        genre = row[10]  # genre
-                        key = row[11]  # key  (NOUVEAU)
-                        mode = row[12]  # mode (NOUVEAU)
-                        musical_key = row[13]  # musical_key
-                        time_signature = row[14]  # time_signature
-                        genius_url = row[15]  # genius_url
-                        spotify_url = row[16]  # spotify_url
-                        is_featuring = row[17]  # is_featuring
-                        primary_artist_name = row[18]  # primary_artist_name
-                        featured_artists = row[19]  # featured_artists
-                        lyrics = row[20]  # lyrics
-                        lyrics_scraped_at = row[21]  # lyrics_scraped_at
-                        has_lyrics = row[22]  # has_lyrics
-                        anecdotes = row[23]  # anecdotes
-                        certifications_json = row[24]  # certifications JSON
-                        album_certifications_json = row[25]  # album_certifications JSON
-                        spotify_page_title = row[26]  # spotify_page_title
-                        created_at = row[27]  # created_at
-                        updated_at = row[28]  # updated_at
-                        last_scraped = row[29]  # last_scraped
-                        isrc = row[30] if len(row) > 30 else None  # isrc (ajouté en fin de SELECT)
-                        bpm_source = row[31] if len(row) > 31 else None
-                        bpm_confidence = row[32] if len(row) > 32 else None
-                        bpm_alt = row[33] if len(row) > 33 else None
-                        lyrics_source = row[34] if len(row) > 34 else None
-                        lyrics_synced = row[35] if len(row) > 35 else None
-                        relationships_raw = row[36] if len(row) > 36 else None
-                        key_mode_source = row[37] if len(row) > 37 else None
-                        reccobeats_resolution = row[38] if len(row) > 38 else None
-                        secondary_role = row[39] if len(row) > 39 else None
-                        youtube_url = row[40] if len(row) > 40 else None
-                        youtube_url_source = row[41] if len(row) > 41 else None
-                        spotify_streams = row[42] if len(row) > 42 else None
-                        spotify_daily_streams = row[43] if len(row) > 43 else None
-                        spotify_streams_updated = row[44] if len(row) > 44 else None
-                        ytm_streams = row[45] if len(row) > 45 else None
-                        ytm_streams_updated = row[46] if len(row) > 46 else None
-                        album_override = row[47] if len(row) > 47 else None
-                        lyrics_synced_source = row[48] if len(row) > 48 else None
-                        lyrics_synced_confidence = row[49] if len(row) > 49 else None
+                        # Accès par nom de colonne (sqlite3.Row)
+                        track_id = row["id"]
+                        title = row["title"]
+                        album = row["album"]
+                        track_number = row["track_number"]
+                        release_date = row["release_date"]
+                        genius_id = row["genius_id"]
+                        spotify_id = row["spotify_id"]
+                        discogs_id = row["discogs_id"]
+                        bpm = row["bpm"]
+                        duration = row["duration"]
+                        genre = row["genre"]
+                        key = row["key"]
+                        mode = row["mode"]
+                        musical_key = row["musical_key"]
+                        time_signature = row["time_signature"]
+                        genius_url = row["genius_url"]
+                        spotify_url = row["spotify_url"]
+                        is_featuring = row["is_featuring"]
+                        primary_artist_name = row["primary_artist_name"]
+                        featured_artists = row["featured_artists"]
+                        lyrics = row["lyrics"]
+                        lyrics_scraped_at = row["lyrics_scraped_at"]
+                        has_lyrics = row["has_lyrics"]
+                        anecdotes = row["anecdotes"]
+                        certifications_json = row["certifications"]
+                        album_certifications_json = row["album_certifications"]
+                        spotify_page_title = row["spotify_page_title"]
+                        created_at = row["created_at"]
+                        updated_at = row["updated_at"]
+                        last_scraped = row["last_scraped"]
+                        isrc = row["isrc"]
+                        bpm_source = row["bpm_source"]
+                        bpm_confidence = row["bpm_confidence"]
+                        bpm_alt = row["bpm_alt"]
+                        lyrics_source = row["lyrics_source"]
+                        lyrics_synced = row["lyrics_synced"]
+                        relationships_raw = row["relationships"]
+                        key_mode_source = row["key_mode_source"]
+                        reccobeats_resolution = row["reccobeats_resolution"]
+                        secondary_role = row["secondary_role"]
+                        youtube_url = row["youtube_url"]
+                        youtube_url_source = row["youtube_url_source"]
+                        spotify_streams = row["spotify_streams"]
+                        spotify_daily_streams = row["spotify_daily_streams"]
+                        spotify_streams_updated = row["spotify_streams_updated"]
+                        ytm_streams = row["ytm_streams"]
+                        ytm_streams_updated = row["ytm_streams_updated"]
+                        album_override = row["album_override"]
+                        lyrics_synced_source = row["lyrics_synced_source"]
+                        lyrics_synced_confidence = row["lyrics_synced_confidence"]
 
                         # Validation
                         if not track_id or not title:
@@ -968,28 +954,6 @@ class DataManager:
 
         return tracks
 
-    def _safe_get(self, row, column_name: str, available_columns: list, default=None):
-        """Accès sécurisé à une colonne de la base de données"""
-        try:
-            if column_name in available_columns:
-                if hasattr(row, "keys") and callable(row.keys):
-                    # sqlite3.Row
-                    return row[column_name]
-                elif hasattr(row, "__getitem__"):
-                    # Tuple/List - utiliser l'index
-                    column_index = available_columns.index(column_name)
-                    if column_index < len(row):
-                        return row[column_index]
-                    else:
-                        return default
-                else:
-                    return default
-            else:
-                return default
-        except Exception as e:
-            logger.debug(f"⚠️ Erreur _safe_get pour {column_name}: {e}")
-            return default
-
     def _get_track_credits(self, cursor, track_id: int) -> list[Credit]:
         """Récupère les crédits d'un morceau - VERSION ROBUSTE"""
         credits = []
@@ -1000,29 +964,27 @@ class DataManager:
 
             for row in credit_rows:
                 try:
-                    # Accès par index aussi pour les crédits
-                    if len(row) >= 6:  # S'assurer qu'on a assez de colonnes
-                        name = row[2] if len(row) > 2 else None
-                        role_str = row[3] if len(row) > 3 else None
-                        role_detail = row[4] if len(row) > 4 else None
-                        source = row[5] if len(row) > 5 else "genius"
+                    name = row["name"]
+                    role_str = row["role"]
+                    role_detail = row["role_detail"]
+                    source = row["source"] or "genius"
 
-                        if name and role_str:
-                            from src.models import Credit, CreditRole
+                    if name and role_str:
+                        from src.models import Credit, CreditRole
 
-                            # Conversion du rôle string vers enum
-                            try:
-                                role = CreditRole(role_str)
-                            except ValueError:
-                                role = CreditRole.OTHER
+                        # Conversion du rôle string vers enum
+                        try:
+                            role = CreditRole(role_str)
+                        except ValueError:
+                            role = CreditRole.OTHER
 
-                            credit = Credit(
-                                name=str(name),
-                                role=role,
-                                role_detail=role_detail,
-                                source=str(source),
-                            )
-                            credits.append(credit)
+                        credit = Credit(
+                            name=str(name),
+                            role=role,
+                            role_detail=role_detail,
+                            source=str(source),
+                        )
+                        credits.append(credit)
 
                 except Exception as credit_error:
                     logger.debug(f"Erreur crédit: {credit_error}")
@@ -1077,7 +1039,7 @@ class DataManager:
                     logger.warning(f"Artiste non trouvé: {artist_name}")
                     return False
 
-                artist_id = artist_row[0]
+                artist_id = artist_row["id"]
 
                 # Supprimer dans l'ordre (contraintes de clés étrangères)
 
@@ -1135,7 +1097,7 @@ class DataManager:
                 if not artist_row:
                     return {}
 
-                artist_id = artist_row[0]
+                artist_id = artist_row["id"]
 
                 # Compter les morceaux et crédits
                 cursor.execute(
@@ -1174,10 +1136,10 @@ class DataManager:
                 for row in cursor.fetchall():
                     recent_tracks.append(
                         {
-                            "title": row[0],
-                            "album": row[1],
-                            "release_date": row[2],
-                            "credits_count": row[3],
+                            "title": row["title"],
+                            "album": row["album"],
+                            "release_date": row["release_date"],
+                            "credits_count": row["credits_count"],
                         }
                     )
 
@@ -1196,17 +1158,17 @@ class DataManager:
 
                 credits_by_role = {}
                 for row in cursor.fetchall():
-                    credits_by_role[row[0]] = row[1]
+                    credits_by_role[row["role"]] = row["count"]
 
                 return {
-                    "name": artist_row[1],
-                    "genius_id": artist_row[2],
-                    "spotify_id": artist_row[3],
-                    "discogs_id": artist_row[4],
-                    "created_at": artist_row[5],
-                    "updated_at": artist_row[6],
-                    "tracks_count": counts[0] if counts else 0,
-                    "credits_count": counts[1] if counts else 0,
+                    "name": artist_row["name"],
+                    "genius_id": artist_row["genius_id"],
+                    "spotify_id": artist_row["spotify_id"],
+                    "discogs_id": artist_row["discogs_id"],
+                    "created_at": artist_row["created_at"],
+                    "updated_at": artist_row["updated_at"],
+                    "tracks_count": counts["tracks_count"] if counts else 0,
+                    "credits_count": counts["credits_count"] if counts else 0,
                     "recent_tracks": recent_tracks,
                     "credits_by_role": credits_by_role,
                 }
@@ -1222,7 +1184,7 @@ class DataManager:
                 row = conn.execute(
                     "SELECT ytm_channel_id FROM artists WHERE id = ?", (artist_id,)
                 ).fetchone()
-                return row[0] if row and row[0] else None
+                return row["ytm_channel_id"] if row and row["ytm_channel_id"] else None
         except Exception as e:
             logger.error(f"Erreur get_artist_ytm_channel: {e}")
             return None
@@ -1314,9 +1276,9 @@ class DataManager:
 
                 if featuring_info:
                     # Préserver les infos featuring sur l'objet track
-                    track.is_featuring = bool(featuring_info[0]) if featuring_info[0] else False
-                    track.primary_artist_name = featuring_info[1]
-                    track.featured_artists = featuring_info[2]
+                    track.is_featuring = bool(featuring_info["is_featuring"])
+                    track.primary_artist_name = featuring_info["primary_artist_name"]
+                    track.featured_artists = featuring_info["featured_artists"]
                     logger.info(f"🔒 Infos featuring préservées pour {track.title}")
                 else:
                     track.is_featuring = False
@@ -1611,11 +1573,11 @@ class DataManager:
                 rows = cursor.fetchall()
                 return [
                     {
-                        "title": row[0],
-                        "spotify_streams": row[1],
-                        "spotify_daily_streams": row[2],
-                        "spotify_streams_updated": row[3],
-                        "ytm_streams": row[4],
+                        "title": row["title"],
+                        "spotify_streams": row["spotify_streams"],
+                        "spotify_daily_streams": row["spotify_daily_streams"],
+                        "spotify_streams_updated": row["spotify_streams_updated"],
+                        "ytm_streams": row["ytm_streams"],
                     }
                     for row in rows
                 ]
@@ -1774,10 +1736,10 @@ class DataManager:
                 )
                 return [
                     {
-                        "spotify_listeners": r[0],
-                        "ytm_listeners": r[1],
-                        "total_estimated": r[2],
-                        "recorded_at": r[3],
+                        "spotify_listeners": r["spotify_listeners"],
+                        "ytm_listeners": r["ytm_listeners"],
+                        "total_estimated": r["total_estimated"],
+                        "recorded_at": r["recorded_at"],
                     }
                     for r in cursor.fetchall()
                 ]

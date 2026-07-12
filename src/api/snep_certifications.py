@@ -2,7 +2,6 @@
 
 import io
 import sqlite3
-import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +9,8 @@ import pandas as pd
 
 from src.config import DATA_PATH
 from src.models.certification import Certification, CertificationCategory, CertificationLevel
+from src.utils.cert_normalize import normalize_text as _normalize_text
+from src.utils.cert_normalize import repair_extra_separators as _repair_extra_separators
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -109,88 +110,13 @@ class SNEPCertificationManager:
         logger.info("📊 Tables de base de données créées/vérifiées")
 
     def normalize_text(self, text: str) -> str:
-        """Normalise le texte pour les comparaisons - VERSION AMÉLIORÉE"""
-        if not text:
-            return ""
-
-        # ÉTAPE 1: Nettoyer les espaces/tabulations (AVANT tout traitement)
-        import re
-
-        # Remplacer tous les espaces blancs (espaces, tabs, etc.) par un seul espace
-        text = re.sub(r"\s+", " ", text.strip())
-
-        # ÉTAPE 2: Supprimer les accents
-        text = unicodedata.normalize("NFD", text)
-        text = "".join(char for char in text if unicodedata.category(char) != "Mn")
-
-        # ÉTAPE 3: Mettre en majuscules
-        text = text.upper()
-
-        # ÉTAPE 4: Remplacer les caractères spéciaux et ligatures
-        replacements = {
-            "&": "AND",
-            "$": "S",
-            "Œ": "OE",
-            "OE": "OE",
-            "Æ": "AE",
-            "AE": "AE",
-            # Échappements Unicode explicites : les guillemets courbes avaient été
-            # aplatis en ASCII par un éditeur → entrées dupliquées no-op (AUDIT.md §3.5)
-            "‘": "'",  # ‘ apostrophe ouvrante
-            "’": "'",  # ’ apostrophe fermante (la plus fréquente dans les titres)
-            "`": "'",
-            "´": "'",  # ´ accent aigu isolé
-            "“": '"',  # “ guillemet double ouvrant
-            "”": '"',  # ” guillemet double fermant
-            "«": '"',
-            "»": '"',
-            "–": "-",
-            "—": "-",
-            "…": "...",
-        }
-
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-
-        # ÉTAPE 5: Supprimer tous les caractères de ponctuation sauf lettres, chiffres et espaces
-        # Garder les apostrophes pour les featuring
-        text = re.sub(r"[^\w\s\'-]", "", text)
-
-        # ÉTAPE 6: Remplacer espaces multiples par un seul (final cleanup)
-        text = re.sub(r"\s+", " ", text)
-
-        return text.strip()
+        """Normalise le texte pour les comparaisons (délègue à cert_normalize)."""
+        return _normalize_text(text)
 
     @staticmethod
     def _repair_extra_separators(text: str, sep: str = ";") -> tuple:
-        """
-        Répare les lignes ayant plus de colonnes que l'en-tête : les champs
-        excédentaires sont fusionnés dans la 3e colonne (Éditeur/Distributeur),
-        seule colonne susceptible de contenir le séparateur (noms de labels).
-        Retourne (texte_réparé, nombre_de_lignes_réparées).
-        """
-        lines = text.splitlines()
-        if not lines:
-            return text, 0
-
-        expected = lines[0].count(sep) + 1
-        repaired = 0
-        out = [lines[0]]
-
-        for line in lines[1:]:
-            fields = line.split(sep)
-            # Ne pas toucher aux lignes vides, conformes, ou contenant des quotes
-            if len(fields) > expected and '"' not in line and line.strip():
-                extra = len(fields) - expected
-                # Fusionner la colonne Éditeur avec les champs excédentaires,
-                # en QUOTANT le champ pour que le ';' interne ne re-splitte pas
-                label = sep.join(fields[2 : 3 + extra])
-                merged = fields[:2] + [f'"{label}"'] + fields[3 + extra :]
-                line = sep.join(merged)
-                repaired += 1
-            out.append(line)
-
-        return "\n".join(out), repaired
+        """Répare les lignes à colonnes excédentaires (délègue à cert_normalize)."""
+        return _repair_extra_separators(text, sep)
 
     def load_csv(self, filepath: Path | None = None) -> pd.DataFrame:
         """Charge le fichier CSV des certifications SNEP"""

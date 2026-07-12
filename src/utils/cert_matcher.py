@@ -24,8 +24,8 @@ from typing import Any
 
 import pandas as pd
 
-from src.api.snep_certifications import get_snep_manager
 from src.config import DATA_PATH
+from src.utils.cert_normalize import normalize_text as _normalize_text
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -101,8 +101,8 @@ class CertMatcher:
     """Magasin unifié + raccordement morceau/album ↔ certifs, multi-pays."""
 
     def __init__(self):
-        # Réutilise EXACTEMENT le normalize_text de la SNEP (parité garantie)
-        self._norm = get_snep_manager().normalize_text
+        # Normalisation partagée (parité entre sources garantie par cert_normalize)
+        self._norm = _normalize_text
         self.df = self._load_all()
         logger.info(
             f"✅ CertMatcher : {len(self.df)} certifs unifiées "

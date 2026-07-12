@@ -1,6 +1,7 @@
 """Gestionnaire de sauvegarde et chargement des données"""
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -13,6 +14,118 @@ from src.utils.logger import get_logger
 from src.utils.track_mapper import track_from_row
 
 logger = get_logger(__name__)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Migrations de schéma versionnées (PRAGMA user_version)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Séquence FIGÉE : une entrée par évolution, dans l'ordre, JAMAIS modifiée
+# après coup (on ajoute uniquement à la fin). Les CREATE TABLE de
+# _init_database posent le schéma de départ ; toute colonne ajoutée depuis
+# est une ligne ci-dessous. Remplace les anciens ALTER TABLE en try/except
+# avalé (cause du bug AUDIT §3.1 : ordre/exception silencieuse).
+#
+# Bootstrap : sur une base existante passée par l'ancien mécanisme
+# (user_version encore 0, colonnes déjà présentes), chaque ADD COLUMN est
+# sauté si sa colonne existe déjà, puis user_version est posé. Une fois
+# user_version = N, ces migrations ne sont plus jamais rejouées.
+_MIGRATIONS: list[tuple[int, str]] = [
+    # artists — auditeurs mensuels + totaux Kworb
+    (1, "ALTER TABLE artists ADD COLUMN spotify_monthly_listeners INTEGER"),
+    (2, "ALTER TABLE artists ADD COLUMN ytm_monthly_listeners INTEGER"),
+    (3, "ALTER TABLE artists ADD COLUMN ytm_channel_id TEXT"),
+    (4, "ALTER TABLE artists ADD COLUMN kworb_total_streams INTEGER"),
+    (5, "ALTER TABLE artists ADD COLUMN kworb_daily_streams INTEGER"),
+    (6, "ALTER TABLE artists ADD COLUMN kworb_lead_streams INTEGER"),
+    (7, "ALTER TABLE artists ADD COLUMN kworb_feat_streams INTEGER"),
+    (8, "ALTER TABLE artists ADD COLUMN kworb_updated TIMESTAMP"),
+    # tracks — colonnes historiques (filet pour bases intermédiaires) puis
+    # enrichissements (isrc, vote BPM, key/mode, paroles synchro, streams…)
+    (9, "ALTER TABLE tracks ADD COLUMN is_featuring BOOLEAN DEFAULT 0"),
+    (10, "ALTER TABLE tracks ADD COLUMN primary_artist_name TEXT"),
+    (11, "ALTER TABLE tracks ADD COLUMN featured_artists TEXT"),
+    (12, "ALTER TABLE tracks ADD COLUMN lyrics TEXT"),
+    (13, "ALTER TABLE tracks ADD COLUMN has_lyrics BOOLEAN DEFAULT 0"),
+    (14, "ALTER TABLE tracks ADD COLUMN lyrics_scraped_at TIMESTAMP"),
+    (15, "ALTER TABLE tracks ADD COLUMN isrc TEXT"),
+    (16, "ALTER TABLE tracks ADD COLUMN bpm_source TEXT"),
+    (17, "ALTER TABLE tracks ADD COLUMN bpm_confidence INTEGER"),
+    (18, "ALTER TABLE tracks ADD COLUMN key_mode_source TEXT"),
+    (19, "ALTER TABLE tracks ADD COLUMN reccobeats_resolution TEXT"),
+    (20, "ALTER TABLE tracks ADD COLUMN secondary_role TEXT"),
+    (21, "ALTER TABLE tracks ADD COLUMN bpm_alt INTEGER"),
+    (22, "ALTER TABLE tracks ADD COLUMN lyrics_source TEXT"),
+    (23, "ALTER TABLE tracks ADD COLUMN lyrics_synced TEXT"),
+    (24, "ALTER TABLE tracks ADD COLUMN lyrics_synced_source TEXT"),
+    (25, "ALTER TABLE tracks ADD COLUMN lyrics_synced_confidence INTEGER"),
+    (26, "ALTER TABLE tracks ADD COLUMN relationships TEXT"),
+    (27, "ALTER TABLE tracks ADD COLUMN certifications TEXT"),
+    (28, "ALTER TABLE tracks ADD COLUMN album_certifications TEXT"),
+    (29, "ALTER TABLE tracks ADD COLUMN musical_key TEXT"),
+    (30, "ALTER TABLE tracks ADD COLUMN key TEXT"),
+    (31, "ALTER TABLE tracks ADD COLUMN mode TEXT"),
+    (32, "ALTER TABLE tracks ADD COLUMN time_signature TEXT"),
+    (33, "ALTER TABLE tracks ADD COLUMN anecdotes TEXT"),
+    (34, "ALTER TABLE tracks ADD COLUMN spotify_page_title TEXT"),
+    (35, "ALTER TABLE tracks ADD COLUMN spotify_streams INTEGER"),
+    (36, "ALTER TABLE tracks ADD COLUMN spotify_daily_streams INTEGER"),
+    (37, "ALTER TABLE tracks ADD COLUMN spotify_streams_updated TIMESTAMP"),
+    (38, "ALTER TABLE tracks ADD COLUMN ytm_streams INTEGER"),
+    (39, "ALTER TABLE tracks ADD COLUMN ytm_streams_updated TIMESTAMP"),
+    (40, "ALTER TABLE tracks ADD COLUMN youtube_url TEXT"),
+    (41, "ALTER TABLE tracks ADD COLUMN youtube_url_source TEXT"),
+    (42, "ALTER TABLE tracks ADD COLUMN album_override INTEGER"),
+    # albums — streams YTM + éditions Spotify agrégées
+    (43, "ALTER TABLE albums ADD COLUMN ytm_streams INTEGER"),
+    (44, "ALTER TABLE albums ADD COLUMN ytm_streams_updated TIMESTAMP"),
+    (45, "ALTER TABLE albums ADD COLUMN spotify_album_ids TEXT"),
+    # Backfill : historiquement youtube_url n'était écrit que par Genius (media).
+    # Idempotent (clause WHERE) — ne s'exécute qu'une fois grâce au versionnage.
+    (
+        46,
+        "UPDATE tracks SET youtube_url_source = 'genius_media' "
+        "WHERE youtube_url IS NOT NULL AND youtube_url != '' "
+        "AND (youtube_url_source IS NULL OR youtube_url_source = '')",
+    ),
+]
+
+_ADD_COLUMN_RE = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", re.IGNORECASE)
+
+
+def _table_columns(cursor, table: str) -> set[str]:
+    cursor.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in cursor.fetchall()}
+
+
+def run_migrations(cursor) -> None:
+    """Applique les migrations de schéma en attente (voir _MIGRATIONS)."""
+    current = cursor.execute("PRAGMA user_version").fetchone()[0]
+    latest = _MIGRATIONS[-1][0] if _MIGRATIONS else 0
+    if current >= latest:
+        return
+
+    # Colonnes présentes par table — consultées uniquement pour le bootstrap
+    # depuis user_version = 0 (base déjà migrée par l'ancien mécanisme).
+    present: dict[str, set[str]] = {}
+
+    for version, sql in _MIGRATIONS:
+        if version <= current:
+            continue
+        m = _ADD_COLUMN_RE.match(sql)
+        if m:
+            table, column = m.group(1), m.group(2)
+            if table not in present:
+                present[table] = _table_columns(cursor, table)
+            if column not in present[table]:
+                cursor.execute(sql)
+                present[table].add(column)
+                logger.info(f"✅ Migration {version} : {table}.{column} ajoutée")
+        else:
+            # Migration de données (backfill), idempotente par sa clause WHERE
+            cursor.execute(sql)
+            logger.info(f"✅ Migration {version} appliquée (données)")
+        cursor.execute(f"PRAGMA user_version = {version}")
 
 
 class DataManager:
@@ -53,26 +166,6 @@ class DataManager:
                     updated_at TIMESTAMP
                 )
             """)
-
-            # Migration conditionnelle : colonnes monthly listeners sur artists
-            cursor.execute("PRAGMA table_info(artists)")
-            artist_cols = {row[1] for row in cursor.fetchall()}
-            for col, typ in [
-                ("spotify_monthly_listeners", "INTEGER"),
-                ("ytm_monthly_listeners", "INTEGER"),
-                ("ytm_channel_id", "TEXT"),  # canal YTM épinglé (homonymes)
-                # Totaux Kworb (tableau récap de la page artiste)
-                ("kworb_total_streams", "INTEGER"),
-                ("kworb_daily_streams", "INTEGER"),
-                ("kworb_lead_streams", "INTEGER"),
-                ("kworb_feat_streams", "INTEGER"),
-                ("kworb_updated", "TIMESTAMP"),  # date "Last updated" de la page Kworb
-            ]:
-                if col not in artist_cols:
-                    try:
-                        cursor.execute(f"ALTER TABLE artists ADD COLUMN {col} {typ}")
-                    except Exception:
-                        pass
 
             # Table historique des auditeurs mensuels
             cursor.execute("""
@@ -123,68 +216,6 @@ class DataManager:
                 )
             """)
 
-            # Vérifier et ajouter les colonnes manquantes si elles n'existent pas
-            cursor.execute("PRAGMA table_info(tracks)")
-            existing_columns = {row[1] for row in cursor.fetchall()}
-
-            # Liste des colonnes à ajouter
-            new_columns = {
-                # Colonnes historiques — présentes dans les vieilles bases mais
-                # absentes de toute migration (filet pour les bases intermédiaires)
-                "is_featuring": "BOOLEAN DEFAULT 0",
-                "primary_artist_name": "TEXT",
-                "featured_artists": "TEXT",
-                "lyrics": "TEXT",
-                "has_lyrics": "BOOLEAN DEFAULT 0",
-                "lyrics_scraped_at": "TIMESTAMP",
-                "isrc": "TEXT",  # ISRC (pivot inter-sources : Deezer/ReccoBeats)
-                "bpm_source": "TEXT",  # Source(s) du BPM retenu (vote §8.3)
-                "bpm_confidence": "INTEGER",  # Nb de sources concordantes
-                "key_mode_source": "TEXT",  # Source de key/mode (peut différer du BPM)
-                "reccobeats_resolution": "TEXT",  # 'isrc' | 'spotify_id'
-                "secondary_role": "TEXT",  # Rôle secondaire (ex: "Additional Voices") — ni primary ni feat
-                "bpm_alt": "INTEGER",  # Octave alternative (half-time) écartée
-                "lyrics_source": "TEXT",  # Provenance des paroles (YouTube Music / genius)
-                "lyrics_synced": "TEXT",  # Paroles synchronisées (format LRC), si dispo
-                "lyrics_synced_source": "TEXT",  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
-                "lyrics_synced_confidence": "INTEGER",  # Nb de sources concordantes (2=croisé, 1=unique/départage)
-                "relationships": "TEXT",  # JSON : samples/interpolations/cover/remix amont + trad FR
-                "certifications": "TEXT",  # JSON array
-                "album_certifications": "TEXT",  # JSON array
-                "musical_key": "TEXT",  # Musical key en français (ex: "Do majeur")
-                "key": "TEXT",  # Key brute (ex: "C", "G#/Ab")
-                "mode": "TEXT",  # Mode (ex: "major", "minor")
-                "time_signature": "TEXT",  # Signature rythmique (ex: "4/4")
-                "anecdotes": "TEXT",  # Anecdotes depuis Genius
-                "spotify_page_title": "TEXT",  # Titre de la page Spotify pour vérification
-                "spotify_streams": "INTEGER",  # Streams totaux Spotify (kworb.net)
-                "spotify_daily_streams": "INTEGER",  # Streams journaliers Spotify (kworb.net)
-                "spotify_streams_updated": "TIMESTAMP",  # Date de dernière mise à jour kworb
-                "ytm_streams": "INTEGER",  # Streams YouTube Music
-                "ytm_streams_updated": "TIMESTAMP",  # Date de dernière mise à jour YTMusic
-                "youtube_url": "TEXT",  # Lien YouTube (absent des bases créées avec l'ancien schéma)
-                "youtube_url_source": "TEXT",  # 'genius_media' (prioritaire) | 'search_auto' (fallback persisté)
-                "album_override": "INTEGER",  # 1 = album édité MANUELLEMENT (détaché…) — ne pas re-remplir via API
-            }
-
-            for col_name, col_type in new_columns.items():
-                if col_name not in existing_columns:
-                    try:
-                        cursor.execute(f"ALTER TABLE tracks ADD COLUMN {col_name} {col_type}")
-                        logger.info(f"✅ Colonne '{col_name}' ajoutée à la table tracks")
-                    except Exception as e:
-                        logger.debug(f"Colonne '{col_name}' déjà existante ou erreur: {e}")
-
-            # Backfill : historiquement youtube_url n'était écrit que par Genius (media)
-            try:
-                cursor.execute(
-                    "UPDATE tracks SET youtube_url_source = 'genius_media' "
-                    "WHERE youtube_url IS NOT NULL AND youtube_url != '' "
-                    "AND (youtube_url_source IS NULL OR youtube_url_source = '')"
-                )
-            except Exception as e:
-                logger.debug(f"Backfill youtube_url_source: {e}")
-
             # Table des crédits
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS credits (
@@ -224,20 +255,9 @@ class DataManager:
                 )
             """)
 
-            # Migration conditionnelle : colonnes YTMusic sur la table albums
-            cursor.execute("PRAGMA table_info(albums)")
-            album_cols = {row[1] for row in cursor.fetchall()}
-            for col, typ in [
-                ("ytm_streams", "INTEGER"),
-                ("ytm_streams_updated", "TIMESTAMP"),
-                ("spotify_album_ids", "TEXT"),
-            ]:  # IDs Spotify des éditions (CSV)
-                if col not in album_cols:
-                    try:
-                        cursor.execute(f"ALTER TABLE albums ADD COLUMN {col} {typ}")
-                        logger.info(f"✅ Colonne '{col}' ajoutée à la table albums")
-                    except Exception as e:
-                        logger.debug(f"Colonne albums '{col}' déjà existante ou erreur: {e}")
+            # Migrations de schéma versionnées (PRAGMA user_version) : toutes
+            # les évolutions de colonnes depuis le schéma de départ ci-dessus.
+            run_migrations(cursor)
 
             conn.commit()
             logger.info("Base de données initialisée")

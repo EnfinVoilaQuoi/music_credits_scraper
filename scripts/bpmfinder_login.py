@@ -10,12 +10,13 @@ la réutilisera en headless sans re-login.
 Usage :
     python scripts/bpmfinder_login.py
 """
+
 import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from src.scrapers.bpmfinder_scraper import ANALYZER_URL, BPMFinderScraper
 

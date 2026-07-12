@@ -12,6 +12,7 @@ from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.models import Track
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+from src.utils.bpm_vote import BpmBallot, sanitize_bpm
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -466,7 +467,9 @@ class DataEnricher:
         initial_bpm = getattr(track, "bpm", None)
 
         # Candidats BPM collectés par chaque source → vote final (_finalize_bpm)
-        track._bpm_candidates = []
+        # NB : le scrutin vit sur le track le temps du run (transitoire ; il
+        # rejoindra l'EnrichmentContext en phase C2).
+        track._bpm_ballot = BpmBallot()
 
         # ========================================
         # FEATS : media/album/relations via API Genius AVANT ReccoBeats
@@ -965,117 +968,33 @@ class DataEnricher:
         return results
 
     # ──────────────────────────────────────────────────────────────────────
-    # Réconciliation BPM (§8.2 borne unique + §8.3 vote demi/double)
+    # Réconciliation BPM — logique pure dans src/utils/bpm_vote.py (§8.2/§8.3).
+    # Ici : la couture avec le scrutin porté par le track le temps du run.
     # ──────────────────────────────────────────────────────────────────────
-    _BPM_SOURCE_RANK = {"reccobeats": 3, "getsongbpm": 2, "songbpm": 1, "deezer": 0}
-
     @staticmethod
     def _sanitize_bpm(value):
-        """Cast en int + borne unique 40–220. None si invalide/hors borne."""
-        try:
-            v = int(round(float(value)))
-        except (ValueError, TypeError):
-            return None
-        return v if 40 <= v <= 220 else None
+        """Cast en int + borne unique 40–220. None si invalide (délègue bpm_vote)."""
+        return sanitize_bpm(value)
+
+    @staticmethod
+    def _get_ballot(track) -> BpmBallot:
+        """Scrutin BPM du run, créé à la volée si absent."""
+        ballot = getattr(track, "_bpm_ballot", None)
+        if ballot is None:
+            ballot = track._bpm_ballot = BpmBallot()
+        return ballot
 
     def _add_bpm_candidate(self, track, source: str, raw):
         """Enregistre un candidat BPM (sanitizé) pour le vote final."""
-        v = self._sanitize_bpm(raw)
-        if v is None:
-            return
-        if not getattr(track, "_bpm_candidates", None):
-            track._bpm_candidates = []
-        track._bpm_candidates.append((source, v))
-        logger.debug(f"🎚️ Candidat BPM: {source}={v}")
-
-    @staticmethod
-    def _bpm_agree(a: int, b: int, tol: int = 3) -> bool:
-        """Concordance à la tolérance près, demi/double inclus (71 ≡ 142)."""
-        return abs(a - b) <= tol or abs(a - 2 * b) <= tol or abs(2 * a - b) <= tol
-
-    # Seuil sous lequel un BPM ISOLÉ (1 seule source) est considéré half-time
-    # et remonté en double-time (logique prod rap & co.). N'agit PAS quand
-    # plusieurs sources concordent ou qu'une source confirme déjà le double.
-    _BPM_HALFTIME_THRESHOLD = 90
-
-    def _reconcile_bpm(self, candidates):
-        """
-        (bpm_real, bpm_alt, 'src1+src2', confidence) à partir des candidats.
-        bpm_real = octave retenue (double-time à l'export) ; bpm_alt = autre octave.
-
-        Résolution demi/double par ÉVIDENCE (pas de seuil aveugle) :
-          1. Deux octaves dans le cluster (74 + 145) → une source confirme le
-             double → on garde la valeur HAUTE réellement mesurée.
-          2. Une seule octave, ≥2 sources d'accord (88 + 88) → consensus = vrai
-             tempo → on NE double PAS.
-          3. Une seule octave, 1 source sous le seuil (71 seul) → aucune preuve
-             → convention rap : on double (71 → 142).
-        """
-        if not candidates:
-            return (None, None, None, 0)
-        clusters = []
-        for cand in candidates:
-            for cl in clusters:
-                if any(self._bpm_agree(cand[1], m[1]) for m in cl):
-                    cl.append(cand)
-                    break
-            else:
-                clusters.append([cand])
-
-        # Meilleur cluster : d'abord la taille (vote), puis la source la plus fiable
-        def rank(cl):
-            return (len(cl), max(self._BPM_SOURCE_RANK.get(s, 0) for s, _ in cl))
-
-        best = max(clusters, key=rank)
-        conf = len(best)
-        srcs = sorted({s for s, _ in best}, key=lambda s: -self._BPM_SOURCE_RANK.get(s, 0))
-        th = self._BPM_HALFTIME_THRESHOLD
-
-        vals = [v for _, v in best]
-        lo, hi = min(vals), max(vals)
-
-        if hi >= lo * 1.5:
-            # (1) Deux octaves : double confirmé → valeur haute la plus fiable
-            high = [(s, v) for s, v in best if v >= lo * 1.5]
-            bpm_real = max(high, key=lambda sb: self._BPM_SOURCE_RANK.get(sb[0], 0))[1]
-            bpm_alt = lo
-        else:
-            # Une seule octave : valeur de la source la plus fiable
-            V = max(best, key=lambda sb: self._BPM_SOURCE_RANK.get(sb[0], 0))[1]
-            if conf < 2 and th > V and V * 2 <= 220:
-                # (3) half-time isolé, aucune confirmation → on double
-                bpm_real, bpm_alt = V * 2, V
-            else:
-                # (2) consensus, ou déjà bande haute → on garde V
-                bpm_real = V
-                if th > V and V * 2 <= 220:
-                    bpm_alt = V * 2  # ex. 88 (consensus) → alt 176
-                else:
-                    half = V // 2
-                    bpm_alt = half if half >= 55 else None
-        return (bpm_real, bpm_alt, "+".join(srcs), conf)
+        self._get_ballot(track).add(source, raw)
 
     def _bpm_consensus_reached(self, track) -> bool:
         """True si ≥2 candidats concordent déjà (→ pas besoin du scrape SongBPM)."""
-        cands = getattr(track, "_bpm_candidates", None) or []
-        if len(cands) < 2:
-            return False
-        return self._reconcile_bpm(cands)[3] >= 2
+        return self._get_ballot(track).consensus_reached()
 
     def _finalize_bpm(self, track):
         """Pose le BPM final : bpm (octave réelle) + bpm_alt + source + confiance."""
-        cands = getattr(track, "_bpm_candidates", None) or []
-        bpm, bpm_alt, src, conf = self._reconcile_bpm(cands)
-        if bpm is not None:
-            track.bpm = bpm
-            track.bpm_alt = bpm_alt
-            track.bpm_source = src
-            track.bpm_confidence = conf
-            alt_str = f" (alt half-time: {bpm_alt})" if bpm_alt else ""
-            logger.info(
-                f"🧮 BPM réconcilié: {bpm}{alt_str} (source(s): {src}, confiance: {conf} | candidats: {cands})"
-            )
-        track._bpm_candidates = []
+        self._get_ballot(track).finalize(track)
 
     def _apply_reccobeats_result(
         self, track: Track, track_info: dict, resolution: str | None = None

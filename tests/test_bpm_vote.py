@@ -1,17 +1,17 @@
-"""Tests du vote BPM (data_enricher) — sanitization, concordance demi/double,
-réconciliation par évidence (cas documentés dans la docstring de _reconcile_bpm).
+"""Tests du vote BPM (src/utils/bpm_vote) — sanitization, concordance demi/double,
+réconciliation par évidence (cas documentés dans la docstring de reconcile_bpm).
 
-Les méthodes n'utilisent self que pour des attributs de CLASSE : on les appelle
-non liées (pas d'instanciation de DataEnricher, qui initialiserait les APIs).
+Logique pure extraite de DataEnricher : on teste désormais le module bpm_vote
+directement. Les asserts de SÉMANTIQUE (§8.3 JOURNAL) sont figés à l'identique.
 """
 
 import pytest
 
-from src.utils.data_enricher import DataEnricher
+from src.utils.bpm_vote import BpmBallot, bpm_agree, reconcile_bpm, sanitize_bpm
 
 
 def _reconcile(candidates):
-    return DataEnricher._reconcile_bpm(DataEnricher, candidates)
+    return reconcile_bpm(candidates)
 
 
 class TestSanitizeBpm:
@@ -27,26 +27,26 @@ class TestSanitizeBpm:
         ],
     )
     def test_valeurs_valides(self, brut, attendu):
-        assert DataEnricher._sanitize_bpm(brut) == attendu
+        assert sanitize_bpm(brut) == attendu
 
     @pytest.mark.parametrize("invalide", [None, "abc", "", 39, 221, 0, -100])
     def test_valeurs_invalides(self, invalide):
-        assert DataEnricher._sanitize_bpm(invalide) is None
+        assert sanitize_bpm(invalide) is None
 
 
 class TestBpmAgree:
     def test_egalite_et_tolerance(self):
-        assert DataEnricher._bpm_agree(142, 142)
-        assert DataEnricher._bpm_agree(142, 140)  # tolérance 3
-        assert not DataEnricher._bpm_agree(142, 138)
+        assert bpm_agree(142, 142)
+        assert bpm_agree(142, 140)  # tolérance 3
+        assert not bpm_agree(142, 138)
 
     def test_demi_double_concordants(self):
         # 71 ≡ 142 : même tempo à l'octave près
-        assert DataEnricher._bpm_agree(71, 142)
-        assert DataEnricher._bpm_agree(142, 71)
+        assert bpm_agree(71, 142)
+        assert bpm_agree(142, 71)
 
     def test_tempos_differents(self):
-        assert not DataEnricher._bpm_agree(100, 150)
+        assert not bpm_agree(100, 150)
 
 
 class TestReconcileBpm:
@@ -91,3 +91,42 @@ class TestReconcileBpm:
         bpm, alt, src, conf = _reconcile([("deezer", 100), ("reccobeats", 150)])
         assert bpm == 150
         assert conf == 1
+
+
+class TestBpmBallot:
+    """Le scrutin encapsule collecte + réconciliation + écriture sur le track."""
+
+    def test_add_ignore_les_valeurs_invalides(self):
+        ballot = BpmBallot()
+        ballot.add("deezer", None)
+        ballot.add("deezer", "abc")
+        ballot.add("deezer", 900)  # hors borne
+        assert ballot.candidates == []
+
+    def test_consensus_reached(self):
+        ballot = BpmBallot()
+        ballot.add("deezer", 120)
+        assert ballot.consensus_reached() is False
+        ballot.add("getsongbpm", 121)  # concordant
+        assert ballot.consensus_reached() is True
+
+    def test_finalize_pose_le_bpm_et_vide_le_scrutin(self):
+        from src.models.track import Track
+
+        track = Track(title="X")
+        ballot = BpmBallot()
+        ballot.add("deezer", 74)
+        ballot.add("reccobeats", 145)
+        ballot.finalize(track)
+        assert track.bpm == 145
+        assert track.bpm_alt == 74
+        assert track.bpm_source == "reccobeats+deezer"
+        assert track.bpm_confidence == 2
+        assert ballot.candidates == []  # vidé après finalize
+
+    def test_finalize_sans_candidat_ne_touche_pas_le_bpm(self):
+        from src.models.track import Track
+
+        track = Track(title="X", bpm=99)
+        BpmBallot().finalize(track)
+        assert track.bpm == 99

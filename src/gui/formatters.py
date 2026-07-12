@@ -7,6 +7,8 @@ forme lisible des certifications (emoji, texte, durées) vit ici.
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from src.utils.dates import parse_flexible
+
 if TYPE_CHECKING:
     from src.models.track import Track
 
@@ -75,11 +77,11 @@ def _format_cert_line(cert: dict) -> str:
     """Formate une ligne « emoji niveau (date) » pour une certification."""
     level = cert.get("certification", "")
     date = cert.get("certification_date", "")
-    if isinstance(date, str) and date:
-        try:
-            date_str = datetime.fromisoformat(date).strftime("%d/%m/%Y")
-        except ValueError:
-            date_str = date
+    parsed = parse_flexible(date)
+    if parsed is not None:
+        date_str = parsed.strftime("%d/%m/%Y")
+    elif isinstance(date, str):
+        date_str = date  # chaîne non-ISO : affichée telle quelle
     else:
         date_str = ""
 

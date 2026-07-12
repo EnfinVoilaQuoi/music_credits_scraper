@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from src.models.artist import Artist
 
+# NB : les utilitaires de src.utils sont importés LOCALEMENT dans les méthodes
+# (et non au niveau module) : src/utils/__init__.py charge DataManager/DataEnricher,
+# qui importent Track — un import module-niveau ici créerait un cycle.
 logger = logging.getLogger(__name__)
 
 
@@ -412,27 +415,15 @@ class Track:
         - Si force=True, écrase sans vérifier
         - Si pas de date existante, met à jour
         """
-        from datetime import datetime
+        from src.utils.dates import parse_flexible
 
-        from src.utils.logger import get_logger
-
-        logger = get_logger(__name__)
-
-        # Convertir new_date en datetime si c'est une string
-        if isinstance(new_date, str):
-            try:
-                # Format ISO (YYYY-MM-DD ou YYYY-MM-DDTHH:MM:SS)
-                if "T" in new_date:
-                    new_date = datetime.fromisoformat(new_date.replace("Z", "+00:00"))
-                else:
-                    new_date = datetime.strptime(new_date[:10], "%Y-%m-%d")
-            except Exception as e:
-                logger.debug(f"Impossible de parser la date '{new_date}': {e}")
-                return False
-
-        # Si new_date n'est pas un datetime valide, abandonner
-        if not isinstance(new_date, datetime):
+        # Convertir en datetime (ISO, "YYYY-MM-DD", objet datetime tel quel)
+        parsed = parse_flexible(new_date)
+        if parsed is None:
+            if new_date is not None:
+                logger.debug(f"Impossible de parser la date '{new_date}'")
             return False
+        new_date = parsed
 
         # Si pas de date existante, mettre à jour
         if not self.release_date:
@@ -442,21 +433,14 @@ class Track:
             )
             return True
 
-        # Convertir la date existante en datetime si nécessaire
-        existing_date = self.release_date
-        if isinstance(existing_date, str):
-            try:
-                if "T" in existing_date:
-                    existing_date = datetime.fromisoformat(existing_date.replace("Z", "+00:00"))
-                else:
-                    existing_date = datetime.strptime(existing_date[:10], "%Y-%m-%d")
-            except Exception:
-                # Si impossible de parser la date existante, la remplacer
-                self.release_date = new_date
-                logger.debug(
-                    f"Date existante invalide remplacée pour '{self.title}': {new_date.strftime('%d/%m/%Y')}"
-                )
-                return True
+        # Convertir la date existante ; si illisible, la remplacer
+        existing_date = parse_flexible(self.release_date)
+        if existing_date is None:
+            self.release_date = new_date
+            logger.debug(
+                f"Date existante invalide remplacée pour '{self.title}': {new_date.strftime('%d/%m/%Y')}"
+            )
+            return True
 
         # Si force=True, écraser sans vérifier
         if force:
@@ -495,26 +479,21 @@ class Track:
 
     # Méthode pour calculer la durée d'obtention
     def calculate_certification_duration(self) -> int | None:
-        """Calcule la durée entre la sortie et la certification"""
-        if not self.certification_date or not self.release_date:
+        """Calcule la durée (en jours) entre la sortie et la certification."""
+        from src.utils.dates import parse_flexible
+
+        cert_date = parse_flexible(self.certification_date)
+        rel_date = parse_flexible(self.release_date)
+        if cert_date is None or rel_date is None:
             return None
 
         try:
-            cert_date = self.certification_date
-            rel_date = self.release_date
-
-            # Convertir en datetime si nécessaire
-            if isinstance(cert_date, str):
-                cert_date = datetime.fromisoformat(cert_date)
-            if isinstance(rel_date, str):
-                rel_date = datetime.fromisoformat(rel_date)
-
             duration = (cert_date - rel_date).days
-            self.certification_duration_days = duration if duration >= 0 else None
-            return self.certification_duration_days
-
-        except Exception:
+        except TypeError:
+            # Mélange aware/naive (une date ISO avec 'Z', l'autre non)
             return None
+        self.certification_duration_days = duration if duration >= 0 else None
+        return self.certification_duration_days
 
     @property
     def producers(self):

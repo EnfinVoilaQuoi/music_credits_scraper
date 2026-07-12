@@ -10,7 +10,9 @@ from src.utils.update_brma import UltratopUpdater
 
 
 def _updater(tmp_path) -> UltratopUpdater:
-    return UltratopUpdater(database_path=str(tmp_path / "certif_brma.csv"), output_dir=str(tmp_path))
+    return UltratopUpdater(
+        database_path=str(tmp_path / "certif_brma.csv"), output_dir=str(tmp_path)
+    )
 
 
 def _cert(artist, title, level="Or", date="2020-01-01", category="single"):

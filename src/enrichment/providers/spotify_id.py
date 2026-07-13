@@ -39,7 +39,7 @@ class SpotifyIdProvider:
         validate = ctx.validate_spotify_id_unique
 
         # Si le track a déjà un Spotify ID et qu'on ne force pas, le vérifier
-        if not force_scraper and hasattr(track, "spotify_id") and track.spotify_id:
+        if not force_scraper and track.spotify_id:
             if validate and validate(track.spotify_id, track, ctx.artist_tracks):
                 logger.info(f"✅ Spotify ID existant validé: {track.spotify_id}")
                 return track.spotify_id

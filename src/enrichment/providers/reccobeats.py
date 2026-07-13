@@ -35,7 +35,7 @@ class ReccoBeatsProvider:
 
     @staticmethod
     def _artist_name(track: Track) -> str:
-        if getattr(track, "is_featuring", False) and getattr(track, "primary_artist_name", None):
+        if track.is_featuring and track.primary_artist_name:
             return track.primary_artist_name
         return track.artist.name if hasattr(track.artist, "name") else str(track.artist)
 
@@ -57,7 +57,7 @@ class ReccoBeatsProvider:
         sbpm = sanitize_bpm(bpm)
         if sbpm is not None:
             ctx.bpm_ballot.add("reccobeats", sbpm)
-            if not getattr(track, "bpm", None):
+            if not track.bpm:
                 track.bpm = sbpm
             applied = True
 
@@ -80,7 +80,7 @@ class ReccoBeatsProvider:
 
         # Durée (ne pas écraser une durée déjà présente)
         dur = track_info.get("duration")
-        if isinstance(dur, (int, float)) and dur > 0 and not getattr(track, "duration", None):
+        if isinstance(dur, (int, float)) and dur > 0 and not track.duration:
             track.duration = int(dur)
 
         return applied
@@ -95,7 +95,7 @@ class ReccoBeatsProvider:
         if artist_name is None:
             artist_name = self._artist_name(track)
 
-        isrc = getattr(track, "isrc", None)
+        isrc = track.isrc
         if not isrc and self._deezer:
             try:
                 isrc = self._deezer.get_isrc(artist_name, track.title)
@@ -147,7 +147,7 @@ class ReccoBeatsProvider:
             spotify_id = None
 
             # 1a. Vérifier si le track a déjà un Spotify ID validé
-            if hasattr(track, "spotify_id") and track.spotify_id:
+            if track.spotify_id:
                 # Valider l'unicité (comportement historique : sans artist_tracks ou
                 # si l'ID est un duplicata, on l'ignore et on le re-scrape)
                 validate = ctx.validate_spotify_id_unique
@@ -237,7 +237,7 @@ class ReccoBeatsProvider:
             sbpm = sanitize_bpm(bpm)
             if sbpm is not None:
                 ctx.bpm_ballot.add("reccobeats", sbpm)
-                if not getattr(track, "bpm", None):
+                if not track.bpm:
                     track.bpm = sbpm
                 logger.info(f"ReccoBeats: ✅ BPM: {sbpm}")
 
@@ -276,9 +276,9 @@ class ReccoBeatsProvider:
                     logger.warning(f"ReccoBeats: ⚠️ Duration invalide: {duration_value}")
 
             # Mise à jour de la logique de succès
-            has_spotify_id = hasattr(track, "spotify_id") and track.spotify_id
-            has_bpm = hasattr(track, "bpm") and track.bpm
-            has_duration = hasattr(track, "duration") and track.duration  # ⭐ NOUVEAU
+            has_spotify_id = track.spotify_id
+            has_bpm = track.bpm
+            has_duration = track.duration  # ⭐ NOUVEAU
 
             if has_spotify_id and has_bpm:
                 logger.info(f"ReccoBeats: ✅ SUCCÈS COMPLET '{track.title}'")

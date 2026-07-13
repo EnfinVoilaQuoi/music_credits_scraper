@@ -37,9 +37,9 @@ class SongBpmProvider:
 
         try:
             # NOUVEAU: Utiliser le bon artiste selon si c'est un featuring
-            if hasattr(track, "is_featuring") and track.is_featuring:
+            if track.is_featuring:
                 # Si c'est un featuring, utiliser l'artiste principal
-                if hasattr(track, "primary_artist_name") and track.primary_artist_name:
+                if track.primary_artist_name:
                     artist_name = track.primary_artist_name
                     logger.info(
                         f"🎤 Featuring détecté, utilisation de l'artiste principal: {artist_name}"
@@ -54,7 +54,7 @@ class SongBpmProvider:
                 )
 
             # Extraire le Spotify ID si disponible (et validé)
-            spotify_id = getattr(track, "spotify_id", None)
+            spotify_id = track.spotify_id
 
             # Valider l'unicité si un ID existe
             if (
@@ -138,7 +138,7 @@ class SongBpmProvider:
 
             # Spotify ID depuis SongBPM (avec validation stricte)
             songbpm_spotify_id = track_data.get("spotify_id")
-            if songbpm_spotify_id and (not hasattr(track, "spotify_id") or not track.spotify_id):
+            if songbpm_spotify_id and (not track.spotify_id):
                 # Valider l'unicité
                 if (
                     artist_tracks
@@ -154,9 +154,7 @@ class SongBpmProvider:
                     )
 
             # Duration
-            if (
-                force_update or not hasattr(track, "duration") or not track.duration
-            ) and track_data.get("duration"):
+            if (force_update or not track.duration) and track_data.get("duration"):
                 track.duration = track_data["duration"]
                 logger.info(
                     f"⏱️ Duration ajoutée depuis SongBPM: {track.duration} pour {track.title}"

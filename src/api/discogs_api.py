@@ -356,7 +356,7 @@ class DiscogsClient:
         """
         try:
             artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-            album_name = track.album if hasattr(track, "album") else None
+            album_name = track.album
 
             # Rechercher le track sur Discogs
             track_data = self.search_track(track.title, artist_name, album_name)

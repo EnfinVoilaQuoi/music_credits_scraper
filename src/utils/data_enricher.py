@@ -15,6 +15,10 @@ from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 from src.utils.bpm_vote import BpmBallot, sanitize_bpm
 from src.utils.logger import get_logger
 
+# NB : les modules de src.enrichment sont importés LOCALEMENT (dans __init__ /
+# enrich_track), pas au niveau module : src/utils/__init__ charge ce fichier,
+# et src.enrichment ré-importe src.utils → un import module-niveau ici bouclerait.
+
 logger = get_logger(__name__)
 
 
@@ -90,6 +94,11 @@ class DataEnricher:
             logger.info("✅ Deezer API initialisée")
         except Exception as e:
             logger.error(f"❌ Erreur init Deezer API: {e}")
+
+        # Provider Deezer (pattern provider, REFACTORING §3) — enveloppe le client
+        from src.enrichment.providers.deezer import DeezerProvider
+
+        self._deezer_provider = DeezerProvider(self.deezer_client)
 
         # Initialiser Discogs API
         self.discogs_client = None
@@ -466,10 +475,19 @@ class DataEnricher:
         # Sauvegarder l'état initial (pour la logique force_update du BPM)
         initial_bpm = getattr(track, "bpm", None)
 
-        # Candidats BPM collectés par chaque source → vote final (_finalize_bpm)
-        # NB : le scrutin vit sur le track le temps du run (transitoire ; il
-        # rejoindra l'EnrichmentContext en phase C2).
-        track._bpm_ballot = BpmBallot()
+        from src.enrichment.context import EnrichmentContext
+
+        # Scrutin BPM partagé par toutes les sources du run (vote final : _finalize_bpm).
+        # Migration provider en cours : les sources déjà migrées lisent le scrutin
+        # via le contexte, les autres via track._bpm_ballot — MÊME instance.
+        ballot = BpmBallot()
+        track._bpm_ballot = ballot
+        ctx = EnrichmentContext(
+            force_update=force_update,
+            artist_tracks=artist_tracks or [],
+            bpm_ballot=ballot,
+            clear_on_failure=clear_on_failure,
+        )
 
         # ========================================
         # FEATS : media/album/relations via API Genius AVANT ReccoBeats
@@ -844,7 +862,7 @@ class DataEnricher:
             # Appeler Deezer pour vérification et enrichissement complémentaire
             logger.info(f"🎵 Appel de Deezer API pour '{track.title}'")
             try:
-                deezer_success = self._enrich_with_deezer(track, force_update=force_update)
+                deezer_success = self._deezer_provider.enrich(track, ctx)
                 results["deezer"] = deezer_success
 
                 if deezer_success:
@@ -1538,177 +1556,4 @@ class DataEnricher:
             return False
         except Exception as e:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
-            return False
-
-    def _enrich_with_deezer(self, track: Track, force_update: bool = False) -> bool:
-        """
-        Enrichit avec Deezer API (4ème enrichisseur)
-        Vérifie la cohérence des données avec les enrichissements précédents
-
-        Args:
-            track: Le track à enrichir
-            force_update: Si True, force la mise à jour même si les données existent
-
-        Returns:
-            bool: True si des données ont été enrichies avec succès
-        """
-        if not self.deezer_client:
-            logger.warning("❌ Deezer API non disponible")
-            return False
-
-        try:
-            # Déterminer l'artiste (gestion des featurings)
-            if hasattr(track, "is_featuring") and track.is_featuring:
-                if hasattr(track, "primary_artist_name") and track.primary_artist_name:
-                    artist_name = track.primary_artist_name
-                    logger.info(
-                        f"🎤 Featuring détecté, utilisation de l'artiste principal: {artist_name}"
-                    )
-                else:
-                    artist_name = (
-                        track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                    )
-            else:
-                artist_name = (
-                    track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                )
-
-            logger.info(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
-
-            # Récupérer les données existantes pour vérification
-            previous_duration = getattr(track, "duration", None)
-            scraped_release_date = getattr(track, "release_date", None)
-
-            # Appeler l'API Deezer avec vérifications
-            result = self.deezer_client.enrich_track(
-                artist=artist_name,
-                title=track.title,
-                previous_duration=previous_duration,
-                scraped_release_date=scraped_release_date,
-            )
-
-            if not result["success"]:
-                logger.warning(f"❌ Deezer: {result.get('error', 'Erreur inconnue')}")
-                return False
-
-            data = result["data"]
-            verifications = result["verifications"]
-            updated = False
-
-            # Logs des vérifications
-            if verifications:
-                logger.info("🔍 Deezer: Vérifications:")
-
-                if "duration" in verifications:
-                    dur_check = verifications["duration"]
-                    if dur_check["is_valid"]:
-                        if dur_check.get("difference") is not None:
-                            logger.info(
-                                f"   ✅ Duration cohérente (diff: {dur_check['difference']}s)"
-                            )
-                        else:
-                            logger.info(f"   ℹ️ {dur_check['message']}")
-                    else:
-                        logger.warning(f"   ⚠️ Duration incohérente! {dur_check['message']}")
-
-                if "release_date" in verifications:
-                    date_check = verifications["release_date"]
-                    if date_check["is_valid"]:
-                        if date_check.get("dates_match") is True:
-                            logger.info("   ✅ Release date cohérente")
-                        elif date_check.get("dates_match") is False:
-                            logger.warning(
-                                f"   ⚠️ Release dates différentes: Deezer={date_check.get('deezer_date')} vs Scraping={date_check.get('scraped_date')}"
-                            )
-                        else:
-                            logger.info(f"   ℹ️ {date_check['message']}")
-                    else:
-                        logger.warning(f"   ⚠️ {date_check['message']}")
-
-            # Stocker la Duration si elle est cohérente ou si on force la mise à jour
-            if data.get("deezer_duration"):
-                duration_check = verifications.get("duration", {})
-                should_update_duration = (
-                    force_update or not previous_duration or duration_check.get("is_valid", False)
-                )
-
-                if should_update_duration:
-                    track.duration = data["deezer_duration"]
-                    logger.info(f"   ✅ Duration mise à jour: {track.duration}s")
-                    updated = True
-                else:
-                    logger.warning("   ⚠️ Duration Deezer ignorée (incohérente)")
-
-            # Stocker la Release Date si elle est cohérente ou si on force la mise à jour
-            if data.get("deezer_release_date"):
-                date_check = verifications.get("release_date", {})
-                should_update_date = (
-                    force_update or not scraped_release_date or date_check.get("dates_match", False)
-                )
-
-                if should_update_date:
-                    # Convertir au format utilisé dans la base de données
-                    track.release_date = data["deezer_release_date"]
-                    logger.info(f"   ✅ Release date mise à jour: {track.release_date}")
-                    updated = True
-                elif date_check.get("dates_match") is False:
-                    logger.warning("   ⚠️ Release date Deezer ignorée (différente du scraping)")
-
-            # Stocker les métadonnées supplémentaires (toujours, pas de vérification nécessaire)
-            if data.get("deezer_track_id") and (
-                not hasattr(track, "deezer_id") or force_update or not track.deezer_id
-            ):
-                track.deezer_id = data["deezer_track_id"]
-                logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
-                updated = True
-
-            # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
-            if data.get("deezer_isrc") and (not getattr(track, "isrc", None) or force_update):
-                track.isrc = data["deezer_isrc"]
-                logger.info(f"   ✅ ISRC: {track.isrc}")
-                updated = True
-
-            # BPM Deezer : candidat (souvent absent/0) — vote arbitré par _finalize_bpm
-            sbpm = self._sanitize_bpm(data.get("deezer_bpm"))
-            if sbpm is not None:
-                self._add_bpm_candidate(track, "deezer", sbpm)
-                if not getattr(track, "bpm", None):
-                    track.bpm = sbpm
-                    logger.info(f"   ✅ BPM (Deezer, opportuniste): {sbpm}")
-                    updated = True
-
-            if data.get("deezer_link") and (
-                not hasattr(track, "deezer_url") or force_update or not track.deezer_url
-            ):
-                track.deezer_url = data["deezer_link"]
-                logger.info(f"   ✅ Deezer URL: {track.deezer_url}")
-                updated = True
-
-            if data.get("deezer_explicit_lyrics") is not None and (
-                not hasattr(track, "explicit_lyrics")
-                or force_update
-                or track.explicit_lyrics is None
-            ):
-                track.explicit_lyrics = data["deezer_explicit_lyrics"]
-                logger.info(f"   ✅ Explicit lyrics: {track.explicit_lyrics}")
-                updated = True
-
-            if data.get("deezer_picture") and (
-                not hasattr(track, "deezer_picture_url")
-                or force_update
-                or not track.deezer_picture_url
-            ):
-                track.deezer_picture_url = data["deezer_picture"]
-                logger.info("   ✅ Deezer picture URL stockée")
-                updated = True
-
-            if updated:
-                logger.info(f"✅ Deezer: Enrichissement réussi pour '{track.title}'")
-            else:
-                logger.info(f"ℹ️ Deezer: Aucune nouvelle donnée pour '{track.title}'")
-
-            return updated
-
-        except Exception as e:
-            logger.error(f"❌ Deezer: Erreur pour '{track.title}': {e}")
             return False

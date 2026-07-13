@@ -39,8 +39,8 @@ class DeezerProvider:
 
         try:
             # Déterminer l'artiste (gestion des featurings)
-            if hasattr(track, "is_featuring") and track.is_featuring:
-                if hasattr(track, "primary_artist_name") and track.primary_artist_name:
+            if track.is_featuring:
+                if track.primary_artist_name:
                     artist_name = track.primary_artist_name
                     logger.info(
                         f"🎤 Featuring détecté, utilisation de l'artiste principal: {artist_name}"
@@ -57,8 +57,8 @@ class DeezerProvider:
             logger.info(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
 
             # Récupérer les données existantes pour vérification
-            previous_duration = getattr(track, "duration", None)
-            scraped_release_date = getattr(track, "release_date", None)
+            previous_duration = track.duration
+            scraped_release_date = track.release_date
 
             # Appeler l'API Deezer avec vérifications
             result = self._client.enrich_track(
@@ -144,7 +144,7 @@ class DeezerProvider:
                 updated = True
 
             # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
-            if data.get("deezer_isrc") and (not getattr(track, "isrc", None) or force_update):
+            if data.get("deezer_isrc") and (not track.isrc or force_update):
                 track.isrc = data["deezer_isrc"]
                 logger.info(f"   ✅ ISRC: {track.isrc}")
                 updated = True
@@ -153,7 +153,7 @@ class DeezerProvider:
             sbpm = sanitize_bpm(data.get("deezer_bpm"))
             if sbpm is not None:
                 ctx.bpm_ballot.add("deezer", sbpm)
-                if not getattr(track, "bpm", None):
+                if not track.bpm:
                     track.bpm = sbpm
                     logger.info(f"   ✅ BPM (Deezer, opportuniste): {sbpm}")
                     updated = True

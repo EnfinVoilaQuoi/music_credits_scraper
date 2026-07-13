@@ -36,8 +36,8 @@ class GetSongBpmProvider:
                 return False
 
             # Déterminer l'artiste (gestion featurings)
-            if hasattr(track, "is_featuring") and track.is_featuring:
-                if hasattr(track, "primary_artist_name") and track.primary_artist_name:
+            if track.is_featuring:
+                if track.primary_artist_name:
                     artist_name = track.primary_artist_name
                     logger.info(f"🎤 Featuring détecté, artiste principal: {artist_name}")
                 else:

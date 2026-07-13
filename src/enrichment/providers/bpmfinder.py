@@ -58,11 +58,9 @@ class BpmFinderProvider:
 
             if self._yt_searcher is None:
                 self._yt_searcher = YouTubeSearcher()
-            _search_artist = (
-                getattr(track, "primary_artist_name", None)
-                if getattr(track, "is_featuring", False)
-                else None
-            ) or (track.artist.name if hasattr(track.artist, "name") else str(track.artist))
+            _search_artist = (track.primary_artist_name if track.is_featuring else None) or (
+                track.artist.name if hasattr(track.artist, "name") else str(track.artist)
+            )
             _res = self._yt_searcher.search_track(_search_artist, track.title, max_results=5)
             _best = _res[0] if _res else None
             if (
@@ -104,11 +102,11 @@ class BpmFinderProvider:
         force_update = ctx.force_update
         # force_update : re-analyser et ÉCRASER même si BPM/key présents (sinon
         # 'not_needed' → combiné au nettoyage, effaçait des données valides).
-        _missing_bpm = force_update or not getattr(track, "bpm", None)
+        _missing_bpm = force_update or not track.bpm
         _missing_km = force_update or (
             getattr(track, "key", None) is None or getattr(track, "mode", None) is None
         )
-        _yt = getattr(track, "youtube_url", None)
+        _yt = track.youtube_url
 
         # Pas de lien en base (ni Genius media ni recherche persistée) : recherche auto.
         if (_missing_bpm or _missing_km) and not _yt:

@@ -111,10 +111,13 @@ class SongBpmProvider:
             sbpm = sanitize_bpm(track_data.get("bpm"))
             if sbpm is not None:
                 ctx.bpm_ballot.add("songbpm", sbpm)
+                # Un candidat valide fourni au vote = SongBPM a RÉUSSI, même si un
+                # BPM était déjà présent (2ᵉ vote concordant). Sans ça, le run était
+                # loggé « ÉCHEC » à tort et pouvait déclencher le nettoyage.
+                updated = True
                 if force_update or not track.bpm:
                     track.bpm = sbpm
                     logger.info(f"📊 BPM ajouté depuis SongBPM: {sbpm} pour {track.title}")
-                    updated = True
 
             # Key et Mode
             key_value = track_data.get("key")

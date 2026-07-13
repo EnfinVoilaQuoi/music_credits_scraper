@@ -38,6 +38,17 @@ def test_bpm_candidat_key_mode_duration():
     assert track.duration == 200
 
 
+def test_candidat_bpm_compte_comme_succes_meme_si_bpm_deja_present():
+    # Régression : SongBPM confirme un BPM déjà présent → SUCCÈS (2ᵉ vote),
+    # plus « ÉCHEC » à tort. Le candidat rejoint le scrutin.
+    provider = SongBpmProvider(_FakeScraper({"bpm": 146}))
+    track = _track()
+    track.bpm = 146  # déjà renseigné
+    ctx = EnrichmentContext()
+    assert provider.enrich(track, ctx) is True
+    assert ("songbpm", 146) in ctx.bpm_ballot.candidates
+
+
 def test_scraper_vide_renvoie_false():
     provider = SongBpmProvider(_FakeScraper(None))
     assert provider.enrich(_track(), EnrichmentContext()) is False

@@ -164,6 +164,9 @@ class RIAADatabaseUpdater:
 
             if gap_days <= 0:
                 self.logger.info("Base de données déjà à jour")
+                # Fraîcheur = date de dernière VÉRIFICATION : horodater même si
+                # rien à récupérer (sinon la GUI affiche une MàJ périmée).
+                _write_riaa_meta(source="GLOBAL")
                 return True
 
             self.logger.info(f"{gap_days} jour(s) à récupérer")
@@ -222,6 +225,11 @@ class RIAADatabaseUpdater:
 
             # Export final
             self.export_to_csv()
+
+            # Fraîcheur = date de dernière VÉRIFICATION : horodater à la fin du
+            # run même si aucune nouvelle certif (_merge_certif_csv ne le fait que
+            # lorsqu'il ajoute des lignes).
+            _write_riaa_meta(source="GLOBAL")
 
             return True
 

@@ -68,6 +68,11 @@ class DataEnricher:
         except Exception as e:
             logger.warning(f"⚠️ GetSongBPM non disponible: {e}")
 
+        # Provider GetSongBPM (pattern provider) — enveloppe le fetcher
+        from src.enrichment.providers.getsongbpm import GetSongBpmProvider
+
+        self._getsongbpm_provider = GetSongBpmProvider(self.getsongbpm_fetcher)
+
         # Initialiser SongBPM scraper
         self.songbpm_scraper = None
         try:
@@ -660,9 +665,7 @@ class DataEnricher:
                 logger.info(f"🎼 Appel de GetSongBPM pour '{track.title}' (raison: {reason_str})")
 
                 try:
-                    getsongbpm_success = self._enrich_with_getsongbpm(
-                        track, force_update=force_update
-                    )
+                    getsongbpm_success = self._getsongbpm_provider.enrich(track, ctx)
                     results["getsongbpm"] = getsongbpm_success
 
                     if getsongbpm_success:
@@ -1313,108 +1316,6 @@ class DataEnricher:
 
         except Exception as e:
             logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
-            return False
-
-    def _enrich_with_getsongbpm(self, track: Track, force_update: bool = False) -> bool:
-        """
-        Enrichit avec GetSongBPM API
-        Récupère: BPM, Key, Mode, Time Signature, Danceability, Acousticness
-        """
-        try:
-            if not self.getsongbpm_fetcher:
-                logger.debug("GetSongBPM API non disponible")
-                return False
-
-            # Déterminer l'artiste (gestion featurings)
-            if hasattr(track, "is_featuring") and track.is_featuring:
-                if hasattr(track, "primary_artist_name") and track.primary_artist_name:
-                    artist_name = track.primary_artist_name
-                    logger.info(f"🎤 Featuring détecté, artiste principal: {artist_name}")
-                else:
-                    artist_name = (
-                        track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                    )
-            else:
-                artist_name = (
-                    track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                )
-
-            logger.info(f"GetSongBPM: DÉBUT traitement '{artist_name}' - '{track.title}'")
-
-            # Appeler l'API
-            try:
-                song_data = self.getsongbpm_fetcher.fetch_track_bpm(artist_name, track.title)
-            except Exception as api_error:
-                logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
-                return False
-
-            if song_data.error:
-                logger.warning(f"GetSongBPM: ❌ {song_data.error}")
-                return False
-
-            # Enrichir le track avec les données GetSongBPM
-            updated = False
-
-            # BPM → candidat pour le vote (+ pose provisoire si manquant)
-            sbpm = self._sanitize_bpm(song_data.bpm)
-            if sbpm is not None:
-                self._add_bpm_candidate(track, "getsongbpm", sbpm)
-                if force_update or not track.bpm:
-                    track.bpm = sbpm
-                    logger.info(f"GetSongBPM: ✅ BPM: {sbpm}")
-                    updated = True
-
-            # Key (seulement si pas déjà présent ou force_update)
-            if song_data.key and (force_update or not track.key):
-                # Convertir la notation anglaise (ex: "F#m") en notation numérique
-                try:
-                    from src.utils.music_theory import convert_key_to_numeric
-
-                    track.key = convert_key_to_numeric(song_data.key)
-                    track.key_mode_source = "getsongbpm"
-                    logger.info(f"GetSongBPM: ✅ Key: {song_data.key} → {track.key}")
-                except Exception:
-                    logger.debug(f"GetSongBPM: Key brute stockée: {song_data.key}")
-                updated = True
-
-            # Mode (seulement si pas déjà présent ou force_update)
-            if song_data.mode and (force_update or not track.mode):
-                # Convertir "major"/"minor" en 1/0
-                track.mode = 1 if song_data.mode == "major" else 0
-                track.key_mode_source = "getsongbpm"
-                logger.info(f"GetSongBPM: ✅ Mode: {song_data.mode}")
-                updated = True
-
-            # Musical key (calculé depuis Key + Mode)
-            if (
-                hasattr(track, "key")
-                and hasattr(track, "mode")
-                and track.key is not None
-                and track.mode is not None
-            ):
-                try:
-                    from src.utils.music_theory import key_mode_to_french
-
-                    track.musical_key = key_mode_to_french(track.key, track.mode)
-                    logger.info(f"GetSongBPM: ✅ Musical Key: {track.musical_key}")
-                except Exception as e:
-                    logger.debug(f"GetSongBPM: Erreur conversion musical_key: {e}")
-
-            # Time Signature (optionnel)
-            if song_data.time_signature:
-                track.time_signature = song_data.time_signature
-                logger.info(f"GetSongBPM: ✅ Time Signature: {track.time_signature}")
-                updated = True
-
-            if updated:
-                logger.info(f"GetSongBPM: ✅ SUCCÈS '{track.title}'")
-                return True
-            else:
-                logger.warning(f"GetSongBPM: ⚠️ Aucune donnée nouvelle pour '{track.title}'")
-                return False
-
-        except Exception as e:
-            logger.error(f"GetSongBPM: ❌ Erreur: {e}")
             return False
 
     def _enrich_with_songbpm(

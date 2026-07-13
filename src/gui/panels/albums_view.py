@@ -113,7 +113,7 @@ def populate_albums_table(app):
     # Lignes grisées quand TOUS les morceaux du groupe sont désactivés
     app.tree.tag_configure("disabled", foreground="gray", background="#2a2a2a")
 
-    if not app.current_artist or not getattr(app.current_artist, "tracks", None):
+    if not app.current_artist or not app.current_artist.tracks:
         return
 
     # Stats streams par album (table albums : Kworb Spotify + YTMusic)
@@ -133,7 +133,7 @@ def populate_albums_table(app):
     for track in app.current_artist.tracks:
         album = (track.album or "").strip()
         if not album:
-            album = FEAT_LABEL if getattr(track, "is_featuring", False) else SINGLES_LABEL
+            album = FEAT_LABEL if track.is_featuring else SINGLES_LABEL
         key = helpers.normalize_album_title(album)
         if key not in groups:
             groups[key] = [album, []]
@@ -161,7 +161,7 @@ def populate_albums_table(app):
         display, group_tracks = groups[key]
         if (
             len(group_tracks) == 1
-            and getattr(group_tracks[0], "is_featuring", False)
+            and group_tracks[0].is_featuring
             and display not in (FEAT_LABEL, SINGLES_LABEL)
         ):
             feat_tracks.append(group_tracks[0])
@@ -176,7 +176,7 @@ def populate_albums_table(app):
     def earliest_date(tracks):
         dates = []
         for t in tracks:
-            d = getattr(t, "release_date", None)
+            d = t.release_date
             if isinstance(d, str):
                 try:
                     d = datetime.fromisoformat(d.split("T")[0])
@@ -210,11 +210,11 @@ def populate_albums_table(app):
         except Exception:
             n_disabled = 0
         n_display = f"{n} ({n_disabled}❌)" if n_disabled else n
-        credits = sum(len(getattr(t, "credits", []) or []) for t in tracks)
-        lyrics = sum(1 for t in tracks if getattr(t, "lyrics", None) and str(t.lyrics).strip())
+        credits = sum(len(t.credits or []) for t in tracks)
+        lyrics = sum(1 for t in tracks if t.lyrics and str(t.lyrics).strip())
         total_sec = 0
         for t in tracks:
-            d = getattr(t, "duration", None)
+            d = t.duration
             if isinstance(d, int):
                 total_sec += d
             elif isinstance(d, str) and ":" in d:
@@ -241,9 +241,9 @@ def populate_albums_table(app):
         # Pas de stats album Kworb (ligne Featurings, apparitions écartées,
         # singles) → fallback : somme des streams MORCEAU du groupe
         if not sp:
-            sp = sum(getattr(t, "spotify_streams", None) or 0 for t in tracks) or None
+            sp = sum(t.spotify_streams or 0 for t in tracks) or None
         if not yt:
-            yt = sum(getattr(t, "ytm_streams", None) or 0 for t in tracks) or None
+            yt = sum(t.ytm_streams or 0 for t in tracks) or None
         sp_streams = fmt_streams(sp)
         ytm_streams = fmt_streams(yt)
 
@@ -298,9 +298,7 @@ def import_genius_album(app):
     from src.utils.title_matching import normalize_title as _nt
 
     artist_key = _nt(app.current_artist.name)
-    known_ids = {
-        int(t.genius_id) for t in app.current_artist.tracks if getattr(t, "genius_id", None)
-    }
+    known_ids = {int(t.genius_id) for t in app.current_artist.tracks if t.genius_id}
     try:
         deleted_ids = app.deleted_tracks_manager.load_deleted_ids(app.current_artist.name)
     except Exception:
@@ -439,7 +437,7 @@ def detach_tracks_from_album(app, tracks_to_detach, album):
         return
     moved = 0
     for t in tracks_to_detach:
-        if getattr(t, "id", None) and app.data_manager.clear_track_album(t.id):
+        if t.id and app.data_manager.clear_track_album(t.id):
             t.album = None
             t.album_override = 1
             moved += 1

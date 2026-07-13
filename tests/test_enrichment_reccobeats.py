@@ -89,7 +89,7 @@ def test_enrich_par_spotify_id_existant_valide():
 def test_enrich_scrape_spotify_si_autorise():
     client = _FakeReccoClient(track_info={"success": True, "bpm": 100})
     scraper = _FakeSpotifyScraper(spotify_id="scraped99", page_title="Solo - Sofiane Pamart")
-    provider = ReccoBeatsProvider(client, spotify_id_scraper=scraper)
+    provider = ReccoBeatsProvider(client, spotify_scraper_getter=lambda: scraper)
     track = _track()
     ctx = EnrichmentContext(allow_spotify_scrape=True)
     assert provider.enrich(track, ctx) is True
@@ -97,7 +97,8 @@ def test_enrich_scrape_spotify_si_autorise():
 
 
 def test_enrich_sans_id_ni_scrape_renvoie_false():
-    provider = ReccoBeatsProvider(_FakeReccoClient(), spotify_id_scraper=_FakeSpotifyScraper(None))
+    scraper = _FakeSpotifyScraper(None)
+    provider = ReccoBeatsProvider(_FakeReccoClient(), spotify_scraper_getter=lambda: scraper)
     track = _track()
     ctx = EnrichmentContext(allow_spotify_scrape=False)
     assert provider.enrich(track, ctx) is False

@@ -1,15 +1,67 @@
 """Contrat commun des providers d'enrichissement.
 
-Un provider encapsule UNE source : il sait dire s'il est disponible, enrichir un
-morceau dans un contexte donné (renvoie True si des données ont changé) et se
-fermer. L'orchestrateur ne connaît que ce protocole + l'ordre d'appel.
+Un provider encapsule UNE source : il sait dire s'il est disponible, décider
+s'il doit tourner (gate), enrichir un morceau dans un contexte donné (renvoie
+True si des données ont changé) et se fermer. L'orchestrateur ne connaît que ce
+protocole + l'ordre d'appel.
 """
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.enrichment.context import EnrichmentContext
     from src.models import Track
+
+logger = get_logger(__name__)
+
+
+class LazyResource:
+    """Ressource d'un provider : injectée (tests) ou créée par factory au 1er usage.
+
+    Règle d'ownership « qui crée ferme » (Refacto Phase 3.5) : close() ne ferme
+    la ressource QUE si elle a été créée par la factory, et la remet à None —
+    elle sera recréée à la demande au run suivant, dans le thread qui l'utilise
+    (les browsers Playwright naissent et meurent dans le thread du batch). Une
+    ressource injectée ou empruntée n'est jamais fermée ici. Un échec de
+    création marque la ressource cassée : plus de tentative pour la session.
+    """
+
+    def __init__(self, resource=None, factory: Callable | None = None, label: str = "ressource"):
+        self._resource = resource
+        self._factory = factory
+        self._label = label
+        self._owned = False
+        self._broken = False
+
+    def available(self) -> bool:
+        """True si la ressource existe ou peut être créée."""
+        return not self._broken and (self._resource is not None or self._factory is not None)
+
+    def get(self):
+        """Ressource injectée, ou créée par la factory au 1er appel (lazy)."""
+        if self._resource is None and self._factory is not None and not self._broken:
+            try:
+                self._resource = self._factory()
+                self._owned = True
+            except Exception as e:
+                logger.warning(f"⚠️ {self._label} indisponible (création échouée): {e}")
+                self._broken = True
+        return self._resource
+
+    def close(self) -> None:
+        """Ferme la ressource si créée par la factory (idempotent, ré-ouvrable)."""
+        if not (self._owned and self._resource is not None):
+            return
+        try:
+            self._resource.close()
+            logger.info(f"{self._label} fermé")
+        except Exception as e:
+            logger.warning(f"⚠️ Fermeture {self._label}: {e}")
+        self._resource = None
+        self._owned = False
 
 
 @runtime_checkable

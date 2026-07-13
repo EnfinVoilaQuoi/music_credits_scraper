@@ -32,145 +32,38 @@ class DataEnricher:
         headless_spotify_scraper: bool = True,
     ):
         """
-        Initialise les scrapers et APIs
+        Compose les providers d'enrichissement (ownership Refacto Phase 3.5).
+
+        Les ressources (browsers Playwright, clients HTTP des sources) sont
+        créées LAZY au premier usage — dans le thread du batch — et fermées par
+        close() ; chaque provider possède et ferme les siennes (« qui crée
+        ferme »). Ici ne vivent que les clients racine PARTAGÉS sans ressource
+        à fermer (Deezer, Genius).
 
         Args:
-            headless_reccobeats: Si True, lance ReccoBeats en mode headless
-            headless_songbpm: Si True, lance SongBPM en mode headless (True par défaut)
+            headless_reccobeats: conservé pour compatibilité (client HTTP)
+            headless_songbpm: Si True, lance SongBPM en mode headless
+            headless_spotify_scraper: Si True, lance le scraper Spotify en headless
         """
-        self.apis_available = {
-            "spotify_id": False,  # 1. Scraper Spotify_ID
-            "reccobeats": False,  # 2. ReccoBeats
-            "getsongbpm": False,  # 3. GetSongBPM API
-            "songbpm": False,  # 4. SongBPM scraper
-            "deezer": False,  # 5. Deezer API
-            "discogs": False,
-        }
-
-        # Initialiser ReccoBeats (pas de clé API nécessaire)
-        self.reccobeats_client = None
-        try:
-            self.reccobeats_client = ReccoBeatsIntegratedClient(headless=headless_reccobeats)
-            # Vider le cache des erreurs précédentes si nécessaire
-            if hasattr(self.reccobeats_client, "clear_old_errors"):
-                self.reccobeats_client.clear_old_errors()
-            self.apis_available["reccobeats"] = True
-            logger.info("✅ ReccoBeats client initialisé")
-        except Exception as e:
-            logger.error(f"❌ Erreur init ReccoBeats: {e}")
-
-        # Initialiser GetSongBPM API
-        self.getsongbpm_fetcher = None
-        try:
-            self.getsongbpm_fetcher = GetSongBPMFetcher()
-            self.apis_available["getsongbpm"] = True
-            logger.info("✅ GetSongBPM API initialisée")
-        except Exception as e:
-            logger.warning(f"⚠️ GetSongBPM non disponible: {e}")
-
-        # Provider GetSongBPM (pattern provider) — enveloppe le fetcher
+        # NB : imports providers LOCAUX (règle anti-boucle src.utils ↔ src.enrichment).
+        from src.enrichment.providers.bpmfinder import BpmFinderProvider
+        from src.enrichment.providers.deezer import DeezerProvider
+        from src.enrichment.providers.discogs import DiscogsProvider
         from src.enrichment.providers.getsongbpm import GetSongBpmProvider
-
-        self._getsongbpm_provider = GetSongBpmProvider(self.getsongbpm_fetcher)
-
-        # Initialiser SongBPM scraper
-        self.songbpm_scraper = None
-        try:
-            self.songbpm_scraper = SongBPMScraper(headless=headless_songbpm)
-            self.apis_available["songbpm"] = True
-            logger.info("✅ SongBPM scraper initialisé (Selenium)")
-        except Exception as e:
-            logger.error(f"❌ Erreur init SongBPM: {e}")
-
-        # Provider SongBPM (pattern provider) — enveloppe le scraper
+        from src.enrichment.providers.reccobeats import ReccoBeatsProvider
         from src.enrichment.providers.songbpm import SongBpmProvider
-
-        self._songbpm_provider = SongBpmProvider(self.songbpm_scraper)
-
-        # Initialiser Spotify ID scraper
-        self.spotify_id_scraper = None
-        try:
-            self.spotify_id_scraper = SpotifyIDScraper(headless=headless_spotify_scraper)
-            self.apis_available["spotify_id"] = True
-            logger.info("✅ Spotify ID scraper initialisé")
-        except Exception as e:
-            logger.error(f"❌ Erreur init Spotify ID scraper: {e}")
-
-        # Provider Spotify ID (pattern provider) — enveloppe le scraper
         from src.enrichment.providers.spotify_id import SpotifyIdProvider
+        from src.scrapers.bpmfinder_scraper import BPMFinderScraper
 
-        self._spotify_id_provider = SpotifyIdProvider(self.spotify_id_scraper)
-
-        # Initialiser Deezer API
+        # Clients racine partagés : Deezer (DeezerProvider + résolution ISRC de
+        # ReccoBeats), Genius (pré-étape media des feats).
         self.deezer_client = None
         try:
             self.deezer_client = DeezerAPI()
-            self.apis_available["deezer"] = True
             logger.info("✅ Deezer API initialisée")
         except Exception as e:
             logger.error(f"❌ Erreur init Deezer API: {e}")
 
-        # Provider Deezer (pattern provider, REFACTORING §3) — enveloppe le client
-        from src.enrichment.providers.deezer import DeezerProvider
-
-        self._deezer_provider = DeezerProvider(self.deezer_client)
-
-        # Provider ReccoBeats — a besoin des clients Deezer (ISRC) et Spotify (scrape),
-        # créés au-dessus : instancié ici une fois les trois disponibles.
-        from src.enrichment.providers.reccobeats import ReccoBeatsProvider
-
-        self._reccobeats_provider = ReccoBeatsProvider(
-            self.reccobeats_client, self.deezer_client, self.spotify_id_scraper
-        )
-
-        # Initialiser Discogs API
-        self.discogs_client = None
-        try:
-            # Chercher le token Discogs dans les variables d'environnement
-            discogs_token = os.getenv("DISCOGS_TOKEN") or os.getenv("DISCOGS_USER_TOKEN")
-            if discogs_token:
-                self.discogs_client = DiscogsClient(user_token=discogs_token)
-                self.apis_available["discogs"] = True
-                logger.info("✅ Discogs API initialisée avec token (60 req/min)")
-            else:
-                # Initialiser quand même sans token (limité à 25 req/min)
-                self.discogs_client = DiscogsClient()
-                self.apis_available["discogs"] = True
-                logger.info("✅ Discogs API initialisée sans token (25 req/min)")
-        except Exception as e:
-            logger.warning(f"⚠️ Discogs API non disponible: {e}")
-            self.apis_available["discogs"] = False
-
-        # Provider Discogs (pattern provider) — enveloppe le client
-        from src.enrichment.providers.discogs import DiscogsProvider
-
-        self._discogs_provider = DiscogsProvider(self.discogs_client)
-
-        # BPM Finder (audioaidynamics) — dernier recours BPM/Key via lien YouTube
-        # Nécessite BPMFINDER_EMAIL/PASSWORD (env/.env) ou une session sauvegardée.
-        # L'attribut reste sur DataEnricher : la GUI y accède directement
-        # (manual_entry / workers) ; le provider (état disjoncteur) l'enveloppe.
-        self.bpmfinder_scraper = None
-        try:
-            from src.scrapers.bpmfinder_scraper import BPMFinderScraper
-
-            if BPMFinderScraper.credentials_or_session_available():
-                self.bpmfinder_scraper = BPMFinderScraper(headless=True)
-                self.apis_available["bpmfinder"] = True
-                logger.info("✅ BPM Finder scraper initialisé (audioaidynamics)")
-            else:
-                logger.info(
-                    "⏭️ BPM Finder non configuré (BPMFINDER_EMAIL/PASSWORD ou session absents)"
-                )
-        except Exception as e:
-            logger.warning(f"⚠️ BPM Finder non disponible: {e}")
-
-        # Provider BPM Finder (pattern provider) — porte l'état du disjoncteur
-        from src.enrichment.providers.bpmfinder import BpmFinderProvider
-
-        self._bpmfinder_provider = BpmFinderProvider(self.bpmfinder_scraper)
-
-        # Client Genius (pour les feats : media/album/relations avant ReccoBeats)
         self.genius_client = None
         try:
             from src.api.genius_api import GeniusAPI
@@ -180,51 +73,72 @@ class DataEnricher:
         except Exception as e:
             logger.debug(f"Genius API non disponible dans l'enricher: {e}")
 
+        self._spotify_id_provider = SpotifyIdProvider(
+            scraper_factory=lambda: SpotifyIDScraper(headless=headless_spotify_scraper)
+        )
+        self._reccobeats_provider = ReccoBeatsProvider(
+            client_factory=lambda: ReccoBeatsIntegratedClient(headless=headless_reccobeats),
+            deezer_client=self.deezer_client,
+            # EMPRUNT : le scraper Spotify appartient à SpotifyIdProvider (qui le
+            # ferme) ; ReccoBeats l'utilise au moment du fallback, sans le posséder.
+            spotify_scraper_getter=lambda: self._spotify_id_provider.scraper,
+        )
+        # Factory seulement si la clé API est présente (le ctor lève sans elle) :
+        # même visibilité qu'avant dans la liste de sources de la GUI.
+        self._getsongbpm_provider = GetSongBpmProvider(
+            fetcher_factory=GetSongBPMFetcher if os.getenv("GETSONGBPM_API_KEY") else None
+        )
+        self._songbpm_provider = SongBpmProvider(
+            scraper_factory=lambda: SongBPMScraper(headless=headless_songbpm)
+        )
+        # Factory seulement si identifiants/session présents (même règle qu'avant).
+        if BPMFinderScraper.credentials_or_session_available():
+            self._bpmfinder_provider = BpmFinderProvider(
+                scraper_factory=lambda: BPMFinderScraper(headless=True)
+            )
+        else:
+            self._bpmfinder_provider = BpmFinderProvider()
+            logger.info("⏭️ BPM Finder non configuré (BPMFINDER_EMAIL/PASSWORD ou session absents)")
+        self._deezer_provider = DeezerProvider(self.deezer_client)
+        discogs_token = os.getenv("DISCOGS_TOKEN") or os.getenv("DISCOGS_USER_TOKEN")
+        self._discogs_provider = DiscogsProvider(
+            client_factory=lambda: (
+                DiscogsClient(user_token=discogs_token) if discogs_token else DiscogsClient()
+            )
+        )
+
+        self.apis_available = {
+            p.name: p.is_available() for p in [*self._pipeline, self._discogs_provider]
+        }
         logger.info(f"Sources disponibles: {[k for k, v in self.apis_available.items() if v]}")
 
+    @property
+    def bpmfinder_scraper(self):
+        """Accès GUI direct (manual_entry ✏️) au scraper BPM Finder — créé à la
+        demande, None si la source n'est pas configurée."""
+        return self._bpmfinder_provider.scraper
+
     def close(self):
-        """Ferme toutes les connexions"""
-        if getattr(self, "bpmfinder_scraper", None):
-            try:
-                self.bpmfinder_scraper.close()
-            except Exception:
-                pass
-        if self.reccobeats_client:
-            try:
-                self.reccobeats_client.close()
-                logger.info("ReccoBeats client fermé")
-            except Exception as e:
-                logger.error(f"Erreur fermeture ReccoBeats: {e}")
+        """Ferme les ressources de toutes les sources (idempotent, ré-ouvrable :
+        les ressources possédées sont recréées à la demande au run suivant).
 
-        if self.songbpm_scraper:
+        À appeler dans le thread qui a fait tourner le batch (browsers
+        Playwright thread-affines) : finally du worker d'enrichissement, et
+        _on_closing de la GUI pour le reliquat du main thread — sans fermeture
+        explicite, un browser orphelin ne mourait qu'au shutdown → EPIPE du
+        driver Node.
+        """
+        for provider in [*self._pipeline, self._discogs_provider]:
             try:
-                self.songbpm_scraper.close()
-                logger.info("SongBPM scraper fermé")
+                provider.close()
             except Exception as e:
-                logger.error(f"Erreur fermeture SongBPM: {e}")
-
-        # Playwright lui aussi : sans fermeture explicite il ne mourait qu'au
-        # __del__ pendant l'arrêt de l'interpréteur → browser orphelin → EPIPE
-        # du driver Node à la fermeture de l'app.
-        if getattr(self, "spotify_id_scraper", None):
-            try:
-                self.spotify_id_scraper.close()
-                logger.info("Spotify ID scraper fermé")
-            except Exception as e:
-                logger.error(f"Erreur fermeture Spotify ID scraper: {e}")
+                logger.warning(f"⚠️ Fermeture provider {provider.name}: {e}")
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
-    def __del__(self):
-        """Cleanup des ressources"""
-        try:
-            self.close()
-        except Exception:
-            pass
 
     # ================== NOUVEAU: VALIDATION SPOTIFY ID ==================
 

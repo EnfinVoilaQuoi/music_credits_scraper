@@ -6,6 +6,7 @@ sera remplacé par asyncio.timeout en phase F. Le BPM alimente le scrutin (§8.3
 le Spotify ID trouvé est validé par la fonction d'unicité fournie via le contexte.
 """
 
+from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
@@ -22,14 +23,16 @@ class SongBpmProvider:
     # « tout a échoué » qui déclenche le nettoyage de l'orchestrateur.
     error_result = None
 
-    def __init__(self, scraper=None):
-        self._scraper = scraper
+    def __init__(self, scraper=None, scraper_factory=None):
+        # PROPRIÉTAIRE de son scraper (créé lazy, fermé par close()).
+        self._resource = LazyResource(scraper, scraper_factory, label="scraper SongBPM")
 
     def is_available(self) -> bool:
-        return self._scraper is not None
+        return self._resource.available()
 
     def close(self) -> None:
-        """No-op en C3 : le scraper reste fermé par DataEnricher.close() (→ C5)."""
+        """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
+        self._resource.close()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """DÉPARTAGE (§8.3) : scrape seulement si les APIs n'ont pas de consensus
@@ -77,7 +80,8 @@ class SongBpmProvider:
         force_update = ctx.force_update
         artist_tracks = ctx.artist_tracks
 
-        if not self._scraper:
+        scraper = self._resource.get()
+        if not scraper:
             return False
 
         try:
@@ -137,7 +141,7 @@ class SongBpmProvider:
             timer.start()
 
             try:
-                track_data = self._scraper.search_track(
+                track_data = scraper.search_track(
                     track.title, artist_name, spotify_id=spotify_id, fetch_details=True
                 )
             finally:

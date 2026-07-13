@@ -6,6 +6,7 @@ utilisé QUE pour l'ID (jamais les audio-features). L'unicité d'ID passe par le
 contexte (logique partagée avec ReccoBeats/SongBPM).
 """
 
+from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.logger import get_logger
@@ -19,14 +20,22 @@ class SpotifyIdProvider:
     name = "spotify_id"
     error_result = False
 
-    def __init__(self, scraper=None):
-        self._scraper = scraper
+    def __init__(self, scraper=None, scraper_factory=None):
+        # PROPRIÉTAIRE du scraper Spotify (créé lazy, fermé par close()).
+        self._resource = LazyResource(scraper, scraper_factory, label="scraper Spotify ID")
+
+    @property
+    def scraper(self):
+        """Point d'EMPRUNT du scraper partagé (créé à la demande) : ReccoBeats
+        l'utilise pour son fallback, sans jamais le posséder ni le fermer."""
+        return self._resource.get()
 
     def is_available(self) -> bool:
-        return self._scraper is not None
+        return self._resource.available()
 
     def close(self) -> None:
-        """No-op en C3 : le scraper reste fermé par DataEnricher.close (→ C5)."""
+        """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
+        self._resource.close()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """Skip si un ID valide existe déjà (hors force_update) ou si la voie
@@ -52,7 +61,8 @@ class SpotifyIdProvider:
         self, track: Track, ctx: EnrichmentContext, force_scraper: bool = False
     ) -> str | None:
         """Récupère un Spotify ID unique (scrape + validation d'unicité)."""
-        if not self._scraper:
+        scraper = self._resource.get()
+        if not scraper:
             logger.warning("❌ Spotify ID scraper non disponible")
             return None
 
@@ -71,7 +81,7 @@ class SpotifyIdProvider:
 
         # Utiliser le scraper Spotify_ID pour obtenir le bon ID
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
-        spotify_id = self._scraper.get_spotify_id(artist_name, track.title)
+        spotify_id = scraper.get_spotify_id(artist_name, track.title)
 
         if not spotify_id:
             logger.warning(f"❌ Aucun Spotify ID trouvé via scraper pour '{track.title}'")
@@ -98,7 +108,7 @@ class SpotifyIdProvider:
 
         # Récupérer le titre de la page Spotify pour vérification
         try:
-            page_title = self._scraper.get_spotify_page_title(spotify_id)
+            page_title = self._resource.get().get_spotify_page_title(spotify_id)
             if page_title:
                 track.spotify_page_title = page_title
                 logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")

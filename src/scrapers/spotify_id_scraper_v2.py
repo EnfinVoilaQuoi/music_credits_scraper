@@ -557,9 +557,3 @@ class SpotifyIDScraper:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
-    def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass

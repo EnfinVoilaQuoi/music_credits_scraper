@@ -241,13 +241,8 @@ class DataEnricher:
         current_title_normalized = self._normalize_title(current_track.title)
 
         for track in artist_tracks:
-            # Récupérer tous les IDs de ce track
-            if hasattr(track, "get_all_spotify_ids"):
-                track_ids = track.get_all_spotify_ids()
-            elif hasattr(track, "spotify_id") and track.spotify_id:
-                track_ids = [track.spotify_id]
-            else:
-                track_ids = []
+            # Tous les IDs de ce track (méthode du modèle : [] si aucun)
+            track_ids = track.get_all_spotify_ids()
 
             # Vérifier si cet ID est déjà utilisé
             if spotify_id in track_ids:
@@ -290,31 +285,25 @@ class DataEnricher:
         logger.info(f"🗑️ Nettoyage des données MUSICALES UNIQUEMENT pour '{track.title}'")
 
         # VÉRIFICATION DE SÉCURITÉ: S'assurer que les données essentielles existent
-        if not hasattr(track, "title") or not track.title:
+        if not track.title:
             logger.error("❌ ERREUR CRITIQUE: Track sans titre détecté! Annulation du nettoyage.")
             return False
 
-        if not hasattr(track, "artist"):
-            logger.error(
-                f"❌ ERREUR CRITIQUE: Track '{track.title}' sans artiste! Annulation du nettoyage."
-            )
-            return False
-
         # Effacer BPM
-        if hasattr(track, "bpm") and track.bpm is not None:
+        if track.bpm is not None:
             old_value = track.bpm
             track.bpm = None
             logger.info(f"   ✅ BPM effacé: {old_value} → None")
             cleaned = True
 
-        # Effacer Key
+        # Effacer Key (attribut dynamique du mapper → hasattr requis)
         if hasattr(track, "key") and track.key is not None:
             old_value = track.key
             track.key = None
             logger.info(f"   ✅ Key effacée: {old_value} → None")
             cleaned = True
 
-        # Effacer Mode
+        # Effacer Mode (attribut dynamique du mapper → hasattr requis)
         if hasattr(track, "mode") and track.mode is not None:
             old_value = track.mode
             track.mode = None
@@ -322,32 +311,32 @@ class DataEnricher:
             cleaned = True
 
         # Effacer Duration
-        if hasattr(track, "duration") and track.duration is not None:
+        if track.duration is not None:
             old_value = track.duration
             track.duration = None
             logger.info(f"   ✅ Duration effacée: {old_value} → None")
             cleaned = True
 
         # Effacer Musical Key (format français)
-        if hasattr(track, "musical_key") and track.musical_key is not None:
+        if track.musical_key is not None:
             old_value = track.musical_key
             track.musical_key = None
             logger.info(f"   ✅ Musical Key effacée: {old_value} → None")
             cleaned = True
 
         # Effacer Spotify ID (optionnel)
-        if clear_spotify_id and hasattr(track, "spotify_id") and track.spotify_id is not None:
+        if clear_spotify_id and track.spotify_id is not None:
             old_value = track.spotify_id
             track.spotify_id = None
             logger.info(f"   ✅ Spotify ID effacé: {old_value} → None")
             cleaned = True
 
         # VÉRIFICATION POST-NETTOYAGE: S'assurer que les données essentielles sont toujours là
-        if not hasattr(track, "title") or not track.title:
+        if not track.title:
             logger.error("❌ ERREUR CRITIQUE POST-NETTOYAGE: Le titre a disparu!")
             return False
 
-        if not hasattr(track, "artist") or not track.artist:
+        if not track.artist:
             logger.error("❌ ERREUR CRITIQUE POST-NETTOYAGE: L'artiste a disparu!")
             return False
 
@@ -453,12 +442,10 @@ class DataEnricher:
         logger.info(
             f"🔍 Enrichissement: track='{track.title}', sources={sources}, force_update={force_update}"
         )
-        logger.info(
-            f"🔍 État actuel: spotify_id={getattr(track, 'spotify_id', None)}, bpm={getattr(track, 'bpm', None)}"
-        )
+        logger.info(f"🔍 État actuel: spotify_id={track.spotify_id}, bpm={track.bpm}")
 
         # Sauvegarder l'état initial (pour la logique force_update du BPM)
-        initial_bpm = getattr(track, "bpm", None)
+        initial_bpm = track.bpm
 
         from src.enrichment.context import EnrichmentContext
 
@@ -483,18 +470,16 @@ class DataEnricher:
         # Les primaires ont déjà été traités à l'import (_prefill_via_song_api).
         # ========================================
         if (
-            getattr(track, "is_featuring", False)
+            track.is_featuring
             and self.genius_client
-            and getattr(track, "genius_id", None)
-            and (
-                not getattr(track, "spotify_id", None) or not getattr(track, "relationships", None)
-            )
+            and track.genius_id
+            and (not track.spotify_id or not track.relationships)
         ):
             try:
                 if self.genius_client.apply_song_metadata(track):
                     logger.info(
-                        f"🎫 Genius (feat) '{track.title}' : Spotify={getattr(track, 'spotify_id', None)}, "
-                        f"relations={len(getattr(track, 'relationships', []) or [])}"
+                        f"🎫 Genius (feat) '{track.title}' : Spotify={track.spotify_id}, "
+                        f"relations={len(track.relationships or [])}"
                     )
             except Exception as e:
                 logger.debug(f"Genius media feat échec: {e}")
@@ -519,13 +504,9 @@ class DataEnricher:
         # ========================================
         if "spotify_id" in sources and self.apis_available.get("spotify_id"):
             # Ne skip que si on a déjà un ID valide ET que force_update=False
-            has_valid_id = (
-                hasattr(track, "spotify_id")
-                and track.spotify_id
-                and (
-                    not artist_tracks
-                    or self.validate_spotify_id_unique(track.spotify_id, track, artist_tracks)
-                )
+            has_valid_id = track.spotify_id and (
+                not artist_tracks
+                or self.validate_spotify_id_unique(track.spotify_id, track, artist_tracks)
             )
 
             # Si l'ISRC a déjà fourni les données audio, inutile de scraper Spotify
@@ -555,9 +536,7 @@ class DataEnricher:
                 # Déjà satisfait par la voie ISRC en amont : pas de second appel
                 reccobeats_success = True
                 results["reccobeats"] = True
-                logger.info(
-                    f"✅ ReccoBeats déjà satisfait via ISRC (BPM={getattr(track, 'bpm', 'N/A')})"
-                )
+                logger.info(f"✅ ReccoBeats déjà satisfait via ISRC (BPM={track.bpm})")
             else:
                 logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
                 try:
@@ -568,7 +547,7 @@ class DataEnricher:
 
                     if reccobeats_success:
                         logger.info(
-                            f"✅ ReccoBeats SUCCÈS: BPM={getattr(track, 'bpm', 'N/A')}, Spotify ID={getattr(track, 'spotify_id', 'N/A')}"
+                            f"✅ ReccoBeats SUCCÈS: BPM={track.bpm}, Spotify ID={track.spotify_id}"
                         )
                     else:
                         logger.warning(
@@ -590,7 +569,7 @@ class DataEnricher:
             # - ReccoBeats a échoué OU
             # - Données manquantes (key, mode)
 
-            missing_bpm = not hasattr(track, "bpm") or not track.bpm
+            missing_bpm = not track.bpm
             missing_key = not hasattr(track, "key") or track.key is None
             missing_mode = not hasattr(track, "mode") or track.mode is None
 
@@ -626,7 +605,7 @@ class DataEnricher:
 
                     if getsongbpm_success:
                         logger.info(
-                            f"✅ GetSongBPM SUCCÈS: BPM={getattr(track, 'bpm', 'N/A')}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}"
+                            f"✅ GetSongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}"
                         )
                     else:
                         logger.warning(
@@ -638,7 +617,7 @@ class DataEnricher:
                     getsongbpm_success = False
             else:
                 logger.info(
-                    f"⏭️ GetSongBPM non appelé (données déjà présentes: BPM={getattr(track, 'bpm', 'N/A')}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')})"
+                    f"⏭️ GetSongBPM non appelé (données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')})"
                 )
                 results["getsongbpm"] = "not_needed"
 
@@ -655,7 +634,7 @@ class DataEnricher:
             # Vérifier si des données sont manquantes
             missing_key = not hasattr(track, "key") or track.key is None
             missing_mode = not hasattr(track, "mode") or track.mode is None
-            missing_duration = not hasattr(track, "duration") or not track.duration
+            missing_duration = not track.duration
 
             # §8.3 : SongBPM (scrape) = DÉPARTAGE. On l'ouvre seulement si les APIs
             # ne donnent pas de consensus BPM, ou s'il manque key/mode/duration.
@@ -693,7 +672,7 @@ class DataEnricher:
 
                     if songbpm_success:
                         logger.info(
-                            f"✅ SongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={getattr(track, 'duration', 'N/A')}"
+                            f"✅ SongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={track.duration}"
                         )
                     else:
                         logger.warning(f"❌ SongBPM ÉCHEC pour '{track.title}'")
@@ -703,7 +682,7 @@ class DataEnricher:
                     results["songbpm"] = None
             else:
                 logger.info(
-                    f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={getattr(track, 'duration', 'N/A')})"
+                    f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={track.duration})"
                 )
                 results["songbpm"] = "not_needed"
 
@@ -775,15 +754,9 @@ class DataEnricher:
             all_failed = bool(attempted) and all(r is False for r in attempted)
 
             if all_failed and force_update and initial_bpm is not None:
-                # Vérifications de sécurité
-                if not hasattr(track, "title") or not track.title:
+                # Vérification de sécurité
+                if not track.title:
                     logger.error("❌ ERREUR: Track sans titre, annulation du nettoyage")
-                    return results
-
-                if not hasattr(track, "artist"):
-                    logger.error(
-                        f"❌ ERREUR: Track '{track.title}' sans artiste, annulation du nettoyage"
-                    )
                     return results
 
                 logger.warning(
@@ -792,11 +765,11 @@ class DataEnricher:
                 logger.warning("⚠️ Effacement des anciennes valeurs potentiellement erronées...")
 
                 # Effacer UNIQUEMENT les données musicales
-                if hasattr(track, "bpm"):
-                    old_bpm = track.bpm
-                    track.bpm = None
-                    logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
+                old_bpm = track.bpm
+                track.bpm = None
+                logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
 
+                # key/mode : attributs dynamiques du mapper → hasattr requis
                 if hasattr(track, "key"):
                     old_key = track.key
                     track.key = None
@@ -807,20 +780,18 @@ class DataEnricher:
                     track.mode = None
                     logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
 
-                if hasattr(track, "duration"):
-                    old_duration = track.duration
-                    track.duration = None
-                    logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
+                old_duration = track.duration
+                track.duration = None
+                logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
 
-                if hasattr(track, "musical_key"):
-                    old_musical_key = track.musical_key
-                    track.musical_key = None
-                    logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
+                old_musical_key = track.musical_key
+                track.musical_key = None
+                logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
 
                 # Vérification post-nettoyage
-                if not hasattr(track, "title") or not track.title:
+                if not track.title:
                     logger.error("❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
-                elif not hasattr(track, "artist") or not track.artist:
+                elif not track.artist:
                     logger.error("❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
                 else:
                     logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
@@ -831,19 +802,18 @@ class DataEnricher:
         # ========================================
         logger.info(f"📊 RÉSUMÉ enrichissement '{track.title}':")
         logger.info(f"   • Résultats: {results}")
-        logger.info(f"   • Spotify ID: {getattr(track, 'spotify_id', 'N/A')}")
-        logger.info(f"   • BPM: {getattr(track, 'bpm', 'N/A')}")
+        logger.info(f"   • Spotify ID: {track.spotify_id}")
+        logger.info(f"   • BPM: {track.bpm}")
+        # key/mode/deezer_id = attributs dynamiques (mapper/providers) → getattr
         logger.info(
             f"   • Key: {getattr(track, 'key', 'N/A')}, Mode: {getattr(track, 'mode', 'N/A')}"
         )
-        logger.info(f"   • Musical Key: {getattr(track, 'musical_key', 'N/A')}")
-        logger.info(f"   • Duration: {getattr(track, 'duration', 'N/A')}")
-        logger.info(f"   • Release Date: {getattr(track, 'release_date', 'N/A')}")
+        logger.info(f"   • Musical Key: {track.musical_key}")
+        logger.info(f"   • Duration: {track.duration}")
+        logger.info(f"   • Release Date: {track.release_date}")
         logger.info(f"   • Deezer ID: {getattr(track, 'deezer_id', 'N/A')}")
-        logger.info(f"   • Discogs ID: {getattr(track, 'discogs_id', 'N/A')}")
-        logger.info(
-            f"   • Crédits totaux: {len(track.credits) if hasattr(track, 'credits') else 0}"
-        )
+        logger.info(f"   • Discogs ID: {track.discogs_id}")
+        logger.info(f"   • Crédits totaux: {len(track.credits)}")
 
         return results
 

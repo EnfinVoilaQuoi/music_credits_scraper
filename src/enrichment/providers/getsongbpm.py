@@ -17,6 +17,7 @@ class GetSongBpmProvider:
     """Enrichissement via l'API GetSongBPM (source `getsongbpm`)."""
 
     name = "getsongbpm"
+    error_result = False
 
     def __init__(self, fetcher=None):
         self._fetcher = fetcher
@@ -26,6 +27,30 @@ class GetSongBpmProvider:
 
     def close(self) -> None:
         """L'API GetSongBPM (HTTP sans état) n'a aucune ressource à libérer."""
+
+    def gate(self, track: Track, ctx: EnrichmentContext) -> None:
+        """Jamais de skip : API gratuite/rapide, appelée SYSTÉMATIQUEMENT pour
+        fournir un 2ᵉ vote BPM (§8.3). Ne sert qu'à logger la raison."""
+        # key/mode : attributs dynamiques du mapper → getattr requis
+        missing_bpm = not track.bpm
+        missing_key = getattr(track, "key", None) is None
+        missing_mode = getattr(track, "mode", None) is None
+
+        reasons = []
+        if ctx.force_update:
+            reasons.append("force_update=True")
+        if missing_bpm:
+            reasons.append("no_bpm")
+        if ctx.results.get("reccobeats") is False:
+            reasons.append("reccobeats_failed")
+        if (missing_key or missing_mode) and not missing_bpm:
+            missing_items = [
+                name for name, missing in (("key", missing_key), ("mode", missing_mode)) if missing
+            ]
+            reasons.append(f"missing_data={','.join(missing_items)}")
+
+        logger.info(f"🎼 Appel de GetSongBPM pour '{track.title}' (raison: {', '.join(reasons)})")
+        return None
 
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Récupère BPM/Key/Mode/Time Signature ; le BPM rejoint le scrutin."""

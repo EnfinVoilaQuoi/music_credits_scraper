@@ -24,6 +24,9 @@ class BpmFinderProvider:
     """Enrichissement de dernier recours via BPM Finder (source `bpmfinder`)."""
 
     name = "bpmfinder"
+    # Aligné sur l'historique : le provider capture tout en interne et renvoie
+    # None sur exception — l'orchestrateur n'a rien à rattraper de spécifique.
+    error_result = None
 
     def __init__(self, scraper=None):
         self._scraper = scraper
@@ -39,6 +42,11 @@ class BpmFinderProvider:
 
     def close(self) -> None:
         """No-op en C3 : le scraper reste fermé par DataEnricher.close (→ C5)."""
+
+    def gate(self, track: Track, ctx: EnrichmentContext) -> None:
+        """Jamais de skip côté orchestrateur : tout le gating (disjoncteur,
+        "not_needed") vit dans enrich(), qui renvoie la valeur historique."""
+        return None
 
     def reset_breaker(self) -> None:
         """Ré-arme le disjoncteur — à appeler en début de run d'enrichissement."""

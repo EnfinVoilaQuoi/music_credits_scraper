@@ -61,3 +61,14 @@ def test_erreur_api_renvoie_false():
 
 def test_indisponible_renvoie_false():
     assert GetSongBpmProvider(None).enrich(_track(), EnrichmentContext()) is False
+
+
+def test_gate_ne_skip_jamais():
+    # API gratuite/rapide : appelée systématiquement (2ᵉ vote BPM, §8.3)
+    track = _track()
+    track.bpm = 120
+    track.key = 5
+    track.mode = 1
+    ctx = EnrichmentContext()
+    ctx.results["reccobeats"] = True  # même quand tout est déjà présent
+    assert GetSongBpmProvider().gate(track, ctx) is None

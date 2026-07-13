@@ -32,3 +32,10 @@ class EnrichmentContext:
     # partagée avec le scraper spotify_id / reccobeats). Signature :
     # (spotify_id, current_track, artist_tracks) -> bool.
     validate_spotify_id_unique: Callable[..., bool] | None = None
+    # Voie ISRC satisfaite en pré-étape (ReccoBeats) : court-circuite le scrape
+    # Spotify ET le second appel ReccoBeats (lu par leurs `gate()`).
+    isrc_satisfied: bool = False
+    # Dict de résultats du run, partagé avec l'orchestrateur (les `gate()` y
+    # lisent l'issue des sources précédentes, p.ex. raison `reccobeats_failed`).
+    # Clé = source, valeur = True/False/None/"skipped"/"not_needed".
+    results: dict = field(default_factory=dict)

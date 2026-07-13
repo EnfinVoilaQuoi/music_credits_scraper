@@ -58,6 +58,17 @@ def test_try_by_isrc_sans_isrc_renvoie_false():
     assert provider.try_by_isrc(_track(), EnrichmentContext()) is False
 
 
+def test_gate_skip_avec_resultat_true_si_isrc_satisfaite():
+    # La voie ISRC (pré-étape) a déjà satisfait la source : pas de second appel,
+    # et le résultat posé dans le dict est True (valeur historique)
+    ctx = EnrichmentContext(isrc_satisfied=True)
+    assert ReccoBeatsProvider().gate(_track(), ctx) is True
+
+
+def test_gate_execute_sinon():
+    assert ReccoBeatsProvider().gate(_track(), EnrichmentContext()) is None
+
+
 def test_enrich_par_spotify_id_existant_valide():
     client = _FakeReccoClient(
         track_info={"success": True, "bpm": 140, "key": 7, "mode": 0, "duration": 200}

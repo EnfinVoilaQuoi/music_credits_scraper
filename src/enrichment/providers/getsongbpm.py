@@ -5,6 +5,7 @@ changement de logique. API gratuite/rapide : appelée systématiquement pour
 fournir un 2ᵉ vote BPM (§8.3). Backlink getsongbpm.com obligatoire côté client.
 """
 
+from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
@@ -19,11 +20,12 @@ class GetSongBpmProvider:
     name = "getsongbpm"
     error_result = False
 
-    def __init__(self, fetcher=None):
-        self._fetcher = fetcher
+    def __init__(self, fetcher=None, fetcher_factory=None):
+        # Fetcher créé lazy (son ctor lève sans GETSONGBPM_API_KEY).
+        self._resource = LazyResource(fetcher, fetcher_factory, label="fetcher GetSongBPM")
 
     def is_available(self) -> bool:
-        return self._fetcher is not None
+        return self._resource.available()
 
     def close(self) -> None:
         """L'API GetSongBPM (HTTP sans état) n'a aucune ressource à libérer."""
@@ -56,7 +58,8 @@ class GetSongBpmProvider:
         """Récupère BPM/Key/Mode/Time Signature ; le BPM rejoint le scrutin."""
         force_update = ctx.force_update
         try:
-            if not self._fetcher:
+            fetcher = self._resource.get()
+            if not fetcher:
                 logger.debug("GetSongBPM API non disponible")
                 return False
 
@@ -78,7 +81,7 @@ class GetSongBpmProvider:
 
             # Appeler l'API
             try:
-                song_data = self._fetcher.fetch_track_bpm(artist_name, track.title)
+                song_data = fetcher.fetch_track_bpm(artist_name, track.title)
             except Exception as api_error:
                 logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
                 return False

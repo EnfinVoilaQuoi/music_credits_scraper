@@ -9,6 +9,7 @@ logique. Deux points d'entrée pour l'orchestrateur :
 Le BPM alimente le scrutin partagé (§8.3) ; l'unicité d'ID passe par le contexte.
 """
 
+from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
@@ -23,16 +24,24 @@ class ReccoBeatsProvider:
     name = "reccobeats"
     error_result = False
 
-    def __init__(self, client=None, deezer_client=None, spotify_id_scraper=None):
-        self._client = client
+    def __init__(
+        self, client=None, deezer_client=None, spotify_scraper_getter=None, client_factory=None
+    ):
+        # PROPRIÉTAIRE de son client HTTP (créé lazy, fermé par close()).
+        self._resource = LazyResource(client, client_factory, label="client ReccoBeats")
+        # Client Deezer PARTAGÉ (résolution ISRC) : possédé par DataEnricher,
+        # sans ressource à fermer.
         self._deezer = deezer_client
-        self._spotify_scraper = spotify_id_scraper
+        # EMPRUNT : le scraper Spotify appartient à SpotifyIdProvider — jamais
+        # stocké, jamais fermé ici ; le getter est appelé au moment de l'usage.
+        self._spotify_scraper_getter = spotify_scraper_getter
 
     def is_available(self) -> bool:
-        return self._client is not None
+        return self._resource.available()
 
     def close(self) -> None:
-        """No-op en C3 : client/scraper restent fermés par DataEnricher.close (→ C5)."""
+        """Ferme SON client s'il l'a créé ; jamais le scraper Spotify emprunté."""
+        self._resource.close()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> bool | None:
         """Skip (résultat True) si la voie ISRC en pré-étape a déjà satisfait
@@ -99,7 +108,8 @@ class ReccoBeatsProvider:
         self, track: Track, ctx: EnrichmentContext, artist_name: str | None = None
     ) -> bool:
         """Voie ISRC : ISRC (track ou Deezer) → ReccoBeats SANS scraper de Spotify ID."""
-        if not self._client:
+        client = self._resource.get()
+        if not client:
             return False
 
         if artist_name is None:
@@ -119,7 +129,7 @@ class ReccoBeatsProvider:
             return False
 
         try:
-            info = self._client.get_track_info_by_isrc(isrc)
+            info = client.get_track_info_by_isrc(isrc)
         except Exception as e:
             logger.error(f"❌ ReccoBeats ISRC API: {e}")
             info = None
@@ -141,7 +151,8 @@ class ReccoBeatsProvider:
         allow_spotify_scrape = ctx.allow_spotify_scrape
 
         try:
-            if not self._client:
+            client = self._resource.get()
+            if not client:
                 logger.error("ReccoBeats client non initialisé")
                 return False
 
@@ -168,15 +179,19 @@ class ReccoBeatsProvider:
                     logger.warning("⚠️ Spotify ID existant est un duplicata, il sera ignoré")
                     track.spotify_id = None
 
-            # 1b. Si pas d'ID, utiliser SpotifyIDScraper (sauf si l'étape 0 l'a déjà fait)
+            # 1b. Si pas d'ID, utiliser SpotifyIDScraper (sauf si l'étape 0 l'a déjà fait).
+            # Scraper EMPRUNTÉ à SpotifyIdProvider au moment de l'usage.
             if not spotify_id and not allow_spotify_scrape:
                 logger.info(
                     "⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
                 )
-            if not spotify_id and allow_spotify_scrape and self._spotify_scraper:
+            spotify_scraper = (
+                self._spotify_scraper_getter() if self._spotify_scraper_getter else None
+            )
+            if not spotify_id and allow_spotify_scrape and spotify_scraper:
                 logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
                 try:
-                    spotify_id = self._spotify_scraper.get_spotify_id(artist_name, track.title)
+                    spotify_id = spotify_scraper.get_spotify_id(artist_name, track.title)
 
                     if spotify_id:
                         # Valider l'unicité
@@ -195,9 +210,7 @@ class ReccoBeatsProvider:
 
                             # Récupérer le titre de la page Spotify pour vérification
                             try:
-                                page_title = self._spotify_scraper.get_spotify_page_title(
-                                    spotify_id
-                                )
+                                page_title = spotify_scraper.get_spotify_page_title(spotify_id)
                                 if page_title:
                                     track.spotify_page_title = page_title
                                     logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
@@ -221,7 +234,7 @@ class ReccoBeatsProvider:
             logger.info(f"🎵 Appel ReccoBeats API avec Spotify ID: {spotify_id}")
 
             try:
-                track_info = self._client.get_track_info(spotify_id)
+                track_info = client.get_track_info(spotify_id)
             except Exception as e:
                 logger.error(f"❌ Erreur ReccoBeats API: {e}")
                 return False

@@ -10,6 +10,7 @@ directement — manual_entry / workers) ; ce provider enveloppe la MÊME instanc
 / True / False / None) posées telles quelles dans le dict de résultats.
 """
 
+from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.logger import get_logger
@@ -28,8 +29,9 @@ class BpmFinderProvider:
     # None sur exception — l'orchestrateur n'a rien à rattraper de spécifique.
     error_result = None
 
-    def __init__(self, scraper=None):
-        self._scraper = scraper
+    def __init__(self, scraper=None, scraper_factory=None):
+        # PROPRIÉTAIRE de son scraper (créé lazy, fermé par close()).
+        self._resource = LazyResource(scraper, scraper_factory, label="scraper BPM Finder")
         # Disjoncteur : 3 échecs consécutifs (timeouts site) → source coupée pour
         # le reste du run (ré-armé par reset_breaker en début de run). Sans lui,
         # une panne site × force_update = ~90 s de pause PAR morceau.
@@ -37,11 +39,19 @@ class BpmFinderProvider:
         self._breaker_logged = False
         self._yt_searcher = None
 
+    @property
+    def scraper(self):
+        """Accès direct de la GUI (manual_entry ✏️, via la propriété de compat
+        `DataEnricher.bpmfinder_scraper`) — créé à la demande, None si la
+        source n'est pas configurée."""
+        return self._resource.get()
+
     def is_available(self) -> bool:
-        return self._scraper is not None
+        return self._resource.available()
 
     def close(self) -> None:
-        """No-op en C3 : le scraper reste fermé par DataEnricher.close (→ C5)."""
+        """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
+        self._resource.close()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> None:
         """Jamais de skip côté orchestrateur : tout le gating (disjoncteur,
@@ -124,8 +134,13 @@ class BpmFinderProvider:
             return "not_needed"
 
         logger.info(f"🎛️ BPM Finder (dernier recours) pour '{track.title}'")
+        scraper = self._resource.get()
+        if scraper is None:
+            # Création impossible (factory en échec) : traité comme un crash
+            # source (None) — exclu du « tout a échoué » du nettoyage.
+            return None
         try:
-            bf = self._scraper.analyze(_yt)
+            bf = scraper.analyze(_yt)
             if bf:
                 self._fail_streak = 0
                 applied = []
@@ -147,7 +162,7 @@ class BpmFinderProvider:
             else:
                 # Le disjoncteur ne vise QUE les vraies indispos site (timeout muet),
                 # pas un refus backend propre à une vidéo (4xx/5xx : le site répond).
-                if getattr(self._scraper, "last_failure_reason", None) == "timeout":
+                if getattr(scraper, "last_failure_reason", None) == "timeout":
                     self._fail_streak += 1
                 return False
         except Exception as e:

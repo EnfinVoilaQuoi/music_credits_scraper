@@ -54,62 +54,55 @@ class TrackRepository:
                     track.lyrics_scraped_at = existing_track["lyrics_scraped_at"]
 
             # Sérialiser les champs JSON une seule fois (partagés UPDATE/INSERT)
-            certifications_json = (
-                json.dumps(getattr(track, "certifications", []))
-                if hasattr(track, "certifications")
-                else "[]"
-            )
-            album_certifications_json = (
-                json.dumps(getattr(track, "album_certifications", []))
-                if hasattr(track, "album_certifications")
-                else "[]"
-            )
-            relationships_json = json.dumps(getattr(track, "relationships", []) or [])
+            certifications_json = json.dumps(track.certifications)
+            album_certifications_json = json.dumps(track.album_certifications)
+            relationships_json = json.dumps(track.relationships or [])
 
             # Paramètres NOMMÉS : un seul dict {colonne: valeur}, lié par nom
             # (:col). L'ordre des ~44 valeurs ne peut plus se désynchroniser du
             # SQL (cause de bugs positionnels). Le même dict sert à l'UPDATE et
             # à l'INSERT ; sqlite3 ignore les clés non référencées.
-            # NB : key/mode/spotify_page_title ne sont pas des champs de la
-            # dataclass Track (posés dynamiquement) → getattr conservé ici.
+            # NB : SEULS key/mode/spotify_page_title ne sont pas des champs de la
+            # dataclass Track (posés dynamiquement par le mapper) → getattr requis.
+            # Les autres colonnes sont des champs garantis → accès direct.
             params = {
                 "title": track.title,
                 "artist_id": track.artist.id,
                 "album": track.album,
-                "track_number": getattr(track, "track_number", None),
+                "track_number": track.track_number,
                 "release_date": track.release_date,
                 "genius_id": track.genius_id,
                 "spotify_id": track.spotify_id,
                 "discogs_id": track.discogs_id,
-                "isrc": getattr(track, "isrc", None),
+                "isrc": track.isrc,
                 "bpm": track.bpm,
-                "bpm_source": getattr(track, "bpm_source", None),
-                "bpm_confidence": getattr(track, "bpm_confidence", None),
-                "key_mode_source": getattr(track, "key_mode_source", None),
-                "reccobeats_resolution": getattr(track, "reccobeats_resolution", None),
-                "bpm_alt": getattr(track, "bpm_alt", None),
+                "bpm_source": track.bpm_source,
+                "bpm_confidence": track.bpm_confidence,
+                "key_mode_source": track.key_mode_source,
+                "reccobeats_resolution": track.reccobeats_resolution,
+                "bpm_alt": track.bpm_alt,
                 "duration": track.duration,
                 "genre": track.genre,
                 "key": getattr(track, "key", None),
                 "mode": getattr(track, "mode", None),
-                "musical_key": getattr(track, "musical_key", None),
-                "time_signature": getattr(track, "time_signature", None),
+                "musical_key": track.musical_key,
+                "time_signature": track.time_signature,
                 "genius_url": track.genius_url,
                 "spotify_url": track.spotify_url,
-                "youtube_url": getattr(track, "youtube_url", None),
-                "youtube_url_source": getattr(track, "youtube_url_source", None),
-                "is_featuring": getattr(track, "is_featuring", False),
-                "primary_artist_name": getattr(track, "primary_artist_name", None),
-                "featured_artists": getattr(track, "featured_artists", None),
-                "secondary_role": getattr(track, "secondary_role", None),
-                "lyrics": getattr(track, "lyrics", None),
-                "lyrics_scraped_at": getattr(track, "lyrics_scraped_at", None),
-                "lyrics_source": getattr(track, "lyrics_source", None),
-                "lyrics_synced": getattr(track, "lyrics_synced", None),
-                "lyrics_synced_source": getattr(track, "lyrics_synced_source", None),
-                "lyrics_synced_confidence": getattr(track, "lyrics_synced_confidence", None),
-                "has_lyrics": bool(getattr(track, "lyrics", None)),  # INSERT uniquement
-                "anecdotes": getattr(track, "anecdotes", None),
+                "youtube_url": track.youtube_url,
+                "youtube_url_source": track.youtube_url_source,
+                "is_featuring": track.is_featuring,
+                "primary_artist_name": track.primary_artist_name,
+                "featured_artists": track.featured_artists,
+                "secondary_role": track.secondary_role,
+                "lyrics": track.lyrics,
+                "lyrics_scraped_at": track.lyrics_scraped_at,
+                "lyrics_source": track.lyrics_source,
+                "lyrics_synced": track.lyrics_synced,
+                "lyrics_synced_source": track.lyrics_synced_source,
+                "lyrics_synced_confidence": track.lyrics_synced_confidence,
+                "has_lyrics": bool(track.lyrics),  # INSERT uniquement
+                "anecdotes": track.anecdotes,
                 "certifications_json": certifications_json,
                 "album_certifications_json": album_certifications_json,
                 "relationships_json": relationships_json,
@@ -225,13 +218,9 @@ class TrackRepository:
 
             conn.commit()
 
-            lyrics_info = (
-                f", Paroles: {bool(getattr(track, 'lyrics', None))}"
-                if hasattr(track, "lyrics")
-                else ""
-            )
             logger.info(
-                f"Morceau sauvegardé: {track.title} (ID: {track.id}, Featuring: {getattr(track, 'is_featuring', False)}{lyrics_info})"
+                f"Morceau sauvegardé: {track.title} (ID: {track.id}, "
+                f"Featuring: {track.is_featuring}, Paroles: {bool(track.lyrics)})"
             )
             return track.id
 
@@ -322,9 +311,7 @@ class TrackRepository:
                         continue
 
                 # Compter les tracks avec musical_key
-                tracks_with_key = sum(
-                    1 for t in tracks if hasattr(t, "musical_key") and t.musical_key
-                )
+                tracks_with_key = sum(1 for t in tracks if t.musical_key)
                 logger.info(
                     f"✅ {len(tracks)} tracks chargés avec succès ({tracks_with_key} avec musical_key)"
                 )
@@ -498,7 +485,7 @@ class TrackRepository:
                 """,
                     (
                         track.album,
-                        getattr(track, "track_number", None),
+                        track.track_number,
                         track.release_date,
                         track.genius_id,
                         track.spotify_id,
@@ -508,9 +495,9 @@ class TrackRepository:
                         track.genre,
                         track.genius_url,
                         track.spotify_url,
-                        getattr(track, "is_featuring", False),
-                        getattr(track, "primary_artist_name", None),
-                        getattr(track, "featured_artists", None),
+                        track.is_featuring,
+                        track.primary_artist_name,
+                        track.featured_artists,
                         datetime.now(),
                         track.last_scraped,
                         track.id,
@@ -531,7 +518,7 @@ class TrackRepository:
 
                 new_credits_count = len(track.credits)
                 logger.info(
-                    f"✅ Mise à jour forcée terminée pour '{track.title}': {new_credits_count} nouveaux crédits (Featuring préservé: {getattr(track, 'is_featuring', False)})"
+                    f"✅ Mise à jour forcée terminée pour '{track.title}': {new_credits_count} nouveaux crédits (Featuring préservé: {track.is_featuring})"
                 )
 
                 return new_credits_count

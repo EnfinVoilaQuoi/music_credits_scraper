@@ -48,7 +48,7 @@ def populate_tracks_table(app):
     for item in app.tree.get_children():
         app.tree.delete(item)
 
-    if not app.current_artist or not getattr(app.current_artist, "tracks", None):
+    if not app.current_artist or not app.current_artist.tracks:
         return
 
     # Charger les morceaux désactivés depuis la mémoire (IDs, pas indices)
@@ -70,24 +70,22 @@ def populate_tracks_table(app):
             title = track.title or f"Track {i+1}"
 
             # Artiste principal - gestion du featuring
-            if getattr(track, "is_featuring", False) and getattr(
-                track, "primary_artist_name", None
-            ):
+            if track.is_featuring and track.primary_artist_name:
                 artist_display = track.primary_artist_name
             else:
                 artist_display = track.artist.name if track.artist else ""
 
             # Rôle secondaire (Additional Voices…) : marqueur distinct du feat
-            _sec_role = getattr(track, "secondary_role", None)
+            _sec_role = track.secondary_role
             if _sec_role:
                 artist_display = f"{artist_display} · 🎙️ {_sec_role}"
                 title = f"🎙️ {title}"
 
-            album = getattr(track, "album", "") or ""
+            album = track.album or ""
 
             # Date de sortie - FORMAT FRANÇAIS (JJ/MM/AAAA)
             release_date = ""
-            if hasattr(track, "release_date") and track.release_date:
+            if track.release_date:
                 try:
                     if isinstance(track.release_date, str):
                         # Convertir string ISO vers datetime puis vers format français
@@ -109,13 +107,13 @@ def populate_tracks_table(app):
 
             # CORRECTION: Obtenir le nombre de crédits directement
             credits_count = 0
-            if hasattr(track, "credits") and track.credits:
+            if track.credits:
                 credits_count = len(track.credits)
             credits_display = str(credits_count)
 
             # Paroles : ✓ = texte, ⏱ = timestamps (paroles synchronisées) en plus
-            has_lyrics_flag = getattr(track, "has_lyrics", False)
-            has_sync_flag = bool(getattr(track, "lyrics_synced", None))
+            has_lyrics_flag = track.has_lyrics
+            has_sync_flag = bool(track.lyrics_synced)
             if has_lyrics_flag and has_sync_flag:
                 lyrics_display = "✓⏱"
             elif has_sync_flag:
@@ -127,17 +125,17 @@ def populate_tracks_table(app):
 
             # BPM avec tonalité - VERSION AMÉLIORÉE
             bpm = ""  # ⭐ IMPORTANT : Initialiser la variable
-            if hasattr(track, "bpm") and track.bpm:
+            if track.bpm:
                 bpm = str(track.bpm)
 
                 # ⭐ LOGIQUE AMÉLIORÉE pour afficher la tonalité
                 musical_key = None
 
                 # 1. Essayer musical_key directement
-                if hasattr(track, "musical_key") and track.musical_key:
+                if track.musical_key:
                     musical_key = track.musical_key
 
-                # 2. FALLBACK : Calculer à partir de key et mode
+                # 2. FALLBACK : key/mode = attributs dynamiques du mapper → hasattr requis
                 elif hasattr(track, "key") and hasattr(track, "mode") and track.key and track.mode:
                     try:
                         from src.utils.music_theory import key_mode_to_french_from_string
@@ -158,7 +156,7 @@ def populate_tracks_table(app):
 
             # Durée du morceau
             duration_display = ""
-            if hasattr(track, "duration") and track.duration:
+            if track.duration:
                 try:
                     # Format MM:SS ou HH:MM:SS
                     if isinstance(track.duration, str):
@@ -175,7 +173,7 @@ def populate_tracks_table(app):
             certif_display = ""
             try:
                 # Vérifier si le track a des certifications stockées
-                if hasattr(track, "certifications") and track.certifications:
+                if track.certifications:
                     # Prendre la plus haute certification (première dans la liste déjà triée)
                     cert_level = track.certifications[0].get("certification", "")
                     emoji_map = {
@@ -205,8 +203,8 @@ def populate_tracks_table(app):
                     streams_source_label,
                 )
 
-                sp = getattr(track, "spotify_streams", None)
-                yt = getattr(track, "ytm_streams", None)
+                sp = track.spotify_streams
+                yt = track.ytm_streams
                 streams_total = calculate_total_streams(sp, yt)
                 streams_display = format_streams(streams_total, streams_source_label(sp, yt))
             except Exception:
@@ -249,7 +247,7 @@ def populate_tracks_table(app):
                     "end",
                     text="☐",
                     values=(
-                        getattr(track, "title", f"Track {i}"),
+                        track.title,
                         "",
                         "",
                         "",
@@ -391,7 +389,7 @@ def delete_track_by_index(app, index):
         # Mémoriser la suppression (genius_id) pour éviter le réajout au prochain import
         try:
             app.deleted_tracks_manager.add_deleted(
-                app.current_artist.name, getattr(track, "genius_id", None), track.title
+                app.current_artist.name, track.genius_id, track.title
             )
         except Exception as e:
             logger.debug(f"Mémo suppression échec: {e}")
@@ -621,12 +619,12 @@ def sort_column(app, col):
             sort_key = lambda t: helpers.normalize_text(t.album or "")
         elif col == "Artiste principal":
             sort_key = lambda t: helpers.normalize_text(
-                (getattr(t, "primary_artist_name", "") or t.artist.name) if t.artist else ""
+                (t.primary_artist_name or t.artist.name) if t.artist else ""
             )
         elif col == "Date sortie":
             # CORRECTION: Gérer datetime ET string
             def get_release_date(t):
-                if not hasattr(t, "release_date") or not t.release_date:
+                if not t.release_date:
                     return datetime.min
                 if isinstance(t.release_date, str):
                     try:
@@ -640,19 +638,19 @@ def sort_column(app, col):
             sort_key = get_release_date
         elif col == "Crédits":
             # CORRECTION: Trier par nombre de crédits
-            sort_key = lambda t: len(getattr(t, "credits", []))
+            sort_key = lambda t: len(t.credits)
         elif col == "Paroles":
             # rien < texte seul < texte + timestamps
             sort_key = lambda t: (
-                bool(getattr(t, "has_lyrics", False)),
-                bool(getattr(t, "lyrics_synced", None)),
+                bool(t.has_lyrics),
+                bool(t.lyrics_synced),
             )
         elif col == "BPM":
-            sort_key = lambda t: getattr(t, "bpm", 0) or 0
+            sort_key = lambda t: t.bpm or 0
         elif col == "Durée":
             # Trier par durée en secondes
             def get_duration_seconds(t):
-                if not hasattr(t, "duration") or not t.duration:
+                if not t.duration:
                     return 0
                 if isinstance(t.duration, int):
                     return t.duration
@@ -687,7 +685,7 @@ def sort_column(app, col):
 
             def get_cert_value(t):
                 try:
-                    if hasattr(t, "certifications") and t.certifications:
+                    if t.certifications:
                         cert_level = t.certifications[0].get("certification", "")
                         emoji_map = {
                             "Quadruple Diamant": "💎💎💎💎",
@@ -714,9 +712,7 @@ def sort_column(app, col):
                 try:
                     from src.utils.streams_calculator import calculate_total_streams
 
-                    total = calculate_total_streams(
-                        getattr(t, "spotify_streams", None), getattr(t, "ytm_streams", None)
-                    )
+                    total = calculate_total_streams(t.spotify_streams, t.ytm_streams)
                     return total if total is not None else -1
                 except Exception:
                     return -1

@@ -802,7 +802,14 @@ class DataEnricher:
                         if applied:
                             logger.info(f"✅ BPM Finder: {', '.join(applied)}")
                     else:
-                        self._bpmfinder_fail_streak += 1
+                        # Le disjoncteur ne vise QUE les vraies indispos site
+                        # (timeout muet), pas un refus backend propre à une vidéo
+                        # (4xx/5xx : le site répond, il traitera d'autres morceaux).
+                        if (
+                            getattr(self.bpmfinder_scraper, "last_failure_reason", None)
+                            == "timeout"
+                        ):
+                            self._bpmfinder_fail_streak += 1
                         results["bpmfinder"] = False
                 except Exception as e:
                     logger.error(f"❌ BPM Finder échec '{track.title}': {e}")

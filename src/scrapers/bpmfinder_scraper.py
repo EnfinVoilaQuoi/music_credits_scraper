@@ -55,6 +55,12 @@ class BPMFinderScraper:
         self.page = None
         self._thread_id = None  # thread propriétaire du driver (Playwright sync = thread-affine)
         self.cache = self._load_cache()
+        # Dernier code HTTP d'erreur backend observé (>=400 sur /api/…), posé par
+        # le listener réseau et lu par _await_and_parse pour un abandon rapide.
+        self._last_api_error: int | None = None
+        # Cause du dernier échec d'analyse (lu par l'orchestrateur pour le
+        # disjoncteur) : "timeout" | "backend" | "ui" | "login" | None.
+        self.last_failure_reason: str | None = None
 
     # ── Disponibilité ──────────────────────────────────────────────────────────
 
@@ -126,15 +132,16 @@ class BPMFinderScraper:
             f"(session {'reprise' if storage else 'neuve'})"
         )
 
-    @staticmethod
-    def _log_api_error(resp):
+    def _log_api_error(self, resp):
         """Listener réseau : rend visibles les erreurs backend (sans lui, un refus
-        de l'API se manifeste par un « pas de résultat en 90s » muet). Propriétés
-        sync uniquement — PAS de resp.text() ici (appel bloquant interdit dans un
+        de l'API se manifeste par un « pas de résultat en 90s » muet) ET mémorise
+        le code pour l'abandon rapide de _await_and_parse. Propriétés sync
+        uniquement — PAS de resp.text() ici (appel bloquant interdit dans un
         handler Playwright sync)."""
         try:
             if "audioaidynamics.com/api" in resp.url and resp.status >= 400:
                 logger.warning(f"BPM Finder API: HTTP {resp.status} sur {resp.url}")
+                self._last_api_error = resp.status
         except Exception:
             pass
 
@@ -335,45 +342,74 @@ class BPMFinderScraper:
         # (cookie access_token) — évite le re-login systématique.
         if not self._is_logged_in():
             if not self._try_login():
+                self.last_failure_reason = "login"
                 return None
         else:
             logger.debug("BPM Finder: session valide (access_token) — pas de login")
 
-        before = self._cards()
-        url_input = self._find_youtube_input()
-        if not url_input:
-            # Dernier essai : reload propre puis re-cherche
-            self._goto_analyzer(force=True)
+        self.last_failure_reason = None
+        # 1 essai + 1 retry : un 5xx backend est souvent transitoire (le
+        # téléchargement YouTube côté serveur se fait jeter). Chaque tentative
+        # abandonne vite grâce au fail-fast de _await_and_parse.
+        for attempt in range(2):
+            if attempt:
+                logger.info(f"BPM Finder: nouvel essai ({attempt + 1}/2) pour {vid}")
+                self._goto_analyzer(force=True)
+            self._last_api_error = None  # armé pour cette tentative
+
+            before = self._cards()
             url_input = self._find_youtube_input()
-        if not url_input:
+            if not url_input:
+                # Dernier essai : reload propre puis re-cherche
+                self._goto_analyzer(force=True)
+                url_input = self._find_youtube_input()
+            if not url_input:
+                try:
+                    dbg = str(DATA_DIR / "bpmfinder_debug.png")
+                    self.page.screenshot(path=dbg)
+                    logger.error(f"BPM Finder: champ YouTube introuvable — capture: {dbg}")
+                except Exception:
+                    logger.error("BPM Finder: champ YouTube introuvable (UI changée ?)")
+                self.last_failure_reason = "ui"
+                return None
             try:
-                dbg = str(DATA_DIR / "bpmfinder_debug.png")
-                self.page.screenshot(path=dbg)
-                logger.error(f"BPM Finder: champ YouTube introuvable — capture: {dbg}")
-            except Exception:
-                logger.error("BPM Finder: champ YouTube introuvable (UI changée ?)")
-            return None
-        try:
-            url_input.fill(youtube_url)
-            self._dismiss_cookie_overlay()  # au cas où l'overlay surgit après la saisie
-            try:
-                self.page.click("button:has-text('Upload')", timeout=15_000)
-            except Exception:
-                # Les overlays pubs (fc-dialog/AdSense) peuvent réapparaître entre
-                # le dismiss et le clic : re-nettoyer et retenter UNE fois.
-                self._dismiss_cookie_overlay()
-                self.page.click("button:has-text('Upload')", timeout=10_000)
-        except Exception as e:
-            logger.error(f"BPM Finder: saisie/Upload échoué: {e}")
-            self._dump_debug_state(f"upload_{vid}")
+                url_input.fill(youtube_url)
+                self._dismiss_cookie_overlay()  # au cas où l'overlay surgit après la saisie
+                try:
+                    self.page.click("button:has-text('Upload')", timeout=15_000)
+                except Exception:
+                    # Les overlays pubs (fc-dialog/AdSense) peuvent réapparaître entre
+                    # le dismiss et le clic : re-nettoyer et retenter UNE fois.
+                    self._dismiss_cookie_overlay()
+                    self.page.click("button:has-text('Upload')", timeout=10_000)
+            except Exception as e:
+                logger.error(f"BPM Finder: saisie/Upload échoué: {e}")
+                self._dump_debug_state(f"upload_{vid}")
+                self.last_failure_reason = "ui"
+                return None
+
+            result = self._await_and_parse(before, timeout_s, label=vid)
+            if result:
+                self.cache[vid] = result
+                self._save_cache()
+                self._save_session()  # prolonge la session (cookies rafraîchis)
+                return result
+
+            status = self._last_api_error
+            if status is None:
+                # Ni carte, ni erreur backend → le site n'a rien renvoyé (muet) :
+                # vraie indispo, comptabilisée par le disjoncteur de l'orchestrateur.
+                self.last_failure_reason = "timeout"
+                return None
+            if 500 <= status < 600 and attempt == 0:
+                continue  # 5xx : on retente une fois
+            # 4xx (vidéo restreinte/indispo) ou 5xx persistant : échec propre à
+            # CETTE vidéo, PAS une panne du site → ne doit pas ouvrir le disjoncteur.
+            self.last_failure_reason = "backend"
             return None
 
-        result = self._await_and_parse(before, timeout_s, label=vid)
-        if result:
-            self.cache[vid] = result
-            self._save_cache()
-            self._save_session()  # prolonge la session (cookies rafraîchis)
-        return result
+        self.last_failure_reason = "backend"
+        return None
 
     def analyze_file(self, filepath: str, timeout_s: int = 120) -> dict | None:
         """Analyse un FICHIER audio/vidéo LOCAL (wav/mp3/ogg/flac/mp4…).
@@ -391,6 +427,7 @@ class BPMFinderScraper:
         if not self._is_logged_in() and not self._try_login():
             return None
 
+        self._last_api_error = None  # armé pour cette analyse
         before = self._cards()
         try:
             self._dismiss_cookie_overlay()
@@ -414,6 +451,13 @@ class BPMFinderScraper:
             if fresh:
                 new_card = sorted(fresh)[0]
                 break
+            # Abandon rapide : le backend a déjà renvoyé une erreur → inutile
+            # d'attendre une carte qui n'arrivera jamais (évite 90 s de pause).
+            if self._last_api_error is not None:
+                logger.warning(
+                    f"BPM Finder: backend HTTP {self._last_api_error} → abandon rapide pour {label}"
+                )
+                return None
         if not new_card:
             logger.warning(f"BPM Finder: pas de résultat en {timeout_s}s pour {label}")
             self._dump_debug_state(f"timeout_{label}")

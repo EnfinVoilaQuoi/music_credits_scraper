@@ -123,6 +123,11 @@ class DataEnricher:
             logger.warning(f"⚠️ Discogs API non disponible: {e}")
             self.apis_available["discogs"] = False
 
+        # Provider Discogs (pattern provider) — enveloppe le client
+        from src.enrichment.providers.discogs import DiscogsProvider
+
+        self._discogs_provider = DiscogsProvider(self.discogs_client)
+
         # BPM Finder (audioaidynamics) — dernier recours BPM/Key via lien YouTube
         # Nécessite BPMFINDER_EMAIL/PASSWORD (env/.env) ou une session sauvegardée
         self.bpmfinder_scraper = None
@@ -887,9 +892,7 @@ class DataEnricher:
         if "discogs" in sources and self.apis_available.get("discogs"):
             logger.info(f"💿 Appel de Discogs API pour '{track.title}'")
             try:
-                discogs_success = self.discogs_client.enrich_track_data(
-                    track, force_update=force_update
-                )
+                discogs_success = self._discogs_provider.enrich(track, ctx)
                 results["discogs"] = discogs_success
 
                 if discogs_success:

@@ -386,25 +386,22 @@ def start_track_retrieval(
 
                     # Si le morceau existe, fusionner les données
                     if existing_track:
-                        # Préserver les données enrichies existantes (BPM, lyrics, crédits, etc.)
-                        # BUG LATENT (non corrigé ici — hors périmètre getattr) : musical_key/
-                        # lyrics/certifications sont gardés par `not hasattr(track, …)`
-                        # TOUJOURS faux (champs de la dataclass) → préservation morte.
-                        # Compensé par le COALESCE de save_track. À traiter en « comportement ».
+                        # Préserver les données enrichies existantes quand le track
+                        # fraîchement récupéré de l'API ne les porte pas (l'API Genius
+                        # ne fournit ni BPM, ni tonalité, ni paroles, ni certifs).
+                        # (Avant 2026-07-13 : musical_key/lyrics/certifs étaient gardés
+                        # par `not hasattr(track, …)` toujours faux → préservation morte.
+                        # Alignés ici sur le pattern correct de bpm/credits.)
                         if not track.bpm and existing_track.bpm:
                             track.bpm = existing_track.bpm
-                        if not hasattr(track, "musical_key") and hasattr(
-                            existing_track, "musical_key"
-                        ):
+                        if not track.musical_key and existing_track.musical_key:
                             track.musical_key = existing_track.musical_key
-                        if not hasattr(track, "lyrics") and hasattr(existing_track, "lyrics"):
+                        if not track.lyrics and existing_track.lyrics:
                             track.lyrics = existing_track.lyrics
                             track.has_lyrics = existing_track.has_lyrics
                         if not track.credits and existing_track.credits:
                             track.credits = existing_track.credits
-                        if not hasattr(track, "certifications") and hasattr(
-                            existing_track, "certifications"
-                        ):
+                        if not track.certifications and existing_track.certifications:
                             track.certifications = existing_track.certifications
                         # Préserver l'ID de la base de données
                         track.id = existing_track.id

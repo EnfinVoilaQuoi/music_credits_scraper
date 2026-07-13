@@ -41,17 +41,14 @@ class TrackRepository:
 
             if existing_track:
                 track.id = existing_track["id"]
-
-                # Préserver les infos existantes
-                if existing_track["is_featuring"] and not hasattr(track, "is_featuring"):
-                    track.is_featuring = bool(existing_track["is_featuring"])
-                    track.primary_artist_name = existing_track["primary_artist_name"]
-                    track.featured_artists = existing_track["featured_artists"]
-
-                if existing_track["lyrics"] and not hasattr(track, "lyrics"):
-                    track.lyrics = existing_track["lyrics"]
-                    track.has_lyrics = bool(existing_track["has_lyrics"])
-                    track.lyrics_scraped_at = existing_track["lyrics_scraped_at"]
+                # NB : plus de « préservation » ici. Les anciens blocs gardés par
+                # `not hasattr(track, "is_featuring"/"lyrics")` étaient morts (champs
+                # de la dataclass → hasattr toujours vrai) et, de toute façon,
+                # redondants : les paroles sont préservées par le COALESCE de
+                # l'UPDATE ci-dessous, et is_featuring suit la décision documentée
+                # « le track en mémoire fait foi » (écrasé SANS COALESCE). La fusion
+                # en mémoire des données enrichies se fait en amont côté worker
+                # (gui/workers/retrieval.py).
 
             # Sérialiser les champs JSON une seule fois (partagés UPDATE/INSERT)
             certifications_json = json.dumps(track.certifications)

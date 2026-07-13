@@ -110,6 +110,14 @@ class DataEnricher:
 
         self._deezer_provider = DeezerProvider(self.deezer_client)
 
+        # Provider ReccoBeats — a besoin des clients Deezer (ISRC) et Spotify (scrape),
+        # créés au-dessus : instancié ici une fois les trois disponibles.
+        from src.enrichment.providers.reccobeats import ReccoBeatsProvider
+
+        self._reccobeats_provider = ReccoBeatsProvider(
+            self.reccobeats_client, self.deezer_client, self.spotify_id_scraper
+        )
+
         # Initialiser Discogs API
         self.discogs_client = None
         try:
@@ -503,6 +511,8 @@ class DataEnricher:
             bpm_ballot=ballot,
             clear_on_failure=clear_on_failure,
             validate_spotify_id_unique=self.validate_spotify_id_unique,
+            # ReccoBeats ne re-scrape pas le Spotify ID si l'étape spotify_id le fait déjà
+            allow_spotify_scrape=("spotify_id" not in sources),
         )
 
         # ========================================
@@ -534,7 +544,7 @@ class DataEnricher:
         isrc_ok = False
         if "reccobeats" in sources and self.apis_available.get("reccobeats"):
             try:
-                isrc_ok = self._try_reccobeats_by_isrc(track)
+                isrc_ok = self._reccobeats_provider.try_by_isrc(track, ctx)
                 if isrc_ok:
                     logger.info(
                         f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
@@ -610,15 +620,9 @@ class DataEnricher:
             else:
                 logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
                 try:
-                    # skip_isrc=True : voie ISRC déjà tentée en amont.
-                    # allow_spotify_scrape=False si l'étape 0 (source 'spotify_id') a déjà
-                    # scrapé → évite un double scrape Playwright par morceau.
-                    reccobeats_success = self._enrich_with_reccobeats(
-                        track,
-                        artist_tracks,
-                        skip_isrc=True,
-                        allow_spotify_scrape=("spotify_id" not in sources),
-                    )
+                    # Voie ISRC déjà tentée en amont ; ctx.allow_spotify_scrape gère
+                    # le double scrape Playwright (False si l'étape spotify_id l'a fait).
+                    reccobeats_success = self._reccobeats_provider.enrich(track, ctx)
                     results["reccobeats"] = reccobeats_success
 
                     if reccobeats_success:
@@ -1023,304 +1027,3 @@ class DataEnricher:
     def _finalize_bpm(self, track):
         """Pose le BPM final : bpm (octave réelle) + bpm_alt + source + confiance."""
         self._get_ballot(track).finalize(track)
-
-    def _apply_reccobeats_result(
-        self, track: Track, track_info: dict, resolution: str | None = None
-    ) -> bool:
-        """
-        Applique au track les données d'un result ReccoBeats (bpm/key/mode/
-        musical_key/duration), de façon non destructive pour la durée.
-
-        Args:
-            resolution: 'isrc' ou 'spotify_id' — voie de résolution (debug).
-
-        Returns:
-            bool: True si au moins le BPM ou la Key a été posé.
-        """
-        applied = False
-        if resolution:
-            track.reccobeats_resolution = resolution
-
-        # BPM → candidat pour le vote (+ pose provisoire si manquant)
-        bpm = track_info.get("bpm")
-        if bpm is None and isinstance(track_info.get("audio_features"), dict):
-            bpm = track_info["audio_features"].get("tempo")
-        sbpm = self._sanitize_bpm(bpm)
-        if sbpm is not None:
-            self._add_bpm_candidate(track, "reccobeats", sbpm)
-            if not getattr(track, "bpm", None):
-                track.bpm = sbpm
-            applied = True
-
-        # Key / Mode
-        if track_info.get("key") is not None:
-            track.key = track_info["key"]
-            track.key_mode_source = "reccobeats"
-            applied = True
-        if track_info.get("mode") is not None:
-            track.mode = track_info["mode"]
-            track.key_mode_source = "reccobeats"
-
-        if getattr(track, "key", None) is not None and getattr(track, "mode", None) is not None:
-            try:
-                from src.utils.music_theory import key_mode_to_french
-
-                track.musical_key = key_mode_to_french(track.key, track.mode)
-            except Exception as e:
-                logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
-
-        # Durée (ne pas écraser une durée déjà présente)
-        dur = track_info.get("duration")
-        if isinstance(dur, (int, float)) and dur > 0 and not getattr(track, "duration", None):
-            track.duration = int(dur)
-
-        return applied
-
-    def _try_reccobeats_by_isrc(self, track: Track, artist_name: str | None = None) -> bool:
-        """
-        Voie ISRC : récupère l'ISRC (track.isrc ou Deezer) puis interroge
-        ReccoBeats SANS scraper de Spotify ID. Applique BPM/Key/Mode au track.
-
-        Returns:
-            bool: True si des audio features ont été appliquées (BPM/Key).
-        """
-        if not self.reccobeats_client:
-            return False
-
-        if artist_name is None:
-            if getattr(track, "is_featuring", False) and getattr(
-                track, "primary_artist_name", None
-            ):
-                artist_name = track.primary_artist_name
-            else:
-                artist_name = (
-                    track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                )
-
-        isrc = getattr(track, "isrc", None)
-        if not isrc and self.deezer_client:
-            try:
-                isrc = self.deezer_client.get_isrc(artist_name, track.title)
-                if isrc:
-                    track.isrc = isrc
-                    logger.info(f"🔑 ISRC récupéré via Deezer: {isrc}")
-            except Exception as e:
-                logger.debug(f"Deezer get_isrc échec: {e}")
-
-        if not isrc:
-            return False
-
-        try:
-            info = self.reccobeats_client.get_track_info_by_isrc(isrc)
-        except Exception as e:
-            logger.error(f"❌ ReccoBeats ISRC API: {e}")
-            info = None
-
-        if (
-            info
-            and info.get("success")
-            and self._apply_reccobeats_result(track, info, resolution="isrc")
-        ):
-            logger.info(
-                f"ReccoBeats: ✅ SUCCÈS via ISRC pour '{track.title}' (scrape Spotify évité)"
-            )
-            return True
-
-        logger.info(
-            f"ReccoBeats: ISRC sans audio-features pour '{track.title}' → fallback Spotify ID"
-        )
-        return False
-
-    def _enrich_with_reccobeats(
-        self,
-        track: Track,
-        artist_tracks: list[Track] | None = None,
-        skip_isrc: bool = False,
-        allow_spotify_scrape: bool = True,
-    ) -> bool:
-        """
-        Enrichit avec ReccoBeats
-        VERSION SÉPARÉE: ISRC (prioritaire) → SpotifyIDScraper → ReccoBeatsAPI
-        skip_isrc=True quand la voie ISRC a déjà été tentée en amont (enrich_track).
-        allow_spotify_scrape=False quand l'étape 0 d'enrich_track a déjà scrapé le
-        Spotify ID (évite un DOUBLE scrape Playwright par morceau).
-        """
-        try:
-            if not self.reccobeats_client:
-                logger.error("ReccoBeats client non initialisé")
-                return False
-
-            # Déterminer l'artiste (gestion featurings)
-            if hasattr(track, "is_featuring") and track.is_featuring:
-                if hasattr(track, "primary_artist_name") and track.primary_artist_name:
-                    artist_name = track.primary_artist_name
-                    logger.info(f"🎤 Featuring détecté, artiste principal: {artist_name}")
-                else:
-                    artist_name = (
-                        track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                    )
-            else:
-                artist_name = (
-                    track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                )
-
-            logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
-
-            # ============================================================
-            # VOIE PRIORITAIRE : ISRC (sauf si déjà tentée en amont par enrich_track)
-            # ============================================================
-            if not skip_isrc and self._try_reccobeats_by_isrc(track, artist_name):
-                return True
-
-            # ============================================================
-            # ÉTAPE 1: RÉCUPÉRER LE SPOTIFY ID (fallback si pas d'ISRC exploitable)
-            # ============================================================
-            spotify_id = None
-
-            # 1a. Vérifier si le track a déjà un Spotify ID validé
-            if hasattr(track, "spotify_id") and track.spotify_id:
-                # Valider l'unicité
-                if artist_tracks and self.validate_spotify_id_unique(
-                    track.spotify_id, track, artist_tracks
-                ):
-                    spotify_id = track.spotify_id
-                    logger.info(f"✅ Spotify ID existant validé: {spotify_id}")
-                else:
-                    logger.warning("⚠️ Spotify ID existant est un duplicata, il sera ignoré")
-                    track.spotify_id = None
-
-            # 1b. Si pas d'ID, utiliser SpotifyIDScraper (sauf si l'étape 0 l'a déjà fait)
-            if not spotify_id and not allow_spotify_scrape:
-                logger.info(
-                    "⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
-                )
-            if not spotify_id and allow_spotify_scrape and self.spotify_id_scraper:
-                logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
-                try:
-                    spotify_id = self.spotify_id_scraper.get_spotify_id(artist_name, track.title)
-
-                    if spotify_id:
-                        # Valider l'unicité
-                        if artist_tracks and not self.validate_spotify_id_unique(
-                            spotify_id, track, artist_tracks
-                        ):
-                            logger.error(
-                                f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}"
-                            )
-                            spotify_id = None
-                        else:
-                            logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
-                            track.spotify_id = spotify_id
-
-                            # Récupérer le titre de la page Spotify pour vérification
-                            try:
-                                page_title = self.spotify_id_scraper.get_spotify_page_title(
-                                    spotify_id
-                                )
-                                if page_title:
-                                    track.spotify_page_title = page_title
-                                    logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-                            except Exception as e:
-                                logger.debug(f"Impossible de récupérer le titre de page: {e}")
-                    else:
-                        logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
-
-                except Exception as e:
-                    logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
-                    spotify_id = None
-
-            # 1c. Si toujours pas d'ID, échec
-            if not spotify_id:
-                logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
-                return False
-
-            # ============================================================
-            # ÉTAPE 2: APPELER RECCOBEATS AVEC L'ID
-            # ============================================================
-            logger.info(f"🎵 Appel ReccoBeats API avec Spotify ID: {spotify_id}")
-
-            try:
-                track_info = self.reccobeats_client.get_track_info(spotify_id)
-            except Exception as e:
-                logger.error(f"❌ Erreur ReccoBeats API: {e}")
-                return False
-
-            if not track_info or not track_info.get("success"):
-                logger.warning(f"ReccoBeats: ❌ Pas de données pour ID {spotify_id}")
-                return False
-
-            logger.debug("ReccoBeats: ✅ Données récupérées")
-            track.reccobeats_resolution = "spotify_id"
-
-            # Stocker le BPM
-            bpm = None
-            if "bpm" in track_info:
-                bpm = track_info["bpm"]
-            elif "tempo" in track_info:
-                bpm = track_info["tempo"]
-            elif "audio_features" in track_info:
-                features = track_info["audio_features"]
-                if isinstance(features, dict) and "tempo" in features:
-                    bpm = features["tempo"]
-
-            sbpm = self._sanitize_bpm(bpm)
-            if sbpm is not None:
-                self._add_bpm_candidate(track, "reccobeats", sbpm)
-                if not getattr(track, "bpm", None):
-                    track.bpm = sbpm
-                logger.info(f"ReccoBeats: ✅ BPM: {sbpm}")
-
-            # Stocker Key et Mode
-            if "key" in track_info and track_info["key"] is not None:
-                track.key = track_info["key"]
-                track.key_mode_source = "reccobeats"
-                logger.info(f"ReccoBeats: ✅ Key: {track.key}")
-
-            if "mode" in track_info and track_info["mode"] is not None:
-                track.mode = track_info["mode"]
-                track.key_mode_source = "reccobeats"
-                logger.info(f"ReccoBeats: ✅ Mode: {track.mode}")
-
-            if (
-                hasattr(track, "key")
-                and hasattr(track, "mode")
-                and track.key is not None
-                and track.mode is not None
-            ):
-                try:
-                    from src.utils.music_theory import key_mode_to_french
-
-                    track.musical_key = key_mode_to_french(track.key, track.mode)
-                    logger.info(f"ReccoBeats: ✅ Musical Key: {track.musical_key}")
-                except Exception as e:
-                    logger.warning(f"ReccoBeats: ⚠️ Erreur conversion musical_key: {e}")
-
-            # Stocker la Durée
-            if "duration" in track_info and track_info["duration"] is not None:
-                duration_value = track_info["duration"]
-                if isinstance(duration_value, (int, float)) and duration_value > 0:
-                    track.duration = int(duration_value)
-                    logger.info(f"ReccoBeats: ✅ Duration: {track.duration}s")
-                else:
-                    logger.warning(f"ReccoBeats: ⚠️ Duration invalide: {duration_value}")
-
-            # Mise à jour de la logique de succès
-            has_spotify_id = hasattr(track, "spotify_id") and track.spotify_id
-            has_bpm = hasattr(track, "bpm") and track.bpm
-            has_duration = hasattr(track, "duration") and track.duration  # ⭐ NOUVEAU
-
-            if has_spotify_id and has_bpm:
-                logger.info(f"ReccoBeats: ✅ SUCCÈS COMPLET '{track.title}'")
-                if has_duration:
-                    logger.info(f"ReccoBeats: ✅ Duration également récupérée: {track.duration}s")
-                return True
-            elif has_spotify_id:
-                logger.info(f"ReccoBeats: ⚠️ SUCCÈS PARTIEL '{track.title}' - ID mais pas BPM")
-                return True
-            else:
-                logger.warning(f"ReccoBeats: ❌ ÉCHEC '{track.title}'")
-                return False
-
-        except Exception as e:
-            logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
-            return False

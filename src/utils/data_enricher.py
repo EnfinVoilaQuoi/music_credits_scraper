@@ -12,7 +12,7 @@ from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.models import Track
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
-from src.utils.bpm_vote import BpmBallot, sanitize_bpm
+from src.utils.bpm_vote import BpmBallot
 from src.utils.logger import get_logger
 
 # NB : les modules de src.enrichment sont importés LOCALEMENT (dans __init__ /
@@ -422,9 +422,13 @@ class DataEnricher:
         clear_on_failure: bool = True,
     ) -> dict[str, bool]:
         """
-        Enrichit un morceau avec les sources spécifiées
-        VERSION CORRIGÉE: Avec validation Spotify ID + logs détaillés + fallback SongBPM + Deezer + GetSongBPM + Discogs
-        ORDRE: 1. Spotify ID, 2. ReccoBeats, 3. GetSongBPM, 4. SongBPM, 5. Deezer, 6. Discogs
+        Enrichit un morceau : boucle ordonnée de providers (gate → enrich).
+
+        Pré-étapes d'orchestrateur : Genius media (feats) puis voie ISRC (évite
+        le scrape Spotify si l'ISRC suffit — lue par les gates spotify_id et
+        reccobeats). Le vote BPM est arbitré entre Deezer et Discogs (position
+        historique). Le gating et la valeur d'échec de chaque source vivent
+        dans son provider (gate() / error_result).
         """
         if sources is None:
             sources = [
@@ -449,11 +453,9 @@ class DataEnricher:
 
         from src.enrichment.context import EnrichmentContext
 
-        # Scrutin BPM partagé par toutes les sources du run (vote final : _finalize_bpm).
-        # Migration provider en cours : les sources déjà migrées lisent le scrutin
-        # via le contexte, les autres via track._bpm_ballot — MÊME instance.
+        # Scrutin BPM partagé par toutes les sources du run, arbitré entre
+        # Deezer et Discogs. `results` est partagé avec les gates (raisons).
         ballot = BpmBallot()
-        track._bpm_ballot = ballot
         ctx = EnrichmentContext(
             force_update=force_update,
             artist_tracks=artist_tracks or [],
@@ -462,340 +464,37 @@ class DataEnricher:
             validate_spotify_id_unique=self.validate_spotify_id_unique,
             # ReccoBeats ne re-scrape pas le Spotify ID si l'étape spotify_id le fait déjà
             allow_spotify_scrape=("spotify_id" not in sources),
+            results=results,
         )
 
-        # ========================================
-        # FEATS : media/album/relations via API Genius AVANT ReccoBeats
-        # (le Spotify ID Genius fiabilise la chaîne ; 1 appel/feat espace les requêtes).
-        # Les primaires ont déjà été traités à l'import (_prefill_via_song_api).
-        # ========================================
-        if (
-            track.is_featuring
-            and self.genius_client
-            and track.genius_id
-            and (not track.spotify_id or not track.relationships)
-        ):
-            try:
-                if self.genius_client.apply_song_metadata(track):
-                    logger.info(
-                        f"🎫 Genius (feat) '{track.title}' : Spotify={track.spotify_id}, "
-                        f"relations={len(track.relationships or [])}"
-                    )
-            except Exception as e:
-                logger.debug(f"Genius media feat échec: {e}")
+        self._apply_genius_feat_metadata(track)
 
-        # ========================================
-        # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright)
-        # Si l'ISRC fournit BPM/Key via ReccoBeats, on évite le scraper Spotify.
-        # ========================================
-        isrc_ok = False
+        # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright) : si l'ISRC
+        # fournit BPM/Key via ReccoBeats, les gates spotify_id/reccobeats skippent.
         if "reccobeats" in sources and self.apis_available.get("reccobeats"):
             try:
-                isrc_ok = self._reccobeats_provider.try_by_isrc(track, ctx)
-                if isrc_ok:
+                ctx.isrc_satisfied = self._reccobeats_provider.try_by_isrc(track, ctx)
+                if ctx.isrc_satisfied:
                     logger.info(
                         f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
                     )
             except Exception as e:
                 logger.debug(f"Voie ISRC échec: {e}")
 
-        # ========================================
-        # 0. SCRAPER SPOTIFY ID
-        # ========================================
-        if "spotify_id" in sources and self.apis_available.get("spotify_id"):
-            # Ne skip que si on a déjà un ID valide ET que force_update=False
-            has_valid_id = track.spotify_id and (
-                not artist_tracks
-                or self.validate_spotify_id_unique(track.spotify_id, track, artist_tracks)
-            )
-
-            # Si l'ISRC a déjà fourni les données audio, inutile de scraper Spotify
-            should_use_spotify_scraper = (force_update or not has_valid_id) and not isrc_ok
-
-            if should_use_spotify_scraper:
-                logger.info(
-                    f"🎯 Appel du scraper Spotify ID pour '{track.title}' (force_update={force_update}, has_valid_id={has_valid_id})"
-                )
-                try:
-                    results["spotify_id"] = self._spotify_id_provider.enrich(track, ctx)
-                except Exception as e:
-                    logger.error(f"Erreur Spotify ID scraper pour {track.title}: {e}")
-                    results["spotify_id"] = False
-            else:
-                logger.info(
-                    f"⏭️ Scraper Spotify ID non nécessaire (ID déjà présent et valide: {track.spotify_id})"
-                )
-                results["spotify_id"] = "not_needed"
+        # Boucle ordonnée : gate() décide (skip → valeur posée telle quelle),
+        # enrich() tourne derrière la frontière d'exception de _run_step.
+        for provider in self._pipeline:
+            self._run_step(provider, track, ctx, sources, results)
 
         # ========================================
-        # 1. RECCOBEATS
+        # VOTE BPM : réconciliation de tous les candidats (§8.3), AVANT Discogs
         # ========================================
-        reccobeats_success = False
-        if "reccobeats" in sources and self.apis_available.get("reccobeats"):
-            if isrc_ok:
-                # Déjà satisfait par la voie ISRC en amont : pas de second appel
-                reccobeats_success = True
-                results["reccobeats"] = True
-                logger.info(f"✅ ReccoBeats déjà satisfait via ISRC (BPM={track.bpm})")
-            else:
-                logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
-                try:
-                    # Voie ISRC déjà tentée en amont ; ctx.allow_spotify_scrape gère
-                    # le double scrape Playwright (False si l'étape spotify_id l'a fait).
-                    reccobeats_success = self._reccobeats_provider.enrich(track, ctx)
-                    results["reccobeats"] = reccobeats_success
+        ballot.finalize(track)
 
-                    if reccobeats_success:
-                        logger.info(
-                            f"✅ ReccoBeats SUCCÈS: BPM={track.bpm}, Spotify ID={track.spotify_id}"
-                        )
-                    else:
-                        logger.warning(
-                            f"❌ ReccoBeats ÉCHEC pour '{track.title}' - On tentera GetSongBPM en fallback"
-                        )
-                except Exception as e:
-                    logger.error(f"❌ Erreur ReccoBeats pour {track.title}: {e}")
-                    results["reccobeats"] = False
-                    reccobeats_success = False
+        self._run_step(self._discogs_provider, track, ctx, sources, results)
 
-        # ========================================
-        # 2. GETSONGBPM API
-        # ========================================
-        getsongbpm_success = False
-        if "getsongbpm" in sources and self.apis_available.get("getsongbpm"):
-            # Utiliser GetSongBPM si :
-            # - force_update OU
-            # - pas de BPM OU
-            # - ReccoBeats a échoué OU
-            # - Données manquantes (key, mode)
-
-            missing_bpm = not track.bpm
-            missing_key = not hasattr(track, "key") or track.key is None
-            missing_mode = not hasattr(track, "mode") or track.mode is None
-
-            has_missing_data = missing_bpm or missing_key or missing_mode
-
-            # §8.3 : GetSongBPM est une API gratuite/rapide → on l'appelle TOUJOURS
-            # pour fournir un 2ᵉ vote BPM (même si ReccoBeats a déjà répondu).
-            should_use_getsongbpm = True
-
-            if should_use_getsongbpm:
-                # Construire le message de raison pour le log
-                reasons = []
-                if force_update:
-                    reasons.append("force_update=True")
-                if missing_bpm:
-                    reasons.append("no_bpm")
-                if not reccobeats_success and "reccobeats" in sources:
-                    reasons.append("reccobeats_failed")
-                if has_missing_data and not missing_bpm:
-                    missing_items = []
-                    if missing_key:
-                        missing_items.append("key")
-                    if missing_mode:
-                        missing_items.append("mode")
-                    reasons.append(f"missing_data={','.join(missing_items)}")
-
-                reason_str = ", ".join(reasons)
-                logger.info(f"🎼 Appel de GetSongBPM pour '{track.title}' (raison: {reason_str})")
-
-                try:
-                    getsongbpm_success = self._getsongbpm_provider.enrich(track, ctx)
-                    results["getsongbpm"] = getsongbpm_success
-
-                    if getsongbpm_success:
-                        logger.info(
-                            f"✅ GetSongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}"
-                        )
-                    else:
-                        logger.warning(
-                            f"❌ GetSongBPM ÉCHEC pour '{track.title}' - On tentera SongBPM scraper"
-                        )
-                except Exception as e:
-                    logger.error(f"❌ Erreur GetSongBPM pour {track.title}: {e}")
-                    results["getsongbpm"] = False
-                    getsongbpm_success = False
-            else:
-                logger.info(
-                    f"⏭️ GetSongBPM non appelé (données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')})"
-                )
-                results["getsongbpm"] = "not_needed"
-
-        # ========================================
-        # 3. SONGBPM SCRAPER (avec amélioration de la logique)
-        # ========================================
-        if "songbpm" in sources and self.apis_available.get("songbpm"):
-            # ⭐ LOGIQUE AMÉLIORÉE : Utiliser SongBPM si :
-            # - force_update OU
-            # - pas de BPM OU
-            # - ReccoBeats ET GetSongBPM ont échoué OU
-            # - Données manquantes (key, mode, duration)
-
-            # Vérifier si des données sont manquantes
-            missing_key = not hasattr(track, "key") or track.key is None
-            missing_mode = not hasattr(track, "mode") or track.mode is None
-            missing_duration = not track.duration
-
-            # §8.3 : SongBPM (scrape) = DÉPARTAGE. On l'ouvre seulement si les APIs
-            # ne donnent pas de consensus BPM, ou s'il manque key/mode/duration.
-            bpm_consensus = self._bpm_consensus_reached(track)
-
-            should_use_songbpm = (
-                force_update or not bpm_consensus or missing_key or missing_mode or missing_duration
-            )
-
-            if should_use_songbpm:
-                # Construire le message de raison pour le log
-                reasons = []
-                if force_update:
-                    reasons.append("force_update=True")
-                if not bpm_consensus:
-                    reasons.append("pas_de_consensus_bpm")
-                missing_items = []
-                if missing_key:
-                    missing_items.append("key")
-                if missing_mode:
-                    missing_items.append("mode")
-                if missing_duration:
-                    missing_items.append("duration")
-                if missing_items:
-                    reasons.append(f"missing_data={','.join(missing_items)}")
-
-                reason_str = ", ".join(reasons)
-                logger.info(
-                    f"🎼 Appel de SongBPM (départage) pour '{track.title}' (raison: {reason_str})"
-                )
-
-                try:
-                    songbpm_success = self._songbpm_provider.enrich(track, ctx)
-                    results["songbpm"] = songbpm_success
-
-                    if songbpm_success:
-                        logger.info(
-                            f"✅ SongBPM SUCCÈS: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={track.duration}"
-                        )
-                    else:
-                        logger.warning(f"❌ SongBPM ÉCHEC pour '{track.title}'")
-                except Exception as e:
-                    logger.error(f"❌ Erreur/Timeout SongBPM pour {track.title}: {e}")
-                    # Utiliser None pour indiquer un crash/timeout (différent de False = pas de données)
-                    results["songbpm"] = None
-            else:
-                logger.info(
-                    f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, Duration={track.duration})"
-                )
-                results["songbpm"] = "not_needed"
-
-        # ========================================
-        # 3bis. BPM FINDER (audioaidynamics) — DERNIER RECOURS via lien YouTube
-        # Pour les morceaux hors de portée de ReccoBeats/GetSongBPM/SongBPM
-        # (pas de Spotify ID, absents des bases BPM) mais présents sur YouTube.
-        # Comble les manques ; en force_update, ré-analyse et ÉCRASE.
-        # ========================================
-        if "bpmfinder" in sources and self.apis_available.get("bpmfinder"):
-            # Tout le comportement (disjoncteur, recherche de lien YouTube, analyse
-            # et écriture) vit dans le provider ; il renvoie la valeur de résultat
-            # historique ("skipped"/"not_needed"/bool/None).
-            results["bpmfinder"] = self._bpmfinder_provider.enrich(track, ctx)
-
-        # ========================================
-        # 4. DEEZER API
-        # ========================================
-        if "deezer" in sources and self.apis_available.get("deezer"):
-            # Appeler Deezer pour vérification et enrichissement complémentaire
-            logger.info(f"🎵 Appel de Deezer API pour '{track.title}'")
-            try:
-                deezer_success = self._deezer_provider.enrich(track, ctx)
-                results["deezer"] = deezer_success
-
-                if deezer_success:
-                    logger.info(f"✅ Deezer SUCCÈS pour '{track.title}'")
-                else:
-                    logger.warning(f"❌ Deezer ÉCHEC pour '{track.title}'")
-            except Exception as e:
-                logger.error(f"❌ Erreur Deezer pour {track.title}: {e}")
-                results["deezer"] = False
-
-        # ========================================
-        # VOTE BPM : réconciliation de tous les candidats (§8.3)
-        # ========================================
-        self._finalize_bpm(track)
-
-        # ========================================
-        # 5. DISCOGS API (CRÉDITS COMPLÉMENTAIRES)
-        # ========================================
-        if "discogs" in sources and self.apis_available.get("discogs"):
-            logger.info(f"💿 Appel de Discogs API pour '{track.title}'")
-            try:
-                discogs_success = self._discogs_provider.enrich(track, ctx)
-                results["discogs"] = discogs_success
-
-                if discogs_success:
-                    logger.info(
-                        f"✅ Discogs SUCCÈS pour '{track.title}' - {len(track.credits)} crédits au total"
-                    )
-                else:
-                    logger.warning(f"❌ Discogs ÉCHEC pour '{track.title}'")
-            except Exception as e:
-                logger.error(f"❌ Erreur Discogs pour {track.title}: {e}")
-                results["discogs"] = False
-
-        # ========================================
-        # 6. NETTOYAGE SI ÉCHEC COMPLET
-        # ========================================
         if clear_on_failure and force_update:
-            # Sources ayant RÉELLEMENT tenté (ni skipped ni not_needed).
-            # ⚠️ all([]) == True en Python : si TOUTES les sources sont
-            # 'not_needed'/'skipped' (aucune n'a tourné), il ne faut PAS conclure
-            # « tout a échoué » et effacer des données valides (bug ayant vidé
-            # TOTAL 90 : 100 BPM/Do majeur légitimes). On n'efface QUE si au
-            # moins une source a tenté ET que toutes les tentatives ont échoué.
-            attempted = [r for r in results.values() if r not in ("skipped", "not_needed")]
-            all_failed = bool(attempted) and all(r is False for r in attempted)
-
-            if all_failed and force_update and initial_bpm is not None:
-                # Vérification de sécurité
-                if not track.title:
-                    logger.error("❌ ERREUR: Track sans titre, annulation du nettoyage")
-                    return results
-
-                logger.warning(
-                    f"⚠️ NETTOYAGE: Aucune source n'a trouvé de données pour '{track.title}'"
-                )
-                logger.warning("⚠️ Effacement des anciennes valeurs potentiellement erronées...")
-
-                # Effacer UNIQUEMENT les données musicales
-                old_bpm = track.bpm
-                track.bpm = None
-                logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
-
-                # key/mode : attributs dynamiques du mapper → hasattr requis
-                if hasattr(track, "key"):
-                    old_key = track.key
-                    track.key = None
-                    logger.info(f"   🗑️ Key effacée: {old_key} → None")
-
-                if hasattr(track, "mode"):
-                    old_mode = track.mode
-                    track.mode = None
-                    logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
-
-                old_duration = track.duration
-                track.duration = None
-                logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
-
-                old_musical_key = track.musical_key
-                track.musical_key = None
-                logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
-
-                # Vérification post-nettoyage
-                if not track.title:
-                    logger.error("❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
-                elif not track.artist:
-                    logger.error("❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
-                else:
-                    logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
-                    results["cleaned"] = True
+            self._clear_after_total_failure(track, results, initial_bpm)
 
         # ========================================
         # RÉSUMÉ FINAL
@@ -818,30 +517,124 @@ class DataEnricher:
         return results
 
     # ──────────────────────────────────────────────────────────────────────
-    # Réconciliation BPM — logique pure dans src/utils/bpm_vote.py (§8.2/§8.3).
-    # Ici : la couture avec le scrutin porté par le track le temps du run.
+    # Orchestration (Refacto Phase 3.4) — l'ordre d'appel des sources est
+    # encodé dans _pipeline, le gating dans les gate() des providers.
     # ──────────────────────────────────────────────────────────────────────
-    @staticmethod
-    def _sanitize_bpm(value):
-        """Cast en int + borne unique 40–220. None si invalide (délègue bpm_vote)."""
-        return sanitize_bpm(value)
 
-    @staticmethod
-    def _get_ballot(track) -> BpmBallot:
-        """Scrutin BPM du run, créé à la volée si absent."""
-        ballot = getattr(track, "_bpm_ballot", None)
-        if ballot is None:
-            ballot = track._bpm_ballot = BpmBallot()
-        return ballot
+    @property
+    def _pipeline(self):
+        """Ordre d'appel historique des sources AVANT le vote BPM (Discogs
+        vient après le vote). Relu à chaque accès : les tests substituent les
+        providers par attribut."""
+        return [
+            self._spotify_id_provider,
+            self._reccobeats_provider,
+            self._getsongbpm_provider,
+            self._songbpm_provider,
+            self._bpmfinder_provider,
+            self._deezer_provider,
+        ]
 
-    def _add_bpm_candidate(self, track, source: str, raw):
-        """Enregistre un candidat BPM (sanitizé) pour le vote final."""
-        self._get_ballot(track).add(source, raw)
+    def _run_step(self, provider, track, ctx, sources: list[str], results: dict) -> None:
+        """Exécute une source si demandée et disponible : gate() puis enrich().
 
-    def _bpm_consensus_reached(self, track) -> bool:
-        """True si ≥2 candidats concordent déjà (→ pas besoin du scrape SongBPM)."""
-        return self._get_ballot(track).consensus_reached()
+        Frontière d'exception du batch : un provider qui lève ne stoppe pas le
+        run, la valeur d'échec posée est déclarée par le provider
+        (`error_result` : False = pas de données, None = crash/timeout).
+        """
+        name = provider.name
+        if name not in sources or not self.apis_available.get(name):
+            return
 
-    def _finalize_bpm(self, track):
-        """Pose le BPM final : bpm (octave réelle) + bpm_alt + source + confiance."""
-        self._get_ballot(track).finalize(track)
+        verdict = provider.gate(track, ctx)
+        if verdict is not None:
+            results[name] = verdict
+            return
+
+        try:
+            outcome = provider.enrich(track, ctx)
+            results[name] = outcome
+            if outcome is True:
+                logger.info(f"✅ {name} SUCCÈS pour '{track.title}'")
+            elif outcome is False:
+                logger.warning(f"❌ {name} ÉCHEC pour '{track.title}'")
+        except Exception as e:
+            logger.error(f"❌ Erreur {name} pour {track.title}: {e}")
+            results[name] = provider.error_result
+
+    def _apply_genius_feat_metadata(self, track) -> None:
+        """FEATS : media/album/relations via API Genius AVANT ReccoBeats
+        (le Spotify ID Genius fiabilise la chaîne ; 1 appel/feat espace les
+        requêtes). Les primaires ont déjà été traités à l'import
+        (_prefill_via_song_api)."""
+        if not (
+            track.is_featuring
+            and self.genius_client
+            and track.genius_id
+            and (not track.spotify_id or not track.relationships)
+        ):
+            return
+        try:
+            if self.genius_client.apply_song_metadata(track):
+                logger.info(
+                    f"🎫 Genius (feat) '{track.title}' : Spotify={track.spotify_id}, "
+                    f"relations={len(track.relationships or [])}"
+                )
+        except Exception as e:
+            logger.debug(f"Genius media feat échec: {e}")
+
+    def _clear_after_total_failure(self, track, results: dict, initial_bpm) -> None:
+        """Efface les données musicales si TOUTES les sources ayant tenté ont échoué.
+
+        Sources ayant RÉELLEMENT tenté = ni 'skipped' ni 'not_needed'.
+        ⚠️ all([]) == True en Python : si TOUTES les sources sont
+        'not_needed'/'skipped' (aucune n'a tourné), il ne faut PAS conclure
+        « tout a échoué » et effacer des données valides (bug ayant vidé
+        TOTAL 90 : 100 BPM/Do majeur légitimes). None (crash/timeout) n'est
+        pas non plus un échec de données : il bloque aussi le nettoyage.
+        """
+        attempted = [r for r in results.values() if r not in ("skipped", "not_needed")]
+        all_failed = bool(attempted) and all(r is False for r in attempted)
+        if not (all_failed and initial_bpm is not None):
+            return
+
+        # Vérification de sécurité
+        if not track.title:
+            logger.error("❌ ERREUR: Track sans titre, annulation du nettoyage")
+            return
+
+        logger.warning(f"⚠️ NETTOYAGE: Aucune source n'a trouvé de données pour '{track.title}'")
+        logger.warning("⚠️ Effacement des anciennes valeurs potentiellement erronées...")
+
+        # Effacer UNIQUEMENT les données musicales
+        old_bpm = track.bpm
+        track.bpm = None
+        logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
+
+        # key/mode : attributs dynamiques du mapper → hasattr requis
+        if hasattr(track, "key"):
+            old_key = track.key
+            track.key = None
+            logger.info(f"   🗑️ Key effacée: {old_key} → None")
+
+        if hasattr(track, "mode"):
+            old_mode = track.mode
+            track.mode = None
+            logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
+
+        old_duration = track.duration
+        track.duration = None
+        logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
+
+        old_musical_key = track.musical_key
+        track.musical_key = None
+        logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
+
+        # Vérification post-nettoyage
+        if not track.title:
+            logger.error("❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
+        elif not track.artist:
+            logger.error("❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
+        else:
+            logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
+            results["cleaned"] = True

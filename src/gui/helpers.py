@@ -106,7 +106,7 @@ def get_track_status_icon(track, disabled_ids) -> str:
         missing = []
 
         # 1. Date de sortie
-        if not hasattr(track, "release_date") or not track.release_date:
+        if not track.release_date:
             missing.append("Date")
 
         # 3. Crédits obtenus
@@ -118,29 +118,28 @@ def get_track_status_icon(track, disabled_ids) -> str:
             missing.append("Crédits")
 
         # 4. Paroles obtenues
-        if not hasattr(track, "lyrics") or not track.lyrics or not track.lyrics.strip():
+        if not track.lyrics or not track.lyrics.strip():
             missing.append("Paroles")
 
         # 5. BPM
-        if not hasattr(track, "bpm") or not track.bpm or track.bpm == 0:
+        if not track.bpm or track.bpm == 0:
             missing.append("BPM")
 
-        # 6. Key et Mode
+        # 6. Key et Mode (key/mode = attributs dynamiques du mapper, pas des
+        # champs de la dataclass → hasattr requis)
         has_key = hasattr(track, "key") and track.key
         has_mode = hasattr(track, "mode") and track.mode
-        has_musical_key = hasattr(track, "musical_key") and track.musical_key
+        has_musical_key = track.musical_key
 
         if not (has_musical_key or (has_key and has_mode)):
             missing.append("Key/Mode")
 
         # 7. Durée
-        if not hasattr(track, "duration") or not track.duration:
+        if not track.duration:
             missing.append("Durée")
 
-        # 8. Certifications (validé si base à jour même sans certif)
-        # On considère que si le champ 'certifications' existe (même vide), c'est que la recherche a été faite
-        if not hasattr(track, "certifications"):
-            missing.append("Certifications")
+        # 8. Certifications : le champ existe toujours (dataclass), donc jamais
+        # « manquant » — la recherche est réputée faite. (Ancien hasattr mort.)
 
         # Retourner le statut selon les données manquantes
         if len(missing) == 0:
@@ -149,9 +148,7 @@ def get_track_status_icon(track, disabled_ids) -> str:
             return "⚠️"  # Données incomplètes
 
     except Exception as e:
-        logger.error(
-            f"Erreur dans get_track_status_icon pour {getattr(track, 'title', 'unknown')}: {e}"
-        )
+        logger.error(f"Erreur dans get_track_status_icon pour {track.title}: {e}")
         return "⚠️"  # Erreur = incomplet
 
 

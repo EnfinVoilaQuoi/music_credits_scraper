@@ -147,13 +147,10 @@ class DataEnricher:
         self._discogs_provider = DiscogsProvider(self.discogs_client)
 
         # BPM Finder (audioaidynamics) — dernier recours BPM/Key via lien YouTube
-        # Nécessite BPMFINDER_EMAIL/PASSWORD (env/.env) ou une session sauvegardée
+        # Nécessite BPMFINDER_EMAIL/PASSWORD (env/.env) ou une session sauvegardée.
+        # L'attribut reste sur DataEnricher : la GUI y accède directement
+        # (manual_entry / workers) ; le provider (état disjoncteur) l'enveloppe.
         self.bpmfinder_scraper = None
-        # Disjoncteur : 3 échecs consécutifs (timeouts site) → source coupée pour
-        # le reste du run (ré-armé par reset_bpmfinder_breaker en début de run).
-        # Sans lui, une panne site × force_update = ~90 s de pause PAR morceau.
-        self._bpmfinder_fail_streak = 0
-        self._bpmfinder_breaker_logged = False
         try:
             from src.scrapers.bpmfinder_scraper import BPMFinderScraper
 
@@ -167,6 +164,11 @@ class DataEnricher:
                 )
         except Exception as e:
             logger.warning(f"⚠️ BPM Finder non disponible: {e}")
+
+        # Provider BPM Finder (pattern provider) — porte l'état du disjoncteur
+        from src.enrichment.providers.bpmfinder import BpmFinderProvider
+
+        self._bpmfinder_provider = BpmFinderProvider(self.bpmfinder_scraper)
 
         # Client Genius (pour les feats : media/album/relations avant ReccoBeats)
         self.genius_client = None
@@ -420,8 +422,7 @@ class DataEnricher:
         """Ré-arme le disjoncteur BPM Finder — à appeler en début de run
         d'enrichissement (l'instance DataEnricher vit toute la session GUI,
         « pour le reste du run » ne doit pas déborder sur le run suivant)."""
-        self._bpmfinder_fail_streak = 0
-        self._bpmfinder_breaker_logged = False
+        self._bpmfinder_provider.reset_breaker()
 
     def enrich_track(
         self,
@@ -712,111 +713,11 @@ class DataEnricher:
         # (pas de Spotify ID, absents des bases BPM) mais présents sur YouTube.
         # Comble les manques ; en force_update, ré-analyse et ÉCRASE.
         # ========================================
-        if (
-            "bpmfinder" in sources
-            and self.apis_available.get("bpmfinder")
-            and self._bpmfinder_fail_streak >= 3
-        ):
-            # Disjoncteur ouvert : le site ne répond plus, inutile de brûler
-            # 90 s par morceau — 'skipped' est exclu du calcul « attempted »
-            # (donc jamais compté comme échec pour le nettoyage).
-            if not self._bpmfinder_breaker_logged:
-                logger.warning(
-                    "⛔ BPM Finder coupé pour le reste du run "
-                    "(3 échecs consécutifs — site en panne ? "
-                    "cf. data/diagnostics/ et scripts/bpmfinder_diagnose.py)"
-                )
-                self._bpmfinder_breaker_logged = True
-            results["bpmfinder"] = "skipped"
-        elif "bpmfinder" in sources and self.apis_available.get("bpmfinder"):
-            # force_update : re-analyser et ÉCRASER même si BPM/key présents
-            # (sinon 'not_needed' → combiné au nettoyage, effaçait des données
-            # valides). Traité comme « manquant » pour déclencher l'analyse.
-            _missing_bpm = force_update or not getattr(track, "bpm", None)
-            _missing_km = force_update or (
-                getattr(track, "key", None) is None or getattr(track, "mode", None) is None
-            )
-            _yt = getattr(track, "youtube_url", None)
-
-            # Pas de lien en base (ni Genius media ni recherche persistée) :
-            # recherche auto — utilisé ET persisté seulement si confiance ≥
-            # YOUTUBE_PERSIST_CONFIDENCE (même règle que la GUI). En dessous,
-            # on ne devine pas (un mauvais lien = un mauvais BPM en base).
-            if (_missing_bpm or _missing_km) and not _yt:
-                try:
-                    from src.config import YOUTUBE_PERSIST_CONFIDENCE
-                    from src.youtube.youtube_searcher import YouTubeSearcher
-
-                    if not hasattr(self, "_yt_searcher"):
-                        self._yt_searcher = YouTubeSearcher()
-                    _search_artist = (
-                        getattr(track, "primary_artist_name", None)
-                        if getattr(track, "is_featuring", False)
-                        else None
-                    ) or (track.artist.name if hasattr(track.artist, "name") else str(track.artist))
-                    _res = self._yt_searcher.search_track(
-                        _search_artist, track.title, max_results=5
-                    )
-                    _best = _res[0] if _res else None
-                    if (
-                        _best
-                        and not _best.get("is_search_url")
-                        and _best.get("relevance_score", 0) >= YOUTUBE_PERSIST_CONFIDENCE
-                    ):
-                        _yt = _best["url"]
-                        track.youtube_url = _yt
-                        track.youtube_url_source = "search_auto"
-                        logger.info(
-                            f"🔗 Lien YouTube trouvé par recherche pour '{track.title}' "
-                            f"(confiance {_best['relevance_score']:.0%}) — persisté"
-                        )
-                    elif _best:
-                        logger.info(
-                            f"⏭️ BPM Finder: lien YouTube incertain pour '{track.title}' "
-                            f"({_best.get('relevance_score', 0):.0%} < "
-                            f"{YOUTUBE_PERSIST_CONFIDENCE:.0%}) — vérifier via la fiche ou saisir ✏️"
-                        )
-                except Exception as e:
-                    logger.debug(f"Recherche lien YouTube échouée '{track.title}': {e}")
-
-            if (_missing_bpm or _missing_km) and _yt:
-                logger.info(f"🎛️ BPM Finder (dernier recours) pour '{track.title}'")
-                try:
-                    bf = self.bpmfinder_scraper.analyze(_yt)
-                    if bf:
-                        self._bpmfinder_fail_streak = 0
-                        applied = []
-                        if _missing_bpm and bf.get("bpm"):
-                            track.bpm = bf["bpm"]
-                            track.bpm_source = "bpmfinder"
-                            applied.append(f"BPM={bf['bpm']}")
-                        if _missing_km and bf.get("key") is not None and bf.get("mode") is not None:
-                            track.key = bf["key"]
-                            track.mode = bf["mode"]
-                            from src.utils.music_theory import key_mode_to_french
-
-                            track.musical_key = key_mode_to_french(bf["key"], bf["mode"])
-                            track.key_mode_source = "bpmfinder"
-                            applied.append(f"key={track.musical_key}")
-                        results["bpmfinder"] = bool(applied)
-                        if applied:
-                            logger.info(f"✅ BPM Finder: {', '.join(applied)}")
-                    else:
-                        # Le disjoncteur ne vise QUE les vraies indispos site
-                        # (timeout muet), pas un refus backend propre à une vidéo
-                        # (4xx/5xx : le site répond, il traitera d'autres morceaux).
-                        if (
-                            getattr(self.bpmfinder_scraper, "last_failure_reason", None)
-                            == "timeout"
-                        ):
-                            self._bpmfinder_fail_streak += 1
-                        results["bpmfinder"] = False
-                except Exception as e:
-                    logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
-                    self._bpmfinder_fail_streak += 1
-                    results["bpmfinder"] = None
-            else:
-                results["bpmfinder"] = "not_needed"
+        if "bpmfinder" in sources and self.apis_available.get("bpmfinder"):
+            # Tout le comportement (disjoncteur, recherche de lien YouTube, analyse
+            # et écriture) vit dans le provider ; il renvoie la valeur de résultat
+            # historique ("skipped"/"not_needed"/bool/None).
+            results["bpmfinder"] = self._bpmfinder_provider.enrich(track, ctx)
 
         # ========================================
         # 4. DEEZER API

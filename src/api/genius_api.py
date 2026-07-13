@@ -728,7 +728,7 @@ class GeniusAPI:
             if known:
                 logger.info("🎫 Genius API : aucun nouveau morceau à enrichir (MàJ)")
             return
-        n_feats = sum(1 for t in targets if getattr(t, "is_featuring", False))
+        n_feats = sum(1 for t in targets if t.is_featuring)
         logger.info(
             f"🎫 Genius API (album/Spotify/YouTube/relations) : "
             f"{len(targets)} morceau(x) dont {n_feats} feat(s)…"
@@ -748,11 +748,11 @@ class GeniusAPI:
         Genius est prioritaire et doit pouvoir le remplacer par le lien officiel.
         """
         return bool(track.genius_id) and (
-            (not getattr(track, "album", None) and not getattr(track, "album_override", None))
-            or not getattr(track, "spotify_id", None)
-            or not getattr(track, "youtube_url", None)
-            or getattr(track, "youtube_url_source", None) == "search_auto"
-            or not getattr(track, "relationships", None)
+            (not track.album and not track.album_override)
+            or not track.spotify_id
+            or not track.youtube_url
+            or track.youtube_url_source == "search_auto"
+            or not track.relationships
         )
 
     # Types de relation AMONT à conserver (ce qui a inspiré le morceau)
@@ -806,35 +806,27 @@ class GeniusAPI:
 
         album = song.get("album")
         name = album.get("name") if isinstance(album, dict) else None
-        if (
-            name
-            and not getattr(track, "album", None)
-            and not getattr(track, "album_override", None)
-        ):  # édition manuelle respectée
+        if name and not track.album and not track.album_override:  # édition manuelle respectée
             track.album = str(name)
             track._album_from_api = True
             changed = True
 
         sid, yt = self._extract_media(song)
-        if sid and not getattr(track, "spotify_id", None):
+        if sid and not track.spotify_id:
             track.spotify_id = sid
             track._spotify_from_api = True
             changed = True
         # Genius pose le lien si absent, et remplace un 'search_auto'. MAIS
         # respecte un lien 'manual' (choix explicite de l'utilisateur, priorité max).
-        _yt_src = getattr(track, "youtube_url_source", None)
-        if (
-            yt
-            and _yt_src != "manual"
-            and (not getattr(track, "youtube_url", None) or _yt_src != "genius_media")
-        ):
+        _yt_src = track.youtube_url_source
+        if yt and _yt_src != "manual" and (not track.youtube_url or _yt_src != "genius_media"):
             track.youtube_url = yt
             track.youtube_url_source = "genius_media"
             track._youtube_from_api = True
             changed = True
 
         rels = self._extract_relationships(song)
-        if rels and not getattr(track, "relationships", None):
+        if rels and not track.relationships:
             track.relationships = rels
             changed = True
 

@@ -372,14 +372,10 @@ class MainWindow:
             current_name = self.current_artist.name if self.current_artist else None
             artist_tracks = None
             artist_albums = None
-            if self.current_artist and getattr(self.current_artist, "tracks", None):
-                artist_tracks = [
-                    t.title for t in self.current_artist.tracks if getattr(t, "title", None)
-                ]
+            if self.current_artist and self.current_artist.tracks:
+                artist_tracks = [t.title for t in self.current_artist.tracks if t.title]
                 # Noms d'albums distincts (pour l'audit des certifs d'albums)
-                artist_albums = sorted(
-                    {t.album for t in self.current_artist.tracks if getattr(t, "album", None)}
-                )
+                artist_albums = sorted({t.album for t in self.current_artist.tracks if t.album})
             dialog = CertificationUpdateDialog(
                 self.root,
                 cert_manager,
@@ -564,11 +560,7 @@ class MainWindow:
                 total_tracks = len(self.current_artist.tracks)
 
                 # Compter les features
-                featuring_count = sum(
-                    1
-                    for t in self.current_artist.tracks
-                    if hasattr(t, "is_featuring") and t.is_featuring
-                )
+                featuring_count = sum(1 for t in self.current_artist.tracks if t.is_featuring)
                 main_tracks = total_tracks - featuring_count
 
                 # Compter les morceaux ACTIFS (non désactivés) pour les stats
@@ -583,19 +575,14 @@ class MainWindow:
                 )
 
                 # Morceaux avec paroles (actifs uniquement)
-                tracks_with_lyrics = sum(
-                    1
-                    for t in active_tracks
-                    if hasattr(t, "lyrics") and t.lyrics and t.lyrics.strip()
-                )
+                tracks_with_lyrics = sum(1 for t in active_tracks if t.lyrics and t.lyrics.strip())
 
                 # Morceaux avec données additionnelles = BPM + Key/Mode + Durée (actifs uniquement)
                 tracks_with_additional = sum(
                     1
                     for t in active_tracks
                     if (
-                        hasattr(t, "bpm")
-                        and t.bpm
+                        t.bpm
                         and (
                             isinstance(t.bpm, (int, float))
                             and t.bpm > 0
@@ -605,7 +592,8 @@ class MainWindow:
                         )
                     )
                     and (
-                        (hasattr(t, "musical_key") and t.musical_key)
+                        t.musical_key
+                        # key/mode : attributs dynamiques du mapper → hasattr requis
                         or (
                             hasattr(t, "key")
                             and t.key
@@ -613,16 +601,12 @@ class MainWindow:
                             and t.mode is not None
                         )
                     )
-                    and (hasattr(t, "duration") and t.duration)
+                    and t.duration
                 )
 
                 # Morceaux avec certifications (actifs uniquement)
                 tracks_with_certifications = sum(
-                    1
-                    for t in active_tracks
-                    if hasattr(t, "certifications")
-                    and t.certifications
-                    and len(t.certifications) > 0
+                    1 for t in active_tracks if t.certifications and len(t.certifications) > 0
                 )
 
                 # Albums avec certifications (compter les albums uniques, pas les morceaux)
@@ -630,11 +614,7 @@ class MainWindow:
                     {
                         t.album
                         for t in active_tracks
-                        if hasattr(t, "album_certifications")
-                        and t.album_certifications
-                        and len(t.album_certifications) > 0
-                        and hasattr(t, "album")
-                        and t.album
+                        if t.album_certifications and len(t.album_certifications) > 0 and t.album
                     }
                 )
 
@@ -689,14 +669,12 @@ class MainWindow:
                     total_cumul = 0
                     tracks_with_streams = 0
                     for t in active_tracks:
-                        sp = getattr(t, "spotify_streams", None)
-                        yt = getattr(t, "ytm_streams", None)
-                        est = calculate_total_streams(sp, yt)
+                        est = calculate_total_streams(t.spotify_streams, t.ytm_streams)
                         if est:
                             total_cumul += est
                             tracks_with_streams += 1
-                    sp_ml = getattr(self.current_artist, "spotify_monthly_listeners", None)
-                    yt_ml = getattr(self.current_artist, "ytm_monthly_listeners", None)
+                    sp_ml = self.current_artist.spotify_monthly_listeners
+                    yt_ml = self.current_artist.ytm_monthly_listeners
                     total_ml = calculate_total_monthly_listeners(sp_ml, yt_ml)
 
                     line3_parts = []

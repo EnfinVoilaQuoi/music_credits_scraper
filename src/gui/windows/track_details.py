@@ -55,7 +55,7 @@ class TrackDetailsWindow:
         details_window.protocol("WM_DELETE_WINDOW", on_close)
 
         # Agrandir la fenêtre selon le contenu
-        has_lyrics = hasattr(track, "lyrics") and track.lyrics
+        has_lyrics = track.lyrics
         window_height = "900" if has_lyrics else "750"
         details_window.geometry(f"900x{window_height}")
 
@@ -77,10 +77,10 @@ class TrackDetailsWindow:
         left_column.pack(side="left", fill="both", expand=True, padx=(5, 10))
 
         # Gestion des features
-        is_featuring = getattr(track, "is_featuring", False)
-        primary_artist = getattr(track, "primary_artist_name", None)
-        featured_artists = getattr(track, "featured_artists", None)
-        secondary_role = getattr(track, "secondary_role", None)
+        is_featuring = track.is_featuring
+        primary_artist = track.primary_artist_name
+        featured_artists = track.featured_artists
+        secondary_role = track.secondary_role
 
         if secondary_role:
             ctk.CTkLabel(
@@ -125,7 +125,7 @@ class TrackDetailsWindow:
         # Album et numéro de piste
         if track.album:
             album_text = f"Album: {track.album}"
-            if hasattr(track, "track_number") and track.track_number:
+            if track.track_number:
                 album_text += f" (Piste {track.track_number})"
             ctk.CTkLabel(left_column, text=album_text).pack(anchor="w", pady=1)
 
@@ -145,7 +145,7 @@ class TrackDetailsWindow:
             musical_key = None
 
             # 1. Ajouter la tonalité si disponible directement
-            if hasattr(track, "musical_key") and track.musical_key:
+            if track.musical_key:
                 musical_key = track.musical_key
 
             # 2. FALLBACK : Si musical_key n'existe pas mais key et mode existent
@@ -212,8 +212,8 @@ class TrackDetailsWindow:
                 streams_source_label,
             )
 
-            sp = getattr(track, "spotify_streams", None)
-            yt = getattr(track, "ytm_streams", None)
+            sp = track.spotify_streams
+            yt = track.ytm_streams
             total_est = calculate_total_streams(sp, yt)
             if total_est:
                 suffix = streams_source_label(sp, yt)
@@ -250,15 +250,8 @@ class TrackDetailsWindow:
 
             genius_label.bind("<Button-1>", lambda e: webbrowser.open(track.genius_url))
 
-        # URL Spotify - GESTION DE MULTIPLES IDs
-        if hasattr(track, "get_all_spotify_ids"):
-            all_spotify_ids = track.get_all_spotify_ids()
-        elif hasattr(track, "spotify_ids") and track.spotify_ids:
-            all_spotify_ids = track.spotify_ids
-        elif hasattr(track, "spotify_id") and track.spotify_id:
-            all_spotify_ids = [track.spotify_id]
-        else:
-            all_spotify_ids = []
+        # URL Spotify - GESTION DE MULTIPLES IDs (méthode du modèle : [] si aucun)
+        all_spotify_ids = track.get_all_spotify_ids()
 
         if all_spotify_ids:
             spotify_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
@@ -384,8 +377,8 @@ class TrackDetailsWindow:
             track.title,
             track.album,
             release_year,
-            known_url=getattr(track, "youtube_url", None),
-            known_source=getattr(track, "youtube_url_source", None),
+            known_url=track.youtube_url,
+            known_source=track.youtube_url_source,
         )
 
         # Persister le lien trouvé par la recherche si la confiance est suffisante.
@@ -394,7 +387,7 @@ class TrackDetailsWindow:
         if (  # noqa: SIM102
             youtube_result.get("source") == "search_auto"
             and youtube_result.get("confidence", 0) >= YOUTUBE_PERSIST_CONFIDENCE
-            and getattr(track, "id", None)
+            and track.id
         ):
             if self.app.data_manager.update_track_youtube_url(
                 track.id, youtube_result["url"], "search_auto"
@@ -588,7 +581,7 @@ class TrackDetailsWindow:
             text="🎚️ Inspiré de (samples • interpolations • reprises • remix • trad. FR)",
             font=("Arial", 14, "bold"),
         ).pack(anchor="w", padx=10, pady=(8, 4))
-        _rels = getattr(track, "relationships", None) or []
+        _rels = track.relationships or []
         if not _rels:
             ctk.CTkLabel(
                 samples_scroll,
@@ -651,7 +644,7 @@ class TrackDetailsWindow:
                 messagebox.showinfo("Copié", "Paroles copiées dans le presse-papier")
 
             # Section Anecdotes EN PREMIER si disponibles
-            if hasattr(track, "anecdotes") and track.anecdotes:
+            if track.anecdotes:
                 # Header anecdotes
                 anecdotes_header = ctk.CTkFrame(lyrics_scrollable)
                 anecdotes_header.pack(fill="x", padx=10, pady=(10, 5))
@@ -693,17 +686,17 @@ class TrackDetailsWindow:
             )
 
             info_text = f"📊 {words_count} mots • {chars_count} caractères"
-            if getattr(track, "lyrics_source", None):
+            if track.lyrics_source:
                 info_text += f" • {track.lyrics_source}"
-            if getattr(track, "lyrics_synced", None):
+            if track.lyrics_synced:
                 info_text += " • ⏱ synchronisé"
-                _sy_src = getattr(track, "lyrics_synced_source", None)
+                _sy_src = track.lyrics_synced_source
                 if _sy_src:
                     info_text += f" ({_sy_src})"
-                _sy_conf = getattr(track, "lyrics_synced_confidence", None)
+                _sy_conf = track.lyrics_synced_confidence
                 if _sy_conf is not None and _sy_conf < 2:
                     info_text += " ⚠ à vérifier"
-            if hasattr(track, "lyrics_scraped_at") and track.lyrics_scraped_at:
+            if track.lyrics_scraped_at:
                 date_str = helpers.format_datetime(track.lyrics_scraped_at)
                 info_text += f" • Récupérées le {date_str}"
 
@@ -727,7 +720,7 @@ class TrackDetailsWindow:
 
             # Nettoyer les paroles de l'anecdote si elle existe
             clean_lyrics = track.lyrics
-            if hasattr(track, "anecdotes") and track.anecdotes:
+            if track.anecdotes:
                 # Méthode robuste : retirer tout le texte jusqu'au premier tag [Couplet], [Partie], etc.
                 import re
 
@@ -753,7 +746,7 @@ class TrackDetailsWindow:
                             logger.debug("Anecdote retirée des paroles (méthode longueur)")
 
             # Timestamps par section (si synchro YTM dispo) : injectés dans les en-têtes
-            if getattr(track, "lyrics_synced", None):
+            if track.lyrics_synced:
                 try:
                     from src.utils.lyrics_sync import annotate_sections
 
@@ -811,15 +804,15 @@ class TrackDetailsWindow:
                 tech_textbox.insert("end", f"   📄 Titre: {display_title}\n")
         if track.discogs_id:
             tech_textbox.insert("end", f"💿 Discogs ID: {track.discogs_id}\n")
-        if getattr(track, "isrc", None):
+        if track.isrc:
             tech_textbox.insert("end", f"🆔 ISRC: {track.isrc}\n")
 
         # Popularité
-        if hasattr(track, "popularity") and track.popularity:
+        if track.popularity:
             tech_textbox.insert("end", f"📈 Popularité: {track.popularity}\n")
 
         # Artwork
-        if getattr(track, "artwork_url", None):
+        if track.artwork_url:
             tech_textbox.insert("end", f"🖼️ Artwork: {track.artwork_url}\n")
 
         # ── PROVENANCE DES MÉTADONNÉES ──────────────────────────────
@@ -827,10 +820,10 @@ class TrackDetailsWindow:
             return "✅" if v else "❌"
 
         tech_textbox.insert("end", "\n🧭 PROVENANCE\n")
-        _album_api = getattr(track, "_album_from_api", None)
+        _album_api = track._album_from_api
         _album_src = "API Genius" if _album_api else ("scrape" if track.album else "—")
         tech_textbox.insert("end", f"• Album : {track.album or 'N/A'}  ({_album_src})\n")
-        _rd_api = getattr(track, "_release_date_from_api", None)
+        _rd_api = track._release_date_from_api
         _rd_src = "API Genius" if _rd_api else ("scrape" if track.release_date else "—")
         tech_textbox.insert(
             "end", f"• Date de sortie : {track.release_date or 'N/A'}  ({_rd_src})\n"
@@ -847,8 +840,8 @@ class TrackDetailsWindow:
         tech_textbox.insert("end", f"• Spotify ID : {_yn(track.spotify_id)}  ({_sp_src})\n")
         # youtube_url persisté en DB avec sa provenance : 'genius_media' (prioritaire)
         # ou 'search_auto' (fallback recherche, persisté si confiance ≥ YOUTUBE_PERSIST_CONFIDENCE)
-        _yt_url = getattr(track, "youtube_url", None)
-        _yt_source_raw = getattr(track, "youtube_url_source", None)
+        _yt_url = track.youtube_url
+        _yt_source_raw = track.youtube_url_source
         if _yt_url:
             _yt_src = {
                 "genius_media": "Genius media",
@@ -859,20 +852,20 @@ class TrackDetailsWindow:
             _yt_src = "recherche live (fallback, non persisté)"
         tech_textbox.insert("end", f"• YouTube : {_yn(_yt_url)}  ({_yt_src})\n")
         _isrc_src = getattr(track, "_isrc_source", None) or (
-            "Deezer/ReccoBeats" if getattr(track, "isrc", None) else "—"
+            "Deezer/ReccoBeats" if track.isrc else "—"
         )
-        tech_textbox.insert("end", f"• ISRC : {_yn(getattr(track, 'isrc', None))}  ({_isrc_src})\n")
+        tech_textbox.insert("end", f"• ISRC : {_yn(track.isrc)}  ({_isrc_src})\n")
 
         # ── PAROLES ─────────────────────────────────────────────────
         _ly = track.lyrics or ""
         _has_struct = any(ln.lstrip().startswith("[") for ln in _ly.splitlines())
-        _has_ts = bool(getattr(track, "lyrics_synced", None))
-        _ly_src = getattr(track, "lyrics_source", None) or "—"
+        _has_ts = bool(track.lyrics_synced)
+        _ly_src = track.lyrics_source or "—"
         tech_textbox.insert("end", "\n📝 PAROLES\n")
         tech_textbox.insert("end", f"• Texte présent : {_yn(_ly)}  (source : {_ly_src})\n")
         tech_textbox.insert("end", f"• Structure Genius [Couplet/Refrain] : {_yn(_has_struct)}\n")
-        _sy_src = getattr(track, "lyrics_synced_source", None) or ("?" if _has_ts else "—")
-        _sy_conf = getattr(track, "lyrics_synced_confidence", None)
+        _sy_src = track.lyrics_synced_source or ("?" if _has_ts else "—")
+        _sy_conf = track.lyrics_synced_confidence
         _sy_conf_txt = {
             2: "2 (croisé LRCLIB+YTM)",
             1: "1 (source unique / après départage durée)",
@@ -887,10 +880,10 @@ class TrackDetailsWindow:
 
         # ── DONNÉES AUDIO (BPM / KEY / MODE) ────────────────────────
         tech_textbox.insert("end", "\n🎛️ DONNÉES AUDIO\n")
-        _bpm = getattr(track, "bpm", None)
-        _bpm_alt = getattr(track, "bpm_alt", None)
-        _bpm_src = getattr(track, "bpm_source", None) or "—"
-        _bpm_conf = getattr(track, "bpm_confidence", None)
+        _bpm = track.bpm
+        _bpm_alt = track.bpm_alt
+        _bpm_src = track.bpm_source or "—"
+        _bpm_conf = track.bpm_confidence
         tech_textbox.insert("end", f"• Provenance BPM : {_bpm_src}\n")
         _conf_txt = f"{_bpm_conf}" if _bpm_conf is not None else "—"
         tech_textbox.insert("end", f"• Arbitrage (vote) : confiance {_conf_txt}\n")
@@ -903,30 +896,30 @@ class TrackDetailsWindow:
             tech_textbox.insert("end", f"• BPM réel : {_bpm}{_alt_txt}\n")
         else:
             tech_textbox.insert("end", "• BPM réel : N/A\n")
-        _km_src = getattr(track, "key_mode_source", None) or "—"
+        _km_src = track.key_mode_source or "—"
         tech_textbox.insert("end", f"• Source Key/Mode : {_km_src}\n")
-        _rb_res = getattr(track, "reccobeats_resolution", None) or "—"
+        _rb_res = track.reccobeats_resolution or "—"
         tech_textbox.insert("end", f"• Résolution ReccoBeats : {_rb_res}\n")
 
         # ── STREAMS & DURÉE ─────────────────────────────────────────
         tech_textbox.insert("end", "\n📦 STREAMS & DURÉE\n")
-        _sp_streams = getattr(track, "spotify_streams", None)
+        _sp_streams = track.spotify_streams
         if _sp_streams is not None:
-            _sp_upd = getattr(track, "spotify_streams_updated", None)
+            _sp_upd = track.spotify_streams_updated
             _sp_when = f"  (maj {helpers.format_datetime(_sp_upd)})" if _sp_upd else ""
             _n = f"{_sp_streams:,}".replace(",", " ")
             tech_textbox.insert("end", f"• Spotify : {_n}{_sp_when}\n")
         else:
             tech_textbox.insert("end", "• Spotify : —\n")
-        _ytm_streams = getattr(track, "ytm_streams", None)
+        _ytm_streams = track.ytm_streams
         if _ytm_streams is not None:
-            _ytm_upd = getattr(track, "ytm_streams_updated", None)
+            _ytm_upd = track.ytm_streams_updated
             _ytm_when = f"  (maj {helpers.format_datetime(_ytm_upd)})" if _ytm_upd else ""
             _n = f"{_ytm_streams:,}".replace(",", " ")
             tech_textbox.insert("end", f"• YouTube Music : {_n}{_ytm_when}\n")
         else:
             tech_textbox.insert("end", "• YouTube Music : —\n")
-        _dur = getattr(track, "duration", None)
+        _dur = track.duration
         if _dur:
             tech_textbox.insert(
                 "end", f"• Durée : {int(_dur)//60}:{int(_dur)%60:02d}  ({int(_dur)}s)\n"
@@ -937,15 +930,15 @@ class TrackDetailsWindow:
         # ── COMPLÉTUDE (à ré-enrichir ?) ────────────────────────────
         tech_textbox.insert("end", "\n🩺 COMPLÉTUDE\n")
         _missing = []
-        if not getattr(track, "bpm", None):
+        if not track.bpm:
             _missing.append("BPM")
         if getattr(track, "key", None) is None or getattr(track, "mode", None) is None:
             _missing.append("Key/Mode")
-        if not getattr(track, "isrc", None):
+        if not track.isrc:
             _missing.append("ISRC")
         if not (track.lyrics or ""):
             _missing.append("paroles")
-        if not getattr(track, "spotify_id", None):
+        if not track.spotify_id:
             _missing.append("Spotify ID")
         if _missing:
             tech_textbox.insert(
@@ -955,7 +948,7 @@ class TrackDetailsWindow:
             tech_textbox.insert("end", "• ✅ Complet\n")
 
         # ── RELATIONS ───────────────────────────────────────────────
-        _nrel = len(getattr(track, "relationships", None) or [])
+        _nrel = len(track.relationships or [])
         tech_textbox.insert("end", f"\n🎚️ Relations : {_nrel}\n")
 
         # Métadonnées de scraping
@@ -982,10 +975,10 @@ class TrackDetailsWindow:
 
             # Raccordement UNIFIÉ multi-pays (SNEP 🇫🇷 + BRMA 🇧🇪 + RIAA 🇺🇸)
             _extra = []
-            _pan = getattr(track, "primary_artist_name", None)
+            _pan = track.primary_artist_name
             if _pan and _pan != self.app.current_artist.name:
                 _extra.append(_pan)
-            _fa = getattr(track, "featured_artists", None)
+            _fa = track.featured_artists
             if isinstance(_fa, str) and _fa:
                 _extra.append(_fa)
             elif isinstance(_fa, (list, tuple)):
@@ -1093,18 +1086,10 @@ class TrackDetailsWindow:
 
         # ✅ NOUVEAU: Debug featuring détaillé
         tech_textbox.insert("end", "\n🎤 DEBUG FEATURING:\n")
-        tech_textbox.insert(
-            "end", f"• is_featuring: {getattr(track, 'is_featuring', 'Non défini')}\n"
-        )
-        tech_textbox.insert(
-            "end", f"• primary_artist_name: {getattr(track, 'primary_artist_name', 'Non défini')}\n"
-        )
-        tech_textbox.insert(
-            "end", f"• secondary_role: {getattr(track, 'secondary_role', None) or '—'}\n"
-        )
-        tech_textbox.insert(
-            "end", f"• featured_artists: {getattr(track, 'featured_artists', 'Non défini')}\n"
-        )
+        tech_textbox.insert("end", f"• is_featuring: {track.is_featuring}\n")
+        tech_textbox.insert("end", f"• primary_artist_name: {track.primary_artist_name}\n")
+        tech_textbox.insert("end", f"• secondary_role: {track.secondary_role or '—'}\n")
+        tech_textbox.insert("end", f"• featured_artists: {track.featured_artists}\n")
         tech_textbox.insert(
             "end", f"• track.artist.name: {track.artist.name if track.artist else 'Non défini'}\n"
         )
@@ -1115,13 +1100,11 @@ class TrackDetailsWindow:
 
         # Informations de la base de données
         tech_textbox.insert("end", "\n💾 BASE DE DONNÉES:\n")
-        tech_textbox.insert("end", f"• Track ID: {getattr(track, 'id', 'Non défini')}\n")
-        tech_textbox.insert(
-            "end", f"• _album_from_api: {getattr(track, '_album_from_api', 'Non défini')}\n"
-        )
+        tech_textbox.insert("end", f"• Track ID: {track.id}\n")
+        tech_textbox.insert("end", f"• _album_from_api: {track._album_from_api}\n")
         tech_textbox.insert(
             "end",
-            f"• _release_date_from_api: {helpers.format_date(getattr(track, '_release_date_from_api', None))}\n",
+            f"• _release_date_from_api: {helpers.format_date(track._release_date_from_api)}\n",
         )
 
         # Erreurs de scraping
@@ -1152,10 +1135,10 @@ class TrackDetailsWindow:
                 streams_source_label,
             )
 
-            sp = getattr(track, "spotify_streams", None)
-            yt = getattr(track, "ytm_streams", None)
-            sp_upd = getattr(track, "spotify_streams_updated", None)
-            yt_upd = getattr(track, "ytm_streams_updated", None)
+            sp = track.spotify_streams
+            yt = track.ytm_streams
+            sp_upd = track.spotify_streams_updated
+            yt_upd = track.ytm_streams_updated
             total_est = calculate_total_streams(sp, yt)
             suffix = streams_source_label(sp, yt)
 

@@ -356,13 +356,22 @@ def run_enrichment(
                 ),
             )
         finally:
-            # Fermer le navigateur BPM Finder DANS ce thread (celui qui l'a
-            # créé) : sinon il survit au batch et son pipe Playwright casse
-            # à l'arrêt de l'app (EPIPE cosmétique mais alarmant).
+            # Fermer les ressources des providers DANS ce thread (celui qui les
+            # a créées) : les browsers Playwright sont thread-affines — ils
+            # naissent et meurent dans le thread du batch et seront recréés à la
+            # demande au suivant. Sans ça, un browser survivait au batch et son
+            # pipe Playwright cassait à l'arrêt de l'app (EPIPE cosmétique mais
+            # alarmant).
             try:
-                bf = getattr(app.data_enricher, "bpmfinder_scraper", None)
-                if bf:
-                    bf.close()
+                app.data_enricher.close()
+            except Exception:
+                pass
+            # Arrêter aussi l'instance Playwright THREAD-LOCALE de ce worker :
+            # browsers fermés, le driver Node n'a plus de raison de survivre.
+            try:
+                from src.scrapers.playwright_manager import stop_playwright
+
+                stop_playwright()
             except Exception:
                 pass
             app.root.after(

@@ -438,6 +438,12 @@ class UltratopUpdater:
         le CLEAN (certif_brma.csv) — convention brut+clean."""
         if not new_certifications:
             self.logger.info("Aucune nouvelle certification trouvée")
+            # Fraîcheur = date de dernière VÉRIFICATION, pas de dernier ajout : on
+            # horodate même sans nouveauté, sinon la GUI affiche une MàJ périmée
+            # (Ultratop n'a quasi jamais de nouvelle certif entre deux runs).
+            raw = self._load_raw()
+            if not raw.empty:
+                self.update_metadata(self._clean_from(raw), 0)
             return
 
         new_df = pd.DataFrame(new_certifications)

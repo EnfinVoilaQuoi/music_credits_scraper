@@ -70,3 +70,25 @@ class TestBrmaRaw:
         clean = pd.read_csv(tmp_path / "certif_brma.csv")
         assert len(raw) == 2  # brut : dédup EXACTE (les 2 A/T identiques → 1)
         assert len(clean) == 2  # clean : 2 certifs distinctes
+
+    def test_metadata_horodatee_meme_sans_nouveaute(self, tmp_path):
+        # Fraîcheur = dernière VÉRIFICATION : un run sans nouvelle certif doit
+        # quand même rafraîchir metadata.json (sinon la GUI affiche une MàJ périmée).
+        import json
+
+        u = _updater(tmp_path)
+        u.save_updated_database([_cert("A", "T")])  # 1er run : crée brut + metadata
+        meta_path = tmp_path / "metadata.json"
+        assert meta_path.exists()
+
+        # Simuler une MàJ ancienne
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["last_update"] = "2000-01-01T00:00:00"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+        # Run SANS nouvelle certif → l'horodatage est tout de même rafraîchi
+        u.save_updated_database([])
+        meta2 = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta2["last_update"] != "2000-01-01T00:00:00"
+        assert meta2["new_records_added"] == 0
+        assert meta2["total_records"] == 1

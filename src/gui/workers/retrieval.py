@@ -280,10 +280,10 @@ def start_track_retrieval(
                     t.genius_id
                     for t in app.current_artist.tracks
                     if t.genius_id
-                    and (getattr(t, "album", None) or getattr(t, "album_override", None))
-                    and getattr(t, "spotify_id", None)
-                    and getattr(t, "youtube_url", None)
-                    and getattr(t, "youtube_url_source", None) != "search_auto"
+                    and (t.album or t.album_override)
+                    and t.spotify_id
+                    and t.youtube_url
+                    and t.youtube_url_source != "search_auto"
                 }
                 n_retry = sum(1 for t in app.current_artist.tracks if t.genius_id) - len(
                     known_genius_ids
@@ -375,7 +375,7 @@ def start_track_retrieval(
                                 key=lambda t: (
                                     bool(t.album),
                                     bool(t.bpm),
-                                    bool(getattr(t, "lyrics", None)),
+                                    bool(t.lyrics),
                                     len(t.credits),
                                 ),
                             )
@@ -387,6 +387,10 @@ def start_track_retrieval(
                     # Si le morceau existe, fusionner les données
                     if existing_track:
                         # Préserver les données enrichies existantes (BPM, lyrics, crédits, etc.)
+                        # BUG LATENT (non corrigé ici — hors périmètre getattr) : musical_key/
+                        # lyrics/certifications sont gardés par `not hasattr(track, …)`
+                        # TOUJOURS faux (champs de la dataclass) → préservation morte.
+                        # Compensé par le COALESCE de save_track. À traiter en « comportement ».
                         if not track.bpm and existing_track.bpm:
                             track.bpm = existing_track.bpm
                         if not hasattr(track, "musical_key") and hasattr(
@@ -430,11 +434,7 @@ def start_track_retrieval(
                 )
 
                 # Analyser les résultats
-                featuring_count = sum(
-                    1
-                    for t in app.current_artist.tracks
-                    if hasattr(t, "is_featuring") and t.is_featuring
-                )
+                featuring_count = sum(1 for t in app.current_artist.tracks if t.is_featuring)
                 api_albums = sum(1 for t in new_tracks if t.album)
                 api_dates = sum(1 for t in new_tracks if t.release_date)
 

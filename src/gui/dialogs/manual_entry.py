@@ -24,7 +24,7 @@ def manual_audio_entry(app, index: int):
     except (IndexError, TypeError):
         return
 
-    _dur = getattr(track, "duration", None)
+    _dur = track.duration
     _dur_init = f"{_dur // 60}:{_dur % 60:02d}" if isinstance(_dur, int) and _dur else ""
 
     # Dialogue unique à 3 champs
@@ -48,10 +48,8 @@ def manual_audio_entry(app, index: int):
         e.pack(fill="x")
         return e
 
-    bpm_entry = _row("BPM", str(track.bpm) if getattr(track, "bpm", None) else "", "ex. 95")
-    key_entry = _row(
-        "Tonalité", getattr(track, "musical_key", None) or "", "ex. G# minor / Sol# mineur"
-    )
+    bpm_entry = _row("BPM", str(track.bpm) if track.bpm else "", "ex. 95")
+    key_entry = _row("Tonalité", track.musical_key or "", "ex. G# minor / Sol# mineur")
     dur_entry = _row("Durée", _dur_init, "ex. 3:24 ou 204")
 
     _result = {"ok": False}
@@ -163,18 +161,13 @@ def manual_youtube_link(app, index: int):
     except (IndexError, TypeError):
         return
 
-    proposed = getattr(track, "youtube_url", None)
+    proposed = track.youtube_url
     if not proposed:
         # Proposer le meilleur résultat de recherche (même sous le seuil)
         try:
             artist_name = track.artist.name if track.artist else app.current_artist.name
             res = youtube_integration.get_youtube_link_for_track(
-                (
-                    getattr(track, "primary_artist_name", None)
-                    if getattr(track, "is_featuring", False)
-                    else None
-                )
-                or artist_name,
+                (track.primary_artist_name if track.is_featuring else None) or artist_name,
                 track.title,
                 track.album,
                 helpers.get_release_year_safely(track),
@@ -292,7 +285,7 @@ def bpmfinder_local_file(app, index: int):
                 )
                 return
             applied = []
-            if not getattr(track, "bpm", None) and res.get("bpm"):
+            if not track.bpm and res.get("bpm"):
                 track.bpm = res["bpm"]
                 track.bpm_source = "bpmfinder"
                 applied.append(f"BPM={res['bpm']}")

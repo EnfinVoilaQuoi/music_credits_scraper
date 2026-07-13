@@ -109,7 +109,7 @@ def merge_selected_tracks(app):
         return
     t1 = app.current_artist.tracks[idxs[0]]
     t2 = app.current_artist.tracks[idxs[1]]
-    if not getattr(t1, "id", None) or not getattr(t2, "id", None):
+    if not t1.id or not t2.id:
         messagebox.showwarning("Fusion", "Les deux morceaux doivent être sauvegardés en base.")
         return
 
@@ -164,7 +164,7 @@ def _do_merge(app, keep, other):
     # 4. Mémoriser la suppression pour ne pas réimporter le doublon
     try:
         app.deleted_tracks_manager.add_deleted(
-            app.current_artist.name, getattr(other, "genius_id", None), other.title
+            app.current_artist.name, other.genius_id, other.title
         )
     except Exception as e:
         logger.debug(f"Mémo suppression échec: {e}")

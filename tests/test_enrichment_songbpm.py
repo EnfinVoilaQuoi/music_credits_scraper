@@ -54,6 +54,53 @@ def test_scraper_vide_renvoie_false():
     assert provider.enrich(_track(), EnrichmentContext()) is False
 
 
+# ──────────────────────────────────────────────────────────────────────
+# gate() — DÉPARTAGE : skip seulement si consensus BPM ET rien de manquant
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _track_complet():
+    track = _track()
+    track.key = 5
+    track.mode = 1
+    track.duration = 200
+    return track
+
+
+def test_gate_skip_si_consensus_et_donnees_completes():
+    ctx = EnrichmentContext()
+    ctx.bpm_ballot.add("reccobeats", 100)
+    ctx.bpm_ballot.add("getsongbpm", 100)  # 2 candidats concordants = consensus
+    assert SongBpmProvider().gate(_track_complet(), ctx) == "not_needed"
+
+
+def test_gate_execute_sans_consensus():
+    ctx = EnrichmentContext()
+    ctx.bpm_ballot.add("reccobeats", 100)  # 1 seul candidat : pas de consensus
+    assert SongBpmProvider().gate(_track_complet(), ctx) is None
+
+
+def test_gate_execute_si_donnee_manquante_malgre_consensus():
+    ctx = EnrichmentContext()
+    ctx.bpm_ballot.add("reccobeats", 100)
+    ctx.bpm_ballot.add("getsongbpm", 100)
+    track = _track_complet()
+    track.duration = None
+    assert SongBpmProvider().gate(track, ctx) is None
+
+
+def test_gate_execute_si_force_update():
+    ctx = EnrichmentContext(force_update=True)
+    ctx.bpm_ballot.add("reccobeats", 100)
+    ctx.bpm_ballot.add("getsongbpm", 100)
+    assert SongBpmProvider().gate(_track_complet(), ctx) is None
+
+
+def test_error_result_none_pour_crash():
+    # Crash/timeout ≠ « pas de données » : la valeur d'erreur est None, pas False
+    assert SongBpmProvider.error_result is None
+
+
 def test_spotify_id_de_songbpm_rejete_si_duplicata():
     # Un validateur qui refuse tout : l'ID trouvé par SongBPM n'est PAS posé
     data = {"spotify_id": "dup123"}

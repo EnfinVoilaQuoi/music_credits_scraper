@@ -18,6 +18,9 @@ class SongBpmProvider:
     """Enrichissement via le scraper SongBPM (source `songbpm`)."""
 
     name = "songbpm"
+    # None = crash/timeout ≠ False (« pas de données ») : n'entre pas dans le
+    # « tout a échoué » qui déclenche le nettoyage de l'orchestrateur.
+    error_result = None
 
     def __init__(self, scraper=None):
         self._scraper = scraper
@@ -27,6 +30,48 @@ class SongBpmProvider:
 
     def close(self) -> None:
         """No-op en C3 : le scraper reste fermé par DataEnricher.close() (→ C5)."""
+
+    def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
+        """DÉPARTAGE (§8.3) : scrape seulement si les APIs n'ont pas de consensus
+        BPM, ou s'il manque key/mode/duration (force_update court-circuite)."""
+        # key/mode : attributs dynamiques du mapper → getattr requis
+        missing_key = getattr(track, "key", None) is None
+        missing_mode = getattr(track, "mode", None) is None
+        missing_duration = not track.duration
+        bpm_consensus = ctx.bpm_ballot.consensus_reached()
+
+        should_run = (
+            ctx.force_update or not bpm_consensus or missing_key or missing_mode or missing_duration
+        )
+        if not should_run:
+            logger.info(
+                f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, "
+                f"Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, "
+                f"Duration={track.duration})"
+            )
+            return "not_needed"
+
+        reasons = []
+        if ctx.force_update:
+            reasons.append("force_update=True")
+        if not bpm_consensus:
+            reasons.append("pas_de_consensus_bpm")
+        missing_items = [
+            name
+            for name, missing in (
+                ("key", missing_key),
+                ("mode", missing_mode),
+                ("duration", missing_duration),
+            )
+            if missing
+        ]
+        if missing_items:
+            reasons.append(f"missing_data={','.join(missing_items)}")
+
+        logger.info(
+            f"🎼 Appel de SongBPM (départage) pour '{track.title}' (raison: {', '.join(reasons)})"
+        )
+        return None
 
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         force_update = ctx.force_update

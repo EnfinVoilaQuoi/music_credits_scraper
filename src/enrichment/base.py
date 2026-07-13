@@ -17,9 +17,21 @@ class EnrichmentProvider(Protocol):
     """Interface minimale d'une source d'enrichissement."""
 
     name: str
+    # Valeur posée dans le dict de résultats si enrich() lève (l'orchestrateur
+    # capture à la frontière batch). False = « pas de données » ; None =
+    # crash/timeout, EXCLU du « tout a échoué » qui déclenche le nettoyage.
+    error_result: bool | None
 
     def is_available(self) -> bool:
         """True si la source est utilisable (client/API/scraper initialisé)."""
+        ...
+
+    def gate(self, track: "Track", ctx: "EnrichmentContext") -> object | None:
+        """Décide si enrich() doit tourner pour ce morceau (+ log de la raison).
+
+        None = exécuter enrich(). Toute autre valeur = skip, posée telle quelle
+        dans le dict de résultats ("not_needed", True pour ISRC déjà satisfait…).
+        """
         ...
 
     def enrich(self, track: "Track", ctx: "EnrichmentContext") -> bool:

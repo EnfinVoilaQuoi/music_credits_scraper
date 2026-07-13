@@ -17,6 +17,7 @@ class SpotifyIdProvider:
     """Récupération du Spotify Track ID via scraper (source `spotify_id`)."""
 
     name = "spotify_id"
+    error_result = False
 
     def __init__(self, scraper=None):
         self._scraper = scraper
@@ -26,6 +27,26 @@ class SpotifyIdProvider:
 
     def close(self) -> None:
         """No-op en C3 : le scraper reste fermé par DataEnricher.close (→ C5)."""
+
+    def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
+        """Skip si un ID valide existe déjà (hors force_update) ou si la voie
+        ISRC a fourni les données audio (le scrape Spotify devient inutile)."""
+        validate = ctx.validate_spotify_id_unique
+        has_valid_id = track.spotify_id and (
+            not ctx.artist_tracks
+            or validate is None
+            or validate(track.spotify_id, track, ctx.artist_tracks)
+        )
+        if (ctx.force_update or not has_valid_id) and not ctx.isrc_satisfied:
+            logger.info(
+                f"🎯 Appel du scraper Spotify ID pour '{track.title}' "
+                f"(force_update={ctx.force_update}, has_valid_id={has_valid_id})"
+            )
+            return None
+        logger.info(
+            f"⏭️ Scraper Spotify ID non nécessaire (ID déjà présent et valide: {track.spotify_id})"
+        )
+        return "not_needed"
 
     def get_unique_spotify_id(
         self, track: Track, ctx: EnrichmentContext, force_scraper: bool = False

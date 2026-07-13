@@ -67,3 +67,42 @@ def test_get_unique_reutilise_id_existant_valide_sans_force():
 
 def test_indisponible_renvoie_none():
     assert SpotifyIdProvider(None).get_unique_spotify_id(_track(), EnrichmentContext()) is None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# gate() — gating historique du bloc « scraper Spotify ID » d'enrich_track
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_gate_execute_si_pas_d_id():
+    assert SpotifyIdProvider().gate(_track(), EnrichmentContext()) is None
+
+
+def test_gate_skip_si_id_valide_sans_force_update():
+    track = _track()
+    track.spotify_id = "existant"
+    ctx = EnrichmentContext(validate_spotify_id_unique=lambda *a: True)
+    assert SpotifyIdProvider().gate(track, ctx) == "not_needed"
+
+
+def test_gate_execute_si_force_update_malgre_id_valide():
+    track = _track()
+    track.spotify_id = "existant"
+    ctx = EnrichmentContext(force_update=True, validate_spotify_id_unique=lambda *a: True)
+    assert SpotifyIdProvider().gate(track, ctx) is None
+
+
+def test_gate_execute_si_id_duplique():
+    track = _track()
+    track.spotify_id = "dup"
+    ctx = EnrichmentContext(
+        artist_tracks=[Track(title="Autre")],
+        validate_spotify_id_unique=lambda *a: False,
+    )
+    assert SpotifyIdProvider().gate(track, ctx) is None
+
+
+def test_gate_skip_si_voie_isrc_satisfaite():
+    # L'ISRC a fourni les données audio → le scrape Spotify devient inutile
+    ctx = EnrichmentContext(force_update=True, isrc_satisfied=True)
+    assert SpotifyIdProvider().gate(_track(), ctx) == "not_needed"

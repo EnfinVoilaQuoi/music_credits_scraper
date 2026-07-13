@@ -21,6 +21,7 @@ class ReccoBeatsProvider:
     """Enrichissement via ReccoBeats (source `reccobeats`)."""
 
     name = "reccobeats"
+    error_result = False
 
     def __init__(self, client=None, deezer_client=None, spotify_id_scraper=None):
         self._client = client
@@ -32,6 +33,15 @@ class ReccoBeatsProvider:
 
     def close(self) -> None:
         """No-op en C3 : client/scraper restent fermés par DataEnricher.close (→ C5)."""
+
+    def gate(self, track: Track, ctx: EnrichmentContext) -> bool | None:
+        """Skip (résultat True) si la voie ISRC en pré-étape a déjà satisfait
+        la source — pas de second appel."""
+        if ctx.isrc_satisfied:
+            logger.info(f"✅ ReccoBeats déjà satisfait via ISRC (BPM={track.bpm})")
+            return True
+        logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
+        return None
 
     @staticmethod
     def _artist_name(track: Track) -> str:

@@ -19,6 +19,7 @@ class DeezerProvider:
     """Enrichissement via l'API Deezer (source `deezer`)."""
 
     name = "deezer"
+    error_result = False
 
     def __init__(self, client: DeezerAPI | None = None):
         self._client = client
@@ -28,6 +29,11 @@ class DeezerProvider:
 
     def close(self) -> None:
         """L'API Deezer (HTTP sans état) n'a aucune ressource à libérer."""
+
+    def gate(self, track: Track, ctx: EnrichmentContext) -> None:
+        """Jamais de skip : vérification de cohérence + enrichissement complémentaire."""
+        logger.info(f"🎵 Appel de Deezer API pour '{track.title}'")
+        return None
 
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Vérifie la cohérence des données Deezer avec l'existant et enrichit."""

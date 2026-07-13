@@ -96,6 +96,11 @@ class DataEnricher:
         except Exception as e:
             logger.error(f"❌ Erreur init Spotify ID scraper: {e}")
 
+        # Provider Spotify ID (pattern provider) — enveloppe le scraper
+        from src.enrichment.providers.spotify_id import SpotifyIdProvider
+
+        self._spotify_id_provider = SpotifyIdProvider(self.spotify_id_scraper)
+
         # Initialiser Deezer API
         self.deezer_client = None
         try:
@@ -258,53 +263,9 @@ class DataEnricher:
 
         return True
 
-    def get_unique_spotify_id(
-        self, track: Track, artist_tracks: list[Track], force_scraper: bool = False
-    ) -> str | None:
-        """
-        Récupère un Spotify ID unique pour un track
-        Utilise le scraper Spotify_ID pour obtenir le bon ID
-
-        Args:
-            track: Le track pour lequel trouver un Spotify ID
-            artist_tracks: Liste de tous les tracks de l'artiste (pour validation)
-            force_scraper: Si True, force l'utilisation du scraper même si un ID existe
-
-        Returns:
-            Optional[str]: Le Spotify ID unique trouvé, ou None
-        """
-        if not self.spotify_id_scraper:
-            logger.warning("❌ Spotify ID scraper non disponible")
-            return None
-
-        artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-
-        # Si le track a déjà un Spotify ID et qu'on ne force pas, le vérifier
-        if not force_scraper and hasattr(track, "spotify_id") and track.spotify_id:
-            if self.validate_spotify_id_unique(track.spotify_id, track, artist_tracks):
-                logger.info(f"✅ Spotify ID existant validé: {track.spotify_id}")
-                return track.spotify_id
-            else:
-                logger.warning(
-                    "⚠️ Spotify ID existant invalide (dupliqué), recherche d'un nouveau..."
-                )
-
-        # Utiliser le scraper Spotify_ID pour obtenir le bon ID
-        logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
-        spotify_id = self.spotify_id_scraper.get_spotify_id(artist_name, track.title)
-
-        if not spotify_id:
-            logger.warning(f"❌ Aucun Spotify ID trouvé via scraper pour '{track.title}'")
-            return None
-
-        # Valider l'unicité de l'ID trouvé
-        if not self.validate_spotify_id_unique(spotify_id, track, artist_tracks):
-            logger.error(f"❌ ERREUR: Spotify ID trouvé par scraper est déjà utilisé: {spotify_id}")
-            logger.error("   Cela ne devrait pas arriver. Vérifiez la base de données.")
-            return None
-
-        logger.info(f"✅ Spotify ID unique trouvé via scraper: {spotify_id}")
-        return spotify_id
+    # get_unique_spotify_id : déplacé dans src/enrichment/providers/spotify_id.py
+    # (SpotifyIdProvider.get_unique_spotify_id). L'unicité d'ID reste
+    # validate_spotify_id_unique ci-dessus (partagée, injectée via le contexte).
 
     # ================== NOUVEAU: NETTOYAGE DES DONNÉES ERRONÉES ==================
 
@@ -574,28 +535,7 @@ class DataEnricher:
                     f"🎯 Appel du scraper Spotify ID pour '{track.title}' (force_update={force_update}, has_valid_id={has_valid_id})"
                 )
                 try:
-                    spotify_id = self.get_unique_spotify_id(
-                        track, artist_tracks or [], force_scraper=True
-                    )
-                    if spotify_id:
-                        track.spotify_id = spotify_id
-                        logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
-                        results["spotify_id"] = True
-
-                        # Récupérer le titre de la page Spotify pour vérification
-                        if self.spotify_id_scraper:
-                            try:
-                                page_title = self.spotify_id_scraper.get_spotify_page_title(
-                                    spotify_id
-                                )
-                                if page_title:
-                                    track.spotify_page_title = page_title
-                                    logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-                            except Exception as e:
-                                logger.debug(f"Impossible de récupérer le titre de page: {e}")
-                    else:
-                        logger.warning("❌ Échec récupération Spotify ID via scraper")
-                        results["spotify_id"] = False
+                    results["spotify_id"] = self._spotify_id_provider.enrich(track, ctx)
                 except Exception as e:
                     logger.error(f"Erreur Spotify ID scraper pour {track.title}: {e}")
                     results["spotify_id"] = False

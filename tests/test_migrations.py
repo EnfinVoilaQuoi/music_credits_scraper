@@ -96,7 +96,14 @@ class TestIdempotence:
         assert v1 == v2 == LATEST
 
 
-def test_datamanager_pose_le_dernier_user_version(data_manager):
-    """Une base créée par DataManager (fresh) est au dernier user_version."""
+def test_datamanager_fresh_est_au_head_alembic(data_manager):
+    """Une base créée par DataManager (fresh) est au head Alembic.
+
+    E3b : le schéma vient d'`alembic upgrade head` (plus de CREATE TABLE ni de
+    `user_version` posé) → on vérifie `alembic_version`, pas `user_version`.
+    """
+    from src.persistence.bootstrap import LEGACY_HEAD_REVISION
+
     with sqlite3.connect(data_manager.db_path) as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == LATEST
+        rev = c.execute("SELECT version_num FROM alembic_version").fetchall()
+    assert rev == [(LEGACY_HEAD_REVISION,)]

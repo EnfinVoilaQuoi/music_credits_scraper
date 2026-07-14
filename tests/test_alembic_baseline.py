@@ -82,6 +82,6 @@ def test_upgrade_head_equivaut_au_schema_legacy(tmp_path):
     legacy_db = tmp_path / "legacy.db"
 
     _upgrade_head(str(alembic_db))
-    Database(str(legacy_db))  # CREATE TABLE + migrations user_version (+ stamp)
+    Database(str(legacy_db))  # E3b : schéma créé par `alembic upgrade head`
 
     assert _snapshot(str(alembic_db)) == _snapshot(str(legacy_db))

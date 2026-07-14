@@ -27,22 +27,28 @@ class TrackRepository:
 
     def save_track(self, track: Track) -> int:
         """Sauvegarde ou met à jour un morceau avec musical_key et time_signature"""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-
+        # Écriture en `text()` via `engine.begin()` (transaction Core, commit/
+        # rollback auto). Le gros UPDATE COALESCE/CASE et l'INSERT gardent leur SQL
+        # verbatim (déjà en paramètres nommés depuis A3) : les binds `text()` ne
+        # sont PAS typés → les strings de date (release_date, last_scraped…)
+        # passent verbatim au driver, ce qui CONTOURNE le piège d'écriture
+        # TIMESTAMP (qui refuse les strings sur un bind typé, cf. date_bind).
+        with self.engine.begin() as conn:
             if not track.artist or not track.artist.id:
                 raise ValueError("Le morceau doit avoir un artiste avec un ID")
 
-            cursor.execute(
-                """
-                SELECT id, is_featuring, primary_artist_name, featured_artists,
-                    lyrics, has_lyrics, lyrics_scraped_at FROM tracks
-                WHERE title = ? AND artist_id = ?
-            """,
-                (track.title, track.artist.id),
+            existing_track = (
+                conn.execute(
+                    text(
+                        "SELECT id, is_featuring, primary_artist_name, featured_artists, "
+                        "lyrics, has_lyrics, lyrics_scraped_at FROM tracks "
+                        "WHERE title = :title AND artist_id = :artist_id"
+                    ),
+                    {"title": track.title, "artist_id": track.artist.id},
+                )
+                .mappings()
+                .first()
             )
-
-            existing_track = cursor.fetchone()
 
             if existing_track:
                 track.id = existing_track["id"]
@@ -126,8 +132,8 @@ class TrackRepository:
                 # re-sauvent depuis l'API portent is_featuring sur l'objet ; le
                 # rafraîchissement de crédits passe par force_update_track_credits
                 # qui relit et re-pose is_featuring AVANT le save.
-                cursor.execute(
-                    """
+                conn.execute(
+                    text("""
                     UPDATE tracks
                     SET album = COALESCE(:album, album),
                         track_number = COALESCE(:track_number, track_number),
@@ -170,12 +176,12 @@ class TrackRepository:
                         updated_at = :now,
                         last_scraped = COALESCE(:last_scraped, last_scraped)
                     WHERE id = :id
-                """,
+                """),
                     params,
                 )
             else:
-                cursor.execute(
-                    """
+                result = conn.execute(
+                    text("""
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id, isrc,
@@ -195,46 +201,54 @@ class TrackRepository:
                         :certifications_json, :album_certifications_json, :relationships_json, :spotify_page_title,
                         :now, :now, :last_scraped
                     )
-                """,
+                """),
                     params,
                 )
-                track.id = cursor.lastrowid
+                track.id = result.lastrowid
 
             # Supprimer les anciens crédits avant d'ajouter les nouveaux
             if track.id:
-                cursor.execute("DELETE FROM credits WHERE track_id = ?", (track.id,))
+                conn.execute(
+                    text("DELETE FROM credits WHERE track_id = :track_id"),
+                    {"track_id": track.id},
+                )
 
                 # Sauvegarder les nouveaux crédits
                 for credit in track.credits:
-                    self._save_credit(cursor, track.id, credit)
+                    self._save_credit(conn, track.id, credit)
 
             # Sauvegarder les erreurs
             for error in track.scraping_errors:
-                cursor.execute(
-                    """
-                    INSERT INTO scraping_errors (track_id, error_message, error_time)
-                    VALUES (?, ?, ?)
-                """,
-                    (track.id, error, datetime.now()),
+                conn.execute(
+                    text(
+                        "INSERT INTO scraping_errors (track_id, error_message, error_time) "
+                        "VALUES (:track_id, :error_message, :error_time)"
+                    ),
+                    {"track_id": track.id, "error_message": error, "error_time": datetime.now()},
                 )
 
-            conn.commit()
-
+            # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
                 f"Morceau sauvegardé: {track.title} (ID: {track.id}, "
                 f"Featuring: {track.is_featuring}, Paroles: {bool(track.lyrics)})"
             )
             return track.id
 
-    def _save_credit(self, cursor, track_id: int, credit: Credit):
-        """Sauvegarde un crédit - VERSION SIMPLIFIÉE SANS VÉRIFICATION UNIQUE"""
+    def _save_credit(self, conn, track_id: int, credit: Credit):
+        """Sauvegarde un crédit (connexion Core fournie par l'appelant)."""
         try:
-            cursor.execute(
-                """
-                INSERT INTO credits (track_id, name, role, role_detail, source)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                (track_id, credit.name, credit.role.value, credit.role_detail, credit.source),
+            conn.execute(
+                text(
+                    "INSERT INTO credits (track_id, name, role, role_detail, source) "
+                    "VALUES (:track_id, :name, :role, :role_detail, :source)"
+                ),
+                {
+                    "track_id": track_id,
+                    "name": credit.name,
+                    "role": credit.role.value,
+                    "role_detail": credit.role_detail,
+                    "source": credit.source,
+                },
             )
         except Exception as e:
             # Log mais ne pas arrêter le processus pour un crédit
@@ -442,19 +456,19 @@ class TrackRepository:
     def force_update_track_credits(self, track: Track) -> int:
         """Force la mise à jour complète des crédits d'un morceau - VERSION PRÉSERVANT FEATURES"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
+            with self.engine.begin() as conn:
                 # ✅ CORRECTION: Récupérer les infos featuring AVANT suppression
-                cursor.execute(
-                    """
-                    SELECT is_featuring, primary_artist_name, featured_artists
-                    FROM tracks WHERE id = ?
-                """,
-                    (track.id,),
+                featuring_info = (
+                    conn.execute(
+                        text(
+                            "SELECT is_featuring, primary_artist_name, featured_artists "
+                            "FROM tracks WHERE id = :tid"
+                        ),
+                        {"tid": track.id},
+                    )
+                    .mappings()
+                    .first()
                 )
-
-                featuring_info = cursor.fetchone()
 
                 if featuring_info:
                     # Préserver les infos featuring sur l'objet track
@@ -466,79 +480,85 @@ class TrackRepository:
                     track.is_featuring = False
 
                 # Supprimer TOUS les anciens crédits
-                cursor.execute("DELETE FROM credits WHERE track_id = ?", (track.id,))
-                deleted_count = cursor.rowcount
+                deleted_count = conn.execute(
+                    text("DELETE FROM credits WHERE track_id = :tid"), {"tid": track.id}
+                ).rowcount
                 logger.info(f"🗑️ {deleted_count} anciens crédits supprimés pour '{track.title}'")
 
                 # Supprimer les anciennes erreurs de scraping
-                cursor.execute("DELETE FROM scraping_errors WHERE track_id = ?", (track.id,))
-                deleted_errors = cursor.rowcount
+                deleted_errors = conn.execute(
+                    text("DELETE FROM scraping_errors WHERE track_id = :tid"), {"tid": track.id}
+                ).rowcount
                 if deleted_errors > 0:
                     logger.info(f"🗑️ {deleted_errors} anciennes erreurs supprimées")
 
                 # Remettre à zéro les métadonnées de scraping (MAIS PRÉSERVER FEATURING)
-                cursor.execute(
-                    """
+                conn.execute(
+                    text("""
                     UPDATE tracks
                     SET last_scraped = NULL,
                         genre = CASE
                             WHEN genre IS NOT NULL AND genre != '' THEN genre
                             ELSE NULL
                         END
-                    WHERE id = ?
-                """,
-                    (track.id,),
+                    WHERE id = :tid
+                """),
+                    {"tid": track.id},
                 )
 
                 # Sauvegarder les nouveaux crédits
                 for credit in track.credits:
-                    self._save_credit(cursor, track.id, credit)
+                    self._save_credit(conn, track.id, credit)
 
                 # Mettre à jour le track complet (EN PRÉSERVANT LES FEATURES)
-                cursor.execute(
-                    """
+                conn.execute(
+                    text("""
                     UPDATE tracks
-                    SET album = ?, track_number = ?, release_date = ?,
-                        genius_id = ?, spotify_id = ?, discogs_id = ?,
-                        bpm = ?, duration = ?, genre = ?,
-                        genius_url = ?, spotify_url = ?,
-                        is_featuring = ?, primary_artist_name = ?, featured_artists = ?,
-                        updated_at = ?, last_scraped = ?
-                    WHERE id = ?
-                """,
-                    (
-                        track.album,
-                        track.track_number,
-                        track.release_date,
-                        track.genius_id,
-                        track.spotify_id,
-                        track.discogs_id,
-                        track.bpm,
-                        track.duration,
-                        track.genre,
-                        track.genius_url,
-                        track.spotify_url,
-                        track.is_featuring,
-                        track.primary_artist_name,
-                        track.featured_artists,
-                        datetime.now(),
-                        track.last_scraped,
-                        track.id,
-                    ),
+                    SET album = :album, track_number = :track_number, release_date = :release_date,
+                        genius_id = :genius_id, spotify_id = :spotify_id, discogs_id = :discogs_id,
+                        bpm = :bpm, duration = :duration, genre = :genre,
+                        genius_url = :genius_url, spotify_url = :spotify_url,
+                        is_featuring = :is_featuring, primary_artist_name = :primary_artist_name,
+                        featured_artists = :featured_artists,
+                        updated_at = :updated_at, last_scraped = :last_scraped
+                    WHERE id = :id
+                """),
+                    {
+                        "album": track.album,
+                        "track_number": track.track_number,
+                        "release_date": track.release_date,
+                        "genius_id": track.genius_id,
+                        "spotify_id": track.spotify_id,
+                        "discogs_id": track.discogs_id,
+                        "bpm": track.bpm,
+                        "duration": track.duration,
+                        "genre": track.genre,
+                        "genius_url": track.genius_url,
+                        "spotify_url": track.spotify_url,
+                        "is_featuring": track.is_featuring,
+                        "primary_artist_name": track.primary_artist_name,
+                        "featured_artists": track.featured_artists,
+                        "updated_at": datetime.now(),
+                        "last_scraped": track.last_scraped,
+                        "id": track.id,
+                    },
                 )
 
                 # Sauvegarder les nouvelles erreurs s'il y en a
                 for error in track.scraping_errors:
-                    cursor.execute(
-                        """
-                        INSERT INTO scraping_errors (track_id, error_message, error_time)
-                        VALUES (?, ?, ?)
-                    """,
-                        (track.id, error, datetime.now()),
+                    conn.execute(
+                        text(
+                            "INSERT INTO scraping_errors (track_id, error_message, error_time) "
+                            "VALUES (:track_id, :error_message, :error_time)"
+                        ),
+                        {
+                            "track_id": track.id,
+                            "error_message": error,
+                            "error_time": datetime.now(),
+                        },
                     )
 
-                conn.commit()
-
+                # commit auto à la sortie du bloc `engine.begin()`
                 new_credits_count = len(track.credits)
                 logger.info(
                     f"✅ Mise à jour forcée terminée pour '{track.title}': {new_credits_count} nouveaux crédits (Featuring préservé: {track.is_featuring})"

@@ -65,6 +65,42 @@ def test_backup_sans_version_est_restampe(tmp_path):
     assert _versions(path) == [LEGACY_HEAD_REVISION]
 
 
+def test_backup_ancien_sous_46_est_rattrape_puis_stampe(tmp_path):
+    """Un vieux backup pré-Alembic à user_version < 46 (colonnes manquantes) doit
+    être RATTRAPÉ (colonnes ajoutées jusqu'à 46) PUIS stampé — pas juste stampé,
+    sinon le stamp mentirait sur le schéma (E3b, base restaurée)."""
+    path = str(tmp_path / "vieux.db")
+    with sqlite3.connect(path) as conn:
+        # Schéma « d'origine » (avant migrations user_version) : les colonnes de
+        # base uniquement, user_version = 0, aucune alembic_version.
+        conn.executescript("""
+            CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE, genius_id INTEGER, spotify_id TEXT,
+                discogs_id INTEGER, spotify_monthly_listeners INTEGER,
+                ytm_monthly_listeners INTEGER, created_at TIMESTAMP, updated_at TIMESTAMP);
+            CREATE TABLE tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+                artist_id INTEGER NOT NULL, album TEXT, track_number INTEGER,
+                release_date TIMESTAMP, genius_id INTEGER, spotify_id TEXT, discogs_id INTEGER,
+                bpm INTEGER, duration INTEGER, genre TEXT, genius_url TEXT, spotify_url TEXT,
+                youtube_url TEXT, created_at TIMESTAMP, updated_at TIMESTAMP, last_scraped TIMESTAMP);
+            CREATE TABLE albums (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+                artist_id INTEGER NOT NULL, spotify_streams INTEGER, spotify_daily_streams INTEGER,
+                spotify_streams_updated TIMESTAMP);
+            """)
+        conn.execute("PRAGMA user_version = 0")
+        conn.commit()
+
+    ensure_stamped(path)
+
+    with sqlite3.connect(path) as conn:
+        tcols = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")}
+        uv = conn.execute("PRAGMA user_version").fetchone()[0]
+    # Échantillon de colonnes ajoutées par le rattrapage (parmi les 46 migrations).
+    assert {"isrc", "bpm_source", "key", "mode", "spotify_streams", "album_override"} <= tcols
+    assert uv == 46
+    assert _versions(path) == [LEGACY_HEAD_REVISION]
+
+
 def test_base_stampee_est_au_head_pour_alembic(tmp_path):
     # Propriété critique pour E3 : Alembic considère la base à jour (head), donc
     # `upgrade head` sera un no-op au lieu de recréer les tables.

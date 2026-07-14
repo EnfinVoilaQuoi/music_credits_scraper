@@ -15,10 +15,11 @@ simple test de présence de table (aucun import Alembic). C'est ce qui garantit
 qu'après E3 (`alembic upgrade head` au démarrage), une base restaurée garde un
 chemin de migration cohérent.
 
-Note E3 : quand `run_migrations` quittera le chemin normal de `db.py`, le
-bootstrap devra d'abord amener une base restaurée à user_version 46 (copie gelée
-de `run_migrations`) AVANT de stamper. Aujourd'hui `init_schema` applique encore
-`run_migrations`, donc `ensure_stamped` est appelé sur une base déjà à 46.
+E3a : `ensure_stamped` amène désormais une base pré-Alembic AVEC schéma à
+user_version 46 (copie gelée `legacy_migrations.run_migrations`) AVANT de la
+stamper — indispensable pour un backup restauré à un `user_version < 46` une
+fois que `run_migrations` aura quitté le chemin normal de `db.py` (E3b). Une
+base VIERGE n'est PAS stampée : `alembic upgrade head` la créera de zéro (E3b).
 
 Imports Alembic/SQLAlchemy **paresseux** (dans `stamp_head`) : le démarrage
 normal (base déjà stampée) ne paie jamais le coût d'import.
@@ -60,6 +61,32 @@ def _has_alembic_version(db_path: str) -> bool:
     return row is not None
 
 
+def _has_schema(db_path: str) -> bool:
+    """La base a-t-elle déjà le schéma métier (table `artists`) ? Sert à
+    distinguer une base VIERGE (à créer par `alembic upgrade head`) d'une base
+    pré-Alembic AVEC schéma (à stamper)."""
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artists'"
+        ).fetchone()
+    return row is not None
+
+
+def _catch_up_legacy(db_path: str) -> None:
+    """Amène une base pré-Alembic à `user_version = 46` (schéma complet) via la
+    copie GELÉE des migrations legacy, AVANT de la stamper à `e1_initial_schema`.
+
+    Indispensable pour un vieux backup restauré (`user_version < 46`, colonnes
+    manquantes) : le stamper sans rattraper mentirait sur son schéma. Sur une
+    base déjà à 46, `run_migrations` sort immédiatement (no-op).
+    """
+    from src.persistence.legacy_migrations import run_migrations
+
+    with sqlite3.connect(db_path) as conn:
+        run_migrations(conn.cursor())
+        conn.commit()
+
+
 def stamp_head(db_path: str) -> None:
     """Stampe la base à la révision head (crée `alembic_version` + 1 ligne)."""
     from sqlalchemy import create_engine
@@ -77,15 +104,24 @@ def stamp_head(db_path: str) -> None:
 
 
 def ensure_stamped(db_path: str) -> None:
-    """Stampe la base si elle n'a pas encore de table `alembic_version`.
+    """Rend une base pré-Alembic reconnaissable par Alembic.
+
+    - base déjà stampée (`alembic_version` présente) → rien ;
+    - base VIERGE (pas de schéma) → rien : c'est `alembic upgrade head` (E3) qui
+      crée tout depuis la révision de base — surtout NE PAS stamper une base
+      vide (elle serait déclarée « à jour » sans aucune table) ;
+    - base pré-Alembic AVEC schéma → rattrapage legacy jusqu'à 46 puis stamp à
+      `e1_initial_schema` (le schéma est déjà là, on ne rejoue pas l'upgrade).
 
     Idempotent et permanent (voir docstring module). Non fatal : en cas d'échec,
-    on log un warning et on continue — en E1, le schéma reste piloté par
-    `db.py`, le stamp n'est que préparatoire.
+    on log un warning et on continue.
     """
     if _has_alembic_version(db_path):
         return
+    if not _has_schema(db_path):
+        return
     try:
+        _catch_up_legacy(db_path)
         stamp_head(db_path)
         logger.info(f"Base stampée Alembic à '{LEGACY_HEAD_REVISION}' : {db_path}")
     except Exception as e:

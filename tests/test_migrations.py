@@ -1,6 +1,7 @@
-"""Tests des migrations de schéma versionnées (PRAGMA user_version).
+"""Tests des migrations de schéma legacy GELÉES (PRAGMA user_version).
 
-Deux scénarios critiques :
+Depuis E3a, la séquence vit dans `src/persistence/legacy_migrations.py` (copie
+gelée : `db.py` puis le bootstrap Alembic s'en servent). Deux scénarios critiques :
 - Base NEUVE : le schéma de départ (CREATE TABLE minimal) est amené au dernier
   user_version, toutes les colonnes étendues ajoutées.
 - Bootstrap d'une base type-PROD : colonnes déjà présentes (ancien mécanisme
@@ -12,7 +13,7 @@ import sqlite3
 
 import pytest
 
-from src.utils.db import _MIGRATIONS, run_migrations
+from src.persistence.legacy_migrations import _MIGRATIONS, run_migrations
 
 LATEST = _MIGRATIONS[-1][0]
 

@@ -12,8 +12,11 @@ requests>=2.31.0
 # Interface graphique
 customtkinter==5.2.1
 
-# Base de données
-sqlalchemy==2.0.23
+# Base de données (migration SQLAlchemy Core + Alembic, phase E).
+# NB : 2.0.23 était incompatible Python 3.13 (import échoue : garde TypingOnly
+# vs __firstlineno__/__static_attributes__ ajoutés en 3.13, corrigé en 2.0.31+).
+sqlalchemy==2.0.51
+alembic==1.18.5
 
 # Configuration (typée/validée + .env natif)
 pydantic>=2.7

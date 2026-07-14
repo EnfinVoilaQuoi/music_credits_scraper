@@ -10,10 +10,12 @@ import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import func, literal, or_, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from src.models import Credit, Track
-from src.persistence.schema import tracks
+from src.persistence.binding import date_bind
+from src.persistence.schema import albums, tracks
 from src.utils.logger import get_logger
 from src.utils.track_mapper import track_from_row
 
@@ -540,17 +542,18 @@ class TrackRepository:
         sinon now().
         """
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracks
-                    SET spotify_streams = ?, spotify_daily_streams = ?, spotify_streams_updated = ?
-                    WHERE id = ?
-                """,
-                    (streams, daily_streams, updated_at or datetime.now(), track_id),
+            stmt = (
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(
+                    spotify_streams=streams,
+                    spotify_daily_streams=daily_streams,
+                    spotify_streams_updated=date_bind(updated_at or datetime.now()),
                 )
-                conn.commit()
-                return True
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur update_track_spotify_streams (track_id={track_id}): {e}")
             return False
@@ -578,16 +581,14 @@ class TrackRepository:
         """Détache un morceau de son album (édition MANUELLE : album_override=1
         empêche l'API de re-remplir le champ au prochain prefill)."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracks SET album = NULL, album_override = 1, updated_at = ?
-                    WHERE id = ?
-                """,
-                    (datetime.now(), track_id),
-                )
-                conn.commit()
-                return True
+            stmt = (
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(album=None, album_override=1, updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur clear_track_album (track_id={track_id}): {e}")
             return False
@@ -608,29 +609,28 @@ class TrackRepository:
         par l'appelant).
         """
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO albums (title, artist_id, spotify_streams, spotify_daily_streams,
-                                        spotify_streams_updated, spotify_album_ids)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(title, artist_id) DO UPDATE SET
-                        spotify_streams = excluded.spotify_streams,
-                        spotify_daily_streams = excluded.spotify_daily_streams,
-                        spotify_streams_updated = excluded.spotify_streams_updated,
-                        spotify_album_ids = COALESCE(excluded.spotify_album_ids, spotify_album_ids)
-                """,
-                    (
-                        title,
-                        artist_id,
-                        streams,
-                        daily_streams,
-                        updated_at or datetime.now(),
-                        spotify_album_ids,
+            ins = sqlite_insert(albums).values(
+                title=title,
+                artist_id=artist_id,
+                spotify_streams=streams,
+                spotify_daily_streams=daily_streams,
+                spotify_streams_updated=date_bind(updated_at or datetime.now()),
+                spotify_album_ids=spotify_album_ids,
+            )
+            stmt = ins.on_conflict_do_update(
+                index_elements=[albums.c.title, albums.c.artist_id],
+                set_={
+                    "spotify_streams": ins.excluded.spotify_streams,
+                    "spotify_daily_streams": ins.excluded.spotify_daily_streams,
+                    "spotify_streams_updated": ins.excluded.spotify_streams_updated,
+                    "spotify_album_ids": func.coalesce(
+                        ins.excluded.spotify_album_ids, albums.c.spotify_album_ids
                     ),
-                )
-                conn.commit()
-                return True
+                },
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
             return False
@@ -666,17 +666,14 @@ class TrackRepository:
     def update_track_ytm_streams(self, track_id: int, streams: int) -> bool:
         """Met à jour les streams YouTube Music d'un morceau."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracks
-                    SET ytm_streams = ?, ytm_streams_updated = ?
-                    WHERE id = ?
-                """,
-                    (streams, datetime.now(), track_id),
-                )
-                conn.commit()
-                return True
+            stmt = (
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(ytm_streams=streams, ytm_streams_updated=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")
             return False
@@ -688,22 +685,24 @@ class TrackRepository:
         'search_auto'. Un lien 'manual' ou 'genius_media' écrase n'importe quoi ;
         un 'search_auto' ne remplace JAMAIS un 'genius_media' ni un 'manual'.
         """
+        protected = ("manual", "genius_media")
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracks
-                    SET youtube_url = ?, youtube_url_source = ?, updated_at = ?
-                    WHERE id = ?
-                      AND (? IN ('manual', 'genius_media')
-                           OR youtube_url IS NULL
-                           OR youtube_url = ''
-                           OR COALESCE(youtube_url_source, '') NOT IN ('manual', 'genius_media'))
-                """,
-                    (url, source, datetime.now(), track_id, source),
+            stmt = (
+                update(tracks)
+                .where(
+                    tracks.c.id == track_id,
+                    or_(
+                        literal(source).in_(protected),
+                        tracks.c.youtube_url.is_(None),
+                        tracks.c.youtube_url == "",
+                        func.coalesce(tracks.c.youtube_url_source, "").notin_(protected),
+                    ),
                 )
-                conn.commit()
-                return True
+                .values(youtube_url=url, youtube_url_source=source, updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")
             return False
@@ -713,15 +712,14 @@ class TrackRepository:
         aligner sur Kworb). Échoue si le titre existe déjà pour l'artiste
         (contrainte UNIQUE(title, artist_id))."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracks SET title = ?, updated_at = ? WHERE id = ?
-                """,
-                    (new_title.strip(), datetime.now(), track_id),
-                )
-                conn.commit()
-                return True
+            stmt = (
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(title=new_title.strip(), updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur rename_track (track_id={track_id}): {e}")
             return False
@@ -729,17 +727,14 @@ class TrackRepository:
     def clear_track_youtube_link(self, track_id: int) -> bool:
         """Efface le lien YouTube et sa provenance (repasse en recherche live)."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracks
-                    SET youtube_url = NULL, youtube_url_source = NULL, updated_at = ?
-                    WHERE id = ?
-                """,
-                    (datetime.now(), track_id),
-                )
-                conn.commit()
-                return True
+            stmt = (
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(youtube_url=None, youtube_url_source=None, updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur clear_track_youtube_link (track_id={track_id}): {e}")
             return False
@@ -747,16 +742,14 @@ class TrackRepository:
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:
         """Met à jour les streams YouTube Music d'un album."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE albums SET ytm_streams = ?, ytm_streams_updated = ?
-                    WHERE title = ? AND artist_id = ?
-                """,
-                    (streams, datetime.now(), title, artist_id),
-                )
-                conn.commit()
-                return True
+            stmt = (
+                update(albums)
+                .where(albums.c.title == title, albums.c.artist_id == artist_id)
+                .values(ytm_streams=streams, ytm_streams_updated=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(
                 f"Erreur update_album_ytm_streams (artist_id={artist_id}, title={title!r}): {e}"

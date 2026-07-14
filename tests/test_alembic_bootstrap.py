@@ -1,9 +1,11 @@
-"""E1d — bootstrap Alembic : les bases pré-Alembic sont stampées, en permanence.
+"""Bootstrap Alembic : bases fraîches au head, bases pré-Alembic stampées à e1.
 
-Une base créée par `db.py` (legacy, sans `alembic_version`) doit être stampée à
-la révision de base pour qu'`alembic upgrade head` (E3) la reconnaisse au lieu
-de vouloir recréer le schéma. Le bootstrap est PERMANENT : un backup pré-Alembic
-restauré (donc sans `alembic_version`) est re-stampé au prochain démarrage.
+Une base VIERGE est créée par `alembic upgrade head` (E3b) → révision head. Une
+base pré-Alembic (legacy, sans `alembic_version`) est rattrapée puis stampée à
+`LEGACY_HEAD_REVISION` (= e1_initial_schema, PAS le head) pour que
+`upgrade_to_head` applique ensuite les révisions suivantes (e4 observations…).
+Le bootstrap est PERMANENT : un backup pré-Alembic restauré est re-traité au
+prochain démarrage.
 """
 
 import sqlite3
@@ -14,10 +16,13 @@ from sqlalchemy import create_engine
 
 from src.persistence.bootstrap import (
     LEGACY_HEAD_REVISION,
+    _head_revision,
     ensure_stamped,
     make_alembic_config,
 )
 from src.utils.db import Database
+
+HEAD = _head_revision()  # révision head courante (e4_observations depuis E4)
 
 
 def _versions(db_path: str):
@@ -40,29 +45,49 @@ def _current_revision(db_path: str) -> str | None:
         engine.dispose()
 
 
-def test_fresh_db_est_stampe(tmp_path):
+def _upgrade_to(db_path: str, revision: str) -> None:
+    """`alembic upgrade <revision>` sur `db_path` (via une connexion)."""
+    from alembic import command
+
+    engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}")
+    try:
+        with engine.connect() as conn:
+            command.upgrade(make_alembic_config(conn), revision)
+            conn.commit()
+    finally:
+        engine.dispose()
+
+
+def test_fresh_db_est_au_head(tmp_path):
     db = Database(str(tmp_path / "fresh.db"))
-    assert _versions(db.db_path) == [LEGACY_HEAD_REVISION]
+    assert _versions(db.db_path) == [HEAD]
 
 
 def test_bootstrap_idempotent(tmp_path):
     path = str(tmp_path / "twice.db")
     Database(path)
     Database(path)  # 2e init : ne doit pas dupliquer ni échouer
-    assert _versions(path) == [LEGACY_HEAD_REVISION]
+    assert _versions(path) == [HEAD]
 
 
-def test_backup_sans_version_est_restampe(tmp_path):
-    # Simule un backup pré-Alembic : base legacy dont on retire alembic_version.
+def test_backup_pre_alembic_est_stampe_a_e1_pas_au_head(tmp_path):
+    """Un backup pré-Alembic (schéma e1, sans alembic_version) doit être stampé à
+    e1 (LEGACY_HEAD_REVISION), PAS au head : sinon `upgrade_to_head` sauterait e4
+    et la table observations ne serait jamais créée sur une base restaurée."""
     path = str(tmp_path / "restored.db")
-    Database(path)
+    _upgrade_to(path, LEGACY_HEAD_REVISION)  # base au schéma e1 (pas d'observations)
     with sqlite3.connect(path) as conn:
         conn.execute("DROP TABLE alembic_version")
+        conn.execute("PRAGMA user_version = 46")
         conn.commit()
+        has_obs = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='observations'"
+        ).fetchone()
+    assert has_obs is None  # base e1 : la table observations n'existe pas encore
     assert _versions(path) is None
 
     ensure_stamped(path)  # re-démarrage
-    assert _versions(path) == [LEGACY_HEAD_REVISION]
+    assert _versions(path) == [LEGACY_HEAD_REVISION]  # stampée e1, pas le head
 
 
 def test_backup_ancien_sous_46_est_rattrape_puis_stampe(tmp_path):
@@ -101,11 +126,11 @@ def test_backup_ancien_sous_46_est_rattrape_puis_stampe(tmp_path):
     assert _versions(path) == [LEGACY_HEAD_REVISION]
 
 
-def test_base_stampee_est_au_head_pour_alembic(tmp_path):
-    # Propriété critique pour E3 : Alembic considère la base à jour (head), donc
-    # `upgrade head` sera un no-op au lieu de recréer les tables.
+def test_base_neuve_est_au_head_pour_alembic(tmp_path):
+    # Propriété critique : une base neuve est au head, donc `upgrade head` est un
+    # no-op au lieu de recréer/perdre des tables.
     db = Database(str(tmp_path / "head.db"))
-    assert _current_revision(db.db_path) == LEGACY_HEAD_REVISION
+    assert _current_revision(db.db_path) == HEAD
 
     # upgrade head : aucune erreur, aucune table recréée/perdue.
     with sqlite3.connect(db.db_path) as conn:
@@ -122,3 +147,41 @@ def test_base_stampee_est_au_head_pour_alembic(tmp_path):
     with sqlite3.connect(db.db_path) as conn:
         apres = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert avant == apres
+
+
+def test_e4_backfill_bpm_key_mode(tmp_path):
+    """La révision e4 crée `observations` et backfill le trio audio depuis les
+    colonnes `*_source` : 1 obs par `bpm_source` non nul, key/mode = 2 obs (même
+    source `key_mode_source`) ; aucune obs si pas de source."""
+    path = str(tmp_path / "backfill.db")
+    _upgrade_to(path, LEGACY_HEAD_REVISION)  # schéma e1, pas encore d'observations
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
+        # T1 : bpm (avec confiance) + key + mode
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, bpm, bpm_source, bpm_confidence, "
+            '"key", "mode", key_mode_source) '
+            "VALUES (1, 'T1', 1, 140, 'reccobeats', 2, '2', '1', 'reccobeats')"
+        )
+        # T2 : bpm seul, sans confiance ni key/mode
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, bpm, bpm_source) "
+            "VALUES (2, 'T2', 1, 90, 'songbpm')"
+        )
+        # T3 : aucune source -> aucune observation
+        conn.execute("INSERT INTO tracks (id, title, artist_id, bpm) VALUES (3, 'T3', 1, 120)")
+        conn.commit()
+
+    _upgrade_to(path, HEAD)  # applique e4 (create observations + backfill)
+
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            "SELECT track_id, field, value, source, confidence "
+            "FROM observations ORDER BY track_id, field"
+        ).fetchall()
+    assert rows == [
+        (1, "bpm", "140", "reccobeats", 2.0),
+        (1, "key", "2", "reccobeats", None),
+        (1, "mode", "1", "reccobeats", None),
+        (2, "bpm", "90", "songbpm", None),
+    ]

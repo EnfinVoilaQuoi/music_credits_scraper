@@ -100,10 +100,11 @@ def test_datamanager_fresh_est_au_head_alembic(data_manager):
     """Une base créée par DataManager (fresh) est au head Alembic.
 
     E3b : le schéma vient d'`alembic upgrade head` (plus de CREATE TABLE ni de
-    `user_version` posé) → on vérifie `alembic_version`, pas `user_version`.
+    `user_version` posé) → on vérifie `alembic_version` (au head courant), pas
+    `user_version`.
     """
-    from src.persistence.bootstrap import LEGACY_HEAD_REVISION
+    from src.persistence.bootstrap import _head_revision
 
     with sqlite3.connect(data_manager.db_path) as c:
         rev = c.execute("SELECT version_num FROM alembic_version").fetchall()
-    assert rev == [(LEGACY_HEAD_REVISION,)]
+    assert rev == [(_head_revision(),)]

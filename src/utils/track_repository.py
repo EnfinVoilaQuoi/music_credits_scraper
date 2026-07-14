@@ -407,6 +407,11 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM scraping_errors WHERE track_id = :tid"), {"tid": track_id}
                 )
+                # Observations : pas de cascade FK (PRAGMA foreign_keys jamais
+                # activé) → suppression explicite (E4).
+                conn.execute(
+                    text("DELETE FROM observations WHERE track_id = :tid"), {"tid": track_id}
+                )
                 deleted = conn.execute(
                     text("DELETE FROM tracks WHERE id = :tid"), {"tid": track_id}
                 ).rowcount
@@ -442,6 +447,21 @@ class TrackRepository:
                     text(
                         "UPDATE scraping_errors SET track_id = :keep_id WHERE track_id = :delete_id"
                     ),
+                    {"keep_id": keep_id, "delete_id": delete_id},
+                )
+                # Observations : dédup par la clé unique (field, source) — le keep
+                # gagne (on écarte celles du doublon déjà couvertes) — puis
+                # réaffectation du reste. Pas de cascade FK (E4).
+                conn.execute(
+                    text("""
+                    DELETE FROM observations WHERE track_id = :delete_id AND EXISTS (
+                        SELECT 1 FROM observations k WHERE k.track_id = :keep_id
+                          AND k.field = observations.field AND k.source = observations.source
+                    )"""),
+                    {"delete_id": delete_id, "keep_id": keep_id},
+                )
+                conn.execute(
+                    text("UPDATE observations SET track_id = :keep_id WHERE track_id = :delete_id"),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
                 conn.execute(

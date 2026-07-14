@@ -73,7 +73,7 @@ Lancer_Venv_Admin.ps1
 
 # Script, Fix & Driver
 src/scripts/
-# scripts/ : ignoré par défaut (one-shot, diagnostics), SAUF les 11 outils maintenus.
+# scripts/ : ignoré par défaut (one-shot, diagnostics), SAUF les outils maintenus.
 # `scripts/*` (et non `scripts/`) pour que les négations fonctionnent, et pour que
 # Black/Ruff (qui respectent le gitignore) voient les fichiers maintenus.
 scripts/*
@@ -83,6 +83,7 @@ scripts/*
 !scripts/merge_duplicates.py
 !scripts/restore_from_backup.py
 !scripts/migrate_snep_to_csv.py
+!scripts/check_observations.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

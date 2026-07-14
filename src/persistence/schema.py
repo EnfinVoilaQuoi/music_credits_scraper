@@ -22,6 +22,7 @@ de E3), plus jamais par ``_MIGRATIONS`` de ``db.py``.
 """
 
 from sqlalchemy import (
+    REAL,
     TIMESTAMP,
     Boolean,
     Column,
@@ -176,5 +177,29 @@ albums = Table(
     Column("ytm_streams_updated", TIMESTAMP),
     Column("spotify_album_ids", Text),
     UniqueConstraint("title", "artist_id"),
+    sqlite_autoincrement=True,
+)
+
+
+# Observations (phase E4) : provenance scalaire par (morceau, champ, source).
+# Modèle UPSERT — au plus une valeur par (track_id, field, source), la dernière
+# vue (`seen_at`). Alimentée par backfill E4 (bpm/key/mode depuis les colonnes
+# `*_source`) puis, en E5, par les providers (triple écriture). `value` en TEXT
+# (coercition au retour par le mapper, E6). `confidence` REAL (sémantique BPM).
+# FK déclarative sans cascade (PRAGMA foreign_keys jamais activé) → delete/merge
+# gèrent les observations explicitement (track_repository).
+# key/mode = DEUX observations distinctes (même source `key_mode_source`), la
+# paire est l'unité fiable côté moteur (E5).
+observations = Table(
+    "observations",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("track_id", Integer, ForeignKey("tracks.id"), nullable=False),
+    Column("field", Text, nullable=False),
+    Column("value", Text),
+    Column("source", Text, nullable=False),
+    Column("confidence", REAL),
+    Column("seen_at", TIMESTAMP),
+    UniqueConstraint("track_id", "field", "source"),
     sqlite_autoincrement=True,
 )

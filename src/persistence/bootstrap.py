@@ -21,7 +21,7 @@ stamper — indispensable pour un backup restauré à un `user_version < 46` une
 fois que `run_migrations` aura quitté le chemin normal de `db.py` (E3b). Une
 base VIERGE n'est PAS stampée : `alembic upgrade head` la créera de zéro (E3b).
 
-Imports Alembic/SQLAlchemy **paresseux** (dans `stamp_head`) : le démarrage
+Imports Alembic/SQLAlchemy **paresseux** (dans `_stamp_legacy`) : le démarrage
 normal (base déjà stampée) ne paie jamais le coût d'import.
 """
 
@@ -87,8 +87,13 @@ def _catch_up_legacy(db_path: str) -> None:
         conn.commit()
 
 
-def stamp_head(db_path: str) -> None:
-    """Stampe la base à la révision head (crée `alembic_version` + 1 ligne)."""
+def _stamp_legacy(db_path: str) -> None:
+    """Stampe la base à `LEGACY_HEAD_REVISION` (= e1_initial_schema), PAS au head.
+
+    Une base legacy (user_version 46) est au schéma e1 ; la stamper à e1 laisse
+    `upgrade_to_head` appliquer les révisions suivantes (e4 observations…). La
+    stamper au head sauterait ces révisions (tables jamais créées).
+    """
     from sqlalchemy import create_engine
     from sqlalchemy.pool import NullPool
 
@@ -97,7 +102,7 @@ def stamp_head(db_path: str) -> None:
     engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
     try:
         with engine.connect() as connection:
-            command.stamp(make_alembic_config(connection), "head")
+            command.stamp(make_alembic_config(connection), LEGACY_HEAD_REVISION)
             connection.commit()
     finally:
         engine.dispose()
@@ -122,7 +127,7 @@ def ensure_stamped(db_path: str) -> None:
         return
     try:
         _catch_up_legacy(db_path)
-        stamp_head(db_path)
+        _stamp_legacy(db_path)
         logger.info(f"Base stampée Alembic à '{LEGACY_HEAD_REVISION}' : {db_path}")
     except Exception as e:
         logger.warning(f"Stamp Alembic impossible ({db_path}) : {e}")

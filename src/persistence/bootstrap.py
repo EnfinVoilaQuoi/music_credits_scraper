@@ -126,3 +126,62 @@ def ensure_stamped(db_path: str) -> None:
         logger.info(f"Base stampée Alembic à '{LEGACY_HEAD_REVISION}' : {db_path}")
     except Exception as e:
         logger.warning(f"Stamp Alembic impossible ({db_path}) : {e}")
+
+
+def _current_revision(db_path: str) -> str | None:
+    """Révision Alembic courante de la base (None si pas d'`alembic_version`)."""
+    from alembic.runtime.migration import MigrationContext
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
+    try:
+        with engine.connect() as conn:
+            return MigrationContext.configure(conn).get_current_revision()
+    finally:
+        engine.dispose()
+
+
+def _head_revision() -> str:
+    """Révision head du dossier `alembic/versions` (sans toucher la base)."""
+    from alembic.script import ScriptDirectory
+
+    return ScriptDirectory.from_config(make_alembic_config()).get_current_head()
+
+
+def upgrade_to_head(db_path: str) -> None:
+    """Applique les révisions Alembic en attente (`alembic upgrade head`).
+
+    - base déjà à head → no-op (démarrage normal : aucun coût de migration) ;
+    - base VIERGE (révision courante None) → crée tout le schéma depuis la
+      révision de base ;
+    - base en retard (révision < head) → applique les révisions manquantes.
+
+    Backup automatique AVANT tout upgrade qui modifie réellement la base (et
+    seulement si elle a déjà un schéma à protéger — une base vierge n'a rien à
+    sauvegarder). FATAL : sans schéma applicable, l'app ne peut pas tourner.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+
+    from alembic import command
+
+    current = _current_revision(db_path)
+    head = _head_revision()
+    if current == head:
+        return
+
+    # Un upgrade va s'appliquer : sauvegarder d'abord si la base a des données.
+    if _has_schema(db_path):
+        from src.utils.database_backup import DatabaseBackupManager
+
+        DatabaseBackupManager(db_path=db_path).create_backup("before_alembic_upgrade")
+
+    engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
+    try:
+        with engine.connect() as connection:
+            command.upgrade(make_alembic_config(connection), "head")
+            connection.commit()
+        logger.info(f"Alembic upgrade head appliqué ({current} → {head}) : {db_path}")
+    finally:
+        engine.dispose()

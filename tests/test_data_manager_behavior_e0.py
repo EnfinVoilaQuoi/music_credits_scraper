@@ -56,6 +56,22 @@ def _count(data_manager, sql, params=()) -> int:
     return _scalar(data_manager, sql, params)[0]
 
 
+def _rows(data_manager, sql, params=()):
+    with sqlite3.connect(data_manager.db_path) as conn:
+        return conn.execute(sql, params).fetchall()
+
+
+def _ajoute_obs(data_manager, track_id, field, source, value="x", confidence=None):
+    """Insère une observation brute (pas d'API publique avant E5)."""
+    with sqlite3.connect(data_manager.db_path) as conn:
+        conn.execute(
+            "INSERT INTO observations (track_id, field, value, source, confidence, seen_at) "
+            "VALUES (?, ?, ?, ?, ?, '2026-01-01')",
+            (track_id, field, value, source, confidence),
+        )
+        conn.commit()
+
+
 # ── merge_tracks ────────────────────────────────────────────────────────────
 
 
@@ -123,6 +139,31 @@ class TestMergeTracks:
             == 0
         )
 
+    def test_reassigne_et_dedup_les_observations(self, data_manager):
+        # La clé unique (field, source) départage : le keep gagne, le reste est
+        # réaffecté, le doublon n'a plus d'observation (E4, pas de cascade FK).
+        artist = _artiste(data_manager)
+        keep = _sauve_track(data_manager, artist, "Garde")
+        drop = _sauve_track(data_manager, artist, "Doublon")
+        _ajoute_obs(data_manager, keep, "bpm", "reccobeats", value="140")
+        _ajoute_obs(data_manager, drop, "bpm", "reccobeats", value="70")  # collision → écartée
+        _ajoute_obs(data_manager, drop, "bpm", "songbpm", value="141")  # réaffectée
+
+        data_manager.merge_tracks(keep, drop)
+
+        assert (
+            _count(data_manager, "SELECT COUNT(*) FROM observations WHERE track_id = ?", (drop,))
+            == 0
+        )
+        rows = sorted(
+            _rows(
+                data_manager,
+                "SELECT source, value FROM observations WHERE track_id = ? AND field = 'bpm'",
+                (keep,),
+            )
+        )
+        assert rows == [("reccobeats", "140"), ("songbpm", "141")]  # keep gagne (140)
+
 
 # ── delete_track ────────────────────────────────────────────────────────────
 
@@ -161,6 +202,21 @@ class TestDeleteTrack:
             == 0
         )
 
+    def test_supprime_les_observations(self, data_manager):
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "À supprimer")
+        _ajoute_obs(data_manager, track_id, "bpm", "reccobeats")
+        _ajoute_obs(data_manager, track_id, "key", "reccobeats")
+
+        data_manager.delete_track(track_id)
+
+        assert (
+            _count(
+                data_manager, "SELECT COUNT(*) FROM observations WHERE track_id = ?", (track_id,)
+            )
+            == 0
+        )
+
 
 # ── delete_artist ───────────────────────────────────────────────────────────
 
@@ -192,6 +248,15 @@ class TestDeleteArtist:
             )
             == 0
         )
+
+    def test_supprime_les_observations(self, data_manager):
+        artist = _artiste(data_manager, name="À supprimer")
+        track_id = _sauve_track(data_manager, artist, "T1")
+        _ajoute_obs(data_manager, track_id, "bpm", "reccobeats")
+
+        data_manager.delete_artist("À supprimer")
+
+        assert _count(data_manager, "SELECT COUNT(*) FROM observations", ()) == 0
 
     def test_artiste_inexistant_retourne_false(self, data_manager):
         assert data_manager.delete_artist("Fantôme") is False

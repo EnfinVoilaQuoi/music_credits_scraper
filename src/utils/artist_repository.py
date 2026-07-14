@@ -168,6 +168,15 @@ class ArtistRepository:
                     {"aid": artist_id},
                 ).rowcount
 
+                # 2b. Supprimer les observations (pas de cascade FK, E4)
+                conn.execute(
+                    text(
+                        "DELETE FROM observations WHERE track_id IN "
+                        "(SELECT id FROM tracks WHERE artist_id = :aid)"
+                    ),
+                    {"aid": artist_id},
+                )
+
                 # 3. Supprimer les morceaux
                 deleted_tracks = conn.execute(
                     text("DELETE FROM tracks WHERE artist_id = :aid"), {"aid": artist_id}

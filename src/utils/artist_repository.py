@@ -11,7 +11,11 @@ constant).
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import func, update
+
 from src.models import Artist
+from src.persistence.binding import date_bind
+from src.persistence.schema import artists, monthly_listeners_history
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -282,13 +286,13 @@ class ArtistRepository:
     def set_artist_ytm_channel(self, artist_id: int, channel_id: str) -> bool:
         """Épingle le canal YTMusic d'un artiste (résout les homonymes)."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    "UPDATE artists SET ytm_channel_id = ? WHERE id = ?", (channel_id, artist_id)
-                )
-                conn.commit()
-                logger.info(f"📌 Canal YTM épinglé pour artist_id={artist_id}: {channel_id}")
-                return True
+            stmt = (
+                update(artists).where(artists.c.id == artist_id).values(ytm_channel_id=channel_id)
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            logger.info(f"📌 Canal YTM épinglé pour artist_id={artist_id}: {channel_id}")
+            return True
         except Exception as e:
             logger.error(f"Erreur set_artist_ytm_channel: {e}")
             return False
@@ -304,22 +308,22 @@ class ArtistRepository:
     ) -> bool:
         """Stocke les totaux du tableau récap Kworb (page songs de l'artiste)."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE artists
-                    SET kworb_total_streams = COALESCE(?, kworb_total_streams),
-                        kworb_daily_streams = COALESCE(?, kworb_daily_streams),
-                        kworb_lead_streams  = COALESCE(?, kworb_lead_streams),
-                        kworb_feat_streams  = COALESCE(?, kworb_feat_streams),
-                        kworb_updated       = COALESCE(?, kworb_updated),
-                        updated_at = ?
-                    WHERE id = ?
-                """,
-                    (total, daily, lead, feat, kworb_date, datetime.now(), artist_id),
+            c = artists.c
+            stmt = (
+                update(artists)
+                .where(c.id == artist_id)
+                .values(
+                    kworb_total_streams=func.coalesce(total, c.kworb_total_streams),
+                    kworb_daily_streams=func.coalesce(daily, c.kworb_daily_streams),
+                    kworb_lead_streams=func.coalesce(lead, c.kworb_lead_streams),
+                    kworb_feat_streams=func.coalesce(feat, c.kworb_feat_streams),
+                    kworb_updated=func.coalesce(date_bind(kworb_date), c.kworb_updated),
+                    updated_at=datetime.now(),
                 )
-                conn.commit()
-                return True
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur update_artist_kworb_totals (artist_id={artist_id}): {e}")
             return False
@@ -335,26 +339,28 @@ class ArtistRepository:
             from src.utils.streams_calculator import calculate_total_monthly_listeners
 
             total = calculate_total_monthly_listeners(spotify_listeners, ytm_listeners)
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE artists
-                    SET spotify_monthly_listeners = COALESCE(?, spotify_monthly_listeners),
-                        ytm_monthly_listeners     = COALESCE(?, ytm_monthly_listeners),
-                        updated_at = ?
-                    WHERE id = ?
-                """,
-                    (spotify_listeners, ytm_listeners, datetime.now(), artist_id),
+            c = artists.c
+            upd = (
+                update(artists)
+                .where(c.id == artist_id)
+                .values(
+                    spotify_monthly_listeners=func.coalesce(
+                        spotify_listeners, c.spotify_monthly_listeners
+                    ),
+                    ytm_monthly_listeners=func.coalesce(ytm_listeners, c.ytm_monthly_listeners),
+                    updated_at=datetime.now(),
                 )
-                conn.execute(
-                    """
-                    INSERT INTO monthly_listeners_history
-                        (artist_id, spotify_listeners, ytm_listeners, total_estimated, recorded_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """,
-                    (artist_id, spotify_listeners, ytm_listeners, total, datetime.now()),
-                )
-                conn.commit()
+            )
+            ins = monthly_listeners_history.insert().values(
+                artist_id=artist_id,
+                spotify_listeners=spotify_listeners,
+                ytm_listeners=ytm_listeners,
+                total_estimated=total,
+                recorded_at=datetime.now(),
+            )
+            with self.engine.begin() as conn:
+                conn.execute(upd)
+                conn.execute(ins)
             return True
         except Exception as e:
             logger.error(f"Erreur update_artist_monthly_listeners (id={artist_id}): {e}")
@@ -389,16 +395,15 @@ class ArtistRepository:
     def update_artist_spotify_id(self, artist_id: int, spotify_id: str) -> bool:
         """Met à jour le spotify_id d'un artiste."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE artists SET spotify_id = ?, updated_at = ? WHERE id = ?
-                """,
-                    (spotify_id, datetime.now(), artist_id),
-                )
-                conn.commit()
-                logger.info(f"spotify_id artiste #{artist_id} mis à jour: {spotify_id}")
-                return True
+            stmt = (
+                update(artists)
+                .where(artists.c.id == artist_id)
+                .values(spotify_id=spotify_id, updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            logger.info(f"spotify_id artiste #{artist_id} mis à jour: {spotify_id}")
+            return True
         except Exception as e:
             logger.error(f"Erreur update_artist_spotify_id (artist_id={artist_id}): {e}")
             return False

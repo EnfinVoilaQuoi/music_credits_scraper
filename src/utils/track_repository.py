@@ -10,7 +10,10 @@ import json
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import update
+
 from src.models import Credit, Track
+from src.persistence.schema import tracks
 from src.utils.logger import get_logger
 from src.utils.track_mapper import track_from_row
 
@@ -556,16 +559,17 @@ class TrackRepository:
         """Backfill du Spotify Track ID (ex: depuis les liens des pages Kworb).
         Ne remplace jamais un ID existant."""
         try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracks SET spotify_id = ?
-                    WHERE id = ? AND (spotify_id IS NULL OR spotify_id = '')
-                """,
-                    (spotify_id, track_id),
+            stmt = (
+                update(tracks)
+                .where(
+                    tracks.c.id == track_id,
+                    (tracks.c.spotify_id.is_(None)) | (tracks.c.spotify_id == ""),
                 )
-                conn.commit()
-                return True
+                .values(spotify_id=spotify_id)
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
         except Exception as e:
             logger.error(f"Erreur update_track_spotify_id (track_id={track_id}): {e}")
             return False

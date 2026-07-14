@@ -35,8 +35,16 @@ class DataManager(ArtistRepository, TrackRepository):
         """Chemin du fichier SQLite (compat : appelé par la GUI)."""
         return self._db.db_path
 
+    @property
+    def engine(self):
+        """Moteur SQLAlchemy Core — utilisé par les repositories migrés (E2)."""
+        return self._db.engine
+
     def _get_connection(self):
-        """Context manager de connexion — délégué à Database (compat GUI)."""
+        """Context manager de connexion sqlite3 — délégué à Database (compat GUI).
+
+        Chemin legacy en cours de remplacement par `self.engine` (Core, E2).
+        """
         return self._db.connect()
 
     def export_to_json(self, artist_name: str, filepath: Path | None = None):

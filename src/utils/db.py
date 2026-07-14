@@ -258,3 +258,14 @@ class Database:
 
             conn.commit()
             logger.info("Base de données initialisée")
+
+        # Bootstrap Alembic (phase E1d) : stampe une base pré-Alembic à la
+        # révision de base (user_version 46 ≡ e1_initial_schema) pour qu'elle
+        # soit reconnue par `alembic upgrade head` en E3. Hors du `with` : sa
+        # propre connexion, aucune ne chevauche celle d'init. Idempotent.
+        # Import paresseux : `bootstrap` importe `src.utils.logger`, or
+        # `src.utils.__init__` tire `DataManager` → import de `db` — un import
+        # au niveau module recréerait un cycle. Ici, `src.utils` est déjà chargé.
+        from src.persistence.bootstrap import ensure_stamped
+
+        ensure_stamped(self.db_path)

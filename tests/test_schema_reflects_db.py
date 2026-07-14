@@ -22,8 +22,11 @@ _SQLITE = sqlite.dialect()
 
 
 def _db_tables(conn) -> set[str]:
+    # alembic_version (créée par le bootstrap E1d) n'appartient pas au schéma
+    # métier décrit par schema.py : on l'exclut de la comparaison.
     rows = conn.execute(
-        "SELECT name FROM sqlite_master " "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'alembic_version'"
     ).fetchall()
     return {r[0] for r in rows}
 

@@ -13,20 +13,23 @@ C'est le garde-fou qui autorise E3 à remplacer `_init_database` par
 import sqlite3
 from pathlib import Path
 
-from alembic.config import Config
 from sqlalchemy import create_engine
 
 from alembic import command
 from src.persistence import schema
+from src.persistence.bootstrap import make_alembic_config
 from src.utils.db import Database
 
-_ROOT = Path(__file__).resolve().parent.parent
 
-
-def _alembic_config(db_path: str) -> Config:
-    cfg = Config(str(_ROOT / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{Path(db_path).as_posix()}")
-    return cfg
+def _upgrade_head(db_path: str) -> None:
+    """`alembic upgrade head` sur `db_path`, via une connexion (pas de fileConfig)."""
+    engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}")
+    try:
+        with engine.connect() as conn:
+            command.upgrade(make_alembic_config(conn), "head")
+            conn.commit()
+    finally:
+        engine.dispose()
 
 
 def _snapshot(db_path: str) -> dict:
@@ -64,7 +67,7 @@ def test_upgrade_head_equivaut_a_create_all(tmp_path):
     alembic_db = tmp_path / "alembic.db"
     createall_db = tmp_path / "createall.db"
 
-    command.upgrade(_alembic_config(str(alembic_db)), "head")
+    _upgrade_head(str(alembic_db))
 
     engine = create_engine(f"sqlite:///{createall_db.as_posix()}")
     schema.metadata.create_all(engine)
@@ -78,7 +81,7 @@ def test_upgrade_head_equivaut_au_schema_legacy(tmp_path):
     alembic_db = tmp_path / "alembic.db"
     legacy_db = tmp_path / "legacy.db"
 
-    command.upgrade(_alembic_config(str(alembic_db)), "head")
-    Database(str(legacy_db))  # CREATE TABLE + migrations user_version
+    _upgrade_head(str(alembic_db))
+    Database(str(legacy_db))  # CREATE TABLE + migrations user_version (+ stamp)
 
     assert _snapshot(str(alembic_db)) == _snapshot(str(legacy_db))

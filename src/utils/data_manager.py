@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import text
+
 from src.config import ARTISTS_DIR, DATABASE_URL
 from src.utils.artist_repository import ArtistRepository
 from src.utils.db import Database
@@ -80,43 +82,33 @@ class DataManager(ArtistRepository, TrackRepository):
     def get_statistics(self) -> dict[str, Any]:
         """Retourne des statistiques sur la base de données"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
+            stats = {}
+            # Agrégats globaux en `text()` verbatim via le moteur Core. La requête
+            # « crédits complets » garde son GROUP BY + HAVING et son `.first()`
+            # (= 1 dès qu'un morceau est complet — nuance figée E0, cf. REFONTE.md).
+            with self.engine.connect() as conn:
+                stats["total_artists"] = conn.execute(text("SELECT COUNT(*) FROM artists")).scalar()
+                stats["total_tracks"] = conn.execute(text("SELECT COUNT(*) FROM tracks")).scalar()
+                stats["total_credits"] = conn.execute(text("SELECT COUNT(*) FROM credits")).scalar()
 
-                stats = {}
-
-                # Nombre d'artistes
-                cursor.execute("SELECT COUNT(*) FROM artists")
-                stats["total_artists"] = cursor.fetchone()[0]
-
-                # Nombre de morceaux
-                cursor.execute("SELECT COUNT(*) FROM tracks")
-                stats["total_tracks"] = cursor.fetchone()[0]
-
-                # Nombre de crédits
-                cursor.execute("SELECT COUNT(*) FROM credits")
-                stats["total_credits"] = cursor.fetchone()[0]
-
-                # Morceaux avec crédits complets
-                cursor.execute("""
-                    SELECT COUNT(DISTINCT t.id)
-                    FROM tracks t
-                    JOIN credits c ON t.id = c.track_id
-                    WHERE c.role IN ('Producer', 'Writer')
-                    GROUP BY t.id
-                    HAVING COUNT(DISTINCT c.role) = 2
-                """)
-                result = cursor.fetchone()
+                result = conn.execute(
+                    text(
+                        "SELECT COUNT(DISTINCT t.id) FROM tracks t "
+                        "JOIN credits c ON t.id = c.track_id "
+                        "WHERE c.role IN ('Producer', 'Writer') "
+                        "GROUP BY t.id HAVING COUNT(DISTINCT c.role) = 2"
+                    )
+                ).first()
                 stats["tracks_with_complete_credits"] = result[0] if result else 0
 
-                # Erreurs récentes
-                cursor.execute("""
-                    SELECT COUNT(*) FROM scraping_errors
-                    WHERE error_time > datetime('now', '-1 day')
-                """)
-                stats["recent_errors"] = cursor.fetchone()[0]
+                stats["recent_errors"] = conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM scraping_errors "
+                        "WHERE error_time > datetime('now', '-1 day')"
+                    )
+                ).scalar()
 
-                return stats
+            return stats
 
         except Exception as e:
             logger.error(f"Erreur lors de la récupération des statistiques: {e}")

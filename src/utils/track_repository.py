@@ -10,12 +10,12 @@ import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, literal, or_, update
+from sqlalchemy import func, literal, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from src.models import Credit, Track
 from src.persistence.binding import date_bind
-from src.persistence.schema import albums, tracks
+from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.logger import get_logger
 from src.utils.track_mapper import track_from_row
 
@@ -241,25 +241,31 @@ class TrackRepository:
             logger.debug(f"Erreur lors de la sauvegarde du crédit {credit.name}: {e}")
 
     def get_artist_tracks(self, artist_id: int) -> list[Track]:
-        """Récupère tous les morceaux d'un artiste - VERSION SANS YOUTUBE_URL"""
-        tracks = []
+        """Récupère tous les morceaux d'un artiste (via le moteur Core)."""
+        result: list[Track] = []
 
         try:
             logger.info(f"🔍 Chargement des tracks pour artist_id: {artist_id}")
 
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
+            with self.engine.connect() as conn:
                 # ✅ ÉTAPE 1: Récupérer d'abord les infos de l'artiste
-                cursor.execute(
-                    "SELECT id, name, genius_id, spotify_id, discogs_id FROM artists WHERE id = ?",
-                    (artist_id,),
+                artist_row = (
+                    conn.execute(
+                        select(
+                            artists.c.id,
+                            artists.c.name,
+                            artists.c.genius_id,
+                            artists.c.spotify_id,
+                            artists.c.discogs_id,
+                        ).where(artists.c.id == artist_id)
+                    )
+                    .mappings()
+                    .first()
                 )
-                artist_row = cursor.fetchone()
 
                 if not artist_row:
                     logger.error(f"❌ Artiste avec ID {artist_id} non trouvé")
-                    return tracks
+                    return result
 
                 # ✅ ÉTAPE 2: Créer l'objet Artist
                 from src.models import Artist
@@ -273,37 +279,48 @@ class TrackRepository:
                 )
 
                 # Vérifier le nombre total
-                cursor.execute("SELECT COUNT(*) FROM tracks WHERE artist_id = ?", (artist_id,))
-                total_count = cursor.fetchone()[0]
+                total_count = conn.execute(
+                    select(func.count()).select_from(tracks).where(tracks.c.artist_id == artist_id)
+                ).scalar()
                 logger.info(f"📊 {total_count} tracks trouvés en base")
 
                 if total_count == 0:
-                    return tracks
+                    return result
 
-                # Accès par nom de colonne (sqlite3.Row) : l'ordre des colonnes
-                # ne compte plus, le schéma est garanti par Database.init_schema.
-                cursor.execute(
-                    "SELECT * FROM tracks WHERE artist_id = ? ORDER BY title",
-                    (artist_id,),
+                # Lecture en `text()` brut (et NON `select(tracks)`) : le type
+                # TIMESTAMP de schema.py applique un result-processor qui PARSE
+                # les colonnes date (release_date, *_updated, created_at…) en
+                # datetime, alors que le legacy sqlite3 — et le mapper, qui fait
+                # ses propres coercitions depuis des strings — les veulent
+                # VERBATIM. `text()` ne type pas ses colonnes → valeurs brutes,
+                # comportement identique. Symétrique du piège d'écriture
+                # `date_bind` (cf. REFONTE.md, piège TIMESTAMP E2). `.mappings()`
+                # donne un accès par nom, indexable comme sqlite3.Row.
+                rows = (
+                    conn.execute(
+                        text("SELECT * FROM tracks WHERE artist_id = :aid ORDER BY title"),
+                        {"aid": artist_id},
+                    )
+                    .mappings()
+                    .all()
                 )
-
-                rows = cursor.fetchall()
                 logger.info(f"📦 {len(rows)} lignes récupérées")
 
-                # Création des objets Track via le mapper (coercitions centralisées)
+                # Création des objets Track via le mapper (coercitions centralisées ;
+                # `row` est une RowMapping, indexable par nom comme sqlite3.Row).
                 for i, row in enumerate(rows):
                     try:
                         track = track_from_row(row, artist)
                         if track is None:
                             continue
 
-                        # Chargement crédits (a besoin du curseur → hors mapper)
+                        # Chargement crédits (a besoin de la connexion → hors mapper)
                         try:
-                            track.credits = self._get_track_credits(cursor, row["id"])
+                            track.credits = self._get_track_credits(conn, row["id"])
                         except Exception:
                             track.credits = []
 
-                        tracks.append(track)
+                        result.append(track)
 
                         if i < 5:
                             logger.info(f"✅ Track {i+1}: {track.title}")
@@ -313,23 +330,27 @@ class TrackRepository:
                         continue
 
                 # Compter les tracks avec musical_key
-                tracks_with_key = sum(1 for t in tracks if t.musical_key)
+                tracks_with_key = sum(1 for t in result if t.musical_key)
                 logger.info(
-                    f"✅ {len(tracks)} tracks chargés avec succès ({tracks_with_key} avec musical_key)"
+                    f"✅ {len(result)} tracks chargés avec succès ({tracks_with_key} avec musical_key)"
                 )
 
         except Exception as e:
             logger.error(f"❌ Erreur dans get_artist_tracks: {e}")
 
-        return tracks
+        return result
 
-    def _get_track_credits(self, cursor, track_id: int) -> list[Credit]:
-        """Récupère les crédits d'un morceau - VERSION ROBUSTE"""
-        credits = []
+    def _get_track_credits(self, conn, track_id: int) -> list[Credit]:
+        """Récupère les crédits d'un morceau (connexion Core fournie par l'appelant)."""
+        # Pas d'annotation sur `result` : `Credit` est ré-importé localement dans
+        # la boucle (avec `CreditRole`), donc traité comme variable locale — une
+        # annotation `list[Credit]` ici déclencherait F823 (réf. avant assignation).
+        result = []
 
         try:
-            cursor.execute("SELECT * FROM credits WHERE track_id = ?", (track_id,))
-            credit_rows = cursor.fetchall()
+            credit_rows = (
+                conn.execute(select(credits).where(credits.c.track_id == track_id)).mappings().all()
+            )
 
             for row in credit_rows:
                 try:
@@ -353,7 +374,7 @@ class TrackRepository:
                             role_detail=role_detail,
                             source=str(source),
                         )
-                        credits.append(credit)
+                        result.append(credit)
 
                 except Exception as credit_error:
                     logger.debug(f"Erreur crédit: {credit_error}")
@@ -362,7 +383,7 @@ class TrackRepository:
         except Exception as e:
             logger.debug(f"Erreur _get_track_credits: {e}")
 
-        return credits
+        return result
 
     def delete_track(self, track_id: int) -> bool:
         """Supprime définitivement un morceau et ses données associées"""
@@ -638,17 +659,22 @@ class TrackRepository:
     def get_albums_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
         """Retourne les albums d'un artiste triés par streams décroissants."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
-                    """
-                    SELECT title, spotify_streams, spotify_daily_streams,
-                           spotify_streams_updated, ytm_streams
-                    FROM albums WHERE artist_id = ?
-                    ORDER BY spotify_streams DESC
-                """,
-                    (artist_id,),
+            # `text()` brut : `spotify_streams_updated` (TIMESTAMP) doit revenir
+            # en STRING verbatim comme au temps du legacy sqlite3 — un `select()`
+            # typé la parserait en datetime (cf. get_artist_tracks / piège E2).
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT title, spotify_streams, spotify_daily_streams, "
+                            "spotify_streams_updated, ytm_streams FROM albums "
+                            "WHERE artist_id = :aid ORDER BY spotify_streams DESC"
+                        ),
+                        {"aid": artist_id},
+                    )
+                    .mappings()
+                    .all()
                 )
-                rows = cursor.fetchall()
                 return [
                     {
                         "title": row["title"],

@@ -11,7 +11,7 @@ constant).
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, update
+from sqlalchemy import func, select, text, update
 
 from src.models import Artist
 from src.persistence.binding import date_bind
@@ -83,37 +83,44 @@ class ArtistRepository:
         try:
             logger.debug(f"🔍 Recherche de l'artiste: '{name}'")
 
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, name, genius_id, spotify_id, discogs_id FROM artists WHERE name = ?",
-                    (name,),
-                )
-                row = cursor.fetchone()
-
-                if not row:
-                    logger.debug(f"❌ Aucun artiste trouvé pour: '{name}'")
-                    return None
-
-                artist = Artist(
-                    id=row["id"],
-                    name=row["name"],
-                    genius_id=row["genius_id"],
-                    spotify_id=row["spotify_id"],
-                    discogs_id=row["discogs_id"],
+            with self.engine.connect() as conn:
+                row = (
+                    conn.execute(
+                        select(
+                            artists.c.id,
+                            artists.c.name,
+                            artists.c.genius_id,
+                            artists.c.spotify_id,
+                            artists.c.discogs_id,
+                        ).where(artists.c.name == name)
+                    )
+                    .mappings()
+                    .first()
                 )
 
-                logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
+            if not row:
+                logger.debug(f"❌ Aucun artiste trouvé pour: '{name}'")
+                return None
 
-                # Charger les tracks
-                try:
-                    artist.tracks = self.get_artist_tracks(artist.id)
-                    logger.info(f"🎵 {len(artist.tracks)} morceaux chargés pour {artist.name}")
-                except Exception as tracks_error:
-                    logger.error(f"⚠️ Erreur chargement tracks: {tracks_error}")
-                    artist.tracks = []
+            artist = Artist(
+                id=row["id"],
+                name=row["name"],
+                genius_id=row["genius_id"],
+                spotify_id=row["spotify_id"],
+                discogs_id=row["discogs_id"],
+            )
 
-                return artist
+            logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
+
+            # Charger les tracks (ouvre sa propre connexion moteur)
+            try:
+                artist.tracks = self.get_artist_tracks(artist.id)
+                logger.info(f"🎵 {len(artist.tracks)} morceaux chargés pour {artist.name}")
+            except Exception as tracks_error:
+                logger.error(f"⚠️ Erreur chargement tracks: {tracks_error}")
+                artist.tracks = []
+
+            return artist
 
         except Exception as e:
             logger.error(f"❌ Erreur dans get_artist_by_name: {e}")
@@ -174,85 +181,77 @@ class ArtistRepository:
 
     def get_artist_details(self, artist_name: str) -> dict[str, Any]:
         """Récupère les détails complets d'un artiste"""
+        # Agrégats multi-tables (LEFT JOIN, GROUP BY, HAVING) exécutés en `text()`
+        # verbatim via le moteur Core : fidélité comportementale maximale (une
+        # traduction en `select()` n'apporterait rien ici et risquerait un écart
+        # de tri/regroupement). Paramètres nommés (`:name`/`:aid`).
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
+            with self.engine.connect() as conn:
                 # Informations de base de l'artiste
-                cursor.execute(
-                    """
-                    SELECT id, name, genius_id, spotify_id, discogs_id, created_at, updated_at
-                    FROM artists WHERE name = ?
-                """,
-                    (artist_name,),
+                artist_row = (
+                    conn.execute(
+                        text(
+                            "SELECT id, name, genius_id, spotify_id, discogs_id, "
+                            "created_at, updated_at FROM artists WHERE name = :name"
+                        ),
+                        {"name": artist_name},
+                    )
+                    .mappings()
+                    .first()
                 )
-
-                artist_row = cursor.fetchone()
                 if not artist_row:
                     return {}
 
                 artist_id = artist_row["id"]
 
                 # Compter les morceaux et crédits
-                cursor.execute(
-                    """
-                    SELECT
-                        COUNT(DISTINCT t.id) as tracks_count,
-                        COUNT(DISTINCT c.id) as credits_count
-                    FROM tracks t
-                    LEFT JOIN credits c ON t.id = c.track_id
-                    WHERE t.artist_id = ?
-                """,
-                    (artist_id,),
+                counts = (
+                    conn.execute(
+                        text(
+                            "SELECT COUNT(DISTINCT t.id) as tracks_count, "
+                            "COUNT(DISTINCT c.id) as credits_count "
+                            "FROM tracks t LEFT JOIN credits c ON t.id = c.track_id "
+                            "WHERE t.artist_id = :aid"
+                        ),
+                        {"aid": artist_id},
+                    )
+                    .mappings()
+                    .first()
                 )
-
-                counts = cursor.fetchone()
 
                 # Morceaux récents
-                cursor.execute(
-                    """
-                    SELECT
-                        t.title,
-                        t.album,
-                        t.release_date,
-                        COUNT(c.id) as credits_count
-                    FROM tracks t
-                    LEFT JOIN credits c ON t.id = c.track_id
-                    WHERE t.artist_id = ?
-                    GROUP BY t.id, t.title, t.album, t.release_date
-                    ORDER BY t.updated_at DESC
-                    LIMIT 20
-                """,
-                    (artist_id,),
-                )
-
-                recent_tracks = []
-                for row in cursor.fetchall():
-                    recent_tracks.append(
-                        {
-                            "title": row["title"],
-                            "album": row["album"],
-                            "release_date": row["release_date"],
-                            "credits_count": row["credits_count"],
-                        }
-                    )
+                recent_tracks = [
+                    {
+                        "title": row["title"],
+                        "album": row["album"],
+                        "release_date": row["release_date"],
+                        "credits_count": row["credits_count"],
+                    }
+                    for row in conn.execute(
+                        text(
+                            "SELECT t.title, t.album, t.release_date, "
+                            "COUNT(c.id) as credits_count "
+                            "FROM tracks t LEFT JOIN credits c ON t.id = c.track_id "
+                            "WHERE t.artist_id = :aid "
+                            "GROUP BY t.id, t.title, t.album, t.release_date "
+                            "ORDER BY t.updated_at DESC LIMIT 20"
+                        ),
+                        {"aid": artist_id},
+                    ).mappings()
+                ]
 
                 # Crédits par rôle
-                cursor.execute(
-                    """
-                    SELECT role, COUNT(*) as count
-                    FROM credits c
-                    JOIN tracks t ON c.track_id = t.id
-                    WHERE t.artist_id = ?
-                    GROUP BY role
-                    ORDER BY count DESC
-                """,
-                    (artist_id,),
-                )
-
-                credits_by_role = {}
-                for row in cursor.fetchall():
-                    credits_by_role[row["role"]] = row["count"]
+                credits_by_role = {
+                    row["role"]: row["count"]
+                    for row in conn.execute(
+                        text(
+                            "SELECT role, COUNT(*) as count "
+                            "FROM credits c JOIN tracks t ON c.track_id = t.id "
+                            "WHERE t.artist_id = :aid GROUP BY role ORDER BY count DESC"
+                        ),
+                        {"aid": artist_id},
+                    ).mappings()
+                }
 
                 return {
                     "name": artist_row["name"],
@@ -274,10 +273,12 @@ class ArtistRepository:
     def get_artist_ytm_channel(self, artist_id: int):
         """Canal YTMusic épinglé pour cet artiste (UC...), ou None."""
         try:
-            with self._get_connection() as conn:
-                row = conn.execute(
-                    "SELECT ytm_channel_id FROM artists WHERE id = ?", (artist_id,)
-                ).fetchone()
+            with self.engine.connect() as conn:
+                row = (
+                    conn.execute(select(artists.c.ytm_channel_id).where(artists.c.id == artist_id))
+                    .mappings()
+                    .first()
+                )
                 return row["ytm_channel_id"] if row and row["ytm_channel_id"] else None
         except Exception as e:
             logger.error(f"Erreur get_artist_ytm_channel: {e}")
@@ -369,15 +370,21 @@ class ArtistRepository:
     def get_monthly_listeners_history(self, artist_id: int) -> list[dict[str, Any]]:
         """Retourne l'historique des auditeurs mensuels d'un artiste."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
-                    """
-                    SELECT spotify_listeners, ytm_listeners, total_estimated, recorded_at
-                    FROM monthly_listeners_history
-                    WHERE artist_id = ?
-                    ORDER BY recorded_at DESC
-                """,
-                    (artist_id,),
+            # `text()` brut : `recorded_at` (TIMESTAMP) doit revenir en STRING
+            # verbatim comme au temps du legacy sqlite3 — un `select()` typé la
+            # parserait en datetime (cf. get_artist_tracks / piège E2).
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT spotify_listeners, ytm_listeners, total_estimated, "
+                            "recorded_at FROM monthly_listeners_history "
+                            "WHERE artist_id = :aid ORDER BY recorded_at DESC"
+                        ),
+                        {"aid": artist_id},
+                    )
+                    .mappings()
+                    .all()
                 )
                 return [
                     {
@@ -386,7 +393,7 @@ class ArtistRepository:
                         "total_estimated": r["total_estimated"],
                         "recorded_at": r["recorded_at"],
                     }
-                    for r in cursor.fetchall()
+                    for r in rows
                 ]
         except Exception as e:
             logger.error(f"Erreur get_monthly_listeners_history (id={artist_id}): {e}")

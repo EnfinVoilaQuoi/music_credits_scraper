@@ -9,6 +9,10 @@ en dépendent — c'est le seul endroit qui connaît le fichier SQLite.
 import re
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
+
+from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 
 from src.utils.logger import get_logger
 
@@ -132,11 +136,20 @@ class Database:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
+        # Moteur SQLAlchemy Core (phase E2) : NullPool = une connexion par
+        # opération, reproduit EXACTEMENT le comportement de `connect()`
+        # (sqlite3) qu'il remplace progressivement, repository par repository.
+        # Les deux visent le même fichier ; QueuePool = optimisation à évaluer
+        # plus tard (au plus tôt en F).
+        self.engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
         self.init_schema()
 
     @contextmanager
     def connect(self):
-        """Context manager pour les connexions à la base de données."""
+        """Context manager pour les connexions à la base de données (sqlite3).
+
+        Chemin legacy, en cours de remplacement par `self.engine` (Core, E2).
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:

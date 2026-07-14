@@ -1,9 +1,10 @@
 {
-  "last_update": "2026-07-12T10:05:17.378630",
+  "last_update": "2026-07-13T11:21:12.966730",
   "source": "MIGRATION",
-  "count": 11765,
-  "last_source": "MIGRATION",
+  "count": 11825,
+  "last_source": "GLOBAL",
   "updates": {
-    "MIGRATION": "2026-07-12T10:05:17.378630"
+    "MIGRATION": "2026-07-12T10:05:17.378630",
+    "GLOBAL": "2026-07-13T11:21:12.966730"
   }
 }

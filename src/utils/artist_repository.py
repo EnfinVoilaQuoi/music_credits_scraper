@@ -2,10 +2,10 @@
 
 Persistance liée aux `artists` : save/get/delete, détails, canal YTM, totaux
 Kworb, auditeurs mensuels + historique. Utilisé comme base de `DataManager`,
-qui fournit `self._get_connection` (délégué à `Database`) et, via
+qui fournit `self.engine` (moteur SQLAlchemy Core, délégué à `Database`) et, via
 `TrackRepository`, `self.get_artist_tracks` (utilisé par get_artist_by_name).
-Corps identiques à l'ancien `data_manager.py` (refonte 1.5 à comportement
-constant).
+Comportement constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule
+Core phase E2).
 """
 
 from datetime import datetime
@@ -22,59 +22,62 @@ logger = get_logger(__name__)
 
 
 class ArtistRepository:
-    """Persistance des artistes. Requiert `self._get_connection` et
+    """Persistance des artistes. Requiert `self.engine` et
     `self.get_artist_tracks` (fournis par DataManager/TrackRepository)."""
 
     def save_artist(self, artist: Artist) -> int:
         """Sauvegarde ou met à jour un artiste"""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-
+        with self.engine.begin() as conn:
             if artist.id:
                 # Mise à jour
-                cursor.execute(
-                    """
-                    UPDATE artists
-                    SET name = ?, genius_id = ?, spotify_id = ?,
-                        discogs_id = ?, updated_at = ?
-                    WHERE id = ?
-                """,
-                    (
-                        artist.name,
-                        artist.genius_id,
-                        artist.spotify_id,
-                        artist.discogs_id,
-                        datetime.now(),
-                        artist.id,
+                conn.execute(
+                    text(
+                        "UPDATE artists SET name = :name, genius_id = :genius_id, "
+                        "spotify_id = :spotify_id, discogs_id = :discogs_id, updated_at = :now "
+                        "WHERE id = :id"
                     ),
+                    {
+                        "name": artist.name,
+                        "genius_id": artist.genius_id,
+                        "spotify_id": artist.spotify_id,
+                        "discogs_id": artist.discogs_id,
+                        "now": datetime.now(),
+                        "id": artist.id,
+                    },
                 )
             else:
                 # Insertion (OR IGNORE si l'artiste existe déjà par contrainte UNIQUE)
-                cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO artists (name, genius_id, spotify_id,
-                                                   discogs_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        artist.name,
-                        artist.genius_id,
-                        artist.spotify_id,
-                        artist.discogs_id,
-                        datetime.now(),
-                        datetime.now(),
+                result = conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO artists (name, genius_id, spotify_id, "
+                        "discogs_id, created_at, updated_at) "
+                        "VALUES (:name, :genius_id, :spotify_id, :discogs_id, :now, :now)"
                     ),
+                    {
+                        "name": artist.name,
+                        "genius_id": artist.genius_id,
+                        "spotify_id": artist.spotify_id,
+                        "discogs_id": artist.discogs_id,
+                        "now": datetime.now(),
+                    },
                 )
-                if cursor.lastrowid:
-                    artist.id = cursor.lastrowid
+                # rowcount == 1 → ligne insérée (nouvel id) ; 0 → déjà présente
+                # (IGNORE) : on relit l'id par nom. Signal plus fiable que
+                # lastrowid après un INSERT OR IGNORE ignoré.
+                if result.rowcount:
+                    artist.id = result.lastrowid
                 else:
-                    # L'artiste existait déjà — récupérer son ID
-                    cursor.execute("SELECT id FROM artists WHERE name = ?", (artist.name,))
-                    row = cursor.fetchone()
+                    row = (
+                        conn.execute(
+                            text("SELECT id FROM artists WHERE name = :name"),
+                            {"name": artist.name},
+                        )
+                        .mappings()
+                        .first()
+                    )
                     if row:
                         artist.id = row["id"]
 
-            conn.commit()
             logger.info(f"Artiste sauvegardé: {artist.name} (ID: {artist.id})")
             return artist.id
 
@@ -129,12 +132,15 @@ class ArtistRepository:
     def delete_artist(self, artist_name: str) -> bool:
         """Supprime un artiste et toutes ses données associées"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
+            with self.engine.begin() as conn:
                 # Récupérer l'ID de l'artiste
-                cursor.execute("SELECT id FROM artists WHERE name = ?", (artist_name,))
-                artist_row = cursor.fetchone()
+                artist_row = (
+                    conn.execute(
+                        text("SELECT id FROM artists WHERE name = :name"), {"name": artist_name}
+                    )
+                    .mappings()
+                    .first()
+                )
 
                 if not artist_row:
                     logger.warning(f"Artiste non trouvé: {artist_name}")
@@ -145,28 +151,32 @@ class ArtistRepository:
                 # Supprimer dans l'ordre (contraintes de clés étrangères)
 
                 # 1. Supprimer les erreurs de scraping
-                cursor.execute(
-                    "DELETE FROM scraping_errors WHERE track_id IN (SELECT id FROM tracks WHERE artist_id = ?)",
-                    (artist_id,),
-                )
-                deleted_errors = cursor.rowcount
+                deleted_errors = conn.execute(
+                    text(
+                        "DELETE FROM scraping_errors WHERE track_id IN "
+                        "(SELECT id FROM tracks WHERE artist_id = :aid)"
+                    ),
+                    {"aid": artist_id},
+                ).rowcount
 
                 # 2. Supprimer les crédits
-                cursor.execute(
-                    "DELETE FROM credits WHERE track_id IN (SELECT id FROM tracks WHERE artist_id = ?)",
-                    (artist_id,),
-                )
-                deleted_credits = cursor.rowcount
+                deleted_credits = conn.execute(
+                    text(
+                        "DELETE FROM credits WHERE track_id IN "
+                        "(SELECT id FROM tracks WHERE artist_id = :aid)"
+                    ),
+                    {"aid": artist_id},
+                ).rowcount
 
                 # 3. Supprimer les morceaux
-                cursor.execute("DELETE FROM tracks WHERE artist_id = ?", (artist_id,))
-                deleted_tracks = cursor.rowcount
+                deleted_tracks = conn.execute(
+                    text("DELETE FROM tracks WHERE artist_id = :aid"), {"aid": artist_id}
+                ).rowcount
 
                 # 4. Supprimer l'artiste
-                cursor.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
-                deleted_artist = cursor.rowcount
-
-                conn.commit()
+                deleted_artist = conn.execute(
+                    text("DELETE FROM artists WHERE id = :aid"), {"aid": artist_id}
+                ).rowcount
 
                 logger.info(f"Artiste '{artist_name}' supprimé avec succès:")
                 logger.info(f"  - {deleted_tracks} morceaux")

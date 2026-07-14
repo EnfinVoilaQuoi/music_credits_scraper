@@ -2,8 +2,8 @@
 
 Toute la persistance liée aux `tracks` (save/get/delete/merge), aux crédits et
 aux albums (streams Kworb/YTM). Utilisé comme base de `DataManager`, qui fournit
-`self._get_connection` (délégué à `Database`). Les corps sont volontairement
-identiques à l'ancien `data_manager.py` (refonte 1.5 à comportement constant).
+`self.engine` (moteur SQLAlchemy Core, délégué à `Database`). Comportement
+constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule Core phase E2).
 """
 
 import json
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 
 class TrackRepository:
-    """Persistance des morceaux, crédits et albums. Requiert `self._get_connection`."""
+    """Persistance des morceaux, crédits et albums. Requiert `self.engine`."""
 
     def save_track(self, track: Track) -> int:
         """Sauvegarde ou met à jour un morceau avec musical_key et time_signature"""
@@ -402,13 +402,14 @@ class TrackRepository:
     def delete_track(self, track_id: int) -> bool:
         """Supprime définitivement un morceau et ses données associées"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM credits WHERE track_id = ?", (track_id,))
-                cursor.execute("DELETE FROM scraping_errors WHERE track_id = ?", (track_id,))
-                cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
-                deleted = cursor.rowcount
-                conn.commit()
+            with self.engine.begin() as conn:
+                conn.execute(text("DELETE FROM credits WHERE track_id = :tid"), {"tid": track_id})
+                conn.execute(
+                    text("DELETE FROM scraping_errors WHERE track_id = :tid"), {"tid": track_id}
+                )
+                deleted = conn.execute(
+                    text("DELETE FROM tracks WHERE id = :tid"), {"tid": track_id}
+                ).rowcount
                 logger.info(f"🗑️ Track {track_id} supprimé ({deleted} ligne(s))")
                 return deleted > 0
         except Exception as e:
@@ -422,28 +423,30 @@ class TrackRepository:
         scripts/merge_duplicates.py + dédup. Le BACKUP est à faire par l'appelant
         AVANT (règle projet : backup avant toute opération destructive)."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
+            with self.engine.begin() as conn:
                 # Crédits : ne transférer que ceux absents du morceau conservé
-                cursor.execute(
-                    """
-                    DELETE FROM credits WHERE track_id = ? AND EXISTS (
-                        SELECT 1 FROM credits k WHERE k.track_id = ?
+                conn.execute(
+                    text("""
+                    DELETE FROM credits WHERE track_id = :delete_id AND EXISTS (
+                        SELECT 1 FROM credits k WHERE k.track_id = :keep_id
                           AND k.name = credits.name AND k.role = credits.role
                           AND IFNULL(k.role_detail, '') = IFNULL(credits.role_detail, '')
-                    )""",
-                    (delete_id, keep_id),
+                    )"""),
+                    {"delete_id": delete_id, "keep_id": keep_id},
                 )
-                cursor.execute(
-                    "UPDATE credits SET track_id = ? WHERE track_id = ?", (keep_id, delete_id)
+                transferred = conn.execute(
+                    text("UPDATE credits SET track_id = :keep_id WHERE track_id = :delete_id"),
+                    {"keep_id": keep_id, "delete_id": delete_id},
+                ).rowcount
+                conn.execute(
+                    text(
+                        "UPDATE scraping_errors SET track_id = :keep_id WHERE track_id = :delete_id"
+                    ),
+                    {"keep_id": keep_id, "delete_id": delete_id},
                 )
-                transferred = cursor.rowcount
-                cursor.execute(
-                    "UPDATE scraping_errors SET track_id = ? WHERE track_id = ?",
-                    (keep_id, delete_id),
+                conn.execute(
+                    text("DELETE FROM tracks WHERE id = :delete_id"), {"delete_id": delete_id}
                 )
-                cursor.execute("DELETE FROM tracks WHERE id = ?", (delete_id,))
-                conn.commit()
                 logger.info(
                     f"🔀 Track {delete_id} fusionné dans {keep_id} "
                     f"({transferred} crédit(s) transféré(s))"

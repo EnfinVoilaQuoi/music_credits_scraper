@@ -343,7 +343,7 @@ class DiscogsClient:
         # Pas de correspondance → OTHER
         return CreditRole.OTHER
 
-    def enrich_track_data(self, track: Track, force_update: bool = False) -> bool:
+    def enrich_track_data(self, track: Track, force_update: bool = False) -> bool | str:
         """
         Enrichit un track avec les données depuis Discogs
 
@@ -352,7 +352,12 @@ class DiscogsClient:
             force_update: Si True, écrase les données existantes
 
         Returns:
-            True si des données ont été ajoutées, False sinon
+            True si des données NOUVELLES ont été ajoutées ;
+            "not_needed" si la release a matché mais que rien de nouveau n'était
+            à poser (données déjà présentes, typiquement prises à la phase
+            scraping) — ce n'est PAS un échec (exclu du calcul `all_failed`, log
+            neutre) ;
+            False si aucune release ne matche (vrai échec / absence).
         """
         try:
             artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
@@ -415,7 +420,16 @@ class DiscogsClient:
                     logger.info(f"✅ {credits_added} crédit(s) Discogs ajouté(s) à '{track.title}'")
                     updated = True
 
-            return updated
+            if updated:
+                return True
+
+            # Release matchée mais rien de NOUVEAU à poser (données déjà
+            # présentes) : ce n'est pas un échec — distinguer de l'absence de
+            # match (False plus haut) pour ne pas fausser le nettoyage.
+            logger.info(
+                f"ℹ️ Discogs : release matchée, aucune donnée nouvelle pour '{track.title}'"
+            )
+            return "not_needed"
 
         except Exception as e:
             logger.error(f"❌ Erreur enrichissement Discogs pour '{track.title}': {e}")

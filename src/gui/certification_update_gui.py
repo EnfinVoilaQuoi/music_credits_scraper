@@ -1,6 +1,5 @@
 """Interface graphique pour la mise à jour des certifications musicales"""
 
-import json
 import subprocess
 import sys
 from datetime import datetime
@@ -225,22 +224,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self.progress_label = ctk.CTkLabel(main_frame, text="")
         self.progress_label.pack(pady=5)
 
-    def _meta_last_update(self, meta_path):
-        """Date ISO de dernière MàJ depuis un sidecar meta.json (la MàJ NON
-        artiste la plus récente si un historique `updates` est présent), sinon
-        None. Fraîcheur uniforme pour BRMA/RIAA (comme SNEP)."""
-        try:
-            if not meta_path.exists():
-                return None
-            data = json.loads(meta_path.read_text(encoding="utf-8"))
-            updates = data.get("updates") or {}
-            non_artist = [t for s, t in updates.items() if s != "ARTIST"]
-            if non_artist:
-                return max(non_artist)
-            return data.get("last_update")
-        except Exception:
-            return None
-
     def _update_status(self):
         """Met à jour l'affichage de l'état"""
         try:
@@ -252,71 +235,44 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
             data_path = Path(DATA_PATH) / "certifications"
 
-            # SNEP — afficher la dernière MàJ GLOBALE (et non le mtime du fichier,
-            # qu'une simple récupération par artiste suffit à bumper)
-            snep_path = data_path / "snep" / "certif-.csv"
-            if snep_path.exists():
-                from src.api.snep_certifications import get_snep_last_update
+            def _fmt(iso):
+                if not iso:
+                    return None
+                try:
+                    return datetime.fromisoformat(iso).strftime("%d/%m/%Y %H:%M")
+                except (ValueError, TypeError):
+                    return str(iso)[:16]
 
-                last_global = get_snep_last_update(source="GLOBAL")
-                last_artist = get_snep_last_update(source="ARTIST")
+            # Fraîcheur UNIFORME par source (E7f) : chaque CertificationSource lit
+            # son propre metadata.json (MàJ NON-artiste la plus récente, pas le
+            # mtime que bumpe une recherche artiste). Plus de code ad-hoc par pays.
+            from src.enrichment.cert_source import all_certification_sources
 
-                def _fmt(iso):
-                    if not iso:
-                        return None
-                    try:
-                        return datetime.fromisoformat(iso).strftime("%d/%m/%Y %H:%M")
-                    except (ValueError, TypeError):
-                        return str(iso)[:16]
-
-                if last_global:
-                    status_text += f"🇫🇷 SNEP: ✅ Dernière MàJ globale: {_fmt(last_global)}\n"
+            flags = {"SNEP": "🇫🇷", "BRMA": "🇧🇪", "RIAA": "🇺🇸"}
+            for source in all_certification_sources():
+                flag = flags.get(source.name, "🏳️")
+                fresh = source.freshness()
+                if not fresh["available"]:
+                    status_text += f"{flag} {source.name}: ❌ Pas de données\n"
+                    continue
+                if fresh["last_global"]:
+                    status_text += (
+                        f"{flag} {source.name}: ✅ Dernière MàJ globale: "
+                        f"{_fmt(fresh['last_global'])}\n"
+                    )
                 else:
-                    # Aucune MàJ globale tracée : repli sur le mtime, mais on le signale
-                    mod_time = datetime.fromtimestamp(snep_path.stat().st_mtime)
-                    status_text += f"🇫🇷 SNEP: ⚠️ MàJ globale jamais tracée (fichier modifié {mod_time:%d/%m/%Y %H:%M})\n"
-                if last_artist:
-                    status_text += f"   ↳ Dernière récup. artiste: {_fmt(last_artist)}\n"
-                if "SNEP" in self.missing_periods:
-                    gaps = self.missing_periods["SNEP"].get("gaps", [])
+                    # Aucune MàJ globale tracée : repli sur le mtime, signalé.
+                    mod_time = datetime.fromtimestamp(source.clean_path.stat().st_mtime)
+                    status_text += (
+                        f"{flag} {source.name}: ⚠️ MàJ globale jamais tracée "
+                        f"(fichier modifié {mod_time:%d/%m/%Y %H:%M})\n"
+                    )
+                if fresh["last_artist"]:
+                    status_text += f"   ↳ Dernière récup. artiste: {_fmt(fresh['last_artist'])}\n"
+                if source.name in self.missing_periods:
+                    gaps = self.missing_periods[source.name].get("gaps", [])
                     if gaps:
                         status_text += f"   ⚠️ {len(gaps)} période(s) manquante(s)\n"
-            else:
-                status_text += "🇫🇷 SNEP: ❌ Pas de données\n"
-
-            # BRMA — fraîcheur via metadata.json (uniforme avec SNEP/RIAA)
-            brma_path = data_path / "brma" / "certif_brma.csv"
-            if brma_path.exists():
-                last = self._meta_last_update(data_path / "brma" / "metadata.json")
-                stamp = (
-                    _fmt(last)
-                    if last
-                    else f"{datetime.fromtimestamp(brma_path.stat().st_mtime):%d/%m/%Y %H:%M} (fichier)"
-                )
-                status_text += f"🇧🇪 BRMA: ✅ Dernière MàJ: {stamp}\n"
-                if "BRMA" in self.missing_periods:
-                    gaps = self.missing_periods["BRMA"].get("gaps", [])
-                    if gaps:
-                        status_text += f"   ⚠️ {len(gaps)} période(s) manquante(s)\n"
-            else:
-                status_text += "🇧🇪 BRMA: ❌ Pas de données\n"
-
-            # RIAA — fraîcheur via metadata.json (uniforme avec SNEP/BRMA)
-            riaa_path = data_path / "riaa" / "certif_riaa.csv"
-            if riaa_path.exists():
-                last = self._meta_last_update(data_path / "riaa" / "metadata.json")
-                stamp = (
-                    _fmt(last)
-                    if last
-                    else f"{datetime.fromtimestamp(riaa_path.stat().st_mtime):%d/%m/%Y %H:%M} (fichier)"
-                )
-                status_text += f"🇺🇸 RIAA: ✅ Dernière MàJ: {stamp}\n"
-                if "RIAA" in self.missing_periods:
-                    gaps = self.missing_periods["RIAA"].get("gaps", [])
-                    if gaps:
-                        status_text += f"   ⚠️ {len(gaps)} période(s) manquante(s)\n"
-            else:
-                status_text += "🇺🇸 RIAA: ❌ Pas de données\n"
 
             # Informations système
             status_text += f"\n📅 Vérification: {datetime.now():%d/%m/%Y %H:%M:%S}\n"

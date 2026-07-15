@@ -39,6 +39,8 @@ _KNOWN_FIELDS = {
     "key": '"key"',
     "mode": '"mode"',
     "lyrics_synced": "lyrics_synced",
+    "spotify_streams": "spotify_streams",
+    "ytm_streams": "ytm_streams",
 }
 
 

@@ -358,6 +358,37 @@ class TestUpdateTrackStreams:
         assert data_manager.update_track_ytm_streams(track_id, 98765) is True
         assert _lire_track(data_manager, artist.id, track_id).ytm_streams == 98765
 
+    def test_spotify_streams_ecrit_une_observation(self, data_manager):
+        # E7e : write-through de provenance (source kworb, seen_at verbatim).
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "T1")
+
+        data_manager.update_track_spotify_streams(track_id, 12345, 678, updated_at="2020-01-01")
+        obs = {o.field: o for o in data_manager.get_observations(track_id)}
+        assert obs["spotify_streams"].value == "12345"
+        assert obs["spotify_streams"].source == "kworb"
+        assert obs["spotify_streams"].seen_at == "2020-01-01"
+
+    def test_ytm_streams_ecrit_une_observation(self, data_manager):
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "T1")
+
+        data_manager.update_track_ytm_streams(track_id, 98765)
+        obs = {o.field: o for o in data_manager.get_observations(track_id)}
+        assert obs["ytm_streams"].value == "98765"
+        assert obs["ytm_streams"].source == "ytmusic"
+
+    def test_spotify_streams_reecrit_l_observation(self, data_manager):
+        # Upsert par (field, source) : une 2e MàJ écrase l'observation kworb.
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "T1")
+
+        data_manager.update_track_spotify_streams(track_id, 100, 1)
+        data_manager.update_track_spotify_streams(track_id, 200, 2)
+        obs = [o for o in data_manager.get_observations(track_id) if o.field == "spotify_streams"]
+        assert len(obs) == 1
+        assert obs[0].value == "200"
+
 
 class TestUpdateTrackSpotifyId:
     def test_backfill_quand_vide(self, data_manager):

@@ -29,8 +29,14 @@ from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
 class RIAADatabaseUpdater:
     """Gestionnaire de mise à jour de la base de données RIAA"""
 
-    def __init__(self, base_dir="music_credits_scraper"):
-        """Initialise le gestionnaire de mise à jour"""
+    def __init__(self, base_dir=None):
+        """Initialise le gestionnaire de mise à jour.
+
+        `base_dir=None` (défaut) → racine projet fiable via `__file__` (comme les
+        constantes module `_RIAA_DIR`). L'ancien défaut `"music_credits_scraper"`
+        était un chemin RELATIF : lancé en subprocess depuis la racine, il créait
+        un dossier dupliqué `music_credits_scraper/music_credits_scraper/data/…`
+        (seul `update_log.txt` y atterrissait, les CSV/meta passant par `_RIAA_DIR`)."""
 
         # Configuration des chemins
         self.base_dir = Path(base_dir) if base_dir else Path(__file__).parent.parent.parent

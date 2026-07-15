@@ -21,7 +21,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
     def __init__(
         self,
         parent,
-        cert_manager=None,
         default_artist=None,
         artist_tracks=None,
         artist_albums=None,
@@ -29,7 +28,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
     ):
         super().__init__(parent)
 
-        self.cert_manager = cert_manager
         # Fenêtre principale : donne accès à current_artist + data_manager pour
         # l'action « Appliquer à l'artiste courant » (E7h). None = action masquée.
         self.app = app

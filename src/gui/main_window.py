@@ -358,17 +358,11 @@ class MainWindow:
     def _open_certification_update(self):
         """Ouvre la fenêtre de mise à jour des certifications"""
         try:
-            # Initialiser le gestionnaire si disponible
-            cert_manager = None
-            try:
-                from src.utils.certification_manager import CertificationManager
-
-                cert_manager = CertificationManager()
-            except Exception:
-                pass
-
             # Ouvrir la fenêtre (pré-remplie avec l'artiste courant + sa
-            # discographie, pour l'audit des certifs orphelines)
+            # discographie, pour l'audit des certifs orphelines). Depuis E7f-h,
+            # les certifs passent par cert_matcher (CSV clean) + apply_certifications :
+            # plus de CertificationManager (créait une DB vestigiale + détournait
+            # la config logging globale).
             current_name = self.current_artist.name if self.current_artist else None
             artist_tracks = None
             artist_albums = None
@@ -378,7 +372,6 @@ class MainWindow:
                 artist_albums = sorted({t.album for t in self.current_artist.tracks if t.album})
             dialog = CertificationUpdateDialog(
                 self.root,
-                cert_manager,
                 default_artist=current_name,
                 artist_tracks=artist_tracks,
                 artist_albums=artist_albums,

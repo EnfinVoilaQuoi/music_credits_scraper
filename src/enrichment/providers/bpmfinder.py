@@ -10,7 +10,7 @@ directement — manual_entry / workers) ; ce provider enveloppe la MÊME instanc
 / True / False / None) posées telles quelles dans le dict de résultats.
 """
 
-from src.enrichment.base import LazyResource
+from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.logger import get_logger
@@ -25,6 +25,7 @@ class BpmFinderProvider:
     """Enrichissement de dernier recours via BPM Finder (source `bpmfinder`)."""
 
     name = "bpmfinder"
+    capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     # Aligné sur l'historique : le provider capture tout en interne et renvoie
     # None sur exception — l'orchestrateur n'a rien à rattraper de spécifique.
     error_result = None

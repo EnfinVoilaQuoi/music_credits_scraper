@@ -6,7 +6,7 @@ niveau de l'orchestrateur (comportement inchangé) jusqu'à la centralisation
 `_run_safely` (phase C4).
 """
 
-from src.enrichment.base import LazyResource
+from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.logger import get_logger
@@ -18,6 +18,7 @@ class DiscogsProvider:
     """Enrichissement via l'API Discogs (source `discogs`)."""
 
     name = "discogs"
+    capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     error_result = False
 
     def __init__(self, client=None, client_factory=None):

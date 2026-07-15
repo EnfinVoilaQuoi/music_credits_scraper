@@ -212,6 +212,32 @@ def test_close_continue_malgre_un_provider_qui_leve():
     assert enricher._discogs_provider.closed == 1
 
 
+def test_tous_les_providers_declarent_leur_capacite():
+    # E7b (structurel) : chaque provider audio annonce {Capability.BPM}. Inerte
+    # côté orchestrateur, mais le contrat est verrouillé ici.
+    from src.enrichment.base import Capability
+    from src.enrichment.providers.bpmfinder import BpmFinderProvider
+    from src.enrichment.providers.deezer import DeezerProvider
+    from src.enrichment.providers.discogs import DiscogsProvider
+    from src.enrichment.providers.getsongbpm import GetSongBpmProvider
+    from src.enrichment.providers.reccobeats import ReccoBeatsProvider
+    from src.enrichment.providers.songbpm import SongBpmProvider
+    from src.enrichment.providers.spotify_id import SpotifyIdProvider
+
+    classes = [
+        BpmFinderProvider,
+        DeezerProvider,
+        DiscogsProvider,
+        GetSongBpmProvider,
+        ReccoBeatsProvider,
+        SongBpmProvider,
+        SpotifyIdProvider,
+    ]
+    assert {c.name for c in classes} == ALL_SOURCES
+    for cls in classes:
+        assert cls.capabilities == {Capability.BPM}, cls.name
+
+
 def test_pas_de_del_non_deterministe():
     # Le teardown est explicite (finally du worker + _on_closing) : plus de
     # __del__ dont l'ordre au shutdown de l'interpréteur causait des EPIPE.

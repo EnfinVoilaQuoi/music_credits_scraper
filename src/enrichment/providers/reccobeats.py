@@ -10,7 +10,7 @@ Le BPM alimente le scrutin partagé (§8.3) ; l'unicité d'ID passe par le conte
 """
 
 from src.enrichment.audio_normalize import key_mode_observations
-from src.enrichment.base import LazyResource
+from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
@@ -23,6 +23,7 @@ class ReccoBeatsProvider:
     """Enrichissement via ReccoBeats (source `reccobeats`)."""
 
     name = "reccobeats"
+    capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     error_result = False
 
     def __init__(

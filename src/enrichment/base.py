@@ -7,6 +7,7 @@ protocole + l'ordre d'appel.
 """
 
 from collections.abc import Callable
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from src.utils.logger import get_logger
@@ -16,6 +17,22 @@ if TYPE_CHECKING:
     from src.models import Track
 
 logger = get_logger(__name__)
+
+
+class Capability(Enum):
+    """Nature des données qu'une source sait produire (jeu de l'AUDIT §8).
+
+    Additif/structurel (phase E7b) : déclaré par chaque provider mais PAS encore
+    consommé par l'orchestrateur — l'aiguillage par capacité (étage 2 : lyrics,
+    streams, certifs) est différé à F5, quand le passage async restructurera les
+    workers concernés (règle « jamais structure + comportement ensemble »).
+    """
+
+    BPM = auto()
+    LYRICS = auto()
+    STREAMS = auto()
+    CERTS = auto()
+    CREDITS = auto()
 
 
 class LazyResource:
@@ -69,6 +86,9 @@ class EnrichmentProvider(Protocol):
     """Interface minimale d'une source d'enrichissement."""
 
     name: str
+    # Données que la source sait produire (E7b, structurel — non consommé par
+    # l'orchestrateur pour l'instant, cf. Capability).
+    capabilities: set[Capability]
     # Valeur posée dans le dict de résultats si enrich() lève (l'orchestrateur
     # capture à la frontière batch). False = « pas de données » ; None =
     # crash/timeout, EXCLU du « tout a échoué » qui déclenche le nettoyage.

@@ -9,6 +9,7 @@ logique. Deux points d'entrée pour l'orchestrateur :
 Le BPM alimente le scrutin partagé (§8.3) ; l'unicité d'ID passe par le contexte.
 """
 
+from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
@@ -79,6 +80,13 @@ class ReccoBeatsProvider:
             if not track.bpm:
                 track.bpm = sbpm
             applied = True
+
+        # Observation key/mode PAR SOURCE (normalisée) — voie ISRC (E5c-2b).
+        ctx.observations.extend(
+            key_mode_observations(
+                "reccobeats", key=track_info.get("key"), mode=track_info.get("mode")
+            )
+        )
 
         # Key / Mode
         if track_info.get("key") is not None:
@@ -263,6 +271,13 @@ class ReccoBeatsProvider:
                 if not track.bpm:
                     track.bpm = sbpm
                 logger.info(f"ReccoBeats: ✅ BPM: {sbpm}")
+
+            # Observation key/mode PAR SOURCE (normalisée) — voie Spotify ID (E5c-2b).
+            ctx.observations.extend(
+                key_mode_observations(
+                    "reccobeats", key=track_info.get("key"), mode=track_info.get("mode")
+                )
+            )
 
             # Stocker Key et Mode
             if "key" in track_info and track_info["key"] is not None:

@@ -39,3 +39,8 @@ class EnrichmentContext:
     # lisent l'issue des sources précédentes, p.ex. raison `reccobeats_failed`).
     # Clé = source, valeur = True/False/None/"skipped"/"not_needed".
     results: dict = field(default_factory=dict)
+    # Observations key/mode PAR SOURCE (normalisées) émises par les providers
+    # pendant le run (phase E5c-2b) : l'orchestrateur les collecte dans
+    # `track.observations` (persistées par save_track). Le BPM passe par
+    # `bpm_ballot` (candidats déjà par source). Vidé à chaque run (contexte neuf).
+    observations: list = field(default_factory=list)

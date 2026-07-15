@@ -340,30 +340,38 @@ def test_source_indisponible_non_appelee():
 
 
 def test_observations_du_run_par_source():
-    def _vote(name, value):
-        def inner(track, ctx):
-            ctx.bpm_ballot.add(name, value)
-            return True
+    from src.enrichment.observation import Observation
 
-        return inner
+    def _recco(track, ctx):
+        # BPM au scrutin + key/mode PAR SOURCE dans ctx.observations (comme les
+        # vrais providers via key_mode_observations).
+        ctx.bpm_ballot.add("reccobeats", 111)
+        ctx.observations.extend(
+            [Observation("key", 5, "reccobeats"), Observation("mode", 1, "reccobeats")]
+        )
+        return True
+
+    def _songbpm(track, ctx):
+        ctx.bpm_ballot.add("songbpm", 135)
+        return True
 
     enricher, fakes, _ = _enricher()
-    fakes["reccobeats"]._on_enrich = _vote("reccobeats", 111)
-    fakes["songbpm"]._on_enrich = _vote("songbpm", 135)
+    fakes["reccobeats"]._on_enrich = _recco
+    fakes["songbpm"]._on_enrich = _songbpm
 
-    track = _track(key=5, mode=1, key_mode_source="reccobeats")
+    track = _track()
     enricher.enrich_track(track)
 
     obs = {(o.field, o.source): o for o in track.observations}
     # BPM : une observation par source ayant voté (valeurs BRUTES, non réconciliées)
     assert obs[("bpm", "reccobeats")].value == 111
     assert obs[("bpm", "songbpm")].value == 135
-    # key/mode : miroir des colonnes, source = key_mode_source
+    # key/mode : PAR SOURCE, depuis ctx.observations (pas le miroir legacy)
     assert obs[("key", "reccobeats")].value == 5
     assert obs[("mode", "reccobeats")].value == 1
 
 
-def test_observations_sans_key_mode_source():
+def test_observations_bpm_seul_si_aucune_key_mode():
     def _vote(track, ctx):
         ctx.bpm_ballot.add("deezer", 120)
         return True
@@ -371,7 +379,7 @@ def test_observations_sans_key_mode_source():
     enricher, fakes, _ = _enricher()
     fakes["deezer"]._on_enrich = _vote
 
-    track = _track()  # pas de key_mode_source → aucune observation key/mode
+    track = _track()  # aucune source n'émet de key/mode
     enricher.enrich_track(track)
 
     assert {o.field for o in track.observations} == {"bpm"}

@@ -109,6 +109,42 @@ def _as_resolution(field: str, obs) -> Resolution:
     return Resolution(field, obs.value, obs.source, obs.confidence)
 
 
+def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
+    """Applique le verdict du moteur aux colonnes legacy de `track` (E5c-2b-ii).
+
+    Remplace `BpmBallot.finalize` : pilote `bpm` (+ `bpm_alt`/`bpm_source`/
+    `bpm_confidence`) et, pour une paire key/mode complète, `key`/`mode`/
+    `key_mode_source` + `musical_key` recalculé. Un champ ABSENT du verdict n'est
+    pas touché (le COALESCE de save_track préserve l'existant). key/mode
+    arrivent normalisés du moteur (pitch class / 0-1) → corrige `mode="minor"`.
+    """
+    bpm = resolutions.get("bpm")
+    if bpm is not None:
+        track.bpm = bpm.value
+        track.bpm_alt = bpm.alt
+        track.bpm_source = bpm.source
+        # bpm_confidence est INTEGER en legacy (le moteur rend un float).
+        track.bpm_confidence = int(bpm.confidence) if bpm.confidence is not None else None
+
+    key = resolutions.get("key")
+    mode = resolutions.get("mode")
+    if key is not None:
+        track.key = key.value
+        track.key_mode_source = key.source
+    if mode is not None:
+        track.mode = mode.value
+        track.key_mode_source = mode.source
+    # key/mode forment une paire (le moteur les rend ensemble ou pas du tout) :
+    # musical_key se recalcule quand les deux sont là.
+    if key is not None and mode is not None:
+        try:
+            from src.utils.music_theory import key_mode_to_french
+
+            track.musical_key = key_mode_to_french(key.value, mode.value)
+        except Exception as e:
+            logger.warning(f"⚠️ apply_resolutions musical_key: {e}")
+
+
 def reconcile(observations: list) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.
 

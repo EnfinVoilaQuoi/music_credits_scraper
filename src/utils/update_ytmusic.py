@@ -96,6 +96,58 @@ def _infer_channel_from_youtube_links(
     return api.infer_channel_from_videos(video_ids)
 
 
+# ── Gate d'identité : valider le canal AVANT toute écriture ────────────────────
+# Contrairement à Kworb (`_scrape_validated`), YTM écrivait streams + auditeurs
+# même sur un homonyme ne matchant presque rien de la base. On confronte donc la
+# discographie du canal à la base par TITRES (signal primaire, déjà collectés) +
+# ALBUMS (repêchage/départage). Un canal MANUEL n'est jamais bloqué (warning) ;
+# un canal inféré/recherché suspect → abort sans aucune écriture.
+_IDENTITY_MIN_MATCHED = 2  # plancher absolu de titres communs
+_IDENTITY_MIN_RATIO = 0.3  # part des titres YTM retrouvés en base
+
+
+def _channel_identity_report(
+    tracks_by_album: dict, db_norm_titles: set, ytm_album_titles, db_norm_albums: set
+) -> dict:
+    """Confronte la discographie du canal YTM à la base.
+
+    Ratio calculé CÔTÉ YTM (part des titres YTM uniques retrouvés en base) :
+    robuste à une base plus complète que le canal — un « - Topic » de 8 morceaux
+    matche ~100 % de SES titres, un mauvais homonyme quasi 0 %.
+
+    Returns:
+        {"ytm_titles": n uniques (dédup _normalize_title), "matched": n,
+         "ratio": float, "album_overlap": n albums YTM au titre normalisé en base}
+    """
+    ytm_norm_titles = set()
+    for raw_tracks in tracks_by_album.values():
+        for entry in raw_tracks:
+            title = entry.get("title") if isinstance(entry, dict) else None
+            if title:
+                ytm_norm_titles.add(_normalize_title(title))
+    matched = len(ytm_norm_titles & db_norm_titles)
+    ytm_titles = len(ytm_norm_titles)
+    ratio = matched / ytm_titles if ytm_titles else 0.0
+    album_overlap = sum(1 for a in ytm_album_titles if a and _normalize_title(a) in db_norm_albums)
+    return {
+        "ytm_titles": ytm_titles,
+        "matched": matched,
+        "ratio": ratio,
+        "album_overlap": album_overlap,
+    }
+
+
+def _identity_suspect(report: dict) -> bool:
+    """Canal suspect si trop peu de titres communs, OU ratio faible SANS album commun.
+
+    Un album entier en commun (album_overlap ≥ 1) REPÊCHE un ratio faible : canal
+    Topic incomplet / artiste niche dont la base est plus fournie que le canal.
+    """
+    if report["matched"] < _IDENTITY_MIN_MATCHED:
+        return True
+    return report["ratio"] < _IDENTITY_MIN_RATIO and report["album_overlap"] == 0
+
+
 def update_ytmusic_streams(artist, data_manager) -> dict:
     """Met à jour les streams YouTube Music des morceaux et albums de l'artiste.
 
@@ -119,29 +171,30 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
     api = YTMusicAPI()
 
     # ── Étape 0 : ID artiste YTMusic (gestion des homonymes) ──────────────────
-    # 1. Canal épinglé manuellement ? (résout définitivement les homonymes)
-    pinned = None
+    # Canal épinglé (manuel ou inféré-persisté) + son ORIGINE : 'manual' n'est
+    # jamais bloqué/écrasé par le gate ; 'inferred' pourra être dé-figé si le gate
+    # (étape 1b) le juge suspect. Le pin inféré/recherché n'est persisté qu'APRÈS
+    # validation (plus de set_artist_ytm_channel immédiat après vote).
+    pinned, pinned_source = None, None
     try:
-        pinned = data_manager.get_artist_ytm_channel(artist.id)
+        pinned, pinned_source = data_manager.get_artist_ytm_channel_info(artist.id)
     except Exception:
         pass
 
-    # 2. Sinon, déduire le canal par vote sur les vidéos YT à haute confiance
-    if not pinned:
-        inferred = _infer_channel_from_youtube_links(api, artist, data_manager)
-        if inferred:
-            pinned = inferred
-            try:
-                data_manager.set_artist_ytm_channel(artist.id, inferred, source="inferred")
-            except Exception:
-                pass
-
     if pinned:
-        logger.info(f"📌 Canal YTM utilisé: {pinned}")
+        channel_source = pinned_source or "manual"
+        logger.info(f"📌 Canal YTM utilisé: {pinned} ({channel_source})")
         candidates = [(pinned, artist.name)]
     else:
-        # 3. Dernier recours : recherche par nom (candidats avec albums d'abord)
-        candidates = api.get_artist_channel_candidates(artist.name)
+        inferred = _infer_channel_from_youtube_links(api, artist, data_manager)
+        if inferred:
+            channel_source = "inferred"
+            candidates = [(inferred, artist.name)]
+            logger.info(f"🗳️ Canal YTM déduit (non encore épinglé) : {inferred}")
+        else:
+            # Dernier recours : recherche par nom (candidats avec albums d'abord).
+            channel_source = "search"
+            candidates = api.get_artist_channel_candidates(artist.name)
     if not candidates:
         logger.error(f"Artiste '{artist.name}' introuvable sur YouTube Music.")
         return result
@@ -166,10 +219,6 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
     albums = artist_info["albums"]
     ytm_monthly_listeners = artist_info["monthly_listeners"]
 
-    if ytm_monthly_listeners:
-        data_manager.update_artist_monthly_listeners(artist.id, ytm_listeners=ytm_monthly_listeners)
-        logger.info(f"Auditeurs mensuels YTMusic : {ytm_monthly_listeners:,}")
-
     if not albums:
         logger.warning(f"Aucun album YTMusic pour '{artist.name}'")
         return result
@@ -189,13 +238,75 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
         f"{len(all_video_ids)} videoId collectés"
     )
 
+    # ── Étape 1b : GATE d'identité — valider le canal AVANT toute écriture ────
+    # Placé AVANT fetch_view_counts_batch (économise le quota YT en cas d'abort)
+    # ET avant le write des auditeurs mensuels.
+    db_tracks = data_manager.get_artist_tracks(artist.id)
+
+    if not db_tracks:
+        logger.warning(
+            f"Base vide pour '{artist.name}' — rien à valider ni à écrire "
+            "(récupère d'abord la discographie)."
+        )
+        result["identity"] = {
+            "status": "aborted",
+            "channel_id": channel_id,
+            "channel_source": channel_source,
+            "matched": 0,
+            "ytm_titles": 0,
+            "ratio": 0.0,
+            "album_overlap": 0,
+        }
+        return result
+
+    db_norm_titles = {_normalize_title(t.title) for t in db_tracks}
+    db_norm_albums = {_normalize_title(t.album) for t in db_tracks if t.album}
+    report = _channel_identity_report(
+        tracks_by_album, db_norm_titles, [a["title"] for a in albums], db_norm_albums
+    )
+    result["identity"] = {"channel_id": channel_id, "channel_source": channel_source, **report}
+
+    if _identity_suspect(report):
+        if channel_source == "manual":
+            logger.warning(
+                f"⚠️ Canal YTM manuel à l'identité divergente "
+                f"({report['matched']}/{report['ytm_titles']} titres, "
+                f"ratio {report['ratio']:.0%}) — écriture maintenue (saisie manuelle)."
+            )
+            result["identity"]["status"] = "warning"
+        else:
+            logger.error(
+                f"🚨 Identité du canal YTM suspecte pour '{artist.name}' "
+                f"({report['matched']}/{report['ytm_titles']} titres retrouvés, "
+                f"ratio {report['ratio']:.0%}, {report['album_overlap']} album(s) commun(s)) "
+                "— AUCUNE écriture. Épingle le bon canal (@handle) dans la fenêtre Nb Streams."
+            )
+            if pinned_source == "inferred":
+                data_manager.clear_artist_ytm_channel(artist.id)
+                logger.info("Canal inféré erroné dé-épinglé (ré-inférence au prochain run).")
+            result["identity"]["status"] = "aborted"
+            return result
+    else:
+        result["identity"]["status"] = "ok"
+        # Canal validé : persister le pin inféré/recherché MAINTENANT (jamais
+        # par-dessus un manuel, qui est déjà en base avec sa propre source).
+        if channel_source != "manual":
+            try:
+                data_manager.set_artist_ytm_channel(artist.id, channel_id, source="inferred")
+            except Exception:
+                pass
+
+    # Auditeurs mensuels : écrits APRÈS validation (jamais sur un homonyme).
+    if ytm_monthly_listeners:
+        data_manager.update_artist_monthly_listeners(artist.id, ytm_listeners=ytm_monthly_listeners)
+        logger.info(f"Auditeurs mensuels YTMusic : {ytm_monthly_listeners:,}")
+
     # ── Étape 2 : UNE seule passe YouTube Data API v3 pour tous les IDs ──────
     view_counts = api.fetch_view_counts_batch(all_video_ids)
     # Estimer le nb de requêtes effectuées
     result["yt_api_calls"] = (len(all_video_ids) + 49) // 50 if all_video_ids else 0
 
     # ── Étape 3 : matching DB + mise à jour ───────────────────────────────────
-    db_tracks = data_manager.get_artist_tracks(artist.id)
     track_index: dict[str, list] = {}
     for t in db_tracks:
         track_index.setdefault(_normalize_title(t.title), []).append(t)

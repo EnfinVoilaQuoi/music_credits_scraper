@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import func, literal, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from src.enrichment.observation import Observation
 from src.models import Credit, Track
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
@@ -398,6 +399,84 @@ class TrackRepository:
             logger.debug(f"Erreur _get_track_credits: {e}")
 
         return result
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Observations (phase E5) — provenance scalaire par (track, field, source).
+    # Modèle UPSERT (clé unique (track_id, field, source)) : dernière valeur par
+    # source, `seen_at` = dernière vue. Écriture/lecture en `text()` brut : la
+    # colonne `seen_at` (TIMESTAMP) est stockée/relue VERBATIM comme partout dans
+    # le legacy (piège TIMESTAMP double-face, cf. E2) ; `value` stocké TEXT
+    # (coercition au retour = mapper, E6). Les deux méthodes acceptent une
+    # connexion existante (`conn=`) pour composer la triple écriture E5c dans UNE
+    # seule transaction `engine.begin()` (l'invariant du contrôle E4 doit
+    # survivre à un crash : observations + colonnes legacy tombent ensemble).
+    # ──────────────────────────────────────────────────────────────────────
+
+    def get_observations(self, track_id: int, *, conn=None) -> list[Observation]:
+        """Observations persistées d'un morceau (`value`/`seen_at` en brut, non coercés)."""
+        if conn is not None:
+            return self._get_observations(conn, track_id)
+        with self.engine.connect() as conn:
+            return self._get_observations(conn, track_id)
+
+    def _get_observations(self, conn, track_id: int) -> list[Observation]:
+        rows = (
+            conn.execute(
+                text(
+                    "SELECT field, value, source, confidence, seen_at "
+                    "FROM observations WHERE track_id = :tid"
+                ),
+                {"tid": track_id},
+            )
+            .mappings()
+            .all()
+        )
+        return [
+            Observation(
+                field=r["field"],
+                value=r["value"],
+                source=r["source"],
+                confidence=r["confidence"],
+                seen_at=r["seen_at"],
+            )
+            for r in rows
+        ]
+
+    def upsert_observations(self, track_id: int, observations, *, conn=None) -> None:
+        """Upsert les observations d'un morceau (clé (field, source)). No-op si vide."""
+        if not observations:
+            return
+        if conn is not None:
+            self._upsert_observations(conn, track_id, observations)
+        else:
+            with self.engine.begin() as conn:
+                self._upsert_observations(conn, track_id, observations)
+
+    def _upsert_observations(self, conn, track_id: int, observations) -> None:
+        for obs in observations:
+            # `seen_at` verbatim (string) comme le backfill E4 et le stockage
+            # legacy ; datetime → format legacy, absent → maintenant.
+            seen_at = obs.seen_at or datetime.now()
+            if isinstance(seen_at, datetime):
+                seen_at = seen_at.strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                text(
+                    "INSERT INTO observations "
+                    "(track_id, field, value, source, confidence, seen_at) "
+                    "VALUES (:tid, :field, :value, :source, :confidence, :seen_at) "
+                    "ON CONFLICT(track_id, field, source) DO UPDATE SET "
+                    "value = excluded.value, confidence = excluded.confidence, "
+                    "seen_at = excluded.seen_at"
+                ),
+                {
+                    "tid": track_id,
+                    "field": obs.field,
+                    "value": None if obs.value is None else str(obs.value),
+                    "source": obs.source,
+                    "confidence": None if obs.confidence is None else float(obs.confidence),
+                    "seen_at": seen_at,
+                },
+            )
 
     def delete_track(self, track_id: int) -> bool:
         """Supprime définitivement un morceau et ses données associées"""

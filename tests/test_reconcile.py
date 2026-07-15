@@ -191,6 +191,83 @@ class TestReconcileDefault:
         assert res["genre"].value == "trap"
 
 
+class TestReconcileLyricsSynced:
+    """Stratégie `lyrics_synced` : délègue à `compare_synced`, repli Musixmatch."""
+
+    # LRC concordants (mêmes lignes, même timeline) → confidence 2, LRCLIB gagne.
+    _LRC = "[00:01.00]alpha\n[00:05.00]beta\n[00:10.00]gamma\n[00:15.00]delta"
+    # Décalé de +30 s (divergence), durée réelle proche du second.
+    _LRC_LATE = "[00:30.00]alpha\n[01:00.00]beta\n[02:00.00]gamma\n[03:00.00]delta"
+    _LRC_EARLY = "[00:00.00]alpha\n[00:30.00]beta\n[01:30.00]gamma\n[02:30.00]delta"
+
+    def test_deux_sources_concordantes_confidence_2(self):
+        res = reconcile(
+            [
+                _obs("lyrics_synced", self._LRC, "lrclib"),
+                _obs("lyrics_synced", self._LRC, "ytmusic"),
+            ]
+        )
+        r = res["lyrics_synced"]
+        assert r.source == "LRCLIB"
+        assert r.confidence == 2.0
+        assert r.value == self._LRC
+
+    def test_une_seule_source_confidence_1(self):
+        res = reconcile([_obs("lyrics_synced", self._LRC, "lrclib")])
+        r = res["lyrics_synced"]
+        assert r.source == "LRCLIB"
+        assert r.confidence == 1.0
+
+    def test_delegation_compare_synced_ytm_seul(self):
+        res = reconcile([_obs("lyrics_synced", self._LRC, "ytmusic")])
+        assert res["lyrics_synced"].source == "YouTube Music"
+
+    def test_divergence_departagee_par_la_duree(self):
+        # LRCLIB finit à 3:00, YTM à 2:30 ; durée réelle 150 s → YTM plus proche.
+        res = reconcile(
+            [
+                _obs("lyrics_synced", self._LRC_LATE, "lrclib"),
+                _obs("lyrics_synced", self._LRC_EARLY, "ytmusic"),
+            ],
+            track_duration=150,
+        )
+        assert res["lyrics_synced"].source == "YouTube Music"
+        assert res["lyrics_synced"].confidence == 1.0
+
+    def test_repli_musixmatch_seul(self):
+        res = reconcile([_obs("lyrics_synced", self._LRC, "musixmatch")])
+        r = res["lyrics_synced"]
+        assert r.source == "Musixmatch"
+        assert r.confidence == 1.0
+        assert r.value == self._LRC
+
+    def test_lrclib_ytm_prioritaires_sur_musixmatch(self):
+        # LRCLIB/YTM présents → compare_synced tranche, Musixmatch ignoré.
+        res = reconcile(
+            [
+                _obs("lyrics_synced", self._LRC, "lrclib"),
+                _obs("lyrics_synced", self._LRC, "ytmusic"),
+                _obs("lyrics_synced", "[00:02.00]autre", "musixmatch"),
+            ]
+        )
+        assert res["lyrics_synced"].source == "LRCLIB"
+
+    def test_apply_resolutions_pilote_les_trois_colonnes(self):
+        track = Track(title="X", artist=Artist(name="A"))
+        apply_resolutions(
+            track,
+            reconcile(
+                [
+                    _obs("lyrics_synced", self._LRC, "lrclib"),
+                    _obs("lyrics_synced", self._LRC, "ytmusic"),
+                ]
+            ),
+        )
+        assert track.lyrics_synced == self._LRC
+        assert track.lyrics_synced_source == "LRCLIB"
+        assert track.lyrics_synced_confidence == 2  # INTEGER legacy (float casté)
+
+
 class TestReconcileEmpty:
     def test_aucune_observation(self):
         assert reconcile([]) == {}

@@ -413,7 +413,7 @@ class DataEnricher:
         from src.enrichment.reconcile import apply_resolutions, reconcile
 
         track.observations = self._collect_run_observations(ballot.candidates, ctx.observations)
-        apply_resolutions(track, reconcile(track.observations))
+        apply_resolutions(track, reconcile(track.observations, track_duration=track.duration))
         logger.info(
             f"🧮 Réconciliation: BPM={track.bpm} (alt={track.bpm_alt}, "
             f"source={track.bpm_source}, conf={track.bpm_confidence})"

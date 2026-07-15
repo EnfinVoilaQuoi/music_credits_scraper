@@ -23,11 +23,17 @@ from typing import Any
 
 from src.utils.bpm_vote import BPM_SOURCE_RANK, reconcile_bpm, sanitize_bpm
 from src.utils.logger import get_logger
+from src.utils.lyrics_sync import compare_synced
 
 logger = get_logger(__name__)
 
 # Champs de la paire audio traitée comme une unité (cf. docstring).
 KEY_MODE_FIELDS = ("key", "mode")
+
+# Slugs des sources de paroles synchronisées (cohérents avec les slugs bpm).
+# LRCLIB (source 1) + YTM (source 2) sont croisés par `compare_synced` ;
+# Musixmatch (source 3) sert de repli direct (asymétrie assumée).
+LYRICS_SYNCED_FIELD = "lyrics_synced"
 
 # Source d'une correction/mesure HUMAINE explicite (saisie GUI ✏️). Elle
 # court-circuite le vote (bpm ET paire key/mode) : une valeur posée à la main
@@ -149,6 +155,39 @@ def _as_resolution(field: str, obs) -> Resolution:
     return Resolution(field, obs.value, obs.source, obs.confidence)
 
 
+def _reconcile_lyrics_synced(observations: list, track_duration) -> Resolution | None:
+    """Départage les LRC synchronisés par source (réutilise `compare_synced`).
+
+    Les observations portent le LRC BRUT par source (slug `lrclib`/`ytmusic`/
+    `musixmatch`), `confidence=None`. La stratégie :
+      - si LRCLIB et/ou YTM ont répondu → `compare_synced(lrclib, ytm, durée)`
+        (fonction pure existante) tranche : concordance=2, divergence/unique=1 ;
+      - sinon si Musixmatch a répondu → verdict direct `confidence=1` (source 3,
+        asymétrie assumée : jamais croisée).
+    `Resolution.source` = LABEL du verdict (`LRCLIB`/`YouTube Music`/`Musixmatch`)
+    → la colonne legacy `lyrics_synced_source` garde exactement sa sémantique.
+    La `confidence` (1/2) est calculée ICI, pas portée par les observations.
+    """
+    by_source = {o.source: o for o in observations}
+    lrclib = by_source.get("lrclib")
+    ytm = by_source.get("ytmusic")
+    if lrclib is not None or ytm is not None:
+        verdict = compare_synced(
+            lrclib.value if lrclib is not None else None,
+            ytm.value if ytm is not None else None,
+            track_duration,
+        )
+        if verdict is None:
+            return None
+        return Resolution(
+            LYRICS_SYNCED_FIELD, verdict["lrc"], verdict["source"], float(verdict["confidence"])
+        )
+    mxm = by_source.get("musixmatch")
+    if mxm is not None:
+        return Resolution(LYRICS_SYNCED_FIELD, mxm.value, "Musixmatch", 1.0)
+    return None
+
+
 def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     """Applique le verdict du moteur aux colonnes legacy de `track` (E5c-2b-ii).
 
@@ -190,13 +229,27 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
         except Exception as e:
             logger.warning(f"⚠️ apply_resolutions musical_key: {e}")
 
+    lyrics = resolutions.get(LYRICS_SYNCED_FIELD)
+    if lyrics is not None:
+        track.lyrics_synced = lyrics.value
+        track.lyrics_synced_source = lyrics.source
+        # lyrics_synced_confidence est INTEGER en legacy (le moteur rend 1.0/2.0).
+        track.lyrics_synced_confidence = (
+            int(lyrics.confidence) if lyrics.confidence is not None else None
+        )
 
-def reconcile(observations: list) -> dict[str, Resolution]:
+
+def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.
 
     Renvoie un dict `field -> Resolution` (un champ absent des observations est
     absent du dict — le moteur ne fabrique jamais de valeur). Un vote BPM sans
     candidat valide n'émet aucune résolution `bpm`.
+
+    `track_duration` (secondes) alimente la stratégie `lyrics_synced` (départage
+    par la durée réelle dans `compare_synced`) ; il entre par PARAMÈTRE pour que
+    le moteur reste pur (aucune lecture de `Track`). Les deux appelants passent
+    `track.duration`.
     """
     by_field: dict[str, list] = {}
     for obs in observations:
@@ -214,7 +267,13 @@ def reconcile(observations: list) -> dict[str, Resolution]:
     if key_obs or mode_obs:
         resolutions.update(_reconcile_key_mode(key_obs, mode_obs))
 
-    handled = {"bpm", *KEY_MODE_FIELDS}
+    lyrics_obs = by_field.get(LYRICS_SYNCED_FIELD, [])
+    if lyrics_obs:
+        lyrics_res = _reconcile_lyrics_synced(lyrics_obs, track_duration)
+        if lyrics_res is not None:
+            resolutions[LYRICS_SYNCED_FIELD] = lyrics_res
+
+    handled = {"bpm", *KEY_MODE_FIELDS, LYRICS_SYNCED_FIELD}
     for field, obs_list in by_field.items():
         if field in handled:
             continue

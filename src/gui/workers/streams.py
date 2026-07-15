@@ -153,6 +153,22 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                         f"{r.get('unmatched', 0)} non matchés, "
                         f"{r.get('albums_processed', 0)} albums"
                     )
+                    # Verdict du gate d'identité (canal homonyme / divergent).
+                    identity = r.get("identity") or {}
+                    status = identity.get("status")
+                    matched = identity.get("matched", 0)
+                    ytm_titles = identity.get("ytm_titles", 0)
+                    if status == "aborted":
+                        lines.append(
+                            f"🚨 Canal YTM suspect ({matched}/{ytm_titles} titres) — "
+                            "rien n'a été écrit. Renseigne le champ « Canal YTM » "
+                            "(@handle) dans cette fenêtre et relance."
+                        )
+                    elif status == "warning":
+                        lines.append(
+                            f"⚠️ Canal YTM manuel divergent ({matched}/{ytm_titles} titres) "
+                            "— écriture maintenue (saisie manuelle prioritaire)."
+                        )
             summary_msg = "\n".join(lines)
 
             app.root.after(

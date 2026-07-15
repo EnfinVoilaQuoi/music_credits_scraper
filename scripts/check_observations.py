@@ -34,7 +34,12 @@ from src.config import DATABASE_URL
 
 # Champs scalaires attendus dans `observations` et leur colonne legacy « miroir »
 # (le nom de colonne est cité verbatim : `key`/`mode` sont sensibles au dialecte).
-_KNOWN_FIELDS = {"bpm": "bpm", "key": '"key"', "mode": '"mode"'}
+_KNOWN_FIELDS = {
+    "bpm": "bpm",
+    "key": '"key"',
+    "mode": '"mode"',
+    "lyrics_synced": "lyrics_synced",
+}
 
 
 def check(db_path: str) -> int:

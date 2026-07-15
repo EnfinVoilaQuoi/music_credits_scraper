@@ -111,6 +111,50 @@ def test_save_track_sans_observations_est_inoffensif(data_manager):
     assert data_manager.get_observations(tid) == []
 
 
+def test_delete_observations_cible_un_champ(data_manager):
+    """delete_observations ne purge QUE le champ visé (E7d, force_sync)."""
+    artist = _artiste(data_manager)
+    tid = _track(data_manager, artist)
+    data_manager.upsert_observations(
+        tid,
+        [
+            _obs("lyrics_synced", "[00:01.00]a", "lrclib"),
+            _obs("lyrics_synced", "[00:01.00]a", "ytmusic"),
+            _obs("bpm", 120, "deezer"),
+        ],
+    )
+
+    data_manager.delete_observations(tid, "lyrics_synced")
+
+    obs = data_manager.get_observations(tid)
+    assert {o.field for o in obs} == {"bpm"}  # lyrics purgées, bpm intact
+
+
+def test_delete_observations_sur_champ_absent_est_no_op(data_manager):
+    artist = _artiste(data_manager)
+    tid = _track(data_manager, artist)
+    data_manager.upsert_observations(tid, [_obs("bpm", 120, "deezer")])
+    data_manager.delete_observations(tid, "lyrics_synced")  # rien à supprimer
+    assert len(data_manager.get_observations(tid)) == 1
+
+
+def test_lyrics_synced_roundtrip_par_source(data_manager):
+    """Le LRC brut par source persiste (permet le re-vote inter-runs, E7d)."""
+    artist = _artiste(data_manager)
+    lrc_l = "[00:01.00]alpha\n[00:05.00]beta"
+    lrc_y = "[00:01.00]alpha\n[00:05.00]beta"
+    track = Track(title="Sync", artist=artist)
+    track.observations = [
+        _obs("lyrics_synced", lrc_l, "lrclib"),
+        _obs("lyrics_synced", lrc_y, "ytmusic"),
+    ]
+    tid = data_manager.save_track(track)
+
+    obs = {o.source: o for o in data_manager.get_observations(tid)}
+    assert obs["lrclib"].value == lrc_l
+    assert obs["ytmusic"].value == lrc_y
+
+
 def test_composition_dans_une_transaction(data_manager):
     """Upsert + lecture au sein d'une même connexion fournie (gabarit triple écriture E5c)."""
     artist = _artiste(data_manager)

@@ -494,6 +494,25 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 self._upsert_observations(conn, track_id, observations)
 
+    def delete_observations(self, track_id: int, field: str, *, conn=None) -> None:
+        """Supprime toutes les observations d'un champ pour un morceau (composable).
+
+        Sert au « force » d'un scrape (E7d, `force_sync`) : repartir de zéro sur
+        `lyrics_synced` — sinon une source disparue laisserait une observation
+        stale qui ressusciterait le verdict à la lecture (le mapper réconcilie
+        l'union persistée). Symétrique de `upsert_observations`."""
+        if conn is not None:
+            self._delete_observations(conn, track_id, field)
+        else:
+            with self.engine.begin() as conn:
+                self._delete_observations(conn, track_id, field)
+
+    def _delete_observations(self, conn, track_id: int, field: str) -> None:
+        conn.execute(
+            text("DELETE FROM observations WHERE track_id = :tid AND field = :field"),
+            {"tid": track_id, "field": field},
+        )
+
     def _upsert_observations(self, conn, track_id: int, observations) -> None:
         for obs in observations:
             # `seen_at` verbatim (string) comme le backfill E4 et le stockage

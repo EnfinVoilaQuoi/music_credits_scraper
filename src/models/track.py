@@ -7,6 +7,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
+    from src.enrichment.observation import Observation
     from src.models.artist import Artist
 
 # NB : les utilitaires de src.utils sont importés LOCALEMENT dans les méthodes
@@ -359,6 +360,11 @@ class Track:
     updated_at: datetime = field(default_factory=datetime.now)
     last_scraped: datetime | None = None
     scraping_errors: list[str] = field(default_factory=list)
+    # Observations FRAÎCHES du run d'enrichissement en cours (phase E5) — NON une
+    # colonne : champ transitoire, vidé par save_track qui les upsert dans SA
+    # transaction (triple écriture). Toujours vide après une lecture DB (le mapper
+    # ne le peuple pas). Peuplé par les providers migrés `fetch()` (E5c-2).
+    observations: list["Observation"] = field(default_factory=list, repr=False)
 
     # Champs de certification SNEP - VERSION MULTI-CERTIFICATIONS
     has_certification: bool = False

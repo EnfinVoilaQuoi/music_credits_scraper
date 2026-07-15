@@ -3,6 +3,7 @@
 from datetime import datetime
 from tkinter import messagebox
 
+from src.enrichment.observation import Observation
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
@@ -216,6 +217,11 @@ def start_combined_scraping(
                         track.lyrics_synced = None
                         track.lyrics_synced_source = None
                         track.lyrics_synced_confidence = None
+                        # E7d : « force » = repartir de zéro. Purger les obs
+                        # lyrics persistées, sinon une source disparue laisserait
+                        # une obs stale qui ressusciterait le verdict à la lecture.
+                        if track.id:
+                            app.data_manager.delete_observations(track.id, "lyrics_synced")
 
                 n_tracks = len(selected_tracks_list)
 
@@ -321,6 +327,23 @@ def start_combined_scraping(
 
                             # CROSS-CHECK (sources 1 & 2) + départage durée
                             if need_sync:
+                                # E7d : persister le LRC BRUT par source (permet le
+                                # re-vote inter-runs à la lecture — le mapper E6
+                                # réconcilie via la même compare_synced). Une source
+                                # « a répondu » = a renvoyé un LRC non vide.
+                                _now = datetime.now()
+                                if lrclib_lrc:
+                                    track.observations.append(
+                                        Observation(
+                                            "lyrics_synced", lrclib_lrc, "lrclib", seen_at=_now
+                                        )
+                                    )
+                                if ytm_lrc:
+                                    track.observations.append(
+                                        Observation(
+                                            "lyrics_synced", ytm_lrc, "ytmusic", seen_at=_now
+                                        )
+                                    )
                                 verdict = compare_synced(lrclib_lrc, ytm_lrc, duration)
                                 if verdict:
                                     track.lyrics_synced = verdict["lrc"]
@@ -352,6 +375,14 @@ def start_combined_scraping(
                                         track.lyrics_synced = mres["lrc"]
                                         track.lyrics_synced_source = mres["source"]
                                         track.lyrics_synced_confidence = mres["confidence"]
+                                        track.observations.append(
+                                            Observation(
+                                                "lyrics_synced",
+                                                mres["lrc"],
+                                                "musixmatch",
+                                                seen_at=_now,
+                                            )
+                                        )
                                         n_mxm += 1
                                         n_review += 1
                                         logger.info(

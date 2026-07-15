@@ -628,3 +628,33 @@ class TestGetArtistDetails:
 
     def test_artiste_inexistant_retourne_dict_vide(self, data_manager):
         assert data_manager.get_artist_details("Fantôme") == {}
+
+
+class TestLyricsSyncedObservations:
+    """E7d : les observations lyrics_synced pilotent la lecture (bascule effective)."""
+
+    _LRC = "[00:01.00]alpha\n[00:05.00]beta\n[00:10.00]gamma\n[00:15.00]delta"
+
+    def test_relecture_reconcilie_le_verdict(self, data_manager):
+        # 2 sources concordantes persistées → relecture via get_artist_tracks
+        # rend lyrics_synced = LRCLIB, confidence 2 (croisé).
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "Sync")
+        _ajoute_obs(data_manager, track_id, "lyrics_synced", "lrclib", value=self._LRC)
+        _ajoute_obs(data_manager, track_id, "lyrics_synced", "ytmusic", value=self._LRC)
+
+        lu = _lire_track(data_manager, artist.id, track_id)
+        assert lu.lyrics_synced == self._LRC
+        assert lu.lyrics_synced_source == "LRCLIB"
+        assert lu.lyrics_synced_confidence == 2
+
+    def test_delete_puis_relecture_sans_verdict(self, data_manager):
+        # force_sync purge les obs → plus aucun verdict à la lecture.
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "Sync")
+        _ajoute_obs(data_manager, track_id, "lyrics_synced", "lrclib", value=self._LRC)
+
+        data_manager.delete_observations(track_id, "lyrics_synced")
+
+        lu = _lire_track(data_manager, artist.id, track_id)
+        assert lu.lyrics_synced is None

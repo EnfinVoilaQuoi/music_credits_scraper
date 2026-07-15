@@ -8,7 +8,8 @@ Le moteur est PUR : il prend des `Observation` et rend un verdict par champ.
 """
 
 from src.enrichment.observation import Observation
-from src.enrichment.reconcile import reconcile
+from src.enrichment.reconcile import apply_resolutions, reconcile
+from src.models import Artist, Track
 
 
 def _obs(field, value, source, confidence=None):
@@ -141,3 +142,51 @@ class TestReconcileDefault:
 class TestReconcileEmpty:
     def test_aucune_observation(self):
         assert reconcile([]) == {}
+
+
+class TestApplyResolutions:
+    """apply_resolutions pilote les colonnes legacy (remplace BpmBallot.finalize)."""
+
+    def _track(self, **attrs):
+        track = Track(title="X", artist=Artist(name="A"))
+        for name, value in attrs.items():
+            setattr(track, name, value)
+        return track
+
+    def test_bpm_pilote_les_quatre_colonnes(self):
+        track = self._track()
+        apply_resolutions(
+            track, reconcile([_obs("bpm", 74, "deezer"), _obs("bpm", 145, "reccobeats")])
+        )
+        assert track.bpm == 145
+        assert track.bpm_alt == 74
+        assert track.bpm_source == "reccobeats+deezer"
+        assert track.bpm_confidence == 2  # INTEGER legacy (float du moteur casté)
+
+    def test_key_mode_normalises_et_musical_key(self):
+        # songbpm "minor" + reccobeats numériques → paire complète, mode=0 (fix bug).
+        track = self._track()
+        obs = [
+            _obs("key", 8, "reccobeats"),
+            _obs("mode", 0, "reccobeats"),
+            _obs("key", 8, "songbpm"),
+            _obs("mode", 0, "songbpm"),
+        ]
+        apply_resolutions(track, reconcile(obs))
+        assert track.key == 8
+        assert track.mode == 0
+        assert track.key_mode_source == "reccobeats"
+        assert track.musical_key == "Sol#/Lab mineur"
+
+    def test_champ_absent_non_touche(self):
+        # Aucune observation bpm → bpm existant préservé (pas d'écrasement).
+        track = self._track(bpm=99, bpm_source="manuel")
+        apply_resolutions(track, reconcile([_obs("key", 5, "deezer")]))
+        assert track.bpm == 99
+        assert track.bpm_source == "manuel"
+
+    def test_paire_incomplete_ne_pilote_pas(self):
+        # key seul (pas de mode) → moteur n'émet rien → track.key inchangé.
+        track = self._track()
+        apply_resolutions(track, reconcile([_obs("key", 5, "deezer")]))
+        assert getattr(track, "key", None) is None

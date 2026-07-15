@@ -401,23 +401,28 @@ class DataEnricher:
             self._run_step(provider, track, ctx, sources, results)
 
         # ========================================
-        # VOTE BPM : réconciliation de tous les candidats (§8.3), AVANT Discogs
+        # RÉCONCILIATION (§8.3) — le MOTEUR pilote les colonnes legacy, AVANT Discogs
         # ========================================
-        # Candidats capturés AVANT finalize (qui vide le scrutin) : ils servent à
-        # émettre les observations BPM PAR SOURCE (E5c-2a).
-        bpm_candidates = ballot.candidates
-        ballot.finalize(track)
+        # Observations PAR SOURCE du run (BPM du scrutin + key/mode normalisés
+        # émis par les providers), puis reconcile() pilote bpm/bpm_alt/source/
+        # confidence + key/mode/musical_key — remplace BpmBallot.finalize. BPM iso
+        # par construction (même reconcile_bpm) ; key/mode normalisés + appariés
+        # (corrige mode="minor" côté legacy). Fresh UNIQUEMENT en 2b-ii : l'union
+        # persisté ∪ frais (vote inter-runs, point-2) = étape ultérieure isolée.
+        # save_track persiste track.observations dans SA transaction (E5c-1).
+        from src.enrichment.reconcile import apply_resolutions, reconcile
+
+        track.observations = self._collect_run_observations(ballot.candidates, ctx.observations)
+        apply_resolutions(track, reconcile(track.observations))
+        logger.info(
+            f"🧮 Réconciliation: BPM={track.bpm} (alt={track.bpm_alt}, "
+            f"source={track.bpm_source}, conf={track.bpm_confidence})"
+        )
 
         self._run_step(self._discogs_provider, track, ctx, sources, results)
 
         if clear_on_failure and force_update:
             self._clear_after_total_failure(track, results, initial_bpm)
-
-        # Observations PAR SOURCE du run → `save_track` les persiste dans SA
-        # transaction (moitié « persistance » de la triple écriture). Le ballot
-        # pilote ENCORE les colonnes legacy (comportement constant) ; la table
-        # `observations` est write-only jusqu'à E6, donc sans risque runtime.
-        track.observations = self._collect_run_observations(bpm_candidates, ctx.observations)
 
         # ========================================
         # RÉSUMÉ FINAL
@@ -561,6 +566,11 @@ class DataEnricher:
         else:
             logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
             results["cleaned"] = True
+            # Cohérence obs⇒legacy : pas d'observation persistée sur un morceau
+            # dont on vient d'effacer les colonnes audio (save_track ne doit rien
+            # upsert). Sur un nettoyage réel il n'y a de toute façon aucun
+            # candidat, mais on l'assure explicitement.
+            track.observations = []
 
     def _collect_run_observations(self, bpm_candidates, key_mode_observations):
         """Observations PAR SOURCE de ce run (phase E5c-2b-i).
@@ -568,8 +578,10 @@ class DataEnricher:
         - **BPM** : une observation par source ayant voté (candidats bruts du
           scrutin, avant réconciliation ; `confidence` None → le moteur la
           recalcule au vote). Cohabite sans dommage avec la ligne backfill
-          « source combinée » (`reccobeats+songbpm`) — table write-only jusqu'à
-          E6, nettoyage des lignes combinées en E5c-2b-ii (migration).
+          « source combinée » (`reccobeats+songbpm`) : la réconciliation ne tape
+          que les observations FRAÎCHES du run, pas l'union persistée — le
+          nettoyage des lignes combinées accompagnera l'introduction de l'union
+          (vote inter-runs, étape ultérieure).
         - **key/mode** : observations PAR SOURCE normalisées, émises par les
           providers dans `ctx.observations` (chaque source qui a mesuré, pas
           seulement le last-writer legacy).

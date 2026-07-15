@@ -19,11 +19,20 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
     """Fenêtre de gestion des mises à jour de certifications"""
 
     def __init__(
-        self, parent, cert_manager=None, default_artist=None, artist_tracks=None, artist_albums=None
+        self,
+        parent,
+        cert_manager=None,
+        default_artist=None,
+        artist_tracks=None,
+        artist_albums=None,
+        app=None,
     ):
         super().__init__(parent)
 
         self.cert_manager = cert_manager
+        # Fenêtre principale : donne accès à current_artist + data_manager pour
+        # l'action « Appliquer à l'artiste courant » (E7h). None = action masquée.
+        self.app = app
         self.default_artist = default_artist
         self.artist_tracks = artist_tracks or []  # Morceaux pour l'audit
         self.artist_albums = artist_albums or []  # Albums pour l'audit
@@ -207,6 +216,17 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             width=150,
         ).pack(side="left", padx=5)
 
+        # Appliquer à l'artiste courant (E7h) : rematch des CSV clean + save.
+        # Masqué si la fenêtre est ouverte hors contexte artiste.
+        if getattr(self, "app", None) is not None:
+            ctk.CTkButton(
+                global_buttons_frame,
+                text="🎯 Appliquer à l'artiste courant",
+                command=self._apply_to_current_artist,
+                fg_color="#1F6AA5",
+                width=200,
+            ).pack(side="left", padx=5)
+
         # Actualiser l'état
         ctk.CTkButton(
             global_buttons_frame,
@@ -305,6 +325,48 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             logger.error(f"Erreur lors de la mise à jour du statut: {e}")
             self.status_text.delete("0.0", "end")
             self.status_text.insert("0.0", f"❌ Erreur: {e}")
+
+    def _apply_to_current_artist(self):
+        """Rematche les certifs de l'artiste courant depuis les CSV clean puis
+        persiste (E7h). Offline (matcher en mémoire) ; reset_cert_matcher pour
+        repartir des CSV fraîchement mis à jour dans cette session."""
+        app = getattr(self, "app", None)
+        artist = getattr(app, "current_artist", None) if app else None
+        if not artist or not getattr(artist, "tracks", None):
+            messagebox.showinfo("Appliquer", "Aucun artiste courant chargé.", parent=self)
+            return
+
+        def run():
+            try:
+                from src.utils.cert_matcher import get_cert_matcher, reset_cert_matcher
+                from src.utils.certification_enricher import apply_certifications
+
+                reset_cert_matcher()  # repartir des CSV clean (MàJ de la session)
+                n = apply_certifications(artist, artist.tracks, get_cert_matcher())
+                for track in artist.tracks:
+                    app.data_manager.save_track(track)
+            except Exception as e:
+                logger.error(f"Application certifs échouée: {e}")
+                # `e` est effacé à la sortie du except → capture par défaut.
+                self.after(
+                    0,
+                    lambda err=e: messagebox.showerror("Appliquer", f"Échec : {err}", parent=self),
+                )
+                return
+
+            def done():
+                messagebox.showinfo(
+                    "Appliquer",
+                    f"{n} morceau(x) certifié(s) pour {artist.name}.",
+                    parent=self,
+                )
+                if hasattr(app, "_populate_tracks_table"):
+                    app._populate_tracks_table()
+                self._update_status()
+
+            self.after(0, done)
+
+        start_worker(run)
 
     def _update_snep(self):
         """Lance la mise à jour SNEP"""

@@ -382,6 +382,7 @@ class MainWindow:
                 default_artist=current_name,
                 artist_tracks=artist_tracks,
                 artist_albums=artist_albums,
+                app=self,
             )
             dialog.transient(self.root)
             dialog.grab_set()

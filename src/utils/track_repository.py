@@ -757,6 +757,14 @@ class TrackRepository:
             )
             with self.engine.begin() as conn:
                 conn.execute(stmt)
+                # E7e : write-through de la provenance (seen_at = fraîcheur Kworb
+                # verbatim, chemin text() de _upsert_observations). PAS de bascule
+                # lecture (champ mono-source, aucun vote), PAS d'albums.
+                self._upsert_observations(
+                    conn,
+                    track_id,
+                    [Observation("spotify_streams", streams, "kworb", seen_at=updated_at)],
+                )
             return True
         except Exception as e:
             logger.error(f"Erreur update_track_spotify_streams (track_id={track_id}): {e}")
@@ -882,6 +890,12 @@ class TrackRepository:
             )
             with self.engine.begin() as conn:
                 conn.execute(stmt)
+                # E7e : write-through de la provenance (mono-source, pas de vote).
+                self._upsert_observations(
+                    conn,
+                    track_id,
+                    [Observation("ytm_streams", streams, "ytmusic", seen_at=datetime.now())],
+                )
             return True
         except Exception as e:
             logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")

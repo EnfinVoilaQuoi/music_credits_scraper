@@ -661,6 +661,50 @@ class TestGetArtistDetails:
         assert data_manager.get_artist_details("Fantôme") == {}
 
 
+class TestCertificationsPersistence:
+    """E7h : certifs rematchées puis persistées se relisent en colonne JSON."""
+
+    def _cert(self, title):
+        return {
+            "certification": "Or",
+            "title": title,
+            "artist_name": "Artiste Test",
+            "category": "single",
+            "certification_date": "2020-01-01",
+            "release_date": "",
+            "publisher": "",
+            "detail_url": "",
+            "country": "FR",
+            "body": "SNEP",
+            "flag": "🇫🇷",
+        }
+
+    def test_apply_certifications_persiste_et_se_relit(self, data_manager):
+        from src.utils.certification_enricher import apply_certifications
+
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "Hit", album="LP")
+        track = _lire_track(data_manager, artist.id, track_id)
+
+        cert = self._cert("Hit")
+
+        class _Matcher:
+            def get_track_certifications(self, a, t, extra_artists=None):
+                return [cert] if t == "Hit" else []
+
+            def get_album_certifications(self, a, alb):
+                return []
+
+        n = apply_certifications(artist, [track], _Matcher())
+        assert n == 1
+        data_manager.save_track(track)
+
+        reloaded = _lire_track(data_manager, artist.id, track_id)
+        assert reloaded.certifications == [cert]
+        assert reloaded.has_certification is True
+        assert reloaded.certification_level == "Or"
+
+
 class TestLyricsSyncedObservations:
     """E7d : les observations lyrics_synced pilotent la lecture (bascule effective)."""
 

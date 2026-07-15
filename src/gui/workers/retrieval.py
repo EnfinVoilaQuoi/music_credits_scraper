@@ -406,6 +406,19 @@ def start_track_retrieval(
                         # Préserver l'ID de la base de données
                         track.id = existing_track.id
 
+                # E7h : rematch des certifications depuis les CSV clean (matcher
+                # en mémoire, offline, rapide) AVANT le save — pose
+                # track.certifications/album_certifications à jour. Autorité = les
+                # CSV clean ; écrase la préservation ci-dessus (certifs = données
+                # dérivées, pas saisies). Défensif : n'interrompt pas la récup.
+                try:
+                    from src.utils.cert_matcher import get_cert_matcher
+                    from src.utils.certification_enricher import apply_certifications
+
+                    apply_certifications(app.current_artist, new_tracks, get_cert_matcher())
+                except Exception as e:
+                    logger.warning(f"Rematch certifications échoué: {e}")
+
                 # Sauvegarder dans la base
                 saved_count = 0
                 for track in new_tracks:

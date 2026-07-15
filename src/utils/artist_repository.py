@@ -303,18 +303,70 @@ class ArtistRepository:
             logger.error(f"Erreur get_artist_ytm_channel: {e}")
             return None
 
-    def set_artist_ytm_channel(self, artist_id: int, channel_id: str) -> bool:
-        """Épingle le canal YTMusic d'un artiste (résout les homonymes)."""
+    def get_artist_ytm_channel_info(self, artist_id: int) -> tuple:
+        """Canal YTM épinglé + son origine : `(channel_id|None, source|None)`.
+
+        `source ∈ {'manual', 'inferred'}` distingue une saisie GUI (jamais
+        écrasée/bloquée) d'un vote (ré-effaçable si le gate le juge suspect).
+        Artiste sans canal → `(None, None)`.
+        """
+        try:
+            with self.engine.connect() as conn:
+                row = (
+                    conn.execute(
+                        select(artists.c.ytm_channel_id, artists.c.ytm_channel_source).where(
+                            artists.c.id == artist_id
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if not row or not row["ytm_channel_id"]:
+                    return (None, None)
+                return (row["ytm_channel_id"], row["ytm_channel_source"])
+        except Exception as e:
+            logger.error(f"Erreur get_artist_ytm_channel_info: {e}")
+            return (None, None)
+
+    def set_artist_ytm_channel(
+        self, artist_id: int, channel_id: str, source: str = "manual"
+    ) -> bool:
+        """Épingle le canal YTMusic d'un artiste (résout les homonymes).
+
+        `source` par défaut = 'manual' (compat ascendante : la GUI épingle
+        toujours du manuel). Le flux d'inférence passe `source='inferred'`.
+        """
         try:
             stmt = (
-                update(artists).where(artists.c.id == artist_id).values(ytm_channel_id=channel_id)
+                update(artists)
+                .where(artists.c.id == artist_id)
+                .values(ytm_channel_id=channel_id, ytm_channel_source=source)
             )
             with self.engine.begin() as conn:
                 conn.execute(stmt)
-            logger.info(f"📌 Canal YTM épinglé pour artist_id={artist_id}: {channel_id}")
+            logger.info(f"📌 Canal YTM épinglé pour artist_id={artist_id}: {channel_id} ({source})")
             return True
         except Exception as e:
             logger.error(f"Erreur set_artist_ytm_channel: {e}")
+            return False
+
+    def clear_artist_ytm_channel(self, artist_id: int) -> bool:
+        """Dé-épingle le canal YTM (les deux colonnes à NULL).
+
+        Utilisé quand le gate d'identité juge suspect un canal INFÉRÉ : on
+        efface pour ne pas figer l'erreur (au prochain run, ré-inférence)."""
+        try:
+            stmt = (
+                update(artists)
+                .where(artists.c.id == artist_id)
+                .values(ytm_channel_id=None, ytm_channel_source=None)
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            logger.info(f"📌 Canal YTM dé-épinglé pour artist_id={artist_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Erreur clear_artist_ytm_channel: {e}")
             return False
 
     def update_artist_kworb_totals(

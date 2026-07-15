@@ -61,6 +61,10 @@ artists = Table(
     Column("kworb_lead_streams", Integer),
     Column("kworb_feat_streams", Integer),
     Column("kworb_updated", TIMESTAMP),
+    # Origine du canal épinglé : 'manual' (saisie GUI) / 'inferred' (vote) — E8.
+    # En FIN de table : `add_column` Alembic (e8) l'appose en dernière position,
+    # `create_all` doit produire le MÊME ordre (garde-fou test_alembic_baseline).
+    Column("ytm_channel_source", Text),
     sqlite_autoincrement=True,
 )
 

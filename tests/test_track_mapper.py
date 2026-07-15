@@ -247,3 +247,23 @@ class TestObservationsOverride:
         assert track.bpm == 140  # observé
         assert track.key == 5  # fallback legacy
         assert track.mode == 1
+
+    def test_manual_survit_aux_observations_concurrentes(self, artist):
+        # E7a : une saisie manuelle (obs `manual`, value TEXT relue) doit primer
+        # sur des sources auto concurrentes à la relecture — sinon écrasement.
+        row = make_row(id=1, title="X", bpm="100")
+        obs = [
+            self._obs("bpm", "140", "deezer"),
+            self._obs("bpm", "140", "reccobeats"),
+            self._obs("bpm", "95", "manual"),
+            self._obs("key", "8", "reccobeats"),
+            self._obs("mode", "1", "reccobeats"),
+            self._obs("key", "2", "manual"),
+            self._obs("mode", "0", "manual"),
+        ]
+        track = track_from_row(row, artist, obs)
+        assert track.bpm == 95
+        assert track.bpm_source == "manual"
+        assert track.key == 2
+        assert track.mode == 0
+        assert track.key_mode_source == "manual"

@@ -111,6 +111,58 @@ class TestReconcileKeyMode:
         assert res == {}
 
 
+class TestReconcileManual:
+    """La source `manual` court-circuite le vote (correction humaine gagne toujours)."""
+
+    def test_manual_bat_un_vote_bpm_a_trois_sources(self):
+        # 3 sources concordent sur 120 (confiance 3), mais une saisie manuelle à
+        # 95 doit primer : verdict verbatim, sans départage demi/double.
+        res = reconcile(
+            [
+                _obs("bpm", 120, "deezer"),
+                _obs("bpm", 120, "getsongbpm"),
+                _obs("bpm", 120, "reccobeats"),
+                _obs("bpm", 95, "manual"),
+            ]
+        )
+        assert res["bpm"].value == 95
+        assert res["bpm"].source == "manual"
+        assert res["bpm"].alt is None
+
+    def test_manual_bpm_isole_non_double(self):
+        # 71 seul via une source auto serait doublé (142) ; manuel = verbatim.
+        res = reconcile([_obs("bpm", 71, "manual")])
+        assert res["bpm"].value == 71
+        assert res["bpm"].source == "manual"
+
+    def test_manual_bpm_invalide_retombe_sur_le_vote(self):
+        # Valeur manuelle hors borne → ignorée, le vote reprend la main.
+        res = reconcile([_obs("bpm", 900, "manual"), _obs("bpm", 120, "deezer")])
+        assert res["bpm"].value == 120
+        assert res["bpm"].source == "deezer"
+
+    def test_manual_key_mode_bat_une_paire_complete(self):
+        # reccobeats fournit une paire complète, mais la saisie manuelle prime.
+        res = reconcile(
+            [
+                _obs("key", 5, "reccobeats"),
+                _obs("mode", 1, "reccobeats"),
+                _obs("key", 8, "manual"),
+                _obs("mode", 0, "manual"),
+            ]
+        )
+        assert res["key"].value == 8
+        assert res["key"].source == "manual"
+        assert res["mode"].value == 0
+        assert res["mode"].source == "manual"
+
+    def test_manual_key_mode_seuls_emettent(self):
+        # Manuel = paire complète à lui seul → verdict même sans autre source.
+        res = reconcile([_obs("key", 2, "manual"), _obs("mode", 1, "manual")])
+        assert res["key"].value == 2
+        assert res["mode"].value == 1
+
+
 class TestReconcileDefault:
     def test_meilleure_confiance_gagne(self):
         res = reconcile(

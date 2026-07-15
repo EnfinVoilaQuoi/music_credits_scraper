@@ -29,6 +29,21 @@ logger = get_logger(__name__)
 # Champs de la paire audio traitée comme une unité (cf. docstring).
 KEY_MODE_FIELDS = ("key", "mode")
 
+# Source d'une correction/mesure HUMAINE explicite (saisie GUI ✏️). Elle
+# court-circuite le vote (bpm ET paire key/mode) : une valeur posée à la main
+# gagne TOUJOURS, sinon le vote inter-runs la réécraserait à la lecture — le bug
+# corrigé en tête de phase E7 (une saisie manuelle disparaissait au rechargement
+# de l'artiste, le mapper E6 réconciliant les observations concurrentes).
+MANUAL_SOURCE = "manual"
+
+
+def _manual_obs(observations: list):
+    """Première observation `source='manual'` d'une liste, ou None."""
+    for obs in observations:
+        if obs.source == MANUAL_SOURCE:
+            return obs
+    return None
+
 
 @dataclass(frozen=True)
 class Resolution:
@@ -65,7 +80,18 @@ def _best(observations: list) -> Any:
 
 
 def _reconcile_bpm(observations: list) -> Resolution | None:
-    """Vote BPM sur les observations `bpm` (sémantique `reconcile_bpm` inchangée)."""
+    """Vote BPM sur les observations `bpm` (sémantique `reconcile_bpm` inchangée).
+
+    Une observation `source='manual'` court-circuite le vote : sa valeur est
+    retenue VERBATIM (aucun départage demi/double), une correction humaine
+    primant sur toute mesure automatique. `alt=None` (pas d'autre octave posée
+    à la main), `confidence` = celle de l'observation (None en pratique).
+    """
+    manual = _manual_obs(observations)
+    if manual is not None:
+        value = sanitize_bpm(manual.value)
+        if value is not None:
+            return Resolution("bpm", value, MANUAL_SOURCE, manual.confidence, alt=None)
     candidates = []
     for obs in observations:
         value = sanitize_bpm(obs.value)
@@ -87,22 +113,36 @@ def _reconcile_key_mode(key_obs: list, mode_obs: list) -> dict[str, Resolution]:
     triple écriture (table `observations`) et rejoint le vote d'un run ultérieur
     (le moteur réconcilie l'union des observations persistées + fraîches). Le
     jour où une autre source fournit la moitié manquante, la paire se complète.
+
+    Une observation `source='manual'` sur key et/ou mode PRIME (posée par-dessus
+    l'appariement normal, champ par champ) : une tonalité saisie à la main gagne
+    toujours. La saisie GUI pose la paire complète, mais chaque champ reste
+    indépendant ici — l'override d'un seul champ n'efface pas l'autre verdict.
     """
+    resolutions: dict[str, Resolution] = {}
+
+    # Appariement normal : SEULE une source complète (key + mode) émet un verdict.
     key_by_source = {o.source: o for o in key_obs}
     mode_by_source = {o.source: o for o in mode_obs}
     complete = key_by_source.keys() & mode_by_source.keys()
-    if not complete:
-        return {}
+    if complete:
+        # Départage : confiance (key) puis fiabilité de source.
+        winner = max(
+            complete,
+            key=lambda s: (_confidence_key(key_by_source[s].confidence), _source_rank(s)),
+        )
+        resolutions["key"] = _as_resolution("key", key_by_source[winner])
+        resolutions["mode"] = _as_resolution("mode", mode_by_source[winner])
 
-    # Départage entre sources complètes : confiance (key) puis fiabilité de source.
-    winner = max(
-        complete,
-        key=lambda s: (_confidence_key(key_by_source[s].confidence), _source_rank(s)),
-    )
-    return {
-        "key": _as_resolution("key", key_by_source[winner]),
-        "mode": _as_resolution("mode", mode_by_source[winner]),
-    }
+    # Court-circuit manuel : prime sur l'appariement, champ par champ.
+    manual_key = _manual_obs(key_obs)
+    if manual_key is not None:
+        resolutions["key"] = _as_resolution("key", manual_key)
+    manual_mode = _manual_obs(mode_obs)
+    if manual_mode is not None:
+        resolutions["mode"] = _as_resolution("mode", manual_mode)
+
+    return resolutions
 
 
 def _as_resolution(field: str, obs) -> Resolution:

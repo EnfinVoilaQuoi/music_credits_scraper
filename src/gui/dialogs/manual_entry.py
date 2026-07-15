@@ -1,9 +1,11 @@
 """Dialogues de saisie manuelle par morceau (BPM/key, lien YouTube, renommage, BPM Finder local)"""
 
+from datetime import datetime
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from src.enrichment.observation import Observation
 from src.gui import helpers
 from src.gui.workers.lifecycle import start_worker
 from src.utils.logger import get_logger
@@ -79,6 +81,11 @@ def manual_audio_entry(app, index: int):
         try:
             track.bpm = int(round(float(bpm_str.replace(",", "."))))
             track.bpm_source = "manual"
+            # Observation `manual` : court-circuite le vote à la relecture (E7a),
+            # sinon la réconciliation E6 réécraserait la valeur saisie.
+            track.observations.append(
+                Observation(field="bpm", value=track.bpm, source="manual", seen_at=datetime.now())
+            )
             changed.append(f"BPM = {track.bpm}")
         except ValueError:
             messagebox.showerror("BPM manuel", f"BPM invalide : {bpm_str!r}")
@@ -105,6 +112,16 @@ def manual_audio_entry(app, index: int):
         track.mode = parse_mode(tokens[-1])
         track.musical_key = canonical
         track.key_mode_source = "manual"
+        # Paire key/mode `manual` : court-circuite l'appariement à la relecture (E7a).
+        _now = datetime.now()
+        if track.key is not None:
+            track.observations.append(
+                Observation(field="key", value=track.key, source="manual", seen_at=_now)
+            )
+        if track.mode is not None:
+            track.observations.append(
+                Observation(field="mode", value=track.mode, source="manual", seen_at=_now)
+            )
         changed.append(f"Tonalité = {canonical}")
 
     duration_str = (duration_str or "").strip()
@@ -285,9 +302,15 @@ def bpmfinder_local_file(app, index: int):
                 )
                 return
             applied = []
+            _now = datetime.now()
             if not track.bpm and res.get("bpm"):
                 track.bpm = res["bpm"]
                 track.bpm_source = "bpmfinder"
+                # Observation `bpmfinder` : participe au vote à la relecture (E7a),
+                # sinon la mesure disparaîtrait sous la réconciliation E6.
+                track.observations.append(
+                    Observation(field="bpm", value=track.bpm, source="bpmfinder", seen_at=_now)
+                )
                 applied.append(f"BPM={res['bpm']}")
             if (
                 (getattr(track, "key", None) is None or getattr(track, "mode", None) is None)
@@ -300,6 +323,12 @@ def bpmfinder_local_file(app, index: int):
                 track.mode = res["mode"]
                 track.musical_key = key_mode_to_french(res["key"], res["mode"])
                 track.key_mode_source = "bpmfinder"
+                track.observations.append(
+                    Observation(field="key", value=track.key, source="bpmfinder", seen_at=_now)
+                )
+                track.observations.append(
+                    Observation(field="mode", value=track.mode, source="bpmfinder", seen_at=_now)
+                )
                 applied.append(f"Tonalité={track.musical_key}")
             if applied:
                 app.data_manager.save_track(track)

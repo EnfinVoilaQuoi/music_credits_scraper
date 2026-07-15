@@ -5,6 +5,7 @@ changement de logique. API gratuite/rapide : appelée systématiquement pour
 fournir un 2ᵉ vote BPM (§8.3). Backlink getsongbpm.com obligatoire côté client.
 """
 
+from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
@@ -101,6 +102,12 @@ class GetSongBpmProvider:
                     track.bpm = sbpm
                     logger.info(f"GetSongBPM: ✅ BPM: {sbpm}")
                     updated = True
+
+            # Observation key/mode PAR SOURCE (normalisée) — émise dès que la
+            # source a mesuré, indépendamment du last-writer legacy (E5c-2b).
+            ctx.observations.extend(
+                key_mode_observations("getsongbpm", key=song_data.key, mode=song_data.mode)
+            )
 
             # Key (seulement si pas déjà présent ou force_update)
             if song_data.key and (force_update or not track.key):

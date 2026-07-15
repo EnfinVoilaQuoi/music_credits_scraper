@@ -413,12 +413,11 @@ class DataEnricher:
         if clear_on_failure and force_update:
             self._clear_after_total_failure(track, results, initial_bpm)
 
-        # Observations PAR SOURCE du run (E5c-2a) → `save_track` les persiste dans
-        # SA transaction (moitié « persistance » de la triple écriture). Lu après
-        # un éventuel nettoyage = état final. Le ballot pilote ENCORE les colonnes
-        # legacy (comportement constant) ; la table `observations` est write-only
-        # jusqu'à E6, donc cette écriture est sans risque runtime.
-        track.observations = self._collect_run_observations(track, bpm_candidates)
+        # Observations PAR SOURCE du run → `save_track` les persiste dans SA
+        # transaction (moitié « persistance » de la triple écriture). Le ballot
+        # pilote ENCORE les colonnes legacy (comportement constant) ; la table
+        # `observations` est write-only jusqu'à E6, donc sans risque runtime.
+        track.observations = self._collect_run_observations(bpm_candidates, ctx.observations)
 
         # ========================================
         # RÉSUMÉ FINAL
@@ -563,31 +562,23 @@ class DataEnricher:
             logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
             results["cleaned"] = True
 
-    def _collect_run_observations(self, track, bpm_candidates):
-        """Observations PAR SOURCE de ce run (phase E5c-2a).
+    def _collect_run_observations(self, bpm_candidates, key_mode_observations):
+        """Observations PAR SOURCE de ce run (phase E5c-2b-i).
 
         - **BPM** : une observation par source ayant voté (candidats bruts du
-          scrutin, avant réconciliation). Cohabite sans dommage avec la ligne
-          backfill « source combinée » (`reccobeats+songbpm`) — table write-only
-          jusqu'à E6, nettoyage des lignes combinées en E5c-2b (migration).
-        - **key/mode** : miroir des colonnes legacy (source = `key_mode_source`),
-          une observation par champ non nul. La normalisation songbpm (bug WIP
-          `mode="minor"`) et la bascule reconcile→legacy arrivent en E5c-2b.
+          scrutin, avant réconciliation ; `confidence` None → le moteur la
+          recalcule au vote). Cohabite sans dommage avec la ligne backfill
+          « source combinée » (`reccobeats+songbpm`) — table write-only jusqu'à
+          E6, nettoyage des lignes combinées en E5c-2b-ii (migration).
+        - **key/mode** : observations PAR SOURCE normalisées, émises par les
+          providers dans `ctx.observations` (chaque source qui a mesuré, pas
+          seulement le last-writer legacy).
 
         Sans effet de bord : renvoie la liste, l'orchestrateur la pose sur
-        `track.observations` (drainé par `save_track`). `confidence` laissée à
-        None sur les observations BPM par source (le moteur la recalcule au vote).
+        `track.observations` (drainé par `save_track`).
         """
         from src.enrichment.observation import Observation
 
         observations = [Observation("bpm", value, source) for source, value in bpm_candidates]
-
-        # key/mode : attributs dynamiques du mapper → getattr requis
-        key_mode_source = getattr(track, "key_mode_source", None)
-        if key_mode_source:
-            if getattr(track, "key", None) is not None:
-                observations.append(Observation("key", track.key, key_mode_source))
-            if getattr(track, "mode", None) is not None:
-                observations.append(Observation("mode", track.mode, key_mode_source))
-
+        observations.extend(key_mode_observations)
         return observations

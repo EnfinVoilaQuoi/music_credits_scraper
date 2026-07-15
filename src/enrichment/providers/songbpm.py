@@ -6,6 +6,7 @@ sera remplacé par asyncio.timeout en phase F. Le BPM alimente le scrutin (§8.3
 le Spotify ID trouvé est validé par la fonction d'unicité fournie via le contexte.
 """
 
+from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
@@ -171,6 +172,13 @@ class SongBpmProvider:
             # Key et Mode
             key_value = track_data.get("key")
             mode_value = track_data.get("mode")
+
+            # Observation key/mode PAR SOURCE (normalisée : "minor"→0, lettre→pc)
+            # — indépendante du last-writer legacy, corrige le bug WIP mode="minor"
+            # côté observations (la colonne legacy suivra en E5c-2b-ii).
+            ctx.observations.extend(
+                key_mode_observations("songbpm", key=key_value, mode=mode_value)
+            )
 
             if key_value and mode_value:
                 if force_update or not hasattr(track, "key") or not track.key:

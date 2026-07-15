@@ -477,10 +477,19 @@ class UltratopUpdater:
         else:
             metadata = {}
 
-        metadata["last_update"] = datetime.now().isoformat()
+        now = datetime.now().isoformat()
+        metadata["last_update"] = now
         metadata["total_records"] = len(updated_db)
         metadata["new_records_added"] = new_count
         metadata["unique_artists"] = updated_db["artist"].nunique()
+        # Fraîcheur par source (uniforme avec SNEP/RIAA) : BRMA = scrape global
+        # d'Ultratop, donc une seule source logique « GLOBAL ». Permet à
+        # cert_source.read_freshness de distinguer MàJ globale / récup artiste.
+        updates = metadata.get("updates") or {}
+        updates["GLOBAL"] = now
+        metadata["updates"] = updates
+        metadata["last_source"] = "GLOBAL"
+        metadata["count"] = len(updated_db)
 
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)

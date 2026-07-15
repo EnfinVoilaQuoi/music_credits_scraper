@@ -219,6 +219,8 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     if observations:
         from src.enrichment.reconcile import apply_resolutions, reconcile
 
-        apply_resolutions(track, reconcile(observations))
+        # track.duration posé plus haut (l.135) : alimente la stratégie
+        # lyrics_synced (départage par durée réelle dans compare_synced).
+        apply_resolutions(track, reconcile(observations, track_duration=track.duration))
 
     return track

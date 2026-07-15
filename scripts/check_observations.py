@@ -1,9 +1,19 @@
-"""Contrôle READ-ONLY de la cohérence de la table `observations` (phase E4).
+"""Contrôle READ-ONLY de la cohérence de la table `observations` (phases E4-E5).
 
-Vérifie que le backfill (et, plus tard, la triple écriture E5) respecte
-l'invariant : une observation `bpm` par `bpm_source` non nul, une `key`/`mode`
-par champ non nul dont `key_mode_source` est renseigné — et aucune observation
-orpheline (track_id inexistant).
+Depuis E5c-2a, la triple écriture émet des observations PAR SOURCE depuis le vrai
+flux d'enrichissement (une ligne `bpm` par source ayant voté), ce qui rompt
+l'invariant strict « 1 observation par colonne legacy » de l'ère backfill (E4).
+La table est aussi MIXTE transitoirement : lignes backfill « source combinée »
+(`reccobeats+songbpm`) + lignes par source — inoffensif, la table est write-only
+jusqu'à E6, et les lignes combinées seront nettoyées en E5c-2b.
+
+Le contrôle passe donc à un invariant ROBUSTE, valable quel que soit le style de
+source :
+  1. aucune observation orpheline (track_id inexistant) ;
+  2. aucune observation sur un champ inconnu ;
+  3. `obs ⇒ colonne legacy présente` : tout morceau porteur d'une observation
+     `bpm`/`key`/`mode` a la colonne legacy correspondante non nulle (la triple
+     écriture pose les deux ensemble, dans une seule transaction).
 
     python scripts/check_observations.py            # base réelle (config)
     python scripts/check_observations.py --db X.db  # une autre base (copie)
@@ -22,13 +32,9 @@ if "pytest" not in sys.modules:
 
 from src.config import DATABASE_URL
 
-# Invariant par champ scalaire E4 : (SQL de comptage attendu depuis `tracks`).
-# key/mode partagent `key_mode_source` mais comptent par valeur non nulle.
-_EXPECTED = {
-    "bpm": "SELECT COUNT(*) FROM tracks WHERE bpm_source IS NOT NULL AND bpm IS NOT NULL",
-    "key": 'SELECT COUNT(*) FROM tracks WHERE key_mode_source IS NOT NULL AND "key" IS NOT NULL',
-    "mode": 'SELECT COUNT(*) FROM tracks WHERE key_mode_source IS NOT NULL AND "mode" IS NOT NULL',
-}
+# Champs scalaires attendus dans `observations` et leur colonne legacy « miroir »
+# (le nom de colonne est cité verbatim : `key`/`mode` sont sensibles au dialecte).
+_KNOWN_FIELDS = {"bpm": "bpm", "key": '"key"', "mode": '"mode"'}
 
 
 def check(db_path: str) -> int:
@@ -42,18 +48,8 @@ def check(db_path: str) -> int:
             return 1
 
         ok = True
-        for field, expected_sql in _EXPECTED.items():
-            got = conn.execute(
-                "SELECT COUNT(*) FROM observations WHERE field = ?", (field,)
-            ).fetchone()[0]
-            expected = conn.execute(expected_sql).fetchone()[0]
-            status = "✅" if got == expected else "❌"
-            if got != expected:
-                ok = False
-            print(f"  {status} {field:5} : {got} observation(s) / {expected} attendue(s)")
 
-        # Observations orphelines (track_id sans morceau) — la FK n'est pas
-        # imposée (PRAGMA foreign_keys désactivé), donc on vérifie à la main.
+        # (1) Orphelines : track_id sans morceau (FK non imposée, PRAGMA off).
         orphans = conn.execute(
             "SELECT COUNT(*) FROM observations o "
             "WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = o.track_id)"
@@ -63,6 +59,31 @@ def check(db_path: str) -> int:
             print(f"  ❌ {orphans} observation(s) orpheline(s) (track_id inexistant)")
         else:
             print("  ✅ aucune observation orpheline")
+
+        # (2) Champs inconnus.
+        placeholders = ",".join("?" * len(_KNOWN_FIELDS))
+        unknown = conn.execute(
+            f"SELECT DISTINCT field FROM observations WHERE field NOT IN ({placeholders})",  # noqa: S608
+            tuple(_KNOWN_FIELDS),
+        ).fetchall()
+        if unknown:
+            ok = False
+            print(f"  ❌ champ(s) inconnu(s) : {', '.join(r[0] for r in unknown)}")
+        else:
+            print("  ✅ tous les champs sont connus")
+
+        # (3) obs ⇒ colonne legacy présente (triple écriture cohérente).
+        for field, column in _KNOWN_FIELDS.items():
+            dangling = conn.execute(
+                f"SELECT COUNT(*) FROM observations o "  # noqa: S608 (colonne d'une whitelist)
+                f"JOIN tracks t ON t.id = o.track_id "
+                f"WHERE o.field = ? AND t.{column} IS NULL",
+                (field,),
+            ).fetchone()[0]
+            status = "✅" if dangling == 0 else "❌"
+            if dangling:
+                ok = False
+            print(f"  {status} {field:5} : {dangling} observation(s) sans colonne legacy")
 
         total = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
         print(f"\n{'✅ Cohérent' if ok else '❌ Incohérent'} — {total} observation(s) au total.")

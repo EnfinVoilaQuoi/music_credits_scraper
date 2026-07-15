@@ -57,6 +57,39 @@ def _parse_views(text: str) -> int | None:
     return int(cleaned) if cleaned else None
 
 
+def _channel_from_votes(votes, names: dict | None = None) -> str | None:
+    """Élit le canal artiste par PLURALITÉ NETTE du vote sur les vidéos.
+
+    `votes` = mapping {channelId: nb_voix} (typiquement un `Counter`).
+    Retourne le canal gagnant, ou `None` si le vote n'est pas concluant.
+
+    Règle : ≥ 2 voix ET strictement devant le second (pluralité nette).
+    Auparavant on exigeait la majorité absolue (count > total/2) ; sur un
+    artiste niche+homonyme dont les morceaux comptent beaucoup de featurings,
+    les voix se dispersent → le bon canal (ex. 3/8) était jeté puis le
+    fallback-par-nom prenait le mauvais canal. Les videoIds votants sont déjà
+    filtrés à confiance ≥ 0.8, donc un leader qui devance strictement le second
+    est plus fiable que la recherche par nom. L'égalité en tête
+    (count == runner_up) reste rejetée : l'ordre y est arbitraire.
+    """
+    names = names or {}
+    ranked = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)
+    if not ranked:
+        return None
+    best, count = ranked[0]
+    runner_up = ranked[1][1] if len(ranked) > 1 else 0
+    total = sum(votes.values())
+    if count >= 2 and count > runner_up:
+        lead = "majorité" if count > total / 2 else "pluralité"
+        logger.info(
+            f"🗳️ Canal déduit des vidéos YT: '{names.get(best, '')}' ({best}) "
+            f"— {count}/{total} voix ({lead})"
+        )
+        return best
+    logger.info(f"🗳️ Vote canal non concluant (égalité en tête): {dict(votes)}")
+    return None
+
+
 # ── Classe principale ─────────────────────────────────────────────────────────
 
 
@@ -177,18 +210,7 @@ class YTMusicAPI:
                     votes[cid] += 1
                     names[cid] = snip.get("channelTitle", "")
 
-            if not votes:
-                return None
-            best, count = votes.most_common(1)[0]
-            # Majorité stricte exigée (≥ 2 voix et > moitié des votes)
-            if count >= 2 and count > sum(votes.values()) / 2:
-                logger.info(
-                    f"🗳️ Canal déduit des vidéos YT: '{names.get(best)}' ({best}) "
-                    f"— {count}/{sum(votes.values())} voix"
-                )
-                return best
-            logger.info(f"🗳️ Vote canal non concluant: {dict(votes)}")
-            return None
+            return _channel_from_votes(votes, names)
         except Exception as e:
             logger.warning(f"infer_channel_from_videos échec: {e}")
             return None

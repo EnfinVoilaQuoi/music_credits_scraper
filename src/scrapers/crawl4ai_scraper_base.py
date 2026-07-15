@@ -263,8 +263,10 @@ class CrawlAIScraperBase:
                     # (infini) → AUCUN timer, la fenêtre reste tant que tu n'as pas fini la
                     # boucle de challenge (ou que tu fermes l'onglet toi-même).
                     sel_timeout = 0 if (not headless and not cdp_mode) else wait_timeout
+                    content_found = False
                     try:
                         await page.wait_for_selector(sel, timeout=sel_timeout)
+                        content_found = True
                     except Exception:
                         pass  # pas trouvé : on récupère quand même le HTML pour diagnostic
                     # JS d'expansion (crédits) sur la vraie page
@@ -284,7 +286,9 @@ class CrawlAIScraperBase:
                     else:
                         await ctx.close()
 
-            blocked = self._looks_blocked(None, html)
+            # Si la vraie page a chargé (conteneur trouvé), on n'est PAS bloqué même
+            # si des scripts Cloudflare résiduels traînent dans le HTML.
+            blocked = (not content_found) and self._looks_blocked(None, html)
             return None, html, blocked
         except Exception as e:
             logger.error(f"{self.__class__.__name__}: patchright fetch {url}: {e}")
@@ -297,13 +301,18 @@ class CrawlAIScraperBase:
         if any(k in err for k in ("cloudflare", "anti-bot", "challenge", "403", "forbidden")):
             return True
         h = (html or "").lower()
+        # NE PAS tester "challenge-platform"/"cf-chl" nus : Cloudflare injecte le
+        # beacon /cdn-cgi/challenge-platform/... sur les pages DÉJÀ PASSÉES → faux
+        # positif systématique (fenêtre VISIBLE à chaque page). On ne matche que
+        # l'interstitiel réel (« Just a moment », objet de défi _cf_chl_opt, form).
         return any(
             k in h
             for k in (
                 "just a moment",
-                "challenge-platform",
-                "cf-chl",
                 "checking your browser",
+                "checking if the site connection is secure",
+                "_cf_chl_opt",
+                'id="challenge-form"',
             )
         )
 

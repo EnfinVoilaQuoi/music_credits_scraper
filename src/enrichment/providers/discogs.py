@@ -36,7 +36,10 @@ class DiscogsProvider:
         logger.info(f"💿 Appel de Discogs API pour '{track.title}'")
         return None
 
-    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
+    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool | str:
+        # enrich_track_data peut renvoyer "not_needed" (release matchée mais
+        # rien de nouveau) : transmis tel quel à l'orchestrateur, qui le traite
+        # comme un skip (pas d'échec, exclu du calcul `all_failed`).
         client = self._resource.get()
         if client is None:
             return False

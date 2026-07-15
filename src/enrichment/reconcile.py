@@ -118,8 +118,11 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     pas touché (le COALESCE de save_track préserve l'existant). key/mode
     arrivent normalisés du moteur (pitch class / 0-1) → corrige `mode="minor"`.
     """
+    from src.utils.music_theory import key_mode_to_french, note_to_pitch_class, parse_mode
+
     bpm = resolutions.get("bpm")
     if bpm is not None:
+        # bpm.value/alt déjà sanitizés (int) par la stratégie bpm du moteur.
         track.bpm = bpm.value
         track.bpm_alt = bpm.alt
         track.bpm_source = bpm.source
@@ -128,19 +131,22 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
 
     key = resolutions.get("key")
     mode = resolutions.get("mode")
+    # La valeur d'observation peut être int (émise fraîche) OU str TEXT (relue de
+    # la DB en E6) → coercition canonique (mêmes normaliseurs que audio_normalize
+    # et le mapper). None si illisible → champ non piloté.
+    key_pc = note_to_pitch_class(key.value) if key is not None else None
+    mode_val = parse_mode(mode.value) if mode is not None else None
     if key is not None:
-        track.key = key.value
+        track.key = key_pc
         track.key_mode_source = key.source
     if mode is not None:
-        track.mode = mode.value
+        track.mode = mode_val
         track.key_mode_source = mode.source
     # key/mode forment une paire (le moteur les rend ensemble ou pas du tout) :
     # musical_key se recalcule quand les deux sont là.
-    if key is not None and mode is not None:
+    if key_pc is not None and mode_val is not None:
         try:
-            from src.utils.music_theory import key_mode_to_french
-
-            track.musical_key = key_mode_to_french(key.value, mode.value)
+            track.musical_key = key_mode_to_french(key_pc, mode_val)
         except Exception as e:
             logger.warning(f"⚠️ apply_resolutions musical_key: {e}")
 

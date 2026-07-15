@@ -329,11 +329,17 @@ class TrackRepository:
                 )
                 logger.info(f"📦 {len(rows)} lignes récupérées")
 
+                # E6 : observations de TOUT l'artiste en 1 requête (pas par track),
+                # groupées par track_id → passées au mapper qui les réconcilie.
+                observations_by_track = self._observations_by_artist(conn, artist_id)
+
                 # Création des objets Track via le mapper (coercitions centralisées ;
                 # `row` est une RowMapping, indexable par nom comme sqlite3.Row).
                 for i, row in enumerate(rows):
                     try:
-                        track = track_from_row(row, artist)
+                        track = track_from_row(
+                            row, artist, observations_by_track.get(row["id"], [])
+                        )
                         if track is None:
                             continue
 
@@ -419,6 +425,34 @@ class TrackRepository:
     # seule transaction `engine.begin()` (l'invariant du contrôle E4 doit
     # survivre à un crash : observations + colonnes legacy tombent ensemble).
     # ──────────────────────────────────────────────────────────────────────
+
+    def _observations_by_artist(self, conn, artist_id: int) -> dict[int, list[Observation]]:
+        """Observations de tous les morceaux d'un artiste, groupées par track_id
+        (1 requête, pour la bascule lecture E6). `value`/`seen_at` en brut."""
+        rows = (
+            conn.execute(
+                text(
+                    "SELECT o.track_id, o.field, o.value, o.source, o.confidence, o.seen_at "
+                    "FROM observations o JOIN tracks t ON t.id = o.track_id "
+                    "WHERE t.artist_id = :aid"
+                ),
+                {"aid": artist_id},
+            )
+            .mappings()
+            .all()
+        )
+        by_track: dict[int, list[Observation]] = {}
+        for r in rows:
+            by_track.setdefault(r["track_id"], []).append(
+                Observation(
+                    field=r["field"],
+                    value=r["value"],
+                    source=r["source"],
+                    confidence=r["confidence"],
+                    seen_at=r["seen_at"],
+                )
+            )
+        return by_track
 
     def get_observations(self, track_id: int, *, conn=None) -> list[Observation]:
         """Observations persistées d'un morceau (`value`/`seen_at` en brut, non coercés)."""

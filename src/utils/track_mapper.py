@@ -74,11 +74,20 @@ def _clean_duration(value, default=None):
         return default
 
 
-def track_from_row(row, artist: Artist) -> Track | None:
+def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     """Construit un Track depuis une ligne `SELECT * FROM tracks` (sqlite3.Row).
 
     Renvoie None si la ligne n'a pas d'id ou de titre exploitable — l'appelant
     passe alors au morceau suivant. Les crédits ne sont PAS chargés ici.
+
+    `observations` (phase E6, bascule lecture) : liste d'`Observation` du morceau.
+    Si fournie, le moteur les réconcilie et PILOTE bpm/bpm_alt/source/confidence
+    + key/mode/key_mode_source/musical_key (via `apply_resolutions`), écrasant les
+    valeurs des colonnes legacy déjà posées ci-dessous. Un champ sans observation
+    n'est pas touché → FALLBACK sur la colonne legacy (la triple écriture les
+    garde en phase ; un morceau jamais réenrichi lit ses colonnes). Réalise le
+    point-2 : l'appariement key/mode inter-runs se fait ici, sur l'union
+    persistée des observations.
     """
     track_id = row["id"]
     title = row["title"]
@@ -203,5 +212,13 @@ def track_from_row(row, artist: Artist) -> Track | None:
             f"{album_certifications_json!r:.100}"
         )
         track.album_certifications = []
+
+    # E6 : les observations pilotent l'audio réconciliable (bpm/key/mode), en
+    # écrasant les colonnes legacy déjà posées ci-dessus. Champ sans observation
+    # = colonne legacy conservée (fallback). Import local (anti-cycle utils↔enrich).
+    if observations:
+        from src.enrichment.reconcile import apply_resolutions, reconcile
+
+        apply_resolutions(track, reconcile(observations))
 
     return track

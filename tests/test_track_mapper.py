@@ -202,3 +202,48 @@ class TestTrackFromRow:
         # key/mode int présents, musical_key absente → recalcul FR
         track = track_from_row(make_row(id=1, title="X", key=7, mode=1), artist)
         assert track.musical_key  # non vide (calculé par music_theory)
+
+
+class TestObservationsOverride:
+    """E6 : les observations réconciliées pilotent bpm/key/mode (fallback legacy)."""
+
+    def _obs(self, field, value, source, confidence=None):
+        from src.enrichment.observation import Observation
+
+        return Observation(field=field, value=value, source=source, confidence=confidence)
+
+    def test_observations_pilotent_bpm(self, artist):
+        # Legacy bpm=100 écrasé par le vote des observations (2 sources à 142).
+        row = make_row(id=1, title="X", bpm="100", bpm_source="legacy")
+        obs = [self._obs("bpm", "142", "reccobeats"), self._obs("bpm", "142", "songbpm")]
+        track = track_from_row(row, artist, obs)
+        assert track.bpm == 142
+        assert track.bpm_source == "reccobeats+songbpm"
+        assert track.bpm_confidence == 2
+
+    def test_valeurs_texte_persistees_coercees(self, artist):
+        # value en TEXT (relue de la DB) → int + musical_key recalculée.
+        obs = [
+            self._obs("key", "8", "reccobeats"),
+            self._obs("mode", "0", "reccobeats"),
+            self._obs("key", "8", "songbpm"),
+            self._obs("mode", "0", "songbpm"),
+        ]
+        track = track_from_row(make_row(id=1, title="X"), artist, obs)
+        assert track.key == 8
+        assert track.mode == 0
+        assert track.musical_key == "Sol#/Lab mineur"
+
+    def test_sans_observation_fallback_legacy(self, artist):
+        row = make_row(id=1, title="X", bpm="120", key="7", mode="1")
+        track = track_from_row(row, artist, [])  # aucune observation
+        assert track.bpm == 120
+        assert track.key == 7
+
+    def test_bpm_observe_key_mode_en_fallback(self, artist):
+        # bpm observé (piloté) ; key/mode SANS observation → colonnes legacy gardées.
+        row = make_row(id=1, title="X", bpm="100", key="5", mode="1")
+        track = track_from_row(row, artist, [self._obs("bpm", "140", "deezer")])
+        assert track.bpm == 140  # observé
+        assert track.key == 5  # fallback legacy
+        assert track.mode == 1

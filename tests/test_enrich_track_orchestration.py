@@ -331,3 +331,54 @@ def test_source_indisponible_non_appelee():
 
     assert calls == []
     assert results == {}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Observations du run (E5c-2a) : collecte PAR SOURCE dans track.observations
+# (le ballot pilote encore les colonnes legacy — comportement constant)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_observations_du_run_par_source():
+    def _vote(name, value):
+        def inner(track, ctx):
+            ctx.bpm_ballot.add(name, value)
+            return True
+
+        return inner
+
+    enricher, fakes, _ = _enricher()
+    fakes["reccobeats"]._on_enrich = _vote("reccobeats", 111)
+    fakes["songbpm"]._on_enrich = _vote("songbpm", 135)
+
+    track = _track(key=5, mode=1, key_mode_source="reccobeats")
+    enricher.enrich_track(track)
+
+    obs = {(o.field, o.source): o for o in track.observations}
+    # BPM : une observation par source ayant voté (valeurs BRUTES, non réconciliées)
+    assert obs[("bpm", "reccobeats")].value == 111
+    assert obs[("bpm", "songbpm")].value == 135
+    # key/mode : miroir des colonnes, source = key_mode_source
+    assert obs[("key", "reccobeats")].value == 5
+    assert obs[("mode", "reccobeats")].value == 1
+
+
+def test_observations_sans_key_mode_source():
+    def _vote(track, ctx):
+        ctx.bpm_ballot.add("deezer", 120)
+        return True
+
+    enricher, fakes, _ = _enricher()
+    fakes["deezer"]._on_enrich = _vote
+
+    track = _track()  # pas de key_mode_source → aucune observation key/mode
+    enricher.enrich_track(track)
+
+    assert {o.field for o in track.observations} == {"bpm"}
+
+
+def test_observations_vides_si_aucun_candidat():
+    enricher, _, _ = _enricher_tout_en_echec()
+    track = _track()
+    enricher.enrich_track(track)
+    assert track.observations == []

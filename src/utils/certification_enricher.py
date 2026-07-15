@@ -1,13 +1,113 @@
-"""Enrichissement des données avec les certifications"""
+"""Enrichissement des données avec les certifications.
+
+Cœur : `apply_certifications(artist, tracks, matcher)` (E7g) — rematche chaque
+morceau/album contre les CSV clean (matcher en mémoire, offline, rapide) et pose
+`track.certifications`/`album_certifications`. La MATÉRIALISATION passe par des
+objets typés `Certification` (`from_match`) puis se re-sérialise au format
+colonne (`to_column_dict`), byte-compatible avec `cert_matcher._format` (contrat
+mapper/GUI inchangé). Ne PERSISTE pas : l'appelant (worker retrieval, E7h) save.
+
+`CertificationEnricher` (classe historique) subsiste pour les scripts one-off et
+délègue son `enrich_tracks` à `apply_certifications`.
+"""
 
 from datetime import datetime
 from typing import Any
 
 from src.models import Artist, Track
+from src.models.certification import Certification
 from src.utils.cert_matcher import get_cert_matcher
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Substitutions Unicode courantes des titres avant le matching (apostrophes
+# courbes, ligatures œ) — alignées sur l'historique de enrich_tracks.
+_TITLE_SUBS = {"’": "'", "‘": "'", "œ": "œ", "Œ": "Œ"}
+
+
+def _normalize_title(title: str) -> str:
+    for bad, good in _TITLE_SUBS.items():
+        title = title.replace(bad, good)
+    return title
+
+
+def _extra_artists(track: Track, artist_name: str) -> list[str]:
+    """Artistes candidats supplémentaires : si NOTRE artiste est secondaire/feat,
+    la certif peut être déposée sous l'artiste PRINCIPAL → on le passe pour la
+    rattacher quand même."""
+    extra: list[str] = []
+    pan = getattr(track, "primary_artist_name", None)
+    if pan and pan != artist_name:
+        extra.append(pan)
+    fa = getattr(track, "featured_artists", None)
+    if isinstance(fa, str) and fa:
+        extra.append(fa)
+    elif isinstance(fa, (list, tuple)):
+        extra.extend(str(x) for x in fa if x)
+    return extra
+
+
+def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
+    """Pose `track.certifications`/`album_certifications` depuis le matcher unifié.
+
+    Matérialise chaque correspondance en `Certification` (frontière typée) puis la
+    re-sérialise au format colonne. Renvoie le nombre de morceaux portant au moins
+    une certification. Offline (matcher en mémoire), NE PERSISTE PAS.
+    """
+    if not tracks or not artist:
+        return 0
+
+    enriched = 0
+    album_cache: dict[str, list[dict]] = {}  # évite de re-chercher le même album
+
+    for track in tracks:
+        try:
+            title = _normalize_title(track.title)
+            extra = _extra_artists(track, artist.name)
+
+            matches = matcher.get_track_certifications(artist.name, title, extra_artists=extra)
+            track.certifications = [Certification.from_match(m).to_column_dict() for m in matches]
+
+            if track.certifications:
+                highest = track.certifications[0]  # déjà trié par priorité
+                track.has_certification = True
+                track.certification_level = highest.get("certification", "")
+                track.certification_date = highest.get("certification_date", "")
+                track.certification_category = highest.get("category", "")
+                track.certification_publisher = highest.get("publisher", "")
+                track.certification_details = highest
+                enriched += 1
+            else:
+                track.has_certification = False
+                track.certification_level = None
+                track.certification_date = None
+                track.certification_category = None
+                track.certification_publisher = None
+                track.certification_details = None
+
+            if track.album:
+                if track.album not in album_cache:
+                    album_cache[track.album] = matcher.get_album_certifications(
+                        artist.name, track.album
+                    )
+                track.album_certifications = [
+                    Certification.from_match(m).to_column_dict() for m in album_cache[track.album]
+                ]
+            else:
+                track.album_certifications = []
+        except Exception as e:
+            logger.error(f"Erreur enrichissement {track.title}: {e}")
+            track.certifications = []
+            track.album_certifications = []
+            track.has_certification = False
+
+    if enriched:
+        logger.info(f"🏆 {enriched}/{len(tracks)} morceaux enrichis avec certifications")
+    albums_with_certs = sum(1 for t in tracks if t.album_certifications)
+    if albums_with_certs:
+        logger.info(f"💿 {albums_with_certs}/{len(tracks)} morceaux ont des certifs d'album")
+    return enriched
 
 
 class CertificationEnricher:
@@ -55,106 +155,13 @@ class CertificationEnricher:
         return artist
 
     def enrich_tracks(self, artist: Artist, tracks: list[Track]) -> list[Track]:
-        """Enrichit une liste de morceaux avec leurs certifications - VERSION AMÉLIORÉE"""
-        if not tracks or not artist:
-            return tracks
+        """Enrichit une liste de morceaux avec leurs certifications.
 
-        # Référence fraîche au matcher : prend en compte un reset_cert_matcher()
-        # après une récup de certifs (sinon on garderait l'ancien snapshot).
+        Délègue à `apply_certifications` (E7g) — logique mutualisée avec le
+        câblage runtime. Rafraîchit d'abord le matcher (prend en compte un
+        `reset_cert_matcher()` post-MàJ, sinon on garderait l'ancien snapshot)."""
         self.matcher = get_cert_matcher()
-
-        enriched_count = 0
-        album_cache = {}  # Cache pour éviter de chercher plusieurs fois le même album
-
-        for track in tracks:
-            try:
-                # Normaliser le titre pour la recherche
-                # Remplacer les apostrophes Unicode courbes par des apostrophes standard
-                track_title = track.title
-                track_title = track_title.replace("\u2019", "'")  # ' (RIGHT SINGLE QUOTATION MARK)
-                track_title = track_title.replace("\u2018", "'")  # ' (LEFT SINGLE QUOTATION MARK)
-                track_title = track_title.replace("\u0153", "œ")  # Œ (OE LIGATURE)
-                track_title = track_title.replace("\u0152", "Œ")  # Œ (OE LIGATURE majuscule)
-
-                # Candidats artistes : si notre artiste est secondaire/feat sur ce
-                # morceau, la certif peut être déposée sous l'artiste PRINCIPAL →
-                # on les passe pour la rattacher quand même.
-                extra_artists = []
-                pan = getattr(track, "primary_artist_name", None)
-                if pan and pan != artist.name:
-                    extra_artists.append(pan)
-                fa = getattr(track, "featured_artists", None)
-                if isinstance(fa, str) and fa:
-                    extra_artists.append(fa)
-                elif isinstance(fa, (list, tuple)):
-                    extra_artists.extend(str(x) for x in fa if x)
-
-                # 1. Rechercher TOUTES les certifications du morceau (tous pays)
-                track_certs = self.matcher.get_track_certifications(
-                    artist.name, track_title, extra_artists=extra_artists
-                )
-
-                # Stocker toutes les certifications
-                track.certifications = track_certs if track_certs else []
-
-                # Pour rétrocompatibilité, garder la plus haute certification dans les anciens champs
-                if track_certs:
-                    highest_cert = track_certs[0]  # Déjà triée par priorité
-                    track.has_certification = True
-                    track.certification_level = highest_cert.get("certification", "")
-                    track.certification_date = highest_cert.get("certification_date", "")
-                    track.certification_category = highest_cert.get("category", "")
-                    track.certification_publisher = highest_cert.get("publisher", "")
-                    track.certification_details = highest_cert
-
-                    enriched_count += 1
-                    logger.debug(
-                        f"✅ {len(track_certs)} certification(s) trouvée(s): {track.title} - {track.certification_level}"
-                    )
-                else:
-                    track.has_certification = False
-                    track.certification_level = None
-                    track.certification_date = None
-                    track.certification_category = None
-                    track.certification_publisher = None
-                    track.certification_details = None
-
-                # 2. Rechercher les certifications de l'album associé
-                if track.album:
-                    # Utiliser le cache si disponible
-                    if track.album not in album_cache:
-                        album_certs = self.matcher.get_album_certifications(
-                            artist.name, track.album
-                        )
-                        album_cache[track.album] = album_certs
-                    else:
-                        album_certs = album_cache[track.album]
-
-                    track.album_certifications = album_certs if album_certs else []
-
-                    if album_certs:
-                        logger.debug(
-                            f"✅ {len(album_certs)} certification(s) d'album trouvée(s) pour '{track.album}'"
-                        )
-                else:
-                    track.album_certifications = []
-
-            except Exception as e:
-                logger.error(f"Erreur enrichissement {track.title}: {e}")
-                track.certifications = []
-                track.album_certifications = []
-                track.has_certification = False
-
-        if enriched_count > 0:
-            logger.info(f"🏆 {enriched_count}/{len(tracks)} morceaux enrichis avec certifications")
-
-        # Afficher statistiques sur les albums
-        albums_with_certs = sum(1 for t in tracks if t.album_certifications)
-        if albums_with_certs > 0:
-            logger.info(
-                f"💿 {albums_with_certs}/{len(tracks)} morceaux ont des certifications d'album"
-            )
-
+        apply_certifications(artist, tracks, self.matcher)
         return tracks
 
     def _calculate_artist_stats(self, certifications: list[dict[str, Any]]) -> dict[str, Any]:

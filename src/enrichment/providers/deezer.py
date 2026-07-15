@@ -7,6 +7,7 @@ ReccoBeats (pivot inter-sources, non destructif).
 """
 
 from src.api.deezer_api import DeezerAPI
+from src.enrichment.base import Capability
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
@@ -19,6 +20,7 @@ class DeezerProvider:
     """Enrichissement via l'API Deezer (source `deezer`)."""
 
     name = "deezer"
+    capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     error_result = False
 
     def __init__(self, client: DeezerAPI | None = None):

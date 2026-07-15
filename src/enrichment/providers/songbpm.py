@@ -7,7 +7,7 @@ le Spotify ID trouvé est validé par la fonction d'unicité fournie via le cont
 """
 
 from src.enrichment.audio_normalize import key_mode_observations
-from src.enrichment.base import LazyResource
+from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
@@ -20,6 +20,7 @@ class SongBpmProvider:
     """Enrichissement via le scraper SongBPM (source `songbpm`)."""
 
     name = "songbpm"
+    capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     # None = crash/timeout ≠ False (« pas de données ») : n'entre pas dans le
     # « tout a échoué » qui déclenche le nettoyage de l'orchestrateur.
     error_result = None

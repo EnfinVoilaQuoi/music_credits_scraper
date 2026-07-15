@@ -6,7 +6,7 @@ fournir un 2ᵉ vote BPM (§8.3). Backlink getsongbpm.com obligatoire côté cli
 """
 
 from src.enrichment.audio_normalize import key_mode_observations
-from src.enrichment.base import LazyResource
+from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
@@ -19,6 +19,7 @@ class GetSongBpmProvider:
     """Enrichissement via l'API GetSongBPM (source `getsongbpm`)."""
 
     name = "getsongbpm"
+    capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     error_result = False
 
     def __init__(self, fetcher=None, fetcher_factory=None):

@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     youtube_confidence_threshold: float = 0.85  # seuil auto-sélection
     youtube_persist_confidence: float = 0.90  # seuil pour PERSISTER un lien trouvé par recherche
 
+    # --- Désambiguïsation canal YTM (gate d'identité, update_ytmusic) ---
+    # Un canal inféré/recherché est jugé suspect (→ abort sans écriture) si trop
+    # peu de titres communs avec la base, ou ratio faible SANS album commun.
+    ytm_identity_min_matched: int = 2  # plancher de titres YTM communs avec la base
+    ytm_identity_min_ratio: float = 0.3  # part min des titres YTM retrouvés en base
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, value: object) -> str:
@@ -149,6 +155,10 @@ YOUTUBE_AUTO_SELECT_ALBUM_TRACKS = settings.youtube_auto_select_album_tracks
 YOUTUBE_VERIFY_OFFICIAL_CHANNELS = settings.youtube_verify_official_channels
 YOUTUBE_CONFIDENCE_THRESHOLD = settings.youtube_confidence_threshold
 YOUTUBE_PERSIST_CONFIDENCE = settings.youtube_persist_confidence
+
+# Désambiguïsation canal YTM (gate d'identité)
+YTM_IDENTITY_MIN_MATCHED = settings.ytm_identity_min_matched
+YTM_IDENTITY_MIN_RATIO = settings.ytm_identity_min_ratio
 
 # Chemins dérivés (non configurables par l'environnement)
 DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"

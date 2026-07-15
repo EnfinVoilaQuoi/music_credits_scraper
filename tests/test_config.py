@@ -103,6 +103,8 @@ def test_backward_compat_names_present():
         "YOUTUBE_VERIFY_OFFICIAL_CHANNELS",
         "YOUTUBE_CONFIDENCE_THRESHOLD",
         "YOUTUBE_PERSIST_CONFIDENCE",
+        "YTM_IDENTITY_MIN_MATCHED",
+        "YTM_IDENTITY_MIN_RATIO",
         "BASE_DIR",
         "DATA_DIR",
         "ARTISTS_DIR",
@@ -119,6 +121,20 @@ def test_compat_types_preserved():
     assert isinstance(config.MAX_RETRIES, int)
     assert isinstance(config.THEME, str) and config.THEME in {"dark", "light"}
     assert config.LOG_LEVEL in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
+def test_ytm_identity_thresholds_defaults():
+    s = Settings(_env_file=None)
+    assert s.ytm_identity_min_matched == 2
+    assert s.ytm_identity_min_ratio == 0.3
+
+
+def test_ytm_identity_thresholds_read_from_env(monkeypatch):
+    monkeypatch.setenv("YTM_IDENTITY_MIN_MATCHED", "3")
+    monkeypatch.setenv("YTM_IDENTITY_MIN_RATIO", "0.5")
+    s = Settings(_env_file=None)
+    assert s.ytm_identity_min_matched == 3 and isinstance(s.ytm_identity_min_matched, int)
+    assert s.ytm_identity_min_ratio == 0.5
 
 
 def test_derived_paths():

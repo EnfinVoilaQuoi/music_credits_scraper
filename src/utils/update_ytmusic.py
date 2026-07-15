@@ -11,6 +11,7 @@ import re
 import sys
 
 from src.api.ytmusic_api import YTMusicAPI
+from src.config import YTM_IDENTITY_MIN_MATCHED, YTM_IDENTITY_MIN_RATIO
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -102,8 +103,10 @@ def _infer_channel_from_youtube_links(
 # discographie du canal à la base par TITRES (signal primaire, déjà collectés) +
 # ALBUMS (repêchage/départage). Un canal MANUEL n'est jamais bloqué (warning) ;
 # un canal inféré/recherché suspect → abort sans aucune écriture.
-_IDENTITY_MIN_MATCHED = 2  # plancher absolu de titres communs
-_IDENTITY_MIN_RATIO = 0.3  # part des titres YTM retrouvés en base
+# Seuils configurables via Settings (config.py) : dérivés ici en constantes
+# module (l'alias local reste lu par `_identity_suspect` + monkeypatchable).
+_IDENTITY_MIN_MATCHED = YTM_IDENTITY_MIN_MATCHED  # plancher absolu de titres communs
+_IDENTITY_MIN_RATIO = YTM_IDENTITY_MIN_RATIO  # part des titres YTM retrouvés en base
 
 
 def _channel_identity_report(

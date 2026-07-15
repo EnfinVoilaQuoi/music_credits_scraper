@@ -228,6 +228,14 @@ class TrackRepository:
                     {"track_id": track.id, "error_message": error, "error_time": datetime.now()},
                 )
 
+            # Observations fraîches du run (phase E5) : upsert DANS la même
+            # transaction que les colonnes legacy — la moitié « persistance » de
+            # la triple écriture (E5c-1). Write-through pur : ne pilote PAS encore
+            # les colonnes legacy (bascule reconcile → E5c-2, vote audio). No-op
+            # tant qu'aucun provider `fetch()` ne peuple `track.observations`.
+            if track.id and track.observations:
+                self._upsert_observations(conn, track.id, track.observations)
+
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
                 f"Morceau sauvegardé: {track.title} (ID: {track.id}, "

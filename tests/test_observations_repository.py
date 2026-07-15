@@ -87,6 +87,30 @@ def test_get_sans_observation(data_manager):
     assert data_manager.get_observations(tid) == []
 
 
+def test_save_track_persiste_les_observations_du_run(data_manager):
+    """save_track upsert `track.observations` dans SA transaction (E5c-1)."""
+    artist = _artiste(data_manager)
+    track = Track(title="Avec observations", artist=artist)
+    track.observations = [
+        _obs("bpm", 142, "reccobeats", confidence=2),
+        _obs("key", 5, "getsongbpm"),
+    ]
+
+    tid = data_manager.save_track(track)
+
+    obs = {o.field: o for o in data_manager.get_observations(tid)}
+    assert obs["bpm"].value == "142"
+    assert obs["bpm"].source == "reccobeats"
+    assert obs["key"].value == "5"
+
+
+def test_save_track_sans_observations_est_inoffensif(data_manager):
+    """Flux actuel : `track.observations` vide → aucune écriture d'observation."""
+    artist = _artiste(data_manager)
+    tid = data_manager.save_track(Track(title="Sans observations", artist=artist))
+    assert data_manager.get_observations(tid) == []
+
+
 def test_composition_dans_une_transaction(data_manager):
     """Upsert + lecture au sein d'une même connexion fournie (gabarit triple écriture E5c)."""
     artist = _artiste(data_manager)

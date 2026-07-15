@@ -129,9 +129,60 @@ class Certification:
     # Champs calculés
     threshold_units: int = field(init=False)
 
+    # Frontière colonne JSON (E7g) : payload EXACT du dict `cert_matcher` capturé
+    # à la matérialisation, restitué verbatim par `to_column_dict`. Non typé à
+    # dessein — les valeurs matcher sont des strings arbitraires (niveaux non
+    # bornés, catégories `single`/`album`, dates brutes) qu'un passage par les
+    # enums/datetime perdrait. Le round-trip doit rester byte-compatible.
+    _column: dict[str, Any] = field(default_factory=dict, repr=False)
+
     def __post_init__(self):
         """Calcule les champs dérivés après initialisation"""
         self.threshold_units = self.level.get_threshold(self.country, self.category.value)
+
+    # Clés du format colonne (contrat mapper/GUI = sortie de cert_matcher._format).
+    _COLUMN_KEYS = (
+        "certification",
+        "title",
+        "artist_name",
+        "category",
+        "certification_date",
+        "release_date",
+        "publisher",
+        "detail_url",
+        "country",
+        "body",
+        "flag",
+    )
+
+    @classmethod
+    def from_match(cls, match: dict[str, Any]) -> "Certification":
+        """Matérialise un dict de `cert_matcher` en objet typé (frontière E7g).
+
+        Peuple les champs domaine en best-effort (accès typé côté enricher) ET
+        capture le payload colonne EXACT pour un round-trip fidèle. Ne LÈVE
+        jamais sur une valeur matcher inattendue (niveau hors enum → défaut Or).
+        """
+        cert = cls()
+        cert.artist_name = match.get("artist_name", "") or ""
+        cert.title = match.get("title", "") or ""
+        cert.publisher = match.get("publisher") or None
+        cert.country = match.get("country", "FR") or "FR"
+        cert.certifying_body = match.get("body", "SNEP") or "SNEP"
+        lvl = CertificationLevel.from_string(match.get("certification", "") or "")
+        if lvl is not None:
+            cert.level = lvl
+        cert.category = CertificationCategory.from_string(match.get("category", "") or "")
+        # Payload colonne verbatim (identité du round-trip, cf. golden test).
+        cert._column = {k: match.get(k, "") for k in cls._COLUMN_KEYS}
+        return cert
+
+    def to_column_dict(self) -> dict[str, Any]:
+        """Dict au format colonne JSON, byte-compatible avec `cert_matcher._format`.
+
+        C'est le CONTRAT lu par le mapper et la GUI (`track_details.py`) : la
+        sérialisation reproduit à l'identique le dict d'origine du matcher."""
+        return dict(self._column)
 
     def to_dict(self) -> dict[str, Any]:
         """Convertit la certification en dictionnaire"""

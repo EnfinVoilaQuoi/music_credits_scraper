@@ -148,6 +148,53 @@ def _identity_suspect(report: dict) -> bool:
     return report["ratio"] < _IDENTITY_MIN_RATIO and report["album_overlap"] == 0
 
 
+def _score_candidate_albums(ytm_album_titles, db_norm_albums) -> int:
+    """Nb d'albums YTM dont le titre normalisé figure en colonne `album` de la base."""
+    return sum(1 for a in ytm_album_titles if a and _normalize_title(a) in db_norm_albums)
+
+
+def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
+    """Départage les homonymes par RECOUVREMENT d'albums avec la base.
+
+    Charge `get_artist_info` pour chaque candidat (≤5, ytmusicapi, zéro quota YT).
+    Retenu si son score (nb d'albums communs) est > 0 ET strictement devant le 2ᵉ
+    (même esprit de pluralité nette que le vote sur les vidéos). Sinon fallback
+    statu quo : premier candidat avec albums, sinon le tout premier — le gate
+    d'identité protège désormais ce fallback. `db_norm_albums` vide → dégénère
+    exactement en comportement historique. Renvoie `(None, None)` si aucun candidat.
+    """
+    infos = [(cid, cname, api.get_artist_info(cid)) for cid, cname in candidates]
+    if not infos:
+        return (None, None)
+
+    if db_norm_albums:
+        scored = sorted(
+            (
+                (_score_candidate_albums([a["title"] for a in info["albums"]], db_norm_albums), i)
+                for i, (_, _, info) in enumerate(infos)
+            ),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        best_score, best_i = scored[0]
+        runner_up = scored[1][0] if len(scored) > 1 else 0
+        if best_score > 0 and best_score > runner_up:
+            cid, cname, info = infos[best_i]
+            logger.info(
+                f"Canal YTMusic départagé par albums: '{cname}' ({cid}) — "
+                f"{best_score} album(s) commun(s) avec la base"
+            )
+            return cid, info
+
+    # Fallback statu quo : premier candidat avec albums, sinon le tout premier.
+    for cid, cname, info in infos:
+        if info.get("albums"):
+            logger.info(f"Canal YTMusic retenu: '{cname}' ({cid}) — {len(info['albums'])} album(s)")
+            return cid, info
+    cid, _, info = infos[0]
+    return cid, info
+
+
 def update_ytmusic_streams(artist, data_manager) -> dict:
     """Met à jour les streams YouTube Music des morceaux et albums de l'artiste.
 
@@ -199,28 +246,39 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
         logger.error(f"Artiste '{artist.name}' introuvable sur YouTube Music.")
         return result
 
-    # Essayer les candidats jusqu'à en trouver un avec des albums
-    # (plusieurs artistes peuvent porter le même nom, ex: 'Isha')
-    channel_id, artist_info = None, None
-    for cid, cname in candidates:
-        info = api.get_artist_info(cid)
-        if info.get("albums"):
-            channel_id, artist_info = cid, info
-            logger.info(
-                f"Canal YTMusic retenu: '{cname}' ({cid}) — " f"{len(info['albums'])} album(s)"
-            )
-            break
-        logger.info(f"Canal YTMusic '{cname}' ({cid}) sans albums — candidat suivant")
+    # db_tracks lu UNE fois : sert au départage des homonymes par albums (0b) ET
+    # au gate d'identité (1b).
+    db_tracks = data_manager.get_artist_tracks(artist.id)
+    db_norm_albums = {_normalize_title(t.album) for t in db_tracks if t.album}
 
+    # ── Étape 0b : départage des homonymes par recouvrement d'albums ──────────
+    # (plusieurs artistes peuvent porter le même nom, ex: 'Isha')
+    channel_id, artist_info = _pick_best_candidate(api, candidates, db_norm_albums)
     if artist_info is None:
-        channel_id = candidates[0][0]
-        artist_info = api.get_artist_info(channel_id)
+        logger.error(f"Artiste '{artist.name}' introuvable sur YouTube Music.")
+        return result
 
     albums = artist_info["albums"]
     ytm_monthly_listeners = artist_info["monthly_listeners"]
 
     if not albums:
         logger.warning(f"Aucun album YTMusic pour '{artist.name}'")
+        return result
+
+    if not db_tracks:
+        logger.warning(
+            f"Base vide pour '{artist.name}' — rien à valider ni à écrire "
+            "(récupère d'abord la discographie)."
+        )
+        result["identity"] = {
+            "status": "aborted",
+            "channel_id": channel_id,
+            "channel_source": channel_source,
+            "matched": 0,
+            "ytm_titles": 0,
+            "ratio": 0.0,
+            "album_overlap": 0,
+        }
         return result
 
     # ── Étape 1 : collecter tous les tracks via ytmusicapi (zéro quota YT) ───
@@ -241,26 +299,7 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
     # ── Étape 1b : GATE d'identité — valider le canal AVANT toute écriture ────
     # Placé AVANT fetch_view_counts_batch (économise le quota YT en cas d'abort)
     # ET avant le write des auditeurs mensuels.
-    db_tracks = data_manager.get_artist_tracks(artist.id)
-
-    if not db_tracks:
-        logger.warning(
-            f"Base vide pour '{artist.name}' — rien à valider ni à écrire "
-            "(récupère d'abord la discographie)."
-        )
-        result["identity"] = {
-            "status": "aborted",
-            "channel_id": channel_id,
-            "channel_source": channel_source,
-            "matched": 0,
-            "ytm_titles": 0,
-            "ratio": 0.0,
-            "album_overlap": 0,
-        }
-        return result
-
     db_norm_titles = {_normalize_title(t.title) for t in db_tracks}
-    db_norm_albums = {_normalize_title(t.album) for t in db_tracks if t.album}
     report = _channel_identity_report(
         tracks_by_album, db_norm_titles, [a["title"] for a in albums], db_norm_albums
     )

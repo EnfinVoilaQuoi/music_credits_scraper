@@ -132,7 +132,7 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
         if inferred:
             pinned = inferred
             try:
-                data_manager.set_artist_ytm_channel(artist.id, inferred)
+                data_manager.set_artist_ytm_channel(artist.id, inferred, source="inferred")
             except Exception:
                 pass
 

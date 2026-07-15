@@ -98,7 +98,9 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                     if ytm_channel_raw:
                         resolved = YTMusicAPI().resolve_channel(ytm_channel_raw)
                         if resolved:
-                            app.data_manager.set_artist_ytm_channel(app.current_artist.id, resolved)
+                            app.data_manager.set_artist_ytm_channel(
+                                app.current_artist.id, resolved, source="manual"
+                            )
                         else:
                             logger.warning(
                                 f"Canal YTM non résolu: {ytm_channel_raw!r} — "

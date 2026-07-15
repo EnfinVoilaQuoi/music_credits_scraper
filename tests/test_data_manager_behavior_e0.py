@@ -516,6 +516,27 @@ class TestUpdateArtist:
         artist = _artiste(data_manager)
         assert data_manager.get_artist_ytm_channel(artist.id) is None
 
+    def test_set_defaut_source_manual(self, data_manager):
+        artist = _artiste(data_manager)
+        assert data_manager.set_artist_ytm_channel(artist.id, "UC123") is True
+        assert data_manager.get_artist_ytm_channel_info(artist.id) == ("UC123", "manual")
+
+    def test_set_source_inferred_round_trip(self, data_manager):
+        artist = _artiste(data_manager)
+        data_manager.set_artist_ytm_channel(artist.id, "UCvote", source="inferred")
+        assert data_manager.get_artist_ytm_channel_info(artist.id) == ("UCvote", "inferred")
+
+    def test_channel_info_artiste_vierge(self, data_manager):
+        artist = _artiste(data_manager)
+        assert data_manager.get_artist_ytm_channel_info(artist.id) == (None, None)
+
+    def test_clear_ytm_channel(self, data_manager):
+        artist = _artiste(data_manager)
+        data_manager.set_artist_ytm_channel(artist.id, "UC123", source="inferred")
+        assert data_manager.clear_artist_ytm_channel(artist.id) is True
+        assert data_manager.get_artist_ytm_channel(artist.id) is None
+        assert data_manager.get_artist_ytm_channel_info(artist.id) == (None, None)
+
 
 # ── monthly_listeners_history ───────────────────────────────────────────────
 

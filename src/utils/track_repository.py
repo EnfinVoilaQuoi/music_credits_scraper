@@ -116,6 +116,10 @@ class TrackRepository:
                 "album_certifications_json": album_certifications_json,
                 "relationships_json": relationships_json,
                 "spotify_page_title": getattr(track, "spotify_page_title", None),
+                # Chantier « Media » : chemins d'images (kind/vues vidéo passent par
+                # update_track_video_views, jamais ici).
+                "cover_path": track.cover_path,
+                "yt_thumbnail_path": track.yt_thumbnail_path,
                 "now": datetime.now(),
                 "last_scraped": track.last_scraped,
             }
@@ -174,6 +178,8 @@ class TrackRepository:
                         certifications = CASE WHEN :certifications_json = '[]' THEN certifications ELSE :certifications_json END,
                         album_certifications = CASE WHEN :album_certifications_json = '[]' THEN album_certifications ELSE :album_certifications_json END,
                         relationships = CASE WHEN :relationships_json = '[]' THEN relationships ELSE :relationships_json END,
+                        cover_path = COALESCE(:cover_path, cover_path),
+                        yt_thumbnail_path = COALESCE(:yt_thumbnail_path, yt_thumbnail_path),
                         updated_at = :now,
                         last_scraped = COALESCE(:last_scraped, last_scraped)
                     WHERE id = :id
@@ -191,6 +197,7 @@ class TrackRepository:
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, lyrics_synced_source, lyrics_synced_confidence, has_lyrics, anecdotes,
                         certifications, album_certifications, relationships, spotify_page_title,
+                        cover_path, yt_thumbnail_path,
                         created_at, updated_at, last_scraped
                     ) VALUES (
                         :title, :artist_id, :album, :track_number, :release_date,
@@ -200,6 +207,7 @@ class TrackRepository:
                         :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,
                         :lyrics, :lyrics_scraped_at, :lyrics_source, :lyrics_synced, :lyrics_synced_source, :lyrics_synced_confidence, :has_lyrics, :anecdotes,
                         :certifications_json, :album_certifications_json, :relationships_json, :spotify_page_title,
+                        :cover_path, :yt_thumbnail_path,
                         :now, :now, :last_scraped
                     )
                 """),
@@ -899,6 +907,33 @@ class TrackRepository:
             return True
         except Exception as e:
             logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")
+            return False
+
+    def update_track_video_views(
+        self, track_id: int, views: int | None, kind: str | None = None
+    ) -> bool:
+        """Met à jour les vues de LA vidéo YouTube d'un morceau + sa catégorie.
+
+        SÉPARÉ de `update_track_ytm_streams` (qui somme audio+clip) : c'est la
+        réponse au « différencier un clip d'un morceau classique ». Écriture en
+        `text()` non typé + `CURRENT_TIMESTAMP` (pas de bind date typé →
+        contourne le piège TIMESTAMP double-face). `kind` en COALESCE : un appel
+        sans catégorie ne l'efface pas.
+        """
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE tracks SET youtube_video_views = :views, "
+                        "youtube_video_kind = COALESCE(:kind, youtube_video_kind), "
+                        "youtube_video_views_updated = CURRENT_TIMESTAMP, "
+                        "updated_at = :now WHERE id = :tid"
+                    ),
+                    {"views": views, "kind": kind, "now": datetime.now(), "tid": track_id},
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Erreur update_track_video_views (track_id={track_id}): {e}")
             return False
 
     def update_track_youtube_url(self, track_id: int, url: str, source: str) -> bool:

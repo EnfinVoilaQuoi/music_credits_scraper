@@ -65,6 +65,8 @@ artists = Table(
     # En FIN de table : `add_column` Alembic (e8) l'appose en dernière position,
     # `create_all` doit produire le MÊME ordre (garde-fou test_alembic_baseline).
     Column("ytm_channel_source", Text),
+    # Chantier « Media » (e9) : chemin relatif (à IMAGES_DIR) de la photo de profil.
+    Column("image_path", Text),
     sqlite_autoincrement=True,
 )
 
@@ -137,6 +139,13 @@ tracks = Table(
     Column("ytm_streams_updated", TIMESTAMP),
     Column("youtube_url_source", Text),
     Column("album_override", Integer),
+    # Chantier « Media » (e9), EN FIN de table (ordre = add_column Alembic) :
+    # chemins d'images (relatifs à IMAGES_DIR) + métadonnées de la vidéo YouTube.
+    Column("cover_path", Text),
+    Column("yt_thumbnail_path", Text),
+    Column("youtube_video_kind", Text),  # 'clip'/'show'/'audio'/'unknown'
+    Column("youtube_video_views", Integer),  # vues de LA vidéo (≠ ytm_streams)
+    Column("youtube_video_views_updated", TIMESTAMP),
     UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )

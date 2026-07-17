@@ -126,6 +126,14 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.ytm_streams_updated = _clean(row["ytm_streams_updated"])
     track.album_override = _clean_int(row["album_override"])
 
+    # Chantier « Media » : chemins d'images (Text) + vidéo YouTube. La date
+    # `youtube_video_views_updated` reste brute (piège TIMESTAMP, comme *_updated).
+    track.cover_path = _clean(row["cover_path"])
+    track.yt_thumbnail_path = _clean(row["yt_thumbnail_path"])
+    track.youtube_video_kind = _clean(row["youtube_video_kind"])
+    track.youtube_video_views = _clean_int(row["youtube_video_views"])
+    track.youtube_video_views_updated = _clean(row["youtube_video_views_updated"])
+
     relationships_raw = row["relationships"]
     try:
         track.relationships = json.loads(relationships_raw) if relationships_raw else []

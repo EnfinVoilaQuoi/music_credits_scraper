@@ -19,6 +19,8 @@ class Artist:
     discogs_id: int | None = None
     spotify_monthly_listeners: int | None = None
     ytm_monthly_listeners: int | None = None
+    # Chantier « Media » : chemin relatif (à IMAGES_DIR) de la photo de profil.
+    image_path: str | None = None
     tracks: list["Track"] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -41,6 +43,7 @@ class Artist:
             "genius_id": self.genius_id,
             "spotify_id": self.spotify_id,
             "discogs_id": self.discogs_id,
+            "image_path": self.image_path,
             "tracks_count": self.get_tracks_count(),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),

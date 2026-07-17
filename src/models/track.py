@@ -337,6 +337,9 @@ class Track:
     # Métadonnées supplémentaires
     popularity: int | None = None  # Nombre de vues sur Genius
     artwork_url: str | None = None  # URL de la pochette
+    # Chantier « Media » : chemins relatifs (à IMAGES_DIR) des images téléchargées.
+    cover_path: str | None = None  # Pochette album/single/sample sur disque
+    yt_thumbnail_path: str | None = None  # Vignette YouTube (shows/lives)
 
     # Crédits
     credits: list[Credit] = field(default_factory=list)
@@ -391,6 +394,13 @@ class Track:
     # Streams YouTube Music
     ytm_streams: int | None = None
     ytm_streams_updated: datetime | None = None
+
+    # Chantier « Media » : vues de LA vidéo YouTube (clip/show/live) et sa
+    # catégorie — SÉPARÉ de ytm_streams (somme audio+clip). Différencie un clip
+    # d'un morceau « classique ».
+    youtube_video_kind: str | None = None  # 'clip'/'show'/'audio'/'unknown'
+    youtube_video_views: int | None = None
+    youtube_video_views_updated: datetime | None = None
 
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.
@@ -661,6 +671,11 @@ class Track:
             "secondary_role": self.secondary_role,
             "popularity": self.popularity,
             "artwork_url": self.artwork_url,
+            # Chantier « Media » : chemins d'images + vidéo YouTube
+            "cover_path": self.cover_path,
+            "yt_thumbnail_path": self.yt_thumbnail_path,
+            "youtube_video_kind": self.youtube_video_kind,
+            "youtube_video_views": self.youtube_video_views,
             # Informations paroles
             **lyrics_info,
             # ✅ SÉPARATION DES CRÉDITS

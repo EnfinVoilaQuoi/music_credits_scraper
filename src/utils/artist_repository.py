@@ -95,6 +95,7 @@ class ArtistRepository:
                             artists.c.genius_id,
                             artists.c.spotify_id,
                             artists.c.discogs_id,
+                            artists.c.image_path,
                         ).where(artists.c.name == name)
                     )
                     .mappings()
@@ -111,6 +112,7 @@ class ArtistRepository:
                 genius_id=row["genius_id"],
                 spotify_id=row["spotify_id"],
                 discogs_id=row["discogs_id"],
+                image_path=row["image_path"],
             )
 
             logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
@@ -484,4 +486,22 @@ class ArtistRepository:
             return True
         except Exception as e:
             logger.error(f"Erreur update_artist_spotify_id (artist_id={artist_id}): {e}")
+            return False
+
+    def set_artist_image_path(self, artist_id: int, path: str) -> bool:
+        """Persiste le chemin (relatif à IMAGES_DIR) de la photo de profil.
+
+        Chantier « Media » : posé par `media_enricher.apply_images` puis sauvé
+        (l'enricher mute l'objet, l'appelant sauve — pattern `apply_certifications`)."""
+        try:
+            stmt = (
+                update(artists)
+                .where(artists.c.id == artist_id)
+                .values(image_path=path, updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            return True
+        except Exception as e:
+            logger.error(f"Erreur set_artist_image_path (artist_id={artist_id}): {e}")
             return False

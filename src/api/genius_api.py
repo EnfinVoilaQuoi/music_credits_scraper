@@ -679,6 +679,14 @@ class GeniusAPI:
                         is_featuring=is_feat,
                     )
                     track.secondary_role = secondary_role
+                    # Chantier « Media » : pochettes (morceau + album) sur le
+                    # chemin réel. `album_cover_url` = transitoire (non persisté),
+                    # consommé par media_enricher en fallback de Deezer.
+                    art, album_cover = self._extract_song_art(song)
+                    if art:
+                        track.artwork_url = art
+                    if album_cover:
+                        track.album_cover_url = album_cover
                     if is_feat and primary.get("name"):
                         track.primary_artist_name = primary["name"]
                         logger.debug(
@@ -830,6 +838,15 @@ class GeniusAPI:
             track.relationships = rels
             changed = True
 
+        # Chantier « Media » : pochettes (morceau + album). Transitoires, non
+        # persistées (aucune colonne) → ne comptent PAS dans `changed` (pas de
+        # save déclenché pour elles), simplement disponibles pour media_enricher.
+        art, album_cover = self._extract_song_art(song)
+        if art and not track.artwork_url:
+            track.artwork_url = art
+        if album_cover:
+            track.album_cover_url = album_cover
+
         return changed
 
     # ── Import d'album complet via l'API WEB genius.com ───────────────────────
@@ -922,6 +939,8 @@ class GeniusAPI:
                     "primary_artist": (song.get("primary_artist") or {}).get("name"),
                     "url": song.get("url"),
                     "lyrics_state": song.get("lyrics_state"),
+                    # Chantier « Media » : pochette du morceau (transitoire).
+                    "song_art_image_url": song.get("song_art_image_url"),
                 }
             )
 
@@ -937,9 +956,44 @@ class GeniusAPI:
                 "artist": (album.get("artist") or {}).get("name"),
                 "release_date": album.get("release_date"),
                 "url": url,
+                # Chantier « Media » : pochette de l'album (transitoire).
+                "cover_art_url": album.get("cover_art_url"),
             },
             "tracks": tracks,
         }
+
+    @staticmethod
+    def _extract_song_art(song: dict) -> tuple[str | None, str | None]:
+        """(song_art_image_url, album_cover_art_url) depuis un song Genius.
+
+        Chantier « Media » : la pochette du morceau (``song_art_image_url``) et,
+        à défaut, celle de son album (``album.cover_art_url``). Consommé par
+        `media_enricher` — jamais persisté en base.
+        """
+        if not isinstance(song, dict):
+            return None, None
+        art = song.get("song_art_image_url") or song.get("song_art_image_thumbnail_url")
+        album = song.get("album")
+        cover = album.get("cover_art_url") if isinstance(album, dict) else None
+        return art, cover
+
+    def get_artist_image(self, genius_id) -> str | None:
+        """URL de la photo de profil d'un artiste (`GET /artists/{id}` → image_url).
+
+        Ignore les avatars par défaut de Genius (URL contenant ``default_avatar``,
+        générique et sans intérêt). Renvoie None sur erreur ou avatar par défaut.
+        """
+        if not genius_id:
+            return None
+        try:
+            data = self.genius.artist(genius_id)
+        except Exception as e:
+            logger.debug(f"genius.artist({genius_id}) échec: {e}")
+            return None
+        image_url = ((data or {}).get("artist") or {}).get("image_url")
+        if not image_url or "default_avatar" in image_url:
+            return None
+        return image_url
 
     @staticmethod
     def _extract_media(song: dict):

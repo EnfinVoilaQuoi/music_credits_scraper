@@ -144,6 +144,25 @@ class DeezerAPI:
         data = self._make_request(f"track/{track_id}")
         return data
 
+    def search_artist(self, name: str) -> dict | None:
+        """Recherche un artiste par nom (`GET /search/artist`).
+
+        Chantier « Media » : expose ``id`` et ``picture_xl`` (photo de profil
+        haute résolution). Renvoie le premier résultat (meilleur match) ou None.
+        """
+        data = self._make_request("search/artist", {"q": name, "limit": 5})
+        if not data or not data.get("data"):
+            logger.warning(f"Aucun artiste Deezer trouvé pour: {name}")
+            return None
+        return data["data"][0]
+
+    def get_album(self, album_id: int) -> dict | None:
+        """Récupère un album par son ID (`GET /album/{id}`).
+
+        Chantier « Media » : expose ``cover_xl`` (pochette haute résolution).
+        """
+        return self._make_request(f"album/{album_id}")
+
     def extract_enrichment_data(self, track_data: dict) -> dict[str, Any]:
         """
         Extrait les données d'enrichissement depuis les données Deezer
@@ -175,17 +194,32 @@ class DeezerAPI:
             "deezer_picture": None,
             "deezer_rank": track_data.get("rank"),
             "deezer_link": track_data.get("link"),
+            # Chantier « Media » : ids + covers haute résolution (déjà présents
+            # dans track_data, jamais lus jusqu'ici). Consommés par media_enricher.
+            "deezer_album_id": None,
+            "deezer_artist_id": None,
+            "deezer_cover_xl": None,
+            "deezer_picture_xl": None,
         }
 
-        # Récupérer l'image depuis l'album
-        if "album" in track_data and track_data["album"]:
-            album = track_data["album"]
+        # Album : image medium (historique, compat provider) + id/cover_xl (Media)
+        album = track_data.get("album")
+        if isinstance(album, dict) and album:
             enriched_data["deezer_picture"] = album.get("cover_medium") or album.get("cover")
+            enriched_data["deezer_album_id"] = album.get("id")
+            enriched_data["deezer_cover_xl"] = album.get("cover_xl") or album.get("cover_big")
 
-        # Si pas d'image d'album, essayer l'artiste
-        if not enriched_data["deezer_picture"] and "artist" in track_data:
-            artist = track_data["artist"]
-            enriched_data["deezer_picture"] = artist.get("picture_medium") or artist.get("picture")
+        # Artiste : id + picture_xl (Media) + fallback deezer_picture si pas d'album
+        artist = track_data.get("artist")
+        if isinstance(artist, dict) and artist:
+            enriched_data["deezer_artist_id"] = artist.get("id")
+            enriched_data["deezer_picture_xl"] = artist.get("picture_xl") or artist.get(
+                "picture_big"
+            )
+            if not enriched_data["deezer_picture"]:
+                enriched_data["deezer_picture"] = artist.get("picture_medium") or artist.get(
+                    "picture"
+                )
 
         return enriched_data
 

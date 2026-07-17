@@ -11,6 +11,7 @@ from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
 from src.gui.panels import albums_view, tracks_table
 from src.gui.windows import artist_loader
+from src.gui.windows.export_studio import show_export_studio
 from src.gui.windows.source_health import show_source_health
 from src.gui.windows.track_details import TrackDetailsWindow
 from src.gui.workers import enrichment, retrieval, streams
@@ -57,6 +58,7 @@ class MainWindow:
         self.deleted_tracks_manager = DeletedTracksManager()
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         self.source_health_window = None  # Fenêtre « État des sources » (singleton)
+        self.export_studio_window = None  # Fenêtre « Export studio » (singleton)
 
         self._create_widgets()
         self._update_statistics()
@@ -185,9 +187,14 @@ class MainWindow:
         )
         self.streams_button.pack(side="left", padx=5)
 
-        # 8. Exporter (aligné à droite)
+        # 8. Export studio (aligné à droite) — ouvre la fenêtre des générateurs
+        # (Bubble Prod…) ; l'export JSON historique vit dedans.
         self.export_button = ctk.CTkButton(
-            control_frame, text="Exporter", command=self._export_data, state="disabled", width=100
+            control_frame,
+            text="Export studio",
+            command=lambda: show_export_studio(self),
+            state="disabled",
+            width=110,
         )
         self.export_button.pack(side="right", padx=5)
 

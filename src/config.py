@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # --- Application ---
     debug: bool = False
     log_level: str = "INFO"  # piloté par l'env LOG_LEVEL (fin du « DEBUG » en dur)
+    # Dossier des exports « studio » (SVG Bubble Prod…). Vide → BASE_DIR/exports.
+    # Pas de mkdir à l'import : création lazy dans dataviz.bubble_prod (gitignoré).
+    exports_dir: str = ""
 
     # --- Scraping ---
     selenium_timeout: int = 30  # secondes
@@ -164,3 +167,7 @@ YTM_IDENTITY_MIN_RATIO = settings.ytm_identity_min_ratio
 DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"
 BPMFINDER_SESSION_FILE = DATA_DIR / ".bpmfinder_session.json"
 DATA_PATH = str(DATA_DIR)
+
+# Dossier des exports studio (SVG Bubble Prod…). PAS de mkdir ici : la création
+# est lazy (dataviz.bubble_prod.default_output_path). Dossier gitignoré.
+EXPORTS_DIR = Path(settings.exports_dir) if settings.exports_dir else (BASE_DIR / "exports")

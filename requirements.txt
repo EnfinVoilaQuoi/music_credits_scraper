@@ -28,6 +28,12 @@ coloredlogs==15.0.1
 pandas>=2.0.0
 numpy>=1.24.3
 
+# Dataviz / export SVG (Bubble Prod) — graphe de collaboration + layout + SVG.
+# networkx était présent en transitif seulement ; rendu direct ici. Pas de scipy
+# (spring_layout numpy-only à l'échelle d'un album). numpy déjà listé ci-dessus.
+networkx>=3.3
+svgwrite>=1.4.3
+
 # Chrome driver
 webdriver-manager==4.0.1
 

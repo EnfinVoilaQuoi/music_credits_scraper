@@ -47,6 +47,11 @@ _COLUMNS = [
     "ytm_streams",
     "ytm_streams_updated",
     "album_override",
+    "cover_path",
+    "yt_thumbnail_path",
+    "youtube_video_kind",
+    "youtube_video_views",
+    "youtube_video_views_updated",
     "relationships",
     "duration",
     "genre",
@@ -202,6 +207,24 @@ class TestTrackFromRow:
         # key/mode int présents, musical_key absente → recalcul FR
         track = track_from_row(make_row(id=1, title="X", key=7, mode=1), artist)
         assert track.musical_key  # non vide (calculé par music_theory)
+
+    def test_champs_media(self, artist):
+        # Chantier « Media » : chemins d'images + métadonnées vidéo (round-trip).
+        row = make_row(
+            id=1,
+            title="X",
+            cover_path="covers/Jul - C'est pas des LOL.jpg",
+            yt_thumbnail_path="vignettes/abc123DEF45.jpg",
+            youtube_video_kind="clip",
+            youtube_video_views="123456",
+            youtube_video_views_updated="2026-07-18 10:00:00",
+        )
+        track = track_from_row(row, artist)
+        assert track.cover_path == "covers/Jul - C'est pas des LOL.jpg"
+        assert track.yt_thumbnail_path == "vignettes/abc123DEF45.jpg"
+        assert track.youtube_video_kind == "clip"
+        assert track.youtube_video_views == 123456  # coercition str → int
+        assert track.youtube_video_views_updated == "2026-07-18 10:00:00"  # brut (TIMESTAMP)
 
 
 class TestObservationsOverride:

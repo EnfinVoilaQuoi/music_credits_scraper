@@ -31,6 +31,8 @@ data/certifications/riaa/backups/*
 data/certifications/snep/certif-backup-*.csv
 data/audios/*
 data/diagnostics/*
+# Exports studio (SVG Bubble Prod…) : générés, non versionnés.
+exports/
 lib/*
 *.db
 *.sqlite
@@ -93,6 +95,8 @@ scripts/*
 !scripts/bpmfinder_diagnose.py
 !scripts/sonoteller_worklist.py
 !scripts/run_brma.ps1
+# Dataviz / export studio
+!scripts/bubble_prod.py
 docs/api/
 /test*\.py
 /*test\.py

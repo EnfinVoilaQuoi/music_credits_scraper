@@ -309,8 +309,10 @@ class BPMFinderScraper:
 
     @staticmethod
     def _video_id(url: str) -> str | None:
-        m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url or "")
-        return m.group(1) if m else None
+        # Helper partagé (factorisé, cf. youtube_utils).
+        from src.utils.youtube_utils import extract_video_id
+
+        return extract_video_id(url)
 
     def _cards(self) -> set[tuple[str, str, str, str]]:
         """Cartes de résultats présentes : {(note, mode, bpm, camelot)}."""

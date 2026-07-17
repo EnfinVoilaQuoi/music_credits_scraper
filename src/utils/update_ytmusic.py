@@ -7,12 +7,15 @@ Architecture quota-optimisée :
 """
 
 import logging
-import re
 import sys
 
 from src.api.ytmusic_api import YTMusicAPI
 from src.config import YTM_IDENTITY_MIN_MATCHED, YTM_IDENTITY_MIN_RATIO
 from src.utils.logger import get_logger
+
+# Extraction du video id : helper partagé (factorisé, cf. youtube_utils). Alias
+# privé conservé pour ne pas toucher les appelants internes.
+from src.utils.youtube_utils import extract_video_id as _extract_video_id
 
 logger = get_logger(__name__)
 
@@ -21,11 +24,6 @@ logger = get_logger(__name__)
 # L'ancien normaliseur local ratait "MURDER INC"/"MURDER INC.", "SOAB"/"S.O.A.B",
 # "L’Augmentation - Pt. 2"/"L’augmentation, Pt. 2".
 from src.utils.title_matching import normalize_title as _normalize_title
-
-
-def _extract_video_id(url: str) -> str | None:
-    m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url or "")
-    return m.group(1) if m else None
 
 
 def _infer_channel_from_youtube_links(

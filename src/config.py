@@ -23,6 +23,12 @@ BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 ARTISTS_DIR = DATA_DIR / "artists"
 LOGS_DIR = DATA_DIR / "logs"
+# Chantier « Media » : images téléchargées (photos d'artistes, covers, vignettes
+# YouTube). Sous-dossiers dédiés par catégorie. Contenu gitignoré (data/images/*).
+IMAGES_DIR = DATA_DIR / "images"
+ARTIST_IMAGES_DIR = IMAGES_DIR / "artistes"
+COVER_IMAGES_DIR = IMAGES_DIR / "covers"
+VIGNETTE_IMAGES_DIR = IMAGES_DIR / "vignettes"
 ENV_FILE = BASE_DIR / ".env"
 
 # Charger .env comme FALLBACK sans écraser les variables Windows (override=False) :
@@ -35,6 +41,8 @@ load_dotenv(ENV_FILE, override=False)
 # Créer les dossiers s'ils n'existent pas
 ARTISTS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+for _img_dir in (ARTIST_IMAGES_DIR, COVER_IMAGES_DIR, VIGNETTE_IMAGES_DIR):
+    _img_dir.mkdir(parents=True, exist_ok=True)
 
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 

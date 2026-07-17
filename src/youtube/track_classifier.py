@@ -64,12 +64,49 @@ class TrackClassifier:
             "intimate",
         ]
 
+        # Chantier « Media » : émissions / freestyles / cyphers (Grünt, COLORS,
+        # Planète Rap, OKLM…). Détectés sur le TITRE OU l'ALBUM. Classés EXOTIC
+        # (pas de nouvelle valeur d'enum → zéro ripple sur les seuils / auto-select).
+        # Liste extensible.
+        self.show_indicators = [
+            "grünt",
+            "grunt",
+            "colors show",
+            "a colors show",
+            "planète rap",
+            "planete rap",
+            "oklm",
+            "rentre dans le cercle",
+            "red bull 64 bars",
+            "on the radar",
+            "from the block",
+            "cypher",
+            "freestyle",
+            "radio session",
+        ]
+
+    def is_show_performance(self, title: str, album: str | None = None) -> bool:
+        """True si le morceau est une prestation d'émission/freestyle/cypher.
+
+        Cherche un `show_indicator` dans le titre OU l'album (chantier « Media »).
+        Helper public réutilisé par la vignette YouTube ET la classification de
+        la vidéo (`youtube_utils.classify_video_kind`).
+        """
+        haystack = f"{title or ''} {album or ''}".lower()
+        return any(indicator in haystack for indicator in self.show_indicators)
+
     def classify_track(
         self, track_title: str, album: str = None, release_year: int = None, **context
     ) -> TrackType:
         """Classifie un morceau selon son type"""
 
         title_lower = track_title.lower()
+
+        # Émissions/freestyles (Grünt, COLORS, Planète Rap…) → EXOTIC. Testé en
+        # PREMIER : un « Freestyle Planète Rap » ne doit pas tomber en LIVE/REMIX.
+        if self.is_show_performance(track_title, album):
+            logger.debug(f"'{track_title}' classifié comme EXOTIC (show/freestyle)")
+            return TrackType.EXOTIC
 
         # Détection des remixes
         if any(indicator in title_lower for indicator in self.remix_indicators):

@@ -108,6 +108,20 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                             )
 
                     results["ytm"] = update_ytmusic_streams(app.current_artist, app.data_manager)
+
+                    # Media 5 : vues + nature (clip/show/audio) de LA vidéo — batch
+                    # YT mutualisé avec les streams. SÉPARÉ de ytm_streams. Défensif :
+                    # n'interrompt pas la récupération des streams en cas d'échec.
+                    if not stop_requested():
+                        try:
+                            from src.utils.update_video_views import update_video_views
+
+                            fresh_tracks = app.data_manager.get_artist_tracks(app.current_artist.id)
+                            results["video_views"] = update_video_views(
+                                app.current_artist, fresh_tracks, app.data_manager
+                            )
+                        except Exception as e:
+                            logger.warning(f"Vues clips échouées: {e}")
                 except Exception as e:
                     results["ytm"] = {"error": str(e)}
 
@@ -169,6 +183,11 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                             f"⚠️ Canal YTM manuel divergent ({matched}/{ytm_titles} titres) "
                             "— écriture maintenue (saisie manuelle prioritaire)."
                         )
+            if "video_views" in results:
+                v = results["video_views"]
+                by_kind = v.get("by_kind") or {}
+                kinds = ", ".join(f"{k}: {n}" for k, n in sorted(by_kind.items())) or "—"
+                lines.append(f"Vues vidéos : {v.get('updated', 0)} mis à jour ({kinds})")
             summary_msg = "\n".join(lines)
 
             app.root.after(

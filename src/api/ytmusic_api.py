@@ -467,6 +467,64 @@ class YTMusicAPI:
         logger.info(f"YouTube Data API v3 : {len(counts)}/{len(unique_ids)} viewCounts récupérés")
         return counts
 
+    def fetch_video_meta_batch(self, video_ids: list[str]) -> dict[str, dict]:
+        """Vues + titre + chaîne pour une liste de videoId (chantier « Media »).
+
+        Même batch que `fetch_view_counts_batch` mais ``part="statistics,snippet"``
+        → **coût quota identique** (1 unité par requête de 50). Le snippet (titre
+        + chaîne) est la base de la différenciation clip/show/audio.
+
+        Returns:
+            ``{videoId: {"views": int|None, "title": str|None, "channel": str|None}}``
+        """
+        if not video_ids:
+            return {}
+
+        if not self._use_yt_api:
+            logger.debug("fetch_video_meta_batch ignoré : pas de YOUTUBE_API_KEY")
+            return {}
+
+        try:
+            from googleapiclient.discovery import build
+        except ImportError:
+            logger.warning(
+                "google-api-python-client non installé — pip install google-api-python-client"
+            )
+            return {}
+
+        meta: dict[str, dict] = {}
+        unique_ids = list(dict.fromkeys(video_ids))
+        n_batches = (len(unique_ids) + _YT_BATCH_SIZE - 1) // _YT_BATCH_SIZE
+        logger.info(
+            f"YouTube Data API v3 (meta) : {len(unique_ids)} videoId → "
+            f"{n_batches} requête(s) (~{n_batches} unité(s) de quota)"
+        )
+
+        youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+
+        for i in range(0, len(unique_ids), _YT_BATCH_SIZE):
+            batch = unique_ids[i : i + _YT_BATCH_SIZE]
+            try:
+                response = (
+                    youtube.videos().list(part="statistics,snippet", id=",".join(batch)).execute()
+                )
+                for item in response.get("items", []):
+                    stats = item.get("statistics", {})
+                    snippet = item.get("snippet", {})
+                    view_str = stats.get("viewCount")
+                    meta[item["id"]] = {
+                        "views": int(view_str) if view_str is not None else None,
+                        "title": snippet.get("title"),
+                        "channel": snippet.get("channelTitle"),
+                    }
+            except Exception as e:
+                logger.error(
+                    f"Erreur YouTube Data API v3 meta (batch {i // _YT_BATCH_SIZE + 1}): {e}"
+                )
+
+        logger.info(f"YouTube Data API v3 (meta) : {len(meta)}/{len(unique_ids)} vidéos")
+        return meta
+
     # ── Étape 3 : résolution streams par track ─────────────────────────────────
 
     @staticmethod

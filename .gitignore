@@ -30,6 +30,7 @@ data/certifications/brma/reports/*
 data/certifications/riaa/backups/*
 data/certifications/snep/certif-backup-*.csv
 data/audios/*
+data/images/*
 data/diagnostics/*
 # Exports studio (SVG Bubble Prod…) : générés, non versionnés.
 exports/

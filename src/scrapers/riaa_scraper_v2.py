@@ -20,7 +20,6 @@ Deux entrées :
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 from datetime import datetime
@@ -29,6 +28,7 @@ from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
+from src.concurrency import async_loop
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -139,8 +139,9 @@ class RIAAScraperV2:
 
     # ------------------------------------------------------------------ rendu
     def _render(self, url: str, load_all: bool, get_details: bool) -> str | None:
+        # Pont F4 : rendu sur LA boucle applicative (plus d'asyncio.run par appel).
         try:
-            return asyncio.run(self._render_async(url, load_all, get_details))
+            return async_loop.run_sync(self._render_async(url, load_all, get_details))
         except Exception as e:
             logger.error(f"RIAA: rendu patchright échoué : {e}")
             return None

@@ -2,9 +2,13 @@
 Base class pour les scrapers utilisant Crawl4AI.
 Fournit le bridge synchrone→asynchrone et la config navigateur commune.
 Les sous-classes n'ont jamais à toucher à asyncio directement.
+
+Phase F4 : plus d'`asyncio.run` par appel (une boucle jetable par crawl dans le
+thread appelant) — le cœur est la coroutine `acrawl_page`, exécutée sur LA
+boucle applicative ; `_crawl_page` n'est plus qu'un pont bloquant
+(`async_loop.run_sync`) pour les workers sync, qui await-eront directement en F5.
 """
 
-import asyncio
 import inspect
 import os
 from pathlib import Path
@@ -12,6 +16,7 @@ from pathlib import Path
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 
+from src.concurrency import async_loop
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -126,6 +131,36 @@ class CrawlAIScraperBase:
         Crawl synchrone d'une page. Retourne (markdown, html_brut).
         Retourne (None, None) si le crawl échoue.
 
+        Pont F4 : exécute `acrawl_page` sur LA boucle applicative (bloquant).
+        À appeler depuis un thread sync uniquement — une coroutine await
+        directement `acrawl_page`.
+        """
+        return async_loop.run_sync(
+            self.acrawl_page(
+                url,
+                js_before_wait=js_before_wait,
+                wait_for=wait_for,
+                wait_timeout=wait_timeout,
+                page_timeout=page_timeout,
+                delay_before_return=delay_before_return,
+            )
+        )
+
+    async def acrawl_page(
+        self,
+        url: str,
+        *,
+        js_before_wait: str | None = None,
+        wait_for: str | None = None,
+        wait_timeout: int = 15_000,
+        page_timeout: int = 30_000,
+        delay_before_return: float = 1.5,
+    ) -> tuple[str | None, str | None]:
+        """
+        Coroutine native (F4) — même séquence que le pont sync historique :
+        CDP → essai headless (profil persistant) → fenêtre VISIBLE (challenge).
+        Retourne (markdown, html_brut), (None, None) si le crawl échoue.
+
         Paramètres :
             js_before_wait   : JS exécuté avant la condition d'attente (ex: clic expand)
             wait_for         : condition CSS ou JS à attendre (ex: "css:.credits", "js:()=>...")
@@ -136,16 +171,14 @@ class CrawlAIScraperBase:
         # 0) Mode CDP : on lit via un navigateur déjà ouvert (Brave, IP résidentielle)
         if _CDP_URL:
             try:
-                _, html, blocked = asyncio.run(
-                    self._patchright_fetch(
-                        url,
-                        js_before_wait,
-                        wait_for,
-                        wait_timeout,
-                        page_timeout,
-                        delay_before_return,
-                        headless=True,
-                    )
+                _, html, blocked = await self._patchright_fetch(
+                    url,
+                    js_before_wait,
+                    wait_for,
+                    wait_timeout,
+                    page_timeout,
+                    delay_before_return,
+                    headless=True,
                 )
                 if blocked:
                     logger.warning(
@@ -161,16 +194,14 @@ class CrawlAIScraperBase:
         #    dès que le cookie cf_clearance est dans le profil.
         if self.headless:
             try:
-                _, html, blocked = asyncio.run(
-                    self._patchright_fetch(
-                        url,
-                        js_before_wait,
-                        wait_for,
-                        wait_timeout,
-                        page_timeout,
-                        delay_before_return,
-                        headless=True,
-                    )
+                _, html, blocked = await self._patchright_fetch(
+                    url,
+                    js_before_wait,
+                    wait_for,
+                    wait_timeout,
+                    page_timeout,
+                    delay_before_return,
+                    headless=True,
                 )
             except Exception as e:
                 logger.error(f"{self.__class__.__name__}: patchright headless {url}: {e}")
@@ -186,16 +217,14 @@ class CrawlAIScraperBase:
         # 2) Mode VISIBLE + undetected + fenêtre longue : tu résous, on capture la
         #    vraie page (on attend le conteneur paroles, pas d'abandon prématuré).
         try:
-            _, html, _ = asyncio.run(
-                self._patchright_fetch(
-                    url,
-                    js_before_wait,
-                    wait_for,
-                    max(wait_timeout, 120_000),
-                    max(page_timeout, 120_000),
-                    max(delay_before_return, 2.0),
-                    headless=False,
-                )
+            _, html, _ = await self._patchright_fetch(
+                url,
+                js_before_wait,
+                wait_for,
+                max(wait_timeout, 120_000),
+                max(page_timeout, 120_000),
+                max(delay_before_return, 2.0),
+                headless=False,
             )
             return None, html
         except Exception as e:

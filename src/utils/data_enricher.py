@@ -95,8 +95,12 @@ class DataEnricher:
         self._getsongbpm_provider = GetSongBpmProvider(
             fetcher_factory=GetSongBPMFetcher if os.getenv("GETSONGBPM_API_KEY") else None
         )
+        from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
+
         self._songbpm_provider = SongBpmProvider(
-            scraper_factory=lambda: SongBPMScraper(headless=headless_songbpm)
+            scraper_factory=lambda: SongBPMScraper(headless=headless_songbpm),
+            # Variante ASYNC (F3c) : vit dans la boucle, fermée par aclose().
+            async_scraper_factory=lambda: SongBPMScraperAsync(headless=headless_songbpm),
         )
         # Factory seulement si identifiants/session présents (même règle qu'avant).
         if BPMFinderScraper.credentials_or_session_available():
@@ -595,7 +599,7 @@ class DataEnricher:
         """Ferme les scrapers Playwright ASYNC des providers (F3) — browsers de
         la boucle, recréés à la demande au batch suivant. À appeler DANS la
         boucle, AVANT stop_playwright_async."""
-        for provider in (self._spotify_id_provider,):
+        for provider in (self._spotify_id_provider, self._songbpm_provider):
             try:
                 await provider.aclose()
             except Exception as e:

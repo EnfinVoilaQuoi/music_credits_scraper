@@ -1,11 +1,26 @@
-"""Enrichissement des données (BPM, certifications, YouTube…) en thread"""
+"""Enrichissement des données (BPM, certifications, YouTube…) — flux async (Phase F2).
 
+Premier flux migré sur la boucle asyncio unique : le batch est une coroutine
+soumise via `async_loop.submit` (plus de `start_worker`). Les providers API
+purs tournent en httpx partagé dans la boucle ; les scrapers Playwright sync
+sur le thread dédié du run (`DataEnricher.sync_runner`) ; les saves SQLite via
+`asyncio.to_thread`. La progression GUI passe toujours par `root.after`
+(inchangé — thread-safe depuis la boucle comme depuis l'ancien thread).
+
+À la fermeture de l'app, `shutdown_workers()` annule la task du batch : le
+save en cours se termine dans son thread (commit SQLite atomique), puis le
+`finally` de la coroutine ferme browsers/Playwright/session httpx dans le
+budget global de 8 s.
+"""
+
+import asyncio
 from tkinter import messagebox
 
 import customtkinter as ctk
 
+from src.concurrency import async_loop
 from src.gui.dialogs import report
-from src.gui.workers.lifecycle import start_worker, stop_requested
+from src.gui.workers.lifecycle import stop_requested
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -218,7 +233,7 @@ def run_enrichment(
         app.root.after(0, lambda: app.progress_var.set(progress))
         app.root.after(0, lambda: app.progress_label.configure(text=info))
 
-    def enrich():
+    async def enrich_batch():
         try:
             # Ré-armer le disjoncteur BPM Finder (coupé après 3 échecs consécutifs
             # au run précédent — l'enricher vit toute la session GUI)
@@ -240,7 +255,7 @@ def run_enrichment(
                     break
                 update_progress(i, len(selected_tracks_list), f"Enrichissement: {track.title}")
 
-                results = app.data_enricher.enrich_track(
+                results = await app.data_enricher.enrich_track_async(
                     track,
                     sources=sources,
                     force_update=force_update,
@@ -255,89 +270,19 @@ def run_enrichment(
                 # Stocker les résultats pour ce track
                 track_results.append({"title": track.title, "results": results})
 
-                # Sauvegarder après chaque enrichissement
-                app.data_manager.save_track(track)
+                # Sauvegarder après chaque enrichissement (SQLite hors boucle)
+                await asyncio.to_thread(app.data_manager.save_track, track)
 
-            # Construire le message de fin avec détails par morceau
             disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
-            summary = "Enrichissement terminé!\n\n"
-            summary += f"Morceaux traités: {len(selected_tracks_list)}\n\n"
-
-            if force_update:
-                summary += "✅ Mode force update activé\n"
-
-            if reset_spotify_id:
-                summary += "🔄 Spotify IDs réinitialisés\n"
-
-            if clear_on_failure and cleaned_count > 0:
-                summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"
-
-            # Étiquettes courtes des sources (générique : toute source présente
-            # dans results est affichée, y compris bpmfinder — l'ancien code
-            # ne gérait qu'un sous-ensemble en dur → ligne vide si on ne
-            # cochait que BPM Finder).
-            _src_labels = {
-                "spotify_id": "SP",
-                "reccobeats": "RC",
-                "getsongbpm": "GS",
-                "songbpm": "SB",
-                "bpmfinder": "BF",
-                "deezer": "DZ",
-                "discogs": "DC",
-            }
-            _meta_keys = {"cleaned"}
-
-            def _status_char(v):
-                if v == "not_needed":
-                    return "-"
-                if v is None:
-                    return "?"  # crash/timeout
-                return "✓" if v else "✗"
-
-            def _overall(results):
-                vals = [v for k, v in results.items() if k not in _meta_keys]
-                chars = [_status_char(v) for v in vals]
-                if "✓" in chars:
-                    return "✓"
-                if "?" in chars:
-                    return "?"
-                if chars and all(c == "-" for c in chars):
-                    return "-"
-                return "✗"
-
-            summary += "\nDÉTAIL PAR MORCEAU:\n"
-            summary += "Légende: ✓=succès | ✗=échec/absent | ?=crash/timeout | -=déjà présent\n\n"
-
-            n_ok = n_fail = 0
-            for track_result in track_results:
-                title = track_result["title"]
-                results = track_result["results"]
-                if len(title) > 30:
-                    title = title[:27] + "..."
-
-                overall = _overall(results)
-                if overall == "✓":
-                    n_ok += 1
-                elif overall in ("✗", "?"):
-                    n_fail += 1
-
-                parts = [
-                    f"{_src_labels.get(k, k)}:{_status_char(v)}"
-                    for k, v in results.items()
-                    if k not in _meta_keys
-                ]
-                detail = f"  {' | '.join(parts)}" if parts else ""
-                summary += f"{overall} {title}\n{detail}\n" if detail else f"{overall} {title}\n"
-
-            # Bilan chiffré en tête du détail
-            summary = summary.replace(
-                "\nDÉTAIL PAR MORCEAU:\n",
-                f"\n✅ {n_ok} réussi(s) · ❌ {n_fail} échec(s)\n\nDÉTAIL PAR MORCEAU:\n",
-                1,
+            summary = _build_summary(
+                track_results,
+                treated_count=len(selected_tracks_list),
+                disabled_count=disabled_count,
+                force_update=force_update,
+                reset_spotify_id=reset_spotify_id,
+                clear_on_failure=clear_on_failure,
+                cleaned_count=cleaned_count,
             )
-
-            if disabled_count > 0:
-                summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
 
             app.root.after(
                 0, lambda s=summary: report.show_scrollable_report(app, "Enrichissement terminé", s)
@@ -356,22 +301,25 @@ def run_enrichment(
                 ),
             )
         finally:
-            # Fermer les ressources des providers DANS ce thread (celui qui les
-            # a créées) : les browsers Playwright sont thread-affines — ils
-            # naissent et meurent dans le thread du batch et seront recréés à la
-            # demande au suivant. Sans ça, un browser survivait au batch et son
-            # pipe Playwright cassait à l'arrêt de l'app (EPIPE cosmétique mais
-            # alarmant).
+            # Fermer les ressources des providers SUR LE THREAD SYNC DU RUN
+            # (celui qui a créé les browsers — Playwright est thread-affine ;
+            # ils seront recréés à la demande au batch suivant). Sans ça, un
+            # browser survivait au batch et son pipe Playwright cassait à
+            # l'arrêt de l'app (EPIPE cosmétique mais alarmant).
+            runner = app.data_enricher.sync_runner
             try:
-                app.data_enricher.close()
+                await runner.run(app.data_enricher.close)
             except Exception:
                 pass
-            # Arrêter aussi l'instance Playwright THREAD-LOCALE de ce worker :
+            # Arrêter aussi l'instance Playwright THREAD-LOCALE du thread sync :
             # browsers fermés, le driver Node n'a plus de raison de survivre.
             try:
-                from src.scrapers.playwright_manager import stop_playwright
-
-                stop_playwright()
+                await runner.run(_stop_playwright)
+            except Exception:
+                pass
+            # Session httpx du batch (rouverte à la demande au suivant)
+            try:
+                await app.data_enricher.aclose_http()
             except Exception:
                 pass
             app.root.after(
@@ -380,4 +328,107 @@ def run_enrichment(
             app.root.after(0, lambda: app.progress_bar.set(0))
             app.root.after(0, lambda: app.progress_label.configure(text=""))
 
-    start_worker(enrich)
+    async_loop.start()  # idempotent : démarre la boucle au premier flux async
+    async_loop.submit(enrich_batch())
+
+
+def _stop_playwright():
+    """Arrêt de l'instance Playwright du thread appelant (helper picklable/nommé)."""
+    from src.scrapers.playwright_manager import stop_playwright
+
+    stop_playwright()
+
+
+# Étiquettes courtes des sources (générique : toute source présente dans
+# results est affichée, y compris bpmfinder — l'ancien code ne gérait qu'un
+# sous-ensemble en dur → ligne vide si on ne cochait que BPM Finder).
+_SRC_LABELS = {
+    "spotify_id": "SP",
+    "reccobeats": "RC",
+    "getsongbpm": "GS",
+    "songbpm": "SB",
+    "bpmfinder": "BF",
+    "deezer": "DZ",
+    "discogs": "DC",
+}
+_META_KEYS = {"cleaned"}
+
+
+def _status_char(v):
+    if v == "not_needed":
+        return "-"
+    if v is None:
+        return "?"  # crash/timeout
+    return "✓" if v else "✗"
+
+
+def _overall(results):
+    vals = [v for k, v in results.items() if k not in _META_KEYS]
+    chars = [_status_char(v) for v in vals]
+    if "✓" in chars:
+        return "✓"
+    if "?" in chars:
+        return "?"
+    if chars and all(c == "-" for c in chars):
+        return "-"
+    return "✗"
+
+
+def _build_summary(
+    track_results,
+    *,
+    treated_count: int,
+    disabled_count: int,
+    force_update: bool,
+    reset_spotify_id: bool,
+    clear_on_failure: bool,
+    cleaned_count: int,
+) -> str:
+    """Message de fin avec détails par morceau (pur — extrait du worker F2)."""
+    summary = "Enrichissement terminé!\n\n"
+    summary += f"Morceaux traités: {treated_count}\n\n"
+
+    if force_update:
+        summary += "✅ Mode force update activé\n"
+
+    if reset_spotify_id:
+        summary += "🔄 Spotify IDs réinitialisés\n"
+
+    if clear_on_failure and cleaned_count > 0:
+        summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"
+
+    summary += "\nDÉTAIL PAR MORCEAU:\n"
+    summary += "Légende: ✓=succès | ✗=échec/absent | ?=crash/timeout | -=déjà présent\n\n"
+
+    n_ok = n_fail = 0
+    for track_result in track_results:
+        title = track_result["title"]
+        results = track_result["results"]
+        if len(title) > 30:
+            title = title[:27] + "..."
+
+        overall = _overall(results)
+        if overall == "✓":
+            n_ok += 1
+        elif overall in ("✗", "?"):
+            n_fail += 1
+
+        parts = [
+            f"{_SRC_LABELS.get(k, k)}:{_status_char(v)}"
+            for k, v in results.items()
+            if k not in _META_KEYS
+        ]
+        detail = f"  {' | '.join(parts)}" if parts else ""
+        summary += f"{overall} {title}\n{detail}\n" if detail else f"{overall} {title}\n"
+
+    # Bilan chiffré en tête du détail
+    summary = summary.replace(
+        "\nDÉTAIL PAR MORCEAU:\n",
+        f"\n✅ {n_ok} réussi(s) · ❌ {n_fail} échec(s)\n\nDÉTAIL PAR MORCEAU:\n",
+        1,
+    )
+
+    if disabled_count > 0:
+        summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
+
+    return summary

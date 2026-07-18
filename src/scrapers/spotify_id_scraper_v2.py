@@ -135,7 +135,10 @@ class SpotifyIDScraper:
     # ──────────────────────────────────────────────────────────────────────────
 
     def extract_artist_id_from_url(self, url: str) -> str | None:
-        if not url or "spotify" not in url.lower():
+        # Drift site 2026-07-18 : la recherche Spotify sert des hrefs RELATIFS
+        # (`/artist/<id>`) — l'ancien garde « 'spotify' dans l'URL » les rejetait
+        # tous (source muette). Les chemins relatifs /artist/ sont donc admis.
+        if not url or ("spotify" not in url.lower() and not url.startswith("/artist/")):
             return None
         for pattern in self.spotify_artist_id_patterns:
             match = re.search(pattern, url)
@@ -146,7 +149,8 @@ class SpotifyIDScraper:
         return None
 
     def extract_spotify_id_from_url(self, url: str) -> str | None:
-        if not url or "spotify" not in url.lower():
+        # Drift site 2026-07-18 : hrefs RELATIFS `/track/<id>` (cf. artist ci-dessus).
+        if not url or ("spotify" not in url.lower() and not url.startswith("/track/")):
             return None
         for pattern in self.spotify_id_patterns:
             match = re.search(pattern, url)

@@ -140,3 +140,24 @@ def submit(coro: Coroutine[Any, Any, Any]) -> Future:
 
 def shutdown(timeout: float = 8.0) -> bool:
     return _app_loop.shutdown(timeout)
+
+
+def run_sync(coro: Coroutine[Any, Any, Any]):
+    """Exécute `coro` sur LA boucle applicative et bloque jusqu'au résultat.
+
+    Pont F4 pour le code sync (threads workers) : remplace les `asyncio.run`
+    par-appel (une boucle jetable par crawl) par la boucle unique — démarrée au
+    besoin. INTERDIT depuis la boucle elle-même (le `.result()` bloquerait le
+    thread qui doit produire le résultat) : les coroutines await directement.
+    À la fermeture de l'app, la task soumise est annulée par `shutdown()` et
+    le `.result()` relève l'annulation dans le thread appelant.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass  # thread sync : cas nominal
+    else:
+        coro.close()
+        raise RuntimeError("run_sync appelé depuis une boucle asyncio — utiliser await")
+    start()
+    return submit(coro).result()

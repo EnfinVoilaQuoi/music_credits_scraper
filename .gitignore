@@ -98,6 +98,7 @@ scripts/*
 !scripts/run_brma.ps1
 # Dataviz / export studio
 !scripts/bubble_prod.py
+!scripts/bubble_feat.py
 docs/api/
 /test*\.py
 /*test\.py

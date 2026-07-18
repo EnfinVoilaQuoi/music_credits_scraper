@@ -5,6 +5,10 @@ Chaîne complète : `select_album_tracks` → `extract_track_groups` (filtre rô
 (positions layout → canevas, tailles pondérées, ellipses englobantes) →
 `write_bubble_svg`. Aucun import GUI : utilisable en CLI comme depuis la fenêtre
 « Export studio ».
+
+Le cœur (`generate_bubble` / `generate_grid`) est générique — seuls le filtre de
+rôles, le nom de fichier et les libellés changent : `bubble_feat.py` le
+reconfigure tel quel pour le réseau des artistes invités.
 """
 
 import math
@@ -41,11 +45,15 @@ _FORBIDDEN_DIRNAME = '<>:"/\\|?*'
 
 @dataclass(frozen=True)
 class BubbleResult:
-    """Retour de `generate_bubble_prod` : le spec rendu + le chemin du SVG."""
+    """Retour de `generate_bubble` : le spec rendu + le chemin du SVG.
+
+    `node_count` = nb de nœuds du réseau (producteurs pour Bubble Prod,
+    artistes invités pour Bubble Feat).
+    """
 
     spec: BubbleSpec
     path: Path
-    producer_count: int
+    node_count: int
     track_count: int
 
 
@@ -720,16 +728,62 @@ def _safe_dirname(name: str) -> str:
     return cleaned or "_"
 
 
-def default_output_path(artist_name: str, album: str) -> Path:
-    """`<EXPORTS_DIR>/<artiste>/<album>/bubble_prod.svg` (dossiers créés lazily)."""
+def default_output_path(artist_name: str, album: str, filename: str = "bubble_prod.svg") -> Path:
+    """`<EXPORTS_DIR>/<artiste>/<album>/<filename>` (dossiers créés lazily)."""
     from src.config import EXPORTS_DIR
 
     base = Path(EXPORTS_DIR) / _safe_dirname(artist_name) / _safe_dirname(album)
     base.mkdir(parents=True, exist_ok=True)
-    return base / "bubble_prod.svg"
+    return base / filename
 
 
 # ── Orchestration ────────────────────────────────────────────────────────────
+
+
+def generate_bubble(
+    tracks,
+    album: str,
+    *,
+    artist_name: str = "",
+    roles: tuple[str, ...],
+    credit_label: str,
+    filename: str,
+    style: SvgStyle | None = None,
+    seed: int = DEFAULT_SEED,
+    output_path=None,
+) -> BubbleResult:
+    """Cœur commun Bubble Prod / Bubble Feat : SVG du réseau des crédits `roles`.
+
+    `credit_label` sert aux messages d'erreur (« producteur », « featuring »),
+    `filename` au chemin de sortie par défaut. Lève `ValueError` si l'album n'a
+    aucun morceau ou aucun crédit dans `roles`.
+    """
+    style = style or SvgStyle()
+    album_tracks = select_album_tracks(tracks, album)
+    if not album_tracks:
+        raise ValueError(f"Aucun morceau trouvé pour l'album « {album} »")
+
+    track_groups = extract_track_groups(album_tracks, roles)
+    if not track_groups:
+        raise ValueError(
+            f"Aucun crédit {credit_label} ({', '.join(roles)}) sur l'album « {album} »"
+        )
+
+    graph = build_collab_graph(track_groups)
+    collab_groups = aggregate_collab_groups(track_groups)
+    spec = build_bubble_spec(graph, collab_groups, style, seed=seed)
+
+    if output_path is None:
+        output_path = default_output_path(artist_name, album, filename)
+    output_path = Path(output_path)
+    write_bubble_svg(spec, output_path)
+
+    return BubbleResult(
+        spec=spec,
+        path=output_path,
+        node_count=graph.number_of_nodes(),
+        track_count=len(track_groups),
+    )
 
 
 def generate_bubble_prod(
@@ -747,29 +801,16 @@ def generate_bubble_prod(
     Lève `ValueError` si l'album n'a aucun morceau ou aucun crédit producteur
     dans `roles`.
     """
-    style = style or SvgStyle()
-    album_tracks = select_album_tracks(tracks, album)
-    if not album_tracks:
-        raise ValueError(f"Aucun morceau trouvé pour l'album « {album} »")
-
-    track_groups = extract_track_groups(album_tracks, roles)
-    if not track_groups:
-        raise ValueError(f"Aucun crédit producteur ({', '.join(roles)}) sur l'album « {album} »")
-
-    graph = build_collab_graph(track_groups)
-    collab_groups = aggregate_collab_groups(track_groups)
-    spec = build_bubble_spec(graph, collab_groups, style, seed=seed)
-
-    if output_path is None:
-        output_path = default_output_path(artist_name, album)
-    output_path = Path(output_path)
-    write_bubble_svg(spec, output_path)
-
-    return BubbleResult(
-        spec=spec,
-        path=output_path,
-        producer_count=graph.number_of_nodes(),
-        track_count=len(track_groups),
+    return generate_bubble(
+        tracks,
+        album,
+        artist_name=artist_name,
+        roles=roles,
+        credit_label="producteur",
+        filename="bubble_prod.svg",
+        style=style,
+        seed=seed,
+        output_path=output_path,
     )
 
 
@@ -787,35 +828,42 @@ _GRID_CSS = (
 )
 
 
-def generate_preview_grid(
+def generate_grid(
     tracks,
     album: str,
     *,
     artist_name: str = "",
-    roles: tuple[str, ...] = STRICT_PRODUCER_ROLES,
+    roles: tuple[str, ...],
+    credit_label: str,
+    svg_prefix: str,
+    title: str,
+    subdir: str,
     style: SvgStyle | None = None,
     seeds: tuple[int, ...] = PREVIEW_SEEDS,
     output_dir=None,
 ) -> Path:
-    """Génère les variantes de `seeds` + une grille HTML 2×2 pour comparer.
+    """Cœur commun des grilles d'aperçus : variantes de `seeds` + HTML 2×2.
 
-    Écrit `bubble_prod_seed<N>.svg` par variante et `apercus.html` (SVG embarqués
-    par référence relative) dans `<album>/apercus/`. Renvoie le chemin du HTML —
-    à ouvrir dans le navigateur pour choisir la variante qui remplit le mieux.
+    Écrit `<svg_prefix>_seed<N>.svg` par variante et `apercus.html` (SVG
+    embarqués par référence relative) dans `<album>/<subdir>/`. Renvoie le
+    chemin du HTML — à ouvrir dans le navigateur pour choisir la variante qui
+    remplit le mieux.
     """
     if output_dir is None:
-        output_dir = default_output_path(artist_name, album).parent / "apercus"
+        output_dir = default_output_path(artist_name, album).parent / subdir
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     figures = []
     for seed in seeds:
-        svg_name = f"bubble_prod_seed{seed}.svg"
-        generate_bubble_prod(
+        svg_name = f"{svg_prefix}_seed{seed}.svg"
+        generate_bubble(
             tracks,
             album,
             artist_name=artist_name,
             roles=roles,
+            credit_label=credit_label,
+            filename=svg_name,
             style=style,
             seed=seed,
             output_path=output_dir / svg_name,
@@ -828,9 +876,35 @@ def generate_preview_grid(
 
     html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>Bubble Prod — {album}</title><style>{_GRID_CSS}</style></head>"
+        f"<title>{title} — {album}</title><style>{_GRID_CSS}</style></head>"
         f"<body><div class='grid'>{''.join(figures)}</div></body></html>"
     )
     html_path = output_dir / "apercus.html"
     html_path.write_text(html, encoding="utf-8")
     return html_path
+
+
+def generate_preview_grid(
+    tracks,
+    album: str,
+    *,
+    artist_name: str = "",
+    roles: tuple[str, ...] = STRICT_PRODUCER_ROLES,
+    style: SvgStyle | None = None,
+    seeds: tuple[int, ...] = PREVIEW_SEEDS,
+    output_dir=None,
+) -> Path:
+    """Grille d'aperçus Bubble Prod (`bubble_prod_seed<N>.svg` dans `apercus/`)."""
+    return generate_grid(
+        tracks,
+        album,
+        artist_name=artist_name,
+        roles=roles,
+        credit_label="producteur",
+        svg_prefix="bubble_prod",
+        title="Bubble Prod",
+        subdir="apercus",
+        style=style,
+        seeds=seeds,
+        output_dir=output_dir,
+    )

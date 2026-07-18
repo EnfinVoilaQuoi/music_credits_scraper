@@ -61,7 +61,7 @@ def _spec(tracks):
 def test_smoke_structure(tmp_path):
     out = tmp_path / "bubble.svg"
     res = generate_bubble_prod(_album_tracks(), "TestAlbum", output_path=out)
-    assert res.producer_count == 4
+    assert res.node_count == 4
     assert res.track_count == 4  # nb de morceaux crédités (pas de combinaisons)
 
     root = ET.parse(out).getroot()
@@ -226,7 +226,7 @@ def test_trio_produit_une_ellipse(tmp_path):
     tracks = [_track(1, "Trio", "Al", _prod("A"), _prod("B"), _prod("C"))]
     out = tmp_path / "trio.svg"
     res = generate_bubble_prod(tracks, "Al", output_path=out)
-    assert res.producer_count == 3
+    assert res.node_count == 3
     root = ET.parse(out).getroot()
     ellipses = root.find(f"{SVG_NS}g[@id='ellipses']").findall(f"{SVG_NS}ellipse")
     assert len(ellipses) == 1

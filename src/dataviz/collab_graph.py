@@ -33,6 +33,11 @@ BROAD_PRODUCER_ROLES: tuple[str, ...] = (
     "Additional Production",
 )
 
+# Filtre Bubble Feat : les artistes invités (même moteur, autre famille de rôles).
+# L'artiste principal n'est pas crédité « Featured Artist » sur ses morceaux →
+# il n'apparaît pas dans le graphe (sinon hub trivial présent partout).
+FEAT_ROLES: tuple[str, ...] = ("Featured Artist",)
+
 DEFAULT_SEED = 42
 
 

@@ -5,14 +5,20 @@ Récupère: BPM, Key, Mode, Time Signature, Danceability, Acousticness
 IMPORTANT: Backlink obligatoire vers getsongbpm.com pour usage gratuit
 """
 
+import asyncio
 import csv
 import json
 import os
 import sys
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+import httpx
 import requests
+
+if TYPE_CHECKING:
+    from src.api.async_http import AsyncHttpSession
 
 # Fix encodage Windows pour les emojis
 if sys.platform == "win32" and "pytest" not in sys.modules:
@@ -174,6 +180,41 @@ class GetSongBPMFetcher:
                 best = h  # titre contenu → candidat de repli
         return best
 
+    def _lookup_params(self, artist: str, title: str) -> tuple[str, str, dict]:
+        """Prépare la requête /search/ selon la documentation (commun sync/async).
+
+        Pour type="both", format: lookup=song:TITRE artist:ARTISTE — ne PAS
+        quoter les deux-points ni l'espace entre song: et artist:. Apostrophes
+        droites : l'API ne matche pas l'apostrophe typographique '.
+        Renvoie aussi artist/title normalisés (utilisés par `_select_hit`).
+        """
+        for apo in ("’", "‘", "`", "´"):
+            title = title.replace(apo, "'")
+            artist = artist.replace(apo, "'")
+        params = {
+            "api_key": self.api_key,
+            "type": "both",
+            "lookup": f"song:{title} artist:{artist}",
+            "limit": 5,  # Récupérer top 5 résultats
+        }
+        return artist, title, params
+
+    def _selected_from_response(self, data: dict, artist: str, title: str) -> dict | None:
+        """Sélection du hit validé dans une réponse 200 (commun sync/async).
+
+        Structure de réponse: {"search": [...]}.
+        """
+        hits = data.get("search")
+        if isinstance(hits, list) and hits:
+            selected = self._select_hit(hits, artist, title)
+            if selected is None:
+                logger.debug(
+                    f"GetSongBPM: {len(hits)} hit(s) mais aucun match artiste+titre pour {artist} - {title}"
+                )
+            return selected
+        # Pas de résultats ou structure inattendue
+        return None
+
     def _search_track(self, artist: str, title: str) -> dict | None:
         """
         Recherche un morceau via l'endpoint /search/ et VÉRIFIE le hit.
@@ -185,22 +226,7 @@ class GetSongBPMFetcher:
         Returns:
             Le hit 'song' validé (artiste+titre) ou None
         """
-        # Préparer la requête selon documentation
-        # Pour type="both", format: lookup=song:TITRE artist:ARTISTE
-        # Ne PAS quoter les deux-points et l'espace entre song: et artist:
-        # Apostrophes droites : l'API ne matche pas l'apostrophe typographique '
-        for apo in ("’", "‘", "`", "´"):
-            title = title.replace(apo, "'")
-            artist = artist.replace(apo, "'")
-        lookup = f"song:{title} artist:{artist}"
-
-        params = {
-            "api_key": self.api_key,
-            "type": "both",
-            "lookup": lookup,
-            "limit": 5,  # Récupérer top 5 résultats
-        }
-
+        artist, title, params = self._lookup_params(artist, title)
         url = f"{self.BASE_URL}/search/"
 
         for attempt in range(self.MAX_RETRIES):
@@ -208,19 +234,7 @@ class GetSongBPMFetcher:
                 response = self.session.get(url, params=params, timeout=15)
 
                 if response.status_code == 200:
-                    data = response.json()
-
-                    # Structure de réponse: {"search": [...]}
-                    hits = data.get("search")
-                    if isinstance(hits, list) and hits:
-                        selected = self._select_hit(hits, artist, title)
-                        if selected is None:
-                            logger.debug(
-                                f"GetSongBPM: {len(hits)} hit(s) mais aucun match artiste+titre pour {artist} - {title}"
-                            )
-                        return selected
-                    # Pas de résultats ou structure inattendue
-                    return None
+                    return self._selected_from_response(response.json(), artist, title)
 
                 elif response.status_code == 429:
                     # Rate limit atteint
@@ -244,6 +258,45 @@ class GetSongBPMFetcher:
                 print(f"    ⚠ Erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}): {e}")
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(2**attempt)
+                continue
+
+        return None
+
+    async def _search_track_async(
+        self, http: "AsyncHttpSession", artist: str, title: str
+    ) -> dict | None:
+        """Jumeau async de `_search_track` (mêmes retries/backoffs, sleep non bloquant)."""
+        artist, title, params = self._lookup_params(artist, title)
+        url = f"{self.BASE_URL}/search/"
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = await http.get(url, params=params, timeout=15)
+
+                if response.status_code == 200:
+                    return self._selected_from_response(response.json(), artist, title)
+
+                elif response.status_code == 429:
+                    wait_time = 10 * (attempt + 1)
+                    print(f"    ⚠ Rate limit! Attente {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                elif response.status_code == 401:
+                    print("    ✗ API Key invalide ou expirée")
+                    return None
+
+                elif response.status_code == 404:
+                    return None
+
+                else:
+                    print(f"    ⚠ Erreur API: Status {response.status_code}")
+                    return None
+
+            except httpx.HTTPError as e:
+                print(f"    ⚠ Erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}): {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(2**attempt)
                 continue
 
         return None
@@ -276,18 +329,9 @@ class GetSongBPMFetcher:
             print(f"    ⚠ Erreur get_song_by_id: {e}")
             return None
 
-    def fetch_track_bpm(self, artist: str, title: str) -> SongData:
-        """
-        Récupère BPM et métadonnées pour un morceau
-
-        Args:
-            artist: Nom de l'artiste
-            title: Titre du morceau
-
-        Returns:
-            Objet SongData avec toutes les métadonnées
-        """
-        # Vérifier le cache (les échecs cachés ne sont PAS définitifs → on retente)
+    def _cached_song(self, artist: str, title: str) -> SongData | None:
+        """Hit de cache exploitable, ou None (les échecs cachés ne sont PAS
+        définitifs → on retente). Commun sync/async."""
         cache_key = self._get_cache_key(artist, title)
         if cache_key in self.cache:
             cached = self.cache[cache_key]
@@ -295,10 +339,11 @@ class GetSongBPMFetcher:
                 logger.debug(f"Cache: {artist} - {title}")
                 return SongData(**cached)
             logger.debug(f"Cache (échec précédent, on retente): {artist} - {title}")
+        return None
 
-        # Rechercher le morceau
-        track_data = self._search_track(artist, title)
-
+    def _song_from_track_data(self, artist: str, title: str, track_data: dict | None) -> SongData:
+        """SongData depuis un hit validé (ou l'échec « introuvable ») + mise en
+        cache. Commun sync/async."""
         if track_data:
             # Extraire les données selon structure documentée
             key_of = track_data.get("key_of")
@@ -332,10 +377,40 @@ class GetSongBPMFetcher:
             logger.debug(f"Non trouvé: {artist} - {title}")
 
         # Mettre en cache
-        self.cache[cache_key] = song.__dict__
+        self.cache[self._get_cache_key(artist, title)] = song.__dict__
         self._save_cache()
 
         return song
+
+    def fetch_track_bpm(self, artist: str, title: str) -> SongData:
+        """
+        Récupère BPM et métadonnées pour un morceau
+
+        Args:
+            artist: Nom de l'artiste
+            title: Titre du morceau
+
+        Returns:
+            Objet SongData avec toutes les métadonnées
+        """
+        cached = self._cached_song(artist, title)
+        if cached is not None:
+            return cached
+
+        # Rechercher le morceau
+        track_data = self._search_track(artist, title)
+        return self._song_from_track_data(artist, title, track_data)
+
+    async def fetch_track_bpm_async(
+        self, http: "AsyncHttpSession", artist: str, title: str
+    ) -> SongData:
+        """Jumeau async de `fetch_track_bpm` (même cache, même sélection)."""
+        cached = self._cached_song(artist, title)
+        if cached is not None:
+            return cached
+
+        track_data = await self._search_track_async(http, artist, title)
+        return self._song_from_track_data(artist, title, track_data)
 
     def fetch_artist_discography(self, artist: str, track_list: list[str]) -> list[SongData]:
         """

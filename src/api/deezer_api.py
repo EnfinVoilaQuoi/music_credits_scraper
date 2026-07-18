@@ -1,14 +1,22 @@
 """
 Module d'enrichissement des données musicales via l'API Deezer
 Troisième enrichisseur dans la chaîne : Reccobeats -> SongBPM -> Deezer
+
+Phase F2 : chaque méthode réseau a un jumeau async (`*_async`) alimenté par
+l'`AsyncHttpSession` partagée (httpx + rate-limit par domaine) ; la logique
+pure (extraction, vérifications) est commune aux deux voies.
 """
 
 import logging
 import time
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import httpx
 import requests
+
+if TYPE_CHECKING:
+    from src.api.async_http import AsyncHttpSession
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -50,6 +58,16 @@ class DeezerAPI:
 
         self.request_times.append(current_time)
 
+    @staticmethod
+    def _payload_or_none(data: dict) -> dict | None:
+        """Filtre les erreurs applicatives de l'API Deezer (commun sync/async)."""
+        if "error" in data:
+            error_type = data["error"].get("type", "Unknown")
+            error_message = data["error"].get("message", "Unknown error")
+            logger.error(f"Erreur API Deezer: {error_type} - {error_message}")
+            return None
+        return data
+
     def _make_request(self, endpoint: str, params: dict | None = None) -> dict | None:
         """
         Effectue une requête à l'API Deezer avec gestion du rate limiting
@@ -68,18 +86,26 @@ class DeezerAPI:
         try:
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
-            data = response.json()
-
-            # Vérifier les erreurs de l'API Deezer
-            if "error" in data:
-                error_type = data["error"].get("type", "Unknown")
-                error_message = data["error"].get("message", "Unknown error")
-                logger.error(f"Erreur API Deezer: {error_type} - {error_message}")
-                return None
-
-            return data
+            return self._payload_or_none(response.json())
 
         except requests.exceptions.RequestException as e:
+            logger.error(f"Erreur de requête: {e}")
+            return None
+        except ValueError as e:
+            logger.error(f"Erreur de parsing JSON: {e}")
+            return None
+
+    async def _make_request_async(
+        self, http: "AsyncHttpSession", endpoint: str, params: dict | None = None
+    ) -> dict | None:
+        """Jumeau async de `_make_request` — le rate-limit par fenêtre (50/5 s)
+        est remplacé par le limiteur par domaine de la session partagée."""
+        url = f"{self.BASE_URL}/{endpoint}"
+        try:
+            response = await http.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            return self._payload_or_none(response.json())
+        except httpx.HTTPError as e:
             logger.error(f"Erreur de requête: {e}")
             return None
         except ValueError as e:
@@ -98,21 +124,32 @@ class DeezerAPI:
         Returns:
             Données du premier résultat ou None
         """
-        # Construction de la requête de recherche avancée
-        query = f'artist:"{artist}" track:"{title}"'
+        data = self._make_request("search", self._search_params(artist, title, strict))
+        return self._first_search_hit(data, artist, title)
 
-        params = {"q": query, "limit": 5}  # Récupérer plusieurs résultats pour choisir le meilleur
+    async def search_track_async(
+        self, http: "AsyncHttpSession", artist: str, title: str, strict: bool = False
+    ) -> dict | None:
+        """Jumeau async de `search_track` (mêmes params, même sélection)."""
+        data = await self._make_request_async(
+            http, "search", self._search_params(artist, title, strict)
+        )
+        return self._first_search_hit(data, artist, title)
 
+    @staticmethod
+    def _search_params(artist: str, title: str, strict: bool) -> dict:
+        """Requête de recherche avancée (commun sync/async)."""
+        params = {"q": f'artist:"{artist}" track:"{title}"', "limit": 5}
         if strict:
             params["strict"] = "on"
+        return params
 
-        data = self._make_request("search", params)
-
+    @staticmethod
+    def _first_search_hit(data: dict | None, artist: str, title: str) -> dict | None:
+        """Premier résultat (meilleur match) ou None (commun sync/async)."""
         if not data or "data" not in data or not data["data"]:
             logger.warning(f"Aucun résultat trouvé pour: {artist} - {title}")
             return None
-
-        # Retourner le premier résultat (meilleur match)
         return data["data"][0]
 
     def get_isrc(self, artist: str, title: str) -> str | None:
@@ -125,6 +162,16 @@ class DeezerAPI:
         """
         try:
             track_data = self.search_track(artist, title)
+            if track_data and track_data.get("isrc"):
+                return track_data["isrc"]
+        except Exception as e:
+            logger.debug(f"get_isrc échec pour {artist} - {title}: {e}")
+        return None
+
+    async def get_isrc_async(self, http: "AsyncHttpSession", artist: str, title: str) -> str | None:
+        """Jumeau async de `get_isrc`."""
+        try:
+            track_data = await self.search_track_async(http, artist, title)
             if track_data and track_data.get("isrc"):
                 return track_data["isrc"]
         except Exception as e:
@@ -344,9 +391,28 @@ class DeezerAPI:
         Returns:
             Données enrichies avec vérifications
         """
-        # Rechercher le track
         track_data = self.search_track(artist, title)
+        return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
 
+    async def enrich_track_async(
+        self,
+        http: "AsyncHttpSession",
+        artist: str,
+        title: str,
+        previous_duration: int | None = None,
+        scraped_release_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Jumeau async d'`enrich_track` (mêmes vérifications, même forme de retour)."""
+        track_data = await self.search_track_async(http, artist, title)
+        return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
+
+    def _build_enrichment_result(
+        self,
+        track_data: dict | None,
+        previous_duration: int | None,
+        scraped_release_date: str | None,
+    ) -> dict[str, Any]:
+        """Extraction + vérifications sur un hit de recherche (commun sync/async)."""
         if not track_data:
             return {
                 "success": False,

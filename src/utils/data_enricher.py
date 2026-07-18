@@ -75,8 +75,12 @@ class DataEnricher:
         except Exception as e:
             logger.debug(f"Genius API non disponible dans l'enricher: {e}")
 
+        from src.scrapers.spotify_id_scraper_async import SpotifyIDScraperAsync
+
         self._spotify_id_provider = SpotifyIdProvider(
-            scraper_factory=lambda: SpotifyIDScraper(headless=headless_spotify_scraper)
+            scraper_factory=lambda: SpotifyIDScraper(headless=headless_spotify_scraper),
+            # Variante ASYNC (F3b) : vit dans la boucle, fermée par aclose().
+            async_scraper_factory=lambda: SpotifyIDScraperAsync(headless=headless_spotify_scraper),
         )
         self._reccobeats_provider = ReccoBeatsProvider(
             client_factory=lambda: ReccoBeatsIntegratedClient(headless=headless_reccobeats),
@@ -84,6 +88,7 @@ class DataEnricher:
             # EMPRUNT : le scraper Spotify appartient à SpotifyIdProvider (qui le
             # ferme) ; ReccoBeats l'utilise au moment du fallback, sans le posséder.
             spotify_scraper_getter=lambda: self._spotify_id_provider.scraper,
+            spotify_scraper_async_getter=lambda: self._spotify_id_provider.async_scraper,
         )
         # Factory seulement si la clé API est présente (le ctor lève sans elle) :
         # même visibilité qu'avant dans la liste de sources de la GUI.
@@ -585,6 +590,16 @@ class DataEnricher:
         """Ferme la session httpx partagée (fin de batch async) ; rouverte à la
         demande au batch suivant. À appeler DANS la boucle asyncio."""
         await self._http.aclose()
+
+    async def aclose_async_scrapers(self) -> None:
+        """Ferme les scrapers Playwright ASYNC des providers (F3) — browsers de
+        la boucle, recréés à la demande au batch suivant. À appeler DANS la
+        boucle, AVANT stop_playwright_async."""
+        for provider in (self._spotify_id_provider,):
+            try:
+                await provider.aclose()
+            except Exception as e:
+                logger.warning(f"⚠️ Fermeture async provider {provider.name}: {e}")
 
     def _apply_genius_feat_metadata(self, track) -> None:
         """FEATS : media/album/relations via API Genius AVANT ReccoBeats

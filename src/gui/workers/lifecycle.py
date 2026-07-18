@@ -18,6 +18,7 @@ Le contrat, en trois pièces :
 import threading
 import time
 
+from src.concurrency import async_loop
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,13 +55,17 @@ def shutdown_workers(total_timeout: float = 8.0) -> list[str]:
         tués par la fin du processus, comme l'ancien comportement daemon).
     """
     _stop_event.set()
+    deadline = time.monotonic() + total_timeout
+    # Boucle asyncio d'abord (garde-fou Phase F : annuler les tasks AVANT de
+    # fermer les ressources qu'elles utilisent) ; no-op immédiat si jamais
+    # démarrée. Budget global partagé avec le join des threads.
+    async_loop.shutdown(timeout=total_timeout)
     with _lock:
         workers = [w for w in _workers if w.is_alive()]
     if not workers:
         return []
 
     logger.info(f"⏳ Fermeture : attente de {len(workers)} worker(s) en cours…")
-    deadline = time.monotonic() + total_timeout
     survivors = []
     for thread in workers:
         remaining = deadline - time.monotonic()

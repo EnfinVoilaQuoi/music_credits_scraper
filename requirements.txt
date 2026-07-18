@@ -50,3 +50,7 @@ python-dateutil==2.8.2
 # IA locale (Crawl4AI + Ollama)
 crawl4ai>=0.5.0
 ollama>=0.4.0
+
+# Concurrence async (phase F) — client HTTP des providers async (boucle unique).
+# Déjà présent en transitif (crawl4ai, ollama) ; dépendance directe désormais.
+httpx>=0.28.1

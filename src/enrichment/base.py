@@ -80,6 +80,22 @@ class LazyResource:
         self._resource = None
         self._owned = False
 
+    async def aclose(self) -> None:
+        """Variante async de close() (Phase F3) : awaite `resource.aclose()`.
+
+        Même ownership « qui crée ferme » — pour les ressources vivant dans la
+        boucle asyncio (scrapers Playwright async). À appeler DANS la boucle.
+        """
+        if not (self._owned and self._resource is not None):
+            return
+        try:
+            await self._resource.aclose()
+            logger.info(f"{self._label} fermé")
+        except Exception as e:
+            logger.warning(f"⚠️ Fermeture {self._label}: {e}")
+        self._resource = None
+        self._owned = False
+
 
 @runtime_checkable
 class EnrichmentProvider(Protocol):

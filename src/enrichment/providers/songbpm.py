@@ -6,6 +6,8 @@ sera remplacé par asyncio.timeout en phase F. Le BPM alimente le scrutin (§8.3
 le Spotify ID trouvé est validé par la fonction d'unicité fournie via le contexte.
 """
 
+import asyncio
+
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
@@ -25,9 +27,13 @@ class SongBpmProvider:
     # « tout a échoué » qui déclenche le nettoyage de l'orchestrateur.
     error_result = None
 
-    def __init__(self, scraper=None, scraper_factory=None):
+    def __init__(self, scraper=None, scraper_factory=None, async_scraper_factory=None):
         # PROPRIÉTAIRE de son scraper (créé lazy, fermé par close()).
         self._resource = LazyResource(scraper, scraper_factory, label="scraper SongBPM")
+        # Variante ASYNC (F3c) : vit dans la boucle, fermée par aclose().
+        self._async_resource = LazyResource(
+            None, async_scraper_factory, label="scraper SongBPM async"
+        )
 
     def is_available(self) -> bool:
         return self._resource.available()
@@ -35,6 +41,10 @@ class SongBpmProvider:
     def close(self) -> None:
         """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
         self._resource.close()
+
+    async def aclose(self) -> None:
+        """Ferme le scraper ASYNC s'il l'a créé (browsers de la boucle, F3c)."""
+        await self._async_resource.aclose()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """DÉPARTAGE (§8.3) : scrape seulement si les APIs n'ont pas de consensus
@@ -78,46 +88,40 @@ class SongBpmProvider:
         )
         return None
 
-    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
-        force_update = ctx.force_update
-        artist_tracks = ctx.artist_tracks
+    @staticmethod
+    def _artist_name(track: Track) -> str:
+        """Artiste de recherche : artiste principal si featuring (commun sync/async)."""
+        if track.is_featuring and track.primary_artist_name:
+            logger.info(
+                f"🎤 Featuring détecté, utilisation de l'artiste principal: "
+                f"{track.primary_artist_name}"
+            )
+            return track.primary_artist_name
+        return track.artist.name if hasattr(track.artist, "name") else str(track.artist)
 
+    def _validated_spotify_id(self, track: Track, ctx: EnrichmentContext) -> str | None:
+        """Spotify ID du track, ignoré s'il est un duplicata (commun sync/async)."""
+        spotify_id = track.spotify_id
+        if (
+            spotify_id
+            and ctx.artist_tracks
+            and ctx.validate_spotify_id_unique
+            and not ctx.validate_spotify_id_unique(spotify_id, track, ctx.artist_tracks)
+        ):
+            logger.warning(
+                "⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM"
+            )
+            return None
+        return spotify_id
+
+    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         scraper = self._resource.get()
         if not scraper:
             return False
 
         try:
-            # NOUVEAU: Utiliser le bon artiste selon si c'est un featuring
-            if track.is_featuring:
-                # Si c'est un featuring, utiliser l'artiste principal
-                if track.primary_artist_name:
-                    artist_name = track.primary_artist_name
-                    logger.info(
-                        f"🎤 Featuring détecté, utilisation de l'artiste principal: {artist_name}"
-                    )
-                else:
-                    artist_name = (
-                        track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                    )
-            else:
-                artist_name = (
-                    track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-                )
-
-            # Extraire le Spotify ID si disponible (et validé)
-            spotify_id = track.spotify_id
-
-            # Valider l'unicité si un ID existe
-            if (
-                spotify_id
-                and artist_tracks
-                and ctx.validate_spotify_id_unique
-                and not ctx.validate_spotify_id_unique(spotify_id, track, artist_tracks)
-            ):
-                logger.warning(
-                    "⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM"
-                )
-                spotify_id = None
+            artist_name = self._artist_name(track)
+            spotify_id = self._validated_spotify_id(track, ctx)
 
             # Timeout de garde (30 s) : un Timer invalide un résultat trop tardif.
             # NOTE (AUDIT.md §3.6) : l'ancien code tentait de fermer un attribut
@@ -126,6 +130,7 @@ class SongBpmProvider:
             # Timer : l'API sync de Playwright n'est pas thread-safe, et le scraper
             # applique déjà ses propres timeouts de navigation (goto timeout=30s).
             # (Branche Unix `signal.alarm` supprimée le 2026-07-11 — app Windows-only.)
+            # Voie ASYNC : remplacé par asyncio.timeout (cf. enrich_async, F3c).
             import threading
 
             timeout_seconds = 30
@@ -156,70 +161,7 @@ class SongBpmProvider:
             if not track_data:
                 return False
 
-            updated = False
-
-            # BPM → candidat pour le vote (+ pose provisoire si manquant)
-            sbpm = sanitize_bpm(track_data.get("bpm"))
-            if sbpm is not None:
-                ctx.bpm_ballot.add("songbpm", sbpm)
-                # Un candidat valide fourni au vote = SongBPM a RÉUSSI, même si un
-                # BPM était déjà présent (2ᵉ vote concordant). Sans ça, le run était
-                # loggé « ÉCHEC » à tort et pouvait déclencher le nettoyage.
-                updated = True
-                if force_update or not track.bpm:
-                    track.bpm = sbpm
-                    logger.info(f"📊 BPM ajouté depuis SongBPM: {sbpm} pour {track.title}")
-
-            # Key et Mode
-            key_value = track_data.get("key")
-            mode_value = track_data.get("mode")
-
-            # Observation key/mode PAR SOURCE (normalisée : "minor"→0, lettre→pc)
-            # — indépendante du last-writer legacy, corrige le bug WIP mode="minor"
-            # côté observations (la colonne legacy suivra en E5c-2b-ii).
-            ctx.observations.extend(
-                key_mode_observations("songbpm", key=key_value, mode=mode_value)
-            )
-
-            if key_value and mode_value:
-                if force_update or not hasattr(track, "key") or not track.key:
-                    track.key = key_value
-                    track.key_mode_source = "songbpm"
-                    logger.info(f"🎵 Key ajoutée depuis SongBPM: {track.key} pour {track.title}")
-                    updated = True
-
-                if force_update or not hasattr(track, "mode") or not track.mode:
-                    track.mode = mode_value
-                    track.key_mode_source = "songbpm"
-                    logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
-                    updated = True
-
-            # Spotify ID depuis SongBPM (avec validation stricte)
-            songbpm_spotify_id = track_data.get("spotify_id")
-            if songbpm_spotify_id and (not track.spotify_id):
-                # Valider l'unicité
-                if (
-                    artist_tracks
-                    and ctx.validate_spotify_id_unique
-                    and ctx.validate_spotify_id_unique(songbpm_spotify_id, track, artist_tracks)
-                ):
-                    track.spotify_id = songbpm_spotify_id
-                    logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id}")
-                    updated = True
-                else:
-                    logger.warning(
-                        f"⚠️ REJET: Spotify ID de SongBPM déjà utilisé: {songbpm_spotify_id}"
-                    )
-
-            # Duration
-            if (force_update or not track.duration) and track_data.get("duration"):
-                track.duration = track_data["duration"]
-                logger.info(
-                    f"⏱️ Duration ajoutée depuis SongBPM: {track.duration} pour {track.title}"
-                )
-                updated = True
-
-            return updated
+            return self._apply_track_data(track, ctx, track_data)
 
         except TimeoutError as e:
             logger.error(f"⏰ SongBPM timeout pour {track.title}: {e}")
@@ -228,7 +170,102 @@ class SongBpmProvider:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
             return False
 
+    def _apply_track_data(self, track: Track, ctx: EnrichmentContext, track_data: dict) -> bool:
+        """Application des données SongBPM au track (commun sync/async)."""
+        force_update = ctx.force_update
+        artist_tracks = ctx.artist_tracks
+        updated = False
+
+        # BPM → candidat pour le vote (+ pose provisoire si manquant)
+        sbpm = sanitize_bpm(track_data.get("bpm"))
+        if sbpm is not None:
+            ctx.bpm_ballot.add("songbpm", sbpm)
+            # Un candidat valide fourni au vote = SongBPM a RÉUSSI, même si un
+            # BPM était déjà présent (2ᵉ vote concordant). Sans ça, le run était
+            # loggé « ÉCHEC » à tort et pouvait déclencher le nettoyage.
+            updated = True
+            if force_update or not track.bpm:
+                track.bpm = sbpm
+                logger.info(f"📊 BPM ajouté depuis SongBPM: {sbpm} pour {track.title}")
+
+        # Key et Mode
+        key_value = track_data.get("key")
+        mode_value = track_data.get("mode")
+
+        # Observation key/mode PAR SOURCE (normalisée : "minor"→0, lettre→pc)
+        # — indépendante du last-writer legacy, corrige le bug WIP mode="minor"
+        # côté observations (la colonne legacy suivra en E5c-2b-ii).
+        ctx.observations.extend(key_mode_observations("songbpm", key=key_value, mode=mode_value))
+
+        if key_value and mode_value:
+            if force_update or not hasattr(track, "key") or not track.key:
+                track.key = key_value
+                track.key_mode_source = "songbpm"
+                logger.info(f"🎵 Key ajoutée depuis SongBPM: {track.key} pour {track.title}")
+                updated = True
+
+            if force_update or not hasattr(track, "mode") or not track.mode:
+                track.mode = mode_value
+                track.key_mode_source = "songbpm"
+                logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
+                updated = True
+
+        # Spotify ID depuis SongBPM (avec validation stricte)
+        songbpm_spotify_id = track_data.get("spotify_id")
+        if songbpm_spotify_id and (not track.spotify_id):
+            # Valider l'unicité
+            if (
+                artist_tracks
+                and ctx.validate_spotify_id_unique
+                and ctx.validate_spotify_id_unique(songbpm_spotify_id, track, artist_tracks)
+            ):
+                track.spotify_id = songbpm_spotify_id
+                logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id}")
+                updated = True
+            else:
+                logger.warning(
+                    f"⚠️ REJET: Spotify ID de SongBPM déjà utilisé: {songbpm_spotify_id}"
+                )
+
+        # Duration
+        if (force_update or not track.duration) and track_data.get("duration"):
+            track.duration = track_data["duration"]
+            logger.info(f"⏱️ Duration ajoutée depuis SongBPM: {track.duration} pour {track.title}")
+            updated = True
+
+        return updated
+
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Voie async (F2) : corps sync inchangé (Timer 30 s compris), exécuté
-        sur le thread sync dédié du run (affinité Playwright — cf. SerialWorker)."""
-        return await ctx.sync_runner.run(self.enrich, track, ctx)
+        """Voie async (F3c) : scraper Playwright ASYNC natif dans la boucle ;
+        `asyncio.timeout(30)` remplace le threading.Timer de garde — même
+        budget, mais l'annulation INTERROMPT la recherche (le Timer laissait
+        finir et jetait le résultat) et le driver est recyclé pour repartir
+        sain. Sans variante async configurée, repli sur le pont sync F2."""
+        scraper = self._async_resource.get()
+        if scraper is None:
+            return await ctx.sync_runner.run(self.enrich, track, ctx)
+
+        try:
+            artist_name = self._artist_name(track)
+            spotify_id = self._validated_spotify_id(track, ctx)
+
+            timeout_seconds = 30
+            try:
+                async with asyncio.timeout(timeout_seconds):
+                    track_data = await scraper.search_track_async(
+                        track.title, artist_name, spotify_id=spotify_id, fetch_details=True
+                    )
+            except TimeoutError:
+                logger.error(f"⏰ SongBPM timeout après {timeout_seconds}s — recherche annulée")
+                logger.error(f"❌ SongBPM: Timeout expiré pour '{track.title}'")
+                await scraper.aclose()  # recyclé : recréé au prochain usage
+                return False
+
+            if not track_data:
+                return False
+
+            return self._apply_track_data(track, ctx, track_data)
+
+        except Exception as e:
+            logger.error(f"Erreur SongBPM pour {track.title}: {e}")
+            return False

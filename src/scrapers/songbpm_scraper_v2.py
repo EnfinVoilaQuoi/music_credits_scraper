@@ -246,39 +246,44 @@ class SongBPMScraper:
                 full_text = body.inner_text() if body else ""
 
             clean_text = re.sub(r"\s+", " ", full_text).replace("\xa0", " ")
-
-            mode_match = re.search(
-                r"key\s+and\s+a\s+(major|minor)\s+mode", clean_text, re.IGNORECASE
-            )
-            if not mode_match:
-                mode_match = re.search(r"\b(major|minor)\s+mode\b", clean_text, re.IGNORECASE)
-            if mode_match:
-                details["mode"] = mode_match.group(1).lower()
-
-            key_match = re.search(r"with\s+a\s+([A-G][\#b♯♭/]+)\s+key", clean_text, re.IGNORECASE)
-            if key_match:
-                details["key_from_paragraph"] = key_match.group(1).strip()
-
-            time_sig_match = re.search(
-                r"time\s+signature\s+of\s+(\d+)\s+beats?\s+per\s+bar", clean_text, re.IGNORECASE
-            )
-            if time_sig_match:
-                details["time_signature"] = int(time_sig_match.group(1))
-
-            # Fallback LLM : complète les champs que les regex n'ont pas trouvés
-            missing = {"mode", "key_from_paragraph", "time_signature"} - set(details)
-            if missing:
-                llm_details = self._extract_details_with_llm(clean_text)
-                for key, value in llm_details.items():
-                    if key in missing:
-                        details[key] = value
-                        logger.info(f"🤖 SongBPM LLM: {key} = {value}")
-
+            details = self._details_from_text(clean_text)
             logger.info(f"✅ Détails extraits: {details}")
         except PlaywrightTimeoutError:
             logger.warning(f"⏰ Timeout ({timeout}s) lors de la récupération des détails")
         except Exception as e:
             logger.error(f"❌ Erreur extraction détails: {e}")
+        return details
+
+    def _details_from_text(self, clean_text: str) -> dict[str, Any]:
+        """Mode/key/time_signature depuis le texte de la page de détail
+        (regex + fallback LLM) — logique PURE, commune sync/async (F3c)."""
+        details: dict[str, Any] = {}
+
+        mode_match = re.search(r"key\s+and\s+a\s+(major|minor)\s+mode", clean_text, re.IGNORECASE)
+        if not mode_match:
+            mode_match = re.search(r"\b(major|minor)\s+mode\b", clean_text, re.IGNORECASE)
+        if mode_match:
+            details["mode"] = mode_match.group(1).lower()
+
+        key_match = re.search(r"with\s+a\s+([A-G][\#b♯♭/]+)\s+key", clean_text, re.IGNORECASE)
+        if key_match:
+            details["key_from_paragraph"] = key_match.group(1).strip()
+
+        time_sig_match = re.search(
+            r"time\s+signature\s+of\s+(\d+)\s+beats?\s+per\s+bar", clean_text, re.IGNORECASE
+        )
+        if time_sig_match:
+            details["time_signature"] = int(time_sig_match.group(1))
+
+        # Fallback LLM : complète les champs que les regex n'ont pas trouvés
+        missing = {"mode", "key_from_paragraph", "time_signature"} - set(details)
+        if missing:
+            llm_details = self._extract_details_with_llm(clean_text)
+            for key, value in llm_details.items():
+                if key in missing:
+                    details[key] = value
+                    logger.info(f"🤖 SongBPM LLM: {key} = {value}")
+
         return details
 
     def _extract_details_with_llm(self, clean_text: str) -> dict[str, Any]:

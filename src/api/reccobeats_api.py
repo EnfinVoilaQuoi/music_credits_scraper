@@ -7,8 +7,12 @@ Le scraping Spotify ID est géré par SpotifyIDScraper (module séparé)
 import json
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import requests
+
+if TYPE_CHECKING:
+    from src.api.async_http import AsyncHttpSession
 
 logger = logging.getLogger("ReccoBeatsAPI")
 
@@ -56,6 +60,34 @@ class ReccoBeatsIntegratedClient:
         """Génère une clé de cache basée sur l'ID Spotify"""
         return f"spotify_id::{spotify_id}"
 
+    @staticmethod
+    def _pick_track_from_response(data) -> dict | None:
+        """Extrait le track d'une réponse 200 aux formats variables (commun sync/async)."""
+        track = None
+
+        if isinstance(data, list) and len(data) > 0:
+            track = data[0]
+            logger.info(f"✅ Track trouvé (liste): {track.get('trackTitle', 'N/A')}")
+        elif isinstance(data, dict):
+            if "content" in data:
+                content = data["content"]
+                if isinstance(content, list) and len(content) > 0:
+                    track = content[0]
+                    logger.info(
+                        f"✅ Track trouvé (dict.content[0]): {track.get('trackTitle', 'N/A')}"
+                    )
+                elif isinstance(content, dict):
+                    if "id" in content or "trackTitle" in content:
+                        track = content
+                        logger.info(
+                            f"✅ Track trouvé (dict.content dict): {track.get('trackTitle', 'N/A')}"
+                        )
+            elif "id" in data or "trackTitle" in data:
+                track = data
+                logger.info(f"✅ Track trouvé (dict direct): {track.get('trackTitle', 'N/A')}")
+
+        return track
+
     def get_track_from_reccobeats(self, spotify_id: str) -> dict | None:
         """
         Récupère les données d'un track depuis ReccoBeats
@@ -77,35 +109,7 @@ class ReccoBeatsIntegratedClient:
             logger.debug(f"📡 Response: Status {response.status_code}")
 
             if response.status_code == 200:
-                data = response.json()
-
-                # Gérer différents formats de réponse
-                track = None
-
-                if isinstance(data, list) and len(data) > 0:
-                    track = data[0]
-                    logger.info(f"✅ Track trouvé (liste): {track.get('trackTitle', 'N/A')}")
-                elif isinstance(data, dict):
-                    if "content" in data:
-                        content = data["content"]
-                        if isinstance(content, list) and len(content) > 0:
-                            track = content[0]
-                            logger.info(
-                                f"✅ Track trouvé (dict.content[0]): {track.get('trackTitle', 'N/A')}"
-                            )
-                        elif isinstance(content, dict):
-                            if "id" in content or "trackTitle" in content:
-                                track = content
-                                logger.info(
-                                    f"✅ Track trouvé (dict.content dict): {track.get('trackTitle', 'N/A')}"
-                                )
-                    elif "id" in data or "trackTitle" in data:
-                        track = data
-                        logger.info(
-                            f"✅ Track trouvé (dict direct): {track.get('trackTitle', 'N/A')}"
-                        )
-
-                return track
+                return self._pick_track_from_response(response.json())
 
             elif response.status_code == 404:
                 logger.warning(f"❌ Track {spotify_id} non trouvé (404)")
@@ -114,6 +118,29 @@ class ReccoBeatsIntegratedClient:
             else:
                 logger.error(f"❌ Erreur {response.status_code}: {response.text[:200]}")
 
+        except Exception as e:
+            logger.error(f"❌ Exception ReccoBeats: {e}")
+
+        return None
+
+    async def get_track_from_reccobeats_async(
+        self, http: "AsyncHttpSession", spotify_id: str
+    ) -> dict | None:
+        """Jumeau async de `get_track_from_reccobeats`."""
+        try:
+            url = f"{self.recco_base_url}/track"
+            logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
+            response = await http.get(url, params={"ids": spotify_id}, timeout=15)
+            logger.debug(f"📡 Response: Status {response.status_code}")
+
+            if response.status_code == 200:
+                return self._pick_track_from_response(response.json())
+            elif response.status_code == 404:
+                logger.warning(f"❌ Track {spotify_id} non trouvé (404)")
+            elif response.status_code == 429:
+                logger.warning("⏰ Rate limit atteint")
+            else:
+                logger.error(f"❌ Erreur {response.status_code}: {response.text[:200]}")
         except Exception as e:
             logger.error(f"❌ Exception ReccoBeats: {e}")
 
@@ -148,6 +175,26 @@ class ReccoBeatsIntegratedClient:
 
         return None
 
+    async def get_track_audio_features_async(
+        self, http: "AsyncHttpSession", reccobeats_id: str
+    ) -> dict | None:
+        """Jumeau async de `get_track_audio_features`."""
+        try:
+            url = f"{self.recco_base_url}/track/{reccobeats_id}/audio-features"
+            logger.debug(f"🎼 Audio features: {url}")
+            response = await http.get(url, timeout=15)
+
+            if response.status_code == 200:
+                features = response.json()
+                logger.info(f"✅ BPM récupéré: {features.get('tempo', 'N/A')}")
+                return features
+            else:
+                logger.warning(f"❌ Audio features erreur {response.status_code}")
+        except Exception as e:
+            logger.error(f"❌ Exception audio features: {e}")
+
+        return None
+
     def get_track_info(
         self, spotify_id: str, use_cache: bool = True, force_refresh: bool = False
     ) -> dict | None:
@@ -166,43 +213,21 @@ class ReccoBeatsIntegratedClient:
 
         try:
             cache_key = self._get_cache_key(spotify_id)
-
-            # Force refresh = nettoyer le cache
-            if force_refresh and cache_key in self.cache:
-                del self.cache[cache_key]
-                logger.info(f"Force refresh pour: {spotify_id}")
-
-            # Vérifier le cache
-            if use_cache and not force_refresh and cache_key in self.cache:
-                cached = self.cache[cache_key]
-                if isinstance(cached, dict):
-                    has_bpm = cached.get("bpm") is not None or cached.get("tempo") is not None
-                    has_audio_features = cached.get("audio_features") is not None
-
-                    if has_bpm or has_audio_features:
-                        logger.info("✅ Données complètes trouvées dans le cache")
-                        return cached
+            cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
+            if cached is not None:
+                return cached
 
             # Étape 1: Récupérer les données du track
             track_data = self.get_track_from_reccobeats(spotify_id)
 
             if not track_data:
-                logger.warning(f"❌ Aucune donnée ReccoBeats pour {spotify_id}")
-                self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
-                self._save_cache()
+                self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
                 return None
 
-            # Réponse de base
-            result = {
-                "spotify_id": spotify_id,
-                "source": "reccobeats",
-                "success": True,
-                "timestamp": time.time(),
-                **track_data,
-            }
-
             # Durée + audio features (BPM/Key/Mode...) via helper partagé
-            result = self._enrich_result_with_features(result, track_data)
+            result = self._enrich_result_with_features(
+                self._base_spotify_result(spotify_id, track_data), track_data
+            )
 
             # Sauvegarder en cache
             self.cache[cache_key] = result
@@ -218,39 +243,138 @@ class ReccoBeatsIntegratedClient:
             logger.error(traceback.format_exc())
             return None
 
+    async def get_track_info_async(
+        self,
+        http: "AsyncHttpSession",
+        spotify_id: str,
+        use_cache: bool = True,
+        force_refresh: bool = False,
+    ) -> dict | None:
+        """Jumeau async de `get_track_info` (même cache, même forme de retour)."""
+        logger.info(f"🎵 get_track_info pour Spotify ID: {spotify_id}")
+
+        try:
+            cache_key = self._get_cache_key(spotify_id)
+            cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
+            if cached is not None:
+                return cached
+
+            track_data = await self.get_track_from_reccobeats_async(http, spotify_id)
+
+            if not track_data:
+                self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
+                return None
+
+            result = await self._enrich_result_with_features_async(
+                http, self._base_spotify_result(spotify_id, track_data), track_data
+            )
+
+            self.cache[cache_key] = result
+            self._save_cache()
+
+            logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Erreur générale get_track_info: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            return None
+
+    def _cached_spotify_info(
+        self, cache_key: str, spotify_id: str, use_cache: bool, force_refresh: bool
+    ) -> dict | None:
+        """Gestion du cache de `get_track_info` (commun sync/async)."""
+        # Force refresh = nettoyer le cache
+        if force_refresh and cache_key in self.cache:
+            del self.cache[cache_key]
+            logger.info(f"Force refresh pour: {spotify_id}")
+
+        # Vérifier le cache
+        if use_cache and not force_refresh and cache_key in self.cache:
+            cached = self.cache[cache_key]
+            if isinstance(cached, dict):
+                has_bpm = cached.get("bpm") is not None or cached.get("tempo") is not None
+                has_audio_features = cached.get("audio_features") is not None
+
+                if has_bpm or has_audio_features:
+                    logger.info("✅ Données complètes trouvées dans le cache")
+                    return cached
+        return None
+
+    def _cache_not_found(self, cache_key: str, label: str) -> None:
+        """Mémorise un échec « not_found » (commun sync/async)."""
+        logger.warning(f"❌ Aucune donnée ReccoBeats pour {label}")
+        self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
+        self._save_cache()
+
+    @staticmethod
+    def _base_spotify_result(spotify_id: str, track_data: dict) -> dict:
+        """Réponse de base de la voie Spotify ID (commun sync/async)."""
+        return {
+            "spotify_id": spotify_id,
+            "source": "reccobeats",
+            "success": True,
+            "timestamp": time.time(),
+            **track_data,
+        }
+
+    @staticmethod
+    def _apply_duration(result: dict, track_data: dict) -> None:
+        """Durée depuis `durationMs` (commun sync/async)."""
+        if "durationMs" in track_data:
+            duration_ms = track_data["durationMs"]
+            result["duration"] = int(duration_ms / 1000) if duration_ms else None
+            logger.info(f"⏱️ Duration: {result['duration']}s ({duration_ms}ms)")
+
+    @staticmethod
+    def _apply_audio_features(result: dict, audio_features: dict | None) -> None:
+        """Applique les audio features + musical_key (commun sync/async)."""
+        if not audio_features:
+            return
+        result["audio_features"] = audio_features
+        result["bpm"] = audio_features.get("tempo")
+        result["key"] = audio_features.get("key")
+        result["mode"] = audio_features.get("mode")
+        result["energy"] = audio_features.get("energy")
+        result["danceability"] = audio_features.get("danceability")
+        result["valence"] = audio_features.get("valence")
+        if result.get("key") is not None and result.get("mode") is not None:
+            try:
+                from src.utils.music_theory import key_mode_to_french
+
+                result["musical_key"] = key_mode_to_french(result["key"], result["mode"])
+                logger.info(f"✅ Musical key: {result['musical_key']}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
+
     def _enrich_result_with_features(self, result: dict, track_data: dict) -> dict:
         """
         Complète un result de base avec la durée et les audio features
         (BPM, Key, Mode, energy, danceability, valence, musical_key).
         Partagé entre la voie Spotify ID et la voie ISRC.
         """
-        # Durée
-        if "durationMs" in track_data:
-            duration_ms = track_data["durationMs"]
-            result["duration"] = int(duration_ms / 1000) if duration_ms else None
-            logger.info(f"⏱️ Duration: {result['duration']}s ({duration_ms}ms)")
+        self._apply_duration(result, track_data)
 
-        # Audio features
         reccobeats_id = track_data.get("id")
         if reccobeats_id:
             logger.debug(f"🎼 Récupération audio features pour ID: {reccobeats_id}")
-            audio_features = self.get_track_audio_features(reccobeats_id)
-            if audio_features:
-                result["audio_features"] = audio_features
-                result["bpm"] = audio_features.get("tempo")
-                result["key"] = audio_features.get("key")
-                result["mode"] = audio_features.get("mode")
-                result["energy"] = audio_features.get("energy")
-                result["danceability"] = audio_features.get("danceability")
-                result["valence"] = audio_features.get("valence")
-                if result.get("key") is not None and result.get("mode") is not None:
-                    try:
-                        from src.utils.music_theory import key_mode_to_french
+            self._apply_audio_features(result, self.get_track_audio_features(reccobeats_id))
+        return result
 
-                        result["musical_key"] = key_mode_to_french(result["key"], result["mode"])
-                        logger.info(f"✅ Musical key: {result['musical_key']}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
+    async def _enrich_result_with_features_async(
+        self, http: "AsyncHttpSession", result: dict, track_data: dict
+    ) -> dict:
+        """Jumeau async de `_enrich_result_with_features`."""
+        self._apply_duration(result, track_data)
+
+        reccobeats_id = track_data.get("id")
+        if reccobeats_id:
+            logger.debug(f"🎼 Récupération audio features pour ID: {reccobeats_id}")
+            self._apply_audio_features(
+                result, await self.get_track_audio_features_async(http, reccobeats_id)
+            )
         return result
 
     def get_track_by_isrc(self, isrc: str) -> dict | None:
@@ -269,15 +393,35 @@ class ReccoBeatsIntegratedClient:
                     logger.warning("⏰ Rate limit ReccoBeats")
                 return None
 
-            content = response.json().get("content", [])
-            if not content:
+            return self._best_isrc_hit(response.json().get("content", []))
+        except Exception as e:
+            logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
+            return None
+
+    @staticmethod
+    def _best_isrc_hit(content: list) -> dict | None:
+        """Entrée la plus populaire parmi les pressings d'un ISRC (commun sync/async)."""
+        if not content:
+            return None
+        best = sorted(content, key=lambda t: t.get("popularity", 0), reverse=True)[0]
+        logger.info(
+            f"✅ Track ISRC trouvé: {best.get('trackTitle', 'N/A')} (pop={best.get('popularity')})"
+        )
+        return best
+
+    async def get_track_by_isrc_async(self, http: "AsyncHttpSession", isrc: str) -> dict | None:
+        """Jumeau async de `get_track_by_isrc`."""
+        try:
+            url = f"{self.recco_base_url}/track"
+            response = await http.get(url, params={"ids": isrc}, timeout=15)
+            logger.info(f"🎵 ReccoBeats: requête ISRC {isrc} (status {response.status_code})")
+
+            if response.status_code != 200:
+                if response.status_code == 429:
+                    logger.warning("⏰ Rate limit ReccoBeats")
                 return None
 
-            best = sorted(content, key=lambda t: t.get("popularity", 0), reverse=True)[0]
-            logger.info(
-                f"✅ Track ISRC trouvé: {best.get('trackTitle', 'N/A')} (pop={best.get('popularity')})"
-            )
-            return best
+            return self._best_isrc_hit(response.json().get("content", []))
         except Exception as e:
             logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
             return None
@@ -295,34 +439,18 @@ class ReccoBeatsIntegratedClient:
         logger.info(f"🎵 get_track_info_by_isrc pour ISRC: {isrc}")
         try:
             cache_key = f"isrc::{isrc}"
-
-            if force_refresh and cache_key in self.cache:
-                del self.cache[cache_key]
-
-            if use_cache and not force_refresh and cache_key in self.cache:
-                cached = self.cache[cache_key]
-                if isinstance(cached, dict) and (
-                    cached.get("bpm") is not None or cached.get("audio_features") is not None
-                ):
-                    logger.info("✅ Données ISRC trouvées dans le cache")
-                    return cached
+            cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
+            if cached is not None:
+                return cached
 
             track_data = self.get_track_by_isrc(isrc)
             if not track_data:
-                logger.warning(f"❌ Aucune donnée ReccoBeats pour ISRC {isrc}")
-                self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
-                self._save_cache()
+                self._cache_not_found(cache_key, f"ISRC {isrc}")
                 return None
 
-            result = {
-                "isrc": isrc,
-                "spotify_id": None,
-                "source": "reccobeats_isrc",
-                "success": True,
-                "timestamp": time.time(),
-                **track_data,
-            }
-            result = self._enrich_result_with_features(result, track_data)
+            result = self._enrich_result_with_features(
+                self._base_isrc_result(isrc, track_data), track_data
+            )
 
             self.cache[cache_key] = result
             self._save_cache()
@@ -331,6 +459,69 @@ class ReccoBeatsIntegratedClient:
         except Exception as e:
             logger.error(f"❌ Erreur get_track_info_by_isrc: {e}")
             return None
+
+    async def get_track_info_by_isrc_async(
+        self,
+        http: "AsyncHttpSession",
+        isrc: str,
+        use_cache: bool = True,
+        force_refresh: bool = False,
+    ) -> dict | None:
+        """Jumeau async de `get_track_info_by_isrc` (même cache, même retour)."""
+        if not isrc:
+            return None
+
+        logger.info(f"🎵 get_track_info_by_isrc pour ISRC: {isrc}")
+        try:
+            cache_key = f"isrc::{isrc}"
+            cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
+            if cached is not None:
+                return cached
+
+            track_data = await self.get_track_by_isrc_async(http, isrc)
+            if not track_data:
+                self._cache_not_found(cache_key, f"ISRC {isrc}")
+                return None
+
+            result = await self._enrich_result_with_features_async(
+                http, self._base_isrc_result(isrc, track_data), track_data
+            )
+
+            self.cache[cache_key] = result
+            self._save_cache()
+            logger.info(f"✅ Succès complet pour ISRC: {isrc}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Erreur get_track_info_by_isrc: {e}")
+            return None
+
+    def _cached_isrc_info(
+        self, cache_key: str, use_cache: bool, force_refresh: bool
+    ) -> dict | None:
+        """Gestion du cache de la voie ISRC (commun sync/async)."""
+        if force_refresh and cache_key in self.cache:
+            del self.cache[cache_key]
+
+        if use_cache and not force_refresh and cache_key in self.cache:
+            cached = self.cache[cache_key]
+            if isinstance(cached, dict) and (
+                cached.get("bpm") is not None or cached.get("audio_features") is not None
+            ):
+                logger.info("✅ Données ISRC trouvées dans le cache")
+                return cached
+        return None
+
+    @staticmethod
+    def _base_isrc_result(isrc: str, track_data: dict) -> dict:
+        """Réponse de base de la voie ISRC (commun sync/async)."""
+        return {
+            "isrc": isrc,
+            "spotify_id": None,
+            "source": "reccobeats_isrc",
+            "success": True,
+            "timestamp": time.time(),
+            **track_data,
+        }
 
     def get_audio_features_batch(self, reccobeats_ids: list[str]) -> dict[str, dict]:
         """

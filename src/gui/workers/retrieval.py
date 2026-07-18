@@ -5,7 +5,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from src.gui.dialogs import report
-from src.gui.workers.lifecycle import start_worker, stop_requested
+from src.gui.workers.lifecycle import run_worker, stop_requested
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,13 +19,13 @@ def get_tracks(app):
     # Inclure les features
     dialog = ctk.CTkToplevel(app.root)
     dialog.title("Options de récupération")
-    dialog.geometry("480x820")
+    dialog.geometry("480x940")
 
     # Centrer la fenêtre
     dialog.update_idletasks()
     x = (dialog.winfo_screenwidth() // 2) - (240)
-    y = (dialog.winfo_screenheight() // 2) - (410)
-    dialog.geometry(f"480x820+{x}+{y}")
+    y = (dialog.winfo_screenheight() // 2) - (470)
+    dialog.geometry(f"480x940+{x}+{y}")
 
     dialog.lift()
     dialog.focus_force()
@@ -36,6 +36,7 @@ def get_tracks(app):
     prefill_var = ctk.BooleanVar(value=True)  # Appel API album + Spotify/YouTube (media)
     include_secondary_var = ctk.BooleanVar(value=False)  # Rôles secondaires (Additional Voices…)
     respect_deleted_var = ctk.BooleanVar(value=True)  # Ne pas réajouter les morceaux supprimés
+    download_images_var = ctk.BooleanVar(value=True)  # Télécharger photos/covers/vignettes (Media)
 
     # Interface
     ctk.CTkLabel(
@@ -128,6 +129,26 @@ def get_tracks(app):
         justify="left",
     ).pack(anchor="w", padx=15, pady=(0, 8))
 
+    # Checkbox : télécharger les images (chantier « Media »)
+    images_frame = ctk.CTkFrame(dialog)
+    images_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+    ctk.CTkCheckBox(
+        images_frame,
+        text="Télécharger les images (photos, covers, vignettes)",
+        variable=download_images_var,
+        font=("Arial", 12),
+    ).pack(anchor="w", padx=15, pady=12)
+
+    ctk.CTkLabel(
+        images_frame,
+        text="🖼️ Photos d'artistes, pochettes et vignettes YouTube → data/images/.\n"
+        "Idempotent (quasi-gratuit au 2ᵉ passage). Décocher = plus rapide.",
+        text_color="gray",
+        font=("Arial", 10),
+        justify="left",
+    ).pack(anchor="w", padx=15, pady=(0, 8))
+
     # Nombre maximum de morceaux
     max_songs_frame = ctk.CTkFrame(dialog)
     max_songs_frame.pack(fill="x", padx=20, pady=15)
@@ -168,6 +189,7 @@ def get_tracks(app):
         prefill = prefill_var.get()
         include_secondary = include_secondary_var.get()
         respect_deleted = respect_deleted_var.get()
+        download_images = download_images_var.get()
         dialog.destroy()
         start_track_retrieval(
             app,
@@ -177,6 +199,7 @@ def get_tracks(app):
             update_only=update_only,
             include_secondary=include_secondary,
             respect_deleted=respect_deleted,
+            download_images=download_images,
         )
 
     def cancel():
@@ -211,6 +234,7 @@ def start_track_retrieval(
     update_only: bool = False,
     include_secondary: bool = False,
     respect_deleted: bool = True,
+    download_images: bool = True,
 ):
     """Lance la récupération des morceaux avec les options choisies.
 
@@ -220,6 +244,8 @@ def start_track_retrieval(
     include_secondary: inclure les rôles secondaires (vérif détail + secondary_role).
     respect_deleted: ignorer les morceaux dont le genius_id est dans l'historique
         des suppressions (ne pas les réajouter).
+    download_images: chantier « Media » — télécharger photos/covers/vignettes en
+        fin de récupération (idempotent).
     """
     app.get_tracks_button.configure(state="disabled", text="Récupération...")
 
@@ -419,6 +445,30 @@ def start_track_retrieval(
                 except Exception as e:
                     logger.warning(f"Rematch certifications échoué: {e}")
 
+                # Media 6 : télécharger les images AVANT la boucle save. apply_images
+                # MUTE les tracks (cover_path/yt_thumbnail_path) + l'artiste
+                # (image_path) que le save existant persiste ensuite. Idempotent,
+                # `should_stop` respecté. Défensif : n'interrompt pas la récup.
+                if download_images:
+                    try:
+                        from src.api.deezer_api import DeezerAPI
+                        from src.utils.media_enricher import apply_images
+
+                        media_report = apply_images(
+                            app.current_artist,
+                            new_tracks,
+                            deezer=DeezerAPI(),
+                            genius=app.genius_api,
+                            should_stop=stop_requested,
+                        )
+                        if app.current_artist.image_path:
+                            app.data_manager.set_artist_image_path(
+                                app.current_artist.id, app.current_artist.image_path
+                            )
+                        logger.info(f"🖼️ Images: {media_report.total_downloaded()} téléchargée(s)")
+                    except Exception as e:
+                        logger.warning(f"Téléchargement des images échoué: {e}")
+
                 # Sauvegarder dans la base
                 saved_count = 0
                 for track in new_tracks:
@@ -503,7 +553,7 @@ def start_track_retrieval(
             )
             app.root.after(0, lambda: app.progress_label.configure(text=""))
 
-    start_worker(get_tracks)
+    run_worker(get_tracks, name="retrieval")
 
 
 # ✅ AJOUT DES MÉTHODES MANQUANTES POUR FONCTIONNALITÉS EXISTANTES

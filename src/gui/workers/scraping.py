@@ -1,11 +1,19 @@
-"""Scraping combiné crédits/paroles (Genius v3, Discogs) en thread"""
+"""Scraping combiné crédits/paroles (Genius v3, Discogs) — flux async (Phase F5).
+
+Le batch est piloté par `run_worker` : un thread daemon enregistré porte le
+corps sync (batchs Genius v3, clients Discogs/LRCLIB/YTM/Musixmatch), une
+coroutine soumise à la boucle unique le représente pour la coordination
+d'arrêt. Les CRAWLS Genius s'exécutent nativement dans la boucle (pont F4
+`run_sync` depuis le thread) : le thread ne porte plus que parsing + LLM +
+saves. `stop_requested()` est testé entre deux unités, comme avant.
+"""
 
 from datetime import datetime
 from tkinter import messagebox
 
 from src.enrichment.observation import Observation
 from src.gui.dialogs import report
-from src.gui.workers.lifecycle import start_worker, stop_requested
+from src.gui.workers.lifecycle import run_worker, stop_requested
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.utils.logger import get_logger
 
@@ -496,4 +504,4 @@ def start_combined_scraping(
             app.root.after(0, lambda: app.progress_label.configure(text=""))
             app.root.after(0, app._update_buttons_state)
 
-    start_worker(scrape)
+    run_worker(scrape, name="scraping")

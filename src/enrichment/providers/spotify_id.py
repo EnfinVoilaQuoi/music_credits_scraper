@@ -21,9 +21,13 @@ class SpotifyIdProvider:
     capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     error_result = False
 
-    def __init__(self, scraper=None, scraper_factory=None):
+    def __init__(self, scraper=None, scraper_factory=None, async_scraper_factory=None):
         # PROPRIÉTAIRE du scraper Spotify (créé lazy, fermé par close()).
         self._resource = LazyResource(scraper, scraper_factory, label="scraper Spotify ID")
+        # Variante ASYNC (F3b) : vit dans la boucle, fermée par aclose().
+        self._async_resource = LazyResource(
+            None, async_scraper_factory, label="scraper Spotify ID async"
+        )
 
     @property
     def scraper(self):
@@ -31,12 +35,22 @@ class SpotifyIdProvider:
         l'utilise pour son fallback, sans jamais le posséder ni le fermer."""
         return self._resource.get()
 
+    @property
+    def async_scraper(self):
+        """Point d'EMPRUNT de la variante async (F3b) — même règle : ReccoBeats
+        l'utilise pour son fallback, jamais possédée ni fermée par l'emprunteur."""
+        return self._async_resource.get()
+
     def is_available(self) -> bool:
         return self._resource.available()
 
     def close(self) -> None:
         """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
         self._resource.close()
+
+    async def aclose(self) -> None:
+        """Ferme le scraper ASYNC s'il l'a créé (browsers de la boucle, F3b)."""
+        await self._async_resource.aclose()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """Skip si un ID valide existe déjà (hors force_update) ou si la voie
@@ -119,6 +133,53 @@ class SpotifyIdProvider:
         return True
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Voie async (F2) : corps sync inchangé, exécuté sur le thread sync
-        dédié du run (affinité Playwright — cf. SerialWorker)."""
-        return await ctx.sync_runner.run(self.enrich, track, ctx)
+        """Voie async (F3b) : scraper Playwright ASYNC natif dans la boucle.
+
+        Sans variante async configurée (tests, compat), repli sur le pont sync
+        F2 (corps sync sur le thread dédié du run).
+        """
+        scraper = self._async_resource.get()
+        if scraper is None:
+            return await ctx.sync_runner.run(self.enrich, track, ctx)
+
+        spotify_id = await self._get_unique_spotify_id_async(track, ctx, scraper)
+        if not spotify_id:
+            logger.warning("❌ Échec récupération Spotify ID via scraper")
+            return False
+
+        track.spotify_id = spotify_id
+        logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
+
+        # Récupérer le titre de la page Spotify pour vérification
+        try:
+            page_title = await scraper.get_spotify_page_title_async(spotify_id)
+            if page_title:
+                track.spotify_page_title = page_title
+                logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
+        except Exception as e:
+            logger.debug(f"Impossible de récupérer le titre de page: {e}")
+
+        return True
+
+    async def _get_unique_spotify_id_async(
+        self, track: Track, ctx: EnrichmentContext, scraper
+    ) -> str | None:
+        """Miroir async de `get_unique_spotify_id(force_scraper=True)` : scrape
+        + validation d'unicité (l'existant a déjà été jugé par le gate)."""
+        artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
+        validate = ctx.validate_spotify_id_unique
+
+        logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
+        spotify_id = await scraper.get_spotify_id_async(artist_name, track.title)
+
+        if not spotify_id:
+            logger.warning(f"❌ Aucun Spotify ID trouvé via scraper pour '{track.title}'")
+            return None
+
+        if validate and not validate(spotify_id, track, ctx.artist_tracks):
+            logger.error(f"❌ ERREUR: Spotify ID trouvé par scraper est déjà utilisé: {spotify_id}")
+            logger.error("   Cela ne devrait pas arriver. Vérifiez la base de données.")
+            return None
+
+        logger.info(f"✅ Spotify ID unique trouvé via scraper: {spotify_id}")
+        return spotify_id

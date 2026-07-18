@@ -301,7 +301,20 @@ def run_enrichment(
                 ),
             )
         finally:
-            # Fermer les ressources des providers SUR LE THREAD SYNC DU RUN
+            # Scrapers Playwright ASYNC d'abord (F3) : browsers de la boucle
+            # fermés PUIS l'instance async partagée stoppée (garde-fou : tasks
+            # annulées avant de fermer Playwright async).
+            try:
+                await app.data_enricher.aclose_async_scrapers()
+            except Exception:
+                pass
+            try:
+                from src.scrapers.playwright_manager import stop_playwright_async
+
+                await stop_playwright_async()
+            except Exception:
+                pass
+            # Fermer les ressources SYNC des providers SUR LE THREAD SYNC DU RUN
             # (celui qui a créé les browsers — Playwright est thread-affine ;
             # ils seront recréés à la demande au batch suivant). Sans ça, un
             # browser survivait au batch et son pipe Playwright cassait à

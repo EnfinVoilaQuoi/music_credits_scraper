@@ -44,3 +44,9 @@ class EnrichmentContext:
     # `track.observations` (persistées par save_track). Le BPM passe par
     # `bpm_ballot` (candidats déjà par source). Vidé à chaque run (contexte neuf).
     observations: list = field(default_factory=list)
+    # ── Voie async (Phase F2) — None sur la voie sync historique ──
+    # Session httpx partagée (AsyncHttpSession) des providers API purs.
+    http: object | None = None
+    # SerialWorker du run : exécute le travail sync (scrapers Playwright,
+    # Discogs, Genius) sur UN thread daemon dédié — affinité de thread garantie.
+    sync_runner: object | None = None

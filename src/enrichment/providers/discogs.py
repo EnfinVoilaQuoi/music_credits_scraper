@@ -44,3 +44,8 @@ class DiscogsProvider:
         if client is None:
             return False
         return client.enrich_track_data(track, force_update=ctx.force_update)
+
+    async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool | str:
+        """Voie async (F2) : client discogs-client sync inchangé, exécuté sur le
+        thread sync dédié du run."""
+        return await ctx.sync_runner.run(self.enrich, track, ctx)

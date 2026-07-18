@@ -5,10 +5,12 @@ VERSION CORRIGÉE: Empêche la duplication des Spotify IDs + Intégration Spotif
 
 import os
 
+from src.api.async_http import AsyncHttpSession
 from src.api.deezer_api import DeezerAPI
 from src.api.discogs_api import DiscogsClient
 from src.api.getsongbpm_api import GetSongBPMFetcher
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
+from src.concurrency.serial_worker import SerialWorker
 from src.models import Track
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
@@ -106,6 +108,12 @@ class DataEnricher:
                 DiscogsClient(user_token=discogs_token) if discogs_token else DiscogsClient()
             )
         )
+
+        # Voie async (Phase F2) : session httpx PARTAGÉE (créée lazy dans la
+        # boucle, fermée par aclose_http en fin de batch) + thread sync dédié
+        # du flux (affinité Playwright — les scrapers y naissent et y meurent).
+        self._http = AsyncHttpSession()
+        self.sync_runner = SerialWorker("enrich-sync")
 
         self.apis_available = {
             p.name: p.is_available() for p in [*self._pipeline, self._discogs_provider]
@@ -344,6 +352,90 @@ class DataEnricher:
         historique). Le gating et la valeur d'échec de chaque source vivent
         dans son provider (gate() / error_result).
         """
+        sources, ctx, ballot, results, initial_bpm = self._start_run(
+            track, sources, force_update, artist_tracks, clear_on_failure
+        )
+
+        self._apply_genius_feat_metadata(track)
+
+        # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright) : si l'ISRC
+        # fournit BPM/Key via ReccoBeats, les gates spotify_id/reccobeats skippent.
+        if "reccobeats" in sources and self.apis_available.get("reccobeats"):
+            try:
+                ctx.isrc_satisfied = self._reccobeats_provider.try_by_isrc(track, ctx)
+                if ctx.isrc_satisfied:
+                    logger.info(
+                        f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
+                    )
+            except Exception as e:
+                logger.debug(f"Voie ISRC échec: {e}")
+
+        # Boucle ordonnée : gate() décide (skip → valeur posée telle quelle),
+        # enrich() tourne derrière la frontière d'exception de _run_step.
+        for provider in self._pipeline:
+            self._run_step(provider, track, ctx, sources, results)
+
+        # Réconciliation (§8.3) — le MOTEUR pilote les colonnes legacy, AVANT Discogs
+        self._finalize_run(track, ballot, ctx)
+
+        self._run_step(self._discogs_provider, track, ctx, sources, results)
+
+        if clear_on_failure and force_update:
+            self._clear_after_total_failure(track, results, initial_bpm)
+
+        self._log_run_summary(track, results)
+        return results
+
+    async def enrich_track_async(
+        self,
+        track: Track,
+        sources: list[str] | None = None,
+        force_update: bool = False,
+        artist_tracks: list[Track] | None = None,
+        clear_on_failure: bool = True,
+    ) -> dict[str, bool]:
+        """Jumeau async d'`enrich_track` (Phase F2) — même orchestration, mêmes
+        gates, mêmes valeurs de résultat.
+
+        Providers API purs (deezer, getsongbpm, reccobeats) via la session
+        httpx partagée ; scrapers sync (spotify_id, songbpm, bpmfinder,
+        discogs, Genius) sur le thread sync dédié du run (affinité Playwright).
+        """
+        sources, ctx, ballot, results, initial_bpm = self._start_run(
+            track, sources, force_update, artist_tracks, clear_on_failure
+        )
+        ctx.http = self._http
+        ctx.sync_runner = self.sync_runner
+
+        await ctx.sync_runner.run(self._apply_genius_feat_metadata, track)
+
+        # VOIE ISRC PRIORITAIRE (même gating que la voie sync)
+        if "reccobeats" in sources and self.apis_available.get("reccobeats"):
+            try:
+                ctx.isrc_satisfied = await self._reccobeats_provider.try_by_isrc_async(track, ctx)
+                if ctx.isrc_satisfied:
+                    logger.info(
+                        f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
+                    )
+            except Exception as e:
+                logger.debug(f"Voie ISRC échec: {e}")
+
+        for provider in self._pipeline:
+            await self._run_step_async(provider, track, ctx, sources, results)
+
+        # Réconciliation (§8.3) — le MOTEUR pilote les colonnes legacy, AVANT Discogs
+        self._finalize_run(track, ballot, ctx)
+
+        await self._run_step_async(self._discogs_provider, track, ctx, sources, results)
+
+        if clear_on_failure and force_update:
+            self._clear_after_total_failure(track, results, initial_bpm)
+
+        self._log_run_summary(track, results)
+        return results
+
+    def _start_run(self, track, sources, force_update, artist_tracks, clear_on_failure):
+        """Sources par défaut + contexte + scrutin d'un run (commun sync/async)."""
         if sources is None:
             sources = [
                 "spotify_id",
@@ -380,36 +472,19 @@ class DataEnricher:
             allow_spotify_scrape=("spotify_id" not in sources),
             results=results,
         )
+        return sources, ctx, ballot, results, initial_bpm
 
-        self._apply_genius_feat_metadata(track)
+    def _finalize_run(self, track, ballot, ctx) -> None:
+        """Réconciliation du run (commun sync/async).
 
-        # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright) : si l'ISRC
-        # fournit BPM/Key via ReccoBeats, les gates spotify_id/reccobeats skippent.
-        if "reccobeats" in sources and self.apis_available.get("reccobeats"):
-            try:
-                ctx.isrc_satisfied = self._reccobeats_provider.try_by_isrc(track, ctx)
-                if ctx.isrc_satisfied:
-                    logger.info(
-                        f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
-                    )
-            except Exception as e:
-                logger.debug(f"Voie ISRC échec: {e}")
-
-        # Boucle ordonnée : gate() décide (skip → valeur posée telle quelle),
-        # enrich() tourne derrière la frontière d'exception de _run_step.
-        for provider in self._pipeline:
-            self._run_step(provider, track, ctx, sources, results)
-
-        # ========================================
-        # RÉCONCILIATION (§8.3) — le MOTEUR pilote les colonnes legacy, AVANT Discogs
-        # ========================================
-        # Observations PAR SOURCE du run (BPM du scrutin + key/mode normalisés
-        # émis par les providers), puis reconcile() pilote bpm/bpm_alt/source/
-        # confidence + key/mode/musical_key — remplace BpmBallot.finalize. BPM iso
-        # par construction (même reconcile_bpm) ; key/mode normalisés + appariés
-        # (corrige mode="minor" côté legacy). Fresh UNIQUEMENT en 2b-ii : l'union
-        # persisté ∪ frais (vote inter-runs, point-2) = étape ultérieure isolée.
-        # save_track persiste track.observations dans SA transaction (E5c-1).
+        Observations PAR SOURCE du run (BPM du scrutin + key/mode normalisés
+        émis par les providers), puis reconcile() pilote bpm/bpm_alt/source/
+        confidence + key/mode/musical_key — remplace BpmBallot.finalize. BPM iso
+        par construction (même reconcile_bpm) ; key/mode normalisés + appariés
+        (corrige mode="minor" côté legacy). Fresh UNIQUEMENT en 2b-ii : l'union
+        persisté ∪ frais (vote inter-runs, point-2) = étape ultérieure isolée.
+        save_track persiste track.observations dans SA transaction (E5c-1).
+        """
         from src.enrichment.reconcile import apply_resolutions, reconcile
 
         track.observations = self._collect_run_observations(ballot.candidates, ctx.observations)
@@ -419,14 +494,8 @@ class DataEnricher:
             f"source={track.bpm_source}, conf={track.bpm_confidence})"
         )
 
-        self._run_step(self._discogs_provider, track, ctx, sources, results)
-
-        if clear_on_failure and force_update:
-            self._clear_after_total_failure(track, results, initial_bpm)
-
-        # ========================================
-        # RÉSUMÉ FINAL
-        # ========================================
+    def _log_run_summary(self, track, results: dict) -> None:
+        """Résumé final d'un run (commun sync/async)."""
         logger.info(f"📊 RÉSUMÉ enrichissement '{track.title}':")
         logger.info(f"   • Résultats: {results}")
         logger.info(f"   • Spotify ID: {track.spotify_id}")
@@ -441,8 +510,6 @@ class DataEnricher:
         logger.info(f"   • Deezer ID: {getattr(track, 'deezer_id', 'N/A')}")
         logger.info(f"   • Discogs ID: {track.discogs_id}")
         logger.info(f"   • Crédits totaux: {len(track.credits)}")
-
-        return results
 
     # ──────────────────────────────────────────────────────────────────────
     # Orchestration (Refacto Phase 3.4) — l'ordre d'appel des sources est
@@ -489,6 +556,35 @@ class DataEnricher:
         except Exception as e:
             logger.error(f"❌ Erreur {name} pour {track.title}: {e}")
             results[name] = provider.error_result
+
+    async def _run_step_async(
+        self, provider, track, ctx, sources: list[str], results: dict
+    ) -> None:
+        """Jumeau async de `_run_step` : mêmes gates, même frontière d'exception."""
+        name = provider.name
+        if name not in sources or not self.apis_available.get(name):
+            return
+
+        verdict = provider.gate(track, ctx)
+        if verdict is not None:
+            results[name] = verdict
+            return
+
+        try:
+            outcome = await provider.enrich_async(track, ctx)
+            results[name] = outcome
+            if outcome is True:
+                logger.info(f"✅ {name} SUCCÈS pour '{track.title}'")
+            elif outcome is False:
+                logger.warning(f"❌ {name} ÉCHEC pour '{track.title}'")
+        except Exception as e:
+            logger.error(f"❌ Erreur {name} pour {track.title}: {e}")
+            results[name] = provider.error_result
+
+    async def aclose_http(self) -> None:
+        """Ferme la session httpx partagée (fin de batch async) ; rouverte à la
+        demande au batch suivant. À appeler DANS la boucle asyncio."""
+        await self._http.aclose()
 
     def _apply_genius_feat_metadata(self, track) -> None:
         """FEATS : media/album/relations via API Genius AVANT ReccoBeats

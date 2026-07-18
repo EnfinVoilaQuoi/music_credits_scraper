@@ -170,3 +170,8 @@ class BpmFinderProvider:
             logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
             self._fail_streak += 1
             return None
+
+    async def enrich_async(self, track: Track, ctx: EnrichmentContext):
+        """Voie async (F2) : corps sync inchangé (disjoncteur, recherche YouTube),
+        exécuté sur le thread sync dédié du run (affinité Playwright)."""
+        return await ctx.sync_runner.run(self.enrich, track, ctx)

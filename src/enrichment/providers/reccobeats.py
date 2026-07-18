@@ -154,11 +154,117 @@ class ReccoBeatsProvider:
         )
         return False
 
+    async def try_by_isrc_async(
+        self, track: Track, ctx: EnrichmentContext, artist_name: str | None = None
+    ) -> bool:
+        """Voie async (F2) de `try_by_isrc` : Deezer + ReccoBeats via httpx partagé."""
+        client = self._resource.get()
+        if not client:
+            return False
+
+        if artist_name is None:
+            artist_name = self._artist_name(track)
+
+        isrc = track.isrc
+        if not isrc and self._deezer:
+            try:
+                isrc = await self._deezer.get_isrc_async(ctx.http, artist_name, track.title)
+                if isrc:
+                    track.isrc = isrc
+                    logger.info(f"🔑 ISRC récupéré via Deezer: {isrc}")
+            except Exception as e:
+                logger.debug(f"Deezer get_isrc échec: {e}")
+
+        if not isrc:
+            return False
+
+        try:
+            info = await client.get_track_info_by_isrc_async(ctx.http, isrc)
+        except Exception as e:
+            logger.error(f"❌ ReccoBeats ISRC API: {e}")
+            info = None
+
+        if info and info.get("success") and self._apply_result(track, info, ctx, resolution="isrc"):
+            logger.info(
+                f"ReccoBeats: ✅ SUCCÈS via ISRC pour '{track.title}' (scrape Spotify évité)"
+            )
+            return True
+
+        logger.info(
+            f"ReccoBeats: ISRC sans audio-features pour '{track.title}' → fallback Spotify ID"
+        )
+        return False
+
+    def _existing_spotify_id(self, track: Track, ctx: EnrichmentContext) -> str | None:
+        """Étape 1a (commun sync/async) : ID existant validé, sinon None.
+
+        Comportement historique : sans artist_tracks ou si l'ID est un
+        duplicata, on l'ignore et on le re-scrape (l'ID dupliqué est effacé).
+        """
+        if not track.spotify_id:
+            return None
+        validate = ctx.validate_spotify_id_unique
+        if ctx.artist_tracks and validate and validate(track.spotify_id, track, ctx.artist_tracks):
+            logger.info(f"✅ Spotify ID existant validé: {track.spotify_id}")
+            return track.spotify_id
+        logger.warning("⚠️ Spotify ID existant est un duplicata, il sera ignoré")
+        track.spotify_id = None
+        return None
+
+    def _spotify_id_via_scraper(
+        self, track: Track, ctx: EnrichmentContext, artist_name: str
+    ) -> str | None:
+        """Étape 1b (commun sync/async) : fallback scraper Spotify EMPRUNTÉ.
+
+        Sur la voie async, ce bloc entier tourne sur le thread sync dédié du
+        run — le scraper Playwright y naît et y travaille (affinité).
+        """
+        if not ctx.allow_spotify_scrape:
+            logger.info(
+                "⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
+            )
+            return None
+        spotify_scraper = self._spotify_scraper_getter() if self._spotify_scraper_getter else None
+        if not spotify_scraper:
+            return None
+
+        artist_tracks = ctx.artist_tracks
+        logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
+        try:
+            spotify_id = spotify_scraper.get_spotify_id(artist_name, track.title)
+
+            if spotify_id:
+                # Valider l'unicité
+                if (
+                    artist_tracks
+                    and ctx.validate_spotify_id_unique
+                    and not ctx.validate_spotify_id_unique(spotify_id, track, artist_tracks)
+                ):
+                    logger.error(f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}")
+                    spotify_id = None
+                else:
+                    logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
+                    track.spotify_id = spotify_id
+
+                    # Récupérer le titre de la page Spotify pour vérification
+                    try:
+                        page_title = spotify_scraper.get_spotify_page_title(spotify_id)
+                        if page_title:
+                            track.spotify_page_title = page_title
+                            logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
+                    except Exception as e:
+                        logger.debug(f"Impossible de récupérer le titre de page: {e}")
+            else:
+                logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
+
+            return spotify_id
+
+        except Exception as e:
+            logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
+            return None
+
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Voie Spotify ID (ISRC déjà tentée en amont par l'orchestrateur)."""
-        artist_tracks = ctx.artist_tracks
-        allow_spotify_scrape = ctx.allow_spotify_scrape
-
         try:
             client = self._resource.get()
             if not client:
@@ -171,75 +277,17 @@ class ReccoBeatsProvider:
             # La voie ISRC a déjà été tentée en amont (enrich_track) : on ne la
             # rejoue pas ici (équivalent skip_isrc=True de l'historique).
 
-            # ============================================================
-            # ÉTAPE 1: RÉCUPÉRER LE SPOTIFY ID (fallback si pas d'ISRC exploitable)
-            # ============================================================
-            spotify_id = None
-
-            # 1a. Vérifier si le track a déjà un Spotify ID validé
-            if track.spotify_id:
-                # Valider l'unicité (comportement historique : sans artist_tracks ou
-                # si l'ID est un duplicata, on l'ignore et on le re-scrape)
-                validate = ctx.validate_spotify_id_unique
-                if artist_tracks and validate and validate(track.spotify_id, track, artist_tracks):
-                    spotify_id = track.spotify_id
-                    logger.info(f"✅ Spotify ID existant validé: {spotify_id}")
-                else:
-                    logger.warning("⚠️ Spotify ID existant est un duplicata, il sera ignoré")
-                    track.spotify_id = None
-
-            # 1b. Si pas d'ID, utiliser SpotifyIDScraper (sauf si l'étape 0 l'a déjà fait).
-            # Scraper EMPRUNTÉ à SpotifyIdProvider au moment de l'usage.
-            if not spotify_id and not allow_spotify_scrape:
-                logger.info(
-                    "⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
-                )
-            spotify_scraper = (
-                self._spotify_scraper_getter() if self._spotify_scraper_getter else None
-            )
-            if not spotify_id and allow_spotify_scrape and spotify_scraper:
-                logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
-                try:
-                    spotify_id = spotify_scraper.get_spotify_id(artist_name, track.title)
-
-                    if spotify_id:
-                        # Valider l'unicité
-                        if (
-                            artist_tracks
-                            and ctx.validate_spotify_id_unique
-                            and not ctx.validate_spotify_id_unique(spotify_id, track, artist_tracks)
-                        ):
-                            logger.error(
-                                f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}"
-                            )
-                            spotify_id = None
-                        else:
-                            logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
-                            track.spotify_id = spotify_id
-
-                            # Récupérer le titre de la page Spotify pour vérification
-                            try:
-                                page_title = spotify_scraper.get_spotify_page_title(spotify_id)
-                                if page_title:
-                                    track.spotify_page_title = page_title
-                                    logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-                            except Exception as e:
-                                logger.debug(f"Impossible de récupérer le titre de page: {e}")
-                    else:
-                        logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
-
-                except Exception as e:
-                    logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
-                    spotify_id = None
+            # ÉTAPE 1 : Spotify ID — existant validé, sinon fallback scraper
+            spotify_id = self._existing_spotify_id(track, ctx)
+            if not spotify_id:
+                spotify_id = self._spotify_id_via_scraper(track, ctx, artist_name)
 
             # 1c. Si toujours pas d'ID, échec
             if not spotify_id:
                 logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
                 return False
 
-            # ============================================================
-            # ÉTAPE 2: APPELER RECCOBEATS AVEC L'ID
-            # ============================================================
+            # ÉTAPE 2 : appeler ReccoBeats avec l'ID
             logger.info(f"🎵 Appel ReccoBeats API avec Spotify ID: {spotify_id}")
 
             try:
@@ -248,89 +296,131 @@ class ReccoBeatsProvider:
                 logger.error(f"❌ Erreur ReccoBeats API: {e}")
                 return False
 
-            if not track_info or not track_info.get("success"):
-                logger.warning(f"ReccoBeats: ❌ Pas de données pour ID {spotify_id}")
-                return False
-
-            logger.debug("ReccoBeats: ✅ Données récupérées")
-            track.reccobeats_resolution = "spotify_id"
-
-            # Stocker le BPM
-            bpm = None
-            if "bpm" in track_info:
-                bpm = track_info["bpm"]
-            elif "tempo" in track_info:
-                bpm = track_info["tempo"]
-            elif "audio_features" in track_info:
-                features = track_info["audio_features"]
-                if isinstance(features, dict) and "tempo" in features:
-                    bpm = features["tempo"]
-
-            sbpm = sanitize_bpm(bpm)
-            if sbpm is not None:
-                ctx.bpm_ballot.add("reccobeats", sbpm)
-                if not track.bpm:
-                    track.bpm = sbpm
-                logger.info(f"ReccoBeats: ✅ BPM: {sbpm}")
-
-            # Observation key/mode PAR SOURCE (normalisée) — voie Spotify ID (E5c-2b).
-            ctx.observations.extend(
-                key_mode_observations(
-                    "reccobeats", key=track_info.get("key"), mode=track_info.get("mode")
-                )
-            )
-
-            # Stocker Key et Mode
-            if "key" in track_info and track_info["key"] is not None:
-                track.key = track_info["key"]
-                track.key_mode_source = "reccobeats"
-                logger.info(f"ReccoBeats: ✅ Key: {track.key}")
-
-            if "mode" in track_info and track_info["mode"] is not None:
-                track.mode = track_info["mode"]
-                track.key_mode_source = "reccobeats"
-                logger.info(f"ReccoBeats: ✅ Mode: {track.mode}")
-
-            if (
-                hasattr(track, "key")
-                and hasattr(track, "mode")
-                and track.key is not None
-                and track.mode is not None
-            ):
-                try:
-                    from src.utils.music_theory import key_mode_to_french
-
-                    track.musical_key = key_mode_to_french(track.key, track.mode)
-                    logger.info(f"ReccoBeats: ✅ Musical Key: {track.musical_key}")
-                except Exception as e:
-                    logger.warning(f"ReccoBeats: ⚠️ Erreur conversion musical_key: {e}")
-
-            # Stocker la Durée
-            if "duration" in track_info and track_info["duration"] is not None:
-                duration_value = track_info["duration"]
-                if isinstance(duration_value, (int, float)) and duration_value > 0:
-                    track.duration = int(duration_value)
-                    logger.info(f"ReccoBeats: ✅ Duration: {track.duration}s")
-                else:
-                    logger.warning(f"ReccoBeats: ⚠️ Duration invalide: {duration_value}")
-
-            # Mise à jour de la logique de succès
-            has_spotify_id = track.spotify_id
-            has_bpm = track.bpm
-            has_duration = track.duration  # ⭐ NOUVEAU
-
-            if has_spotify_id and has_bpm:
-                logger.info(f"ReccoBeats: ✅ SUCCÈS COMPLET '{track.title}'")
-                if has_duration:
-                    logger.info(f"ReccoBeats: ✅ Duration également récupérée: {track.duration}s")
-                return True
-            elif has_spotify_id:
-                logger.info(f"ReccoBeats: ⚠️ SUCCÈS PARTIEL '{track.title}' - ID mais pas BPM")
-                return True
-            else:
-                logger.warning(f"ReccoBeats: ❌ ÉCHEC '{track.title}'")
-                return False
+            return self._apply_spotify_info(track, track_info, ctx, spotify_id)
 
         except Exception as e:
             logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
+            return False
+
+    async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
+        """Voie async (F2) : API via httpx partagé, fallback scraper sur le
+        thread sync dédié du run, application identique à la voie sync."""
+        try:
+            client = self._resource.get()
+            if not client:
+                logger.error("ReccoBeats client non initialisé")
+                return False
+
+            artist_name = self._artist_name(track)
+            logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
+
+            spotify_id = self._existing_spotify_id(track, ctx)
+            if not spotify_id:
+                spotify_id = await ctx.sync_runner.run(
+                    self._spotify_id_via_scraper, track, ctx, artist_name
+                )
+
+            if not spotify_id:
+                logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
+                return False
+
+            logger.info(f"🎵 Appel ReccoBeats API avec Spotify ID: {spotify_id}")
+
+            try:
+                track_info = await client.get_track_info_async(ctx.http, spotify_id)
+            except Exception as e:
+                logger.error(f"❌ Erreur ReccoBeats API: {e}")
+                return False
+
+            return self._apply_spotify_info(track, track_info, ctx, spotify_id)
+
+        except Exception as e:
+            logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
+            return False
+
+    def _apply_spotify_info(
+        self, track: Track, track_info: dict | None, ctx: EnrichmentContext, spotify_id: str
+    ) -> bool:
+        """Étape 2 (commun sync/async) : application des données ReccoBeats."""
+        if not track_info or not track_info.get("success"):
+            logger.warning(f"ReccoBeats: ❌ Pas de données pour ID {spotify_id}")
+            return False
+
+        logger.debug("ReccoBeats: ✅ Données récupérées")
+        track.reccobeats_resolution = "spotify_id"
+
+        # Stocker le BPM
+        bpm = None
+        if "bpm" in track_info:
+            bpm = track_info["bpm"]
+        elif "tempo" in track_info:
+            bpm = track_info["tempo"]
+        elif "audio_features" in track_info:
+            features = track_info["audio_features"]
+            if isinstance(features, dict) and "tempo" in features:
+                bpm = features["tempo"]
+
+        sbpm = sanitize_bpm(bpm)
+        if sbpm is not None:
+            ctx.bpm_ballot.add("reccobeats", sbpm)
+            if not track.bpm:
+                track.bpm = sbpm
+            logger.info(f"ReccoBeats: ✅ BPM: {sbpm}")
+
+        # Observation key/mode PAR SOURCE (normalisée) — voie Spotify ID (E5c-2b).
+        ctx.observations.extend(
+            key_mode_observations(
+                "reccobeats", key=track_info.get("key"), mode=track_info.get("mode")
+            )
+        )
+
+        # Stocker Key et Mode
+        if "key" in track_info and track_info["key"] is not None:
+            track.key = track_info["key"]
+            track.key_mode_source = "reccobeats"
+            logger.info(f"ReccoBeats: ✅ Key: {track.key}")
+
+        if "mode" in track_info and track_info["mode"] is not None:
+            track.mode = track_info["mode"]
+            track.key_mode_source = "reccobeats"
+            logger.info(f"ReccoBeats: ✅ Mode: {track.mode}")
+
+        if (
+            hasattr(track, "key")
+            and hasattr(track, "mode")
+            and track.key is not None
+            and track.mode is not None
+        ):
+            try:
+                from src.utils.music_theory import key_mode_to_french
+
+                track.musical_key = key_mode_to_french(track.key, track.mode)
+                logger.info(f"ReccoBeats: ✅ Musical Key: {track.musical_key}")
+            except Exception as e:
+                logger.warning(f"ReccoBeats: ⚠️ Erreur conversion musical_key: {e}")
+
+        # Stocker la Durée
+        if "duration" in track_info and track_info["duration"] is not None:
+            duration_value = track_info["duration"]
+            if isinstance(duration_value, (int, float)) and duration_value > 0:
+                track.duration = int(duration_value)
+                logger.info(f"ReccoBeats: ✅ Duration: {track.duration}s")
+            else:
+                logger.warning(f"ReccoBeats: ⚠️ Duration invalide: {duration_value}")
+
+        # Mise à jour de la logique de succès
+        has_spotify_id = track.spotify_id
+        has_bpm = track.bpm
+        has_duration = track.duration  # ⭐ NOUVEAU
+
+        if has_spotify_id and has_bpm:
+            logger.info(f"ReccoBeats: ✅ SUCCÈS COMPLET '{track.title}'")
+            if has_duration:
+                logger.info(f"ReccoBeats: ✅ Duration également récupérée: {track.duration}s")
+            return True
+        elif has_spotify_id:
+            logger.info(f"ReccoBeats: ⚠️ SUCCÈS PARTIEL '{track.title}' - ID mais pas BPM")
+            return True
+        else:
+            logger.warning(f"ReccoBeats: ❌ ÉCHEC '{track.title}'")
             return False

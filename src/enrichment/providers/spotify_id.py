@@ -117,3 +117,8 @@ class SpotifyIdProvider:
             logger.debug(f"Impossible de récupérer le titre de page: {e}")
 
         return True
+
+    async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
+        """Voie async (F2) : corps sync inchangé, exécuté sur le thread sync
+        dédié du run (affinité Playwright — cf. SerialWorker)."""
+        return await ctx.sync_runner.run(self.enrich, track, ctx)

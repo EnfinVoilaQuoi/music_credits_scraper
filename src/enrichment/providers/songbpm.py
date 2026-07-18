@@ -227,3 +227,8 @@ class SongBpmProvider:
         except Exception as e:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
             return False
+
+    async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
+        """Voie async (F2) : corps sync inchangé (Timer 30 s compris), exécuté
+        sur le thread sync dédié du run (affinité Playwright — cf. SerialWorker)."""
+        return await ctx.sync_runner.run(self.enrich, track, ctx)

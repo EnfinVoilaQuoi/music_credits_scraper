@@ -32,12 +32,23 @@ args = parser.parse_args()
 conn = sqlite3.connect(DATABASE_URL.replace("sqlite:///", ""))
 conn.row_factory = sqlite3.Row
 
+# E7-D2 : bpm/key/mode vivent dans `observations` (colonnes droppées). Un morceau
+# « manque » un champ audio quand il n'a AUCUNE observation de ce champ. `duration`
+# reste une colonne.
 rows = conn.execute(
     """
-    SELECT t.id, t.title, t.bpm, t.key, t.mode, t.duration, t.youtube_url
+    SELECT t.id, t.title, t.duration, t.youtube_url,
+           EXISTS(SELECT 1 FROM observations o WHERE o.track_id=t.id AND o.field='bpm') AS has_bpm,
+           EXISTS(SELECT 1 FROM observations o WHERE o.track_id=t.id AND o.field='key') AS has_key,
+           EXISTS(SELECT 1 FROM observations o WHERE o.track_id=t.id AND o.field='mode') AS has_mode
     FROM tracks t JOIN artists a ON a.id = t.artist_id
     WHERE a.name = ?
-      AND (t.bpm IS NULL OR t.key IS NULL OR t.mode IS NULL OR t.duration IS NULL)
+      AND (
+        NOT EXISTS(SELECT 1 FROM observations o WHERE o.track_id=t.id AND o.field='bpm')
+        OR NOT EXISTS(SELECT 1 FROM observations o WHERE o.track_id=t.id AND o.field='key')
+        OR NOT EXISTS(SELECT 1 FROM observations o WHERE o.track_id=t.id AND o.field='mode')
+        OR t.duration IS NULL
+      )
     ORDER BY t.title COLLATE NOCASE
 """,
     (args.artist,),
@@ -47,14 +58,15 @@ with_yt, without_yt = [], []
 for r in rows:
     missing = [
         m
-        for m, v in (
-            ("BPM", r["bpm"]),
-            ("key", r["key"]),
-            ("mode", r["mode"]),
-            ("durée", r["duration"]),
+        for m, present in (
+            ("BPM", r["has_bpm"]),
+            ("key", r["has_key"]),
+            ("mode", r["has_mode"]),
         )
-        if v is None
+        if not present
     ]
+    if r["duration"] is None:
+        missing.append("durée")
     (with_yt if r["youtube_url"] else without_yt).append((r, missing))
 
 print(f"\n🎧 {len(rows)} morceau(x) incomplet(s) pour {args.artist}\n")

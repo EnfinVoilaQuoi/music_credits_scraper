@@ -172,7 +172,8 @@ def test_e4_backfill_bpm_key_mode(tmp_path):
         conn.execute("INSERT INTO tracks (id, title, artist_id, bpm) VALUES (3, 'T3', 1, 120)")
         conn.commit()
 
-    _upgrade_to(path, HEAD)  # applique e4 (create observations + backfill)
+    # Épinglé à e4 (pas HEAD) : on isole le backfill e4 du backfill legacy e10.
+    _upgrade_to(path, "e4_observations")
 
     with sqlite3.connect(path) as conn:
         rows = conn.execute(
@@ -185,3 +186,95 @@ def test_e4_backfill_bpm_key_mode(tmp_path):
         (1, "mode", "1", "reccobeats", None),
         (2, "bpm", "90", "songbpm", None),
     ]
+
+
+def test_e10_backfill_legacy_observations(tmp_path):
+    """La révision e10 (E7-D0) backfill une observation `source='legacy'` là où une
+    colonne audio est renseignée SANS observation du champ : bpm/key/mode/
+    time_signature, et bpm_alt seulement quand aucune VRAIE source bpm n'existe."""
+    path = str(tmp_path / "legacy.db")
+    _upgrade_to(path, "e9_media_images")  # schéma pré-e10 (observations existe déjà)
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
+        # T1 : bpm avec une VRAIE observation déjà présente -> pas de legacy.
+        conn.execute("INSERT INTO tracks (id, title, artist_id, bpm) VALUES (1, 'T1', 1, 140)")
+        conn.execute(
+            "INSERT INTO observations (track_id, field, value, source, confidence, seen_at) "
+            "VALUES (1, 'bpm', '140', 'songbpm', 2.0, '2026-01-01')"
+        )
+        # T2 : bpm + bpm_confidence, aucune obs -> legacy bpm (confiance castée REAL).
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, bpm, bpm_confidence) "
+            "VALUES (2, 'T2', 1, 120, 3)"
+        )
+        # T3 : key/mode sans obs -> legacy key + mode.
+        conn.execute(
+            'INSERT INTO tracks (id, title, artist_id, "key", "mode") '
+            "VALUES (3, 'T3', 1, '5', '0')"
+        )
+        # T4 : bpm_alt sans vraie source bpm -> legacy bpm_alt.
+        conn.execute("INSERT INTO tracks (id, title, artist_id, bpm_alt) VALUES (4, 'T4', 1, 70)")
+        # T5 : bpm_alt AVEC vraie source bpm -> PAS de legacy bpm_alt (re-dérivé).
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, bpm, bpm_alt) VALUES (5, 'T5', 1, 160, 80)"
+        )
+        conn.execute(
+            "INSERT INTO observations (track_id, field, value, source, confidence, seen_at) "
+            "VALUES (5, 'bpm', '160', 'reccobeats', 1.0, '2026-01-01')"
+        )
+        # T6 : time_signature sans obs -> legacy time_signature.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, time_signature) VALUES (6, 'T6', 1, '4/4')"
+        )
+        conn.commit()
+
+    _upgrade_to(path, HEAD)  # applique e10
+
+    with sqlite3.connect(path) as conn:
+        legacy = conn.execute(
+            "SELECT track_id, field, value, confidence FROM observations "
+            "WHERE source = 'legacy' ORDER BY track_id, field"
+        ).fetchall()
+    assert legacy == [
+        (2, "bpm", "120", 3.0),
+        (3, "key", "5", None),
+        (3, "mode", "0", None),
+        (4, "bpm_alt", "70", None),
+        (6, "time_signature", "4/4", None),
+    ]
+
+
+def test_e11_backfill_musical_key_orphans(tmp_path):
+    """La révision e11 rétro-dérive key/mode des orphelins `musical_key` (colonne
+    sans paire key/mode en observations), pour les préserver au drop E7-D2."""
+    path = str(tmp_path / "orphans.db")
+    _upgrade_to(path, "e10_backfill_legacy_obs")
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
+        # T1 : orphelin (musical_key, aucune obs key/mode) -> rétro-dérivé 11/0.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, musical_key) VALUES (1, 'T1', 1, 'Si mineur')"
+        )
+        # T2 : musical_key MAIS déjà une paire key/mode (source réelle) -> intouché.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, musical_key) VALUES (2, 'T2', 1, 'Sol majeur')"
+        )
+        conn.execute(
+            "INSERT INTO observations (track_id, field, value, source, seen_at) "
+            "VALUES (2, 'key', '7', 'songbpm', '2026-01-01'), "
+            "(2, 'mode', '1', 'songbpm', '2026-01-01')"
+        )
+        # T3 : musical_key non interprétable -> ignoré (reste orphelin).
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, musical_key) VALUES (3, 'T3', 1, 'grosse blague')"
+        )
+        conn.commit()
+
+    _upgrade_to(path, HEAD)  # applique e11
+
+    with sqlite3.connect(path) as conn:
+        legacy = conn.execute(
+            "SELECT track_id, field, value FROM observations "
+            "WHERE source = 'legacy' ORDER BY track_id, field"
+        ).fetchall()
+    assert legacy == [(1, "key", "11"), (1, "mode", "0")]

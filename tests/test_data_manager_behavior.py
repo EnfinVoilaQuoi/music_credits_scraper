@@ -11,6 +11,7 @@ Deux rôles :
 
 import sqlite3
 
+from src.enrichment.observation import Observation
 from src.models import Artist, Track
 
 
@@ -49,6 +50,9 @@ class TestBaseVierge:
             spotify_id="abc123",
             bpm=142,
         )
+        # E7-D1 : le BPM ne fait plus l'aller-retour par la colonne mais par les
+        # observations → on l'émet explicitement (comme le flux d'enrichissement).
+        track.observations = [Observation("bpm", 142, "songbpm")]
         data_manager.save_track(track)
 
         tracks = data_manager.get_artist_tracks(artist.id)
@@ -60,7 +64,7 @@ class TestBaseVierge:
         assert lu.featured_artists == "Artiste Test"
         assert lu.lyrics == "Première ligne\nDeuxième ligne"
         assert lu.spotify_id == "abc123"
-        assert lu.bpm == 142
+        assert lu.bpm == 142  # reconstruit depuis l'observation
 
 
 class TestRoundtrip:
@@ -82,9 +86,13 @@ class TestUpdateNonDestructif:
 
     def test_coalesce_preserve_les_champs_enrichis(self, data_manager):
         # Un re-save « vide » (re-fetch discographie API, champs None) ne doit
-        # PAS écraser les données enrichies.
+        # PAS écraser les données enrichies. E7-D1 : le BPM est préservé via son
+        # observation (le re-save vide ne porte pas d'observation → aucun upsert) ;
+        # lyrics reste préservé par le COALESCE de la colonne.
         artist = _artiste_sauve(data_manager)
-        data_manager.save_track(Track(title="X", artist=artist, bpm=142, lyrics="paroles"))
+        t = Track(title="X", artist=artist, bpm=142, lyrics="paroles")
+        t.observations = [Observation("bpm", 142, "songbpm")]
+        data_manager.save_track(t)
         data_manager.save_track(Track(title="X", artist=artist))
         (lu,) = data_manager.get_artist_tracks(artist.id)
         assert lu.bpm == 142
@@ -108,6 +116,36 @@ class TestUpdateNonDestructif:
         (lu,) = data_manager.get_artist_tracks(artist.id)
         assert lu.certifications
         assert lu.certifications[0]["certification"] == "Or"
+
+
+class TestClearAudio:
+    """E7-D1/D2 : un save avec `clear_audio_observations` efface DÉFINITIVEMENT
+    l'audio (observations supprimées ; colonnes déjà droppées en D2) → aucune
+    résurrection à la relecture."""
+
+    def test_clear_supprime_obs_et_colonne(self, data_manager):
+        artist = _artiste_sauve(data_manager)
+        t = Track(title="X", artist=artist, bpm=142)
+        t.observations = [
+            Observation("bpm", 142, "songbpm"),
+            Observation("key", 5, "songbpm"),
+            Observation("mode", 1, "songbpm"),
+        ]
+        data_manager.save_track(t)
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.bpm == 142  # présent via l'observation
+
+        wipe = Track(title="X", artist=artist)
+        wipe.clear_audio_observations = True
+        data_manager.save_track(wipe)
+
+        (apres,) = data_manager.get_artist_tracks(artist.id)
+        assert apres.bpm is None
+        assert getattr(apres, "key", None) is None
+        assert getattr(apres, "mode", None) is None
+        # Les observations audio ont bien été supprimées en base.
+        obs = {o.field for o in data_manager.get_observations(t.id)}
+        assert obs.isdisjoint({"bpm", "key", "mode", "bpm_alt", "time_signature"})
 
 
 class TestConversionDuree:

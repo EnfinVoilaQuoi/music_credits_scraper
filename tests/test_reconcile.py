@@ -292,6 +292,12 @@ class TestApplyResolutions:
         assert track.bpm_source == "reccobeats+deezer"
         assert track.bpm_confidence == 2  # INTEGER legacy (float du moteur casté)
 
+    def test_time_signature_pilote(self):
+        # E7-D2 : time_signature reconstruit depuis son observation (write-through).
+        track = self._track()
+        apply_resolutions(track, reconcile([_obs("time_signature", "4/4", "getsongbpm")]))
+        assert track.time_signature == "4/4"
+
     def test_key_mode_normalises_et_musical_key(self):
         # songbpm "minor" + reccobeats numériques → paire complète, mode=0 (fix bug).
         track = self._track()
@@ -319,3 +325,64 @@ class TestApplyResolutions:
         track = self._track()
         apply_resolutions(track, reconcile([_obs("key", 5, "deezer")]))
         assert getattr(track, "key", None) is None
+
+
+class TestReconcileLegacy:
+    """Règle backfill `source='legacy'` (E7-D0) : verbatim si seule, écartée du
+    vote dès qu'une source réelle existe."""
+
+    def test_bpm_legacy_seul_verbatim_pas_de_re_vote(self):
+        # Colonne 88 (consensus, non doublé) + bpm_alt 176 : la legacy reprend 88
+        # TEL QUEL. Un re-vote la doublerait à 176 (candidat isolé < 90) → le test
+        # échouerait, prouvant que la branche verbatim est bien empruntée.
+        res = reconcile([_obs("bpm", 88, "legacy"), _obs("bpm_alt", 176, "legacy")])
+        assert res["bpm"].value == 88
+        assert res["bpm"].alt == 176
+        assert res["bpm"].source == "legacy"
+
+    def test_bpm_legacy_seul_sans_alt(self):
+        res = reconcile([_obs("bpm", 120, "legacy")])
+        assert res["bpm"].value == 120
+        assert res["bpm"].alt is None
+
+    def test_bpm_legacy_ecartee_si_source_reelle(self):
+        # legacy 88 + songbpm 140 : la legacy est écartée, seul songbpm vote.
+        res = reconcile([_obs("bpm", 88, "legacy"), _obs("bpm", 140, "songbpm")])
+        assert res["bpm"].value == 140
+        assert res["bpm"].source == "songbpm"
+
+    def test_paire_key_mode_legacy_seule_utilisee(self):
+        res = reconcile([_obs("key", 5, "legacy"), _obs("mode", 1, "legacy")])
+        assert res["key"].value == 5
+        assert res["mode"].value == 1
+        assert res["key"].source == "legacy"
+
+    def test_key_mode_legacy_ecartee_si_source_reelle(self):
+        # legacy (5,1) + songbpm complet (8,0) : la paire réelle gagne.
+        res = reconcile(
+            [
+                _obs("key", 5, "legacy"),
+                _obs("mode", 1, "legacy"),
+                _obs("key", 8, "songbpm"),
+                _obs("mode", 0, "songbpm"),
+            ]
+        )
+        assert res["key"].value == 8
+        assert res["mode"].value == 0
+        assert res["key"].source == "songbpm"
+
+    def test_champ_defaut_legacy_seul_puis_ecarte(self):
+        # time_signature (stratégie par défaut) : legacy seul utilisé…
+        res = reconcile([_obs("time_signature", "4/4", "legacy")])
+        assert res["time_signature"].value == "4/4"
+        # …mais écarté dès qu'une source réelle existe.
+        res = reconcile(
+            [_obs("time_signature", "4/4", "legacy"), _obs("time_signature", "3/4", "songbpm")]
+        )
+        assert res["time_signature"].value == "3/4"
+
+    def test_bpm_alt_seul_n_emet_aucun_verdict(self):
+        # bpm_alt n'est jamais un verdict autonome (consommé par la stratégie bpm).
+        res = reconcile([_obs("bpm_alt", 90, "legacy")])
+        assert "bpm" not in res
+        assert "bpm_alt" not in res

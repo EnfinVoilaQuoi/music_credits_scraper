@@ -272,6 +272,9 @@ class DataEnricher:
             return False
 
         if cleaned:
+            # E7-D1 : demander la suppression des observations audio au prochain
+            # save (sinon résurrection à la lecture via la réconciliation).
+            track.clear_audio_observations = True
             logger.info(
                 f"✅ Nettoyage terminé pour '{track.title}' - Artiste intact: {track.artist}"
             )
@@ -681,11 +684,11 @@ class DataEnricher:
         else:
             logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
             results["cleaned"] = True
-            # Cohérence obs⇒legacy : pas d'observation persistée sur un morceau
-            # dont on vient d'effacer les colonnes audio (save_track ne doit rien
-            # upsert). Sur un nettoyage réel il n'y a de toute façon aucun
-            # candidat, mais on l'assure explicitement.
+            # E7-D1 : ne rien upserter ET demander la SUPPRESSION des observations
+            # audio persistées (sinon la réconciliation ressusciterait les valeurs
+            # effacées à la lecture — la vérité vit dans `observations`).
             track.observations = []
+            track.clear_audio_observations = True
 
     def _collect_run_observations(self, bpm_candidates, key_mode_observations):
         """Observations PAR SOURCE de ce run (phase E5c-2b-i).

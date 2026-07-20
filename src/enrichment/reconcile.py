@@ -42,6 +42,15 @@ LYRICS_SYNCED_FIELD = "lyrics_synced"
 # de l'artiste, le mapper E6 réconciliant les observations concurrentes).
 MANUAL_SOURCE = "manual"
 
+# Source du BACKFILL des morceaux enrichis AVANT l'ère per-source (E7-D0, Chantier
+# 3 : arrêt écriture legacy + drop des colonnes audio). La colonne portait DÉJÀ la
+# valeur réconciliée → l'observation `legacy` la reprend VERBATIM. Elle ne sert
+# QUE seule : dès qu'une source réelle existe pour le champ, elle est écartée du
+# vote (un candidat fantôme sinon — même écueil que les obs à source combinée
+# purgées par `e5_drop_combined_bpm_observations`). Inerte tant que le backfill
+# n'a pas tourné (aucune observation `legacy` en base).
+LEGACY_SOURCE = "legacy"
+
 
 def _manual_obs(observations: list):
     """Première observation `source='manual'` d'une liste, ou None."""
@@ -49,6 +58,14 @@ def _manual_obs(observations: list):
         if obs.source == MANUAL_SOURCE:
             return obs
     return None
+
+
+def _drop_legacy(observations: list) -> list:
+    """Écarte les observations `legacy` s'il existe AU MOINS une source réelle
+    pour ce champ (elles ne servent que seules). Sans source réelle, la liste est
+    rendue telle quelle — la donnée backfillée est le seul recours."""
+    real = [o for o in observations if o.source != LEGACY_SOURCE]
+    return real if real else observations
 
 
 @dataclass(frozen=True)
@@ -85,21 +102,38 @@ def _best(observations: list) -> Any:
     )
 
 
-def _reconcile_bpm(observations: list) -> Resolution | None:
+def _reconcile_bpm(observations: list, alt_observations: list) -> Resolution | None:
     """Vote BPM sur les observations `bpm` (sémantique `reconcile_bpm` inchangée).
 
     Une observation `source='manual'` court-circuite le vote : sa valeur est
     retenue VERBATIM (aucun départage demi/double), une correction humaine
     primant sur toute mesure automatique. `alt=None` (pas d'autre octave posée
     à la main), `confidence` = celle de l'observation (None en pratique).
+
+    Une observation `source='legacy'` SEULE (aucune source réelle) est reprise
+    VERBATIM elle aussi : la colonne backfillée portait déjà le BPM réconcilié, le
+    re-voter le fausserait (`reconcile_bpm` re-doublerait un 88 de consensus). Son
+    `bpm_alt` — valeur DÉRIVÉE non recalculable pour un candidat unique — vient de
+    l'observation `bpm_alt` legacy (`alt_observations`). Dès qu'une source réelle
+    existe, la legacy est écartée et le vote normal reprend.
     """
     manual = _manual_obs(observations)
     if manual is not None:
         value = sanitize_bpm(manual.value)
         if value is not None:
             return Resolution("bpm", value, MANUAL_SOURCE, manual.confidence, alt=None)
+
+    real = [o for o in observations if o.source != LEGACY_SOURCE]
+    if not real and observations:
+        legacy = observations[0]
+        value = sanitize_bpm(legacy.value)
+        if value is None:
+            return None
+        alt = sanitize_bpm(alt_observations[0].value) if alt_observations else None
+        return Resolution("bpm", value, LEGACY_SOURCE, legacy.confidence, alt=alt)
+
     candidates = []
-    for obs in observations:
+    for obs in real:
         value = sanitize_bpm(obs.value)
         if value is not None:
             candidates.append((obs.source, value))
@@ -126,6 +160,11 @@ def _reconcile_key_mode(key_obs: list, mode_obs: list) -> dict[str, Resolution]:
     indépendant ici — l'override d'un seul champ n'efface pas l'autre verdict.
     """
     resolutions: dict[str, Resolution] = {}
+
+    # Backfill : une paire legacy ne sert que seule (écartée dès qu'une source
+    # réelle fournit key ou mode).
+    key_obs = _drop_legacy(key_obs)
+    mode_obs = _drop_legacy(mode_obs)
 
     # Appariement normal : SEULE une source complète (key + mode) émet un verdict.
     key_by_source = {o.source: o for o in key_obs}
@@ -238,6 +277,12 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
             int(lyrics.confidence) if lyrics.confidence is not None else None
         )
 
+    # time_signature (E7-D2) : champ mono-source préservé via observation. Piloté
+    # ici pour survivre au drop de la colonne (valeur telle quelle, ex. "4/4").
+    time_signature = resolutions.get("time_signature")
+    if time_signature is not None:
+        track.time_signature = time_signature.value
+
 
 def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.
@@ -258,7 +303,8 @@ def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolutio
     resolutions: dict[str, Resolution] = {}
 
     if by_field.get("bpm"):
-        bpm_res = _reconcile_bpm(by_field["bpm"])
+        # `bpm_alt` alimente la seule branche legacy-seul (alt non recalculable).
+        bpm_res = _reconcile_bpm(by_field["bpm"], by_field.get("bpm_alt", []))
         if bpm_res is not None:
             resolutions["bpm"] = bpm_res
 
@@ -273,10 +319,11 @@ def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolutio
         if lyrics_res is not None:
             resolutions[LYRICS_SYNCED_FIELD] = lyrics_res
 
-    handled = {"bpm", *KEY_MODE_FIELDS, LYRICS_SYNCED_FIELD}
+    # `bpm_alt` est consommé par la stratégie bpm (jamais un verdict autonome).
+    handled = {"bpm", "bpm_alt", *KEY_MODE_FIELDS, LYRICS_SYNCED_FIELD}
     for field, obs_list in by_field.items():
         if field in handled:
             continue
-        resolutions[field] = _as_resolution(field, _best(obs_list))
+        resolutions[field] = _as_resolution(field, _best(_drop_legacy(obs_list)))
 
     return resolutions

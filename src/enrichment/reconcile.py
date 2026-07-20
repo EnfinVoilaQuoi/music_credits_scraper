@@ -283,6 +283,13 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     if time_signature is not None:
         track.time_signature = time_signature.value
 
+    # reccobeats_resolution : provenance mono-source (voie ISRC/Spotify ID de
+    # ReccoBeats) préservée en observation, reposée telle quelle (survit au drop
+    # de la colonne e12).
+    reccobeats_resolution = resolutions.get("reccobeats_resolution")
+    if reccobeats_resolution is not None:
+        track.reccobeats_resolution = reccobeats_resolution.value
+
 
 def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.

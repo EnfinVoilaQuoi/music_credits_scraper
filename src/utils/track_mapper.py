@@ -110,8 +110,8 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     # E7-D2 : colonnes AUDIO droppées (bpm, bpm_alt, bpm_source, bpm_confidence,
     # key, mode, key_mode_source, musical_key, time_signature, reccobeats_resolution).
     # Attributs posés à None ici (garantit leur existence) PUIS pilotés par la
-    # réconciliation des observations (bas de fonction). reccobeats_resolution n'a
-    # pas d'observation (provenance debug) → reste None (perte assumée au drop).
+    # réconciliation des observations (bas de fonction). reccobeats_resolution est
+    # reposé par apply_resolutions quand son observation de provenance existe.
     track.bpm = None
     track.bpm_source = None
     track.bpm_confidence = None

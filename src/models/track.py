@@ -281,9 +281,8 @@ class Audio:
 
     Sous-objet de `Track` (Phase 5). Regroupe les champs audio historiquement
     plats. Pilotés par le moteur de réconciliation (`apply_resolutions`) depuis
-    les observations ; posés à None par le mapper au chargement. Pendant la
-    migration, `Track` expose des propriétés de compat (`track.bpm` →
-    `track.audio.bpm`) — à retirer une fois tous les call-sites migrés.
+    les observations ; posés à None par le mapper au chargement. Accès via
+    `track.audio.<champ>`.
     """
 
     bpm: int | None = None  # BPM "réel" (double-time) — valeur exportée
@@ -320,9 +319,8 @@ class Track:
     isrc: str | None = None  # International Standard Recording Code (pivot inter-sources)
 
     # Métadonnées
-    # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5).
-    # Les anciens attributs plats restent lisibles/écrivables via les propriétés
-    # de compat (bas de classe) le temps de migrer les call-sites vers track.audio.
+    # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5) :
+    # accès via track.audio.<champ> (bpm, key, mode, musical_key…).
     audio: Audio = field(default_factory=Audio)
     duration: int | None = None  # En secondes
     genre: str | None = None
@@ -444,89 +442,6 @@ class Track:
 
     def __hash__(self) -> int:
         return hash(self._identity())
-
-    # ── Compat Phase 5 : audio plat ↔ sous-objet `audio` ───────────────────────
-    # Propriétés TEMPORAIRES le temps de migrer les call-sites `track.bpm` →
-    # `track.audio.bpm`. À RETIRER une fois la migration terminée.
-    @property
-    def bpm(self) -> int | None:
-        return self.audio.bpm
-
-    @bpm.setter
-    def bpm(self, value: int | None) -> None:
-        self.audio.bpm = value
-
-    @property
-    def bpm_alt(self) -> int | None:
-        return self.audio.bpm_alt
-
-    @bpm_alt.setter
-    def bpm_alt(self, value: int | None) -> None:
-        self.audio.bpm_alt = value
-
-    @property
-    def bpm_source(self) -> str | None:
-        return self.audio.bpm_source
-
-    @bpm_source.setter
-    def bpm_source(self, value: str | None) -> None:
-        self.audio.bpm_source = value
-
-    @property
-    def bpm_confidence(self) -> int | None:
-        return self.audio.bpm_confidence
-
-    @bpm_confidence.setter
-    def bpm_confidence(self, value: int | None) -> None:
-        self.audio.bpm_confidence = value
-
-    @property
-    def key(self) -> int | None:
-        return self.audio.key
-
-    @key.setter
-    def key(self, value: int | None) -> None:
-        self.audio.key = value
-
-    @property
-    def mode(self) -> int | None:
-        return self.audio.mode
-
-    @mode.setter
-    def mode(self, value: int | None) -> None:
-        self.audio.mode = value
-
-    @property
-    def key_mode_source(self) -> str | None:
-        return self.audio.key_mode_source
-
-    @key_mode_source.setter
-    def key_mode_source(self, value: str | None) -> None:
-        self.audio.key_mode_source = value
-
-    @property
-    def musical_key(self) -> str | None:
-        return self.audio.musical_key
-
-    @musical_key.setter
-    def musical_key(self, value: str | None) -> None:
-        self.audio.musical_key = value
-
-    @property
-    def time_signature(self) -> str | None:
-        return self.audio.time_signature
-
-    @time_signature.setter
-    def time_signature(self, value: str | None) -> None:
-        self.audio.time_signature = value
-
-    @property
-    def reccobeats_resolution(self) -> str | None:
-        return self.audio.reccobeats_resolution
-
-    @reccobeats_resolution.setter
-    def reccobeats_resolution(self, value: str | None) -> None:
-        self.audio.reccobeats_resolution = value
 
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""

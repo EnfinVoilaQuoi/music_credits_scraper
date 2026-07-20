@@ -50,7 +50,7 @@ def test_try_by_isrc_applique_bpm_et_resolution():
     ctx = EnrichmentContext()
     assert provider.try_by_isrc(track, ctx) is True
     assert ("reccobeats", 120) in ctx.bpm_ballot.candidates
-    assert track.reccobeats_resolution == "isrc"
+    assert track.audio.reccobeats_resolution == "isrc"
 
 
 def test_try_by_isrc_sans_isrc_renvoie_false():
@@ -82,7 +82,7 @@ def test_enrich_par_spotify_id_existant_valide():
     )
     assert provider.enrich(track, ctx) is True
     assert ("reccobeats", 140) in ctx.bpm_ballot.candidates
-    assert track.reccobeats_resolution == "spotify_id"
+    assert track.audio.reccobeats_resolution == "spotify_id"
     assert track.duration == 200
 
 
@@ -123,7 +123,7 @@ def test_reccobeats_resolution_repose_au_chargement():
     from src.enrichment.reconcile import apply_resolutions, reconcile
 
     track = _track()
-    track.reccobeats_resolution = None  # état « rechargé » par le mapper (colonne droppée)
+    track.audio.reccobeats_resolution = None  # état « rechargé » par le mapper (colonne droppée)
     obs = [Observation("reccobeats_resolution", "spotify_id", "reccobeats")]
     apply_resolutions(track, reconcile(obs))
-    assert track.reccobeats_resolution == "spotify_id"
+    assert track.audio.reccobeats_resolution == "spotify_id"

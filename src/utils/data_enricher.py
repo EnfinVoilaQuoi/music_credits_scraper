@@ -494,9 +494,7 @@ class DataEnricher:
         logger.info(f"   • Spotify ID: {track.spotify_id}")
         logger.info(f"   • BPM: {track.audio.bpm}")
         # key/mode/deezer_id = attributs dynamiques (mapper/providers) → getattr
-        logger.info(
-            f"   • Key: {getattr(track, 'key', 'N/A')}, Mode: {getattr(track, 'mode', 'N/A')}"
-        )
+        logger.info(f"   • Key: {track.audio.key}, Mode: {track.audio.mode}")
         logger.info(f"   • Musical Key: {track.audio.musical_key}")
         logger.info(f"   • Duration: {track.duration}")
         logger.info(f"   • Release Date: {track.release_date}")

@@ -37,7 +37,7 @@ class _FakeAsyncScraper:
 
 def _track(bpm=None, yt="https://youtu.be/abc"):
     t = Track(title="Solo", artist=Artist(name="X"))
-    t.bpm = bpm
+    t.audio.bpm = bpm
     t.youtube_url = yt
     return t
 
@@ -50,8 +50,8 @@ def test_is_available():
 def test_not_needed_si_rien_manquant():
     provider = BpmFinderProvider(_FakeScraper({"bpm": 140}))
     track = _track(bpm=120)
-    track.key = 5
-    track.mode = 1
+    track.audio.key = 5
+    track.audio.mode = 1
     assert provider.enrich(track, EnrichmentContext(force_update=False)) == "not_needed"
 
 
@@ -59,8 +59,8 @@ def test_bpm_manquant_devient_candidat():
     scraper = _FakeScraper({"bpm": 140})
     provider = BpmFinderProvider(scraper)
     track = _track(bpm=None)  # bpm manquant → analyse
-    track.key = 5  # key/mode présents → seul le bpm manque
-    track.mode = 1
+    track.audio.key = 5  # key/mode présents → seul le bpm manque
+    track.audio.mode = 1
     ctx = EnrichmentContext()
     assert provider.enrich(track, ctx) is True
     # E7 : BpmFinder alimente le scrutin comme toute source (plus de pose directe)
@@ -73,8 +73,8 @@ def test_emet_bpm_et_observations_key_mode():
     scraper = _FakeScraper({"bpm": 140, "key": 5, "mode": 0})
     provider = BpmFinderProvider(scraper)
     track = _track(bpm=None)
-    track.key = None
-    track.mode = None
+    track.audio.key = None
+    track.audio.mode = None
     ctx = EnrichmentContext()
     assert provider.enrich(track, ctx) is True
     assert ("bpmfinder", 140) in ctx.bpm_ballot.candidates
@@ -127,8 +127,8 @@ def test_enrich_async_repli_sync_sans_factory():
     scraper = _FakeScraper({"bpm": 140})
     provider = BpmFinderProvider(scraper)
     track = _track(bpm=None)
-    track.key = None
-    track.mode = None
+    track.audio.key = None
+    track.audio.mode = None
     runner = SerialWorker("test-bpmfinder")
     ctx = EnrichmentContext(sync_runner=runner)
     try:
@@ -147,8 +147,8 @@ def test_enrich_async_natif_avec_factory():
     sync_scraper = _FakeScraper({"bpm": 999})  # ne doit PAS être appelé
     provider = BpmFinderProvider(scraper=sync_scraper, async_scraper_factory=lambda: async_scraper)
     track = _track(bpm=None)
-    track.key = None
-    track.mode = None
+    track.audio.key = None
+    track.audio.mode = None
     runner = SerialWorker("test-bpmfinder")
     ctx = EnrichmentContext(sync_runner=runner)
     try:

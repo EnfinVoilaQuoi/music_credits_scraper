@@ -154,7 +154,7 @@ class TestTrackEquality:
         # Une version re-scrapée (paroles, bpm mis à jour) reste LE même morceau
         a = Track(title="Chanson", genius_id=123, lyrics="v1")
         b = Track(title="Chanson (Remaster)", genius_id=123, lyrics="v2")
-        a.bpm, b.bpm = 90, 140  # Phase 5 : audio hors constructeur (track.audio)
+        a.audio.bpm, b.audio.bpm = 90, 140  # Phase 5 : audio hors constructeur (track.audio)
         assert a == b
         assert hash(a) == hash(b)
 

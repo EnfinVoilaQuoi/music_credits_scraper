@@ -21,6 +21,7 @@ par `bootstrap` :
 
 import sqlite3
 from contextlib import contextmanager
+from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -29,6 +30,29 @@ from sqlalchemy.pool import NullPool
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ── Adaptateurs sqlite3 date/datetime explicites ────────────────────────────
+# Python 3.12+ déprécie les adaptateurs date/datetime PAR DÉFAUT du module
+# sqlite3 (supprimés en 3.14) : dès qu'un `datetime`/`date` BRUT atteint la
+# DBAPI en bind (colonnes date « libres » via `text()` / `date_bind`, cf.
+# `src/persistence/binding.py` — SQLAlchemy convertit lui-même les colonnes
+# TYPÉES avant la DBAPI, celles-là ne déclenchaient rien), un DeprecationWarning
+# était émis à chaque write. On réenregistre des adaptateurs explicites qui
+# reproduisent BYTE POUR BYTE l'ancien défaut (datetime → isoformat(" ") ==
+# str(datetime) ; date → isoformat()) : zéro changement de stockage, warning
+# supprimé, code pérenne pour 3.14. Enregistré au niveau module (process-global,
+# une fois) — `db.py` est importé avant toute connexion (Database/bootstrap).
+def _adapt_datetime_iso(val: datetime) -> str:
+    return val.isoformat(" ")
+
+
+def _adapt_date_iso(val: date) -> str:
+    return val.isoformat()
+
+
+sqlite3.register_adapter(datetime, _adapt_datetime_iso)
+sqlite3.register_adapter(date, _adapt_date_iso)
 
 
 class Database:

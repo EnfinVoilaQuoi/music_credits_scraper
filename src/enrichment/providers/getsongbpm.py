@@ -173,8 +173,14 @@ class GetSongBpmProvider:
             except Exception as e:
                 logger.debug(f"GetSongBPM: Erreur conversion musical_key: {e}")
 
-        # Time Signature (optionnel)
+        # Time Signature (optionnel) — write-through observation (E7-D2 : la
+        # colonne est dropée, la vérité vit dans l'observation).
         if song_data.time_signature:
+            from src.enrichment.observation import Observation
+
+            ctx.observations.append(
+                Observation("time_signature", song_data.time_signature, "getsongbpm")
+            )
             track.time_signature = song_data.time_signature
             logger.info(f"GetSongBPM: ✅ Time Signature: {track.time_signature}")
             updated = True

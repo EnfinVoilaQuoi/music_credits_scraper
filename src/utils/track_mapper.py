@@ -107,12 +107,17 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.spotify_id = _clean(row["spotify_id"])
     track.discogs_id = _clean(row["discogs_id"])
     track.isrc = _clean(row["isrc"])
-    track.bpm = _clean_int(row["bpm"])
-    track.bpm_source = _clean(row["bpm_source"])
-    track.bpm_confidence = _clean_int(row["bpm_confidence"])
-    track.key_mode_source = _clean(row["key_mode_source"])
-    track.reccobeats_resolution = _clean(row["reccobeats_resolution"])
-    track.bpm_alt = _clean_int(row["bpm_alt"])
+    # E7-D2 : colonnes AUDIO droppées (bpm, bpm_alt, bpm_source, bpm_confidence,
+    # key, mode, key_mode_source, musical_key, time_signature, reccobeats_resolution).
+    # Attributs posés à None ici (garantit leur existence) PUIS pilotés par la
+    # réconciliation des observations (bas de fonction). reccobeats_resolution n'a
+    # pas d'observation (provenance debug) → reste None (perte assumée au drop).
+    track.bpm = None
+    track.bpm_source = None
+    track.bpm_confidence = None
+    track.key_mode_source = None
+    track.reccobeats_resolution = None
+    track.bpm_alt = None
     track.lyrics_source = _clean(row["lyrics_source"])
     track.lyrics_synced = _clean(row["lyrics_synced"])
     track.lyrics_synced_source = _clean(row["lyrics_synced_source"])
@@ -142,34 +147,14 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
 
     track.duration = _clean_duration(row["duration"])  # Supporte "3:48" et int
     track.genre = _clean(row["genre"])
-    # Key/Mode : int (0-11, 0/1) OU string ("G", "major") pour rétrocompatibilité
-    track.key = _clean_int(row["key"], allow_string=True)
-    track.mode = _clean_int(row["mode"], allow_string=True)
-    track.musical_key = _clean(row["musical_key"])
-
-    # Auto-normalisation : anciennes valeurs en notation US / Unicode
-    # ("G♯/A♭ majeur", "A minor") → format FR canonique. Persisté au prochain
-    # save_track (self-healing).
-    if track.musical_key:
-        try:
-            from src.utils.music_theory import normalize_musical_key
-
-            _norm = normalize_musical_key(track.musical_key)
-            if _norm and _norm != track.musical_key:
-                track.musical_key = _norm
-        except Exception:
-            pass
-
-    # Recalculer musical_key si manquante mais que key + mode existent
-    if not track.musical_key and track.key is not None and track.mode is not None:
-        try:
-            from src.utils.music_theory import key_mode_to_french_from_string
-
-            track.musical_key = key_mode_to_french_from_string(track.key, track.mode)
-        except Exception as e:
-            logger.debug(f"Impossible de calculer musical_key pour track {track_id}: {e}")
-
-    track.time_signature = _clean(row["time_signature"])
+    # E7-D2 : key/mode/musical_key/time_signature DROPPÉS → None ici, pilotés par
+    # la réconciliation des observations (apply_resolutions, bas de fonction) qui
+    # normalise key/mode et RECALCULE musical_key (key_mode_to_french, déjà
+    # canonique) — l'ancien self-healing sur la colonne devient inutile.
+    track.key = None
+    track.mode = None
+    track.musical_key = None
+    track.time_signature = None
     track.genius_url = _clean(row["genius_url"])
     track.spotify_url = _clean(row["spotify_url"])
     track.spotify_page_title = _clean(row["spotify_page_title"])

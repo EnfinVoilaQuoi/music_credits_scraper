@@ -1,19 +1,13 @@
-"""Contrôle READ-ONLY de la cohérence de la table `observations` (phases E4-E5).
+"""Contrôle READ-ONLY de la cohérence de la table `observations`.
 
-Depuis E5c-2a, la triple écriture émet des observations PAR SOURCE depuis le vrai
-flux d'enrichissement (une ligne `bpm` par source ayant voté), ce qui rompt
-l'invariant strict « 1 observation par colonne legacy » de l'ère backfill (E4).
-La table est aussi MIXTE transitoirement : lignes backfill « source combinée »
-(`reccobeats+songbpm`) + lignes par source — inoffensif, la table est write-only
-jusqu'à E6, et les lignes combinées seront nettoyées en E5c-2b.
-
-Le contrôle passe donc à un invariant ROBUSTE, valable quel que soit le style de
-source :
+Depuis E7-D2 (drop des colonnes audio), les observations sont l'UNIQUE source de
+vérité de l'audio (bpm/key/mode/…). Ce contrôle vérifie trois invariants,
+valables quel que soit le style de source :
   1. aucune observation orpheline (track_id inexistant) ;
   2. aucune observation sur un champ inconnu ;
-  3. `obs ⇒ colonne legacy présente` : tout morceau porteur d'une observation
-     `bpm`/`key`/`mode` a la colonne legacy correspondante non nulle (la triple
-     écriture pose les deux ensemble, dans une seule transaction).
+  3. `obs ⇒ colonne présente` — SEULEMENT pour les champs encore écrits en
+     colonne (lyrics_synced/streams, triple écriture maintenue). L'audio n'a plus
+     de colonne miroir (droppée), l'invariant ne s'y applique donc pas.
 
     python scripts/check_observations.py            # base réelle (config)
     python scripts/check_observations.py --db X.db  # une autre base (copie)
@@ -32,12 +26,24 @@ if "pytest" not in sys.modules:
 
 from src.config import DATABASE_URL
 
-# Champs scalaires attendus dans `observations` et leur colonne legacy « miroir »
-# (le nom de colonne est cité verbatim : `key`/`mode` sont sensibles au dialecte).
-_KNOWN_FIELDS = {
-    "bpm": "bpm",
-    "key": '"key"',
-    "mode": '"mode"',
+# Champs scalaires attendus dans `observations`. bpm/key/mode/bpm_alt/time_signature
+# sont désormais SANS colonne miroir (droppées E7-D2) : ils restent des champs
+# d'observation valides (la vérité audio y vit), mais ne sont plus contrôlés par
+# l'invariant « obs ⇒ colonne ».
+_KNOWN_FIELDS = (
+    "bpm",
+    "bpm_alt",
+    "key",
+    "mode",
+    "time_signature",
+    "lyrics_synced",
+    "spotify_streams",
+    "ytm_streams",
+)
+
+# Champs ENCORE écrits en colonne (triple écriture maintenue) → seuls concernés
+# par l'invariant « obs ⇒ colonne non-null ».
+_COLUMN_BACKED_FIELDS = {
     "lyrics_synced": "lyrics_synced",
     "spotify_streams": "spotify_streams",
     "ytm_streams": "ytm_streams",
@@ -71,7 +77,7 @@ def check(db_path: str) -> int:
         placeholders = ",".join("?" * len(_KNOWN_FIELDS))
         unknown = conn.execute(
             f"SELECT DISTINCT field FROM observations WHERE field NOT IN ({placeholders})",  # noqa: S608
-            tuple(_KNOWN_FIELDS),
+            _KNOWN_FIELDS,
         ).fetchall()
         if unknown:
             ok = False
@@ -79,8 +85,8 @@ def check(db_path: str) -> int:
         else:
             print("  ✅ tous les champs sont connus")
 
-        # (3) obs ⇒ colonne legacy présente (triple écriture cohérente).
-        for field, column in _KNOWN_FIELDS.items():
+        # (3) obs ⇒ colonne présente, pour les champs encore écrits en colonne.
+        for field, column in _COLUMN_BACKED_FIELDS.items():
             dangling = conn.execute(
                 f"SELECT COUNT(*) FROM observations o "  # noqa: S608 (colonne d'une whitelist)
                 f"JOIN tracks t ON t.id = o.track_id "
@@ -90,7 +96,7 @@ def check(db_path: str) -> int:
             status = "✅" if dangling == 0 else "❌"
             if dangling:
                 ok = False
-            print(f"  {status} {field:5} : {dangling} observation(s) sans colonne legacy")
+            print(f"  {status} {field:14} : {dangling} observation(s) sans colonne")
 
         total = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
         print(f"\n{'✅ Cohérent' if ok else '❌ Incohérent'} — {total} observation(s) au total.")

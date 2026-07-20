@@ -12,6 +12,7 @@ from src.utils.music_theory import (
     key_mode_to_english,
     key_mode_to_french,
     key_mode_to_french_from_string,
+    musical_key_to_pitch_mode,
     normalize_musical_key,
     note_to_pitch_class,
     parse_mode,
@@ -135,6 +136,32 @@ class TestNormalizeMusicalKey:
     @pytest.mark.parametrize("invalide", [None, "", "Do", "n'importe quoi du tout", 42])
     def test_non_interpretable_retourne_none(self, invalide):
         assert normalize_musical_key(invalide) is None
+
+
+class TestMusicalKeyToPitchMode:
+    """Inverse de key_mode_to_french (rétro-dérivation E7-D2 des orphelins)."""
+
+    @pytest.mark.parametrize(
+        ("entree", "attendu"),
+        [
+            ("Si mineur", (11, 0)),
+            ("Sol majeur", (7, 1)),
+            ("Do#/Réb mineur", (1, 0)),  # composite : 1re enharmonie
+            ("La#/Sib mineur", (10, 0)),
+            ("A minor", (9, 0)),  # notation anglaise tolérée
+        ],
+    )
+    def test_decomposition(self, entree, attendu):
+        assert musical_key_to_pitch_mode(entree) == attendu
+
+    @pytest.mark.parametrize("valeur", ["Si mineur", "Do#/Réb majeur", "Sol#/Lab mineur"])
+    def test_roundtrip_avec_key_mode_to_french(self, valeur):
+        pc, mode = musical_key_to_pitch_mode(valeur)
+        assert key_mode_to_french(pc, mode) == valeur
+
+    @pytest.mark.parametrize("invalide", [None, "", "Do", "n'importe quoi", 42])
+    def test_non_interpretable_retourne_none(self, invalide):
+        assert musical_key_to_pitch_mode(invalide) is None
 
 
 class TestKeyModeToEnglish:

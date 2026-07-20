@@ -102,13 +102,14 @@ def parse_mode(mode) -> int | None:
     return _MODE_WORDS.get(str(mode).strip().lower())
 
 
-def normalize_musical_key(musical_key: str) -> str | None:
+def musical_key_to_pitch_mode(musical_key: str) -> tuple[int, int] | None:
     """
-    Re-normalise une chaîne `musical_key` existante vers le format canonique
-    français, quelle que soit sa notation d'origine :
-      "G♯/A♭ majeur" → "Sol#/Lab majeur" ; "A minor" → "La mineur" ;
-      "Do# majeur" → "Do#/Réb majeur" ; "Do majeur" → "Do majeur" (inchangé).
-    Retourne None si la chaîne n'est pas interprétable (à laisser telle quelle).
+    Décompose une tonalité FR ("Si mineur", "Do#/Réb majeur", "G♯/A♭ majeur",
+    "A minor") en couple (pitch class 0-11, mode 0/1) — INVERSE de
+    `key_mode_to_french`. None si la chaîne n'est pas interprétable.
+
+    Note enharmonique composite : la 1re partie suffit ("Do#/Réb" → 1), le
+    round-trip via `key_mode_to_french` réécrit la forme canonique complète.
     """
     if not musical_key or not isinstance(musical_key, str):
         return None
@@ -119,7 +120,21 @@ def normalize_musical_key(musical_key: str) -> str | None:
     pc = note_to_pitch_class(" ".join(tokens[:-1]))
     if pc is None or mode is None:
         return None
-    return key_mode_to_french(pc, mode)
+    return pc, mode
+
+
+def normalize_musical_key(musical_key: str) -> str | None:
+    """
+    Re-normalise une chaîne `musical_key` existante vers le format canonique
+    français, quelle que soit sa notation d'origine :
+      "G♯/A♭ majeur" → "Sol#/Lab majeur" ; "A minor" → "La mineur" ;
+      "Do# majeur" → "Do#/Réb majeur" ; "Do majeur" → "Do majeur" (inchangé).
+    Retourne None si la chaîne n'est pas interprétable (à laisser telle quelle).
+    """
+    parsed = musical_key_to_pitch_mode(musical_key)
+    if parsed is None:
+        return None
+    return key_mode_to_french(*parsed)
 
 
 def convert_key_to_numeric(key_str: str) -> int:

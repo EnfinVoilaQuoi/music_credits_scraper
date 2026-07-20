@@ -369,6 +369,13 @@ class Track:
     # ne le peuple pas). Peuplé par les providers migrés `fetch()` (E5c-2).
     observations: list["Observation"] = field(default_factory=list, repr=False)
 
+    # Signal transitoire d'EFFACEMENT audio (E7-D1) : posé par les chemins de
+    # nettoyage (clear_track_data / _clear_after_total_failure) pour que save_track
+    # SUPPRIME les observations audio persistées (bpm/key/mode/…) dans SA
+    # transaction — sinon la réconciliation les ressusciterait à la lecture. Non
+    # une colonne ; toujours False après une lecture DB.
+    clear_audio_observations: bool = field(default=False, repr=False)
+
     # Champs de certification SNEP - VERSION MULTI-CERTIFICATIONS
     has_certification: bool = False
     certification_level: str | None = None  # Plus haute certification (rétrocompatibilité)

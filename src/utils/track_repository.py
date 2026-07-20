@@ -22,12 +22,24 @@ from src.utils.track_mapper import track_from_row
 
 logger = get_logger(__name__)
 
+# Champs d'observation AUDIO pilotant les colonnes réconciliées (E6). Supprimés
+# ensemble quand un morceau est « nettoyé » (E7-D1) : sinon la réconciliation les
+# ressusciterait à la lecture. bpm_alt suit bpm (octave dérivée).
+_AUDIO_OBS_FIELDS = ("bpm", "bpm_alt", "key", "mode", "time_signature")
+
 
 class TrackRepository:
     """Persistance des morceaux, crédits et albums. Requiert `self.engine`."""
 
     def save_track(self, track: Track) -> int:
-        """Sauvegarde ou met à jour un morceau avec musical_key et time_signature"""
+        """Sauvegarde ou met à jour un morceau.
+
+        E7-D1 : les colonnes AUDIO (bpm, bpm_alt, bpm_source, bpm_confidence, key,
+        mode, key_mode_source, musical_key, time_signature, reccobeats_resolution)
+        ne sont PLUS écrites — la vérité vit dans `observations` (upsert ci-dessous),
+        relue par la réconciliation du mapper (E6). Les colonnes restent (gelées)
+        jusqu'au drop E7-D2 et servent de fallback pour un morceau sans observation.
+        """
         # Écriture en `text()` via `engine.begin()` (transaction Core, commit/
         # rollback auto). Le gros UPDATE COALESCE/CASE et l'INSERT gardent leur SQL
         # verbatim (déjà en paramètres nommés depuis A3) : les binds `text()` ne
@@ -84,18 +96,10 @@ class TrackRepository:
                 "spotify_id": track.spotify_id,
                 "discogs_id": track.discogs_id,
                 "isrc": track.isrc,
-                "bpm": track.bpm,
-                "bpm_source": track.bpm_source,
-                "bpm_confidence": track.bpm_confidence,
-                "key_mode_source": track.key_mode_source,
-                "reccobeats_resolution": track.reccobeats_resolution,
-                "bpm_alt": track.bpm_alt,
+                # E7-D1 : les colonnes audio ne sont plus écrites (pilotées par les
+                # observations, reconcile au mapper) → clés retirées de params.
                 "duration": track.duration,
                 "genre": track.genre,
-                "key": getattr(track, "key", None),
-                "mode": getattr(track, "mode", None),
-                "musical_key": track.musical_key,
-                "time_signature": track.time_signature,
                 "genius_url": track.genius_url,
                 "spotify_url": track.spotify_url,
                 "youtube_url": track.youtube_url,
@@ -147,18 +151,13 @@ class TrackRepository:
                         spotify_id = COALESCE(:spotify_id, spotify_id),
                         discogs_id = COALESCE(:discogs_id, discogs_id),
                         isrc = COALESCE(:isrc, isrc),
-                        bpm = COALESCE(:bpm, bpm),
-                        bpm_source = COALESCE(:bpm_source, bpm_source),
-                        bpm_confidence = COALESCE(:bpm_confidence, bpm_confidence),
-                        key_mode_source = COALESCE(:key_mode_source, key_mode_source),
-                        reccobeats_resolution = COALESCE(:reccobeats_resolution, reccobeats_resolution),
-                        bpm_alt = COALESCE(:bpm_alt, bpm_alt),
+                        -- E7-D1 : colonnes audio (bpm, bpm_alt, bpm_source,
+                        -- bpm_confidence, key, mode, key_mode_source, musical_key,
+                        -- time_signature, reccobeats_resolution) NON écrites — la
+                        -- réconciliation des observations les pilote (mapper E6).
+                        -- Gelées jusqu'au drop E7-D2 ; lues en fallback si aucune obs.
                         duration = COALESCE(:duration, duration),
                         genre = COALESCE(:genre, genre),
-                        key = COALESCE(:key, key),
-                        mode = COALESCE(:mode, mode),
-                        musical_key = COALESCE(:musical_key, musical_key),
-                        time_signature = COALESCE(:time_signature, time_signature),
                         genius_url = COALESCE(:genius_url, genius_url),
                         spotify_url = COALESCE(:spotify_url, spotify_url),
                         youtube_url = COALESCE(:youtube_url, youtube_url),
@@ -189,10 +188,14 @@ class TrackRepository:
             else:
                 result = conn.execute(
                     text("""
+                    -- E7-D1 : colonnes audio (bpm, bpm_alt, bpm_source, bpm_confidence,
+                    -- key, mode, key_mode_source, musical_key, time_signature,
+                    -- reccobeats_resolution) NON insérées — pilotées par les
+                    -- observations (mapper E6). NULL à l'INSERT, gelées jusqu'au drop D2.
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id, isrc,
-                        bpm, bpm_source, bpm_confidence, key_mode_source, reccobeats_resolution, bpm_alt, duration, genre, key, mode, musical_key, time_signature,
+                        duration, genre,
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, lyrics_synced_source, lyrics_synced_confidence, has_lyrics, anecdotes,
@@ -202,7 +205,7 @@ class TrackRepository:
                     ) VALUES (
                         :title, :artist_id, :album, :track_number, :release_date,
                         :genius_id, :spotify_id, :discogs_id, :isrc,
-                        :bpm, :bpm_source, :bpm_confidence, :key_mode_source, :reccobeats_resolution, :bpm_alt, :duration, :genre, :key, :mode, :musical_key, :time_signature,
+                        :duration, :genre,
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,
                         :lyrics, :lyrics_scraped_at, :lyrics_source, :lyrics_synced, :lyrics_synced_source, :lyrics_synced_confidence, :has_lyrics, :anecdotes,
@@ -243,6 +246,16 @@ class TrackRepository:
             # tant qu'aucun provider `fetch()` ne peuple `track.observations`.
             if track.id and track.observations:
                 self._upsert_observations(conn, track.id, track.observations)
+
+            # E7-D1 : nettoyage audio demandé → supprimer les observations audio
+            # persistées DANS la même transaction. Sans ça, la réconciliation du
+            # mapper les ressusciterait à la lecture (l'attribut mis à None ne
+            # suffit plus : la vérité vit dans `observations`, pas dans la colonne).
+            if track.id and track.clear_audio_observations:
+                for obs_field in _AUDIO_OBS_FIELDS:
+                    self._delete_observations(conn, track.id, obs_field)
+                # E7-D2 : plus de colonnes audio à vider (droppées) — la suppression
+                # des observations suffit (le mapper n'a plus de fallback colonne).
 
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
@@ -687,7 +700,7 @@ class TrackRepository:
                     UPDATE tracks
                     SET album = :album, track_number = :track_number, release_date = :release_date,
                         genius_id = :genius_id, spotify_id = :spotify_id, discogs_id = :discogs_id,
-                        bpm = :bpm, duration = :duration, genre = :genre,
+                        duration = :duration, genre = :genre,
                         genius_url = :genius_url, spotify_url = :spotify_url,
                         is_featuring = :is_featuring, primary_artist_name = :primary_artist_name,
                         featured_artists = :featured_artists,
@@ -701,7 +714,8 @@ class TrackRepository:
                         "genius_id": track.genius_id,
                         "spotify_id": track.spotify_id,
                         "discogs_id": track.discogs_id,
-                        "bpm": track.bpm,
+                        # E7-D1 : bpm NON écrit ici (writer sans COALESCE) — le BPM
+                        # est piloté par les observations, pas par le re-scrape crédits.
                         "duration": track.duration,
                         "genre": track.genre,
                         "genius_url": track.genius_url,

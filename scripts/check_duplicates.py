@@ -20,8 +20,7 @@ def analyze_specific_duplicate(title):
 
     cursor.execute(
         """
-        SELECT id, title, album, release_date, genius_id, bpm, duration,
-               musical_key, spotify_id, lyrics
+        SELECT id, title, album, release_date, genius_id, duration, spotify_id, lyrics
         FROM tracks
         WHERE LOWER(title) = LOWER(?)
         ORDER BY title
@@ -45,11 +44,9 @@ def analyze_specific_duplicate(title):
         print(f"  Album: {row[2] or 'N/A'}")
         print(f"  Date: {row[3] or 'N/A'}")
         print(f"  Genius ID: {row[4] or 'N/A'}")
-        print(f"  BPM: {row[5] or 'N/A'}")
-        print(f"  Duration: {row[6] or 'N/A'}")
-        print(f"  Musical Key: {row[7] or 'N/A'}")
-        print(f"  Spotify ID: {row[8] or 'N/A'}")
-        print(f"  Has Lyrics: {'Oui' if row[9] else 'Non'}")
+        print(f"  Duration: {row[5] or 'N/A'}")
+        print(f"  Spotify ID: {row[6] or 'N/A'}")
+        print(f"  Has Lyrics: {'Oui' if row[7] else 'Non'}")
 
         # Compter les crédits
         cursor.execute("SELECT COUNT(*) FROM credits WHERE track_id = ?", (row[0],))
@@ -68,14 +65,10 @@ def analyze_specific_duplicate(title):
         if row[4]:
             score += 2  # genius_id (important)
         if row[5]:
-            score += 1  # bpm
-        if row[6]:
             score += 1  # duration
-        if row[7]:
-            score += 1  # musical_key
-        if row[8]:
+        if row[6]:
             score += 1  # spotify_id
-        if row[9]:
+        if row[7]:
             score += 1  # lyrics
 
         # Credits
@@ -126,7 +119,7 @@ def find_all_duplicates():
         # Récupérer les versions exactes
         cursor.execute(
             """
-            SELECT id, title, album, bpm, duration
+            SELECT id, title, album, duration
             FROM tracks
             WHERE LOWER(title) = ?
             ORDER BY id
@@ -142,9 +135,7 @@ def find_all_duplicates():
             if version[2]:
                 info += f" | Album: {version[2]}"
             if version[3]:
-                info += f" | BPM: {version[3]}"
-            if version[4]:
-                info += f" | Duree: {version[4]}s"
+                info += f" | Duree: {version[3]}s"
             print(info)
         print()
 

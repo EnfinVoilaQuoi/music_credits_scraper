@@ -24,7 +24,7 @@ def find_normalized_duplicates(artist_name=None):
     cur = conn.cursor()
 
     sql = (
-        "SELECT t.id, t.title, t.album, t.release_date, t.spotify_id, t.bpm, a.name "
+        "SELECT t.id, t.title, t.album, t.release_date, t.spotify_id, a.name "
         "FROM tracks t JOIN artists a ON a.id = t.artist_id"
     )
     params = ()
@@ -35,9 +35,9 @@ def find_normalized_duplicates(artist_name=None):
     conn.close()
 
     groups = {}
-    for tid, title, album, rdate, sid, bpm, artist in rows:
+    for tid, title, album, rdate, sid, artist in rows:
         key = (artist, normalize_title(title or ""))
-        groups.setdefault(key, []).append((tid, title, album, rdate, sid, bpm))
+        groups.setdefault(key, []).append((tid, title, album, rdate, sid))
 
     dups = {k: v for k, v in groups.items() if len(v) > 1}
     if not dups:
@@ -51,11 +51,11 @@ def find_normalized_duplicates(artist_name=None):
     )
     for (artist, norm), items in sorted(dups.items(), key=lambda x: -len(x[1])):
         print(f"[{artist}]  « {norm} »  ({len(items)} entrées)")
-        for tid, title, album, rdate, sid, bpm in items:
+        for tid, title, album, rdate, sid in items:
             d = str(rdate)[:10] if rdate else "—"
             print(
                 f"    #{tid:>4}  {title!r}  album={album or '—'}  date={d}  "
-                f"sid={'oui' if sid else 'non'}  bpm={bpm or '—'}"
+                f"sid={'oui' if sid else 'non'}"
             )
         ids = [str(i[0]) for i in items]
         print(
@@ -138,7 +138,20 @@ def merge_duplicate_tracks(keep_id, delete_id, dry_run=True):
             (keep_id, delete_id),
         )
 
-        # 3. Supprimer le track en doublon
+        # 3. Transférer les observations (audio = vérité depuis E7-D2) : dédup par
+        # la clé unique (field, source) — le keep gagne — puis réaffectation.
+        cursor.execute(
+            "DELETE FROM observations WHERE track_id = ? AND EXISTS ("
+            "SELECT 1 FROM observations k WHERE k.track_id = ? "
+            "AND k.field = observations.field AND k.source = observations.source)",
+            (delete_id, keep_id),
+        )
+        cursor.execute(
+            "UPDATE observations SET track_id = ? WHERE track_id = ?",
+            (keep_id, delete_id),
+        )
+
+        # 4. Supprimer le track en doublon
         cursor.execute("DELETE FROM tracks WHERE id = ?", (delete_id,))
 
         conn.commit()
@@ -201,7 +214,10 @@ def delete_duplicate_track(track_id, dry_run=True):
         # 2. Supprimer les erreurs de scraping
         cursor.execute("DELETE FROM scraping_errors WHERE track_id = ?", (track_id,))
 
-        # 3. Supprimer le track
+        # 3. Supprimer les observations (pas de cascade FK) — sinon orphelines.
+        cursor.execute("DELETE FROM observations WHERE track_id = ?", (track_id,))
+
+        # 4. Supprimer le track
         cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
 
         conn.commit()
@@ -255,8 +271,7 @@ def auto_clean_duplicates(dry_run=True):
         # Récupérer toutes les versions
         cursor.execute(
             """
-            SELECT id, title, album, genius_id, bpm, duration,
-                   musical_key, spotify_id, lyrics
+            SELECT id, title, album, genius_id, duration, spotify_id, lyrics
             FROM tracks
             WHERE LOWER(title) = ?
             ORDER BY id
@@ -266,7 +281,7 @@ def auto_clean_duplicates(dry_run=True):
 
         versions = cursor.fetchall()
 
-        # Calculer les scores
+        # Calculer les scores (audio droppé E7-D2 : plus de bpm/musical_key ici).
         scores = []
         for version in versions:
             score = 0
@@ -275,14 +290,10 @@ def auto_clean_duplicates(dry_run=True):
             if version[3]:
                 score += 2  # genius_id
             if version[4]:
-                score += 1  # bpm
-            if version[5]:
                 score += 1  # duration
-            if version[6]:
-                score += 1  # musical_key
-            if version[7]:
+            if version[5]:
                 score += 1  # spotify_id
-            if version[8]:
+            if version[6]:
                 score += 1  # lyrics
 
             # Credits

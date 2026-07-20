@@ -29,12 +29,6 @@ _COLUMNS = [
     "spotify_id",
     "discogs_id",
     "isrc",
-    "bpm",
-    "bpm_source",
-    "bpm_confidence",
-    "key_mode_source",
-    "reccobeats_resolution",
-    "bpm_alt",
     "lyrics_source",
     "lyrics_synced",
     "lyrics_synced_source",
@@ -55,10 +49,6 @@ _COLUMNS = [
     "relationships",
     "duration",
     "genre",
-    "key",
-    "mode",
-    "musical_key",
-    "time_signature",
     "genius_url",
     "spotify_url",
     "spotify_page_title",
@@ -158,13 +148,15 @@ class TestTrackFromRow:
         assert track_from_row(make_row(id=1, title="NULL"), artist) is None
 
     def test_champs_de_base(self, artist):
-        row = make_row(id=5, title="  Matrix  ", spotify_id="abc", bpm="142")
+        row = make_row(id=5, title="  Matrix  ", spotify_id="abc", duration="228")
         track = track_from_row(row, artist)
         assert track.id == 5
         assert track.title == "Matrix"  # strip appliqué
         assert track.artist is artist
         assert track.spotify_id == "abc"
-        assert track.bpm == 142  # coercition str → int
+        assert track.duration == 228  # coercition str → int
+        # E7-D2 : bpm/key/mode droppés → None sans observation (plus de colonne).
+        assert track.bpm is None
 
     def test_duree_mm_ss(self, artist):
         track = track_from_row(make_row(id=1, title="X", duration="3:48"), artist)
@@ -198,16 +190,6 @@ class TestTrackFromRow:
         assert track.certifications == []
         assert track.has_certification is False
 
-    def test_key_mode_string_conserves(self, artist):
-        track = track_from_row(make_row(id=1, title="X", key="G", mode="major"), artist)
-        assert track.key == "G"
-        assert track.mode == "major"
-
-    def test_musical_key_recalcule_depuis_key_mode(self, artist):
-        # key/mode int présents, musical_key absente → recalcul FR
-        track = track_from_row(make_row(id=1, title="X", key=7, mode=1), artist)
-        assert track.musical_key  # non vide (calculé par music_theory)
-
     def test_champs_media(self, artist):
         # Chantier « Media » : chemins d'images + métadonnées vidéo (round-trip).
         row = make_row(
@@ -228,7 +210,8 @@ class TestTrackFromRow:
 
 
 class TestObservationsOverride:
-    """E6 : les observations réconciliées pilotent bpm/key/mode (fallback legacy)."""
+    """E7-D2 : bpm/key/mode/musical_key/time_signature viennent UNIQUEMENT des
+    observations réconciliées (colonnes droppées, plus de fallback)."""
 
     def _obs(self, field, value, source, confidence=None):
         from src.enrichment.observation import Observation
@@ -236,10 +219,9 @@ class TestObservationsOverride:
         return Observation(field=field, value=value, source=source, confidence=confidence)
 
     def test_observations_pilotent_bpm(self, artist):
-        # Legacy bpm=100 écrasé par le vote des observations (2 sources à 142).
-        row = make_row(id=1, title="X", bpm="100", bpm_source="legacy")
+        # Le vote des observations (2 sources à 142) pilote bpm/source/confidence.
         obs = [self._obs("bpm", "142", "reccobeats"), self._obs("bpm", "142", "songbpm")]
-        track = track_from_row(row, artist, obs)
+        track = track_from_row(make_row(id=1, title="X"), artist, obs)
         assert track.bpm == 142
         assert track.bpm_source == "reccobeats+songbpm"
         assert track.bpm_confidence == 2
@@ -257,24 +239,27 @@ class TestObservationsOverride:
         assert track.mode == 0
         assert track.musical_key == "Sol#/Lab mineur"
 
-    def test_sans_observation_fallback_legacy(self, artist):
-        row = make_row(id=1, title="X", bpm="120", key="7", mode="1")
-        track = track_from_row(row, artist, [])  # aucune observation
-        assert track.bpm == 120
-        assert track.key == 7
+    def test_sans_observation_aucune_donnee_audio(self, artist):
+        # E7-D2 : plus de colonne audio → sans observation, tout est None.
+        track = track_from_row(make_row(id=1, title="X"), artist, [])
+        assert track.bpm is None
+        assert track.key is None
+        assert track.mode is None
+        assert track.musical_key is None
 
-    def test_bpm_observe_key_mode_en_fallback(self, artist):
-        # bpm observé (piloté) ; key/mode SANS observation → colonnes legacy gardées.
-        row = make_row(id=1, title="X", bpm="100", key="5", mode="1")
-        track = track_from_row(row, artist, [self._obs("bpm", "140", "deezer")])
+    def test_bpm_observe_key_mode_absents(self, artist):
+        # bpm observé (piloté) ; key/mode SANS observation → None (pas de fallback).
+        track = track_from_row(
+            make_row(id=1, title="X"), artist, [self._obs("bpm", "140", "deezer")]
+        )
         assert track.bpm == 140  # observé
-        assert track.key == 5  # fallback legacy
-        assert track.mode == 1
+        assert track.key is None
+        assert track.mode is None
 
     def test_manual_survit_aux_observations_concurrentes(self, artist):
         # E7a : une saisie manuelle (obs `manual`, value TEXT relue) doit primer
         # sur des sources auto concurrentes à la relecture — sinon écrasement.
-        row = make_row(id=1, title="X", bpm="100")
+        row = make_row(id=1, title="X")
         obs = [
             self._obs("bpm", "140", "deezer"),
             self._obs("bpm", "140", "reccobeats"),

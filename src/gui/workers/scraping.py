@@ -8,14 +8,13 @@ d'arrêt. Les CRAWLS Genius s'exécutent nativement dans la boucle (pont F4
 saves. `stop_requested()` est testé entre deux unités, comme avant.
 """
 
-from datetime import datetime
 from tkinter import messagebox
 
+from src.enrichment.providers.lyrics import LyricsProvider
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import run_worker, stop_requested
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.utils.logger import get_logger
-from src.utils.synced_lyrics_resolver import resolve_track_synced_lyrics
 
 logger = get_logger(__name__)
 
@@ -259,20 +258,14 @@ def start_combined_scraping(
                 #    car Genius ne fournit pas la durée (voir docs/api/genius-api.md).
                 if scrape_sync or lyrics_ytm:
                     try:
-                        # Instanciation paresseuse : seulement les clients des sources cochées.
-                        lrclib = ytm = mxm = None
-                        if sync_lrclib:
-                            from src.api.lrclib_api import LRCLIBAPI
-
-                            lrclib = LRCLIBAPI()
-                        if sync_ytm or lyrics_ytm:
-                            from src.api.ytmusic_api import YTMusicAPI
-
-                            ytm = YTMusicAPI()
-                        if sync_musixmatch:
-                            from src.api.musixmatch_api import MusixmatchAPI
-
-                            mxm = MusixmatchAPI()  # token en cache réutilisé sur tout le batch
+                        # Provider paroles : possède les clients (créés lazy selon les
+                        # sources cochées) et applique la résolution par morceau.
+                        lyrics_provider = LyricsProvider(
+                            sync_lrclib=sync_lrclib,
+                            sync_ytm=sync_ytm,
+                            sync_musixmatch=sync_musixmatch,
+                            lyrics_ytm=lyrics_ytm,
+                        )
 
                         n_lrclib, n_ytm, n_mxm, n_cross, n_review, n_text = 0, 0, 0, 0, 0, 0
                         for i, track in enumerate(selected_tracks_list):
@@ -297,22 +290,12 @@ def start_combined_scraping(
                             else:
                                 a_name = app.current_artist.name
 
-                            # Résolution timestamps + texte (cœur extrait, GUI-free).
-                            outcome = resolve_track_synced_lyrics(
-                                track,
-                                a_name,
-                                lrclib=lrclib,
-                                ytm=ytm,
-                                mxm=mxm,
-                                need_sync=need_sync,
-                                need_text=need_text,
-                                sync_ytm=sync_ytm,
+                            # Provider paroles : résout + applique au track ; on
+                            # n'agrège ici que les compteurs pour le résumé GUI.
+                            outcome = lyrics_provider.enrich(
+                                track, a_name, need_sync=need_sync, need_text=need_text
                             )
-                            track.observations.extend(outcome.observations)
                             if outcome.lyrics_synced is not None:
-                                track.lyrics_synced = outcome.lyrics_synced
-                                track.lyrics_synced_source = outcome.lyrics_synced_source
-                                track.lyrics_synced_confidence = outcome.lyrics_synced_confidence
                                 if outcome.synced_kind == "lrclib":
                                     n_lrclib += 1
                                 elif outcome.synced_kind == "ytm":
@@ -324,10 +307,6 @@ def start_combined_scraping(
                                 else:
                                     n_review += 1
                             if outcome.text is not None:
-                                track.lyrics = outcome.text
-                                track.has_lyrics = True
-                                track.lyrics_scraped_at = datetime.now()
-                                track.lyrics_source = outcome.text_source
                                 n_text += 1
                             update_progress(i + 1, n_tracks, track.title, "Timestamps")
                         logger.info(

@@ -42,16 +42,20 @@ def test_is_available():
     assert GetSongBpmProvider(_FakeFetcher(_FakeSongData())).is_available() is True
 
 
-def test_bpm_devient_candidat_et_key_mode_poses():
+def test_bpm_devient_candidat_et_key_mode_observes():
+    # E7 : plus de pose legacy directe — BPM au scrutin, key/mode en observations
+    # PAR SOURCE normalisées (F#m → pitch class 6, "minor" → 0). apply_resolutions
+    # pose les colonnes en fin de run (hors périmètre du provider).
     song = _FakeSongData(bpm=142, key="F#m", mode="minor")
     provider = GetSongBpmProvider(_FakeFetcher(song))
     track = _track()
     ctx = EnrichmentContext()
     assert provider.enrich(track, ctx) is True
     assert ("getsongbpm", 142) in ctx.bpm_ballot.candidates
-    assert track.bpm == 142
-    assert track.mode == 0  # minor → 0
-    assert track.key_mode_source == "getsongbpm"
+    keys = [o for o in ctx.observations if o.field == "key" and o.source == "getsongbpm"]
+    modes = [o for o in ctx.observations if o.field == "mode" and o.source == "getsongbpm"]
+    assert keys and keys[0].value == 6
+    assert modes and modes[0].value == 0  # minor → 0
 
 
 def test_erreur_api_renvoie_false():

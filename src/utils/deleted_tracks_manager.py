@@ -91,12 +91,6 @@ class DeletedTracksManager:
                 pass
         return out
 
-    def get_deleted_entries(self, artist_name: str) -> list[dict]:
-        """Liste des entrées {genius_id, title, deleted_at}, plus récentes d'abord."""
-        entries = list(self._read(artist_name).values())
-        entries.sort(key=lambda e: e.get("deleted_at", ""), reverse=True)
-        return entries
-
     def remove_deleted(self, artist_name: str, genius_id: int) -> bool:
         """Retire un morceau de l'historique (pour autoriser son réajout)."""
         entries = self._read(artist_name)

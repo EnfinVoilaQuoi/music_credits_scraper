@@ -307,34 +307,6 @@ class GetSongBPMFetcher:
 
         return None
 
-    def get_song_by_id(self, song_id: str) -> dict | None:
-        """
-        Récupère les détails complets d'un morceau via son ID
-
-        Args:
-            song_id: ID GetSongBPM du morceau
-
-        Returns:
-            Données complètes du morceau ou None
-        """
-        params = {"api_key": self.api_key, "id": song_id}
-
-        url = f"{self.BASE_URL}/song/"
-
-        try:
-            response = self.session.get(url, params=params, timeout=15)
-
-            if response.status_code == 200:
-                data = response.json()
-                # Structure: {"song": {...}}
-                return data.get("song")
-            else:
-                return None
-
-        except requests.exceptions.RequestException as e:
-            print(f"    ⚠ Erreur get_song_by_id: {e}")
-            return None
-
     def _cached_song(self, artist: str, title: str) -> SongData | None:
         """Hit de cache exploitable, ou None (les échecs cachés ne sont PAS
         définitifs → on retente). Commun sync/async."""
@@ -486,36 +458,6 @@ class GetSongBPMFetcher:
 
         except requests.exceptions.RequestException as e:
             print(f"⚠ Erreur recherche BPM: {e}")
-            return []
-
-    def search_by_key(self, key_of: int, mode: int, limit: int = 50) -> list[dict]:
-        """
-        Recherche des morceaux par tonalité
-
-        Args:
-            key_of: Tonalité (0=C, 1=C#, 2=D, etc.)
-            mode: 1=Major, 0=Minor
-            limit: Nombre de résultats (max 250)
-
-        Returns:
-            Liste de morceaux correspondants
-        """
-        params = {"api_key": self.api_key, "key_of": key_of, "mode": mode, "limit": min(limit, 250)}
-
-        url = f"{self.BASE_URL}/key/"
-
-        try:
-            response = self.session.get(url, params=params, timeout=15)
-
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("key", [])
-            else:
-                print(f"⚠ Erreur recherche Key: Status {response.status_code}")
-                return []
-
-        except requests.exceptions.RequestException as e:
-            print(f"⚠ Erreur recherche Key: {e}")
             return []
 
     def export_to_csv(self, results: list[SongData], output_file: str = "getsongbpm_results.csv"):

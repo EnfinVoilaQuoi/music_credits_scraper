@@ -1070,17 +1070,31 @@ class TrackDetailsWindow:
                             txt += "\n"
                     return txt
 
+                def _fmt_delay(days: int) -> str:
+                    return f"{days} j ({days // 365} an(s), {(days % 365) // 30} mois)"
+
                 cert_text = ""
                 if track_certs:
                     cert_text += "🎵 CERTIFICATIONS DU MORCEAU\n" + "=" * 60 + "\n"
-                    # Délai d'obtention (écart sortie→certif) de la plus haute certif,
-                    # calculé par le modèle (Track.calculate_certification_duration).
-                    _delay = track.calculate_certification_duration()
-                    if _delay is not None:
-                        cert_text += (
-                            f"⏱️ Délai d'obtention (plus haute certif) : {_delay} j "
-                            f"({_delay // 365} an(s), {(_delay % 365) // 30} mois)\n"
+                    # Délai d'obtention (écart sortie→certif) via le modèle : un
+                    # palier important (Or/Platine/Diamant) par ligne, + la plus
+                    # haute certif si c'est un palier à multiplicateur (ex. 2× Platine).
+                    _delay_lines = [
+                        f"   • {lvl} : {_fmt_delay(d)}"
+                        for lvl, d in track.certification_milestone_durations()
+                    ]
+                    _high_days = track.calculate_certification_duration()
+                    _high_lvl = track.certification_level
+                    if (
+                        _high_days is not None
+                        and _high_lvl
+                        and _high_lvl not in ("Or", "Platine", "Diamant")
+                    ):
+                        _delay_lines.append(
+                            f"   • plus haute ({_high_lvl}) : {_fmt_delay(_high_days)}"
                         )
+                    if _delay_lines:
+                        cert_text += "⏱️ Délai d'obtention :\n" + "\n".join(_delay_lines) + "\n"
                     cert_text += _render_grouped(track_certs)
                 if album_certs:
                     cert_text += (

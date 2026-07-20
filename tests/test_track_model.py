@@ -188,6 +188,29 @@ class TestTrackEquality:
         assert Track(title="X", genius_id=1) != "pas un track"
 
 
+class TestCertificationMilestoneDurations:
+    def test_un_delai_par_palier_de_base_au_plus_tot(self):
+        t = Track(title="X")
+        t.release_date = "2020-01-01"
+        t.certifications = [
+            {"certification": "Diamant", "certification_date": "2023-01-01"},
+            {"certification": "Platine", "certification_date": "2021-07-01"},
+            {"certification": "Or", "certification_date": "2020-07-01"},
+            {"certification": "Double Platine", "certification_date": "2022-01-01"},
+            {"certification": "Platine", "certification_date": "2021-01-01"},  # + ancien
+        ]
+        result = dict(t.certification_milestone_durations())
+        assert set(result) == {"Or", "Platine", "Diamant"}  # multiplicateurs exclus
+        assert result["Or"] == (datetime(2020, 7, 1) - datetime(2020, 1, 1)).days
+        # Palier présent deux fois → date la plus ANCIENNE retenue
+        assert result["Platine"] == (datetime(2021, 1, 1) - datetime(2020, 1, 1)).days
+
+    def test_sans_date_de_sortie_renvoie_vide(self):
+        t = Track(title="X")
+        t.certifications = [{"certification": "Or", "certification_date": "2020-07-01"}]
+        assert t.certification_milestone_durations() == []
+
+
 class TestCertificationEmoji:
     def test_paliers_connus(self):
         assert certification_emoji("Or") == "🥇"

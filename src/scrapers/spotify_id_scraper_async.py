@@ -244,9 +244,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
         try:
             spotify_url = f"https://open.spotify.com/track/{spotify_id}"
             await self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
-            title = await self.page.title()
-            if title:
-                return title.replace(" | Spotify", "").strip()
+            return self._clean_page_title(await self.page.title())
         except Exception as e:
             logger.error(f"❌ Erreur récupération titre: {e}")
         return None

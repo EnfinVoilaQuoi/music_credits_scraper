@@ -233,6 +233,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             width=150,
         ).pack(side="left", padx=5)
 
+        # Vérifier les périodes manquantes (gaps par mois) dans les CSV brut
+        ctk.CTkButton(
+            global_buttons_frame,
+            text="🕳️ Vérifier périodes manquantes",
+            command=self._check_missing_periods_all,
+            width=220,
+        ).pack(side="left", padx=5)
+
         # Fermer
         ctk.CTkButton(global_buttons_frame, text="Fermer", command=self.destroy, width=100).pack(
             side="right", padx=5
@@ -998,6 +1006,21 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         self.after(0, update)
 
+    def _check_missing_periods_all(self):
+        """Lance la vérification des périodes manquantes pour chaque source.
+
+        Analyse le CSV BRUT de chaque source (accumulation complète, avec sa
+        colonne de date native) — distinct de l'audit PAR ARTISTE
+        (`_audit_snep_artist`). Chaque appel s'exécute dans son propre worker et
+        rafraîchit l'état à la fin.
+        """
+        for source_name, folder, filename in (
+            ("SNEP", "snep", "certif-.csv"),
+            ("BRMA", "brma", "brma_raw.csv"),
+            ("RIAA", "riaa", "riaa_raw.csv"),
+        ):
+            self._check_missing_periods(source_name, folder, filename)
+
     def _check_missing_periods(self, source_name: str, folder: str, filename: str):
         """Vérifie les périodes manquantes dans un CSV de certification"""
 
@@ -1039,30 +1062,39 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
     def _analyze_csv_gaps(self, csv_path: Path, source: str) -> dict:
         """Analyse un CSV pour détecter les périodes manquantes"""
         try:
-            # Charger le CSV avec gestion d'encodage
+            # Charger le CSV : séparateur auto-détecté (SNEP=';', BRMA/RIAA=',')
+            # via le moteur python, avec repli d'encodage.
             try:
-                df = pd.read_csv(csv_path, encoding="utf-8", sep=";")
+                df = pd.read_csv(csv_path, encoding="utf-8", sep=None, engine="python")
             except Exception:
-                df = pd.read_csv(csv_path, encoding="latin1", sep=";")
+                df = pd.read_csv(csv_path, encoding="latin1", sep=None, engine="python")
 
             if df.empty:
                 return {"total": 0, "gaps": [], "date_range": None}
 
-            # Identifier la colonne de date selon la source
-            date_columns = {"SNEP": "Date de constat", "BRMA": "date", "RIAA": "certification_date"}
+            # Colonne de date par source (nom brut). Match insensible à la casse,
+            # puis repli sur toute colonne contenant « date ».
+            date_columns = {
+                "SNEP": "Date de constat",
+                "BRMA": "certification_date",
+                "RIAA": "Certification_Date",
+            }
 
             date_col = date_columns.get(source)
             if not date_col or date_col not in df.columns:
-                # Essayer de trouver une colonne de date
-                possible_cols = [col for col in df.columns if "date" in col.lower()]
-                if possible_cols:
-                    date_col = possible_cols[0]
+                lowered = {c.lower(): c for c in df.columns}
+                if date_col and date_col.lower() in lowered:
+                    date_col = lowered[date_col.lower()]
                 else:
-                    return {
-                        "total": len(df),
-                        "gaps": ["Colonne de date non trouvée"],
-                        "date_range": None,
-                    }
+                    possible_cols = [col for col in df.columns if "date" in col.lower()]
+                    if possible_cols:
+                        date_col = possible_cols[0]
+                    else:
+                        return {
+                            "total": len(df),
+                            "gaps": ["Colonne de date non trouvée"],
+                            "date_range": None,
+                        }
 
             # Convertir les dates
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)

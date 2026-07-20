@@ -12,6 +12,7 @@ Le BPM alimente le scrutin partagé (§8.3) ; l'unicité d'ID passe par le conte
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
+from src.enrichment.observation import Observation
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
@@ -77,6 +78,9 @@ class ReccoBeatsProvider:
         applied = False
         if resolution:
             track.reccobeats_resolution = resolution
+            # Provenance persistée en observation (survit au drop de colonne e12) :
+            # reposée par apply_resolutions au chargement de l'artiste.
+            ctx.observations.append(Observation("reccobeats_resolution", resolution, self.name))
 
         # BPM → candidat pour le vote (+ pose provisoire si manquant)
         bpm = track_info.get("bpm")
@@ -390,6 +394,7 @@ class ReccoBeatsProvider:
 
         logger.debug("ReccoBeats: ✅ Données récupérées")
         track.reccobeats_resolution = "spotify_id"
+        ctx.observations.append(Observation("reccobeats_resolution", "spotify_id", self.name))
 
         # Stocker le BPM
         bpm = None

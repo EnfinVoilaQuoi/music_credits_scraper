@@ -378,7 +378,7 @@ class TrackRepository:
                         continue
 
                 # Compter les tracks avec musical_key
-                tracks_with_key = sum(1 for t in result if t.musical_key)
+                tracks_with_key = sum(1 for t in result if t.audio.musical_key)
                 logger.info(
                     f"✅ {len(result)} tracks chargés avec succès ({tracks_with_key} avec musical_key)"
                 )

@@ -122,14 +122,14 @@ def get_track_status_icon(track, disabled_ids) -> str:
             missing.append("Paroles")
 
         # 5. BPM
-        if not track.bpm or track.bpm == 0:
+        if not track.audio.bpm or track.audio.bpm == 0:
             missing.append("BPM")
 
         # 6. Key et Mode (key/mode = attributs dynamiques du mapper, pas des
         # champs de la dataclass → hasattr requis)
-        has_key = hasattr(track, "key") and track.key
-        has_mode = hasattr(track, "mode") and track.mode
-        has_musical_key = track.musical_key
+        has_key = track.audio.key
+        has_mode = track.audio.mode
+        has_musical_key = track.audio.musical_key
 
         if not (has_musical_key or (has_key and has_mode)):
             missing.append("Key/Mode")

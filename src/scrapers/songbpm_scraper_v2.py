@@ -531,13 +531,13 @@ class SongBPMScraper:
 
             updated = False
 
-            if (force_update or not track.bpm) and track_data.get("bpm"):
-                track.bpm = track_data["bpm"]
+            if (force_update or not track.audio.bpm) and track_data.get("bpm"):
+                track.audio.bpm = track_data["bpm"]
                 updated = True
 
             key_value = track_data.get("key")
             if key_value and (force_update or not getattr(track, "key", None)):
-                track.key = key_value
+                track.audio.key = key_value
                 updated = True
 
             songbpm_sid = track_data.get("spotify_id")
@@ -565,12 +565,12 @@ class SongBPMScraper:
                 try:
                     details = self._extract_track_details(detail_url, timeout=30)
                     if details.get("mode") and (force_update or not getattr(track, "mode", None)):
-                        track.mode = details["mode"]
+                        track.audio.mode = details["mode"]
                         updated = True
                     if details.get("key_from_paragraph") and (
                         force_update or not getattr(track, "key", None)
                     ):
-                        track.key = details["key_from_paragraph"]
+                        track.audio.key = details["key_from_paragraph"]
                         updated = True
                     final_key = getattr(track, "key", None)
                     final_mode = getattr(track, "mode", None)
@@ -584,7 +584,7 @@ class SongBPMScraper:
 
                             _mk = key_mode_to_french_from_string(final_key, final_mode)
                             if _mk:  # None si key/mode non interprétables
-                                track.musical_key = _mk
+                                track.audio.musical_key = _mk
                                 updated = True
                         except Exception:
                             pass

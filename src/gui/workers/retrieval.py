@@ -400,7 +400,7 @@ def start_track_retrieval(
                                 candidates,
                                 key=lambda t: (
                                     bool(t.album),
-                                    bool(t.bpm),
+                                    bool(t.audio.bpm),
                                     bool(t.lyrics),
                                     len(t.credits),
                                 ),
@@ -418,10 +418,10 @@ def start_track_retrieval(
                         # (Avant 2026-07-13 : musical_key/lyrics/certifs étaient gardés
                         # par `not hasattr(track, …)` toujours faux → préservation morte.
                         # Alignés ici sur le pattern correct de bpm/credits.)
-                        if not track.bpm and existing_track.bpm:
-                            track.bpm = existing_track.bpm
-                        if not track.musical_key and existing_track.musical_key:
-                            track.musical_key = existing_track.musical_key
+                        if not track.audio.bpm and existing_track.audio.bpm:
+                            track.audio.bpm = existing_track.audio.bpm
+                        if not track.audio.musical_key and existing_track.audio.musical_key:
+                            track.audio.musical_key = existing_track.audio.musical_key
                         if not track.lyrics and existing_track.lyrics:
                             track.lyrics = existing_track.lyrics
                             track.has_lyrics = existing_track.has_lyrics

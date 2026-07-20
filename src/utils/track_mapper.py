@@ -112,12 +112,12 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     # Attributs posés à None ici (garantit leur existence) PUIS pilotés par la
     # réconciliation des observations (bas de fonction). reccobeats_resolution est
     # reposé par apply_resolutions quand son observation de provenance existe.
-    track.bpm = None
-    track.bpm_source = None
-    track.bpm_confidence = None
-    track.key_mode_source = None
-    track.reccobeats_resolution = None
-    track.bpm_alt = None
+    track.audio.bpm = None
+    track.audio.bpm_source = None
+    track.audio.bpm_confidence = None
+    track.audio.key_mode_source = None
+    track.audio.reccobeats_resolution = None
+    track.audio.bpm_alt = None
     track.lyrics_source = _clean(row["lyrics_source"])
     track.lyrics_synced = _clean(row["lyrics_synced"])
     track.lyrics_synced_source = _clean(row["lyrics_synced_source"])
@@ -151,10 +151,10 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     # la réconciliation des observations (apply_resolutions, bas de fonction) qui
     # normalise key/mode et RECALCULE musical_key (key_mode_to_french, déjà
     # canonique) — l'ancien self-healing sur la colonne devient inutile.
-    track.key = None
-    track.mode = None
-    track.musical_key = None
-    track.time_signature = None
+    track.audio.key = None
+    track.audio.mode = None
+    track.audio.musical_key = None
+    track.audio.time_signature = None
     track.genius_url = _clean(row["genius_url"])
     track.spotify_url = _clean(row["spotify_url"])
     track.spotify_page_title = _clean(row["spotify_page_title"])

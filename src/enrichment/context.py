@@ -57,6 +57,6 @@ class EnrichmentContext:
         Sert aux gates inter-providers (SongBPM, BpmFinder, GetSongBPM) à savoir
         qu'une source amont a MESURÉ un champ (ex. key/mode) sans dépendre d'une
         pose legacy provisoire sur `Track` (retirée, phase E7). À combiner avec
-        la valeur PERSISTÉE (`track.key`) pour rester fidèle : un morceau déjà
+        la valeur PERSISTÉE (`track.audio.key`) pour rester fidèle : un morceau déjà
         enrichi porte sa key persistée sans observation fraîche."""
         return any(o.field == field for o in self.observations)

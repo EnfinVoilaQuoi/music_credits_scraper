@@ -1073,6 +1073,14 @@ class TrackDetailsWindow:
                 cert_text = ""
                 if track_certs:
                     cert_text += "🎵 CERTIFICATIONS DU MORCEAU\n" + "=" * 60 + "\n"
+                    # Délai d'obtention (écart sortie→certif) de la plus haute certif,
+                    # calculé par le modèle (Track.calculate_certification_duration).
+                    _delay = track.calculate_certification_duration()
+                    if _delay is not None:
+                        cert_text += (
+                            f"⏱️ Délai d'obtention (plus haute certif) : {_delay} j "
+                            f"({_delay // 365} an(s), {(_delay % 365) // 30} mois)\n"
+                        )
                     cert_text += _render_grouped(track_certs)
                 if album_certs:
                     cert_text += (

@@ -55,6 +55,8 @@ class MainWindow:
         self.sort_reverse = False
         self.last_selected_index = None  # Sélection multiple
         self.disabled_tracks_manager = DisabledTracksManager()
+        # Purge des fichiers de désactivation orphelins (> 30 j sans modif)
+        self.disabled_tracks_manager.cleanup_old_files()
         self.deleted_tracks_manager = DeletedTracksManager()
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         self.source_health_window = None  # Fenêtre « État des sources » (singleton)
@@ -245,6 +247,15 @@ class MainWindow:
             text="Désactiver sélectionnés",
             command=lambda: tracks_table.disable_selected_tracks(self),
             width=140,
+            fg_color="gray",
+            hover_color="darkgray",
+        ).pack(side="left", padx=5)
+
+        ctk.CTkButton(
+            selection_frame,
+            text="Réactiver tous",
+            command=lambda: tracks_table.enable_selected_tracks(self),
+            width=120,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="left", padx=5)

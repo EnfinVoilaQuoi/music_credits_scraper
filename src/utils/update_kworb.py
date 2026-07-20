@@ -129,12 +129,13 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     return None, spotify_artist_id
 
 
-def update_kworb_streams(artist, data_manager) -> dict:
+def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
     """Scrape kworb.net et met à jour les streams des morceaux et albums de l'artiste.
 
     Args:
         artist: objet Artist avec au moins `id`, `name`, `spotify_id`
         data_manager: instance de DataManager
+        scraper: KworbScraper injecté (StreamsProvider) ; créé en interne si None
 
     Returns:
         dict résumé {matched, unmatched, albums_updated, unmatched_titles,
@@ -176,7 +177,8 @@ def update_kworb_streams(artist, data_manager) -> dict:
 
     logger.info(f"🎵 Mise à jour Kworb pour '{artist.name}' (spotify_id={spotify_artist_id})")
 
-    scraper = KworbScraper()
+    if scraper is None:
+        scraper = KworbScraper()
 
     # ── 2. Page songs + VALIDATION D'IDENTITÉ ─────────────────────────────────
     page_songs, spotify_artist_id = _scrape_validated(

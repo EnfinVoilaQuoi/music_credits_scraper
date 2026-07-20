@@ -196,12 +196,13 @@ def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
     return cid, info
 
 
-def update_ytmusic_streams(artist, data_manager) -> dict:
+def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
     """Met à jour les streams YouTube Music des morceaux et albums de l'artiste.
 
     Args:
         artist: objet Artist avec `id` et `name`
         data_manager: instance de DataManager
+        api: YTMusicAPI injecté (StreamsProvider) ; créé en interne si None
 
     Returns:
         dict résumé {matched, unmatched, albums_processed, yt_api_calls, unmatched_titles}
@@ -216,7 +217,8 @@ def update_ytmusic_streams(artist, data_manager) -> dict:
         "ambiguous": 0,  # titres homonymes passés à l'étape 4 (pas d'écriture au hasard)
     }
 
-    api = YTMusicAPI()
+    if api is None:
+        api = YTMusicAPI()
 
     # ── Étape 0 : ID artiste YTMusic (gestion des homonymes) ──────────────────
     # Canal épinglé (manuel ou inféré-persisté) + son ORIGINE : 'manual' n'est

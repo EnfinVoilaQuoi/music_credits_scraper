@@ -48,8 +48,8 @@ class TestBaseVierge:
             lyrics="Première ligne\nDeuxième ligne",
             has_lyrics=True,
             spotify_id="abc123",
-            bpm=142,
         )
+        track.bpm = 142  # Phase 5 : audio hors constructeur (sous-objet track.audio)
         # E7-D1 : le BPM ne fait plus l'aller-retour par la colonne mais par les
         # observations → on l'émet explicitement (comme le flux d'enrichissement).
         track.observations = [Observation("bpm", 142, "songbpm")]
@@ -90,7 +90,8 @@ class TestUpdateNonDestructif:
         # observation (le re-save vide ne porte pas d'observation → aucun upsert) ;
         # lyrics reste préservé par le COALESCE de la colonne.
         artist = _artiste_sauve(data_manager)
-        t = Track(title="X", artist=artist, bpm=142, lyrics="paroles")
+        t = Track(title="X", artist=artist, lyrics="paroles")
+        t.bpm = 142
         t.observations = [Observation("bpm", 142, "songbpm")]
         data_manager.save_track(t)
         data_manager.save_track(Track(title="X", artist=artist))
@@ -125,7 +126,8 @@ class TestClearAudio:
 
     def test_clear_supprime_obs_et_colonne(self, data_manager):
         artist = _artiste_sauve(data_manager)
-        t = Track(title="X", artist=artist, bpm=142)
+        t = Track(title="X", artist=artist)
+        t.bpm = 142
         t.observations = [
             Observation("bpm", 142, "songbpm"),
             Observation("key", 5, "songbpm"),

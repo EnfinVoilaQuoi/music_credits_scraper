@@ -275,6 +275,29 @@ class Credit:
         return credits
 
 
+@dataclass
+class Audio:
+    """Données audio réconciliées d'un morceau (BPM / key / mode + provenance).
+
+    Sous-objet de `Track` (Phase 5). Regroupe les champs audio historiquement
+    plats. Pilotés par le moteur de réconciliation (`apply_resolutions`) depuis
+    les observations ; posés à None par le mapper au chargement. Pendant la
+    migration, `Track` expose des propriétés de compat (`track.bpm` →
+    `track.audio.bpm`) — à retirer une fois tous les call-sites migrés.
+    """
+
+    bpm: int | None = None  # BPM "réel" (double-time) — valeur exportée
+    bpm_alt: int | None = None  # Octave alternative (half-time), ex. 71 pour 142
+    bpm_source: str | None = None  # Source(s) du BPM retenu (vote §8.3)
+    bpm_confidence: int | None = None  # Nb de sources concordantes
+    key: int | None = None  # Pitch class 0-11 (posé par le moteur, ex-attr dynamique)
+    mode: int | None = None  # 0=mineur, 1=majeur (ex-attr dynamique)
+    key_mode_source: str | None = None  # Source de key/mode (peut différer du BPM)
+    musical_key: str | None = None  # Notation FR canonique (ex. "Do# mineur")
+    time_signature: str | None = None  # ex. "4/4"
+    reccobeats_resolution: str | None = None  # 'isrc' | 'spotify_id' — voie ReccoBeats
+
+
 @dataclass(eq=False)
 class Track:
     """Représente un morceau musical"""
@@ -297,19 +320,13 @@ class Track:
     isrc: str | None = None  # International Standard Recording Code (pivot inter-sources)
 
     # Métadonnées
-    bpm: int | None = None  # BPM "réel" (double-time) — valeur exportée
-    bpm_alt: int | None = None  # Octave alternative (half-time), ex. 71 pour 142
-    bpm_source: str | None = None  # Source(s) du BPM retenu (vote §8.3)
-    bpm_confidence: int | None = None  # Nb de sources concordantes
-    key_mode_source: str | None = None  # Source de key/mode (peut différer du BPM)
-    reccobeats_resolution: str | None = (
-        None  # 'isrc' | 'spotify_id' — voie de résolution ReccoBeats
-    )
+    # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5).
+    # Les anciens attributs plats restent lisibles/écrivables via les propriétés
+    # de compat (bas de classe) le temps de migrer les call-sites vers track.audio.
+    audio: Audio = field(default_factory=Audio)
     duration: int | None = None  # En secondes
     genre: str | None = None
     track_number: int | None = None
-    musical_key: str | None = None
-    time_signature: str | None = None
     audio_features: dict[str, Any] | None = field(default_factory=dict)
 
     # Support des features
@@ -427,6 +444,89 @@ class Track:
 
     def __hash__(self) -> int:
         return hash(self._identity())
+
+    # ── Compat Phase 5 : audio plat ↔ sous-objet `audio` ───────────────────────
+    # Propriétés TEMPORAIRES le temps de migrer les call-sites `track.bpm` →
+    # `track.audio.bpm`. À RETIRER une fois la migration terminée.
+    @property
+    def bpm(self) -> int | None:
+        return self.audio.bpm
+
+    @bpm.setter
+    def bpm(self, value: int | None) -> None:
+        self.audio.bpm = value
+
+    @property
+    def bpm_alt(self) -> int | None:
+        return self.audio.bpm_alt
+
+    @bpm_alt.setter
+    def bpm_alt(self, value: int | None) -> None:
+        self.audio.bpm_alt = value
+
+    @property
+    def bpm_source(self) -> str | None:
+        return self.audio.bpm_source
+
+    @bpm_source.setter
+    def bpm_source(self, value: str | None) -> None:
+        self.audio.bpm_source = value
+
+    @property
+    def bpm_confidence(self) -> int | None:
+        return self.audio.bpm_confidence
+
+    @bpm_confidence.setter
+    def bpm_confidence(self, value: int | None) -> None:
+        self.audio.bpm_confidence = value
+
+    @property
+    def key(self) -> int | None:
+        return self.audio.key
+
+    @key.setter
+    def key(self, value: int | None) -> None:
+        self.audio.key = value
+
+    @property
+    def mode(self) -> int | None:
+        return self.audio.mode
+
+    @mode.setter
+    def mode(self, value: int | None) -> None:
+        self.audio.mode = value
+
+    @property
+    def key_mode_source(self) -> str | None:
+        return self.audio.key_mode_source
+
+    @key_mode_source.setter
+    def key_mode_source(self, value: str | None) -> None:
+        self.audio.key_mode_source = value
+
+    @property
+    def musical_key(self) -> str | None:
+        return self.audio.musical_key
+
+    @musical_key.setter
+    def musical_key(self, value: str | None) -> None:
+        self.audio.musical_key = value
+
+    @property
+    def time_signature(self) -> str | None:
+        return self.audio.time_signature
+
+    @time_signature.setter
+    def time_signature(self, value: str | None) -> None:
+        self.audio.time_signature = value
+
+    @property
+    def reccobeats_resolution(self) -> str | None:
+        return self.audio.reccobeats_resolution
+
+    @reccobeats_resolution.setter
+    def reccobeats_resolution(self, value: str | None) -> None:
+        self.audio.reccobeats_resolution = value
 
     def add_credit(self, credit: Credit):
         """Ajoute un crédit au morceau"""

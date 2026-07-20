@@ -152,8 +152,9 @@ class TestTrackEquality:
 
     def test_meme_genius_id_meme_morceau_malgre_champs_differents(self):
         # Une version re-scrapée (paroles, bpm mis à jour) reste LE même morceau
-        a = Track(title="Chanson", genius_id=123, lyrics="v1", bpm=90)
-        b = Track(title="Chanson (Remaster)", genius_id=123, lyrics="v2", bpm=140)
+        a = Track(title="Chanson", genius_id=123, lyrics="v1")
+        b = Track(title="Chanson (Remaster)", genius_id=123, lyrics="v2")
+        a.bpm, b.bpm = 90, 140  # Phase 5 : audio hors constructeur (track.audio)
         assert a == b
         assert hash(a) == hash(b)
 

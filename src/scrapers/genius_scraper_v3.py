@@ -578,7 +578,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 if name and name not in names:
                     names.append(name)
 
-            for text_node in container_div.find_all(text=True, recursive=False):
+            for text_node in container_div.find_all(string=True, recursive=False):
                 text = text_node.strip()
                 if text and text not in names:
                     for separator in [" & ", ", ", " and ", " + ", " / "]:

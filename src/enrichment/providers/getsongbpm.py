@@ -40,8 +40,8 @@ class GetSongBpmProvider:
         # des providers amont ont été retirées (E7). Gate purement informatif
         # (jamais de skip) → sert à un log honnête. getattr : attrs dynamiques.
         missing_bpm = not track.audio.bpm and not ctx.bpm_ballot.candidates
-        missing_key = getattr(track, "key", None) is None and not ctx.has_observation("key")
-        missing_mode = getattr(track, "mode", None) is None and not ctx.has_observation("mode")
+        missing_key = track.audio.key is None and not ctx.has_observation("key")
+        missing_mode = track.audio.mode is None and not ctx.has_observation("mode")
 
         reasons = []
         if ctx.force_update:

@@ -317,7 +317,7 @@ def bpmfinder_local_file(app, index: int):
                 )
                 applied.append(f"BPM={res['bpm']}")
             if (
-                (getattr(track, "key", None) is None or getattr(track, "mode", None) is None)
+                (track.audio.key is None or track.audio.mode is None)
                 and res.get("key") is not None
                 and res.get("mode") is not None
             ):

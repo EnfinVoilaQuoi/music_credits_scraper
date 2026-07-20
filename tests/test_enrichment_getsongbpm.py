@@ -32,8 +32,8 @@ def _track():
     # champs de la dataclass) : on les initialise comme un track chargé depuis
     # la base, sinon le provider (fidèle à l'historique) lève AttributeError.
     track = Track(title="Solo", artist=Artist(name="Sofiane Pamart"))
-    track.key = None
-    track.mode = None
+    track.audio.key = None
+    track.audio.mode = None
     return track
 
 
@@ -70,9 +70,9 @@ def test_indisponible_renvoie_false():
 def test_gate_ne_skip_jamais():
     # API gratuite/rapide : appelée systématiquement (2ᵉ vote BPM, §8.3)
     track = _track()
-    track.bpm = 120
-    track.key = 5
-    track.mode = 1
+    track.audio.bpm = 120
+    track.audio.key = 5
+    track.audio.mode = 1
     ctx = EnrichmentContext()
     ctx.results["reccobeats"] = True  # même quand tout est déjà présent
     assert GetSongBpmProvider().gate(track, ctx) is None

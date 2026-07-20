@@ -942,7 +942,7 @@ class TrackDetailsWindow:
         _missing = []
         if not track.audio.bpm:
             _missing.append("BPM")
-        if getattr(track, "key", None) is None or getattr(track, "mode", None) is None:
+        if track.audio.key is None or track.audio.mode is None:
             _missing.append("Key/Mode")
         if not track.isrc:
             _missing.append("ISRC")

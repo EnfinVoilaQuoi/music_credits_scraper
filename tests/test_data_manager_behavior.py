@@ -49,7 +49,7 @@ class TestBaseVierge:
             has_lyrics=True,
             spotify_id="abc123",
         )
-        track.bpm = 142  # Phase 5 : audio hors constructeur (sous-objet track.audio)
+        track.audio.bpm = 142  # Phase 5 : audio hors constructeur (sous-objet track.audio)
         # E7-D1 : le BPM ne fait plus l'aller-retour par la colonne mais par les
         # observations → on l'émet explicitement (comme le flux d'enrichissement).
         track.observations = [Observation("bpm", 142, "songbpm")]
@@ -64,7 +64,7 @@ class TestBaseVierge:
         assert lu.featured_artists == "Artiste Test"
         assert lu.lyrics == "Première ligne\nDeuxième ligne"
         assert lu.spotify_id == "abc123"
-        assert lu.bpm == 142  # reconstruit depuis l'observation
+        assert lu.audio.bpm == 142  # reconstruit depuis l'observation
 
 
 class TestRoundtrip:
@@ -91,12 +91,12 @@ class TestUpdateNonDestructif:
         # lyrics reste préservé par le COALESCE de la colonne.
         artist = _artiste_sauve(data_manager)
         t = Track(title="X", artist=artist, lyrics="paroles")
-        t.bpm = 142
+        t.audio.bpm = 142
         t.observations = [Observation("bpm", 142, "songbpm")]
         data_manager.save_track(t)
         data_manager.save_track(Track(title="X", artist=artist))
         (lu,) = data_manager.get_artist_tracks(artist.id)
-        assert lu.bpm == 142
+        assert lu.audio.bpm == 142
         assert lu.lyrics == "paroles"
 
     def test_is_featuring_ecrase_sans_coalesce(self, data_manager):
@@ -127,7 +127,7 @@ class TestClearAudio:
     def test_clear_supprime_obs_et_colonne(self, data_manager):
         artist = _artiste_sauve(data_manager)
         t = Track(title="X", artist=artist)
-        t.bpm = 142
+        t.audio.bpm = 142
         t.observations = [
             Observation("bpm", 142, "songbpm"),
             Observation("key", 5, "songbpm"),
@@ -135,16 +135,16 @@ class TestClearAudio:
         ]
         data_manager.save_track(t)
         (lu,) = data_manager.get_artist_tracks(artist.id)
-        assert lu.bpm == 142  # présent via l'observation
+        assert lu.audio.bpm == 142  # présent via l'observation
 
         wipe = Track(title="X", artist=artist)
         wipe.clear_audio_observations = True
         data_manager.save_track(wipe)
 
         (apres,) = data_manager.get_artist_tracks(artist.id)
-        assert apres.bpm is None
-        assert getattr(apres, "key", None) is None
-        assert getattr(apres, "mode", None) is None
+        assert apres.audio.bpm is None
+        assert apres.audio.key is None
+        assert apres.audio.mode is None
         # Les observations audio ont bien été supprimées en base.
         obs = {o.field for o in data_manager.get_observations(t.id)}
         assert obs.isdisjoint({"bpm", "key", "mode", "bpm_alt", "time_signature"})

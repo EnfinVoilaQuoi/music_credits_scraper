@@ -181,7 +181,7 @@ class SongBpmProvider:
         updated = False
 
         # BPM → candidat pour le vote (§8.3). E7 : plus de pose legacy directe —
-        # apply_resolutions pose track.bpm en fin de run. Un candidat valide au
+        # apply_resolutions pose track.audio.bpm en fin de run. Un candidat valide au
         # vote = SongBPM a contribué (même 2ᵉ vote concordant) → succès, sinon
         # faux « ÉCHEC » → nettoyage.
         sbpm = sanitize_bpm(track_data.get("bpm"))

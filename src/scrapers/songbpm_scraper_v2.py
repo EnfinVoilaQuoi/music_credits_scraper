@@ -536,7 +536,7 @@ class SongBPMScraper:
                 updated = True
 
             key_value = track_data.get("key")
-            if key_value and (force_update or not getattr(track, "key", None)):
+            if key_value and (force_update or not track.audio.key):
                 track.audio.key = key_value
                 updated = True
 
@@ -564,21 +564,15 @@ class SongBPMScraper:
             if detail_url and key_value:
                 try:
                     details = self._extract_track_details(detail_url, timeout=30)
-                    if details.get("mode") and (force_update or not getattr(track, "mode", None)):
+                    if details.get("mode") and (force_update or not track.audio.mode):
                         track.audio.mode = details["mode"]
                         updated = True
-                    if details.get("key_from_paragraph") and (
-                        force_update or not getattr(track, "key", None)
-                    ):
+                    if details.get("key_from_paragraph") and (force_update or not track.audio.key):
                         track.audio.key = details["key_from_paragraph"]
                         updated = True
-                    final_key = getattr(track, "key", None)
-                    final_mode = getattr(track, "mode", None)
-                    if (
-                        final_key
-                        and final_mode
-                        and (force_update or not getattr(track, "musical_key", None))
-                    ):
+                    final_key = track.audio.key
+                    final_mode = track.audio.mode
+                    if final_key and final_mode and (force_update or not track.audio.musical_key):
                         try:
                             from src.utils.music_theory import key_mode_to_french_from_string
 

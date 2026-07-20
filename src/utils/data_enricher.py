@@ -103,6 +103,11 @@ class DataEnricher:
             async_scraper_factory=lambda: SongBPMScraperAsync(headless=headless_songbpm),
         )
         # Factory seulement si identifiants/session présents (même règle qu'avant).
+        # F3d : le jumeau ASYNC (BPMFinderScraperAsync) est PRÉPARÉ mais NON activé
+        # — enrich_async retombe sur le pont sync. Activation = ajouter
+        # `async_scraper_factory=lambda: BPMFinderScraperAsync(headless=True)` ici
+        # + le provider dans aclose_async_scrapers, après un run réel (login/quota,
+        # backend audioaidynamics rétabli). Cf. src/scrapers/bpmfinder_scraper_async.py.
         if BPMFinderScraper.credentials_or_session_available():
             self._bpmfinder_provider = BpmFinderProvider(
                 scraper_factory=lambda: BPMFinderScraper(headless=True)

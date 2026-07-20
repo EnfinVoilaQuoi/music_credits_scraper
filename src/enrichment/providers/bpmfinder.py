@@ -32,9 +32,15 @@ class BpmFinderProvider:
     # None sur exception — l'orchestrateur n'a rien à rattraper de spécifique.
     error_result = None
 
-    def __init__(self, scraper=None, scraper_factory=None):
+    def __init__(self, scraper=None, scraper_factory=None, async_scraper_factory=None):
         # PROPRIÉTAIRE de son scraper (créé lazy, fermé par close()).
         self._resource = LazyResource(scraper, scraper_factory, label="scraper BPM Finder")
+        # Variante ASYNC (F3d) : vit dans la boucle, fermée par aclose(). NON
+        # fournie par défaut (cf. bpmfinder_scraper_async : « préparé, non activé »)
+        # → enrich_async retombe sur le pont sync tant que la factory est absente.
+        self._async_resource = LazyResource(
+            None, async_scraper_factory, label="scraper BPM Finder async"
+        )
         # Disjoncteur : 3 échecs consécutifs (timeouts site) → source coupée pour
         # le reste du run (ré-armé par reset_breaker en début de run). Sans lui,
         # une panne site × force_update = ~90 s de pause PAR morceau.
@@ -55,6 +61,14 @@ class BpmFinderProvider:
     def close(self) -> None:
         """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
         self._resource.close()
+
+    async def aclose(self) -> None:
+        """Ferme le scraper ASYNC s'il l'a créé (browser de la boucle, F3d).
+
+        No-op tant que la variante async n'est pas activée (aucune factory →
+        rien n'est créé). À appeler DANS la boucle si le provider rejoint
+        `DataEnricher.aclose_async_scrapers` lors de l'activation."""
+        await self._async_resource.aclose()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> None:
         """Jamais de skip côté orchestrateur : tout le gating (disjoncteur,
@@ -106,8 +120,14 @@ class BpmFinderProvider:
             logger.debug(f"Recherche lien YouTube échouée '{track.title}': {e}")
         return None
 
-    def enrich(self, track: Track, ctx: EnrichmentContext):
-        """Analyse BPM/Key via lien YouTube. Renvoie "skipped"/"not_needed"/bool/None."""
+    def _resolve_link_or_skip(self, track: Track, ctx: EnrichmentContext):
+        """Gate commun (disjoncteur + « manquant » + recherche de lien YouTube).
+
+        Renvoie `(youtube_url, skip)` : si `skip` n'est pas None ("skipped"/
+        "not_needed"), il est à renvoyer tel quel ; sinon `youtube_url` est le
+        lien à analyser. Partagé par les voies sync et async (touche le réseau via
+        `_search_youtube_link` → la voie async l'exécute sur le thread sync dédié).
+        """
         # Disjoncteur ouvert : le site ne répond plus, inutile de brûler 90 s par
         # morceau — 'skipped' est exclu du calcul « attempted » du nettoyage.
         if self._fail_streak >= _BREAKER_THRESHOLD:
@@ -118,7 +138,7 @@ class BpmFinderProvider:
                     "cf. data/diagnostics/ et scripts/bpmfinder_diagnose.py)"
                 )
                 self._breaker_logged = True
-            return "skipped"
+            return None, "skipped"
 
         force_update = ctx.force_update
         # force_update : re-analyser et ÉCRASER même si BPM/key présents (sinon
@@ -138,7 +158,47 @@ class BpmFinderProvider:
             _yt = self._search_youtube_link(track) or _yt
 
         if not ((_missing_bpm or _missing_km) and _yt):
-            return "not_needed"
+            return None, "not_needed"
+        return _yt, None
+
+    def _apply_bf(self, bf: dict, ctx: EnrichmentContext) -> bool:
+        """Alimente le MOTEUR avec le résultat BPM Finder (E7, « source à part
+        entière ») : BPM au scrutin, key/mode en observations PAR SOURCE.
+        `apply_resolutions` repose ensuite bpm/key/mode/musical_key (bpmfinder =
+        rang 0 → dernier mot seulement s'il est seul). Restaure la persistance
+        perdue au drop des colonnes audio (e12 : mutations directes plus
+        persistées, la vérité vit dans les observations). Renvoie True si BPM
+        Finder a contribué quoi que ce soit."""
+        applied = []
+        sbpm = sanitize_bpm(bf.get("bpm"))
+        if sbpm is not None:
+            ctx.bpm_ballot.add("bpmfinder", sbpm)
+            applied.append(f"BPM={sbpm}")
+        km_obs = key_mode_observations("bpmfinder", key=bf.get("key"), mode=bf.get("mode"))
+        if km_obs:
+            ctx.observations.extend(km_obs)
+            applied.append(f"key/mode={bf.get('key')}/{bf.get('mode')}")
+        if applied:
+            logger.info(f"✅ BPM Finder: {', '.join(applied)}")
+        return bool(applied)
+
+    def _handle_analysis(self, bf, ctx: EnrichmentContext, scraper) -> bool:
+        """Issue d'une analyse (commun sync/async) : applique le résultat ou
+        comptabilise l'échec pour le disjoncteur."""
+        if bf:
+            self._fail_streak = 0
+            return self._apply_bf(bf, ctx)
+        # Le disjoncteur ne vise QUE les vraies indispos site (timeout muet), pas
+        # un refus backend propre à une vidéo (4xx/5xx : le site répond).
+        if getattr(scraper, "last_failure_reason", None) == "timeout":
+            self._fail_streak += 1
+        return False
+
+    def enrich(self, track: Track, ctx: EnrichmentContext):
+        """Analyse BPM/Key via lien YouTube. Renvoie "skipped"/"not_needed"/bool/None."""
+        _yt, skip = self._resolve_link_or_skip(track, ctx)
+        if skip is not None:
+            return skip
 
         logger.info(f"🎛️ BPM Finder (dernier recours) pour '{track.title}'")
         scraper = self._resource.get()
@@ -147,40 +207,30 @@ class BpmFinderProvider:
             # source (None) — exclu du « tout a échoué » du nettoyage.
             return None
         try:
-            bf = scraper.analyze(_yt)
-            if bf:
-                self._fail_streak = 0
-                applied = []
-                # BpmFinder alimente le MOTEUR comme toute source (E7, décision
-                # « source à part entière ») : BPM au scrutin, key/mode en
-                # observations PAR SOURCE. `apply_resolutions` repose ensuite
-                # bpm/key/mode/musical_key (bpmfinder = rang 0 → dernier mot
-                # seulement s'il est seul). Restaure la persistance perdue au
-                # drop des colonnes audio (e12) — les mutations directes ne
-                # persistaient plus (colonnes droppées, vérité = observations).
-                sbpm = sanitize_bpm(bf.get("bpm"))
-                if sbpm is not None:
-                    ctx.bpm_ballot.add("bpmfinder", sbpm)
-                    applied.append(f"BPM={sbpm}")
-                km_obs = key_mode_observations("bpmfinder", key=bf.get("key"), mode=bf.get("mode"))
-                if km_obs:
-                    ctx.observations.extend(km_obs)
-                    applied.append(f"key/mode={bf.get('key')}/{bf.get('mode')}")
-                if applied:
-                    logger.info(f"✅ BPM Finder: {', '.join(applied)}")
-                return bool(applied)
-            else:
-                # Le disjoncteur ne vise QUE les vraies indispos site (timeout muet),
-                # pas un refus backend propre à une vidéo (4xx/5xx : le site répond).
-                if getattr(scraper, "last_failure_reason", None) == "timeout":
-                    self._fail_streak += 1
-                return False
+            return self._handle_analysis(scraper.analyze(_yt), ctx, scraper)
         except Exception as e:
             logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
             self._fail_streak += 1
             return None
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext):
-        """Voie async (F2) : corps sync inchangé (disjoncteur, recherche YouTube),
-        exécuté sur le thread sync dédié du run (affinité Playwright)."""
-        return await ctx.sync_runner.run(self.enrich, track, ctx)
+        """Voie async (F3d) : scraper Playwright ASYNC natif dans la boucle si
+        configuré (analyze_async), sinon repli sur le pont sync F2 (corps sync sur
+        le thread dédié du run). Tant qu'aucune `async_scraper_factory` n'est
+        fournie au provider, c'est TOUJOURS le repli (comportement livré)."""
+        scraper = self._async_resource.get()
+        if scraper is None:
+            return await ctx.sync_runner.run(self.enrich, track, ctx)
+
+        # Gate + recherche YouTube = sync (YouTubeSearcher réseau) → thread dédié.
+        _yt, skip = await ctx.sync_runner.run(self._resolve_link_or_skip, track, ctx)
+        if skip is not None:
+            return skip
+
+        logger.info(f"🎛️ BPM Finder (dernier recours, async) pour '{track.title}'")
+        try:
+            return self._handle_analysis(await scraper.analyze_async(_yt), ctx, scraper)
+        except Exception as e:
+            logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
+            self._fail_streak += 1
+            return None

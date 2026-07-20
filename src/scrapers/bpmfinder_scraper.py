@@ -314,13 +314,19 @@ class BPMFinderScraper:
 
         return extract_video_id(url)
 
+    @staticmethod
+    def _cards_from_text(text: str) -> set[tuple[str, str, str, str]]:
+        """Cartes présentes dans un texte de page (PUR — partagé sync/async) :
+        {(note, mode, bpm, camelot)}."""
+        return {m.groups() for m in _CARD_RE.finditer(text or "")}
+
     def _cards(self) -> set[tuple[str, str, str, str]]:
         """Cartes de résultats présentes : {(note, mode, bpm, camelot)}."""
         try:
             text = self.page.inner_text("body") or ""
         except Exception:
             return set()
-        return {m.groups() for m in _CARD_RE.finditer(text)}
+        return self._cards_from_text(text)
 
     def analyze(self, youtube_url: str, timeout_s: int = 90) -> dict | None:
         """Analyse un lien YouTube.
@@ -465,6 +471,12 @@ class BPMFinderScraper:
             self._dump_debug_state(f"timeout_{label}")
             return None
 
+        return self._card_to_result(new_card, label)
+
+    @staticmethod
+    def _card_to_result(new_card, label: str) -> dict:
+        """Carte (note, mode, bpm, camelot) → dict résultat + log (PUR — partagé
+        sync/async)."""
         note, mode_name, bpm, camelot = new_card
         result = {
             "bpm": int(bpm),

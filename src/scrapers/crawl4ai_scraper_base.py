@@ -13,24 +13,12 @@ import inspect
 import os
 from pathlib import Path
 
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
-from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
+from crawl4ai import BrowserConfig
 
 from src.concurrency import async_loop
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Anti-bot renforcé (Cloudflare) : UndetectedAdapter branché sur la stratégie
-# Playwright. Import gardé — disponibilité variable selon la version de crawl4ai.
-try:
-    from crawl4ai import UndetectedAdapter
-    from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
-
-    _UNDETECTED_OK = True
-except Exception as _e:  # pragma: no cover
-    _UNDETECTED_OK = False
-    logger.debug(f"UndetectedAdapter indisponible: {_e}")
 
 
 def _supported_kwargs(cls, **kwargs) -> dict:
@@ -344,89 +332,3 @@ class CrawlAIScraperBase:
                 'id="challenge-form"',
             )
         )
-
-    async def _async_crawl_page(
-        self,
-        url: str,
-        js_before_wait: str | None,
-        wait_for: str | None,
-        wait_timeout: int,
-        page_timeout: int,
-        delay_before_return: float,
-        browser_config: BrowserConfig | None = None,
-        undetected: bool = False,
-    ) -> tuple[str | None, str | None, bool]:
-        """Coroutine interne — retourne (markdown, html, blocked).
-
-        undetected=True → utilise l'UndetectedAdapter (anti-bot Cloudflare).
-        """
-        browser_config = browser_config or self._browser_config
-        # Anti-bot Cloudflare : magic/simulate_user/override_navigator si supportés
-        run_extras = _supported_kwargs(
-            CrawlerRunConfig,
-            magic=True,
-            simulate_user=True,
-            override_navigator=True,
-        )
-        run_config = CrawlerRunConfig(
-            js_code=js_before_wait,
-            wait_for=wait_for,
-            wait_for_timeout=wait_timeout,
-            page_timeout=page_timeout,
-            delay_before_return_html=delay_before_return,
-            remove_consent_popups=True,
-            remove_overlay_elements=True,
-            markdown_generator=DefaultMarkdownGenerator(options={"ignore_links": True}),
-            cache_mode=CacheMode.BYPASS,
-            verbose=False,
-            **run_extras,
-        )
-
-        # Crawler standard, ou avec UndetectedAdapter (anti-bot) si demandé/dispo
-        if undetected and not _UNDETECTED_OK:
-            logger.warning(
-                f"{self.__class__.__name__}: UndetectedAdapter demandé mais indisponible "
-                f"→ `pip install -U crawl4ai && crawl4ai-setup` (sinon Cloudflare bloquera)"
-            )
-        if undetected and _UNDETECTED_OK:
-            strategy = AsyncPlaywrightCrawlerStrategy(
-                browser_config=browser_config,
-                browser_adapter=UndetectedAdapter(),
-            )
-            crawler_cm = AsyncWebCrawler(crawler_strategy=strategy, config=browser_config)
-            logger.debug(f"{self.__class__.__name__}: crawl en mode UndetectedAdapter")
-        else:
-            crawler_cm = AsyncWebCrawler(config=browser_config)
-
-        try:
-            async with crawler_cm as crawler:
-                result = await crawler.arun(url=url, config=run_config)
-
-                if not result.success:
-                    blocked = self._looks_blocked(result.error_message, None)
-                    logger.warning(
-                        f"{self.__class__.__name__}: crawl échoué pour {url} — "
-                        f"{result.error_message}"
-                    )
-                    return None, None, blocked
-
-                # HTML BRUT de préférence : cleaned_html supprime les attributs
-                # data-* (ex: data-lyrics-container) nécessaires aux extracteurs
-                html = result.html or result.cleaned_html or None
-                # Parfois CF renvoie 200 avec la page « Just a moment » (défi non résolu)
-                if self._looks_blocked(None, html):
-                    logger.warning(
-                        f"{self.__class__.__name__}: page-défi Cloudflare (200) pour {url}"
-                    )
-                    return None, None, True
-
-                markdown = str(result.markdown) if result.markdown else None
-                logger.debug(
-                    f"{self.__class__.__name__}: crawl OK — "
-                    f"markdown={len(markdown or '')} chars, html={len(html or '')} chars"
-                )
-                return markdown, html, False
-
-        except Exception as e:
-            logger.error(f"{self.__class__.__name__}: exception AsyncWebCrawler: {e}")
-            return None, None, False

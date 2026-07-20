@@ -370,16 +370,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         """Lance la mise à jour SNEP"""
         self._run_update_script("update_snep.py", "SNEP")
 
-    def _update_snep_artist(self):
-        """Récupère le CSV SNEP complet d'un artiste (filtre ?interprete=)"""
-        artist = self.artist_entry.get().strip()
-        if not artist:
-            messagebox.showwarning("Artiste manquant", "Saisis un nom d'artiste.", parent=self)
-            return
-        self._run_update_script(
-            "update_snep.py", f"SNEP ({artist})", extra_args=["--artist", artist]
-        )
-
     def _fetch_artist_all_sources(self):
         """Récup UNIFIÉE des certifs d'un artiste : SNEP (?interprete=) + RIAA
         (?ar=, via CDP). BRMA n'a pas de vraie recherche artiste (substring) →

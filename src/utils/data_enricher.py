@@ -288,30 +288,6 @@ class DataEnricher:
 
         return cleaned
 
-    def clear_multiple_tracks_data(
-        self, tracks: list[Track], clear_spotify_id: bool = False
-    ) -> int:
-        """
-        Nettoie les données de plusieurs tracks
-
-        Args:
-            tracks: Liste des tracks à nettoyer
-            clear_spotify_id: Si True, efface aussi les Spotify IDs
-
-        Returns:
-            int: Nombre de tracks nettoyés
-        """
-        cleaned_count = 0
-
-        logger.info(f"🗑️ Nettoyage de {len(tracks)} track(s)")
-
-        for track in tracks:
-            if self.clear_track_data(track, clear_spotify_id=clear_spotify_id):
-                cleaned_count += 1
-
-        logger.info(f"✅ {cleaned_count}/{len(tracks)} track(s) nettoyé(s)")
-        return cleaned_count
-
     def _normalize_title(self, title: str) -> str:
         """
         Normalise un titre pour comparaison

@@ -558,17 +558,6 @@ class SpotifyIDScraper:
         self._save_cache()
         return None
 
-    def get_spotify_id_for_track(self, track) -> str | None:
-        if hasattr(track, "is_featuring") and track.is_featuring:
-            artist_name = (
-                track.primary_artist_name
-                if hasattr(track, "primary_artist_name") and track.primary_artist_name
-                else (track.artist.name if hasattr(track.artist, "name") else str(track.artist))
-            )
-        else:
-            artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-        return self.get_spotify_id(artist_name, track.title)
-
     def close(self):
         self._cleanup_resources()
         logger.info("✅ SpotifyIDScraper fermé")

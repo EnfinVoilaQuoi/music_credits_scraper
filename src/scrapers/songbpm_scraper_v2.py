@@ -16,15 +16,12 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from src.config import SELENIUM_TIMEOUT
 from src.models import Track
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import build_songbpm_prompt, get_shared_extractor
 from src.utils.logger import get_logger, log_api
 
 logger = get_logger(__name__)
-
-PW_TIMEOUT = SELENIUM_TIMEOUT * 1000  # Playwright attend des ms
 
 
 class SongBPMScraper:

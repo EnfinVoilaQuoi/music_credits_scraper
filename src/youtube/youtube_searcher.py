@@ -250,16 +250,3 @@ class YouTubeSearcher:
             conn.close()
         except Exception as e:
             logger.debug(f"Erreur mise en cache: {e}")
-
-    def get_direct_youtube_url(self, artist: str, title: str) -> str | None:
-        """Retourne directement le meilleur lien YouTube trouvé"""
-        results = self.search_track(artist, title, max_results=5)
-
-        if results and not results[0].get("is_search_url", False):
-            best_result = results[0]
-            logger.info(
-                f"Lien automatique sélectionné: {best_result['url']} (score: {best_result['relevance_score']:.2f})"
-            )
-            return best_result["url"]
-
-        return None

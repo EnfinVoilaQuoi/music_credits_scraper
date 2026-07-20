@@ -557,11 +557,6 @@ class Track:
             return [a.strip() for a in self.featured_artists.split(",") if a.strip()]
         return [c.name for c in self.get_credits_by_role(CreditRole.FEATURED)]
 
-    @property
-    def credits_scraped(self):
-        """Retourne le nombre de crédits (au lieu d'un booléen)."""
-        return len(self.credits)
-
     def has_complete_credits(self) -> bool:
         """Vérifie si les crédits semblent complets.
 
@@ -616,10 +611,6 @@ class Track:
 
         # Pour les morceaux principaux
         return self.artist.name if self.artist else "Unknown"
-
-    def is_main_track(self) -> bool:
-        """Retourne True si c'est un morceau principal (pas un featuring)"""
-        return not self.is_featuring
 
     def to_dict(self) -> dict:
         """Convertit le morceau en dictionnaire - VERSION AVEC SÉPARATION VIDÉO ET PAROLES"""

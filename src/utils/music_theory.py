@@ -137,22 +137,6 @@ def normalize_musical_key(musical_key: str) -> str | None:
     return key_mode_to_french(*parsed)
 
 
-def convert_key_to_numeric(key_str: str) -> int:
-    """
-    Convertit une notation de tonalité en pitch class numérique (0-11).
-    Rétrocompatible : retourne 0 (Do) si non reconnue — préférer
-    `note_to_pitch_class` qui retourne None dans ce cas.
-
-    Args:
-        key_str: Note (ex: "F#", "Bb", "C", "F#m", "G♯/A♭", "Sol#")
-
-    Returns:
-        Pitch class (0-11 où 0=C, 1=C#, 2=D, etc.)
-    """
-    pc = note_to_pitch_class(key_str)
-    return pc if pc is not None else 0
-
-
 def key_mode_to_french(key: int, mode: int) -> str:
     """
     Convertit key (0-11) + mode (0-1) en notation française CANONIQUE.
@@ -200,25 +184,3 @@ def key_mode_to_french_from_string(key_str, mode_str) -> str | None:
     if pc is None or mode is None:
         return None
     return key_mode_to_french(pc, mode)
-
-
-def key_mode_to_english(key: int, mode: int) -> str:
-    """Version anglaise pour référence"""
-    notes_en = {
-        0: "C",
-        1: "C#/Db",
-        2: "D",
-        3: "D#/Eb",
-        4: "E",
-        5: "F",
-        6: "F#/Gb",
-        7: "G",
-        8: "G#/Ab",
-        9: "A",
-        10: "A#/Bb",
-        11: "B",
-    }
-
-    mode_en = "major" if mode == 1 else "minor"
-    note = notes_en.get(key, "Unknown")
-    return f"{note} {mode_en}"

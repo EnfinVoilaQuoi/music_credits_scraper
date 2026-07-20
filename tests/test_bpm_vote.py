@@ -109,24 +109,3 @@ class TestBpmBallot:
         assert ballot.consensus_reached() is False
         ballot.add("getsongbpm", 121)  # concordant
         assert ballot.consensus_reached() is True
-
-    def test_finalize_pose_le_bpm_et_vide_le_scrutin(self):
-        from src.models.track import Track
-
-        track = Track(title="X")
-        ballot = BpmBallot()
-        ballot.add("deezer", 74)
-        ballot.add("reccobeats", 145)
-        ballot.finalize(track)
-        assert track.bpm == 145
-        assert track.bpm_alt == 74
-        assert track.bpm_source == "reccobeats+deezer"
-        assert track.bpm_confidence == 2
-        assert ballot.candidates == []  # vidé après finalize
-
-    def test_finalize_sans_candidat_ne_touche_pas_le_bpm(self):
-        from src.models.track import Track
-
-        track = Track(title="X", bpm=99)
-        BpmBallot().finalize(track)
-        assert track.bpm == 99

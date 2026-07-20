@@ -121,18 +121,3 @@ class BpmBallot:
         if len(self._candidates) < 2:
             return False
         return reconcile_bpm(self._candidates)[3] >= 2
-
-    def finalize(self, track) -> None:
-        """Pose le BPM final : bpm (octave réelle) + bpm_alt + source + confiance."""
-        bpm, bpm_alt, src, conf = reconcile_bpm(self._candidates)
-        if bpm is not None:
-            track.bpm = bpm
-            track.bpm_alt = bpm_alt
-            track.bpm_source = src
-            track.bpm_confidence = conf
-            alt_str = f" (alt half-time: {bpm_alt})" if bpm_alt else ""
-            logger.info(
-                f"🧮 BPM réconcilié: {bpm}{alt_str} (source(s): {src}, "
-                f"confiance: {conf} | candidats: {self._candidates})"
-            )
-        self._candidates = []

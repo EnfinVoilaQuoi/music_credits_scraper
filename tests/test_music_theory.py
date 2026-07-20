@@ -8,8 +8,6 @@ enharmonique) et la convergence des notations d'entrée (US/FR/Unicode).
 import pytest
 
 from src.utils.music_theory import (
-    convert_key_to_numeric,
-    key_mode_to_english,
     key_mode_to_french,
     key_mode_to_french_from_string,
     musical_key_to_pitch_mode,
@@ -80,15 +78,6 @@ class TestParseMode:
     @pytest.mark.parametrize("invalide", [None, "", "dorien", 2, -1])
     def test_modes_invalides(self, invalide):
         assert parse_mode(invalide) is None
-
-
-class TestConvertKeyToNumeric:
-    def test_note_valide(self):
-        assert convert_key_to_numeric("F#") == 6
-
-    def test_retrocompatibilite_retourne_0_si_inconnue(self):
-        # Comportement historique assumé : 0 (Do) en fallback
-        assert convert_key_to_numeric("???") == 0
 
 
 class TestKeyModeToFrench:
@@ -162,9 +151,3 @@ class TestMusicalKeyToPitchMode:
     @pytest.mark.parametrize("invalide", [None, "", "Do", "n'importe quoi", 42])
     def test_non_interpretable_retourne_none(self, invalide):
         assert musical_key_to_pitch_mode(invalide) is None
-
-
-class TestKeyModeToEnglish:
-    def test_format_anglais(self):
-        assert key_mode_to_english(6, 1) == "F#/Gb major"
-        assert key_mode_to_english(9, 0) == "A minor"

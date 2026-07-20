@@ -196,42 +196,6 @@ class GeniusScraperV3(CrawlAIScraperBase):
         time.sleep(DELAY_BETWEEN_REQUESTS)
         return lyrics
 
-    def scrape_multiple_tracks_with_lyrics(
-        self, tracks: list[Track], progress_callback=None, include_lyrics: bool = True
-    ) -> dict[str, Any]:
-        """Scrape crédits + paroles — même interface que GeniusScraper (v2)."""
-        results = {
-            "success": 0,
-            "failed": 0,
-            "errors": [],
-            "albums_scraped": set(),
-            "lyrics_scraped": 0,
-            "structures_analyzed": 0,
-        }
-        total = len(tracks)
-        for i, track in enumerate(tracks):
-            try:
-                logger.info(f"V3: scraping {i+1}/{total}: {track.title}")
-                self.scrape_track_credits(track, include_lyrics=include_lyrics)
-                if track.has_lyrics:
-                    results["lyrics_scraped"] += 1
-                    results["structures_analyzed"] += 1
-                if track.credits:
-                    results["success"] += 1
-                else:
-                    results["failed"] += 1
-            except Exception as e:
-                results["failed"] += 1
-                results["errors"].append({"track": track.title, "error": str(e)})
-                logger.error(f"V3: erreur sur '{track.title}': {e}")
-            if progress_callback:
-                progress_callback(i + 1, total, track.title)
-        logger.info(
-            f"V3: scraping terminé — {results['success']} réussis, "
-            f"{results['lyrics_scraped']} paroles récupérées"
-        )
-        return results
-
     def scrape_lyrics_batch(self, tracks: list[Track], progress_callback=None) -> dict[str, Any]:
         """
         Scrape uniquement les paroles — même interface que GeniusScraper (v2).

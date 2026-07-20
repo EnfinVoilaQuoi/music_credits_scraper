@@ -192,14 +192,14 @@ class DeezerProvider:
             logger.info(f"   ✅ ISRC: {track.isrc}")
             updated = True
 
-        # BPM Deezer : candidat (souvent absent/0) — vote arbitré par le scrutin
+        # BPM Deezer : candidat (souvent absent/0) — vote arbitré par le scrutin.
+        # E7 : plus de pose legacy directe, apply_resolutions pose track.bpm en
+        # fin de run ; updated rattaché au candidat fourni (pas à la pose).
         sbpm = sanitize_bpm(data.get("deezer_bpm"))
         if sbpm is not None:
             ctx.bpm_ballot.add("deezer", sbpm)
-            if not track.bpm:
-                track.bpm = sbpm
-                logger.info(f"   ✅ BPM (Deezer, opportuniste): {sbpm}")
-                updated = True
+            logger.info(f"   ✅ BPM (Deezer, opportuniste, candidat): {sbpm}")
+            updated = True
 
         if data.get("deezer_link") and (
             not hasattr(track, "deezer_url") or force_update or not track.deezer_url

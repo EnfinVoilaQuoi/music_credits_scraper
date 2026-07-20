@@ -452,6 +452,25 @@ class SpotifyIDScraper:
         logger.info(f"✅ ID artiste (1er crédité '{artists[0]['name']}'): {artists[0]['id']}")
         return artists[0]["id"]
 
+    # Titres génériques servis par Spotify quand la page track ne rend plus
+    # « Titre • Artiste » (drift observé) : ne portent AUCUNE info de vérif →
+    # normalisés en None pour ne pas polluer la base / l'affichage.
+    _GENERIC_PAGE_TITLES = frozenset(
+        {"", "spotify", "spotify – web player", "spotify - web player", "web player"}
+    )
+
+    @classmethod
+    def _clean_page_title(cls, raw: str | None) -> str | None:
+        """Nettoie le titre de page (« … | Spotify » retiré) ; renvoie None si le
+        titre est générique (aucune info « Titre • Artiste »). Partagé par les
+        voies sync et async (héritage)."""
+        if not raw:
+            return None
+        cleaned = raw.replace(" | Spotify", "").strip()
+        if cleaned.lower() in cls._GENERIC_PAGE_TITLES:
+            return None
+        return cleaned
+
     def get_spotify_page_title(self, spotify_id: str) -> str | None:
         try:
             self._ensure_driver()
@@ -460,9 +479,7 @@ class SpotifyIDScraper:
         try:
             spotify_url = f"https://open.spotify.com/track/{spotify_id}"
             self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
-            title = self.page.title()
-            if title:
-                return title.replace(" | Spotify", "").strip()
+            return self._clean_page_title(self.page.title())
         except Exception as e:
             logger.error(f"❌ Erreur récupération titre: {e}")
         return None

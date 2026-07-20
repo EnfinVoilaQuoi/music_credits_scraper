@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("ReccoBeatsAPI")
 
+# En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE
+# (UA httpx par défaut) → on repasse l'UA/Accept du client sync par requête
+# (cf. self.recco_session.headers). Sans effet observé, alignement préventif.
+_ASYNC_HEADERS = {"Accept": "application/json", "User-Agent": "ReccoBeats-Python-Client/3.0"}
+
 
 class ReccoBeatsIntegratedClient:
     """Client ReccoBeats pour récupération BPM/Key/Mode/Audio Features"""
@@ -130,7 +135,9 @@ class ReccoBeatsIntegratedClient:
         try:
             url = f"{self.recco_base_url}/track"
             logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
-            response = await http.get(url, params={"ids": spotify_id}, timeout=15)
+            response = await http.get(
+                url, params={"ids": spotify_id}, headers=_ASYNC_HEADERS, timeout=15
+            )
             logger.debug(f"📡 Response: Status {response.status_code}")
 
             if response.status_code == 200:
@@ -182,7 +189,7 @@ class ReccoBeatsIntegratedClient:
         try:
             url = f"{self.recco_base_url}/track/{reccobeats_id}/audio-features"
             logger.debug(f"🎼 Audio features: {url}")
-            response = await http.get(url, timeout=15)
+            response = await http.get(url, headers=_ASYNC_HEADERS, timeout=15)
 
             if response.status_code == 200:
                 features = response.json()
@@ -413,7 +420,7 @@ class ReccoBeatsIntegratedClient:
         """Jumeau async de `get_track_by_isrc`."""
         try:
             url = f"{self.recco_base_url}/track"
-            response = await http.get(url, params={"ids": isrc}, timeout=15)
+            response = await http.get(url, params={"ids": isrc}, headers=_ASYNC_HEADERS, timeout=15)
             logger.info(f"🎵 ReccoBeats: requête ISRC {isrc} (status {response.status_code})")
 
             if response.status_code != 200:

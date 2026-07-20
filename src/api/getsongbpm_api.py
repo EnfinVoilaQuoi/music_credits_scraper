@@ -29,6 +29,12 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE
+# (UA httpx par défaut) → on repasse l'UA/Accept du client sync par requête
+# (cf. self.session.headers de la voie sync). Sans effet observé, alignement
+# préventif si l'API se met à filtrer par User-Agent.
+_ASYNC_HEADERS = {"Accept": "application/json", "User-Agent": "GetSongBPM-Python-Client/2.0"}
+
 
 @dataclass
 class SongData:
@@ -271,7 +277,7 @@ class GetSongBPMFetcher:
 
         for attempt in range(self.MAX_RETRIES):
             try:
-                response = await http.get(url, params=params, timeout=15)
+                response = await http.get(url, params=params, headers=_ASYNC_HEADERS, timeout=15)
 
                 if response.status_code == 200:
                     return self._selected_from_response(response.json(), artist, title)

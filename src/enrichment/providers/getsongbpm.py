@@ -39,7 +39,7 @@ class GetSongBpmProvider:
         # ballot pour le BPM, observation pour key/mode) — les poses provisoires
         # des providers amont ont été retirées (E7). Gate purement informatif
         # (jamais de skip) → sert à un log honnête. getattr : attrs dynamiques.
-        missing_bpm = not track.bpm and not ctx.bpm_ballot.candidates
+        missing_bpm = not track.audio.bpm and not ctx.bpm_ballot.candidates
         missing_key = getattr(track, "key", None) is None and not ctx.has_observation("key")
         missing_mode = getattr(track, "mode", None) is None and not ctx.has_observation("mode")
 
@@ -153,7 +153,7 @@ class GetSongBpmProvider:
             updated = True
 
         # Time Signature → observation PAR SOURCE (colonne droppée E7-D2 ;
-        # apply_resolutions repose track.time_signature depuis l'observation).
+        # apply_resolutions repose track.audio.time_signature depuis l'observation).
         if song_data.time_signature:
             from src.enrichment.observation import Observation
 

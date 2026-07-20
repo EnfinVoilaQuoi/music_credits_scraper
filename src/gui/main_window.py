@@ -594,24 +594,19 @@ class MainWindow:
                     1
                     for t in active_tracks
                     if (
-                        t.bpm
+                        t.audio.bpm
                         and (
-                            isinstance(t.bpm, (int, float))
-                            and t.bpm > 0
-                            or isinstance(t.bpm, str)
-                            and t.bpm.isdigit()
-                            and int(t.bpm) > 0
+                            isinstance(t.audio.bpm, (int, float))
+                            and t.audio.bpm > 0
+                            or isinstance(t.audio.bpm, str)
+                            and t.audio.bpm.isdigit()
+                            and int(t.audio.bpm) > 0
                         )
                     )
                     and (
-                        t.musical_key
-                        # key/mode : attributs dynamiques du mapper → hasattr requis
-                        or (
-                            hasattr(t, "key")
-                            and t.key
-                            and hasattr(t, "mode")
-                            and t.mode is not None
-                        )
+                        # key/mode : champs du sous-objet audio (Phase 5)
+                        t.audio.musical_key
+                        or (t.audio.key and t.audio.mode is not None)
                     )
                     and t.duration
                 )

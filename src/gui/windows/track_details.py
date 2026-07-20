@@ -138,25 +138,25 @@ class TrackDetailsWindow:
             date_str = helpers.format_date(track.release_date)
             ctk.CTkLabel(right_column, text=f"📅 Date: {date_str}").pack(anchor="w", pady=1)
 
-        if track.bpm:
-            bpm_text = f"🎼 BPM: {track.bpm}"
+        if track.audio.bpm:
+            bpm_text = f"🎼 BPM: {track.audio.bpm}"
 
             # ⭐ LOGIQUE AMÉLIORÉE pour afficher la tonalité
             musical_key = None
 
             # 1. Ajouter la tonalité si disponible directement
-            if track.musical_key:
-                musical_key = track.musical_key
+            if track.audio.musical_key:
+                musical_key = track.audio.musical_key
 
             # 2. FALLBACK : Si musical_key n'existe pas mais key et mode existent
-            elif hasattr(track, "key") and hasattr(track, "mode") and track.key and track.mode:
+            elif track.audio.key and track.audio.mode:
                 try:
                     from src.utils.music_theory import key_mode_to_french_from_string
 
-                    musical_key = key_mode_to_french_from_string(track.key, track.mode)
+                    musical_key = key_mode_to_french_from_string(track.audio.key, track.audio.mode)
 
                     # ⭐ BONUS : Stocker le résultat calculé pour éviter de recalculer
-                    track.musical_key = musical_key
+                    track.audio.musical_key = musical_key
                     logger.debug(
                         f"Musical key calculée et stockée pour '{track.title}': {musical_key}"
                     )
@@ -890,10 +890,10 @@ class TrackDetailsWindow:
 
         # ── DONNÉES AUDIO (BPM / KEY / MODE) ────────────────────────
         tech_textbox.insert("end", "\n🎛️ DONNÉES AUDIO\n")
-        _bpm = track.bpm
-        _bpm_alt = track.bpm_alt
-        _bpm_src = track.bpm_source or "—"
-        _bpm_conf = track.bpm_confidence
+        _bpm = track.audio.bpm
+        _bpm_alt = track.audio.bpm_alt
+        _bpm_src = track.audio.bpm_source or "—"
+        _bpm_conf = track.audio.bpm_confidence
         tech_textbox.insert("end", f"• Provenance BPM : {_bpm_src}\n")
         _conf_txt = f"{_bpm_conf}" if _bpm_conf is not None else "—"
         tech_textbox.insert("end", f"• Arbitrage (vote) : confiance {_conf_txt}\n")
@@ -906,9 +906,9 @@ class TrackDetailsWindow:
             tech_textbox.insert("end", f"• BPM réel : {_bpm}{_alt_txt}\n")
         else:
             tech_textbox.insert("end", "• BPM réel : N/A\n")
-        _km_src = track.key_mode_source or "—"
+        _km_src = track.audio.key_mode_source or "—"
         tech_textbox.insert("end", f"• Source Key/Mode : {_km_src}\n")
-        _rb_res = track.reccobeats_resolution or "—"
+        _rb_res = track.audio.reccobeats_resolution or "—"
         tech_textbox.insert("end", f"• Résolution ReccoBeats : {_rb_res}\n")
 
         # ── STREAMS & DURÉE ─────────────────────────────────────────
@@ -940,7 +940,7 @@ class TrackDetailsWindow:
         # ── COMPLÉTUDE (à ré-enrichir ?) ────────────────────────────
         tech_textbox.insert("end", "\n🩺 COMPLÉTUDE\n")
         _missing = []
-        if not track.bpm:
+        if not track.audio.bpm:
             _missing.append("BPM")
         if getattr(track, "key", None) is None or getattr(track, "mode", None) is None:
             _missing.append("Key/Mode")

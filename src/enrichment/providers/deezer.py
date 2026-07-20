@@ -193,7 +193,7 @@ class DeezerProvider:
             updated = True
 
         # BPM Deezer : candidat (souvent absent/0) — vote arbitré par le scrutin.
-        # E7 : plus de pose legacy directe, apply_resolutions pose track.bpm en
+        # E7 : plus de pose legacy directe, apply_resolutions pose track.audio.bpm en
         # fin de run ; updated rattaché au candidat fourni (pas à la pose).
         sbpm = sanitize_bpm(data.get("deezer_bpm"))
         if sbpm is not None:

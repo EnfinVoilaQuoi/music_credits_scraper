@@ -125,25 +125,27 @@ def populate_tracks_table(app):
 
             # BPM avec tonalité - VERSION AMÉLIORÉE
             bpm = ""  # ⭐ IMPORTANT : Initialiser la variable
-            if track.bpm:
-                bpm = str(track.bpm)
+            if track.audio.bpm:
+                bpm = str(track.audio.bpm)
 
                 # ⭐ LOGIQUE AMÉLIORÉE pour afficher la tonalité
                 musical_key = None
 
                 # 1. Essayer musical_key directement
-                if track.musical_key:
-                    musical_key = track.musical_key
+                if track.audio.musical_key:
+                    musical_key = track.audio.musical_key
 
-                # 2. FALLBACK : key/mode = attributs dynamiques du mapper → hasattr requis
-                elif hasattr(track, "key") and hasattr(track, "mode") and track.key and track.mode:
+                # 2. FALLBACK : key/mode du sous-objet audio (Phase 5)
+                elif track.audio.key and track.audio.mode:
                     try:
                         from src.utils.music_theory import key_mode_to_french_from_string
 
-                        musical_key = key_mode_to_french_from_string(track.key, track.mode)
+                        musical_key = key_mode_to_french_from_string(
+                            track.audio.key, track.audio.mode
+                        )
 
                         # ⭐ BONUS : Stocker le résultat pour la prochaine fois
-                        track.musical_key = musical_key
+                        track.audio.musical_key = musical_key
                         logger.debug(
                             f"Musical key calculée et stockée pour '{track.title}': {musical_key}"
                         )
@@ -152,7 +154,7 @@ def populate_tracks_table(app):
 
                 # Ajouter la tonalité au BPM si disponible
                 if musical_key:
-                    bpm = f"{track.bpm} ({musical_key})"
+                    bpm = f"{track.audio.bpm} ({musical_key})"
 
             # Durée du morceau
             duration_display = ""
@@ -646,7 +648,7 @@ def sort_column(app, col):
                 bool(t.lyrics_synced),
             )
         elif col == "BPM":
-            sort_key = lambda t: t.bpm or 0
+            sort_key = lambda t: t.audio.bpm or 0
         elif col == "Durée":
             # Trier par durée en secondes
             def get_duration_seconds(t):

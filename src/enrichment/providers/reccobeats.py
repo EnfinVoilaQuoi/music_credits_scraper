@@ -57,7 +57,7 @@ class ReccoBeatsProvider:
         """Skip (résultat True) si la voie ISRC en pré-étape a déjà satisfait
         la source — pas de second appel."""
         if ctx.isrc_satisfied:
-            logger.info(f"✅ ReccoBeats déjà satisfait via ISRC (BPM={track.bpm})")
+            logger.info(f"✅ ReccoBeats déjà satisfait via ISRC (BPM={track.audio.bpm})")
             return True
         logger.info(f"🎵 Appel de ReccoBeats pour '{track.title}'")
         return None
@@ -77,7 +77,7 @@ class ReccoBeatsProvider:
         """
         applied = False
         if resolution:
-            track.reccobeats_resolution = resolution
+            track.audio.reccobeats_resolution = resolution
             # Provenance persistée en observation (survit au drop de colonne e12) :
             # reposée par apply_resolutions au chargement de l'artiste.
             ctx.observations.append(Observation("reccobeats_resolution", resolution, self.name))
@@ -393,7 +393,7 @@ class ReccoBeatsProvider:
             return False
 
         logger.debug("ReccoBeats: ✅ Données récupérées")
-        track.reccobeats_resolution = "spotify_id"
+        track.audio.reccobeats_resolution = "spotify_id"
         ctx.observations.append(Observation("reccobeats_resolution", "spotify_id", self.name))
 
         # Stocker le BPM
@@ -435,10 +435,10 @@ class ReccoBeatsProvider:
                 logger.warning(f"ReccoBeats: ⚠️ Duration invalide: {duration_value}")
 
         # Mise à jour de la logique de succès. E7 : le BPM n'est PLUS posé sur
-        # track.bpm (candidat au scrutin, reposé par apply_resolutions en fin de
+        # track.audio.bpm (candidat au scrutin, reposé par apply_resolutions en fin de
         # run) → « a un BPM » = candidat frais ce run OU valeur persistée.
         has_spotify_id = track.spotify_id
-        has_bpm = bool(track.bpm) or sbpm is not None
+        has_bpm = bool(track.audio.bpm) or sbpm is not None
         has_duration = track.duration
 
         if has_spotify_id and has_bpm:

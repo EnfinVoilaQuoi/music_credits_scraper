@@ -241,11 +241,11 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     bpm = resolutions.get("bpm")
     if bpm is not None:
         # bpm.value/alt déjà sanitizés (int) par la stratégie bpm du moteur.
-        track.bpm = bpm.value
-        track.bpm_alt = bpm.alt
-        track.bpm_source = bpm.source
+        track.audio.bpm = bpm.value
+        track.audio.bpm_alt = bpm.alt
+        track.audio.bpm_source = bpm.source
         # bpm_confidence est INTEGER en legacy (le moteur rend un float).
-        track.bpm_confidence = int(bpm.confidence) if bpm.confidence is not None else None
+        track.audio.bpm_confidence = int(bpm.confidence) if bpm.confidence is not None else None
 
     key = resolutions.get("key")
     mode = resolutions.get("mode")
@@ -255,16 +255,16 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     key_pc = note_to_pitch_class(key.value) if key is not None else None
     mode_val = parse_mode(mode.value) if mode is not None else None
     if key is not None:
-        track.key = key_pc
-        track.key_mode_source = key.source
+        track.audio.key = key_pc
+        track.audio.key_mode_source = key.source
     if mode is not None:
-        track.mode = mode_val
-        track.key_mode_source = mode.source
+        track.audio.mode = mode_val
+        track.audio.key_mode_source = mode.source
     # key/mode forment une paire (le moteur les rend ensemble ou pas du tout) :
     # musical_key se recalcule quand les deux sont là.
     if key_pc is not None and mode_val is not None:
         try:
-            track.musical_key = key_mode_to_french(key_pc, mode_val)
+            track.audio.musical_key = key_mode_to_french(key_pc, mode_val)
         except Exception as e:
             logger.warning(f"⚠️ apply_resolutions musical_key: {e}")
 
@@ -281,14 +281,14 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     # ici pour survivre au drop de la colonne (valeur telle quelle, ex. "4/4").
     time_signature = resolutions.get("time_signature")
     if time_signature is not None:
-        track.time_signature = time_signature.value
+        track.audio.time_signature = time_signature.value
 
     # reccobeats_resolution : provenance mono-source (voie ISRC/Spotify ID de
     # ReccoBeats) préservée en observation, reposée telle quelle (survit au drop
     # de la colonne e12).
     reccobeats_resolution = resolutions.get("reccobeats_resolution")
     if reccobeats_resolution is not None:
-        track.reccobeats_resolution = reccobeats_resolution.value
+        track.audio.reccobeats_resolution = reccobeats_resolution.value
 
 
 def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolution]:

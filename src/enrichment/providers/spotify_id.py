@@ -67,9 +67,17 @@ class SpotifyIdProvider:
                 f"(force_update={ctx.force_update}, has_valid_id={has_valid_id})"
             )
             return None
-        logger.info(
-            f"⏭️ Scraper Spotify ID non nécessaire (ID déjà présent et valide: {track.spotify_id})"
-        )
+        # Deux motifs de skip distincts : soit l'ISRC a déjà satisfait ReccoBeats
+        # en pré-étape (spotify_id souvent None sur cette voie), soit un ID valide
+        # existe déjà. Ne pas afficher « ID déjà présent » quand c'est l'ISRC.
+        if ctx.isrc_satisfied:
+            logger.info(
+                f"⏭️ Scraper Spotify ID non nécessaire (ISRC déjà satisfait) pour '{track.title}'"
+            )
+        else:
+            logger.info(
+                f"⏭️ Scraper Spotify ID non nécessaire (ID déjà présent et valide: {track.spotify_id})"
+            )
         return "not_needed"
 
     def get_unique_spotify_id(

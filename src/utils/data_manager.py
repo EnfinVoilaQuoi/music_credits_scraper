@@ -39,15 +39,8 @@ class DataManager(ArtistRepository, TrackRepository):
 
     @property
     def engine(self):
-        """Moteur SQLAlchemy Core — utilisé par les repositories migrés (E2)."""
+        """Moteur SQLAlchemy Core — seul chemin d'accès à la base (E2)."""
         return self._db.engine
-
-    def _get_connection(self):
-        """Context manager de connexion sqlite3 — délégué à Database (compat GUI).
-
-        Chemin legacy en cours de remplacement par `self.engine` (Core, E2).
-        """
-        return self._db.connect()
 
     def export_to_json(self, artist_name: str, filepath: Path | None = None):
         """Exporte les données d'un artiste en JSON"""

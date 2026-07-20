@@ -85,33 +85,18 @@ class ReccoBeatsProvider:
         sbpm = sanitize_bpm(bpm)
         if sbpm is not None:
             ctx.bpm_ballot.add("reccobeats", sbpm)
-            if not track.bpm:
-                track.bpm = sbpm
             applied = True
 
-        # Observation key/mode PAR SOURCE (normalisée) — voie ISRC (E5c-2b).
+        # Observations key/mode PAR SOURCE (normalisées) — voie ISRC (E5c-2b).
+        # apply_resolutions repose key/mode/key_mode_source/musical_key en fin de
+        # run (plus de pose legacy directe ni de musical_key redondant, E7).
         ctx.observations.extend(
             key_mode_observations(
                 "reccobeats", key=track_info.get("key"), mode=track_info.get("mode")
             )
         )
-
-        # Key / Mode
         if track_info.get("key") is not None:
-            track.key = track_info["key"]
-            track.key_mode_source = "reccobeats"
             applied = True
-        if track_info.get("mode") is not None:
-            track.mode = track_info["mode"]
-            track.key_mode_source = "reccobeats"
-
-        if getattr(track, "key", None) is not None and getattr(track, "mode", None) is not None:
-            try:
-                from src.utils.music_theory import key_mode_to_french
-
-                track.musical_key = key_mode_to_french(track.key, track.mode)
-            except Exception as e:
-                logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
 
         # Durée (ne pas écraser une durée déjà présente)
         dur = track_info.get("duration")
@@ -420,41 +405,20 @@ class ReccoBeatsProvider:
         sbpm = sanitize_bpm(bpm)
         if sbpm is not None:
             ctx.bpm_ballot.add("reccobeats", sbpm)
-            if not track.bpm:
-                track.bpm = sbpm
             logger.info(f"ReccoBeats: ✅ BPM: {sbpm}")
 
-        # Observation key/mode PAR SOURCE (normalisée) — voie Spotify ID (E5c-2b).
+        # Observations key/mode PAR SOURCE (normalisées) — voie Spotify ID (E5c-2b).
+        # apply_resolutions repose key/mode/key_mode_source/musical_key en fin de
+        # run (plus de pose legacy directe ni de musical_key redondant, E7).
         ctx.observations.extend(
             key_mode_observations(
                 "reccobeats", key=track_info.get("key"), mode=track_info.get("mode")
             )
         )
-
-        # Stocker Key et Mode
-        if "key" in track_info and track_info["key"] is not None:
-            track.key = track_info["key"]
-            track.key_mode_source = "reccobeats"
-            logger.info(f"ReccoBeats: ✅ Key: {track.key}")
-
-        if "mode" in track_info and track_info["mode"] is not None:
-            track.mode = track_info["mode"]
-            track.key_mode_source = "reccobeats"
-            logger.info(f"ReccoBeats: ✅ Mode: {track.mode}")
-
-        if (
-            hasattr(track, "key")
-            and hasattr(track, "mode")
-            and track.key is not None
-            and track.mode is not None
-        ):
-            try:
-                from src.utils.music_theory import key_mode_to_french
-
-                track.musical_key = key_mode_to_french(track.key, track.mode)
-                logger.info(f"ReccoBeats: ✅ Musical Key: {track.musical_key}")
-            except Exception as e:
-                logger.warning(f"ReccoBeats: ⚠️ Erreur conversion musical_key: {e}")
+        if track_info.get("key") is not None:
+            logger.info(f"ReccoBeats: ✅ Key: {track_info['key']}")
+        if track_info.get("mode") is not None:
+            logger.info(f"ReccoBeats: ✅ Mode: {track_info['mode']}")
 
         # Stocker la Durée
         if "duration" in track_info and track_info["duration"] is not None:
@@ -465,10 +429,12 @@ class ReccoBeatsProvider:
             else:
                 logger.warning(f"ReccoBeats: ⚠️ Duration invalide: {duration_value}")
 
-        # Mise à jour de la logique de succès
+        # Mise à jour de la logique de succès. E7 : le BPM n'est PLUS posé sur
+        # track.bpm (candidat au scrutin, reposé par apply_resolutions en fin de
+        # run) → « a un BPM » = candidat frais ce run OU valeur persistée.
         has_spotify_id = track.spotify_id
-        has_bpm = track.bpm
-        has_duration = track.duration  # ⭐ NOUVEAU
+        has_bpm = bool(track.bpm) or sbpm is not None
+        has_duration = track.duration
 
         if has_spotify_id and has_bpm:
             logger.info(f"ReccoBeats: ✅ SUCCÈS COMPLET '{track.title}'")

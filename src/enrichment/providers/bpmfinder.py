@@ -10,9 +10,11 @@ directement — manual_entry / workers) ; ce provider enveloppe la MÊME instanc
 / True / False / None) posées telles quelles dans le dict de résultats.
 """
 
+from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
+from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -121,9 +123,13 @@ class BpmFinderProvider:
         force_update = ctx.force_update
         # force_update : re-analyser et ÉCRASER même si BPM/key présents (sinon
         # 'not_needed' → combiné au nettoyage, effaçait des données valides).
-        _missing_bpm = force_update or not track.bpm
+        # « Manquant » = ni valeur PERSISTÉE (track.X, relue via observations au
+        # chargement) ni observation/vote FRAIS ce run — les poses provisoires des
+        # providers amont ayant été retirées (E7), on lit LES DEUX canaux.
+        _missing_bpm = force_update or (not track.bpm and not ctx.bpm_ballot.candidates)
         _missing_km = force_update or (
-            getattr(track, "key", None) is None or getattr(track, "mode", None) is None
+            (getattr(track, "key", None) is None and not ctx.has_observation("key"))
+            or (getattr(track, "mode", None) is None and not ctx.has_observation("mode"))
         )
         _yt = track.youtube_url
 
@@ -145,18 +151,21 @@ class BpmFinderProvider:
             if bf:
                 self._fail_streak = 0
                 applied = []
-                if _missing_bpm and bf.get("bpm"):
-                    track.bpm = bf["bpm"]
-                    track.bpm_source = "bpmfinder"
-                    applied.append(f"BPM={bf['bpm']}")
-                if _missing_km and bf.get("key") is not None and bf.get("mode") is not None:
-                    track.key = bf["key"]
-                    track.mode = bf["mode"]
-                    from src.utils.music_theory import key_mode_to_french
-
-                    track.musical_key = key_mode_to_french(bf["key"], bf["mode"])
-                    track.key_mode_source = "bpmfinder"
-                    applied.append(f"key={track.musical_key}")
+                # BpmFinder alimente le MOTEUR comme toute source (E7, décision
+                # « source à part entière ») : BPM au scrutin, key/mode en
+                # observations PAR SOURCE. `apply_resolutions` repose ensuite
+                # bpm/key/mode/musical_key (bpmfinder = rang 0 → dernier mot
+                # seulement s'il est seul). Restaure la persistance perdue au
+                # drop des colonnes audio (e12) — les mutations directes ne
+                # persistaient plus (colonnes droppées, vérité = observations).
+                sbpm = sanitize_bpm(bf.get("bpm"))
+                if sbpm is not None:
+                    ctx.bpm_ballot.add("bpmfinder", sbpm)
+                    applied.append(f"BPM={sbpm}")
+                km_obs = key_mode_observations("bpmfinder", key=bf.get("key"), mode=bf.get("mode"))
+                if km_obs:
+                    ctx.observations.extend(km_obs)
+                    applied.append(f"key/mode={bf.get('key')}/{bf.get('mode')}")
                 if applied:
                     logger.info(f"✅ BPM Finder: {', '.join(applied)}")
                 return bool(applied)

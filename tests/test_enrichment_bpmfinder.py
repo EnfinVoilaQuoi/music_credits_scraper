@@ -41,15 +41,33 @@ def test_not_needed_si_rien_manquant():
     assert provider.enrich(track, EnrichmentContext(force_update=False)) == "not_needed"
 
 
-def test_applique_bpm_manquant():
+def test_bpm_manquant_devient_candidat():
     scraper = _FakeScraper({"bpm": 140})
     provider = BpmFinderProvider(scraper)
     track = _track(bpm=None)  # bpm manquant → analyse
-    track.key = 5  # key/mode présents → seul le bpm est appliqué
+    track.key = 5  # key/mode présents → seul le bpm manque
     track.mode = 1
-    assert provider.enrich(track, EnrichmentContext()) is True
-    assert track.bpm == 140
-    assert track.bpm_source == "bpmfinder"
+    ctx = EnrichmentContext()
+    assert provider.enrich(track, ctx) is True
+    # E7 : BpmFinder alimente le scrutin comme toute source (plus de pose directe)
+    assert ("bpmfinder", 140) in ctx.bpm_ballot.candidates
+
+
+def test_emet_bpm_et_observations_key_mode():
+    # FIX persistance E7 : BpmFinder alimente le MOTEUR (scrutin + observations
+    # PAR SOURCE) — seul canal persisté depuis le drop des colonnes audio (e12).
+    scraper = _FakeScraper({"bpm": 140, "key": 5, "mode": 0})
+    provider = BpmFinderProvider(scraper)
+    track = _track(bpm=None)
+    track.key = None
+    track.mode = None
+    ctx = EnrichmentContext()
+    assert provider.enrich(track, ctx) is True
+    assert ("bpmfinder", 140) in ctx.bpm_ballot.candidates
+    keys = [o for o in ctx.observations if o.field == "key" and o.source == "bpmfinder"]
+    modes = [o for o in ctx.observations if o.field == "mode" and o.source == "bpmfinder"]
+    assert keys and keys[0].value == 5
+    assert modes and modes[0].value == 0
 
 
 def test_disjoncteur_sur_timeout_puis_skipped():

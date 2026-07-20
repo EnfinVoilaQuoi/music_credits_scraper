@@ -50,8 +50,8 @@ def manual_audio_entry(app, index: int):
         e.pack(fill="x")
         return e
 
-    bpm_entry = _row("BPM", str(track.bpm) if track.bpm else "", "ex. 95")
-    key_entry = _row("Tonalité", track.musical_key or "", "ex. G# minor / Sol# mineur")
+    bpm_entry = _row("BPM", str(track.audio.bpm) if track.audio.bpm else "", "ex. 95")
+    key_entry = _row("Tonalité", track.audio.musical_key or "", "ex. G# minor / Sol# mineur")
     dur_entry = _row("Durée", _dur_init, "ex. 3:24 ou 204")
 
     _result = {"ok": False}
@@ -79,14 +79,16 @@ def manual_audio_entry(app, index: int):
     bpm_str = (bpm_str or "").strip()
     if bpm_str:
         try:
-            track.bpm = int(round(float(bpm_str.replace(",", "."))))
-            track.bpm_source = "manual"
+            track.audio.bpm = int(round(float(bpm_str.replace(",", "."))))
+            track.audio.bpm_source = "manual"
             # Observation `manual` : court-circuite le vote à la relecture (E7a),
             # sinon la réconciliation E6 réécraserait la valeur saisie.
             track.observations.append(
-                Observation(field="bpm", value=track.bpm, source="manual", seen_at=datetime.now())
+                Observation(
+                    field="bpm", value=track.audio.bpm, source="manual", seen_at=datetime.now()
+                )
             )
-            changed.append(f"BPM = {track.bpm}")
+            changed.append(f"BPM = {track.audio.bpm}")
         except ValueError:
             messagebox.showerror("BPM manuel", f"BPM invalide : {bpm_str!r}")
             return
@@ -108,19 +110,19 @@ def manual_audio_entry(app, index: int):
             )
             return
         tokens = key_str.split()
-        track.key = note_to_pitch_class(" ".join(tokens[:-1]))
-        track.mode = parse_mode(tokens[-1])
-        track.musical_key = canonical
-        track.key_mode_source = "manual"
+        track.audio.key = note_to_pitch_class(" ".join(tokens[:-1]))
+        track.audio.mode = parse_mode(tokens[-1])
+        track.audio.musical_key = canonical
+        track.audio.key_mode_source = "manual"
         # Paire key/mode `manual` : court-circuite l'appariement à la relecture (E7a).
         _now = datetime.now()
-        if track.key is not None:
+        if track.audio.key is not None:
             track.observations.append(
-                Observation(field="key", value=track.key, source="manual", seen_at=_now)
+                Observation(field="key", value=track.audio.key, source="manual", seen_at=_now)
             )
-        if track.mode is not None:
+        if track.audio.mode is not None:
             track.observations.append(
-                Observation(field="mode", value=track.mode, source="manual", seen_at=_now)
+                Observation(field="mode", value=track.audio.mode, source="manual", seen_at=_now)
             )
         changed.append(f"Tonalité = {canonical}")
 
@@ -303,13 +305,15 @@ def bpmfinder_local_file(app, index: int):
                 return
             applied = []
             _now = datetime.now()
-            if not track.bpm and res.get("bpm"):
-                track.bpm = res["bpm"]
-                track.bpm_source = "bpmfinder"
+            if not track.audio.bpm and res.get("bpm"):
+                track.audio.bpm = res["bpm"]
+                track.audio.bpm_source = "bpmfinder"
                 # Observation `bpmfinder` : participe au vote à la relecture (E7a),
                 # sinon la mesure disparaîtrait sous la réconciliation E6.
                 track.observations.append(
-                    Observation(field="bpm", value=track.bpm, source="bpmfinder", seen_at=_now)
+                    Observation(
+                        field="bpm", value=track.audio.bpm, source="bpmfinder", seen_at=_now
+                    )
                 )
                 applied.append(f"BPM={res['bpm']}")
             if (
@@ -319,17 +323,21 @@ def bpmfinder_local_file(app, index: int):
             ):
                 from src.utils.music_theory import key_mode_to_french
 
-                track.key = res["key"]
-                track.mode = res["mode"]
-                track.musical_key = key_mode_to_french(res["key"], res["mode"])
-                track.key_mode_source = "bpmfinder"
+                track.audio.key = res["key"]
+                track.audio.mode = res["mode"]
+                track.audio.musical_key = key_mode_to_french(res["key"], res["mode"])
+                track.audio.key_mode_source = "bpmfinder"
                 track.observations.append(
-                    Observation(field="key", value=track.key, source="bpmfinder", seen_at=_now)
+                    Observation(
+                        field="key", value=track.audio.key, source="bpmfinder", seen_at=_now
+                    )
                 )
                 track.observations.append(
-                    Observation(field="mode", value=track.mode, source="bpmfinder", seen_at=_now)
+                    Observation(
+                        field="mode", value=track.audio.mode, source="bpmfinder", seen_at=_now
+                    )
                 )
-                applied.append(f"Tonalité={track.musical_key}")
+                applied.append(f"Tonalité={track.audio.musical_key}")
             if applied:
                 app.data_manager.save_track(track)
                 app._populate_tracks_table()

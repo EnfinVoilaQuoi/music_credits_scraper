@@ -11,11 +11,11 @@ saves. `stop_requested()` est testé entre deux unités, comme avant.
 from datetime import datetime
 from tkinter import messagebox
 
-from src.enrichment.observation import Observation
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import run_worker, stop_requested
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.utils.logger import get_logger
+from src.utils.synced_lyrics_resolver import resolve_track_synced_lyrics
 
 logger = get_logger(__name__)
 
@@ -259,8 +259,6 @@ def start_combined_scraping(
                 #    car Genius ne fournit pas la durée (voir docs/api/genius-api.md).
                 if scrape_sync or lyrics_ytm:
                     try:
-                        from src.utils.lyrics_sync import compare_synced
-
                         # Instanciation paresseuse : seulement les clients des sources cochées.
                         lrclib = ytm = mxm = None
                         if sync_lrclib:
@@ -299,115 +297,38 @@ def start_combined_scraping(
                             else:
                                 a_name = app.current_artist.name
 
-                            duration = getattr(track, "duration", None)
-
-                            # YTM : LRC (source 2) ET durée de secours ET texte fallback.
-                            ytm_res = None
-                            if ytm is not None:
-                                try:
-                                    ytm_res = ytm.get_lyrics(a_name, track.title)
-                                except Exception as e:
-                                    logger.debug(
-                                        f"YTM get_lyrics échec '{a_name} - {track.title}': {e}"
-                                    )
-                            if ytm_res and not duration and ytm_res.get("duration"):
-                                duration = ytm_res["duration"]
-                            ytm_lrc = (
-                                (ytm_res.get("lyrics_synced") if ytm_res else None)
-                                if sync_ytm
-                                else None
+                            # Résolution timestamps + texte (cœur extrait, GUI-free).
+                            outcome = resolve_track_synced_lyrics(
+                                track,
+                                a_name,
+                                lrclib=lrclib,
+                                ytm=ytm,
+                                mxm=mxm,
+                                need_sync=need_sync,
+                                need_text=need_text,
+                                sync_ytm=sync_ytm,
                             )
-
-                            # SOURCE 1 (LRCLIB) : match sur la durée ±2 s
-                            lrclib_lrc = None
-                            if need_sync and lrclib is not None:
-                                try:
-                                    lr = lrclib.get_synced(
-                                        track.title,
-                                        a_name,
-                                        album_name=getattr(track, "album", None),
-                                        duration=duration,
-                                    )
-                                    if lr:
-                                        lrclib_lrc = lr.get("lyrics_synced")
-                                except Exception as e:
-                                    logger.debug(f"LRCLIB échec '{a_name} - {track.title}': {e}")
-
-                            # CROSS-CHECK (sources 1 & 2) + départage durée
-                            if need_sync:
-                                # E7d : persister le LRC BRUT par source (permet le
-                                # re-vote inter-runs à la lecture — le mapper E6
-                                # réconcilie via la même compare_synced). Une source
-                                # « a répondu » = a renvoyé un LRC non vide.
-                                _now = datetime.now()
-                                if lrclib_lrc:
-                                    track.observations.append(
-                                        Observation(
-                                            "lyrics_synced", lrclib_lrc, "lrclib", seen_at=_now
-                                        )
-                                    )
-                                if ytm_lrc:
-                                    track.observations.append(
-                                        Observation(
-                                            "lyrics_synced", ytm_lrc, "ytmusic", seen_at=_now
-                                        )
-                                    )
-                                verdict = compare_synced(lrclib_lrc, ytm_lrc, duration)
-                                if verdict:
-                                    track.lyrics_synced = verdict["lrc"]
-                                    track.lyrics_synced_source = verdict["source"]
-                                    track.lyrics_synced_confidence = verdict["confidence"]
-                                    if verdict["source"] == "LRCLIB":
-                                        n_lrclib += 1
-                                    else:
-                                        n_ytm += 1
-                                    if verdict["confidence"] >= 2:
-                                        n_cross += 1
-                                    else:
-                                        n_review += 1
-                                    logger.info(
-                                        f"⏱ {track.title}: {verdict['source']} (conf {verdict['confidence']}) — {verdict['note']}"
-                                    )
-                                elif mxm is not None:
-                                    # SOURCE 3 (Musixmatch) : dernier recours, LRCLIB+YTM vides.
-                                    try:
-                                        mres = mxm.get_synced_as_source3(
-                                            track.title, a_name, duration=duration
-                                        )
-                                    except Exception as e:
-                                        mres = None
-                                        logger.debug(
-                                            f"Musixmatch échec '{a_name} - {track.title}': {e}"
-                                        )
-                                    if mres:
-                                        track.lyrics_synced = mres["lrc"]
-                                        track.lyrics_synced_source = mres["source"]
-                                        track.lyrics_synced_confidence = mres["confidence"]
-                                        track.observations.append(
-                                            Observation(
-                                                "lyrics_synced",
-                                                mres["lrc"],
-                                                "musixmatch",
-                                                seen_at=_now,
-                                            )
-                                        )
-                                        n_mxm += 1
-                                        n_review += 1
-                                        logger.info(
-                                            f"⏱ {track.title}: Musixmatch (conf {mres['confidence']}) — {mres['note']}"
-                                        )
-
-                            # Fallback TEXTE (YTM) — seulement si Genius n'a rien donné.
-                            if need_text and not (track.has_lyrics and track.lyrics):
-                                txt = ytm_res.get("lyrics") if ytm_res else None
-                                if txt:
-                                    track.lyrics = txt
-                                    track.has_lyrics = True
-                                    track.lyrics_scraped_at = datetime.now()
-                                    track.lyrics_source = (
-                                        ytm_res.get("source") if ytm_res else None
-                                    ) or "YouTube Music"
-                                    n_text += 1
+                            track.observations.extend(outcome.observations)
+                            if outcome.lyrics_synced is not None:
+                                track.lyrics_synced = outcome.lyrics_synced
+                                track.lyrics_synced_source = outcome.lyrics_synced_source
+                                track.lyrics_synced_confidence = outcome.lyrics_synced_confidence
+                                if outcome.synced_kind == "lrclib":
+                                    n_lrclib += 1
+                                elif outcome.synced_kind == "ytm":
+                                    n_ytm += 1
+                                elif outcome.synced_kind == "musixmatch":
+                                    n_mxm += 1
+                                if outcome.synced_is_cross:
+                                    n_cross += 1
+                                else:
+                                    n_review += 1
+                            if outcome.text is not None:
+                                track.lyrics = outcome.text
+                                track.has_lyrics = True
+                                track.lyrics_scraped_at = datetime.now()
+                                track.lyrics_source = outcome.text_source
+                                n_text += 1
                             update_progress(i + 1, n_tracks, track.title, "Timestamps")
                         logger.info(
                             f"⏱ Synchro : {n_lrclib} LRCLIB, {n_ytm} YTM, {n_mxm} Musixmatch ; "

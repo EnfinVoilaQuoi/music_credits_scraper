@@ -67,17 +67,14 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
                 track.has_certification = True
                 track.certification_level = highest.get("certification", "")
                 track.certification_date = highest.get("certification_date", "")
-                track.certification_category = highest.get("category", "")
-                track.certification_publisher = highest.get("publisher", "")
-                track.certification_details = highest
+                # Durée d'obtention (écart sortie→certif) de la plus haute certif.
+                track.calculate_certification_duration()
                 enriched += 1
             else:
                 track.has_certification = False
                 track.certification_level = None
                 track.certification_date = None
-                track.certification_category = None
-                track.certification_publisher = None
-                track.certification_details = None
+                track.certification_duration_days = None
 
             if track.album:
                 if track.album not in album_cache:

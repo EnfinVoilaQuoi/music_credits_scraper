@@ -381,9 +381,6 @@ class Track:
     certification_level: str | None = None  # Plus haute certification (rétrocompatibilité)
     certification_date: datetime | None = None  # Date de la plus haute certification
     certification_duration_days: int | None = None  # Durée d'obtention en jours
-    certification_category: str | None = None  # "Singles" ou "Albums"
-    certification_publisher: str | None = None  # Éditeur/Distributeur
-    certification_details: dict[str, Any] | None = None  # Détails de la plus haute certification
 
     # NOUVEAU: Support de plusieurs certifications
     certifications: list[dict[str, Any]] = field(

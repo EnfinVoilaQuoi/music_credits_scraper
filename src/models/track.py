@@ -537,6 +537,39 @@ class Track:
         self.certification_duration_days = duration if duration >= 0 else None
         return self.certification_duration_days
 
+    def certification_milestone_durations(self) -> list[tuple[str, int]]:
+        """Délai (jours) sortie→certif pour chaque palier IMPORTANT atteint.
+
+        Un couple `(palier, jours)` par palier de base (Or, Platine, Diamant —
+        hors multiplicateurs) présent dans `certifications`, à la date la PLUS
+        ANCIENNE où le morceau l'a atteint. Paliers absents, sans date de sortie
+        ou aux dates illisibles : ignorés.
+        """
+        from src.utils.dates import parse_flexible
+
+        rel_date = parse_flexible(self.release_date)
+        if rel_date is None:
+            return []
+
+        out: list[tuple[str, int]] = []
+        for level in ("Or", "Platine", "Diamant"):
+            dates = [
+                d
+                for c in self.certifications
+                if c.get("certification") == level
+                and (d := parse_flexible(c.get("certification_date"))) is not None
+            ]
+            if not dates:
+                continue
+            try:
+                days = (min(dates) - rel_date).days
+            except TypeError:
+                # Mélange aware/naive (une date ISO avec 'Z', l'autre non)
+                continue
+            if days >= 0:
+                out.append((level, days))
+        return out
+
     @property
     def producers(self):
         """Propriété pour la compatibilité avec l'interface - retourne get_producers()"""

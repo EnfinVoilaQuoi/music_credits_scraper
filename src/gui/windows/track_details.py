@@ -212,8 +212,8 @@ class TrackDetailsWindow:
                 streams_source_label,
             )
 
-            sp = track.spotify_streams
-            yt = track.ytm_streams
+            sp = track.streams.spotify_streams
+            yt = track.streams.ytm_streams
             total_est = calculate_total_streams(sp, yt)
             if total_est:
                 suffix = streams_source_label(sp, yt)
@@ -913,17 +913,17 @@ class TrackDetailsWindow:
 
         # ── STREAMS & DURÉE ─────────────────────────────────────────
         tech_textbox.insert("end", "\n📦 STREAMS & DURÉE\n")
-        _sp_streams = track.spotify_streams
+        _sp_streams = track.streams.spotify_streams
         if _sp_streams is not None:
-            _sp_upd = track.spotify_streams_updated
+            _sp_upd = track.streams.spotify_streams_updated
             _sp_when = f"  (maj {helpers.format_datetime(_sp_upd)})" if _sp_upd else ""
             _n = f"{_sp_streams:,}".replace(",", " ")
             tech_textbox.insert("end", f"• Spotify : {_n}{_sp_when}\n")
         else:
             tech_textbox.insert("end", "• Spotify : —\n")
-        _ytm_streams = track.ytm_streams
+        _ytm_streams = track.streams.ytm_streams
         if _ytm_streams is not None:
-            _ytm_upd = track.ytm_streams_updated
+            _ytm_upd = track.streams.ytm_streams_updated
             _ytm_when = f"  (maj {helpers.format_datetime(_ytm_upd)})" if _ytm_upd else ""
             _n = f"{_ytm_streams:,}".replace(",", " ")
             tech_textbox.insert("end", f"• YouTube Music : {_n}{_ytm_when}\n")
@@ -1167,10 +1167,10 @@ class TrackDetailsWindow:
                 streams_source_label,
             )
 
-            sp = track.spotify_streams
-            yt = track.ytm_streams
-            sp_upd = track.spotify_streams_updated
-            yt_upd = track.ytm_streams_updated
+            sp = track.streams.spotify_streams
+            yt = track.streams.ytm_streams
+            sp_upd = track.streams.spotify_streams_updated
+            yt_upd = track.streams.ytm_streams_updated
             total_est = calculate_total_streams(sp, yt)
             suffix = streams_source_label(sp, yt)
 

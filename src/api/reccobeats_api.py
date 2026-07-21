@@ -560,6 +560,46 @@ class ReccoBeatsIntegratedClient:
             logger.error(f"❌ audio-features batch error: {e}")
         return result
 
+    def get_multiple_tracks_with_bpm(self, ids: list[str]) -> list[dict]:
+        """Récupère plusieurs tracks + audio features EN BATCH (1 appel /track?ids=
+        + 1 appel /audio-features?ids=). `ids` accepte Spotify IDs, ReccoBeats IDs
+        ou ISRC (max 40 — limite API).
+
+        NON câblé à l'orchestrateur GUI (le flux par morceau suffit) : bloc prêt
+        pour un futur « mode d'enrichissement par lots » — cf. WIP.md et
+        OPTIMISATION API.md §4. Retourne la liste de tracks (chacun enrichi de
+        'bpm' + 'audio_features' si dispo)."""
+        try:
+            # Doc ReccoBeats : 1 à 40 valeurs par requête /track?ids=
+            ids = ids[:40]
+            url = f"{self.recco_base_url}/track"
+            params = {"ids": ",".join(ids)}
+            logger.info(f"🎵 Batch request pour {len(ids)} tracks")
+            response = self.recco_session.get(url, params=params, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"❌ Batch request failed: {response.status_code}")
+                return []
+
+            # La réponse est wrappée dans {'content': [...]}
+            tracks = response.json().get("content", [])
+            if not tracks:
+                return []
+
+            # Audio features en UN appel batch, puis mapping par ID ReccoBeats
+            reccobeats_ids = [t["id"] for t in tracks if t.get("id")]
+            features_map = self.get_audio_features_batch(reccobeats_ids)
+            for track in tracks:
+                feats = features_map.get(track.get("id"))
+                if feats:
+                    track["bpm"] = feats.get("tempo")
+                    track["audio_features"] = feats
+
+            logger.info(f"✅ {len(tracks)} tracks enrichis (audio-features en 1 appel)")
+            return tracks
+        except Exception as e:
+            logger.error(f"❌ Batch processing error: {e}")
+            return []
+
     def get_cache_stats(self) -> dict:
         """Statistiques du cache"""
         total = len(self.cache)

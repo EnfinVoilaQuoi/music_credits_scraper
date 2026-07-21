@@ -33,8 +33,8 @@ def _track(has_lyrics=False, lyrics=None):
     t = Track(title="Solo", artist=Artist(name="X"))
     t.duration = 200
     t.album = "Album"
-    t.has_lyrics = has_lyrics
-    t.lyrics = lyrics
+    t.lyrics.present = has_lyrics
+    t.lyrics.text = lyrics
     return t
 
 
@@ -54,9 +54,9 @@ def test_applique_synchro_lrclib():
     track = _track()
     outcome = provider.enrich(track, "X", need_sync=True, need_text=False)
     # Appliqué au track
-    assert track.lyrics_synced == _LRC
-    assert track.lyrics_synced_source == "LRCLIB"
-    assert track.lyrics_synced_confidence == 1
+    assert track.lyrics.synced == _LRC
+    assert track.lyrics.synced_source == "LRCLIB"
+    assert track.lyrics.synced_confidence == 1
     assert [o.source for o in track.observations] == ["lrclib"]
     # Outcome renvoyé pour l'agrégation des compteurs
     assert outcome.synced_kind == "lrclib"
@@ -73,10 +73,10 @@ def test_applique_fallback_texte():
     )
     track = _track(has_lyrics=False, lyrics=None)
     outcome = provider.enrich(track, "X", need_sync=False, need_text=True)
-    assert track.lyrics == "des paroles"
-    assert track.has_lyrics is True
-    assert track.lyrics_source == "YouTube Music"
-    assert track.lyrics_scraped_at is not None
+    assert track.lyrics.text == "des paroles"
+    assert track.lyrics.present is True
+    assert track.lyrics.source == "YouTube Music"
+    assert track.lyrics.scraped_at is not None
     assert outcome.text == "des paroles"
 
 

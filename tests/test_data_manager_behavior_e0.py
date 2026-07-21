@@ -740,9 +740,9 @@ class TestLyricsSyncedObservations:
         _ajoute_obs(data_manager, track_id, "lyrics_synced", "ytmusic", value=self._LRC)
 
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.lyrics_synced == self._LRC
-        assert lu.lyrics_synced_source == "LRCLIB"
-        assert lu.lyrics_synced_confidence == 2
+        assert lu.lyrics.synced == self._LRC
+        assert lu.lyrics.synced_source == "LRCLIB"
+        assert lu.lyrics.synced_confidence == 2
 
     def test_delete_puis_relecture_sans_verdict(self, data_manager):
         # force_sync purge les obs → plus aucun verdict à la lecture.
@@ -753,4 +753,4 @@ class TestLyricsSyncedObservations:
         data_manager.delete_observations(track_id, "lyrics_synced")
 
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.lyrics_synced is None
+        assert lu.lyrics.synced is None

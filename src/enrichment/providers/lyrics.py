@@ -95,14 +95,14 @@ class LyricsProvider:
         )
         track.observations.extend(outcome.observations)
         if outcome.lyrics_synced is not None:
-            track.lyrics_synced = outcome.lyrics_synced
-            track.lyrics_synced_source = outcome.lyrics_synced_source
-            track.lyrics_synced_confidence = outcome.lyrics_synced_confidence
+            track.lyrics.synced = outcome.lyrics_synced
+            track.lyrics.synced_source = outcome.lyrics_synced_source
+            track.lyrics.synced_confidence = outcome.lyrics_synced_confidence
         if outcome.text is not None:
-            track.lyrics = outcome.text
-            track.has_lyrics = True
-            track.lyrics_scraped_at = datetime.now()
-            track.lyrics_source = outcome.text_source
+            track.lyrics.text = outcome.text
+            track.lyrics.present = True
+            track.lyrics.scraped_at = datetime.now()
+            track.lyrics.source = outcome.text_source
         return outcome
 
     def close(self) -> None:

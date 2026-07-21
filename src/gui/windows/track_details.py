@@ -55,7 +55,7 @@ class TrackDetailsWindow:
         details_window.protocol("WM_DELETE_WINDOW", on_close)
 
         # Agrandir la fenêtre selon le contenu
-        has_lyrics = track.lyrics
+        has_lyrics = track.lyrics.text
         window_height = "900" if has_lyrics else "750"
         details_window.geometry(f"900x{window_height}")
 
@@ -640,7 +640,7 @@ class TrackDetailsWindow:
             def copy_lyrics():
                 """Copie les paroles dans le presse-papier"""
                 details_window.clipboard_clear()
-                details_window.clipboard_append(track.lyrics)
+                details_window.clipboard_append(track.lyrics.text)
                 messagebox.showinfo("Copié", "Paroles copiées dans le presse-papier")
 
             # Section Anecdotes EN PREMIER si disponibles
@@ -671,8 +671,8 @@ class TrackDetailsWindow:
                 )
 
             # Header "Paroles complètes" avec stats et bouton Copier (APRÈS le séparateur)
-            words_count = len(track.lyrics.split()) if track.lyrics else 0
-            chars_count = len(track.lyrics) if track.lyrics else 0
+            words_count = len(track.lyrics.text.split()) if track.lyrics.text else 0
+            chars_count = len(track.lyrics.text) if track.lyrics.text else 0
 
             lyrics_header = ctk.CTkFrame(lyrics_scrollable)
             lyrics_header.pack(fill="x", padx=10, pady=(5, 10))
@@ -686,18 +686,18 @@ class TrackDetailsWindow:
             )
 
             info_text = f"📊 {words_count} mots • {chars_count} caractères"
-            if track.lyrics_source:
-                info_text += f" • {track.lyrics_source}"
-            if track.lyrics_synced:
+            if track.lyrics.source:
+                info_text += f" • {track.lyrics.source}"
+            if track.lyrics.synced:
                 info_text += " • ⏱ synchronisé"
-                _sy_src = track.lyrics_synced_source
+                _sy_src = track.lyrics.synced_source
                 if _sy_src:
                     info_text += f" ({_sy_src})"
-                _sy_conf = track.lyrics_synced_confidence
+                _sy_conf = track.lyrics.synced_confidence
                 if _sy_conf is not None and _sy_conf < 2:
                     info_text += " ⚠ à vérifier"
-            if track.lyrics_scraped_at:
-                date_str = helpers.format_datetime(track.lyrics_scraped_at)
+            if track.lyrics.scraped_at:
+                date_str = helpers.format_datetime(track.lyrics.scraped_at)
                 info_text += f" • Récupérées le {date_str}"
 
             ctk.CTkLabel(left_part, text=info_text, text_color="gray", font=("Arial", 9)).pack(
@@ -719,7 +719,7 @@ class TrackDetailsWindow:
             lyrics_textbox.pack(fill="x", padx=10, pady=10)
 
             # Nettoyer les paroles de l'anecdote si elle existe
-            clean_lyrics = track.lyrics
+            clean_lyrics = track.lyrics.text
             if track.anecdotes:
                 # Méthode robuste : retirer tout le texte jusqu'au premier tag [Couplet], [Partie], etc.
                 import re
@@ -746,11 +746,11 @@ class TrackDetailsWindow:
                             logger.debug("Anecdote retirée des paroles (méthode longueur)")
 
             # Timestamps par section (si synchro YTM dispo) : injectés dans les en-têtes
-            if track.lyrics_synced:
+            if track.lyrics.synced:
                 try:
                     from src.utils.lyrics_sync import annotate_sections
 
-                    clean_lyrics = annotate_sections(clean_lyrics, track.lyrics_synced)
+                    clean_lyrics = annotate_sections(clean_lyrics, track.lyrics.synced)
                 except Exception as e:
                     logger.debug(f"Annotation timestamps échouée: {e}")
 
@@ -867,15 +867,15 @@ class TrackDetailsWindow:
         tech_textbox.insert("end", f"• ISRC : {_yn(track.isrc)}  ({_isrc_src})\n")
 
         # ── PAROLES ─────────────────────────────────────────────────
-        _ly = track.lyrics or ""
+        _ly = track.lyrics.text or ""
         _has_struct = any(ln.lstrip().startswith("[") for ln in _ly.splitlines())
-        _has_ts = bool(track.lyrics_synced)
-        _ly_src = track.lyrics_source or "—"
+        _has_ts = bool(track.lyrics.synced)
+        _ly_src = track.lyrics.source or "—"
         tech_textbox.insert("end", "\n📝 PAROLES\n")
         tech_textbox.insert("end", f"• Texte présent : {_yn(_ly)}  (source : {_ly_src})\n")
         tech_textbox.insert("end", f"• Structure Genius [Couplet/Refrain] : {_yn(_has_struct)}\n")
-        _sy_src = track.lyrics_synced_source or ("?" if _has_ts else "—")
-        _sy_conf = track.lyrics_synced_confidence
+        _sy_src = track.lyrics.synced_source or ("?" if _has_ts else "—")
+        _sy_conf = track.lyrics.synced_confidence
         _sy_conf_txt = {
             2: "2 (croisé LRCLIB+YTM)",
             1: "1 (source unique / après départage durée)",
@@ -946,7 +946,7 @@ class TrackDetailsWindow:
             _missing.append("Key/Mode")
         if not track.isrc:
             _missing.append("ISRC")
-        if not (track.lyrics or ""):
+        if not (track.lyrics.text or ""):
             _missing.append("paroles")
         if not track.spotify_id:
             _missing.append("Spotify ID")

@@ -313,6 +313,24 @@ class Streams:
     ytm_streams_updated: datetime | None = None
 
 
+@dataclass
+class Lyrics:
+    """Paroles d'un morceau (texte + synchro LRC + provenance).
+
+    Sous-objet de `Track` (Phase 5). Champs renommés (le sous-objet porte déjà le
+    contexte « lyrics ») : accès via `track.lyrics.text.text`, `.synced`, etc. Les
+    colonnes DB gardent leurs noms (`lyrics`, `has_lyrics`, `lyrics_synced`…).
+    """
+
+    text: str | None = None  # Paroles complètes (colonne DB `lyrics`)
+    present: bool = False  # Présence de paroles (colonne DB `has_lyrics`)
+    scraped_at: datetime | None = None  # Date de récupération (colonne `lyrics_scraped_at`)
+    source: str | None = None  # Provenance (colonne `lyrics_source`)
+    synced: str | None = None  # LRC retenu LRCLIB>YTM (colonne `lyrics_synced`)
+    synced_source: str | None = None  # colonne `lyrics_synced_source`
+    synced_confidence: int | None = None  # colonne `lyrics_synced_confidence`
+
+
 @dataclass(eq=False)
 class Track:
     """Représente un morceau musical"""
@@ -351,18 +369,9 @@ class Track:
         None  # Rôle secondaire (ex: "Additional Voices") si l'artiste n'est ni primary ni feat — rempli = contribution secondaire
     )
 
-    # Support des paroles
-    lyrics: str | None = None  # Paroles complètes
-    has_lyrics: bool = False  # Indicateur si les paroles sont disponibles
-    lyrics_scraped_at: datetime | None = None  # Date de récupération des paroles
-    lyrics_source: str | None = None  # Provenance des paroles (YouTube Music / genius)
-    lyrics_synced: str | None = None  # Paroles synchronisées (LRC) retenues (LRCLIB > YTM)
-    lyrics_synced_source: str | None = (
-        None  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
-    )
-    lyrics_synced_confidence: int | None = (
-        None  # Nb de sources concordantes (2=croisé/validé, 1=unique ou après départage durée)
-    )
+    # Paroles (texte + synchro LRC + provenance) regroupées en sous-objet
+    # `lyrics` (Phase 5) : accès via track.lyrics.text.text / .synced / .source …
+    lyrics: Lyrics = field(default_factory=Lyrics)
     anecdotes: str | None = None  # Anecdotes et informations supplémentaires
 
     # Métadonnées supplémentaires
@@ -676,18 +685,18 @@ class Track:
         video_credits = self.get_video_credits()
 
         # Informations sur les paroles
-        if self.lyrics:
+        if self.lyrics.text:
             lyrics_info = {
                 "has_lyrics": True,
-                "lyrics_word_count": len(self.lyrics.split()),
-                "lyrics_char_count": len(self.lyrics),
+                "lyrics_word_count": len(self.lyrics.text.split()),
+                "lyrics_char_count": len(self.lyrics.text),
                 "lyrics_scraped_at": (
-                    self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None
+                    self.lyrics.scraped_at.isoformat() if self.lyrics.scraped_at else None
                 ),
-                "lyrics_source": self.lyrics_source,
-                "has_synced_lyrics": bool(self.lyrics_synced),
-                "lyrics_synced_source": self.lyrics_synced_source,
-                "lyrics_synced_confidence": self.lyrics_synced_confidence,
+                "lyrics_source": self.lyrics.source,
+                "has_synced_lyrics": bool(self.lyrics.synced),
+                "lyrics_synced_source": self.lyrics.synced_source,
+                "lyrics_synced_confidence": self.lyrics.synced_confidence,
             }
         else:
             lyrics_info = {

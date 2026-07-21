@@ -277,9 +277,9 @@ class TestReconcileLyricsSynced:
                 ]
             ),
         )
-        assert track.lyrics_synced == self._LRC
-        assert track.lyrics_synced_source == "LRCLIB"
-        assert track.lyrics_synced_confidence == 2  # INTEGER legacy (float casté)
+        assert track.lyrics.synced == self._LRC
+        assert track.lyrics.synced_source == "LRCLIB"
+        assert track.lyrics.synced_confidence == 2  # INTEGER legacy (float casté)
 
 
 class TestReconcileEmpty:

@@ -1,10 +1,8 @@
 # APIs
 lyricsgenius==3.0.1
 discogs-client==2.3.0
-pylast==5.2.0
 
 # Scraping
-selenium>=4.15.2
 playwright>=1.40.0
 beautifulsoup4>=4.12.2
 requests>=2.31.0
@@ -33,9 +31,6 @@ numpy>=1.24.3
 # (spring_layout numpy-only à l'échelle d'un album). numpy déjà listé ci-dessus.
 networkx>=3.3
 svgwrite>=1.4.3
-
-# Chrome driver
-webdriver-manager==4.0.1
 
 # YouTube integration
 ytmusicapi==1.8.0

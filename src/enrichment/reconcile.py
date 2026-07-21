@@ -270,10 +270,10 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
 
     lyrics = resolutions.get(LYRICS_SYNCED_FIELD)
     if lyrics is not None:
-        track.lyrics_synced = lyrics.value
-        track.lyrics_synced_source = lyrics.source
+        track.lyrics.synced = lyrics.value
+        track.lyrics.synced_source = lyrics.source
         # lyrics_synced_confidence est INTEGER en legacy (le moteur rend 1.0/2.0).
-        track.lyrics_synced_confidence = (
+        track.lyrics.synced_confidence = (
             int(lyrics.confidence) if lyrics.confidence is not None else None
         )
 

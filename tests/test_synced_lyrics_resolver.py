@@ -51,8 +51,8 @@ class _FakeMxm:
 def _track(title="Solo", duration=None, has_lyrics=False, lyrics=None, album="Album"):
     t = Track(title=title, artist=Artist(name="X"))
     t.duration = duration
-    t.has_lyrics = has_lyrics
-    t.lyrics = lyrics
+    t.lyrics.present = has_lyrics
+    t.lyrics.text = lyrics
     t.album = album
     return t
 

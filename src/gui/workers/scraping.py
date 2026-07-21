@@ -214,16 +214,16 @@ def start_combined_scraping(
                 # Mise à jour forcée : TEXTE et SYNCHRO sont désormais indépendants.
                 if force_lyrics:
                     for track in selected_tracks_list:
-                        track.lyrics = None
+                        track.lyrics.text = None
                         track.anecdotes = None
-                        track.has_lyrics = False
-                        track.lyrics_scraped_at = None
-                        track.lyrics_source = None
+                        track.lyrics.present = False
+                        track.lyrics.scraped_at = None
+                        track.lyrics.source = None
                 if force_sync:
                     for track in selected_tracks_list:
-                        track.lyrics_synced = None
-                        track.lyrics_synced_source = None
-                        track.lyrics_synced_confidence = None
+                        track.lyrics.synced = None
+                        track.lyrics.synced_source = None
+                        track.lyrics.synced_confidence = None
                         # E7d : « force » = repartir de zéro. Purger les obs
                         # lyrics persistées, sinon une source disparue laisserait
                         # une obs stale qui ressusciterait le verdict à la lecture.
@@ -235,7 +235,9 @@ def start_combined_scraping(
                 # 1) TEXTE STRUCTURÉ : Genius (sections [Couplet : artiste]). Le batch
                 #    skippe les morceaux déjà pourvus (ex. via la phase crédits Genius).
                 if lyrics_genius:
-                    need_text = [t for t in selected_tracks_list if not (t.has_lyrics and t.lyrics)]
+                    need_text = [
+                        t for t in selected_tracks_list if not (t.lyrics.present and t.lyrics.text)
+                    ]
                     if need_text:
                         if scraper is None:
                             scraper = GeniusScraperV3(headless=True)
@@ -246,8 +248,12 @@ def start_combined_scraping(
                             ),
                         )
                     for t in selected_tracks_list:
-                        if t.has_lyrics and t.lyrics and not getattr(t, "lyrics_source", None):
-                            t.lyrics_source = "genius"
+                        if (
+                            t.lyrics.present
+                            and t.lyrics.text
+                            and not getattr(t, "lyrics_source", None)
+                        ):
+                            t.lyrics.source = "genius"
 
                 # 2) TIMESTAMPS (paroles synchronisées) — sources cochées dans le dialogue :
                 #    SOURCE 1 = LRCLIB, SOURCE 2 = YTM, cross-check + départage par la durée
@@ -276,7 +282,9 @@ def start_combined_scraping(
                                 break
                             has_sync = bool(getattr(track, "lyrics_synced", None))
                             need_sync = scrape_sync and not (has_sync and not force_sync)
-                            need_text = lyrics_ytm and not (track.has_lyrics and track.lyrics)
+                            need_text = lyrics_ytm and not (
+                                track.lyrics.present and track.lyrics.text
+                            )
                             if not need_sync and not need_text:
                                 continue
 
@@ -324,7 +332,9 @@ def start_combined_scraping(
                         logger.warning(f"Passe synchro (timestamps) échouée: {e}")
 
                 if lyrics_results is None:
-                    n_ok = sum(1 for t in selected_tracks_list if t.has_lyrics and t.lyrics)
+                    n_ok = sum(
+                        1 for t in selected_tracks_list if t.lyrics.present and t.lyrics.text
+                    )
                     lyrics_results = {
                         "success": n_ok,
                         "failed": n_tracks - n_ok,

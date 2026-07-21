@@ -7,7 +7,7 @@ Deux rôles :
    le LRC YTM (source 2). Si les deux concordent → `confidence=2` (on garde LRCLIB).
    Sinon on **départage par la durée réelle** du morceau (`sync_error`) et on pose
    `confidence=1`. Une seule source → `confidence=1`. C'est le LRC retenu qui part en
-   base (`track.lyrics_synced`) avec sa source/confidence.
+   base (`track.lyrics.synced`) avec sa source/confidence.
 
 2. **Alignement d'affichage** (`annotate_sections`) : annote chaque en-tête de section
    `[Couplet : artiste]` avec son intervalle `⏱ 0:12 → 0:45`, en retrouvant le timestamp

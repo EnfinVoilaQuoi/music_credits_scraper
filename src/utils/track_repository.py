@@ -108,13 +108,13 @@ class TrackRepository:
                 "primary_artist_name": track.primary_artist_name,
                 "featured_artists": track.featured_artists,
                 "secondary_role": track.secondary_role,
-                "lyrics": track.lyrics,
-                "lyrics_scraped_at": track.lyrics_scraped_at,
-                "lyrics_source": track.lyrics_source,
-                "lyrics_synced": track.lyrics_synced,
-                "lyrics_synced_source": track.lyrics_synced_source,
-                "lyrics_synced_confidence": track.lyrics_synced_confidence,
-                "has_lyrics": bool(track.lyrics),  # INSERT uniquement
+                "lyrics": track.lyrics.text,
+                "lyrics_scraped_at": track.lyrics.scraped_at,
+                "lyrics_source": track.lyrics.source,
+                "lyrics_synced": track.lyrics.synced,
+                "lyrics_synced_source": track.lyrics.synced_source,
+                "lyrics_synced_confidence": track.lyrics.synced_confidence,
+                "has_lyrics": bool(track.lyrics.text),  # INSERT uniquement
                 "anecdotes": track.anecdotes,
                 "certifications_json": certifications_json,
                 "album_certifications_json": album_certifications_json,
@@ -258,7 +258,7 @@ class TrackRepository:
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
                 f"Morceau sauvegardé: {track.title} (ID: {track.id}, "
-                f"Featuring: {track.is_featuring}, Paroles: {bool(track.lyrics)})"
+                f"Featuring: {track.is_featuring}, Paroles: {bool(track.lyrics.text)})"
             )
             return track.id
 

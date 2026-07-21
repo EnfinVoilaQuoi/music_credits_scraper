@@ -587,7 +587,9 @@ class MainWindow:
                 )
 
                 # Morceaux avec paroles (actifs uniquement)
-                tracks_with_lyrics = sum(1 for t in active_tracks if t.lyrics and t.lyrics.strip())
+                tracks_with_lyrics = sum(
+                    1 for t in active_tracks if t.lyrics.text and t.lyrics.text.strip()
+                )
 
                 # Morceaux avec données additionnelles = BPM + Key/Mode + Durée (actifs uniquement)
                 tracks_with_additional = sum(

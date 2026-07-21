@@ -112,8 +112,8 @@ def populate_tracks_table(app):
             credits_display = str(credits_count)
 
             # Paroles : ✓ = texte, ⏱ = timestamps (paroles synchronisées) en plus
-            has_lyrics_flag = track.has_lyrics
-            has_sync_flag = bool(track.lyrics_synced)
+            has_lyrics_flag = track.lyrics.present
+            has_sync_flag = bool(track.lyrics.synced)
             if has_lyrics_flag and has_sync_flag:
                 lyrics_display = "✓⏱"
             elif has_sync_flag:
@@ -644,8 +644,8 @@ def sort_column(app, col):
         elif col == "Paroles":
             # rien < texte seul < texte + timestamps
             sort_key = lambda t: (
-                bool(t.has_lyrics),
-                bool(t.lyrics_synced),
+                bool(t.lyrics.present),
+                bool(t.lyrics.synced),
             )
         elif col == "BPM":
             sort_key = lambda t: t.audio.bpm or 0

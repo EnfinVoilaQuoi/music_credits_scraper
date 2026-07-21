@@ -32,9 +32,9 @@ class TestBaseVierge:
             is_featuring=True,
             primary_artist_name="Artiste Principal",
             featured_artists="Artiste Test",
-            lyrics="Première ligne\nDeuxième ligne",
-            has_lyrics=True,
         )
+        track.lyrics.text = "Première ligne\nDeuxième ligne"
+        track.lyrics.present = True
         assert data_manager.save_track(track)
 
     def test_relecture_des_champs_historiquement_manquants(self, data_manager):
@@ -45,11 +45,11 @@ class TestBaseVierge:
             is_featuring=True,
             primary_artist_name="Artiste Principal",
             featured_artists="Artiste Test",
-            lyrics="Première ligne\nDeuxième ligne",
-            has_lyrics=True,
             spotify_id="abc123",
         )
-        track.audio.bpm = 142  # Phase 5 : audio hors constructeur (sous-objet track.audio)
+        track.lyrics.text = "Première ligne\nDeuxième ligne"
+        track.lyrics.present = True
+        track.audio.bpm = 142  # Phase 5 : audio/lyrics hors constructeur (sous-objets)
         # E7-D1 : le BPM ne fait plus l'aller-retour par la colonne mais par les
         # observations → on l'émet explicitement (comme le flux d'enrichissement).
         track.observations = [Observation("bpm", 142, "songbpm")]
@@ -62,7 +62,7 @@ class TestBaseVierge:
         assert bool(lu.is_featuring) is True
         assert lu.primary_artist_name == "Artiste Principal"
         assert lu.featured_artists == "Artiste Test"
-        assert lu.lyrics == "Première ligne\nDeuxième ligne"
+        assert lu.lyrics.text == "Première ligne\nDeuxième ligne"
         assert lu.spotify_id == "abc123"
         assert lu.audio.bpm == 142  # reconstruit depuis l'observation
 
@@ -90,14 +90,15 @@ class TestUpdateNonDestructif:
         # observation (le re-save vide ne porte pas d'observation → aucun upsert) ;
         # lyrics reste préservé par le COALESCE de la colonne.
         artist = _artiste_sauve(data_manager)
-        t = Track(title="X", artist=artist, lyrics="paroles")
+        t = Track(title="X", artist=artist)
+        t.lyrics.text = "paroles"
         t.audio.bpm = 142
         t.observations = [Observation("bpm", 142, "songbpm")]
         data_manager.save_track(t)
         data_manager.save_track(Track(title="X", artist=artist))
         (lu,) = data_manager.get_artist_tracks(artist.id)
         assert lu.audio.bpm == 142
-        assert lu.lyrics == "paroles"
+        assert lu.lyrics.text == "paroles"
 
     def test_is_featuring_ecrase_sans_coalesce(self, data_manager):
         # Décision documentée : is_featuring est le seul champ écrasé sans COALESCE.

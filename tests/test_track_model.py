@@ -152,9 +152,10 @@ class TestTrackEquality:
 
     def test_meme_genius_id_meme_morceau_malgre_champs_differents(self):
         # Une version re-scrapée (paroles, bpm mis à jour) reste LE même morceau
-        a = Track(title="Chanson", genius_id=123, lyrics="v1")
-        b = Track(title="Chanson (Remaster)", genius_id=123, lyrics="v2")
-        a.audio.bpm, b.audio.bpm = 90, 140  # Phase 5 : audio hors constructeur (track.audio)
+        a = Track(title="Chanson", genius_id=123)
+        b = Track(title="Chanson (Remaster)", genius_id=123)
+        a.lyrics.text, b.lyrics.text = "v1", "v2"
+        a.audio.bpm, b.audio.bpm = 90, 140  # Phase 5 : audio/lyrics hors constructeur
         assert a == b
         assert hash(a) == hash(b)
 
@@ -178,10 +179,12 @@ class TestTrackEquality:
 
     def test_add_track_dedup_par_identite_metier(self):
         artist = Artist(name="X")
-        t1 = Track(title="Song", genius_id=999, lyrics="ancienne version")
+        t1 = Track(title="Song", genius_id=999)
+        t1.lyrics.text = "ancienne version"
         artist.add_track(t1)
         # Même genius_id, paroles différentes → pas de doublon
-        t2 = Track(title="Song", genius_id=999, lyrics="nouvelle version")
+        t2 = Track(title="Song", genius_id=999)
+        t2.lyrics.text = "nouvelle version"
         artist.add_track(t2)
         assert artist.get_tracks_count() == 1
 

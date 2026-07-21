@@ -401,7 +401,7 @@ def start_track_retrieval(
                                 key=lambda t: (
                                     bool(t.album),
                                     bool(t.audio.bpm),
-                                    bool(t.lyrics),
+                                    bool(t.lyrics.text),
                                     len(t.credits),
                                 ),
                             )
@@ -422,9 +422,9 @@ def start_track_retrieval(
                             track.audio.bpm = existing_track.audio.bpm
                         if not track.audio.musical_key and existing_track.audio.musical_key:
                             track.audio.musical_key = existing_track.audio.musical_key
-                        if not track.lyrics and existing_track.lyrics:
-                            track.lyrics = existing_track.lyrics
-                            track.has_lyrics = existing_track.has_lyrics
+                        if not track.lyrics.text and existing_track.lyrics.text:
+                            track.lyrics.text = existing_track.lyrics.text
+                            track.lyrics.present = existing_track.lyrics.present
                         if not track.credits and existing_track.credits:
                             track.credits = existing_track.credits
                         if not track.certifications and existing_track.certifications:

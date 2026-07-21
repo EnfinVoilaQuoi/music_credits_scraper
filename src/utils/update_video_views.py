@@ -56,8 +56,8 @@ def update_video_views(artist, tracks, data_manager, api=None) -> dict:
         views = info.get("views")
         if data_manager.update_track_video_views(track.id, views, kind):
             # Mutation mémoire (affichage immédiat, pas de reload nécessaire)
-            track.youtube_video_kind = kind
-            track.youtube_video_views = views
+            track.media.youtube_video_kind = kind
+            track.media.youtube_video_views = views
             report["updated"] += 1
             report["by_kind"][kind] = report["by_kind"].get(kind, 0) + 1
 

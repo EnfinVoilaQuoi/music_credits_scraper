@@ -122,8 +122,8 @@ class TrackRepository:
                 "spotify_page_title": getattr(track, "spotify_page_title", None),
                 # Chantier « Media » : chemins d'images (kind/vues vidéo passent par
                 # update_track_video_views, jamais ici).
-                "cover_path": track.cover_path,
-                "yt_thumbnail_path": track.yt_thumbnail_path,
+                "cover_path": track.media.cover_path,
+                "yt_thumbnail_path": track.media.yt_thumbnail_path,
                 "now": datetime.now(),
                 "last_scraped": track.last_scraped,
             }

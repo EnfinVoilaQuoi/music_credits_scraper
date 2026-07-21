@@ -133,11 +133,11 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
 
     # Chantier « Media » : chemins d'images (Text) + vidéo YouTube. La date
     # `youtube_video_views_updated` reste brute (piège TIMESTAMP, comme *_updated).
-    track.cover_path = _clean(row["cover_path"])
-    track.yt_thumbnail_path = _clean(row["yt_thumbnail_path"])
-    track.youtube_video_kind = _clean(row["youtube_video_kind"])
-    track.youtube_video_views = _clean_int(row["youtube_video_views"])
-    track.youtube_video_views_updated = _clean(row["youtube_video_views_updated"])
+    track.media.cover_path = _clean(row["cover_path"])
+    track.media.yt_thumbnail_path = _clean(row["yt_thumbnail_path"])
+    track.media.youtube_video_kind = _clean(row["youtube_video_kind"])
+    track.media.youtube_video_views = _clean_int(row["youtube_video_views"])
+    track.media.youtube_video_views_updated = _clean(row["youtube_video_views_updated"])
 
     relationships_raw = row["relationships"]
     try:

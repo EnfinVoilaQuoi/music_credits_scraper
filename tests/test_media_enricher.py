@@ -72,10 +72,21 @@ def _artist(**kw):
     return Artist(id=1, name=kw.pop("name", "Jul"), **kw)
 
 
+# Attrs routés vers le sous-objet track.media (Phase 5) par le helper _track.
+_MEDIA_ATTRS = {
+    "artwork_url",
+    "cover_path",
+    "yt_thumbnail_path",
+    "youtube_video_kind",
+    "youtube_video_views",
+    "youtube_video_views_updated",
+}
+
+
 def _track(title, artist, **kw):
     t = Track(id=kw.pop("id", None), title=title, artist=artist)
     for k, v in kw.items():
-        setattr(t, k, v)
+        setattr(t.media if k in _MEDIA_ATTRS else t, k, v)
     return t
 
 
@@ -148,8 +159,8 @@ def test_cover_album_posee_sur_tous_les_morceaux(media_env):
     ]
     report = _apply(artist, tracks, deezer=FakeDeezer())
     assert report.downloaded["cover"] == 1  # UN seul download pour l'album
-    assert tracks[0].cover_path == "covers/Jul - Feu.jpg"
-    assert tracks[1].cover_path == "covers/Jul - Feu.jpg"
+    assert tracks[0].media.cover_path == "covers/Jul - Feu.jpg"
+    assert tracks[1].media.cover_path == "covers/Jul - Feu.jpg"
 
 
 def test_cover_album_fallback_genius_transitoire(media_env):
@@ -159,7 +170,7 @@ def test_cover_album_fallback_genius_transitoire(media_env):
     deezer = FakeDeezer(track_cover=None)  # Deezer ne trouve pas
     report = _apply(artist, [t], deezer=deezer)
     assert report.downloaded["cover"] == 1
-    assert t.cover_path == "covers/Jul - Feu.jpg"
+    assert t.media.cover_path == "covers/Jul - Feu.jpg"
 
 
 # ── 4. Covers de singles ─────────────────────────────────────────────────────
@@ -168,7 +179,7 @@ def test_cover_single_prefere_artwork_url(media_env):
     t = _track("Solo", artist, artwork_url="http://genius/solo.jpg")
     deezer = FakeDeezer()
     report = _apply(artist, [t], deezer=deezer)
-    assert t.cover_path == "covers/Jul - Solo.jpg"
+    assert t.media.cover_path == "covers/Jul - Solo.jpg"
     assert report.downloaded["cover"] == 1
     # artwork_url suffisant → pas de recherche Deezer pour ce single
     assert ("Jul", "Solo") not in deezer.search_track_calls
@@ -193,7 +204,7 @@ def test_vignette_pour_show_exotic(media_env):
     artist = _artist()
     t = _track("Grünt #52", artist, youtube_url="https://youtu.be/dQw4w9WgXcQ")
     report = _apply(artist, [t], deezer=FakeDeezer())
-    assert t.yt_thumbnail_path == "vignettes/dQw4w9WgXcQ.jpg"
+    assert t.media.yt_thumbnail_path == "vignettes/dQw4w9WgXcQ.jpg"
     assert report.downloaded["vignette"] == 1
 
 
@@ -201,7 +212,7 @@ def test_pas_de_vignette_pour_morceau_album(media_env):
     artist = _artist()
     t = _track("Titre normal", artist, album="Album", youtube_url="https://youtu.be/dQw4w9WgXcQ")
     report = _apply(artist, [t], deezer=FakeDeezer())
-    assert t.yt_thumbnail_path is None
+    assert t.media.yt_thumbnail_path is None
     assert report.downloaded["vignette"] == 0
 
 
@@ -217,7 +228,7 @@ def test_vignette_maxres_404_bascule_hqdefault(media_env, monkeypatch):
     t = _track("Freestyle", artist, youtube_url="https://youtu.be/dQw4w9WgXcQ")
     report = _apply(artist, [t], deezer=FakeDeezer())
     assert report.downloaded["vignette"] == 1
-    assert t.yt_thumbnail_path == "vignettes/dQw4w9WgXcQ.jpg"
+    assert t.media.yt_thumbnail_path == "vignettes/dQw4w9WgXcQ.jpg"
 
 
 # ── should_stop ──────────────────────────────────────────────────────────────

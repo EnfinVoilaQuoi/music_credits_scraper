@@ -812,15 +812,15 @@ class TrackDetailsWindow:
             tech_textbox.insert("end", f"📈 Popularité: {track.popularity}\n")
 
         # Artwork
-        if track.artwork_url:
-            tech_textbox.insert("end", f"🖼️ Artwork: {track.artwork_url}\n")
+        if track.media.artwork_url:
+            tech_textbox.insert("end", f"🖼️ Artwork: {track.media.artwork_url}\n")
 
         # Vidéo YouTube (chantier « Media ») : nature + vues de LA vidéo
         # (distinct des streams YTM, somme audio+clip).
-        if track.youtube_video_kind or track.youtube_video_views is not None:
-            _kind = track.youtube_video_kind or "?"
-            if track.youtube_video_views is not None:
-                _views = f"{track.youtube_video_views:,}".replace(",", " ")
+        if track.media.youtube_video_kind or track.media.youtube_video_views is not None:
+            _kind = track.media.youtube_video_kind or "?"
+            if track.media.youtube_video_views is not None:
+                _views = f"{track.media.youtube_video_views:,}".replace(",", " ")
                 tech_textbox.insert("end", f"🎬 Vidéo ({_kind}) : {_views} vues\n")
             else:
                 tech_textbox.insert("end", f"🎬 Vidéo : {_kind}\n")

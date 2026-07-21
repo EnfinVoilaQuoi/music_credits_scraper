@@ -387,7 +387,7 @@ class GeniusAPI:
                     # consommé par media_enricher en fallback de Deezer.
                     art, album_cover = self._extract_song_art(song)
                     if art:
-                        track.artwork_url = art
+                        track.media.artwork_url = art
                     if album_cover:
                         track.album_cover_url = album_cover
                     if is_feat and primary.get("name"):
@@ -545,8 +545,8 @@ class GeniusAPI:
         # persistées (aucune colonne) → ne comptent PAS dans `changed` (pas de
         # save déclenché pour elles), simplement disponibles pour media_enricher.
         art, album_cover = self._extract_song_art(song)
-        if art and not track.artwork_url:
-            track.artwork_url = art
+        if art and not track.media.artwork_url:
+            track.media.artwork_url = art
         if album_cover:
             track.album_cover_url = album_cover
 

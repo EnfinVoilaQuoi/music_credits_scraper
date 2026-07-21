@@ -75,8 +75,8 @@ class TrackRepository:
                 # (gui/workers/retrieval.py).
 
             # Sérialiser les champs JSON une seule fois (partagés UPDATE/INSERT)
-            certifications_json = json.dumps(track.certifications)
-            album_certifications_json = json.dumps(track.album_certifications)
+            certifications_json = json.dumps(track.certs.entries)
+            album_certifications_json = json.dumps(track.certs.album_entries)
             relationships_json = json.dumps(track.relationships or [])
 
             # Paramètres NOMMÉS : un seul dict {colonne: valeur}, lié par nom

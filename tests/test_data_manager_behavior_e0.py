@@ -721,9 +721,9 @@ class TestCertificationsPersistence:
         data_manager.save_track(track)
 
         reloaded = _lire_track(data_manager, artist.id, track_id)
-        assert reloaded.certifications == [cert]
-        assert reloaded.has_certification is True
-        assert reloaded.certification_level == "Or"
+        assert reloaded.certs.entries == [cert]
+        assert reloaded.certs.has is True
+        assert reloaded.certs.level == "Or"
 
 
 class TestLyricsSyncedObservations:

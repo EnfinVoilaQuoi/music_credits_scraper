@@ -180,15 +180,15 @@ class TestTrackFromRow:
     def test_certifications_json_et_backcompat(self, artist):
         certs = [{"certification": "Or", "certification_date": "2020-01-01"}]
         track = track_from_row(make_row(id=1, title="X", certifications=json.dumps(certs)), artist)
-        assert track.certifications == certs
-        assert track.has_certification is True
-        assert track.certification_level == "Or"
-        assert track.certification_date == "2020-01-01"
+        assert track.certs.entries == certs
+        assert track.certs.has is True
+        assert track.certs.level == "Or"
+        assert track.certs.date == "2020-01-01"
 
     def test_certifications_absentes_liste_vide(self, artist):
         track = track_from_row(make_row(id=1, title="X"), artist)
-        assert track.certifications == []
-        assert track.has_certification is False
+        assert track.certs.entries == []
+        assert track.certs.has is False
 
     def test_champs_media(self, artist):
         # Chantier « Media » : chemins d'images + métadonnées vidéo (round-trip).

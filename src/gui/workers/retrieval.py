@@ -427,14 +427,14 @@ def start_track_retrieval(
                             track.lyrics.present = existing_track.lyrics.present
                         if not track.credits and existing_track.credits:
                             track.credits = existing_track.credits
-                        if not track.certifications and existing_track.certifications:
-                            track.certifications = existing_track.certifications
+                        if not track.certs.entries and existing_track.certs.entries:
+                            track.certs.entries = existing_track.certs.entries
                         # Préserver l'ID de la base de données
                         track.id = existing_track.id
 
                 # E7h : rematch des certifications depuis les CSV clean (matcher
                 # en mémoire, offline, rapide) AVANT le save — pose
-                # track.certifications/album_certifications à jour. Autorité = les
+                # track.certs.entries/album_certifications à jour. Autorité = les
                 # CSV clean ; écrase la préservation ci-dessus (certifs = données
                 # dérivées, pas saisies). Défensif : n'interrompt pas la récup.
                 try:

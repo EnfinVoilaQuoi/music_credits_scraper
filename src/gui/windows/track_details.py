@@ -1084,7 +1084,7 @@ class TrackDetailsWindow:
                         for lvl, d in track.certification_milestone_durations()
                     ]
                     _high_days = track.calculate_certification_duration()
-                    _high_lvl = track.certification_level
+                    _high_lvl = track.certs.level
                     if (
                         _high_days is not None
                         and _high_lvl

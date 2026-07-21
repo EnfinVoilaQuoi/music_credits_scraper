@@ -124,11 +124,11 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.lyrics_synced_confidence = _clean_int(row["lyrics_synced_confidence"])
     track.youtube_url = _clean(row["youtube_url"])
     track.youtube_url_source = _clean(row["youtube_url_source"])
-    track.spotify_streams = _clean_int(row["spotify_streams"])
-    track.spotify_daily_streams = _clean_int(row["spotify_daily_streams"])
-    track.spotify_streams_updated = _clean(row["spotify_streams_updated"])
-    track.ytm_streams = _clean_int(row["ytm_streams"])
-    track.ytm_streams_updated = _clean(row["ytm_streams_updated"])
+    track.streams.spotify_streams = _clean_int(row["spotify_streams"])
+    track.streams.spotify_daily_streams = _clean_int(row["spotify_daily_streams"])
+    track.streams.spotify_streams_updated = _clean(row["spotify_streams_updated"])
+    track.streams.ytm_streams = _clean_int(row["ytm_streams"])
+    track.streams.ytm_streams_updated = _clean(row["ytm_streams_updated"])
     track.album_override = _clean_int(row["album_override"])
 
     # Chantier « Media » : chemins d'images (Text) + vidéo YouTube. La date

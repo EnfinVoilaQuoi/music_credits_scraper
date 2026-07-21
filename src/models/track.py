@@ -297,6 +297,22 @@ class Audio:
     reccobeats_resolution: str | None = None  # 'isrc' | 'spotify_id' — voie ReccoBeats
 
 
+@dataclass
+class Streams:
+    """Compteurs de streams d'un morceau (Spotify via Kworb + YouTube Music).
+
+    Sous-objet de `Track` (Phase 5). Écrits en base par write-through
+    (update_kworb / update_ytmusic) puis relus par le mapper ; noms de champs
+    alignés sur les colonnes DB. Accès via `track.streams.<champ>`.
+    """
+
+    spotify_streams: int | None = None
+    spotify_daily_streams: int | None = None
+    spotify_streams_updated: datetime | None = None
+    ytm_streams: int | None = None
+    ytm_streams_updated: datetime | None = None
+
+
 @dataclass(eq=False)
 class Track:
     """Représente un morceau musical"""
@@ -405,14 +421,9 @@ class Track:
         default_factory=list
     )  # Certifications de l'album associé
 
-    # Streams Spotify (kworb.net)
-    spotify_streams: int | None = None
-    spotify_daily_streams: int | None = None
-    spotify_streams_updated: datetime | None = None
-
-    # Streams YouTube Music
-    ytm_streams: int | None = None
-    ytm_streams_updated: datetime | None = None
+    # Streams (Spotify via kworb.net + YouTube Music) regroupés en sous-objet
+    # `streams` (Phase 5) : accès via track.streams.<champ>.
+    streams: Streams = field(default_factory=Streams)
 
     # Chantier « Media » : vues de LA vidéo YouTube (clip/show/live) et sa
     # catégorie — SÉPARÉ de ytm_streams (somme audio+clip). Différencie un clip

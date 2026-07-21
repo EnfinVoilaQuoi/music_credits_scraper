@@ -340,8 +340,8 @@ class TestUpdateTrackStreams:
 
         assert data_manager.update_track_spotify_streams(track_id, 12345, 678) is True
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.spotify_streams == 12345
-        assert lu.spotify_daily_streams == 678
+        assert lu.streams.spotify_streams == 12345
+        assert lu.streams.spotify_daily_streams == 678
 
     def test_update_spotify_streams_updated_at_personnalise(self, data_manager):
         artist = _artiste(data_manager)
@@ -349,14 +349,14 @@ class TestUpdateTrackStreams:
 
         data_manager.update_track_spotify_streams(track_id, 100, 1, updated_at="2020-01-01")
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.spotify_streams_updated == "2020-01-01"
+        assert lu.streams.spotify_streams_updated == "2020-01-01"
 
     def test_update_ytm_streams(self, data_manager):
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
         assert data_manager.update_track_ytm_streams(track_id, 98765) is True
-        assert _lire_track(data_manager, artist.id, track_id).ytm_streams == 98765
+        assert _lire_track(data_manager, artist.id, track_id).streams.ytm_streams == 98765
 
     def test_spotify_streams_ecrit_une_observation(self, data_manager):
         # E7e : write-through de provenance (source kworb, seen_at verbatim).

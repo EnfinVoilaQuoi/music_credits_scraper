@@ -241,9 +241,9 @@ def populate_albums_table(app):
         # Pas de stats album Kworb (ligne Featurings, apparitions écartées,
         # singles) → fallback : somme des streams MORCEAU du groupe
         if not sp:
-            sp = sum(t.spotify_streams or 0 for t in tracks) or None
+            sp = sum(t.streams.spotify_streams or 0 for t in tracks) or None
         if not yt:
-            yt = sum(t.ytm_streams or 0 for t in tracks) or None
+            yt = sum(t.streams.ytm_streams or 0 for t in tracks) or None
         sp_streams = fmt_streams(sp)
         ytm_streams = fmt_streams(yt)
 

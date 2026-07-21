@@ -205,8 +205,8 @@ def populate_tracks_table(app):
                     streams_source_label,
                 )
 
-                sp = track.spotify_streams
-                yt = track.ytm_streams
+                sp = track.streams.spotify_streams
+                yt = track.streams.ytm_streams
                 streams_total = calculate_total_streams(sp, yt)
                 streams_display = format_streams(streams_total, streams_source_label(sp, yt))
             except Exception:
@@ -714,7 +714,9 @@ def sort_column(app, col):
                 try:
                     from src.utils.streams_calculator import calculate_total_streams
 
-                    total = calculate_total_streams(t.spotify_streams, t.ytm_streams)
+                    total = calculate_total_streams(
+                        t.streams.spotify_streams, t.streams.ytm_streams
+                    )
                     return total if total is not None else -1
                 except Exception:
                     return -1

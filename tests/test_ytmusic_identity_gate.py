@@ -95,7 +95,7 @@ def _track(idx, title, album="Alb", spotify_streams=None):
         id=idx,
         title=title,
         album=album,
-        spotify_streams=spotify_streams,
+        streams=SimpleNamespace(spotify_streams=spotify_streams),  # Phase 5 : sous-objet
         is_featuring=False,
         primary_artist_name=None,
         youtube_url=None,

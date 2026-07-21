@@ -676,7 +676,9 @@ class MainWindow:
                     total_cumul = 0
                     tracks_with_streams = 0
                     for t in active_tracks:
-                        est = calculate_total_streams(t.spotify_streams, t.ytm_streams)
+                        est = calculate_total_streams(
+                            t.streams.spotify_streams, t.streams.ytm_streams
+                        )
                         if est:
                             total_cumul += est
                             tracks_with_streams += 1

@@ -421,7 +421,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
         t
         for t in db_tracks
         if t.id not in covered_track_ids
-        and getattr(t, "spotify_streams", None) is not None  # repéré sur Kworb
+        and t.streams.spotify_streams is not None  # repéré sur Kworb
     ]
     if candidates:
         try:

@@ -1,11 +1,11 @@
 {
-  "last_update": "2026-07-15T18:57:26.665280",
+  "last_update": "2026-07-20T22:16:37.236622",
   "source": "MIGRATION",
-  "count": 11865,
-  "last_source": "ARTIST",
+  "count": 11893,
+  "last_source": "GLOBAL",
   "updates": {
     "MIGRATION": "2026-07-12T10:05:17.378630",
-    "GLOBAL": "2026-07-15T18:57:05.418401",
+    "GLOBAL": "2026-07-20T22:16:37.236622",
     "ARTIST": "2026-07-15T18:57:26.665280"
   }
 }

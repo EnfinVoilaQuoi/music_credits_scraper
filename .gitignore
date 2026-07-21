@@ -62,6 +62,9 @@ lib/*
 .claude/
 CLAUDE.md
 JOURNAL.md
+WIP.md
+/*.md
+docs/api/
 
 # OS
 .DS_Store
@@ -99,7 +102,6 @@ scripts/*
 # Dataviz / export studio
 !scripts/bubble_prod.py
 !scripts/bubble_feat.py
-docs/api/
 /test*\.py
 /*test\.py
 /debug*\.py

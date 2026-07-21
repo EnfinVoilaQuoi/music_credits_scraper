@@ -202,11 +202,11 @@ class TestTrackFromRow:
             youtube_video_views_updated="2026-07-18 10:00:00",
         )
         track = track_from_row(row, artist)
-        assert track.cover_path == "covers/Jul - C'est pas des LOL.jpg"
-        assert track.yt_thumbnail_path == "vignettes/abc123DEF45.jpg"
-        assert track.youtube_video_kind == "clip"
-        assert track.youtube_video_views == 123456  # coercition str → int
-        assert track.youtube_video_views_updated == "2026-07-18 10:00:00"  # brut (TIMESTAMP)
+        assert track.media.cover_path == "covers/Jul - C'est pas des LOL.jpg"
+        assert track.media.yt_thumbnail_path == "vignettes/abc123DEF45.jpg"
+        assert track.media.youtube_video_kind == "clip"
+        assert track.media.youtube_video_views == 123456  # coercition str → int
+        assert track.media.youtube_video_views_updated == "2026-07-18 10:00:00"  # brut (TIMESTAMP)
 
 
 class TestObservationsOverride:

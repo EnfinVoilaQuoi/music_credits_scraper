@@ -112,12 +112,12 @@ class TestUpdateNonDestructif:
         # CASE WHEN :certifications_json = '[]' → conserve l'existant.
         artist = _artiste_sauve(data_manager)
         t = Track(title="X", artist=artist)
-        t.certifications = [{"certification": "Or", "certification_date": "2020-01-01"}]
+        t.certs.entries = [{"certification": "Or", "certification_date": "2020-01-01"}]
         data_manager.save_track(t)
         data_manager.save_track(Track(title="X", artist=artist))
         (lu,) = data_manager.get_artist_tracks(artist.id)
-        assert lu.certifications
-        assert lu.certifications[0]["certification"] == "Or"
+        assert lu.certs.entries
+        assert lu.certs.entries[0]["certification"] == "Or"
 
 
 class TestClearAudio:

@@ -331,6 +331,23 @@ class Lyrics:
     synced_confidence: int | None = None  # colonne `lyrics_synced_confidence`
 
 
+@dataclass
+class Certs:
+    """Certifications d'un morceau (plus haute + listes détaillées).
+
+    Sous-objet de `Track` (Phase 5). Renommé (`certs`) pour éviter la collision
+    avec la liste `certifications` : accès via track.certs.level / .date /
+    .entries … Les colonnes/JSON DB gardent leurs noms.
+    """
+
+    has: bool = False  # colonne DB `has_certification`
+    level: str | None = None  # Plus haute certif (colonne `certification_level`)
+    date: datetime | None = None  # Date de la plus haute (colonne `certification_date`)
+    duration_days: int | None = None  # Durée d'obtention (colonne `certification_duration_days`)
+    entries: list[dict[str, Any]] = field(default_factory=list)  # colonne `certifications`
+    album_entries: list[dict[str, Any]] = field(default_factory=list)  # `album_certifications`
+
+
 @dataclass(eq=False)
 class Track:
     """Représente un morceau musical"""
@@ -416,19 +433,9 @@ class Track:
     # une colonne ; toujours False après une lecture DB.
     clear_audio_observations: bool = field(default=False, repr=False)
 
-    # Champs de certification SNEP - VERSION MULTI-CERTIFICATIONS
-    has_certification: bool = False
-    certification_level: str | None = None  # Plus haute certification (rétrocompatibilité)
-    certification_date: datetime | None = None  # Date de la plus haute certification
-    certification_duration_days: int | None = None  # Durée d'obtention en jours
-
-    # NOUVEAU: Support de plusieurs certifications
-    certifications: list[dict[str, Any]] = field(
-        default_factory=list
-    )  # Toutes les certifications du morceau
-    album_certifications: list[dict[str, Any]] = field(
-        default_factory=list
-    )  # Certifications de l'album associé
+    # Certifications (plus haute + listes détaillées) regroupées en sous-objet
+    # `certs` (Phase 5) : accès via track.certs.level / .date / .entries …
+    certs: Certs = field(default_factory=Certs)
 
     # Streams (Spotify via kworb.net + YouTube Music) regroupés en sous-objet
     # `streams` (Phase 5) : accès via track.streams.<champ>.
@@ -559,7 +566,7 @@ class Track:
         """Calcule la durée (en jours) entre la sortie et la certification."""
         from src.utils.dates import parse_flexible
 
-        cert_date = parse_flexible(self.certification_date)
+        cert_date = parse_flexible(self.certs.date)
         rel_date = parse_flexible(self.release_date)
         if cert_date is None or rel_date is None:
             return None
@@ -569,8 +576,8 @@ class Track:
         except TypeError:
             # Mélange aware/naive (une date ISO avec 'Z', l'autre non)
             return None
-        self.certification_duration_days = duration if duration >= 0 else None
-        return self.certification_duration_days
+        self.certs.duration_days = duration if duration >= 0 else None
+        return self.certs.duration_days
 
     def certification_milestone_durations(self) -> list[tuple[str, int]]:
         """Délai (jours) sortie→certif pour chaque palier IMPORTANT atteint.
@@ -590,7 +597,7 @@ class Track:
         for level in ("Or", "Platine", "Diamant"):
             dates = [
                 d
-                for c in self.certifications
+                for c in self.certs.entries
                 if c.get("certification") == level
                 and (d := parse_flexible(c.get("certification_date"))) is not None
             ]

@@ -615,7 +615,7 @@ class MainWindow:
 
                 # Morceaux avec certifications (actifs uniquement)
                 tracks_with_certifications = sum(
-                    1 for t in active_tracks if t.certifications and len(t.certifications) > 0
+                    1 for t in active_tracks if t.certs.entries and len(t.certs.entries) > 0
                 )
 
                 # Albums avec certifications (compter les albums uniques, pas les morceaux)
@@ -623,7 +623,7 @@ class MainWindow:
                     {
                         t.album
                         for t in active_tracks
-                        if t.album_certifications and len(t.album_certifications) > 0 and t.album
+                        if t.certs.album_entries and len(t.certs.album_entries) > 0 and t.album
                     }
                 )
 

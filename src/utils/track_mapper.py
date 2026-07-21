@@ -178,33 +178,33 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     certifications_json = row["certifications"]
     try:
         if certifications_json:
-            track.certifications = json.loads(certifications_json)
+            track.certs.entries = json.loads(certifications_json)
             # Champs de rétrocompatibilité (plus haute certification)
-            if track.certifications:
-                highest = track.certifications[0]
-                track.has_certification = True
-                track.certification_level = highest.get("certification")
-                track.certification_date = highest.get("certification_date")
+            if track.certs.entries:
+                highest = track.certs.entries[0]
+                track.certs.has = True
+                track.certs.level = highest.get("certification")
+                track.certs.date = highest.get("certification_date")
         else:
-            track.certifications = []
+            track.certs.entries = []
     except (ValueError, TypeError, json.JSONDecodeError):
         logger.debug(
             f"JSON certifications invalide pour track {track_id}: {certifications_json!r:.100}"
         )
-        track.certifications = []
+        track.certs.entries = []
 
     album_certifications_json = row["album_certifications"]
     try:
         if album_certifications_json:
-            track.album_certifications = json.loads(album_certifications_json)
+            track.certs.album_entries = json.loads(album_certifications_json)
         else:
-            track.album_certifications = []
+            track.certs.album_entries = []
     except (ValueError, TypeError, json.JSONDecodeError):
         logger.debug(
             f"JSON album_certifications invalide pour track {track_id}: "
             f"{album_certifications_json!r:.100}"
         )
-        track.album_certifications = []
+        track.certs.album_entries = []
 
     # E6 : les observations pilotent l'audio réconciliable (bpm/key/mode), en
     # écrasant les colonnes legacy déjà posées ci-dessus. Champ sans observation

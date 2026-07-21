@@ -196,7 +196,7 @@ class TestCertificationMilestoneDurations:
     def test_un_delai_par_palier_de_base_au_plus_tot(self):
         t = Track(title="X")
         t.release_date = "2020-01-01"
-        t.certifications = [
+        t.certs.entries = [
             {"certification": "Diamant", "certification_date": "2023-01-01"},
             {"certification": "Platine", "certification_date": "2021-07-01"},
             {"certification": "Or", "certification_date": "2020-07-01"},
@@ -211,7 +211,7 @@ class TestCertificationMilestoneDurations:
 
     def test_sans_date_de_sortie_renvoie_vide(self):
         t = Track(title="X")
-        t.certifications = [{"certification": "Or", "certification_date": "2020-07-01"}]
+        t.certs.entries = [{"certification": "Or", "certification_date": "2020-07-01"}]
         assert t.certification_milestone_durations() == []
 
 

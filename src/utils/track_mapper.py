@@ -118,10 +118,10 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.audio.key_mode_source = None
     track.audio.reccobeats_resolution = None
     track.audio.bpm_alt = None
-    track.lyrics_source = _clean(row["lyrics_source"])
-    track.lyrics_synced = _clean(row["lyrics_synced"])
-    track.lyrics_synced_source = _clean(row["lyrics_synced_source"])
-    track.lyrics_synced_confidence = _clean_int(row["lyrics_synced_confidence"])
+    track.lyrics.source = _clean(row["lyrics_source"])
+    track.lyrics.synced = _clean(row["lyrics_synced"])
+    track.lyrics.synced_source = _clean(row["lyrics_synced_source"])
+    track.lyrics.synced_confidence = _clean_int(row["lyrics_synced_confidence"])
     track.youtube_url = _clean(row["youtube_url"])
     track.youtube_url_source = _clean(row["youtube_url_source"])
     track.streams.spotify_streams = _clean_int(row["spotify_streams"])
@@ -169,10 +169,10 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.secondary_role = _clean(row["secondary_role"])
 
     # Propriétés paroles
-    track.lyrics = _clean(row["lyrics"])
+    track.lyrics.text = _clean(row["lyrics"])
     track.anecdotes = _clean(row["anecdotes"])
-    track.has_lyrics = bool(_clean(row["has_lyrics"], False))
-    track.lyrics_scraped_at = _clean(row["lyrics_scraped_at"])
+    track.lyrics.present = bool(_clean(row["has_lyrics"], False))
+    track.lyrics.scraped_at = _clean(row["lyrics_scraped_at"])
 
     # Désérialiser les certifications JSON
     certifications_json = row["certifications"]

@@ -118,7 +118,7 @@ def get_track_status_icon(track, disabled_ids) -> str:
             missing.append("Crédits")
 
         # 4. Paroles obtenues
-        if not track.lyrics or not track.lyrics.strip():
+        if not track.lyrics.text or not track.lyrics.text.strip():
             missing.append("Paroles")
 
         # 5. BPM

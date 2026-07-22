@@ -265,7 +265,7 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     if key_pc is not None and mode_val is not None:
         try:
             track.audio.musical_key = key_mode_to_french(key_pc, mode_val)
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, IndexError) as e:
             logger.warning(f"⚠️ apply_resolutions musical_key: {e}")
 
     lyrics = resolutions.get(LYRICS_SYNCED_FIELD)

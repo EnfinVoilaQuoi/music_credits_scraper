@@ -751,7 +751,7 @@ class TrackDetailsWindow:
                     from src.utils.lyrics_sync import annotate_sections
 
                     clean_lyrics = annotate_sections(clean_lyrics, track.lyrics.synced)
-                except Exception as e:
+                except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.debug(f"Annotation timestamps échouée: {e}")
 
             formatted_lyrics = helpers.format_lyrics_for_display(clean_lyrics)

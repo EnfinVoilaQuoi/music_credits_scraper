@@ -63,7 +63,7 @@ class DataEnricher:
         try:
             self.deezer_client = DeezerAPI()
             logger.info("✅ Deezer API initialisée")
-        except Exception as e:
+        except (ValueError, OSError) as e:
             logger.error(f"❌ Erreur init Deezer API: {e}")
 
         self.genius_client = None
@@ -72,7 +72,8 @@ class DataEnricher:
 
             self.genius_client = GeniusAPI()
             logger.info("✅ Genius API initialisée (media feats)")
-        except Exception as e:
+        except (ValueError, ImportError) as e:
+            # GeniusAPI() lève ValueError sans GENIUS_API_KEY (état de config normal).
             logger.debug(f"Genius API non disponible dans l'enricher: {e}")
 
         from src.scrapers.spotify_id_scraper_async import SpotifyIDScraperAsync
@@ -153,7 +154,7 @@ class DataEnricher:
         for provider in [*self._pipeline, self._discogs_provider]:
             try:
                 provider.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — fermeture best-effort de fin de batch
                 logger.warning(f"⚠️ Fermeture provider {provider.name}: {e}")
 
     def __enter__(self):
@@ -360,8 +361,11 @@ class DataEnricher:
                     logger.info(
                         f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
                     )
-            except Exception as e:
-                logger.debug(f"Voie ISRC échec: {e}")
+            except Exception:
+                # Pré-étape hors _run_step : le provider gère déjà ses frontières,
+                # ce qui remonte est un bug → trace complète (la voie ISRC est
+                # opportuniste, le pipeline retentera).
+                logger.exception("Voie ISRC échec")
 
         # Boucle ordonnée : gate() décide (skip → valeur posée telle quelle),
         # enrich() tourne derrière la frontière d'exception de _run_step.
@@ -410,8 +414,8 @@ class DataEnricher:
                     logger.info(
                         f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
                     )
-            except Exception as e:
-                logger.debug(f"Voie ISRC échec: {e}")
+            except Exception:
+                logger.exception("Voie ISRC échec")
 
         for provider in self._pipeline:
             await self._run_step_async(provider, track, ctx, sources, results)
@@ -544,8 +548,10 @@ class DataEnricher:
                 logger.info(f"✅ {name} SUCCÈS pour '{track.title}'")
             elif outcome is False:
                 logger.warning(f"❌ {name} ÉCHEC pour '{track.title}'")
-        except Exception as e:
-            logger.error(f"❌ Erreur {name} pour {track.title}: {e}")
+        except Exception:
+            # Frontière d'exception du batch (dernier ressort) : un provider qui
+            # lève ne stoppe pas le run. logger.exception = trace complète.
+            logger.exception(f"❌ Erreur {name} pour {track.title}")
             results[name] = provider.error_result
 
     async def _run_step_async(
@@ -568,8 +574,9 @@ class DataEnricher:
                 logger.info(f"✅ {name} SUCCÈS pour '{track.title}'")
             elif outcome is False:
                 logger.warning(f"❌ {name} ÉCHEC pour '{track.title}'")
-        except Exception as e:
-            logger.error(f"❌ Erreur {name} pour {track.title}: {e}")
+        except Exception:
+            # Frontière d'exception du batch (dernier ressort), cf. jumeau sync.
+            logger.exception(f"❌ Erreur {name} pour {track.title}")
             results[name] = provider.error_result
 
     async def aclose_http(self) -> None:
@@ -584,7 +591,7 @@ class DataEnricher:
         for provider in (self._spotify_id_provider, self._songbpm_provider):
             try:
                 await provider.aclose()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — fermeture best-effort de fin de batch
                 logger.warning(f"⚠️ Fermeture async provider {provider.name}: {e}")
 
     def _apply_genius_feat_metadata(self, track) -> None:
@@ -605,8 +612,10 @@ class DataEnricher:
                     f"🎫 Genius (feat) '{track.title}' : Spotify={track.spotify_id}, "
                     f"relations={len(track.relationships or [])}"
                 )
-        except Exception as e:
-            logger.debug(f"Genius media feat échec: {e}")
+        except (AttributeError, TypeError) as e:
+            # apply_song_metadata gère déjà son réseau (requests/AssertionError) ;
+            # ici on ne couvre plus qu'un accès inattendu → warning, pas de silence.
+            logger.warning(f"Genius media feat échec: {e}")
 
     def _clear_after_total_failure(self, track, results: dict, initial_bpm) -> None:
         """Efface les données musicales si TOUTES les sources ayant tenté ont échoué.

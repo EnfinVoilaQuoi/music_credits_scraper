@@ -181,7 +181,7 @@ class UltratopScraperInitial:
                             }
                         )
 
-            except Exception as e:
+            except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
                 self.logger.error(f"Erreur lors de l'extraction d'une certification: {e}")
                 continue
 

@@ -77,5 +77,5 @@ class StreamsProvider:
             if callable(close):
                 try:
                     close()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — fermeture best-effort (client arbitraire)
                     logger.debug(f"Fermeture client streams: {e}")

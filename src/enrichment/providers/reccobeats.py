@@ -9,6 +9,8 @@ logique. Deux points d'entrée pour l'orchestrateur :
 Le BPM alimente le scrutin partagé (§8.3) ; l'unicité d'ID passe par le contexte.
 """
 
+from playwright.async_api import Error as PlaywrightError
+
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
@@ -18,6 +20,7 @@ from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+# playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
 
 
 class ReccoBeatsProvider:
@@ -127,7 +130,7 @@ class ReccoBeatsProvider:
                 if isrc:
                     track.isrc = isrc
                     logger.info(f"🔑 ISRC récupéré via Deezer: {isrc}")
-            except Exception as e:
+            except (AttributeError, TypeError) as e:
                 logger.debug(f"Deezer get_isrc échec: {e}")
 
         if not isrc:
@@ -135,7 +138,7 @@ class ReccoBeatsProvider:
 
         try:
             info = client.get_track_info_by_isrc(isrc)
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError) as e:
             logger.error(f"❌ ReccoBeats ISRC API: {e}")
             info = None
 
@@ -168,7 +171,7 @@ class ReccoBeatsProvider:
                 if isrc:
                     track.isrc = isrc
                     logger.info(f"🔑 ISRC récupéré via Deezer: {isrc}")
-            except Exception as e:
+            except (AttributeError, TypeError) as e:
                 logger.debug(f"Deezer get_isrc échec: {e}")
 
         if not isrc:
@@ -176,7 +179,7 @@ class ReccoBeatsProvider:
 
         try:
             info = await client.get_track_info_by_isrc_async(ctx.http, isrc)
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError) as e:
             logger.error(f"❌ ReccoBeats ISRC API: {e}")
             info = None
 
@@ -248,14 +251,14 @@ class ReccoBeatsProvider:
                         if page_title:
                             track.spotify_page_title = page_title
                             logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-                    except Exception as e:
+                    except PlaywrightError as e:
                         logger.debug(f"Impossible de récupérer le titre de page: {e}")
             else:
                 logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
 
             return spotify_id
 
-        except Exception as e:
+        except PlaywrightError as e:
             logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
             return None
 
@@ -300,14 +303,14 @@ class ReccoBeatsProvider:
                         if page_title:
                             track.spotify_page_title = page_title
                             logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-                    except Exception as e:
+                    except PlaywrightError as e:
                         logger.debug(f"Impossible de récupérer le titre de page: {e}")
             else:
                 logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
 
             return spotify_id
 
-        except Exception as e:
+        except PlaywrightError as e:
             logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
             return None
 
@@ -340,14 +343,16 @@ class ReccoBeatsProvider:
 
             try:
                 track_info = client.get_track_info(spotify_id)
-            except Exception as e:
+            except (AttributeError, TypeError, KeyError) as e:
                 logger.error(f"❌ Erreur ReccoBeats API: {e}")
                 return False
 
             return self._apply_spotify_info(track, track_info, ctx, spotify_id)
 
-        except Exception as e:
-            logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
+        except Exception:
+            # Dernier ressort : scrape ID + client + _apply gèrent leurs frontières ;
+            # un bug d'orchestration remonte ici → trace complète, ÉCHEC.
+            logger.exception("ReccoBeats: ❌ Erreur générale")
             return False
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
@@ -374,14 +379,14 @@ class ReccoBeatsProvider:
 
             try:
                 track_info = await client.get_track_info_async(ctx.http, spotify_id)
-            except Exception as e:
+            except (AttributeError, TypeError, KeyError) as e:
                 logger.error(f"❌ Erreur ReccoBeats API: {e}")
                 return False
 
             return self._apply_spotify_info(track, track_info, ctx, spotify_id)
 
-        except Exception as e:
-            logger.error(f"ReccoBeats: ❌ Erreur générale: {e}")
+        except Exception:
+            logger.exception("ReccoBeats: ❌ Erreur générale")
             return False
 
     def _apply_spotify_info(

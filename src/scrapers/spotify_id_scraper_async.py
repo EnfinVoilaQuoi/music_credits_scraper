@@ -17,6 +17,7 @@ import asyncio
 import logging
 import urllib.parse
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.scrapers.playwright_manager import get_playwright_async
@@ -87,7 +88,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
             if obj:
                 try:
                     await obj.close()
-                except Exception:
+                except PlaywrightError:
                     pass
                 setattr(self, attr, None)
         self._playwright = None
@@ -112,7 +113,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
                     await btn.click()
                     logger.info(f"✅ Cookies acceptés via: {selector}")
                     return
-            except Exception:
+            except PlaywrightError:
                 continue
 
     # ── Recherche principale (miroir async de get_spotify_id) ───────────────
@@ -130,7 +131,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
 
         try:
             await self._ensure_driver_async()
-        except Exception:
+        except PlaywrightError:
             logger.error("❌ Browser non disponible")
             return None
 
@@ -183,18 +184,18 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
                                 parent_text = (await parent.inner_text()).lower() if parent else ""
                                 combined = f"{link_text} {parent_text}"
                                 relevance = self._calculate_relevance(artist, title, combined)
-                            except Exception:
+                            except (PlaywrightError, AttributeError, TypeError, ValueError):
                                 combined, relevance = "", 0.5
                             found_tracks.append(
                                 {"id": sid, "text": combined, "relevance": relevance, "href": href}
                             )
-                        except Exception:
+                        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError):
                             continue
 
                 if found_tracks:
                     break
 
-            except Exception as e:
+            except (PlaywrightError, RuntimeError) as e:
                 had_errors = True
                 logger.error(f"❌ Erreur requête '{query}': {e}")
                 # Driver mort (page/context fermé) → re-création et on continue
@@ -203,7 +204,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
                     try:
                         await self._cleanup_resources_async()
                         await self._init_driver_async()
-                    except Exception:
+                    except PlaywrightError:
                         logger.error("❌ Impossible de réinitialiser le driver SpotifyID")
                         break
                 continue
@@ -239,12 +240,12 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
     async def get_spotify_page_title_async(self, spotify_id: str) -> str | None:
         try:
             await self._ensure_driver_async()
-        except Exception:
+        except PlaywrightError:
             return None
         try:
             spotify_url = f"https://open.spotify.com/track/{spotify_id}"
             await self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
             return self._clean_page_title(await self.page.title())
-        except Exception as e:
+        except (PlaywrightError, AttributeError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur récupération titre: {e}")
         return None

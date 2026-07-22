@@ -11,9 +11,11 @@ valables quel que soit le style de source :
 
     python scripts/check_observations.py            # base réelle (config)
     python scripts/check_observations.py --db X.db  # une autre base (copie)
+    python scripts/check_observations.py --sizes    # volume par champ (perf E7d)
 
 Code de sortie 1 si un écart est détecté (utilisable en CI / après migration).
-N'écrit JAMAIS dans la base.
+`--sizes` n'exécute PAS les invariants : il ne fait qu'un GROUP BY read-only pour
+jauger le poids par champ (cible : `lyrics_synced`, LRC bruts). N'écrit JAMAIS.
 """
 
 import argparse
@@ -27,15 +29,17 @@ if "pytest" not in sys.modules:
 from src.config import DATABASE_URL
 
 # Champs scalaires attendus dans `observations`. bpm/key/mode/bpm_alt/time_signature
-# sont désormais SANS colonne miroir (droppées E7-D2) : ils restent des champs
-# d'observation valides (la vérité audio y vit), mais ne sont plus contrôlés par
-# l'invariant « obs ⇒ colonne ».
+# /reccobeats_resolution sont désormais SANS colonne miroir (droppées E7-D2) : ils
+# restent des champs d'observation valides (la vérité audio y vit), mais ne sont
+# plus contrôlés par l'invariant « obs ⇒ colonne ». reccobeats_resolution est une
+# provenance mono-source émise par le provider ReccoBeats (voie ISRC/Spotify ID).
 _KNOWN_FIELDS = (
     "bpm",
     "bpm_alt",
     "key",
     "mode",
     "time_signature",
+    "reccobeats_resolution",
     "lyrics_synced",
     "spotify_streams",
     "ytm_streams",
@@ -105,15 +109,54 @@ def check(db_path: str) -> int:
         conn.close()
 
 
+def sizes(db_path: str) -> int:
+    """Poids par champ (COUNT + octets de `value`) — read-only, sans invariant."""
+    conn = sqlite3.connect(db_path)
+    try:
+        has_obs = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='observations'"
+        ).fetchone()
+        if not has_obs:
+            print("❌ Table `observations` absente (migration e4 non appliquée ?)")
+            return 1
+        rows = conn.execute(
+            "SELECT field, COUNT(*), SUM(LENGTH(value)), AVG(LENGTH(value)), MAX(LENGTH(value)) "
+            "FROM observations GROUP BY field ORDER BY 3 DESC"
+        ).fetchall()
+        print(f"{'field':16} {'count':>7} {'total':>12} {'avg':>9} {'max':>9}")
+        print("-" * 56)
+        total_bytes = 0
+        for field, count, sum_len, avg_len, max_len in rows:
+            sum_len = sum_len or 0
+            total_bytes += sum_len
+            print(
+                f"{field:16} {count:>7} {sum_len/1024:>10.1f}K "
+                f"{(avg_len or 0):>8.0f} {(max_len or 0):>8}"
+            )
+        print("-" * 56)
+        print(f"{'TOTAL value':16} {'':>7} {total_bytes/1024:>10.1f}K")
+        return 0
+    finally:
+        conn.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Contrôle read-only de la table observations")
     parser.add_argument("--db", metavar="CHEMIN", help="base à contrôler (défaut : config)")
+    parser.add_argument(
+        "--sizes",
+        action="store_true",
+        help="afficher le volume par champ (octets de value) au lieu des invariants",
+    )
     args = parser.parse_args()
 
     db_path = args.db or DATABASE_URL.replace("sqlite:///", "")
     if not Path(db_path).exists():
         print(f"❌ Base introuvable : {db_path}")
         return 1
+    if args.sizes:
+        print(f"Volume observations sur : {db_path}\n")
+        return sizes(db_path)
     print(f"Contrôle observations sur : {db_path}\n")
     return check(db_path)
 

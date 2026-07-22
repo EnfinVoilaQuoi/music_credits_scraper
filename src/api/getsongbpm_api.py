@@ -117,7 +117,7 @@ class GetSongBPMFetcher:
         try:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
-        except Exception as e:
+        except OSError as e:
             print(f"⚠ Erreur sauvegarde cache: {e}")
 
     def _get_cache_key(self, artist: str, title: str) -> str:

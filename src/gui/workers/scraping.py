@@ -259,6 +259,7 @@ def start_combined_scraping(
                 #    Durée : track.duration (Deezer, canonique) sinon duration_seconds YTM (secours),
                 #    car Genius ne fournit pas la durée (voir docs/api/genius-api.md).
                 if scrape_sync or lyrics_ytm:
+                    lyrics_provider = None
                     try:
                         # Provider paroles : possède les clients (créés lazy selon les
                         # sources cochées) et applique la résolution par morceau.
@@ -326,6 +327,14 @@ def start_combined_scraping(
                         }
                     except Exception as e:
                         logger.warning(f"Passe synchro (timestamps) échouée: {e}")
+                    finally:
+                        # Ferme les clients + la session httpx async partagée
+                        # (LRCLIB/Musixmatch async) — « qui crée ferme ».
+                        if lyrics_provider is not None:
+                            try:
+                                lyrics_provider.close()
+                            except Exception as e:
+                                logger.debug(f"Fermeture provider paroles: {e}")
 
                 if lyrics_results is None:
                     n_ok = sum(

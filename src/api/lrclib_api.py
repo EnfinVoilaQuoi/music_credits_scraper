@@ -17,13 +17,19 @@ Politesse : User-Agent identifiable (recommandé par LRCLIB), retries réseau vi
 Pas de rate limit annoncé, on respecte quand même DELAY_BETWEEN_REQUESTS.
 """
 
+import asyncio
 import logging
 import re
 import time
 import unicodedata
 from difflib import SequenceMatcher
+from typing import TYPE_CHECKING
 
+import httpx
 import requests
+
+if TYPE_CHECKING:
+    from src.api.async_http import AsyncHttpSession
 
 try:
     from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES
@@ -34,6 +40,11 @@ logger = logging.getLogger(__name__)
 
 # User-Agent identifiable, recommandé par LRCLIB (nom + version + lien projet).
 _USER_AGENT = "MusicCreditsScraper/1.0 (+https://github.com/g78rem/music_credits_scraper)"
+
+# En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE (UA
+# httpx par défaut) — on repasse l'UA identifiable par requête (comme la session
+# sync le pose sur son propre requests.Session), recommandé par LRCLIB.
+_ASYNC_HEADERS = {"User-Agent": _USER_AGENT}
 
 # Seuil de similarité de titre pour accepter un candidat /search (« titre fort exigé »).
 _TITLE_MATCH_MIN = 0.72
@@ -249,6 +260,98 @@ class LRCLIBAPI:
 
         # 3) Dernier recours : texte brut (pas de synchro) via /search
         hit = self.search(track_name, artist_name, duration=duration, require_synced=False)
+        if hit:
+            logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
+            return hit
+
+        return None
+
+    # ── Jumeaux ASYNC (F5) : même logique, sur l'AsyncHttpSession partagée ───────
+    async def _request_async(self, http: "AsyncHttpSession", path: str, params: dict):
+        """Jumeau async de `_request` (mêmes retries 200/404/5xx, sleep non bloquant)."""
+        url = f"{self.BASE_URL}{path}"
+        last_err = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                r = await http.get(url, params=params, headers=_ASYNC_HEADERS, timeout=self.timeout)
+                if r.status_code == 200:
+                    return r.json()
+                if r.status_code == 404:
+                    return None  # non trouvé : inutile de réessayer
+                last_err = f"HTTP {r.status_code}"  # 5xx / 429 : on réessaie
+            except httpx.HTTPError as e:
+                last_err = str(e)
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(max(DELAY_BETWEEN_REQUESTS, 0.5) * (attempt + 1))
+        logger.debug(f"LRCLIB {path} échec ({last_err}) params={params}")
+        return None
+
+    async def get_exact_async(
+        self, http: "AsyncHttpSession", track_name, artist_name, album_name, duration
+    ) -> dict | None:
+        """Jumeau async de `get_exact` (`/get`, match sur les 4 champs, durée ±2 s)."""
+        obj = await self._request_async(
+            http,
+            "/get",
+            {
+                "track_name": track_name,
+                "artist_name": artist_name,
+                "album_name": album_name or "",
+                "duration": int(duration),
+            },
+        )
+        return self._pack(obj) if isinstance(obj, dict) else None
+
+    async def search_async(
+        self,
+        http: "AsyncHttpSession",
+        track_name: str,
+        artist_name: str | None = None,
+        duration: int | None = None,
+        require_synced: bool = True,
+    ) -> dict | None:
+        """Jumeau async de `search` (sélection via `_best_search_hit`, partagée)."""
+        params = {"track_name": track_name}
+        if artist_name:
+            params["artist_name"] = artist_name
+        results = await self._request_async(http, "/search", params)
+        if not isinstance(results, list) or not results:
+            return None
+        best = _best_search_hit(results, track_name, artist_name, duration, require_synced)
+        return self._pack(best) if best else None
+
+    async def get_synced_async(
+        self,
+        http: "AsyncHttpSession",
+        track_name: str,
+        artist_name: str,
+        album_name: str | None = None,
+        duration: int | None = None,
+    ) -> dict | None:
+        """Jumeau async de `get_synced` : `/get` exact puis fallback `/search`."""
+        if not track_name or not artist_name:
+            return None
+
+        if duration and album_name:
+            hit = await self.get_exact_async(http, track_name, artist_name, album_name, duration)
+            if hit and hit.get("lyrics_synced"):
+                logger.info(
+                    f"🎵 LRCLIB /get: '{artist_name} - {track_name}' "
+                    f"(synchro, id={hit.get('lrclib_id')})"
+                )
+                return hit
+
+        hit = await self.search_async(http, track_name, artist_name, duration=duration)
+        if hit and hit.get("lyrics_synced"):
+            logger.info(
+                f"🎵 LRCLIB /search: '{artist_name} - {track_name}' "
+                f"(synchro, id={hit.get('lrclib_id')})"
+            )
+            return hit
+
+        hit = await self.search_async(
+            http, track_name, artist_name, duration=duration, require_synced=False
+        )
         if hit:
             logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
             return hit

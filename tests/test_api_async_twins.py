@@ -12,6 +12,8 @@ import httpx
 from src.api.async_http import AsyncHttpSession
 from src.api.deezer_api import DeezerAPI
 from src.api.getsongbpm_api import GetSongBPMFetcher
+from src.api.lrclib_api import LRCLIBAPI
+from src.api.musixmatch_api import MusixmatchAPI
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.concurrency.rate_limiter import DomainRateLimiter
 
@@ -229,3 +231,161 @@ def test_recco_not_found_async(tmp_path):
     assert asyncio.run(client.get_track_info_async(_http(handler), "SPID404")) is None
     # L'échec est mémorisé dans le cache (comme la voie sync)
     assert client.cache["spotify_id::SPID404"]["error"] == "not_found"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# LRCLIB
+# ──────────────────────────────────────────────────────────────────────
+
+_LRCLIB_LRC = "[00:10.00] alpha\n[00:20.00] beta\n[00:30.00] gamma"
+
+
+def test_lrclib_get_synced_async_via_get():
+    """`/get` exact (durée + album) → synchro, avec l'UA custom par requête."""
+
+    def handler(request):
+        assert request.url.host == "lrclib.net"
+        assert request.url.path == "/api/get"
+        assert request.headers["user-agent"].startswith("MusicCreditsScraper/")
+        return httpx.Response(
+            200,
+            json={"id": 7, "syncedLyrics": _LRCLIB_LRC, "plainLyrics": "alpha", "duration": 200},
+        )
+
+    hit = asyncio.run(
+        LRCLIBAPI().get_synced_async(_http(handler), "Solo", "X", album_name="Album", duration=200)
+    )
+    assert hit["lyrics_synced"] == _LRCLIB_LRC
+    assert hit["source"] == "LRCLIB"
+    assert hit["lrclib_id"] == 7
+
+
+def test_lrclib_get_synced_async_fallback_search():
+    """Sans album → saute `/get`, part sur `/search` et départage par la durée."""
+
+    def handler(request):
+        assert request.url.path == "/api/search"
+        return httpx.Response(
+            200,
+            json=[
+                {"trackName": "Autre", "artistName": "X", "syncedLyrics": "[00:01.00] x"},
+                {
+                    "id": 9,
+                    "trackName": "Solo",
+                    "artistName": "X",
+                    "syncedLyrics": _LRCLIB_LRC,
+                    "duration": 201,
+                },
+            ],
+        )
+
+    hit = asyncio.run(LRCLIBAPI().get_synced_async(_http(handler), "Solo", "X", duration=200))
+    assert hit["lrclib_id"] == 9
+    assert hit["lyrics_synced"] == _LRCLIB_LRC
+
+
+def test_lrclib_get_synced_async_not_found():
+    def handler(request):
+        return httpx.Response(404, json={"code": 404, "name": "TrackNotFound"})
+
+    assert asyncio.run(LRCLIBAPI().get_synced_async(_http(handler), "Solo", "X")) is None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Musixmatch
+# ──────────────────────────────────────────────────────────────────────
+
+_MXM_LRC = "[00:10.00] alpha\n[00:20.00] beta"
+
+
+def _mxm(monkeypatch, tmp_path) -> MusixmatchAPI:
+    # Isole du token épinglé/coupe-circuit d'environnement + cache fichier réel.
+    monkeypatch.delenv("MUSIXMATCH_USER_TOKEN", raising=False)
+    monkeypatch.delenv("MUSIXMATCH_ENABLED", raising=False)
+    return MusixmatchAPI(token_file=tmp_path / ".mxm_token.json", enabled=True)
+
+
+def _mxm_call(body: dict) -> dict:
+    return {"message": {"header": {"status_code": 200}, "body": body}}
+
+
+def _mxm_token_env(token: str = "tok123") -> dict:
+    return {"message": {"header": {"status_code": 200}, "body": {"user_token": token}}}
+
+
+def _mxm_macro_env(synced: str = _MXM_LRC, status: int = 200) -> dict:
+    calls = {
+        "matcher.track.get": _mxm_call(
+            {
+                "track": {
+                    "track_id": 42,
+                    "track_name": "Solo",
+                    "artist_name": "X",
+                    "track_length": 200,
+                }
+            }
+        ),
+        "track.subtitles.get": _mxm_call(
+            {"subtitle_list": [{"subtitle": {"subtitle_body": synced}}]}
+        ),
+        "track.lyrics.get": _mxm_call({"lyrics": {"lyrics_body": "alpha", "instrumental": 0}}),
+    }
+    return {"message": {"header": {"status_code": status}, "body": {"macro_calls": calls}}}
+
+
+def test_mxm_get_synced_as_source3_async_success(monkeypatch, tmp_path):
+    def handler(request):
+        assert request.url.host == "apic-desktop.musixmatch.com"
+        assert request.headers["user-agent"].startswith("Mozilla/5.0")
+        assert request.headers["cookie"] == "AWSELB=0; AWSELBCORS=0"
+        if request.url.path.endswith("token.get"):
+            return httpx.Response(200, json=_mxm_token_env())
+        if request.url.path.endswith("macro.subtitles.get"):
+            assert request.url.params["usertoken"] == "tok123"
+            return httpx.Response(200, json=_mxm_macro_env())
+        raise AssertionError(f"URL inattendue: {request.url}")
+
+    res = asyncio.run(
+        _mxm(monkeypatch, tmp_path).get_synced_as_source3_async(
+            _http(handler), "Solo", "X", duration=200
+        )
+    )
+    assert res == {
+        "lrc": _MXM_LRC,
+        "source": "Musixmatch",
+        "confidence": 1,
+        "note": "source unique (Musixmatch, dernier recours)",
+    }
+
+
+def test_mxm_async_upgrade_only_token_rejected(monkeypatch, tmp_path):
+    def handler(request):
+        if request.url.path.endswith("token.get"):
+            return httpx.Response(200, json=_mxm_token_env("UpgradeOnly-xyz"))
+        raise AssertionError("macro ne doit pas être appelé sans token valide")
+
+    res = asyncio.run(_mxm(monkeypatch, tmp_path).get_synced_async(_http(handler), "Solo", "X"))
+    assert res is None
+
+
+def test_mxm_async_retry_after_envelope_401(monkeypatch, tmp_path):
+    """401 dans l'enveloppe macro → invalidation token + retry unique qui réussit."""
+    calls = {"macro": 0, "token": 0}
+
+    def handler(request):
+        if request.url.path.endswith("token.get"):
+            calls["token"] += 1
+            return httpx.Response(200, json=_mxm_token_env(f"tok{calls['token']}"))
+        if request.url.path.endswith("macro.subtitles.get"):
+            calls["macro"] += 1
+            if calls["macro"] == 1:
+                return httpx.Response(200, json=_mxm_macro_env(status=401))
+            return httpx.Response(200, json=_mxm_macro_env())
+        raise AssertionError(f"URL inattendue: {request.url}")
+
+    res = asyncio.run(
+        _mxm(monkeypatch, tmp_path).get_synced_async(_http(handler), "Solo", "X", duration=200)
+    )
+    assert res["lyrics_synced"] == _MXM_LRC
+    assert calls["macro"] == 2  # 1 échec auth + 1 retry OK
+    assert calls["token"] == 2  # token initial + refresh forcé

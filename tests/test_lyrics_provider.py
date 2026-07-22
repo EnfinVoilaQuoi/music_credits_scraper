@@ -5,6 +5,12 @@ au morceau. On injecte des stubs et on vérifie l'application (colonnes + observ
 + fallback texte) + le respect des flags de source (pas de client créé si off).
 """
 
+import asyncio
+
+import httpx
+
+from src.api.async_http import AsyncHttpSession
+from src.concurrency.rate_limiter import DomainRateLimiter
 from src.enrichment.base import Capability
 from src.enrichment.providers.lyrics import LyricsProvider
 from src.models.artist import Artist
@@ -102,3 +108,48 @@ def test_close_ne_leve_pas_sans_close_client():
     # LRCLIB/YTM/Musixmatch n'ont pas de close() → no-op silencieux.
     provider = LyricsProvider(lrclib=_FakeLRCLIB(_LRC), ytm=_FakeYTM())
     provider.close()  # ne doit pas lever
+
+
+# ── Voie async : pont LRCLIB par défaut + fermeture de la session ────────────
+
+
+def _offline_http(handler):
+    """AsyncHttpSession offline (transport mocké, sans délai)."""
+    return AsyncHttpSession(transport=httpx.MockTransport(handler), limiter=DomainRateLimiter(0.0))
+
+
+def test_pont_lrclib_async_utilise_quand_non_injecte():
+    """Sans client injecté, LRCLIB passe par le jumeau async sur la session partagée."""
+
+    def handler(request):
+        # `/get` exact (durée + album fournis) renvoie la synchro.
+        return httpx.Response(200, json={"id": 1, "syncedLyrics": _LRC, "duration": 200})
+
+    provider = LyricsProvider(
+        sync_lrclib=True,
+        sync_ytm=False,
+        sync_musixmatch=False,
+        lyrics_ytm=False,
+        http=_offline_http(handler),
+        runner=asyncio.run,  # runner offline (pas de boucle applicative en test)
+    )
+    track = _track()
+    provider.enrich(track, "X", need_sync=True, need_text=False)
+    assert track.lyrics.synced == _LRC
+    assert track.lyrics.synced_source == "LRCLIB"
+    assert [o.source for o in track.observations] == ["lrclib"]
+
+
+def test_close_ferme_la_session_async():
+    closed = {"n": 0}
+
+    class _FakeHttp:
+        async def aclose(self):
+            closed["n"] += 1
+
+    provider = LyricsProvider(sync_lrclib=True, http=_FakeHttp(), runner=asyncio.run)
+    # Force la création du pont (donc l'usage de la session).
+    assert provider._lrclib_client() is not None
+    provider.close()
+    assert closed["n"] == 1
+    assert provider._http is None

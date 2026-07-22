@@ -46,6 +46,7 @@ Token épinglé optionnel : `MUSIXMATCH_USER_TOKEN` (env) amorce le cache ; en c
 d'auth, on retombe automatiquement sur `token.get`.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -54,8 +55,13 @@ import time
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import httpx
 import requests
+
+if TYPE_CHECKING:
+    from src.api.async_http import AsyncHttpSession
 
 try:
     from src.config import DATA_DIR, DELAY_BETWEEN_REQUESTS, MAX_RETRIES
@@ -72,6 +78,15 @@ _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+# En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE (UA
+# httpx par défaut) → on repasse par requête les en-têtes de la session sync
+# (UA navigateur + Accept + Cookie AWSELB, indispensables pour ne pas être flaggé).
+_ASYNC_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept": "application/json",
+    "Accept-Language": "en",
+    "Cookie": "AWSELB=0; AWSELBCORS=0",
+}
 # Le token serveur s'invalide vers ~10 min ; on rafraîchit un peu avant.
 _TOKEN_TTL = 9 * 60  # secondes
 _TOKEN_FILE = Path(DATA_DIR) / ".musixmatch_token.json"
@@ -449,6 +464,165 @@ class MusixmatchAPI:
         dernier recours → candidate à vérification manuelle, même sémantique que le BPM).
         """
         hit = self.get_synced(track_name, artist_name, duration=duration)
+        if not hit or not hit.get("lyrics_synced"):
+            return None
+        return {
+            "lrc": hit["lyrics_synced"],
+            "source": "Musixmatch",
+            "confidence": 1,
+            "note": "source unique (Musixmatch, dernier recours)",
+        }
+
+    # ── Jumeaux ASYNC (F5) : même logique + gardes-fous, sur l'AsyncHttpSession ──
+    # Le cache token (mémoire + fichier) et les helpers d'extraction/vérification
+    # (purs) sont RÉUTILISÉS tels quels : seuls les appels HTTP passent en async.
+    # Les I/O fichier du cache token (_load_cached_token/_save_token) restent sync
+    # dans la coroutine (~1 ms, hors boucle chaude) — assumé.
+    async def _api_get_async(
+        self, http: "AsyncHttpSession", action: str, params: dict, with_token: bool = True
+    ) -> tuple[int | None, dict | None]:
+        """Jumeau async de `_api_get` (mêmes retries/gardes-fous, sleep non bloquant)."""
+        q = dict(params)
+        q["app_id"] = _APP_ID
+        q["format"] = "json"
+        q["t"] = str(int(time.time() * 1000))
+        if with_token:
+            tok = self._load_cached_token() or await self._fetch_new_token_async(http)
+            if not tok:
+                return _STATUS_AUTH, None
+            q["usertoken"] = tok
+
+        url = f"{_API_BASE}/{action}"
+        last_err = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                r = await http.get(url, params=q, headers=_ASYNC_HEADERS, timeout=self.timeout)
+                if r.status_code == _STATUS_OK:
+                    try:
+                        return _STATUS_OK, r.json()
+                    except ValueError as e:
+                        last_err = f"JSON invalide ({e})"
+                        return _STATUS_OK, None  # 200 corps illisible : ne pas réessayer
+                if r.status_code in (401, 403):
+                    return _STATUS_AUTH, None  # auth : ne pas réessayer aveuglément
+                last_err = f"HTTP {r.status_code}"  # 5xx/429 → retry
+            except httpx.HTTPError as e:
+                last_err = str(e)
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(max(DELAY_BETWEEN_REQUESTS, 0.5) * (attempt + 1))
+        logger.debug(f"Musixmatch {action} échec ({last_err})")
+        return None, None
+
+    async def _fetch_new_token_async(self, http: "AsyncHttpSession") -> str | None:
+        """Jumeau async de `_fetch_new_token` (mêmes gardes-fous #2, mise en cache)."""
+        status, env = await self._api_get_async(
+            http, "token.get", {"user_language": "en"}, with_token=False
+        )
+        if env is None:
+            return None
+        if status == _STATUS_AUTH or _envelope_status(env) == _STATUS_AUTH:
+            logger.warning("Musixmatch: 401 sur token.get (IP flaggée / CAPTCHA-gate ?)")
+            return None
+        token = ((env.get("message") or {}).get("body") or {}).get("user_token") or ""
+        if not token or "UpgradeOnly" in token:
+            logger.warning("Musixmatch: token 'UpgradeOnly'/vide rejeté (IP restreinte)")
+            return None
+        self._save_token(token)
+        logger.debug("Musixmatch: nouveau usertoken obtenu (async)")
+        return token
+
+    async def get_synced_async(
+        self,
+        http: "AsyncHttpSession",
+        track_name: str,
+        artist_name: str,
+        duration: float | None = None,
+        album_name: str | None = None,
+    ) -> dict | None:
+        """Jumeau async de `get_synced` (passe 1 + retry unique après refresh token)."""
+        if not self.enabled or not track_name or not artist_name:
+            return None
+        result = await self._try_fetch_async(http, track_name, artist_name, duration, False)
+        if result is _AUTH_FAILURE:
+            logger.debug("Musixmatch: auth échouée → refresh token + retry (async)")
+            result = await self._try_fetch_async(http, track_name, artist_name, duration, True)
+        return None if result is _AUTH_FAILURE else result
+
+    async def _try_fetch_async(
+        self,
+        http: "AsyncHttpSession",
+        track_name: str,
+        artist_name: str,
+        duration: float | None,
+        force_token: bool,
+    ):
+        """Jumeau async de `_try_fetch` (même enchaînement, sentinelle _AUTH_FAILURE)."""
+        if force_token:
+            self._invalidate_token()
+            if await self._fetch_new_token_async(http) is None:
+                return _AUTH_FAILURE
+
+        params = {
+            "q_track": track_name,
+            "q_artist": artist_name,
+            "namespace": "lyrics_richsynced",
+            "optional_calls": "track.richsync",
+            "subtitle_format": "lrc",
+        }
+        if duration and duration > 0:
+            params["f_subtitle_length"] = str(int(round(duration)))
+            params["f_subtitle_length_max_deviation"] = "3"
+
+        status, env = await self._api_get_async(
+            http, "macro.subtitles.get", params, with_token=True
+        )
+        if status == _STATUS_AUTH:
+            self._invalidate_token()
+            return _AUTH_FAILURE
+        if env is None:
+            return None
+        if _envelope_status(env) == _STATUS_AUTH:
+            self._invalidate_token()
+            return _AUTH_FAILURE
+
+        calls = self._macro_calls(env)
+        if not calls:
+            return None
+
+        track = self._matched_track(calls)
+        if not self._verify_match(track, track_name, artist_name):
+            return None  # mauvais morceau → on n'attache rien
+
+        synced = self._subtitle_lrc(calls) or self._richsync_as_lrc(calls)
+        plain, instrumental = self._plain_lyrics(calls)
+        if not synced and not plain and not instrumental:
+            return None
+
+        track = track or {}
+        tid = track.get("track_id")
+        tdur = track.get("track_length") or (int(round(duration)) if duration else None)
+        if synced:
+            logger.info("🎵 Musixmatch: '%s - %s' (synchro, id=%s)", artist_name, track_name, tid)
+        else:
+            logger.debug("Musixmatch: seulement texte brut pour '%s - %s'", artist_name, track_name)
+        return {
+            "lyrics_synced": synced,
+            "lyrics": plain,
+            "source": "Musixmatch",
+            "musixmatch_track_id": tid,
+            "duration": tdur,
+            "instrumental": instrumental,
+        }
+
+    async def get_synced_as_source3_async(
+        self,
+        http: "AsyncHttpSession",
+        track_name: str,
+        artist_name: str,
+        duration: float | None = None,
+    ) -> dict | None:
+        """Jumeau async de `get_synced_as_source3` (forme `compare_synced`, conf=1)."""
+        hit = await self.get_synced_async(http, track_name, artist_name, duration=duration)
         if not hit or not hit.get("lyrics_synced"):
             return None
         return {

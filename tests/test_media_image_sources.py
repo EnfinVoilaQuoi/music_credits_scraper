@@ -4,6 +4,9 @@ Aucun réseau : Deezer via `_make_request` monkeypatché / dict figé,
 Genius via un faux client `self.genius` (instance construite sans __init__).
 """
 
+import pytest
+import requests
+
 from src.api.deezer_api import DeezerAPI
 from src.api.genius_api import GeniusAPI
 
@@ -121,6 +124,14 @@ def test_get_artist_image_sans_id():
     assert api.get_artist_image(None) is None
 
 
-def test_get_artist_image_erreur_client():
-    api = _genius_with(_FakeGeniusClient(raise_exc=RuntimeError("boom")))
+def test_get_artist_image_erreur_reseau_renvoie_none():
+    """Frontière réseau resserrée : une erreur requests reste avalée → repli None."""
+    api = _genius_with(_FakeGeniusClient(raise_exc=requests.ConnectionError("réseau")))
     assert api.get_artist_image(123) is None
+
+
+def test_get_artist_image_erreur_inattendue_propage():
+    """Une exception hors domaine réseau n'est plus avalée (fail-fast)."""
+    api = _genius_with(_FakeGeniusClient(raise_exc=RuntimeError("bug interne")))
+    with pytest.raises(RuntimeError):
+        api.get_artist_image(123)

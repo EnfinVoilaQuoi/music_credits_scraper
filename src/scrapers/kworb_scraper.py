@@ -103,7 +103,7 @@ class KworbScraper:
             )
             return page
 
-        except Exception as e:
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.error(f"Erreur parsing Kworb ({url}): {e}")
             return None
 

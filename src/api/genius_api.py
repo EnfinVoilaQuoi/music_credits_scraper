@@ -83,7 +83,7 @@ class GeniusAPI:
                 if artist_id and found_name and artist_id not in seen_ids:
                     seen_ids.add(artist_id)
                     candidates.append(Artist(name=found_name, genius_id=artist_id))
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
             logger.warning(f"Recherche Genius échouée: {e}")
 
         # Trier : correspondances exactes en premier, puis par proximité
@@ -152,8 +152,11 @@ class GeniusAPI:
             logger.info(f"{len(tracks)} morceaux récupérés pour {artist.name}")
             return tracks
 
-        except Exception as e:
-            logger.error(f"Erreur lors de la récupération des morceaux: {e}")
+        except Exception:
+            # Dernier ressort : les méthodes internes gèrent déjà leurs frontières
+            # réseau/parse ; ce qui remonte ici est un bug d'orchestration → trace
+            # complète dans errors.log, on rend les morceaux déjà collectés.
+            logger.exception("Erreur lors de la récupération des morceaux")
             log_api("Genius", "artist/songs", False)
             return tracks
 
@@ -209,8 +212,8 @@ class GeniusAPI:
             if raw_data.get("song_art_image_url"):
                 metadata["artwork_url"] = raw_data["song_art_image_url"]
 
-        except Exception as e:
-            logger.debug(f"Erreur lors de l'extraction des métadonnées: {e}")
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
+            logger.warning(f"Erreur lors de l'extraction des métadonnées: {e}")
 
         return metadata
 
@@ -259,8 +262,9 @@ class GeniusAPI:
             return None
         try:
             data = self.genius.song(song_id)
-        except Exception as e:
-            logger.debug(f"verify credit échec song {song_id}: {e}")
+        # lyricsgenius lève un AssertionError quand le statut HTTP n'est ni 200 ni 204.
+        except (requests.RequestException, AssertionError) as e:
+            logger.warning(f"verify credit échec song {song_id}: {e}")
             return None
         song = (data or {}).get("song") or {}
         try:
@@ -409,8 +413,10 @@ class GeniusAPI:
                 if len(songs) < per_page:
                     break
 
-        except Exception as e:
-            logger.error(f"Erreur dans la méthode manuelle: {e}")
+        except Exception:
+            # Dernier ressort : boucle mêlant réseau lyricsgenius, parse du payload
+            # et construction de Track → trace complète, on rend le partiel accumulé.
+            logger.exception("Erreur dans la méthode manuelle")
 
         return tracks
 
@@ -509,8 +515,8 @@ class GeniusAPI:
             return False
         try:
             data = self.genius.song(track.genius_id)
-        except Exception as e:
-            logger.debug(f"genius.song échec '{track.title}': {e}")
+        except (requests.RequestException, AssertionError) as e:
+            logger.warning(f"genius.song échec '{track.title}': {e}")
             return False
         song = (data or {}).get("song") or {}
         changed = False
@@ -593,7 +599,7 @@ class GeniusAPI:
             resp.raise_for_status()
             sections = (resp.json().get("response") or {}).get("sections") or []
             hits = sections[0].get("hits", []) if sections else []
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as e:
             logger.error(f"Recherche album Genius échouée ({slug_query!r}): {e}")
             return None
 
@@ -625,7 +631,7 @@ class GeniusAPI:
                 timeout=20,
             )
             raw_tracks = (tr_resp.json().get("response") or {}).get("tracks") or []
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
             logger.error(f"Tracklist album Genius {album_id} échouée: {e}")
             return None
 
@@ -690,8 +696,8 @@ class GeniusAPI:
             return None
         try:
             data = self.genius.artist(genius_id)
-        except Exception as e:
-            logger.debug(f"genius.artist({genius_id}) échec: {e}")
+        except (requests.RequestException, AssertionError) as e:
+            logger.warning(f"genius.artist({genius_id}) échec: {e}")
             return None
         image_url = ((data or {}).get("artist") or {}).get("image_url")
         if not image_url or "default_avatar" in image_url:
@@ -725,8 +731,8 @@ class GeniusAPI:
                 album_name = album_data.get("name")
                 if album_name:
                     return album_name
-        except Exception as e:
-            logger.debug(f"Erreur lors de l'extraction de l'album: {e}")
+        except (KeyError, TypeError, AttributeError) as e:
+            logger.warning(f"Erreur lors de l'extraction de l'album: {e}")
         return None
 
     def _extract_release_date_from_song(self, song: dict) -> datetime | None:
@@ -744,7 +750,7 @@ class GeniusAPI:
                     else:
                         return datetime(year, 1, 1)
 
-        except Exception as e:
-            logger.debug(f"Erreur lors de l'extraction de la date: {e}")
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
+            logger.warning(f"Erreur lors de l'extraction de la date: {e}")
 
         return None

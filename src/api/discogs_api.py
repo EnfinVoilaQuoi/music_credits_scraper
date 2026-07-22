@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 import discogs_client
-from discogs_client.exceptions import HTTPError
+from discogs_client.exceptions import DiscogsAPIError, HTTPError
 
 from src.models import Credit, CreditRole, Track
 from src.utils.logger import get_logger, log_api
@@ -61,7 +61,7 @@ class DiscogsClient:
                     logger.info("⏸️ Pause de 60s pour reset du rate limit...")
                     time.sleep(60)
 
-        except Exception as e:
+        except (AttributeError, TypeError) as e:
             logger.debug(f"Impossible de vérifier le rate limit: {e}")
 
     def search_track(
@@ -125,7 +125,9 @@ class DiscogsClient:
                         log_api("Discogs", f"search/{track_title}", True)
                         return track_data
 
-                except Exception as e:
+                # release.* est lazy-loadé par discogs_client → accès = fetch réseau
+                # possible (DiscogsAPIError). Best-effort par candidat : on continue.
+                except (DiscogsAPIError, AttributeError, TypeError, ValueError, KeyError) as e:
                     logger.debug(f"Erreur analyse résultat #{i}: {e}")
                     continue
 
@@ -144,7 +146,7 @@ class DiscogsClient:
             log_api("Discogs", f"search/{track_title}", False)
             return None
 
-        except Exception as e:
+        except (DiscogsAPIError, KeyError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur recherche Discogs: {e}")
             log_api("Discogs", f"search/{track_title}", False)
             return None
@@ -213,8 +215,8 @@ class DiscogsClient:
 
             return None
 
-        except Exception as e:
-            logger.debug(f"Erreur extraction track depuis release: {e}")
+        except (DiscogsAPIError, AttributeError, TypeError, KeyError, ValueError) as e:
+            logger.warning(f"Erreur extraction track depuis release: {e}")
             return None
 
     def _extract_credits_from_release(self, release) -> list[dict[str, str]]:
@@ -259,14 +261,14 @@ class DiscogsClient:
                     credits.append(credit_dict)
                     logger.debug(f"Crédit Discogs: {name} - {role}")
 
-                except Exception as e:
+                except (AttributeError, TypeError, KeyError) as e:
                     logger.debug(f"Erreur extraction crédit: {e}")
                     continue
 
             logger.info(f"✅ {len(credits)} crédit(s) extrait(s) de Discogs")
             return credits
 
-        except Exception as e:
+        except (DiscogsAPIError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"⚠️ Erreur extraction crédits Discogs: {e}")
             return []
 
@@ -412,7 +414,7 @@ class DiscogsClient:
                         track.add_credit(credit)
                         credits_added += 1
 
-                    except Exception as e:
+                    except (KeyError, TypeError, ValueError) as e:
                         logger.debug(f"Erreur ajout crédit: {e}")
                         continue
 
@@ -431,6 +433,8 @@ class DiscogsClient:
             )
             return "not_needed"
 
-        except Exception as e:
-            logger.error(f"❌ Erreur enrichissement Discogs pour '{track.title}': {e}")
+        except Exception:
+            # Dernier ressort : search_track et les boucles de crédits gèrent déjà
+            # leurs frontières ; un bug de notre logique remonte ici → trace complète.
+            logger.exception(f"❌ Erreur enrichissement Discogs pour '{track.title}'")
             return False

@@ -33,6 +33,12 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
           pip install -e .
 
+      # Binaires navigateur (le paquet pip playwright n'installe QUE la lib) :
+      # requis par test_playwright_manager_async (lance un vrai Chromium headless).
+      # `chromium` tire aussi le chrome-headless-shell utilisé par headless=True.
+      - name: Installer le navigateur Playwright
+        run: playwright install chromium
+
       - name: Ruff (lint)
         run: ruff check src scripts tests
 

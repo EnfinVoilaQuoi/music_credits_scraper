@@ -25,6 +25,7 @@ import re
 import time
 from pathlib import Path
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.config import (
@@ -86,7 +87,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
             if obj:
                 try:
                     await obj.close()
-                except Exception:
+                except PlaywrightError:
                     pass
                 setattr(self, attr, None)
         self._playwright = None
@@ -100,7 +101,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
             Path(BPMFINDER_SESSION_FILE).parent.mkdir(parents=True, exist_ok=True)
             await self.context.storage_state(path=str(BPMFINDER_SESSION_FILE))
             logger.info("💾 Session BPM Finder sauvegardée")
-        except Exception as e:
+        except (PlaywrightError, OSError) as e:
             logger.warning(f"Session BPM Finder non sauvegardée: {e}")
 
     async def _dismiss_cookie_overlay_async(self):
@@ -130,7 +131,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
                   });
                 }
             """)
-        except Exception:
+        except PlaywrightError:
             pass
 
     async def _goto_analyzer_async(self, force: bool = False):
@@ -149,7 +150,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
             loc = self.page.get_by_placeholder("YouTube", exact=False)
             await loc.wait_for(state="visible", timeout=timeout_ms)
             return loc.first
-        except Exception:
+        except PlaywrightError:
             pass
         for sel in (
             "input[placeholder*='YouTube' i]",
@@ -160,7 +161,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
                 el = await self.page.wait_for_selector(sel, state="visible", timeout=3_000)
                 if el:
                     return el
-            except Exception:
+            except PlaywrightError:
                 continue
         return None
 
@@ -170,7 +171,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
         try:
             cookies = await self.context.cookies()
             return any(c.get("name") == "access_token" for c in cookies)
-        except Exception:
+        except PlaywrightError:
             return False
 
     async def _looks_logged_out_async(self) -> bool:
@@ -178,7 +179,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
             return False
         try:
             return await self.page.locator("span:text-is('LOGIN')").count() > 0
-        except Exception:
+        except PlaywrightError:
             return False
 
     async def _try_login_async(self) -> bool:
@@ -209,7 +210,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
             await self._save_session_async()
             logger.info("✅ BPM Finder: connecté")
             return True
-        except Exception as e:
+        except (PlaywrightError, OSError) as e:
             logger.error(
                 f"BPM Finder: login échoué: {e} — bootstrap manuel : scripts/bpmfinder_login.py"
             )
@@ -220,7 +221,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
     async def _cards_async(self) -> set[tuple[str, str, str, str]]:
         try:
             text = await self.page.inner_text("body") or ""
-        except Exception:
+        except PlaywrightError:
             return set()
         return self._cards_from_text(text)
 
@@ -238,7 +239,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
                 await self.page.inner_text("body") or "", encoding="utf-8"
             )
             logger.warning(f"BPM Finder: état de la page capturé dans {diag}")
-        except Exception:
+        except (PlaywrightError, OSError):
             pass
 
     async def _await_and_parse_async(self, before, timeout_s: int, label: str) -> dict | None:
@@ -300,7 +301,7 @@ class BPMFinderScraperAsync(BPMFinderScraper):
                     dbg = str(DATA_DIR / "bpmfinder_debug.png")
                     await self.page.screenshot(path=dbg)
                     logger.error(f"BPM Finder: champ YouTube introuvable — capture: {dbg}")
-                except Exception:
+                except (PlaywrightError, OSError):
                     logger.error("BPM Finder: champ YouTube introuvable (UI changée ?)")
                 self.last_failure_reason = "ui"
                 return None
@@ -309,10 +310,10 @@ class BPMFinderScraperAsync(BPMFinderScraper):
                 await self._dismiss_cookie_overlay_async()
                 try:
                     await self.page.click("button:has-text('Upload')", timeout=15_000)
-                except Exception:
+                except PlaywrightError:
                     await self._dismiss_cookie_overlay_async()
                     await self.page.click("button:has-text('Upload')", timeout=10_000)
-            except Exception as e:
+            except PlaywrightError as e:
                 logger.error(f"BPM Finder: saisie/Upload échoué: {e}")
                 await self._dump_debug_state_async(f"upload_{vid}")
                 self.last_failure_reason = "ui"

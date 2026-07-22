@@ -18,6 +18,17 @@ from crawl4ai import BrowserConfig
 from src.concurrency import async_loop
 from src.utils.logger import get_logger
 
+# patchright (undetected Chromium) est importé en lazy dans _patchright_fetch : on
+# expose sa classe d'erreur — DISTINCTE de celle de playwright — pour cibler les
+# `except` ; sentinelle jamais levée si la lib est absente.
+try:
+    from patchright.async_api import Error as PatchrightError
+except ImportError:  # pragma: no cover
+
+    class PatchrightError(Exception):
+        """Sentinelle quand patchright est absent (jamais levée)."""
+
+
 logger = get_logger(__name__)
 
 
@@ -174,7 +185,7 @@ class CrawlAIScraperBase:
                         f"genius.com dans ton Brave (résidentiel) pour lever le challenge."
                     )
                 return None, html
-            except Exception as e:
+            except PatchrightError as e:
                 logger.error(f"{self.__class__.__name__}: CDP {url}: {e}")
                 return None, None
 
@@ -191,7 +202,7 @@ class CrawlAIScraperBase:
                     delay_before_return,
                     headless=True,
                 )
-            except Exception as e:
+            except PatchrightError as e:
                 logger.error(f"{self.__class__.__name__}: patchright headless {url}: {e}")
                 html, blocked = None, True
             if not blocked:
@@ -215,7 +226,7 @@ class CrawlAIScraperBase:
                 headless=False,
             )
             return None, html
-        except Exception as e:
+        except PatchrightError as e:
             logger.error(f"{self.__class__.__name__}: patchright visible {url}: {e}")
             return None, None
 
@@ -237,7 +248,7 @@ class CrawlAIScraperBase:
         """
         try:
             from patchright.async_api import async_playwright
-        except Exception as e:
+        except ImportError as e:
             logger.error(
                 f"patchright indisponible: {e} — `pip install -U crawl4ai && crawl4ai-setup`"
             )
@@ -284,14 +295,14 @@ class CrawlAIScraperBase:
                     try:
                         await page.wait_for_selector(sel, timeout=sel_timeout)
                         content_found = True
-                    except Exception:
+                    except PatchrightError:
                         pass  # pas trouvé : on récupère quand même le HTML pour diagnostic
                     # JS d'expansion (crédits) sur la vraie page
                     if js_before_wait:
                         try:
                             await page.evaluate(js_before_wait)
                             await page.wait_for_timeout(800)
-                        except Exception:
+                        except PatchrightError:
                             pass
                     if delay_before_return:
                         await page.wait_for_timeout(int(delay_before_return * 1000))
@@ -307,7 +318,7 @@ class CrawlAIScraperBase:
             # si des scripts Cloudflare résiduels traînent dans le HTML.
             blocked = (not content_found) and self._looks_blocked(None, html)
             return None, html, blocked
-        except Exception as e:
+        except PatchrightError as e:
             logger.error(f"{self.__class__.__name__}: patchright fetch {url}: {e}")
             return None, None, True
 

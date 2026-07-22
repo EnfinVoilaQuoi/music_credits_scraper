@@ -6,12 +6,17 @@ utilisé QUE pour l'ID (jamais les audio-features). L'unicité d'ID passe par le
 contexte (logique partagée avec ReccoBeats/SongBPM).
 """
 
+from playwright.async_api import Error as PlaywrightError
+
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# playwright sync et async partagent les mêmes classes d'erreur (Error, TimeoutError) ;
+# TimeoutError ⊂ Error → un seul except couvre les deux voies. (patchright = classes DISTINCTES.)
 
 
 class SpotifyIdProvider:
@@ -135,7 +140,7 @@ class SpotifyIdProvider:
             if page_title:
                 track.spotify_page_title = page_title
                 logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-        except Exception as e:
+        except PlaywrightError as e:
             logger.debug(f"Impossible de récupérer le titre de page: {e}")
 
         return True
@@ -164,7 +169,7 @@ class SpotifyIdProvider:
             if page_title:
                 track.spotify_page_title = page_title
                 logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-        except Exception as e:
+        except PlaywrightError as e:
             logger.debug(f"Impossible de récupérer le titre de page: {e}")
 
         return True

@@ -114,7 +114,7 @@ def get_track_status_icon(track, disabled_ids) -> str:
             music_credits = track.get_music_credits()
             if not music_credits or len(music_credits) == 0:
                 missing.append("Crédits")
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             missing.append("Crédits")
 
         # 4. Paroles obtenues
@@ -147,7 +147,7 @@ def get_track_status_icon(track, disabled_ids) -> str:
         else:
             return "⚠️"  # Données incomplètes
 
-    except Exception as e:
+    except (AttributeError, TypeError, KeyError, ValueError) as e:
         logger.error(f"Erreur dans get_track_status_icon pour {track.title}: {e}")
         return "⚠️"  # Erreur = incomplet
 
@@ -178,7 +178,7 @@ def get_release_year_safely(track):
                 except ValueError:
                     continue
 
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
             logger.debug(f"Erreur parsing date '{track.release_date}': {e}")
 
     return None
@@ -202,7 +202,7 @@ def format_date(release_date):
                 try:
                     dt = datetime.strptime(date_str, "%Y-%m-%d")
                     return dt.strftime("%d/%m/%Y")
-                except Exception:
+                except (ValueError, TypeError):
                     pass
             # Si format ISO avec T
             if "T" in str(release_date):
@@ -211,13 +211,13 @@ def format_date(release_date):
                         str(release_date).replace("Z", "+00:00").split("T")[0]
                     )
                     return dt.strftime("%d/%m/%Y")
-                except Exception:
+                except (ValueError, TypeError):
                     pass
             return date_str
 
         return str(release_date)[:10]
 
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError) as e:
         logger.debug(f"Erreur formatage date '{release_date}': {e}")
         return "N/A"
 
@@ -239,7 +239,7 @@ def format_datetime(date_value):
                 try:
                     dt = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
                     return dt.strftime("%d/%m/%Y à %H:%M")
-                except Exception:
+                except (ValueError, TypeError):
                     pass
 
             # Format YYYY-MM-DD HH:MM:SS
@@ -247,7 +247,7 @@ def format_datetime(date_value):
                 try:
                     dt = datetime.strptime(date_value[:19], "%Y-%m-%d %H:%M:%S")
                     return dt.strftime("%d/%m/%Y à %H:%M")
-                except Exception:
+                except (ValueError, TypeError):
                     pass
 
             # Format court YYYY-MM-DD (sans heure)
@@ -255,14 +255,14 @@ def format_datetime(date_value):
                 try:
                     dt = datetime.strptime(date_value, "%Y-%m-%d")
                     return dt.strftime("%d/%m/%Y")
-                except Exception:
+                except (ValueError, TypeError):
                     pass
 
             return date_value
 
         return str(date_value)
 
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError) as e:
         logger.debug(f"Erreur formatage datetime '{date_value}': {e}")
         return "N/A"
 

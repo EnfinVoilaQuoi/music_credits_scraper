@@ -56,7 +56,7 @@ def populate_tracks_table(app):
         app.disabled_tracks = app.disabled_tracks_manager.load_disabled_tracks(
             app.current_artist.name
         )
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.debug(f"Pas de morceaux désactivés sauvegardés: {e}")
         app.disabled_tracks = set()
 
@@ -393,7 +393,7 @@ def delete_track_by_index(app, index):
             app.deleted_tracks_manager.add_deleted(
                 app.current_artist.name, track.genius_id, track.title
             )
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.debug(f"Mémo suppression échec: {e}")
         app.current_artist.tracks.pop(index)
         # Les indices ne sont plus valides

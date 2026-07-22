@@ -5,6 +5,8 @@ import tkinter
 from datetime import datetime
 from tkinter import messagebox
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.gui import helpers
 from src.gui.panels import tracks_table
 from src.models import Track
@@ -121,7 +123,7 @@ def populate_albums_table(app):
     try:
         for a in app.data_manager.get_albums_for_artist(app.current_artist.id):
             albums_db[helpers.normalize_album_title(a["title"])] = a
-    except Exception as e:
+    except (SQLAlchemyError, KeyError, TypeError) as e:
         logger.debug(f"Albums DB indisponibles: {e}")
 
     FEAT_LABEL = "🎤 Featurings (albums invités)"

@@ -181,7 +181,7 @@ def _do_merge(app, keep, other):
         app.deleted_tracks_manager.add_deleted(
             app.current_artist.name, other.genius_id, other.title
         )
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.debug(f"Mémo suppression échec: {e}")
 
     # 5. Rafraîchir la GUI

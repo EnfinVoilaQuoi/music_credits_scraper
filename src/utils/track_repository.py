@@ -7,6 +7,7 @@ constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule Core phase E2).
 """
 
 import json
+import time
 from datetime import datetime
 from typing import Any
 
@@ -338,6 +339,11 @@ class TrackRepository:
                 # comportement identique. Symétrique du piège d'écriture
                 # `date_bind` (cf. REFONTE.md, piège TIMESTAMP E2). `.mappings()`
                 # donne un accès par nom, indexable comme sqlite3.Row.
+                # Témoin de perf (E7d) : chrono par sous-phase pour localiser le
+                # coût du chargement d'un gros artiste (SELECT tracks / observations
+                # / boucle mapper+crédits). La boucle mapper porte à la fois la
+                # réconciliation par morceau ET un N+1 sur les crédits.
+                _t0 = time.monotonic()
                 rows = (
                     conn.execute(
                         text("SELECT * FROM tracks WHERE artist_id = :aid ORDER BY title"),
@@ -347,10 +353,22 @@ class TrackRepository:
                     .all()
                 )
                 logger.info(f"📦 {len(rows)} lignes récupérées")
+                _t_rows = time.monotonic()
 
                 # E6 : observations de TOUT l'artiste en 1 requête (pas par track),
                 # groupées par track_id → passées au mapper qui les réconcilie.
                 observations_by_track = self._observations_by_artist(conn, artist_id)
+                _t_obs = time.monotonic()
+
+                # Volume des LRC bruts chargés (`lyrics_synced`) : champ lourd
+                # (~3-10 Ko × sources × morceaux), cible désignée de l'optim E7d.
+                _n_obs = sum(len(v) for v in observations_by_track.values())
+                _lyrics_bytes = sum(
+                    len(o.value or "")
+                    for v in observations_by_track.values()
+                    for o in v
+                    if o.field == "lyrics_synced"
+                )
 
                 # Création des objets Track via le mapper (coercitions centralisées ;
                 # `row` est une RowMapping, indexable par nom comme sqlite3.Row).
@@ -381,6 +399,19 @@ class TrackRepository:
                 tracks_with_key = sum(1 for t in result if t.audio.musical_key)
                 logger.info(
                     f"✅ {len(result)} tracks chargés avec succès ({tracks_with_key} avec musical_key)"
+                )
+
+                _t_end = time.monotonic()
+                logger.info(
+                    "⏱ get_artist_tracks: %d tracks, %d obs dont %.0f Ko lyrics_synced "
+                    "en %.2fs (rows %.2fs, obs %.2fs, map+crédits %.2fs)",
+                    len(result),
+                    _n_obs,
+                    _lyrics_bytes / 1024,
+                    _t_end - _t0,
+                    _t_rows - _t0,
+                    _t_obs - _t_rows,
+                    _t_end - _t_obs,
                 )
 
         except Exception as e:

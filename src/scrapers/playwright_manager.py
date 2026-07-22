@@ -54,7 +54,7 @@ def stop_playwright() -> None:
     if pw is not None:
         try:
             pw.stop()
-        except Exception:
+        except Exception:  # noqa: BLE001 — arrêt best-effort de l'instance Playwright
             pass
         _local.playwright = None
 
@@ -74,6 +74,6 @@ async def stop_playwright_async() -> None:
     if _async_instance is not None:
         try:
             await _async_instance.stop()
-        except Exception:
+        except Exception:  # noqa: BLE001 — arrêt best-effort de l'instance Playwright async
             pass
         _async_instance = None

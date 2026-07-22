@@ -5,6 +5,9 @@ import pickle
 import sqlite3
 from datetime import datetime, timedelta
 
+import requests
+from ytmusicapi.exceptions import YTMusicError
+
 from src.config import DATA_DIR, YOUTUBE_CACHE_TTL_HOURS
 from src.utils.logger import get_logger
 
@@ -29,7 +32,7 @@ class YouTubeSearcher:
             logger.warning("ytmusicapi non disponible, utilisation fallback requests")
             self.ytmusic = None
             self.ytmusic_available = False
-        except Exception as e:
+        except (YTMusicError, requests.RequestException, OSError) as e:
             logger.warning(f"Erreur YTMusic: {e}, utilisation fallback")
             self.ytmusic = None
             self.ytmusic_available = False
@@ -67,7 +70,7 @@ class YouTubeSearcher:
             try:
                 results = self._search_with_ytmusic(artist, title, max_results)
                 logger.info(f"ytmusicapi: {len(results)} résultats pour {artist} - {title}")
-            except Exception as e:
+            except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
                 logger.warning(f"Erreur ytmusicapi: {e}")
 
         # Méthode 2: Fallback requests simple (si ytmusicapi échoue)
@@ -75,7 +78,7 @@ class YouTubeSearcher:
             try:
                 results = self._search_with_requests_fallback(artist, title, max_results)
                 logger.info(f"Fallback: {len(results)} résultats pour {artist} - {title}")
-            except Exception as e:
+            except (requests.RequestException, ValueError, KeyError, TypeError) as e:
                 logger.error(f"Erreur fallback: {e}")
 
         # Trier par pertinence
@@ -135,7 +138,7 @@ class YouTubeSearcher:
                         if len(all_results) >= max_results:
                             break
 
-            except Exception as e:
+            except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
                 logger.debug(f"Erreur recherche ytmusicapi pour '{query}': {e}")
                 continue
 
@@ -231,7 +234,7 @@ class YouTubeSearcher:
 
             if result:
                 return pickle.loads(result[0])
-        except Exception as e:
+        except (sqlite3.Error, pickle.PickleError, EOFError, OSError) as e:
             logger.debug(f"Erreur cache: {e}")
 
         return None
@@ -248,5 +251,5 @@ class YouTubeSearcher:
             )
             conn.commit()
             conn.close()
-        except Exception as e:
+        except (sqlite3.Error, pickle.PickleError, OSError) as e:
             logger.debug(f"Erreur mise en cache: {e}")

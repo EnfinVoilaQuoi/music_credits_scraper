@@ -26,15 +26,18 @@ def test_is_available():
 
 
 def test_bpm_candidat_key_mode_duration():
+    # E7 : BPM au scrutin, key/mode en observations PAR SOURCE (plus de pose
+    # legacy directe). Duration reste une colonne (posée telle quelle).
     data = {"bpm": 90, "key": 5, "mode": 1, "duration": 200}
     provider = SongBpmProvider(_FakeScraper(data))
     track = _track()
     ctx = EnrichmentContext()
     assert provider.enrich(track, ctx) is True
     assert ("songbpm", 90) in ctx.bpm_ballot.candidates
-    assert track.key == 5
-    assert track.mode == 1
-    assert track.key_mode_source == "songbpm"
+    keys = [o for o in ctx.observations if o.field == "key" and o.source == "songbpm"]
+    modes = [o for o in ctx.observations if o.field == "mode" and o.source == "songbpm"]
+    assert keys and keys[0].value == 5
+    assert modes and modes[0].value == 1
     assert track.duration == 200
 
 
@@ -43,7 +46,7 @@ def test_candidat_bpm_compte_comme_succes_meme_si_bpm_deja_present():
     # plus « ÉCHEC » à tort. Le candidat rejoint le scrutin.
     provider = SongBpmProvider(_FakeScraper({"bpm": 146}))
     track = _track()
-    track.bpm = 146  # déjà renseigné
+    track.audio.bpm = 146  # déjà renseigné
     ctx = EnrichmentContext()
     assert provider.enrich(track, ctx) is True
     assert ("songbpm", 146) in ctx.bpm_ballot.candidates
@@ -61,8 +64,8 @@ def test_scraper_vide_renvoie_false():
 
 def _track_complet():
     track = _track()
-    track.key = 5
-    track.mode = 1
+    track.audio.key = 5
+    track.audio.mode = 1
     track.duration = 200
     return track
 

@@ -400,8 +400,8 @@ def start_track_retrieval(
                                 candidates,
                                 key=lambda t: (
                                     bool(t.album),
-                                    bool(t.bpm),
-                                    bool(t.lyrics),
+                                    bool(t.audio.bpm),
+                                    bool(t.lyrics.text),
                                     len(t.credits),
                                 ),
                             )
@@ -418,23 +418,23 @@ def start_track_retrieval(
                         # (Avant 2026-07-13 : musical_key/lyrics/certifs étaient gardés
                         # par `not hasattr(track, …)` toujours faux → préservation morte.
                         # Alignés ici sur le pattern correct de bpm/credits.)
-                        if not track.bpm and existing_track.bpm:
-                            track.bpm = existing_track.bpm
-                        if not track.musical_key and existing_track.musical_key:
-                            track.musical_key = existing_track.musical_key
-                        if not track.lyrics and existing_track.lyrics:
-                            track.lyrics = existing_track.lyrics
-                            track.has_lyrics = existing_track.has_lyrics
+                        if not track.audio.bpm and existing_track.audio.bpm:
+                            track.audio.bpm = existing_track.audio.bpm
+                        if not track.audio.musical_key and existing_track.audio.musical_key:
+                            track.audio.musical_key = existing_track.audio.musical_key
+                        if not track.lyrics.text and existing_track.lyrics.text:
+                            track.lyrics.text = existing_track.lyrics.text
+                            track.lyrics.present = existing_track.lyrics.present
                         if not track.credits and existing_track.credits:
                             track.credits = existing_track.credits
-                        if not track.certifications and existing_track.certifications:
-                            track.certifications = existing_track.certifications
+                        if not track.certs.entries and existing_track.certs.entries:
+                            track.certs.entries = existing_track.certs.entries
                         # Préserver l'ID de la base de données
                         track.id = existing_track.id
 
                 # E7h : rematch des certifications depuis les CSV clean (matcher
                 # en mémoire, offline, rapide) AVANT le save — pose
-                # track.certifications/album_certifications à jour. Autorité = les
+                # track.certs.entries/album_certifications à jour. Autorité = les
                 # CSV clean ; écrase la préservation ci-dessus (certifs = données
                 # dérivées, pas saisies). Défensif : n'interrompt pas la récup.
                 try:

@@ -75,8 +75,8 @@ class TrackRepository:
                 # (gui/workers/retrieval.py).
 
             # Sérialiser les champs JSON une seule fois (partagés UPDATE/INSERT)
-            certifications_json = json.dumps(track.certifications)
-            album_certifications_json = json.dumps(track.album_certifications)
+            certifications_json = json.dumps(track.certs.entries)
+            album_certifications_json = json.dumps(track.certs.album_entries)
             relationships_json = json.dumps(track.relationships or [])
 
             # Paramètres NOMMÉS : un seul dict {colonne: valeur}, lié par nom
@@ -108,13 +108,13 @@ class TrackRepository:
                 "primary_artist_name": track.primary_artist_name,
                 "featured_artists": track.featured_artists,
                 "secondary_role": track.secondary_role,
-                "lyrics": track.lyrics,
-                "lyrics_scraped_at": track.lyrics_scraped_at,
-                "lyrics_source": track.lyrics_source,
-                "lyrics_synced": track.lyrics_synced,
-                "lyrics_synced_source": track.lyrics_synced_source,
-                "lyrics_synced_confidence": track.lyrics_synced_confidence,
-                "has_lyrics": bool(track.lyrics),  # INSERT uniquement
+                "lyrics": track.lyrics.text,
+                "lyrics_scraped_at": track.lyrics.scraped_at,
+                "lyrics_source": track.lyrics.source,
+                "lyrics_synced": track.lyrics.synced,
+                "lyrics_synced_source": track.lyrics.synced_source,
+                "lyrics_synced_confidence": track.lyrics.synced_confidence,
+                "has_lyrics": bool(track.lyrics.text),  # INSERT uniquement
                 "anecdotes": track.anecdotes,
                 "certifications_json": certifications_json,
                 "album_certifications_json": album_certifications_json,
@@ -122,8 +122,8 @@ class TrackRepository:
                 "spotify_page_title": getattr(track, "spotify_page_title", None),
                 # Chantier « Media » : chemins d'images (kind/vues vidéo passent par
                 # update_track_video_views, jamais ici).
-                "cover_path": track.cover_path,
-                "yt_thumbnail_path": track.yt_thumbnail_path,
+                "cover_path": track.media.cover_path,
+                "yt_thumbnail_path": track.media.yt_thumbnail_path,
                 "now": datetime.now(),
                 "last_scraped": track.last_scraped,
             }
@@ -138,9 +138,7 @@ class TrackRepository:
                 # DÉCISION is_featuring : seul champ écrasé SANS COALESCE (le
                 # track en mémoire fait foi pour le statut featuring au moment du
                 # save). Comportement historique conservé. Les appelants qui
-                # re-sauvent depuis l'API portent is_featuring sur l'objet ; le
-                # rafraîchissement de crédits passe par force_update_track_credits
-                # qui relit et re-pose is_featuring AVANT le save.
+                # re-sauvent depuis l'API portent is_featuring sur l'objet.
                 conn.execute(
                     text("""
                     UPDATE tracks
@@ -260,7 +258,7 @@ class TrackRepository:
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
                 f"Morceau sauvegardé: {track.title} (ID: {track.id}, "
-                f"Featuring: {track.is_featuring}, Paroles: {bool(track.lyrics)})"
+                f"Featuring: {track.is_featuring}, Paroles: {bool(track.lyrics.text)})"
             )
             return track.id
 
@@ -380,7 +378,7 @@ class TrackRepository:
                         continue
 
                 # Compter les tracks avec musical_key
-                tracks_with_key = sum(1 for t in result if t.musical_key)
+                tracks_with_key = sum(1 for t in result if t.audio.musical_key)
                 logger.info(
                     f"✅ {len(result)} tracks chargés avec succès ({tracks_with_key} avec musical_key)"
                 )
@@ -636,124 +634,6 @@ class TrackRepository:
         except Exception as e:
             logger.error(f"Erreur fusion track {delete_id} → {keep_id}: {e}")
             return False
-
-    def force_update_track_credits(self, track: Track) -> int:
-        """Force la mise à jour complète des crédits d'un morceau - VERSION PRÉSERVANT FEATURES"""
-        try:
-            with self.engine.begin() as conn:
-                # ✅ CORRECTION: Récupérer les infos featuring AVANT suppression
-                featuring_info = (
-                    conn.execute(
-                        text(
-                            "SELECT is_featuring, primary_artist_name, featured_artists "
-                            "FROM tracks WHERE id = :tid"
-                        ),
-                        {"tid": track.id},
-                    )
-                    .mappings()
-                    .first()
-                )
-
-                if featuring_info:
-                    # Préserver les infos featuring sur l'objet track
-                    track.is_featuring = bool(featuring_info["is_featuring"])
-                    track.primary_artist_name = featuring_info["primary_artist_name"]
-                    track.featured_artists = featuring_info["featured_artists"]
-                    logger.info(f"🔒 Infos featuring préservées pour {track.title}")
-                else:
-                    track.is_featuring = False
-
-                # Supprimer TOUS les anciens crédits
-                deleted_count = conn.execute(
-                    text("DELETE FROM credits WHERE track_id = :tid"), {"tid": track.id}
-                ).rowcount
-                logger.info(f"🗑️ {deleted_count} anciens crédits supprimés pour '{track.title}'")
-
-                # Supprimer les anciennes erreurs de scraping
-                deleted_errors = conn.execute(
-                    text("DELETE FROM scraping_errors WHERE track_id = :tid"), {"tid": track.id}
-                ).rowcount
-                if deleted_errors > 0:
-                    logger.info(f"🗑️ {deleted_errors} anciennes erreurs supprimées")
-
-                # Remettre à zéro les métadonnées de scraping (MAIS PRÉSERVER FEATURING)
-                conn.execute(
-                    text("""
-                    UPDATE tracks
-                    SET last_scraped = NULL,
-                        genre = CASE
-                            WHEN genre IS NOT NULL AND genre != '' THEN genre
-                            ELSE NULL
-                        END
-                    WHERE id = :tid
-                """),
-                    {"tid": track.id},
-                )
-
-                # Sauvegarder les nouveaux crédits
-                for credit in track.credits:
-                    self._save_credit(conn, track.id, credit)
-
-                # Mettre à jour le track complet (EN PRÉSERVANT LES FEATURES)
-                conn.execute(
-                    text("""
-                    UPDATE tracks
-                    SET album = :album, track_number = :track_number, release_date = :release_date,
-                        genius_id = :genius_id, spotify_id = :spotify_id, discogs_id = :discogs_id,
-                        duration = :duration, genre = :genre,
-                        genius_url = :genius_url, spotify_url = :spotify_url,
-                        is_featuring = :is_featuring, primary_artist_name = :primary_artist_name,
-                        featured_artists = :featured_artists,
-                        updated_at = :updated_at, last_scraped = :last_scraped
-                    WHERE id = :id
-                """),
-                    {
-                        "album": track.album,
-                        "track_number": track.track_number,
-                        "release_date": track.release_date,
-                        "genius_id": track.genius_id,
-                        "spotify_id": track.spotify_id,
-                        "discogs_id": track.discogs_id,
-                        # E7-D1 : bpm NON écrit ici (writer sans COALESCE) — le BPM
-                        # est piloté par les observations, pas par le re-scrape crédits.
-                        "duration": track.duration,
-                        "genre": track.genre,
-                        "genius_url": track.genius_url,
-                        "spotify_url": track.spotify_url,
-                        "is_featuring": track.is_featuring,
-                        "primary_artist_name": track.primary_artist_name,
-                        "featured_artists": track.featured_artists,
-                        "updated_at": datetime.now(),
-                        "last_scraped": track.last_scraped,
-                        "id": track.id,
-                    },
-                )
-
-                # Sauvegarder les nouvelles erreurs s'il y en a
-                for error in track.scraping_errors:
-                    conn.execute(
-                        text(
-                            "INSERT INTO scraping_errors (track_id, error_message, error_time) "
-                            "VALUES (:track_id, :error_message, :error_time)"
-                        ),
-                        {
-                            "track_id": track.id,
-                            "error_message": error,
-                            "error_time": datetime.now(),
-                        },
-                    )
-
-                # commit auto à la sortie du bloc `engine.begin()`
-                new_credits_count = len(track.credits)
-                logger.info(
-                    f"✅ Mise à jour forcée terminée pour '{track.title}': {new_credits_count} nouveaux crédits (Featuring préservé: {track.is_featuring})"
-                )
-
-                return new_credits_count
-
-        except Exception as e:
-            logger.error(f"❌ Erreur lors de la mise à jour forcée: {e}")
-            return 0
 
     # ──────────────────────────────────────────────────────────────────────────
     # Kworb — streams Spotify

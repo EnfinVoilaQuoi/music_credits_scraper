@@ -35,10 +35,13 @@ class GetSongBpmProvider:
     def gate(self, track: Track, ctx: EnrichmentContext) -> None:
         """Jamais de skip : API gratuite/rapide, appelée SYSTÉMATIQUEMENT pour
         fournir un 2ᵉ vote BPM (§8.3). Ne sert qu'à logger la raison."""
-        # key/mode : attributs dynamiques du mapper → getattr requis
-        missing_bpm = not track.bpm
-        missing_key = getattr(track, "key", None) is None
-        missing_mode = getattr(track, "mode", None) is None
+        # « Manquant » = ni valeur PERSISTÉE (track.X) ni frais ce run (vote au
+        # ballot pour le BPM, observation pour key/mode) — les poses provisoires
+        # des providers amont ont été retirées (E7). Gate purement informatif
+        # (jamais de skip) → sert à un log honnête. getattr : attrs dynamiques.
+        missing_bpm = not track.audio.bpm and not ctx.bpm_ballot.candidates
+        missing_key = track.audio.key is None and not ctx.has_observation("key")
+        missing_mode = track.audio.mode is None and not ctx.has_observation("mode")
 
         reasons = []
         if ctx.force_update:
@@ -53,7 +56,11 @@ class GetSongBpmProvider:
             ]
             reasons.append(f"missing_data={','.join(missing_items)}")
 
-        logger.info(f"🎼 Appel de GetSongBPM pour '{track.title}' (raison: {', '.join(reasons)})")
+        # Appel SYSTÉMATIQUE (2ᵉ vote BPM §8.3) : quand l'ISRC a déjà tout posé,
+        # aucune raison ci-dessus ne s'applique → motif explicite plutôt qu'un
+        # « (raison: ) » vide.
+        motif = ", ".join(reasons) if reasons else "2e_vote_bpm"
+        logger.info(f"🎼 Appel de GetSongBPM pour '{track.title}' (raison: {motif})")
         return None
 
     @staticmethod
@@ -113,76 +120,47 @@ class GetSongBpmProvider:
             return False
 
     def _apply_song_data(self, track: Track, ctx: EnrichmentContext, song_data) -> bool:
-        """Application des données GetSongBPM au track (commun sync/async)."""
-        force_update = ctx.force_update
+        """Émet les observations GetSongBPM (commun sync/async).
+
+        E7 : plus de pose legacy directe sur `track` — le BPM va au scrutin, key/
+        mode/time_signature en observations PAR SOURCE. `apply_resolutions` repose
+        ensuite bpm/key/mode/key_mode_source/musical_key/time_signature en fin de
+        run. `updated` (→ succès) reflète « la source a MESURÉ un champ », non une
+        pose (sinon faux ÉCHEC → nettoyage, cf. data_enricher._clear...).
+        """
         if song_data.error:
             logger.warning(f"GetSongBPM: ❌ {song_data.error}")
             return False
 
-        # Enrichir le track avec les données GetSongBPM
         updated = False
 
-        # BPM → candidat pour le vote (+ pose provisoire si manquant)
+        # BPM → candidat pour le scrutin (§8.3).
         sbpm = sanitize_bpm(song_data.bpm)
         if sbpm is not None:
             ctx.bpm_ballot.add("getsongbpm", sbpm)
-            if force_update or not track.bpm:
-                track.bpm = sbpm
-                logger.info(f"GetSongBPM: ✅ BPM: {sbpm}")
-                updated = True
+            logger.info(f"GetSongBPM: ✅ BPM: {sbpm}")
+            updated = True
 
-        # Observation key/mode PAR SOURCE (normalisée) — émise dès que la
-        # source a mesuré, indépendamment du last-writer legacy (E5c-2b).
+        # Observations key/mode PAR SOURCE (normalisées : lettre/mot → pc/0-1).
         ctx.observations.extend(
             key_mode_observations("getsongbpm", key=song_data.key, mode=song_data.mode)
         )
-
-        # Key (seulement si pas déjà présent ou force_update)
-        if song_data.key and (force_update or not track.key):
-            # Convertir la notation anglaise (ex: "F#m") en notation numérique
-            try:
-                from src.utils.music_theory import convert_key_to_numeric
-
-                track.key = convert_key_to_numeric(song_data.key)
-                track.key_mode_source = "getsongbpm"
-                logger.info(f"GetSongBPM: ✅ Key: {song_data.key} → {track.key}")
-            except Exception:
-                logger.debug(f"GetSongBPM: Key brute stockée: {song_data.key}")
+        if song_data.key:
+            logger.info(f"GetSongBPM: ✅ Key: {song_data.key}")
             updated = True
-
-        # Mode (seulement si pas déjà présent ou force_update)
-        if song_data.mode and (force_update or not track.mode):
-            # Convertir "major"/"minor" en 1/0
-            track.mode = 1 if song_data.mode == "major" else 0
-            track.key_mode_source = "getsongbpm"
+        if song_data.mode:
             logger.info(f"GetSongBPM: ✅ Mode: {song_data.mode}")
             updated = True
 
-        # Musical key (calculé depuis Key + Mode)
-        if (
-            hasattr(track, "key")
-            and hasattr(track, "mode")
-            and track.key is not None
-            and track.mode is not None
-        ):
-            try:
-                from src.utils.music_theory import key_mode_to_french
-
-                track.musical_key = key_mode_to_french(track.key, track.mode)
-                logger.info(f"GetSongBPM: ✅ Musical Key: {track.musical_key}")
-            except Exception as e:
-                logger.debug(f"GetSongBPM: Erreur conversion musical_key: {e}")
-
-        # Time Signature (optionnel) — write-through observation (E7-D2 : la
-        # colonne est dropée, la vérité vit dans l'observation).
+        # Time Signature → observation PAR SOURCE (colonne droppée E7-D2 ;
+        # apply_resolutions repose track.audio.time_signature depuis l'observation).
         if song_data.time_signature:
             from src.enrichment.observation import Observation
 
             ctx.observations.append(
                 Observation("time_signature", song_data.time_signature, "getsongbpm")
             )
-            track.time_signature = song_data.time_signature
-            logger.info(f"GetSongBPM: ✅ Time Signature: {track.time_signature}")
+            logger.info(f"GetSongBPM: ✅ Time Signature: {song_data.time_signature}")
             updated = True
 
         if updated:

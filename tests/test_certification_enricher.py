@@ -4,7 +4,7 @@ Deux invariants :
 - **Golden round-trip** : `Certification.from_match(dict).to_column_dict()` doit
   reproduire À L'IDENTIQUE le dict de `cert_matcher._format` (contrat colonne
   JSON lu par le mapper/GUI — aucun champ perdu, même via un niveau hors enum).
-- **apply_certifications** pose `track.certifications`/`album_certifications` et
+- **apply_certifications** pose `track.certs.entries`/`album_certifications` et
   les champs de rétro-compat, via un matcher factice (offline, déterministe).
 """
 
@@ -83,23 +83,23 @@ class TestApplyCertifications:
         n = apply_certifications(artist, [track], matcher)
 
         assert n == 1
-        assert track.certifications == [_match()]
-        assert track.has_certification is True
-        assert track.certification_level == "Double Platine"
-        assert track.certification_date == "2021-05-01"
-        assert track.album_certifications == [_match(category="album", title="Mon Album")]
+        assert track.certs.entries == [_match()]
+        assert track.certs.has is True
+        assert track.certs.level == "Double Platine"
+        assert track.certs.date == "2021-05-01"
+        assert track.certs.album_entries == [_match(category="album", title="Mon Album")]
 
     def test_sans_certif_reset_backcompat(self):
         artist = self._artist()
         track = Track(title="Inconnu", artist=artist)
-        track.has_certification = True  # état sale préexistant
+        track.certs.has = True  # état sale préexistant
 
         n = apply_certifications(artist, [track], _FakeMatcher())
 
         assert n == 0
-        assert track.certifications == []
-        assert track.has_certification is False
-        assert track.certification_level is None
+        assert track.certs.entries == []
+        assert track.certs.has is False
+        assert track.certs.level is None
 
     def test_titre_normalise_avant_match(self):
         # L'apostrophe courbe est normalisée → match sur la clé ASCII.
@@ -109,7 +109,7 @@ class TestApplyCertifications:
 
         n = apply_certifications(artist, [track], matcher)
         assert n == 1
-        assert track.certifications[0]["title"] == "L'Odyssée"
+        assert track.certs.entries[0]["title"] == "L'Odyssée"
 
     def test_cache_album_une_seule_recherche(self):
         artist = self._artist()

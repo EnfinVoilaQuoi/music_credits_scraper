@@ -156,7 +156,7 @@ class TestTrackFromRow:
         assert track.spotify_id == "abc"
         assert track.duration == 228  # coercition str → int
         # E7-D2 : bpm/key/mode droppés → None sans observation (plus de colonne).
-        assert track.bpm is None
+        assert track.audio.bpm is None
 
     def test_duree_mm_ss(self, artist):
         track = track_from_row(make_row(id=1, title="X", duration="3:48"), artist)
@@ -180,15 +180,15 @@ class TestTrackFromRow:
     def test_certifications_json_et_backcompat(self, artist):
         certs = [{"certification": "Or", "certification_date": "2020-01-01"}]
         track = track_from_row(make_row(id=1, title="X", certifications=json.dumps(certs)), artist)
-        assert track.certifications == certs
-        assert track.has_certification is True
-        assert track.certification_level == "Or"
-        assert track.certification_date == "2020-01-01"
+        assert track.certs.entries == certs
+        assert track.certs.has is True
+        assert track.certs.level == "Or"
+        assert track.certs.date == "2020-01-01"
 
     def test_certifications_absentes_liste_vide(self, artist):
         track = track_from_row(make_row(id=1, title="X"), artist)
-        assert track.certifications == []
-        assert track.has_certification is False
+        assert track.certs.entries == []
+        assert track.certs.has is False
 
     def test_champs_media(self, artist):
         # Chantier « Media » : chemins d'images + métadonnées vidéo (round-trip).
@@ -202,11 +202,11 @@ class TestTrackFromRow:
             youtube_video_views_updated="2026-07-18 10:00:00",
         )
         track = track_from_row(row, artist)
-        assert track.cover_path == "covers/Jul - C'est pas des LOL.jpg"
-        assert track.yt_thumbnail_path == "vignettes/abc123DEF45.jpg"
-        assert track.youtube_video_kind == "clip"
-        assert track.youtube_video_views == 123456  # coercition str → int
-        assert track.youtube_video_views_updated == "2026-07-18 10:00:00"  # brut (TIMESTAMP)
+        assert track.media.cover_path == "covers/Jul - C'est pas des LOL.jpg"
+        assert track.media.yt_thumbnail_path == "vignettes/abc123DEF45.jpg"
+        assert track.media.youtube_video_kind == "clip"
+        assert track.media.youtube_video_views == 123456  # coercition str → int
+        assert track.media.youtube_video_views_updated == "2026-07-18 10:00:00"  # brut (TIMESTAMP)
 
 
 class TestObservationsOverride:
@@ -222,9 +222,9 @@ class TestObservationsOverride:
         # Le vote des observations (2 sources à 142) pilote bpm/source/confidence.
         obs = [self._obs("bpm", "142", "reccobeats"), self._obs("bpm", "142", "songbpm")]
         track = track_from_row(make_row(id=1, title="X"), artist, obs)
-        assert track.bpm == 142
-        assert track.bpm_source == "reccobeats+songbpm"
-        assert track.bpm_confidence == 2
+        assert track.audio.bpm == 142
+        assert track.audio.bpm_source == "reccobeats+songbpm"
+        assert track.audio.bpm_confidence == 2
 
     def test_valeurs_texte_persistees_coercees(self, artist):
         # value en TEXT (relue de la DB) → int + musical_key recalculée.
@@ -235,26 +235,26 @@ class TestObservationsOverride:
             self._obs("mode", "0", "songbpm"),
         ]
         track = track_from_row(make_row(id=1, title="X"), artist, obs)
-        assert track.key == 8
-        assert track.mode == 0
-        assert track.musical_key == "Sol#/Lab mineur"
+        assert track.audio.key == 8
+        assert track.audio.mode == 0
+        assert track.audio.musical_key == "Sol#/Lab mineur"
 
     def test_sans_observation_aucune_donnee_audio(self, artist):
         # E7-D2 : plus de colonne audio → sans observation, tout est None.
         track = track_from_row(make_row(id=1, title="X"), artist, [])
-        assert track.bpm is None
-        assert track.key is None
-        assert track.mode is None
-        assert track.musical_key is None
+        assert track.audio.bpm is None
+        assert track.audio.key is None
+        assert track.audio.mode is None
+        assert track.audio.musical_key is None
 
     def test_bpm_observe_key_mode_absents(self, artist):
         # bpm observé (piloté) ; key/mode SANS observation → None (pas de fallback).
         track = track_from_row(
             make_row(id=1, title="X"), artist, [self._obs("bpm", "140", "deezer")]
         )
-        assert track.bpm == 140  # observé
-        assert track.key is None
-        assert track.mode is None
+        assert track.audio.bpm == 140  # observé
+        assert track.audio.key is None
+        assert track.audio.mode is None
 
     def test_manual_survit_aux_observations_concurrentes(self, artist):
         # E7a : une saisie manuelle (obs `manual`, value TEXT relue) doit primer
@@ -270,8 +270,8 @@ class TestObservationsOverride:
             self._obs("mode", "0", "manual"),
         ]
         track = track_from_row(row, artist, obs)
-        assert track.bpm == 95
-        assert track.bpm_source == "manual"
-        assert track.key == 2
-        assert track.mode == 0
-        assert track.key_mode_source == "manual"
+        assert track.audio.bpm == 95
+        assert track.audio.bpm_source == "manual"
+        assert track.audio.key == 2
+        assert track.audio.mode == 0
+        assert track.audio.key_mode_source == "manual"

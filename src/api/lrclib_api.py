@@ -85,6 +85,45 @@ def _artist_match(a: str, b: str) -> float:
     return SequenceMatcher(None, na, nb).ratio()
 
 
+def _best_search_hit(
+    results: list,
+    track_name: str,
+    artist_name: str | None,
+    duration: int | None,
+    require_synced: bool,
+) -> dict | None:
+    """Meilleur candidat `/search` : titre fort exigé, départage/bonus par la durée.
+
+    Pur (sans I/O) → partagé VERBATIM par les voies sync (`search`) et async
+    (`search_async`). Renvoie le candidat brut LRCLIB (non `_pack`é) ou None.
+    """
+    best, best_score = None, -1.0
+    for cand in results:
+        if not isinstance(cand, dict):
+            continue
+        if require_synced and not cand.get("syncedLyrics"):
+            continue
+        tscore = _title_match(track_name, cand.get("trackName", ""))
+        if tscore < _TITLE_MATCH_MIN:
+            continue  # titre pas assez proche → écarté
+        ascore = (
+            _artist_match(artist_name or "", cand.get("artistName", "")) if artist_name else 0.5
+        )
+        score = tscore + 0.5 * ascore
+        # Départage / bonus par la durée réelle
+        if duration and cand.get("duration"):
+            diff = abs(int(cand["duration"]) - int(duration))
+            if diff <= 2:
+                score += 1.0  # match durée quasi exact = forte confiance
+            elif diff <= 5:
+                score += 0.3
+            else:
+                score -= min(diff / 60.0, 1.0)  # pénalité croissante
+        if score > best_score:
+            best, best_score = cand, score
+    return best
+
+
 class LRCLIBAPI:
     """Client lecture seule pour lrclib.net (paroles synchronisées libres)."""
 
@@ -170,31 +209,7 @@ class LRCLIBAPI:
         if not isinstance(results, list) or not results:
             return None
 
-        best, best_score = None, -1.0
-        for cand in results:
-            if not isinstance(cand, dict):
-                continue
-            if require_synced and not cand.get("syncedLyrics"):
-                continue
-            tscore = _title_match(track_name, cand.get("trackName", ""))
-            if tscore < _TITLE_MATCH_MIN:
-                continue  # titre pas assez proche → écarté
-            ascore = (
-                _artist_match(artist_name or "", cand.get("artistName", "")) if artist_name else 0.5
-            )
-            score = tscore + 0.5 * ascore
-            # Départage / bonus par la durée réelle
-            if duration and cand.get("duration"):
-                diff = abs(int(cand["duration"]) - int(duration))
-                if diff <= 2:
-                    score += 1.0  # match durée quasi exact = forte confiance
-                elif diff <= 5:
-                    score += 0.3
-                else:
-                    score -= min(diff / 60.0, 1.0)  # pénalité croissante
-            if score > best_score:
-                best, best_score = cand, score
-
+        best = _best_search_hit(results, track_name, artist_name, duration, require_synced)
         return self._pack(best) if best else None
 
     def get_synced(

@@ -12,7 +12,21 @@ import logging
 import re
 import unicodedata
 
+import requests
 from ytmusicapi import YTMusic
+from ytmusicapi.exceptions import YTMusicError
+
+# googleapiclient est une dépendance OPTIONNELLE (YouTube Data API v3, importée en
+# lazy dans les méthodes qui l'utilisent). On expose sa classe d'erreur de base
+# pour cibler les `except` ; si la lib est absente, une sentinelle jamais levée
+# prend sa place afin que les clauses `except (...)` restent valides.
+try:
+    from googleapiclient.errors import Error as GoogleApiError
+except ImportError:  # pragma: no cover
+
+    class GoogleApiError(Exception):
+        """Sentinelle quand googleapiclient est absent (jamais levée)."""
+
 
 logger = logging.getLogger("YTMusicAPI")
 
@@ -164,14 +178,13 @@ class YTMusicAPI:
                     cid = items[0]["id"]
                     logger.info(f"✅ Handle @{handle} résolu via API: {cid}")
                     return cid
-            except Exception as e:
+            # ImportError inclus : googleapiclient optionnel → on retombe sur la page.
+            except (GoogleApiError, OSError, ImportError, KeyError, IndexError, TypeError) as e:
                 logger.warning(f"resolve_channel API échec pour @{handle}: {e}")
 
         # 2. Fallback : page music.youtube.com/@handle
         try:
-            import requests as _rq
-
-            r = _rq.get(
+            r = requests.get(
                 f"https://music.youtube.com/@{handle}",
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
                 timeout=15,
@@ -180,7 +193,7 @@ class YTMusicAPI:
             if m:
                 logger.info(f"✅ Handle @{handle} résolu via page: {m.group(1)}")
                 return m.group(1)
-        except Exception as e:
+        except requests.RequestException as e:
             logger.warning(f"resolve_channel page échec pour @{handle}: {e}")
 
         return None
@@ -211,7 +224,7 @@ class YTMusicAPI:
                     names[cid] = snip.get("channelTitle", "")
 
             return _channel_from_votes(votes, names)
-        except Exception as e:
+        except (GoogleApiError, OSError, ImportError, KeyError, IndexError, TypeError) as e:
             logger.warning(f"infer_channel_from_videos échec: {e}")
             return None
 
@@ -244,7 +257,7 @@ class YTMusicAPI:
                 + ", ".join(f"{n} ({b})" for b, n in candidates[:3])
             )
             return candidates
-        except Exception as e:
+        except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_artist_channel_candidates pour '{artist_name}': {e}")
             return []
 
@@ -284,7 +297,7 @@ class YTMusicAPI:
                 f"auditeurs/mois={monthly_listeners}"
             )
             return {"albums": albums, "monthly_listeners": monthly_listeners}
-        except Exception as e:
+        except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_artist_info ({channel_id}): {e}")
             return {"albums": [], "monthly_listeners": None}
 
@@ -304,7 +317,7 @@ class YTMusicAPI:
             ]
             logger.info(f"YTMusic: {len(result)} album(s)/single(s) trouvés pour {channel_id}")
             return result
-        except Exception as e:
+        except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_artist_albums ({channel_id}): {e}")
             return []
 
@@ -328,7 +341,7 @@ class YTMusicAPI:
                 }
                 for t in album.get("tracks", [])
             ]
-        except Exception as e:
+        except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_album_tracks_raw ({browse_id}): {e}")
             return []
 
@@ -389,7 +402,8 @@ class YTMusicAPI:
             # Demander la version synchronisée ; fallback texte brut si indispo
             try:
                 data = self.yt.get_lyrics(lyrics_id, timestamps=True)
-            except Exception:
+            except (YTMusicError, requests.RequestException):
+                # Certaines pistes n'ont pas de version synchronisée → texte brut.
                 data = self.yt.get_lyrics(lyrics_id)
 
             raw = data.get("lyrics") if isinstance(data, dict) else None
@@ -412,8 +426,8 @@ class YTMusicAPI:
                 f"{', synchro' if synced else ''})"
             )
             return {"lyrics": str(text).strip(), "lyrics_synced": synced, "source": source}
-        except Exception as e:
-            logger.debug(f"YTM get_lyrics échec '{artist} - {title}': {e}")
+        except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
+            logger.warning(f"YTM get_lyrics échec '{artist} - {title}': {e}")
             return None
 
     # ── Étape 2 : batch YouTube Data API v3 (quota-optimal) ───────────────────
@@ -461,7 +475,7 @@ class YTMusicAPI:
                     view_str = item.get("statistics", {}).get("viewCount")
                     if view_str is not None:
                         counts[item["id"]] = int(view_str)
-            except Exception as e:
+            except (GoogleApiError, OSError, KeyError, ValueError) as e:
                 logger.error(f"Erreur YouTube Data API v3 (batch {i // _YT_BATCH_SIZE + 1}): {e}")
 
         logger.info(f"YouTube Data API v3 : {len(counts)}/{len(unique_ids)} viewCounts récupérés")
@@ -517,7 +531,7 @@ class YTMusicAPI:
                         "title": snippet.get("title"),
                         "channel": snippet.get("channelTitle"),
                     }
-            except Exception as e:
+            except (GoogleApiError, OSError, KeyError, ValueError) as e:
                 logger.error(
                     f"Erreur YouTube Data API v3 meta (batch {i // _YT_BATCH_SIZE + 1}): {e}"
                 )

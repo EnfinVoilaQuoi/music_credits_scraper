@@ -20,38 +20,56 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Champs comparés (conflit = les DEUX remplis ET différents) puis complétés
+# Champs comparés (conflit = les DEUX remplis ET différents) puis complétés.
+# Phase 5 : les champs regroupés en sous-objets sont désignés par un CHEMIN
+# POINTÉ (`audio.bpm`, `lyrics.text`…) — cf. `_get`/`_set`. Sans ça, l'ancien
+# `getattr(t, "bpm")` plat renvoyait None (aucun __getattr__ de compat) → conflit
+# jamais détecté, recopie jamais faite.
 _FIELDS = [
     ("title", "Titre"),
     ("album", "Album"),
     ("track_number", "N° piste"),
     ("release_date", "Date de sortie"),
-    ("bpm", "BPM"),
-    ("musical_key", "Tonalité"),
+    ("audio.bpm", "BPM"),
+    ("audio.musical_key", "Tonalité"),
     ("duration", "Durée"),
     ("spotify_id", "Spotify ID"),
     ("isrc", "ISRC"),
-    ("deezer_id", "Deezer ID"),
     ("discogs_id", "Discogs ID"),
     ("youtube_url", "Lien YouTube"),
 ]
 # Champs volumineux : comparés par contenu mais affichés par longueur
-_TEXT_FIELDS = [("lyrics", "Paroles (texte)"), ("lyrics_synced", "Paroles synchronisées")]
+_TEXT_FIELDS = [("lyrics.text", "Paroles (texte)"), ("lyrics.synced", "Paroles synchronisées")]
 # Champs recopiés silencieusement si manquants sur la fiche gardée
 _FILL_ONLY = [
-    "key",
-    "mode",
-    "bpm_source",
-    "key_mode_source",
-    "lyrics_source",
-    "lyrics_synced_source",
-    "lyrics_synced_confidence",
-    "lyrics_scraped_at",
+    "audio.key",
+    "audio.mode",
+    "audio.bpm_source",
+    "audio.key_mode_source",
+    "lyrics.source",
+    "lyrics.synced_source",
+    "lyrics.synced_confidence",
+    "lyrics.scraped_at",
     "youtube_url_source",
     "anecdotes",
-    "has_lyrics",
+    "lyrics.present",
     "genius_url",
 ]
+
+
+def _get(obj, path):
+    """Lit un attribut éventuellement niché (`"audio.bpm"` → `obj.audio.bpm`)."""
+    for part in path.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+def _set(obj, path, value):
+    """Écrit un attribut éventuellement niché (`"audio.bpm"` → `obj.audio.bpm = …`)."""
+    parts = path.split(".")
+    for part in parts[:-1]:
+        obj = getattr(obj, part)
+    setattr(obj, parts[-1], value)
 
 
 def _norm(v):
@@ -84,13 +102,13 @@ def _find_conflicts(t1, t2):
 
     conflicts = []
     for attr, label in _FIELDS:
-        a, b = _norm(getattr(t1, attr, None)), _norm(getattr(t2, attr, None))
+        a, b = _norm(_get(t1, attr)), _norm(_get(t2, attr))
         if a is not None and b is not None and a != b:
             if attr in ("title", "album") and normalize_title(str(a)) == normalize_title(str(b)):
                 continue  # variante de casse/ponctuation → même chose
-            conflicts.append((label, getattr(t1, attr), getattr(t2, attr)))
+            conflicts.append((label, _get(t1, attr), _get(t2, attr)))
     for attr, label in _TEXT_FIELDS:
-        a, b = getattr(t1, attr, None) or "", getattr(t2, attr, None) or ""
+        a, b = _get(t1, attr) or "", _get(t2, attr) or ""
         if a.strip() and b.strip() and a.strip() != b.strip():
             conflicts.append((label, f"présentes ({len(a)} car.)", f"présentes ({len(b)} car.)"))
     return conflicts
@@ -98,7 +116,7 @@ def _find_conflicts(t1, t2):
 
 def _score(t):
     """Nombre de champs remplis — sert à choisir la fiche gardée par défaut."""
-    return sum(1 for attr, _ in _FIELDS + _TEXT_FIELDS if _norm(getattr(t, attr, None)) is not None)
+    return sum(1 for attr, _ in _FIELDS + _TEXT_FIELDS if _norm(_get(t, attr)) is not None)
 
 
 def merge_selected_tracks(app):
@@ -144,15 +162,12 @@ def _do_merge(app, keep, other):
 
     # 2. Compléter les champs manquants de la fiche gardée depuis l'autre
     for attr, _label in _FIELDS + _TEXT_FIELDS:
-        if (
-            _norm(getattr(keep, attr, None)) is None
-            and _norm(getattr(other, attr, None)) is not None
-        ):
-            setattr(keep, attr, getattr(other, attr))
+        if _norm(_get(keep, attr)) is None and _norm(_get(other, attr)) is not None:
+            _set(keep, attr, _get(other, attr))
     for attr in _FILL_ONLY:
-        kv = getattr(keep, attr, None)
-        if kv in (None, "", False) and getattr(other, attr, None) not in (None, "", False):
-            setattr(keep, attr, getattr(other, attr))
+        kv = _get(keep, attr)
+        if kv in (None, "", False) and _get(other, attr) not in (None, "", False):
+            _set(keep, attr, _get(other, attr))
     keep.artist = app.current_artist
     app.data_manager.save_track(keep)
 

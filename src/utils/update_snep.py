@@ -158,7 +158,7 @@ def download_latest_snep_csv():
 
         except requests.exceptions.RequestException as e:
             safe_print(f"❌ Erreur de connexion : {e}")
-        except Exception as e:
+        except (OSError, ValueError) as e:
             safe_print(f"❌ Erreur inattendue : {e}")
 
     safe_print("\n⚠️ Impossible de télécharger le fichier CSV")
@@ -175,7 +175,7 @@ import time
 
 try:
     from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT
-except Exception:  # repli si config minimale
+except ImportError:  # repli si config minimale
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT = 1, 3, 30
 
 _SNEP_BASE = "https://snepmusique.com/les-certifications/"
@@ -508,7 +508,14 @@ def update_snep_database():
     try:
         added = scrape_recent_certifications(csv_path)
         safe_print(f"🔀 Scraping : {added} certification(s) ajoutée(s) depuis le site")
-    except Exception as e:
+    except (
+        requests.RequestException,
+        AttributeError,
+        KeyError,
+        IndexError,
+        TypeError,
+        ValueError,
+    ) as e:
         safe_print(f"⚠️ Scraping des pages impossible ({e}) — on continue avec l'export")
 
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
@@ -552,8 +559,8 @@ def schedule_monthly_update():
             logging.info("✅ Mise à jour réussie")
         else:
             logging.error("❌ Échec de la mise à jour")
-    except Exception as e:
-        logging.error(f"❌ Erreur lors de la mise à jour : {e}")
+    except Exception:
+        logging.exception("❌ Erreur lors de la mise à jour")
 
     logging.info("Fin de la mise à jour mensuelle")
     logging.info("=" * 50)

@@ -106,7 +106,8 @@ def read_raw_snep_csv(filepath: Path) -> pd.DataFrame:
         logger.info(f"✅ CSV brut chargé : {len(df)} enregistrements")
         return df
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
+        # pandas : ParserError/EmptyDataError/UnicodeDecodeError ⊂ ValueError.
         logger.error(f"❌ Erreur lors du chargement du CSV brut : {e}")
         return pd.DataFrame()
 
@@ -162,7 +163,7 @@ def canonical_rows_from_raw(df: pd.DataFrame) -> list[dict]:
                     "certification_date": _to_date_str(r[cols[6]] if len(cols) > 6 else None),
                 }
             )
-        except Exception:
+        except (AttributeError, KeyError, IndexError, ValueError, TypeError):
             continue
     return rows
 
@@ -214,7 +215,7 @@ def write_meta(path: Path, source: str, count: int) -> None:
     if path.exists():
         try:
             meta = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError):
             meta = {}
     now = datetime.now().isoformat()
     updates = meta.get("updates") or {}

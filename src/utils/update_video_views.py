@@ -19,14 +19,14 @@ from src.utils.youtube_utils import classify_video_kind, extract_video_id
 logger = get_logger(__name__)
 
 
-def update_video_views(artist, tracks, data_manager) -> dict:
+def update_video_views(artist, tracks, data_manager, api=None) -> dict:
     """Met à jour vues + kind de la vidéo YouTube de chaque morceau.
+
+    ``api`` : YTMusicAPI injecté (StreamsProvider) ; créé en interne si None.
 
     Returns:
         Rapport ``{"updated", "no_video_id", "no_meta", "by_kind": {...}}``.
     """
-    from src.api.ytmusic_api import YTMusicAPI
-
     report = {"updated": 0, "no_video_id": 0, "no_meta": 0, "by_kind": {}}
 
     pairs = []  # (track, video_id)
@@ -41,7 +41,11 @@ def update_video_views(artist, tracks, data_manager) -> dict:
         logger.info(f"Vues clips : aucun lien YouTube exploitable pour {artist.name}")
         return report
 
-    meta = YTMusicAPI().fetch_video_meta_batch([vid for _, vid in pairs])
+    if api is None:
+        from src.api.ytmusic_api import YTMusicAPI
+
+        api = YTMusicAPI()
+    meta = api.fetch_video_meta_batch([vid for _, vid in pairs])
 
     for track, vid in pairs:
         info = meta.get(vid)
@@ -52,8 +56,8 @@ def update_video_views(artist, tracks, data_manager) -> dict:
         views = info.get("views")
         if data_manager.update_track_video_views(track.id, views, kind):
             # Mutation mémoire (affichage immédiat, pas de reload nécessaire)
-            track.youtube_video_kind = kind
-            track.youtube_video_views = views
+            track.media.youtube_video_kind = kind
+            track.media.youtube_video_views = views
             report["updated"] += 1
             report["by_kind"][kind] = report["by_kind"].get(kind, 0) + 1
 

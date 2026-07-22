@@ -55,7 +55,7 @@ class TrackDetailsWindow:
         details_window.protocol("WM_DELETE_WINDOW", on_close)
 
         # Agrandir la fenêtre selon le contenu
-        has_lyrics = track.lyrics
+        has_lyrics = track.lyrics.text
         window_height = "900" if has_lyrics else "750"
         details_window.geometry(f"900x{window_height}")
 
@@ -138,25 +138,25 @@ class TrackDetailsWindow:
             date_str = helpers.format_date(track.release_date)
             ctk.CTkLabel(right_column, text=f"📅 Date: {date_str}").pack(anchor="w", pady=1)
 
-        if track.bpm:
-            bpm_text = f"🎼 BPM: {track.bpm}"
+        if track.audio.bpm:
+            bpm_text = f"🎼 BPM: {track.audio.bpm}"
 
             # ⭐ LOGIQUE AMÉLIORÉE pour afficher la tonalité
             musical_key = None
 
             # 1. Ajouter la tonalité si disponible directement
-            if track.musical_key:
-                musical_key = track.musical_key
+            if track.audio.musical_key:
+                musical_key = track.audio.musical_key
 
             # 2. FALLBACK : Si musical_key n'existe pas mais key et mode existent
-            elif hasattr(track, "key") and hasattr(track, "mode") and track.key and track.mode:
+            elif track.audio.key and track.audio.mode:
                 try:
                     from src.utils.music_theory import key_mode_to_french_from_string
 
-                    musical_key = key_mode_to_french_from_string(track.key, track.mode)
+                    musical_key = key_mode_to_french_from_string(track.audio.key, track.audio.mode)
 
                     # ⭐ BONUS : Stocker le résultat calculé pour éviter de recalculer
-                    track.musical_key = musical_key
+                    track.audio.musical_key = musical_key
                     logger.debug(
                         f"Musical key calculée et stockée pour '{track.title}': {musical_key}"
                     )
@@ -212,8 +212,8 @@ class TrackDetailsWindow:
                 streams_source_label,
             )
 
-            sp = track.spotify_streams
-            yt = track.ytm_streams
+            sp = track.streams.spotify_streams
+            yt = track.streams.ytm_streams
             total_est = calculate_total_streams(sp, yt)
             if total_est:
                 suffix = streams_source_label(sp, yt)
@@ -640,7 +640,7 @@ class TrackDetailsWindow:
             def copy_lyrics():
                 """Copie les paroles dans le presse-papier"""
                 details_window.clipboard_clear()
-                details_window.clipboard_append(track.lyrics)
+                details_window.clipboard_append(track.lyrics.text)
                 messagebox.showinfo("Copié", "Paroles copiées dans le presse-papier")
 
             # Section Anecdotes EN PREMIER si disponibles
@@ -671,8 +671,8 @@ class TrackDetailsWindow:
                 )
 
             # Header "Paroles complètes" avec stats et bouton Copier (APRÈS le séparateur)
-            words_count = len(track.lyrics.split()) if track.lyrics else 0
-            chars_count = len(track.lyrics) if track.lyrics else 0
+            words_count = len(track.lyrics.text.split()) if track.lyrics.text else 0
+            chars_count = len(track.lyrics.text) if track.lyrics.text else 0
 
             lyrics_header = ctk.CTkFrame(lyrics_scrollable)
             lyrics_header.pack(fill="x", padx=10, pady=(5, 10))
@@ -686,18 +686,18 @@ class TrackDetailsWindow:
             )
 
             info_text = f"📊 {words_count} mots • {chars_count} caractères"
-            if track.lyrics_source:
-                info_text += f" • {track.lyrics_source}"
-            if track.lyrics_synced:
+            if track.lyrics.source:
+                info_text += f" • {track.lyrics.source}"
+            if track.lyrics.synced:
                 info_text += " • ⏱ synchronisé"
-                _sy_src = track.lyrics_synced_source
+                _sy_src = track.lyrics.synced_source
                 if _sy_src:
                     info_text += f" ({_sy_src})"
-                _sy_conf = track.lyrics_synced_confidence
+                _sy_conf = track.lyrics.synced_confidence
                 if _sy_conf is not None and _sy_conf < 2:
                     info_text += " ⚠ à vérifier"
-            if track.lyrics_scraped_at:
-                date_str = helpers.format_datetime(track.lyrics_scraped_at)
+            if track.lyrics.scraped_at:
+                date_str = helpers.format_datetime(track.lyrics.scraped_at)
                 info_text += f" • Récupérées le {date_str}"
 
             ctk.CTkLabel(left_part, text=info_text, text_color="gray", font=("Arial", 9)).pack(
@@ -719,7 +719,7 @@ class TrackDetailsWindow:
             lyrics_textbox.pack(fill="x", padx=10, pady=10)
 
             # Nettoyer les paroles de l'anecdote si elle existe
-            clean_lyrics = track.lyrics
+            clean_lyrics = track.lyrics.text
             if track.anecdotes:
                 # Méthode robuste : retirer tout le texte jusqu'au premier tag [Couplet], [Partie], etc.
                 import re
@@ -746,11 +746,11 @@ class TrackDetailsWindow:
                             logger.debug("Anecdote retirée des paroles (méthode longueur)")
 
             # Timestamps par section (si synchro YTM dispo) : injectés dans les en-têtes
-            if track.lyrics_synced:
+            if track.lyrics.synced:
                 try:
                     from src.utils.lyrics_sync import annotate_sections
 
-                    clean_lyrics = annotate_sections(clean_lyrics, track.lyrics_synced)
+                    clean_lyrics = annotate_sections(clean_lyrics, track.lyrics.synced)
                 except Exception as e:
                     logger.debug(f"Annotation timestamps échouée: {e}")
 
@@ -812,15 +812,15 @@ class TrackDetailsWindow:
             tech_textbox.insert("end", f"📈 Popularité: {track.popularity}\n")
 
         # Artwork
-        if track.artwork_url:
-            tech_textbox.insert("end", f"🖼️ Artwork: {track.artwork_url}\n")
+        if track.media.artwork_url:
+            tech_textbox.insert("end", f"🖼️ Artwork: {track.media.artwork_url}\n")
 
         # Vidéo YouTube (chantier « Media ») : nature + vues de LA vidéo
         # (distinct des streams YTM, somme audio+clip).
-        if track.youtube_video_kind or track.youtube_video_views is not None:
-            _kind = track.youtube_video_kind or "?"
-            if track.youtube_video_views is not None:
-                _views = f"{track.youtube_video_views:,}".replace(",", " ")
+        if track.media.youtube_video_kind or track.media.youtube_video_views is not None:
+            _kind = track.media.youtube_video_kind or "?"
+            if track.media.youtube_video_views is not None:
+                _views = f"{track.media.youtube_video_views:,}".replace(",", " ")
                 tech_textbox.insert("end", f"🎬 Vidéo ({_kind}) : {_views} vues\n")
             else:
                 tech_textbox.insert("end", f"🎬 Vidéo : {_kind}\n")
@@ -867,15 +867,15 @@ class TrackDetailsWindow:
         tech_textbox.insert("end", f"• ISRC : {_yn(track.isrc)}  ({_isrc_src})\n")
 
         # ── PAROLES ─────────────────────────────────────────────────
-        _ly = track.lyrics or ""
+        _ly = track.lyrics.text or ""
         _has_struct = any(ln.lstrip().startswith("[") for ln in _ly.splitlines())
-        _has_ts = bool(track.lyrics_synced)
-        _ly_src = track.lyrics_source or "—"
+        _has_ts = bool(track.lyrics.synced)
+        _ly_src = track.lyrics.source or "—"
         tech_textbox.insert("end", "\n📝 PAROLES\n")
         tech_textbox.insert("end", f"• Texte présent : {_yn(_ly)}  (source : {_ly_src})\n")
         tech_textbox.insert("end", f"• Structure Genius [Couplet/Refrain] : {_yn(_has_struct)}\n")
-        _sy_src = track.lyrics_synced_source or ("?" if _has_ts else "—")
-        _sy_conf = track.lyrics_synced_confidence
+        _sy_src = track.lyrics.synced_source or ("?" if _has_ts else "—")
+        _sy_conf = track.lyrics.synced_confidence
         _sy_conf_txt = {
             2: "2 (croisé LRCLIB+YTM)",
             1: "1 (source unique / après départage durée)",
@@ -890,10 +890,10 @@ class TrackDetailsWindow:
 
         # ── DONNÉES AUDIO (BPM / KEY / MODE) ────────────────────────
         tech_textbox.insert("end", "\n🎛️ DONNÉES AUDIO\n")
-        _bpm = track.bpm
-        _bpm_alt = track.bpm_alt
-        _bpm_src = track.bpm_source or "—"
-        _bpm_conf = track.bpm_confidence
+        _bpm = track.audio.bpm
+        _bpm_alt = track.audio.bpm_alt
+        _bpm_src = track.audio.bpm_source or "—"
+        _bpm_conf = track.audio.bpm_confidence
         tech_textbox.insert("end", f"• Provenance BPM : {_bpm_src}\n")
         _conf_txt = f"{_bpm_conf}" if _bpm_conf is not None else "—"
         tech_textbox.insert("end", f"• Arbitrage (vote) : confiance {_conf_txt}\n")
@@ -906,24 +906,24 @@ class TrackDetailsWindow:
             tech_textbox.insert("end", f"• BPM réel : {_bpm}{_alt_txt}\n")
         else:
             tech_textbox.insert("end", "• BPM réel : N/A\n")
-        _km_src = track.key_mode_source or "—"
+        _km_src = track.audio.key_mode_source or "—"
         tech_textbox.insert("end", f"• Source Key/Mode : {_km_src}\n")
-        _rb_res = track.reccobeats_resolution or "—"
+        _rb_res = track.audio.reccobeats_resolution or "—"
         tech_textbox.insert("end", f"• Résolution ReccoBeats : {_rb_res}\n")
 
         # ── STREAMS & DURÉE ─────────────────────────────────────────
         tech_textbox.insert("end", "\n📦 STREAMS & DURÉE\n")
-        _sp_streams = track.spotify_streams
+        _sp_streams = track.streams.spotify_streams
         if _sp_streams is not None:
-            _sp_upd = track.spotify_streams_updated
+            _sp_upd = track.streams.spotify_streams_updated
             _sp_when = f"  (maj {helpers.format_datetime(_sp_upd)})" if _sp_upd else ""
             _n = f"{_sp_streams:,}".replace(",", " ")
             tech_textbox.insert("end", f"• Spotify : {_n}{_sp_when}\n")
         else:
             tech_textbox.insert("end", "• Spotify : —\n")
-        _ytm_streams = track.ytm_streams
+        _ytm_streams = track.streams.ytm_streams
         if _ytm_streams is not None:
-            _ytm_upd = track.ytm_streams_updated
+            _ytm_upd = track.streams.ytm_streams_updated
             _ytm_when = f"  (maj {helpers.format_datetime(_ytm_upd)})" if _ytm_upd else ""
             _n = f"{_ytm_streams:,}".replace(",", " ")
             tech_textbox.insert("end", f"• YouTube Music : {_n}{_ytm_when}\n")
@@ -940,13 +940,13 @@ class TrackDetailsWindow:
         # ── COMPLÉTUDE (à ré-enrichir ?) ────────────────────────────
         tech_textbox.insert("end", "\n🩺 COMPLÉTUDE\n")
         _missing = []
-        if not track.bpm:
+        if not track.audio.bpm:
             _missing.append("BPM")
-        if getattr(track, "key", None) is None or getattr(track, "mode", None) is None:
+        if track.audio.key is None or track.audio.mode is None:
             _missing.append("Key/Mode")
         if not track.isrc:
             _missing.append("ISRC")
-        if not (track.lyrics or ""):
+        if not (track.lyrics.text or ""):
             _missing.append("paroles")
         if not track.spotify_id:
             _missing.append("Spotify ID")
@@ -1070,9 +1070,31 @@ class TrackDetailsWindow:
                             txt += "\n"
                     return txt
 
+                def _fmt_delay(days: int) -> str:
+                    return f"{days} j ({days // 365} an(s), {(days % 365) // 30} mois)"
+
                 cert_text = ""
                 if track_certs:
                     cert_text += "🎵 CERTIFICATIONS DU MORCEAU\n" + "=" * 60 + "\n"
+                    # Délai d'obtention (écart sortie→certif) via le modèle : un
+                    # palier important (Or/Platine/Diamant) par ligne, + la plus
+                    # haute certif si c'est un palier à multiplicateur (ex. 2× Platine).
+                    _delay_lines = [
+                        f"   • {lvl} : {_fmt_delay(d)}"
+                        for lvl, d in track.certification_milestone_durations()
+                    ]
+                    _high_days = track.calculate_certification_duration()
+                    _high_lvl = track.certs.level
+                    if (
+                        _high_days is not None
+                        and _high_lvl
+                        and _high_lvl not in ("Or", "Platine", "Diamant")
+                    ):
+                        _delay_lines.append(
+                            f"   • plus haute ({_high_lvl}) : {_fmt_delay(_high_days)}"
+                        )
+                    if _delay_lines:
+                        cert_text += "⏱️ Délai d'obtention :\n" + "\n".join(_delay_lines) + "\n"
                     cert_text += _render_grouped(track_certs)
                 if album_certs:
                     cert_text += (
@@ -1145,10 +1167,10 @@ class TrackDetailsWindow:
                 streams_source_label,
             )
 
-            sp = track.spotify_streams
-            yt = track.ytm_streams
-            sp_upd = track.spotify_streams_updated
-            yt_upd = track.ytm_streams_updated
+            sp = track.streams.spotify_streams
+            yt = track.streams.ytm_streams
+            sp_upd = track.streams.spotify_streams_updated
+            yt_upd = track.streams.ytm_streams_updated
             total_est = calculate_total_streams(sp, yt)
             suffix = streams_source_label(sp, yt)
 

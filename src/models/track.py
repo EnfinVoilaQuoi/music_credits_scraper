@@ -275,6 +275,95 @@ class Credit:
         return credits
 
 
+@dataclass
+class Audio:
+    """Données audio réconciliées d'un morceau (BPM / key / mode + provenance).
+
+    Sous-objet de `Track` (Phase 5). Regroupe les champs audio historiquement
+    plats. Pilotés par le moteur de réconciliation (`apply_resolutions`) depuis
+    les observations ; posés à None par le mapper au chargement. Accès via
+    `track.audio.<champ>`.
+    """
+
+    bpm: int | None = None  # BPM "réel" (double-time) — valeur exportée
+    bpm_alt: int | None = None  # Octave alternative (half-time), ex. 71 pour 142
+    bpm_source: str | None = None  # Source(s) du BPM retenu (vote §8.3)
+    bpm_confidence: int | None = None  # Nb de sources concordantes
+    key: int | None = None  # Pitch class 0-11 (posé par le moteur, ex-attr dynamique)
+    mode: int | None = None  # 0=mineur, 1=majeur (ex-attr dynamique)
+    key_mode_source: str | None = None  # Source de key/mode (peut différer du BPM)
+    musical_key: str | None = None  # Notation FR canonique (ex. "Do# mineur")
+    time_signature: str | None = None  # ex. "4/4"
+    reccobeats_resolution: str | None = None  # 'isrc' | 'spotify_id' — voie ReccoBeats
+
+
+@dataclass
+class Streams:
+    """Compteurs de streams d'un morceau (Spotify via Kworb + YouTube Music).
+
+    Sous-objet de `Track` (Phase 5). Écrits en base par write-through
+    (update_kworb / update_ytmusic) puis relus par le mapper ; noms de champs
+    alignés sur les colonnes DB. Accès via `track.streams.<champ>`.
+    """
+
+    spotify_streams: int | None = None
+    spotify_daily_streams: int | None = None
+    spotify_streams_updated: datetime | None = None
+    ytm_streams: int | None = None
+    ytm_streams_updated: datetime | None = None
+
+
+@dataclass
+class Lyrics:
+    """Paroles d'un morceau (texte + synchro LRC + provenance).
+
+    Sous-objet de `Track` (Phase 5). Champs renommés (le sous-objet porte déjà le
+    contexte « lyrics ») : accès via `track.lyrics.text.text`, `.synced`, etc. Les
+    colonnes DB gardent leurs noms (`lyrics`, `has_lyrics`, `lyrics_synced`…).
+    """
+
+    text: str | None = None  # Paroles complètes (colonne DB `lyrics`)
+    present: bool = False  # Présence de paroles (colonne DB `has_lyrics`)
+    scraped_at: datetime | None = None  # Date de récupération (colonne `lyrics_scraped_at`)
+    source: str | None = None  # Provenance (colonne `lyrics_source`)
+    synced: str | None = None  # LRC retenu LRCLIB>YTM (colonne `lyrics_synced`)
+    synced_source: str | None = None  # colonne `lyrics_synced_source`
+    synced_confidence: int | None = None  # colonne `lyrics_synced_confidence`
+
+
+@dataclass
+class Certs:
+    """Certifications d'un morceau (plus haute + listes détaillées).
+
+    Sous-objet de `Track` (Phase 5). Renommé (`certs`) pour éviter la collision
+    avec la liste `certifications` : accès via track.certs.level / .date /
+    .entries … Les colonnes/JSON DB gardent leurs noms.
+    """
+
+    has: bool = False  # colonne DB `has_certification`
+    level: str | None = None  # Plus haute certif (colonne `certification_level`)
+    date: datetime | None = None  # Date de la plus haute (colonne `certification_date`)
+    duration_days: int | None = None  # Durée d'obtention (colonne `certification_duration_days`)
+    entries: list[dict[str, Any]] = field(default_factory=list)  # colonne `certifications`
+    album_entries: list[dict[str, Any]] = field(default_factory=list)  # `album_certifications`
+
+
+@dataclass
+class Media:
+    """Images (pochette/vignette) et vidéo YouTube d'un morceau.
+
+    Sous-objet de `Track` (Phase 5). Accès via track.media.<champ> ; noms alignés
+    sur les colonnes DB (inchangées).
+    """
+
+    artwork_url: str | None = None  # URL de la pochette
+    cover_path: str | None = None  # Pochette album/single/sample sur disque
+    yt_thumbnail_path: str | None = None  # Vignette YouTube (shows/lives)
+    youtube_video_kind: str | None = None  # 'clip'/'show'/'audio'/'unknown'
+    youtube_video_views: int | None = None
+    youtube_video_views_updated: datetime | None = None
+
+
 @dataclass(eq=False)
 class Track:
     """Représente un morceau musical"""
@@ -297,19 +386,12 @@ class Track:
     isrc: str | None = None  # International Standard Recording Code (pivot inter-sources)
 
     # Métadonnées
-    bpm: int | None = None  # BPM "réel" (double-time) — valeur exportée
-    bpm_alt: int | None = None  # Octave alternative (half-time), ex. 71 pour 142
-    bpm_source: str | None = None  # Source(s) du BPM retenu (vote §8.3)
-    bpm_confidence: int | None = None  # Nb de sources concordantes
-    key_mode_source: str | None = None  # Source de key/mode (peut différer du BPM)
-    reccobeats_resolution: str | None = (
-        None  # 'isrc' | 'spotify_id' — voie de résolution ReccoBeats
-    )
+    # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5) :
+    # accès via track.audio.<champ> (bpm, key, mode, musical_key…).
+    audio: Audio = field(default_factory=Audio)
     duration: int | None = None  # En secondes
     genre: str | None = None
     track_number: int | None = None
-    musical_key: str | None = None
-    time_signature: str | None = None
     audio_features: dict[str, Any] | None = field(default_factory=dict)
 
     # Support des features
@@ -320,26 +402,16 @@ class Track:
         None  # Rôle secondaire (ex: "Additional Voices") si l'artiste n'est ni primary ni feat — rempli = contribution secondaire
     )
 
-    # Support des paroles
-    lyrics: str | None = None  # Paroles complètes
-    has_lyrics: bool = False  # Indicateur si les paroles sont disponibles
-    lyrics_scraped_at: datetime | None = None  # Date de récupération des paroles
-    lyrics_source: str | None = None  # Provenance des paroles (YouTube Music / genius)
-    lyrics_synced: str | None = None  # Paroles synchronisées (LRC) retenues (LRCLIB > YTM)
-    lyrics_synced_source: str | None = (
-        None  # Source de la synchro retenue ('LRCLIB' / 'YouTube Music')
-    )
-    lyrics_synced_confidence: int | None = (
-        None  # Nb de sources concordantes (2=croisé/validé, 1=unique ou après départage durée)
-    )
+    # Paroles (texte + synchro LRC + provenance) regroupées en sous-objet
+    # `lyrics` (Phase 5) : accès via track.lyrics.text.text / .synced / .source …
+    lyrics: Lyrics = field(default_factory=Lyrics)
     anecdotes: str | None = None  # Anecdotes et informations supplémentaires
 
     # Métadonnées supplémentaires
     popularity: int | None = None  # Nombre de vues sur Genius
-    artwork_url: str | None = None  # URL de la pochette
-    # Chantier « Media » : chemins relatifs (à IMAGES_DIR) des images téléchargées.
-    cover_path: str | None = None  # Pochette album/single/sample sur disque
-    yt_thumbnail_path: str | None = None  # Vignette YouTube (shows/lives)
+    # Images (pochette/vignette) + vidéo YouTube regroupées en sous-objet `media`
+    # (Phase 5) : accès via track.media.cover_path / .youtube_video_views …
+    media: Media = field(default_factory=Media)
 
     # Crédits
     credits: list[Credit] = field(default_factory=list)
@@ -376,38 +448,13 @@ class Track:
     # une colonne ; toujours False après une lecture DB.
     clear_audio_observations: bool = field(default=False, repr=False)
 
-    # Champs de certification SNEP - VERSION MULTI-CERTIFICATIONS
-    has_certification: bool = False
-    certification_level: str | None = None  # Plus haute certification (rétrocompatibilité)
-    certification_date: datetime | None = None  # Date de la plus haute certification
-    certification_duration_days: int | None = None  # Durée d'obtention en jours
-    certification_category: str | None = None  # "Singles" ou "Albums"
-    certification_publisher: str | None = None  # Éditeur/Distributeur
-    certification_details: dict[str, Any] | None = None  # Détails de la plus haute certification
+    # Certifications (plus haute + listes détaillées) regroupées en sous-objet
+    # `certs` (Phase 5) : accès via track.certs.level / .date / .entries …
+    certs: Certs = field(default_factory=Certs)
 
-    # NOUVEAU: Support de plusieurs certifications
-    certifications: list[dict[str, Any]] = field(
-        default_factory=list
-    )  # Toutes les certifications du morceau
-    album_certifications: list[dict[str, Any]] = field(
-        default_factory=list
-    )  # Certifications de l'album associé
-
-    # Streams Spotify (kworb.net)
-    spotify_streams: int | None = None
-    spotify_daily_streams: int | None = None
-    spotify_streams_updated: datetime | None = None
-
-    # Streams YouTube Music
-    ytm_streams: int | None = None
-    ytm_streams_updated: datetime | None = None
-
-    # Chantier « Media » : vues de LA vidéo YouTube (clip/show/live) et sa
-    # catégorie — SÉPARÉ de ytm_streams (somme audio+clip). Différencie un clip
-    # d'un morceau « classique ».
-    youtube_video_kind: str | None = None  # 'clip'/'show'/'audio'/'unknown'
-    youtube_video_views: int | None = None
-    youtube_video_views_updated: datetime | None = None
+    # Streams (Spotify via kworb.net + YouTube Music) regroupés en sous-objet
+    # `streams` (Phase 5) : accès via track.streams.<champ>.
+    streams: Streams = field(default_factory=Streams)
 
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.
@@ -527,7 +574,7 @@ class Track:
         """Calcule la durée (en jours) entre la sortie et la certification."""
         from src.utils.dates import parse_flexible
 
-        cert_date = parse_flexible(self.certification_date)
+        cert_date = parse_flexible(self.certs.date)
         rel_date = parse_flexible(self.release_date)
         if cert_date is None or rel_date is None:
             return None
@@ -537,8 +584,41 @@ class Track:
         except TypeError:
             # Mélange aware/naive (une date ISO avec 'Z', l'autre non)
             return None
-        self.certification_duration_days = duration if duration >= 0 else None
-        return self.certification_duration_days
+        self.certs.duration_days = duration if duration >= 0 else None
+        return self.certs.duration_days
+
+    def certification_milestone_durations(self) -> list[tuple[str, int]]:
+        """Délai (jours) sortie→certif pour chaque palier IMPORTANT atteint.
+
+        Un couple `(palier, jours)` par palier de base (Or, Platine, Diamant —
+        hors multiplicateurs) présent dans `certifications`, à la date la PLUS
+        ANCIENNE où le morceau l'a atteint. Paliers absents, sans date de sortie
+        ou aux dates illisibles : ignorés.
+        """
+        from src.utils.dates import parse_flexible
+
+        rel_date = parse_flexible(self.release_date)
+        if rel_date is None:
+            return []
+
+        out: list[tuple[str, int]] = []
+        for level in ("Or", "Platine", "Diamant"):
+            dates = [
+                d
+                for c in self.certs.entries
+                if c.get("certification") == level
+                and (d := parse_flexible(c.get("certification_date"))) is not None
+            ]
+            if not dates:
+                continue
+            try:
+                days = (min(dates) - rel_date).days
+            except TypeError:
+                # Mélange aware/naive (une date ISO avec 'Z', l'autre non)
+                continue
+            if days >= 0:
+                out.append((level, days))
+        return out
 
     @property
     def producers(self):
@@ -556,11 +636,6 @@ class Track:
         if self.featured_artists:
             return [a.strip() for a in self.featured_artists.split(",") if a.strip()]
         return [c.name for c in self.get_credits_by_role(CreditRole.FEATURED)]
-
-    @property
-    def credits_scraped(self):
-        """Retourne le nombre de crédits (au lieu d'un booléen)."""
-        return len(self.credits)
 
     def has_complete_credits(self) -> bool:
         """Vérifie si les crédits semblent complets.
@@ -617,10 +692,6 @@ class Track:
         # Pour les morceaux principaux
         return self.artist.name if self.artist else "Unknown"
 
-    def is_main_track(self) -> bool:
-        """Retourne True si c'est un morceau principal (pas un featuring)"""
-        return not self.is_featuring
-
     def to_dict(self) -> dict:
         """Convertit le morceau en dictionnaire - VERSION AVEC SÉPARATION VIDÉO ET PAROLES"""
         is_featuring = self.is_featuring
@@ -629,18 +700,18 @@ class Track:
         video_credits = self.get_video_credits()
 
         # Informations sur les paroles
-        if self.lyrics:
+        if self.lyrics.text:
             lyrics_info = {
                 "has_lyrics": True,
-                "lyrics_word_count": len(self.lyrics.split()),
-                "lyrics_char_count": len(self.lyrics),
+                "lyrics_word_count": len(self.lyrics.text.split()),
+                "lyrics_char_count": len(self.lyrics.text),
                 "lyrics_scraped_at": (
-                    self.lyrics_scraped_at.isoformat() if self.lyrics_scraped_at else None
+                    self.lyrics.scraped_at.isoformat() if self.lyrics.scraped_at else None
                 ),
-                "lyrics_source": self.lyrics_source,
-                "has_synced_lyrics": bool(self.lyrics_synced),
-                "lyrics_synced_source": self.lyrics_synced_source,
-                "lyrics_synced_confidence": self.lyrics_synced_confidence,
+                "lyrics_source": self.lyrics.source,
+                "has_synced_lyrics": bool(self.lyrics.synced),
+                "lyrics_synced_source": self.lyrics.synced_source,
+                "lyrics_synced_confidence": self.lyrics.synced_confidence,
             }
         else:
             lyrics_info = {
@@ -664,12 +735,12 @@ class Track:
             "discogs_id": self.discogs_id,
             "isrc": self.isrc,
             "relationships": self.relationships or [],
-            "bpm": self.bpm,
-            "bpm_alt": self.bpm_alt,
-            "bpm_source": self.bpm_source,
-            "bpm_confidence": self.bpm_confidence,
-            "key_mode_source": self.key_mode_source,
-            "reccobeats_resolution": self.reccobeats_resolution,
+            "bpm": self.audio.bpm,
+            "bpm_alt": self.audio.bpm_alt,
+            "bpm_source": self.audio.bpm_source,
+            "bpm_confidence": self.audio.bpm_confidence,
+            "key_mode_source": self.audio.key_mode_source,
+            "reccobeats_resolution": self.audio.reccobeats_resolution,
             "duration": self.duration,
             "genre": self.genre,
             "is_featuring": is_featuring,
@@ -677,12 +748,12 @@ class Track:
             "primary_artist_name": self.primary_artist_name,
             "secondary_role": self.secondary_role,
             "popularity": self.popularity,
-            "artwork_url": self.artwork_url,
+            "artwork_url": self.media.artwork_url,
             # Chantier « Media » : chemins d'images + vidéo YouTube
-            "cover_path": self.cover_path,
-            "yt_thumbnail_path": self.yt_thumbnail_path,
-            "youtube_video_kind": self.youtube_video_kind,
-            "youtube_video_views": self.youtube_video_views,
+            "cover_path": self.media.cover_path,
+            "yt_thumbnail_path": self.media.yt_thumbnail_path,
+            "youtube_video_kind": self.media.youtube_video_kind,
+            "youtube_video_views": self.media.youtube_video_views,
             # Informations paroles
             **lyrics_info,
             # ✅ SÉPARATION DES CRÉDITS

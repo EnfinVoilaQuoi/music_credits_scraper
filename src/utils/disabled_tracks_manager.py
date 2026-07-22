@@ -108,65 +108,6 @@ class DisabledTracksManager:
             )
             return set()
 
-    def clear_disabled_tracks(self, artist_name: str) -> bool:
-        """
-        Supprime le fichier des morceaux désactivés pour un artiste
-
-        Args:
-            artist_name: Nom de l'artiste
-
-        Returns:
-            bool: True si la suppression a réussi
-        """
-        try:
-            file_path = self._get_artist_file(artist_name)
-
-            if file_path.exists():
-                file_path.unlink()
-                logger.info(f"Fichier des morceaux désactivés supprimé pour {artist_name}")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Erreur lors de la suppression du fichier pour {artist_name}: {e}")
-            return False
-
-    def get_all_artists_with_disabled_tracks(self) -> dict[str, int]:
-        """
-        Retourne tous les artistes ayant des morceaux désactivés
-
-        Returns:
-            Dict[str, int]: Dictionnaire {nom_artiste: nombre_morceaux_désactivés}
-        """
-        artists = {}
-
-        try:
-            for file_path in self.disabled_tracks_dir.glob("*_disabled.json"):
-                try:
-                    with open(file_path, encoding="utf-8") as f:
-                        data = json.load(f)
-
-                    if isinstance(data, dict) and "artist_name" in data:
-                        artist_name = data["artist_name"]
-                        # Support des versions 1.0 et 2.0
-                        if "disabled_track_ids" in data:
-                            count = len(data["disabled_track_ids"])
-                        elif "disabled_tracks" in data:
-                            count = len(data["disabled_tracks"])
-                        else:
-                            continue
-                        artists[artist_name] = count
-
-                except Exception as e:
-                    logger.warning(f"Erreur lors de la lecture de {file_path}: {e}")
-                    continue
-
-            return artists
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'énumération des artistes: {e}")
-            return {}
-
     def cleanup_old_files(self, days_old: int = 30) -> int:
         """
         Nettoie les fichiers anciens

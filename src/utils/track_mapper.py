@@ -110,34 +110,34 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     # E7-D2 : colonnes AUDIO droppées (bpm, bpm_alt, bpm_source, bpm_confidence,
     # key, mode, key_mode_source, musical_key, time_signature, reccobeats_resolution).
     # Attributs posés à None ici (garantit leur existence) PUIS pilotés par la
-    # réconciliation des observations (bas de fonction). reccobeats_resolution n'a
-    # pas d'observation (provenance debug) → reste None (perte assumée au drop).
-    track.bpm = None
-    track.bpm_source = None
-    track.bpm_confidence = None
-    track.key_mode_source = None
-    track.reccobeats_resolution = None
-    track.bpm_alt = None
-    track.lyrics_source = _clean(row["lyrics_source"])
-    track.lyrics_synced = _clean(row["lyrics_synced"])
-    track.lyrics_synced_source = _clean(row["lyrics_synced_source"])
-    track.lyrics_synced_confidence = _clean_int(row["lyrics_synced_confidence"])
+    # réconciliation des observations (bas de fonction). reccobeats_resolution est
+    # reposé par apply_resolutions quand son observation de provenance existe.
+    track.audio.bpm = None
+    track.audio.bpm_source = None
+    track.audio.bpm_confidence = None
+    track.audio.key_mode_source = None
+    track.audio.reccobeats_resolution = None
+    track.audio.bpm_alt = None
+    track.lyrics.source = _clean(row["lyrics_source"])
+    track.lyrics.synced = _clean(row["lyrics_synced"])
+    track.lyrics.synced_source = _clean(row["lyrics_synced_source"])
+    track.lyrics.synced_confidence = _clean_int(row["lyrics_synced_confidence"])
     track.youtube_url = _clean(row["youtube_url"])
     track.youtube_url_source = _clean(row["youtube_url_source"])
-    track.spotify_streams = _clean_int(row["spotify_streams"])
-    track.spotify_daily_streams = _clean_int(row["spotify_daily_streams"])
-    track.spotify_streams_updated = _clean(row["spotify_streams_updated"])
-    track.ytm_streams = _clean_int(row["ytm_streams"])
-    track.ytm_streams_updated = _clean(row["ytm_streams_updated"])
+    track.streams.spotify_streams = _clean_int(row["spotify_streams"])
+    track.streams.spotify_daily_streams = _clean_int(row["spotify_daily_streams"])
+    track.streams.spotify_streams_updated = _clean(row["spotify_streams_updated"])
+    track.streams.ytm_streams = _clean_int(row["ytm_streams"])
+    track.streams.ytm_streams_updated = _clean(row["ytm_streams_updated"])
     track.album_override = _clean_int(row["album_override"])
 
     # Chantier « Media » : chemins d'images (Text) + vidéo YouTube. La date
     # `youtube_video_views_updated` reste brute (piège TIMESTAMP, comme *_updated).
-    track.cover_path = _clean(row["cover_path"])
-    track.yt_thumbnail_path = _clean(row["yt_thumbnail_path"])
-    track.youtube_video_kind = _clean(row["youtube_video_kind"])
-    track.youtube_video_views = _clean_int(row["youtube_video_views"])
-    track.youtube_video_views_updated = _clean(row["youtube_video_views_updated"])
+    track.media.cover_path = _clean(row["cover_path"])
+    track.media.yt_thumbnail_path = _clean(row["yt_thumbnail_path"])
+    track.media.youtube_video_kind = _clean(row["youtube_video_kind"])
+    track.media.youtube_video_views = _clean_int(row["youtube_video_views"])
+    track.media.youtube_video_views_updated = _clean(row["youtube_video_views_updated"])
 
     relationships_raw = row["relationships"]
     try:
@@ -151,10 +151,10 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     # la réconciliation des observations (apply_resolutions, bas de fonction) qui
     # normalise key/mode et RECALCULE musical_key (key_mode_to_french, déjà
     # canonique) — l'ancien self-healing sur la colonne devient inutile.
-    track.key = None
-    track.mode = None
-    track.musical_key = None
-    track.time_signature = None
+    track.audio.key = None
+    track.audio.mode = None
+    track.audio.musical_key = None
+    track.audio.time_signature = None
     track.genius_url = _clean(row["genius_url"])
     track.spotify_url = _clean(row["spotify_url"])
     track.spotify_page_title = _clean(row["spotify_page_title"])
@@ -169,42 +169,42 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.secondary_role = _clean(row["secondary_role"])
 
     # Propriétés paroles
-    track.lyrics = _clean(row["lyrics"])
+    track.lyrics.text = _clean(row["lyrics"])
     track.anecdotes = _clean(row["anecdotes"])
-    track.has_lyrics = bool(_clean(row["has_lyrics"], False))
-    track.lyrics_scraped_at = _clean(row["lyrics_scraped_at"])
+    track.lyrics.present = bool(_clean(row["has_lyrics"], False))
+    track.lyrics.scraped_at = _clean(row["lyrics_scraped_at"])
 
     # Désérialiser les certifications JSON
     certifications_json = row["certifications"]
     try:
         if certifications_json:
-            track.certifications = json.loads(certifications_json)
+            track.certs.entries = json.loads(certifications_json)
             # Champs de rétrocompatibilité (plus haute certification)
-            if track.certifications:
-                highest = track.certifications[0]
-                track.has_certification = True
-                track.certification_level = highest.get("certification")
-                track.certification_date = highest.get("certification_date")
+            if track.certs.entries:
+                highest = track.certs.entries[0]
+                track.certs.has = True
+                track.certs.level = highest.get("certification")
+                track.certs.date = highest.get("certification_date")
         else:
-            track.certifications = []
+            track.certs.entries = []
     except (ValueError, TypeError, json.JSONDecodeError):
         logger.debug(
             f"JSON certifications invalide pour track {track_id}: {certifications_json!r:.100}"
         )
-        track.certifications = []
+        track.certs.entries = []
 
     album_certifications_json = row["album_certifications"]
     try:
         if album_certifications_json:
-            track.album_certifications = json.loads(album_certifications_json)
+            track.certs.album_entries = json.loads(album_certifications_json)
         else:
-            track.album_certifications = []
+            track.certs.album_entries = []
     except (ValueError, TypeError, json.JSONDecodeError):
         logger.debug(
             f"JSON album_certifications invalide pour track {track_id}: "
             f"{album_certifications_json!r:.100}"
         )
-        track.album_certifications = []
+        track.certs.album_entries = []
 
     # E6 : les observations pilotent l'audio réconciliable (bpm/key/mode), en
     # écrasant les colonnes legacy déjà posées ci-dessus. Champ sans observation

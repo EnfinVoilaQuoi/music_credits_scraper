@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("ReccoBeatsAPI")
 
+# En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE
+# (UA httpx par défaut) → on repasse l'UA/Accept du client sync par requête
+# (cf. self.recco_session.headers). Sans effet observé, alignement préventif.
+_ASYNC_HEADERS = {"Accept": "application/json", "User-Agent": "ReccoBeats-Python-Client/3.0"}
+
 
 class ReccoBeatsIntegratedClient:
     """Client ReccoBeats pour récupération BPM/Key/Mode/Audio Features"""
@@ -130,7 +135,9 @@ class ReccoBeatsIntegratedClient:
         try:
             url = f"{self.recco_base_url}/track"
             logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
-            response = await http.get(url, params={"ids": spotify_id}, timeout=15)
+            response = await http.get(
+                url, params={"ids": spotify_id}, headers=_ASYNC_HEADERS, timeout=15
+            )
             logger.debug(f"📡 Response: Status {response.status_code}")
 
             if response.status_code == 200:
@@ -182,7 +189,7 @@ class ReccoBeatsIntegratedClient:
         try:
             url = f"{self.recco_base_url}/track/{reccobeats_id}/audio-features"
             logger.debug(f"🎼 Audio features: {url}")
-            response = await http.get(url, timeout=15)
+            response = await http.get(url, headers=_ASYNC_HEADERS, timeout=15)
 
             if response.status_code == 200:
                 features = response.json()
@@ -413,7 +420,7 @@ class ReccoBeatsIntegratedClient:
         """Jumeau async de `get_track_by_isrc`."""
         try:
             url = f"{self.recco_base_url}/track"
-            response = await http.get(url, params={"ids": isrc}, timeout=15)
+            response = await http.get(url, params={"ids": isrc}, headers=_ASYNC_HEADERS, timeout=15)
             logger.info(f"🎵 ReccoBeats: requête ISRC {isrc} (status {response.status_code})")
 
             if response.status_code != 200:
@@ -554,24 +561,21 @@ class ReccoBeatsIntegratedClient:
         return result
 
     def get_multiple_tracks_with_bpm(self, ids: list[str]) -> list[dict]:
-        """
-        Récupère plusieurs tracks + audio features en batch.
-        `ids` accepte Spotify IDs, ReccoBeats IDs ou ISRC (max 40 — limite API).
+        """Récupère plusieurs tracks + audio features EN BATCH (1 appel /track?ids=
+        + 1 appel /audio-features?ids=). `ids` accepte Spotify IDs, ReccoBeats IDs
+        ou ISRC (max 40 — limite API).
 
-        Returns:
-            Liste de tracks (chacun enrichi de 'bpm' + 'audio_features' si dispo).
-        """
+        NON câblé à l'orchestrateur GUI (le flux par morceau suffit) : bloc prêt
+        pour un futur « mode d'enrichissement par lots » — cf. WIP.md et
+        OPTIMISATION API.md §4. Retourne la liste de tracks (chacun enrichi de
+        'bpm' + 'audio_features' si dispo)."""
         try:
             # Doc ReccoBeats : 1 à 40 valeurs par requête /track?ids=
             ids = ids[:40]
-
             url = f"{self.recco_base_url}/track"
             params = {"ids": ",".join(ids)}
-
             logger.info(f"🎵 Batch request pour {len(ids)} tracks")
-
             response = self.recco_session.get(url, params=params, timeout=30)
-
             if response.status_code != 200:
                 logger.error(f"❌ Batch request failed: {response.status_code}")
                 return []
@@ -584,7 +588,6 @@ class ReccoBeatsIntegratedClient:
             # Audio features en UN appel batch, puis mapping par ID ReccoBeats
             reccobeats_ids = [t["id"] for t in tracks if t.get("id")]
             features_map = self.get_audio_features_batch(reccobeats_ids)
-
             for track in tracks:
                 feats = features_map.get(track.get("id"))
                 if feats:
@@ -593,35 +596,9 @@ class ReccoBeatsIntegratedClient:
 
             logger.info(f"✅ {len(tracks)} tracks enrichis (audio-features en 1 appel)")
             return tracks
-
         except Exception as e:
             logger.error(f"❌ Batch processing error: {e}")
             return []
-
-    def clear_cache(self):
-        """Vide le cache"""
-        self.cache.clear()
-        self._save_cache()
-        logger.info("Cache vidé")
-
-    def clear_error_cache(self):
-        """Nettoie les entrées d'erreur du cache"""
-        errors_removed = 0
-        keys_to_remove = []
-
-        for key, value in self.cache.items():
-            if isinstance(value, dict) and "error" in value:
-                keys_to_remove.append(key)
-
-        for key in keys_to_remove:
-            del self.cache[key]
-            errors_removed += 1
-
-        if errors_removed > 0:
-            logger.info(f"{errors_removed} entrées d'erreur supprimées du cache")
-            self._save_cache()
-
-        return errors_removed > 0
 
     def get_cache_stats(self) -> dict:
         """Statistiques du cache"""

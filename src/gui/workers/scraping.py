@@ -8,10 +8,9 @@ d'arrêt. Les CRAWLS Genius s'exécutent nativement dans la boucle (pont F4
 saves. `stop_requested()` est testé entre deux unités, comme avant.
 """
 
-from datetime import datetime
 from tkinter import messagebox
 
-from src.enrichment.observation import Observation
+from src.enrichment.providers.lyrics import LyricsProvider
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import run_worker, stop_requested
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
@@ -215,16 +214,16 @@ def start_combined_scraping(
                 # Mise à jour forcée : TEXTE et SYNCHRO sont désormais indépendants.
                 if force_lyrics:
                     for track in selected_tracks_list:
-                        track.lyrics = None
+                        track.lyrics.text = None
                         track.anecdotes = None
-                        track.has_lyrics = False
-                        track.lyrics_scraped_at = None
-                        track.lyrics_source = None
+                        track.lyrics.present = False
+                        track.lyrics.scraped_at = None
+                        track.lyrics.source = None
                 if force_sync:
                     for track in selected_tracks_list:
-                        track.lyrics_synced = None
-                        track.lyrics_synced_source = None
-                        track.lyrics_synced_confidence = None
+                        track.lyrics.synced = None
+                        track.lyrics.synced_source = None
+                        track.lyrics.synced_confidence = None
                         # E7d : « force » = repartir de zéro. Purger les obs
                         # lyrics persistées, sinon une source disparue laisserait
                         # une obs stale qui ressusciterait le verdict à la lecture.
@@ -236,7 +235,9 @@ def start_combined_scraping(
                 # 1) TEXTE STRUCTURÉ : Genius (sections [Couplet : artiste]). Le batch
                 #    skippe les morceaux déjà pourvus (ex. via la phase crédits Genius).
                 if lyrics_genius:
-                    need_text = [t for t in selected_tracks_list if not (t.has_lyrics and t.lyrics)]
+                    need_text = [
+                        t for t in selected_tracks_list if not (t.lyrics.present and t.lyrics.text)
+                    ]
                     if need_text:
                         if scraper is None:
                             scraper = GeniusScraperV3(headless=True)
@@ -247,8 +248,12 @@ def start_combined_scraping(
                             ),
                         )
                     for t in selected_tracks_list:
-                        if t.has_lyrics and t.lyrics and not getattr(t, "lyrics_source", None):
-                            t.lyrics_source = "genius"
+                        if (
+                            t.lyrics.present
+                            and t.lyrics.text
+                            and not getattr(t, "lyrics_source", None)
+                        ):
+                            t.lyrics.source = "genius"
 
                 # 2) TIMESTAMPS (paroles synchronisées) — sources cochées dans le dialogue :
                 #    SOURCE 1 = LRCLIB, SOURCE 2 = YTM, cross-check + départage par la durée
@@ -259,22 +264,14 @@ def start_combined_scraping(
                 #    car Genius ne fournit pas la durée (voir docs/api/genius-api.md).
                 if scrape_sync or lyrics_ytm:
                     try:
-                        from src.utils.lyrics_sync import compare_synced
-
-                        # Instanciation paresseuse : seulement les clients des sources cochées.
-                        lrclib = ytm = mxm = None
-                        if sync_lrclib:
-                            from src.api.lrclib_api import LRCLIBAPI
-
-                            lrclib = LRCLIBAPI()
-                        if sync_ytm or lyrics_ytm:
-                            from src.api.ytmusic_api import YTMusicAPI
-
-                            ytm = YTMusicAPI()
-                        if sync_musixmatch:
-                            from src.api.musixmatch_api import MusixmatchAPI
-
-                            mxm = MusixmatchAPI()  # token en cache réutilisé sur tout le batch
+                        # Provider paroles : possède les clients (créés lazy selon les
+                        # sources cochées) et applique la résolution par morceau.
+                        lyrics_provider = LyricsProvider(
+                            sync_lrclib=sync_lrclib,
+                            sync_ytm=sync_ytm,
+                            sync_musixmatch=sync_musixmatch,
+                            lyrics_ytm=lyrics_ytm,
+                        )
 
                         n_lrclib, n_ytm, n_mxm, n_cross, n_review, n_text = 0, 0, 0, 0, 0, 0
                         for i, track in enumerate(selected_tracks_list):
@@ -285,7 +282,9 @@ def start_combined_scraping(
                                 break
                             has_sync = bool(getattr(track, "lyrics_synced", None))
                             need_sync = scrape_sync and not (has_sync and not force_sync)
-                            need_text = lyrics_ytm and not (track.has_lyrics and track.lyrics)
+                            need_text = lyrics_ytm and not (
+                                track.lyrics.present and track.lyrics.text
+                            )
                             if not need_sync and not need_text:
                                 continue
 
@@ -299,115 +298,24 @@ def start_combined_scraping(
                             else:
                                 a_name = app.current_artist.name
 
-                            duration = getattr(track, "duration", None)
-
-                            # YTM : LRC (source 2) ET durée de secours ET texte fallback.
-                            ytm_res = None
-                            if ytm is not None:
-                                try:
-                                    ytm_res = ytm.get_lyrics(a_name, track.title)
-                                except Exception as e:
-                                    logger.debug(
-                                        f"YTM get_lyrics échec '{a_name} - {track.title}': {e}"
-                                    )
-                            if ytm_res and not duration and ytm_res.get("duration"):
-                                duration = ytm_res["duration"]
-                            ytm_lrc = (
-                                (ytm_res.get("lyrics_synced") if ytm_res else None)
-                                if sync_ytm
-                                else None
+                            # Provider paroles : résout + applique au track ; on
+                            # n'agrège ici que les compteurs pour le résumé GUI.
+                            outcome = lyrics_provider.enrich(
+                                track, a_name, need_sync=need_sync, need_text=need_text
                             )
-
-                            # SOURCE 1 (LRCLIB) : match sur la durée ±2 s
-                            lrclib_lrc = None
-                            if need_sync and lrclib is not None:
-                                try:
-                                    lr = lrclib.get_synced(
-                                        track.title,
-                                        a_name,
-                                        album_name=getattr(track, "album", None),
-                                        duration=duration,
-                                    )
-                                    if lr:
-                                        lrclib_lrc = lr.get("lyrics_synced")
-                                except Exception as e:
-                                    logger.debug(f"LRCLIB échec '{a_name} - {track.title}': {e}")
-
-                            # CROSS-CHECK (sources 1 & 2) + départage durée
-                            if need_sync:
-                                # E7d : persister le LRC BRUT par source (permet le
-                                # re-vote inter-runs à la lecture — le mapper E6
-                                # réconcilie via la même compare_synced). Une source
-                                # « a répondu » = a renvoyé un LRC non vide.
-                                _now = datetime.now()
-                                if lrclib_lrc:
-                                    track.observations.append(
-                                        Observation(
-                                            "lyrics_synced", lrclib_lrc, "lrclib", seen_at=_now
-                                        )
-                                    )
-                                if ytm_lrc:
-                                    track.observations.append(
-                                        Observation(
-                                            "lyrics_synced", ytm_lrc, "ytmusic", seen_at=_now
-                                        )
-                                    )
-                                verdict = compare_synced(lrclib_lrc, ytm_lrc, duration)
-                                if verdict:
-                                    track.lyrics_synced = verdict["lrc"]
-                                    track.lyrics_synced_source = verdict["source"]
-                                    track.lyrics_synced_confidence = verdict["confidence"]
-                                    if verdict["source"] == "LRCLIB":
-                                        n_lrclib += 1
-                                    else:
-                                        n_ytm += 1
-                                    if verdict["confidence"] >= 2:
-                                        n_cross += 1
-                                    else:
-                                        n_review += 1
-                                    logger.info(
-                                        f"⏱ {track.title}: {verdict['source']} (conf {verdict['confidence']}) — {verdict['note']}"
-                                    )
-                                elif mxm is not None:
-                                    # SOURCE 3 (Musixmatch) : dernier recours, LRCLIB+YTM vides.
-                                    try:
-                                        mres = mxm.get_synced_as_source3(
-                                            track.title, a_name, duration=duration
-                                        )
-                                    except Exception as e:
-                                        mres = None
-                                        logger.debug(
-                                            f"Musixmatch échec '{a_name} - {track.title}': {e}"
-                                        )
-                                    if mres:
-                                        track.lyrics_synced = mres["lrc"]
-                                        track.lyrics_synced_source = mres["source"]
-                                        track.lyrics_synced_confidence = mres["confidence"]
-                                        track.observations.append(
-                                            Observation(
-                                                "lyrics_synced",
-                                                mres["lrc"],
-                                                "musixmatch",
-                                                seen_at=_now,
-                                            )
-                                        )
-                                        n_mxm += 1
-                                        n_review += 1
-                                        logger.info(
-                                            f"⏱ {track.title}: Musixmatch (conf {mres['confidence']}) — {mres['note']}"
-                                        )
-
-                            # Fallback TEXTE (YTM) — seulement si Genius n'a rien donné.
-                            if need_text and not (track.has_lyrics and track.lyrics):
-                                txt = ytm_res.get("lyrics") if ytm_res else None
-                                if txt:
-                                    track.lyrics = txt
-                                    track.has_lyrics = True
-                                    track.lyrics_scraped_at = datetime.now()
-                                    track.lyrics_source = (
-                                        ytm_res.get("source") if ytm_res else None
-                                    ) or "YouTube Music"
-                                    n_text += 1
+                            if outcome.lyrics_synced is not None:
+                                if outcome.synced_kind == "lrclib":
+                                    n_lrclib += 1
+                                elif outcome.synced_kind == "ytm":
+                                    n_ytm += 1
+                                elif outcome.synced_kind == "musixmatch":
+                                    n_mxm += 1
+                                if outcome.synced_is_cross:
+                                    n_cross += 1
+                                else:
+                                    n_review += 1
+                            if outcome.text is not None:
+                                n_text += 1
                             update_progress(i + 1, n_tracks, track.title, "Timestamps")
                         logger.info(
                             f"⏱ Synchro : {n_lrclib} LRCLIB, {n_ytm} YTM, {n_mxm} Musixmatch ; "
@@ -424,7 +332,9 @@ def start_combined_scraping(
                         logger.warning(f"Passe synchro (timestamps) échouée: {e}")
 
                 if lyrics_results is None:
-                    n_ok = sum(1 for t in selected_tracks_list if t.has_lyrics and t.lyrics)
+                    n_ok = sum(
+                        1 for t in selected_tracks_list if t.lyrics.present and t.lyrics.text
+                    )
                     lyrics_results = {
                         "success": n_ok,
                         "failed": n_tracks - n_ok,

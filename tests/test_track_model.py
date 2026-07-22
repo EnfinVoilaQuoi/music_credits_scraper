@@ -152,8 +152,10 @@ class TestTrackEquality:
 
     def test_meme_genius_id_meme_morceau_malgre_champs_differents(self):
         # Une version re-scrapée (paroles, bpm mis à jour) reste LE même morceau
-        a = Track(title="Chanson", genius_id=123, lyrics="v1", bpm=90)
-        b = Track(title="Chanson (Remaster)", genius_id=123, lyrics="v2", bpm=140)
+        a = Track(title="Chanson", genius_id=123)
+        b = Track(title="Chanson (Remaster)", genius_id=123)
+        a.lyrics.text, b.lyrics.text = "v1", "v2"
+        a.audio.bpm, b.audio.bpm = 90, 140  # Phase 5 : audio/lyrics hors constructeur
         assert a == b
         assert hash(a) == hash(b)
 
@@ -177,15 +179,40 @@ class TestTrackEquality:
 
     def test_add_track_dedup_par_identite_metier(self):
         artist = Artist(name="X")
-        t1 = Track(title="Song", genius_id=999, lyrics="ancienne version")
+        t1 = Track(title="Song", genius_id=999)
+        t1.lyrics.text = "ancienne version"
         artist.add_track(t1)
         # Même genius_id, paroles différentes → pas de doublon
-        t2 = Track(title="Song", genius_id=999, lyrics="nouvelle version")
+        t2 = Track(title="Song", genius_id=999)
+        t2.lyrics.text = "nouvelle version"
         artist.add_track(t2)
         assert artist.get_tracks_count() == 1
 
     def test_pas_egal_a_un_non_track(self):
         assert Track(title="X", genius_id=1) != "pas un track"
+
+
+class TestCertificationMilestoneDurations:
+    def test_un_delai_par_palier_de_base_au_plus_tot(self):
+        t = Track(title="X")
+        t.release_date = "2020-01-01"
+        t.certs.entries = [
+            {"certification": "Diamant", "certification_date": "2023-01-01"},
+            {"certification": "Platine", "certification_date": "2021-07-01"},
+            {"certification": "Or", "certification_date": "2020-07-01"},
+            {"certification": "Double Platine", "certification_date": "2022-01-01"},
+            {"certification": "Platine", "certification_date": "2021-01-01"},  # + ancien
+        ]
+        result = dict(t.certification_milestone_durations())
+        assert set(result) == {"Or", "Platine", "Diamant"}  # multiplicateurs exclus
+        assert result["Or"] == (datetime(2020, 7, 1) - datetime(2020, 1, 1)).days
+        # Palier présent deux fois → date la plus ANCIENNE retenue
+        assert result["Platine"] == (datetime(2021, 1, 1) - datetime(2020, 1, 1)).days
+
+    def test_sans_date_de_sortie_renvoie_vide(self):
+        t = Track(title="X")
+        t.certs.entries = [{"certification": "Or", "certification_date": "2020-07-01"}]
+        assert t.certification_milestone_durations() == []
 
 
 class TestCertificationEmoji:

@@ -29,15 +29,6 @@ import pandas as pd
 # Réutilise la réparation de séparateurs (fonction pure partagée)
 from src.utils.cert_normalize import repair_extra_separators
 
-HEADER_COLS = [
-    "Interprète",
-    "Titre",
-    "Éditeur / Distributeur",
-    "Catégorie",
-    "Certification",
-    "Date de sortie",
-    "Date de constat",
-]
 EXPECTED_NCOLS = 7
 
 VALID_CATEGORIES = {"Singles", "Albums", "Vidéos", "Single", "Album", "Vidéo"}

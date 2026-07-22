@@ -50,3 +50,13 @@ class EnrichmentContext:
     # SerialWorker du run : exécute le travail sync (scrapers Playwright,
     # Discogs, Genius) sur UN thread daemon dédié — affinité de thread garantie.
     sync_runner: object | None = None
+
+    def has_observation(self, field: str) -> bool:
+        """Une source a-t-elle émis une observation pour ce champ CE run ?
+
+        Sert aux gates inter-providers (SongBPM, BpmFinder, GetSongBPM) à savoir
+        qu'une source amont a MESURÉ un champ (ex. key/mode) sans dépendre d'une
+        pose legacy provisoire sur `Track` (retirée, phase E7). À combiner avec
+        la valeur PERSISTÉE (`track.audio.key`) pour rester fidèle : un morceau déjà
+        enrichi porte sa key persistée sans observation fraîche."""
+        return any(o.field == field for o in self.observations)

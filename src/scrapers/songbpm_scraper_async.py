@@ -14,6 +14,7 @@ import logging
 import re
 from typing import Any
 
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.scrapers.playwright_manager import get_playwright_async
@@ -87,7 +88,7 @@ class SongBPMScraperAsync(SongBPMScraper):
             if obj:
                 try:
                     await obj.close()
-                except Exception:
+                except PlaywrightError:
                     pass
                 setattr(self, attr, None)
         self._playwright = None
@@ -119,9 +120,9 @@ class SongBPMScraperAsync(SongBPMScraper):
                         await btn.click()
                         logger.info(f"✅ Popup cookies fermé via: {selector}")
                         return
-                except Exception:
+                except PlaywrightError:
                     continue
-        except Exception as e:
+        except PlaywrightError as e:
             logger.debug(f"Gestion cookies (non bloquant): {e}")
 
     # ── Détails (miroir async ; texte → détails = logique pure héritée) ─────
@@ -158,7 +159,7 @@ class SongBPMScraperAsync(SongBPMScraper):
             logger.info(f"✅ Détails extraits: {details}")
         except PlaywrightTimeoutError:
             logger.warning(f"⏰ Timeout ({timeout}s) lors de la récupération des détails")
-        except Exception as e:
+        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur extraction détails: {e}")
         return details
 
@@ -244,11 +245,18 @@ class SongBPMScraperAsync(SongBPMScraper):
                         results.append(result)
                         logger.info(f"✅ Résultat: {result['artist']} - {result['title']}")
 
-                except Exception as e:
+                except (
+                    PlaywrightError,
+                    AttributeError,
+                    KeyError,
+                    IndexError,
+                    TypeError,
+                    ValueError,
+                ) as e:
                     logger.debug(f"Erreur conteneur: {e}")
                     continue
 
-        except Exception as e:
+        except (PlaywrightError, AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur extraction résultats: {e}")
         return results
 
@@ -306,7 +314,13 @@ class SongBPMScraperAsync(SongBPMScraper):
                         try:
                             details = await self._extract_track_details_async(result["detail_url"])
                             result.update(details)
-                        except Exception as e:
+                        except (
+                            PlaywrightError,
+                            AttributeError,
+                            KeyError,
+                            TypeError,
+                            ValueError,
+                        ) as e:
                             logger.warning(f"⚠️ Détails inaccessibles: {e}")
                     log_api("SongBPM", f"search/{track_title}", True)
                     return result
@@ -320,7 +334,7 @@ class SongBPMScraperAsync(SongBPMScraper):
             logger.error("❌ SongBPM: Timeout Playwright")
             await self._reset_browser_on_error_async()
             return None
-        except Exception as e:
+        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"❌ SongBPM: Erreur recherche: {e}")
             await self._reset_browser_on_error_async()
             return None

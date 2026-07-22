@@ -63,7 +63,7 @@ class LazyResource:
             try:
                 self._resource = self._factory()
                 self._owned = True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — factory arbitraire : création ratée = cassée
                 logger.warning(f"⚠️ {self._label} indisponible (création échouée): {e}")
                 self._broken = True
         return self._resource
@@ -75,7 +75,7 @@ class LazyResource:
         try:
             self._resource.close()
             logger.info(f"{self._label} fermé")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — fermeture best-effort (ressource arbitraire)
             logger.warning(f"⚠️ Fermeture {self._label}: {e}")
         self._resource = None
         self._owned = False
@@ -91,7 +91,7 @@ class LazyResource:
         try:
             await self._resource.aclose()
             logger.info(f"{self._label} fermé")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — fermeture best-effort (ressource arbitraire)
             logger.warning(f"⚠️ Fermeture {self._label}: {e}")
         self._resource = None
         self._owned = False

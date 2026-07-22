@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 try:
     from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES
-except Exception:  # exécution hors package (tests standalone)
+except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
 
 logger = logging.getLogger(__name__)

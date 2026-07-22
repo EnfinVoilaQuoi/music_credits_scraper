@@ -31,6 +31,17 @@ from bs4 import BeautifulSoup
 from src.concurrency import async_loop
 from src.utils.logger import get_logger
 
+# patchright est une dépendance OPTIONNELLE (installée avec crawl4ai), importée en
+# lazy. On expose sa classe d'erreur de base — DISTINCTE de celle de playwright —
+# pour cibler les `except` ; sentinelle jamais levée si la lib est absente.
+try:
+    from patchright.async_api import Error as PatchrightError
+except ImportError:  # pragma: no cover
+
+    class PatchrightError(Exception):
+        """Sentinelle quand patchright est absent (jamais levée)."""
+
+
 logger = get_logger(__name__)
 
 _BASE = "https://www.riaa.com/gold-platinum/"
@@ -142,14 +153,14 @@ class RIAAScraperV2:
         # Pont F4 : rendu sur LA boucle applicative (plus d'asyncio.run par appel).
         try:
             return async_loop.run_sync(self._render_async(url, load_all, get_details))
-        except Exception as e:
+        except (PatchrightError, RuntimeError, OSError) as e:
             logger.error(f"RIAA: rendu patchright échoué : {e}")
             return None
 
     async def _render_async(self, url: str, load_all: bool, get_details: bool) -> str | None:
         try:
             from patchright.async_api import async_playwright
-        except Exception as e:
+        except ImportError as e:
             logger.error(
                 f"patchright indisponible : {e} — `pip install -U crawl4ai && crawl4ai-setup`"
             )
@@ -178,7 +189,7 @@ class RIAAScraperV2:
                 await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
                 try:
                     await page.wait_for_selector("tr.table_award_row", timeout=20_000)
-                except Exception:
+                except PatchrightError:
                     logger.warning("RIAA : aucune ligne (page vide / Cloudflare ?)")
                     return await page.content()
 
@@ -208,7 +219,7 @@ class RIAAScraperV2:
             try:
                 await lm.scroll_into_view_if_needed()
                 await lm.click()
-            except Exception:
+            except PatchrightError:
                 await page.evaluate("var l=document.getElementById('loadmore'); if(l){l.click();}")
             clicks += 1
             await page.wait_for_timeout(2500)
@@ -237,19 +248,19 @@ class RIAAScraperV2:
                 continue
             try:
                 await link.click()
-            except Exception:
+            except PatchrightError:
                 onclick = await link.get_attribute("onclick") or ""
                 m = re.search(r"showDefaultDetail\('([^']+)'\s*,\s*'([^']+)'\)", onclick)
                 if m:
                     try:
                         await page.evaluate(f"showDefaultDetail('{m.group(1)}','{m.group(2)}');")
-                    except Exception:
+                    except PatchrightError:
                         pass
             await page.wait_for_timeout(300)
         # Attendre l'injection AJAX du premier historique (puis un délai global)
         try:
             await page.wait_for_selector("tr.content_recent_table", timeout=10_000)
-        except Exception:
+        except PatchrightError:
             logger.warning("RIAA : aucun historique MORE DETAILS injecté (AJAX)")
         await page.wait_for_timeout(1500)
 

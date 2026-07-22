@@ -109,7 +109,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         if include_lyrics and html:
             try:
                 self._apply_lyrics_from_html(html, track)
-            except Exception as e:
+            except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
                 logger.warning(f"GeniusScraperV3: erreur extraction paroles '{track.title}': {e}")
 
         # Nom d'album depuis la page (l'API /artists/songs ne le fournit pas)
@@ -119,7 +119,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 if album:
                     track.album = album
                     logger.info(f"💿 Album détecté pour '{track.title}': {album}")
-            except Exception as e:
+            except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
                 logger.debug(f"GeniusScraperV3: album introuvable pour '{track.title}': {e}")
 
         credits: list[Credit] = []
@@ -169,9 +169,11 @@ class GeniusScraperV3(CrawlAIScraperBase):
                     results["failed"] += 1
                     logger.warning(f"V3: aucun crédit pour '{track.title}'")
             except Exception as e:
+                # Boucle batch résiliente : l'échec d'un morceau est consigné et
+                # n'arrête pas les suivants. logger.exception = trace complète.
                 results["failed"] += 1
                 results["errors"].append({"track": track.title, "error": str(e)})
-                logger.error(f"V3: erreur sur '{track.title}': {e}")
+                logger.exception(f"V3: erreur sur '{track.title}'")
             if progress_callback:
                 progress_callback(i + 1, total, track.title)
         return results
@@ -221,9 +223,10 @@ class GeniusScraperV3(CrawlAIScraperBase):
                         results["failed"] += 1
                         logger.warning(f"V3: aucune parole trouvée pour '{track.title}'")
             except Exception as e:
+                # Boucle batch résiliente (cf. scrape_multiple_tracks).
                 results["failed"] += 1
                 results["errors"].append({"track": track.title, "error": str(e)})
-                logger.error(f"V3: erreur paroles sur '{track.title}': {e}")
+                logger.exception(f"V3: erreur paroles sur '{track.title}'")
             if progress_callback:
                 progress_callback(i + 1, total, track.title)
         logger.info(
@@ -510,7 +513,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                         continue
                     names = self._extract_names_intelligently(container_div)
                     self._append_credits(credits, role_text, names)
-        except Exception as e:
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.error(f"GeniusScraperV3: erreur extraction BeautifulSoup: {e}")
 
         return self._deduplicate_credits(credits)
@@ -558,7 +561,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                             names.append(text)
 
             return [n.replace("&amp;", "&").strip() for n in names if n and len(n) > 1]
-        except Exception as e:
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.debug(f"Erreur extraction noms: {e}")
             return []
 

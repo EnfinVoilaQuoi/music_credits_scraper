@@ -14,6 +14,8 @@ import sys
 import types
 from types import SimpleNamespace
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.utils.update_ytmusic import _infer_channel_from_youtube_links
 
 
@@ -73,7 +75,8 @@ class _DM:
 
     def get_artist_tracks(self, artist_id):
         if self._raise:
-            raise RuntimeError("boom")
+            # Erreur DB réaliste : la frontière resserrée ne catche que SQLAlchemyError.
+            raise SQLAlchemyError("boom")
         return self._tracks
 
 

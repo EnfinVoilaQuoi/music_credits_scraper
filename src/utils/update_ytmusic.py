@@ -9,6 +9,10 @@ Architecture quota-optimisée :
 import logging
 import sys
 
+import requests
+from sqlalchemy.exc import SQLAlchemyError
+from ytmusicapi.exceptions import YTMusicError
+
 from src.api.ytmusic_api import YTMusicAPI
 from src.config import YTM_IDENTITY_MIN_MATCHED, YTM_IDENTITY_MIN_RATIO
 from src.utils.logger import get_logger
@@ -39,7 +43,8 @@ def _infer_channel_from_youtube_links(
     """
     try:
         tracks = data_manager.get_artist_tracks(artist.id)
-    except Exception:
+    except SQLAlchemyError as e:
+        logger.debug(f"Lecture morceaux DB échouée (inférence canal): {e}")
         return None
     if not tracks:
         return None
@@ -67,7 +72,7 @@ def _infer_channel_from_youtube_links(
     if len(video_ids) < 3 and tracks_without_link:
         try:
             from src.utils.youtube_integration import youtube_integration
-        except Exception:
+        except ImportError:
             youtube_integration = None
 
         if youtube_integration:
@@ -80,7 +85,7 @@ def _infer_channel_from_youtube_links(
                     res = youtube_integration.get_youtube_link_for_track(
                         artist.name, t.title, album=getattr(t, "album", None)
                     )
-                except Exception:
+                except (AttributeError, TypeError, KeyError):
                     continue
                 if res.get("type") == "direct" and res.get("confidence", 0) >= 0.8:
                     vid = _extract_video_id(res.get("url"))
@@ -228,7 +233,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
     pinned, pinned_source = None, None
     try:
         pinned, pinned_source = data_manager.get_artist_ytm_channel_info(artist.id)
-    except Exception:
+    except SQLAlchemyError:
         pass
 
     if pinned:
@@ -335,7 +340,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
         if channel_source != "manual":
             try:
                 data_manager.set_artist_ytm_channel(artist.id, channel_id, source="inferred")
-            except Exception:
+            except SQLAlchemyError:
                 pass
 
     # Auditeurs mensuels : écrits APRÈS validation (jamais sur un homonyme).
@@ -429,7 +434,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
             from src.youtube.youtube_searcher import YouTubeSearcher
 
             searcher = YouTubeSearcher()
-        except Exception as e:
+        except (ImportError, YTMusicError, requests.RequestException, OSError) as e:
             logger.warning(f"Recherche audio YTM indisponible ({e}) — clips seulement")
             searcher, YOUTUBE_CONFIDENCE_THRESHOLD = None, 1.1
 
@@ -455,7 +460,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
                         and best.get("video_id")
                     ):
                         vids.add(best["video_id"])
-                except Exception as e:
+                except (AttributeError, TypeError, KeyError, IndexError) as e:
                     logger.debug(f"Recherche audio YTM échouée '{t.title}': {e}")
             if vids:
                 extras.append((t, vids))

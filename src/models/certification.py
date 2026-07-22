@@ -204,37 +204,6 @@ class Certification:
             "updated_at": self.updated_at.isoformat(),
         }
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Certification":
-        """Crée une certification depuis un dictionnaire"""
-        cert = cls()
-
-        # Champs simples
-        cert.id = data.get("id")
-        cert.artist_name = data.get("artist_name", "")
-        cert.title = data.get("title", "")
-        cert.publisher = data.get("publisher")
-        cert.country = data.get("country", "FR")
-        cert.certifying_body = data.get("certifying_body", "SNEP")
-
-        # Enums
-        if "category" in data:
-            cert.category = CertificationCategory[data["category"].upper().replace(" ", "_")]
-        if "level" in data:
-            cert.level = CertificationLevel.from_string(data["level"])
-
-        # Dates
-        if data.get("certification_date"):
-            cert.certification_date = datetime.fromisoformat(data["certification_date"])
-        if data.get("release_date"):
-            cert.release_date = datetime.fromisoformat(data["release_date"])
-        if data.get("created_at"):
-            cert.created_at = datetime.fromisoformat(data["created_at"])
-        if data.get("updated_at"):
-            cert.updated_at = datetime.fromisoformat(data["updated_at"])
-
-        return cert
-
     def __str__(self) -> str:
         """Représentation string"""
         return f"{self.artist_name} - {self.title} ({self.level.value} {self.country})"

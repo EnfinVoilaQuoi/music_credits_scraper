@@ -102,10 +102,24 @@ class _FakeRecco(_FakeEnrich, ReccoBeatsProvider):
         return self._isrc_result
 
 
+_AUDIO_ATTRS = {
+    "bpm",
+    "bpm_alt",
+    "bpm_source",
+    "bpm_confidence",
+    "key",
+    "mode",
+    "key_mode_source",
+    "musical_key",
+    "time_signature",
+    "reccobeats_resolution",
+}
+
+
 def _track(**attrs):
     track = Track(title="Solo", artist=Artist(name="X"))
     for name, value in attrs.items():
-        setattr(track, name, value)
+        setattr(track.audio if name in _AUDIO_ATTRS else track, name, value)
     return track
 
 
@@ -153,7 +167,7 @@ def test_ordre_nominal_et_finalize_entre_deezer_et_discogs():
 
     def _discogs_observe(track, ctx):
         # Le vote BPM doit être finalisé AVANT Discogs (position historique)
-        seen["bpm_at_discogs"] = track.bpm
+        seen["bpm_at_discogs"] = track.audio.bpm
         return True
 
     enricher, fakes, calls = _enricher()
@@ -218,7 +232,7 @@ def test_consensus_bpm_saute_songbpm():
 
     assert results["songbpm"] == "not_needed"
     assert fakes["songbpm"].enrich_calls == 0
-    assert track.bpm == 100  # vote finalisé sur le consensus
+    assert track.audio.bpm == 100  # vote finalisé sur le consensus
 
 
 def test_force_update_rappelle_le_scraper_spotify_meme_avec_id_valide():
@@ -263,7 +277,7 @@ def test_crash_songbpm_donne_none_et_bloque_le_nettoyage():
     # None (crash) ≠ False (pas de données) : n'alimente PAS « tout a échoué »
     assert results["songbpm"] is None
     assert "cleaned" not in results
-    assert track.bpm == 95  # données préservées
+    assert track.audio.bpm == 95  # données préservées
 
 
 def test_nettoyage_si_toutes_les_tentatives_ont_echoue():
@@ -273,11 +287,11 @@ def test_nettoyage_si_toutes_les_tentatives_ont_echoue():
     results = enricher.enrich_track(track, force_update=True, clear_on_failure=True)
 
     assert results["cleaned"] is True
-    assert track.bpm is None
-    assert track.key is None
-    assert track.mode is None
+    assert track.audio.bpm is None
+    assert track.audio.key is None
+    assert track.audio.mode is None
     assert track.duration is None
-    assert track.musical_key is None
+    assert track.audio.musical_key is None
     assert track.title == "Solo"  # les données essentielles restent intactes
 
 
@@ -294,7 +308,7 @@ def test_pas_de_nettoyage_si_aucune_source_n_a_tente():
 
     assert results == {"bpmfinder": "skipped"}
     assert "cleaned" not in results
-    assert track.bpm == 100
+    assert track.audio.bpm == 100
 
 
 def test_pas_de_nettoyage_si_une_source_a_reussi():
@@ -307,7 +321,7 @@ def test_pas_de_nettoyage_si_une_source_a_reussi():
 
     assert results["deezer"] is True
     assert "cleaned" not in results
-    assert track.bpm == 95
+    assert track.audio.bpm == 95
 
 
 # ──────────────────────────────────────────────────────────────────────

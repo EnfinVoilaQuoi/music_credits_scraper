@@ -49,9 +49,13 @@ class SongBpmProvider:
     def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """DÉPARTAGE (§8.3) : scrape seulement si les APIs n'ont pas de consensus
         BPM, ou s'il manque key/mode/duration (force_update court-circuite)."""
-        # key/mode : attributs dynamiques du mapper → getattr requis
-        missing_key = getattr(track, "key", None) is None
-        missing_mode = getattr(track, "mode", None) is None
+        # « Manquant » = ni valeur PERSISTÉE (track.audio.key/mode, relue via
+        # observations au chargement) ni observation FRAÎCHE d'une source amont ce
+        # run (E7 : les poses provisoires des providers ayant été retirées, on ne
+        # peut plus se fier au seul `track.audio.key`). Phase 5 : key/mode sont des
+        # champs du sous-objet audio (fin des attributs dynamiques → plus de getattr).
+        missing_key = track.audio.key is None and not ctx.has_observation("key")
+        missing_mode = track.audio.mode is None and not ctx.has_observation("mode")
         missing_duration = not track.duration
         bpm_consensus = ctx.bpm_ballot.consensus_reached()
 
@@ -60,8 +64,8 @@ class SongBpmProvider:
         )
         if not should_run:
             logger.info(
-                f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.bpm}, "
-                f"Key={getattr(track, 'key', 'N/A')}, Mode={getattr(track, 'mode', 'N/A')}, "
+                f"⏭️ SongBPM non appelé (toutes les données déjà présentes: BPM={track.audio.bpm}, "
+                f"Key={track.audio.key}, Mode={track.audio.mode}, "
                 f"Duration={track.duration})"
             )
             return "not_needed"
@@ -176,39 +180,27 @@ class SongBpmProvider:
         artist_tracks = ctx.artist_tracks
         updated = False
 
-        # BPM → candidat pour le vote (+ pose provisoire si manquant)
+        # BPM → candidat pour le vote (§8.3). E7 : plus de pose legacy directe —
+        # apply_resolutions pose track.audio.bpm en fin de run. Un candidat valide au
+        # vote = SongBPM a contribué (même 2ᵉ vote concordant) → succès, sinon
+        # faux « ÉCHEC » → nettoyage.
         sbpm = sanitize_bpm(track_data.get("bpm"))
         if sbpm is not None:
             ctx.bpm_ballot.add("songbpm", sbpm)
-            # Un candidat valide fourni au vote = SongBPM a RÉUSSI, même si un
-            # BPM était déjà présent (2ᵉ vote concordant). Sans ça, le run était
-            # loggé « ÉCHEC » à tort et pouvait déclencher le nettoyage.
+            logger.info(f"📊 BPM SongBPM (candidat): {sbpm} pour {track.title}")
             updated = True
-            if force_update or not track.bpm:
-                track.bpm = sbpm
-                logger.info(f"📊 BPM ajouté depuis SongBPM: {sbpm} pour {track.title}")
 
         # Key et Mode
         key_value = track_data.get("key")
         mode_value = track_data.get("mode")
 
-        # Observation key/mode PAR SOURCE (normalisée : "minor"→0, lettre→pc)
-        # — indépendante du last-writer legacy, corrige le bug WIP mode="minor"
-        # côté observations (la colonne legacy suivra en E5c-2b-ii).
+        # Observations key/mode PAR SOURCE (normalisées : "minor"→0, lettre→pc) —
+        # corrige le bug WIP mode="minor". apply_resolutions repose key/mode/
+        # key_mode_source en fin de run (plus de pose legacy directe, E7).
         ctx.observations.extend(key_mode_observations("songbpm", key=key_value, mode=mode_value))
-
-        if key_value and mode_value:
-            if force_update or not hasattr(track, "key") or not track.key:
-                track.key = key_value
-                track.key_mode_source = "songbpm"
-                logger.info(f"🎵 Key ajoutée depuis SongBPM: {track.key} pour {track.title}")
-                updated = True
-
-            if force_update or not hasattr(track, "mode") or not track.mode:
-                track.mode = mode_value
-                track.key_mode_source = "songbpm"
-                logger.info(f"🎼 Mode ajouté depuis SongBPM: {track.mode} pour {track.title}")
-                updated = True
+        if key_value or mode_value:
+            logger.info(f"🎵 Key/Mode SongBPM: {key_value}/{mode_value} pour {track.title}")
+            updated = True
 
         # Spotify ID depuis SongBPM (avec validation stricte)
         songbpm_spotify_id = track_data.get("spotify_id")

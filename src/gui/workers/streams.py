@@ -4,6 +4,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from src.enrichment.providers.streams import StreamsProvider
 from src.gui.dialogs import kworb_confirm, report
 from src.gui.workers.lifecycle import run_worker, stop_requested
 from src.utils.logger import get_logger
@@ -71,6 +72,10 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
         app.streams_button.configure(state="disabled")
 
     def run():
+        # Provider streams (Chantier 3) : POSSÈDE les clients Kworb/YTM (lazy),
+        # le worker garde la boucle/résumés/confirmation/saves. Le client YTM est
+        # partagé entre streams YTM et vues vidéo.
+        provider = StreamsProvider()
         try:
             app.root.after(0, app._show_progress_bar)
             results = {}
@@ -80,9 +85,9 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                     0, lambda: app.progress_label.configure(text="Spotify (Kworb) en cours...")
                 )
                 try:
-                    from src.utils.update_kworb import update_kworb_streams
-
-                    results["spotify"] = update_kworb_streams(app.current_artist, app.data_manager)
+                    results["spotify"] = provider.fetch_spotify(
+                        app.current_artist, app.data_manager
+                    )
                 except Exception as e:
                     results["spotify"] = {"error": str(e)}
 
@@ -92,7 +97,6 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                 )
                 try:
                     from src.api.ytmusic_api import YTMusicAPI
-                    from src.utils.update_ytmusic import update_ytmusic_streams
 
                     # Épingler le canal YTM saisi (@handle, lien ou UC...)
                     if ytm_channel_raw:
@@ -107,17 +111,15 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                                 "recherche automatique utilisée"
                             )
 
-                    results["ytm"] = update_ytmusic_streams(app.current_artist, app.data_manager)
+                    results["ytm"] = provider.fetch_ytm(app.current_artist, app.data_manager)
 
                     # Media 5 : vues + nature (clip/show/audio) de LA vidéo — batch
                     # YT mutualisé avec les streams. SÉPARÉ de ytm_streams. Défensif :
                     # n'interrompt pas la récupération des streams en cas d'échec.
                     if not stop_requested():
                         try:
-                            from src.utils.update_video_views import update_video_views
-
                             fresh_tracks = app.data_manager.get_artist_tracks(app.current_artist.id)
-                            results["video_views"] = update_video_views(
+                            results["video_views"] = provider.fetch_video_views(
                                 app.current_artist, fresh_tracks, app.data_manager
                             )
                         except Exception as e:
@@ -210,6 +212,7 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
             err_msg = f"Erreur inattendue : {e}"
             app.root.after(0, lambda: messagebox.showerror("Erreur Streams", err_msg))
         finally:
+            provider.close()
             app.root.after(0, app._hide_progress_bar)
             app.root.after(0, app._update_buttons_state)
 

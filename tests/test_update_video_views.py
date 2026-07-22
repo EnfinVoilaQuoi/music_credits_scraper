@@ -48,8 +48,8 @@ def test_update_video_views_ecrit_kind_et_vues(monkeypatch):
 
     assert report["updated"] == 1
     assert report["by_kind"] == {"clip": 1}
-    assert track.youtube_video_kind == "clip"
-    assert track.youtube_video_views == 1000
+    assert track.media.youtube_video_kind == "clip"
+    assert track.media.youtube_video_views == 1000
     assert dm.calls == [(1, 1000, "clip")]
 
 
@@ -80,5 +80,5 @@ def test_update_video_views_show(monkeypatch):
     dm = _FakeDM()
     track = _track(1, "https://youtu.be/dQw4w9WgXcQ")
     report = update_video_views(_artist(), [track], dm)
-    assert track.youtube_video_kind == "show"
+    assert track.media.youtube_video_kind == "show"
     assert report["by_kind"] == {"show": 1}

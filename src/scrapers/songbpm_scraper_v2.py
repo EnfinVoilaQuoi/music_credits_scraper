@@ -16,15 +16,12 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from src.config import SELENIUM_TIMEOUT
 from src.models import Track
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import build_songbpm_prompt, get_shared_extractor
 from src.utils.logger import get_logger, log_api
 
 logger = get_logger(__name__)
-
-PW_TIMEOUT = SELENIUM_TIMEOUT * 1000  # Playwright attend des ms
 
 
 class SongBPMScraper:
@@ -534,13 +531,13 @@ class SongBPMScraper:
 
             updated = False
 
-            if (force_update or not track.bpm) and track_data.get("bpm"):
-                track.bpm = track_data["bpm"]
+            if (force_update or not track.audio.bpm) and track_data.get("bpm"):
+                track.audio.bpm = track_data["bpm"]
                 updated = True
 
             key_value = track_data.get("key")
-            if key_value and (force_update or not getattr(track, "key", None)):
-                track.key = key_value
+            if key_value and (force_update or not track.audio.key):
+                track.audio.key = key_value
                 updated = True
 
             songbpm_sid = track_data.get("spotify_id")
@@ -567,27 +564,21 @@ class SongBPMScraper:
             if detail_url and key_value:
                 try:
                     details = self._extract_track_details(detail_url, timeout=30)
-                    if details.get("mode") and (force_update or not getattr(track, "mode", None)):
-                        track.mode = details["mode"]
+                    if details.get("mode") and (force_update or not track.audio.mode):
+                        track.audio.mode = details["mode"]
                         updated = True
-                    if details.get("key_from_paragraph") and (
-                        force_update or not getattr(track, "key", None)
-                    ):
-                        track.key = details["key_from_paragraph"]
+                    if details.get("key_from_paragraph") and (force_update or not track.audio.key):
+                        track.audio.key = details["key_from_paragraph"]
                         updated = True
-                    final_key = getattr(track, "key", None)
-                    final_mode = getattr(track, "mode", None)
-                    if (
-                        final_key
-                        and final_mode
-                        and (force_update or not getattr(track, "musical_key", None))
-                    ):
+                    final_key = track.audio.key
+                    final_mode = track.audio.mode
+                    if final_key and final_mode and (force_update or not track.audio.musical_key):
                         try:
                             from src.utils.music_theory import key_mode_to_french_from_string
 
                             _mk = key_mode_to_french_from_string(final_key, final_mode)
                             if _mk:  # None si key/mode non interprétables
-                                track.musical_key = _mk
+                                track.audio.musical_key = _mk
                                 updated = True
                         except Exception:
                             pass

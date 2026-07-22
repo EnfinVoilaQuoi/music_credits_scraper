@@ -340,8 +340,8 @@ class TestUpdateTrackStreams:
 
         assert data_manager.update_track_spotify_streams(track_id, 12345, 678) is True
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.spotify_streams == 12345
-        assert lu.spotify_daily_streams == 678
+        assert lu.streams.spotify_streams == 12345
+        assert lu.streams.spotify_daily_streams == 678
 
     def test_update_spotify_streams_updated_at_personnalise(self, data_manager):
         artist = _artiste(data_manager)
@@ -349,14 +349,14 @@ class TestUpdateTrackStreams:
 
         data_manager.update_track_spotify_streams(track_id, 100, 1, updated_at="2020-01-01")
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.spotify_streams_updated == "2020-01-01"
+        assert lu.streams.spotify_streams_updated == "2020-01-01"
 
     def test_update_ytm_streams(self, data_manager):
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
         assert data_manager.update_track_ytm_streams(track_id, 98765) is True
-        assert _lire_track(data_manager, artist.id, track_id).ytm_streams == 98765
+        assert _lire_track(data_manager, artist.id, track_id).streams.ytm_streams == 98765
 
     def test_spotify_streams_ecrit_une_observation(self, data_manager):
         # E7e : write-through de provenance (source kworb, seen_at verbatim).
@@ -721,9 +721,9 @@ class TestCertificationsPersistence:
         data_manager.save_track(track)
 
         reloaded = _lire_track(data_manager, artist.id, track_id)
-        assert reloaded.certifications == [cert]
-        assert reloaded.has_certification is True
-        assert reloaded.certification_level == "Or"
+        assert reloaded.certs.entries == [cert]
+        assert reloaded.certs.has is True
+        assert reloaded.certs.level == "Or"
 
 
 class TestLyricsSyncedObservations:
@@ -740,9 +740,9 @@ class TestLyricsSyncedObservations:
         _ajoute_obs(data_manager, track_id, "lyrics_synced", "ytmusic", value=self._LRC)
 
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.lyrics_synced == self._LRC
-        assert lu.lyrics_synced_source == "LRCLIB"
-        assert lu.lyrics_synced_confidence == 2
+        assert lu.lyrics.synced == self._LRC
+        assert lu.lyrics.synced_source == "LRCLIB"
+        assert lu.lyrics.synced_confidence == 2
 
     def test_delete_puis_relecture_sans_verdict(self, data_manager):
         # force_sync purge les obs → plus aucun verdict à la lecture.
@@ -753,4 +753,4 @@ class TestLyricsSyncedObservations:
         data_manager.delete_observations(track_id, "lyrics_synced")
 
         lu = _lire_track(data_manager, artist.id, track_id)
-        assert lu.lyrics_synced is None
+        assert lu.lyrics.synced is None

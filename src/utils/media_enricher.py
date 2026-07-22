@@ -2,7 +2,7 @@
 
 Cœur du chantier « Media ». Suit le **pattern « dual certifs »** (`apply_certifications`) :
 `apply_images` MUTE les objets en mémoire (pose `artist.image_path`,
-`track.cover_path`, `track.yt_thumbnail_path`, écrit `cover_path` dans les dicts
+`track.media.cover_path`, `track.media.yt_thumbnail_path`, écrit `cover_path` dans les dicts
 de `track.relationships`) mais **ne sauve pas** — l'appelant (worker Discographie
 auto / fenêtre Export studio) sauve ensuite.
 
@@ -224,7 +224,7 @@ class _MediaRun:
             if existing and not self.force:
                 rel = self._rel(existing)
                 for track in album_tracks:
-                    track.cover_path = rel
+                    track.media.cover_path = rel
                 self.report.skipped[CAT_COVER] += 1
                 continue
             self.progress(f"Cover album : {album}")
@@ -244,7 +244,7 @@ class _MediaRun:
             if result:
                 rel = self._rel(result)
                 for track in album_tracks:
-                    track.cover_path = rel
+                    track.media.cover_path = rel
                 self.report.downloaded[CAT_COVER] += 1
             else:
                 self.report.failed[CAT_COVER] += 1
@@ -256,14 +256,14 @@ class _MediaRun:
             base = cover_image_path(self.artist.name, track.title)
             existing = _existing_variant(base)
             if existing and not self.force:
-                track.cover_path = self._rel(existing)
+                track.media.cover_path = self._rel(existing)
                 self.report.skipped[CAT_COVER] += 1
                 continue
             self.progress(f"Cover single : {track.title}")
-            url = track.artwork_url or self._deezer_track_cover(self.artist.name, track.title)
+            url = track.media.artwork_url or self._deezer_track_cover(self.artist.name, track.title)
             result = download_image(url, base)
             if result:
-                track.cover_path = self._rel(result)
+                track.media.cover_path = self._rel(result)
                 self.report.downloaded[CAT_COVER] += 1
             else:
                 self.report.failed[CAT_COVER] += 1
@@ -310,14 +310,14 @@ class _MediaRun:
             base = vignette_image_path(vid)
             if (
                 not self.force
-                and track.yt_thumbnail_path
-                and (IMAGES_DIR / track.yt_thumbnail_path).exists()
+                and track.media.yt_thumbnail_path
+                and (IMAGES_DIR / track.media.yt_thumbnail_path).exists()
             ):
                 self.report.skipped[CAT_VIGNETTE] += 1
                 continue
             existing = _existing_variant(base)
             if existing and not self.force:
-                track.yt_thumbnail_path = self._rel(existing)
+                track.media.yt_thumbnail_path = self._rel(existing)
                 self.report.skipped[CAT_VIGNETTE] += 1
                 continue
             self.progress(f"Vignette : {track.title}")
@@ -328,7 +328,7 @@ class _MediaRun:
                 if result:
                     break
             if result:
-                track.yt_thumbnail_path = self._rel(result)
+                track.media.yt_thumbnail_path = self._rel(result)
                 self.report.downloaded[CAT_VIGNETTE] += 1
             else:
                 self.report.failed[CAT_VIGNETTE] += 1

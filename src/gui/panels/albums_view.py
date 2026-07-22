@@ -211,7 +211,7 @@ def populate_albums_table(app):
             n_disabled = 0
         n_display = f"{n} ({n_disabled}❌)" if n_disabled else n
         credits = sum(len(t.credits or []) for t in tracks)
-        lyrics = sum(1 for t in tracks if t.lyrics and str(t.lyrics).strip())
+        lyrics = sum(1 for t in tracks if t.lyrics.text and str(t.lyrics.text).strip())
         total_sec = 0
         for t in tracks:
             d = t.duration
@@ -241,9 +241,9 @@ def populate_albums_table(app):
         # Pas de stats album Kworb (ligne Featurings, apparitions écartées,
         # singles) → fallback : somme des streams MORCEAU du groupe
         if not sp:
-            sp = sum(t.spotify_streams or 0 for t in tracks) or None
+            sp = sum(t.streams.spotify_streams or 0 for t in tracks) or None
         if not yt:
-            yt = sum(t.ytm_streams or 0 for t in tracks) or None
+            yt = sum(t.streams.ytm_streams or 0 for t in tracks) or None
         sp_streams = fmt_streams(sp)
         ytm_streams = fmt_streams(yt)
 

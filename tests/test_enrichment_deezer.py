@@ -53,7 +53,7 @@ def test_enrich_pose_duration_isrc_et_candidat_bpm():
     assert ("deezer", 142) in ctx.bpm_ballot.candidates
 
 
-def test_enrich_bpm_opportuniste_si_aucun_bpm():
+def test_enrich_bpm_opportuniste_candidat():
     result = {
         "success": True,
         "verifications": {},
@@ -61,9 +61,10 @@ def test_enrich_bpm_opportuniste_si_aucun_bpm():
     }
     provider = DeezerProvider(_FakeDeezerClient(result))
     track = _track()
-    provider.enrich(track, EnrichmentContext())
-    # bpm absent au départ → valeur opportuniste posée en plus du candidat
-    assert track.bpm == 100
+    ctx = EnrichmentContext()
+    provider.enrich(track, ctx)
+    # E7 : le BPM Deezer est un CANDIDAT du scrutin (plus de pose legacy directe)
+    assert ("deezer", 100) in ctx.bpm_ballot.candidates
 
 
 def test_enrich_echec_client_renvoie_false():

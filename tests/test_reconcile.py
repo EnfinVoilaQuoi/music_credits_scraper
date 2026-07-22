@@ -11,6 +11,20 @@ from src.enrichment.observation import Observation
 from src.enrichment.reconcile import apply_resolutions, reconcile
 from src.models import Artist, Track
 
+# Attrs routés vers le sous-objet track.audio par le helper _track (Phase 5).
+_AUDIO_ATTRS = {
+    "bpm",
+    "bpm_alt",
+    "bpm_source",
+    "bpm_confidence",
+    "key",
+    "mode",
+    "key_mode_source",
+    "musical_key",
+    "time_signature",
+    "reccobeats_resolution",
+}
+
 
 def _obs(field, value, source, confidence=None):
     return Observation(field=field, value=value, source=source, confidence=confidence)
@@ -263,9 +277,9 @@ class TestReconcileLyricsSynced:
                 ]
             ),
         )
-        assert track.lyrics_synced == self._LRC
-        assert track.lyrics_synced_source == "LRCLIB"
-        assert track.lyrics_synced_confidence == 2  # INTEGER legacy (float casté)
+        assert track.lyrics.synced == self._LRC
+        assert track.lyrics.synced_source == "LRCLIB"
+        assert track.lyrics.synced_confidence == 2  # INTEGER legacy (float casté)
 
 
 class TestReconcileEmpty:
@@ -279,7 +293,7 @@ class TestApplyResolutions:
     def _track(self, **attrs):
         track = Track(title="X", artist=Artist(name="A"))
         for name, value in attrs.items():
-            setattr(track, name, value)
+            setattr(track.audio if name in _AUDIO_ATTRS else track, name, value)
         return track
 
     def test_bpm_pilote_les_quatre_colonnes(self):
@@ -287,16 +301,16 @@ class TestApplyResolutions:
         apply_resolutions(
             track, reconcile([_obs("bpm", 74, "deezer"), _obs("bpm", 145, "reccobeats")])
         )
-        assert track.bpm == 145
-        assert track.bpm_alt == 74
-        assert track.bpm_source == "reccobeats+deezer"
-        assert track.bpm_confidence == 2  # INTEGER legacy (float du moteur casté)
+        assert track.audio.bpm == 145
+        assert track.audio.bpm_alt == 74
+        assert track.audio.bpm_source == "reccobeats+deezer"
+        assert track.audio.bpm_confidence == 2  # INTEGER legacy (float du moteur casté)
 
     def test_time_signature_pilote(self):
         # E7-D2 : time_signature reconstruit depuis son observation (write-through).
         track = self._track()
         apply_resolutions(track, reconcile([_obs("time_signature", "4/4", "getsongbpm")]))
-        assert track.time_signature == "4/4"
+        assert track.audio.time_signature == "4/4"
 
     def test_key_mode_normalises_et_musical_key(self):
         # songbpm "minor" + reccobeats numériques → paire complète, mode=0 (fix bug).
@@ -308,23 +322,23 @@ class TestApplyResolutions:
             _obs("mode", 0, "songbpm"),
         ]
         apply_resolutions(track, reconcile(obs))
-        assert track.key == 8
-        assert track.mode == 0
-        assert track.key_mode_source == "reccobeats"
-        assert track.musical_key == "Sol#/Lab mineur"
+        assert track.audio.key == 8
+        assert track.audio.mode == 0
+        assert track.audio.key_mode_source == "reccobeats"
+        assert track.audio.musical_key == "Sol#/Lab mineur"
 
     def test_champ_absent_non_touche(self):
         # Aucune observation bpm → bpm existant préservé (pas d'écrasement).
         track = self._track(bpm=99, bpm_source="manuel")
         apply_resolutions(track, reconcile([_obs("key", 5, "deezer")]))
-        assert track.bpm == 99
-        assert track.bpm_source == "manuel"
+        assert track.audio.bpm == 99
+        assert track.audio.bpm_source == "manuel"
 
     def test_paire_incomplete_ne_pilote_pas(self):
-        # key seul (pas de mode) → moteur n'émet rien → track.key inchangé.
+        # key seul (pas de mode) → moteur n'émet rien → track.audio.key inchangé.
         track = self._track()
         apply_resolutions(track, reconcile([_obs("key", 5, "deezer")]))
-        assert getattr(track, "key", None) is None
+        assert track.audio.key is None
 
 
 class TestReconcileLegacy:

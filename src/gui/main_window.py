@@ -55,6 +55,8 @@ class MainWindow:
         self.sort_reverse = False
         self.last_selected_index = None  # Sélection multiple
         self.disabled_tracks_manager = DisabledTracksManager()
+        # Purge des fichiers de désactivation orphelins (> 30 j sans modif)
+        self.disabled_tracks_manager.cleanup_old_files()
         self.deleted_tracks_manager = DeletedTracksManager()
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         self.source_health_window = None  # Fenêtre « État des sources » (singleton)
@@ -245,6 +247,15 @@ class MainWindow:
             text="Désactiver sélectionnés",
             command=lambda: tracks_table.disable_selected_tracks(self),
             width=140,
+            fg_color="gray",
+            hover_color="darkgray",
+        ).pack(side="left", padx=5)
+
+        ctk.CTkButton(
+            selection_frame,
+            text="Réactiver tous",
+            command=lambda: tracks_table.enable_selected_tracks(self),
+            width=120,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="left", padx=5)
@@ -576,38 +587,35 @@ class MainWindow:
                 )
 
                 # Morceaux avec paroles (actifs uniquement)
-                tracks_with_lyrics = sum(1 for t in active_tracks if t.lyrics and t.lyrics.strip())
+                tracks_with_lyrics = sum(
+                    1 for t in active_tracks if t.lyrics.text and t.lyrics.text.strip()
+                )
 
                 # Morceaux avec données additionnelles = BPM + Key/Mode + Durée (actifs uniquement)
                 tracks_with_additional = sum(
                     1
                     for t in active_tracks
                     if (
-                        t.bpm
+                        t.audio.bpm
                         and (
-                            isinstance(t.bpm, (int, float))
-                            and t.bpm > 0
-                            or isinstance(t.bpm, str)
-                            and t.bpm.isdigit()
-                            and int(t.bpm) > 0
+                            isinstance(t.audio.bpm, (int, float))
+                            and t.audio.bpm > 0
+                            or isinstance(t.audio.bpm, str)
+                            and t.audio.bpm.isdigit()
+                            and int(t.audio.bpm) > 0
                         )
                     )
                     and (
-                        t.musical_key
-                        # key/mode : attributs dynamiques du mapper → hasattr requis
-                        or (
-                            hasattr(t, "key")
-                            and t.key
-                            and hasattr(t, "mode")
-                            and t.mode is not None
-                        )
+                        # key/mode : champs du sous-objet audio (Phase 5)
+                        t.audio.musical_key
+                        or (t.audio.key and t.audio.mode is not None)
                     )
                     and t.duration
                 )
 
                 # Morceaux avec certifications (actifs uniquement)
                 tracks_with_certifications = sum(
-                    1 for t in active_tracks if t.certifications and len(t.certifications) > 0
+                    1 for t in active_tracks if t.certs.entries and len(t.certs.entries) > 0
                 )
 
                 # Albums avec certifications (compter les albums uniques, pas les morceaux)
@@ -615,7 +623,7 @@ class MainWindow:
                     {
                         t.album
                         for t in active_tracks
-                        if t.album_certifications and len(t.album_certifications) > 0 and t.album
+                        if t.certs.album_entries and len(t.certs.album_entries) > 0 and t.album
                     }
                 )
 
@@ -670,7 +678,9 @@ class MainWindow:
                     total_cumul = 0
                     tracks_with_streams = 0
                     for t in active_tracks:
-                        est = calculate_total_streams(t.spotify_streams, t.ytm_streams)
+                        est = calculate_total_streams(
+                            t.streams.spotify_streams, t.streams.ytm_streams
+                        )
                         if est:
                             total_cumul += est
                             tracks_with_streams += 1

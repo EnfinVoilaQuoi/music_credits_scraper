@@ -112,8 +112,8 @@ def populate_tracks_table(app):
             credits_display = str(credits_count)
 
             # Paroles : ✓ = texte, ⏱ = timestamps (paroles synchronisées) en plus
-            has_lyrics_flag = track.has_lyrics
-            has_sync_flag = bool(track.lyrics_synced)
+            has_lyrics_flag = track.lyrics.present
+            has_sync_flag = bool(track.lyrics.synced)
             if has_lyrics_flag and has_sync_flag:
                 lyrics_display = "✓⏱"
             elif has_sync_flag:
@@ -125,25 +125,27 @@ def populate_tracks_table(app):
 
             # BPM avec tonalité - VERSION AMÉLIORÉE
             bpm = ""  # ⭐ IMPORTANT : Initialiser la variable
-            if track.bpm:
-                bpm = str(track.bpm)
+            if track.audio.bpm:
+                bpm = str(track.audio.bpm)
 
                 # ⭐ LOGIQUE AMÉLIORÉE pour afficher la tonalité
                 musical_key = None
 
                 # 1. Essayer musical_key directement
-                if track.musical_key:
-                    musical_key = track.musical_key
+                if track.audio.musical_key:
+                    musical_key = track.audio.musical_key
 
-                # 2. FALLBACK : key/mode = attributs dynamiques du mapper → hasattr requis
-                elif hasattr(track, "key") and hasattr(track, "mode") and track.key and track.mode:
+                # 2. FALLBACK : key/mode du sous-objet audio (Phase 5)
+                elif track.audio.key and track.audio.mode:
                     try:
                         from src.utils.music_theory import key_mode_to_french_from_string
 
-                        musical_key = key_mode_to_french_from_string(track.key, track.mode)
+                        musical_key = key_mode_to_french_from_string(
+                            track.audio.key, track.audio.mode
+                        )
 
                         # ⭐ BONUS : Stocker le résultat pour la prochaine fois
-                        track.musical_key = musical_key
+                        track.audio.musical_key = musical_key
                         logger.debug(
                             f"Musical key calculée et stockée pour '{track.title}': {musical_key}"
                         )
@@ -152,7 +154,7 @@ def populate_tracks_table(app):
 
                 # Ajouter la tonalité au BPM si disponible
                 if musical_key:
-                    bpm = f"{track.bpm} ({musical_key})"
+                    bpm = f"{track.audio.bpm} ({musical_key})"
 
             # Durée du morceau
             duration_display = ""
@@ -169,13 +171,13 @@ def populate_tracks_table(app):
                 except Exception:
                     pass
 
-            # Certifications - Lire depuis track.certifications au lieu de l'API
+            # Certifications - Lire depuis track.certs.entries au lieu de l'API
             certif_display = ""
             try:
                 # Vérifier si le track a des certifications stockées
-                if track.certifications:
+                if track.certs.entries:
                     # Prendre la plus haute certification (première dans la liste déjà triée)
-                    cert_level = track.certifications[0].get("certification", "")
+                    cert_level = track.certs.entries[0].get("certification", "")
                     emoji_map = {
                         "Or": "🥇",
                         "Double Or": "🥇🥇",
@@ -203,8 +205,8 @@ def populate_tracks_table(app):
                     streams_source_label,
                 )
 
-                sp = track.spotify_streams
-                yt = track.ytm_streams
+                sp = track.streams.spotify_streams
+                yt = track.streams.ytm_streams
                 streams_total = calculate_total_streams(sp, yt)
                 streams_display = format_streams(streams_total, streams_source_label(sp, yt))
             except Exception:
@@ -642,11 +644,11 @@ def sort_column(app, col):
         elif col == "Paroles":
             # rien < texte seul < texte + timestamps
             sort_key = lambda t: (
-                bool(t.has_lyrics),
-                bool(t.lyrics_synced),
+                bool(t.lyrics.present),
+                bool(t.lyrics.synced),
             )
         elif col == "BPM":
-            sort_key = lambda t: t.bpm or 0
+            sort_key = lambda t: t.audio.bpm or 0
         elif col == "Durée":
             # Trier par durée en secondes
             def get_duration_seconds(t):
@@ -685,8 +687,8 @@ def sort_column(app, col):
 
             def get_cert_value(t):
                 try:
-                    if t.certifications:
-                        cert_level = t.certifications[0].get("certification", "")
+                    if t.certs.entries:
+                        cert_level = t.certs.entries[0].get("certification", "")
                         emoji_map = {
                             "Quadruple Diamant": "💎💎💎💎",
                             "Triple Diamant": "💎💎💎",
@@ -712,7 +714,9 @@ def sort_column(app, col):
                 try:
                     from src.utils.streams_calculator import calculate_total_streams
 
-                    total = calculate_total_streams(t.spotify_streams, t.ytm_streams)
+                    total = calculate_total_streams(
+                        t.streams.spotify_streams, t.streams.ytm_streams
+                    )
                     return total if total is not None else -1
                 except Exception:
                     return -1

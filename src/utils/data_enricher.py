@@ -103,6 +103,11 @@ class DataEnricher:
             async_scraper_factory=lambda: SongBPMScraperAsync(headless=headless_songbpm),
         )
         # Factory seulement si identifiants/session présents (même règle qu'avant).
+        # F3d : le jumeau ASYNC (BPMFinderScraperAsync) est PRÉPARÉ mais NON activé
+        # — enrich_async retombe sur le pont sync. Activation = ajouter
+        # `async_scraper_factory=lambda: BPMFinderScraperAsync(headless=True)` ici
+        # + le provider dans aclose_async_scrapers, après un run réel (login/quota,
+        # backend audioaidynamics rétabli). Cf. src/scrapers/bpmfinder_scraper_async.py.
         if BPMFinderScraper.credentials_or_session_available():
             self._bpmfinder_provider = BpmFinderProvider(
                 scraper_factory=lambda: BPMFinderScraper(headless=True)
@@ -221,23 +226,23 @@ class DataEnricher:
             return False
 
         # Effacer BPM
-        if track.bpm is not None:
-            old_value = track.bpm
-            track.bpm = None
+        if track.audio.bpm is not None:
+            old_value = track.audio.bpm
+            track.audio.bpm = None
             logger.info(f"   ✅ BPM effacé: {old_value} → None")
             cleaned = True
 
-        # Effacer Key (attribut dynamique du mapper → hasattr requis)
-        if hasattr(track, "key") and track.key is not None:
-            old_value = track.key
-            track.key = None
+        # Effacer Key (champ du sous-objet audio — Phase 5)
+        if track.audio.key is not None:
+            old_value = track.audio.key
+            track.audio.key = None
             logger.info(f"   ✅ Key effacée: {old_value} → None")
             cleaned = True
 
-        # Effacer Mode (attribut dynamique du mapper → hasattr requis)
-        if hasattr(track, "mode") and track.mode is not None:
-            old_value = track.mode
-            track.mode = None
+        # Effacer Mode (champ du sous-objet audio — Phase 5)
+        if track.audio.mode is not None:
+            old_value = track.audio.mode
+            track.audio.mode = None
             logger.info(f"   ✅ Mode effacé: {old_value} → None")
             cleaned = True
 
@@ -249,9 +254,9 @@ class DataEnricher:
             cleaned = True
 
         # Effacer Musical Key (format français)
-        if track.musical_key is not None:
-            old_value = track.musical_key
-            track.musical_key = None
+        if track.audio.musical_key is not None:
+            old_value = track.audio.musical_key
+            track.audio.musical_key = None
             logger.info(f"   ✅ Musical Key effacée: {old_value} → None")
             cleaned = True
 
@@ -282,30 +287,6 @@ class DataEnricher:
             logger.info(f"ℹ️ Aucune donnée à nettoyer pour '{track.title}'")
 
         return cleaned
-
-    def clear_multiple_tracks_data(
-        self, tracks: list[Track], clear_spotify_id: bool = False
-    ) -> int:
-        """
-        Nettoie les données de plusieurs tracks
-
-        Args:
-            tracks: Liste des tracks à nettoyer
-            clear_spotify_id: Si True, efface aussi les Spotify IDs
-
-        Returns:
-            int: Nombre de tracks nettoyés
-        """
-        cleaned_count = 0
-
-        logger.info(f"🗑️ Nettoyage de {len(tracks)} track(s)")
-
-        for track in tracks:
-            if self.clear_track_data(track, clear_spotify_id=clear_spotify_id):
-                cleaned_count += 1
-
-        logger.info(f"✅ {cleaned_count}/{len(tracks)} track(s) nettoyé(s)")
-        return cleaned_count
 
     def _normalize_title(self, title: str) -> str:
         """
@@ -464,10 +445,10 @@ class DataEnricher:
         logger.info(
             f"🔍 Enrichissement: track='{track.title}', sources={sources}, force_update={force_update}"
         )
-        logger.info(f"🔍 État actuel: spotify_id={track.spotify_id}, bpm={track.bpm}")
+        logger.info(f"🔍 État actuel: spotify_id={track.spotify_id}, bpm={track.audio.bpm}")
 
         # Sauvegarder l'état initial (pour la logique force_update du BPM)
-        initial_bpm = track.bpm
+        initial_bpm = track.audio.bpm
 
         from src.enrichment.context import EnrichmentContext
 
@@ -502,8 +483,8 @@ class DataEnricher:
         track.observations = self._collect_run_observations(ballot.candidates, ctx.observations)
         apply_resolutions(track, reconcile(track.observations, track_duration=track.duration))
         logger.info(
-            f"🧮 Réconciliation: BPM={track.bpm} (alt={track.bpm_alt}, "
-            f"source={track.bpm_source}, conf={track.bpm_confidence})"
+            f"🧮 Réconciliation: BPM={track.audio.bpm} (alt={track.audio.bpm_alt}, "
+            f"source={track.audio.bpm_source}, conf={track.audio.bpm_confidence})"
         )
 
     def _log_run_summary(self, track, results: dict) -> None:
@@ -511,12 +492,10 @@ class DataEnricher:
         logger.info(f"📊 RÉSUMÉ enrichissement '{track.title}':")
         logger.info(f"   • Résultats: {results}")
         logger.info(f"   • Spotify ID: {track.spotify_id}")
-        logger.info(f"   • BPM: {track.bpm}")
+        logger.info(f"   • BPM: {track.audio.bpm}")
         # key/mode/deezer_id = attributs dynamiques (mapper/providers) → getattr
-        logger.info(
-            f"   • Key: {getattr(track, 'key', 'N/A')}, Mode: {getattr(track, 'mode', 'N/A')}"
-        )
-        logger.info(f"   • Musical Key: {track.musical_key}")
+        logger.info(f"   • Key: {track.audio.key}, Mode: {track.audio.mode}")
+        logger.info(f"   • Musical Key: {track.audio.musical_key}")
         logger.info(f"   • Duration: {track.duration}")
         logger.info(f"   • Release Date: {track.release_date}")
         logger.info(f"   • Deezer ID: {getattr(track, 'deezer_id', 'N/A')}")
@@ -653,27 +632,25 @@ class DataEnricher:
         logger.warning("⚠️ Effacement des anciennes valeurs potentiellement erronées...")
 
         # Effacer UNIQUEMENT les données musicales
-        old_bpm = track.bpm
-        track.bpm = None
+        old_bpm = track.audio.bpm
+        track.audio.bpm = None
         logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
 
-        # key/mode : attributs dynamiques du mapper → hasattr requis
-        if hasattr(track, "key"):
-            old_key = track.key
-            track.key = None
-            logger.info(f"   🗑️ Key effacée: {old_key} → None")
+        # key/mode : champs du sous-objet audio (Phase 5), toujours présents
+        old_key = track.audio.key
+        track.audio.key = None
+        logger.info(f"   🗑️ Key effacée: {old_key} → None")
 
-        if hasattr(track, "mode"):
-            old_mode = track.mode
-            track.mode = None
-            logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
+        old_mode = track.audio.mode
+        track.audio.mode = None
+        logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
 
         old_duration = track.duration
         track.duration = None
         logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
 
-        old_musical_key = track.musical_key
-        track.musical_key = None
+        old_musical_key = track.audio.musical_key
+        track.audio.musical_key = None
         logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
 
         # Vérification post-nettoyage

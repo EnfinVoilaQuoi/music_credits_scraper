@@ -71,8 +71,10 @@ class DeezerProvider:
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
-        except Exception as e:
-            logger.error(f"❌ Deezer: Erreur pour '{track.title}': {e}")
+        except Exception:
+            # Dernier ressort : DeezerAPI.enrich_track gère déjà le réseau/JSON ;
+            # ce qui remonte est un bug d'_apply_result → trace complète, ÉCHEC.
+            logger.exception(f"❌ Deezer: Erreur pour '{track.title}'")
             return False
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
@@ -98,8 +100,10 @@ class DeezerProvider:
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
-        except Exception as e:
-            logger.error(f"❌ Deezer: Erreur pour '{track.title}': {e}")
+        except Exception:
+            # Dernier ressort : DeezerAPI.enrich_track gère déjà le réseau/JSON ;
+            # ce qui remonte est un bug d'_apply_result → trace complète, ÉCHEC.
+            logger.exception(f"❌ Deezer: Erreur pour '{track.title}'")
             return False
 
     def _apply_result(

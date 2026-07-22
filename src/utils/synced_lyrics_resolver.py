@@ -76,7 +76,9 @@ def resolve_track_synced_lyrics(
     if ytm is not None:
         try:
             ytm_res = ytm.get_lyrics(artist_name, track.title)
-        except Exception as e:
+        except (AttributeError, TypeError) as e:
+            # Le client YTM gère déjà son réseau (YTMusicError/requests) → ici on ne
+            # couvre plus qu'un retour inattendu ; les autres sources continuent.
             logger.debug(f"YTM get_lyrics échec '{artist_name} - {track.title}': {e}")
     if ytm_res and not duration and ytm_res.get("duration"):
         duration = ytm_res["duration"]
@@ -94,7 +96,8 @@ def resolve_track_synced_lyrics(
             )
             if lr:
                 lrclib_lrc = lr.get("lyrics_synced")
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError) as e:
+            # LRCLIBAPI gère déjà son réseau → accès inattendu seul ; on continue.
             logger.debug(f"LRCLIB échec '{artist_name} - {track.title}': {e}")
 
     # CROSS-CHECK (sources 1 & 2) + départage durée.
@@ -119,7 +122,9 @@ def resolve_track_synced_lyrics(
             # SOURCE 3 (Musixmatch) : dernier recours, LRCLIB+YTM vides.
             try:
                 mres = mxm.get_synced_as_source3(track.title, artist_name, duration=duration)
-            except Exception as e:
+            except (AttributeError, TypeError, KeyError) as e:
+                # Musixmatch renvoie None sur toute erreur (garde-fou #4) → ici on
+                # ne couvre plus qu'un retour inattendu ; dernier recours, non bloquant.
                 mres = None
                 logger.debug(f"Musixmatch échec '{artist_name} - {track.title}': {e}")
             if mres:

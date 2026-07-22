@@ -48,7 +48,7 @@ def read_freshness(meta_path: Path, clean_path: Path) -> dict:
         return fresh
     try:
         data = json.loads(meta_path.read_text(encoding="utf-8"))
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.warning(f"Lecture {meta_path.name} impossible : {e}")
         return fresh
 

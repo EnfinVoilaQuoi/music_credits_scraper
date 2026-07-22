@@ -168,11 +168,11 @@ class LyricsProvider:
             if callable(close):
                 try:
                     close()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — fermeture best-effort (client arbitraire)
                     logger.debug(f"Fermeture client paroles: {e}")
         if self._http is not None:
             try:
                 self._runner(self._http.aclose())
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — fermeture best-effort (session async)
                 logger.debug(f"Fermeture session async paroles: {e}")
             self._http = None

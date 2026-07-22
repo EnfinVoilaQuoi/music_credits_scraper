@@ -31,7 +31,7 @@ def _port_alive(port: int) -> bool:
     try:
         with urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2) as r:
             return r.status == 200
-    except Exception:
+    except OSError:  # URLError ⊂ OSError, + timeout/connexion refusée
         return False
 
 
@@ -89,7 +89,7 @@ def ensure_cdp_chrome(
             [chrome, f"--remote-debugging-port={port}", f"--user-data-dir={profile}"],
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
         )
-    except Exception as e:
+    except OSError as e:
         logger.error(f"Échec lancement Chrome debug : {e}")
         return None
 

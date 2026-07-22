@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+import requests
+
 from src.enrichment.context import EnrichmentContext
 from src.enrichment.providers.getsongbpm import GetSongBpmProvider
 from src.models.artist import Artist
@@ -65,6 +67,32 @@ def test_erreur_api_renvoie_false():
 
 def test_indisponible_renvoie_false():
     assert GetSongBpmProvider(None).enrich(_track(), EnrichmentContext()) is False
+
+
+class _RaisingFetcher:
+    def __init__(self, exc):
+        self._exc = exc
+
+    def fetch_track_bpm(self, artist, title):
+        raise self._exc
+
+
+def test_erreur_reseau_api_renvoie_false():
+    """Frontière réseau resserrée : une RequestException de l'API est catchée →
+    repli False (le BPM manquant est journalisé, pas avalé en silence)."""
+    provider = GetSongBpmProvider(_RaisingFetcher(requests.ConnectionError("réseau")))
+    assert provider.enrich(_track(), EnrichmentContext()) is False
+
+
+def test_erreur_inattendue_absorbee_mais_tracee(caplog):
+    """Une exception hors domaine réseau (bug interne) est absorbée par le dernier
+    ressort du provider (→ False) MAIS rendue visible : logger.exception émet un
+    traceback (fini le debug muet qui masquait les bugs)."""
+    provider = GetSongBpmProvider(_RaisingFetcher(RuntimeError("bug interne")))
+    with caplog.at_level("ERROR"):
+        assert provider.enrich(_track(), EnrichmentContext()) is False
+    trace_records = [r for r in caplog.records if r.exc_info and "GetSongBPM" in r.getMessage()]
+    assert trace_records, "le dernier ressort doit émettre un traceback (logger.exception)"
 
 
 def test_gate_ne_skip_jamais():

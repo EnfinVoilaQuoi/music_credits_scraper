@@ -267,7 +267,7 @@ class UltratopUpdater:
                                 }
                             )
 
-            except Exception as e:
+            except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
                 self.logger.error(f"Erreur lors de l'extraction: {e}")
                 error_count += 1
                 continue
@@ -585,7 +585,14 @@ class UltratopUpdater:
                     else:
                         self.logger.error(f"❌ Impossible de récupérer {year}/{category}")
 
-                except Exception as e:
+                except (
+                    requests.RequestException,
+                    AttributeError,
+                    KeyError,
+                    IndexError,
+                    TypeError,
+                    ValueError,
+                ) as e:
                     self.logger.error(f"❌ Erreur lors de la récupération {year}/{category}: {e}")
                     continue
 
@@ -609,8 +616,8 @@ class UltratopUpdater:
 
             self.logger.info("=== FIN DE LA MISE À JOUR MANUELLE ===")
 
-        except Exception as e:
-            self.logger.error(f"Erreur lors de la mise à jour: {e}", exc_info=True)
+        except Exception:
+            self.logger.exception("Erreur lors de la mise à jour")
 
     def run_scheduled_update(self):
         """Lance une mise à jour programmée (mensuelle)"""
@@ -629,8 +636,8 @@ class UltratopUpdater:
 
             self.logger.info("=== FIN DE LA MISE À JOUR PROGRAMMÉE ===")
 
-        except Exception as e:
-            self.logger.error(f"Erreur lors de la mise à jour programmée: {e}", exc_info=True)
+        except Exception:
+            self.logger.exception("Erreur lors de la mise à jour programmée")
 
     def schedule_monthly_updates(self, day_of_month=1, hour=3):
         """

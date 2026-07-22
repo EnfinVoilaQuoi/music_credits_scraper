@@ -13,6 +13,7 @@ from typing import Any
 
 from sqlalchemy import func, literal, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.enrichment.observation import Observation
 from src.models import Credit, Track
@@ -455,11 +456,11 @@ class TrackRepository:
                         )
                         result.append(credit)
 
-                except Exception as credit_error:
+                except (KeyError, ValueError, TypeError) as credit_error:
                     logger.debug(f"Erreur crédit: {credit_error}")
                     continue
 
-        except Exception as e:
+        except (SQLAlchemyError, KeyError, ValueError, TypeError) as e:
             logger.debug(f"Erreur _get_track_credits: {e}")
 
         return result

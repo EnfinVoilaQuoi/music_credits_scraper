@@ -2,6 +2,8 @@
 
 from tkinter import messagebox
 
+from playwright.sync_api import Error as PlaywrightError
+
 from src.gui.workers.lifecycle import start_worker
 from src.models import Artist
 from src.scrapers.playwright_manager import get_playwright
@@ -54,13 +56,13 @@ def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Artist |
         }""")
         if result and result.get("id"):
             return Artist(name=result.get("name") or fallback_name, genius_id=result["id"])
-    except Exception as e:
+    except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
         logger.debug(f"Fetch artiste depuis {url} échoué: {e}")
     finally:
         if browser:
             try:
                 browser.close()  # ne PAS stopper l'instance Playwright partagée
-            except Exception:
+            except PlaywrightError:
                 pass
     return None
 

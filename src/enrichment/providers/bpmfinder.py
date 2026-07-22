@@ -116,7 +116,7 @@ class BpmFinderProvider:
                     f"({_best.get('relevance_score', 0):.0%} < "
                     f"{YOUTUBE_PERSIST_CONFIDENCE:.0%}) — vérifier via la fiche ou saisir ✏️"
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — lien auxiliaire best-effort (surface large)
             logger.debug(f"Recherche lien YouTube échouée '{track.title}': {e}")
         return None
 
@@ -208,8 +208,10 @@ class BpmFinderProvider:
             return None
         try:
             return self._handle_analysis(scraper.analyze(_yt), ctx, scraper)
-        except Exception as e:
-            logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
+        except Exception:
+            # Dernier ressort : analyze() = scrape complexe (login/upload/parse),
+            # surface large ; TOUT crash compte pour le disjoncteur (trace complète).
+            logger.exception(f"❌ BPM Finder échec '{track.title}'")
             self._fail_streak += 1
             return None
 
@@ -230,7 +232,7 @@ class BpmFinderProvider:
         logger.info(f"🎛️ BPM Finder (dernier recours, async) pour '{track.title}'")
         try:
             return self._handle_analysis(await scraper.analyze_async(_yt), ctx, scraper)
-        except Exception as e:
-            logger.error(f"❌ BPM Finder échec '{track.title}': {e}")
+        except Exception:
+            logger.exception(f"❌ BPM Finder échec '{track.title}'")
             self._fail_streak += 1
             return None

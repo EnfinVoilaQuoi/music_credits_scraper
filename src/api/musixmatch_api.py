@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 
 try:
     from src.config import DATA_DIR, DELAY_BETWEEN_REQUESTS, MAX_RETRIES
-except Exception:  # exécution hors package (tests standalone)
+except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
     DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
@@ -195,7 +195,7 @@ class MusixmatchAPI:
                 if tok and "UpgradeOnly" not in tok and (now - ts) < _TOKEN_TTL:
                     self._token, self._token_ts = tok, ts
                     return tok
-        except Exception as e:  # cache corrompu → on l'ignore
+        except (OSError, ValueError, TypeError) as e:  # cache corrompu → on l'ignore
             logger.debug(f"Musixmatch: cache token illisible ({e})")
         return None
 
@@ -207,7 +207,7 @@ class MusixmatchAPI:
                 json.dumps({"token": token, "obtained_at": self._token_ts}),
                 encoding="utf-8",
             )
-        except Exception as e:  # échec disque non bloquant (copie mémoire conservée)
+        except OSError as e:  # échec disque non bloquant (copie mémoire conservée)
             logger.debug(f"Musixmatch: écriture cache token impossible ({e})")
 
     def _invalidate_token(self) -> None:
@@ -215,7 +215,7 @@ class MusixmatchAPI:
         try:
             if self.token_file.exists():
                 self.token_file.unlink()
-        except Exception:
+        except OSError:
             pass
 
     def _fetch_new_token(self) -> str | None:

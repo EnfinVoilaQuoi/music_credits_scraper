@@ -19,6 +19,7 @@ import threading
 import time
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from src.config import (
@@ -75,7 +76,7 @@ class BPMFinderScraper:
     def _load_cache(self) -> dict:
         try:
             return json.loads(Path(_CACHE_FILE).read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError):
             return {}
 
     def _save_cache(self):
@@ -83,7 +84,7 @@ class BPMFinderScraper:
             Path(_CACHE_FILE).write_text(
                 json.dumps(self.cache, ensure_ascii=False, indent=1), encoding="utf-8"
             )
-        except Exception as e:
+        except OSError as e:
             logger.debug(f"Cache BPM Finder non sauvegardé: {e}")
 
     # ── Driver / session ───────────────────────────────────────────────────────
@@ -104,7 +105,7 @@ class BPMFinderScraper:
                 obj = getattr(self, attr, None)
                 if obj:
                     obj.close()
-            except Exception:
+            except PlaywrightError:
                 pass
             setattr(self, attr, None)
 
@@ -142,7 +143,7 @@ class BPMFinderScraper:
             if "audioaidynamics.com/api" in resp.url and resp.status >= 400:
                 logger.warning(f"BPM Finder API: HTTP {resp.status} sur {resp.url}")
                 self._last_api_error = resp.status
-        except Exception:
+        except (PlaywrightError, AttributeError, TypeError):
             pass
 
     def _dump_debug_state(self, label: str):
@@ -162,7 +163,7 @@ class BPMFinderScraper:
                 self.page.inner_text("body") or "", encoding="utf-8"
             )
             logger.warning(f"BPM Finder: état de la page capturé dans {diag}")
-        except Exception:
+        except (PlaywrightError, OSError):
             pass
 
     def _dismiss_cookie_overlay(self):
@@ -201,7 +202,7 @@ class BPMFinderScraper:
                   });
                 }
             """)
-        except Exception:
+        except PlaywrightError:
             pass
 
     def _save_session(self):
@@ -209,7 +210,7 @@ class BPMFinderScraper:
             Path(BPMFINDER_SESSION_FILE).parent.mkdir(parents=True, exist_ok=True)
             self.context.storage_state(path=str(BPMFINDER_SESSION_FILE))
             logger.info("💾 Session BPM Finder sauvegardée")
-        except Exception as e:
+        except (PlaywrightError, OSError) as e:
             logger.warning(f"Session BPM Finder non sauvegardée: {e}")
 
     def _goto_analyzer(self, force: bool = False):
@@ -229,7 +230,7 @@ class BPMFinderScraper:
             loc = self.page.get_by_placeholder("YouTube", exact=False)
             loc.wait_for(state="visible", timeout=timeout_ms)
             return loc.first
-        except Exception:
+        except PlaywrightError:
             pass
         for sel in (
             "input[placeholder*='YouTube' i]",
@@ -240,7 +241,7 @@ class BPMFinderScraper:
                 el = self.page.wait_for_selector(sel, state="visible", timeout=3_000)
                 if el:
                     return el
-            except Exception:
+            except PlaywrightError:
                 continue
         return None
 
@@ -252,7 +253,7 @@ class BPMFinderScraper:
         aucun span « LOGIN »). Évite le re-login inutile à chaque run."""
         try:
             return any(c.get("name") == "access_token" for c in self.context.cookies())
-        except Exception:
+        except PlaywrightError:
             return False
 
     def _looks_logged_out(self) -> bool:
@@ -261,7 +262,7 @@ class BPMFinderScraper:
             return False
         try:
             return self.page.locator("span:text-is('LOGIN')").count() > 0
-        except Exception:
+        except PlaywrightError:
             return False
 
     def _try_login(self) -> bool:
@@ -299,7 +300,7 @@ class BPMFinderScraper:
             self._save_session()
             logger.info("✅ BPM Finder: connecté")
             return True
-        except Exception as e:
+        except (PlaywrightError, OSError) as e:
             logger.error(
                 f"BPM Finder: login échoué: {e} — " "bootstrap manuel : scripts/bpmfinder_login.py"
             )
@@ -324,7 +325,7 @@ class BPMFinderScraper:
         """Cartes de résultats présentes : {(note, mode, bpm, camelot)}."""
         try:
             text = self.page.inner_text("body") or ""
-        except Exception:
+        except PlaywrightError:
             return set()
         return self._cards_from_text(text)
 
@@ -376,7 +377,7 @@ class BPMFinderScraper:
                     dbg = str(DATA_DIR / "bpmfinder_debug.png")
                     self.page.screenshot(path=dbg)
                     logger.error(f"BPM Finder: champ YouTube introuvable — capture: {dbg}")
-                except Exception:
+                except (PlaywrightError, OSError):
                     logger.error("BPM Finder: champ YouTube introuvable (UI changée ?)")
                 self.last_failure_reason = "ui"
                 return None
@@ -385,12 +386,12 @@ class BPMFinderScraper:
                 self._dismiss_cookie_overlay()  # au cas où l'overlay surgit après la saisie
                 try:
                     self.page.click("button:has-text('Upload')", timeout=15_000)
-                except Exception:
+                except PlaywrightError:
                     # Les overlays pubs (fc-dialog/AdSense) peuvent réapparaître entre
                     # le dismiss et le clic : re-nettoyer et retenter UNE fois.
                     self._dismiss_cookie_overlay()
                     self.page.click("button:has-text('Upload')", timeout=10_000)
-            except Exception as e:
+            except PlaywrightError as e:
                 logger.error(f"BPM Finder: saisie/Upload échoué: {e}")
                 self._dump_debug_state(f"upload_{vid}")
                 self.last_failure_reason = "ui"
@@ -440,7 +441,7 @@ class BPMFinderScraper:
         try:
             self._dismiss_cookie_overlay()
             self.page.set_input_files("input#fileInput", str(p))
-        except Exception as e:
+        except (PlaywrightError, OSError) as e:
             logger.error(f"BPM Finder: envoi du fichier échoué: {e}")
             return None
 
@@ -501,7 +502,7 @@ class BPMFinderScraper:
             if obj:
                 try:
                     obj.close()
-                except Exception:
+                except PlaywrightError:
                     pass
                 setattr(self, attr, None)
         # NB: ne pas stopper self._playwright — instance partagée (playwright_manager)

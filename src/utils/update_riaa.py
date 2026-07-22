@@ -85,7 +85,7 @@ class RIAADatabaseUpdater:
                     isod = isod[isod != ""]
                     if len(isod):
                         return datetime.strptime(isod.max(), "%Y-%m-%d")
-        except Exception as e:
+        except (OSError, ValueError, KeyError, TypeError) as e:
             self.logger.error(f"Lecture dernière date (certif_riaa.csv) : {e}")
         # Repli : fin de la base historique
         return datetime(2017, 10, 1)
@@ -96,7 +96,7 @@ class RIAADatabaseUpdater:
         Retourne (ajoutées_au_brut, 0)."""
         try:
             _total, added = _merge_certif_csv(_flatten_records(data))
-        except Exception as e:
+        except (OSError, ValueError, KeyError, TypeError) as e:
             self.logger.error(f"Fusion certif_riaa.csv : {e}")
             return 0, 0
         return added, 0
@@ -152,8 +152,9 @@ class RIAADatabaseUpdater:
                 self.scraper.close_driver()
 
         except Exception as e:
-            self.logger.error(f"Erreur mise à jour: {e}")
-            self.log_update(start_str, end_str, 0, 0, f"ERROR: {str(e)}")
+            # Dernier ressort de l'orchestrateur (subprocess certifs) : trace + statut.
+            self.logger.exception("Erreur mise à jour")
+            self.log_update(start_str, end_str, 0, 0, f"ERROR: {e}")
             return False
 
     def update_missing_months(self) -> bool:
@@ -214,8 +215,9 @@ class RIAADatabaseUpdater:
                     # Pause entre les requêtes
                     time.sleep(5)
 
-                except Exception as e:
-                    self.logger.error(f"Erreur période {start_str}-{end_str}: {e}")
+                except Exception:
+                    # Boucle par période résiliente : trace + on passe à la suivante.
+                    self.logger.exception(f"Erreur période {start_str}-{end_str}")
 
                 # Garde-fou anti-stagnation : si la tranche n'avance pas, on sort.
                 if end_date <= current_date:
@@ -239,8 +241,8 @@ class RIAADatabaseUpdater:
 
             return True
 
-        except Exception as e:
-            self.logger.error(f"Erreur mise à jour complète: {e}")
+        except Exception:
+            self.logger.exception("Erreur mise à jour complète")
             return False
 
     def log_update(self, start: str, end: str, added: int, updated: int, status: str):
@@ -481,7 +483,7 @@ def _write_riaa_meta(source: str = "GLOBAL", count: int | None = None) -> None:
     if RIAA_META.exists():
         try:
             meta = json.loads(RIAA_META.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError):
             meta = {}
     now = datetime.now().isoformat()
     updates = meta.get("updates") or {}
@@ -489,7 +491,7 @@ def _write_riaa_meta(source: str = "GLOBAL", count: int | None = None) -> None:
     if count is None and CERTIF_CSV.exists():
         try:
             count = len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str))
-        except Exception:
+        except (OSError, ValueError):
             count = meta.get("count")
     meta.update({"last_update": now, "last_source": source, "count": count, "updates": updates})
     RIAA_META.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")

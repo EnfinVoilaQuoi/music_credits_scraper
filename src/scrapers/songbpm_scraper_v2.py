@@ -10,6 +10,9 @@ from playwright.sync_api import (
     Page,
 )
 from playwright.sync_api import (
+    Error as PlaywrightError,
+)
+from playwright.sync_api import (
     Playwright as PlaywrightInstance,
 )
 from playwright.sync_api import (
@@ -79,7 +82,7 @@ class SongBPMScraper:
             if obj:
                 try:
                     obj.close()
-                except Exception:
+                except PlaywrightError:
                     pass
                 setattr(self, attr, None)
 
@@ -207,9 +210,9 @@ class SongBPMScraper:
                         btn.click()
                         logger.info(f"✅ Popup cookies fermé via: {selector}")
                         return
-                except Exception:
+                except PlaywrightError:
                     continue
-        except Exception as e:
+        except PlaywrightError as e:
             logger.debug(f"Gestion cookies (non bloquant): {e}")
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -247,7 +250,7 @@ class SongBPMScraper:
             logger.info(f"✅ Détails extraits: {details}")
         except PlaywrightTimeoutError:
             logger.warning(f"⏰ Timeout ({timeout}s) lors de la récupération des détails")
-        except Exception as e:
+        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur extraction détails: {e}")
         return details
 
@@ -391,11 +394,18 @@ class SongBPMScraper:
                         results.append(result)
                         logger.info(f"✅ Résultat: {result['artist']} - {result['title']}")
 
-                except Exception as e:
+                except (
+                    PlaywrightError,
+                    AttributeError,
+                    KeyError,
+                    IndexError,
+                    TypeError,
+                    ValueError,
+                ) as e:
                     logger.debug(f"Erreur conteneur: {e}")
                     continue
 
-        except Exception as e:
+        except (PlaywrightError, AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur extraction résultats: {e}")
         return results
 
@@ -451,7 +461,13 @@ class SongBPMScraper:
                         try:
                             details = self._extract_track_details(result["detail_url"])
                             result.update(details)
-                        except Exception as e:
+                        except (
+                            PlaywrightError,
+                            AttributeError,
+                            KeyError,
+                            TypeError,
+                            ValueError,
+                        ) as e:
                             logger.warning(f"⚠️ Détails inaccessibles: {e}")
                     log_api("SongBPM", f"search/{track_title}", True)
                     return result
@@ -465,7 +481,7 @@ class SongBPMScraper:
             logger.error("❌ SongBPM: Timeout Playwright")
             self._reset_browser_on_error()
             return None
-        except Exception as e:
+        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"❌ SongBPM: Erreur recherche: {e}")
             self._reset_browser_on_error()
             return None
@@ -580,15 +596,16 @@ class SongBPMScraper:
                             if _mk:  # None si key/mode non interprétables
                                 track.audio.musical_key = _mk
                                 updated = True
-                        except Exception:
+                        except (ValueError, TypeError, KeyError, IndexError):
                             pass
-                except Exception as e:
+                except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
                     logger.warning(f"⚠️ Erreur mode pour '{track.title}': {e}")
 
             return updated
 
-        except Exception as e:
-            logger.error(f"❌ SongBPM ERREUR pour {track.title}: {e}")
+        except Exception:
+            # Dernier ressort de la méthode d'application (scrape + parse) → trace.
+            logger.exception(f"❌ SongBPM ERREUR pour {track.title}")
             return False
 
     def _reset_browser_on_error(self):

@@ -5,6 +5,9 @@ changement de logique. API gratuite/rapide : appelée systématiquement pour
 fournir un 2ᵉ vote BPM (§8.3). Backlink getsongbpm.com obligatoire côté client.
 """
 
+import httpx
+import requests
+
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
@@ -85,14 +88,16 @@ class GetSongBpmProvider:
             # Appeler l'API
             try:
                 song_data = fetcher.fetch_track_bpm(artist_name, track.title)
-            except Exception as api_error:
+            except (requests.RequestException, ValueError) as api_error:
                 logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
                 return False
 
             return self._apply_song_data(track, ctx, song_data)
 
-        except Exception as e:
-            logger.error(f"GetSongBPM: ❌ Erreur: {e}")
+        except Exception:
+            # Dernier ressort : l'appel API est déjà catché ci-dessus ; ce qui
+            # remonte est un bug d'_apply_song_data → trace complète, ÉCHEC.
+            logger.exception("GetSongBPM: ❌ Erreur")
             return False
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
@@ -109,14 +114,14 @@ class GetSongBpmProvider:
 
             try:
                 song_data = await fetcher.fetch_track_bpm_async(ctx.http, artist_name, track.title)
-            except Exception as api_error:
+            except (httpx.HTTPError, ValueError) as api_error:
                 logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
                 return False
 
             return self._apply_song_data(track, ctx, song_data)
 
-        except Exception as e:
-            logger.error(f"GetSongBPM: ❌ Erreur: {e}")
+        except Exception:
+            logger.exception("GetSongBPM: ❌ Erreur")
             return False
 
     def _apply_song_data(self, track: Track, ctx: EnrichmentContext, song_data) -> bool:

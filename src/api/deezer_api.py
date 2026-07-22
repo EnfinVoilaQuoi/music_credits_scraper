@@ -160,12 +160,14 @@ class DeezerAPI:
         Returns:
             L'ISRC (str) ou None si non trouvé.
         """
+        # Le réseau/JSON est déjà géré par _make_request (retourne None) : ce garde
+        # ne couvre plus qu'un accès inattendu sur le hit → warning, pas de silence.
         try:
             track_data = self.search_track(artist, title)
             if track_data and track_data.get("isrc"):
                 return track_data["isrc"]
-        except Exception as e:
-            logger.debug(f"get_isrc échec pour {artist} - {title}: {e}")
+        except (AttributeError, TypeError) as e:
+            logger.warning(f"get_isrc échec pour {artist} - {title}: {e}")
         return None
 
     async def get_isrc_async(self, http: "AsyncHttpSession", artist: str, title: str) -> str | None:
@@ -174,8 +176,8 @@ class DeezerAPI:
             track_data = await self.search_track_async(http, artist, title)
             if track_data and track_data.get("isrc"):
                 return track_data["isrc"]
-        except Exception as e:
-            logger.debug(f"get_isrc échec pour {artist} - {title}: {e}")
+        except (AttributeError, TypeError) as e:
+            logger.warning(f"get_isrc échec pour {artist} - {title}: {e}")
         return None
 
     def get_track_by_id(self, track_id: int) -> dict | None:

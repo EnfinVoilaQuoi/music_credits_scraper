@@ -8,6 +8,8 @@ le Spotify ID trouvé est validé par la fonction d'unicité fournie via le cont
 
 import asyncio
 
+from playwright.async_api import Error as PlaywrightError
+
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
@@ -16,6 +18,7 @@ from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+# playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
 
 
 class SongBpmProvider:
@@ -170,7 +173,7 @@ class SongBpmProvider:
         except TimeoutError as e:
             logger.error(f"⏰ SongBPM timeout pour {track.title}: {e}")
             return False
-        except Exception as e:
+        except (PlaywrightError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
             return False
 
@@ -258,6 +261,6 @@ class SongBpmProvider:
 
             return self._apply_track_data(track, ctx, track_data)
 
-        except Exception as e:
+        except (PlaywrightError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
             return False

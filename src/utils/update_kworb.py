@@ -19,6 +19,9 @@ import logging
 import sys
 from collections import defaultdict
 
+from playwright.sync_api import Error as PlaywrightError
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.scrapers.kworb_scraper import KworbScraper
 from src.utils.logger import get_logger
 
@@ -57,13 +60,13 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | N
 
     try:
         from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
-    except Exception as e:
+    except ImportError as e:
         logger.error(f"SpotifyIDScraper indisponible: {e}")
         return None
 
     try:
         tracks = data_manager.get_artist_tracks(artist.id)
-    except Exception:
+    except SQLAlchemyError:
         tracks = []
     track_ids = [
         t.spotify_id
@@ -87,7 +90,7 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | N
                 logger.warning(f"🗳️ Vote ID artiste non concluant: {dict(votes)}")
             # Secours : recherche par nom (ambiguïté possible)
             return scraper.get_artist_spotify_id(artist.name)
-    except Exception as e:
+    except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
         logger.error(f"Vote ID artiste Spotify échoué: {e}")
         return None
 
@@ -233,12 +236,12 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
                 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 
                 _embed_scraper = SpotifyIDScraper(headless=True)
-            except Exception as e:
+            except ImportError as e:
                 logger.warning(f"Désambiguïsation embed indisponible: {e}")
                 return None
         try:
             credited = _embed_scraper.get_track_artists(entry["spotify_id"])
-        except Exception:
+        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError):
             credited = []
         credited_norm = {_normalize_title(a["name"]) for a in credited if a.get("name")}
         if not credited_norm:
@@ -300,7 +303,7 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
 
         _links = KworbLinksManager()
         _decisions = _links.load(artist.name)
-    except Exception:
+    except (OSError, ValueError):
         _decisions = {"confirmed": {}, "rejected": []}
     _by_id = {t.id: t for t in tracks}
 
@@ -406,7 +409,7 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
     if _embed_scraper is not None:
         try:
             _embed_scraper.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 — fermeture best-effort du scraper embed
             pass
 
     for track_id, a in agg.items():

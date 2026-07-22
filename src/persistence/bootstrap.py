@@ -129,7 +129,7 @@ def ensure_stamped(db_path: str) -> None:
         _catch_up_legacy(db_path)
         _stamp_legacy(db_path)
         logger.info(f"Base stampée Alembic à '{LEGACY_HEAD_REVISION}' : {db_path}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — bootstrap best-effort (surface Alembic large)
         logger.warning(f"Stamp Alembic impossible ({db_path}) : {e}")
 
 

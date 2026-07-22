@@ -40,17 +40,46 @@ select = [
     "B",   # bugbear — pièges classiques (closures sur variable de boucle…)
     "UP",  # pyupgrade — modernisation (Optional[X] → X | None…)
     "SIM", # simplifications
+    "BLE", # flake8-blind-except — `except Exception/BaseException` large interdit
 ]
 ignore = [
     "SIM105", # « utiliser contextlib.suppress » : purement stylistique, sans intérêt ici
     "E731",   # lambdas assignées : usage idiomatique pour les clés de tri (tracks_table)
 ]
 
+# BLE001 (chantier « attrape-tout silencieux », 2026-07-22) : les frontières
+# externes doivent cibler leur domaine (requests/httpx/Playwright/Patchright/
+# json/OSError…) au lieu d'`except Exception`. Exemptions automatiques : re-raise
+# et `logger.exception(...)` (dernier ressort légitime). Les cleanup best-effort
+# portent un `# noqa: BLE001` commenté. api/, scrapers/, enrichment/, concurrency/,
+# persistence/ sont NETTOYÉS (0 résiduel). La liste ci-dessous est un CLIQUET à
+# faire décroître : chaque fichier reste à resserrer (widgets GUI best-effort +
+# filets workers documentés pour src/gui, reliquat pour les utils).
+
 [tool.ruff.lint.per-file-ignores]
 # Wrapper UTF-8 stdout et/ou imports tardifs volontaires avant les imports projet.
 # (Les hacks sys.path ont été supprimés le 2026-07-11 au profit de `pip install -e .`.)
-"scripts/**" = ["E402"]
-"src/utils/init_certifications.py" = ["E402"]
+"scripts/**" = ["E402", "BLE001"]
+"tests/**" = ["BLE001"]
+# GUI : widgets best-effort + filets top-level des workers (dernier ressort documenté).
+"src/gui/**" = ["BLE001"]
+# Cliquet des utils non encore balayés (à faire décroître) :
+"src/utils/artist_repository.py" = ["BLE001"]
+"src/utils/brma_validator.py" = ["BLE001"]
+"src/utils/cert_matcher.py" = ["BLE001"]
+"src/utils/certification_enricher.py" = ["BLE001"]
+"src/utils/data_manager.py" = ["BLE001"]
+"src/utils/database_backup.py" = ["BLE001"]
+"src/utils/deleted_tracks_manager.py" = ["BLE001"]
+"src/utils/disabled_tracks_manager.py" = ["BLE001"]
+"src/utils/init_certifications.py" = ["E402", "BLE001"]
+"src/utils/kworb_links_manager.py" = ["BLE001"]
+"src/utils/llm_extractor.py" = ["BLE001"]
+"src/utils/media_enricher.py" = ["BLE001"]
+"src/utils/riaa_validator.py" = ["BLE001"]
+"src/utils/snep_validator.py" = ["BLE001"]
+"src/utils/source_health.py" = ["BLE001"]
+"src/utils/track_repository.py" = ["BLE001"]
 "src/utils/update_kworb.py" = ["E402"]
 "src/utils/update_snep.py" = ["E402"]
 "src/utils/update_ytmusic.py" = ["E402"]

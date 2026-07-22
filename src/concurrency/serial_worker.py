@@ -42,7 +42,7 @@ class SerialWorker:
                 continue  # annulé avant exécution
             try:
                 future.set_result(fn(*args, **kwargs))
-            except BaseException as exc:  # propagé à l'appelant via la Future
+            except BaseException as exc:  # noqa: BLE001 — propagé à l'appelant via la Future
                 future.set_exception(exc)
 
     def submit(self, fn, /, *args, **kwargs) -> Future:

@@ -53,8 +53,9 @@ def fetch_ultratop_html(year, category: str) -> str | None:
             page_timeout=45_000,
             delay_before_return=1.0,
         )
-    except Exception as e:
-        logger.error(f"Ultratop {year}/{category} : échec fetch CF : {e}")
+    except Exception:
+        # Frontière crawl (crawl4ai + patchright + boucle) : surface large → trace.
+        logger.exception(f"Ultratop {year}/{category} : échec fetch CF")
         return None
 
     if not html or "chart_title" not in html:

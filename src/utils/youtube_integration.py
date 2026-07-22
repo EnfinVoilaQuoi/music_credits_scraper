@@ -71,7 +71,7 @@ class YouTubeIntegration:
             # Fallback: URL de recherche
             return self._generate_search_url(artist, title, track_type)
 
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError) as e:
             logger.error(f"Erreur YouTube pour {artist} - {title}: {e}")
             return self._generate_fallback_search_url(artist, title)
 
@@ -108,7 +108,7 @@ class YouTubeIntegration:
                 logger.debug(f"Confiance insuffisante: {confidence:.2f} < {threshold}")
                 return None
 
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError, IndexError) as e:
             logger.debug(f"Erreur auto-sélection: {e}")
             return None
 
@@ -159,7 +159,7 @@ class YouTubeIntegration:
                     logger.info(f"Ouverture recherche: {youtube_result.get('query', 'N/A')}")
 
                 return True
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError, OSError) as e:
             logger.error(f"Erreur ouverture YouTube: {e}")
 
         return False

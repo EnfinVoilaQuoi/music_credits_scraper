@@ -16,6 +16,9 @@ from playwright.sync_api import (
     Page,
 )
 from playwright.sync_api import (
+    Error as PlaywrightError,
+)
+from playwright.sync_api import (
     Playwright as PlaywrightInstance,
 )
 from playwright.sync_api import (
@@ -104,7 +107,7 @@ class SpotifyIDScraper:
             if obj:
                 try:
                     obj.close()
-                except Exception:
+                except PlaywrightError:
                     pass
                 setattr(self, attr, None)
         self._playwright = None
@@ -124,7 +127,7 @@ class SpotifyIDScraper:
         try:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Erreur sauvegarde cache: {e}")
 
     def _get_cache_key(self, artist: str, title: str) -> str:
@@ -204,7 +207,7 @@ class SpotifyIDScraper:
                     btn.click()
                     logger.info(f"✅ Cookies acceptés via: {selector}")
                     return
-            except Exception:
+            except PlaywrightError:
                 continue
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -225,7 +228,7 @@ class SpotifyIDScraper:
 
         try:
             self._ensure_driver()
-        except Exception:
+        except PlaywrightError:
             logger.error("❌ Browser non disponible")
             return None
 
@@ -278,18 +281,18 @@ class SpotifyIDScraper:
                                 parent_text = parent.inner_text().lower() if parent else ""
                                 combined = f"{link_text} {parent_text}"
                                 relevance = self._calculate_relevance(artist, title, combined)
-                            except Exception:
+                            except (PlaywrightError, AttributeError, TypeError, ValueError):
                                 combined, relevance = "", 0.5
                             found_tracks.append(
                                 {"id": sid, "text": combined, "relevance": relevance, "href": href}
                             )
-                        except Exception:
+                        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError):
                             continue
 
                 if found_tracks:
                     break
 
-            except Exception as e:
+            except (PlaywrightError, RuntimeError) as e:
                 had_errors = True
                 logger.error(f"❌ Erreur requête '{query}': {e}")
                 # Driver mort (thread/greenlet/page fermée) → re-création et on continue
@@ -298,7 +301,7 @@ class SpotifyIDScraper:
                     try:
                         self._cleanup_resources()
                         self._init_driver()
-                    except Exception:
+                    except PlaywrightError:
                         logger.error("❌ Impossible de réinitialiser le driver SpotifyID")
                         break
                 continue
@@ -416,7 +419,7 @@ class SpotifyIDScraper:
             self._ensure_driver()
             self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
             return self._parse_embed_artists(self.page.content())
-        except Exception as e:
+        except (PlaywrightError, AttributeError, TypeError, ValueError) as e:
             logger.error(f"❌ Embed via Playwright échoué ({track_spotify_id}): {e}")
             return []
 
@@ -474,13 +477,13 @@ class SpotifyIDScraper:
     def get_spotify_page_title(self, spotify_id: str) -> str | None:
         try:
             self._ensure_driver()
-        except Exception:
+        except PlaywrightError:
             return None
         try:
             spotify_url = f"https://open.spotify.com/track/{spotify_id}"
             self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
             return self._clean_page_title(self.page.title())
-        except Exception as e:
+        except (PlaywrightError, AttributeError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur récupération titre: {e}")
         return None
 
@@ -498,7 +501,7 @@ class SpotifyIDScraper:
 
         try:
             self._ensure_driver()
-        except Exception:
+        except PlaywrightError:
             logger.error("❌ Browser non disponible")
             return None
 
@@ -535,7 +538,7 @@ class SpotifyIDScraper:
                         self.cache[cache_key] = aid
                         self._save_cache()
                         return aid
-                except Exception:
+                except (PlaywrightError, AttributeError, TypeError, ValueError):
                     continue
 
             # Fallback : premier lien artiste sans vérification de nom
@@ -548,10 +551,10 @@ class SpotifyIDScraper:
                         self.cache[cache_key] = aid
                         self._save_cache()
                         return aid
-                except Exception:
+                except (PlaywrightError, AttributeError, TypeError, ValueError):
                     continue
 
-        except Exception as e:
+        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"❌ Erreur recherche ID artiste '{artist_name}': {e}")
 
         self.cache[cache_key] = "not_found"

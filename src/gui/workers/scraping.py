@@ -248,11 +248,7 @@ def start_combined_scraping(
                             ),
                         )
                     for t in selected_tracks_list:
-                        if (
-                            t.lyrics.present
-                            and t.lyrics.text
-                            and not getattr(t, "lyrics_source", None)
-                        ):
+                        if t.lyrics.present and t.lyrics.text and not t.lyrics.source:
                             t.lyrics.source = "genius"
 
                 # 2) TIMESTAMPS (paroles synchronisées) — sources cochées dans le dialogue :
@@ -280,7 +276,7 @@ def start_combined_scraping(
                                     "⏹️ Fermeture demandée — synchro interrompue entre deux morceaux"
                                 )
                                 break
-                            has_sync = bool(getattr(track, "lyrics_synced", None))
+                            has_sync = bool(track.lyrics.synced)
                             need_sync = scrape_sync and not (has_sync and not force_sync)
                             need_text = lyrics_ytm and not (
                                 track.lyrics.present and track.lyrics.text

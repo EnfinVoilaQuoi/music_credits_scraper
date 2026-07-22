@@ -9,6 +9,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+import httpx
 import requests
 
 if TYPE_CHECKING:
@@ -58,7 +59,7 @@ class ReccoBeatsIntegratedClient:
         try:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Erreur sauvegarde cache: {e}")
 
     def _get_cache_key(self, spotify_id: str) -> str:
@@ -123,7 +124,7 @@ class ReccoBeatsIntegratedClient:
             else:
                 logger.error(f"❌ Erreur {response.status_code}: {response.text[:200]}")
 
-        except Exception as e:
+        except (requests.RequestException, ValueError) as e:
             logger.error(f"❌ Exception ReccoBeats: {e}")
 
         return None
@@ -148,7 +149,7 @@ class ReccoBeatsIntegratedClient:
                 logger.warning("⏰ Rate limit atteint")
             else:
                 logger.error(f"❌ Erreur {response.status_code}: {response.text[:200]}")
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error(f"❌ Exception ReccoBeats: {e}")
 
         return None
@@ -177,7 +178,7 @@ class ReccoBeatsIntegratedClient:
             else:
                 logger.warning(f"❌ Audio features erreur {response.status_code}")
 
-        except Exception as e:
+        except (requests.RequestException, ValueError) as e:
             logger.error(f"❌ Exception audio features: {e}")
 
         return None
@@ -197,7 +198,7 @@ class ReccoBeatsIntegratedClient:
                 return features
             else:
                 logger.warning(f"❌ Audio features erreur {response.status_code}")
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error(f"❌ Exception audio features: {e}")
 
         return None
@@ -243,11 +244,10 @@ class ReccoBeatsIntegratedClient:
             logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
             return result
 
-        except Exception as e:
-            logger.error(f"❌ Erreur générale get_track_info: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
+        except Exception:
+            # Dernier ressort : les appels internes gèrent déjà leurs frontières
+            # réseau/parse ; un bug d'orchestration remonte ici → trace complète.
+            logger.exception("❌ Erreur générale get_track_info")
             return None
 
     async def get_track_info_async(
@@ -282,11 +282,8 @@ class ReccoBeatsIntegratedClient:
             logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
             return result
 
-        except Exception as e:
-            logger.error(f"❌ Erreur générale get_track_info: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
+        except Exception:
+            logger.exception("❌ Erreur générale get_track_info")
             return None
 
     def _cached_spotify_info(
@@ -353,7 +350,7 @@ class ReccoBeatsIntegratedClient:
 
                 result["musical_key"] = key_mode_to_french(result["key"], result["mode"])
                 logger.info(f"✅ Musical key: {result['musical_key']}")
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, IndexError) as e:
                 logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
 
     def _enrich_result_with_features(self, result: dict, track_data: dict) -> dict:
@@ -401,7 +398,7 @@ class ReccoBeatsIntegratedClient:
                 return None
 
             return self._best_isrc_hit(response.json().get("content", []))
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
             logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
             return None
 
@@ -429,7 +426,7 @@ class ReccoBeatsIntegratedClient:
                 return None
 
             return self._best_isrc_hit(response.json().get("content", []))
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
             logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
             return None
 
@@ -463,8 +460,8 @@ class ReccoBeatsIntegratedClient:
             self._save_cache()
             logger.info(f"✅ Succès complet pour ISRC: {isrc}")
             return result
-        except Exception as e:
-            logger.error(f"❌ Erreur get_track_info_by_isrc: {e}")
+        except Exception:
+            logger.exception("❌ Erreur get_track_info_by_isrc")
             return None
 
     async def get_track_info_by_isrc_async(
@@ -498,8 +495,8 @@ class ReccoBeatsIntegratedClient:
             self._save_cache()
             logger.info(f"✅ Succès complet pour ISRC: {isrc}")
             return result
-        except Exception as e:
-            logger.error(f"❌ Erreur get_track_info_by_isrc: {e}")
+        except Exception:
+            logger.exception("❌ Erreur get_track_info_by_isrc")
             return None
 
     def _cached_isrc_info(
@@ -556,7 +553,7 @@ class ReccoBeatsIntegratedClient:
                 fid = feat.get("id")
                 if fid:
                     result[fid] = feat
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
             logger.error(f"❌ audio-features batch error: {e}")
         return result
 
@@ -596,7 +593,7 @@ class ReccoBeatsIntegratedClient:
 
             logger.info(f"✅ {len(tracks)} tracks enrichis (audio-features en 1 appel)")
             return tracks
-        except Exception as e:
+        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
             logger.error(f"❌ Batch processing error: {e}")
             return []
 
@@ -621,7 +618,7 @@ class ReccoBeatsIntegratedClient:
 
             logger.info("✅ ReccoBeats client fermé")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — fermeture best-effort (close ne doit jamais lever)
             logger.error(f"Erreur fermeture ReccoBeats client: {e}")
 
     def __enter__(self):

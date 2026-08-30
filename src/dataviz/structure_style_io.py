@@ -16,12 +16,10 @@ Une clé inconnue est ignorée avec un avertissement (plutôt que de faire écho
 tout l'export sur une faute de frappe), et un fichier partiel reste valide.
 """
 
-import json
-import re
-from dataclasses import fields, replace
 from pathlib import Path
 
 from src.dataviz.structure_svg import StructureStyle
+from src.dataviz.style_io import build_style, read_overrides, render_commented
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,9 +29,6 @@ FILENAME = "structure_style.json"
 # Champs non réglables depuis le fichier : ils décrivent la mécanique de rendu,
 # pas le goût. `colors` est traité à part (fusion clé à clé).
 _LOCKED = {"colors", "coord_precision"}
-
-# Ligne entièrement commentée (éventuellement indentée).
-_COMMENT_LINE_RE = re.compile(r"^\s*//")
 
 # Le fichier écrit à la création : sections, et une ligne d'explication par clé.
 # L'ordre est celui de la lecture, pas celui de la dataclass.
@@ -185,10 +180,6 @@ def style_path() -> Path:
     return Path(DATA_DIR) / FILENAME
 
 
-def _editable_fields() -> dict[str, object]:
-    return {f.name: f.type for f in fields(StructureStyle) if f.name not in _LOCKED}
-
-
 def default_payload() -> dict:
     """Valeurs par défaut, dans l'ordre de lecture du fichier annoté."""
     base = StructureStyle()
@@ -200,77 +191,23 @@ def default_payload() -> dict:
     return payload
 
 
+_INTRO = [
+    "// Réglages du générateur « Structure ».",
+    "//",
+    "// Édite une valeur, relance l'export : elle sera reprise.",
+    "// NE MODIFIE PAS le structure.json d'un album — il est régénéré à chaque",
+    "// export, ta valeur y serait écrasée. C'est CE fichier qui persiste.",
+    "//",
+    "// Les lignes // sont des commentaires (JSON n'en admet pas nativement,",
+    "// ils sont retirés à la lecture). Une clé inconnue est ignorée avec un",
+    "// avertissement dans les logs. Le fichier peut être partiel : tout ce qui",
+    "// manque garde sa valeur par défaut. Supprime-le pour repartir de zéro.",
+]
+
+
 def _render_commented(payload: dict) -> str:
     """Sérialise `payload` en JSON annoté (lignes `//` avant chaque réglage)."""
-    lines = [
-        "// Réglages du générateur « Structure ».",
-        "//",
-        "// Édite une valeur, relance l'export : elle sera reprise.",
-        "// NE MODIFIE PAS le structure.json d'un album — il est régénéré à chaque",
-        "// export, ta valeur y serait écrasée. C'est CE fichier qui persiste.",
-        "//",
-        "// Les lignes // sont des commentaires (JSON n'en admet pas nativement,",
-        "// ils sont retirés à la lecture). Une clé inconnue est ignorée avec un",
-        "// avertissement dans les logs. Le fichier peut être partiel : tout ce qui",
-        "// manque garde sa valeur par défaut. Supprime-le pour repartir de zéro.",
-        "{",
-    ]
-    total = len(payload)
-    written = 0
-    for title, entries in _SECTIONS:
-        lines.append("")
-        lines.extend(_section_header(title))
-        for key, help_text in entries:
-            if key not in payload:
-                continue
-            for chunk in _wrap(help_text, 74):
-                lines.append(f"  // {chunk}")
-            written += 1
-            comma = "," if written < total else ""
-            lines.append(
-                f"  {json.dumps(key)}: {json.dumps(payload[key], ensure_ascii=False)}{comma}"
-            )
-
-    if "colors" in payload:
-        lines.append("")
-        lines.extend(_section_header(_COLORS_HELP))
-        colors = json.dumps(payload["colors"], ensure_ascii=False, indent=2)
-        colors = "\n".join(("  " + ln) if i else ln for i, ln in enumerate(colors.split("\n")))
-        lines.append(f'  "colors": {colors}')
-
-    lines.append("}")
-    return "\n".join(lines) + "\n"
-
-
-def _section_header(title: str) -> list[str]:
-    """Titre de section : le tiret cadratin sur la 1ʳᵉ ligne seulement."""
-    out = []
-    for i, line in enumerate(title.split("\n")):
-        out.append(f"  // ── {line}" if i == 0 else f"  //    {line}")
-    return out
-
-
-def _wrap(text: str, width: int) -> list[str]:
-    """Découpe un texte d'aide en lignes de `width` caractères max, sur les mots."""
-    out, current = [], ""
-    for word in text.split():
-        if current and len(current) + 1 + len(word) > width:
-            out.append(current)
-            current = word
-        else:
-            current = f"{current} {word}".strip()
-    if current:
-        out.append(current)
-    return out
-
-
-def strip_comments(text: str) -> str:
-    """Retire les lignes ENTIÈREMENT commentées (`//`), en préservant la numérotation.
-
-    Les lignes sont blanchies plutôt que supprimées : un message d'erreur de
-    `json` continue de pointer la bonne ligne du fichier réel.
-    """
-    return "\n".join("" if _COMMENT_LINE_RE.match(ln) else ln for ln in text.splitlines())
+    return render_commented(_INTRO, _SECTIONS, payload, trailing=(_COLORS_HELP, "colors"))
 
 
 def write_default_style(path: Path | None = None) -> Path:
@@ -296,34 +233,14 @@ def load_style(path: Path | None = None) -> StructureStyle:
             logger.warning(f"Réglages « Structure » non créés ({path}) : {exc}")
         return StructureStyle()
 
-    try:
-        raw = json.loads(strip_comments(path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning(f"Réglages « Structure » illisibles ({path}) : {exc} — valeurs par défaut")
+    read = read_overrides(path, StructureStyle, _LOCKED, "Structure")
+    if read is None:
         return StructureStyle()
-    if not isinstance(raw, dict):
-        logger.warning(f"Réglages « Structure » : objet JSON attendu dans {path}")
-        return StructureStyle()
-
-    editable = _editable_fields()
-    overrides, unknown = {}, []
-    for key, value in raw.items():
-        if key == "colors":
-            continue  # fusionné plus bas
-        if key not in editable:
-            unknown.append(key)
-            continue
-        overrides[key] = value
-    if unknown:
-        logger.warning(f"Réglages « Structure » : clés inconnues ignorées — {', '.join(unknown)}")
+    overrides, raw = read
 
     # Couleurs : fusion clé à clé, pour qu'un fichier partiel reste valide.
     colors = dict(StructureStyle().colors)
     if isinstance(raw.get("colors"), dict):
         colors.update({k: v for k, v in raw["colors"].items() if k in colors})
 
-    try:
-        return replace(StructureStyle(), colors=colors, **overrides)
-    except TypeError as exc:
-        logger.warning(f"Réglages « Structure » invalides : {exc} — valeurs par défaut")
-        return StructureStyle()
+    return build_style(StructureStyle, overrides, "Structure", colors=colors)

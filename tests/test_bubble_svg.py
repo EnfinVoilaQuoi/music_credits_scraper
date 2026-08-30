@@ -1,10 +1,11 @@
 """Smoke test du pipeline SVG Bubble Prod (structure + tailles + déterminisme).
 
-Vérifie les invariants : 6 groupes-calques, nb rects = nb producteurs, nb
+Vérifie les invariants : 7 groupes-calques, nb cercles = nb producteurs, nb
 ellipses = nb combinaisons de producteurs distinctes, légendes (titres ou
-« N morceaux »), ids stables (`square-kalim`, `ellipse-…`), badge du bon compte,
-coins arrondis, gradation monotone et bornée des tailles, byte-identité entre
-deux runs, et le `ValueError` explicite quand l'album n'a aucun producteur.
+« N morceaux »), ids stables (`node-kalim`, `ellipse-…`), badge du bon compte,
+zone de composition FIXE, gradation monotone et bornée des diamètres,
+byte-identité entre deux runs, et le `ValueError` explicite quand l'album n'a
+aucun producteur.
 """
 
 import xml.etree.ElementTree as ET
@@ -18,6 +19,7 @@ from src.dataviz.bubble_prod import (
     list_albums,
     select_album_tracks,
 )
+from src.dataviz.bubble_svg import SvgStyle
 from src.dataviz.collab_graph import (
     aggregate_collab_groups,
     build_collab_graph,
@@ -48,11 +50,11 @@ def _album_tracks():
     ]
 
 
-def _spec(tracks):
+def _spec(tracks, style=None):
     track_groups = extract_track_groups(tracks)
     graph = build_collab_graph(track_groups)
     collab_groups = aggregate_collab_groups(track_groups)
-    return build_bubble_spec(graph, collab_groups)
+    return build_bubble_spec(graph, collab_groups, style)
 
 
 # ── Structure du SVG ─────────────────────────────────────────────────────────
@@ -71,23 +73,22 @@ def test_smoke_structure(tmp_path):
         "edges",
         "ellipses",
         "ellipse-labels",
-        "squares",
+        "nodes",
         "badges",
         "labels",
     }
-    # Cadre carré présent.
+    # Cadre présent : il matérialise la zone.
     assert groups["frame"].find(f"{SVG_NS}rect").get("id") == "frame-border"
 
-    rects = groups["squares"].findall(f"{SVG_NS}rect")
-    assert len(rects) == 4  # un carré par producteur
-    assert all(r.get("rx") is not None for r in rects)  # coins arrondis
+    circles = groups["nodes"].findall(f"{SVG_NS}circle")
+    assert len(circles) == 4  # un cercle par producteur
 
     # 3 combinaisons distinctes : {big,kalim}, {big,other}, {solo}.
     ellipses = groups["ellipses"].findall(f"{SVG_NS}ellipse")
     assert len(ellipses) == 3
 
     ids = {el.get("id") for el in root.iter()}
-    assert "square-kalim" in ids
+    assert "node-kalim" in ids
     assert "ellipse-big--kalim" in ids
     assert "ellipse-solo" in ids
 
@@ -120,7 +121,7 @@ def test_legende_solo_plusieurs_morceaux_compte(tmp_path):
 
 
 def test_name_lines():
-    from src.dataviz.bubble_svg import _name_lines
+    from src.dataviz.bubble_svg import name_lines as _name_lines
 
     assert _name_lines("PRICE D.") == ("PRICE D.",)  # initiale collée, une ligne
     assert _name_lines("LEWIS AMBER") == ("LEWIS", "AMBER")
@@ -161,12 +162,47 @@ def test_legende_combinaison_au_dela_du_seuil(tmp_path):
     assert texts == ["4 morceaux"]
 
 
-def test_cadre_carre():
+def test_zone_fixe_et_cadre_confondu():
+    # La zone ne suit PLUS le contenu : deux albums de tailles différentes
+    # doivent sortir sur le même canevas, sinon les cercles ne sont plus
+    # comparables d'une planche à l'autre.
     spec = _spec(_album_tracks())
-    assert spec.width == spec.height  # cadre carré
-    assert spec.frame is not None
-    fx, fy, fw, fh = spec.frame
-    assert fw == fh  # le cadre lui-même est carré
+    style = spec.style
+    assert (spec.width, spec.height) == (style.frame_width, style.frame_height)
+    assert spec.frame == (0.0, 0.0, style.frame_width, style.frame_height)
+
+    petit = _spec([_track(1, "T1", "Al", _prod("Seul"))])
+    assert (petit.width, petit.height) == (spec.width, spec.height)
+
+
+def test_dimensions_independantes_du_nombre_de_producteurs():
+    # Corollaire : un prod à 1 morceau fait le même diamètre sur les deux
+    # albums (échelle absolue), c'est tout l'intérêt de la zone fixe.
+    petit = _spec([_track(1, "T1", "Al", _prod("Seul"))])
+    (node,) = petit.nodes
+    assert node.size == pytest.approx(petit.style.node_size_min)
+
+
+def test_debordement_signale_et_non_corrige():
+    # Un gros réseau CONNECTÉ dans une zone volontairement minuscule : il DOIT
+    # déborder, et le spec doit le dire au lieu de réduire les cercles.
+    # (Réseau connecté et pas 12 solos : des composantes isolées sont calées
+    # dans les coins de la zone, donc bornées par construction.)
+    tracks = [_track(i, f"T{i}", "Al", _prod("Hub"), _prod(f"P{i}")) for i in range(1, 13)]
+    spec = _spec(tracks, style=SvgStyle(frame_width=200.0, frame_height=120.0))
+    assert spec.overflow is not None
+    over_w, over_h = spec.overflow
+    assert over_w > 0 or over_h > 0
+    # Les diamètres n'ont pas bougé : rien n'a été mis à l'échelle pour rentrer.
+    tailles = {n.key: n.size for n in spec.nodes}
+    assert tailles["hub"] == pytest.approx(spec.style.node_size_max)
+    assert min(v for k, v in tailles.items() if k != "hub") == pytest.approx(
+        spec.style.node_size_min
+    )
+
+
+def test_pas_de_debordement_sur_un_album_normal():
+    assert _spec(_album_tracks()).overflow is None
 
 
 def test_ilots_dans_les_coins():
@@ -180,15 +216,27 @@ def test_ilots_dans_les_coins():
     ]
     spec = _spec(tracks)
     pos = {n.key: (n.x, n.y) for n in spec.nodes}
-    hub = pos["a"]
-    # Les membres d'îlots sont plus loin du hub que ses propres voisins.
-    d_island = min(
-        ((pos[k][0] - hub[0]) ** 2 + (pos[k][1] - hub[1]) ** 2) ** 0.5 for k in ("e", "f", "g")
-    )
-    d_hub = max(
-        ((pos[k][0] - hub[0]) ** 2 + (pos[k][1] - hub[1]) ** 2) ** 0.5 for k in ("b", "c", "d")
-    )
-    assert d_island > d_hub
+    size = {n.key: n.size for n in spec.nodes}
+
+    # Les îlots vivent en PÉRIPHÉRIE : chaque îlot a AU MOINS un cercle à
+    # portée de la marge (celui par lequel il est calé au coin — sur un duo en
+    # diagonale, le second membre est forcément plus en retrait).
+    # Comparer leur distance au hub ne marche plus : depuis l'étalement, les
+    # satellites du hub vont eux aussi chercher le bord de la zone.
+    for ilot in (("e", "f"), ("g",)):
+        bords = []
+        for key in ilot:
+            x, y = pos[key]
+            bords.append(min(x, y, spec.width - x, spec.height - y) - size[key] / 2.0)
+        assert min(bords) <= spec.style.margin + spec.style.island_corner_pad + 12.0
+
+    # Et ils ne viennent JAMAIS toucher un cercle du hub.
+    for island in ("e", "f", "g"):
+        for member in ("a", "b", "c", "d"):
+            dist = (
+                (pos[island][0] - pos[member][0]) ** 2 + (pos[island][1] - pos[member][1]) ** 2
+            ) ** 0.5
+            assert dist > (size[island] + size[member]) / 2.0
 
 
 def test_spec_insensible_a_l_ordre_d_insertion_des_noeuds():
@@ -241,10 +289,21 @@ def test_tailles_monotones_et_bornees():
     style = spec.style
     assert size["big"] > size["kalim"] > size["other"]  # gradation par participation
     assert size["other"] == size["solo"]  # comptes égaux → tailles égales
-    assert size["other"] == pytest.approx(style.square_size_min)  # compte 1 = min
-    assert size["big"] == pytest.approx(style.square_size_max)  # plus gros compte = max
-    assert min(size.values()) >= style.square_size_min - 1e-9
-    assert max(size.values()) <= style.square_size_max + 1e-9
+    assert size["other"] == pytest.approx(style.node_size_min)  # compte 1 = min
+    assert size["big"] == pytest.approx(style.node_size_max)  # plus gros compte = max
+    assert min(size.values()) >= style.node_size_min - 1e-9
+    assert max(size.values()) <= style.node_size_max + 1e-9
+
+
+def test_taille_du_nom_suit_le_diametre():
+    # Un petit cercle ne peut pas porter 25 px : la taille descend au prorata
+    # du diamètre, sans jamais passer sous le plancher de lisibilité.
+    spec = _spec(_album_tracks())
+    style = spec.style
+    font = {n.key: n.label_font_size for n in spec.nodes}
+    assert font["big"] == pytest.approx(style.font_size)  # plus gros cercle = taille pleine
+    assert font["other"] < font["big"]
+    assert min(font.values()) >= style.font_size_min
 
 
 def test_tous_comptes_egaux_donnent_taille_min():
@@ -255,7 +314,7 @@ def test_tous_comptes_egaux_donnent_taille_min():
     ]
     spec = _spec(tracks)
     for n in spec.nodes:
-        assert n.size == spec.style.square_size_min
+        assert n.size == spec.style.node_size_min
 
 
 # ── Déterminisme ─────────────────────────────────────────────────────────────

@@ -111,9 +111,33 @@ def download_image(url: str | None, dest: Path, *, timeout: int = 15) -> Path | 
 # les artistes par autre chose que le nom.
 
 
+# Extensions produites par `download_image` (cf. `_CONTENT_TYPE_EXT`) : un même
+# artiste peut avoir été téléchargé en .jpg comme en .png selon la source.
+IMAGE_EXTENSIONS = (".jpg", ".png", ".webp")
+
+
 def artist_image_path(name: str) -> Path:
     """`artistes/<slug-nom>.jpg` (extension par défaut, ajustée au download)."""
     return ARTIST_IMAGES_DIR / f"{slugify_filename(name)}.jpg"
+
+
+def existing_image(base: Path) -> Path | None:
+    """Fichier existant pour ce stem, toutes extensions connues, ou `None`.
+
+    Le FICHIER fait office d'état : c'est ainsi qu'on sait qu'une photo a déjà
+    été récupérée (les featurings et producteurs n'ont pas de ligne en base), et
+    qu'une photo déposée à la main est reprise telle quelle.
+    """
+    for ext in IMAGE_EXTENSIONS:
+        candidate = base.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def find_artist_image(name: str) -> Path | None:
+    """Photo déjà présente pour cet artiste (quelle que soit son extension)."""
+    return existing_image(artist_image_path(name))
 
 
 def cover_image_path(artist_name: str, album_or_title: str) -> Path:

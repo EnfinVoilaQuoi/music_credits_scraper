@@ -39,8 +39,8 @@ class SvgStyle:
     # remettre une ici ne ferait que rétrécir le réseau pour rien.
     margin: float = 0.0
     # Cercles artistes : bornes de l'échelle de participation (DIAMÈTRE en px).
-    node_size_min: float = 78.0
-    node_size_max: float = 150.0
+    node_size_min: float = 88.0
+    node_size_max: float = 160.0
     # Badge (compteur de morceaux) ancré au milieu de l'arête basse du cercle.
     badge_size: float = 22.0
     badge_corner_radius: float = 4.0
@@ -72,6 +72,9 @@ class SvgStyle:
     # Deux titres sur un même ovale se posent sur DEUX anneaux concentriques —
     # l'équivalent d'un retour à la ligne sur une courbe. Écart entre eux :
     ellipse_label_line_gap: float = 24.0
+    # Inclinaison maximale du texte : au-delà il devient pénible à lire. C'est
+    # elle qui décide jusqu'où un titre peut glisser vers le bout de son ovale.
+    ellipse_label_max_angle: float = 28.0
     # Part maximale du tour d'ellipse qu'un titre a le droit d'occuper : au-delà
     # il s'enroule et se lit à la verticale. La couronne s'écarte pour y tenir.
     ellipse_label_max_arc: float = 0.42

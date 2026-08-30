@@ -24,6 +24,7 @@ from src.dataviz.bubble_svg import (
     BubbleSpec,
     EdgeSpec,
     GroupShape,
+    LabelRing,
     NodeSpec,
     SvgStyle,
     write_bubble_svg,
@@ -245,10 +246,10 @@ def _label_tip(
     lit à plat. Sur un ovale très incliné — le cas de tous les îlots — la pointe
     du grand axe est quasi verticale, et le titre s'y écrivait de haut en bas.
 
-    Haut ou bas selon le côté où l'ovale est déjà, par rapport au centre du
-    nuage : la légende part ainsi vers l'extérieur plutôt que de traverser le
-    dessin. `inward` inverse ce choix pour les îlots calés dans un coin, qui
-    n'ont de place que du côté du centre.
+    Des deux (le sommet et le creux), on retient celui qui est le plus LOIN du
+    centre du dessin : la légende part ainsi vers l'extérieur de l'image plutôt
+    que de traverser le tas. `inward` inverse ce choix pour les îlots calés dans
+    un coin, qui n'ont de place que du côté du centre.
 
     Le sens de parcours est ensuite choisi pour que les lettres avancent vers la
     droite : sur un chemin, elles suivent la tangente, et l'autre sens les écrit
@@ -266,15 +267,95 @@ def _label_tip(
     top, bottom = (t, t + 180.0)
     if ellipse.point_at(top)[1] > ellipse.point_at(bottom)[1]:
         top, bottom = bottom, top
-    above = ellipse.cy <= center_y
-    chosen = top if (above != inward) else bottom
+
+    # Le point le plus ÉLOIGNÉ du centre du dessin : le titre part ainsi vers
+    # l'extérieur de l'image au lieu de traverser le tas. Comparer les centres
+    # d'ellipse ne suffisait pas — les gros ovales du noyau sont tous centrés au
+    # milieu, et leurs titres se retrouvaient empilés là.
+    def _far(t):
+        px, py = ellipse.point_at(t)
+        return (px - center_x) ** 2 + (py - center_y) ** 2
+
+    outer, inner = (top, bottom) if _far(top) >= _far(bottom) else (bottom, top)
+    chosen = inner if inward else outer
     tx, _ty = ellipse.tangent_at(chosen)
     return chosen, (1 if tx >= 0 else 0)
 
 
-def _label_offset(style: SvgStyle) -> float:
-    """Écart entre le tracé de l'ellipse et la ligne de base du texte posé dessus."""
-    return style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap
+def _perimeter(rx: float, ry: float) -> float:
+    """Périmètre d'ellipse (approximation de Ramanujan, exacte à 1e-5 près ici)."""
+    h = (rx - ry) ** 2 / max(1e-9, (rx + ry) ** 2)
+    return math.pi * (rx + ry) * (1.0 + 3.0 * h / (10.0 + math.sqrt(4.0 - 3.0 * h)))
+
+
+def _label_offset(style: SvgStyle, ellipse=None, text: str = "") -> float:
+    """Écart entre le tracé de l'ellipse et le texte curviligne posé dessus.
+
+    Écart de base, PLUS ce qu'il faut pour que le titre ne s'enroule pas : sur
+    un petit ovale, « 3ein / Risotto Gambas » couvrirait plus de la moitié du
+    tour et se lirait à la verticale à ses extrémités. On écarte alors la
+    couronne — son périmètre grandit d'environ 2π par pixel — jusqu'à ce que le
+    texte n'en occupe plus qu'une fraction, donc reste à peu près droit.
+    L'écart supplémentaire est plafonné : au-delà, la légende ne semblerait plus
+    appartenir à son ovale.
+    """
+    base = style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap
+    if ellipse is None or not text:
+        return base
+    needed = len(text) * style.ellipse_label_font_size * _CHAR_WIDTH_RATIO
+    target = needed / style.ellipse_label_max_arc
+    extra = 0.0
+    for _ in range(3):  # Newton : le périmètre croît de ~2π par pixel d'écart.
+        perim = _perimeter(ellipse.rx + base + extra, ellipse.ry + base + extra)
+        if perim >= target:
+            break
+        extra += (target - perim) / (2.0 * math.pi)
+    return base + min(extra, style.ellipse_label_max_extra_offset)
+
+
+# Largeur moyenne d'un caractère, en fraction de la taille de police. 0,55 est
+# la valeur usuelle d'une grotesque comme Montserrat — il ne s'agit que de
+# dimensionner la couronne, pas de mesurer le texte au pixel.
+_CHAR_WIDTH_RATIO = 0.55
+
+
+def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=False):
+    """Un anneau par titre, empilés vers l'extérieur, dans l'ordre de lecture.
+
+    Deux morceaux sur un même ovale s'écrivaient à la suite sur une seule
+    couronne : la ligne faisait le tour de l'ovale et se lisait mal. Ils sont
+    maintenant posés l'un « sous » l'autre, sur deux couronnes concentriques.
+
+    Chaque anneau prend l'écart dont SON texte a besoin, sans jamais repasser
+    sous le précédent (`ellipse_label_line_gap` les sépare). L'ordre suit la
+    lecture : posée EN HAUT de l'ovale, la première ligne est la plus éloignée
+    du tracé — c'est elle qui est le plus haut ; posée en bas, c'est l'inverse.
+    """
+    if not lines:
+        return ()
+    base = _label_offset(style)
+    t_base, _sweep = _label_tip(ellipse.inflated(base), center_x, center_y, inward=inward)
+    # Le texte est-il posé au-dessus de l'ovale ? Alors s'éloigner du tracé,
+    # c'est monter, et la 1ʳᵉ ligne doit être la plus éloignée.
+    above = ellipse.inflated(base + 1.0).point_at(t_base)[1] < ellipse.point_at(t_base)[1]
+
+    offsets = []
+    previous = None
+    for line in lines:
+        offset = _label_offset(style, ellipse, line)
+        if previous is not None:
+            offset = max(offset, previous + style.ellipse_label_line_gap)
+        offsets.append(offset)
+        previous = offset
+    ordered = list(lines) if not above else list(reversed(lines))
+
+    rings = []
+    for text, offset in zip(ordered, offsets, strict=True):
+        t, sweep = _label_tip(ellipse.inflated(offset), center_x, center_y, inward=inward)
+        rings.append(LabelRing(text=text, offset=offset, t=t, sweep=sweep))
+    if above:
+        rings.reverse()  # rendu dans l'ordre de lecture
+    return tuple(rings)
 
 
 def _label_allowance(style: SvgStyle) -> float:
@@ -679,33 +760,37 @@ def build_bubble_spec(
             # Un seul traitement pour tout le monde, producteur solo compris :
             # la légende est curviligne sur son ellipse, il n'y a plus de cas
             # « où poser le texte ? » à distinguer.
-            # Sur l'ellipse ÉCARTÉE, celle qui portera le texte : c'est son
-            # sommet à elle qu'il faut, pas celui du tracé visible.
-            tip = _label_tip(
-                ellipse.inflated(_label_offset(style)),
+            rings = _label_rings(
+                ellipse,
+                label_lines,
+                style,
                 center_x,
                 center_y,
                 inward=not set(cg.keys) <= main_set,
             )
-            raw_groups.append((cg, ellipse, label_lines, tip))
+            raw_groups.append((cg, ellipse, label_lines, rings))
         return raw_groups
 
     raw_groups = _make_groups(canvas)
     _state = {"canvas": canvas, "groups": raw_groups}
 
-    def _bbox(keys, canvas=None, raw_groups=None, with_labels=True):
-        """Boîte englobante des nœuds `keys` : cercles, ellipses, et légendes.
+    def _bbox(keys, canvas=None, raw_groups=None, what="all"):
+        """Boîte englobante des nœuds `keys`, à un des TROIS niveaux de budget.
 
         `canvas`/`raw_groups` explicites pour mesurer un état CANDIDAT (la passe
         d'étalement essaie plusieurs écartements avant d'en retenir un).
 
-        `with_labels=False` = le budget DUR, celui qui contraint la mise en
-        page : les cercles et leurs ellipses. Les légendes, elles, sont
-        volontairement hors budget — elles sont posées au bout des ellipses et
-        atteignent le bord de la zone dès qu'un titre est long. Les compter
-        comme contrainte figeait tout : le dessin se tassait au centre pendant
-        que le texte occupait le cadre. Un titre qui mord la marge se replace
-        en deux secondes dans Illustrator ; des cercles agglutinés, non.
+        Trois niveaux, du plus contraignant au plus lâche :
+
+        - `"circles"` : les cercles seuls. Ils doivent tenir dans la zone MOINS
+          la marge — c'est le seul budget vraiment dur.
+        - `"ellipses"` : + les ovales. Ils ont droit à la marge : un ovale
+          enveloppe forcément plusieurs cercles et déborde d'eux, l'exiger dans
+          la même boîte que les cercles interdirait à ceux-ci d'approcher du bord.
+        - `"all"` : + la couronne du titre curviligne. Elle n'est PAS une
+          contrainte : le titre n'est qu'à quelques dizaines de pixels au-delà
+          de son ovale, visiblement rattaché à lui, et le compter tassait tout
+          le dessin au centre. L'aperçu SVG l'affiche en débord (`bleed`).
         """
         canvas = canvas if canvas is not None else _state["canvas"]
         raw_groups = raw_groups if raw_groups is not None else _state["groups"]
@@ -717,16 +802,13 @@ def build_bubble_spec(
             half = sizes[key] / 2.0
             xs.extend((px - half, px + half))
             ys.extend((py - half, py + half))
-        for cg, ellipse, _lines, _tip in raw_groups:
-            if not set(cg.keys) <= subset:
-                continue
-            x0, y0, x1, y1 = ellipse.bbox()
-            xs.extend((x0, x1))
-            ys.extend((y0, y1))
-            if with_labels:
-                # La légende suit le tracé : elle ne coûte qu'un anneau autour
-                # de l'ellipse, pas une boîte de texte partie au loin.
-                pad = _label_allowance(style)
+        if what != "circles":
+            for cg, ellipse, _lines, rings in raw_groups:
+                if not set(cg.keys) <= subset:
+                    continue
+                x0, y0, x1, y1 = ellipse.bbox()
+                outer = max((r.offset for r in rings), default=0.0)
+                pad = (outer + style.ellipse_label_font_size) if what == "all" else 0.0
                 xs.extend((x0 - pad, x1 + pad))
                 ys.extend((y0 - pad, y1 + pad))
         return min(xs), min(ys), max(xs), max(ys)
@@ -737,24 +819,24 @@ def build_bubble_spec(
     # distances, on reconstruit les ellipses — quelques passes suffisent, et
     # l'anti-chevauchement finit par s'y opposer : un album dense débordera
     # plutôt que de voir ses cercles se coller.
-    # Deux budgets : les cercles et leurs ellipses tiennent dans la zone MOINS
-    # la marge ; les légendes ont droit à la marge, mais pas à en sortir (un
-    # titre hors cadre est un titre perdu).
+    # Deux bornes : les cercles tiennent dans la zone moins la marge, les ovales
+    # dans la zone entière. Le titre curviligne, lui, a le droit de déborder —
+    # il reste collé à son ovale (cf. `_bbox`).
     avail_w = style.frame_width - 2 * style.margin
     avail_h = style.frame_height - 2 * style.margin
     main_sizes = {k: sizes[k] for k in comps[0]}
     for _ in range(_FIT_PASSES):
-        bx0, by0, bx1, by1 = _bbox(comps[0], with_labels=False)
-        lx0, ly0, lx1, ly1 = _bbox(comps[0])
+        bx0, by0, bx1, by1 = _bbox(comps[0], what="circles")
+        ex0, ey0, ex1, ey1 = _bbox(comps[0], what="ellipses")
         ratios = [1.0]
         if bx1 - bx0 > avail_w:
             ratios.append(avail_w / (bx1 - bx0))
         if by1 - by0 > avail_h:
             ratios.append(avail_h / (by1 - by0))
-        if lx1 - lx0 > style.frame_width:
-            ratios.append(style.frame_width / (lx1 - lx0))
-        if ly1 - ly0 > style.frame_height:
-            ratios.append(style.frame_height / (ly1 - ly0))
+        if ex1 - ex0 > style.frame_width:
+            ratios.append(style.frame_width / (ex1 - ex0))
+        if ey1 - ey0 > style.frame_height:
+            ratios.append(style.frame_height / (ey1 - ey0))
         ratio = min(ratios)
         if ratio > 0.999:
             break
@@ -774,7 +856,7 @@ def build_bubble_spec(
     # coins de la zone juste après, donc les inclure dans le centrage décalerait
     # tout le dessin d'un côté (et les îlots seraient recalés depuis un repère
     # devenu faux). Sans îlot, hub = contenu et le centrage est le même.
-    min_x, min_y, max_x, max_y = _bbox(comps[0], with_labels=False)
+    min_x, min_y, max_x, max_y = _bbox(comps[0], what="ellipses")
     content_w = max_x - min_x
     content_h = max_y - min_y
     width = style.frame_width
@@ -797,8 +879,8 @@ def build_bubble_spec(
             comp_set = set(comp)
             # Boîte englobante de l'îlot : cercles + ellipses (budget dur), et
             # la même légendes comprises, qui servira à retenir la translation.
-            bx0, by0, bx1, by1 = _bbox(comp, with_labels=False)
-            ax0, ay0, ax1, ay1 = _bbox(comp)
+            bx0, by0, bx1, by1 = _bbox(comp, what="circles")
+            ax0, ay0, ax1, ay1 = _bbox(comp, what="ellipses")
             sx, sy = _SLOTS[idx % len(_SLOTS)]
             if sx < 0:
                 tx = (raw_fx0 + pad) - bx0
@@ -820,11 +902,11 @@ def build_bubble_spec(
             ty = min(max(ty, (-dy) - ay0), (height - dy) - ay1)
             for k in comp:
                 canvas[k] = (canvas[k][0] + tx, canvas[k][1] + ty)
-            for i, (cg, ellipse, label_lines, tip) in enumerate(raw_groups):
+            for i, (cg, ellipse, label_lines, rings) in enumerate(raw_groups):
                 if set(cg.keys) <= comp_set:
-                    # La légende suit son ellipse : une translation ne change ni
-                    # sa pointe ni son sens de lecture.
-                    raw_groups[i] = (cg, _shift_ellipse(ellipse, tx, ty), label_lines, tip)
+                    # Les légendes suivent leur ellipse : une translation ne
+                    # change ni leur point d'ancrage ni leur sens de lecture.
+                    raw_groups[i] = (cg, _shift_ellipse(ellipse, tx, ty), label_lines, rings)
 
     # ── Étalement : occuper la zone au lieu de se tasser au centre ───────────
     # Le resserrage ci-dessus ne sait que RÉDUIRE. Sur la plupart des albums le
@@ -839,7 +921,7 @@ def build_bubble_spec(
     if len(hub_keys) > 1:
         zx0, zy0 = style.margin - dx, style.margin - dy
         zx1, zy1 = (width - style.margin) - dx, (height - style.margin) - dy
-        # Bornes ÉLARGIES pour les légendes : elles ont droit à la marge.
+        # Bornes ÉLARGIES pour les ovales : ils ont droit à la marge.
         lx_lo, ly_lo = -dx, -dy
         lx_hi, ly_hi = width - dx, height - dy
         # Les îlots sont figés (calés aux coins) : on retient leurs CERCLES.
@@ -847,7 +929,7 @@ def build_bubble_spec(
             (canvas[k][0], canvas[k][1], sizes[k] / 2.0) for comp in comps[1:] for k in comp
         ]
         gap = style.component_gap
-        hx0, hy0, hx1, hy1 = _bbox(hub_keys, canvas, raw_groups, with_labels=False)
+        hx0, hy0, hx1, hy1 = _bbox(hub_keys, canvas, raw_groups, what="circles")
         pivot_x, pivot_y = (hx0 + hx1) / 2.0, (hy0 + hy1) / 2.0
 
         def _spread(fx, fy, base=None):
@@ -863,12 +945,11 @@ def build_bubble_spec(
             cand = {**base, **moved}
             return cand, _make_groups(cand)
 
-        def _fits(cand, box, label_box):
+        def _fits(cand, box, ellipse_box):
             """Le hub tient-il dans la zone sans venir toucher un îlot ?
 
-            Deux bornes : les cercles et leurs ellipses restent dans la zone
-            moins la marge, les légendes ont droit à la marge mais pas au-delà
-            (un titre hors cadre est un titre perdu). La proximité des îlots, elle, se teste
+            Deux bornes : les cercles restent dans la zone moins la marge, les
+            ovales ont droit à la marge. La proximité des îlots, elle, se teste
             CERCLE À CERCLE : la boîte d'un hub large recouvre forcément la
             bande d'un îlot de coin, et un test de boîtes bloquerait tout
             étalement dès le premier pixel. Ce qui doit être garanti, c'est que
@@ -877,10 +958,10 @@ def build_bubble_spec(
             if box[0] < zx0 or box[1] < zy0 or box[2] > zx1 or box[3] > zy1:
                 return False
             if (
-                label_box[0] < lx_lo
-                or label_box[1] < ly_lo
-                or label_box[2] > lx_hi
-                or label_box[3] > ly_hi
+                ellipse_box[0] < lx_lo
+                or ellipse_box[1] < ly_lo
+                or ellipse_box[2] > lx_hi
+                or ellipse_box[3] > ly_hi
             ):
                 return False
             for k in hub_keys:
@@ -899,8 +980,8 @@ def build_bubble_spec(
                 cand, cand_groups = _spread(fx, fy, base)
                 return _fits(
                     cand,
-                    _bbox(hub_keys, cand, cand_groups, with_labels=False),
-                    _bbox(hub_keys, cand, cand_groups),
+                    _bbox(hub_keys, cand, cand_groups, what="circles"),
+                    _bbox(hub_keys, cand, cand_groups, what="ellipses"),
                 )
 
             if candidate(_SPREAD_MAX):
@@ -933,19 +1014,9 @@ def build_bubble_spec(
     # contenu) et sur les mêmes éléments que le cadrage : cercles, ellipses,
     # légendes. Le contenu n'est pas réduit pour rentrer — on se contente de le
     # DIRE (`BubbleSpec.overflow`), à charge de l'appelant d'avertir.
-    final_x: list[float] = []
-    final_y: list[float] = []
-    for key in graph.nodes:
-        px, py = canvas[key]
-        half = sizes[key] / 2.0
-        final_x.extend((px - half, px + half))
-        final_y.extend((py - half, py + half))
-    for _, ellipse, _lines, _tip in raw_groups:
-        x0, y0, x1, y1 = ellipse.bbox()
-        final_x.extend((x0, x1))
-        final_y.extend((y0, y1))
-    over_w = max(0.0, (max(final_x) - min(final_x)) - width)
-    over_h = max(0.0, (max(final_y) - min(final_y)) - height)
+    fx0, fy0, fx1, fy1 = _bbox(graph.nodes, canvas, raw_groups, what="ellipses")
+    over_w = max(0.0, (fx1 - fx0) - width)
+    over_h = max(0.0, (fy1 - fy0) - height)
     overflow = (over_w, over_h) if (over_w > 0 or over_h > 0) else None
 
     # Application de la translation (repère positif). Sorties triées par clé →
@@ -982,11 +1053,10 @@ def build_bubble_spec(
             member_keys=cg.keys,
             ellipse=_shift_ellipse(ellipse, dx, dy),
             label_lines=label_lines,
-            label_t=tip[0],
-            label_sweep=tip[1],
+            rings=rings,
             track_count=cg.track_count,
         )
-        for cg, ellipse, label_lines, tip in raw_groups
+        for cg, ellipse, label_lines, rings in raw_groups
     )
 
     return BubbleSpec(

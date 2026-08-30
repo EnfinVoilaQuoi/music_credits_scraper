@@ -37,7 +37,7 @@ class SvgStyle:
     frame_height: float = 520.0
     margin: float = 16.0  # marge intérieure entre le bord de la zone et le contenu
     # Cercles artistes : bornes de l'échelle de participation (DIAMÈTRE en px).
-    node_size_min: float = 96.0
+    node_size_min: float = 78.0
     node_size_max: float = 150.0
     # Badge (compteur de morceaux) ancré au milieu de l'arête basse du cercle.
     badge_size: float = 22.0
@@ -86,7 +86,7 @@ class SvgStyle:
     radial_fill: float = 0.85  # remplissage : les feuilles s'étirent vers le bord de la zone
     radial_fill_islands: float = 0.62  # idem, quand des îlots doivent tenir dans les coins
     main_component_scale: float = 1.0  # zoom de la composante principale (hub)
-    component_gap: float = 22.0  # écart initial hub↔îlots (avant calage aux coins)
+    component_gap: float = 14.0  # écart initial hub↔îlots (avant calage aux coins)
     # Cadre : il matérialise EXACTEMENT la zone dans l'aperçu — ce qui déborde
     # se voit d'un coup d'œil (rien n'est mis à l'échelle pour rentrer).
     draw_frame: bool = True

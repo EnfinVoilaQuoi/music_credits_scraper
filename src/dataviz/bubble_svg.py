@@ -33,9 +33,11 @@ class SvgStyle:
     # comparable d'un album à l'autre (un album à 4 producteurs ne doit pas
     # produire des cercles plus gros qu'un album à 15). Reprend les cotes du
     # repère `zone-bubble` du template Illustrator.
-    frame_width: float = 860.0
-    frame_height: float = 520.0
-    margin: float = 16.0  # marge intérieure entre le bord de la zone et le contenu
+    frame_width: float = 850.0
+    frame_height: float = 600.0
+    # Marge NULLE par défaut : la maquette a déjà la sienne autour du repère, en
+    # remettre une ici ne ferait que rétrécir le réseau pour rien.
+    margin: float = 0.0
     # Cercles artistes : bornes de l'échelle de participation (DIAMÈTRE en px).
     node_size_min: float = 78.0
     node_size_max: float = 150.0
@@ -90,7 +92,7 @@ class SvgStyle:
     # Cadre : il matérialise EXACTEMENT la zone dans l'aperçu — ce qui déborde
     # se voit d'un coup d'œil (rien n'est mis à l'échelle pour rentrer).
     draw_frame: bool = True
-    island_corner_pad: float = 12.0  # écart entre un îlot et le coin intérieur du cadre
+    island_corner_pad: float = 0.0  # écart entre un îlot et le coin de la zone
     frame_stroke: str = "#C9C9C9"
     frame_stroke_width: float = 1.0
     frame_fill: str = "none"

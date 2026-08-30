@@ -504,6 +504,53 @@ class GeniusAPI:
                 )
         return out
 
+    def get_album_track_numbers(self, song_id: int) -> dict[int, int] | None:
+        """Numéros de piste de l'album auquel appartient `song_id` : {song_id: n°}.
+
+        Passe par l'**API authentifiée** (`api.genius.com`), pas par les endpoints
+        web `genius.com/api/…` : ceux-là sont derrière Cloudflare et répondent 403
+        depuis 2026-08 (cf. `get_album_tracks_from_url`). Deux appels :
+        `GET /songs/{id}` pour l'album, puis `GET /albums/{id}/tracks`.
+
+        Aucune URL à fournir : l'album se déduit de n'importe quel morceau déjà
+        en base. Renvoie None si l'album est introuvable ou l'API en échec.
+        """
+        headers = {"Authorization": f"Bearer {GENIUS_API_KEY}"}
+        try:
+            resp = requests.get(
+                f"https://api.genius.com/songs/{song_id}", headers=headers, timeout=20
+            )
+            resp.raise_for_status()
+            album = ((resp.json().get("response") or {}).get("song") or {}).get("album") or {}
+            album_id = album.get("id")
+            if not album_id:
+                logger.warning(f"Aucun album Genius pour le morceau #{song_id}")
+                return None
+
+            tr_resp = requests.get(
+                f"https://api.genius.com/albums/{album_id}/tracks",
+                headers=headers,
+                params={"per_page": 50},
+                timeout=20,
+            )
+            tr_resp.raise_for_status()
+            raw = (tr_resp.json().get("response") or {}).get("tracks") or []
+        except (requests.RequestException, ValueError, TypeError) as e:
+            logger.error(f"Numéros de piste Genius (morceau #{song_id}) échoués: {e}")
+            return None
+
+        numbers = {}
+        for entry in raw:
+            sid = (entry.get("song") or {}).get("id")
+            number = entry.get("number")
+            if sid and number:
+                numbers[int(sid)] = int(number)
+        logger.info(
+            f"🔢 Album Genius #{album_id} « {album.get('name')} » : "
+            f"{len(numbers)} numéro(s) de piste"
+        )
+        return numbers
+
     def apply_song_metadata(self, track: "Track") -> bool:
         """
         UN appel `GET /songs/{id}` → pose album + Spotify ID + YouTube (depuis

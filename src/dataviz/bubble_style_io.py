@@ -121,8 +121,20 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "(le titre est curviligne : trop peu d'écart et le trait barre les lettres).",
             ),
             (
-                "ellipse_label_separator",
-                "Ce qui sépare deux titres sur une même ellipse.",
+                "ellipse_label_line_gap",
+                "Écart entre deux titres d'un même ovale, en px : ils se posent sur des "
+                "anneaux concentriques, l'un « sous » l'autre.",
+            ),
+            (
+                "ellipse_label_max_arc",
+                "Part maximale du tour d'ovale qu'un titre a le droit d'occuper, de 0 à 1. "
+                "Au-delà il s'enroule et se lit à la verticale : le texte est alors écarté "
+                "du tracé, où le tour est plus long.",
+            ),
+            (
+                "ellipse_label_max_extra_offset",
+                "Plafond de cet écartement supplémentaire, en px : au-delà, le titre ne "
+                "semblerait plus appartenir à son ovale.",
             ),
         ),
     ),

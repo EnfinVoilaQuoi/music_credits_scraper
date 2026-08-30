@@ -37,7 +37,7 @@ class SvgStyle:
     frame_height: float = 520.0
     margin: float = 16.0  # marge intérieure entre le bord de la zone et le contenu
     # Cercles artistes : bornes de l'échelle de participation (DIAMÈTRE en px).
-    node_size_min: float = 78.0
+    node_size_min: float = 96.0
     node_size_max: float = 150.0
     # Badge (compteur de morceaux) ancré au milieu de l'arête basse du cercle.
     badge_size: float = 22.0
@@ -67,7 +67,13 @@ class SvgStyle:
     # entre le tracé et la ligne de base du texte, qui le tient à l'extérieur —
     # sinon le trait barre les lettres.
     ellipse_label_gap: float = 9.0
-    ellipse_label_separator: str = " · "  # entre deux titres d'une même ellipse
+    # Deux titres sur un même ovale se posent sur DEUX anneaux concentriques —
+    # l'équivalent d'un retour à la ligne sur une courbe. Écart entre eux :
+    ellipse_label_line_gap: float = 24.0
+    # Part maximale du tour d'ellipse qu'un titre a le droit d'occuper : au-delà
+    # il s'enroule et se lit à la verticale. La couronne s'écarte pour y tenir.
+    ellipse_label_max_arc: float = 0.42
+    ellipse_label_max_extra_offset: float = 55.0  # plafond de cet écartement, en px
     # Ellipses (une par combinaison de producteurs).
     min_axis_ratio: float = 0.35  # borne l'aplatissement (duo / quasi-colinéaire)
     ellipse_margin: float = 10.0  # marge ajoutée au rayon des cercles
@@ -136,22 +142,35 @@ class EdgeSpec:
 
 
 @dataclass(frozen=True)
+class LabelRing:
+    """Un titre posé sur son anneau : le texte, son écart au tracé, où le centrer.
+
+    Un anneau par titre : deux morceaux sur un même ovale s'empilent sur deux
+    couronnes concentriques plutôt que de s'aligner en une seule longue ligne,
+    qui ferait le tour de l'ovale et deviendrait illisible.
+    """
+
+    text: str
+    offset: float
+    t: float
+    sweep: int
+
+
+@dataclass(frozen=True)
 class GroupShape:
     """Une combinaison de producteurs : ellipse englobante + légende ancrée.
 
     `member_keys` = les producteurs de la combinaison (sert à l'id stable).
     `label_lines` = ce qui s'affiche (titres si peu de morceaux, sinon
-    « N morceaux »). Le texte est **curviligne, posé sur l'ellipse elle-même** :
-    `label_t` donne le paramètre (degrés) de la pointe où il est centré, et
-    `label_sweep` le sens de parcours retenu pour qu'il se lise à l'endroit.
-    `track_count` = nb de morceaux.
+    « N morceaux ») ; `rings` en est le rendu résolu, un anneau par ligne. Le
+    texte est **curviligne, posé sur l'ellipse elle-même**. `track_count` = nb
+    de morceaux.
     """
 
     member_keys: tuple[str, ...]
     ellipse: EllipseSpec
     label_lines: tuple[str, ...]
-    label_t: float
-    label_sweep: int
+    rings: tuple[LabelRing, ...]
     track_count: int
 
 
@@ -264,6 +283,24 @@ def _ellipse_path_d(ellipse: EllipseSpec, t_start: float, sweep: int, prec: int)
     )
 
 
+def _display_bleed(spec: BubbleSpec) -> float:
+    """De combien élargir le viewBox pour ne rien couper — pas un pixel de plus.
+
+    Mesuré sur le dessin RÉEL et non sur le pire cas théorique : sinon un album
+    dont aucun titre ne dépasse serait affiché entouré d'un vide, et paraîtrait
+    plus petit qu'il n'est.
+    """
+    over = 0.0
+    for gs in spec.groups:
+        outer = max((r.offset for r in gs.rings), default=0.0)
+        pad = outer + spec.style.ellipse_label_font_size
+        x0, y0, x1, y1 = gs.ellipse.bbox()
+        over = max(
+            over, -(x0 - pad), -(y0 - pad), (x1 + pad) - spec.width, (y1 + pad) - spec.height
+        )
+    return max(0.0, over)
+
+
 def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
     """Sérialise `spec` en SVG. Écrit dans `path` si fourni ; renvoie la chaîne."""
     style = spec.style
@@ -272,8 +309,18 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
     def f(v):
         return _fmt(v, prec)
 
-    dwg = svgwrite.Drawing(size=(f(spec.width), f(spec.height)), profile="full", debug=False)
-    dwg.attribs["viewBox"] = f"0 0 {f(spec.width)} {f(spec.height)}"
+    # Débord d'AFFICHAGE : les titres curvilignes rident juste à l'extérieur de
+    # leur ovale et peuvent donc dépasser la zone de quelques dizaines de pixels.
+    # Le viewBox les laisse voir plutôt que de les couper — c'est un aperçu de
+    # contrôle, un titre tronqué ferait croire à un bug. Le cadre dessiné, lui,
+    # reste la VRAIE zone : ce qui est dehors se voit.
+    bleed = _display_bleed(spec)
+    dwg = svgwrite.Drawing(
+        size=(f(spec.width + 2 * bleed), f(spec.height + 2 * bleed)), profile="full", debug=False
+    )
+    dwg.attribs["viewBox"] = (
+        f"{f(-bleed)} {f(-bleed)} {f(spec.width + 2 * bleed)} {f(spec.height + 2 * bleed)}"
+    )
 
     g_frame = dwg.g(id="frame")
     g_edges = dwg.g(id="edges")
@@ -328,36 +375,28 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
         )
         g_ellipses.add(outline)
 
-        text_content = style.ellipse_label_separator.join(gs.label_lines)
-        if not text_content:
-            continue
-        # Chemin PORTEUR du texte : la même ellipse, écartée vers l'extérieur
-        # (sinon le trait barre les lettres) et démarrée à l'ANTIPODE de la
-        # pointe visée. L'ellipse ayant une symétrie centrale, la moitié de son
-        # périmètre tombe exactement sur l'antipode : un texte centré à
-        # `startOffset="50%"` atterrit donc pile sur la pointe, sans avoir à
-        # intégrer la longueur d'arc.
-        offset = style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap
-        path_id = f"ellipse-labelpath-{set_token}"
-        d, start_offset = _label_path(el.inflated(offset), gs.label_t, gs.label_sweep, prec)
-        g_ellipse_labels.add(dwg.path(d=d, fill="none", stroke="none", id=path_id))
-        text = dwg.text(
-            "",
-            font_size=f(style.ellipse_label_font_size),
-            font_family=style.font_family,
-            font_weight="500",
-            fill=style.ellipse_label_color,
-            id=f"ellipse-label-{set_token}",
-        )
-        text.add(
-            svgwrite.text.TextPath(
-                path=f"#{path_id}",
-                text=text_content,
-                startOffset=f(start_offset),
-                text_anchor="middle",
+        # Un anneau par titre, du plus proche du tracé au plus éloigné.
+        for i, ring in enumerate(gs.rings):
+            path_id = f"ellipse-labelpath-{set_token}-{i}"
+            d, start_offset = _label_path(el.inflated(ring.offset), ring.t, ring.sweep, prec)
+            g_ellipse_labels.add(dwg.path(d=d, fill="none", stroke="none", id=path_id))
+            text = dwg.text(
+                "",
+                font_size=f(style.ellipse_label_font_size),
+                font_family=style.font_family,
+                font_weight="500",
+                fill=style.ellipse_label_color,
+                id=f"ellipse-label-{set_token}-{i}",
             )
-        )
-        g_ellipse_labels.add(text)
+            text.add(
+                svgwrite.text.TextPath(
+                    path=f"#{path_id}",
+                    text=ring.text,
+                    startOffset=f(start_offset),
+                    text_anchor="middle",
+                )
+            )
+            g_ellipse_labels.add(text)
 
     # ── Calques 3-5 : cercles, badges, libellés ──
     for n in spec.nodes:

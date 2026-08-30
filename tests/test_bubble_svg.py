@@ -112,7 +112,7 @@ def test_legende_solo_un_morceau_affiche_le_titre(tmp_path):
     generate_bubble_prod(_album_tracks(), "TestAlbum", output_path=out)
     texts = _ellipse_labels(ET.parse(out).getroot())
     # Un seul morceau → son TITRE (« 1 morceau » n'apporterait rien — cas mammouth).
-    assert texts["ellipse-label-solo"] == "T4"
+    assert texts["ellipse-label-solo-0"] == "T4"
 
 
 def test_legende_solo_plusieurs_morceaux_compte(tmp_path):
@@ -141,23 +141,33 @@ def test_legende_posee_a_plat_et_lisible():
     # Le titre est CURVILIGNE. Il doit être posé là où la tangente de l'ovale
     # est horizontale (sinon il s'écrit de haut en bas), et parcouru dans le
     # sens qui l'écrit de gauche à droite (sinon il est à l'envers).
-    from src.dataviz.bubble_prod import _label_offset
-
     spec = _spec(_album_tracks())
     for gs in spec.groups:
-        porteuse = gs.ellipse.inflated(_label_offset(spec.style))
-        tx, ty = porteuse.tangent_at(gs.label_t)
-        assert abs(ty) < 1e-6 * max(1.0, abs(tx))  # tangente horizontale
-        sens = 1.0 if gs.label_sweep else -1.0
-        assert tx * sens > 0  # les lettres avancent vers la droite
+        for ring in gs.rings:
+            porteuse = gs.ellipse.inflated(ring.offset)
+            tx, ty = porteuse.tangent_at(ring.t)
+            assert abs(ty) < 1e-6 * max(1.0, abs(tx))  # tangente horizontale
+            sens = 1.0 if ring.sweep else -1.0
+            assert tx * sens > 0  # les lettres avancent vers la droite
+
+
+def test_deux_titres_sur_deux_anneaux():
+    # Deux morceaux sur un même ovale s'empilent l'un « sous » l'autre, sur deux
+    # couronnes concentriques — pas en une longue ligne qui ferait le tour.
+    spec = _spec(_album_tracks())
+    duo = next(g for g in spec.groups if set(g.member_keys) == {"big", "kalim"})
+    assert [r.text for r in duo.rings] == ["T1", "T2"]
+    offsets = sorted(r.offset for r in duo.rings)
+    assert offsets[1] - offsets[0] >= spec.style.ellipse_label_line_gap - 1e-9
 
 
 def test_legende_duo_liste_les_titres(tmp_path):
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(_album_tracks(), "TestAlbum", output_path=out)
     texts = _ellipse_labels(ET.parse(out).getroot())
-    # Duo à 2 morceaux (≤ seuil) → les titres, joints sur une seule courbe.
-    assert texts["ellipse-label-big--kalim"] == "T1 · T2"
+    # Duo à 2 morceaux (≤ seuil) → un titre par anneau.
+    assert texts["ellipse-label-big--kalim-0"] == "T1"
+    assert texts["ellipse-label-big--kalim-1"] == "T2"
 
 
 def test_legende_combinaison_au_dela_du_seuil(tmp_path):

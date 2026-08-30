@@ -455,3 +455,26 @@ def test_titre_nettoye_des_fioritures():
     assert clean_track_title("Mort Ce soir (feat. X) [Bonus]") == "Mort Ce soir"
     assert clean_track_title("3ein / Risotto Gambas") == "3ein / Risotto Gambas"
     assert clean_track_title("J'ai (encore) faim") == "J'ai (encore) faim"
+
+
+def test_aucun_chevauchement_entre_cercles_meme_hors_composante():
+    # Deux cercles ne se marchent JAMAIS dessus, y compris quand ils
+    # appartiennent à des composantes différentes : l'anti-chevauchement ne
+    # travaille qu'à l'intérieur d'une composante, un satellite du noyau venait
+    # donc se coller à un îlot calé dans son coin.
+    import math
+
+    tracks = [
+        _track(1, "H1", "Al", _prod("A"), _prod("B")),
+        _track(2, "H2", "Al", _prod("A"), _prod("C")),
+        _track(3, "H3", "Al", _prod("A"), _prod("D")),
+        _track(4, "Duo", "Al", _prod("E"), _prod("F")),
+        _track(5, "Solo", "Al", _prod("G")),
+        _track(6, "Solo2", "Al", _prod("H")),
+    ]
+    spec = _spec(tracks)
+    nodes = list(spec.nodes)
+    for i, a in enumerate(nodes):
+        for b in nodes[i + 1 :]:
+            distance = math.hypot(a.x - b.x, a.y - b.y)
+            assert distance >= (a.size + b.size) / 2.0 - 1e-6

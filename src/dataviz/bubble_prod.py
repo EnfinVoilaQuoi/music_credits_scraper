@@ -12,6 +12,7 @@ reconfigure tel quel pour le réseau des artistes invités.
 """
 
 import math
+import re
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,6 +146,28 @@ def _label_font_size(node_size: float, style: SvgStyle) -> float:
 # ── Construction du spec ─────────────────────────────────────────────────────
 
 
+# Suffixe entre parenthèses ou crochets en FIN de titre : « (Interlude) »,
+# « (feat. X) », « [Bonus] ». Répété pour les titres qui en cumulent deux.
+_TITLE_SUFFIX_RE = re.compile(r"\s*[(\[][^()\[\]]*[)\]]\s*$")
+
+
+def clean_track_title(title: str) -> str:
+    """Titre allégé pour la légende : on garde le nom du morceau, rien d'autre.
+
+    Sur une bulle, « Fiesta (Interlude) » ne dit rien de plus que « Fiesta » et
+    coûte la moitié de la place — or la légende est posée sur l'ellipse, où la
+    place est comptée. Les mentions entre parenthèses (interlude, feat., bonus,
+    version) sautent donc. Ce qui est ENTRE parenthèses au milieu du titre est
+    conservé : il fait partie du nom.
+    """
+    cleaned = (title or "").strip()
+    previous = None
+    while cleaned != previous:
+        previous = cleaned
+        cleaned = _TITLE_SUFFIX_RE.sub("", cleaned).strip()
+    return cleaned or (title or "").strip()
+
+
 def _count_label(n: int) -> str:
     return f"{n} morceau" if n == 1 else f"{n} morceaux"
 
@@ -157,12 +180,12 @@ def _ellipse_label(collab_group, style: SvgStyle) -> tuple[str, ...]:
     combinaison → titres jusqu'au seuil, compte au-delà.
     """
     if collab_group.track_count == 1:
-        return collab_group.track_titles
+        return tuple(clean_track_title(t) for t in collab_group.track_titles)
     if len(collab_group.keys) == 1:
         # Producteur seul sur N morceaux → « N solo » (affiché DANS son carré).
         return (f"{collab_group.track_count} solo",)
     if collab_group.track_count <= style.label_track_threshold:
-        return collab_group.track_titles
+        return tuple(clean_track_title(t) for t in collab_group.track_titles)
     return (_count_label(collab_group.track_count),)
 
 
@@ -212,76 +235,59 @@ def _remove_overlaps(
     return {k: (pos[k][0], pos[k][1]) for k in keys}
 
 
-def _axis_label_anchor(
-    ellipse,
-    center_x: float,
-    center_y: float,
-    gap: float,
-    line_half: float,
-    max_angle: float,
-    inward: bool = False,
-) -> tuple[float, float, float]:
-    """Ancre + angle de la légende, posée à la pointe de l'ellipse, quasi droite.
+def _label_tip(
+    ellipse, center_x: float, center_y: float, inward: bool = False
+) -> tuple[float, int]:
+    """Où poser la légende curviligne sur l'ellipse : `(paramètre t, sens)`.
 
-    Le texte est **tangent** à la pointe (perpendiculaire au grand axe) : un
-    pétale vertical porte sa légende à l'horizontale au-dessus/en-dessous, comme
-    écrite « au bord » de la bulle. L'angle est normalisé dans `[-90, 90]` puis
-    amorti dans `[-max_angle, max_angle]`. Pointe **extérieure** (à l'opposé du
-    centre du nuage) par défaut ; `inward=True` pour les îlots calés aux coins
-    du cadre (pas de place côté coin → légende côté centre). Renvoie
-    `(x, y, angle_degrés)`.
+    Au SOMMET (ou au creux) de l'ovale, pas à la pointe de son grand axe : c'est
+    le seul point où la tangente est horizontale, donc le seul où le texte se
+    lit à plat. Sur un ovale très incliné — le cas de tous les îlots — la pointe
+    du grand axe est quasi verticale, et le titre s'y écrivait de haut en bas.
+
+    Haut ou bas selon le côté où l'ovale est déjà, par rapport au centre du
+    nuage : la légende part ainsi vers l'extérieur plutôt que de traverser le
+    dessin. `inward` inverse ce choix pour les îlots calés dans un coin, qui
+    n'ont de place que du côté du centre.
+
+    Le sens de parcours est ensuite choisi pour que les lettres avancent vers la
+    droite : sur un chemin, elles suivent la tangente, et l'autre sens les écrit
+    à l'envers.
+
+    ⚠️ `ellipse` doit être celle qui PORTE le texte, c'est-à-dire l'ellipse
+    écartée — pas le tracé visible. Le paramètre du sommet dépend du rapport
+    `ry/rx` : écarter les deux axes de la même quantité arrondit l'ovale et
+    déplace son sommet. Calculé sur le mauvais des deux, le titre atterrit sur
+    un flanc et repart à la verticale.
     """
     a = math.radians(ellipse.angle)
-    ux, uy = math.cos(a), math.sin(a)  # direction du grand axe
-    # Pointes du grand axe (± rx le long de l'axe).
-    tip_plus = (ellipse.cx + ellipse.rx * ux, ellipse.cy + ellipse.rx * uy)
-    tip_minus = (ellipse.cx - ellipse.rx * ux, ellipse.cy - ellipse.rx * uy)
-    d_plus = (tip_plus[0] - center_x) ** 2 + (tip_plus[1] - center_y) ** 2
-    d_minus = (tip_minus[0] - center_x) ** 2 + (tip_minus[1] - center_y) ** 2
-    outer_is_plus = d_plus >= d_minus
-    if outer_is_plus != inward:  # pointe extérieure, ou intérieure si inward
-        tip, out_x, out_y = tip_plus, ux, uy
-    else:
-        tip, out_x, out_y = tip_minus, -ux, -uy
-
-    # Tangente à la pointe = grand axe + 90°, normalisée puis amortie.
-    ang = ((ellipse.angle + 90.0 + 180.0) % 360.0) - 180.0  # → (-180, 180]
-    if ang > 90.0:
-        ang -= 180.0
-    elif ang < -90.0:
-        ang += 180.0
-    ang = max(-max_angle, min(max_angle, ang))  # amortissement (texte quasi droit)
-
-    x = tip[0] + out_x * (gap + line_half)
-    y = tip[1] + out_y * (gap + line_half)
-    return x, y, ang
+    # dy/dt = 0 → le sommet et le creux, aux deux solutions opposées.
+    t = math.degrees(math.atan2(ellipse.ry * math.cos(a), ellipse.rx * math.sin(a)))
+    top, bottom = (t, t + 180.0)
+    if ellipse.point_at(top)[1] > ellipse.point_at(bottom)[1]:
+        top, bottom = bottom, top
+    above = ellipse.cy <= center_y
+    chosen = top if (above != inward) else bottom
+    tx, _ty = ellipse.tangent_at(chosen)
+    return chosen, (1 if tx >= 0 else 0)
 
 
-def _label_half_width(label_lines: tuple[str, ...], style: SvgStyle) -> float:
-    """Demi-largeur estimée d'un bloc de légende, DANS le sens de son texte."""
-    if not label_lines:
-        return 0.0
-    longest = max(len(line) for line in label_lines)
-    return longest * style.ellipse_label_font_size * 0.3
+def _label_offset(style: SvgStyle) -> float:
+    """Écart entre le tracé de l'ellipse et la ligne de base du texte posé dessus."""
+    return style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap
 
 
-def _label_half_extents(
-    label_lines: tuple[str, ...], angle: float, style: SvgStyle
-) -> tuple[float, float]:
-    """Demi-extension en x et en y d'une légende TOURNÉE de `angle` degrés.
+def _label_allowance(style: SvgStyle) -> float:
+    """De combien une légende curviligne déborde de son ellipse.
 
-    Une borne circulaire (`reach` = la plus grande des deux dimensions dans les
-    deux axes) était acceptable tant que le cadre grandissait avec le contenu ;
-    depuis que la zone est fixe elle déclencherait de fausses alertes de
-    débordement — un titre de 25 caractères revendiquerait ±150 px EN HAUTEUR.
-    On projette donc la boîte du texte selon son angle réel.
+    Elle est posée SUR le tracé, écartée vers l'extérieur : elle ne coûte plus
+    que l'écart et la hauteur des lettres, là où une légende posée au bout de
+    l'ellipse revendiquait la moitié de sa longueur — c'est ce qui étranglait la
+    mise en page (le texte occupait le cadre pendant que les cercles se tassaient).
     """
-    if not label_lines:
-        return 0.0, 0.0
-    along = _label_half_width(label_lines, style)
-    across = len(label_lines) * style.ellipse_label_line_height
-    ca, sa = abs(math.cos(math.radians(angle))), abs(math.sin(math.radians(angle)))
-    return along * ca + across * sa, along * sa + across * ca
+    return (
+        style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap + style.ellipse_label_font_size
+    )
 
 
 def _cloud_half_extents(
@@ -431,12 +437,7 @@ def _radialize_main(
             # tout ce qui pend au bout du pétale : son rayon, l'ellipse qui
             # l'entoure et la légende posée derrière. Sans cette déduction, une
             # feuille poussée au bord emmène systématiquement son titre dehors.
-            hang = (
-                sizes[k] / 2.0
-                + style.ellipse_margin
-                + style.ellipse_label_gap
-                + style.ellipse_label_line_height
-            )
+            hang = sizes[k] / 2.0 + style.ellipse_margin + _label_allowance(style)
             target = max(0.0, boundary - hang)
             # Étirement vers le bord, PUIS plafond au même bord : le rayon hérité
             # du spring layout pouvait à lui seul sortir de la zone (le plafond
@@ -487,7 +488,7 @@ def _fit_to_zone(
     mieux vaut un débordement signalé que des cercles qui se marchent dessus.
     """
     # Ce qui pend hors des cercles (ellipse + légende) doit tenir aussi.
-    hang = style.ellipse_margin + style.ellipse_label_gap + style.ellipse_label_line_height
+    hang = style.ellipse_margin + _label_allowance(style)
     avail_w = style.frame_width / 2.0 - style.margin - hang
     avail_h = style.frame_height / 2.0 - style.margin - hang
     cx, cy, hw, hh = _cloud_half_extents(canvas, sizes)
@@ -675,30 +676,18 @@ def build_bubble_spec(
                 min_axis_ratio=style.min_axis_ratio,
             )
             label_lines = _ellipse_label(cg, style)
-            if len(cg.keys) == 1:
-                # Producteur seul (« N solo », ou le TITRE s'il n'a qu'un morceau) :
-                # légende SOUS son cercle, clairement rattachée. Elle ne peut plus
-                # tenir dedans depuis que les cercles sont petits et que le nom en
-                # occupe le centre.
-                anchor = (
-                    ellipse.cx,
-                    ellipse.cy
-                    + ellipse.ry
-                    + style.ellipse_label_gap
-                    + style.ellipse_label_line_height / 2.0,
-                    0.0,
-                )
-            else:
-                anchor = _axis_label_anchor(
-                    ellipse,
-                    center_x,
-                    center_y,
-                    style.ellipse_label_gap,
-                    style.ellipse_label_line_height / 2.0,
-                    style.ellipse_label_max_angle,
-                    inward=not set(cg.keys) <= main_set,
-                )
-            raw_groups.append((cg, ellipse, label_lines, anchor))
+            # Un seul traitement pour tout le monde, producteur solo compris :
+            # la légende est curviligne sur son ellipse, il n'y a plus de cas
+            # « où poser le texte ? » à distinguer.
+            # Sur l'ellipse ÉCARTÉE, celle qui portera le texte : c'est son
+            # sommet à elle qu'il faut, pas celui du tracé visible.
+            tip = _label_tip(
+                ellipse.inflated(_label_offset(style)),
+                center_x,
+                center_y,
+                inward=not set(cg.keys) <= main_set,
+            )
+            raw_groups.append((cg, ellipse, label_lines, tip))
         return raw_groups
 
     raw_groups = _make_groups(canvas)
@@ -728,17 +717,18 @@ def build_bubble_spec(
             half = sizes[key] / 2.0
             xs.extend((px - half, px + half))
             ys.extend((py - half, py + half))
-        for cg, ellipse, label_lines, anchor in raw_groups:
+        for cg, ellipse, _lines, _tip in raw_groups:
             if not set(cg.keys) <= subset:
                 continue
             x0, y0, x1, y1 = ellipse.bbox()
             xs.extend((x0, x1))
             ys.extend((y0, y1))
             if with_labels:
-                # Légende tournée : boîte projetée selon son angle réel.
-                hx, hy = _label_half_extents(label_lines, anchor[2], style)
-                xs.extend((anchor[0] - hx, anchor[0] + hx))
-                ys.extend((anchor[1] - hy, anchor[1] + hy))
+                # La légende suit le tracé : elle ne coûte qu'un anneau autour
+                # de l'ellipse, pas une boîte de texte partie au loin.
+                pad = _label_allowance(style)
+                xs.extend((x0 - pad, x1 + pad))
+                ys.extend((y0 - pad, y1 + pad))
         return min(xs), min(ys), max(xs), max(ys)
 
     # Resserrage du hub, LÉGENDES COMPRISES. `_fit_to_zone` ne connaît que les
@@ -830,14 +820,11 @@ def build_bubble_spec(
             ty = min(max(ty, (-dy) - ay0), (height - dy) - ay1)
             for k in comp:
                 canvas[k] = (canvas[k][0] + tx, canvas[k][1] + ty)
-            for i, (cg, ellipse, label_lines, anchor) in enumerate(raw_groups):
+            for i, (cg, ellipse, label_lines, tip) in enumerate(raw_groups):
                 if set(cg.keys) <= comp_set:
-                    raw_groups[i] = (
-                        cg,
-                        _shift_ellipse(ellipse, tx, ty),
-                        label_lines,
-                        (anchor[0] + tx, anchor[1] + ty, anchor[2]),
-                    )
+                    # La légende suit son ellipse : une translation ne change ni
+                    # sa pointe ni son sens de lecture.
+                    raw_groups[i] = (cg, _shift_ellipse(ellipse, tx, ty), label_lines, tip)
 
     # ── Étalement : occuper la zone au lieu de se tasser au centre ───────────
     # Le resserrage ci-dessus ne sait que RÉDUIRE. Sur la plupart des albums le
@@ -953,7 +940,7 @@ def build_bubble_spec(
         half = sizes[key] / 2.0
         final_x.extend((px - half, px + half))
         final_y.extend((py - half, py + half))
-    for _, ellipse, _label_lines, _anchor in raw_groups:
+    for _, ellipse, _lines, _tip in raw_groups:
         x0, y0, x1, y1 = ellipse.bbox()
         final_x.extend((x0, x1))
         final_y.extend((y0, y1))
@@ -995,12 +982,11 @@ def build_bubble_spec(
             member_keys=cg.keys,
             ellipse=_shift_ellipse(ellipse, dx, dy),
             label_lines=label_lines,
-            label_x=anchor[0] + dx,
-            label_y=anchor[1] + dy,
-            label_angle=anchor[2],
+            label_t=tip[0],
+            label_sweep=tip[1],
             track_count=cg.track_count,
         )
-        for cg, ellipse, label_lines, anchor in raw_groups
+        for cg, ellipse, label_lines, tip in raw_groups
     )
 
     return BubbleSpec(

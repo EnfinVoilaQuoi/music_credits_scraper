@@ -58,7 +58,6 @@ def _style_payload(style: SvgStyle) -> dict:
         "ellipse_fill": style.ellipse_fill,
         "ellipse_label_font_size": style.ellipse_label_font_size,
         "ellipse_label_color": style.ellipse_label_color,
-        "ellipse_label_line_height": style.ellipse_label_line_height,
         "edge_color": style.edge_color,
         "edge_width": style.edge_width,
     }
@@ -100,7 +99,16 @@ def _node_payload(node, style: SvgStyle) -> dict:
     }
 
 
-def _group_payload(group) -> dict:
+def _group_payload(group, style: SvgStyle) -> dict:
+    """Une combinaison d'artistes. `label_text` est PRÊT À POSER.
+
+    Le texte est assemblé ici (titres joints par le séparateur de style) plutôt
+    que côté JSX : les deux rendus doivent afficher la même chaîne, et
+    ExtendScript n'a pas à connaître nos règles d'affichage.
+
+    `label_t` / `label_sweep` disent où le poser sur l'ellipse et dans quel sens
+    la parcourir — le texte est CURVILIGNE, il suit le tracé.
+    """
     el = group.ellipse
     return {
         "id": "--".join(id_token(k) for k in group.member_keys),
@@ -109,10 +117,11 @@ def _group_payload(group) -> dict:
         "rx": _r(el.rx),
         "ry": _r(el.ry),
         "angle": _r(el.angle),
+        "label_text": style.ellipse_label_separator.join(group.label_lines),
         "label_lines": list(group.label_lines),
-        "label_x": _r(group.label_x),
-        "label_y": _r(group.label_y),
-        "label_angle": _r(group.label_angle),
+        "label_t": _r(group.label_t),
+        "label_sweep": group.label_sweep,
+        "label_offset": _r(style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap),
         "track_count": group.track_count,
     }
 
@@ -145,7 +154,7 @@ def build_payload(spec: BubbleSpec, *, kind: str, artist_name: str, album: str, 
         "overflow": [_r(v) for v in spec.overflow] if spec.overflow else None,
         "style": _style_payload(spec.style),
         "nodes": [_node_payload(n, spec.style) for n in spec.nodes],
-        "groups": [_group_payload(g) for g in spec.groups],
+        "groups": [_group_payload(g, spec.style) for g in spec.groups],
         # Les traits artiste↔artiste sont désactivés par défaut (les bulles
         # disent déjà qui travaille avec qui) : rien à dessiner, rien à porter.
         "edges": [_edge_payload(e) for e in spec.edges] if spec.style.draw_edges else [],

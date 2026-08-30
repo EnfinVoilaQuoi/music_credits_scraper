@@ -9,14 +9,19 @@ Deux rôles :
    `confidence=1`. Une seule source → `confidence=1`. C'est le LRC retenu qui part en
    base (`track.lyrics.synced`) avec sa source/confidence.
 
-2. **Alignement d'affichage** (`annotate_sections`) : annote chaque en-tête de section
-   `[Couplet : artiste]` avec son intervalle `⏱ 0:12 → 0:45`, en retrouvant le timestamp
-   de la 1ʳᵉ ligne de section dans le LRC. Le matching est désormais **monotone**
-   (recherche en avant uniquement) pour éviter qu'une ligne de refrain répétée ne se
-   cale sur une occurrence antérieure → intervalles non croissants / incohérents.
+2. **Découpage temporel** (`extract_sections`) : retrouve, pour chaque en-tête de
+   section `[Couplet : artiste]`, l'intervalle `(start, end)` en secondes, en
+   alignant sa 1ʳᵉ ligne sur le LRC. Le matching est **monotone** (recherche en
+   avant uniquement) pour éviter qu'une ligne de refrain répétée ne se cale sur une
+   occurrence antérieure → intervalles non croissants / incohérents.
+
+3. **Alignement d'affichage** (`annotate_sections`) : habillage texte de (2) — annote
+   chaque en-tête avec son intervalle `⏱ 0:12 → 0:45`. Les consommateurs qui veulent
+   les temps (dataviz « Structure ») passent par `extract_sections`, pas par le texte.
 """
 
 import re
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 _LRC_RE = re.compile(r"\[(\d+):(\d+)(?:[.:](\d+))?\]\s*(.*)")
@@ -49,39 +54,105 @@ def _fmt(t: float) -> str:
     return f"{m}:{s:02d}"
 
 
+# Longueur normalisée minimale du début commun pour valoir alignement : en
+# dessous, « j'te jure » ouvrirait n'importe quelle ligne.
+_PREFIX_MIN = 15
+
+
+def _is_prefix_match(a: str, b: str) -> bool:
+    """Les deux lignes normalisées partagent-elles un DÉBUT assez long ?
+
+    Les deux sources ne découpent pas les vers pareil et le match exact comme la
+    similarité globale s'y cassent, alors que l'ancrage temporel est certain :
+    - Genius agrège plusieurs lignes LRC en une (« …pas différents : moi aussi,
+      j'en veux… » = 2 lignes LRC) → l'une est préfixe de l'autre ;
+    - Genius double une ligne de hook (« chaque jour… chaque jour… ») là où le
+      LRC la joint à la suivante → ni l'une ni l'autre n'est préfixe, mais le
+      début commun est franc.
+    Comparaison **par mots** (jamais au milieu d'un mot) pour éviter les
+    faux positifs.
+    """
+    wa, wb = a.split(), b.split()
+    shared: list[str] = []
+    for x, y in zip(wa, wb, strict=False):
+        if x != y:
+            break
+        shared.append(x)
+    return len(" ".join(shared)) >= _PREFIX_MIN
+
+
 def _is_header(line: str) -> bool:
     stripped = line.strip()
     return stripped.startswith("[") and stripped.endswith("]")
 
 
-def annotate_sections(structured: str, lrc: str) -> str:
+@dataclass(frozen=True)
+class LyricSection:
+    """Une section de paroles datée : `[Couplet 1 : Isha]` → 12.0 s → 45.0 s.
+
+    `label` = en-tête SANS les crochets. `header_index` = index de la ligne
+    d'en-tête dans le texte structuré. `start`/`end` sont `None` quand la section
+    n'a pas pu être alignée sur le LRC (aucune de ses 3 premières lignes retrouvée).
+
+    `content_lines == 0` distingue le **non-alignable** de l'**échec d'alignement** :
+    un en-tête de regroupement (« [Partie 2 : Risotto Gambas] » sur un 2-en-1) ou
+    une « [Outro Instrumentale] » n'a aucune parole à ancrer — ce n'est pas un raté.
+
+    `end` = borne d'AFFICHAGE (début de la section suivante) ; `sung_end` = dernière
+    ligne réellement chantée. L'écart entre les deux est une **plage instrumentale**
+    (solo, interlude non chanté) : c'est lui qui permet de la colorer à part.
     """
-    Retourne les paroles structurées avec, sur chaque en-tête `[...]`, l'intervalle
-    de temps inséré DANS les crochets (pour rester décoré par l'affichage) :
-        [Couplet 1 : Isha]  →  [Couplet 1 : Isha ⏱ 0:12 → 0:45]
-    Si pas de LRC ou aucun alignement, retourne `structured` inchangé.
+
+    label: str
+    header_index: int
+    start: float | None
+    end: float | None
+    content_lines: int = 0  # lignes de paroles sous l'en-tête (0 = rien à aligner)
+    sung_end: float | None = None  # dernière ligne CHANTÉE (≠ `end` si plage instru)
+
+
+def extract_sections(structured: str, lrc: str) -> list[LyricSection]:
+    """Sections du texte structuré, datées par alignement sur le LRC.
+
+    Renvoie `[]` si pas de LRC, pas de texte ou aucun en-tête `[...]`. L'`end` de
+    la dernière section vaut le DERNIER TIMESTAMP du LRC (pas la durée du morceau :
+    une coda instrumentale n'est pas couverte — c'est à l'appelant de l'étendre).
+
+    Le matching est **monotone** : chaque section cherche après la dernière ligne
+    alignée, ce qui empêche un refrain répété de se caler sur une occurrence
+    antérieure (piège documenté dans CLAUDE.md, verrouillé par les tests).
     """
     lrc_lines = parse_lrc(lrc)
     if not lrc_lines or not structured:
-        return structured
+        return []
 
     norm_lrc = [(_norm2(txt), t) for t, txt in lrc_lines if txt.strip()]
     n_lrc = len(norm_lrc)
 
-    def find_from(text: str, start_idx: int):
+    def find_from(text: str, start_idx: int, skip: int = 0):
         """
-        1er timestamp alignant `text` à une position >= start_idx (recherche EN AVANT).
-        Match exact prioritaire, sinon 1ʳᵉ ligne de similarité >= 0.82.
-        Renvoie (time, index) ou None. La contrainte « en avant » impose la monotonie.
+        Timestamp alignant `text` à une position >= start_idx (recherche EN AVANT).
+        Trois passes, de la plus sûre à la plus permissive : match exact, **préfixe**
+        (découpage différent des deux sources, cf. `_PREFIX_MIN`), puis similarité
+        >= 0.82. Renvoie (time, index) ou None.
+        La contrainte « en avant » impose la monotonie.
+
+        `skip` = nombre d'occurrences à ignorer, quand la ligne cherchée figure
+        aussi dans la section PRÉCÉDENTE (elle y a donc déjà été consommée).
+        Borné au dernier candidat : un `skip` trop grand ne fait jamais échouer.
         """
         nt = _norm2(text)
         if len(nt) < 3:
             return None
-        for i in range(start_idx, n_lrc):  # match exact, le plus proche en avant
-            if norm_lrc[i][0] == nt:
-                return norm_lrc[i][1], i
-        for i in range(start_idx, n_lrc):  # sinon 1ʳᵉ similarité suffisante en avant
-            if SequenceMatcher(None, nt, norm_lrc[i][0]).ratio() >= 0.82:
+        passes = (
+            lambda other: other == nt,
+            lambda other: _is_prefix_match(nt, other),
+            lambda other: SequenceMatcher(None, nt, other).ratio() >= 0.82,
+        )
+        for matches in passes:
+            hits = [i for i in range(start_idx, n_lrc) if matches(norm_lrc[i][0])]
+            if hits:
+                i = hits[min(skip, len(hits) - 1)]
                 return norm_lrc[i][1], i
         return None
 
@@ -98,36 +169,97 @@ def annotate_sections(structured: str, lrc: str) -> str:
             cur["lines"].append(ln.strip())
 
     if not sections:
-        return structured
+        return []
 
     # Start de chaque section = timestamp de sa 1ʳᵉ ligne alignable (parmi les 3 premières).
-    # Recherche MONOTONE : chaque section cherche APRÈS la dernière ligne alignée, ce qui
-    # empêche un refrain répété de se caler sur une occurrence antérieure.
     starts: list[float | None] = []
+    indexes: list[int | None] = []
     cursor = 0
+    # Lignes de la section précédente NON encore consommées : si la section
+    # courante s'ouvre sur l'une d'elles, la 1ʳᵉ occurrence rencontrée appartient
+    # à la précédente, pas à celle-ci. « On peut t'éteindre… » clôt l'[Intro] ET
+    # ouvre le [Couplet unique] de « 3ein / Risotto Gambas » — sans ce décompte
+    # le couplet démarrait 7 s trop tôt, sur la ligne de l'intro.
+    pending: list[str] = []
     for sec in sections:
-        found = None
-        for line in sec["lines"][:3]:
-            found = find_from(line, cursor)
+        found, matched_pos = None, 0
+        for pos, line in enumerate(sec["lines"][:3]):
+            # Le décompte doit suivre la MÊME relation que le matching : la ligne
+            # d'ouverture du couplet est souvent une ligne fusionnée par Genius,
+            # elle ne s'égale pas à celle de la section précédente, elle la préfixe.
+            nt = _norm2(line)
+            skip = sum(1 for p in pending if p == nt or _is_prefix_match(nt, p))
+            found = find_from(line, cursor, skip=skip)
             if found is not None:
+                matched_pos = pos
                 break
         if found is not None:
             starts.append(found[0])
+            indexes.append(found[1])
             cursor = found[1] + 1  # la section suivante repart après ce point
+            pending = [_norm2(line) for line in sec["lines"][matched_pos + 1 :]]
         else:
             starts.append(None)  # non alignée : on ne recule pas le curseur
+            indexes.append(None)
 
     last_t = lrc_lines[-1][0]
-    annotated = list(lines)
-    any_annotated = False
+    out: list[LyricSection] = []
     for i, sec in enumerate(sections):
         st = starts[i]
-        if st is None:
+        # Fin = start de la 1ʳᵉ section alignée suivante, sinon dernier timestamp.
+        nxt = next((j for j in range(i + 1, len(sections)) if starts[j] is not None), None)
+        en = None if st is None else (starts[nxt] if nxt is not None else last_t)
+        out.append(
+            LyricSection(
+                label=lines[sec["idx"]].strip().strip("[]").strip(),
+                header_index=sec["idx"],
+                start=st,
+                end=en,
+                content_lines=len(sec["lines"]),
+                sung_end=_sung_end(norm_lrc, indexes[i], indexes[nxt] if nxt is not None else None),
+            )
+        )
+    return out
+
+
+def _sung_end(norm_lrc, idx: int | None, next_idx: int | None) -> float | None:
+    """Timestamp de la DERNIÈRE ligne chantée d'une section.
+
+    `end` est la borne d'affichage (début de la section suivante) ; entre les
+    deux il peut y avoir une longue plage instrumentale (solo, interlude non
+    chanté). `sung_end` donne le vrai bout du chant : la dernière ligne LRC
+    située avant le début de la section suivante.
+    """
+    if idx is None:
+        return None
+    last = (len(norm_lrc) - 1) if next_idx is None else (next_idx - 1)
+    return norm_lrc[max(idx, min(last, len(norm_lrc) - 1))][1]
+
+
+def annotate_sections(structured: str, lrc: str) -> str:
+    """
+    Retourne les paroles structurées avec, sur chaque en-tête `[...]`, l'intervalle
+    de temps inséré DANS les crochets (pour rester décoré par l'affichage) :
+        [Couplet 1 : Isha]  →  [Couplet 1 : Isha ⏱ 0:12 → 0:45]
+    Si pas de LRC ou aucun alignement, retourne `structured` inchangé.
+
+    Habillage texte de `extract_sections` (qui porte toute la logique temporelle).
+    """
+    sections = extract_sections(structured, lrc)
+    if not sections:
+        return structured
+
+    lines = structured.splitlines()
+    annotated = list(lines)
+    any_annotated = False
+    for sec in sections:
+        if sec.start is None:
             continue
-        en = next((starts[j] for j in range(i + 1, len(sections)) if starts[j] is not None), last_t)
-        h = lines[sec["idx"]].strip()
+        h = lines[sec.header_index].strip()
         if h.endswith("]"):
-            annotated[sec["idx"]] = f"{h[:-1].rstrip()}  ⏱ {_fmt(st)} → {_fmt(en)}]"
+            annotated[sec.header_index] = (
+                f"{h[:-1].rstrip()}  ⏱ {_fmt(sec.start)} → {_fmt(sec.end)}]"
+            )
             any_annotated = True
 
     return "\n".join(annotated) if any_annotated else structured

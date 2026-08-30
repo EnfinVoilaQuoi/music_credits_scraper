@@ -819,24 +819,21 @@ def build_bubble_spec(
     # distances, on reconstruit les ellipses — quelques passes suffisent, et
     # l'anti-chevauchement finit par s'y opposer : un album dense débordera
     # plutôt que de voir ses cercles se coller.
-    # Deux bornes : les cercles tiennent dans la zone moins la marge, les ovales
-    # dans la zone entière. Le titre curviligne, lui, a le droit de déborder —
-    # il reste collé à son ovale (cf. `_bbox`).
+    # SEULS LES CERCLES sont contraints (zone moins la marge). Un ovale enveloppe
+    # plusieurs cercles et déborde forcément d'eux : l'exiger dans le cadre
+    # empêchait les cercles d'en approcher — sur M.A.N le noyau se retrouvait sur
+    # 44 % de la largeur pour 93 % de la hauteur, un boudin vertical au milieu.
+    # Un ovale coupé par le bord est d'ailleurs conforme à la DA (cf. maquette).
     avail_w = style.frame_width - 2 * style.margin
     avail_h = style.frame_height - 2 * style.margin
     main_sizes = {k: sizes[k] for k in comps[0]}
     for _ in range(_FIT_PASSES):
         bx0, by0, bx1, by1 = _bbox(comps[0], what="circles")
-        ex0, ey0, ex1, ey1 = _bbox(comps[0], what="ellipses")
         ratios = [1.0]
         if bx1 - bx0 > avail_w:
             ratios.append(avail_w / (bx1 - bx0))
         if by1 - by0 > avail_h:
             ratios.append(avail_h / (by1 - by0))
-        if ex1 - ex0 > style.frame_width:
-            ratios.append(style.frame_width / (ex1 - ex0))
-        if ey1 - ey0 > style.frame_height:
-            ratios.append(style.frame_height / (ey1 - ey0))
         ratio = min(ratios)
         if ratio > 0.999:
             break
@@ -856,7 +853,7 @@ def build_bubble_spec(
     # coins de la zone juste après, donc les inclure dans le centrage décalerait
     # tout le dessin d'un côté (et les îlots seraient recalés depuis un repère
     # devenu faux). Sans îlot, hub = contenu et le centrage est le même.
-    min_x, min_y, max_x, max_y = _bbox(comps[0], what="ellipses")
+    min_x, min_y, max_x, max_y = _bbox(comps[0], what="circles")
     content_w = max_x - min_x
     content_h = max_y - min_y
     width = style.frame_width
@@ -880,7 +877,7 @@ def build_bubble_spec(
             # Boîte englobante de l'îlot : cercles + ellipses (budget dur), et
             # la même légendes comprises, qui servira à retenir la translation.
             bx0, by0, bx1, by1 = _bbox(comp, what="circles")
-            ax0, ay0, ax1, ay1 = _bbox(comp, what="ellipses")
+            ax0, ay0, ax1, ay1 = _bbox(comp, what="all")
             sx, sy = _SLOTS[idx % len(_SLOTS)]
             if sx < 0:
                 tx = (raw_fx0 + pad) - bx0
@@ -921,9 +918,6 @@ def build_bubble_spec(
     if len(hub_keys) > 1:
         zx0, zy0 = style.margin - dx, style.margin - dy
         zx1, zy1 = (width - style.margin) - dx, (height - style.margin) - dy
-        # Bornes ÉLARGIES pour les ovales : ils ont droit à la marge.
-        lx_lo, ly_lo = -dx, -dy
-        lx_hi, ly_hi = width - dx, height - dy
         # Les îlots sont figés (calés aux coins) : on retient leurs CERCLES.
         island_circles = [
             (canvas[k][0], canvas[k][1], sizes[k] / 2.0) for comp in comps[1:] for k in comp
@@ -945,24 +939,18 @@ def build_bubble_spec(
             cand = {**base, **moved}
             return cand, _make_groups(cand)
 
-        def _fits(cand, box, ellipse_box):
+        def _fits(cand, box):
             """Le hub tient-il dans la zone sans venir toucher un îlot ?
 
-            Deux bornes : les cercles restent dans la zone moins la marge, les
-            ovales ont droit à la marge. La proximité des îlots, elle, se teste
+            Seuls les CERCLES sont bornés (zone moins la marge) : leurs ovales
+            ont le droit d'être coupés par le bord, c'est même ce que montre la
+            maquette. La proximité des îlots, elle, se teste
             CERCLE À CERCLE : la boîte d'un hub large recouvre forcément la
             bande d'un îlot de coin, et un test de boîtes bloquerait tout
             étalement dès le premier pixel. Ce qui doit être garanti, c'est que
             deux cercles ne se marchent pas dessus.
             """
             if box[0] < zx0 or box[1] < zy0 or box[2] > zx1 or box[3] > zy1:
-                return False
-            if (
-                ellipse_box[0] < lx_lo
-                or ellipse_box[1] < ly_lo
-                or ellipse_box[2] > lx_hi
-                or ellipse_box[3] > ly_hi
-            ):
                 return False
             for k in hub_keys:
                 hx, hy = cand[k]
@@ -978,11 +966,7 @@ def build_bubble_spec(
             def candidate(f):
                 fx, fy = (f, 1.0) if axis == "x" else (1.0, f)
                 cand, cand_groups = _spread(fx, fy, base)
-                return _fits(
-                    cand,
-                    _bbox(hub_keys, cand, cand_groups, what="circles"),
-                    _bbox(hub_keys, cand, cand_groups, what="ellipses"),
-                )
+                return _fits(cand, _bbox(hub_keys, cand, cand_groups, what="circles"))
 
             if candidate(_SPREAD_MAX):
                 return _SPREAD_MAX
@@ -1014,7 +998,7 @@ def build_bubble_spec(
     # contenu) et sur les mêmes éléments que le cadrage : cercles, ellipses,
     # légendes. Le contenu n'est pas réduit pour rentrer — on se contente de le
     # DIRE (`BubbleSpec.overflow`), à charge de l'appelant d'avertir.
-    fx0, fy0, fx1, fy1 = _bbox(graph.nodes, canvas, raw_groups, what="ellipses")
+    fx0, fy0, fx1, fy1 = _bbox(graph.nodes, canvas, raw_groups, what="circles")
     over_w = max(0.0, (fx1 - fx0) - width)
     over_h = max(0.0, (fy1 - fy0) - height)
     overflow = (over_w, over_h) if (over_w > 0 or over_h > 0) else None

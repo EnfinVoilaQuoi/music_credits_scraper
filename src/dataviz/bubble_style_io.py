@@ -76,6 +76,12 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "Interligne des noms sur plusieurs mots, en multiple de la taille.",
             ),
             ("uppercase_names", "Écrire les noms en MAJUSCULES (true/false)."),
+            (
+                "include_instruments",
+                "Faire entrer les instrumentistes dans le réseau (true/false) : les crédits "
+                "« Piano », « Guitare »… deviennent des cercles, avec l'instrument sous le nom.",
+            ),
+            ("sub_label_ratio", "Taille de cet instrument, en fraction de celle du nom."),
             ("label_color", "Couleur du nom (hex)."),
             ("font_family", "APERÇU SVG : familles de police, la première disponible gagne."),
             ("font_bold", "ILLUSTRATOR : nom PostScript de la police des noms d'artistes."),
@@ -130,6 +136,12 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "Inclinaison maximale du texte, en degrés. C'est elle qui décide jusqu'où "
                 "un titre peut glisser vers le bout de son ovale : plus on tolère, plus il "
                 "part vers les bords de l'image, mais plus il penche.",
+            ),
+            (
+                "ellipse_label_bounds_slack",
+                "De combien un titre peut sortir de la zone, en px. À 0 il reste dedans coûte "
+                "que coûte, quitte à se rabattre vers le milieu du dessin sur un très grand "
+                "ovale ; l'augmenter le laisse ressortir vers les bords.",
             ),
             (
                 "ellipse_label_max_arc",

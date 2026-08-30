@@ -42,6 +42,7 @@ def _style_payload(style: SvgStyle) -> dict:
         "font_medium": style.font_medium,
         "uppercase_names": style.uppercase_names,
         "line_height_ratio": style.line_height_ratio,
+        "sub_label_ratio": style.sub_label_ratio,
         "label_color": style.label_color,
         "node_fill": style.node_fill,
         "node_stroke": style.node_stroke,
@@ -94,6 +95,8 @@ def _node_payload(node, style: SvgStyle) -> dict:
         "y": _r(node.y),
         "diameter": _r(node.size),
         "track_count": node.track_count,
+        "badge_text": node.badge_text or str(node.track_count),
+        "sub_label": node.sub_label,
         "font_size": _r(node.label_font_size),
         **_image_payload(node.display),
     }

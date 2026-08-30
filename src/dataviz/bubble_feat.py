@@ -43,6 +43,7 @@ def generate_bubble_feat(
         credit_label="featuring",
         filename="bubble_feat.svg",
         kind="feat",
+        solo_badge=False,  # « en solo » ne veut rien dire pour un invité
         style=style,
         seed=seed,
         output_path=output_path,

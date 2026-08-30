@@ -31,6 +31,7 @@ from src.dataviz.bubble_svg import (
 )
 from src.dataviz.collab_graph import (
     DEFAULT_SEED,
+    INSTRUMENT_ROLES,
     STRICT_PRODUCER_ROLES,
     aggregate_collab_groups,
     build_collab_graph,
@@ -64,6 +65,12 @@ _TIP_SAMPLES = 180
 # cercle. 7 suffisent : un cercle assez petit pour se glisser entre deux sondes
 # ne masquerait qu'une lettre.
 _ARC_PROBES = 7
+
+# Pas de quantification du dégagement, en px. Deux emplacements qui ne diffèrent
+# que de quelques pixels de vide sont tenus pour équivalents : c'est alors
+# l'éloignement du centre qui tranche, et le choix reste stable d'un album à
+# l'autre au lieu de basculer sur un écart insignifiant.
+_CLEARANCE_STEP = 12.0
 
 # Allers-retours « écarter des îlots / ré-écarter entre eux » du noyau. Deux
 # suffisent en pratique ; au-delà les deux contraintes s'opposent et il faut
@@ -142,6 +149,46 @@ def _node_size(track_count: int, min_count: int, max_count: int, style: SvgStyle
     return style.node_size_min + frac * (style.node_size_max - style.node_size_min)
 
 
+def _badge_text(track_count: int, solo_count: int) -> str:
+    """Ce qu'affiche le badge : le compte, et le détail des solos s'il y en a.
+
+    « 15 (7 Solos) » pour un producteur qui a des morceaux à plusieurs ET des
+    solos. Un producteur qui n'a QUE des solos garde son simple compte : le
+    répéter entre parenthèses n'apprendrait rien.
+    """
+    if not solo_count or solo_count >= track_count:
+        return str(track_count)
+    unite = "Solo" if solo_count == 1 else "Solos"
+    return f"{track_count} ({solo_count} {unite})"
+
+
+def _format_instrument(role: str) -> str:
+    """« Bass Guitar » → « Bass guitar » : minuscules, initiale en capitale."""
+    cleaned = (role or "").strip()
+    return cleaned[:1].upper() + cleaned[1:].lower() if cleaned else ""
+
+
+def extract_instruments(tracks, roles: tuple[str, ...]) -> dict[str, str]:
+    """`identity_key` → instrument(s) joué(s), pour le sous-titre du cercle.
+
+    Plusieurs instruments pour la même personne sont joints : un musicien qui
+    tient le piano sur un morceau et les cordes sur un autre porte les deux.
+    """
+    from src.utils.credit_normalize import identity_key
+
+    role_set = set(roles)
+    found: dict[str, list[str]] = {}
+    for track in tracks:
+        for credit in track.credits:
+            if credit.role.value not in role_set:
+                continue
+            key = identity_key(credit.name)
+            label = _format_instrument(credit.role.value)
+            if key and label and label not in found.setdefault(key, []):
+                found[key].append(label)
+    return {key: ", ".join(sorted(labels)) for key, labels in sorted(found.items())}
+
+
 def _label_font_size(node_size: float, style: SvgStyle) -> float:
     """Taille du nom dans un cercle : `font_size` au prorata du diamètre.
 
@@ -208,8 +255,10 @@ def _ellipse_label(collab_group, style: SvgStyle) -> tuple[str, ...]:
     if collab_group.track_count == 1:
         return tuple(clean_track_title(t) for t in collab_group.track_titles)
     if len(collab_group.keys) == 1:
-        # Producteur seul sur N morceaux → « N solo » (affiché DANS son carré).
-        return (f"{collab_group.track_count} solo",)
+        # Producteur seul sur N morceaux : rien sur l'ovale. « N solo » s'y
+        # perdait au milieu des titres voisins alors que l'info tient dans le
+        # badge du cercle — « 15 (7 Solos) ».
+        return ()
     if collab_group.track_count <= style.label_track_threshold:
         return tuple(clean_track_title(t) for t in collab_group.track_titles)
     return (_count_label(collab_group.track_count),)
@@ -272,8 +321,7 @@ def _ring_obstacles(ellipse, rings, style: SvgStyle) -> list[tuple[float, float,
     radius = style.ellipse_label_font_size * 0.6
     for ring in rings:
         carrier = ellipse.inflated(ring.offset)
-        half = len(ring.text) * style.ellipse_label_font_size * _CHAR_WIDTH_RATIO / 2.0
-        span = math.degrees(half / max(1e-9, min(carrier.rx, carrier.ry)))
+        span = _text_span(carrier, ring.text, style)
         for i in range(_ARC_PROBES):
             t = ring.t - span + 2.0 * span * i / (_ARC_PROBES - 1)
             px, py = carrier.point_at(t)
@@ -281,19 +329,43 @@ def _ring_obstacles(ellipse, rings, style: SvgStyle) -> list[tuple[float, float,
     return marks
 
 
-def _arc_is_clear(ellipse, t_center, span_deg, avoid) -> bool:
-    """Aucun cercle ne recouvre l'arc que le texte occuperait autour de `t_center` ?"""
+def _text_span(ellipse, text: str, style: SvgStyle) -> float:
+    """Demi-ouverture angulaire occupée par `text` sur `ellipse`, en degrés."""
+    half = len(text) * style.ellipse_label_font_size * _CHAR_WIDTH_RATIO / 2.0
+    return math.degrees(half / max(1e-9, min(ellipse.rx, ellipse.ry)))
+
+
+def _arc_in_bounds(ellipse, t_center, text: str, style: SvgStyle, bounds) -> bool:
+    """L'arc qu'occuperait `text` tient-il entièrement dans `bounds` ?"""
+    span = _text_span(ellipse, text, style)
+    x0, y0, x1, y1 = bounds
+    for i in range(_ARC_PROBES):
+        t = t_center - span + 2.0 * span * i / (_ARC_PROBES - 1)
+        px, py = ellipse.point_at(t)
+        if px < x0 or px > x1 or py < y0 or py > y1:
+            return False
+    return True
+
+
+def _arc_clearance(ellipse, t_center, span_deg, avoid) -> float:
+    """Plus petit dégagement, le long de l'arc du texte, vis-à-vis des obstacles.
+
+    Négatif quand le titre passerait DANS un obstacle (un cercle, ou un titre
+    déjà posé) : le classement écarte alors naturellement cet emplacement.
+    """
+    if not avoid:
+        return math.inf
+    worst = math.inf
     for i in range(_ARC_PROBES):
         t = t_center - span_deg + 2.0 * span_deg * i / (_ARC_PROBES - 1)
         px, py = ellipse.point_at(t)
         for cx, cy, radius in avoid:
-            if math.hypot(px - cx, py - cy) < radius:
-                return False
-    return True
+            worst = min(worst, math.hypot(px - cx, py - cy) - radius)
+    return worst
 
 
 def _label_tip(
-    ellipse, center_x, center_y, style: SvgStyle, inward=False, avoid=(), text=""
+    ellipse, center_x, center_y, style: SvgStyle, inward=False, avoid=(), text="", bounds=None
 ) -> tuple[float, int]:
     """Où poser la légende curviligne sur l'ellipse : `(paramètre t, sens)`.
 
@@ -334,17 +406,33 @@ def _label_tip(
         return t, (1 if tx >= 0 else 0)
 
     candidates.sort(key=lambda c: (-c[0], c[1]))  # tri explicite → déterministe
-    best = candidates[0]
-    if avoid and text:
-        # Le meilleur emplacement ne vaut rien si un cercle passe devant : les
-        # titres sont dessinés SOUS les cercles, « Mort Ce soir » s'y perdait la
-        # moitié. On descend le classement jusqu'au premier qui soit dégagé.
-        half = len(text) * style.ellipse_label_font_size * _CHAR_WIDTH_RATIO / 2.0
-        span = math.degrees(half / max(1e-9, min(ellipse.rx, ellipse.ry)))
-        for candidate in candidates:
-            if _arc_is_clear(ellipse, candidate[1], span, avoid):
-                best = candidate
-                break
+    if not (avoid or bounds) or not text:
+        return candidates[0][1], (1 if candidates[0][2] >= 0 else 0)
+
+    if bounds:
+        # Un titre hors du cadre est un titre perdu : on ne garde que les
+        # emplacements qui tiennent, quitte à tous les perdre (on reprend alors
+        # le classement complet plutôt que de ne rien placer).
+        slack = style.ellipse_label_bounds_slack
+        loose = (bounds[0] - slack, bounds[1] - slack, bounds[2] + slack, bounds[3] + slack)
+        inside = [c for c in candidates if _arc_in_bounds(ellipse, c[1], text, style, loose)]
+        if inside:
+            candidates = inside
+
+    # Classement par la PLACE DISPONIBLE, pas par l'éloignement du centre.
+    # L'éloignement favorisait les flancs gauche et droit, qui sur un grand
+    # ovale traversent justement le tas central — « McQueen / Givenchy » y
+    # atterrissait. Ce qui compte est qu'il y ait du vide autour du titre.
+    span = _text_span(ellipse, text, style)
+    best = None
+    for score, t, tx in candidates:
+        clearance = _arc_clearance(ellipse, t, span, avoid)
+        # L'éloignement du centre ne tranche plus qu'à place égale, à quelques
+        # pixels près : deux coins aussi dégagés l'un que l'autre donneraient
+        # sinon un choix instable d'un album à l'autre.
+        ranked = (round(clearance / _CLEARANCE_STEP), score)
+        if best is None or ranked > best[0]:
+            best = (ranked, t, tx)
     return best[1], (1 if best[2] >= 0 else 0)
 
 
@@ -385,7 +473,9 @@ def _label_offset(style: SvgStyle, ellipse=None, text: str = "") -> float:
 _CHAR_WIDTH_RATIO = 0.55
 
 
-def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=False, avoid=()):
+def _label_rings(
+    ellipse, lines, style: SvgStyle, center_x, center_y, inward=False, avoid=(), bounds=None
+):
     """Un anneau par titre, empilés vers l'extérieur, dans l'ordre de lecture.
 
     Deux morceaux sur un même ovale s'écrivaient à la suite sur une seule
@@ -401,7 +491,14 @@ def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=Fal
         return ()
     base = _label_offset(style)
     t_base, _sweep = _label_tip(
-        ellipse.inflated(base), center_x, center_y, style, inward=inward, avoid=avoid, text=lines[0]
+        ellipse.inflated(base),
+        center_x,
+        center_y,
+        style,
+        inward=inward,
+        avoid=avoid,
+        text=lines[0],
+        bounds=bounds,
     )
     # Le texte est-il posé au-dessus de l'ovale ? Alors s'éloigner du tracé,
     # c'est monter, et la 1ʳᵉ ligne doit être la plus éloignée.
@@ -433,6 +530,7 @@ def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=Fal
             inward=inward,
             avoid=avoid,
             text=text,
+            bounds=bounds,
         )
         rings.append(LabelRing(text=text, offset=offset, t=t, sweep=sweep))
     if above:
@@ -782,7 +880,12 @@ def _compose_layout(
 
 
 def build_bubble_spec(
-    graph, collab_groups, style: SvgStyle | None = None, seed: int = DEFAULT_SEED
+    graph,
+    collab_groups,
+    style: SvgStyle | None = None,
+    seed: int = DEFAULT_SEED,
+    sub_labels: dict[str, str] | None = None,
+    solo_badge: bool = True,
 ) -> BubbleSpec:
     """Assemble le `BubbleSpec` : composition par composante, ellipses, zone fixe.
 
@@ -794,10 +897,19 @@ def build_bubble_spec(
     un dépassement est signalé (`BubbleSpec.overflow`), pas corrigé.
     """
     style = style or SvgStyle()
+    sub_labels = sub_labels or {}
     if graph.number_of_nodes() == 0:
         raise ValueError("build_bubble_spec : graphe vide (aucun producteur)")
 
     counts = {key: graph.nodes[key]["track_count"] for key in graph.nodes}
+    # Le détail des solos ne vaut que pour les producteurs : un artiste SEUL
+    # invité sur un morceau n'est pas « en solo », le mot induirait en erreur
+    # sur une planche Bubble Feat.
+    solos = (
+        {cg.keys[0]: cg.track_count for cg in collab_groups if len(cg.keys) == 1}
+        if solo_badge
+        else {}
+    )
     min_count = min(counts.values())
     max_count = max(counts.values())
     sizes = {key: _node_size(counts[key], min_count, max_count, style) for key in graph.nodes}
@@ -810,12 +922,18 @@ def build_bubble_spec(
     # ordre trié → indépendante de l'ordre d'insertion des nœuds (byte-identité).
     ordered = sorted(canvas)
 
-    def _make_groups(canvas):
+    def _make_groups(canvas, bounds=None, place=False):
         """Ellipses + légendes pour un état donné du nuage.
 
         Refait à chaque resserrage du hub : une ellipse et sa légende dépendent
         des positions, on ne peut pas les calculer une fois pour toutes avant de
         savoir si le dessin tient dans la zone.
+
+        `place=False` (le cas des passes de mesure) pose les titres au plus
+        simple : la recherche d'étalement reconstruit les groupes des dizaines
+        de fois, et seule la géométrie des ovales l'intéresse. Le placement fin
+        — éviter les cercles, les titres voisins, rester dans le cadre — n'est
+        calculé qu'une fois, à la toute fin.
         """
         center_x = sum(canvas[k][0] for k in ordered) / len(canvas)
         center_y = sum(canvas[k][1] for k in ordered) / len(canvas)
@@ -856,9 +974,11 @@ def build_bubble_spec(
                 center_x,
                 center_y,
                 inward=not set(cg.keys) <= main_set,
-                avoid=tuple(obstacles),
+                avoid=tuple(obstacles) if place else (),
+                bounds=bounds,
             )
-            obstacles.extend(_ring_obstacles(ellipse, rings, style))
+            if place:
+                obstacles.extend(_ring_obstacles(ellipse, rings, style))
             raw_groups.append((cg, ellipse, label_lines, rings))
         return raw_groups
 
@@ -1151,6 +1271,13 @@ def build_bubble_spec(
             canvas, raw_groups = _spread(fx, fy, canvas)
             _state["canvas"], _state["groups"] = canvas, raw_groups
 
+    # Dernier placement des titres, cette fois en CONNAISSANT la zone : jusqu'ici
+    # `_make_groups` travaillait sans savoir où tomberait le cadre (le centrage
+    # n'était pas encore calculé), et un titre pouvait se poser hors champ —
+    # « McQueen / Givenchy » sortait par le haut.
+    raw_groups = _make_groups(canvas, bounds=(-dx, -dy, width - dx, height - dy), place=True)
+    _state["canvas"], _state["groups"] = canvas, raw_groups
+
     # Dépassement de la zone, mesuré APRÈS le calage des îlots (qui déplace du
     # contenu) et sur les mêmes éléments que le cadrage : cercles, ellipses,
     # légendes. Le contenu n'est pas réduit pour rentrer — on se contente de le
@@ -1171,6 +1298,8 @@ def build_bubble_spec(
             size=sizes[key],
             track_count=counts[key],
             label_font_size=_label_font_size(sizes[key], style),
+            badge_text=_badge_text(counts[key], solos.get(key, 0)),
+            sub_label=sub_labels.get(key, ""),
         )
         for key in ordered
     )
@@ -1251,6 +1380,7 @@ def generate_bubble(
     credit_label: str,
     filename: str,
     kind: str = "prod",
+    solo_badge: bool = True,
     style: SvgStyle | None = None,
     seed: int = DEFAULT_SEED,
     output_path=None,
@@ -1268,7 +1398,15 @@ def generate_bubble(
     if not album_tracks:
         raise ValueError(f"Aucun morceau trouvé pour l'album « {album} »")
 
-    track_groups = extract_track_groups(album_tracks, roles)
+    # Les instrumentistes rejoignent le réseau (option) : ce sont des crédits de
+    # fabrication au même titre, avec leur instrument affiché sous leur nom.
+    effective_roles = roles
+    sub_labels: dict[str, str] = {}
+    if style.include_instruments:
+        effective_roles = roles + INSTRUMENT_ROLES
+        sub_labels = extract_instruments(album_tracks, INSTRUMENT_ROLES)
+
+    track_groups = extract_track_groups(album_tracks, effective_roles)
     if not track_groups:
         raise ValueError(
             f"Aucun crédit {credit_label} ({', '.join(roles)}) sur l'album « {album} »"
@@ -1276,7 +1414,9 @@ def generate_bubble(
 
     graph = build_collab_graph(track_groups)
     collab_groups = aggregate_collab_groups(track_groups)
-    spec = build_bubble_spec(graph, collab_groups, style, seed=seed)
+    spec = build_bubble_spec(
+        graph, collab_groups, style, seed=seed, sub_labels=sub_labels, solo_badge=solo_badge
+    )
 
     if output_path is None:
         output_path = default_output_path(artist_name, album, filename)

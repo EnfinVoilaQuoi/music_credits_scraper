@@ -115,15 +115,33 @@ def test_legende_solo_un_morceau_affiche_le_titre(tmp_path):
     assert texts["ellipse-label-solo-0"] == "T4"
 
 
-def test_legende_solo_plusieurs_morceaux_compte(tmp_path):
-    # Producteur seul sur 2 morceaux → « 2 solo » (affiché dans son carré).
+def test_solos_annonces_par_le_badge_pas_par_une_legende(tmp_path):
+    # Un producteur qui a des morceaux à plusieurs ET des solos le dit dans son
+    # badge : « 3 (2 Solos) ». Posée sur l'ovale, la mention se perdait au
+    # milieu des titres voisins.
     tracks = [
         _track(1, "S1", "Al", _prod("X")),
         _track(2, "S2", "Al", _prod("X")),
+        _track(3, "Duo", "Al", _prod("X"), _prod("Y")),
     ]
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(tracks, "Al", output_path=out)
-    assert list(_ellipse_labels(ET.parse(out).getroot()).values()) == ["2 solo"]
+    root = ET.parse(out).getroot()
+    badge = next(el for el in root.iter() if el.get("id") == "badge-count-x")
+    assert badge.text == "3 (2 Solos)"
+    # Aucune légende « N solo » ne subsiste sur les ovales.
+    assert not [v for v in _ellipse_labels(root).values() if "olo" in v]
+
+
+def test_badge_sans_detail_quand_tout_est_solo(tmp_path):
+    # Un producteur qui n'a QUE des solos garde son simple compte : le répéter
+    # entre parenthèses n'apprendrait rien.
+    tracks = [_track(1, "S1", "Al", _prod("X")), _track(2, "S2", "Al", _prod("X"))]
+    out = tmp_path / "bubble.svg"
+    generate_bubble_prod(tracks, "Al", output_path=out)
+    root = ET.parse(out).getroot()
+    badge = next(el for el in root.iter() if el.get("id") == "badge-count-x")
+    assert badge.text == "2"
 
 
 def test_name_lines():
@@ -478,3 +496,33 @@ def test_aucun_chevauchement_entre_cercles_meme_hors_composante():
         for b in nodes[i + 1 :]:
             distance = math.hypot(a.x - b.x, a.y - b.y)
             assert distance >= (a.size + b.size) / 2.0 - 1e-6
+
+
+def test_instrument_sous_le_nom(tmp_path):
+    # Les instrumentistes entrent dans le réseau (option) : leur instrument est
+    # posé sous leur nom, en minuscules avec une capitale à la première lettre.
+    # Passe par `generate_bubble_prod` : c'est lui qui élargit le filtre de
+    # rôles et récolte les instruments.
+    from src.models.track import Credit, CreditRole
+
+    tracks = _album_tracks()
+    tracks[0].credits.append(Credit(name="Sofiane Pamart", role=CreditRole.PIANO))
+    result = generate_bubble_prod(tracks, "TestAlbum", output_path=tmp_path / "b.svg")
+    pamart = next(n for n in result.spec.nodes if n.key == "sofiane pamart")
+    assert pamart.sub_label == "Piano"
+    # Un producteur sans instrument n'a rien sous son nom.
+    assert next(n for n in result.spec.nodes if n.key == "kalim").sub_label == ""
+
+
+def test_instrument_desactivable(tmp_path):
+    from src.models.track import Credit, CreditRole
+
+    tracks = _album_tracks()
+    tracks[0].credits.append(Credit(name="Sofiane Pamart", role=CreditRole.PIANO))
+    result = generate_bubble_prod(
+        tracks,
+        "TestAlbum",
+        style=SvgStyle(include_instruments=False),
+        output_path=tmp_path / "b.svg",
+    )
+    assert all(n.key != "sofiane pamart" for n in result.spec.nodes)

@@ -75,6 +75,15 @@ class SvgStyle:
     # Inclinaison maximale du texte : au-delà il devient pénible à lire. C'est
     # elle qui décide jusqu'où un titre peut glisser vers le bout de son ovale.
     ellipse_label_max_angle: float = 28.0
+    # Instrumentistes : crédits « Piano », « Guitar »… ajoutés au réseau, avec
+    # l'instrument sous le nom de l'artiste, en plus petit.
+    # De combien un titre a le droit de sortir de la zone pour trouver une belle
+    # place. À 0 il reste dedans coûte que coûte — quitte, sur un très grand
+    # ovale dont le sommet est hors cadre, à se rabattre vers le milieu du
+    # dessin. L'augmenter le laisse ressortir vers les bords.
+    ellipse_label_bounds_slack: float = 0.0
+    include_instruments: bool = True
+    sub_label_ratio: float = 0.62  # taille du sous-titre, en fraction du nom
     # Part maximale du tour d'ellipse qu'un titre a le droit d'occuper : au-delà
     # il s'enroule et se lit à la verticale. La couronne s'écarte pour y tenir.
     ellipse_label_max_arc: float = 0.42
@@ -122,6 +131,10 @@ class NodeSpec:
     `label_font_size` est résolu ICI (dans le spec) et non à l'affichage : le
     SVG d'aperçu et la planche Illustrator doivent poser exactement la même
     taille, sans que chacun refasse le calcul de son côté.
+
+    `badge_text` = ce qu'affiche le badge, pas toujours le simple compte : un
+    producteur qui a des morceaux à plusieurs ET des solos porte « 15 (7 Solos) ».
+    `sub_label` = son instrument, posé sous son nom en plus petit.
     """
 
     key: str
@@ -131,6 +144,8 @@ class NodeSpec:
     size: float
     track_count: int
     label_font_size: float
+    badge_text: str = ""
+    sub_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -419,14 +434,17 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
                 id=f"node-{token}",
             )
         )
-        # Badge : petit carré arrondi à cheval sur le bas du cercle.
+        # Badge à cheval sur le bas du cercle. Sa LARGEUR suit son texte : il ne
+        # porte pas toujours un simple compte (« 15 (7 Solos) »).
         bsize = style.badge_size
-        bx = n.x - bsize / 2.0
+        text_value = n.badge_text or str(n.track_count)
+        bwidth = max(bsize, len(text_value) * style.badge_font_size * 0.62 + bsize * 0.5)
+        bx = n.x - bwidth / 2.0
         by = n.y + half - bsize / 2.0
         g_badges.add(
             dwg.rect(
                 insert=(f(bx), f(by)),
-                size=(f(bsize), f(bsize)),
+                size=(f(bwidth), f(bsize)),
                 rx=f(style.badge_corner_radius),
                 ry=f(style.badge_corner_radius),
                 fill=style.badge_fill,
@@ -437,9 +455,9 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
         # `dominant-baseline` n'étant pas fiable (ignoré par Illustrator).
         g_badges.add(
             dwg.text(
-                str(n.track_count),
+                text_value,
                 insert=(
-                    f(bx + bsize / 2.0),
+                    f(bx + bwidth / 2.0),
                     f(by + bsize / 2.0 + style.badge_font_size * 0.35),
                 ),
                 text_anchor="middle",
@@ -457,8 +475,12 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
         name = n.display.upper() if style.uppercase_names else n.display
         lines = name_lines(name)
         line_height = n.label_font_size * style.line_height_ratio
+        sub_size = n.label_font_size * style.sub_label_ratio
+        # Le bloc ENTIER (nom + instrument) est centré : sinon ajouter une ligne
+        # sous le nom décale l'ensemble vers le haut du cercle.
+        total = (len(lines) - 1) * line_height + (sub_size * 1.35 if n.sub_label else 0.0)
         label_group = dwg.g(id=f"label-{token}")
-        base_y = n.y - (len(lines) - 1) * line_height / 2.0 + n.label_font_size * 0.35
+        base_y = n.y - total / 2.0 + n.label_font_size * 0.35
         for i, line in enumerate(lines):
             label_group.add(
                 dwg.text(
@@ -469,6 +491,19 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
                     font_family=style.font_family,
                     font_weight="bold",
                     fill=style.label_color,
+                )
+            )
+        if n.sub_label:
+            label_group.add(
+                dwg.text(
+                    n.sub_label,
+                    insert=(f(n.x), f(base_y + (len(lines) - 1) * line_height + sub_size * 1.35)),
+                    text_anchor="middle",
+                    font_size=f(sub_size),
+                    font_family=style.font_family,
+                    font_weight="500",
+                    fill=style.label_color,
+                    id=f"instrument-{token}",
                 )
             )
         g_labels.add(label_group)

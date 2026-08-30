@@ -103,11 +103,9 @@ scripts/*
 !scripts/bubble_prod.py
 !scripts/bubble_feat.py
 !scripts/structure.py
-# Scripts Illustrator : git ne descend pas dans un dossier exclu, il faut donc
-# ré-inclure le RÉPERTOIRE avant de pouvoir whitelister un fichier dedans.
-!scripts/illustrator/
-scripts/illustrator/*
-!scripts/illustrator/structure.jsx
+# Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
+# méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
+# `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.
 /test*\.py
 /*test\.py
 /debug*\.py
@@ -123,3 +121,7 @@ archive/
 data/.bpmfinder_session.json
 # Décisions de rapprochement Kworb (confirmé/rejeté par artiste)
 data/kworb_links/*
+
+# Docs de mise en page Illustrator : même raison que les .jsx ci-dessus — elles
+# détaillent la maquette et le tour de main, elles restent locales.
+docs/*-illustrator.md

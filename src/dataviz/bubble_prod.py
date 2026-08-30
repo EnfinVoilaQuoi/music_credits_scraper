@@ -18,6 +18,7 @@ from pathlib import Path
 
 import networkx as nx
 
+from src.dataviz.bubble_json import build_payload, write_bubble_json
 from src.dataviz.bubble_svg import (
     BubbleSpec,
     EdgeSpec,
@@ -37,7 +38,22 @@ from src.dataviz.collab_graph import (
 from src.dataviz.geometry import EllipseSpec, enclosing_shape
 from src.utils.title_matching import normalize_title
 
-_SQRT2 = math.sqrt(2.0)
+# Nombre de points échantillonnés sur le contour d'un cercle pour caler
+# l'ellipse englobante : 8 suffisent (l'écart max au vrai cercle vaut 7,6 % du
+# rayon, absorbé par `ellipse_margin`), et ça reste 2× moins de points que les
+# 4 coins d'un carré ne coûtaient en précision inutile.
+_CIRCLE_SAMPLES = 8
+
+# Passes de resserrage du hub dans la zone (mesure → homothétie → reconstruction
+# des ellipses). Le point fixe est atteint en 2-3 passes ; au-delà, c'est que
+# l'anti-chevauchement bloque et qu'il faut assumer le débordement.
+_FIT_PASSES = 4
+
+# Étalement du hub dans la zone (dichotomie sur le facteur d'écartement).
+# `_SPREAD_MAX` borne le cas dégénéré du duo, qu'un facteur libre enverrait à
+# chaque bout de la planche ; 8 passes donnent le facteur à ~0,5 % près.
+_SPREAD_MAX = 3.0
+_SPREAD_PASSES = 8
 
 # Caractères interdits dans un nom de dossier Windows.
 _FORBIDDEN_DIRNAME = '<>:"/\\|?*'
@@ -45,16 +61,20 @@ _FORBIDDEN_DIRNAME = '<>:"/\\|?*'
 
 @dataclass(frozen=True)
 class BubbleResult:
-    """Retour de `generate_bubble` : le spec rendu + le chemin du SVG.
+    """Retour de `generate_bubble` : le spec rendu et les fichiers écrits.
 
     `node_count` = nb de nœuds du réseau (producteurs pour Bubble Prod,
-    artistes invités pour Bubble Feat).
+    artistes invités pour Bubble Feat). `path` = l'aperçu SVG, `json_path` = les
+    données de la planche Illustrator, `missing_images` = les artistes sans
+    photo (cercle plein en repli).
     """
 
     spec: BubbleSpec
     path: Path
     node_count: int
     track_count: int
+    json_path: Path | None = None
+    missing_images: tuple[str, ...] = ()
 
 
 # ── Sélection d'album ────────────────────────────────────────────────────────
@@ -89,19 +109,37 @@ def select_album_tracks(tracks, album: str) -> list:
 
 
 def _node_size(track_count: int, min_count: int, max_count: int, style: SvgStyle) -> float:
-    """Côté du carré ∝ sqrt(participation), mappé sur [min, max], borné.
+    """Diamètre du cercle ∝ sqrt(participation), mappé sur [min, max], borné.
 
     Échelle ancrée en `[sqrt(1), sqrt(max_count_album)]` : un prod à 1 morceau
-    = `square_size_min`, le plus gros compte = `square_size_max`. Si tous les
+    = `node_size_min`, le plus gros compte = `node_size_max`. Si tous les
     comptes de l'album sont égaux (aucune gradation à montrer) → `min` pour tous.
+
+    Les diamètres sont **absolus** (jamais remis à l'échelle pour tenir dans la
+    zone) : c'est ce qui rend deux albums comparables à l'œil.
     """
     if max_count == min_count:
-        return style.square_size_min
+        return style.node_size_min
     lo = math.sqrt(1)
     hi = math.sqrt(max_count)
     frac = (math.sqrt(track_count) - lo) / (hi - lo)
     frac = max(0.0, min(1.0, frac))
-    return style.square_size_min + frac * (style.square_size_max - style.square_size_min)
+    return style.node_size_min + frac * (style.node_size_max - style.node_size_min)
+
+
+def _label_font_size(node_size: float, style: SvgStyle) -> float:
+    """Taille du nom dans un cercle : `font_size` au prorata du diamètre.
+
+    Un cercle à `node_size_max` porte `font_size` en entier ; un plus petit
+    reçoit la même taille réduite dans le même rapport, jamais sous
+    `font_size_min` (en dessous, le nom n'est plus lisible et autant le laisser
+    déborder). Résolu ici plutôt qu'à l'affichage pour que l'aperçu SVG et la
+    planche Illustrator posent EXACTEMENT la même valeur.
+    """
+    if style.node_size_max <= 0:
+        return style.font_size
+    ratio = min(1.0, node_size / style.node_size_max)
+    return max(style.font_size_min, style.font_size * ratio)
 
 
 # ── Construction du spec ─────────────────────────────────────────────────────
@@ -131,11 +169,15 @@ def _ellipse_label(collab_group, style: SvgStyle) -> tuple[str, ...]:
 def _remove_overlaps(
     canvas: dict[str, tuple[float, float]], sizes: dict[str, float], style: SvgStyle
 ) -> dict[str, tuple[float, float]]:
-    """Écarte itérativement les carrés qui se superposent (boîtes, pas points).
+    """Écarte itérativement les cercles qui se superposent (disques, pas points).
 
     `spring_layout` ignore la taille des nœuds → passe corrective : à chaque
-    paire en collision, translation minimale (sur l'axe de moindre recouvrement),
-    répartie sur les deux carrés. Ordre et positions fixes → déterministe.
+    paire en collision, translation minimale le long de la ligne des centres,
+    répartie sur les deux cercles. Ordre et positions fixes → déterministe.
+
+    Sur des DISQUES la séparation est radiale (distance des centres ≥ somme des
+    rayons + gap) : la règle « boîtes » d'avant écartait sur l'axe de moindre
+    recouvrement, ce qui laissait deux cercles se frôler en diagonale.
     """
     keys = list(canvas.keys())
     pos = {k: [canvas[k][0], canvas[k][1]] for k in keys}
@@ -149,18 +191,22 @@ def _remove_overlaps(
                 min_sep = (sizes[ki] + sizes[kj]) / 2.0 + style.overlap_gap
                 ddx = pos[kj][0] - pos[ki][0]
                 ddy = pos[kj][1] - pos[ki][1]
-                ox = min_sep - abs(ddx)
-                oy = min_sep - abs(ddy)
-                if ox > 0 and oy > 0:  # boîtes en collision
-                    moved = True
-                    if ox <= oy:
-                        shift = ox / 2.0 * (1.0 if ddx >= 0 else -1.0)
-                        pos[ki][0] -= shift
-                        pos[kj][0] += shift
-                    else:
-                        shift = oy / 2.0 * (1.0 if ddy >= 0 else -1.0)
-                        pos[ki][1] -= shift
-                        pos[kj][1] += shift
+                dist = math.hypot(ddx, ddy)
+                if dist >= min_sep:
+                    continue
+                moved = True
+                if dist < 1e-9:
+                    # Centres confondus : aucune direction ne se dégage. On sépare
+                    # horizontalement (choix arbitraire mais FIXE → déterministe).
+                    ux, uy = 1.0, 0.0
+                    dist = 0.0
+                else:
+                    ux, uy = ddx / dist, ddy / dist
+                shift = (min_sep - dist) / 2.0
+                pos[ki][0] -= ux * shift
+                pos[ki][1] -= uy * shift
+                pos[kj][0] += ux * shift
+                pos[kj][1] += uy * shift
         if not moved:
             break
     return {k: (pos[k][0], pos[k][1]) for k in keys}
@@ -212,17 +258,36 @@ def _axis_label_anchor(
 
 
 def _label_half_width(label_lines: tuple[str, ...], style: SvgStyle) -> float:
-    """Demi-largeur estimée d'un bloc de légende (pour le cadrage du viewBox)."""
+    """Demi-largeur estimée d'un bloc de légende, DANS le sens de son texte."""
     if not label_lines:
         return 0.0
     longest = max(len(line) for line in label_lines)
     return longest * style.ellipse_label_font_size * 0.3
 
 
-def _square_half_extents(
+def _label_half_extents(
+    label_lines: tuple[str, ...], angle: float, style: SvgStyle
+) -> tuple[float, float]:
+    """Demi-extension en x et en y d'une légende TOURNÉE de `angle` degrés.
+
+    Une borne circulaire (`reach` = la plus grande des deux dimensions dans les
+    deux axes) était acceptable tant que le cadre grandissait avec le contenu ;
+    depuis que la zone est fixe elle déclencherait de fausses alertes de
+    débordement — un titre de 25 caractères revendiquerait ±150 px EN HAUTEUR.
+    On projette donc la boîte du texte selon son angle réel.
+    """
+    if not label_lines:
+        return 0.0, 0.0
+    along = _label_half_width(label_lines, style)
+    across = len(label_lines) * style.ellipse_label_line_height
+    ca, sa = abs(math.cos(math.radians(angle))), abs(math.sin(math.radians(angle)))
+    return along * ca + across * sa, along * sa + across * ca
+
+
+def _cloud_half_extents(
     canvas: dict[str, tuple[float, float]], sizes: dict[str, float]
 ) -> tuple[float, float, float, float]:
-    """Centre + demi-largeur/hauteur d'un nuage de carrés (boîte englobante)."""
+    """Centre + demi-largeur/hauteur d'un nuage de cercles (boîte englobante)."""
     xs: list[float] = []
     ys: list[float] = []
     for key, (x, y) in canvas.items():
@@ -234,23 +299,39 @@ def _square_half_extents(
     return cx, cy, (max(xs) - min(xs)) / 2.0, (max(ys) - min(ys)) / 2.0
 
 
+def _zone_radius(angle: float, half_w: float, half_h: float) -> float:
+    """Rayon de la zone (ellipse inscrite `half_w` × `half_h`) dans la direction `angle`.
+
+    La zone étant PAYSAGE (860 × 520), un rayon isotrope laisserait deux gros
+    vides à gauche et à droite : les pétales doivent s'étirer plus loin à
+    l'horizontale qu'à la verticale, dans le rapport même de la zone.
+    """
+    ca, sa = math.cos(angle), math.sin(angle)
+    return 1.0 / math.hypot(ca / half_w, sa / half_h)
+
+
 def _radialize_main(
     canvas: dict[str, tuple[float, float]],
     sizes: dict[str, float],
     style: SvgStyle,
     collab_groups,
+    fill_ratio: float,
 ) -> dict[str, tuple[float, float]]:
     """Répartit les feuilles du hub en angle (pétales sur 360°), clusters compacts.
 
     Le `spring_layout` oriente les pétales arbitrairement (souvent tassés d'un
     côté, ce qui les fait « pointer » vers les îlots par coïncidence). Ici :
-    pivot = plus gros carré (le hub). Les feuilles sont regroupées en **unités** :
+    pivot = plus gros cercle (le hub). Les feuilles sont regroupées en **unités** :
     une combinaison de ≥ 3 feuilles forme un **cluster** posé en bloc compact à
     2 colonnes le long de sa direction (rayons étagés → ellipse étroite, membres
     PAS tous à la même distance du hub) ; les autres feuilles sont isolées et
     gardent leur rayon (plancher `hub_clearance` pour dégager le pivot). Les
     unités reçoivent des parts angulaires (cluster = 2 parts), dans leur ordre
     angulaire d'origine. Déterministe : tris explicites partout.
+
+    `fill_ratio` = jusqu'où les feuilles isolées s'étirent vers le bord de la
+    zone (0,85 quand le hub est seul ; réduit quand des îlots doivent tenir dans
+    les coins, sinon les pétales viendraient les percuter).
     """
     if len(canvas) < 3:
         return canvas
@@ -290,12 +371,10 @@ def _radialize_main(
     total = sum(weights)
     base = units[0][0]
 
-    # Géométrie des clusters (départ, pas) + profondeur de référence : l'unité
-    # la plus profonde fixe le rayon du contenu ; les feuilles isolées
-    # s'étireront vers cette profondeur pour OCCUPER le cadre (sinon elles
-    # restent au plancher et laissent des vides sur les bords).
+    # Géométrie des clusters (départ, pas). La profondeur de référence des
+    # feuilles isolées ne vient plus du contenu mais de la ZONE FIXE (voir
+    # `_zone_radius` plus bas) : c'est elle qu'il s'agit d'occuper.
     cluster_geo: dict[int, tuple[float, float]] = {}
-    r_ref = 0.0
     for idx, (_, ks) in enumerate(units):
         if len(ks) > 1:
             biggest = max(sizes[k2] for k2 in ks)
@@ -304,13 +383,6 @@ def _radialize_main(
             r0 = (sizes[pivot] + biggest) * 0.85 + style.overlap_gap / 2.0
             step = biggest + style.overlap_gap
             cluster_geo[idx] = (r0, step)
-            rows = (len(ks) + 1) // 2
-            r_ref = max(r_ref, r0 + (rows - 1) * step + biggest / 2.0)
-        else:
-            k = ks[0]
-            floor_r = (sizes[pivot] + sizes[k]) * style.hub_clearance + style.overlap_gap
-            r = math.hypot(canvas[k][0] - px, canvas[k][1] - py)
-            r_ref = max(r_ref, max(min(r, floor_r * 1.25), floor_r) + sizes[k] / 2.0)
 
     # Angles assignés par part angulaire, puis rotation d'ensemble : le cluster
     # le plus profond pointe vers l'AXE le plus proche (haut/bas/gauche/droite).
@@ -346,12 +418,32 @@ def _radialize_main(
             # Plancher pour dégager le pivot, plafond de cohérence d'échelle.
             floor_r = (sizes[pivot] + sizes[k]) * style.hub_clearance + style.overlap_gap
             r = max(min(r, floor_r * 1.25), floor_r)
-            # Étirement vers le bord du cadre carré selon la place disponible
-            # dans cette direction (plafonné en diagonale à la profondeur de
-            # référence : les coins sont aux îlots, un pétale n'y rampe pas).
-            denom = max(abs(math.cos(a)), abs(math.sin(a)))
-            boundary = min(r_ref / denom, r_ref * 1.02)
-            r = max(r, style.radial_fill * boundary - sizes[k] / 2.0)
+            # Étirement vers le bord de la ZONE dans cette direction : le rayon
+            # disponible suit la forme paysage de la zone (plus loin à
+            # l'horizontale), sinon le hub dessine un disque au milieu d'un
+            # rectangle et laisse deux vides sur les côtés.
+            boundary = _zone_radius(
+                a,
+                style.frame_width / 2.0 - style.margin,
+                style.frame_height / 2.0 - style.margin,
+            )
+            # Ce n'est pas le CENTRE du cercle qui doit tenir dans la zone mais
+            # tout ce qui pend au bout du pétale : son rayon, l'ellipse qui
+            # l'entoure et la légende posée derrière. Sans cette déduction, une
+            # feuille poussée au bord emmène systématiquement son titre dehors.
+            hang = (
+                sizes[k] / 2.0
+                + style.ellipse_margin
+                + style.ellipse_label_gap
+                + style.ellipse_label_line_height
+            )
+            target = max(0.0, boundary - hang)
+            # Étirement vers le bord, PUIS plafond au même bord : le rayon hérité
+            # du spring layout pouvait à lui seul sortir de la zone (le plafond
+            # `floor_r × 1,25` ne connaît pas la zone, il ne connaît que le hub).
+            # Le dégagement du hub reste prioritaire sur le plafond : mieux vaut
+            # déborder que superposer deux cercles.
+            r = max(floor_r, min(max(r, fill_ratio * target), target))
             out[k] = (px + r * math.cos(a), py + r * math.sin(a))
         else:
             # Bloc compact 2 colonnes le long de la direction : rayons étagés.
@@ -379,6 +471,37 @@ def _radialize_main(
     return out
 
 
+def _fit_to_zone(
+    canvas: dict[str, tuple[float, float]], sizes: dict[str, float], style: SvgStyle
+) -> dict[str, tuple[float, float]]:
+    """Resserre les DISTANCES du nuage pour qu'il tienne dans la zone.
+
+    Ne touche JAMAIS aux diamètres : seuls les écarts entre cercles sont réduits
+    (homothétie des positions autour du centre du nuage). L'encodage visuel de
+    la participation reste donc comparable d'un album à l'autre, alors que le
+    vide, lui, n'a aucune raison d'être conservé — un duo layouté par
+    `spring_layout` à `canvas_scale` fait 600 px de haut pour deux cercles.
+
+    L'anti-chevauchement repasse APRÈS : sur un album vraiment dense il
+    ré-écartera les cercles et le dessin débordera quand même. C'est voulu —
+    mieux vaut un débordement signalé que des cercles qui se marchent dessus.
+    """
+    # Ce qui pend hors des cercles (ellipse + légende) doit tenir aussi.
+    hang = style.ellipse_margin + style.ellipse_label_gap + style.ellipse_label_line_height
+    avail_w = style.frame_width / 2.0 - style.margin - hang
+    avail_h = style.frame_height / 2.0 - style.margin - hang
+    cx, cy, hw, hh = _cloud_half_extents(canvas, sizes)
+    ratios = [1.0]
+    if hw > 1e-9 and avail_w > 0:
+        ratios.append(avail_w / hw)
+    if hh > 1e-9 and avail_h > 0:
+        ratios.append(avail_h / hh)
+    ratio = min(ratios)
+    if ratio >= 1.0:
+        return canvas
+    return {k: (cx + (x - cx) * ratio, cy + (y - cy) * ratio) for k, (x, y) in canvas.items()}
+
+
 def _component_canvas(
     graph,
     comp: list[str],
@@ -387,6 +510,7 @@ def _component_canvas(
     seed: int,
     is_main: bool,
     collab_groups=(),
+    fill_ratio: float = 1.0,
 ) -> dict[str, tuple[float, float]]:
     """Layout local d'une composante, centré sur l'origine, sans chevauchement.
 
@@ -425,9 +549,13 @@ def _component_canvas(
 
     canvas = {k: (raw[k][0] * scale, -raw[k][1] * scale) for k in keys}
     if is_main:
-        canvas = _radialize_main(canvas, sizes, style, collab_groups)
+        canvas = _radialize_main(canvas, sizes, style, collab_groups, fill_ratio)
     canvas = _remove_overlaps(canvas, sizes, style)
-    cx, cy, _, _ = _square_half_extents(canvas, sizes)
+    if is_main:
+        # Le hub occupe le centre de la zone : c'est lui qui doit y tenir (les
+        # îlots sont calés aux coins ensuite, ils ne débordent pas par nature).
+        canvas = _remove_overlaps(_fit_to_zone(canvas, sizes, style), sizes, style)
+    cx, cy, _, _ = _cloud_half_extents(canvas, sizes)
     return {k: (x - cx, y - cy) for k, (x, y) in canvas.items()}
 
 
@@ -451,15 +579,26 @@ def _compose_layout(
 
     canvas: dict[str, tuple[float, float]] = {}
     main = comps[0]
+    # Le hub n'occupe toute la zone que s'il y est seul : dès qu'il y a des
+    # îlots à caler dans les coins, on lui laisse moins de place, sinon ses
+    # pétales viennent buter dessus (la zone ne grandit plus pour absorber).
+    fill_ratio = style.radial_fill if len(comps) == 1 else style.radial_fill_islands
     main_local = _component_canvas(
-        graph, main, sizes, style, seed, is_main=True, collab_groups=collab_groups
+        graph,
+        main,
+        sizes,
+        style,
+        seed,
+        is_main=True,
+        collab_groups=collab_groups,
+        fill_ratio=fill_ratio,
     )
     canvas.update(main_local)
-    _, _, main_hw, main_hh = _square_half_extents(main_local, sizes)
+    _, _, main_hw, main_hh = _cloud_half_extents(main_local, sizes)
 
     for idx, comp in enumerate(comps[1:]):
         local = _component_canvas(graph, comp, sizes, style, seed, is_main=False)
-        _, _, hw, hh = _square_half_extents(local, sizes)
+        _, _, hw, hh = _cloud_half_extents(local, sizes)
         sx, sy = _SLOTS[idx % len(_SLOTS)]
         ring = idx // len(_SLOTS) + 1  # anneaux successifs si + de 8 îlots
         if sx and sy:
@@ -481,12 +620,14 @@ def _compose_layout(
 def build_bubble_spec(
     graph, collab_groups, style: SvgStyle | None = None, seed: int = DEFAULT_SEED
 ) -> BubbleSpec:
-    """Assemble le `BubbleSpec` : composition par composante, ellipses, cadre carré.
+    """Assemble le `BubbleSpec` : composition par composante, ellipses, zone fixe.
 
-    Chaque composante connexe est layoutée séparément (hub central agrandi, îlots
-    dans les coins d'un cadre). Puis **une ellipse par combinaison de producteurs**
-    (`CollabGroup`), légendée (titres ou « N morceaux ») et ancrée vers l'extérieur.
-    Le contenu est centré dans un **cadre carré** (côté = plus grande dimension).
+    Chaque composante connexe est layoutée séparément (hub central, îlots dans
+    les coins de la zone). Puis **une ellipse par combinaison de producteurs**
+    (`CollabGroup`), légendée (titres ou « N morceaux ») et ancrée vers
+    l'extérieur. Le contenu est centré dans la **zone fixe**
+    `style.frame_width × frame_height` — jamais mis à l'échelle pour y tenir :
+    un dépassement est signalé (`BubbleSpec.overflow`), pas corrigé.
     """
     style = style or SvgStyle()
     if graph.number_of_nodes() == 0:
@@ -504,136 +645,170 @@ def build_bubble_spec(
     # Centre du nuage (oriente les légendes vers l'extérieur du hub). Somme en
     # ordre trié → indépendante de l'ordre d'insertion des nœuds (byte-identité).
     ordered = sorted(canvas)
-    center_x = sum(canvas[k][0] for k in ordered) / len(canvas)
-    center_y = sum(canvas[k][1] for k in ordered) / len(canvas)
 
-    # Une ellipse par combinaison de producteurs, calculée sur les COINS des
-    # carrés membres (pas leurs centres + padding uniforme : la demi-diagonale du
-    # hub gonflerait toute l'ellipse, même aux pointes où il n'y a que des
-    # petits carrés). L'ellipse épouse ainsi exactement les carrés + marge.
-    raw_groups = []
-    for cg in collab_groups:
-        member_pts = []
-        for k in cg.keys:
-            x, y = canvas[k]
-            half = sizes[k] / 2.0
-            member_pts.extend(
-                (
-                    (x - half, y - half),
-                    (x + half, y - half),
-                    (x - half, y + half),
-                    (x + half, y + half),
+    def _make_groups(canvas):
+        """Ellipses + légendes pour un état donné du nuage.
+
+        Refait à chaque resserrage du hub : une ellipse et sa légende dépendent
+        des positions, on ne peut pas les calculer une fois pour toutes avant de
+        savoir si le dessin tient dans la zone.
+        """
+        center_x = sum(canvas[k][0] for k in ordered) / len(canvas)
+        center_y = sum(canvas[k][1] for k in ordered) / len(canvas)
+        raw_groups = []
+        for cg in collab_groups:
+            member_pts = []
+            for k in cg.keys:
+                x, y = canvas[k]
+                half = sizes[k] / 2.0
+                member_pts.extend(
+                    (
+                        x + half * math.cos(2.0 * math.pi * i / _CIRCLE_SAMPLES),
+                        y + half * math.sin(2.0 * math.pi * i / _CIRCLE_SAMPLES),
+                    )
+                    for i in range(_CIRCLE_SAMPLES)
                 )
+            ellipse = enclosing_shape(
+                member_pts,
+                padding=style.ellipse_margin,
+                min_radius=style.ellipse_margin,
+                min_axis_ratio=style.min_axis_ratio,
             )
-        ellipse = enclosing_shape(
-            member_pts,
-            padding=style.ellipse_margin,
-            min_radius=style.ellipse_margin,
-            min_axis_ratio=style.min_axis_ratio,
-        )
-        label_lines = _ellipse_label(cg, style)
-        if len(cg.keys) == 1 and cg.track_count > 1:
-            # « N solo » : DANS le carré du producteur, en bas, juste au-dessus
-            # du badge (une légende à la pointe du cercle flotterait entre les
-            # pétales voisins et semblerait appartenir à un autre ovale).
-            k = cg.keys[0]
-            x, y = canvas[k]
-            anchor = (
-                x,
-                y
-                + sizes[k] / 2.0
-                - style.badge_size / 2.0
-                - 8.0
-                - style.ellipse_label_font_size / 2.0,
-                0.0,
-            )
-        elif len(cg.keys) == 1:
-            # Cercle solo à morceau unique : son TITRE sous le cercle
-            # (cas mammouth), clairement rattaché.
-            anchor = (
-                ellipse.cx,
-                ellipse.cy
-                + ellipse.ry
-                + style.ellipse_label_gap
-                + style.ellipse_label_line_height / 2.0,
-                0.0,
-            )
-        else:
-            anchor = _axis_label_anchor(
-                ellipse,
-                center_x,
-                center_y,
-                style.ellipse_label_gap,
-                style.ellipse_label_line_height / 2.0,
-                style.ellipse_label_max_angle,
-                inward=not set(cg.keys) <= main_set,
-            )
-        raw_groups.append((cg, ellipse, label_lines, anchor))
+            label_lines = _ellipse_label(cg, style)
+            if len(cg.keys) == 1:
+                # Producteur seul (« N solo », ou le TITRE s'il n'a qu'un morceau) :
+                # légende SOUS son cercle, clairement rattachée. Elle ne peut plus
+                # tenir dedans depuis que les cercles sont petits et que le nom en
+                # occupe le centre.
+                anchor = (
+                    ellipse.cx,
+                    ellipse.cy
+                    + ellipse.ry
+                    + style.ellipse_label_gap
+                    + style.ellipse_label_line_height / 2.0,
+                    0.0,
+                )
+            else:
+                anchor = _axis_label_anchor(
+                    ellipse,
+                    center_x,
+                    center_y,
+                    style.ellipse_label_gap,
+                    style.ellipse_label_line_height / 2.0,
+                    style.ellipse_label_max_angle,
+                    inward=not set(cg.keys) <= main_set,
+                )
+            raw_groups.append((cg, ellipse, label_lines, anchor))
+        return raw_groups
 
-    # Cadre : boîte englobante des carrés, des ellipses ET des légendes.
-    xs: list[float] = []
-    ys: list[float] = []
-    for key in graph.nodes:
-        px, py = canvas[key]
-        half = sizes[key] / 2.0
-        xs.extend((px - half, px + half))
-        ys.extend((py - half, py + half))
-    for _, ellipse, label_lines, anchor in raw_groups:
-        x0, y0, x1, y1 = ellipse.bbox()
-        xs.extend((x0, x1))
-        ys.extend((y0, y1))
-        # Légende tournée : borne circulaire conservatrice autour de son ancre.
-        ax, ay, _ = anchor
-        reach = max(
-            _label_half_width(label_lines, style),
-            len(label_lines) * style.ellipse_label_line_height,
-        )
-        xs.extend((ax - reach, ax + reach))
-        ys.extend((ay - reach, ay + reach))
+    raw_groups = _make_groups(canvas)
+    _state = {"canvas": canvas, "groups": raw_groups}
 
-    # Cadre CARRÉ : côté = plus grande dimension du contenu, contenu centré dedans.
-    min_x, min_y = min(xs), min(ys)
-    max_x, max_y = max(xs), max(ys)
+    def _bbox(keys, canvas=None, raw_groups=None, with_labels=True):
+        """Boîte englobante des nœuds `keys` : cercles, ellipses, et légendes.
+
+        `canvas`/`raw_groups` explicites pour mesurer un état CANDIDAT (la passe
+        d'étalement essaie plusieurs écartements avant d'en retenir un).
+
+        `with_labels=False` = le budget DUR, celui qui contraint la mise en
+        page : les cercles et leurs ellipses. Les légendes, elles, sont
+        volontairement hors budget — elles sont posées au bout des ellipses et
+        atteignent le bord de la zone dès qu'un titre est long. Les compter
+        comme contrainte figeait tout : le dessin se tassait au centre pendant
+        que le texte occupait le cadre. Un titre qui mord la marge se replace
+        en deux secondes dans Illustrator ; des cercles agglutinés, non.
+        """
+        canvas = canvas if canvas is not None else _state["canvas"]
+        raw_groups = raw_groups if raw_groups is not None else _state["groups"]
+        subset = set(keys)
+        xs: list[float] = []
+        ys: list[float] = []
+        for key in subset:
+            px, py = canvas[key]
+            half = sizes[key] / 2.0
+            xs.extend((px - half, px + half))
+            ys.extend((py - half, py + half))
+        for cg, ellipse, label_lines, anchor in raw_groups:
+            if not set(cg.keys) <= subset:
+                continue
+            x0, y0, x1, y1 = ellipse.bbox()
+            xs.extend((x0, x1))
+            ys.extend((y0, y1))
+            if with_labels:
+                # Légende tournée : boîte projetée selon son angle réel.
+                hx, hy = _label_half_extents(label_lines, anchor[2], style)
+                xs.extend((anchor[0] - hx, anchor[0] + hx))
+                ys.extend((anchor[1] - hy, anchor[1] + hy))
+        return min(xs), min(ys), max(xs), max(ys)
+
+    # Resserrage du hub, LÉGENDES COMPRISES. `_fit_to_zone` ne connaît que les
+    # cercles, or ce qui sort de la zone est le plus souvent un titre posé au
+    # bout d'un pétale. On mesure donc la boîte réelle, on resserre les
+    # distances, on reconstruit les ellipses — quelques passes suffisent, et
+    # l'anti-chevauchement finit par s'y opposer : un album dense débordera
+    # plutôt que de voir ses cercles se coller.
+    # Deux budgets : les cercles et leurs ellipses tiennent dans la zone MOINS
+    # la marge ; les légendes ont droit à la marge, mais pas à en sortir (un
+    # titre hors cadre est un titre perdu).
+    avail_w = style.frame_width - 2 * style.margin
+    avail_h = style.frame_height - 2 * style.margin
+    main_sizes = {k: sizes[k] for k in comps[0]}
+    for _ in range(_FIT_PASSES):
+        bx0, by0, bx1, by1 = _bbox(comps[0], with_labels=False)
+        lx0, ly0, lx1, ly1 = _bbox(comps[0])
+        ratios = [1.0]
+        if bx1 - bx0 > avail_w:
+            ratios.append(avail_w / (bx1 - bx0))
+        if by1 - by0 > avail_h:
+            ratios.append(avail_h / (by1 - by0))
+        if lx1 - lx0 > style.frame_width:
+            ratios.append(style.frame_width / (lx1 - lx0))
+        if ly1 - ly0 > style.frame_height:
+            ratios.append(style.frame_height / (ly1 - ly0))
+        ratio = min(ratios)
+        if ratio > 0.999:
+            break
+        cx, cy = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
+        shrunk = {
+            k: (cx + (canvas[k][0] - cx) * ratio, cy + (canvas[k][1] - cy) * ratio)
+            for k in comps[0]
+        }
+        canvas = {**canvas, **_remove_overlaps(shrunk, main_sizes, style)}
+        raw_groups = _make_groups(canvas)
+        _state["canvas"], _state["groups"] = canvas, raw_groups
+
+    # Zone FIXE : rien n'est mis à l'échelle pour y tenir (l'échelle doit rester
+    # comparable d'un album à l'autre — cf. `_node_size`).
+    #
+    # C'est le HUB qu'on centre, pas le contenu entier : les îlots sont calés aux
+    # coins de la zone juste après, donc les inclure dans le centrage décalerait
+    # tout le dessin d'un côté (et les îlots seraient recalés depuis un repère
+    # devenu faux). Sans îlot, hub = contenu et le centrage est le même.
+    min_x, min_y, max_x, max_y = _bbox(comps[0], with_labels=False)
     content_w = max_x - min_x
     content_h = max_y - min_y
-    side = max(content_w, content_h)
-    dx = style.margin + (side - content_w) / 2.0 - min_x
-    dy = style.margin + (side - content_h) / 2.0 - min_y
-    width = height = side + 2 * style.margin
+    width = style.frame_width
+    height = style.frame_height
+    dx = (width - content_w) / 2.0 - min_x
+    dy = (height - content_h) / 2.0 - min_y
     frame = None
     if style.draw_frame:
-        inset = style.frame_inset
-        frame = (inset, inset, width - 2 * inset, height - 2 * inset)
+        frame = (0.0, 0.0, width, height)
 
-        # Îlots calés aux EXTRÉMITÉS du cadre (coin intérieur - pad), maintenant
-        # que le carré est connu. Translation rigide par composante (repère brut) :
-        # nœuds + ellipses + ancres de légende bougent ensemble.
-        raw_fx0 = inset - dx
-        raw_fx1 = (width - inset) - dx
-        raw_fy0 = inset - dy
-        raw_fy1 = (height - inset) - dy
+        # Îlots calés aux EXTRÉMITÉS de la zone (coin intérieur - marge - pad).
+        # Translation rigide par composante (repère brut) : nœuds + ellipses +
+        # ancres de légende bougent ensemble.
+        raw_fx0 = style.margin - dx
+        raw_fx1 = (width - style.margin) - dx
+        raw_fy0 = style.margin - dy
+        raw_fy1 = (height - style.margin) - dy
         pad = style.island_corner_pad
         for idx, comp in enumerate(comps[1:]):
             comp_set = set(comp)
-            # Boîte englobante de l'îlot : carrés + ellipses + légendes.
-            bx0 = by0 = math.inf
-            bx1 = by1 = -math.inf
-            for k in comp:
-                px, py = canvas[k]
-                half = sizes[k] / 2.0
-                bx0, bx1 = min(bx0, px - half), max(bx1, px + half)
-                by0, by1 = min(by0, py - half), max(by1, py + half)
-            for cg, ellipse, label_lines, anchor in raw_groups:
-                if set(cg.keys) <= comp_set:
-                    ex0, ey0, ex1, ey1 = ellipse.bbox()
-                    bx0, bx1 = min(bx0, ex0), max(bx1, ex1)
-                    by0, by1 = min(by0, ey0), max(by1, ey1)
-                    reach = max(
-                        _label_half_width(label_lines, style),
-                        len(label_lines) * style.ellipse_label_line_height,
-                    )
-                    bx0, bx1 = min(bx0, anchor[0] - reach), max(bx1, anchor[0] + reach)
-                    by0, by1 = min(by0, anchor[1] - reach), max(by1, anchor[1] + reach)
+            # Boîte englobante de l'îlot : cercles + ellipses (budget dur), et
+            # la même légendes comprises, qui servira à retenir la translation.
+            bx0, by0, bx1, by1 = _bbox(comp, with_labels=False)
+            ax0, ay0, ax1, ay1 = _bbox(comp)
             sx, sy = _SLOTS[idx % len(_SLOTS)]
             if sx < 0:
                 tx = (raw_fx0 + pad) - bx0
@@ -647,6 +822,12 @@ def build_bubble_spec(
                 ty = (raw_fy1 - pad) - by1
             else:
                 ty = (raw_fy0 + raw_fy1) / 2.0 - (by0 + by1) / 2.0
+            # Un îlot poussé dans son coin par ses seuls cercles y emmène sa
+            # légende, qui déborde alors du cadre : on retient la translation
+            # juste assez pour que le titre reste dedans (il a droit à la marge,
+            # pas au-delà — même règle que pour le hub).
+            tx = min(max(tx, (-dx) - ax0), (width - dx) - ax1)
+            ty = min(max(ty, (-dy) - ay0), (height - dy) - ay1)
             for k in comp:
                 canvas[k] = (canvas[k][0] + tx, canvas[k][1] + ty)
             for i, (cg, ellipse, label_lines, anchor) in enumerate(raw_groups):
@@ -658,6 +839,128 @@ def build_bubble_spec(
                         (anchor[0] + tx, anchor[1] + ty, anchor[2]),
                     )
 
+    # ── Étalement : occuper la zone au lieu de se tasser au centre ───────────
+    # Le resserrage ci-dessus ne sait que RÉDUIRE. Sur la plupart des albums le
+    # hub finit donc bien plus petit que la zone, avec de grands vides entre lui
+    # et les îlots des coins. On écarte ici les cercles du hub (leurs DISTANCES,
+    # jamais leurs diamètres) jusqu'à ce qu'il touche soit le bord de la zone,
+    # soit un îlot. Recherche par dichotomie sur le facteur : chaque candidat est
+    # mesuré pour de vrai (ellipses et légendes reconstruites), car les légendes
+    # ne grandissent PAS avec l'écartement — un facteur appliqué à l'aveugle
+    # sortirait du cadre.
+    hub_keys = comps[0]
+    if len(hub_keys) > 1:
+        zx0, zy0 = style.margin - dx, style.margin - dy
+        zx1, zy1 = (width - style.margin) - dx, (height - style.margin) - dy
+        # Bornes ÉLARGIES pour les légendes : elles ont droit à la marge.
+        lx_lo, ly_lo = -dx, -dy
+        lx_hi, ly_hi = width - dx, height - dy
+        # Les îlots sont figés (calés aux coins) : on retient leurs CERCLES.
+        island_circles = [
+            (canvas[k][0], canvas[k][1], sizes[k] / 2.0) for comp in comps[1:] for k in comp
+        ]
+        gap = style.component_gap
+        hx0, hy0, hx1, hy1 = _bbox(hub_keys, canvas, raw_groups, with_labels=False)
+        pivot_x, pivot_y = (hx0 + hx1) / 2.0, (hy0 + hy1) / 2.0
+
+        def _spread(fx, fy, base=None):
+            """État candidat : hub écarté de `fx`/`fy` autour de son centre."""
+            base = base if base is not None else canvas
+            moved = {
+                k: (
+                    pivot_x + (base[k][0] - pivot_x) * fx,
+                    pivot_y + (base[k][1] - pivot_y) * fy,
+                )
+                for k in hub_keys
+            }
+            cand = {**base, **moved}
+            return cand, _make_groups(cand)
+
+        def _fits(cand, box, label_box):
+            """Le hub tient-il dans la zone sans venir toucher un îlot ?
+
+            Deux bornes : les cercles et leurs ellipses restent dans la zone
+            moins la marge, les légendes ont droit à la marge mais pas au-delà
+            (un titre hors cadre est un titre perdu). La proximité des îlots, elle, se teste
+            CERCLE À CERCLE : la boîte d'un hub large recouvre forcément la
+            bande d'un îlot de coin, et un test de boîtes bloquerait tout
+            étalement dès le premier pixel. Ce qui doit être garanti, c'est que
+            deux cercles ne se marchent pas dessus.
+            """
+            if box[0] < zx0 or box[1] < zy0 or box[2] > zx1 or box[3] > zy1:
+                return False
+            if (
+                label_box[0] < lx_lo
+                or label_box[1] < ly_lo
+                or label_box[2] > lx_hi
+                or label_box[3] > ly_hi
+            ):
+                return False
+            for k in hub_keys:
+                hx, hy = cand[k]
+                hr = sizes[k] / 2.0
+                for ix, iy, ir in island_circles:
+                    if math.hypot(hx - ix, hy - iy) < hr + ir + gap:
+                        return False
+            return True
+
+        def _best_factor(axis, base):
+            """Plus grand écartement tenable sur cet axe seul, par dichotomie."""
+
+            def candidate(f):
+                fx, fy = (f, 1.0) if axis == "x" else (1.0, f)
+                cand, cand_groups = _spread(fx, fy, base)
+                return _fits(
+                    cand,
+                    _bbox(hub_keys, cand, cand_groups, with_labels=False),
+                    _bbox(hub_keys, cand, cand_groups),
+                )
+
+            if candidate(_SPREAD_MAX):
+                return _SPREAD_MAX
+            lo, hi = 1.0, _SPREAD_MAX
+            for _ in range(_SPREAD_PASSES):
+                mid = (lo + hi) / 2.0
+                if candidate(mid):
+                    lo = mid
+                else:
+                    hi = mid
+            return lo
+
+        # Un facteur PAR AXE, et non un facteur unique : dans une zone paysage,
+        # la hauteur sature bien avant la largeur (le hub touche déjà le haut et
+        # le bas alors qu'il reste deux grands vides à gauche et à droite). Un
+        # facteur commun serait donc bloqué à 1 par l'axe le plus contraint et
+        # n'étalerait rien. Les cercles gardent leur diamètre : seules les
+        # DISTANCES s'allongent, le nuage s'ovalise à l'image de la zone.
+        # Deux tours : élargir en x libère parfois du jeu en y, et inversement.
+        for axis in ("x", "y", "x", "y"):
+            factor = _best_factor(axis, canvas)
+            if factor <= 1.0 + 1e-3:
+                continue
+            fx, fy = (factor, 1.0) if axis == "x" else (1.0, factor)
+            canvas, raw_groups = _spread(fx, fy, canvas)
+            _state["canvas"], _state["groups"] = canvas, raw_groups
+
+    # Dépassement de la zone, mesuré APRÈS le calage des îlots (qui déplace du
+    # contenu) et sur les mêmes éléments que le cadrage : cercles, ellipses,
+    # légendes. Le contenu n'est pas réduit pour rentrer — on se contente de le
+    # DIRE (`BubbleSpec.overflow`), à charge de l'appelant d'avertir.
+    final_x: list[float] = []
+    final_y: list[float] = []
+    for key in graph.nodes:
+        px, py = canvas[key]
+        half = sizes[key] / 2.0
+        final_x.extend((px - half, px + half))
+        final_y.extend((py - half, py + half))
+    for _, ellipse, _label_lines, _anchor in raw_groups:
+        x0, y0, x1, y1 = ellipse.bbox()
+        final_x.extend((x0, x1))
+        final_y.extend((y0, y1))
+    over_w = max(0.0, (max(final_x) - min(final_x)) - width)
+    over_h = max(0.0, (max(final_y) - min(final_y)) - height)
+    overflow = (over_w, over_h) if (over_w > 0 or over_h > 0) else None
+
     # Application de la translation (repère positif). Sorties triées par clé →
     # ordre des éléments SVG indépendant de l'ordre d'insertion des nœuds.
     nodes = tuple(
@@ -668,6 +971,7 @@ def build_bubble_spec(
             y=canvas[key][1] + dy,
             size=sizes[key],
             track_count=counts[key],
+            label_font_size=_label_font_size(sizes[key], style),
         )
         for key in ordered
     )
@@ -707,6 +1011,7 @@ def build_bubble_spec(
         groups=groups_shapes,
         style=style,
         frame=frame,
+        overflow=overflow,
     )
 
 
@@ -748,15 +1053,18 @@ def generate_bubble(
     roles: tuple[str, ...],
     credit_label: str,
     filename: str,
+    kind: str = "prod",
     style: SvgStyle | None = None,
     seed: int = DEFAULT_SEED,
     output_path=None,
 ) -> BubbleResult:
-    """Cœur commun Bubble Prod / Bubble Feat : SVG du réseau des crédits `roles`.
+    """Cœur commun Bubble Prod / Bubble Feat : le réseau des crédits `roles`.
 
-    `credit_label` sert aux messages d'erreur (« producteur », « featuring »),
-    `filename` au chemin de sortie par défaut. Lève `ValueError` si l'album n'a
-    aucun morceau ou aucun crédit dans `roles`.
+    Écrit DEUX fichiers côte à côte, comme « Structure » : le `.svg` (aperçu de
+    contrôle) et le `.json` (données de la planche Illustrator). `credit_label`
+    sert aux messages d'erreur (« producteur », « featuring »), `filename` au
+    chemin de sortie par défaut, `kind` distingue prod/feat dans le payload.
+    Lève `ValueError` si l'album n'a aucun morceau ou aucun crédit dans `roles`.
     """
     style = style or SvgStyle()
     album_tracks = select_album_tracks(tracks, album)
@@ -778,11 +1086,18 @@ def generate_bubble(
     output_path = Path(output_path)
     write_bubble_svg(spec, output_path)
 
+    payload = build_payload(spec, kind=kind, artist_name=artist_name, album=album, seed=seed)
+    json_path = output_path.with_suffix(".json")
+    write_bubble_json(payload, json_path)
+    missing = tuple(n["name"] for n in payload["nodes"] if n["image"] is None)
+
     return BubbleResult(
         spec=spec,
         path=output_path,
         node_count=graph.number_of_nodes(),
         track_count=len(track_groups),
+        json_path=json_path,
+        missing_images=missing,
     )
 
 
@@ -808,6 +1123,7 @@ def generate_bubble_prod(
         roles=roles,
         credit_label="producteur",
         filename="bubble_prod.svg",
+        kind="prod",
         style=style,
         seed=seed,
         output_path=output_path,

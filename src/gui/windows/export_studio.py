@@ -23,6 +23,7 @@ from src.dataviz.bubble_prod import (
     generate_preview_grid,
     list_albums,
 )
+from src.dataviz.bubble_style_io import load_style as load_bubble_style
 from src.dataviz.structure import generate_structure
 from src.dataviz.structure_style_io import load_style
 from src.gui.dialogs import report
@@ -233,7 +234,9 @@ class ExportStudioWindow:
             # NB : `exc` est effacé à la sortie du bloc except → le message est
             # FIGÉ en argument par défaut de la lambda (jamais capturé tel quel).
             try:
-                result = generate(tracks, album, artist_name=artist_name, seed=seed)
+                result = generate(
+                    tracks, album, artist_name=artist_name, seed=seed, style=load_bubble_style()
+                )
             except ValueError as exc:  # album sans crédit correspondant, etc.
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))
             except Exception as exc:  # frontière thread→GUI : tout remonte en dialog
@@ -245,10 +248,19 @@ class ExportStudioWindow:
         start_worker(worker, name=f"export_studio:bubble_{kind}")
 
     def _on_bubble_done(self, result, open_after: bool, noun: str):
+        # Un débordement ne se voit pas sur la vignette du SVG, et une photo
+        # manquante encore moins : les deux doivent être DITS, sinon la planche
+        # part dans Illustrator avec un trou qu'on ne découvre qu'à la mise en page.
+        warning = ""
+        if result.spec.overflow:
+            w, h = result.spec.overflow
+            warning += f" — ⚠️ dépasse la zone de {w:.0f} × {h:.0f} px"
+        if result.missing_images:
+            warning += f" — ⚠️ {len(result.missing_images)} sans photo"
         self._set_busy(
             False,
-            f"✅ {result.path.name} — {result.node_count} {noun}, "
-            f"{result.track_count} morceau(x)",
+            f"✅ {result.path.name} + .json — {result.node_count} {noun}, "
+            f"{result.track_count} morceau(x){warning}",
         )
         if open_after:
             try:
@@ -314,7 +326,9 @@ class ExportStudioWindow:
 
         def worker():
             try:
-                html_path = generate_grid(tracks, album, artist_name=artist_name)
+                html_path = generate_grid(
+                    tracks, album, artist_name=artist_name, style=load_bubble_style()
+                )
             except ValueError as exc:
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))
             except Exception as exc:  # frontière thread→GUI : tout remonte en dialog

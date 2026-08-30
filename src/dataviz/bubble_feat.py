@@ -42,6 +42,7 @@ def generate_bubble_feat(
         roles=roles,
         credit_label="featuring",
         filename="bubble_feat.svg",
+        kind="feat",
         style=style,
         seed=seed,
         output_path=output_path,

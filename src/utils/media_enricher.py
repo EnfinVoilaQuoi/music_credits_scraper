@@ -21,10 +21,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.config import DELAY_BETWEEN_REQUESTS, IMAGES_DIR
+from src.utils.credit_normalize import display_name, identity_key
 from src.utils.image_downloader import (
     artist_image_path,
     cover_image_path,
     download_image,
+    existing_image,
     vignette_image_path,
 )
 from src.utils.logger import get_logger
@@ -36,14 +38,16 @@ logger = get_logger(__name__)
 # Catégories du rapport (compteurs par catégorie).
 CAT_ARTIST = "artist"
 CAT_FEAT = "feat"
+CAT_PRODUCER = "producteur"
 CAT_COVER = "cover"  # covers d'albums + singles
 CAT_SAMPLE = "sample"
 CAT_VIGNETTE = "vignette"
-_CATEGORIES = (CAT_ARTIST, CAT_FEAT, CAT_COVER, CAT_SAMPLE, CAT_VIGNETTE)
+_CATEGORIES = (CAT_ARTIST, CAT_FEAT, CAT_PRODUCER, CAT_COVER, CAT_SAMPLE, CAT_VIGNETTE)
 
-# Extensions possibles pour un même « stem » (le Content-Type décide à l'écriture)
-# → l'idempotence par existence de fichier doit toutes les considérer.
-_IMG_EXTS = (".jpg", ".png", ".webp")
+# Rôles dont on récupère une photo de producteur : le filtre STRICT de
+# `dataviz.collab_graph.STRICT_PRODUCER_ROLES`, celui que dessine Bubble Prod.
+# Constante locale plutôt qu'un import : `utils` ne dépend pas de `dataviz`.
+_PRODUCER_ROLE_VALUES = {"Producer"}
 
 # Relations amont dont on cherche une pochette (mêmes types que genius_api).
 _SAMPLE_REL_TYPES = {"samples", "interpolates", "cover_of", "remix_of"}
@@ -71,15 +75,6 @@ class MediaReport:
         if self.errors:
             text += "\n\nErreurs :\n" + "\n".join(f"  • {e}" for e in self.errors[:20])
         return text
-
-
-def _existing_variant(base: Path) -> Path | None:
-    """Fichier existant pour ce stem (toutes extensions connues), ou None."""
-    for ext in _IMG_EXTS:
-        candidate = base.with_suffix(ext)
-        if candidate.exists():
-            return candidate
-    return None
 
 
 class _MediaRun:
@@ -126,6 +121,7 @@ class _MediaRun:
         for step in (
             self._artist_photo,
             self._feat_photos,
+            self._producer_photos,
             self._album_and_single_covers,
             self._sample_covers,
             self._vignettes,
@@ -144,7 +140,7 @@ class _MediaRun:
             self.report.skipped[CAT_ARTIST] += 1
             return
         if not self.force:
-            existing = _existing_variant(base)
+            existing = existing_image(base)
             if existing:
                 artist.image_path = self._rel(existing)
                 self.report.skipped[CAT_ARTIST] += 1
@@ -174,36 +170,64 @@ class _MediaRun:
         else:
             self.report.failed[CAT_ARTIST] += 1
 
-    # ── 2. Photos des featurings (pas de ligne DB : fichier = état) ───────────
-    def _feat_photos(self) -> None:
-        feat_names: set[str] = set()
-        for track in self.tracks:
-            feat_names.update(track.featured_artists_list)
-        for name in sorted(feat_names):
+    # ── 2. Photos des personnes créditées (pas de ligne DB : fichier = état) ──
+    def _person_photos(self, names: set[str], category: str, label: str) -> None:
+        """Télécharge la photo Deezer de chaque nom manquant.
+
+        Aucune ligne en base pour ces personnes : c'est l'EXISTENCE DU FICHIER
+        qui fait état. Conséquence utile — une photo déposée à la main sous
+        `data/images/artistes/` est reprise telle quelle et jamais réécrasée
+        (hors `force`), ce qui rattrape les noms que Deezer ne connaît pas.
+        """
+        for name in sorted(names):
             if self.should_stop():
                 return
             name = name.strip()
             if not name:
                 continue
             base = artist_image_path(name)
-            if not self.force and _existing_variant(base):
-                self.report.skipped[CAT_FEAT] += 1
+            if not self.force and existing_image(base):
+                self.report.skipped[category] += 1
                 continue
             url = None
             if self.deezer:
                 try:
                     found = self.deezer.search_artist(name)
                 except Exception as e:
-                    self.report.errors.append(f"Deezer search_artist (feat) '{name}': {e}")
+                    self.report.errors.append(f"Deezer search_artist ({label}) '{name}': {e}")
                     found = None
                 finally:
                     self._sleep()
                 if found:
                     url = found.get("picture_xl")
             if download_image(url, base):
-                self.report.downloaded[CAT_FEAT] += 1
+                self.report.downloaded[category] += 1
             else:
-                self.report.failed[CAT_FEAT] += 1
+                self.report.failed[category] += 1
+
+    def _feat_photos(self) -> None:
+        feat_names: set[str] = set()
+        for track in self.tracks:
+            feat_names.update(track.featured_artists_list)
+        self._person_photos(feat_names, CAT_FEAT, "feat")
+
+    def _producer_photos(self) -> None:
+        """Photos des producteurs — elles peuplent les cercles de « Bubble Prod ».
+
+        Dédup par `identity_key` (deux graphies d'un même beatmaker ne font
+        qu'une recherche), en gardant la graphie d'affichage. Deezer référence
+        mal les beatmakers : beaucoup d'échecs sont NORMAUX ici, le visuel
+        retombe alors sur un cercle plein.
+        """
+        by_key: dict[str, str] = {}
+        for track in self.tracks:
+            for credit in track.credits:
+                if credit.role.value not in _PRODUCER_ROLE_VALUES:
+                    continue
+                key = identity_key(credit.name)
+                if key and key not in by_key:
+                    by_key[key] = display_name(credit.name)
+        self._person_photos(set(by_key.values()), CAT_PRODUCER, "prod")
 
     # ── 3 & 4. Covers d'albums (groupées) + singles/morceaux isolés ───────────
     def _album_and_single_covers(self) -> None:
@@ -220,7 +244,7 @@ class _MediaRun:
             if self.should_stop():
                 return
             base = cover_image_path(self.artist.name, album)
-            existing = _existing_variant(base)
+            existing = existing_image(base)
             if existing and not self.force:
                 rel = self._rel(existing)
                 for track in album_tracks:
@@ -254,7 +278,7 @@ class _MediaRun:
             if self.should_stop():
                 return
             base = cover_image_path(self.artist.name, track.title)
-            existing = _existing_variant(base)
+            existing = existing_image(base)
             if existing and not self.force:
                 track.media.cover_path = self._rel(existing)
                 self.report.skipped[CAT_COVER] += 1
@@ -281,7 +305,7 @@ class _MediaRun:
                 if not rel_title:
                     continue
                 base = cover_image_path(rel_artist or "Inconnu", rel_title)
-                existing = _existing_variant(base)
+                existing = existing_image(base)
                 if existing and not self.force:
                     rel["cover_path"] = self._rel(existing)
                     self.report.skipped[CAT_SAMPLE] += 1
@@ -315,7 +339,7 @@ class _MediaRun:
             ):
                 self.report.skipped[CAT_VIGNETTE] += 1
                 continue
-            existing = _existing_variant(base)
+            existing = existing_image(base)
             if existing and not self.force:
                 track.media.yt_thumbnail_path = self._rel(existing)
                 self.report.skipped[CAT_VIGNETTE] += 1

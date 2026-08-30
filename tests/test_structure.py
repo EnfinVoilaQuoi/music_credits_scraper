@@ -18,7 +18,7 @@ from src.dataviz.structure import (
     section_kind,
 )
 from src.dataviz.structure_json import PAYLOAD_VERSION, build_payload, write_structure_json
-from src.dataviz.structure_style_io import default_payload, load_style, strip_comments
+from src.dataviz.structure_style_io import default_payload, load_style
 from src.dataviz.structure_svg import (
     StructureStyle,
     _segment_bounds,
@@ -26,6 +26,7 @@ from src.dataviz.structure_svg import (
     format_duration,
     write_structure_svg,
 )
+from src.dataviz.style_io import strip_comments
 from src.models.track import Track
 from src.utils.lyrics_sync import extract_sections
 from src.utils.title_matching import clean_display_title, split_title_paren

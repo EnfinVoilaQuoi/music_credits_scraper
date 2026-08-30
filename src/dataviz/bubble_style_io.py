@@ -1,0 +1,210 @@
+"""Réglages utilisateur des générateurs « Bubble » (Prod et Feat), persistés.
+
+Même contrat que `structure_style_io` (voir `style_io` pour la mécanique) : le
+`bubble_<kind>.json` d'un album est **régénéré** à chaque export, alors que ce
+fichier-ci, `data/bubble_style.json`, persiste. Il est créé annoté au premier
+export, tolère les lignes entièrement commentées, accepte un contenu partiel, et
+ignore les clés inconnues avec un avertissement.
+
+**Un seul fichier pour Prod et Feat** : les deux générateurs partagent le moteur
+et la même zone de composition — deux réglages séparés donneraient deux planches
+qui ne se ressemblent plus alors qu'elles se suivent dans le même post.
+"""
+
+from pathlib import Path
+
+from src.dataviz.bubble_svg import SvgStyle
+from src.dataviz.style_io import build_style, read_overrides, render_commented
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+FILENAME = "bubble_style.json"
+
+# Champs non réglables : mécanique de rendu, pas goût. `coord_precision` fixe la
+# byte-identité ; les noms PostScript des polices doivent matcher le template.
+_LOCKED = {"coord_precision", "overlap_iterations", "main_component_scale"}
+
+_SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "Zone de composition.\n"
+        "Côté Illustrator, c'est le repère « zone-bubble » du template qui fait\n"
+        "foi ; ces cotes servent à l'aperçu SVG ET de référence d'échelle au JSX.",
+        (
+            ("frame_width", "Largeur de la zone, en px."),
+            ("frame_height", "Hauteur de la zone, en px."),
+            ("margin", "Marge intérieure entre le bord de la zone et le dessin, en px."),
+            (
+                "draw_frame",
+                "Dessiner le cadre de la zone dans l'aperçu SVG (true/false). "
+                "Il ne part JAMAIS dans Illustrator : il sert à voir ce qui déborde.",
+            ),
+            ("frame_stroke", "Couleur du cadre d'aperçu (hex)."),
+            ("frame_stroke_width", "Épaisseur du cadre d'aperçu, en px."),
+            ("frame_fill", "Remplissage du cadre d'aperçu (« none » par défaut)."),
+        ),
+    ),
+    (
+        "Cercles artistes.\n"
+        "Le diamètre encode la participation : un artiste à 1 morceau fait\n"
+        "node_size_min, le plus gros compte de l'album fait node_size_max. Ces\n"
+        "valeurs sont ABSOLUES — c'est ce qui rend deux albums comparables.",
+        (
+            ("node_size_min", "Diamètre du plus petit cercle, en px."),
+            ("node_size_max", "Diamètre du plus gros cercle, en px."),
+            ("node_fill", "Couleur du cercle (hex) — visible aussi sous la photo."),
+            ("node_stroke", "Couleur du contour du cercle (hex, ou « none »)."),
+            ("node_stroke_width", "Épaisseur du contour du cercle, en px."),
+            (
+                "photo_overlay_color",
+                "ILLUSTRATOR : couleur du voile posé sur la photo, pour que le nom reste lisible.",
+            ),
+            ("photo_overlay_opacity", "ILLUSTRATOR : opacité de ce voile, de 0 à 1."),
+        ),
+    ),
+    (
+        "Nom de l'artiste, centré dans son cercle.",
+        (
+            ("font_size", "Taille du nom sur le PLUS GROS cercle, en px."),
+            (
+                "font_size_min",
+                "Plancher de taille : en dessous le nom est illisible, on le laisse déborder. "
+                "Entre les deux, la taille suit le diamètre du cercle.",
+            ),
+            (
+                "line_height_ratio",
+                "Interligne des noms sur plusieurs mots, en multiple de la taille.",
+            ),
+            ("uppercase_names", "Écrire les noms en MAJUSCULES (true/false)."),
+            ("label_color", "Couleur du nom (hex)."),
+            ("font_family", "APERÇU SVG : familles de police, la première disponible gagne."),
+            ("font_bold", "ILLUSTRATOR : nom PostScript de la police des noms d'artistes."),
+            ("font_medium", "ILLUSTRATOR : nom PostScript de la police des titres de morceaux."),
+        ),
+    ),
+    (
+        "Badge : le compteur de morceaux, posé en bas du cercle.",
+        (
+            ("badge_size", "Côté du badge, en px."),
+            ("badge_corner_radius", "Rayon des coins du badge, en px."),
+            ("badge_font_size", "Taille du chiffre, en px."),
+            ("badge_fill", "Couleur du badge (hex)."),
+            ("badge_text_color", "Couleur du chiffre (hex)."),
+        ),
+    ),
+    (
+        "Ellipses : une par combinaison d'artistes ayant travaillé ensemble.",
+        (
+            ("ellipse_stroke", "Couleur du tracé (hex)."),
+            ("ellipse_stroke_width", "Épaisseur du tracé, en px."),
+            ("ellipse_fill", "Remplissage (« none » par défaut)."),
+            ("ellipse_margin", "Marge entre les cercles et l'ellipse qui les entoure, en px."),
+            (
+                "min_axis_ratio",
+                "Aplatissement maximal : 0,35 empêche un duo de rendre une ellipse en aiguille.",
+            ),
+        ),
+    ),
+    (
+        "Légendes des ellipses : les titres de morceaux, alignés sur l'ellipse.",
+        (
+            (
+                "label_track_threshold",
+                "Au-delà de ce nombre de morceaux, la légende devient « N morceaux » "
+                "au lieu de lister les titres.",
+            ),
+            ("ellipse_label_font_size", "Taille des titres, en px."),
+            ("ellipse_label_color", "Couleur des titres (hex)."),
+            ("ellipse_label_gap", "Écart entre le bout de l'ellipse et sa légende, en px."),
+            ("ellipse_label_line_height", "Interligne d'une légende sur plusieurs lignes, en px."),
+            (
+                "ellipse_label_max_angle",
+                "Rotation maximale du texte, en degrés : au-delà il devient pénible à lire.",
+            ),
+        ),
+    ),
+    (
+        "Disposition — à ne toucher qu'en connaissance de cause.\n"
+        "Ces valeurs pilotent le placement automatique ; les changer peut faire\n"
+        "déborder la planche (le débordement est signalé à l'export).",
+        (
+            ("overlap_gap", "Espace minimal entre deux cercles, en px."),
+            ("canvas_scale", "Échelle du layout avant resserrage dans la zone."),
+            ("hub_clearance", "Dégagement autour du plus gros cercle, en multiple des rayons."),
+            ("radial_fill", "Remplissage de la zone par les satellites, de 0 à 1."),
+            (
+                "radial_fill_islands",
+                "Idem, quand des groupes isolés doivent tenir dans les coins.",
+            ),
+            ("component_gap", "Écart entre le groupe principal et les groupes isolés, en px."),
+            ("island_corner_pad", "Écart entre un groupe isolé et le coin de la zone, en px."),
+            (
+                "draw_edges",
+                "Tracer les traits artiste↔artiste (true/false) — les bulles suffisent.",
+            ),
+            ("edge_color", "Couleur de ces traits (hex)."),
+            ("edge_width", "Épaisseur de ces traits, en px."),
+        ),
+    ),
+)
+
+_INTRO = [
+    "// Réglages des générateurs « Bubble Prod » et « Bubble Feat ».",
+    "//",
+    "// Édite une valeur, relance l'export : elle sera reprise.",
+    "// NE MODIFIE PAS le bubble_prod.json / bubble_feat.json d'un album — ils",
+    "// sont régénérés à chaque export, ta valeur y serait écrasée. C'est CE",
+    "// fichier qui persiste, et il vaut pour les DEUX générateurs.",
+    "//",
+    "// Les lignes // sont des commentaires (JSON n'en admet pas nativement,",
+    "// ils sont retirés à la lecture). Une clé inconnue est ignorée avec un",
+    "// avertissement dans les logs. Le fichier peut être partiel : tout ce qui",
+    "// manque garde sa valeur par défaut. Supprime-le pour repartir de zéro.",
+]
+
+
+def style_path() -> Path:
+    """`data/bubble_style.json` (import lazy de la config, comme `bubble_prod`)."""
+    from src.config import DATA_DIR
+
+    return Path(DATA_DIR) / FILENAME
+
+
+def default_payload() -> dict:
+    """Valeurs par défaut, dans l'ordre de lecture du fichier annoté."""
+    base = SvgStyle()
+    return {key: getattr(base, key) for _, entries in _SECTIONS for key, _help in entries}
+
+
+def _render_commented(payload: dict) -> str:
+    return render_commented(_INTRO, _SECTIONS, payload)
+
+
+def write_default_style(path: Path | None = None) -> Path:
+    """(Re)crée le fichier de réglages annoté, avec les valeurs par défaut."""
+    path = Path(path) if path else style_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_render_commented(default_payload()), encoding="utf-8")
+    logger.info(f"🎛 Réglages « Bubble » écrits : {path}")
+    return path
+
+
+def load_style(path: Path | None = None) -> SvgStyle:
+    """`SvgStyle` par défaut, surchargé par le fichier de réglages.
+
+    Crée le fichier s'il n'existe pas — l'utilisateur découvre ainsi la liste
+    complète des valeurs réglables, commentées, sans avoir à lire le code.
+    """
+    path = Path(path) if path else style_path()
+    if not path.exists():
+        try:
+            write_default_style(path)
+        except OSError as exc:
+            logger.warning(f"Réglages « Bubble » non créés ({path}) : {exc}")
+        return SvgStyle()
+
+    read = read_overrides(path, SvgStyle, _LOCKED, "Bubble")
+    if read is None:
+        return SvgStyle()
+    overrides, _raw = read
+    return build_style(SvgStyle, overrides, "Bubble")

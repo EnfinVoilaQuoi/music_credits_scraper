@@ -66,15 +66,15 @@ def test_smoke_structure(tmp_path):
 
     root = ET.parse(out).getroot()
     groups = {g.get("id"): g for g in root.findall(f"{SVG_NS}g")}
-    rects = groups["squares"].findall(f"{SVG_NS}rect")
-    assert len(rects) == 3  # un carré par artiste invité
+    circles = groups["nodes"].findall(f"{SVG_NS}circle")
+    assert len(circles) == 3  # un cercle par artiste invité
 
     # 3 combinaisons distinctes : {damso, nekfeu}, {damso}, {alpha wann}.
     ellipses = groups["ellipses"].findall(f"{SVG_NS}ellipse")
     assert len(ellipses) == 3
 
     ids = {el.get("id") for el in root.iter()}
-    assert "square-damso" in ids
+    assert "node-damso" in ids
     assert "ellipse-damso--nekfeu" in ids
     assert "ellipse-alpha-wann" in ids
 

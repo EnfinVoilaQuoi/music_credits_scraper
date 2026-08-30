@@ -22,9 +22,22 @@ from src.dataviz.bubble_prod import (
     list_albums,
     select_album_tracks,
 )
+from src.dataviz.bubble_style_io import load_style
 from src.dataviz.collab_graph import BROAD_PRODUCER_ROLES, DEFAULT_SEED, STRICT_PRODUCER_ROLES
 from src.dataviz.debug_preview import debug_preview
 from src.utils.data_manager import DataManager
+
+
+def report_outputs(result) -> None:
+    """Affiche les deux fichiers écrits + les alertes (débordement, photos)."""
+    print(f"✅ SVG écrit  : {result.path}")
+    print(f"✅ JSON écrit : {result.json_path}")
+    if result.spec.overflow:
+        w, h = result.spec.overflow
+        print(f"   ⚠️ Le réseau dépasse la zone de {w:.0f} × {h:.0f} px (album dense).")
+    if result.missing_images:
+        names = ", ".join(result.missing_images)
+        print(f"   ⚠️ {len(result.missing_images)} sans photo (cercle plein) : {names}")
 
 
 def main() -> int:
@@ -72,6 +85,7 @@ def main() -> int:
             artist_name=artist.name,
             roles=roles,
             seed=args.seed,
+            style=load_style(),
             output_path=args.out,
         )
     except ValueError as exc:
@@ -79,7 +93,7 @@ def main() -> int:
         return 1
 
     filtre = "large" if args.broad_roles else "strict (Producer)"
-    print(f"✅ SVG écrit : {result.path}")
+    report_outputs(result)
     print(
         f"   {result.node_count} producteur(s), "
         f"{result.track_count}/{album_total} morceau(x) crédités  ·  filtre {filtre}"

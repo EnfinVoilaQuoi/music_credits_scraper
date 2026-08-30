@@ -1,16 +1,18 @@
 """Modèle calculé (`BubbleSpec`) + rendu SVG « layout brut » (svgwrite).
 
 `BubbleSpec` est un modèle **pur et testable sans svgwrite** : positions et
-tailles des carrés producteurs déjà résolues, une `EllipseSpec` par morceau,
+diamètres des cercles artistes déjà résolus, une `EllipseSpec` par combinaison,
 arêtes de collaboration. Il est produit par `bubble_prod.build_bubble_spec` et
 consommé par `write_bubble_svg`.
 
-Le SVG est pensé pour Illustrator : **groupes-calques** empilés bas→top
-(`edges` < `ellipses` < `squares` < `badges` < `labels`) et **ids stables**
-(`square-<token>`, `badge-<token>`, `ellipse-track-<id>`, `edge-<a>--<b>`) que de
-futurs scripts JSX pourront cibler (le rect donne directement la boîte de
-recadrage d'une photo de producteur). Coordonnées arrondies (précision fixe) →
-sortie byte-identique entre deux régénérations.
+Le SVG est un **aperçu de contrôle**, pas le livrable : la planche finale est
+dessinée par `scripts/illustrator/bubble.jsx` à partir de `bubble_<kind>.json`
+(mêmes coordonnées, dans la même zone fixe). Il reste pensé pour Illustrator :
+**groupes-calques** empilés bas→top (`edges` < `ellipses` < `nodes` < `badges` <
+`labels`) et **ids stables** (`node-<token>`, `badge-<token>`, `ellipse-<a>--<b>`,
+`edge-<a>--<b>`) — le cercle donne directement la boîte de recadrage de la photo
+d'artiste. Coordonnées arrondies (précision fixe) → sortie byte-identique entre
+deux régénérations.
 """
 
 import math
@@ -26,68 +28,86 @@ from src.dataviz.geometry import EllipseSpec
 class SvgStyle:
     """Paramètres de rendu (tailles, couleurs). Habillage brut, éditable ensuite."""
 
-    # Carrés producteurs : bornes de l'échelle de participation (côté en px).
-    # Très grands (post Insta, lisible sur mobile) : photo + nom y tiendront.
-    square_size_min: float = 240.0
-    square_size_max: float = 400.0
-    corner_radius: float = 16.0
-    # Badge (compteur de morceaux) ancré au milieu de l'arête basse du carré.
-    badge_size: float = 58.0
-    badge_corner_radius: float = 9.0
-    badge_font_size: float = 29.0
-    # Libellés (noms de producteurs).
-    font_size: float = 34.0
-    font_family: str = "Arial, sans-serif"
-    name_dy_ratio: float = -0.28  # position verticale du nom dans le carré (-0.5=haut)
-    name_line_height: float = 38.0  # interligne des noms multi-lignes
+    # ── Zone de composition ──────────────────────────────────────────────────
+    # Cadre FIXE, et non déduit du contenu : c'est ce qui garde l'échelle
+    # comparable d'un album à l'autre (un album à 4 producteurs ne doit pas
+    # produire des cercles plus gros qu'un album à 15). Reprend les cotes du
+    # repère `zone-bubble` du template Illustrator.
+    frame_width: float = 860.0
+    frame_height: float = 520.0
+    margin: float = 16.0  # marge intérieure entre le bord de la zone et le contenu
+    # Cercles artistes : bornes de l'échelle de participation (DIAMÈTRE en px).
+    node_size_min: float = 55.0
+    node_size_max: float = 120.0
+    # Badge (compteur de morceaux) ancré au milieu de l'arête basse du cercle.
+    badge_size: float = 22.0
+    badge_corner_radius: float = 4.0
+    badge_font_size: float = 11.0
+    # Nom d'artiste, centré dans le cercle. La taille suit le DIAMÈTRE :
+    # `node_size_max` porte `font_size` en entier, un cercle plus petit reçoit
+    # la même taille au prorata, jamais sous `font_size_min` (sinon illisible).
+    font_size: float = 25.0
+    font_size_min: float = 9.0
+    line_height_ratio: float = 1.08  # interligne des noms multi-lignes (× font_size)
+    font_family: str = "Montserrat, Arial, sans-serif"
+    font_bold: str = "Montserrat-Bold"  # nom PostScript, pour Illustrator
+    font_medium: str = "Montserrat-Medium"
     uppercase_names: bool = True  # noms d'artistes en MAJUSCULES (choix utilisateur)
+    # Photo d'artiste : recadrée dans le cercle CÔTÉ ILLUSTRATOR seulement
+    # (l'aperçu SVG ne place aucune image), voilée pour que le nom reste lisible.
+    photo_overlay_color: str = "#333030"
+    photo_overlay_opacity: float = 0.33
     # Légende d'ellipse (titres des morceaux si peu nombreux, sinon « XX morceaux »).
     label_track_threshold: int = 3  # au-delà : « N morceaux » au lieu des titres
-    ellipse_label_font_size: float = 31.0
-    ellipse_label_color: str = "#33475B"
-    ellipse_label_gap: float = 18.0  # écart entre le bout de l'ellipse et sa légende
-    ellipse_label_line_height: float = 37.0
+    ellipse_label_font_size: float = 20.0
+    ellipse_label_color: str = "#333030"
+    ellipse_label_gap: float = 8.0  # écart entre le bout de l'ellipse et sa légende
+    ellipse_label_line_height: float = 23.0
     ellipse_label_max_angle: float = 30.0  # rotation max du texte (± degrés, reste lisible)
     # Ellipses (une par combinaison de producteurs).
     min_axis_ratio: float = 0.35  # borne l'aplatissement (duo / quasi-colinéaire)
-    ellipse_margin: float = 22.0  # marge ajoutée à la demi-diagonale des carrés
-    # Anti-chevauchement des carrés (passe post-layout, déterministe).
-    overlap_gap: float = 48.0  # espace minimal entre deux carrés (aère le centre)
+    ellipse_margin: float = 10.0  # marge ajoutée au rayon des cercles
+    # Anti-chevauchement des cercles (passe post-layout, déterministe).
+    overlap_gap: float = 14.0  # espace minimal entre deux cercles (aère le centre)
     overlap_iterations: int = 400
     # Canevas.
-    canvas_scale: float = 560.0  # layout spring (~[-1,1]) → px
+    canvas_scale: float = 190.0  # layout spring (~[-1,1]) → px
     hub_clearance: float = 0.8  # facteur du plancher de rayon feuille↔hub (éloigne du hub)
-    radial_fill: float = 0.85  # remplissage : les feuilles s'étirent vers le bord du cadre
+    radial_fill: float = 0.85  # remplissage : les feuilles s'étirent vers le bord de la zone
+    radial_fill_islands: float = 0.62  # idem, quand des îlots doivent tenir dans les coins
     main_component_scale: float = 1.0  # zoom de la composante principale (hub)
-    component_gap: float = 72.0  # écart initial hub↔îlots (avant calage aux coins)
-    margin: float = 48.0  # marge intérieure entre le cadre et le contenu
-    # Cadre (les îlots se calent dans ses coins, le hub occupe le centre).
+    component_gap: float = 22.0  # écart initial hub↔îlots (avant calage aux coins)
+    # Cadre : il matérialise EXACTEMENT la zone dans l'aperçu — ce qui déborde
+    # se voit d'un coup d'œil (rien n'est mis à l'échelle pour rentrer).
     draw_frame: bool = True
-    frame_inset: float = 20.0  # écart entre le bord du viewBox et le cadre
-    island_corner_pad: float = 36.0  # écart entre un îlot et le coin intérieur du cadre
-    frame_stroke: str = "#222222"
-    frame_stroke_width: float = 2.0
+    island_corner_pad: float = 12.0  # écart entre un îlot et le coin intérieur du cadre
+    frame_stroke: str = "#C9C9C9"
+    frame_stroke_width: float = 1.0
     frame_fill: str = "none"
     coord_precision: int = 2  # décimales des coordonnées (déterminisme)
     # Couleurs.
     draw_edges: bool = False  # traits producteur↔producteur (les bulles suffisent)
     edge_color: str = "#B0B0B0"
     edge_width: float = 1.0
-    ellipse_fill: str = "#EAF2FB"
-    ellipse_opacity: float = 0.55
-    ellipse_stroke: str = "#5B8DEF"
-    ellipse_stroke_width: float = 2.0
-    square_fill: str = "#FFFFFF"
-    square_stroke: str = "#222222"
-    square_stroke_width: float = 2.2
-    label_color: str = "#111111"
-    badge_fill: str = "#222222"
+    ellipse_fill: str = "none"
+    ellipse_stroke: str = "#c98684"
+    ellipse_stroke_width: float = 5.0
+    node_fill: str = "#333030"
+    node_stroke: str = "none"
+    node_stroke_width: float = 0.0
+    label_color: str = "#FFFFFF"
+    badge_fill: str = "#c98684"
     badge_text_color: str = "#FFFFFF"
 
 
 @dataclass(frozen=True)
 class NodeSpec:
-    """Un producteur : centre (x, y), côté `size`, compteur `track_count`."""
+    """Un artiste : centre (x, y), DIAMÈTRE `size`, compteur `track_count`.
+
+    `label_font_size` est résolu ICI (dans le spec) et non à l'affichage : le
+    SVG d'aperçu et la planche Illustrator doivent poser exactement la même
+    taille, sans que chacun refasse le calcul de son côté.
+    """
 
     key: str
     display: str
@@ -95,6 +115,7 @@ class NodeSpec:
     y: float
     size: float
     track_count: int
+    label_font_size: float
 
 
 @dataclass(frozen=True)
@@ -134,7 +155,13 @@ class GroupShape:
 class BubbleSpec:
     """Modèle complet prêt à rendre : dimensions + nœuds + arêtes + combinaisons.
 
-    `frame` = `(x, y, w, h)` du cadre carré, ou `None` si désactivé.
+    `width`/`height` valent la zone FIXE (`style.frame_width/height`).
+    `frame` = `(x, y, w, h)` du cadre, ou `None` si désactivé.
+
+    `overflow` = `(dx, dy)` de dépassement de la zone, ou `None` si le contenu
+    tient. Le dessin n'est JAMAIS mis à l'échelle pour rentrer (l'échelle doit
+    rester comparable entre albums) : ce qui dépasse dépasse, et se rattrape
+    dans Illustrator — mais l'appelant doit pouvoir le DIRE.
     """
 
     width: float
@@ -144,6 +171,7 @@ class BubbleSpec:
     groups: tuple[GroupShape, ...]
     style: SvgStyle
     frame: tuple[float, float, float, float] | None = None
+    overflow: tuple[float, float] | None = None
 
 
 def id_token(key: str) -> str:
@@ -156,7 +184,7 @@ def id_token(key: str) -> str:
     return token or "x"
 
 
-def _name_lines(name: str) -> tuple[str, ...]:
+def name_lines(name: str) -> tuple[str, ...]:
     """Découpe un nom en lignes : un mot par ligne dans le carré.
 
     Les morceaux très courts (initiales « D. », particules) restent collés au
@@ -195,7 +223,7 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
     g_edges = dwg.g(id="edges")
     g_ellipses = dwg.g(id="ellipses")
     g_ellipse_labels = dwg.g(id="ellipse-labels")
-    g_squares = dwg.g(id="squares")
+    g_nodes = dwg.g(id="nodes")
     g_badges = dwg.g(id="badges")
     g_labels = dwg.g(id="labels")
 
@@ -234,7 +262,6 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
             center=(f(el.cx), f(el.cy)),
             r=(f(el.rx), f(el.ry)),
             fill=style.ellipse_fill,
-            fill_opacity=style.ellipse_opacity,
             stroke=style.ellipse_stroke,
             stroke_width=f(style.ellipse_stroke_width),
             id=f"ellipse-{set_token}",
@@ -267,24 +294,23 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
             text.attribs["transform"] = f"rotate({f(gs.label_angle)} {f(lx)} {f(ly)})"
             g_ellipse_labels.add(text)
 
-    # ── Calques 3-5 : carrés, badges, libellés ──
+    # ── Calques 3-5 : cercles, badges, libellés ──
     for n in spec.nodes:
         token = id_token(n.key)
         half = n.size / 2.0
-        # Carré centré, coins arrondis.
-        g_squares.add(
-            dwg.rect(
-                insert=(f(n.x - half), f(n.y - half)),
-                size=(f(n.size), f(n.size)),
-                rx=f(style.corner_radius),
-                ry=f(style.corner_radius),
-                fill=style.square_fill,
-                stroke=style.square_stroke,
-                stroke_width=f(style.square_stroke_width),
-                id=f"square-{token}",
+        # Cercle plein : c'est le REPLI (aucune photo). Côté Illustrator, le
+        # même cercle sert de boîte de recadrage à la photo d'artiste.
+        g_nodes.add(
+            dwg.circle(
+                center=(f(n.x), f(n.y)),
+                r=f(half),
+                fill=style.node_fill,
+                stroke=style.node_stroke,
+                stroke_width=f(style.node_stroke_width),
+                id=f"node-{token}",
             )
         )
-        # Badge : petit carré arrondi à cheval sur le milieu de l'arête basse.
+        # Badge : petit carré arrondi à cheval sur le bas du cercle.
         bsize = style.badge_size
         bx = n.x - bsize / 2.0
         by = n.y + half - bsize / 2.0
@@ -314,32 +340,38 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
                 id=f"badge-count-{token}",
             )
         )
-        # Libellé (nom) dans le carré, vers le haut (la photo occupera le bas).
-        # Multi-lignes : un mot par ligne, initiales collées (cf. _name_lines).
+        # Nom CENTRÉ dans le cercle, par-dessus la photo voilée. Multi-lignes :
+        # un mot par ligne, initiales collées (cf. `name_lines`) ; le bloc est
+        # centré verticalement, donc décalé d'une demi-hauteur vers le haut.
+        # Centrage vertical MANUEL (+0.35 em) : `dominant-baseline` est ignoré
+        # par Illustrator.
         name = n.display.upper() if style.uppercase_names else n.display
+        lines = name_lines(name)
+        line_height = n.label_font_size * style.line_height_ratio
         label_group = dwg.g(id=f"label-{token}")
-        base_y = n.y + style.name_dy_ratio * n.size + style.font_size * 0.35
-        for i, line in enumerate(_name_lines(name)):
+        base_y = n.y - (len(lines) - 1) * line_height / 2.0 + n.label_font_size * 0.35
+        for i, line in enumerate(lines):
             label_group.add(
                 dwg.text(
                     line,
-                    insert=(f(n.x), f(base_y + i * style.name_line_height)),
+                    insert=(f(n.x), f(base_y + i * line_height)),
                     text_anchor="middle",
-                    font_size=f(style.font_size),
+                    font_size=f(n.label_font_size),
                     font_family=style.font_family,
+                    font_weight="bold",
                     fill=style.label_color,
                 )
             )
         g_labels.add(label_group)
 
-    # Ordre d'empilement : les légendes d'ellipses passent AU-DESSUS des carrés
-    # (le « N solo » du hub est écrit DANS son carré — sous les carrés, il
-    # serait masqué par le rect blanc).
+    # Ordre d'empilement : les légendes d'ellipses passent AU-DESSUS des cercles
+    # (le « N solo » du hub est écrit DANS son cercle — dessous, il serait
+    # masqué par le disque plein).
     for group in (
         g_frame,
         g_edges,
         g_ellipses,
-        g_squares,
+        g_nodes,
         g_ellipse_labels,
         g_badges,
         g_labels,

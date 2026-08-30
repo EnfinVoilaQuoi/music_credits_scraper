@@ -65,6 +65,11 @@ _TIP_SAMPLES = 180
 # ne masquerait qu'une lettre.
 _ARC_PROBES = 7
 
+# Allers-retours « écarter des îlots / ré-écarter entre eux » du noyau. Deux
+# suffisent en pratique ; au-delà les deux contraintes s'opposent et il faut
+# assumer le résultat plutôt que de faire vibrer le dessin.
+_SEPARATION_PASSES = 3
+
 # Caractères interdits dans un nom de dossier Windows.
 _FORBIDDEN_DIRNAME = '<>:"/\\|?*'
 
@@ -254,6 +259,26 @@ def _remove_overlaps(
         if not moved:
             break
     return {k: (pos[k][0], pos[k][1]) for k in keys}
+
+
+def _ring_obstacles(ellipse, rings, style: SvgStyle) -> list[tuple[float, float, float]]:
+    """Jalons occupés par des titres déjà posés, pour que les suivants s'écartent.
+
+    Un titre curviligne est approché par une poignée de disques le long de son
+    arc : c'est grossier, mais suffisant pour qu'une légende voisine renonce à
+    l'emplacement et descende d'un cran dans son classement.
+    """
+    marks: list[tuple[float, float, float]] = []
+    radius = style.ellipse_label_font_size * 0.6
+    for ring in rings:
+        carrier = ellipse.inflated(ring.offset)
+        half = len(ring.text) * style.ellipse_label_font_size * _CHAR_WIDTH_RATIO / 2.0
+        span = math.degrees(half / max(1e-9, min(carrier.rx, carrier.ry)))
+        for i in range(_ARC_PROBES):
+            t = ring.t - span + 2.0 * span * i / (_ARC_PROBES - 1)
+            px, py = carrier.point_at(t)
+            marks.append((px, py, radius))
+    return marks
 
 
 def _arc_is_clear(ellipse, t_center, span_deg, avoid) -> bool:
@@ -794,8 +819,10 @@ def build_bubble_spec(
         """
         center_x = sum(canvas[k][0] for k in ordered) / len(canvas)
         center_y = sum(canvas[k][1] for k in ordered) / len(canvas)
-        # Les cercles à ne pas masquer, dans leur état courant.
-        circles = tuple((canvas[k][0], canvas[k][1], sizes[k] / 2.0) for k in sorted(canvas))
+        # Ce qu'un titre ne doit pas recouvrir : les cercles, puis les titres
+        # DÉJÀ POSÉS — ils s'ajoutent au fur et à mesure, sinon deux légendes
+        # voisines se choisissent le même bel emplacement et se superposent.
+        obstacles = [(canvas[k][0], canvas[k][1], sizes[k] / 2.0) for k in sorted(canvas)]
         raw_groups = []
         for cg in collab_groups:
             member_pts = []
@@ -829,8 +856,9 @@ def build_bubble_spec(
                 center_x,
                 center_y,
                 inward=not set(cg.keys) <= main_set,
-                avoid=circles,
+                avoid=tuple(obstacles),
             )
+            obstacles.extend(_ring_obstacles(ellipse, rings, style))
             raw_groups.append((cg, ellipse, label_lines, rings))
         return raw_groups
 
@@ -962,6 +990,77 @@ def build_bubble_spec(
                     # Les légendes suivent leur ellipse : une translation ne
                     # change ni leur point d'ancrage ni leur sens de lecture.
                     raw_groups[i] = (cg, _shift_ellipse(ellipse, tx, ty), label_lines, rings)
+
+    # ── Îlots entre eux : au-delà de 8, ils se partagent les mêmes coins ─────
+    # Les emplacements (`_SLOTS`) sont au nombre de 8 ; un album qui compte plus
+    # d'îlots que ça en superpose deux (vu sur « Labrador bleu », 10 composantes).
+    # On les écarte EN BLOC — un îlot est un petit dessin cohérent, le déformer
+    # en poussant ses cercles un par un le casserait.
+    for _ in range(_SEPARATION_PASSES):
+        moved = False
+        for i, comp_a in enumerate(comps[1:]):
+            for comp_b in comps[i + 2 :]:
+                push_x = push_y = 0.0
+                for ka in comp_a:
+                    for kb in comp_b:
+                        ddx = canvas[kb][0] - canvas[ka][0]
+                        ddy = canvas[kb][1] - canvas[ka][1]
+                        dist = math.hypot(ddx, ddy)
+                        needed = (sizes[ka] + sizes[kb]) / 2.0 + style.component_gap
+                        if dist >= needed:
+                            continue
+                        ux, uy = (1.0, 0.0) if dist < 1e-9 else (ddx / dist, ddy / dist)
+                        overlap = (needed - dist) / 2.0
+                        if abs(overlap) > abs(push_x) + abs(push_y):
+                            push_x, push_y = ux * overlap, uy * overlap
+                if push_x or push_y:
+                    moved = True
+                    for k in comp_a:
+                        canvas[k] = (canvas[k][0] - push_x, canvas[k][1] - push_y)
+                    for k in comp_b:
+                        canvas[k] = (canvas[k][0] + push_x, canvas[k][1] + push_y)
+        if not moved:
+            break
+    if len(comps) > 1:
+        raw_groups = _make_groups(canvas)
+        _state["canvas"], _state["groups"] = canvas, raw_groups
+
+    # ── Dégagement des îlots : le noyau recule, eux sont figés ───────────────
+    # `_remove_overlaps` ne travaille QU'À L'INTÉRIEUR d'une composante : rien
+    # n'empêchait un satellite du noyau de venir se coller à un îlot calé dans
+    # son coin (Sofiane Pamart sur Yahmanny). Les îlots ne bougent plus à ce
+    # stade — ils tiennent leur bord —, c'est donc le noyau qui cède.
+    if len(comps) > 1:
+        island_pins = tuple(
+            (canvas[k][0], canvas[k][1], sizes[k] / 2.0) for comp in comps[1:] for k in sorted(comp)
+        )
+        hub_only = {k: canvas[k] for k in comps[0]}
+        hub_sizes = {k: sizes[k] for k in comps[0]}
+        for _ in range(_SEPARATION_PASSES):
+            moved = False
+            for k in comps[0]:
+                hx, hy = hub_only[k]
+                radius = hub_sizes[k] / 2.0
+                for ix, iy, ir in island_pins:
+                    ddx, ddy = hx - ix, hy - iy
+                    dist = math.hypot(ddx, ddy)
+                    needed = radius + ir + style.component_gap
+                    if dist >= needed:
+                        continue
+                    moved = True
+                    if dist < 1e-9:
+                        ux, uy, dist = 1.0, 0.0, 0.0
+                    else:
+                        ux, uy = ddx / dist, ddy / dist
+                    hx, hy = ix + ux * needed, iy + uy * needed
+                hub_only[k] = (hx, hy)
+            if not moved:
+                break
+            # Le recul peut coller deux satellites entre eux : on ré-écarte.
+            hub_only = _remove_overlaps(hub_only, hub_sizes, style)
+        canvas = {**canvas, **hub_only}
+        raw_groups = _make_groups(canvas)
+        _state["canvas"], _state["groups"] = canvas, raw_groups
 
     # ── Étalement : occuper la zone au lieu de se tasser au centre ───────────
     # Le resserrage ci-dessus ne sait que RÉDUIRE. Sur la plupart des albums le

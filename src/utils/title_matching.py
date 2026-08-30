@@ -8,6 +8,48 @@ coûté des faux non-matchés ("MURDER INC" vs "MURDER INC.", "S.O.A.B" vs "SOAB
 import re
 import unicodedata
 
+# Superpositions décoratives que Genius laisse dans certains titres
+# (« F̶i̶e̶s̶t̶a̶ ») : barres et solidus combinants. Ce ne sont JAMAIS des accents,
+# contrairement au reste du bloc U+0300-U+036F — les retirer en bloc casserait
+# les caractères accentués écrits en forme décomposée.
+_DECORATIVE_OVERLAYS = {0x0335, 0x0336, 0x0337, 0x0338}
+
+
+def clean_display_title(title: str) -> str:
+    """Titre prêt à l'affichage : accents recomposés, décorations barrées retirées.
+
+    `normalize_title` est réservé au matching (il écrase la casse et la
+    ponctuation) ; ici on ne touche qu'à ce qui empêcherait un rendu propre.
+    """
+    if not title:
+        return ""
+    text = unicodedata.normalize("NFC", title)
+    return "".join(ch for ch in text if ord(ch) not in _DECORATIVE_OVERLAYS).strip()
+
+
+def split_title_paren(title: str) -> tuple[str, str | None]:
+    """Sépare un titre de sa parenthèse FINALE, pour l'affichage.
+
+        « Fiesta (Interlude) »  → ("Fiesta", "(Interlude)")
+        « Outro (Labrador bleu) » → ("Outro", "(Labrador bleu)")
+        « McQueen / Givenchy »  → ("McQueen / Givenchy", None)
+
+    Contrairement à `normalize_title` (qui écrase la ponctuation et sert au
+    matching), on préserve la graphie : la dataviz « Structure » rend le titre en
+    SemiBold et sa parenthèse en Light. Seule la parenthèse en fin de chaîne est
+    détachée — une parenthèse interne (« 3ein (part 1) / Risotto ») reste dans le
+    titre.
+    """
+    if not title:
+        return "", None
+    stripped = title.strip()
+    match = re.search(r"\s*(\([^()]*\))$", stripped)
+    if not match:
+        return stripped, None
+    head = stripped[: match.start()].strip()
+    # Un titre entièrement parenthésé n'a pas de « tête » : on le laisse entier.
+    return (head, match.group(1)) if head else (stripped, None)
+
 
 def normalize_title(s: str) -> str:
     """Normalise un titre : feat (avec/sans parenthèses), apostrophes, accents,

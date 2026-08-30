@@ -1,7 +1,7 @@
 """Fenêtre « Export studio » — générateurs de visuels par produit final.
 
-Trois onglets : **Analyse de Projet** (7 générateurs prévus, « Bubble Prod » et
-« Bubble Feat » sont câblés), **Timeline** et **Stats en Vrac** (à venir).
+Trois onglets : **Analyse de Projet** (8 générateurs prévus, « Bubble Prod »,
+« Bubble Feat » et « Structure » sont câblés), **Timeline** et **Stats en Vrac** (à venir).
 L'export JSON historique (bouton « Exporter » d'origine) vit désormais ici, en
 bas de fenêtre, et délègue à `app._export_data()` (inchangé).
 
@@ -23,6 +23,8 @@ from src.dataviz.bubble_prod import (
     generate_preview_grid,
     list_albums,
 )
+from src.dataviz.structure import generate_structure
+from src.dataviz.structure_style_io import load_style
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.utils.logger import get_logger
@@ -33,6 +35,7 @@ logger = get_logger(__name__)
 _PROJECT_GENERATORS = [
     ("Bubble Prod", True),
     ("Bubble Feat", True),
+    ("Structure", True),
     ("Répartition BPM", False),
     ("Clés & modes", False),
     ("Durées", False),
@@ -128,6 +131,7 @@ class ExportStudioWindow:
         commands = {
             "Bubble Prod": lambda: self._start_bubble("prod"),
             "Bubble Feat": lambda: self._start_bubble("feat"),
+            "Structure": self._start_structure,
         }
         self.generator_buttons: dict[str, ctk.CTkButton] = {}
         for i, (label, enabled) in enumerate(_PROJECT_GENERATORS):
@@ -245,6 +249,54 @@ class ExportStudioWindow:
             False,
             f"✅ {result.path.name} — {result.node_count} {noun}, "
             f"{result.track_count} morceau(x)",
+        )
+        if open_after:
+            try:
+                os.startfile(result.path)  # noqa: S606 — ouverture du SVG généré
+            except OSError as exc:
+                logger.warning(f"Ouverture du SVG impossible : {exc}")
+
+    def _start_structure(self):
+        """Génère le SVG « Structure » (barres de sections) de l'album courant."""
+        snapshot = self._snapshot_inputs()
+        if snapshot is None:
+            return
+        artist_name, album, tracks, _ = snapshot  # rendu déterministe : pas de seed
+        open_after = self.open_after_var.get()
+        self._set_busy(True, f"Génération Structure ({album})…")
+
+        def worker():
+            # `exc` est effacé à la sortie du bloc except → message FIGÉ en défaut.
+            try:
+                result = generate_structure(
+                    tracks, album, artist_name=artist_name, style=load_style()
+                )
+            except ValueError as exc:  # album vide, morceaux sans LRC/sections/durée
+                self._safe_after(lambda msg=str(exc): self._on_error(msg))
+            except Exception as exc:  # frontière thread→GUI : tout remonte en dialog
+                logger.error(f"Structure : erreur inattendue : {exc}")
+                self._safe_after(lambda msg=str(exc): self._on_error(msg))
+            else:
+                self._safe_after(lambda: self._on_structure_done(result, open_after))
+
+        start_worker(worker, name="export_studio:structure")
+
+    def _on_structure_done(self, result, open_after: bool):
+        # Les sections non alignées sont absorbées par la précédente : le visuel
+        # reste juste dans les grandes masses, mais l'utilisateur doit le savoir.
+        warning = (
+            f" — ⚠️ {result.unaligned_count} section(s) non alignée(s)"
+            if result.unaligned_count
+            else ""
+        )
+        # Sans n° de piste, l'ordre des lignes est alphabétique : à dire, sinon
+        # la planche paraît juste alors que la tracklist est fausse.
+        if result.unnumbered_count:
+            warning += f" — ⚠️ {result.unnumbered_count} sans n° de piste (ordre alphabétique)"
+        self._set_busy(
+            False,
+            f"✅ {result.path.name} + {result.json_path.name} — "
+            f"{result.track_count} morceau(x), {result.section_count} section(s){warning}",
         )
         if open_after:
             try:

@@ -102,6 +102,12 @@ scripts/*
 # Dataviz / export studio
 !scripts/bubble_prod.py
 !scripts/bubble_feat.py
+!scripts/structure.py
+# Scripts Illustrator : git ne descend pas dans un dossier exclu, il faut donc
+# ré-inclure le RÉPERTOIRE avant de pouvoir whitelister un fichier dedans.
+!scripts/illustrator/
+scripts/illustrator/*
+!scripts/illustrator/structure.jsx
 /test*\.py
 /*test\.py
 /debug*\.py

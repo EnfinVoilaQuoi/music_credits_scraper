@@ -300,17 +300,31 @@ def import_genius_album(app):
     from src.utils.title_matching import normalize_title as _nt
 
     artist_key = _nt(app.current_artist.name)
-    known_ids = {int(t.genius_id) for t in app.current_artist.tracks if t.genius_id}
+    by_genius_id = {int(t.genius_id): t for t in app.current_artist.tracks if t.genius_id}
+    known_ids = set(by_genius_id)
     try:
         deleted_ids = app.deleted_tracks_manager.load_deleted_ids(app.current_artist.name)
     except Exception:
         deleted_ids = set()
 
-    created, skipped_known, skipped_deleted = [], 0, 0
+    created, skipped_known, skipped_deleted, renumbered = [], 0, 0, 0
     for tr in data["tracks"]:
         gid = int(tr["genius_id"])
         if gid in known_ids:
             skipped_known += 1
+            # Le morceau existe déjà, mais Genius nous donne son RANG dans
+            # l'album — la seule source du `track_number`. Sans ce backfill il
+            # était jeté, et tout ce qui trie une tracklist (dataviz Structure)
+            # retombait sur l'ordre alphabétique.
+            number = tr.get("track_number")
+            existing = by_genius_id[gid]
+            if number and existing.track_number != number:
+                existing.track_number = number
+                try:
+                    app.data_manager.save_track(existing)
+                    renumbered += 1
+                except Exception as e:
+                    logger.error(f"N° de piste '{existing.title}' échoué: {e}")
             continue
         if gid in deleted_ids:
             skipped_deleted += 1
@@ -341,8 +355,9 @@ def import_genius_album(app):
         "Import album",
         f"« {album_name} » — {len(data['tracks'])} morceaux sur Genius :\n\n"
         f"➕ {len(created)} ajoutés\n"
-        f"⏭️ {skipped_known} déjà en base\n"
-        f"🗂️ {skipped_deleted} ignorés (supprimés par toi)\n\n"
+        f"⏭️ {skipped_known} déjà en base"
+        + (f" (dont 🔢 {renumbered} numérotés)" if renumbered else "")
+        + f"\n🗂️ {skipped_deleted} ignorés (supprimés par toi)\n\n"
         + (
             "Lance une MàJ Discographie (case media) puis l'enrichissement\n"
             "pour compléter les nouveaux morceaux."
@@ -352,6 +367,109 @@ def import_genius_album(app):
     )
 
 
+def _apply_album_numbers(app, album: str, tracks) -> tuple[int, list[str]]:
+    """Numérote les morceaux d'UN album depuis Genius. Renvoie (posés, manquants).
+
+    Aucune URL à saisir : l'album se déduit du `genius_id` d'un morceau déjà en
+    base. Passe par l'API AUTHENTIFIÉE (`api.genius.com`) et non par les endpoints
+    web `genius.com/api/…`, en 403 Cloudflare depuis 2026-08.
+
+    Cœur partagé par l'action d'un album et par le lot sur tout l'artiste — pas
+    de dialogue ici, l'appelant s'en charge (le lot tourne hors du thread Tk).
+    """
+    seeds = [t for t in tracks if t.genius_id]
+    if not seeds:
+        return 0, [t.title for t in tracks]
+
+    numbers = None
+    for seed in seeds[:3]:  # un morceau peut être rattaché à un autre album
+        numbers = app.genius_api.get_album_track_numbers(int(seed.genius_id))
+        if numbers:
+            break
+    if not numbers:
+        return 0, [t.title for t in tracks]
+
+    updated, missing = 0, []
+    for track in tracks:
+        number = numbers.get(int(track.genius_id)) if track.genius_id else None
+        if not number:
+            missing.append(track.title)
+            continue
+        if track.track_number != number:
+            track.track_number = number
+            try:
+                app.data_manager.save_track(track)
+                updated += 1
+            except Exception as e:
+                logger.error(f"N° de piste '{track.title}' échoué: {e}")
+    return updated, missing
+
+
+def number_album_tracks(app, album: str, tracks):
+    """Numérote un seul album (2 appels API : rapide, donc en ligne)."""
+    updated, missing = _apply_album_numbers(app, album, tracks)
+    app._reload_tracks_and_refresh()
+    messagebox.showinfo(
+        "Numéroter les pistes",
+        f"« {album} » :\n\n🔢 {updated} morceau(x) numéroté(s)\n"
+        + (
+            f"⚠️ {len(missing)} absent(s) de la tracklist Genius :\n"
+            + "\n".join(f"  • {t}" for t in missing[:8])
+            if missing
+            else "✅ tous les morceaux ont leur numéro"
+        ),
+    )
+
+
+def number_all_albums(app):
+    """Numérote TOUS les albums de l'artiste courant, en une passe.
+
+    Deux appels API par album : la boucle est trop longue pour le thread Tk, elle
+    part donc en worker (réseau + DB purement sync → `start_worker`).
+    """
+    from src.gui.dialogs import report
+    from src.gui.workers.lifecycle import start_worker, stop_requested
+
+    if not app.current_artist or not app.current_artist.tracks:
+        messagebox.showinfo("Numéroter les pistes", "Charge un artiste d'abord.")
+        return
+
+    # Snapshot SUR LE THREAD TK. Les lignes synthétiques (Featurings, Singles)
+    # ne sont pas des albums : rien à numéroter.
+    groups: dict[str, list] = {}
+    for track in app.current_artist.tracks:
+        album = (track.album or "").strip()
+        if album:
+            groups.setdefault(album, []).append(track)
+    if not groups:
+        messagebox.showinfo("Numéroter les pistes", "Aucun album à numéroter.")
+        return
+
+    artist_name = app.current_artist.name
+
+    def worker():
+        lines, total = [], 0
+        for album, tracks in sorted(groups.items()):
+            if stop_requested():
+                lines.append("⏹ Interrompu.")
+                break
+            updated, missing = _apply_album_numbers(app, album, tracks)
+            total += updated
+            flag = "🔢" if updated else ("⚠️" if missing else "✅")
+            lines.append(f"{flag} {album} — {updated} numéroté(s), {len(missing)} sans numéro")
+            for title in missing[:5]:
+                lines.append(f"      • {title}")
+        summary = f"{artist_name} — {total} morceau(x) numéroté(s) sur {len(groups)} album(s)\n\n"
+        app.root.after(0, lambda: _on_numbering_done(app, summary + "\n".join(lines), report))
+
+    start_worker(worker, name="albums:number_all")
+
+
+def _on_numbering_done(app, text: str, report):
+    app._reload_tracks_and_refresh()
+    report.show_scrollable_report(app, "Numérotation des pistes", text)
+
+
 def on_album_right_click(app, event):
     """Menu contextuel de la vue Albums : détacher des morceaux de l'album."""
     item = app.tree.identify_row(event.y)
@@ -359,6 +477,11 @@ def on_album_right_click(app, event):
     if not item or item not in rows:
         # Clic dans le vide : import d'album par URL
         context_menu = tkinter.Menu(app.root, tearoff=0)
+        context_menu.add_command(
+            label="🔢 Numéroter les pistes de TOUS les albums (Genius)",
+            command=lambda: number_all_albums(app),
+        )
+        context_menu.add_separator()
         context_menu.add_command(
             label="➕ Importer un album Genius (URL…)", command=lambda: import_genius_album(app)
         )
@@ -386,6 +509,11 @@ def on_album_right_click(app, event):
         context_menu.add_cascade(label="👁 Rétablir la ligne d'album", menu=restore_menu)
     else:
         key = helpers.normalize_album_title(album)
+        context_menu.add_command(
+            label="🔢 Numéroter les pistes (Genius)",
+            command=lambda a=album, t=tracks: number_album_tracks(app, a, t),
+        )
+        context_menu.add_separator()
         # Classement VISUEL (réversible, base intacte) — pour les albums
         # hôtes (feats) ou compilations qu'on ne veut pas voir en ligne
         context_menu.add_command(

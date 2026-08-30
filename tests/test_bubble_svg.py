@@ -138,17 +138,36 @@ def test_name_lines():
 
 
 def test_legende_posee_a_plat_et_lisible():
-    # Le titre est CURVILIGNE. Il doit être posé là où la tangente de l'ovale
-    # est horizontale (sinon il s'écrit de haut en bas), et parcouru dans le
-    # sens qui l'écrit de gauche à droite (sinon il est à l'envers).
+    # Le titre est CURVILIGNE. Il glisse vers le bout de son ovale — d'où une
+    # tangente qui n'est plus exactement horizontale — mais jamais au-delà de
+    # l'inclinaison tolérée, et toujours parcouru dans le sens qui l'écrit de
+    # gauche à droite (sinon il est à l'envers).
+    import math
+
     spec = _spec(_album_tracks())
     for gs in spec.groups:
         for ring in gs.rings:
             porteuse = gs.ellipse.inflated(ring.offset)
             tx, ty = porteuse.tangent_at(ring.t)
-            assert abs(ty) < 1e-6 * max(1.0, abs(tx))  # tangente horizontale
+            angle = math.degrees(math.atan2(ty, tx))
+            angle = ((angle + 90.0) % 180.0) - 90.0
+            assert abs(angle) <= spec.style.ellipse_label_max_angle + 1e-9
             sens = 1.0 if ring.sweep else -1.0
             assert tx * sens > 0  # les lettres avancent vers la droite
+
+
+def test_legende_du_noyau_part_vers_le_bord():
+    # Consigne DA : les ovales du noyau poussent leur titre vers l'extérieur de
+    # l'image. Le point retenu doit donc être plus loin du centre que le centre
+    # de l'ovale lui-même.
+    spec = _spec(_album_tracks())
+    cx, cy = spec.width / 2.0, spec.height / 2.0
+    duo = next(g for g in spec.groups if set(g.member_keys) == {"big", "kalim"})
+    ring = duo.rings[0]
+    px, py = duo.ellipse.inflated(ring.offset).point_at(ring.t)
+    depuis_le_point = (px - cx) ** 2 + (py - cy) ** 2
+    depuis_le_centre = (duo.ellipse.cx - cx) ** 2 + (duo.ellipse.cy - cy) ** 2
+    assert depuis_le_point > depuis_le_centre
 
 
 def test_deux_titres_sur_deux_anneaux():

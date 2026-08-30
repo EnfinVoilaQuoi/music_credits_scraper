@@ -57,6 +57,14 @@ _FIT_PASSES = 4
 _SPREAD_MAX = 3.0
 _SPREAD_PASSES = 8
 
+# Pas de balayage du contour pour choisir où poser un titre (tous les 2°).
+_TIP_SAMPLES = 180
+
+# Points testés le long de l'arc d'un titre pour savoir s'il passe derrière un
+# cercle. 7 suffisent : un cercle assez petit pour se glisser entre deux sondes
+# ne masquerait qu'une lettre.
+_ARC_PROBES = 7
+
 # Caractères interdits dans un nom de dossier Windows.
 _FORBIDDEN_DIRNAME = '<>:"/\\|?*'
 
@@ -248,50 +256,71 @@ def _remove_overlaps(
     return {k: (pos[k][0], pos[k][1]) for k in keys}
 
 
+def _arc_is_clear(ellipse, t_center, span_deg, avoid) -> bool:
+    """Aucun cercle ne recouvre l'arc que le texte occuperait autour de `t_center` ?"""
+    for i in range(_ARC_PROBES):
+        t = t_center - span_deg + 2.0 * span_deg * i / (_ARC_PROBES - 1)
+        px, py = ellipse.point_at(t)
+        for cx, cy, radius in avoid:
+            if math.hypot(px - cx, py - cy) < radius:
+                return False
+    return True
+
+
 def _label_tip(
-    ellipse, center_x: float, center_y: float, inward: bool = False
+    ellipse, center_x, center_y, style: SvgStyle, inward=False, avoid=(), text=""
 ) -> tuple[float, int]:
     """Où poser la légende curviligne sur l'ellipse : `(paramètre t, sens)`.
 
-    Au SOMMET (ou au creux) de l'ovale, pas à la pointe de son grand axe : c'est
-    le seul point où la tangente est horizontale, donc le seul où le texte se
-    lit à plat. Sur un ovale très incliné — le cas de tous les îlots — la pointe
-    du grand axe est quasi verticale, et le titre s'y écrivait de haut en bas.
+    Le plus LOIN possible du centre du dessin — ou le plus près si `inward` —
+    parmi les points où le texte reste à peu près droit (tangente à moins de
+    `ellipse_label_max_angle` de l'horizontale). C'est la traduction directe des
+    deux consignes : les ovales du noyau poussent leur titre vers les bords de
+    l'image, les îlots ramènent le leur vers l'intérieur.
 
-    Des deux (le sommet et le creux), on retient celui qui est le plus LOIN du
-    centre du dessin : la légende part ainsi vers l'extérieur de l'image plutôt
-    que de traverser le tas. `inward` inverse ce choix pour les îlots calés dans
-    un coin, qui n'ont de place que du côté du centre.
-
-    Le sens de parcours est ensuite choisi pour que les lettres avancent vers la
-    droite : sur un chemin, elles suivent la tangente, et l'autre sens les écrit
-    à l'envers.
+    Se limiter au sommet et au creux (les deux seuls points de tangente
+    parfaitement horizontale) collait les titres du noyau au milieu de la
+    planche : sur un ovale large, ces points sont au centre. Balayer le contour
+    permet de glisser vers les extrémités aussi loin que la lisibilité l'admet.
 
     ⚠️ `ellipse` doit être celle qui PORTE le texte, c'est-à-dire l'ellipse
-    écartée — pas le tracé visible. Le paramètre du sommet dépend du rapport
-    `ry/rx` : écarter les deux axes de la même quantité arrondit l'ovale et
-    déplace son sommet. Calculé sur le mauvais des deux, le titre atterrit sur
-    un flanc et repart à la verticale.
+    écartée — pas le tracé visible. Le paramètre dépend du rapport `ry/rx` :
+    écarter les deux axes arrondit l'ovale et déplace ses points.
     """
-    a = math.radians(ellipse.angle)
-    # dy/dt = 0 → le sommet et le creux, aux deux solutions opposées.
-    t = math.degrees(math.atan2(ellipse.ry * math.cos(a), ellipse.rx * math.sin(a)))
-    top, bottom = (t, t + 180.0)
-    if ellipse.point_at(top)[1] > ellipse.point_at(bottom)[1]:
-        top, bottom = bottom, top
-
-    # Le point le plus ÉLOIGNÉ du centre du dessin : le titre part ainsi vers
-    # l'extérieur de l'image au lieu de traverser le tas. Comparer les centres
-    # d'ellipse ne suffisait pas — les gros ovales du noyau sont tous centrés au
-    # milieu, et leurs titres se retrouvaient empilés là.
-    def _far(t):
+    candidates = []
+    for i in range(_TIP_SAMPLES):
+        t = i * 360.0 / _TIP_SAMPLES
+        tx, ty = ellipse.tangent_at(t)
+        angle = math.degrees(math.atan2(ty, tx))
+        angle = ((angle + 90.0) % 180.0) - 90.0  # → (-90, 90]
+        if abs(angle) > style.ellipse_label_max_angle:
+            continue
         px, py = ellipse.point_at(t)
-        return (px - center_x) ** 2 + (py - center_y) ** 2
+        distance = (px - center_x) ** 2 + (py - center_y) ** 2
+        candidates.append((-distance if inward else distance, t, tx))
+    if not candidates:
+        # Aucun point assez droit (ovale quasi vertical) : on retombe sur le
+        # sommet, le moins mauvais des compromis.
+        a = math.radians(ellipse.angle)
+        t = math.degrees(math.atan2(ellipse.ry * math.cos(a), ellipse.rx * math.sin(a)))
+        if ellipse.point_at(t)[1] > ellipse.point_at(t + 180.0)[1]:
+            t += 180.0
+        tx, _ty = ellipse.tangent_at(t)
+        return t, (1 if tx >= 0 else 0)
 
-    outer, inner = (top, bottom) if _far(top) >= _far(bottom) else (bottom, top)
-    chosen = inner if inward else outer
-    tx, _ty = ellipse.tangent_at(chosen)
-    return chosen, (1 if tx >= 0 else 0)
+    candidates.sort(key=lambda c: (-c[0], c[1]))  # tri explicite → déterministe
+    best = candidates[0]
+    if avoid and text:
+        # Le meilleur emplacement ne vaut rien si un cercle passe devant : les
+        # titres sont dessinés SOUS les cercles, « Mort Ce soir » s'y perdait la
+        # moitié. On descend le classement jusqu'au premier qui soit dégagé.
+        half = len(text) * style.ellipse_label_font_size * _CHAR_WIDTH_RATIO / 2.0
+        span = math.degrees(half / max(1e-9, min(ellipse.rx, ellipse.ry)))
+        for candidate in candidates:
+            if _arc_is_clear(ellipse, candidate[1], span, avoid):
+                best = candidate
+                break
+    return best[1], (1 if best[2] >= 0 else 0)
 
 
 def _perimeter(rx: float, ry: float) -> float:
@@ -331,7 +360,7 @@ def _label_offset(style: SvgStyle, ellipse=None, text: str = "") -> float:
 _CHAR_WIDTH_RATIO = 0.55
 
 
-def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=False):
+def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=False, avoid=()):
     """Un anneau par titre, empilés vers l'extérieur, dans l'ordre de lecture.
 
     Deux morceaux sur un même ovale s'écrivaient à la suite sur une seule
@@ -346,7 +375,9 @@ def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=Fal
     if not lines:
         return ()
     base = _label_offset(style)
-    t_base, _sweep = _label_tip(ellipse.inflated(base), center_x, center_y, inward=inward)
+    t_base, _sweep = _label_tip(
+        ellipse.inflated(base), center_x, center_y, style, inward=inward, avoid=avoid, text=lines[0]
+    )
     # Le texte est-il posé au-dessus de l'ovale ? Alors s'éloigner du tracé,
     # c'est monter, et la 1ʳᵉ ligne doit être la plus éloignée.
     above = ellipse.inflated(base + 1.0).point_at(t_base)[1] < ellipse.point_at(t_base)[1]
@@ -369,7 +400,15 @@ def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=Fal
 
     rings = []
     for text, offset in zip(ordered, offsets, strict=True):
-        t, sweep = _label_tip(ellipse.inflated(offset), center_x, center_y, inward=inward)
+        t, sweep = _label_tip(
+            ellipse.inflated(offset),
+            center_x,
+            center_y,
+            style,
+            inward=inward,
+            avoid=avoid,
+            text=text,
+        )
         rings.append(LabelRing(text=text, offset=offset, t=t, sweep=sweep))
     if above:
         rings.reverse()  # rendu dans l'ordre de lecture
@@ -740,6 +779,7 @@ def build_bubble_spec(
 
     # Composition par composante (hub centré, îlots provisoirement autour).
     canvas, comps = _compose_layout(graph, sizes, style, seed, collab_groups)
+    main_set = set(comps[0])
 
     # Centre du nuage (oriente les légendes vers l'extérieur du hub). Somme en
     # ordre trié → indépendante de l'ordre d'insertion des nœuds (byte-identité).
@@ -754,6 +794,8 @@ def build_bubble_spec(
         """
         center_x = sum(canvas[k][0] for k in ordered) / len(canvas)
         center_y = sum(canvas[k][1] for k in ordered) / len(canvas)
+        # Les cercles à ne pas masquer, dans leur état courant.
+        circles = tuple((canvas[k][0], canvas[k][1], sizes[k] / 2.0) for k in sorted(canvas))
         raw_groups = []
         for cg in collab_groups:
             member_pts = []
@@ -777,12 +819,18 @@ def build_bubble_spec(
             # Un seul traitement pour tout le monde, producteur solo compris :
             # la légende est curviligne sur son ellipse, il n'y a plus de cas
             # « où poser le texte ? » à distinguer.
-            # Toujours vers l'EXTÉRIEUR, îlots compris : leur légende visait
-            # jadis le centre faute de place côté coin, et s'y faisait barrer
-            # par les grandes ellipses du noyau qui balaient toute la planche.
-            # Depuis qu'un titre a le droit de mordre hors du cadre, le côté
-            # extérieur est libre — c'est celui-là qu'il faut.
-            rings = _label_rings(ellipse, label_lines, style, center_x, center_y)
+            # Le noyau pousse ses titres vers les BORDS de l'image ; les îlots,
+            # déjà calés dans les coins, ramènent les leurs vers l'INTÉRIEUR —
+            # à l'extérieur ils sortiraient de la planche.
+            rings = _label_rings(
+                ellipse,
+                label_lines,
+                style,
+                center_x,
+                center_y,
+                inward=not set(cg.keys) <= main_set,
+                avoid=circles,
+            )
             raw_groups.append((cg, ellipse, label_lines, rings))
         return raw_groups
 

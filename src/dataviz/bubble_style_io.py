@@ -126,6 +126,12 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "anneaux concentriques, l'un « sous » l'autre.",
             ),
             (
+                "ellipse_label_max_angle",
+                "Inclinaison maximale du texte, en degrés. C'est elle qui décide jusqu'où "
+                "un titre peut glisser vers le bout de son ovale : plus on tolère, plus il "
+                "part vers les bords de l'image, mais plus il penche.",
+            ),
+            (
                 "ellipse_label_max_arc",
                 "Part maximale du tour d'ovale qu'un titre a le droit d'occuper, de 0 à 1. "
                 "Au-delà il s'enroule et se lit à la verticale : le texte est alors écarté "

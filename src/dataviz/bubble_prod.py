@@ -151,17 +151,29 @@ def _label_font_size(node_size: float, style: SvgStyle) -> float:
 # « (feat. X) », « [Bonus] ». Répété pour les titres qui en cumulent deux.
 _TITLE_SUFFIX_RE = re.compile(r"\s*[(\[][^()\[\]]*[)\]]\s*$")
 
+# Barres et solidus COMBINANTS (U+0334 à U+0338) : Genius stylise certains
+# titres en glissant un « barré » après chaque lettre — « F̶i̶e̶s̶t̶a̶ ». C'est de la
+# décoration de page, pas le nom du morceau, et ça le rend illisible sur une
+# bulle. Seule cette plage est retirée : les accents combinants, eux, sont de
+# vraies lettres (un « e » + accent aigu décomposé doit rester « é »).
+_STRIKETHROUGH_RE = re.compile("[̴-̸]")
+
 
 def clean_track_title(title: str) -> str:
     """Titre allégé pour la légende : on garde le nom du morceau, rien d'autre.
 
-    Sur une bulle, « Fiesta (Interlude) » ne dit rien de plus que « Fiesta » et
-    coûte la moitié de la place — or la légende est posée sur l'ellipse, où la
-    place est comptée. Les mentions entre parenthèses (interlude, feat., bonus,
-    version) sautent donc. Ce qui est ENTRE parenthèses au milieu du titre est
-    conservé : il fait partie du nom.
+    Deux nettoyages :
+
+    - les **barrés décoratifs** de Genius (« F̶i̶e̶s̶t̶a̶ », un caractère combinant
+      après chaque lettre) — c'est de la mise en forme de page, pas le nom du
+      morceau, et le titre en devient illisible ;
+    - les **mentions entre parenthèses en fin de titre** : sur une bulle,
+      « Fiesta (Interlude) » ne dit rien de plus que « Fiesta » et coûte la
+      moitié de la place, or la légende est posée sur l'ellipse, où la place est
+      comptée. Ce qui est entre parenthèses AU MILIEU du titre est conservé :
+      il fait partie du nom.
     """
-    cleaned = (title or "").strip()
+    cleaned = _STRIKETHROUGH_RE.sub("", title or "").strip()
     previous = None
     while cleaned != previous:
         previous = cleaned
@@ -339,10 +351,16 @@ def _label_rings(ellipse, lines, style: SvgStyle, center_x, center_y, inward=Fal
     # c'est monter, et la 1ʳᵉ ligne doit être la plus éloignée.
     above = ellipse.inflated(base + 1.0).point_at(t_base)[1] < ellipse.point_at(t_base)[1]
 
+    # Côté BAS, les lettres poussent vers l'ovale : sur un chemin, elles se
+    # dressent du côté gauche du sens de lecture, qui pointe vers l'intérieur
+    # quand le texte est sous la courbe. Sans ce décalage d'une hauteur de
+    # capitale, le tracé barre le titre — le cas de « Fiesta » sur son îlot.
+    baseline = 0.0 if above else style.ellipse_label_font_size
+
     offsets = []
     previous = None
     for line in lines:
-        offset = _label_offset(style, ellipse, line)
+        offset = _label_offset(style, ellipse, line) + baseline
         if previous is not None:
             offset = max(offset, previous + style.ellipse_label_line_gap)
         offsets.append(offset)
@@ -722,7 +740,6 @@ def build_bubble_spec(
 
     # Composition par composante (hub centré, îlots provisoirement autour).
     canvas, comps = _compose_layout(graph, sizes, style, seed, collab_groups)
-    main_set = set(comps[0])
 
     # Centre du nuage (oriente les légendes vers l'extérieur du hub). Somme en
     # ordre trié → indépendante de l'ordre d'insertion des nœuds (byte-identité).
@@ -760,14 +777,12 @@ def build_bubble_spec(
             # Un seul traitement pour tout le monde, producteur solo compris :
             # la légende est curviligne sur son ellipse, il n'y a plus de cas
             # « où poser le texte ? » à distinguer.
-            rings = _label_rings(
-                ellipse,
-                label_lines,
-                style,
-                center_x,
-                center_y,
-                inward=not set(cg.keys) <= main_set,
-            )
+            # Toujours vers l'EXTÉRIEUR, îlots compris : leur légende visait
+            # jadis le centre faute de place côté coin, et s'y faisait barrer
+            # par les grandes ellipses du noyau qui balaient toute la planche.
+            # Depuis qu'un titre a le droit de mordre hors du cadre, le côté
+            # extérieur est libre — c'est celui-là qu'il faut.
+            rings = _label_rings(ellipse, label_lines, style, center_x, center_y)
             raw_groups.append((cg, ellipse, label_lines, rings))
         return raw_groups
 
@@ -874,10 +889,11 @@ def build_bubble_spec(
         pad = style.island_corner_pad
         for idx, comp in enumerate(comps[1:]):
             comp_set = set(comp)
-            # Boîte englobante de l'îlot : cercles + ellipses (budget dur), et
-            # la même légendes comprises, qui servira à retenir la translation.
-            bx0, by0, bx1, by1 = _bbox(comp, what="circles")
-            ax0, ay0, ax1, ay1 = _bbox(comp, what="all")
+            # L'îlot est calé par son OVALE : c'est lui qu'on veut voir toucher
+            # le bord. Le caler par sa légende le laissait en retrait de toute
+            # la couronne du texte, et le caler par ses seuls cercles enverrait
+            # l'ovale largement hors cadre.
+            bx0, by0, bx1, by1 = _bbox(comp, what="ellipses")
             sx, sy = _SLOTS[idx % len(_SLOTS)]
             if sx < 0:
                 tx = (raw_fx0 + pad) - bx0
@@ -891,12 +907,6 @@ def build_bubble_spec(
                 ty = (raw_fy1 - pad) - by1
             else:
                 ty = (raw_fy0 + raw_fy1) / 2.0 - (by0 + by1) / 2.0
-            # Un îlot poussé dans son coin par ses seuls cercles y emmène sa
-            # légende, qui déborde alors du cadre : on retient la translation
-            # juste assez pour que le titre reste dedans (il a droit à la marge,
-            # pas au-delà — même règle que pour le hub).
-            tx = min(max(tx, (-dx) - ax0), (width - dx) - ax1)
-            ty = min(max(ty, (-dy) - ay0), (height - dy) - ay1)
             for k in comp:
                 canvas[k] = (canvas[k][0] + tx, canvas[k][1] + ty)
             for i, (cg, ellipse, label_lines, rings) in enumerate(raw_groups):

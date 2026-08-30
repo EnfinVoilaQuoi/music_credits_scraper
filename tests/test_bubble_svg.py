@@ -423,3 +423,16 @@ def test_aucun_producteur_leve_valueerror():
 def test_album_inconnu_leve_valueerror():
     with pytest.raises(ValueError):
         generate_bubble_prod(_album_tracks(), "AlbumInexistant", output_path="unused.svg")
+
+
+def test_titre_nettoye_des_fioritures():
+    # Genius stylise certains titres en barrant chaque lettre (« F̶i̶e̶s̶t̶a̶ ») :
+    # c'est de la décoration, illisible sur une bulle. Les accents combinants,
+    # eux, sont de vraies lettres et doivent survivre.
+    from src.dataviz.bubble_prod import clean_track_title
+
+    assert clean_track_title("F̶i̶e̶s̶t̶a̶ (Interlude)") == "Fiesta"
+    assert clean_track_title("Brûle") == "Brûle"
+    assert clean_track_title("Mort Ce soir (feat. X) [Bonus]") == "Mort Ce soir"
+    assert clean_track_title("3ein / Risotto Gambas") == "3ein / Risotto Gambas"
+    assert clean_track_title("J'ai (encore) faim") == "J'ai (encore) faim"

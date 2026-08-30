@@ -59,7 +59,9 @@ def test_structure_du_payload():
     assert p["version"] == PAYLOAD_VERSION
     assert p["kind"] == "prod"
     assert (p["artist"], p["album"], p["seed"]) == ("Artiste", "TestAlbum", 42)
-    assert p["zone"] == {"width": 860.0, "height": 520.0}
+    # La zone du payload est celle du style — pas une cote en dur ici : elle
+    # bouge avec la maquette, et le JSX s'en sert comme référence d'échelle.
+    assert p["zone"] == {"width": SvgStyle().frame_width, "height": SvgStyle().frame_height}
     assert len(p["nodes"]) == 4
     assert len(p["groups"]) == 3  # {big,kalim}, {big,lewis amber}, {solo}
     assert {n["id"] for n in p["nodes"]} == {"big", "kalim", "lewis-amber", "solo"}

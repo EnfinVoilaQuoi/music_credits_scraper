@@ -50,6 +50,17 @@ def _album_tracks():
     ]
 
 
+def _ellipse_labels(root):
+    """Textes des légendes, par id d'ellipse. Ils vivent dans un `<textPath>` :
+    le titre est CURVILIGNE, posé sur le tracé de son ovale."""
+    labels = root.find(f"{SVG_NS}g[@id='ellipse-labels']")
+    out = {}
+    for text in labels.findall(f"{SVG_NS}text"):
+        path = text.find(f"{SVG_NS}textPath")
+        out[text.get("id")] = path.text if path is not None else text.text
+    return out
+
+
 def _spec(tracks, style=None):
     track_groups = extract_track_groups(tracks)
     graph = build_collab_graph(track_groups)
@@ -84,7 +95,7 @@ def test_smoke_structure(tmp_path):
     assert len(circles) == 4  # un cercle par producteur
 
     # 3 combinaisons distinctes : {big,kalim}, {big,other}, {solo}.
-    ellipses = groups["ellipses"].findall(f"{SVG_NS}ellipse")
+    ellipses = groups["ellipses"].findall(f"{SVG_NS}path")
     assert len(ellipses) == 3
 
     ids = {el.get("id") for el in root.iter()}
@@ -99,11 +110,9 @@ def test_smoke_structure(tmp_path):
 def test_legende_solo_un_morceau_affiche_le_titre(tmp_path):
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(_album_tracks(), "TestAlbum", output_path=out)
-    root = ET.parse(out).getroot()
-    labels = root.find(f"{SVG_NS}g[@id='ellipse-labels']")
-    texts = {el.get("id"): el.text for el in labels.findall(f"{SVG_NS}text")}
+    texts = _ellipse_labels(ET.parse(out).getroot())
     # Un seul morceau → son TITRE (« 1 morceau » n'apporterait rien — cas mammouth).
-    assert texts["ellipse-label-solo-0"] == "T4"
+    assert texts["ellipse-label-solo"] == "T4"
 
 
 def test_legende_solo_plusieurs_morceaux_compte(tmp_path):
@@ -114,10 +123,7 @@ def test_legende_solo_plusieurs_morceaux_compte(tmp_path):
     ]
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(tracks, "Al", output_path=out)
-    root = ET.parse(out).getroot()
-    labels = root.find(f"{SVG_NS}g[@id='ellipse-labels']")
-    texts = [el.text for el in labels.findall(f"{SVG_NS}text")]
-    assert texts == ["2 solo"]
+    assert list(_ellipse_labels(ET.parse(out).getroot()).values()) == ["2 solo"]
 
 
 def test_name_lines():
@@ -131,24 +137,27 @@ def test_name_lines():
     assert _name_lines("J. COLE") == ("J. COLE",)  # initiale en tête aussi
 
 
-def test_legende_angle_amorti():
-    # La rotation du texte est bornée (± max_angle) : reste « un peu droit ».
+def test_legende_posee_a_plat_et_lisible():
+    # Le titre est CURVILIGNE. Il doit être posé là où la tangente de l'ovale
+    # est horizontale (sinon il s'écrit de haut en bas), et parcouru dans le
+    # sens qui l'écrit de gauche à droite (sinon il est à l'envers).
+    from src.dataviz.bubble_prod import _label_offset
+
     spec = _spec(_album_tracks())
     for gs in spec.groups:
-        assert abs(gs.label_angle) <= spec.style.ellipse_label_max_angle + 1e-9
+        porteuse = gs.ellipse.inflated(_label_offset(spec.style))
+        tx, ty = porteuse.tangent_at(gs.label_t)
+        assert abs(ty) < 1e-6 * max(1.0, abs(tx))  # tangente horizontale
+        sens = 1.0 if gs.label_sweep else -1.0
+        assert tx * sens > 0  # les lettres avancent vers la droite
 
 
 def test_legende_duo_liste_les_titres(tmp_path):
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(_album_tracks(), "TestAlbum", output_path=out)
-    root = ET.parse(out).getroot()
-    labels = root.find(f"{SVG_NS}g[@id='ellipse-labels']")
-    lines = [
-        el.text
-        for el in labels.findall(f"{SVG_NS}text")
-        if el.get("id").startswith("ellipse-label-big--kalim")
-    ]
-    assert lines == ["T1", "T2"]  # duo à 2 morceaux (≤ seuil) → titres
+    texts = _ellipse_labels(ET.parse(out).getroot())
+    # Duo à 2 morceaux (≤ seuil) → les titres, joints sur une seule courbe.
+    assert texts["ellipse-label-big--kalim"] == "T1 · T2"
 
 
 def test_legende_combinaison_au_dela_du_seuil(tmp_path):
@@ -156,10 +165,7 @@ def test_legende_combinaison_au_dela_du_seuil(tmp_path):
     tracks = [_track(i, f"T{i}", "Al", _prod("X"), _prod("Y")) for i in range(1, 5)]
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(tracks, "Al", output_path=out)
-    root = ET.parse(out).getroot()
-    labels = root.find(f"{SVG_NS}g[@id='ellipse-labels']")
-    texts = [el.text for el in labels.findall(f"{SVG_NS}text")]
-    assert texts == ["4 morceaux"]
+    assert list(_ellipse_labels(ET.parse(out).getroot()).values()) == ["4 morceaux"]
 
 
 def test_zone_fixe_et_cadre_confondu():
@@ -228,7 +234,17 @@ def test_ilots_dans_les_coins():
         for key in ilot:
             x, y = pos[key]
             bords.append(min(x, y, spec.width - x, spec.height - y) - size[key] / 2.0)
-        assert min(bords) <= spec.style.margin + spec.style.island_corner_pad + 12.0
+        # Ce qui est calé sur le coin, c'est l'anneau ENTIER de l'îlot : son
+        # ellipse plus la légende curviligne posée dessus. Le centre du cercle
+        # est donc en retrait d'autant.
+        st = spec.style
+        anneau = (
+            st.ellipse_margin
+            + st.ellipse_stroke_width / 2.0
+            + st.ellipse_label_gap
+            + st.ellipse_label_font_size
+        )
+        assert min(bords) <= st.margin + st.island_corner_pad + anneau + 2.0
 
     # Et ils ne viennent JAMAIS toucher un cercle du hub.
     for island in ("e", "f", "g"):
@@ -262,12 +278,26 @@ def test_spec_insensible_a_l_ordre_d_insertion_des_noeuds():
     assert [(n.key, n.x, n.y) for n in s1.nodes] == [(n.key, n.x, n.y) for n in s2.nodes]
 
 
-def test_transform_rotate_present_sur_ellipses(tmp_path):
+def test_ellipses_en_chemin_avec_rotation_cuite(tmp_path):
+    # Les ovales sont des <path> et non des <ellipse> : c'est ce qui permet d'y
+    # poser du texte curviligne. Et la rotation est CUITE dans le chemin — un
+    # `transform` sur le tracé ne suivrait pas le texte posé dessus.
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(_album_tracks(), "TestAlbum", output_path=out)
     root = ET.parse(out).getroot()
-    for el in root.iter(f"{SVG_NS}ellipse"):
-        assert el.get("transform", "").startswith("rotate(")
+    ellipses = root.find(f"{SVG_NS}g[@id='ellipses']").findall(f"{SVG_NS}path")
+    assert ellipses
+    for el in ellipses:
+        assert el.get("transform") is None
+        assert " A " in el.get("d")
+
+    # Chaque légende pointe le chemin de SON ovale.
+    labels = root.find(f"{SVG_NS}g[@id='ellipse-labels']")
+    for text in labels.findall(f"{SVG_NS}text"):
+        path = text.find(f"{SVG_NS}textPath")
+        href = path.get("{http://www.w3.org/1999/xlink}href") or path.get("href")
+        token = text.get("id").replace("ellipse-label-", "")
+        assert href == f"#ellipse-labelpath-{token}"
 
 
 def test_trio_produit_une_ellipse(tmp_path):
@@ -276,7 +306,7 @@ def test_trio_produit_une_ellipse(tmp_path):
     res = generate_bubble_prod(tracks, "Al", output_path=out)
     assert res.node_count == 3
     root = ET.parse(out).getroot()
-    ellipses = root.find(f"{SVG_NS}g[@id='ellipses']").findall(f"{SVG_NS}ellipse")
+    ellipses = root.find(f"{SVG_NS}g[@id='ellipses']").findall(f"{SVG_NS}path")
     assert len(ellipses) == 1
 
 

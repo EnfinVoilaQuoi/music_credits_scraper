@@ -52,6 +52,34 @@ class EllipseSpec:
         half_h = math.hypot(self.rx * math.sin(t), self.ry * math.cos(t))
         return (self.cx - half_w, self.cy - half_h, self.cx + half_w, self.cy + half_h)
 
+    def point_at(self, t_deg: float) -> tuple[float, float]:
+        """Point du contour au paramètre `t_deg` (degrés), rotation comprise.
+
+        `t` est le paramètre de l'ellipse, PAS l'angle polaire vu du centre :
+        les deux ne coïncident que sur un cercle. `t = 0` est la pointe du grand
+        axe, `t = 180` l'autre.
+        """
+        t = math.radians(t_deg)
+        a = math.radians(self.angle)
+        lx, ly = self.rx * math.cos(t), self.ry * math.sin(t)
+        return (
+            self.cx + lx * math.cos(a) - ly * math.sin(a),
+            self.cy + lx * math.sin(a) + ly * math.cos(a),
+        )
+
+    def tangent_at(self, t_deg: float) -> tuple[float, float]:
+        """Vecteur tangent (non normalisé) au paramètre `t_deg`, dans le sens des `t` croissants."""
+        t = math.radians(t_deg)
+        a = math.radians(self.angle)
+        lx, ly = -self.rx * math.sin(t), self.ry * math.cos(t)
+        return (lx * math.cos(a) - ly * math.sin(a), lx * math.sin(a) + ly * math.cos(a))
+
+    def inflated(self, delta: float) -> "EllipseSpec":
+        """Même ellipse, agrandie de `delta` sur les deux axes (chemin du texte)."""
+        return EllipseSpec(
+            cx=self.cx, cy=self.cy, rx=self.rx + delta, ry=self.ry + delta, angle=self.angle
+        )
+
 
 def min_enclosing_ellipse(
     points, tol: float = 1e-3, max_iter: int = 1000

@@ -115,11 +115,14 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ),
             ("ellipse_label_font_size", "Taille des titres, en px."),
             ("ellipse_label_color", "Couleur des titres (hex)."),
-            ("ellipse_label_gap", "Écart entre le bout de l'ellipse et sa légende, en px."),
-            ("ellipse_label_line_height", "Interligne d'une légende sur plusieurs lignes, en px."),
             (
-                "ellipse_label_max_angle",
-                "Rotation maximale du texte, en degrés : au-delà il devient pénible à lire.",
+                "ellipse_label_gap",
+                "Écart entre le tracé de l'ellipse et le texte posé dessus, en px "
+                "(le titre est curviligne : trop peu d'écart et le trait barre les lettres).",
+            ),
+            (
+                "ellipse_label_separator",
+                "Ce qui sépare deux titres sur une même ellipse.",
             ),
         ),
     ),

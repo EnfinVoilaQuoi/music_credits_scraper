@@ -37,8 +37,8 @@ class SvgStyle:
     frame_height: float = 520.0
     margin: float = 16.0  # marge intérieure entre le bord de la zone et le contenu
     # Cercles artistes : bornes de l'échelle de participation (DIAMÈTRE en px).
-    node_size_min: float = 55.0
-    node_size_max: float = 120.0
+    node_size_min: float = 78.0
+    node_size_max: float = 150.0
     # Badge (compteur de morceaux) ancré au milieu de l'arête basse du cercle.
     badge_size: float = 22.0
     badge_corner_radius: float = 4.0
@@ -47,7 +47,9 @@ class SvgStyle:
     # `node_size_max` porte `font_size` en entier, un cercle plus petit reçoit
     # la même taille au prorata, jamais sous `font_size_min` (sinon illisible).
     font_size: float = 25.0
-    font_size_min: float = 9.0
+    # Plancher CALÉ sur la taille des titres de morceaux : un nom d'artiste ne
+    # doit jamais devenir plus petit qu'un titre, la hiérarchie s'inverserait.
+    font_size_min: float = 20.0
     line_height_ratio: float = 1.08  # interligne des noms multi-lignes (× font_size)
     font_family: str = "Montserrat, Arial, sans-serif"
     font_bold: str = "Montserrat-Bold"  # nom PostScript, pour Illustrator
@@ -61,9 +63,11 @@ class SvgStyle:
     label_track_threshold: int = 3  # au-delà : « N morceaux » au lieu des titres
     ellipse_label_font_size: float = 20.0
     ellipse_label_color: str = "#333030"
-    ellipse_label_gap: float = 8.0  # écart entre le bout de l'ellipse et sa légende
-    ellipse_label_line_height: float = 23.0
-    ellipse_label_max_angle: float = 30.0  # rotation max du texte (± degrés, reste lisible)
+    # Le titre est posé SUR l'ellipse (texte curviligne) : `gap` est l'écart
+    # entre le tracé et la ligne de base du texte, qui le tient à l'extérieur —
+    # sinon le trait barre les lettres.
+    ellipse_label_gap: float = 9.0
+    ellipse_label_separator: str = " · "  # entre deux titres d'une même ellipse
     # Ellipses (une par combinaison de producteurs).
     min_axis_ratio: float = 0.35  # borne l'aplatissement (duo / quasi-colinéaire)
     ellipse_margin: float = 10.0  # marge ajoutée au rayon des cercles
@@ -137,17 +141,17 @@ class GroupShape:
 
     `member_keys` = les producteurs de la combinaison (sert à l'id stable).
     `label_lines` = ce qui s'affiche (titres si peu de morceaux, sinon
-    « N morceaux »), aligné **le long du grand axe de l'ellipse** (`label_angle`,
-    degrés, normalisé pour rester lisible), ancré à la pointe extérieure de
-    l'ellipse. `track_count` = nb de morceaux.
+    « N morceaux »). Le texte est **curviligne, posé sur l'ellipse elle-même** :
+    `label_t` donne le paramètre (degrés) de la pointe où il est centré, et
+    `label_sweep` le sens de parcours retenu pour qu'il se lise à l'endroit.
+    `track_count` = nb de morceaux.
     """
 
     member_keys: tuple[str, ...]
     ellipse: EllipseSpec
     label_lines: tuple[str, ...]
-    label_x: float
-    label_y: float
-    label_angle: float
+    label_t: float
+    label_sweep: int
     track_count: int
 
 
@@ -208,6 +212,58 @@ def _fmt(value: float, prec: int) -> str:
     return f"{rounded:.{prec}f}"
 
 
+# Échantillonnage du chemin porteur du texte curviligne. 180 segments : l'écart
+# à la vraie ellipse est de l'ordre du millième de pixel, invisible, et la
+# longueur d'une polyligne est SANS AMBIGUÏTÉ — ce qui permet de placer le texte
+# au point exact voulu, là où un `startOffset` en pourcentage d'un arc dépend de
+# la façon dont le moteur mesure le chemin.
+_LABEL_PATH_SAMPLES = 180
+
+
+def _label_path(ellipse: EllipseSpec, t_apex: float, sweep: int, prec: int) -> tuple[str, float]:
+    """Chemin porteur d'une légende + l'offset où centrer le texte.
+
+    Le chemin part d'un demi-tour AVANT le sommet et finit un demi-tour après,
+    dans le sens de lecture retenu ; l'offset renvoyé est la longueur parcourue
+    jusqu'au sommet. Le texte, ancré au milieu, s'y centre donc exactement.
+    """
+    step = 1.0 if sweep else -1.0
+    points = []
+    for i in range(_LABEL_PATH_SAMPLES + 1):
+        t = t_apex + step * (-180.0 + 360.0 * i / _LABEL_PATH_SAMPLES)
+        points.append(ellipse.point_at(t))
+    # Longueurs calculées sur les points ARRONDIS, ceux qui partiront dans le
+    # fichier : sinon l'offset décrirait un chemin légèrement différent.
+    rounded = [(round(x, prec), round(y, prec)) for x, y in points]
+    middle = _LABEL_PATH_SAMPLES // 2
+    offset = 0.0
+    for i in range(middle):
+        offset += math.hypot(rounded[i + 1][0] - rounded[i][0], rounded[i + 1][1] - rounded[i][1])
+    d = "M " + " L ".join(f"{_fmt(x, prec)} {_fmt(y, prec)}" for x, y in points)
+    return d, offset
+
+
+def _ellipse_path_d(ellipse: EllipseSpec, t_start: float, sweep: int, prec: int) -> str:
+    """Contour d'ellipse en commandes de chemin, rotation CUITE dans les points.
+
+    Démarre au paramètre `t_start` (degrés) et parcourt le tour complet en deux
+    arcs (une commande `A` ne peut pas décrire un tour entier : départ et arrivée
+    confondus seraient ambigus). `sweep` = sens de parcours, qui détermine le
+    sens de lecture d'un texte posé dessus.
+    """
+    mid = t_start + (180.0 if sweep else -180.0)
+    p0 = ellipse.point_at(t_start)
+    p1 = ellipse.point_at(mid)
+    rx, ry = _fmt(ellipse.rx, prec), _fmt(ellipse.ry, prec)
+    rot = _fmt(ellipse.angle, prec)
+    arc = f"A {rx} {ry} {rot} 0 {sweep}"
+    return (
+        f"M {_fmt(p0[0], prec)} {_fmt(p0[1], prec)} "
+        f"{arc} {_fmt(p1[0], prec)} {_fmt(p1[1], prec)} "
+        f"{arc} {_fmt(p0[0], prec)} {_fmt(p0[1], prec)} Z"
+    )
+
+
 def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
     """Sérialise `spec` en SVG. Écrit dans `path` si fourni ; renvoie la chaîne."""
     style = spec.style
@@ -258,41 +314,50 @@ def write_bubble_svg(spec: BubbleSpec, path=None) -> str:
     for gs in spec.groups:
         el = gs.ellipse
         set_token = "--".join(id_token(k) for k in gs.member_keys)
-        ellipse = dwg.ellipse(
-            center=(f(el.cx), f(el.cy)),
-            r=(f(el.rx), f(el.ry)),
+        # Tracé en <path> et non en <ellipse> : c'est ce qui permet d'y poser du
+        # texte curviligne (<textPath> exige un <path>). La rotation est CUITE
+        # dans les points plutôt que portée par un attribut `transform` — un
+        # `transform` sur le chemin référencé ne s'applique pas au texte qui le
+        # suit, la légende partirait ailleurs que son ovale.
+        outline = dwg.path(
+            d=_ellipse_path_d(el, 0.0, 1, prec),
             fill=style.ellipse_fill,
             stroke=style.ellipse_stroke,
             stroke_width=f(style.ellipse_stroke_width),
             id=f"ellipse-{set_token}",
         )
-        # Rotation explicite (contrôle exact de la chaîne → byte-identique).
-        ellipse.attribs["transform"] = f"rotate({f(el.angle)} {f(el.cx)} {f(el.cy)})"
-        g_ellipses.add(ellipse)
-        # Légende alignée le long du grand axe de l'ellipse, ancrée à la pointe
-        # extérieure. Lignes multiples empilées perpendiculairement à l'axe.
-        # Centrage vertical MANUEL (+0.35 em de baseline) : `dominant-baseline`
-        # est ignoré par Illustrator et inégal selon les renderers.
-        ra = math.radians(gs.label_angle)
-        perp_x, perp_y = -math.sin(ra), math.cos(ra)
-        # Empiler vers l'extérieur (à l'opposé du centre de l'ellipse).
-        if perp_x * (gs.label_x - el.cx) + perp_y * (gs.label_y - el.cy) < 0:
-            perp_x, perp_y = -perp_x, -perp_y
-        for i, line in enumerate(gs.label_lines):
-            lx = gs.label_x + perp_x * i * style.ellipse_label_line_height
-            ly = gs.label_y + perp_y * i * style.ellipse_label_line_height
-            ly += style.ellipse_label_font_size * 0.35
-            text = dwg.text(
-                line,
-                insert=(f(lx), f(ly)),
+        g_ellipses.add(outline)
+
+        text_content = style.ellipse_label_separator.join(gs.label_lines)
+        if not text_content:
+            continue
+        # Chemin PORTEUR du texte : la même ellipse, écartée vers l'extérieur
+        # (sinon le trait barre les lettres) et démarrée à l'ANTIPODE de la
+        # pointe visée. L'ellipse ayant une symétrie centrale, la moitié de son
+        # périmètre tombe exactement sur l'antipode : un texte centré à
+        # `startOffset="50%"` atterrit donc pile sur la pointe, sans avoir à
+        # intégrer la longueur d'arc.
+        offset = style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap
+        path_id = f"ellipse-labelpath-{set_token}"
+        d, start_offset = _label_path(el.inflated(offset), gs.label_t, gs.label_sweep, prec)
+        g_ellipse_labels.add(dwg.path(d=d, fill="none", stroke="none", id=path_id))
+        text = dwg.text(
+            "",
+            font_size=f(style.ellipse_label_font_size),
+            font_family=style.font_family,
+            font_weight="500",
+            fill=style.ellipse_label_color,
+            id=f"ellipse-label-{set_token}",
+        )
+        text.add(
+            svgwrite.text.TextPath(
+                path=f"#{path_id}",
+                text=text_content,
+                startOffset=f(start_offset),
                 text_anchor="middle",
-                font_size=f(style.ellipse_label_font_size),
-                font_family=style.font_family,
-                fill=style.ellipse_label_color,
-                id=f"ellipse-label-{set_token}-{i}",
             )
-            text.attribs["transform"] = f"rotate({f(gs.label_angle)} {f(lx)} {f(ly)})"
-            g_ellipse_labels.add(text)
+        )
+        g_ellipse_labels.add(text)
 
     # ── Calques 3-5 : cercles, badges, libellés ──
     for n in spec.nodes:

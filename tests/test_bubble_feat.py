@@ -70,7 +70,7 @@ def test_smoke_structure(tmp_path):
     assert len(circles) == 3  # un cercle par artiste invité
 
     # 3 combinaisons distinctes : {damso, nekfeu}, {damso}, {alpha wann}.
-    ellipses = groups["ellipses"].findall(f"{SVG_NS}ellipse")
+    ellipses = groups["ellipses"].findall(f"{SVG_NS}path")
     assert len(ellipses) == 3
 
     ids = {el.get("id") for el in root.iter()}

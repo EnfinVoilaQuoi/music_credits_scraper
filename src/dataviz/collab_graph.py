@@ -38,6 +38,33 @@ BROAD_PRODUCER_ROLES: tuple[str, ...] = (
 # il n'apparaît pas dans le graphe (sinon hub trivial présent partout).
 FEAT_ROLES: tuple[str, ...] = ("Featured Artist",)
 
+# Instruments joués : ces crédits désignent un MUSICIEN, pas un producteur, mais
+# ils font partie de la fabrication du morceau et méritent leur place dans le
+# réseau — avec l'instrument affiché sous le nom (option `include_instruments`).
+INSTRUMENT_ROLES: tuple[str, ...] = (
+    "Guitar",
+    "Bass Guitar",
+    "Acoustic Guitar",
+    "Electric Guitar",
+    "Rhythm Guitar",
+    "Cello",
+    "Drums",
+    "Bass",
+    "Keyboard",
+    "Percussion",
+    "Piano",
+    "Violin",
+    "Organ",
+    "Synthesizer",
+    "Strings",
+    "Trumpet",
+    "Viola",
+    "Saxophone",
+    "Trombone",
+    "Scratches",
+    "Instrumentation",
+)
+
 DEFAULT_SEED = 42
 
 

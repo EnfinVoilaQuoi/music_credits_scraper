@@ -29,6 +29,7 @@ if sys.platform == "win32":
 from src.config import DATA_DIR, EXPORTS_DIR
 from src.dataviz.bubble_audit import check_spec
 from src.dataviz.bubble_feat import generate_bubble_feat
+from src.dataviz.bubble_overrides_io import load_overrides
 from src.dataviz.bubble_prod import _safe_dirname, generate_bubble_prod
 from src.dataviz.bubble_style_io import load_style
 from src.dataviz.style_io import strip_comments
@@ -105,9 +106,16 @@ def slug(witness: dict) -> str:
 
 
 def generate_all(witnesses: list[dict]) -> list[dict]:
-    """Régénère chaque témoin avec le code courant. Une entrée de compte-rendu par témoin."""
+    """Régénère chaque témoin avec le code courant. Une entrée de compte-rendu par témoin.
+
+    Les overrides par album sont APPLIQUÉS : le harnais compare ce que
+    l'utilisateur obtiendra réellement (l'audit `--audit`, lui, reste brut —
+    c'est le banc d'essai du moteur, un seed choisi à la main masquerait ses
+    défauts).
+    """
     dm = DataManager()
     style = load_style()
+    overrides = load_overrides()
     tracks_cache: dict[str, list] = {}
     out_dir = current_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -131,6 +139,7 @@ def generate_all(witnesses: list[dict]) -> list[dict]:
                 witness["album"],
                 artist_name=name,
                 style=style,
+                overrides=overrides,
                 output_path=out_dir / f"{entry['slug']}.svg",
             )
         except ValueError as exc:  # album absent, aucun crédit du bon type…

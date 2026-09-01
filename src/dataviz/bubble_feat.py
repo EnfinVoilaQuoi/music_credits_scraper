@@ -17,7 +17,7 @@ from src.dataviz.bubble_prod import (
     generate_grid,
 )
 from src.dataviz.bubble_svg import SvgStyle
-from src.dataviz.collab_graph import DEFAULT_SEED, FEAT_ROLES
+from src.dataviz.collab_graph import FEAT_ROLES
 
 
 def generate_bubble_feat(
@@ -27,7 +27,8 @@ def generate_bubble_feat(
     artist_name: str = "",
     roles: tuple[str, ...] = FEAT_ROLES,
     style: SvgStyle | None = None,
-    seed: int = DEFAULT_SEED,
+    seed: int | None = None,
+    overrides: dict | None = None,
     output_path=None,
 ) -> BubbleResult:
     """Génère le SVG Bubble Feat pour `album` et renvoie un `BubbleResult`.
@@ -46,6 +47,7 @@ def generate_bubble_feat(
         solo_badge=False,  # « en solo » ne veut rien dire pour un invité
         style=style,
         seed=seed,
+        overrides=overrides,
         output_path=output_path,
     )
 
@@ -58,6 +60,7 @@ def generate_feat_preview_grid(
     roles: tuple[str, ...] = FEAT_ROLES,
     style: SvgStyle | None = None,
     seeds: tuple[int, ...] = PREVIEW_SEEDS,
+    overrides: dict | None = None,
     output_dir=None,
 ) -> Path:
     """Grille d'aperçus Bubble Feat (`bubble_feat_seed<N>.svg` dans `apercus_feat/`)."""
@@ -72,5 +75,6 @@ def generate_feat_preview_grid(
         subdir="apercus_feat",
         style=style,
         seeds=seeds,
+        overrides=overrides,
         output_dir=output_dir,
     )

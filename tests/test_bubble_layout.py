@@ -390,3 +390,50 @@ def test_i9_un_titre_ne_traverse_pas_un_cercle_etranger():
         for ring in groupe.rings:
             degagement = _degagement(groupe.ellipse, ring, spec.style, etrangers)
             assert degagement > 0.0, f"{ring.text!r} traverse un cercle ({degagement:.1f} px)"
+
+
+def test_i9_deux_titres_ne_se_superposent_jamais():
+    # Un ovale traversé par plusieurs autres n'offre parfois qu'UNE zone
+    # lisible : y envoyer un titre en haut et l'autre en bas les entassait au
+    # même endroit (mesuré 3,3 px entre « 3ein / Risotto Gambas » et « Peace,
+    # Haine, Love », 2026-09-01). Ils sont alors réunis sur une seule ligne.
+    from src.dataviz.bubble_labels import _arc_points, text_span
+
+    spec = _spec(_reseau_dense())
+    arcs = []
+    for groupe in spec.groups:
+        for ring in groupe.rings:
+            porteuse = groupe.ellipse.inflated(ring.offset)
+            span = text_span(porteuse, ring.text, spec.style)
+            arcs.append((ring.text, list(_arc_points(porteuse, ring.t, span))))
+    for i, (t1, p1) in enumerate(arcs):
+        for t2, p2 in arcs[i + 1 :]:
+            distance = min(math.hypot(a[0] - b[0], a[1] - b[1]) for a in p1 for b in p2)
+            assert (
+                distance >= spec.style.ellipse_label_font_size
+            ), f"{t1!r} et {t2!r} se superposent ({distance:.1f} px)"
+
+
+def test_i9_paire_jugee_illisible_quand_les_deux_titres_se_touchent():
+    # Le garde-fou qui décide de réunir deux titres sur une seule ligne : deux
+    # textes posés au MÊME endroit doivent être jugés illisibles, sinon rien ne
+    # déclenche le repli et ils restent superposés.
+    from src.dataviz.bubble_labels import _paire_lisible
+    from src.dataviz.bubble_svg import LabelRing
+    from src.dataviz.geometry import EllipseSpec
+
+    style = SvgStyle()
+    ellipse = EllipseSpec(cx=400.0, cy=300.0, rx=150.0, ry=100.0, angle=0.0)
+    colles = (
+        LabelRing(text="Un", offset=11.5, t=0.0, sweep=1),
+        LabelRing(text="Deux", offset=11.5, t=2.0, sweep=1),
+    )
+    assert not _paire_lisible(ellipse, colles, style, ())
+
+    # À l'opposé du tour, la même paire est parfaitement lisible.
+    ecartes = (
+        LabelRing(text="Un", offset=11.5, t=0.0, sweep=1),
+        LabelRing(text="Deux", offset=11.5, t=180.0, sweep=1),
+    )
+    assert _paire_lisible(ellipse, ecartes, style, ())
+    assert style.label_join_separator == "•"

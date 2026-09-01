@@ -15,6 +15,10 @@ Les règles sont désormais dites une fois, sous forme de **forces** :
 - `cohesion` — les membres d'un même groupe se rapprochent : un groupe compact
   donne une petite ellipse, donc peu d'occasions d'attraper un étranger ;
 - `exclusion` — un cercle NON membre est repoussé hors de l'ellipse d'un groupe ;
+- `disjonction` — deux ovales SANS MEMBRE COMMUN ne se croisent pas. Deux ovales
+  qui partagent un artiste doivent forcément se recouvrir (ils passent tous deux
+  par lui) ; deux ovales étrangers l'un à l'autre, non — leur croisement ne dit
+  rien et brouille la lecture ;
 - `separation` — deux cercles gardent `gap` entre eux, quelle que soit leur
   composante. CONTRAINTE, pas force : projetée après coup ;
 - `containment` — rien ne sort de la zone.
@@ -34,6 +38,7 @@ clés parcourues en ordre trié partout, et aucune source d'aléa.
 """
 
 import math
+import zlib
 
 import numpy as np
 
@@ -116,6 +121,26 @@ def encloses(ellipse: EllipseSpec, x: float, y: float, radius: float = 0.0) -> b
     return (lx / rx) ** 2 + (ly / ry) ** 2 < 1.0
 
 
+_CONTOUR_SAMPLES = 16
+
+
+def _ellipses_croisent(a: EllipseSpec, b: EllipseSpec) -> bool:
+    """Les deux ovales se recouvrent-ils ? (échantillonnage de leurs contours)
+
+    Test approché mais symétrique : un point du contour de l'un dans l'autre,
+    ou l'inverse. Il attrape aussi le cas d'un ovale entièrement dans l'autre,
+    par le test des centres.
+    """
+    if encloses(b, a.cx, a.cy) or encloses(a, b.cx, b.cy):
+        return True
+    for shape, other in ((a, b), (b, a)):
+        for i in range(_CONTOUR_SAMPLES):
+            px, py = shape.point_at(i * 360.0 / _CONTOUR_SAMPLES)
+            if encloses(other, px, py):
+                return True
+    return False
+
+
 def _push_out(ellipse: EllipseSpec, x: float, y: float, radius: float) -> tuple[float, float]:
     """Déplacement minimal qui sort le disque `(x, y, radius)` de l'ellipse.
 
@@ -152,6 +177,14 @@ def _grid(style):
     ys = (np.arange(rows) + 0.5) * (style.frame_height / rows)
     gx, gy = np.meshgrid(xs, ys)
     return gx.ravel(), gy.ravel()
+
+
+def _jitter(key: str, style) -> tuple[float, float]:
+    """Décalage fixe propre à une clé, pour casser la régularité du pavage."""
+    h = zlib.crc32(key.encode("utf-8"))
+    angle = (h & 0xFFFF) / 65535.0 * 2.0 * math.pi
+    rayon = ((h >> 16) & 0xFFFF) / 65535.0 * style.spread_jitter
+    return rayon * math.cos(angle), rayon * math.sin(angle)
 
 
 def _lloyd_targets(pos, keys, radii, style):
@@ -245,12 +278,35 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
                 disp[k][0] += ox * style.force_exclusion
                 disp[k][1] += oy * style.force_exclusion
 
+        # ── Disjonction : deux ovales étrangers ne se croisent pas ──
+        for i, (membres_a, forme_a) in enumerate(sorted(ellipses.items())):
+            for membres_b, forme_b in sorted(ellipses.items())[i + 1 :]:
+                if set(membres_a) & set(membres_b):
+                    continue  # un artiste commun : le recouvrement est inévitable
+                if not _ellipses_croisent(forme_a, forme_b):
+                    continue
+                dx = forme_b.cx - forme_a.cx
+                dy = forme_b.cy - forme_a.cy
+                dist = math.hypot(dx, dy)
+                ux, uy = (1.0, 0.0) if dist < 1e-9 else (dx / dist, dy / dist)
+                # Les deux groupes s'écartent en bloc, chacun de son côté.
+                for membres, sens in ((membres_a, -1.0), (membres_b, 1.0)):
+                    for k in membres:
+                        disp[k][0] += ux * sens * style.force_disjunction
+                        disp[k][1] += uy * sens * style.force_disjunction
+
         # ── Lloyd : chacun vers le milieu de la part de zone qu'il occupe ──
         # C'est CE terme qui répartit. Un vide est une part que personne ne
         # réclame vraiment : le cercle qui en hérite s'y déplace.
         for k, (tx, ty) in _lloyd_targets(pos, keys, radii, style).items():
-            disp[k][0] += (tx - pos[k][0]) * style.force_spread
-            disp[k][1] += (ty - pos[k][1]) * style.force_spread
+            # Écart propre à chaque cercle, DÉTERMINISTE (crc32 du nom, jamais
+            # `random` ni `hash()`) : une relaxation de Lloyd pure converge vers
+            # un pavage régulier, et les membres d'un groupe s'y alignent en
+            # rangées — un effet de grille qui fait mécanique. Ce décalage les
+            # laisse s'étaler dans leur ovale.
+            jx, jy = _jitter(k, style)
+            disp[k][0] += (tx + jx - pos[k][0]) * style.force_spread
+            disp[k][1] += (ty + jy - pos[k][1]) * style.force_spread
 
         for k in keys:
             pos[k] = (pos[k][0] + disp[k][0], pos[k][1] + disp[k][1])

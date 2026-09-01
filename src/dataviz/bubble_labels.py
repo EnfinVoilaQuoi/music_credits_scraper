@@ -13,8 +13,10 @@ plus à quel ovale « Peace, Haine, Love » appartenait. Ici, **un seul score** 
           − w_membre × distance au cercle membre le plus proche
           − w_zone   × ce qui sort de la zone
 
-sous la seule contrainte dure de l'inclinaison (`ellipse_label_max_angle`) : un
-texte trop penché ne se lit plus, ça ne se compense pas.
+sous DEUX contraintes dures : l'inclinaison (`ellipse_label_max_angle`, un texte
+trop penché ne se lit plus) et le cadre — un titre hors zone est un titre perdu,
+aucune qualité ne rachète ça. Le terme `w_zone` ne sert plus qu'à départager
+quand AUCUN emplacement ne tient dedans.
 
 Le terme `w_membre` est la traduction directe de « un titre doit être
 rattachable à son ovale » — la règle qui manquait.
@@ -133,21 +135,29 @@ def _tip(ellipse, style: SvgStyle, text: str, members, obstacles, zone) -> tuple
     """
     span = text_span(ellipse, text, style)
     best = None
+    best_dehors = None  # repli si rien ne tient dans le cadre
     for i in range(_TIP_SAMPLES):
         t = i * 360.0 / _TIP_SAMPLES
         tx, ty = ellipse.tangent_at(t)
         angle = ((math.degrees(math.atan2(ty, tx)) + 90.0) % 180.0) - 90.0  # → (-90, 90]
         if abs(angle) > style.ellipse_label_max_angle:
             continue  # illisible : aucune autre qualité ne rachète ça
+        dehors = _outside(ellipse, t, span, zone)
         score = (
             style.label_weight_clearance * _clearance(ellipse, t, span, obstacles)
             - style.label_weight_member * _distance_to_members(ellipse, t, members)
-            - style.label_weight_zone * _outside(ellipse, t, span, zone)
+            - style.label_weight_zone * dehors
         )
         # `t` départage à score égal : le choix reste le même d'une exécution à
         # l'autre, sans dépendre de l'ordre d'itération des flottants.
+        candidat = (score, t, tx)
+        if best_dehors is None or (score, -t) > (best_dehors[0], -best_dehors[1]):
+            best_dehors = candidat
+        if dehors > 0.0:
+            continue  # hors cadre : écarté tant qu'il reste un emplacement dedans
         if best is None or (score, -t) > (best[0], -best[1]):
-            best = (score, t, tx)
+            best = candidat
+    best = best or best_dehors
     if best is None:
         # Ovale si vertical qu'aucun point n'est lisible : on prend son sommet,
         # le moins mauvais des compromis.

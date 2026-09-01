@@ -41,18 +41,29 @@ def report_outputs(result) -> None:
 
 
 def audit(artist, tracks) -> int:
-    """Passe tous les albums au crible des invariants et rapporte les entorses.
+    """Passe tous les albums au crible des invariants.
 
     Ce qui était mesuré à la main à chaque itération de calibrage devient
     reproductible : un réglage de forces qui casse une planche se voit ici, sur
     la vraie discographie, sans avoir à ouvrir un SVG.
+
+    Deux niveaux, et la distinction compte :
+
+    - les **entorses** violent ce que le moteur GARANTIT (deux cercles qui se
+      chevauchent, un artiste capturé par un ovale étranger). Une seule est un
+      bug ;
+    - les **compromis** portent sur ce qu'il optimise SANS PROMESSE (un titre
+      qui ne tient pas dans le cadre, deux ovales étrangers qui se croisent).
+      Sur un album dense, aucun placement ne les satisfait tous — vérifié :
+      renforcer la disjonction ne les élimine pas et creuse les vides.
     """
     import math
 
-    from src.dataviz.bubble_layout import encloses, largest_void
+    from src.dataviz.bubble_layout import _ellipses_croisent, encloses, largest_void
     from src.dataviz.collab_graph import FEAT_ROLES
 
     fautes = 0
+    arbitrages = 0
     occupations = []
     print(f"🔍 Audit des planches de {artist.name}\n")
     for album in list_albums(tracks):
@@ -65,7 +76,7 @@ def audit(artist, tracks) -> int:
                 continue  # album sans crédit de ce type : rien à auditer
             if spec is None or len(spec.nodes) < 2:
                 continue
-            ennuis = []
+            ennuis, compromis = [], []
             nodes = list(spec.nodes)
             for i, a in enumerate(nodes):
                 for b in nodes[i + 1 :]:
@@ -76,6 +87,24 @@ def audit(artist, tracks) -> int:
                 for n in nodes:
                     if n.key not in membres and encloses(groupe.ellipse, n.x, n.y):
                         ennuis.append(f"{n.key} capturé par l'ovale {groupe.member_keys}")
+            gr = [g for g in spec.groups if len(g.member_keys) > 1]
+            for i, ga in enumerate(gr):
+                for gb in gr[i + 1 :]:
+                    if set(ga.member_keys) & set(gb.member_keys):
+                        continue  # artiste commun : recouvrement inévitable
+                    if _ellipses_croisent(ga.ellipse, gb.ellipse):
+                        compromis.append(
+                            f"ovales étrangers croisés {ga.member_keys} ✕ {gb.member_keys}"
+                        )
+            for groupe in spec.groups:
+                for ring in groupe.rings:
+                    porteuse = groupe.ellipse.inflated(ring.offset)
+                    for j in range(7):
+                        px, py = porteuse.point_at(ring.t - 20.0 + 40.0 * j / 6.0)
+                        if not (-1 <= px <= spec.width + 1 and -1 <= py <= spec.height + 1):
+                            compromis.append(f"titre hors cadre : {ring.text!r}")
+                            break
+
             # Le plus grand disque vide qu'on puisse loger dans la zone. C'est
             # CE que l'œil appelle « un trou » — l'occupation par boîte
             # englobante valait 100 % dès que quelques cercles touchaient les
@@ -92,10 +121,13 @@ def audit(artist, tracks) -> int:
             if ennuis:
                 fautes += len(ennuis)
                 print(f"  ❌ {label} · {album}")
-                for ennui in ennuis:
-                    print(f"       {ennui}")
+            elif compromis:
+                arbitrages += len(compromis)
+                print(f"  ⚠️  {label} · {album[:40]:40} vide {vide:4.0f} px ({vide / ideal:.1f}×)")
             else:
                 print(f"  ✅ {label} · {album[:40]:40} vide {vide:4.0f} px ({vide / ideal:.1f}×)")
+            for ligne in ennuis + compromis:
+                print(f"       {ligne}")
 
     if occupations:
         mediane = sorted(occupations)[len(occupations) // 2]
@@ -103,7 +135,7 @@ def audit(artist, tracks) -> int:
             f"\n{len(occupations)} planche(s) · plus grand vide rapporté à l'idéal : "
             f"médiane {mediane:.1f}×, pire {max(occupations):.1f}×"
         )
-    print(f"{fautes} entorse(s) aux invariants")
+    print(f"{fautes} entorse(s) à ce qui est garanti · {arbitrages} compromis assumé(s)")
     return 1 if fautes else 0
 
 

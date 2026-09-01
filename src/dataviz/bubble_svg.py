@@ -89,7 +89,16 @@ class SvgStyle:
     # Part maximale du tour d'ellipse qu'un titre a le droit d'occuper : au-delà
     # il s'enroule et se lit à la verticale. La couronne s'écarte pour y tenir.
     ellipse_label_max_arc: float = 0.42
-    ellipse_label_max_extra_offset: float = 55.0  # plafond de cet écartement, en px
+    # Plafond de cet écartement, en px. BAS par principe (18 et non 55) : l'écart
+    # au tracé doit être quasi FIXE, c'est lui qui rattache le titre à son ovale
+    # — un écart qui varie se lit comme un défaut (« certains partent trop loin
+    # de leur cercle », 2026-09-01). Un titre trop long est COUPÉ EN DEUX plutôt
+    # qu'écarté (ci-dessous) ; ce plafond ne rattrape que le reliquat.
+    ellipse_label_max_extra_offset: float = 18.0
+    # Couper en deux un titre SEUL trop long pour le tour de son ovale, et poser
+    # la 1ʳᵉ moitié en haut, la 2ᵈᵉ en bas (cas d'un producteur solo au titre
+    # long). Sinon il faudrait l'écarter loin, ou le laisser s'enrouler.
+    split_long_titles: bool = True
     # Ellipses (une par combinaison de producteurs).
     min_axis_ratio: float = 0.35  # borne l'aplatissement (duo / quasi-colinéaire)
     ellipse_margin: float = 10.0  # marge ajoutée au rayon des cercles

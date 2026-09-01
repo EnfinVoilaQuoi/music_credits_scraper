@@ -160,8 +160,15 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ),
             (
                 "ellipse_label_max_extra_offset",
-                "Plafond de cet écartement supplémentaire, en px : au-delà, le titre ne "
-                "semblerait plus appartenir à son ovale.",
+                "Plafond de cet écartement supplémentaire, en px. Le garder BAS : l'écart "
+                "au tracé doit rester quasi fixe, c'est lui qui rattache le titre à son "
+                "ovale. Un titre trop long est plutôt coupé en deux (réglage suivant).",
+            ),
+            (
+                "split_long_titles",
+                "Couper en deux un titre SEUL trop long pour le tour de son ovale (true/false) "
+                "et poser la 1ʳᵉ moitié en haut, la 2ᵈᵉ en bas — cas d'un producteur solo au "
+                "titre long. À false, le titre est écarté du tracé à la place.",
             ),
         ),
     ),

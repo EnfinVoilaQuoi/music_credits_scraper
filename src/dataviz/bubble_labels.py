@@ -52,12 +52,17 @@ def _perimeter(rx: float, ry: float) -> float:
 def label_offset(style: SvgStyle, ellipse=None, text: str = "") -> float:
     """Écart entre le tracé de l'ellipse et le texte curviligne posé dessus.
 
-    Écart de base, PLUS ce qu'il faut pour que le titre ne s'enroule pas : sur
-    un petit ovale, « 3ein / Risotto Gambas » couvrirait plus de la moitié du
-    tour et se lirait à la verticale à ses extrémités. On écarte alors la
-    couronne — son périmètre grandit d'environ 2π par pixel — jusqu'à ce que le
-    texte n'en occupe plus qu'une fraction. L'écart supplémentaire est plafonné :
-    au-delà, la légende ne semblerait plus appartenir à son ovale.
+    L'écart est **fixe par principe** : c'est ce qui rattache le titre à son
+    ovale, et un écart qui varie d'un titre à l'autre se lit comme un défaut
+    (retour utilisateur du 2026-09-01 : « certains partent trop loin de leur
+    cercle, j'aimerais garder un espace fixe »).
+
+    Une seule exception, bornée court par `ellipse_label_max_extra_offset` : un
+    texte qui couvrirait plus de `ellipse_label_max_arc` du tour s'enroule et
+    se lit à la verticale à ses extrémités. On écarte alors un peu la couronne
+    — son périmètre grandit d'environ 2π par pixel. Le vrai remède pour un titre
+    long est ailleurs : le COUPER EN DEUX (`split_text`), un morceau en haut, un
+    en bas. L'écartement ne fait que rattraper le reliquat.
     """
     base = style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap
     if ellipse is None or not text:
@@ -71,6 +76,42 @@ def label_offset(style: SvgStyle, ellipse=None, text: str = "") -> float:
             break
         extra += (target - perim) / (2.0 * math.pi)
     return base + min(extra, style.ellipse_label_max_extra_offset)
+
+
+def _tient_sur_le_tour(ellipse, text: str, style: SvgStyle) -> bool:
+    """Le texte tient-il dans la part de tour autorisée, à l'écart FIXE ?
+
+    Mesuré sur la couronne porteuse (l'ellipse écartée de l'écart de base), et
+    non sur le tracé visible : c'est là que le texte est réellement posé.
+    """
+    base = style.ellipse_stroke_width / 2.0 + style.ellipse_label_gap
+    perim = _perimeter(ellipse.rx + base, ellipse.ry + base)
+    needed = len(text) * style.ellipse_label_font_size * _CHAR_WIDTH_RATIO
+    return needed <= perim * style.ellipse_label_max_arc
+
+
+def split_text(text: str) -> tuple[str, ...] | None:
+    """Coupe un titre en deux moitiés, sur l'espace le plus proche du milieu.
+
+    Pour un titre long sur un petit ovale — « On sourit pas sur les photos » sur
+    la bulle d'un producteur solo —, mieux vaut deux moitiés posées de part et
+    d'autre qu'une ligne écartée si loin qu'elle ne semble plus rattachée à rien.
+
+    Renvoie `None` quand la coupe n'a pas de sens : moins de deux mots (un mot
+    seul ne se coupe pas au milieu), ou une moitié qui resterait vide.
+    """
+    mots = (text or "").split()
+    if len(mots) < 2:
+        return None
+    milieu = len(text) / 2.0
+    meilleur, ecart = 1, math.inf
+    longueur = 0
+    for i, mot in enumerate(mots[:-1]):
+        longueur += len(mot) + (1 if i else 0)
+        if abs(longueur - milieu) < ecart:
+            ecart, meilleur = abs(longueur - milieu), i + 1
+    haut, bas = " ".join(mots[:meilleur]), " ".join(mots[meilleur:])
+    return (haut, bas) if haut and bas else None
 
 
 def label_allowance(style: SvgStyle) -> float:
@@ -132,17 +173,26 @@ def _distance_to_members(ellipse, t_center, members) -> float:
     return min(math.hypot(px - cx, py - cy) - radius for cx, cy, radius in members)
 
 
-def _tip(ellipse, style: SvgStyle, text: str, members, obstacles, zone) -> tuple[float, int]:
+def _tip(
+    ellipse, style: SvgStyle, text: str, members, obstacles, zone, cote: int = 0
+) -> tuple[float, int]:
     """Meilleur emplacement `(paramètre t, sens de parcours)` pour ce titre.
 
     Le sens est choisi pour que les lettres avancent vers la droite : sur un
     chemin elles suivent la tangente, et l'autre sens les écrit à l'envers.
+
+    `cote` impose la moitié de l'ovale où chercher (`+1` au-dessus du centre,
+    `-1` en dessous, `0` libre) : c'est ce qui pose les deux moitiés d'un titre
+    coupé de part et d'autre, au lieu de les laisser se choisir le même bel
+    emplacement et se chevaucher.
     """
     span = text_span(ellipse, text, style)
     best = None
     best_dehors = None  # repli si rien ne tient dans le cadre
     for i in range(_TIP_SAMPLES):
         t = i * 360.0 / _TIP_SAMPLES
+        if cote and (ellipse.point_at(t)[1] - ellipse.cy) * cote > 0.0:
+            continue  # mauvaise moitié (y croît vers le BAS en SVG)
         tx, ty = ellipse.tangent_at(t)
         angle = ((math.degrees(math.atan2(ty, tx)) + 90.0) % 180.0) - 90.0  # → (-90, 90]
         if abs(angle) > style.ellipse_label_max_angle:
@@ -185,7 +235,7 @@ def _cote_haut(ellipse, offset: float, t: float) -> bool:
     return ellipse.inflated(offset + 1.0).point_at(t)[1] < ellipse.inflated(offset).point_at(t)[1]
 
 
-def _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher):
+def _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher, cote=0):
     """Pose UNE ligne : son écart au tracé, où la centrer, dans quel sens.
 
     Par POINT FIXE, et c'est le point délicat. L'écart dépend du côté (sous
@@ -200,7 +250,7 @@ def _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher):
     """
     socle = max(plancher, label_offset(style, ellipse, text))
     offset = socle
-    t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone)
+    t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone, cote)
     haut = _cote_haut(ellipse, offset, t)
     vus = {offset}
     for _ in range(_POINT_FIXE_PASSES):
@@ -212,25 +262,47 @@ def _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher):
             # chaque essai. On tranche pour le PLUS ÉCARTÉ — un texte un peu
             # loin du tracé reste lisible, un texte barré par le tracé, non.
             offset = socle + style.ellipse_label_font_size
-            t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone)
+            t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone, cote)
             break
         vus.add(voulu)
         offset = voulu
-        t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone)
+        t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone, cote)
         haut = _cote_haut(ellipse, offset, t)
     return LabelRing(text=text, offset=offset, t=t, sweep=sweep), haut
 
 
 def _rings(ellipse, lines, style: SvgStyle, members, obstacles, zone) -> tuple[LabelRing, ...]:
-    """Un anneau par titre, empilés vers l'extérieur, dans l'ordre de lecture.
+    """Les titres d'un ovale : chacun à l'écart FIXE, répartis autour du tracé.
 
-    Deux morceaux sur un même ovale s'écrivaient à la suite sur une seule
-    couronne : la ligne faisait le tour et se lisait mal. Ils sont posés l'un
-    « sous » l'autre, sur deux couronnes concentriques.
+    **Deux textes se posent DE PART ET D'AUTRE** (un en haut, un en bas), et non
+    plus empilés sur des couronnes concentriques : l'empilement éloignait le
+    second de l'écart d'une ligne — mesuré jusqu'à 75 px du tracé, ce que
+    l'utilisateur voyait comme « des titres qui partent trop loin de leur
+    cercle ». Sur le corpus, aucun ovale n'en porte plus de deux (24 ovales à
+    un titre, 5 à deux) : l'empilement ne subsiste que pour ce cas théorique.
+
+    Deux textes, deux origines : soit l'ovale porte deux morceaux distincts,
+    soit il porte UN titre trop long pour le tour de son ovale (bulle d'un
+    producteur solo) — coupé en deux plutôt qu'écarté.
     """
     if not lines:
         return ()
 
+    if (
+        style.split_long_titles
+        and len(lines) == 1
+        and not _tient_sur_le_tour(ellipse, lines[0], style)
+    ):
+        moities = split_text(lines[0])
+        if moities is not None:
+            return _rings_haut_bas(ellipse, moities, style, members, obstacles, zone)
+
+    if len(lines) == 2:
+        return _rings_haut_bas(ellipse, tuple(lines), style, members, obstacles, zone)
+
+    # Trois titres ou plus (jamais rencontré sur le corpus — `label_track_threshold`
+    # bascule sur « N morceaux » au-delà) : faute de place autour du tracé, ils
+    # s'empilent sur des couronnes concentriques, dans l'ordre de lecture.
     # La première ligne fixe le côté ; les suivantes s'empilent vers l'extérieur.
     premier, haut = _pose_une_ligne(
         ellipse, lines[0], style, members, obstacles, zone, label_offset(style)
@@ -252,6 +324,27 @@ def _rings(ellipse, lines, style: SvgStyle, members, obstacles, zone) -> tuple[L
             for texte, r in zip(textes, rings, strict=True)
         ][::-1]
     return tuple(rings)
+
+
+def _rings_haut_bas(ellipse, textes, style, members, obstacles, zone) -> tuple[LabelRing, ...]:
+    """Deux textes de part et d'autre : le 1ᵉʳ en HAUT, le 2ᵈ en BAS.
+
+    Sert aux deux cas — les deux moitiés d'un titre coupé, ou deux morceaux
+    distincts sur le même ovale. Chacun est posé à l'écart FIXE, sur sa propre
+    moitié d'ovale : le côté est IMPOSÉ (`cote`), pas négocié, sinon les deux se
+    choisiraient le même bel emplacement. Le premier devient un obstacle pour le
+    second, comme deux titres voisins.
+    """
+    ecart = label_offset(style)
+    haut_texte, bas_texte = textes[0], textes[1]
+    ring_haut, _ = _pose_une_ligne(
+        ellipse, haut_texte, style, members, obstacles, zone, ecart, cote=1
+    )
+    obstacles_bas = tuple(obstacles) + tuple(ring_obstacles(ellipse, (ring_haut,), style))
+    ring_bas, _ = _pose_une_ligne(
+        ellipse, bas_texte, style, members, obstacles_bas, zone, ecart, cote=-1
+    )
+    return (ring_haut, ring_bas)
 
 
 def ring_obstacles(ellipse, rings, style: SvgStyle) -> list[tuple[float, float, float]]:

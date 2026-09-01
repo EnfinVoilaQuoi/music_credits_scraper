@@ -101,12 +101,25 @@ class SvgStyle:
     # l'album) : son ovale n'entre pas dans le jeu des contraintes (3 tentatives
     # annulées, JOURNAL 2026-09-01) — c'est donc la DISTANCE qui l'isole du
     # réseau, sinon elle se fond dans le tas et se lit comme un membre.
-    gap_solo: float = 40.0
-    force_cohesion: float = 0.06  # les membres d'un groupe se rapprochent
+    # 70 et non 40 : à 40, un solo restait « trop proche » des ovales voisins
+    # (Mammouth/M.A.N, Keur/Labrador) — verdict utilisateur A/B du 2026-09-01.
+    gap_solo: float = 70.0
+    # Les membres d'un groupe se rapprochent. 0,12 et non 0,06 : à 0,06 la
+    # cohésion ne faisait pas le poids face à Lloyd (0,22), qui étale les
+    # membres à travers la zone — l'ellipse englobante suivait et devenait
+    # ÉNORME (mesuré 15,4× l'aire de ses membres sur J.000.$), au point de
+    # capturer des étrangers. Doubler la cohésion règle les deux d'un coup
+    # (15,4× → 3,6×, 6 captures → 0). Au-delà de 0,20 les planches se
+    # dégradent en sens inverse (Swing : 30 captures à 0,45).
+    force_cohesion: float = 0.12
     force_exclusion: float = 0.5  # un étranger est chassé de l'ellipse d'un groupe
     force_disjunction: float = 20.0  # écarte deux ovales sans membre commun (px/itération)
     force_spread: float = 0.22  # répartition homogène dans la zone (relaxation de Lloyd)
-    spread_jitter: float = 34.0  # casse l'alignement en grille (px, déterministe)
+    # Décalage anti-grille (px, déterministe). DÉSACTIVÉ par défaut : à 34 px il
+    # éparpillait les membres d'un groupe en 2D → ellipses rondes et « obèses »,
+    # solos poussés dans les interstices des hubs. Verdict utilisateur A/B du
+    # 2026-09-01 : le léger effet de rangées gêne moins que cet éparpillement.
+    spread_jitter: float = 0.0
     lloyd_cell: float = 20.0  # finesse de l'échantillonnage de la zone, en px
     seed_scale: float = 190.0  # échelle de l'amorce (spring layout ~[-1,1]) → px
     # Cadre : il matérialise EXACTEMENT la zone dans l'aperçu — ce qui déborde

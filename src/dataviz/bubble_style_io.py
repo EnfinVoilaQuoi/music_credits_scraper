@@ -168,6 +168,12 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         "poids accélère la mise en place mais fait osciller le dessin.",
         (
             ("gap", "Espace minimal entre deux cercles, en px."),
+            (
+                "gap_solo",
+                "Espace SUPPLÉMENTAIRE autour d'une bulle solo (un artiste sans "
+                "collaboration sur l'album), en px : c'est la distance qui l'isole du "
+                "réseau — son ovale n'entre pas dans le jeu des contraintes.",
+            ),
             ("force_cohesion", "Force de rapprochement des membres d'un même groupe, de 0 à 1."),
             (
                 "force_exclusion",

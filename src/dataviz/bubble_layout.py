@@ -227,6 +227,18 @@ def largest_void(pos, sizes, style) -> float:
     return float(np.max(np.min(d, axis=1)))
 
 
+def _solo_keys(keys, groups) -> frozenset:
+    """Clés SANS aucune collaboration : membres d'aucun groupe multi-membres.
+
+    Un artiste qui a des solos ET des collaborations n'en fait pas partie : ses
+    ovales le rattachent déjà au réseau. La bulle 100 % solo, elle, n'a pas
+    d'ovale dans le jeu des contraintes (`len(g) > 1`) — rien ne l'écarte de
+    rien, elle se fondait dans le tas (cas mammouth sur M.A.N).
+    """
+    in_multi = {k for g in groups if len(g) > 1 for k in g}
+    return frozenset(k for k in keys if k not in in_multi)
+
+
 def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]]:
     """Positions des cercles, par relaxation sous contraintes.
 
@@ -237,6 +249,7 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
     """
     keys = sorted(sizes)
     radii = {k: sizes[k] / 2.0 for k in keys}
+    solos = _solo_keys(keys, groups)
     width, height = style.frame_width, style.frame_height
 
     # Amorce recentrée sur la zone : le `spring_layout` sort dans [-1, 1].
@@ -316,7 +329,7 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
         # Traitée comme une force parmi les autres, elle se faisait défaire par
         # l'exclusion — mesuré : le nuage convergeait en 20 itérations, puis se
         # dégradait jusqu'à 88 px de chevauchement et s'y stabilisait.
-        pos = _separate(pos, keys, radii, style)
+        pos = _separate(pos, keys, radii, style, solos)
 
         # ── Cadrage : rien ne sort de la zone ──
         for k in keys:
@@ -326,17 +339,25 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
             pos[k] = (x, y)
 
     # Dernier mot à la contrainte dure : le cadrage a pu re-serrer des cercles.
-    return _separate(pos, keys, radii, style, passes=FINAL_SEPARATION_PASSES)
+    return _separate(pos, keys, radii, style, solos, passes=FINAL_SEPARATION_PASSES)
 
 
-def _separate(pos, keys, radii, style, passes=SEPARATION_PASSES) -> dict[str, tuple[float, float]]:
+def _separate(
+    pos, keys, radii, style, solos=frozenset(), passes=SEPARATION_PASSES
+) -> dict[str, tuple[float, float]]:
     """Écarte les disques jusqu'à ce qu'aucun ne se chevauche (projection).
 
     Passes successives : écarter une paire peut en rapprocher une autre. Le
     nombre de passes est FIXE (déterminisme) et généreux — c'est la seule
     contrainte qu'on ne négocie pas.
+
+    Une paire dont l'un est SOLO exige `gap_solo` EN PLUS : c'est la distance
+    qui isole la bulle solo du réseau, puisque son ovale n'entre pas dans le
+    jeu des contraintes (trois réintégrations tentées et annulées — JOURNAL
+    2026-09-01, ne pas y revenir par les poids de force).
     """
     gap = style.gap
+    gap_solo = style.gap_solo
     current = {k: [pos[k][0], pos[k][1]] for k in keys}
     for _ in range(passes):
         moved = False
@@ -346,6 +367,8 @@ def _separate(pos, keys, radii, style, passes=SEPARATION_PASSES) -> dict[str, tu
                 dy = current[kj][1] - current[ki][1]
                 dist = math.hypot(dx, dy)
                 needed = radii[ki] + radii[kj] + gap
+                if ki in solos or kj in solos:
+                    needed += gap_solo
                 if dist >= needed:
                     continue
                 moved = True
@@ -363,5 +386,3 @@ def _separate(pos, keys, radii, style, passes=SEPARATION_PASSES) -> dict[str, tu
         if not moved:
             break
     return {k: (current[k][0], current[k][1]) for k in keys}
-
-    return pos

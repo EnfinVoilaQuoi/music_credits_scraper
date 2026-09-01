@@ -24,7 +24,10 @@ def test_cle_normalisee_regroupe_les_graphies():
     # Même regroupement que `select_album_tracks` : un seed mémorisé depuis une
     # graphie de l'album doit être retrouvé depuis l'autre.
     assert override_key("prod", "Josman", "Vol.3") == override_key("prod", "Josman", "Vol. 3")
-    assert override_key("prod", "Josman", "M.A.N") != override_key("feat", "Josman", "M.A.N")
+    # Le `kind` sépare les générateurs : « prod » est le seul aujourd'hui, mais
+    # un second visuel (les featurings) est prévu et ne doit pas hériter des
+    # variantes choisies pour celui-ci.
+    assert override_key("prod", "Josman", "M.A.N") != override_key("autre", "Josman", "M.A.N")
 
 
 def test_round_trip_save_load(tmp_path):
@@ -38,14 +41,14 @@ def test_save_fusionne_sans_ecraser(tmp_path):
     # Deux planches, puis un style ajouté à la première : rien ne se perd.
     path = tmp_path / "overrides.json"
     save_override("prod", "Josman", "M.A.N", seed=7, path=path)
-    save_override("feat", "Josman", "M.A.N", seed=13, path=path)
+    save_override("prod", "Josman", "SPLIT", seed=13, path=path)
     save_override("prod", "Josman", "M.A.N", style={"gap": 20.0}, path=path)
     overrides = load_overrides(path)
     assert get_override(overrides, "prod", "Josman", "M.A.N") == {
         "seed": 7,
         "style": {"gap": 20.0},
     }
-    assert get_override(overrides, "feat", "Josman", "M.A.N") == {"seed": 13}
+    assert get_override(overrides, "prod", "Josman", "SPLIT") == {"seed": 13}
 
 
 def test_load_tolere_absence_et_fichier_casse(tmp_path):

@@ -51,39 +51,36 @@ def audit(artist, tracks) -> int:
     mêmes que celles du harnais `scripts/bubble_compare.py`.
     """
     from src.dataviz.bubble_audit import check_spec
-    from src.dataviz.collab_graph import FEAT_ROLES
 
     fautes = 0
     arbitrages = 0
     occupations = []
-    pires_ovales = []  # (ratio, album, label, membres) — instrument du chantier 3b
+    pires_ovales = []  # (ratio, album, membres) — instrument du chantier « ovales obèses »
     print(f"🔍 Audit des planches de {artist.name}\n")
     for album in list_albums(tracks):
         album_tracks = select_album_tracks(tracks, album)
-        for label, roles in (("prod", STRICT_PRODUCER_ROLES), ("feat", FEAT_ROLES)):
-            try:
-                generate = generate_bubble_prod if label == "prod" else None
-                spec = _spec_pour_audit(album_tracks, album, artist.name, roles, generate)
-            except ValueError:
-                continue  # album sans crédit de ce type : rien à auditer
-            if spec is None or len(spec.nodes) < 2:
-                continue
-            crible = check_spec(spec)
-            vide, ratio = crible.void, crible.void_ratio
-            occupations.append(ratio)
-            ovale = f" · ovale {crible.obesites[0][0]:4.1f}×" if crible.obesites else ""
-            if crible.obesites:
-                pires_ovales.append((crible.obesites[0][0], album, label, crible.obesites[0][1]))
-            if crible.entorses:
-                fautes += len(crible.entorses)
-                print(f"  ❌ {label} · {album}")
-            elif crible.compromis:
-                arbitrages += len(crible.compromis)
-                print(f"  ⚠️  {label} · {album[:40]:40} vide {vide:4.0f} px ({ratio:.1f}×){ovale}")
-            else:
-                print(f"  ✅ {label} · {album[:40]:40} vide {vide:4.0f} px ({ratio:.1f}×){ovale}")
-            for ligne in (*crible.entorses, *crible.compromis):
-                print(f"       {ligne}")
+        try:
+            spec = _spec_pour_audit(album_tracks, album, STRICT_PRODUCER_ROLES)
+        except ValueError:
+            continue  # album sans crédit producteur : rien à auditer
+        if spec is None or len(spec.nodes) < 2:
+            continue
+        crible = check_spec(spec)
+        vide, ratio = crible.void, crible.void_ratio
+        occupations.append(ratio)
+        ovale = f" · ovale {crible.obesites[0][0]:4.1f}×" if crible.obesites else ""
+        if crible.obesites:
+            pires_ovales.append((crible.obesites[0][0], album, crible.obesites[0][1]))
+        if crible.entorses:
+            fautes += len(crible.entorses)
+            print(f"  ❌ {album}")
+        elif crible.compromis:
+            arbitrages += len(crible.compromis)
+            print(f"  ⚠️  {album[:44]:44} vide {vide:4.0f} px ({ratio:.1f}×){ovale}")
+        else:
+            print(f"  ✅ {album[:44]:44} vide {vide:4.0f} px ({ratio:.1f}×){ovale}")
+        for ligne in (*crible.entorses, *crible.compromis):
+            print(f"       {ligne}")
 
     if occupations:
         mediane = sorted(occupations)[len(occupations) // 2]
@@ -98,14 +95,19 @@ def audit(artist, tracks) -> int:
         ratios = sorted(r for r, *_ in pires_ovales)
         mediane_ovale = ratios[len(ratios) // 2]
         print(f"ovale le plus obèse par planche : médiane {mediane_ovale:.1f}×, top 5 :")
-        for r, album, label, membres in sorted(pires_ovales, reverse=True)[:5]:
-            print(f"  {r:5.1f}×  {label} · {album[:36]:36} {', '.join(membres)}")
+        for r, album, membres in sorted(pires_ovales, reverse=True)[:5]:
+            print(f"  {r:5.1f}×  {album[:40]:40} {', '.join(membres)}")
     print(f"{fautes} entorse(s) à ce qui est garanti · {arbitrages} compromis assumé(s)")
     return 1 if fautes else 0
 
 
-def _spec_pour_audit(album_tracks, album, artist_name, roles, generate):
-    """Le spec d'une planche, sans écrire de fichier."""
+def _spec_pour_audit(album_tracks, album, roles):
+    """Le spec d'une planche, sans écrire de fichier.
+
+    N'applique PAS les overrides par album : l'audit est le banc d'essai du
+    MOTEUR, un seed choisi à la main y masquerait ses défauts (le harnais
+    `bubble_compare`, lui, les applique — il montre ce que l'utilisateur obtient).
+    """
     from src.dataviz.bubble_prod import build_bubble_spec, extract_instruments
     from src.dataviz.collab_graph import (
         INSTRUMENT_ROLES,
@@ -125,7 +127,7 @@ def _spec_pour_audit(album_tracks, album, artist_name, roles, generate):
         aggregate_collab_groups(groups),
         style,
         sub_labels=subs,
-        solo_badge=generate is not None,
+        solo_badge=True,
     )
 
 

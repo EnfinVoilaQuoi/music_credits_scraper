@@ -188,14 +188,21 @@ def test_legende_du_noyau_part_vers_le_bord():
     assert depuis_le_point > depuis_le_centre
 
 
-def test_deux_titres_sur_deux_anneaux():
-    # Deux morceaux sur un même ovale s'empilent l'un « sous » l'autre, sur deux
-    # couronnes concentriques — pas en une longue ligne qui ferait le tour.
+def test_deux_titres_de_part_et_d_autre():
+    # Deux morceaux sur un même ovale se posent DE PART ET D'AUTRE, au même
+    # écart du tracé — et non plus empilés sur des couronnes concentriques, ce
+    # qui envoyait le second jusqu'à 75 px du tracé (« des titres qui partent
+    # trop loin de leur cercle », retour utilisateur du 2026-09-01).
     spec = _spec(_album_tracks())
     duo = next(g for g in spec.groups if set(g.member_keys) == {"big", "kalim"})
     assert [r.text for r in duo.rings] == ["T1", "T2"]
+    # Un titre au-dessus du centre de l'ovale, l'autre en dessous.
+    ys = [duo.ellipse.inflated(r.offset).point_at(r.t)[1] - duo.ellipse.cy for r in duo.rings]
+    assert ys[0] < 0 < ys[1], f"les deux titres ne sont pas de part et d'autre : {ys}"
+    # Écarts quasi identiques : seul le recul d'une capitale sous l'ovale sépare
+    # les deux valeurs possibles.
     offsets = sorted(r.offset for r in duo.rings)
-    assert offsets[1] - offsets[0] >= spec.style.ellipse_label_line_gap - 1e-9
+    assert offsets[1] - offsets[0] <= spec.style.ellipse_label_font_size + 1e-6
 
 
 def test_legende_duo_liste_les_titres(tmp_path):

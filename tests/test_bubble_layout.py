@@ -265,3 +265,81 @@ def test_i6_le_seed_change_le_dessin():
     a = _spec(_reseau_dense(), seed=42)
     b = _spec(_reseau_dense(), seed=7)
     assert [(n.key, n.x) for n in a.nodes] != [(n.key, n.x) for n in b.nodes]
+
+
+# ── I8 : l'écart d'un titre au tracé reste PRESQUE fixe ──────────────────────
+
+
+def test_i8_ecart_des_titres_quasi_fixe():
+    # « Certains partent trop loin de leur cercle » (2026-09-01) : l'écart au
+    # tracé est ce qui rattache un titre à son ovale. Il ne doit varier que de
+    # ce que justifient le côté (recul d'une capitale sous l'ovale), le reliquat
+    # d'écartement plafonné, et l'empilement des anneaux.
+    from src.dataviz.bubble_labels import label_offset
+
+    spec = _spec(_reseau_dense())
+    base = label_offset(spec.style)
+    # Un ovale porte au plus DEUX titres (au-delà, `label_track_threshold`
+    # bascule sur « N morceaux ») : ils se posent de part et d'autre, au même
+    # écart, sans empilement. Le seul supplément légitime est le recul d'une
+    # capitale sous l'ovale, plus le reliquat d'écartement plafonné.
+    plafond = base + spec.style.ellipse_label_font_size + spec.style.ellipse_label_max_extra_offset
+    for groupe in spec.groups:
+        assert len(groupe.rings) <= 2, f"{groupe.member_keys} empile {len(groupe.rings)} titres"
+        for ring in groupe.rings:
+            assert base - 1e-6 <= ring.offset <= plafond, (
+                f"{ring.text!r} à {ring.offset:.0f} px du tracé (base {base:.0f}, "
+                f"plafond {plafond:.0f})"
+            )
+
+
+# ── I9 : un titre trop long est coupé, ses moitiés de part et d'autre ────────
+
+
+def test_i9_titre_long_coupe_en_haut_et_en_bas():
+    # Un producteur SEUL sur un morceau au titre long : son ovale est petit, le
+    # titre n'y tient pas. Plutôt que de l'écarter très loin, on le coupe en
+    # deux — 1ʳᵉ moitié en haut, 2ᵈᵉ en bas (demande utilisateur 2026-09-01).
+    tracks = [
+        _track(1, "On sourit pas sur les photos", "Al", _prod("Solo")),
+        _track(2, "T2", "Al", _prod("A"), _prod("B")),
+        _track(3, "T3", "Al", _prod("A"), _prod("C")),
+    ]
+    spec = _spec(tracks)
+    groupe = next(g for g in spec.groups if g.member_keys == ("solo",))
+    assert len(groupe.rings) == 2, "le titre long doit être coupé en deux"
+    assert groupe.rings[0].text == "On sourit pas"
+    assert groupe.rings[1].text == "sur les photos"
+    # Une moitié au-dessus du centre de l'ovale, l'autre en dessous.
+    ys = [
+        groupe.ellipse.inflated(r.offset).point_at(r.t)[1] - groupe.ellipse.cy for r in groupe.rings
+    ]
+    assert ys[0] < 0 < ys[1], f"les moitiés ne sont pas de part et d'autre : {ys}"
+
+
+def test_i9_coupe_desactivable_et_titre_court_intact():
+    from src.dataviz.bubble_labels import split_text
+
+    # Un titre qui tient n'est jamais coupé.
+    spec = _spec(_reseau_dense())
+    for groupe in spec.groups:
+        for ring in groupe.rings:
+            assert (
+                ring.text in ("T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8")
+                or len(groupe.rings) > 1
+            )
+
+    # La coupe se refuse quand elle n'a pas de sens.
+    assert split_text("Fiesta") is None  # un seul mot
+    assert split_text("") is None
+    assert split_text("On sourit pas sur les photos") == ("On sourit pas", "sur les photos")
+
+    # Et elle est désactivable.
+    tracks = [
+        _track(1, "On sourit pas sur les photos", "Al", _prod("Solo")),
+        _track(2, "T2", "Al", _prod("A"), _prod("B")),
+        _track(3, "T3", "Al", _prod("A"), _prod("C")),
+    ]
+    spec = _spec(tracks, style=SvgStyle(split_long_titles=False))
+    groupe = next(g for g in spec.groups if g.member_keys == ("solo",))
+    assert len(groupe.rings) == 1

@@ -97,6 +97,11 @@ class SvgStyle:
     # (cf. `bubble_layout`). Ils remplacent une pile de passes correctives ; les
     # monter accélère la mise en place mais fait osciller le nuage.
     gap: float = 14.0  # espace minimal entre deux cercles, quels qu'ils soient
+    # Espace SUPPLÉMENTAIRE autour d'une bulle SOLO (aucune collaboration sur
+    # l'album) : son ovale n'entre pas dans le jeu des contraintes (3 tentatives
+    # annulées, JOURNAL 2026-09-01) — c'est donc la DISTANCE qui l'isole du
+    # réseau, sinon elle se fond dans le tas et se lit comme un membre.
+    gap_solo: float = 40.0
     force_cohesion: float = 0.06  # les membres d'un groupe se rapprochent
     force_exclusion: float = 0.5  # un étranger est chassé de l'ellipse d'un groupe
     force_disjunction: float = 20.0  # écarte deux ovales sans membre commun (px/itération)

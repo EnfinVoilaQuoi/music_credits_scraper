@@ -212,6 +212,41 @@ def test_i5_pas_de_grand_vide():
     assert vide / ideal <= 2.0, f"trou de {vide:.0f} px, soit {vide / ideal:.1f}× l'idéal"
 
 
+# ── I7 : une bulle solo est isolée par la distance ───────────────────────────
+
+
+def _solos_du_spec(spec):
+    """Les nœuds SANS aucune collaboration (membres d'aucun groupe multi)."""
+    multi = {k for g in spec.groups if len(g.member_keys) > 1 for k in g.member_keys}
+    return [n for n in spec.nodes if n.key not in multi]
+
+
+def test_i7_solo_ecarte_du_reseau():
+    # Une bulle SOLO n'a pas d'ovale dans le jeu des contraintes (`len(g) > 1`,
+    # trois réintégrations tentées et annulées — JOURNAL 2026-09-01) : c'est la
+    # DISTANCE qui l'isole. Sans elle, elle se fondait dans le tas et se lisait
+    # comme un membre (cas mammouth sur M.A.N).
+    spec = _spec(_reseau_dense())
+    solos = _solos_du_spec(spec)
+    assert solos, "le réseau dense doit avoir au moins un solo (F)"
+    minimum = spec.style.gap + spec.style.gap_solo
+    for s in solos:
+        for other in spec.nodes:
+            if other.key == s.key:
+                continue
+            ecart = math.hypot(s.x - other.x, s.y - other.y) - (s.size + other.size) / 2.0
+            assert ecart >= minimum - 1e-6, f"{s.key} à {ecart:.0f} px de {other.key}"
+
+
+def test_i7_un_artiste_mixte_n_est_pas_un_solo():
+    # « Hub » a un morceau seul ET des collaborations : ses ovales le rattachent
+    # déjà au réseau, il ne doit PAS être écarté comme un solo.
+    spec = _spec(_reseau_dense())
+    cles_solo = {n.key for n in _solos_du_spec(spec)}
+    hub = next(n.key for n in spec.nodes if n.display == "Hub")
+    assert hub not in cles_solo
+
+
 # ── I6 : la sortie ne bouge pas d'une exécution à l'autre ────────────────────
 
 

@@ -11,7 +11,7 @@ réglage qui les casse rougit ici, et non trois semaines plus tard sur une planc
 
 import math
 
-from src.dataviz.bubble_layout import encloses
+from src.dataviz.bubble_layout import encloses, largest_void
 from src.dataviz.bubble_prod import build_bubble_spec
 from src.dataviz.bubble_svg import SvgStyle
 from src.dataviz.collab_graph import (
@@ -132,15 +132,25 @@ def test_i4_titre_lisible():
             assert (tx >= 0) == bool(ring.sweep)  # se lit de gauche à droite
 
 
-# ── I5 : le dessin occupe la zone ────────────────────────────────────────────
+# ── I5 : le dessin occupe la zone SANS TROU ─────────────────────────────────
 
 
-def test_i5_occupation_de_la_zone():
+def test_i5_pas_de_grand_vide():
+    # L'invariant se mesure par le plus grand disque VIDE qu'on puisse loger
+    # dans la zone, rapporté à ce qui est atteignable pour ce nombre de cercles.
+    #
+    # (Il se mesurait avant par la boîte englobante. C'était trompeur : elle
+    # valait 100 % dès que quelques cercles touchaient les bords, pendant que
+    # l'intérieur restait béant — le défaut que l'utilisateur voyait et que la
+    # métrique niait.)
     spec = _spec(_reseau_dense())
-    xs = [n.x - n.size / 2.0 for n in spec.nodes] + [n.x + n.size / 2.0 for n in spec.nodes]
-    ys = [n.y - n.size / 2.0 for n in spec.nodes] + [n.y + n.size / 2.0 for n in spec.nodes]
-    assert (max(xs) - min(xs)) / spec.width >= 0.75
-    assert (max(ys) - min(ys)) / spec.height >= 0.75
+    vide = largest_void(
+        {n.key: (n.x, n.y) for n in spec.nodes},
+        {n.key: n.size for n in spec.nodes},
+        spec.style,
+    )
+    ideal = math.sqrt(spec.width * spec.height / (math.pi * len(spec.nodes)))
+    assert vide / ideal <= 2.0, f"trou de {vide:.0f} px, soit {vide / ideal:.1f}× l'idéal"
 
 
 # ── I6 : la sortie ne bouge pas d'une exécution à l'autre ────────────────────

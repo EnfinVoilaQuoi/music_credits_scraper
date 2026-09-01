@@ -99,9 +99,8 @@ class SvgStyle:
     gap: float = 14.0  # espace minimal entre deux cercles, quels qu'ils soient
     force_cohesion: float = 0.06  # les membres d'un groupe se rapprochent
     force_exclusion: float = 0.5  # un étranger est chassé de l'ellipse d'un groupe
-    force_repulsion: float = 2.5  # les cercles se répartissent (px par itération)
-    repulsion_range: float = 300.0  # au-delà, deux cercles s'ignorent (px)
-    force_expansion: float = 0.08  # le nuage grandit jusqu'à occuper la zone
+    force_spread: float = 0.22  # répartition homogène dans la zone (relaxation de Lloyd)
+    lloyd_cell: float = 20.0  # finesse de l'échantillonnage de la zone, en px
     seed_scale: float = 190.0  # échelle de l'amorce (spring layout ~[-1,1]) → px
     # Cadre : il matérialise EXACTEMENT la zone dans l'aperçu — ce qui déborde
     # se voit d'un coup d'œil (rien n'est mis à l'échelle pour rentrer).

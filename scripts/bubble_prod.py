@@ -49,7 +49,7 @@ def audit(artist, tracks) -> int:
     """
     import math
 
-    from src.dataviz.bubble_layout import encloses
+    from src.dataviz.bubble_layout import encloses, largest_void
     from src.dataviz.collab_graph import FEAT_ROLES
 
     fautes = 0
@@ -76,21 +76,33 @@ def audit(artist, tracks) -> int:
                 for n in nodes:
                     if n.key not in membres and encloses(groupe.ellipse, n.x, n.y):
                         ennuis.append(f"{n.key} capturé par l'ovale {groupe.member_keys}")
-            xs = [n.x - n.size / 2 for n in nodes] + [n.x + n.size / 2 for n in nodes]
-            ys = [n.y - n.size / 2 for n in nodes] + [n.y + n.size / 2 for n in nodes]
-            occupation = (max(xs) - min(xs)) / spec.width * (max(ys) - min(ys)) / spec.height
-            occupations.append(occupation)
+            # Le plus grand disque vide qu'on puisse loger dans la zone. C'est
+            # CE que l'œil appelle « un trou » — l'occupation par boîte
+            # englobante valait 100 % dès que quelques cercles touchaient les
+            # bords, pendant que l'intérieur restait béant.
+            vide = largest_void(
+                {n.key: (n.x, n.y) for n in nodes}, {n.key: n.size for n in nodes}, spec.style
+            )
+            # Rapporté à ce qui est ATTEIGNABLE pour ce nombre de cercles : à
+            # 2 cercles dans 850 × 600, un vide de 330 px est incompressible.
+            # Le rapport, lui, se compare d'une planche à l'autre — 1 = aussi
+            # homogène que possible, 2 = un trou deux fois trop grand.
+            ideal = math.sqrt(spec.width * spec.height / (math.pi * len(nodes)))
+            occupations.append(vide / ideal)
             if ennuis:
                 fautes += len(ennuis)
                 print(f"  ❌ {label} · {album}")
                 for ennui in ennuis:
                     print(f"       {ennui}")
             else:
-                print(f"  ✅ {label} · {album[:44]:44} occupation {occupation * 100:3.0f}%")
+                print(f"  ✅ {label} · {album[:40]:40} vide {vide:4.0f} px ({vide / ideal:.1f}×)")
 
     if occupations:
         mediane = sorted(occupations)[len(occupations) // 2]
-        print(f"\n{len(occupations)} planche(s) · occupation médiane {mediane * 100:.0f}%")
+        print(
+            f"\n{len(occupations)} planche(s) · plus grand vide rapporté à l'idéal : "
+            f"médiane {mediane:.1f}×, pire {max(occupations):.1f}×"
+        )
     print(f"{fautes} entorse(s) aux invariants")
     return 1 if fautes else 0
 

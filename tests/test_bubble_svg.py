@@ -214,12 +214,14 @@ def test_legende_duo_liste_les_titres(tmp_path):
     assert texts["ellipse-label-big--kalim-1"] == "T2"
 
 
-def test_legende_combinaison_au_dela_du_seuil(tmp_path):
-    # Duo présent sur 4 morceaux (> seuil 3) → « 4 morceaux », pas les titres.
+def test_legende_combinaison_montre_un_titre_et_le_reste(tmp_path):
+    # Duo présent sur 4 morceaux : le plus écouté, puis le reliquat DIT.
+    # Un ovale légendé « 4 morceaux » n'apprenait rien et paraissait vide
+    # (retour utilisateur 2026-09-02 sur Lamsi et Cellulaire/Alpraz).
     tracks = [_track(i, f"T{i}", "Al", _prod("X"), _prod("Y")) for i in range(1, 5)]
     out = tmp_path / "bubble.svg"
     generate_bubble_prod(tracks, "Al", output_path=out)
-    assert list(_ellipse_labels(ET.parse(out).getroot()).values()) == ["4 morceaux"]
+    assert list(_ellipse_labels(ET.parse(out).getroot()).values()) == ["T1", "+ 3 titres"]
 
 
 def test_zone_fixe_et_cadre_confondu():

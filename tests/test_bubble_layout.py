@@ -279,8 +279,8 @@ def test_i8_ecart_des_titres_quasi_fixe():
 
     spec = _spec(_reseau_dense())
     base = label_offset(spec.style)
-    # Un ovale porte au plus DEUX titres (au-delà, `label_track_threshold`
-    # bascule sur « N morceaux ») : ils se posent de part et d'autre, au même
+    # Un ovale porte au plus DEUX textes (`label_max_titles`, le reliquat
+    # devenant « + N titres ») : ils se posent de part et d'autre, au même
     # écart, sans empilement. Le seul supplément légitime est le recul d'une
     # capitale sous l'ovale, plus le reliquat d'écartement plafonné.
     plafond = base + spec.style.ellipse_label_font_size + spec.style.ellipse_label_max_extra_offset

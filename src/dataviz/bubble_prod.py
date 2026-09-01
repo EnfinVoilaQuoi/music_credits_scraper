@@ -207,27 +207,40 @@ def clean_track_title(title: str) -> str:
     return cleaned or (title or "").strip()
 
 
-def _count_label(n: int) -> str:
-    return f"{n} morceau" if n == 1 else f"{n} morceaux"
+def _reste_label(n: int) -> str:
+    return f"+ {n} titre" if n == 1 else f"+ {n} titres"
 
 
 def _ellipse_label(collab_group, style: SvgStyle) -> tuple[str, ...]:
-    """Légende de l'ellipse : titres des morceaux si peu nombreux, sinon « N morceaux ».
+    """Légende de l'ellipse : les morceaux les plus ÉCOUTÉS, et ce qui reste.
 
-    Un seul morceau → toujours son TITRE (même pour un producteur solo : afficher
-    « 1 morceau » n'apporterait rien). Plusieurs morceaux : solo → compte ;
-    combinaison → titres jusqu'au seuil, compte au-delà.
+    Un ovale sans légende paraît vide et n'apprend rien (retour utilisateur du
+    2026-09-02 : « ça fait bizarre de voir l'ellipse vide autour de Lamsi »).
+    Tout ovale porte donc au moins un titre, quel que soit le nombre de morceaux.
+
+    Lesquels ? Les **plus écoutés** — ce sont ceux que le public reconnaît, à
+    défaut de savoir lesquels sont sortis en single (donnée absente de la base).
+    Au plus `label_max_titles`, la place autour d'un tracé étant comptée.
+
+    Ce qui ne tient pas est DIT plutôt que tu : « + 3 titres » sur la seconde
+    ligne. Sauf pour un producteur SOLO, dont le badge de cercle porte déjà le
+    compte total — le répéter n'apprendrait rien.
     """
+    titres = [clean_track_title(t) for t in collab_group.titles_by_plays] or [
+        clean_track_title(t) for t in collab_group.track_titles
+    ]
     if collab_group.track_count == 1:
-        return tuple(clean_track_title(t) for t in collab_group.track_titles)
+        return tuple(titres[:1])
+
+    montres = titres[: max(1, style.label_max_titles)]
     if len(collab_group.keys) == 1:
-        # Producteur seul sur N morceaux : rien sur l'ovale. « N solo » s'y
-        # perdait au milieu des titres voisins alors que l'info tient dans le
-        # badge du cercle — « 15 (7 Solos) ».
-        return ()
-    if collab_group.track_count <= style.label_track_threshold:
-        return tuple(clean_track_title(t) for t in collab_group.track_titles)
-    return (_count_label(collab_group.track_count),)
+        return tuple(montres)  # le badge du cercle dit déjà « 15 (7 Solos) »
+    if len(montres) >= collab_group.track_count:
+        return tuple(montres)
+    # Une combinaison n'a pas de badge à elle : le reliquat doit être écrit. La
+    # seconde ligne le portant, un seul titre reste affiché — le décompte se
+    # fait donc sur CE titre, pas sur les deux qu'on aurait pu montrer.
+    return (montres[0], _reste_label(collab_group.track_count - 1))
 
 
 def build_bubble_spec(

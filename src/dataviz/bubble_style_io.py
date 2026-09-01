@@ -194,9 +194,10 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ),
             (
                 "spread_jitter",
-                "Décalage aléatoire (mais reproductible) appliqué à chaque cercle, en px : "
-                "une répartition parfaitement homogène aligne les membres d'un groupe en "
-                "rangées, ce qui fait mécanique.",
+                "Décalage aléatoire (mais reproductible) appliqué à chaque cercle, en px. "
+                "0 = désactivé (défaut) : à 34 px il éparpillait les membres d'un groupe "
+                "et rendait les ellipses rondes et obèses. Le remonter casse l'effet de "
+                "rangées d'une répartition trop homogène, au prix de cet éparpillement.",
             ),
             ("lloyd_cell", "Finesse de l'échantillonnage de la zone pour ce calcul, en px."),
             ("seed_scale", "Échelle de l'amorce (le layout de départ), en px."),

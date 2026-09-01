@@ -123,3 +123,18 @@ def test_bbox_ellipse_axis_aligned():
 def test_zero_point_leve():
     with pytest.raises(ValueError):
         enclosing_shape([])
+
+
+def test_quasi_colineaire_sous_le_radar_reste_fini():
+    # Régression 2026-09-01 : des points PRESQUE colinéaires — assez pour rendre
+    # la conique de Khachiyan numériquement dégénérée (valeur propre ≤ 0 → axes
+    # NaN, propagé jusqu'au startOffset du SVG), pas assez pour déclencher la
+    # garde de rang `_is_colinear`. Quel que soit l'epsilon, la forme rendue
+    # doit être FINIE et englober les points.
+    import math
+
+    for eps in (1e-2, 1e-4, 1e-6, 1e-8):
+        pts = [[0.0, 0.0], [100.0, eps * 100.0], [200.0, -eps * 50.0], [320.0, eps * 20.0]]
+        spec = enclosing_shape(pts, padding=10.0, min_radius=10.0, min_axis_ratio=0.35)
+        assert math.isfinite(spec.rx) and math.isfinite(spec.ry), f"NaN pour eps={eps}"
+        assert spec.rx > 0 and spec.ry > 0

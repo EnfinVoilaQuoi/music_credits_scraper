@@ -312,11 +312,12 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
         # C'est CE terme qui répartit. Un vide est une part que personne ne
         # réclame vraiment : le cercle qui en hérite s'y déplace.
         for k, (tx, ty) in _lloyd_targets(pos, keys, radii, style).items():
-            # Écart propre à chaque cercle, DÉTERMINISTE (crc32 du nom, jamais
-            # `random` ni `hash()`) : une relaxation de Lloyd pure converge vers
-            # un pavage régulier, et les membres d'un groupe s'y alignent en
-            # rangées — un effet de grille qui fait mécanique. Ce décalage les
-            # laisse s'étaler dans leur ovale.
+            # Écart anti-grille propre à chaque cercle, DÉTERMINISTE (crc32 du
+            # nom, jamais `random` ni `hash()`) — une relaxation de Lloyd pure
+            # converge vers un pavage régulier. DÉSACTIVÉ par défaut
+            # (`spread_jitter` = 0) : à 34 px il éparpillait les membres d'un
+            # groupe et rendait les ellipses rondes et obèses (verdict A/B
+            # 2026-09-01, l'effet de rangées gêne moins). Le réglage reste.
             jx, jy = _jitter(k, style)
             disp[k][0] += (tx + jx - pos[k][0]) * style.force_spread
             disp[k][1] += (ty + jy - pos[k][1]) * style.force_spread

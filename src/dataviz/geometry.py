@@ -206,6 +206,12 @@ def enclosing_shape(
         )
     try:
         c, A = min_enclosing_ellipse(pts)
+        if not np.all(np.isfinite(A)) or float(np.linalg.eigvalsh(A).min()) <= 0.0:
+            # Quasi-colinéaire passé SOUS `_RANK_TOL` : Khachiyan rend alors une
+            # conique numériquement dégénérée (valeur propre ≤ 0 → axes NaN, qui
+            # se propageait jusqu'au `startOffset` du SVG). Même repli que le
+            # rang mal détecté.
+            raise np.linalg.LinAlgError("conique dégénérée")
     except np.linalg.LinAlgError:
         # Filet de sécurité : rang mal détecté → segment sur les extrêmes.
         p1, p2 = _two_extreme_points(pts)

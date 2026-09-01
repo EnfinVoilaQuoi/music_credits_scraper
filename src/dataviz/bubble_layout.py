@@ -8,15 +8,22 @@ capturé par une ellipse, et un dessin tassé au centre.
 
 Les règles sont désormais dites une fois, sous forme de **forces** :
 
-- `separation` — deux cercles gardent `gap` entre eux, quelle que soit leur
-  composante ;
+- `lloyd` — chaque cercle se déplace vers le barycentre de la part de zone
+  qu'il occupe (relaxation de Lloyd, dite « de Voronoï »). C'est ce qui donne
+  une répartition HOMOGÈNE : un vide est une part que personne ne réclame, et
+  le cercle le plus proche y est attiré ;
 - `cohesion` — les membres d'un même groupe se rapprochent : un groupe compact
   donne une petite ellipse, donc peu d'occasions d'attraper un étranger ;
 - `exclusion` — un cercle NON membre est repoussé hors de l'ellipse d'un groupe ;
-- `repulsion` — les cercles se répartissent au lieu de se contenter d'éviter
-  le contact ;
-- `expansion` — le nuage grandit jusqu'à occuper la zone ;
-- `containment` — et n'en sort pas.
+- `separation` — deux cercles gardent `gap` entre eux, quelle que soit leur
+  composante. CONTRAINTE, pas force : projetée après coup ;
+- `containment` — rien ne sort de la zone.
+
+La version précédente répartissait par répulsion mutuelle bornée et étirait le
+nuage jusqu'à ce que sa BOÎTE remplisse la zone. La boîte remplissait bien, mais
+l'intérieur restait troué : étirer n'est pas répartir, et deux cercles éloignés
+de plus que la portée cessaient de se voir. Lloyd n'a pas ce défaut — il
+raisonne sur la surface, pas sur les distances deux à deux.
 
 Module de **géométrie pure** : il ne connaît ni `Track`, ni la GUI, ni le rendu.
 Entrées = des diamètres et des ensembles de clés, sortie = des coordonnées.
@@ -28,22 +35,27 @@ clés parcourues en ordre trié partout, et aucune source d'aléa.
 
 import math
 
+import numpy as np
+
 from src.dataviz.geometry import EllipseSpec, enclosing_shape
 
-# Itérations de la relaxation. 140 suffisent à atteindre le point fixe sur les
-# planches réelles (20 nœuds, 12 groupes) ; le nombre est FIXE et non un critère
-# de convergence, c'est ce qui garantit une sortie byte-identique.
-ITERATIONS = 140
+# Itérations de la relaxation. Mesuré sur M.A.N (18 cercles) : au-delà de 40 la
+# répartition ne bouge plus (plus grand vide 134 px à 40, 132 à 140) — 60 laisse
+# de la marge aux planches plus denses. Le nombre est FIXE et non un critère de
+# convergence : c'est ce qui garantit une sortie byte-identique.
+ITERATIONS = 60
 
 # Les ellipses ne sont recalculées qu'une itération sur cinq : `enclosing_shape`
 # (Khachiyan) est le seul point coûteux de la boucle, et la force d'exclusion
 # n'a pas besoin d'une forme fraîche au pixel près pour pousser dans le bon sens.
 ELLIPSE_REFRESH = 5
 
-# Passes de la projection de séparation, à chaque itération. Écarter une paire
-# peut en rapprocher une autre : 40 passes suffisent largement sur une planche
-# réelle, et le nombre reste FIXE pour ne pas dépendre d'un seuil.
-SEPARATION_PASSES = 40
+# Passes de la projection de séparation à chaque itération : écarter une paire
+# peut en rapprocher une autre. 10 suffisent en cours de route (les itérations
+# suivantes rattrapent), la passe FINALE en fait davantage — c'est elle qui doit
+# tenir. Nombres FIXES, pour ne pas dépendre d'un seuil.
+SEPARATION_PASSES = 10
+FINAL_SEPARATION_PASSES = 60
 
 # Points échantillonnés sur le contour d'un cercle pour caler l'ellipse d'un
 # groupe : elle doit envelopper les DISQUES de ses membres, pas leurs centres.
@@ -127,6 +139,61 @@ def _push_out(ellipse: EllipseSpec, x: float, y: float, radius: float) -> tuple[
     return tx - x, ty - y
 
 
+def _grid(style):
+    """Points d'échantillonnage de la zone, calculés une fois par appel.
+
+    Résolution volontairement grossière : on cherche des barycentres, pas des
+    frontières. `numpy` fait le travail d'un coup, la boucle Python resterait
+    des dizaines de fois plus lente pour un résultat visuellement identique.
+    """
+    cols = max(8, int(style.frame_width / style.lloyd_cell))
+    rows = max(8, int(style.frame_height / style.lloyd_cell))
+    xs = (np.arange(cols) + 0.5) * (style.frame_width / cols)
+    ys = (np.arange(rows) + 0.5) * (style.frame_height / rows)
+    gx, gy = np.meshgrid(xs, ys)
+    return gx.ravel(), gy.ravel()
+
+
+def _lloyd_targets(pos, keys, radii, style):
+    """Barycentre de la part de zone revenant à chaque cercle.
+
+    Chaque point de la zone est attribué au cercle dont le BORD est le plus
+    proche — pas le centre : un gros cercle réclame ainsi plus de place, ce qui
+    est exactement ce qu'on veut d'un artiste plus présent.
+    """
+    gx, gy = _grid(style)
+    cx = np.array([pos[k][0] for k in keys])
+    cy = np.array([pos[k][1] for k in keys])
+    r = np.array([radii[k] for k in keys])
+    # (points × cercles) : distance au bord de chaque cercle.
+    d = np.hypot(gx[:, None] - cx[None, :], gy[:, None] - cy[None, :]) - r[None, :]
+    owner = np.argmin(d, axis=1)
+    counts = np.bincount(owner, minlength=len(keys))
+    sum_x = np.bincount(owner, weights=gx, minlength=len(keys))
+    sum_y = np.bincount(owner, weights=gy, minlength=len(keys))
+    targets = {}
+    for i, k in enumerate(keys):
+        if counts[i]:  # un cercle sans part reste où il est
+            targets[k] = (sum_x[i] / counts[i], sum_y[i] / counts[i])
+    return targets
+
+
+def largest_void(pos, sizes, style) -> float:
+    """Rayon du plus grand disque vide qu'on puisse loger dans la zone.
+
+    LA mesure de « trou » — celle qui manquait. L'occupation par boîte
+    englobante valait 100 % dès que quelques cercles touchaient les bords,
+    pendant que l'intérieur restait béant.
+    """
+    gx, gy = _grid(style)
+    keys = sorted(pos)
+    cx = np.array([pos[k][0] for k in keys])
+    cy = np.array([pos[k][1] for k in keys])
+    r = np.array([sizes[k] / 2.0 for k in keys])
+    d = np.hypot(gx[:, None] - cx[None, :], gy[:, None] - cy[None, :]) - r[None, :]
+    return float(np.max(np.min(d, axis=1)))
+
+
 def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]]:
     """Positions des cercles, par relaxation sous contraintes.
 
@@ -178,42 +245,21 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
                 disp[k][0] += ox * style.force_exclusion
                 disp[k][1] += oy * style.force_exclusion
 
-        # ── Expansion : le nuage grandit jusqu'à occuper la zone ──
-        # Un facteur PAR AXE : la zone est paysage, un facteur commun serait
-        # bloqué par la hauteur et laisserait deux vides sur les côtés. Seules
-        # les DISTANCES changent — les diamètres encodent la participation et
-        # doivent rester comparables d'un album à l'autre.
-        pos = _expand(pos, keys, radii, style)
-
-        # ── Répulsion : répartir, pas seulement éviter le contact ──
-        # La séparation ne fait que garantir un écart minimal ; sans répulsion,
-        # le nuage garde la forme de son amorce et se retrouve de guingois — le
-        # noyau d'un côté, tous les îlots empilés de l'autre. La portée est
-        # bornée pour que deux cercles éloignés cessent de s'influencer.
-        reach = style.repulsion_range
-        for i, ki in enumerate(keys):
-            for kj in keys[i + 1 :]:
-                dx = pos[kj][0] - pos[ki][0]
-                dy = pos[kj][1] - pos[ki][1]
-                dist = math.hypot(dx, dy)
-                if dist >= reach:
-                    continue
-                ux, uy = (1.0, 0.0) if dist < 1e-9 else (dx / dist, dy / dist)
-                force = style.force_repulsion * (reach - dist) / reach
-                disp[ki][0] -= ux * force
-                disp[ki][1] -= uy * force
-                disp[kj][0] += ux * force
-                disp[kj][1] += uy * force
+        # ── Lloyd : chacun vers le milieu de la part de zone qu'il occupe ──
+        # C'est CE terme qui répartit. Un vide est une part que personne ne
+        # réclame vraiment : le cercle qui en hérite s'y déplace.
+        for k, (tx, ty) in _lloyd_targets(pos, keys, radii, style).items():
+            disp[k][0] += (tx - pos[k][0]) * style.force_spread
+            disp[k][1] += (ty - pos[k][1]) * style.force_spread
 
         for k in keys:
             pos[k] = (pos[k][0] + disp[k][0], pos[k][1] + disp[k][1])
 
         # ── Séparation : une CONTRAINTE, pas une force ──
-        # Elle est projetée après coup, et répétée jusqu'à ce qu'elle tienne.
+        # Projetée après les forces, et répétée jusqu'à ce qu'elle tienne.
         # Traitée comme une force parmi les autres, elle se faisait défaire par
         # l'exclusion — mesuré : le nuage convergeait en 20 itérations, puis se
-        # dégradait jusqu'à 88 px de chevauchement et s'y stabilisait. Les deux
-        # se renvoyaient la balle, chacune à moitié satisfaite.
+        # dégradait jusqu'à 88 px de chevauchement et s'y stabilisait.
         pos = _separate(pos, keys, radii, style)
 
         # ── Cadrage : rien ne sort de la zone ──
@@ -224,10 +270,10 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
             pos[k] = (x, y)
 
     # Dernier mot à la contrainte dure : le cadrage a pu re-serrer des cercles.
-    return _separate(pos, keys, radii, style)
+    return _separate(pos, keys, radii, style, passes=FINAL_SEPARATION_PASSES)
 
 
-def _separate(pos, keys, radii, style) -> dict[str, tuple[float, float]]:
+def _separate(pos, keys, radii, style, passes=SEPARATION_PASSES) -> dict[str, tuple[float, float]]:
     """Écarte les disques jusqu'à ce qu'aucun ne se chevauche (projection).
 
     Passes successives : écarter une paire peut en rapprocher une autre. Le
@@ -236,7 +282,7 @@ def _separate(pos, keys, radii, style) -> dict[str, tuple[float, float]]:
     """
     gap = style.gap
     current = {k: [pos[k][0], pos[k][1]] for k in keys}
-    for _ in range(SEPARATION_PASSES):
+    for _ in range(passes):
         moved = False
         for i, ki in enumerate(keys):
             for kj in keys[i + 1 :]:
@@ -263,25 +309,3 @@ def _separate(pos, keys, radii, style) -> dict[str, tuple[float, float]]:
     return {k: (current[k][0], current[k][1]) for k in keys}
 
     return pos
-
-
-def _expand(pos, keys, radii, style) -> dict[str, tuple[float, float]]:
-    """Rapproche le nuage de la taille de la zone, un axe à la fois."""
-    xs = [pos[k][0] - radii[k] for k in keys] + [pos[k][0] + radii[k] for k in keys]
-    ys = [pos[k][1] - radii[k] for k in keys] + [pos[k][1] + radii[k] for k in keys]
-    span_x, span_y = max(xs) - min(xs), max(ys) - min(ys)
-    target_x = style.frame_width - 2 * style.margin
-    target_y = style.frame_height - 2 * style.margin
-    cx = (max(xs) + min(xs)) / 2.0
-    cy = (max(ys) + min(ys)) / 2.0
-
-    def factor(span, target):
-        if span < 1e-9:
-            return 1.0
-        # Amorti : on ne fait qu'une fraction du chemin à chaque itération,
-        # sinon l'expansion et la séparation se renvoient la balle et le nuage
-        # oscille au lieu de se poser.
-        return 1.0 + (target / span - 1.0) * style.force_expansion
-
-    fx, fy = factor(span_x, target_x), factor(span_y, target_y)
-    return {k: (cx + (pos[k][0] - cx) * fx, cy + (pos[k][1] - cy) * fy) for k in keys}

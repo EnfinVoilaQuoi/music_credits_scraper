@@ -175,12 +175,12 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "Sans elle, un artiste qui passe par là se lit comme un membre.",
             ),
             (
-                "force_repulsion",
-                "Force de répartition entre cercles, en px par itération. Sans elle le nuage "
-                "garde la forme de son amorce et se retrouve de guingois.",
+                "force_spread",
+                "Force de répartition homogène dans la zone, de 0 à 1 : chaque cercle est "
+                "attiré vers le milieu de la part de surface qu'il occupe. C'est elle qui "
+                "évite les grands vides.",
             ),
-            ("repulsion_range", "Portée de cette répartition, en px : au-delà, ils s'ignorent."),
-            ("force_expansion", "Vitesse à laquelle le nuage grandit vers les bords, de 0 à 1."),
+            ("lloyd_cell", "Finesse de l'échantillonnage de la zone pour ce calcul, en px."),
             ("seed_scale", "Échelle de l'amorce (le layout de départ), en px."),
             (
                 "draw_edges",

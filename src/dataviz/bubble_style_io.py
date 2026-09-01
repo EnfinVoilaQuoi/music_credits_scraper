@@ -165,6 +165,17 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "ovale. Un titre trop long est plutôt coupé en deux (réglage suivant).",
             ),
             (
+                "cap_height_ratio",
+                "Hauteur d'une capitale, en fraction de la taille de police (0,72 pour "
+                "Montserrat) : c'est de CETTE hauteur que recule un titre posé SOUS son "
+                "ovale, pour être à la même distance du tracé que ceux posés au-dessus.",
+            ),
+            (
+                "label_min_clearance_ratio",
+                "Dégagement minimal autour d'un titre, en fraction de sa taille. En dessous, "
+                "il est reposé ailleurs — un titre qui touche un cercle ne se lit plus.",
+            ),
+            (
                 "split_long_titles",
                 "Couper en deux un titre SEUL trop long pour le tour de son ovale (true/false) "
                 "et poser la 1ʳᵉ moitié en haut, la 2ᵈᵉ en bas — cas d'un producteur solo au "

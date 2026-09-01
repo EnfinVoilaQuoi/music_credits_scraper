@@ -249,25 +249,36 @@ def _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher, co
     être relié à rien. On itère donc jusqu'à ce que les deux s'accordent.
     """
     socle = max(plancher, label_offset(style, ellipse, text))
+    recul = style.ellipse_label_font_size * style.cap_height_ratio
     offset = socle
     t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone, cote)
     haut = _cote_haut(ellipse, offset, t)
     vus = {offset}
     for _ in range(_POINT_FIXE_PASSES):
-        voulu = socle if haut else socle + style.ellipse_label_font_size
+        voulu = socle if haut else socle + recul
         if abs(voulu - offset) < 0.5:
             break  # l'écart et le côté s'accordent : c'est fini
         if voulu in vus:
             # Aller-retour : les deux emplacements se valent, le côté bascule à
             # chaque essai. On tranche pour le PLUS ÉCARTÉ — un texte un peu
             # loin du tracé reste lisible, un texte barré par le tracé, non.
-            offset = socle + style.ellipse_label_font_size
+            offset = socle + recul
             t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone, cote)
             break
         vus.add(voulu)
         offset = voulu
         t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone, cote)
         haut = _cote_haut(ellipse, offset, t)
+
+    # ── Cohérence FINALE entre l'écart et le côté ────────────────────────────
+    # Le point fixe peut sortir sur une bascule : la garde anti-oscillation
+    # tranche pour le plus écarté, puis le `t` retenu se trouve finalement AU
+    # DESSUS de l'ovale — le texte porte alors un recul qui ne se justifie plus
+    # et paraît trop loin (« La familia », « Gros spectacle », 2026-09-01).
+    # L'écart est donc REPOSÉ sur le côté réellement obtenu ; `t` ne bouge pas,
+    # ce qui évite de relancer une oscillation.
+    haut = _cote_haut(ellipse, offset, t)
+    offset = socle if haut else socle + recul
     return LabelRing(text=text, offset=offset, t=t, sweep=sweep), haut
 
 
@@ -336,15 +347,37 @@ def _rings_haut_bas(ellipse, textes, style, members, obstacles, zone) -> tuple[L
     second, comme deux titres voisins.
     """
     ecart = label_offset(style)
-    haut_texte, bas_texte = textes[0], textes[1]
-    ring_haut, _ = _pose_une_ligne(
-        ellipse, haut_texte, style, members, obstacles, zone, ecart, cote=1
-    )
+    ring_haut = _pose_de_ce_cote(ellipse, textes[0], style, members, obstacles, zone, ecart, 1)
     obstacles_bas = tuple(obstacles) + tuple(ring_obstacles(ellipse, (ring_haut,), style))
-    ring_bas, _ = _pose_une_ligne(
-        ellipse, bas_texte, style, members, obstacles_bas, zone, ecart, cote=-1
-    )
+    ring_bas = _pose_de_ce_cote(ellipse, textes[1], style, members, obstacles_bas, zone, ecart, -1)
     return (ring_haut, ring_bas)
+
+
+def _pose_de_ce_cote(ellipse, text, style, members, obstacles, zone, ecart, cote):
+    """Pose un texte du côté demandé — mais pas au prix de la lisibilité.
+
+    Le côté est une PRÉFÉRENCE, pas un dogme : imposé durement, il enfermait un
+    titre dans une moitié encombrée, jusqu'à le faire passer DANS un cercle
+    (mesuré : « 3ein / Risotto Gambas » à −14 px de dégagement, « Brûle » caché
+    par le cercle de Lucci', 2026-09-01). Si le meilleur emplacement du bon côté
+    frôle un obstacle de moins d'une demi-hauteur de texte, on replace SANS
+    contrainte : un titre lisible ailleurs vaut mieux qu'un titre illisible à sa
+    place idéale.
+    """
+    ring, _ = _pose_une_ligne(ellipse, text, style, members, obstacles, zone, ecart, cote=cote)
+    seuil = style.ellipse_label_font_size * style.label_min_clearance_ratio
+    if _degagement(ellipse, ring, style, obstacles) >= seuil:
+        return ring
+    libre, _ = _pose_une_ligne(ellipse, text, style, members, obstacles, zone, ecart, cote=0)
+    if _degagement(ellipse, libre, style, obstacles) > _degagement(ellipse, ring, style, obstacles):
+        return libre
+    return ring
+
+
+def _degagement(ellipse, ring, style: SvgStyle, obstacles) -> float:
+    """Dégagement de l'arc d'un titre déjà posé, vis-à-vis des obstacles."""
+    porteuse = ellipse.inflated(ring.offset)
+    return _clearance(porteuse, ring.t, text_span(porteuse, ring.text, style), obstacles)
 
 
 def ring_obstacles(ellipse, rings, style: SvgStyle) -> list[tuple[float, float, float]]:

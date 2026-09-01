@@ -23,7 +23,7 @@ FILENAME = "bubble_style.json"
 
 # Champs non réglables : mécanique de rendu, pas goût. `coord_precision` fixe la
 # byte-identité ; les noms PostScript des polices doivent matcher le template.
-_LOCKED = {"coord_precision", "overlap_iterations", "main_component_scale"}
+_LOCKED = {"coord_precision"}
 
 _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     (
@@ -138,11 +138,15 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "part vers les bords de l'image, mais plus il penche.",
             ),
             (
-                "ellipse_label_bounds_slack",
-                "De combien un titre peut sortir de la zone, en px. À 0 il reste dedans coûte "
-                "que coûte, quitte à se rabattre vers le milieu du dessin sur un très grand "
-                "ovale ; l'augmenter le laisse ressortir vers les bords.",
+                "label_weight_clearance",
+                "Poids de la PLACE LIBRE autour d'un titre dans le choix de son emplacement.",
             ),
+            (
+                "label_weight_member",
+                "Poids de sa distance à ses PROPRES cercles : c'est ce qui le rend rattachable "
+                "à son ovale. Le baisser laisse les titres partir au loin.",
+            ),
+            ("label_weight_zone", "Poids de ce qui sortirait de la zone."),
             (
                 "ellipse_label_max_arc",
                 "Part maximale du tour d'ovale qu'un titre a le droit d'occuper, de 0 à 1. "
@@ -157,20 +161,27 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ),
     ),
     (
-        "Disposition — à ne toucher qu'en connaissance de cause.\n"
-        "Ces valeurs pilotent le placement automatique ; les changer peut faire\n"
-        "déborder la planche (le débordement est signalé à l'export).",
+        "Placement — les forces qui posent les cercles.\n"
+        "Le dessin est relaxé sous contraintes : les cercles s'écartent, les\n"
+        "membres d'un groupe se rapprochent, un étranger est chassé de l'ovale\n"
+        "d'un groupe, et le nuage grandit jusqu'à occuper la zone. Monter un\n"
+        "poids accélère la mise en place mais fait osciller le dessin.",
         (
-            ("overlap_gap", "Espace minimal entre deux cercles, en px."),
-            ("canvas_scale", "Échelle du layout avant resserrage dans la zone."),
-            ("hub_clearance", "Dégagement autour du plus gros cercle, en multiple des rayons."),
-            ("radial_fill", "Remplissage de la zone par les satellites, de 0 à 1."),
+            ("gap", "Espace minimal entre deux cercles, en px."),
+            ("force_cohesion", "Force de rapprochement des membres d'un même groupe, de 0 à 1."),
             (
-                "radial_fill_islands",
-                "Idem, quand des groupes isolés doivent tenir dans les coins.",
+                "force_exclusion",
+                "Force qui chasse un cercle ÉTRANGER de l'ovale d'un groupe, de 0 à 1. "
+                "Sans elle, un artiste qui passe par là se lit comme un membre.",
             ),
-            ("component_gap", "Écart entre le groupe principal et les groupes isolés, en px."),
-            ("island_corner_pad", "Écart entre un groupe isolé et le coin de la zone, en px."),
+            (
+                "force_repulsion",
+                "Force de répartition entre cercles, en px par itération. Sans elle le nuage "
+                "garde la forme de son amorce et se retrouve de guingois.",
+            ),
+            ("repulsion_range", "Portée de cette répartition, en px : au-delà, ils s'ignorent."),
+            ("force_expansion", "Vitesse à laquelle le nuage grandit vers les bords, de 0 à 1."),
+            ("seed_scale", "Échelle de l'amorce (le layout de départ), en px."),
             (
                 "draw_edges",
                 "Tracer les traits artiste↔artiste (true/false) — les bulles suffisent.",

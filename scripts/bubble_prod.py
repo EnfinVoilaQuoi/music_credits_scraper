@@ -40,6 +40,86 @@ def report_outputs(result) -> None:
         print(f"   ⚠️ {len(result.missing_images)} sans photo (cercle plein) : {names}")
 
 
+def audit(artist, tracks) -> int:
+    """Passe tous les albums au crible des invariants et rapporte les entorses.
+
+    Ce qui était mesuré à la main à chaque itération de calibrage devient
+    reproductible : un réglage de forces qui casse une planche se voit ici, sur
+    la vraie discographie, sans avoir à ouvrir un SVG.
+    """
+    import math
+
+    from src.dataviz.bubble_layout import encloses
+    from src.dataviz.collab_graph import FEAT_ROLES
+
+    fautes = 0
+    occupations = []
+    print(f"🔍 Audit des planches de {artist.name}\n")
+    for album in list_albums(tracks):
+        album_tracks = select_album_tracks(tracks, album)
+        for label, roles in (("prod", STRICT_PRODUCER_ROLES), ("feat", FEAT_ROLES)):
+            try:
+                generate = generate_bubble_prod if label == "prod" else None
+                spec = _spec_pour_audit(album_tracks, album, artist.name, roles, generate)
+            except ValueError:
+                continue  # album sans crédit de ce type : rien à auditer
+            if spec is None or len(spec.nodes) < 2:
+                continue
+            ennuis = []
+            nodes = list(spec.nodes)
+            for i, a in enumerate(nodes):
+                for b in nodes[i + 1 :]:
+                    if math.hypot(a.x - b.x, a.y - b.y) < (a.size + b.size) / 2.0 - 1e-6:
+                        ennuis.append(f"{a.key} chevauche {b.key}")
+            for groupe in spec.groups:
+                membres = set(groupe.member_keys)
+                for n in nodes:
+                    if n.key not in membres and encloses(groupe.ellipse, n.x, n.y):
+                        ennuis.append(f"{n.key} capturé par l'ovale {groupe.member_keys}")
+            xs = [n.x - n.size / 2 for n in nodes] + [n.x + n.size / 2 for n in nodes]
+            ys = [n.y - n.size / 2 for n in nodes] + [n.y + n.size / 2 for n in nodes]
+            occupation = (max(xs) - min(xs)) / spec.width * (max(ys) - min(ys)) / spec.height
+            occupations.append(occupation)
+            if ennuis:
+                fautes += len(ennuis)
+                print(f"  ❌ {label} · {album}")
+                for ennui in ennuis:
+                    print(f"       {ennui}")
+            else:
+                print(f"  ✅ {label} · {album[:44]:44} occupation {occupation * 100:3.0f}%")
+
+    if occupations:
+        mediane = sorted(occupations)[len(occupations) // 2]
+        print(f"\n{len(occupations)} planche(s) · occupation médiane {mediane * 100:.0f}%")
+    print(f"{fautes} entorse(s) aux invariants")
+    return 1 if fautes else 0
+
+
+def _spec_pour_audit(album_tracks, album, artist_name, roles, generate):
+    """Le spec d'une planche, sans écrire de fichier."""
+    from src.dataviz.bubble_prod import build_bubble_spec, extract_instruments
+    from src.dataviz.collab_graph import (
+        INSTRUMENT_ROLES,
+        aggregate_collab_groups,
+        build_collab_graph,
+        extract_track_groups,
+    )
+
+    style = load_style()
+    effective = roles + INSTRUMENT_ROLES if style.include_instruments else roles
+    groups = extract_track_groups(album_tracks, effective)
+    if not groups:
+        return None
+    subs = extract_instruments(album_tracks, INSTRUMENT_ROLES) if style.include_instruments else {}
+    return build_bubble_spec(
+        build_collab_graph(groups),
+        aggregate_collab_groups(groups),
+        style,
+        sub_labels=subs,
+        solo_badge=generate is not None,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Génère le SVG Bubble Prod d'un album.")
     parser.add_argument("artist", help="Nom exact de l'artiste (tel qu'en base)")
@@ -51,6 +131,9 @@ def main() -> int:
         "--broad-roles", action="store_true", help="Filtre large (toute la famille production)"
     )
     parser.add_argument("--debug", action="store_true", help="Aperçu matplotlib du spec")
+    parser.add_argument(
+        "--audit", action="store_true", help="Vérifie les invariants sur tous les albums"
+    )
     args = parser.parse_args()
 
     dm = DataManager()
@@ -62,6 +145,9 @@ def main() -> int:
     if not tracks:
         print(f"❌ Aucun morceau en base pour {artist.name!r}")
         return 1
+
+    if args.audit:
+        return audit(artist, tracks)
 
     if args.list_albums:
         albums = list_albums(tracks)

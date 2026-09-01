@@ -258,8 +258,18 @@ def test_pas_de_debordement_sur_un_album_normal():
     assert _spec(_album_tracks()).overflow is None
 
 
-def test_ilots_dans_les_coins():
-    # Un hub (A avec B,C,D) + deux îlots (duo E-F, solo G) → îlots écartés du hub.
+def test_ilots_ni_avales_ni_collis():
+    # Un groupe isolé reste lisible COMME groupe isolé : ses cercles ne touchent
+    # personne, et aucune ellipse du noyau ne les enveloppe — sinon ils
+    # passeraient pour des membres.
+    #
+    # (Cette vérification remplace un test qui affirmait « les îlots sont dans
+    # les coins ». C'était le MOYEN d'alors, pas la fin : le placement ne cale
+    # plus rien aux coins, mais l'exigence, elle, tient toujours.)
+    import math
+
+    from src.dataviz.bubble_layout import encloses
+
     tracks = [
         _track(1, "H1", "Al", _prod("A"), _prod("B")),
         _track(2, "H2", "Al", _prod("A"), _prod("C")),
@@ -268,38 +278,15 @@ def test_ilots_dans_les_coins():
         _track(5, "Solo", "Al", _prod("G")),
     ]
     spec = _spec(tracks)
-    pos = {n.key: (n.x, n.y) for n in spec.nodes}
-    size = {n.key: n.size for n in spec.nodes}
-
-    # Les îlots vivent en PÉRIPHÉRIE : chaque îlot a AU MOINS un cercle à
-    # portée de la marge (celui par lequel il est calé au coin — sur un duo en
-    # diagonale, le second membre est forcément plus en retrait).
-    # Comparer leur distance au hub ne marche plus : depuis l'étalement, les
-    # satellites du hub vont eux aussi chercher le bord de la zone.
-    for ilot in (("e", "f"), ("g",)):
-        bords = []
-        for key in ilot:
-            x, y = pos[key]
-            bords.append(min(x, y, spec.width - x, spec.height - y) - size[key] / 2.0)
-        # Ce qui est calé sur le coin, c'est l'anneau ENTIER de l'îlot : son
-        # ellipse plus la légende curviligne posée dessus. Le centre du cercle
-        # est donc en retrait d'autant.
-        st = spec.style
-        anneau = (
-            st.ellipse_margin
-            + st.ellipse_stroke_width / 2.0
-            + st.ellipse_label_gap
-            + st.ellipse_label_font_size
-        )
-        assert min(bords) <= st.margin + st.island_corner_pad + anneau + 2.0
-
-    # Et ils ne viennent JAMAIS toucher un cercle du hub.
-    for island in ("e", "f", "g"):
-        for member in ("a", "b", "c", "d"):
-            dist = (
-                (pos[island][0] - pos[member][0]) ** 2 + (pos[island][1] - pos[member][1]) ** 2
-            ) ** 0.5
-            assert dist > (size[island] + size[member]) / 2.0
+    pos = {n.key: n for n in spec.nodes}
+    for ilot in ("e", "f", "g"):
+        for autre in ("a", "b", "c", "d"):
+            distance = math.hypot(pos[ilot].x - pos[autre].x, pos[ilot].y - pos[autre].y)
+            assert distance > (pos[ilot].size + pos[autre].size) / 2.0
+        for groupe in spec.groups:
+            if ilot in set(groupe.member_keys):
+                continue
+            assert not encloses(groupe.ellipse, pos[ilot].x, pos[ilot].y)
 
 
 def test_spec_insensible_a_l_ordre_d_insertion_des_noeuds():

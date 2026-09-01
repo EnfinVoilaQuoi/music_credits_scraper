@@ -17,6 +17,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from src.dataviz.bubble_feat import generate_bubble_feat, generate_feat_preview_grid
+from src.dataviz.bubble_overrides_io import get_override, load_overrides, save_override
 from src.dataviz.bubble_prod import (
     PREVIEW_SEEDS,
     generate_bubble_prod,
@@ -107,6 +108,15 @@ class ExportStudioWindow:
             seed_row, variable=self.seed_var, values=[str(s) for s in PREVIEW_SEEDS], width=90
         )
         self.seed_menu.pack(side="left")
+        # Mémorisation PAR ALBUM de la variante affichée (bubble_overrides.json) :
+        # le choix survit à la fermeture et est repris par les CLI et le harnais.
+        self.save_seed_button = ctk.CTkButton(
+            seed_row, text="💾 Mémoriser", width=110, command=self._save_seed_override
+        )
+        self.save_seed_button.pack(side="left", padx=(6, 0))
+        # Changer d'album recale le sélecteur : variante mémorisée si elle
+        # existe, défaut sinon (le sélecteur DOIT refléter ce qui sera généré).
+        self.album_var.trace_add("write", lambda *_args: self._preset_seed_from_override())
         # Packés côté droit : le premier posé est le plus à droite → ordre
         # visuel [Prod][Feat], aligné sur la grille des générateurs.
         self.preview_feat_button = ctk.CTkButton(
@@ -192,6 +202,57 @@ class ExportStudioWindow:
             self.album_var.set(albums[0])
         self.status_label.configure(text=f"{len(albums)} album(s) — {artist.name}")
 
+    def _preset_seed_from_override(self):
+        """Recale le sélecteur de variante sur l'album affiché.
+
+        Variante mémorisée si elle existe (prod prioritaire, sinon feat),
+        défaut sinon — sans quoi le seed d'un album resterait silencieusement
+        appliqué au suivant. Un seed mémorisé via CLI hors grille d'aperçus est
+        ajouté aux valeurs proposées.
+        """
+        artist = getattr(self.app, "current_artist", None)
+        album = self.album_var.get().strip()
+        if artist is None or not album:
+            return
+        overrides = load_overrides()
+        for kind in ("prod", "feat"):
+            seed = get_override(overrides, kind, artist.name, album).get("seed")
+            if isinstance(seed, int):
+                values = [str(s) for s in PREVIEW_SEEDS]
+                if str(seed) not in values:
+                    values.append(str(seed))
+                self.seed_menu.configure(values=values)
+                self.seed_var.set(str(seed))
+                return
+        self.seed_menu.configure(values=[str(s) for s in PREVIEW_SEEDS])
+        self.seed_var.set(str(PREVIEW_SEEDS[0]))
+
+    def _save_seed_override(self):
+        """Mémorise la variante affichée pour l'album courant (prod ET feat).
+
+        Le sélecteur est COMMUN aux deux générateurs : la mémorisation l'est
+        aussi. Un choix différent par générateur reste possible via les CLI
+        (`--seed N --save-seed`).
+        """
+        artist = getattr(self.app, "current_artist", None)
+        album = self.album_var.get().strip()
+        if artist is None or not album:
+            messagebox.showinfo("Export studio", "Chargez un artiste et choisissez un album.")
+            return
+        try:
+            seed = int(self.seed_var.get())
+        except ValueError:
+            seed = PREVIEW_SEEDS[0]
+        try:
+            for kind in ("prod", "feat"):
+                save_override(kind, artist.name, album, seed=seed)
+        except OSError as exc:
+            messagebox.showerror("Export studio", f"Mémorisation impossible : {exc}")
+            return
+        self.status_label.configure(
+            text=f"💾 Variante {seed} mémorisée pour « {album} » (prod + feat)"
+        )
+
     def _snapshot_inputs(self):
         """Snapshot des entrées SUR LE THREAD TK (jamais depuis le worker).
 
@@ -218,6 +279,7 @@ class ExportStudioWindow:
                 self.generator_buttons[label].configure(state=state)
         self.preview_prod_button.configure(state=state)
         self.preview_feat_button.configure(state=state)
+        self.save_seed_button.configure(state=state)
         self.status_label.configure(text=message)
 
     def _start_bubble(self, kind: str):
@@ -235,7 +297,12 @@ class ExportStudioWindow:
             # FIGÉ en argument par défaut de la lambda (jamais capturé tel quel).
             try:
                 result = generate(
-                    tracks, album, artist_name=artist_name, seed=seed, style=load_bubble_style()
+                    tracks,
+                    album,
+                    artist_name=artist_name,
+                    seed=seed,
+                    style=load_bubble_style(),
+                    overrides=load_overrides(),
                 )
             except ValueError as exc:  # album sans crédit correspondant, etc.
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))
@@ -327,7 +394,11 @@ class ExportStudioWindow:
         def worker():
             try:
                 html_path = generate_grid(
-                    tracks, album, artist_name=artist_name, style=load_bubble_style()
+                    tracks,
+                    album,
+                    artist_name=artist_name,
+                    style=load_bubble_style(),
+                    overrides=load_overrides(),
                 )
             except ValueError as exc:
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))

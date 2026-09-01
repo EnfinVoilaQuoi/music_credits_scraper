@@ -19,9 +19,9 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from src.dataviz.bubble_feat import generate_bubble_feat
+from src.dataviz.bubble_overrides_io import load_overrides, save_override
 from src.dataviz.bubble_prod import list_albums, select_album_tracks
 from src.dataviz.bubble_style_io import load_style
-from src.dataviz.collab_graph import DEFAULT_SEED
 from src.dataviz.debug_preview import debug_preview
 from src.utils.data_manager import DataManager
 
@@ -44,7 +44,17 @@ def main() -> int:
     parser.add_argument("album", nargs="?", default=None, help="Album (ou --list-albums)")
     parser.add_argument("--list-albums", action="store_true", help="Liste les albums et quitte")
     parser.add_argument("--out", default=None, help="Chemin du SVG (défaut : exports/…)")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Seed du layout")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed du layout (défaut : variante mémorisée pour l'album, sinon 42)",
+    )
+    parser.add_argument(
+        "--save-seed",
+        action="store_true",
+        help="Mémorise le --seed passé pour cet album (data/bubble_overrides.json)",
+    )
     parser.add_argument("--debug", action="store_true", help="Aperçu matplotlib du spec")
     args = parser.parse_args()
 
@@ -72,12 +82,20 @@ def main() -> int:
 
     album_total = len(select_album_tracks(tracks, args.album))
 
+    if args.save_seed:
+        if args.seed is None:
+            print("❌ --save-seed exige un --seed explicite.")
+            return 1
+        path = save_override("feat", artist.name, args.album, seed=args.seed)
+        print(f"💾 Variante {args.seed} mémorisée pour cet album : {path}")
+
     try:
         result = generate_bubble_feat(
             tracks,
             args.album,
             artist_name=artist.name,
             seed=args.seed,
+            overrides=load_overrides(),
             style=load_style(),
             output_path=args.out,
         )

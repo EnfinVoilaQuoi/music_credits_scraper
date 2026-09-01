@@ -20,6 +20,7 @@ import networkx as nx
 
 from src.dataviz import bubble_labels, bubble_layout
 from src.dataviz.bubble_json import build_payload, write_bubble_json
+from src.dataviz.bubble_overrides_io import apply_style_override, get_override, resolve_seed
 from src.dataviz.bubble_svg import (
     BubbleSpec,
     EdgeSpec,
@@ -388,7 +389,8 @@ def generate_bubble(
     kind: str = "prod",
     solo_badge: bool = True,
     style: SvgStyle | None = None,
-    seed: int = DEFAULT_SEED,
+    seed: int | None = None,
+    overrides: dict | None = None,
     output_path=None,
 ) -> BubbleResult:
     """Cœur commun Bubble Prod / Bubble Feat : le réseau des crédits `roles`.
@@ -398,8 +400,15 @@ def generate_bubble(
     sert aux messages d'erreur (« producteur », « featuring »), `filename` au
     chemin de sortie par défaut, `kind` distingue prod/feat dans le payload.
     Lève `ValueError` si l'album n'a aucun morceau ou aucun crédit dans `roles`.
+
+    `overrides` = les entrées PAR ALBUM (`bubble_overrides_io.load_overrides`),
+    passées en donnée pour rester testable sans disque : un `seed` explicite
+    gagne toujours, sinon la variante mémorisée pour CETTE planche, sinon
+    `DEFAULT_SEED` ; le bloc `style` de la planche surcharge le style global.
     """
-    style = style or SvgStyle()
+    override = get_override(overrides, kind, artist_name, album)
+    seed = resolve_seed(override, seed, DEFAULT_SEED)
+    style = apply_style_override(style or SvgStyle(), override)
     album_tracks = select_album_tracks(tracks, album)
     if not album_tracks:
         raise ValueError(f"Aucun morceau trouvé pour l'album « {album} »")
@@ -451,7 +460,8 @@ def generate_bubble_prod(
     artist_name: str = "",
     roles: tuple[str, ...] = STRICT_PRODUCER_ROLES,
     style: SvgStyle | None = None,
-    seed: int = DEFAULT_SEED,
+    seed: int | None = None,
+    overrides: dict | None = None,
     output_path=None,
 ) -> BubbleResult:
     """Génère le SVG Bubble Prod pour `album` et renvoie un `BubbleResult`.
@@ -469,6 +479,7 @@ def generate_bubble_prod(
         kind="prod",
         style=style,
         seed=seed,
+        overrides=overrides,
         output_path=output_path,
     )
 
@@ -499,6 +510,7 @@ def generate_grid(
     subdir: str,
     style: SvgStyle | None = None,
     seeds: tuple[int, ...] = PREVIEW_SEEDS,
+    overrides: dict | None = None,
     output_dir=None,
 ) -> Path:
     """Cœur commun des grilles d'aperçus : variantes de `seeds` + HTML 2×2.
@@ -506,7 +518,9 @@ def generate_grid(
     Écrit `<svg_prefix>_seed<N>.svg` par variante et `apercus.html` (SVG
     embarqués par référence relative) dans `<album>/<subdir>/`. Renvoie le
     chemin du HTML — à ouvrir dans le navigateur pour choisir la variante qui
-    remplit le mieux.
+    remplit le mieux. Les `overrides` ne jouent ici que sur le STYLE (chaque
+    aperçu impose son seed) : la grille montre les variantes telles qu'elles
+    sortiraient réellement.
     """
     if output_dir is None:
         output_dir = default_output_path(artist_name, album).parent / subdir
@@ -525,6 +539,7 @@ def generate_grid(
             filename=svg_name,
             style=style,
             seed=seed,
+            overrides=overrides,
             output_path=output_dir / svg_name,
         )
         suffix = " (défaut)" if seed == DEFAULT_SEED else ""
@@ -551,6 +566,7 @@ def generate_preview_grid(
     roles: tuple[str, ...] = STRICT_PRODUCER_ROLES,
     style: SvgStyle | None = None,
     seeds: tuple[int, ...] = PREVIEW_SEEDS,
+    overrides: dict | None = None,
     output_dir=None,
 ) -> Path:
     """Grille d'aperçus Bubble Prod (`bubble_prod_seed<N>.svg` dans `apercus/`)."""
@@ -565,5 +581,6 @@ def generate_preview_grid(
         subdir="apercus",
         style=style,
         seeds=seeds,
+        overrides=overrides,
         output_dir=output_dir,
     )

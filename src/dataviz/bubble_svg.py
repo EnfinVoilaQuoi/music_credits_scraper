@@ -77,11 +77,13 @@ class SvgStyle:
     ellipse_label_max_angle: float = 28.0
     # Instrumentistes : crédits « Piano », « Guitar »… ajoutés au réseau, avec
     # l'instrument sous le nom de l'artiste, en plus petit.
-    # De combien un titre a le droit de sortir de la zone pour trouver une belle
-    # place. À 0 il reste dedans coûte que coûte — quitte, sur un très grand
-    # ovale dont le sommet est hors cadre, à se rabattre vers le milieu du
-    # dessin. L'augmenter le laisse ressortir vers les bords.
-    ellipse_label_bounds_slack: float = 0.0
+    # Poids du score de placement des titres (cf. `bubble_labels`). Trois termes
+    # en pixels, donc directement comparables : la place autour du texte, sa
+    # distance à ses propres cercles — c'est ce qui le rend rattachable à son
+    # ovale — et ce qui sortirait de la zone.
+    label_weight_clearance: float = 2.2
+    label_weight_member: float = 1.6
+    label_weight_zone: float = 3.0
     include_instruments: bool = True
     sub_label_ratio: float = 0.62  # taille du sous-titre, en fraction du nom
     # Part maximale du tour d'ellipse qu'un titre a le droit d'occuper : au-delà
@@ -91,20 +93,19 @@ class SvgStyle:
     # Ellipses (une par combinaison de producteurs).
     min_axis_ratio: float = 0.35  # borne l'aplatissement (duo / quasi-colinéaire)
     ellipse_margin: float = 10.0  # marge ajoutée au rayon des cercles
-    # Anti-chevauchement des cercles (passe post-layout, déterministe).
-    overlap_gap: float = 14.0  # espace minimal entre deux cercles (aère le centre)
-    overlap_iterations: int = 400
-    # Canevas.
-    canvas_scale: float = 190.0  # layout spring (~[-1,1]) → px
-    hub_clearance: float = 0.8  # facteur du plancher de rayon feuille↔hub (éloigne du hub)
-    radial_fill: float = 0.85  # remplissage : les feuilles s'étirent vers le bord de la zone
-    radial_fill_islands: float = 0.62  # idem, quand des îlots doivent tenir dans les coins
-    main_component_scale: float = 1.0  # zoom de la composante principale (hub)
-    component_gap: float = 14.0  # écart initial hub↔îlots (avant calage aux coins)
+    # ── Placement : les poids des forces de la relaxation ────────────────────
+    # (cf. `bubble_layout`). Ils remplacent une pile de passes correctives ; les
+    # monter accélère la mise en place mais fait osciller le nuage.
+    gap: float = 14.0  # espace minimal entre deux cercles, quels qu'ils soient
+    force_cohesion: float = 0.06  # les membres d'un groupe se rapprochent
+    force_exclusion: float = 0.5  # un étranger est chassé de l'ellipse d'un groupe
+    force_repulsion: float = 2.5  # les cercles se répartissent (px par itération)
+    repulsion_range: float = 300.0  # au-delà, deux cercles s'ignorent (px)
+    force_expansion: float = 0.08  # le nuage grandit jusqu'à occuper la zone
+    seed_scale: float = 190.0  # échelle de l'amorce (spring layout ~[-1,1]) → px
     # Cadre : il matérialise EXACTEMENT la zone dans l'aperçu — ce qui déborde
     # se voit d'un coup d'œil (rien n'est mis à l'échelle pour rentrer).
     draw_frame: bool = True
-    island_corner_pad: float = 0.0  # écart entre un îlot et le coin de la zone
     frame_stroke: str = "#C9C9C9"
     frame_stroke_width: float = 1.0
     frame_fill: str = "none"

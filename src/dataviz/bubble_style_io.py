@@ -1,14 +1,19 @@
-"""Réglages utilisateur des générateurs « Bubble » (Prod et Feat), persistés.
+"""Réglages utilisateur du générateur « Bubble Prod », persistés.
 
 Même contrat que `structure_style_io` (voir `style_io` pour la mécanique) : le
-`bubble_<kind>.json` d'un album est **régénéré** à chaque export, alors que ce
+`bubble_prod.json` d'un album est **régénéré** à chaque export, alors que ce
 fichier-ci, `data/bubble_style.json`, persiste. Il est créé annoté au premier
 export, tolère les lignes entièrement commentées, accepte un contenu partiel, et
 ignore les clés inconnues avec un avertissement.
 
-**Un seul fichier pour Prod et Feat** : les deux générateurs partagent le moteur
-et la même zone de composition — deux réglages séparés donneraient deux planches
-qui ne se ressemblent plus alors qu'elles se suivent dans le même post.
+Ces valeurs valent pour TOUTES les planches. Un réglage propre à UN album vit
+dans `data/bubble_overrides.json` (`bubble_overrides_io`) — ne pas déplacer un
+défaut global pour arranger un album.
+
+⚠️ Ce fichier est écrit avec TOUTES les clés dès sa création : tant qu'il
+existe, changer une valeur par défaut dans `SvgStyle` n'a AUCUN effet. Le
+SUPPRIMER après toute modification d'un défaut (piège vécu deux fois, JOURNAL
+2026-09-01).
 """
 
 from pathlib import Path
@@ -212,12 +217,12 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
 )
 
 _INTRO = [
-    "// Réglages des générateurs « Bubble Prod » et « Bubble Feat ».",
+    "// Réglages du générateur « Bubble Prod ».",
     "//",
     "// Édite une valeur, relance l'export : elle sera reprise.",
-    "// NE MODIFIE PAS le bubble_prod.json / bubble_feat.json d'un album — ils",
-    "// sont régénérés à chaque export, ta valeur y serait écrasée. C'est CE",
-    "// fichier qui persiste, et il vaut pour les DEUX générateurs.",
+    "// NE MODIFIE PAS le bubble_prod.json d'un album — il est régénéré à",
+    "// chaque export, ta valeur y serait écrasée. C'est CE fichier qui persiste.",
+    "// Pour un réglage propre à UN album : data/bubble_overrides.json.",
     "//",
     "// Les lignes // sont des commentaires (JSON n'en admet pas nativement,",
     "// ils sont retirés à la lecture). Une clé inconnue est ignorée avec un",

@@ -16,7 +16,6 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from src.dataviz.bubble_feat import generate_bubble_feat, generate_feat_preview_grid
 from src.dataviz.bubble_overrides_io import get_override, load_overrides, save_override
 from src.dataviz.bubble_prod import (
     PREVIEW_SEEDS,
@@ -34,9 +33,10 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Générateurs de l'onglet « Analyse de Projet » : (libellé, actif).
+# « Bubble Feat » a été retiré le 2026-09-01 (rendu non convaincant pour les
+# featurings — un visuel différent est prévu).
 _PROJECT_GENERATORS = [
     ("Bubble Prod", True),
-    ("Bubble Feat", True),
     ("Structure", True),
     ("Répartition BPM", False),
     ("Clés & modes", False),
@@ -44,13 +44,6 @@ _PROJECT_GENERATORS = [
     ("Certifications", False),
     ("Streams", False),
 ]
-
-# Configuration par générateur de bulles : (fonction SVG, fonction aperçus,
-# libellé du compteur dans le statut). Même moteur, autre filtre de rôles.
-_BUBBLE_KINDS = {
-    "prod": (generate_bubble_prod, generate_preview_grid, "producteur(s)", "Bubble Prod"),
-    "feat": (generate_bubble_feat, generate_feat_preview_grid, "featuring(s)", "Bubble Feat"),
-}
 
 
 class ExportStudioWindow:
@@ -117,20 +110,11 @@ class ExportStudioWindow:
         # Changer d'album recale le sélecteur : variante mémorisée si elle
         # existe, défaut sinon (le sélecteur DOIT refléter ce qui sera généré).
         self.album_var.trace_add("write", lambda *_args: self._preset_seed_from_override())
-        # Packés côté droit : le premier posé est le plus à droite → ordre
-        # visuel [Prod][Feat], aligné sur la grille des générateurs.
-        self.preview_feat_button = ctk.CTkButton(
-            seed_row,
-            text="Aperçus Feat (4)…",
-            width=140,
-            command=lambda: self._start_preview_grid("feat"),
-        )
-        self.preview_feat_button.pack(side="right", padx=(6, 0))
         self.preview_prod_button = ctk.CTkButton(
             seed_row,
             text="Aperçus Prod (4)…",
             width=140,
-            command=lambda: self._start_preview_grid("prod"),
+            command=self._start_preview_grid,
         )
         self.preview_prod_button.pack(side="right")
 
@@ -140,8 +124,7 @@ class ExportStudioWindow:
         grid.grid_columnconfigure(1, weight=1)
 
         commands = {
-            "Bubble Prod": lambda: self._start_bubble("prod"),
-            "Bubble Feat": lambda: self._start_bubble("feat"),
+            "Bubble Prod": self._start_bubble,
             "Structure": self._start_structure,
         }
         self.generator_buttons: dict[str, ctk.CTkButton] = {}
@@ -205,35 +188,27 @@ class ExportStudioWindow:
     def _preset_seed_from_override(self):
         """Recale le sélecteur de variante sur l'album affiché.
 
-        Variante mémorisée si elle existe (prod prioritaire, sinon feat),
-        défaut sinon — sans quoi le seed d'un album resterait silencieusement
-        appliqué au suivant. Un seed mémorisé via CLI hors grille d'aperçus est
-        ajouté aux valeurs proposées.
+        Variante mémorisée si elle existe, défaut sinon — sans quoi le seed d'un
+        album resterait silencieusement appliqué au suivant. Un seed mémorisé
+        via CLI hors grille d'aperçus est ajouté aux valeurs proposées.
         """
         artist = getattr(self.app, "current_artist", None)
         album = self.album_var.get().strip()
         if artist is None or not album:
             return
-        overrides = load_overrides()
-        for kind in ("prod", "feat"):
-            seed = get_override(overrides, kind, artist.name, album).get("seed")
-            if isinstance(seed, int):
-                values = [str(s) for s in PREVIEW_SEEDS]
-                if str(seed) not in values:
-                    values.append(str(seed))
-                self.seed_menu.configure(values=values)
-                self.seed_var.set(str(seed))
-                return
-        self.seed_menu.configure(values=[str(s) for s in PREVIEW_SEEDS])
+        values = [str(s) for s in PREVIEW_SEEDS]
+        seed = get_override(load_overrides(), "prod", artist.name, album).get("seed")
+        if isinstance(seed, int):
+            if str(seed) not in values:
+                values.append(str(seed))
+            self.seed_menu.configure(values=values)
+            self.seed_var.set(str(seed))
+            return
+        self.seed_menu.configure(values=values)
         self.seed_var.set(str(PREVIEW_SEEDS[0]))
 
     def _save_seed_override(self):
-        """Mémorise la variante affichée pour l'album courant (prod ET feat).
-
-        Le sélecteur est COMMUN aux deux générateurs : la mémorisation l'est
-        aussi. Un choix différent par générateur reste possible via les CLI
-        (`--seed N --save-seed`).
-        """
+        """Mémorise la variante affichée pour l'album courant."""
         artist = getattr(self.app, "current_artist", None)
         album = self.album_var.get().strip()
         if artist is None or not album:
@@ -244,14 +219,11 @@ class ExportStudioWindow:
         except ValueError:
             seed = PREVIEW_SEEDS[0]
         try:
-            for kind in ("prod", "feat"):
-                save_override(kind, artist.name, album, seed=seed)
+            save_override("prod", artist.name, album, seed=seed)
         except OSError as exc:
             messagebox.showerror("Export studio", f"Mémorisation impossible : {exc}")
             return
-        self.status_label.configure(
-            text=f"💾 Variante {seed} mémorisée pour « {album} » (prod + feat)"
-        )
+        self.status_label.configure(text=f"💾 Variante {seed} mémorisée pour « {album} »")
 
     def _snapshot_inputs(self):
         """Snapshot des entrées SUR LE THREAD TK (jamais depuis le worker).
@@ -278,25 +250,23 @@ class ExportStudioWindow:
             if enabled:
                 self.generator_buttons[label].configure(state=state)
         self.preview_prod_button.configure(state=state)
-        self.preview_feat_button.configure(state=state)
         self.save_seed_button.configure(state=state)
         self.status_label.configure(text=message)
 
-    def _start_bubble(self, kind: str):
-        """Génère le SVG du générateur `kind` (« prod » ou « feat »)."""
+    def _start_bubble(self):
+        """Génère le SVG « Bubble Prod » de l'album courant."""
         snapshot = self._snapshot_inputs()
         if snapshot is None:
             return
         artist_name, album, tracks, seed = snapshot
         open_after = self.open_after_var.get()
-        generate, _, noun, title = _BUBBLE_KINDS[kind]
-        self._set_busy(True, f"Génération {title} ({album})…")
+        self._set_busy(True, f"Génération Bubble Prod ({album})…")
 
         def worker():
             # NB : `exc` est effacé à la sortie du bloc except → le message est
             # FIGÉ en argument par défaut de la lambda (jamais capturé tel quel).
             try:
-                result = generate(
+                result = generate_bubble_prod(
                     tracks,
                     album,
                     artist_name=artist_name,
@@ -307,14 +277,14 @@ class ExportStudioWindow:
             except ValueError as exc:  # album sans crédit correspondant, etc.
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))
             except Exception as exc:  # frontière thread→GUI : tout remonte en dialog
-                logger.error(f"{title} : erreur inattendue : {exc}")
+                logger.error(f"Bubble Prod : erreur inattendue : {exc}")
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))
             else:
-                self._safe_after(lambda: self._on_bubble_done(result, open_after, noun))
+                self._safe_after(lambda: self._on_bubble_done(result, open_after))
 
-        start_worker(worker, name=f"export_studio:bubble_{kind}")
+        start_worker(worker, name="export_studio:bubble_prod")
 
-    def _on_bubble_done(self, result, open_after: bool, noun: str):
+    def _on_bubble_done(self, result, open_after: bool):
         # Un débordement ne se voit pas sur la vignette du SVG, et une photo
         # manquante encore moins : les deux doivent être DITS, sinon la planche
         # part dans Illustrator avec un trou qu'on ne découvre qu'à la mise en page.
@@ -326,7 +296,7 @@ class ExportStudioWindow:
             warning += f" — ⚠️ {len(result.missing_images)} sans photo"
         self._set_busy(
             False,
-            f"✅ {result.path.name} + .json — {result.node_count} {noun}, "
+            f"✅ {result.path.name} + .json — {result.node_count} producteur(s), "
             f"{result.track_count} morceau(x){warning}",
         )
         if open_after:
@@ -383,17 +353,16 @@ class ExportStudioWindow:
             except OSError as exc:
                 logger.warning(f"Ouverture du SVG impossible : {exc}")
 
-    def _start_preview_grid(self, kind: str):
+    def _start_preview_grid(self):
         snapshot = self._snapshot_inputs()
         if snapshot is None:
             return
         artist_name, album, tracks, _ = snapshot
-        _, generate_grid, _, title = _BUBBLE_KINDS[kind]
-        self._set_busy(True, f"Génération des {len(PREVIEW_SEEDS)} aperçus {title} ({album})…")
+        self._set_busy(True, f"Génération des {len(PREVIEW_SEEDS)} aperçus ({album})…")
 
         def worker():
             try:
-                html_path = generate_grid(
+                html_path = generate_preview_grid(
                     tracks,
                     album,
                     artist_name=artist_name,
@@ -403,12 +372,12 @@ class ExportStudioWindow:
             except ValueError as exc:
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))
             except Exception as exc:  # frontière thread→GUI : tout remonte en dialog
-                logger.error(f"Aperçus {title} : erreur inattendue : {exc}")
+                logger.error(f"Aperçus Bubble Prod : erreur inattendue : {exc}")
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))
             else:
                 self._safe_after(lambda: self._on_preview_done(html_path))
 
-        start_worker(worker, name=f"export_studio:preview_grid_{kind}")
+        start_worker(worker, name="export_studio:preview_grid")
 
     def _on_preview_done(self, html_path):
         self._set_busy(False, f"✅ Aperçus : {html_path}")

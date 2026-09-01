@@ -1,8 +1,8 @@
 """Aperçu matplotlib d'un `BubbleSpec` (debug CLI uniquement, import lazy).
 
-Partagé par `scripts/bubble_prod.py` et `scripts/bubble_feat.py`. matplotlib
-n'est qu'en requirements-dev : l'import vit DANS la fonction pour que le module
-reste importable sans lui.
+Utilisé par `scripts/bubble_prod.py --debug`. matplotlib n'est qu'en
+requirements-dev : l'import vit DANS la fonction pour que le module reste
+importable sans lui.
 """
 
 

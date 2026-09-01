@@ -6,7 +6,7 @@ Chaîne : morceaux (`Track`) → filtre des crédits par rôle → dédup des no
 `spring_layout` à seed fixe.
 
 Le filtre est **paramétré par des rôles-chaînes** (pas par l'enum du modèle) pour
-rester découplé de la GUI et réutilisable tel quel par « Bubble Feat » plus tard.
+rester découplé de la GUI et réutilisable par un autre générateur.
 
 **Déterminisme** (SVG reproductible) : les morceaux sont triés avant insertion et
 les membres triés par clé → l'ordre d'insertion des nœuds est stable → le
@@ -33,9 +33,10 @@ BROAD_PRODUCER_ROLES: tuple[str, ...] = (
     "Additional Production",
 )
 
-# Filtre Bubble Feat : les artistes invités (même moteur, autre famille de rôles).
-# L'artiste principal n'est pas crédité « Featured Artist » sur ses morceaux →
-# il n'apparaît pas dans le graphe (sinon hub trivial présent partout).
+# Les artistes invités. Le générateur « Bubble Feat » qui s'en servait a été
+# RETIRÉ le 2026-09-01 (rendu non convaincant pour les featurings, un visuel
+# différent est prévu) — la constante reste, c'est une donnée de domaine d'une
+# ligne dont le futur générateur aura besoin.
 FEAT_ROLES: tuple[str, ...] = ("Featured Artist",)
 
 # Instruments joués : ces crédits désignent un MUSICIEN, pas un producteur, mais

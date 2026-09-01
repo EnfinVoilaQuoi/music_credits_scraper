@@ -28,7 +28,6 @@ if sys.platform == "win32":
 
 from src.config import DATA_DIR, EXPORTS_DIR
 from src.dataviz.bubble_audit import check_spec
-from src.dataviz.bubble_feat import generate_bubble_feat
 from src.dataviz.bubble_overrides_io import load_overrides
 from src.dataviz.bubble_prod import _safe_dirname, generate_bubble_prod
 from src.dataviz.bubble_style_io import load_style
@@ -37,22 +36,22 @@ from src.utils.data_manager import DataManager
 
 WITNESS_FILENAME = "bubble_witness.json"
 
-# Jeu de témoins par défaut : la planche signalée (mammouth en solo sur M.A.N),
-# une dense, une moyenne, deux autres artistes, et deux planches feat.
+# Jeu de témoins par défaut : deux albums DENSES (dont M.A.N, la planche
+# signalée — mammouth en solo), et trois PETITS albums, où le trop-condensé se
+# voit le mieux. Les deux régimes doivent rester représentés : un réglage qui
+# arrange les denses peut tasser les petits, et réciproquement.
 _DEFAULT_WITNESSES: tuple[dict, ...] = (
-    {"artist": "Josman", "album": "M.A.N (Black Roses & Lost Feelings)", "kind": "prod"},
-    {"artist": "Josman", "album": "SPLIT", "kind": "prod"},
-    {"artist": "Josman", "album": "Matrix", "kind": "prod"},
-    {"artist": "Django", "album": "ATHANOR", "kind": "prod"},
-    {"artist": "Isha", "album": "Labrador bleu", "kind": "prod"},
-    {"artist": "Josman", "album": "M.A.N (Black Roses & Lost Feelings)", "kind": "feat"},
-    {"artist": "Django", "album": "S/O le Flem", "kind": "feat"},
+    {"artist": "Josman", "album": "M.A.N (Black Roses & Lost Feelings)"},
+    {"artist": "Isha", "album": "Labrador bleu"},
+    {"artist": "Josman", "album": "SPLIT"},
+    {"artist": "Josman", "album": "Matrix"},
+    {"artist": "Django", "album": "ATHANOR"},
 )
 
 _WITNESS_HEADER = [
     "// Planches témoins du harnais bubble_compare : le MÊME jeu à chaque",
     "// comparaison, c'est ce qui rend les avant/après comparables entre eux.",
-    '// Une entrée = {"artist": ..., "album": ..., "kind": "prod"|"feat"}.',
+    '// Une entrée = {"artist": ..., "album": ...}.',
     "// Les lignes // sont des commentaires, retirés à la lecture.",
 ]
 
@@ -96,13 +95,13 @@ def load_witnesses() -> list[dict]:
     raw = json.loads(strip_comments(path.read_text(encoding="utf-8")))
     if not isinstance(raw, list):
         raise ValueError(f"{path} : liste JSON attendue")
-    return [w for w in raw if isinstance(w, dict) and {"artist", "album", "kind"} <= set(w)]
+    return [w for w in raw if isinstance(w, dict) and {"artist", "album"} <= set(w)]
 
 
 def slug(witness: dict) -> str:
     safe_artist = _safe_dirname(witness["artist"]).replace(" ", "_")
     safe_album = _safe_dirname(witness["album"]).replace(" ", "_")
-    return f"{witness['kind']}_{safe_artist}_{safe_album}"
+    return f"prod_{safe_artist}_{safe_album}"
 
 
 def generate_all(witnesses: list[dict]) -> list[dict]:
@@ -132,9 +131,8 @@ def generate_all(witnesses: list[dict]) -> list[dict]:
             entry["error"] = f"artiste introuvable ou sans morceaux : {name!r}"
             rows.append(entry)
             continue
-        generate = generate_bubble_prod if witness["kind"] == "prod" else generate_bubble_feat
         try:
-            result = generate(
+            result = generate_bubble_prod(
                 tracks,
                 witness["album"],
                 artist_name=name,
@@ -206,7 +204,7 @@ def build_html(rows: list[dict]) -> Path:
     blocks = []
     for entry in rows:
         witness = entry["witness"]
-        title = f"{witness['kind']} · {witness['artist']} — {witness['album']}"
+        title = f"{witness['artist']} — {witness['album']}"
         if entry["error"]:
             blocks.append(
                 f"<div class='wit'><h2>{title}</h2>"

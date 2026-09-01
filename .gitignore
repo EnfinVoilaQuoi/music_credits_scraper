@@ -101,7 +101,6 @@ scripts/*
 !scripts/run_brma.ps1
 # Dataviz / export studio
 !scripts/bubble_prod.py
-!scripts/bubble_feat.py
 !scripts/bubble_compare.py
 !scripts/structure.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la

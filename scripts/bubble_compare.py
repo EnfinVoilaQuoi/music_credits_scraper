@@ -215,6 +215,8 @@ def build_html(rows: list[dict]) -> Path:
             continue
         audit = entry["audit"]
         metrics = f"vide {audit.void:.0f} px ({audit.void_ratio:.1f}×)"
+        if audit.obesites:
+            metrics += f" — ovale max {audit.obesites[0][0]:.1f}×"
         if audit.entorses:
             metrics += f' — <span class="bad">{len(audit.entorses)} entorse(s)</span>'
         if audit.compromis:

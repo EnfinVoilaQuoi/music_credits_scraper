@@ -56,6 +56,7 @@ def audit(artist, tracks) -> int:
     fautes = 0
     arbitrages = 0
     occupations = []
+    pires_ovales = []  # (ratio, album, label, membres) — instrument du chantier 3b
     print(f"🔍 Audit des planches de {artist.name}\n")
     for album in list_albums(tracks):
         album_tracks = select_album_tracks(tracks, album)
@@ -70,14 +71,17 @@ def audit(artist, tracks) -> int:
             crible = check_spec(spec)
             vide, ratio = crible.void, crible.void_ratio
             occupations.append(ratio)
+            ovale = f" · ovale {crible.obesites[0][0]:4.1f}×" if crible.obesites else ""
+            if crible.obesites:
+                pires_ovales.append((crible.obesites[0][0], album, label, crible.obesites[0][1]))
             if crible.entorses:
                 fautes += len(crible.entorses)
                 print(f"  ❌ {label} · {album}")
             elif crible.compromis:
                 arbitrages += len(crible.compromis)
-                print(f"  ⚠️  {label} · {album[:40]:40} vide {vide:4.0f} px ({ratio:.1f}×)")
+                print(f"  ⚠️  {label} · {album[:40]:40} vide {vide:4.0f} px ({ratio:.1f}×){ovale}")
             else:
-                print(f"  ✅ {label} · {album[:40]:40} vide {vide:4.0f} px ({ratio:.1f}×)")
+                print(f"  ✅ {label} · {album[:40]:40} vide {vide:4.0f} px ({ratio:.1f}×){ovale}")
             for ligne in (*crible.entorses, *crible.compromis):
                 print(f"       {ligne}")
 
@@ -87,6 +91,15 @@ def audit(artist, tracks) -> int:
             f"\n{len(occupations)} planche(s) · plus grand vide rapporté à l'idéal : "
             f"médiane {mediane:.1f}×, pire {max(occupations):.1f}×"
         )
+    if pires_ovales:
+        # Le palmarès des ovales obèses : c'est LUI qui dira où porter le
+        # levier du chantier « ellipses trop grandes pour rien » — mesurer
+        # d'abord, régler ensuite.
+        ratios = sorted(r for r, *_ in pires_ovales)
+        mediane_ovale = ratios[len(ratios) // 2]
+        print(f"ovale le plus obèse par planche : médiane {mediane_ovale:.1f}×, top 5 :")
+        for r, album, label, membres in sorted(pires_ovales, reverse=True)[:5]:
+            print(f"  {r:5.1f}×  {label} · {album[:36]:36} {', '.join(membres)}")
     print(f"{fautes} entorse(s) à ce qui est garanti · {arbitrages} compromis assumé(s)")
     return 1 if fautes else 0
 

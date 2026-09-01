@@ -33,6 +33,12 @@ class SpecAudit:
     compromis: tuple[str, ...]
     void: float
     void_ratio: float
+    # « Obésité » d'un ovale = son aire / la somme des aires des disques de ses
+    # membres, du pire au moins pire (`(ratio, member_keys)`). Un ovale compact
+    # tourne autour de 2-3× ; il enfle quand ses membres s'étalent (l'ellipse
+    # englobante suit). MESURE seulement — c'est l'instrument du chantier
+    # « ellipses trop grandes pour rien », posé AVANT tout levier.
+    obesites: tuple[tuple[float, tuple[str, ...]], ...] = ()
 
 
 def check_spec(spec) -> SpecAudit:
@@ -73,6 +79,17 @@ def check_spec(spec) -> SpecAudit:
                     compromis.append(f"titre hors cadre : {ring.text!r}")
                     break
 
+    obesites = []
+    for groupe in spec.groups:
+        if len(groupe.member_keys) < 2:
+            continue
+        membres = set(groupe.member_keys)
+        aire_ovale = math.pi * groupe.ellipse.rx * groupe.ellipse.ry
+        aire_disques = sum(math.pi * (n.size / 2.0) ** 2 for n in nodes if n.key in membres)
+        if aire_disques > 0:
+            obesites.append((aire_ovale / aire_disques, groupe.member_keys))
+    obesites.sort(reverse=True)
+
     vide = largest_void(
         {n.key: (n.x, n.y) for n in nodes}, {n.key: n.size for n in nodes}, spec.style
     )
@@ -82,4 +99,5 @@ def check_spec(spec) -> SpecAudit:
         compromis=tuple(compromis),
         void=vide,
         void_ratio=vide / ideal,
+        obesites=tuple(obesites),
     )

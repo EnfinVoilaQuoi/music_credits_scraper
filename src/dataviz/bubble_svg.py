@@ -99,6 +99,17 @@ class SvgStyle:
     # la 1ʳᵉ moitié en haut, la 2ᵈᵉ en bas (cas d'un producteur solo au titre
     # long). Sinon il faudrait l'écarter loin, ou le laisser s'enrouler.
     split_long_titles: bool = True
+    # Hauteur d'une CAPITALE, en fraction de la taille de police. Sous l'ovale
+    # les lettres poussent vers lui : la ligne de base recule d'exactement cette
+    # hauteur, pas d'une police entière — sinon le texte du bas se retrouve
+    # ~6 px plus loin du tracé que celui du haut, et l'asymétrie se voit
+    # (« les deux parties ne sont pas au même écartement », 2026-09-01).
+    # 0,72 est la valeur de Montserrat (grotesque géométrique).
+    cap_height_ratio: float = 0.72
+    # Dégagement minimal d'un titre autour de lui, en fraction de sa taille :
+    # en dessous, il vaut mieux le poser ailleurs, quitte à renoncer au côté
+    # préféré — un titre qui touche un cercle ne se lit plus.
+    label_min_clearance_ratio: float = 0.5
     # Ellipses (une par combinaison de producteurs).
     min_axis_ratio: float = 0.35  # borne l'aplatissement (duo / quasi-colinéaire)
     ellipse_margin: float = 10.0  # marge ajoutée au rayon des cercles

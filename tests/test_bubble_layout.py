@@ -343,3 +343,50 @@ def test_i9_coupe_desactivable_et_titre_court_intact():
     spec = _spec(tracks, style=SvgStyle(split_long_titles=False))
     groupe = next(g for g in spec.groups if g.member_keys == ("solo",))
     assert len(groupe.rings) == 1
+
+
+def test_i8_ecart_coherent_avec_le_cote():
+    # L'écart doit correspondre au côté RÉELLEMENT obtenu : le point fixe
+    # pouvait sortir sur une bascule (garde anti-oscillation) et laisser un
+    # texte posé AU-DESSUS porter le recul du bas — il paraissait alors trop
+    # loin (« La familia », « Gros spectacle », 2026-09-01).
+    from src.dataviz.bubble_labels import _cote_haut, label_offset
+
+    spec = _spec(_reseau_dense())
+    base = label_offset(spec.style)
+    recul = spec.style.ellipse_label_font_size * spec.style.cap_height_ratio
+    for groupe in spec.groups:
+        for ring in groupe.rings:
+            attendu = base if _cote_haut(groupe.ellipse, ring.offset, ring.t) else base + recul
+            assert abs(ring.offset - attendu) < 1e-6, (
+                f"{ring.text!r} à {ring.offset:.1f} px alors que son côté impose "
+                f"{attendu:.1f} px"
+            )
+
+
+def test_i8_le_recul_vaut_une_capitale_pas_une_police():
+    # Le texte du bas doit être à la MÊME distance visuelle du tracé que celui
+    # du haut : il recule d'une hauteur de capitale (~0,72 em), pas d'une police
+    # entière — sinon l'asymétrie se voit sur les deux moitiés d'un titre coupé.
+    from src.dataviz.bubble_labels import label_offset
+
+    style = SvgStyle()
+    assert style.cap_height_ratio < 1.0
+    base = label_offset(style)
+    recul = style.ellipse_label_font_size * style.cap_height_ratio
+    assert base + recul < base + style.ellipse_label_font_size
+
+
+def test_i9_un_titre_ne_traverse_pas_un_cercle_etranger():
+    # Le côté préféré ne vaut pas la lisibilité : imposé durement, il enfermait
+    # un titre dans une moitié encombrée jusqu'à le faire passer DANS un cercle
+    # (« 3ein » à −14 px, « Brûle » caché par Lucci', 2026-09-01).
+    from src.dataviz.bubble_labels import _degagement
+
+    spec = _spec(_reseau_dense())
+    circles = {n.key: (n.x, n.y, n.size / 2.0) for n in spec.nodes}
+    for groupe in spec.groups:
+        etrangers = [circles[k] for k in sorted(circles) if k not in groupe.member_keys]
+        for ring in groupe.rings:
+            degagement = _degagement(groupe.ellipse, ring, spec.style, etrangers)
+            assert degagement > 0.0, f"{ring.text!r} traverse un cercle ({degagement:.1f} px)"

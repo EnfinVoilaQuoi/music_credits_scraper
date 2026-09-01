@@ -151,6 +151,34 @@ def test_i4_titre_dans_la_zone():
                 assert -1.0 <= py <= spec.height + 1.0, f"{ring.text!r} sort du cadre"
 
 
+def test_i4_titre_ni_barre_ni_flottant():
+    # Le décalage d'un titre doit correspondre au côté où il est FINALEMENT
+    # posé. Décidé avant le placement puis appliqué à un texte posé de l'autre
+    # côté, il l'éloignait du double — le titre semblait ne plus être relié à
+    # rien (retour utilisateur : « comme placé avant un déplacement de
+    # l'ellipse »). Deux bornes, une par travers :
+    from src.dataviz.bubble_labels import _cote_haut
+
+    spec = _spec(_reseau_dense())
+    capitale = spec.style.ellipse_label_font_size
+    for groupe in spec.groups:
+        for ring in groupe.rings:
+            haut = _cote_haut(groupe.ellipse, ring.offset, ring.t)
+            if not haut:
+                # Sous l'ovale, les lettres poussent vers lui : sans le recul
+                # d'une capitale, le tracé les barre.
+                assert ring.offset >= capitale, f"{ring.text!r} est barré par son tracé"
+            # Et personne ne part flotter : l'écart reste borné par ce que
+            # justifient le côté, l'empilement et l'allongement d'un titre long.
+            plafond = (
+                capitale
+                + spec.style.ellipse_label_max_extra_offset
+                + spec.style.ellipse_label_line_gap * len(groupe.rings)
+                + 20.0
+            )
+            assert ring.offset <= plafond, f"{ring.text!r} flotte à {ring.offset:.0f} px"
+
+
 def test_i4_titre_lisible():
     # Le texte suit la courbe : au-delà d'une certaine inclinaison il s'écrit
     # de haut en bas. C'est la seule contrainte DURE du placement des titres.

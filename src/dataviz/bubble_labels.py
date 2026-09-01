@@ -37,6 +37,11 @@ _TIP_SAMPLES = 180
 # Points testés le long de l'arc d'un titre (dégagement, sortie de zone).
 _ARC_PROBES = 7
 
+# Allers-retours « écart ↔ côté » pour poser une ligne. Le point fixe est
+# atteint en une ou deux passes ; la borne évite un aller-retour perpétuel
+# quand deux emplacements se valent exactement.
+_POINT_FIXE_PASSES = 4
+
 
 def _perimeter(rx: float, ry: float) -> float:
     """Périmètre d'ellipse (approximation de Ramanujan, exacte à 1e-5 près ici)."""
@@ -170,6 +175,52 @@ def _tip(ellipse, style: SvgStyle, text: str, members, obstacles, zone) -> tuple
     return best[1], (1 if best[2] >= 0 else 0)
 
 
+def _cote_haut(ellipse, offset: float, t: float) -> bool:
+    """Le texte posé en `t` est-il AU-DESSUS de l'ovale ?
+
+    C'est-à-dire : s'éloigner du tracé, à cet endroit, fait-il monter ? La
+    réponse décide de deux choses — le sens d'empilement des lignes, et s'il
+    faut décaler la ligne de base.
+    """
+    return ellipse.inflated(offset + 1.0).point_at(t)[1] < ellipse.inflated(offset).point_at(t)[1]
+
+
+def _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher):
+    """Pose UNE ligne : son écart au tracé, où la centrer, dans quel sens.
+
+    Par POINT FIXE, et c'est le point délicat. L'écart dépend du côté (sous
+    l'ovale, les lettres poussent vers lui : sans un décalage d'une hauteur de
+    capitale, le tracé les barre), mais le côté n'est connu qu'une fois la place
+    choisie — et changer l'écart peut déplacer la place, donc changer le côté.
+
+    Décidé une fois pour toutes AVANT le placement — ce qu'on faisait — le
+    décalage se retrouvait appliqué à un texte finalement posé de l'autre côté :
+    il s'éloignait alors du double de ce qu'il fallait, et paraissait ne plus
+    être relié à rien. On itère donc jusqu'à ce que les deux s'accordent.
+    """
+    socle = max(plancher, label_offset(style, ellipse, text))
+    offset = socle
+    t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone)
+    haut = _cote_haut(ellipse, offset, t)
+    vus = {offset}
+    for _ in range(_POINT_FIXE_PASSES):
+        voulu = socle if haut else socle + style.ellipse_label_font_size
+        if abs(voulu - offset) < 0.5:
+            break  # l'écart et le côté s'accordent : c'est fini
+        if voulu in vus:
+            # Aller-retour : les deux emplacements se valent, le côté bascule à
+            # chaque essai. On tranche pour le PLUS ÉCARTÉ — un texte un peu
+            # loin du tracé reste lisible, un texte barré par le tracé, non.
+            offset = socle + style.ellipse_label_font_size
+            t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone)
+            break
+        vus.add(voulu)
+        offset = voulu
+        t, sweep = _tip(ellipse.inflated(offset), style, text, members, obstacles, zone)
+        haut = _cote_haut(ellipse, offset, t)
+    return LabelRing(text=text, offset=offset, t=t, sweep=sweep), haut
+
+
 def _rings(ellipse, lines, style: SvgStyle, members, obstacles, zone) -> tuple[LabelRing, ...]:
     """Un anneau par titre, empilés vers l'extérieur, dans l'ordre de lecture.
 
@@ -179,35 +230,27 @@ def _rings(ellipse, lines, style: SvgStyle, members, obstacles, zone) -> tuple[L
     """
     if not lines:
         return ()
-    base = label_offset(style)
-    t_base, _sweep = _tip(ellipse.inflated(base), style, lines[0], members, obstacles, zone)
-    # Le texte est-il posé au-dessus de l'ovale ? Alors s'éloigner du tracé,
-    # c'est monter, et la 1ʳᵉ ligne doit être la plus éloignée pour se lire en
-    # premier. Posé dessous, c'est l'inverse.
-    above = ellipse.inflated(base + 1.0).point_at(t_base)[1] < ellipse.point_at(t_base)[1]
-    # Côté BAS, les lettres poussent vers l'ovale : sur un chemin elles se
-    # dressent à gauche du sens de lecture, qui pointe vers l'intérieur quand le
-    # texte est sous la courbe. Sans ce décalage d'une hauteur de capitale, le
-    # tracé barre le titre.
-    baseline = 0.0 if above else style.ellipse_label_font_size
 
-    offsets = []
-    previous = None
-    for line in lines:
-        offset = label_offset(style, ellipse, line) + baseline
-        if previous is not None:
-            offset = max(offset, previous + style.ellipse_label_line_gap)
-        offsets.append(offset)
-        previous = offset
-    ordered = list(lines) if not above else list(reversed(lines))
+    # La première ligne fixe le côté ; les suivantes s'empilent vers l'extérieur.
+    premier, haut = _pose_une_ligne(
+        ellipse, lines[0], style, members, obstacles, zone, label_offset(style)
+    )
+    rings = [premier]
+    plancher = premier.offset
+    for text in lines[1:]:
+        plancher += style.ellipse_label_line_gap
+        suivant, _ = _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher)
+        plancher = suivant.offset
+        rings.append(suivant)
 
-    rings = []
-    for text, offset in zip(ordered, offsets, strict=True):
-        carrier = ellipse.inflated(offset)
-        t, sweep = _tip(carrier, style, text, members, obstacles, zone)
-        rings.append(LabelRing(text=text, offset=offset, t=t, sweep=sweep))
-    if above:
-        rings.reverse()  # rendu dans l'ordre de lecture
+    # Posé AU-DESSUS de l'ovale, s'éloigner du tracé c'est monter : la dernière
+    # couronne est la plus haute, donc c'est elle qui doit porter la 1ʳᵉ ligne.
+    if haut:
+        textes = [r.text for r in rings][::-1]
+        rings = [
+            LabelRing(text=texte, offset=r.offset, t=r.t, sweep=r.sweep)
+            for texte, r in zip(textes, rings, strict=True)
+        ][::-1]
     return tuple(rings)
 
 

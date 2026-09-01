@@ -227,6 +227,27 @@ def largest_void(pos, sizes, style) -> float:
     return float(np.max(np.min(d, axis=1)))
 
 
+def _cohesion_scale(sizes, style) -> float:
+    """Facteur appliqué à la cohésion, selon la place OCCUPÉE dans la zone.
+
+    Une cohésion unique ne peut pas convenir aux deux régimes : les albums
+    denses remplissent 22-25 % de la zone (mesuré), les petits 7-11 %. À
+    `force_cohesion` constante, le réglage qui empêche l'ovale d'enfler sur un
+    album dense TASSE un petit album, qui a proportionnellement deux fois plus
+    de place — retour utilisateur du 2026-09-01 : « sur SPLIT, Matrix ou
+    ATHANOR l'étalon est mieux car moins condensé, il n'y a pas de morceaux
+    isolés donc plus de place pour afficher les infos ».
+
+    La cohésion suit donc l'occupation, plafonnée à 1 (au-delà de la densité de
+    référence elle ne monte plus) et plancherée pour qu'un groupe reste un
+    groupe même sur une planche quasi vide.
+    """
+    aire_disques = sum(math.pi * (d / 2.0) ** 2 for d in sizes.values())
+    zone = max(1e-9, style.frame_width * style.frame_height)
+    ratio = (aire_disques / zone) / max(1e-9, style.cohesion_density_ref)
+    return max(style.cohesion_scale_min, min(1.0, ratio))
+
+
 def _solo_keys(keys, groups) -> frozenset:
     """Clés SANS aucune collaboration : membres d'aucun groupe multi-membres.
 
@@ -250,6 +271,7 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
     keys = sorted(sizes)
     radii = {k: sizes[k] / 2.0 for k in keys}
     solos = _solo_keys(keys, groups)
+    cohesion = style.force_cohesion * _cohesion_scale(sizes, style)
     width, height = style.frame_width, style.frame_height
 
     # Amorce recentrée sur la zone : le `spring_layout` sort dans [-1, 1].
@@ -275,8 +297,8 @@ def solve(sizes, groups, style, seed_positions) -> dict[str, tuple[float, float]
             cx = sum(pos[k][0] for k in members) / len(members)
             cy = sum(pos[k][1] for k in members) / len(members)
             for k in members:
-                disp[k][0] += (cx - pos[k][0]) * style.force_cohesion
-                disp[k][1] += (cy - pos[k][1]) * style.force_cohesion
+                disp[k][0] += (cx - pos[k][0]) * cohesion
+                disp[k][1] += (cy - pos[k][1]) * cohesion
 
         # ── Exclusion : un étranger ne reste pas dans l'ellipse d'un groupe ──
         for members, shape in sorted(ellipses.items()):

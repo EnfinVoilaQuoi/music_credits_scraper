@@ -112,6 +112,14 @@ class SvgStyle:
     # (15,4× → 3,6×, 6 captures → 0). Au-delà de 0,20 les planches se
     # dégradent en sens inverse (Swing : 30 captures à 0,45).
     force_cohesion: float = 0.12
+    # La cohésion suit la place OCCUPÉE : une valeur unique ne convient pas aux
+    # deux régimes (albums denses ≈ 22-25 % de la zone, petits ≈ 7-11 %) — celle
+    # qui empêche l'ovale d'enfler sur un dense TASSE un petit album, qui a
+    # proportionnellement plus de place. `cohesion_density_ref` = l'occupation
+    # au-delà de laquelle `force_cohesion` s'applique en entier ; en dessous
+    # elle décroît proportionnellement, jamais sous `cohesion_scale_min`.
+    cohesion_density_ref: float = 0.22
+    cohesion_scale_min: float = 0.30
     force_exclusion: float = 0.5  # un étranger est chassé de l'ellipse d'un groupe
     force_disjunction: float = 20.0  # écarte deux ovales sans membre commun (px/itération)
     force_spread: float = 0.22  # répartition homogène dans la zone (relaxation de Lloyd)

@@ -181,6 +181,17 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ),
             ("force_cohesion", "Force de rapprochement des membres d'un même groupe, de 0 à 1."),
             (
+                "cohesion_density_ref",
+                "Part de la zone couverte par les cercles à partir de laquelle la cohésion "
+                "s'applique EN ENTIER (0,22 = un album dense). En dessous elle décroît : un "
+                "petit album a proportionnellement plus de place, la tasser le dessert.",
+            ),
+            (
+                "cohesion_scale_min",
+                "Plancher de cette décroissance, de 0 à 1 : en dessous, un groupe cesserait "
+                "de se lire comme un groupe.",
+            ),
+            (
                 "force_exclusion",
                 "Force qui chasse un cercle ÉTRANGER de l'ovale d'un groupe, de 0 à 1. "
                 "Sans elle, un artiste qui passe par là se lit comme un membre.",

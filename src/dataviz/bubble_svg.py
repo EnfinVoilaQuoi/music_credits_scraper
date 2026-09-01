@@ -99,6 +99,10 @@ class SvgStyle:
     # la 1ʳᵉ moitié en haut, la 2ᵈᵉ en bas (cas d'un producteur solo au titre
     # long). Sinon il faudrait l'écarter loin, ou le laisser s'enrouler.
     split_long_titles: bool = True
+    # Séparateur employé quand deux titres d'un même ovale doivent s'écrire À LA
+    # SUITE, faute d'une seconde zone lisible autour du tracé (ovale traversé
+    # par plusieurs autres). Choix utilisateur : une puce, bien détachée.
+    label_join_separator: str = "•"
     # Hauteur d'une CAPITALE, en fraction de la taille de police. Sous l'ovale
     # les lettres poussent vers lui : la ligne de base recule d'exactement cette
     # hauteur, pas d'une police entière — sinon le texte du bas se retrouve

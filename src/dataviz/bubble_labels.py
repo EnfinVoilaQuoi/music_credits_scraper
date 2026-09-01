@@ -42,6 +42,11 @@ _ARC_PROBES = 7
 # quand deux emplacements se valent exactement.
 _POINT_FIXE_PASSES = 4
 
+# Paliers d'écartement du dernier recours (un par hauteur de texte). Six suffit
+# à sortir un titre de la zone centrale d'une planche dense ; nombre FIXE, pour
+# que la sortie reste byte-identique.
+_PALIERS_DERNIER_RECOURS = 6
+
 
 def _perimeter(rx: float, ry: float) -> float:
     """Périmètre d'ellipse (approximation de Ramanujan, exacte à 1e-5 près ici)."""
@@ -142,9 +147,14 @@ def _clearance(ellipse, t_center, span_deg, obstacles) -> float:
 
     Négatif quand le titre passerait DANS un obstacle : le score l'écarte alors
     naturellement, sans avoir besoin d'un filtre à part.
+
+    Sans aucun obstacle, le dégagement est INFINI et non nul : c'est un critère
+    de viabilité autant qu'un terme de score, et « rien alentour » veut dire
+    « parfaitement dégagé ». Renvoyer 0 faisait juger illisible un titre seul
+    sur sa planche. Les appelants qui l'additionnent au score bornent la valeur.
     """
     if not obstacles:
-        return 0.0
+        return math.inf
     worst = math.inf
     for px, py in _arc_points(ellipse, t_center, span_deg):
         for cx, cy, radius in obstacles:
@@ -198,8 +208,11 @@ def _tip(
         if abs(angle) > style.ellipse_label_max_angle:
             continue  # illisible : aucune autre qualité ne rachète ça
         dehors = _outside(ellipse, t, span, zone)
+        degagement = _clearance(ellipse, t, span, obstacles)
+        # Borné pour le SCORE (un dégagement infini rendrait tous les
+        # emplacements équivalents) ; le critère de viabilité, lui, le lit brut.
         score = (
-            style.label_weight_clearance * _clearance(ellipse, t, span, obstacles)
+            style.label_weight_clearance * min(degagement, 1e6)
             - style.label_weight_member * _distance_to_members(ellipse, t, members)
             - style.label_weight_zone * dehors
         )
@@ -208,8 +221,17 @@ def _tip(
         candidat = (score, t, tx)
         if best_dehors is None or (score, -t) > (best_dehors[0], -best_dehors[1]):
             best_dehors = candidat
-        if dehors > 0.0:
-            continue  # hors cadre : écarté tant qu'il reste un emplacement dedans
+        # Deux motifs d'inéligibilité, tous deux avec repli sur le moins mauvais :
+        # sortir du cadre, et FRÔLER un obstacle. Le dégagement était jusqu'ici
+        # un simple terme du score, qu'un bon rattachement pouvait racheter :
+        # deux titres se sont retrouvés superposés à 3,3 px (« 3ein / Risotto
+        # Gambas » sur « Peace, Haine, Love », 2026-09-01). Un texte illisible
+        # n'est racheté par rien.
+        if (
+            dehors > 0.0
+            or degagement < style.ellipse_label_font_size * style.label_min_clearance_ratio
+        ):
+            continue
         if best is None or (score, -t) > (best[0], -best[1]):
             best = candidat
     best = best or best_dehors
@@ -306,10 +328,22 @@ def _rings(ellipse, lines, style: SvgStyle, members, obstacles, zone) -> tuple[L
     ):
         moities = split_text(lines[0])
         if moities is not None:
-            return _rings_haut_bas(ellipse, moities, style, members, obstacles, zone)
+            paire = _rings_haut_bas(ellipse, moities, style, members, obstacles, zone)
+            if _paire_lisible(ellipse, paire, style, obstacles):
+                return paire
+            # Une seule zone exploitable : la coupe n'a plus de sens, on repose
+            # le titre ENTIER sur cette zone (flux normal, plus bas).
 
     if len(lines) == 2:
-        return _rings_haut_bas(ellipse, tuple(lines), style, members, obstacles, zone)
+        paire = _rings_haut_bas(ellipse, tuple(lines), style, members, obstacles, zone)
+        if _paire_lisible(ellipse, paire, style, obstacles):
+            return paire
+        # Ovale traversé par d'autres : les emplacements lisibles se réduisent à
+        # une seule zone, et forcer un titre en haut, l'autre en bas, les y
+        # superpose (mesuré : deux titres à 3,3 px, 2026-09-01). On les écrit
+        # alors À LA SUITE sur cette zone, séparés par une puce.
+        joint = f" {style.label_join_separator} ".join(lines)
+        return (_pose_en_degageant(ellipse, joint, style, members, obstacles, zone),)
 
     # Trois titres ou plus (jamais rencontré sur le corpus — `label_track_threshold`
     # bascule sur « N morceaux » au-delà) : faute de place autour du tracé, ils
@@ -353,6 +387,33 @@ def _rings_haut_bas(ellipse, textes, style, members, obstacles, zone) -> tuple[L
     return (ring_haut, ring_bas)
 
 
+def _pose_en_degageant(ellipse, text, style, members, obstacles, zone):
+    """Dernier recours : écarter le texte du tracé jusqu'à trouver de l'air.
+
+    Employé pour le seul cas où l'écart fixe ne peut pas tenir : deux titres
+    réunis en une ligne sur un ovale du centre, que TOUS les emplacements du
+    tour frôlent un cercle (mesuré −21 px de dégagement). Plutôt qu'un texte
+    illisible, on s'éloigne par paliers — la couronne grandit et finit par
+    passer au-delà des cercles voisins. Le premier palier qui dégage assez est
+    retenu ; si aucun n'y parvient, le moins mauvais.
+
+    C'est une exception ASSUMÉE à l'écart fixe, bornée et réservée à ce cas :
+    l'alternative serait de renoncer à afficher les titres.
+    """
+    base = label_offset(style)
+    seuil = style.ellipse_label_font_size * style.label_min_clearance_ratio
+    meilleur, sa_marge = None, -math.inf
+    for palier in range(_PALIERS_DERNIER_RECOURS):
+        ecart = base + palier * style.ellipse_label_font_size
+        ring, _ = _pose_une_ligne(ellipse, text, style, members, obstacles, zone, ecart)
+        marge = _degagement(ellipse, ring, style, obstacles)
+        if marge > sa_marge:
+            meilleur, sa_marge = ring, marge
+        if marge >= seuil:
+            return ring
+    return meilleur
+
+
 def _pose_de_ce_cote(ellipse, text, style, members, obstacles, zone, ecart, cote):
     """Pose un texte du côté demandé — mais pas au prix de la lisibilité.
 
@@ -378,6 +439,26 @@ def _degagement(ellipse, ring, style: SvgStyle, obstacles) -> float:
     """Dégagement de l'arc d'un titre déjà posé, vis-à-vis des obstacles."""
     porteuse = ellipse.inflated(ring.offset)
     return _clearance(porteuse, ring.t, text_span(porteuse, ring.text, style), obstacles)
+
+
+def _paire_lisible(ellipse, rings, style: SvgStyle, obstacles) -> bool:
+    """Les deux titres posés de part et d'autre sont-ils VRAIMENT lisibles ?
+
+    Deux conditions : chacun garde ses distances avec les cercles, ET les deux
+    ne se marchent pas dessus. Sur un ovale isolé la réponse est oui — c'est le
+    cas nominal. Sur un ovale traversé par plusieurs autres, les emplacements
+    lisibles se réduisent parfois à UNE seule zone : les y envoyer de part et
+    d'autre les entasse au même endroit, et l'appelant bascule alors sur une
+    ligne unique séparée par une puce.
+    """
+    if len(rings) != 2:
+        return True
+    seuil = style.ellipse_label_font_size * style.label_min_clearance_ratio
+    for ring in rings:
+        if _degagement(ellipse, ring, style, obstacles) < seuil:
+            return False
+    entre_eux = _degagement(ellipse, rings[1], style, ring_obstacles(ellipse, (rings[0],), style))
+    return entre_eux >= seuil
 
 
 def ring_obstacles(ellipse, rings, style: SvgStyle) -> list[tuple[float, float, float]]:

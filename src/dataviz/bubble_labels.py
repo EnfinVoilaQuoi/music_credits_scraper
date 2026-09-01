@@ -343,20 +343,56 @@ def _rings(ellipse, lines, style: SvgStyle, members, obstacles, zone) -> tuple[L
         # superpose (mesuré : deux titres à 3,3 px, 2026-09-01). On les écrit
         # alors À LA SUITE sur cette zone, séparés par une puce.
         joint = f" {style.label_join_separator} ".join(lines)
-        return (_pose_en_degageant(ellipse, joint, style, members, obstacles, zone),)
+        if _tient_sur_le_tour(ellipse, joint, style):
+            return (_pose_en_degageant(ellipse, joint, style, members, obstacles, zone),)
+        # Réunis, les deux titres feraient une ligne interminable qui ferait le
+        # tour de l'ovale (« 3ein / Risotto Gambas • Peace, Haine, Love »,
+        # 2026-09-02). Avant d'empiler — le seul cas où l'écart cesse d'être
+        # fixe —, on regarde si le SEUL titre le plus écouté trouve une place
+        # correcte : mieux vaut en montrer un bien posé que deux repoussés très
+        # loin (mesuré 130 px du tracé sur l'ovale central de M.A.N).
+        seul, _ = _pose_une_ligne(
+            ellipse, lines[0], style, members, obstacles, zone, label_offset(style)
+        )
+        seuil = style.ellipse_label_font_size * style.label_min_clearance_ratio
+        if _degagement(ellipse, seul, style, obstacles) >= seuil:
+            return (seul,)
+        return _rings_empiles(ellipse, tuple(lines), style, members, obstacles, zone)
 
-    # Trois titres ou plus (jamais rencontré sur le corpus — `label_track_threshold`
-    # bascule sur « N morceaux » au-delà) : faute de place autour du tracé, ils
-    # s'empilent sur des couronnes concentriques, dans l'ordre de lecture.
+    # Trois titres ou plus (jamais rencontré sur le corpus — `label_max_titles`
+    # plafonne à deux) : faute de place autour du tracé, ils s'empilent.
+    return _rings_empiles(ellipse, tuple(lines), style, members, obstacles, zone)
+
+
+def _rings_empiles(ellipse, lines, style, members, obstacles, zone) -> tuple[LabelRing, ...]:
+    """Les titres empilés sur des couronnes concentriques, l'un sous l'autre.
+
+    Dernier recours : l'écart cesse d'être fixe (chaque ligne s'éloigne d'un
+    interligne), mais deux titres l'un SOUS l'autre restent lisibles là où une
+    ligne réunie ferait le tour de l'ovale.
+    """
     # La première ligne fixe le côté ; les suivantes s'empilent vers l'extérieur.
+    # Chaque ligne devient un obstacle pour la suivante, et l'ensemble reste
+    # soumis au dégagement minimal : empiler ne dispense pas d'être lisible
+    # (mesuré −13 px sans cette garde, 2026-09-02).
+    seuil = style.ellipse_label_font_size * style.label_min_clearance_ratio
+    obstacles = list(obstacles)
     premier, haut = _pose_une_ligne(
         ellipse, lines[0], style, members, obstacles, zone, label_offset(style)
     )
+    if _degagement(ellipse, premier, style, obstacles) < seuil:
+        premier = _pose_en_degageant(ellipse, lines[0], style, members, obstacles, zone)
+        haut = _cote_haut(ellipse, premier.offset, premier.t)
     rings = [premier]
     plancher = premier.offset
     for text in lines[1:]:
+        obstacles = obstacles + ring_obstacles(ellipse, (rings[-1],), style)
         plancher += style.ellipse_label_line_gap
         suivant, _ = _pose_une_ligne(ellipse, text, style, members, obstacles, zone, plancher)
+        if _degagement(ellipse, suivant, style, obstacles) < seuil:
+            suivant = _pose_en_degageant(
+                ellipse, text, style, members, obstacles, zone, plancher=plancher
+            )
         plancher = suivant.offset
         rings.append(suivant)
 
@@ -387,7 +423,7 @@ def _rings_haut_bas(ellipse, textes, style, members, obstacles, zone) -> tuple[L
     return (ring_haut, ring_bas)
 
 
-def _pose_en_degageant(ellipse, text, style, members, obstacles, zone):
+def _pose_en_degageant(ellipse, text, style, members, obstacles, zone, plancher=None):
     """Dernier recours : écarter le texte du tracé jusqu'à trouver de l'air.
 
     Employé pour le seul cas où l'écart fixe ne peut pas tenir : deux titres
@@ -400,7 +436,7 @@ def _pose_en_degageant(ellipse, text, style, members, obstacles, zone):
     C'est une exception ASSUMÉE à l'écart fixe, bornée et réservée à ce cas :
     l'alternative serait de renoncer à afficher les titres.
     """
-    base = label_offset(style)
+    base = label_offset(style) if plancher is None else plancher
     seuil = style.ellipse_label_font_size * style.label_min_clearance_ratio
     meilleur, sa_marge = None, -math.inf
     for palier in range(_PALIERS_DERNIER_RECOURS):

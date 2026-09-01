@@ -62,7 +62,10 @@ class SvgStyle:
     photo_overlay_color: str = "#333030"
     photo_overlay_opacity: float = 0.33
     # Légende d'ellipse (titres des morceaux si peu nombreux, sinon « XX morceaux »).
-    label_track_threshold: int = 3  # au-delà : « N morceaux » au lieu des titres
+    # Nombre maximal de titres listés sur un ovale : au-delà, le reliquat est
+    # écrit « + N titres ». Deux, parce qu'un ovale ne porte proprement que deux
+    # textes (un de part et d'autre) — le troisième devrait s'empiler.
+    label_max_titles: int = 2
     ellipse_label_font_size: float = 20.0
     ellipse_label_color: str = "#333030"
     # Le titre est posé SUR l'ellipse (texte curviligne) : `gap` est l'écart
@@ -72,9 +75,14 @@ class SvgStyle:
     # Deux titres sur un même ovale se posent sur DEUX anneaux concentriques —
     # l'équivalent d'un retour à la ligne sur une courbe. Écart entre eux :
     ellipse_label_line_gap: float = 24.0
-    # Inclinaison maximale du texte : au-delà il devient pénible à lire. C'est
-    # elle qui décide jusqu'où un titre peut glisser vers le bout de son ovale.
-    ellipse_label_max_angle: float = 28.0
+    # Inclinaison maximale du texte, en degrés : au-delà il devient pénible à
+    # lire. C'est elle qui décide jusqu'où un titre peut glisser vers le bout de
+    # son ovale. 55 et non 28 : à 28 les emplacements dégagés étaient si rares
+    # sur un ovale du centre qu'un titre devait s'éloigner beaucoup pour trouver
+    # de l'air. Arbitrage utilisateur du 2026-09-02 — « si le texte penche sur
+    # un côté vertical ce n'est pas un problème, je préfère un titre penché
+    # clair qu'un titre droit mais confondu dans des ellipses ».
+    ellipse_label_max_angle: float = 55.0
     # Instrumentistes : crédits « Piano », « Guitar »… ajoutés au réseau, avec
     # l'instrument sous le nom de l'artiste, en plus petit.
     # Poids du score de placement des titres (cf. `bubble_labels`). Trois termes
@@ -88,7 +96,12 @@ class SvgStyle:
     sub_label_ratio: float = 0.62  # taille du sous-titre, en fraction du nom
     # Part maximale du tour d'ellipse qu'un titre a le droit d'occuper : au-delà
     # il s'enroule et se lit à la verticale. La couronne s'écarte pour y tenir.
-    ellipse_label_max_arc: float = 0.42
+    # 0,55 et non 0,42 : à 0,42 un titre un peu long était coupé en deux alors
+    # que son ovale (deux artistes, donc large) avait la place de le porter
+    # entier — « la séparation de La réincarnation de Biggie n'est pas
+    # obligatoire, l'ellipse est plus large, on a la place » (2026-09-02). La
+    # tolérance d'inclinaison accrue rend d'ailleurs les extrémités lisibles.
+    ellipse_label_max_arc: float = 0.55
     # Plafond de cet écartement, en px. BAS par principe (18 et non 55) : l'écart
     # au tracé doit être quasi FIXE, c'est lui qui rattache le titre à son ovale
     # — un écart qui varie se lit comme un défaut (« certains partent trop loin

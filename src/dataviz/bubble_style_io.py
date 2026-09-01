@@ -120,9 +120,10 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         "Légendes des ellipses : les titres de morceaux, alignés sur l'ellipse.",
         (
             (
-                "label_track_threshold",
-                "Au-delà de ce nombre de morceaux, la légende devient « N morceaux » "
-                "au lieu de lister les titres.",
+                "label_max_titles",
+                "Nombre maximal de titres listés sur un ovale (les PLUS ÉCOUTÉS d'abord). "
+                "Le reliquat s'écrit « + N titres ». Au-delà de deux, les titres devraient "
+                "s'empiler : l'ovale n'en porte proprement qu'un de chaque côté.",
             ),
             ("ellipse_label_font_size", "Taille des titres, en px."),
             ("ellipse_label_color", "Couleur des titres (hex)."),

@@ -81,6 +81,11 @@ class TrackGroup:
     track_id: int | None
     title: str
     members: tuple[tuple[str, str], ...]
+    # Écoutes du morceau, pour CHOISIR les titres à afficher quand un ovale en
+    # porte plus qu'il ne peut en montrer : le plus écouté est celui que le
+    # public reconnaît. 0 quand la donnée manque — le titre passe alors après
+    # ceux qui en ont, sans disparaître.
+    plays: int = 0
 
     @property
     def keys(self) -> tuple[str, ...]:
@@ -100,6 +105,10 @@ class CollabGroup:
 
     members: tuple[tuple[str, str], ...]
     track_titles: tuple[str, ...]
+    # Les mêmes titres, du plus écouté au moins écouté (départage alphabétique
+    # pour rester déterministe). C'est dans cet ordre qu'on choisit ceux à
+    # afficher quand l'ovale ne peut pas tous les porter.
+    titles_by_plays: tuple[str, ...] = ()
 
     @property
     def keys(self) -> tuple[str, ...]:
@@ -113,6 +122,19 @@ class CollabGroup:
 def _track_sort_key(track) -> tuple[str, int]:
     """Ordre stable d'insertion : par titre puis id (id manquant → -1)."""
     return (track.title or "", track.id if track.id is not None else -1)
+
+
+def _plays(track) -> int:
+    """Écoutes d'un morceau : le meilleur compteur disponible, 0 si aucun.
+
+    Spotify et YouTube Music ne se somment pas (deux publics, deux unités) : on
+    retient le PLUS GRAND, qui suffit à ordonner des morceaux d'un même album.
+    """
+    streams = getattr(track, "streams", None)
+    if streams is None:
+        return 0
+    valeurs = [streams.spotify_streams or 0, streams.ytm_streams or 0]
+    return max(valeurs)
 
 
 def extract_track_groups(
@@ -139,7 +161,14 @@ def extract_track_groups(
         if not seen:
             continue
         members = tuple(sorted(seen.items()))  # tri par clé → ordre de nœuds stable
-        groups.append(TrackGroup(track_id=track.id, title=track.title, members=members))
+        groups.append(
+            TrackGroup(
+                track_id=track.id,
+                title=track.title,
+                members=members,
+                plays=_plays(track),
+            )
+        )
     return groups
 
 
@@ -150,15 +179,23 @@ def aggregate_collab_groups(track_groups: list[TrackGroup]) -> list[CollabGroup]
     morceaux concernés (triés). Résultat trié par `keys` → ordre déterministe
     (une ellipse par entrée, dans un ordre stable).
     """
-    by_set: dict[tuple[str, ...], tuple[tuple[tuple[str, str], ...], list[str]]] = {}
+    by_set: dict[tuple[str, ...], tuple[tuple[tuple[str, str], ...], list[tuple[int, str]]]] = {}
     for tg in track_groups:
         key = tg.keys
         if key not in by_set:
             by_set[key] = (tg.members, [])
-        by_set[key][1].append(tg.title)
+        by_set[key][1].append((tg.plays, tg.title))
     result = [
-        CollabGroup(members=members, track_titles=tuple(sorted(titles)))
-        for members, titles in by_set.values()
+        CollabGroup(
+            members=members,
+            track_titles=tuple(sorted(titre for _plays, titre in entries)),
+            # `-plays` puis le titre : le plus écouté d'abord, l'alphabétique
+            # départageant les ex æquo (et les morceaux sans donnée).
+            titles_by_plays=tuple(
+                titre for _, titre in sorted(entries, key=lambda e: (-e[0], e[1]))
+            ),
+        )
+        for members, entries in by_set.values()
     ]
     result.sort(key=lambda g: g.keys)
     return result

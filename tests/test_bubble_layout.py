@@ -11,7 +11,7 @@ réglage qui les casse rougit ici, et non trois semaines plus tard sur une planc
 
 import math
 
-from src.dataviz.bubble_layout import encloses, largest_void
+from src.dataviz.bubble_layout import _ellipses_croisent, encloses, largest_void
 from src.dataviz.bubble_prod import build_bubble_spec
 from src.dataviz.bubble_svg import SvgStyle
 from src.dataviz.collab_graph import (
@@ -105,6 +105,24 @@ def test_i3_aucune_ellipse_ne_capture_un_etranger():
             ), f"{n.key} est dans l'ellipse {groupe.member_keys}"
 
 
+# ── I3bis : deux ovales étrangers ne se croisent pas ─────────────────────────
+
+
+def test_i3_ovales_sans_membre_commun_ne_se_croisent_pas():
+    # Deux ovales qui PARTAGENT un artiste doivent se recouvrir — ils passent
+    # tous deux par lui. Deux ovales étrangers l'un à l'autre, non : leur
+    # croisement ne dit rien et brouille la lecture.
+    spec = _spec(_reseau_dense())
+    groupes = [g for g in spec.groups if len(g.member_keys) > 1]
+    for i, a in enumerate(groupes):
+        for b in groupes[i + 1 :]:
+            if set(a.member_keys) & set(b.member_keys):
+                continue
+            assert not _ellipses_croisent(
+                a.ellipse, b.ellipse
+            ), f"{a.member_keys} croise {b.member_keys}"
+
+
 # ── I4 : un titre est rattachable à son ovale ────────────────────────────────
 
 
@@ -118,6 +136,19 @@ def test_i4_titre_pres_de_ses_membres():
             px, py = groupe.ellipse.inflated(ring.offset).point_at(ring.t)
             distance = min(math.hypot(px - m.x, py - m.y) - m.size / 2.0 for m in membres)
             assert distance <= 140.0, f"{ring.text!r} est à {distance:.0f} px de ses membres"
+
+
+def test_i4_titre_dans_la_zone():
+    # Un titre hors cadre est un titre perdu : c'est une contrainte DURE, pas
+    # une pénalité que la place libre pourrait racheter.
+    spec = _spec(_reseau_dense())
+    for groupe in spec.groups:
+        for ring in groupe.rings:
+            porteuse = groupe.ellipse.inflated(ring.offset)
+            for i in range(7):
+                px, py = porteuse.point_at(ring.t - 20.0 + 40.0 * i / 6.0)
+                assert -1.0 <= px <= spec.width + 1.0, f"{ring.text!r} sort du cadre"
+                assert -1.0 <= py <= spec.height + 1.0, f"{ring.text!r} sort du cadre"
 
 
 def test_i4_titre_lisible():

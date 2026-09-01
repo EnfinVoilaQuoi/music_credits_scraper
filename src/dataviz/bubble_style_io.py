@@ -175,10 +175,22 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
                 "Sans elle, un artiste qui passe par là se lit comme un membre.",
             ),
             (
+                "force_disjunction",
+                "Force qui écarte deux ovales SANS artiste commun, en px par itération. "
+                "Deux ovales qui partagent quelqu'un se recouvrent forcément ; deux ovales "
+                "étrangers qui se croisent ne disent rien et brouillent la lecture.",
+            ),
+            (
                 "force_spread",
                 "Force de répartition homogène dans la zone, de 0 à 1 : chaque cercle est "
                 "attiré vers le milieu de la part de surface qu'il occupe. C'est elle qui "
                 "évite les grands vides.",
+            ),
+            (
+                "spread_jitter",
+                "Décalage aléatoire (mais reproductible) appliqué à chaque cercle, en px : "
+                "une répartition parfaitement homogène aligne les membres d'un groupe en "
+                "rangées, ce qui fait mécanique.",
             ),
             ("lloyd_cell", "Finesse de l'échantillonnage de la zone pour ce calcul, en px."),
             ("seed_scale", "Échelle de l'amorce (le layout de départ), en px."),

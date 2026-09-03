@@ -485,7 +485,13 @@ class CertMatcher:
                     "flag": r["flag"],
                 }
             )
-        # Tri : pays (FR, BE, US) puis niveau puis date décroissante
+        # Tri : pays (FR, BE, US), puis niveau (le plus haut d'abord), puis date
+        # CROISSANTE. Le commentaire disait « décroissante » jusqu'au 2026-09-03 :
+        # c'est le commentaire qui avait tort, et l'ordre croissant est le bon —
+        # `certification_enricher` prend `entries[0]` pour peupler
+        # `track.certs.level`/`date`, donc à niveau égal on veut la date la PLUS
+        # ANCIENNE (meilleur proxy de la date d'obtention, et `calculate_
+        # certification_duration` mesure alors le vrai délai sortie→certif).
         order = {"FR": 0, "BE": 1, "US": 2}
         out.sort(
             key=lambda c: (

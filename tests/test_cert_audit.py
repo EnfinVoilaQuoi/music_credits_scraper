@@ -76,3 +76,19 @@ def test_matcher_vide():
     res = m.audit_artist_certifications("Jul", ["x"], [])
     assert res["total"] == 0
     assert res["orphans"] == []
+
+
+def test_certif_au_titre_tout_symbole_ni_matchee_ni_orpheline():
+    """« ÷ » se normalise en chaîne vide : impossible de la rapprocher de quoi
+    que ce soit, mais l'accuser d'être orpheline serait faux. Elle est comptée
+    au total et écartée du verdict."""
+    m = _matcher_with(
+        [
+            _row("SNEP", "Ed Sheeran", "÷", cat="album"),
+            _row("SNEP", "Ed Sheeran", "Shape of You"),
+        ]
+    )
+    res = m.audit_artist_certifications("Ed Sheeran", ["Shape of You"], [])
+    assert res["total"] == 2
+    assert res["matched_tracks"] == 1
+    assert res["orphans"] == []

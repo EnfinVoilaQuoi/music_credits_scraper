@@ -98,3 +98,109 @@ def repair_extra_separators(text: str, sep: str = ";") -> tuple:
         out.append(line)
 
     return "\n".join(out), repaired
+
+
+# ---------------------------------------------------------------------------
+# Canonicalisation SNEP — PARTAGÉE entre le validateur et le nettoyeur.
+#
+# Ces fonctions vivaient dans `snep_cleaner`, où le validateur ne pouvait pas les
+# atteindre sans créer un import entre deux pairs. Résultat mesuré le 2026-09-03 :
+# le nettoyeur retirait 722 doublons là où le validateur n'en signalait que 151,
+# parce que lui seul normalisait avant de construire sa clé. Elles rejoignent donc
+# `repair_extra_separators` ici — même statut, même raison.
+# ---------------------------------------------------------------------------
+# Casse canonique des niveaux (clé = forme minuscule)
+LEVEL_CANON = {
+    lvl.lower(): lvl
+    for lvl in (
+        "Or",
+        "Double Or",
+        "Triple Or",
+        "Platine",
+        "Double Platine",
+        "Triple Platine",
+        "Diamant",
+        "Double Diamant",
+        "Triple Diamant",
+        "Quadruple Diamant",
+    )
+}
+
+# Catégories : singulier → pluriel + casse canonique
+CATEGORY_CANON = {
+    "single": "Singles",
+    "singles": "Singles",
+    "album": "Albums",
+    "albums": "Albums",
+    "vidéo": "Vidéos",
+    "vidéos": "Vidéos",
+    "video": "Vidéos",
+    "videos": "Vidéos",
+}
+
+
+# --- Restauration des caractères corrompus par le SNEP ---
+# Le '?' (codepoint 63) gravé dans la donnée SNEP remplace N'IMPORTE QUEL
+# caractère perdu lors d'une vieille migration — PAS seulement l'apostrophe :
+#   • la ligature œ  (C?UR → CŒUR, S?UR → SŒUR…)
+#   • l'apostrophe d'élision/contraction (L?empire → L'empire, it?s → it's)
+# On ne traite QUE les contextes à haute confiance ; tout '?' ambigu (ex:
+# "SMILE?IT", "Who… are ?") est LAISSÉ tel quel pour révision manuelle.
+
+# 1) Ligature œ : mots français connus (la liste évite les faux positifs).
+_OE_PATTERNS = [
+    re.compile(p, re.I)
+    for p in (
+        r"\bC\?URS?\b",  # CŒUR(S)
+        r"\bS\?URS?\b",  # SŒUR(S)
+        r"\bV\?UX?\b",  # VŒU(X)
+        r"\bB\?UFS?\b",  # BŒUF(S)
+        r"\bN\?UDS?\b",  # NŒUD(S)
+        r"\bM\?URS\b",  # MŒURS
+        r"\bF\?TUS\b",  # FŒTUS
+        r"(?<![A-Za-zÀ-ÿ])\?UVRES?\b",  # ŒUVRE(S)
+        r"(?<![A-Za-zÀ-ÿ])\?UFS?\b",  # ŒUF(S)
+        r"(?<![A-Za-zÀ-ÿ])\?IL\b",  # ŒIL
+        r"(?<![A-Za-zÀ-ÿ])\?DIPE\b",  # ŒDIPE
+    )
+]
+
+
+def _oe_sub(m):
+    g = m.group(0)
+    lig = "Œ" if g == g.upper() else "œ"
+    return g.replace("?", lig, 1)
+
+
+# 2) Apostrophe : UNIQUEMENT élisions françaises et contractions anglaises.
+_ELISION_FR = re.compile(r"\b([CDJLMNST])\?(?=[A-Za-zÀ-ÿ])", re.I)
+_ELISION_FR2 = re.compile(r"\b(QU|JUSQU|LORSQU|PUISQU|QUOIQU|AUJOURD)\?(?=[A-Za-zÀ-ÿ])", re.I)
+_CONTRACTION_EN = re.compile(r"([A-Za-zÀ-ÿ])\?(S|T|RE|VE|LL|D|M)\b", re.I)
+
+
+def clean_field(s: str) -> str:
+    """Strip + écrase tab/espaces multiples en un seul espace."""
+    return re.sub(r"\s+", " ", (s or "")).strip()
+
+
+def restore_apostrophes(s: str) -> tuple[str, int]:
+    """Restaure les caractères corrompus (?) en contexte sûr : ligature œ puis
+    apostrophe d'élision/contraction. Retourne (texte, nb de '?' restaurés).
+    Les '?' ambigus restent intacts (à signaler par le validateur)."""
+    before = s.count("?")
+    if not before:
+        return s, 0
+    for pat in _OE_PATTERNS:
+        s = pat.sub(_oe_sub, s)
+    s = _ELISION_FR.sub(lambda m: m.group(1) + "'", s)
+    s = _ELISION_FR2.sub(lambda m: m.group(1) + "'", s)
+    s = _CONTRACTION_EN.sub(lambda m: m.group(1) + "'" + m.group(2), s)
+    return s, before - s.count("?")
+
+
+def canon_category(cat: str) -> str:
+    return CATEGORY_CANON.get(cat.lower(), cat)
+
+
+def canon_level(lvl: str) -> str:
+    return LEVEL_CANON.get(lvl.lower(), lvl)

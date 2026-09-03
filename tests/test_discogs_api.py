@@ -142,6 +142,45 @@ class TestCorrespondanceDesRoles:
         for cle in cles:
             assert client._map_discogs_role_to_enum(cle) is not CreditRole.OTHER, cle
 
+    @pytest.mark.parametrize(
+        ("libelle", "attendu"),
+        [
+            ("Songwriter", CreditRole.WRITER),
+            ("Graphics", CreditRole.GRAPHIC_DESIGN),
+            ("Logo", CreditRole.GRAPHIC_DESIGN),
+            ("Cover", CreditRole.ARTWORK),
+            ("DJ Mix, Scratches", CreditRole.SCRATCHES),
+            ("Direct Metal Mastering By", CreditRole.MASTERING_ENGINEER),
+            ("Lacquer Cut By", CreditRole.MASTERING_ENGINEER),
+            ("Editor", CreditRole.VIDEO_EDITOR),
+        ],
+    )
+    def test_alias_releves_sur_la_base_reelle(self, client, libelle, attendu):
+        """Libellés Discogs rencontrés en base et ajoutés le 2026-09-03. Chacun
+        est soit lexicalement non ambigu, soit confirmé par l'oracle Genius
+        (« Direct Metal Mastering By » : 6/6 Mastering Engineer)."""
+        assert client._map_discogs_role_to_enum(libelle) == attendu
+
+    @pytest.mark.parametrize(
+        "libelle",
+        [
+            "Music By",
+            "Realization",
+            "Project Manager",
+            "Management",
+            "Production Manager",
+            "Stylist",
+        ],
+    )
+    def test_libelles_laisses_en_other_deliberement(self, client, libelle):
+        """DÉCISION, pas un oubli : l'oracle Genius est partagé sur « Music By »
+        (Producer x4, Mixing Engineer x3) et « Realization » (Mixing x10,
+        Recording x9, Producer x2) ; les quatre autres n'ont aucun équivalent
+        dans l'enum. Les mapper inventerait une précision que la donnée n'a pas.
+        Ce test existe pour qu'un futur « complétons la table » voie que ces
+        libellés ont été écartés SCIEMMENT."""
+        assert client._map_discogs_role_to_enum(libelle) == CreditRole.OTHER
+
     def test_role_inconnu(self, client):
         """Rangé en OTHER — la donnée n'est pas perdue, mais elle disparaît des
         regroupements par rôle : c'est là qu'un rôle manquant se voit."""

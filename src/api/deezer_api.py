@@ -15,12 +15,17 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import requests
 
+from src.observability import source_usage
+
 if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "deezer"
 
 
 class DeezerAPI:
@@ -85,13 +90,19 @@ class DeezerAPI:
 
         try:
             response = self.session.get(url, params=params, timeout=10)
+            source_usage.record_response(url, response.status_code, headers=response.headers)
             response.raise_for_status()
             return self._payload_or_none(response.json())
 
         except requests.exceptions.RequestException as e:
+            # Le `record_response` ci-dessus a déjà qualifié les codes HTTP ;
+            # ici on ne capte que ce qui n'a pas atteint le serveur.
+            if not isinstance(e, requests.exceptions.HTTPError):
+                source_usage.note_failure(_SOURCE, e)
             logger.error(f"Erreur de requête: {e}")
             return None
         except ValueError as e:
+            source_usage.note_failure(_SOURCE, e, detail=f"JSON illisible : {e}")
             logger.error(f"Erreur de parsing JSON: {e}")
             return None
 
@@ -102,6 +113,7 @@ class DeezerAPI:
         est remplacé par le limiteur par domaine de la session partagée."""
         url = f"{self.BASE_URL}/{endpoint}"
         try:
+            # La tentative est déjà enregistrée par AsyncHttpSession.get.
             response = await http.get(url, params=params, timeout=10)
             response.raise_for_status()
             return self._payload_or_none(response.json())
@@ -109,6 +121,7 @@ class DeezerAPI:
             logger.error(f"Erreur de requête: {e}")
             return None
         except ValueError as e:
+            source_usage.note_failure(_SOURCE, e, detail=f"JSON illisible : {e}")
             logger.error(f"Erreur de parsing JSON: {e}")
             return None
 
@@ -162,23 +175,29 @@ class DeezerAPI:
         """
         # Le réseau/JSON est déjà géré par _make_request (retourne None) : ce garde
         # ne couvre plus qu'un accès inattendu sur le hit → warning, pas de silence.
-        try:
-            track_data = self.search_track(artist, title)
-            if track_data and track_data.get("isrc"):
-                return track_data["isrc"]
-        except (AttributeError, TypeError) as e:
-            logger.warning(f"get_isrc échec pour {artist} - {title}: {e}")
-        return None
+        with source_usage.observe(_SOURCE, label=f"ISRC {artist} — {title}") as obs:
+            try:
+                track_data = self.search_track(artist, title)
+                if track_data and track_data.get("isrc"):
+                    return track_data["isrc"]
+                obs.absent("pas d'ISRC sur le hit")
+            except (AttributeError, TypeError) as e:
+                obs.parse_error(f"hit inexploitable : {e}")
+                logger.warning(f"get_isrc échec pour {artist} - {title}: {e}")
+            return None
 
     async def get_isrc_async(self, http: "AsyncHttpSession", artist: str, title: str) -> str | None:
         """Jumeau async de `get_isrc`."""
-        try:
-            track_data = await self.search_track_async(http, artist, title)
-            if track_data and track_data.get("isrc"):
-                return track_data["isrc"]
-        except (AttributeError, TypeError) as e:
-            logger.warning(f"get_isrc échec pour {artist} - {title}: {e}")
-        return None
+        with source_usage.observe(_SOURCE, label=f"ISRC {artist} — {title}") as obs:
+            try:
+                track_data = await self.search_track_async(http, artist, title)
+                if track_data and track_data.get("isrc"):
+                    return track_data["isrc"]
+                obs.absent("pas d'ISRC sur le hit")
+            except (AttributeError, TypeError) as e:
+                obs.parse_error(f"hit inexploitable : {e}")
+                logger.warning(f"get_isrc échec pour {artist} - {title}: {e}")
+            return None
 
     def get_track_by_id(self, track_id: int) -> dict | None:
         """
@@ -393,8 +412,13 @@ class DeezerAPI:
         Returns:
             Données enrichies avec vérifications
         """
-        track_data = self.search_track(artist, title)
-        return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
+        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
+            track_data = self.search_track(artist, title)
+            if track_data is None:
+                obs.absent("aucun hit de recherche")
+            return self._build_enrichment_result(
+                track_data, previous_duration, scraped_release_date
+            )
 
     async def enrich_track_async(
         self,
@@ -405,8 +429,13 @@ class DeezerAPI:
         scraped_release_date: str | None = None,
     ) -> dict[str, Any]:
         """Jumeau async d'`enrich_track` (mêmes vérifications, même forme de retour)."""
-        track_data = await self.search_track_async(http, artist, title)
-        return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
+        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
+            track_data = await self.search_track_async(http, artist, title)
+            if track_data is None:
+                obs.absent("aucun hit de recherche")
+            return self._build_enrichment_result(
+                track_data, previous_duration, scraped_release_date
+            )
 
     def _build_enrichment_result(
         self,

@@ -12,10 +12,16 @@ from typing import TYPE_CHECKING
 import httpx
 import requests
 
+from src.observability import source_usage
+from src.observability.issues import IssueKind
+
 if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
 
 logger = logging.getLogger("ReccoBeatsAPI")
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "reccobeats"
 
 # En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE
 # (UA httpx par défaut) → on repasse l'UA/Accept du client sync par requête
@@ -111,6 +117,7 @@ class ReccoBeatsIntegratedClient:
             logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
 
             response = self.recco_session.get(url, params=params, timeout=15)
+            source_usage.record_response(url, response.status_code, headers=response.headers)
 
             logger.debug(f"📡 Response: Status {response.status_code}")
 
@@ -125,6 +132,7 @@ class ReccoBeatsIntegratedClient:
                 logger.error(f"❌ Erreur {response.status_code}: {response.text[:200]}")
 
         except (requests.RequestException, ValueError) as e:
+            source_usage.note_failure(_SOURCE, e)
             logger.error(f"❌ Exception ReccoBeats: {e}")
 
         return None
@@ -170,6 +178,7 @@ class ReccoBeatsIntegratedClient:
             logger.debug(f"🎼 Audio features: {url}")
 
             response = self.recco_session.get(url, timeout=15)
+            source_usage.record_response(url, response.status_code, headers=response.headers)
 
             if response.status_code == 200:
                 features = response.json()
@@ -179,6 +188,7 @@ class ReccoBeatsIntegratedClient:
                 logger.warning(f"❌ Audio features erreur {response.status_code}")
 
         except (requests.RequestException, ValueError) as e:
+            source_usage.note_failure(_SOURCE, e)
             logger.error(f"❌ Exception audio features: {e}")
 
         return None
@@ -219,36 +229,41 @@ class ReccoBeatsIntegratedClient:
         """
         logger.info(f"🎵 get_track_info pour Spotify ID: {spotify_id}")
 
-        try:
-            cache_key = self._get_cache_key(spotify_id)
-            cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
-            if cached is not None:
-                return cached
+        cache_key = self._get_cache_key(spotify_id)
+        cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
+        if cached is not None:
+            return cached  # servi par le cache : aucune sollicitation de la source
 
-            # Étape 1: Récupérer les données du track
-            track_data = self.get_track_from_reccobeats(spotify_id)
+        # UNE observation pour la chaîne track + audio features : c'est un seul
+        # appel logique à ReccoBeats, même s'il coûte deux requêtes.
+        with source_usage.observe(_SOURCE, label=f"spotify:{spotify_id}") as obs:
+            try:
+                # Étape 1: Récupérer les données du track
+                track_data = self.get_track_from_reccobeats(spotify_id)
 
-            if not track_data:
-                self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
+                if not track_data:
+                    obs.absent(f"Spotify ID {spotify_id} inconnu de ReccoBeats")
+                    self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
+                    return None
+
+                # Durée + audio features (BPM/Key/Mode...) via helper partagé
+                result = self._enrich_result_with_features(
+                    self._base_spotify_result(spotify_id, track_data), track_data
+                )
+
+                # Sauvegarder en cache
+                self.cache[cache_key] = result
+                self._save_cache()
+
+                logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
+                return result
+
+            except Exception as e:
+                # Dernier ressort : les appels internes gèrent déjà leurs frontières
+                # réseau/parse ; un bug d'orchestration remonte ici → trace complète.
+                obs.fail(IssueKind.CRASH, f"{type(e).__name__}: {e}")
+                logger.exception("❌ Erreur générale get_track_info")
                 return None
-
-            # Durée + audio features (BPM/Key/Mode...) via helper partagé
-            result = self._enrich_result_with_features(
-                self._base_spotify_result(spotify_id, track_data), track_data
-            )
-
-            # Sauvegarder en cache
-            self.cache[cache_key] = result
-            self._save_cache()
-
-            logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
-            return result
-
-        except Exception:
-            # Dernier ressort : les appels internes gèrent déjà leurs frontières
-            # réseau/parse ; un bug d'orchestration remonte ici → trace complète.
-            logger.exception("❌ Erreur générale get_track_info")
-            return None
 
     async def get_track_info_async(
         self,
@@ -260,31 +275,34 @@ class ReccoBeatsIntegratedClient:
         """Jumeau async de `get_track_info` (même cache, même forme de retour)."""
         logger.info(f"🎵 get_track_info pour Spotify ID: {spotify_id}")
 
-        try:
-            cache_key = self._get_cache_key(spotify_id)
-            cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
-            if cached is not None:
-                return cached
+        cache_key = self._get_cache_key(spotify_id)
+        cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
+        if cached is not None:
+            return cached  # servi par le cache : aucune sollicitation de la source
 
-            track_data = await self.get_track_from_reccobeats_async(http, spotify_id)
+        with source_usage.observe(_SOURCE, label=f"spotify:{spotify_id}") as obs:
+            try:
+                track_data = await self.get_track_from_reccobeats_async(http, spotify_id)
 
-            if not track_data:
-                self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
+                if not track_data:
+                    obs.absent(f"Spotify ID {spotify_id} inconnu de ReccoBeats")
+                    self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
+                    return None
+
+                result = await self._enrich_result_with_features_async(
+                    http, self._base_spotify_result(spotify_id, track_data), track_data
+                )
+
+                self.cache[cache_key] = result
+                self._save_cache()
+
+                logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
+                return result
+
+            except Exception as e:
+                obs.fail(IssueKind.CRASH, f"{type(e).__name__}: {e}")
+                logger.exception("❌ Erreur générale get_track_info")
                 return None
-
-            result = await self._enrich_result_with_features_async(
-                http, self._base_spotify_result(spotify_id, track_data), track_data
-            )
-
-            self.cache[cache_key] = result
-            self._save_cache()
-
-            logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
-            return result
-
-        except Exception:
-            logger.exception("❌ Erreur générale get_track_info")
-            return None
 
     def _cached_spotify_info(
         self, cache_key: str, spotify_id: str, use_cache: bool, force_refresh: bool

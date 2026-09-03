@@ -781,4 +781,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Lancé en SOUS-PROCESSUS par le dialog certifs : on branche les compteurs
+    # d'usage sur la même base, sinon rien de ce run ne serait compté.
+    from src.observability import repository as usage_repository
+    from src.observability.registry import Flow
+
+    with usage_repository.script_scope(Flow.CERTS):
+        main()

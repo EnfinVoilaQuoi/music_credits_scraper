@@ -6,6 +6,8 @@ import customtkinter as ctk
 
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import run_worker, stop_requested
+from src.observability import source_usage
+from src.observability.registry import Flow
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -156,10 +158,19 @@ def get_tracks(app):
     ctk.CTkLabel(max_songs_frame, text="Nombre maximum de morceaux:", font=("Arial", 12)).pack(
         anchor="w", padx=15, pady=(12, 5)
     )
+    ctk.CTkLabel(
+        max_songs_frame,
+        text="⚠️ Plafond DUR : au-delà, la liste Genius est coupée. Les grosses\n"
+        "discographies (SCH : 329 morceaux) demandent une valeur large.\n"
+        "Tri du PLUS RÉCENT au plus ancien : ce qui saute est le plus vieux.",
+        text_color="gray",
+        font=("Arial", 10),
+        justify="left",
+    ).pack(anchor="w", padx=15, pady=(0, 4))
 
-    max_songs_entry = ctk.CTkEntry(max_songs_frame, width=100, placeholder_text="200")
+    max_songs_entry = ctk.CTkEntry(max_songs_frame, width=100, placeholder_text="500")
     max_songs_entry.pack(anchor="w", padx=15, pady=(0, 12))
-    max_songs_entry.insert(0, "200")
+    max_songs_entry.insert(0, "500")
 
     # Info supplémentaire
     info_frame = ctk.CTkFrame(dialog)
@@ -181,9 +192,9 @@ def get_tracks(app):
         try:
             max_songs = int(max_songs_entry.get())
             if max_songs <= 0:
-                max_songs = 300
+                max_songs = 500
         except ValueError:
-            max_songs = 300
+            max_songs = 500
 
         include_features = include_features_var.get()
         prefill = prefill_var.get()
@@ -553,7 +564,15 @@ def start_track_retrieval(
             )
             app.root.after(0, lambda: app.progress_label.configure(text=""))
 
-    run_worker(get_tracks, name="retrieval")
+    def get_tracks_observe():
+        """Le scope nomme l'artiste et le flux : sans lui, l'usage des sources
+        serait compté sans savoir POUR QUI (`artist_id` à NULL)."""
+        with source_usage.run_scope(
+            Flow.DISCO, artist_id=app.current_artist.id, artist_name=app.current_artist.name
+        ):
+            return get_tracks()
+
+    run_worker(get_tracks_observe, name="retrieval")
 
 
 # ✅ AJOUT DES MÉTHODES MANQUANTES POUR FONCTIONNALITÉS EXISTANTES

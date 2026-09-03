@@ -28,7 +28,12 @@ except ImportError:  # pragma: no cover
         """Sentinelle quand googleapiclient est absent (jamais levée)."""
 
 
+from src.observability import source_usage
+
 logger = logging.getLogger("YTMusicAPI")
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "ytmusic"
 
 try:
     from src.config import YOUTUBE_API_KEY
@@ -376,9 +381,19 @@ class YTMusicAPI:
         Returns:
             {'lyrics': str, 'lyrics_synced': str|None, 'source': str} ou None.
         """
+        # `attempt` autour de chaque appel à ytmusicapi : la lib fait ses
+        # requêtes elle-même, ni le shim `requests_get` ni l'AsyncHttpSession ne
+        # les voient. Sans ça, l'observation conclurait `indeterminate`.
+        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
+            return self._get_lyrics_body(obs, artist, title)
+
+    def _get_lyrics_body(self, obs, artist: str, title: str) -> dict | None:
+        """Corps de `get_lyrics`, sous l'observation ouverte par elle."""
         try:
-            results = self.yt.search(f"{artist} {title}", filter="songs", limit=3)
+            with source_usage.attempt(_SOURCE, detail="search"):
+                results = self.yt.search(f"{artist} {title}", filter="songs", limit=3)
             if not results:
+                obs.absent("aucun résultat de recherche")
                 return None
 
             na = _normalize(artist)
@@ -392,11 +407,14 @@ class YTMusicAPI:
                     break
             if not chosen:
                 logger.debug(f"YTM lyrics: artiste non confirmé pour '{artist} - {title}'")
+                obs.absent("artiste non confirmé sur les résultats")
                 return None
 
-            watch = self.yt.get_watch_playlist(videoId=chosen["videoId"])
+            with source_usage.attempt(_SOURCE, detail="watch_playlist"):
+                watch = self.yt.get_watch_playlist(videoId=chosen["videoId"])
             lyrics_id = watch.get("lyrics") if isinstance(watch, dict) else None
             if not lyrics_id:
+                obs.absent("pas de paroles pour cette vidéo")
                 return None
 
             # Demander la version synchronisée ; fallback texte brut si indispo
@@ -418,6 +436,7 @@ class YTMusicAPI:
                 text = raw
 
             if not text or not str(text).strip():
+                obs.absent("paroles vides")
                 return None
 
             source = (data.get("source") if isinstance(data, dict) else None) or "YouTube Music"
@@ -427,6 +446,10 @@ class YTMusicAPI:
             )
             return {"lyrics": str(text).strip(), "lyrics_synced": synced, "source": source}
         except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
+            # Le transport a déjà été qualifié par `attempt` ; ici on ne nomme que
+            # les ruptures de FORME de la réponse.
+            if isinstance(e, (KeyError, TypeError, IndexError)):
+                obs.parse_error(f"réponse inexploitable : {e}")
             logger.warning(f"YTM get_lyrics échec '{artist} - {title}': {e}")
             return None
 

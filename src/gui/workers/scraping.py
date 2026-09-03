@@ -13,6 +13,8 @@ from tkinter import messagebox
 from src.enrichment.providers.lyrics import LyricsProvider
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import run_worker, stop_requested
+from src.observability import source_usage
+from src.observability.registry import Flow
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.utils.logger import get_logger
 
@@ -419,4 +421,10 @@ def start_combined_scraping(
             app.root.after(0, lambda: app.progress_label.configure(text=""))
             app.root.after(0, app._update_buttons_state)
 
-    run_worker(scrape, name="scraping")
+    def scrape_observe():
+        with source_usage.run_scope(
+            Flow.ENRICHMENT, artist_id=app.current_artist.id, artist_name=app.current_artist.name
+        ):
+            return scrape()
+
+    run_worker(scrape_observe, name="scraping")

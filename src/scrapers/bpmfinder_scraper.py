@@ -28,10 +28,15 @@ from src.config import (
     BPMFINDER_SESSION_FILE,
     DATA_DIR,
 )
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.music_theory import note_to_pitch_class, parse_mode
 
 logger = logging.getLogger("BPMFinderScraper")
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "bpmfinder"
 
 ANALYZER_URL = "https://audioaidynamics.com/music-analyzer"
 _CACHE_FILE = DATA_DIR / "bpmfinder_cache.json"
@@ -344,6 +349,40 @@ class BPMFinderScraper:
             logger.debug(f"BPM Finder: cache hit {vid}")
             return self.cache[vid]
 
+        # L'observation s'ouvre APRÈS le cache. Le verdict est déduit de
+        # `last_failure_reason`, que ce scraper renseigne déjà finement.
+        with source_usage.observe(_SOURCE, label=vid) as obs:
+            resultat = self._analyze_body(youtube_url, vid, timeout_s)
+            self._note_issue(obs, resultat)
+            return resultat
+
+    def _note_issue(self, obs, resultat) -> None:
+        """Traduit `last_failure_reason` en verdict.
+
+        Ces quatre cas existaient déjà pour le disjoncteur de l'orchestrateur :
+        ils disent la même chose que la taxonomie, il suffit de les nommer.
+        """
+        if resultat:
+            obs.ok()
+            return
+        raison = self.last_failure_reason
+        if raison == "login":
+            obs.fail(IssueKind.AUTH, "login refusé (BPMFINDER_EMAIL/PASSWORD)")
+        elif raison == "timeout":
+            obs.fail(IssueKind.UNREACHABLE, "le site n'a rien renvoyé")
+        elif raison == "backend":
+            status = self._last_api_error
+            if status is not None and 500 <= status < 600:
+                obs.fail(IssueKind.UNREACHABLE, f"backend HTTP {status}")
+            else:
+                # 4xx : la vidéo n'est pas analysable (restreinte, indispo).
+                # C'est une absence de donnée, PAS une panne de la source.
+                obs.absent(f"vidéo non analysable (HTTP {status})")
+        else:
+            obs.absent("aucun résultat")
+
+    def _analyze_body(self, youtube_url: str, vid: str, timeout_s: int) -> dict | None:
+        """Corps d'`analyze`, sous l'observation ouverte par elle."""
         self._ensure_driver()
         self._goto_analyzer()
 

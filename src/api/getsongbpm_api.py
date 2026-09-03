@@ -24,10 +24,15 @@ if TYPE_CHECKING:
 if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from src.observability import source_usage
+
 # Import logger
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "getsongbpm"
 
 # En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE
 # (UA httpx par défaut) → on repasse l'UA/Accept du client sync par requête
@@ -238,6 +243,7 @@ class GetSongBPMFetcher:
         for attempt in range(self.MAX_RETRIES):
             try:
                 response = self.session.get(url, params=params, timeout=15)
+                source_usage.record_response(url, response.status_code, headers=response.headers)
 
                 if response.status_code == 200:
                     return self._selected_from_response(response.json(), artist, title)
@@ -261,6 +267,7 @@ class GetSongBPMFetcher:
                     return None
 
             except requests.exceptions.RequestException as e:
+                source_usage.note_failure(_SOURCE, e)
                 print(f"    ⚠ Erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}): {e}")
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(2**attempt)
@@ -373,11 +380,13 @@ class GetSongBPMFetcher:
         """
         cached = self._cached_song(artist, title)
         if cached is not None:
-            return cached
+            return cached  # servi par le cache : aucune sollicitation de la source
 
-        # Rechercher le morceau
-        track_data = self._search_track(artist, title)
-        return self._song_from_track_data(artist, title, track_data)
+        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
+            track_data = self._search_track(artist, title)
+            if track_data is None:
+                obs.absent("aucun hit validé")
+            return self._song_from_track_data(artist, title, track_data)
 
     async def fetch_track_bpm_async(
         self, http: "AsyncHttpSession", artist: str, title: str
@@ -385,10 +394,13 @@ class GetSongBPMFetcher:
         """Jumeau async de `fetch_track_bpm` (même cache, même sélection)."""
         cached = self._cached_song(artist, title)
         if cached is not None:
-            return cached
+            return cached  # servi par le cache : aucune sollicitation de la source
 
-        track_data = await self._search_track_async(http, artist, title)
-        return self._song_from_track_data(artist, title, track_data)
+        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
+            track_data = await self._search_track_async(http, artist, title)
+            if track_data is None:
+                obs.absent("aucun hit validé")
+            return self._song_from_track_data(artist, title, track_data)
 
     def fetch_artist_discography(self, artist: str, track_list: list[str]) -> list[SongData]:
         """

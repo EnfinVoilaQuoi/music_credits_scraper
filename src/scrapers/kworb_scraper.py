@@ -20,9 +20,13 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
+from src.observability import source_usage
 from src.utils.llm_extractor import build_streams_table_prompt, get_shared_extractor
 
 logger = logging.getLogger("KworbScraper")
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "kworb"
 
 _HEADERS = {
     "User-Agent": (
@@ -71,8 +75,15 @@ class KworbScraper:
     # ── Fetch + parse ──────────────────────────────────────────────────────────
 
     def _fetch_and_parse(self, url: str) -> dict | None:
+        # UNE observation par page demandée. Le shim `requests_get` est
+        # indispensable ici : le `except` ci-dessous AVALE l'erreur et rend
+        # None, si bien qu'aucun échec n'atteindrait le capteur autrement.
+        with source_usage.observe(_SOURCE, label=url) as obs:
+            return self._fetch_and_parse_body(url, obs)
+
+    def _fetch_and_parse_body(self, url: str, obs) -> dict | None:
         try:
-            resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+            resp = source_usage.requests_get(_SOURCE, url, headers=_HEADERS, timeout=_TIMEOUT)
             if resp.status_code == 404:
                 logger.warning(f"Page Kworb introuvable (404): {url}")
                 return None
@@ -94,7 +105,10 @@ class KworbScraper:
             }
 
             if not page["entries"]:
-                # Fallback LLM si la structure de la page a changé
+                # 0 entrée sur une page servie : la structure a changé. C'est un
+                # scrape cassé, pas une absence de donnée — le repli LLM ne doit
+                # pas masquer le signal.
+                obs.parse_error("0 entrée parsée (structure de table changée ?)")
                 page["entries"] = self._extract_with_llm(soup.get_text(separator="\n", strip=True))
 
             logger.info(
@@ -104,6 +118,7 @@ class KworbScraper:
             return page
 
         except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
+            obs.parse_error(f"page illisible : {e}")
             logger.error(f"Erreur parsing Kworb ({url}): {e}")
             return None
 

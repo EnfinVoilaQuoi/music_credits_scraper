@@ -95,6 +95,71 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | N
         return None
 
 
+def _resolve_homonym(candidates, artist_name: str, credited_norm: set[str]):
+    """Départage des HOMONYMES par les artistes crédités du track Spotify.
+
+    Deux morceaux distincts peuvent porter le même titre (« MEILLEUR » de
+    Souffrance vs « Meilleur » de Goldee Money — cf. JOURNAL). On compare
+    l'artiste principal de chaque candidat aux artistes crédités sur la page
+    embed. ABSTENTION dès qu'il n'y a pas exactement UN candidat compatible :
+    attribuer les streams au mauvais morceau est pire que ne rien écrire.
+
+    Fonction PURE : les crédits sont fournis en entrée, le scraping reste au
+    site d'appel (extraite d'une closure le 2026-09-03 pour être testable).
+    """
+    if not credited_norm:
+        return None
+    matches = []
+    for cand in candidates:
+        primary = (
+            getattr(cand, "primary_artist_name", None)
+            if getattr(cand, "is_featuring", False)
+            else None
+        ) or artist_name
+        p = _normalize_title(primary)
+        if any(p == c or p in c or c in p for c in credited_norm):
+            matches.append(cand)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
+    """Rapproche un titre Kworb d'UN SEUL morceau en base par similarité
+    (difflib sur titre normalisé) — attrape les coquilles (« Rhythm » vs
+    « Rythm »). GARDE-FOUS anti-fusion : ne matche QUE s'il existe
+    exactement UN candidat au-dessus du seuil (abstention si ambigu, ex.
+    plusieurs variantes « My Love »). Ne strippe PAS les descripteurs de
+    version (Acoustic/Intro/Remix) → studio et acoustique restent distincts.
+    """
+    nk = _normalize_title(entry_title)
+    hits = []
+    for t in tracks:
+        r = difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio()
+        if r >= threshold:
+            hits.append((r, t))
+    return (hits[0][1], hits[0][0]) if len(hits) == 1 else (None, 0.0)
+
+
+def _best_candidate(entry_title, tracks):
+    """Meilleur candidat unique dans la bande INCERTAINE [0.55, 0.87) — pour
+    proposer une confirmation à l'utilisateur (ex. « Matrix » vs
+    « Matrix (Intro) ») sans écrire. Unique = pas de 2e candidat proche."""
+    nk = _normalize_title(entry_title)
+    scored = sorted(
+        ((difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio(), t) for t in tracks),
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    if not scored:
+        return None, 0.0
+    best_r, best_t = scored[0]
+    if not (0.55 <= best_r < 0.87):
+        return None, 0.0
+    # écart net avec le 2e (évite de proposer quand plusieurs se valent)
+    if len(scored) > 1 and (best_r - scored[1][0]) < 0.08:
+        return None, 0.0
+    return best_t, best_r
+
+
 def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     """Scrape la page songs et valide l'identité. Re-vote une fois si mismatch.
 
@@ -244,58 +309,9 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
         except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError):
             credited = []
         credited_norm = {_normalize_title(a["name"]) for a in credited if a.get("name")}
-        if not credited_norm:
-            return None
-        matches = []
-        for cand in candidates:
-            primary = (
-                getattr(cand, "primary_artist_name", None)
-                if getattr(cand, "is_featuring", False)
-                else None
-            ) or artist.name
-            p = _normalize_title(primary)
-            if any(p == c or p in c or c in p for c in credited_norm):
-                matches.append(cand)
-        return matches[0] if len(matches) == 1 else None
-
-    def _fuzzy_unique(entry_title, threshold: float = 0.87):
-        """Rapproche un titre Kworb d'UN SEUL morceau en base par similarité
-        (difflib sur titre normalisé) — attrape les coquilles (« Rhythm » vs
-        « Rythm »). GARDE-FOUS anti-fusion : ne matche QUE s'il existe
-        exactement UN candidat au-dessus du seuil (abstention si ambigu, ex.
-        plusieurs variantes « My Love »). Ne strippe PAS les descripteurs de
-        version (Acoustic/Intro/Remix) → studio et acoustique restent distincts.
-        """
-        nk = _normalize_title(entry_title)
-        hits = []
-        for t in tracks:
-            r = difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio()
-            if r >= threshold:
-                hits.append((r, t))
-        return (hits[0][1], hits[0][0]) if len(hits) == 1 else (None, 0.0)
-
-    def _best_candidate(entry_title):
-        """Meilleur candidat unique dans la bande INCERTAINE [0.55, 0.87) — pour
-        proposer une confirmation à l'utilisateur (ex. « Matrix » vs
-        « Matrix (Intro) ») sans écrire. Unique = pas de 2e candidat proche."""
-        nk = _normalize_title(entry_title)
-        scored = sorted(
-            (
-                (difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio(), t)
-                for t in tracks
-            ),
-            key=lambda x: x[0],
-            reverse=True,
-        )
-        if not scored:
-            return None, 0.0
-        best_r, best_t = scored[0]
-        if not (0.55 <= best_r < 0.87):
-            return None, 0.0
-        # écart net avec le 2e (évite de proposer quand plusieurs se valent)
-        if len(scored) > 1 and (best_r - scored[1][0]) < 0.08:
-            return None, 0.0
-        return best_t, best_r
+        # La DÉCISION vit au niveau module (`_resolve_homonym`) : seule
+        # l'ouverture du scraper embed reste ici.
+        return _resolve_homonym(candidates, artist.name, credited_norm)
 
     # Décisions mémorisées (confirmé/rejeté) pour ne pas redemander
     try:
@@ -338,7 +354,7 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
             # 3ᵉ niveau : rapprochement flou (candidat unique) pour les coquilles
             # / ponctuation. Seulement si ni ID ni titre exact n'ont abouti.
             if track is None:
-                ftrack, fscore = _fuzzy_unique(entry["title"])
+                ftrack, fscore = _fuzzy_unique(entry["title"], tracks)
                 if ftrack:
                     track, via = ftrack, "fuzzy"
                     result["fuzzy_matched"].append((entry["title"], ftrack.title, fscore))
@@ -358,7 +374,7 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
                             f"🔗 Kworb (confirmé mémorisé): '{entry['title']}' → '{track.title}'"
                         )
                 elif _nk not in _decisions.get("rejected", []):
-                    cand, score = _best_candidate(entry["title"])
+                    cand, score = _best_candidate(entry["title"], tracks)
                     if cand:
                         _suggested = True
                         result["suggestions"].append(

@@ -4,6 +4,8 @@ Les fonctions de update_riaa écrivent dans des fichiers module-niveau : on
 monkeypatch les chemins vers tmp_path pour tester sans toucher aux vraies données.
 """
 
+from datetime import datetime
+
 import pandas as pd
 import pytest
 
@@ -73,3 +75,215 @@ def test_clean_certif_csv_derive_du_brut(riaa_tmp):
     clean = pd.read_csv(riaa_tmp / "certif_riaa.csv")
     assert after == 1  # dédup depuis le brut
     assert len(clean) == 1
+
+
+# ─────────────────────────────────────── aplatissement des données scrapées
+
+
+class TestAplatissement:
+    """`_flatten_records` : scrape → schéma certif_riaa.csv.
+
+    Avec « MORE DETAILS », une fiche RIAA porte l'HISTORIQUE de ses paliers :
+    chacun doit devenir sa propre ligne (dédup additive), sinon seul le dernier
+    palier survit et l'historique de certification est perdu.
+    """
+
+    def test_fiche_sans_historique(self):
+        rows = u._flatten_records(
+            [
+                {
+                    "artist": "DRAKE",
+                    "title": "VIEWS",
+                    "label": "OVO",
+                    "format": "ALBUM",
+                    "certification_date": "January 5, 2018",
+                    "release_date": "April 29, 2016",
+                    "certification_level": "Diamond",
+                }
+            ]
+        )
+        assert len(rows) == 1
+        assert rows[0]["Artist"] == "DRAKE"
+        assert rows[0]["Certification_Type"] == "Diamond"
+        assert rows[0]["Label"] == "OVO"
+
+    def test_historique_eclate_en_lignes(self):
+        rows = u._flatten_records(
+            [
+                {
+                    "artist": "DRAKE",
+                    "title": "VIEWS",
+                    "format": "ALBUM",
+                    "history": [
+                        {"certification_level": "Gold", "certification_date": "June 1, 2016"},
+                        {"certification_level": "Platinum", "certification_date": "July 1, 2016"},
+                        {"certification_level": "Diamond", "certification_date": "January 5, 2018"},
+                    ],
+                }
+            ]
+        )
+        assert [r["Certification_Type"] for r in rows] == ["Gold", "Platinum", "Diamond"]
+        assert all(r["Artist"] == "DRAKE" for r in rows)
+
+    def test_palier_sans_niveau_ecarte(self):
+        """Une entrée d'historique sans niveau n'est pas une certification."""
+        rows = u._flatten_records(
+            [
+                {
+                    "artist": "A",
+                    "title": "B",
+                    "history": [
+                        {"certification_level": "", "certification_date": "x"},
+                        {"certification_level": "Gold", "certification_date": "June 1, 2016"},
+                    ],
+                }
+            ]
+        )
+        assert len(rows) == 1
+        assert rows[0]["Certification_Type"] == "Gold"
+
+    def test_multiplicateur_normalise(self):
+        """« 4x Multi-Platinum » et « 4x Platinum » désignent le même palier :
+        les laisser diverger créerait deux lignes pour une seule certification."""
+        rows = u._flatten_records(
+            [{"artist": "A", "title": "B", "certification_level": "4x Multi-Platinum"}]
+        )
+        assert rows[0]["Certification_Type"] == "4x Platinum"
+
+    def test_date_du_palier_prime_sur_celle_de_la_fiche(self):
+        rows = u._flatten_records(
+            [
+                {
+                    "artist": "A",
+                    "title": "B",
+                    "certification_date": "January 1, 2020",
+                    "history": [
+                        {"certification_level": "Gold", "certification_date": "June 1, 2016"}
+                    ],
+                }
+            ]
+        )
+        assert rows[0]["Certification_Date"] == "June 1, 2016"
+
+    def test_date_de_la_fiche_en_repli(self):
+        rows = u._flatten_records(
+            [
+                {
+                    "artist": "A",
+                    "title": "B",
+                    "certification_date": "January 1, 2020",
+                    "history": [{"certification_level": "Gold"}],
+                }
+            ]
+        )
+        assert rows[0]["Certification_Date"] == "January 1, 2020"
+
+    def test_aucun_enregistrement(self):
+        assert u._flatten_records([]) == []
+
+
+class TestNormalisations:
+    @pytest.mark.parametrize(
+        ("entree", "attendu"),
+        [
+            ("SHORT FORM ALBUM", "SHORTFORMALBUM"),
+            ("SHORTFORM ALBUM", "SHORTFORMALBUM"),
+            ("short  form   album", "SHORTFORMALBUM"),
+            ("ALBUM", "ALBUM"),
+            ("", ""),
+        ],
+    )
+    def test_format(self, entree, attendu):
+        assert u._norm_format(entree) == attendu
+
+    @pytest.mark.parametrize(
+        ("entree", "attendu"),
+        [
+            ("October 17, 2017", "2017-10-17"),
+            ("2017-10-17", "2017-10-17"),
+            ("", ""),
+            ("None", ""),
+        ],
+    )
+    def test_date(self, entree, attendu):
+        assert u._riaa_iso(entree) == attendu
+
+
+# ─────────────────────────────────────── lecture du clean par l'updater
+
+
+@pytest.fixture
+def updater(tmp_path, riaa_tmp):
+    return u.RIAADatabaseUpdater(base_dir=tmp_path)
+
+
+def _ecrire_clean(chemin, lignes):
+    entete = "Artist,Title,Certification_Date,Label,Format_Type,Certification_Type"
+    chemin.write_text("\n".join([entete, *lignes]) + "\n", encoding="utf-8-sig")
+
+
+class TestLectureDuClean:
+    def test_derniere_date_connue(self, updater, riaa_tmp):
+        """La fraîcheur se lit dans le CLEAN (fichier du matcher), pas ailleurs."""
+        _ecrire_clean(
+            u.CERTIF_CSV,
+            [
+                'A,B,"January 5, 2018",L,ALBUM,Gold',
+                'C,D,"March 15, 2021",L,ALBUM,Gold',
+            ],
+        )
+        assert updater.get_last_update_date() == datetime(2021, 3, 15)
+
+    def test_date_vide_ne_fait_pas_crasher(self, updater, riaa_tmp):
+        """Une cellule vide arrive en NaN (un float) : sans `.fillna("")`,
+        `_riaa_iso` lève AttributeError, qui n'est PAS rattrapé par le `except`
+        de la méthode. Une seule ligne sans date casserait définitivement
+        l'affichage de fraîcheur RIAA. Corrigé le 2026-09-03."""
+        _ecrire_clean(
+            u.CERTIF_CSV,
+            ["A,B,,L,ALBUM,Gold", 'C,D,"March 15, 2021",L,ALBUM,Gold'],
+        )
+        assert updater.get_last_update_date() == datetime(2021, 3, 15)
+
+    def test_toutes_les_dates_vides(self, updater, riaa_tmp):
+        """Aucune date exploitable : repli, pas d'exception."""
+        _ecrire_clean(u.CERTIF_CSV, ["A,B,,L,ALBUM,Gold"])
+        updater.get_last_update_date()  # ne lève pas
+
+    def test_statistiques(self, updater, riaa_tmp):
+        _ecrire_clean(
+            u.CERTIF_CSV,
+            [
+                'DRAKE,VIEWS,"January 5, 2018",OVO,ALBUM,Diamond',
+                'DRAKE,SCORPION,"March 1, 2019",OVO,ALBUM,Gold',
+                'JUL,MY WORLD,"June 1, 2020",L,ALBUM,Gold',
+            ],
+        )
+        stats = updater.get_statistics()
+        assert stats["total"] == 3
+        assert stats["by_level"]["Gold"] == 2
+        assert stats["top_artists"][0] == ("DRAKE", 2)
+        assert stats["last_updated"] == "2020-06-01"
+
+    def test_statistiques_sans_fichier(self, updater, riaa_tmp):
+        stats = updater.get_statistics()
+        assert stats == {"total": 0, "by_level": {}, "top_artists": [], "last_updated": None}
+
+    def test_accumulation_depuis_un_scrape(self, updater, riaa_tmp):
+        ajoutees, _ = updater.update_from_scraped_data(
+            [
+                {
+                    "artist": "DRAKE",
+                    "title": "VIEWS",
+                    "format": "ALBUM",
+                    "certification_level": "Diamond",
+                    "certification_date": "January 5, 2018",
+                }
+            ]
+        )
+        assert ajoutees == 1
+        assert u.CERTIF_CSV.exists()
+
+    def test_export_est_un_no_op(self, updater):
+        """Conservé pour les appelants du flux bulk : ne doit RIEN faire."""
+        assert updater.export_to_csv() is None

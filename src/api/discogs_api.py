@@ -361,10 +361,19 @@ class DiscogsClient:
             "photography": CreditRole.PHOTOGRAPHY,
         }
 
-        # Chercher une correspondance
-        for discogs_role, credit_role in role_mapping.items():
+        # Chercher une correspondance, de la clé la PLUS SPÉCIFIQUE à la plus
+        # générale. Jusqu'au 2026-09-03 la table était parcourue dans son ordre
+        # d'insertion et rendait la PREMIÈRE sous-chaîne trouvée : « producer »
+        # arrivant avant « co-producer », six rôles sur vingt-sept étaient
+        # INATTEIGNABLES malgré leur présence dans la table —
+        #   co-producer / executive producer / vocal producer → PRODUCER
+        #   assistant engineer                                → ENGINEER
+        #   lead vocals / backing vocals                      → VOCALS
+        # Le tri par longueur décroissante est stable : à longueur égale l'ordre
+        # d'insertion (donc le comportement historique) est conservé.
+        for discogs_role in sorted(role_mapping, key=len, reverse=True):
             if discogs_role in role_lower:
-                return credit_role
+                return role_mapping[discogs_role]
 
         # Pas de correspondance → OTHER
         return CreditRole.OTHER

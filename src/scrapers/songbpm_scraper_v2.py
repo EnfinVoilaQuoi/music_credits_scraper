@@ -116,13 +116,22 @@ class SongBPMScraper:
         return " ".join(s.lower().strip().split())
 
     def _normalize_title_for_matching(self, title: str) -> str:
+        # ORDRE SIGNIFICATIF : les formes DÉLIMITÉES (parenthèses puis crochets)
+        # d'abord, les formes nues ensuite. Jusqu'au 2026-09-03 les motifs nus
+        # passaient avant les crochets : sur « Titre [feat. SCH] », `feat\.?\s+.+$`
+        # emportait « feat. SCH] » et laissait un « [ » orphelin, que
+        # `_remove_parentheses_and_brackets` ne peut pas retirer (crochet non
+        # fermé) et que la ponctuation de `_title_key` ne couvre pas. La clé
+        # devenait « titre [ » : rattrapé par la règle d'inclusion sur un titre
+        # long, mais REJETÉ sur un titre court (« Ok [feat. X] » ne trouvait pas
+        # « Ok »), alors que la forme entre parenthèses passait.
         patterns_to_remove = [
             r"\s*\(feat\.?\s+[^)]+\)",
             r"\s*\(ft\.?\s+[^)]+\)",
-            r"\s*feat\.?\s+.+$",
-            r"\s*ft\.?\s+.+$",
             r"\s*\[feat\.?\s+[^\]]+\]",
             r"\s*\[ft\.?\s+[^\]]+\]",
+            r"\s*feat\.?\s+.+$",
+            r"\s*ft\.?\s+.+$",
         ]
         normalized = title
         for pattern in patterns_to_remove:

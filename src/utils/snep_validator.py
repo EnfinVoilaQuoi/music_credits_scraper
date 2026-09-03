@@ -7,7 +7,10 @@ non-déterministe et pourrait halluciner des trous inexistants).
 Vérifications effectuées :
   - Intégrité structurelle : nb de colonnes, lignes malformées, artefacts tab,
     champs critiques vides (Interprète / Titre / Certification).
-  - Doublons exacts (artiste + titre + certif + date de constat).
+  - Doublons, sur DEUX mesures : « exacts » (valeurs brutes) et « après
+    normalisation » — ce que `snep_cleaner` retirera réellement. Les deux
+    sont rapportés car l'écart est important (151 vs 722 sur le CSV réel au
+    2026-09-03) : n'en montrer qu'un induisait en erreur.
   - Dates : échecs de parsing, plage couverte, fraîcheur (date la plus récente).
   - Couverture mensuelle des années cibles (2025/2026 par défaut) : mois à 0
     certification, mois suspects (couverture faible).
@@ -26,8 +29,15 @@ from pathlib import Path
 
 import pandas as pd
 
-# Réutilise la réparation de séparateurs (fonction pure partagée)
-from src.utils.cert_normalize import repair_extra_separators
+# Fonctions pures partagées avec le nettoyeur (mêmes règles des deux côtés :
+# sans ça les deux outils annonçaient des comptes de doublons incomparables).
+from src.utils.cert_normalize import (
+    canon_category,
+    canon_level,
+    clean_field,
+    repair_extra_separators,
+    restore_apostrophes,
+)
 
 EXPECTED_NCOLS = 7
 
@@ -136,6 +146,7 @@ def validate_snep_csv(
         "month_gaps": [],
         "low_months": [],
         "duplicates": [],
+        "duplicates_normalized": [],
         "malformed": [],
         "tab_artifacts": 0,
         "empty_critical": 0,
@@ -236,6 +247,44 @@ def validate_snep_csv(
             ex.append(k.replace(" |  | ", " | "))
         report["duplicates"] = ex
 
+    # Doublons APRÈS NORMALISATION — c'est ce que « Nettoyer » retirera vraiment.
+    #
+    # La clé ci-dessus compare les valeurs BRUTES : « L?EMPIRE » et « L'EMPIRE »,
+    # « Double or » et « Double Or », « JUL\t » et « JUL » y restent distincts.
+    # Le nettoyeur, lui, normalise avant de dédoublonner. Mesuré le 2026-09-03 sur
+    # le CSV réel : 151 doublons exacts contre 722 retirés par le nettoyeur —
+    # n'annoncer que le premier chiffre laissait croire que le nettoyage n'avait
+    # presque rien à faire. On reproduit donc SA clé, à l'identique (mêmes
+    # fonctions, désormais dans cert_normalize), catégorie comprise.
+    def _norm_texte(s: str) -> str:
+        return restore_apostrophes(clean_field(s))[0]
+
+    n_artist = artist.fillna("").map(_norm_texte)
+    n_title = title.fillna("").map(_norm_texte)
+    norm_key = (
+        n_artist.str.lower()
+        + " | "
+        + n_title.str.lower()
+        + " | "
+        + category.fillna("").map(lambda s: canon_category(clean_field(s)))
+        + " | "
+        + level.fillna("").map(lambda s: canon_level(clean_field(s)))
+        + " | "
+        + constat_raw.fillna("").map(clean_field)
+    )
+    # Le nettoyeur écarte les lignes à artiste OU titre vide avant de dédoublonner
+    # (elles sont supprimées, pas dédoublonnées) : même exclusion ici, sinon les
+    # deux comptes ne seraient pas comparables.
+    exploitable = (n_artist != "") & (n_title != "")
+    norm_dup_mask = norm_key.duplicated(keep="first") & exploitable
+    report["stats"]["duplicates_normalized"] = int(norm_dup_mask.sum())
+    # Exemples du DELTA : les redondances qu'une comparaison brute ne voit pas.
+    caches = norm_dup_mask & ~dup_mask
+    if caches.any():
+        report["duplicates_normalized"] = [
+            k.replace(" |  | ", " | ") for k in norm_key[caches].head(10)
+        ]
+
     # Valeurs hors référentiel — comparaison insensible à la casse pour ne pas
     # confondre un niveau réellement inconnu et une simple variante de casse
     # (ex: "Double diamant" vs "Double Diamant", fréquent dans les vieilles
@@ -302,11 +351,15 @@ def validate_snep_csv(
             report["stats"][f"count_{year}"] = int((year_series == year).sum())
 
     # Verdict
+    # Les doublons NORMALISÉS entrent dans le verdict : sinon un CSV dont toutes
+    # les redondances portent une casse ou une apostrophe divergente serait déclaré
+    # « RAS » alors que le nettoyeur s'apprête à en retirer des centaines.
     report["ok"] = (
         not report["errors"]
         and not malformed
         and report["empty_critical"] == 0
         and dup_count == 0
+        and report["stats"]["duplicates_normalized"] == 0
         and not bad_cat
         and not bad_lvl
     )
@@ -369,12 +422,23 @@ def format_report(report: dict) -> str:
         )
     if report["date_parse_failures"]:
         L.append(f"⚠️ Dates de constat illisibles : {report['date_parse_failures']}")
+    n_norm = s.get("duplicates_normalized", 0)
+    if n_norm > s.get("duplicates", 0):
+        L.append(
+            f"🩹 Doublons après normalisation : {n_norm} "
+            f"(dont {n_norm - s['duplicates']} masqués par une casse, une apostrophe "
+            f"corrompue ou un espace parasite) — c'est ce que « Nettoyer » retirera"
+        )
     if s.get("repaired_lines"):
         L.append(f"🩹 Lignes réparées (séparateur en trop) : {s['repaired_lines']}")
 
     section("Lignes malformées", report["malformed"])
     section("Caractères corrompus (?) — à vérifier", report.get("corrupted_apostrophes", []))
     section("Doublons exacts", report["duplicates"])
+    section(
+        "Doublons visibles seulement après normalisation",
+        report.get("duplicates_normalized", []),
+    )
     section("Catégories hors référentiel", report["invalid_categories"])
     section("Niveaux hors référentiel", report["invalid_levels"])
     section("Catégories — variantes de casse (à normaliser)", report.get("casing_categories", []))

@@ -1,7 +1,9 @@
 """Tests des helpers purs de cert_matcher (normalisation dates/niveaux, ranking).
 
-Le chargement des CSV (SNEP/BRMA/RIAA) n'est pas couvert ici : il dépend des
-fichiers de data/ — hors périmètre des tests unitaires.
+Le chargement des CSV (SNEP/BRMA/RIAA) et le raccordement morceau/album vivent
+dans `test_cert_matcher_loading.py` : ils ne dépendent PAS des fichiers de data/
+(`DATA_PATH` est monkeypatché sur un `tmp_path`), contrairement à ce que cette
+note affirmait avant le 2026-09-03.
 """
 
 import pytest

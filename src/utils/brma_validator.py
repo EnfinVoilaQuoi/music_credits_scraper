@@ -22,6 +22,12 @@ from pathlib import Path
 import pandas as pd
 
 REQUIRED_COLS = ["artist", "title", "category", "certification_level", "certification_date"]
+# Référentiels en MINUSCULES : ce sont des jeux de COMPARAISON (tout est
+# comparé en .lower()), pas des formes canoniques d'affichage. D'où l'absence
+# de détection de « variantes de casse » ici, contrairement à `snep_validator`
+# dont les référentiels portent, eux, la casse canonique. Une clé `casing_levels`
+# morte a traîné jusqu'au 2026-09-03 ; y brancher la formule SNEP signalerait
+# 5 148 des 5 826 lignes réelles (« Or », « Platine ») — mesuré, ne pas refaire.
 VALID_CATEGORIES = {"singles", "albums"}
 VALID_LEVELS = {
     "or",
@@ -78,7 +84,6 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
         "date_parse_failures": 0,
         "invalid_categories": [],
         "invalid_levels": [],
-        "casing_levels": [],
         "date_range": None,
         "latest_date": None,
     }
@@ -256,7 +261,6 @@ def format_report(report: dict) -> str:
     section("Doublons exacts", report["duplicates"])
     section("Catégories hors référentiel", report["invalid_categories"])
     section("Niveaux hors référentiel", report["invalid_levels"])
-    section("Niveaux — variantes de casse", report.get("casing_levels", []))
     if report.get("missing_years"):
         section(
             "Années ENTIÈREMENT absentes (trou)",

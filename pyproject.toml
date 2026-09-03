@@ -72,7 +72,6 @@ ignore = [
 "src/utils/database_backup.py" = ["BLE001"]
 "src/utils/deleted_tracks_manager.py" = ["BLE001"]
 "src/utils/disabled_tracks_manager.py" = ["BLE001"]
-"src/utils/init_certifications.py" = ["E402", "BLE001"]
 "src/utils/kworb_links_manager.py" = ["BLE001"]
 "src/utils/llm_extractor.py" = ["BLE001"]
 "src/utils/media_enricher.py" = ["BLE001"]
@@ -93,3 +92,9 @@ pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["src"]
+
+[tool.coverage.report]
+# Le bloc de démonstration d'un module lancé en direct (`python src/utils/x.py`)
+# n'est pas du code applicatif : il ne s'exécute jamais sous pytest et gonflait
+# artificiellement le dénominateur.
+exclude_also = ["if __name__ == .__main__.:"]

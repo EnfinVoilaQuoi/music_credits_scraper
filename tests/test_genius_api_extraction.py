@@ -17,6 +17,7 @@ payloads reproduits ici sont ceux de cette API.
 from datetime import datetime
 
 import pytest
+import requests
 
 from src.api.genius_api import GeniusAPI
 from src.models.track import Track
@@ -663,3 +664,163 @@ class TestRechercheSimple:
     def test_aucun_candidat(self, api, recherche):
         recherche["reponse"] = _Reponse(_hits())
         assert api.search_artist("Inexistant") is None
+
+
+# ──────────────────────────── numéros de piste (API authentifiée) et préremplissage
+
+
+class _Rep:
+    def __init__(self, charge, statut=200):
+        self._charge = charge
+        self.status_code = statut
+        self.headers = {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+    def json(self):
+        if isinstance(self._charge, Exception):
+            raise self._charge
+        return self._charge
+
+
+class TestNumerosDePiste:
+    """`get_album_track_numbers` passe par `api.genius.com` en Bearer : les
+    endpoints web `genius.com/api/…` répondent 403 derrière Cloudflare depuis
+    2026-08. Deux appels — le morceau pour trouver l'album, puis ses pistes.
+    """
+
+    def _stub(self, monkeypatch, *reponses):
+        vues = []
+
+        def fake_get(source, url, **kwargs):
+            vues.append(url)
+            i = len(vues) - 1
+            rep = reponses[i] if i < len(reponses) else reponses[-1]
+            if isinstance(rep, Exception):
+                raise rep
+            return rep
+
+        monkeypatch.setattr("src.api.genius_api.source_usage.requests_get", fake_get)
+        return vues
+
+    def test_numeros_recuperes(self, api, monkeypatch):
+        vues = self._stub(
+            monkeypatch,
+            _Rep({"response": {"song": {"album": {"id": 9, "name": "J.O.S"}}}}),
+            _Rep(
+                {
+                    "response": {
+                        "tracks": [
+                            {"number": 1, "song": {"id": 101}},
+                            {"number": 2, "song": {"id": 102}},
+                        ]
+                    }
+                }
+            ),
+        )
+
+        assert api.get_album_track_numbers(101) == {101: 1, 102: 2}
+        assert "api.genius.com/songs/101" in vues[0]
+        assert "api.genius.com/albums/9/tracks" in vues[1]
+
+    def test_morceau_sans_album(self, api, monkeypatch):
+        vues = self._stub(monkeypatch, _Rep({"response": {"song": {}}}))
+
+        assert api.get_album_track_numbers(101) is None
+        assert len(vues) == 1  # on n'appelle pas /albums sans id
+
+    def test_entrees_incompletes_ignorees(self, api, monkeypatch):
+        self._stub(
+            monkeypatch,
+            _Rep({"response": {"song": {"album": {"id": 9}}}}),
+            _Rep({"response": {"tracks": [{"number": None, "song": {"id": 101}}, {"number": 2}]}}),
+        )
+        assert api.get_album_track_numbers(101) == {}
+
+    def test_panne_reseau(self, api, monkeypatch):
+        self._stub(monkeypatch, requests.RequestException("coupure"))
+        assert api.get_album_track_numbers(101) is None
+
+    def test_reponse_illisible(self, api, monkeypatch):
+        self._stub(monkeypatch, _Rep(ValueError("pas du JSON")))
+        assert api.get_album_track_numbers(101) is None
+
+    def test_statut_derreur(self, api, monkeypatch):
+        self._stub(monkeypatch, _Rep({}, statut=401))
+        assert api.get_album_track_numbers(101) is None
+
+
+class TestPreremplissageParLApiDetail:
+    """La LISTE `/artists/{id}/songs` ne fournit ni album ni media : seul
+    `GET /songs/{id}` les donne. On n'appelle donc que pour ce qui manque."""
+
+    def _stub_apply(self, api, monkeypatch, resultat=True):
+        vus = []
+
+        def fake_apply(track):
+            vus.append(track.genius_id)
+            return resultat
+
+        monkeypatch.setattr(api, "apply_song_metadata", fake_apply)
+        monkeypatch.setattr("src.api.genius_api.time.sleep", lambda *_: None)
+        return vus
+
+    def _complet(self, genius_id):
+        return _track(
+            genius_id=genius_id,
+            album="Un album",
+            spotify_id="sp1",
+            youtube_url="https://yt/1",
+            youtube_url_source="genius_media",
+            relationships=[{"type": "samples"}],
+        )
+
+    def test_seuls_les_morceaux_incomplets_sont_appeles(self, api, monkeypatch):
+        vus = self._stub_apply(api, monkeypatch)
+        api._prefill_via_song_api([self._complet(1), _track(genius_id=2)])
+
+        assert vus == [2]
+
+    def test_lien_de_recherche_compte_comme_manquant(self, api, monkeypatch):
+        """Genius est prioritaire : un lien 'search_auto' doit pouvoir être
+        remplacé par le lien officiel."""
+        t = self._complet(1)
+        t.youtube_url_source = "search_auto"
+        vus = self._stub_apply(api, monkeypatch)
+
+        api._prefill_via_song_api([t])
+        assert vus == [1]
+
+    def test_ids_connus_exclus_en_mode_maj(self, api, monkeypatch):
+        vus = self._stub_apply(api, monkeypatch)
+        api._prefill_via_song_api([_track(genius_id=1), _track(genius_id=2)], known_genius_ids={1})
+
+        assert vus == [2]
+
+    def test_rien_a_faire(self, api, monkeypatch):
+        vus = self._stub_apply(api, monkeypatch)
+        api._prefill_via_song_api([self._complet(1)])
+
+        assert vus == []
+
+    def test_les_feats_sont_inclus(self, api, monkeypatch):
+        """Leur media alimente les streams et l'affichage : les exclure laissait
+        des morceaux sans lien YouTube."""
+        feat = _track(genius_id=2)
+        feat.is_featuring = True
+        vus = self._stub_apply(api, monkeypatch)
+
+        api._prefill_via_song_api([feat])
+        assert vus == [2]
+
+    def test_album_override_vaut_album_connu(self, api, monkeypatch):
+        """Un détachement MANUEL ne doit pas relancer un appel API à chaque run."""
+        t = self._complet(1)
+        t.album = None
+        t.album_override = 1
+        vus = self._stub_apply(api, monkeypatch)
+
+        api._prefill_via_song_api([t])
+        assert vus == []

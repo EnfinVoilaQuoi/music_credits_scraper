@@ -23,6 +23,19 @@ from src.dataviz.style_io import strip_comments
 from src.models.track import Credit, CreditRole, Track
 
 
+@pytest.fixture(autouse=True)
+def _sans_photo_sur_disque(monkeypatch):
+    """Isole les tests du dossier RÉEL `data/images/artistes/`.
+
+    `bubble_json` cherche la photo de chaque producteur sur le disque. Les noms
+    utilisés ici (« Kalim », « Lewis Amber ») sont de vrais producteurs : le jour
+    où l'app a téléchargé leurs photos (2026-09-03), deux tests sont passés au
+    rouge sur cette machine alors qu'ils restaient verts sur un clone frais.
+    Un test ne doit pas dépendre de ce que l'utilisateur a enrichi entre-temps.
+    """
+    monkeypatch.setattr("src.dataviz.bubble_json.find_artist_image", lambda name: None)
+
+
 def _prod(name):
     return Credit(name=name, role=CreditRole.PRODUCER)
 

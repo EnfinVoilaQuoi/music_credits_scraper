@@ -104,7 +104,7 @@ class GeniusAPI:
     def get_artist_songs(
         self,
         artist: Artist,
-        max_songs: int = 200,
+        max_songs: int = 500,
         include_features: bool = False,
         prefill: bool = True,
         known_genius_ids: set | None = None,
@@ -306,7 +306,7 @@ class GeniusAPI:
 
             while len(tracks) < max_songs:
                 response = self.genius.artist_songs(
-                    artist.genius_id, sort="popularity", per_page=per_page, page=page
+                    artist.genius_id, sort="release_date", per_page=per_page, page=page
                 )
 
                 if not response or "songs" not in response:
@@ -408,10 +408,15 @@ class GeniusAPI:
 
                     time.sleep(DELAY_BETWEEN_REQUESTS)
 
-                page += 1
-
-                if len(songs) < per_page:
+                # Pagination : SEUL `next_page` fait foi. Genius sert des pages
+                # COURTES EN PLEIN MILIEU de la liste (SCH : 50, 50, 49, 49, 48,
+                # 50, 33) ; s'arrêter sur `len(songs) < per_page` amputait la
+                # discographie à la 1ʳᵉ page courte — SCH 149 morceaux sur 329,
+                # Jazzy Bazz 148 sur 177. Cf. JOURNAL 2026-09-03.
+                next_page = response.get("next_page")
+                if not next_page:
                     break
+                page = next_page
 
         except Exception:
             # Dernier ressort : boucle mêlant réseau lyricsgenius, parse du payload

@@ -65,10 +65,11 @@ jobs:
       # Cliquet de couverture, sur le modèle du cliquet per-file-ignores BLE001 :
       # le seuil ne fait que MONTER, tier après tier. Périmètre HORS GUI — le GUI
       # (4 780 statements à 9 %) écraserait le signal et n'est pas au chantier.
-      # Paliers franchis : 61 (tier 1) → 65 (tier 2) → 68 (tier 3) → 72 (tier 4).
+      # Paliers franchis : 61 (tier 1) → 65 (tier 2) → 68 (tier 3) → 72 (tier 4)
+      # → 74 (tier 5-6 : collecteurs de certifs + chemins d'erreur des repositories).
       # Le reste du hors-GUI est du PILOTAGE (navigateur Playwright, flux réseau
       # bout en bout) : le monter davantage demanderait un harnais de session,
       # pas des tests unitaires. Ne remonter ce seuil qu'avec du code réellement
       # couvert, jamais pour « faire un chiffre ».
       - name: Cliquet de couverture (hors GUI)
-        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=72
+        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=74

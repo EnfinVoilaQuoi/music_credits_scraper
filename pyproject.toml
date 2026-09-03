@@ -64,7 +64,6 @@ ignore = [
 # GUI : widgets best-effort + filets top-level des workers (dernier ressort documenté).
 "src/gui/**" = ["BLE001"]
 # Cliquet des utils non encore balayés (à faire décroître) :
-"src/utils/artist_repository.py" = ["BLE001"]
 "src/utils/brma_validator.py" = ["BLE001"]
 "src/utils/cert_matcher.py" = ["BLE001"]
 "src/utils/certification_enricher.py" = ["BLE001"]
@@ -78,7 +77,6 @@ ignore = [
 "src/utils/riaa_validator.py" = ["BLE001"]
 "src/utils/snep_validator.py" = ["BLE001"]
 "src/utils/source_health.py" = ["BLE001"]
-"src/utils/track_repository.py" = ["BLE001"]
 "src/utils/update_kworb.py" = ["E402"]
 "src/utils/update_snep.py" = ["E402"]
 "src/utils/update_ytmusic.py" = ["E402"]

@@ -280,9 +280,11 @@ class TrackRepository:
                     "source": credit.source,
                 },
             )
-        except Exception as e:
-            # Log mais ne pas arrêter le processus pour un crédit
-            logger.debug(f"Erreur lors de la sauvegarde du crédit {credit.name}: {e}")
+        except SQLAlchemyError as e:
+            # Un crédit perdu ne doit pas arrêter la sauvegarde du morceau, mais il
+            # doit se VOIR : `logger.debug` n'atteint aucun fichier de log (handler
+            # à INFO), la perte était donc silencieuse.
+            logger.warning(f"Crédit non sauvegardé ({credit.name}): {e}")
 
     def get_artist_tracks(self, artist_id: int) -> list[Track]:
         """Récupère tous les morceaux d'un artiste (via le moteur Core)."""
@@ -384,7 +386,7 @@ class TrackRepository:
                         # Chargement crédits (a besoin de la connexion → hors mapper)
                         try:
                             track.credits = self._get_track_credits(conn, row["id"])
-                        except Exception:
+                        except SQLAlchemyError:
                             track.credits = []
 
                         result.append(track)
@@ -392,8 +394,11 @@ class TrackRepository:
                         if i < 5:
                             logger.info(f"✅ Track {i+1}: {track.title}")
 
-                    except Exception as track_error:
-                        logger.error(f"❌ Erreur track {i}: {track_error}")
+                    except Exception:
+                        # Dernier ressort : un morceau illisible ne doit pas faire
+                        # perdre la discographie entière. `logger.exception` pour
+                        # garder la trace (et rester exempt de BLE001).
+                        logger.exception("❌ Erreur track %d — ignoré, on continue", i)
                         continue
 
                 # Compter les tracks avec musical_key
@@ -415,7 +420,7 @@ class TrackRepository:
                     _t_end - _t_obs,
                 )
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"❌ Erreur dans get_artist_tracks: {e}")
 
         return result
@@ -608,7 +613,7 @@ class TrackRepository:
                 ).rowcount
                 logger.info(f"🗑️ Track {track_id} supprimé ({deleted} ligne(s))")
                 return deleted > 0
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur suppression track {track_id}: {e}")
             return False
 
@@ -663,7 +668,7 @@ class TrackRepository:
                     f"({transferred} crédit(s) transféré(s))"
                 )
                 return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur fusion track {delete_id} → {keep_id}: {e}")
             return False
 
@@ -700,7 +705,7 @@ class TrackRepository:
                     [Observation("spotify_streams", streams, "kworb", seen_at=updated_at)],
                 )
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_spotify_streams (track_id={track_id}): {e}")
             return False
 
@@ -719,7 +724,7 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_spotify_id (track_id={track_id}): {e}")
             return False
 
@@ -735,7 +740,7 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur clear_track_album (track_id={track_id}): {e}")
             return False
 
@@ -777,7 +782,7 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
             return False
 
@@ -810,7 +815,7 @@ class TrackRepository:
                     }
                     for row in rows
                 ]
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur get_albums_for_artist (artist_id={artist_id}): {e}")
             return []
 
@@ -831,7 +836,7 @@ class TrackRepository:
                     [Observation("ytm_streams", streams, "ytmusic", seen_at=datetime.now())],
                 )
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")
             return False
 
@@ -858,7 +863,7 @@ class TrackRepository:
                     {"views": views, "kind": kind, "now": datetime.now(), "tid": track_id},
                 )
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_video_views (track_id={track_id}): {e}")
             return False
 
@@ -887,7 +892,7 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")
             return False
 
@@ -904,7 +909,7 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur rename_track (track_id={track_id}): {e}")
             return False
 
@@ -919,7 +924,7 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur clear_track_youtube_link (track_id={track_id}): {e}")
             return False
 
@@ -934,7 +939,7 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(
                 f"Erreur update_album_ytm_streams (artist_id={artist_id}, title={title!r}): {e}"
             )

@@ -16,6 +16,8 @@ from pathlib import Path
 from crawl4ai import BrowserConfig
 
 from src.concurrency import async_loop
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.utils.logger import get_logger
 
 # patchright (undetected Chromium) est importé en lazy dans _patchright_fetch : on
@@ -81,8 +83,13 @@ class CrawlAIScraperBase:
         markdown, html = self._crawl_page(url, js_before_wait=JS, wait_for="js:...")
     """
 
-    def __init__(self, headless: bool = True):
+    #: Clé de `source_health.SOURCES` sous laquelle l'usage est compté. La base
+    #: sert Genius par défaut ; `ultratop_fetch` l'instancie avec sa propre clé.
+    HEALTH_KEY = "genius_scrape"
+
+    def __init__(self, headless: bool = True, health_key: str | None = None):
         self.headless = headless
+        self.health_key = health_key or self.HEALTH_KEY
         self._browser_config = self._make_browser_config(headless)
 
     @staticmethod
@@ -167,6 +174,30 @@ class CrawlAIScraperBase:
             page_timeout     : ms avant abandon du chargement de page
             delay_before_return : secondes d'attente supplémentaires après le wait_for
         """
+        with source_usage.observe(self.health_key, label=url) as obs:
+            html = await self._acrawl_page_body(
+                url, js_before_wait, wait_for, wait_timeout, page_timeout, delay_before_return
+            )
+            if html is None:
+                # Les trois passes ont échoué sans exception : la page n'est pas
+                # venue. Si une tentative a déjà dit pourquoi (bloquée, timeout),
+                # c'est elle qui parle — sinon on nomme l'inaccessibilité.
+                obs.fail(IssueKind.UNREACHABLE, "aucune passe n'a rendu de HTML")
+            return None, html
+
+    async def _acrawl_page_body(
+        self,
+        url: str,
+        js_before_wait: str | None,
+        wait_for: str | None,
+        wait_timeout: int,
+        page_timeout: int,
+        delay_before_return: float,
+    ) -> str | None:
+        """L'échelle CDP → headless → fenêtre visible, sous l'observation ouverte
+        par `acrawl_page`. Chaque passe est une TENTATIVE, l'appel reste unique :
+        bloqué en headless puis servi en fenêtre visible vaut UN succès, pas deux
+        échecs."""
         # 0) Mode CDP : on lit via un navigateur déjà ouvert (Brave, IP résidentielle)
         if _CDP_URL:
             try:
@@ -179,15 +210,17 @@ class CrawlAIScraperBase:
                     delay_before_return,
                     headless=True,
                 )
+                self._note_passe(blocked, html, "CDP")
                 if blocked:
                     logger.warning(
                         f"{self.__class__.__name__}: via CDP, page bloquée — ouvre d'abord "
                         f"genius.com dans ton Brave (résidentiel) pour lever le challenge."
                     )
-                return None, html
+                return html
             except PatchrightError as e:
+                source_usage.note_failure(self.health_key, e, detail=f"CDP : {e}")
                 logger.error(f"{self.__class__.__name__}: CDP {url}: {e}")
-                return None, None
+                return None
 
         # 1) Essai HEADLESS rapide (patchright + profil persistant) : passe seul
         #    dès que le cookie cf_clearance est dans le profil.
@@ -202,11 +235,13 @@ class CrawlAIScraperBase:
                     delay_before_return,
                     headless=True,
                 )
+                self._note_passe(blocked, html, "headless")
             except PatchrightError as e:
+                source_usage.note_failure(self.health_key, e, detail=f"headless : {e}")
                 logger.error(f"{self.__class__.__name__}: patchright headless {url}: {e}")
                 html, blocked = None, True
             if not blocked:
-                return None, html
+                return html
             logger.info(
                 f"{self.__class__.__name__}: Cloudflare → fenêtre VISIBLE pour {url}. "
                 f"⚠️ Résous le challenge UNE fois ; le cookie est mémorisé (profil persistant), "
@@ -225,10 +260,31 @@ class CrawlAIScraperBase:
                 max(delay_before_return, 2.0),
                 headless=False,
             )
-            return None, html
+            self._note_passe(False, html, "fenêtre visible")
+            return html
         except PatchrightError as e:
+            source_usage.note_failure(self.health_key, e, detail=f"fenêtre visible : {e}")
             logger.error(f"{self.__class__.__name__}: patchright visible {url}: {e}")
-            return None, None
+            return None
+
+    def _note_passe(self, blocked: bool, html: str | None, passe: str) -> None:
+        """Une passe de l'échelle = une tentative.
+
+        Un blocage anti-bot est ATTENDU sur ces sources (`tolerate_403`) : il est
+        marqué comme tel, ce qui l'exclut du taux d'échec ET du calcul du pire,
+        tout en restant compté — si les contournements grimpent pendant que les
+        succès s'effondrent, c'est le signe que Cloudflare a durci.
+        """
+        if blocked:
+            source_usage.record_attempt(
+                self.health_key, IssueKind.BLOCKED, detail=f"{passe} : anti-bot", expected=True
+            )
+        elif html:
+            source_usage.record_attempt(self.health_key, IssueKind.OK, detail=passe)
+        else:
+            source_usage.record_attempt(
+                self.health_key, IssueKind.UNREACHABLE, detail=f"{passe} : page vide"
+            )
 
     async def _patchright_fetch(
         self,

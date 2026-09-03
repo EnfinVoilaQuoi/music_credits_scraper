@@ -14,6 +14,10 @@ La GUI et la CLI branchent leurs callbacks (`progress_cb`, `should_stop`).
 Statuts : ok | degraded | broken | unknown.
 Persistance : data/sources_health.json (fusion par clé, jamais d'écrasement des
 sources non re-sondées).
+
+Ces sondes disent si la source répondait à l'instant du clic. Ce que l'usage
+RÉEL révèle est compté ailleurs (`src/observability/`) et occupe des colonnes
+VOISINES dans le panneau : l'usage n'écrase jamais le statut d'une sonde.
 """
 
 from __future__ import annotations
@@ -27,6 +31,8 @@ from datetime import datetime
 import requests
 
 from src.config import DATA_DIR, DELAY_BETWEEN_REQUESTS, GENIUS_API_KEY, GETSONGBPM_API_KEY
+from src.observability.issues import DEFAULT_ABSENT_STATUSES
+from src.observability.registry import Family
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -74,10 +80,18 @@ class SourceSpec:
     label: str
     fast_url: str | None = None
     fast_marker: str | None = None  # texte attendu dans une réponse 200
-    tolerate_403: bool = False  # 403/503 anti-bot → degraded (pas broken)
+    tolerate_403: bool = False  # 403/503 anti-bot → la sonde nue ne conclut PAS
     fast_probe: Callable[[], list[str]] | None = None  # override du GET par défaut
     full_probe: Callable[[], list[str]] | None = None  # rejoue fetch+parse (sentinelle)
     notes: str = ""
+    # Regroupement par UTILITÉ (sections du panneau) : une source peut en servir
+    # deux — YTMusic donne timestamps ET streams, Deezer durée ET ISRC.
+    families: tuple[Family, ...] = ()
+    # Codes qui veulent dire « pas au catalogue » pour CETTE source : un 404 sur
+    # api.deezer.com/track/<inconnu> est une absence, un 404 sur
+    # api.genius.com/search serait une rupture d'API.
+    absent_statuses: tuple[int, ...] = DEFAULT_ABSENT_STATUSES
+    usage_note: str = ""  # précision affichée dans la colonne d'usage réel
 
 
 # ── Sondes complètes (imports paresseux : aucun coût à l'import du module) ──────
@@ -183,6 +197,39 @@ def _probe_genius_api_full() -> list[str]:
     return []
 
 
+def _probe_ytmusic() -> list[str]:
+    from ytmusicapi import YTMusic
+
+    hits = YTMusic().search("Daft Punk", filter="artists", limit=5)
+    if not hits:
+        return ["recherche sentinelle sans résultat"]
+    if not any(isinstance(h, dict) and h.get("browseId") for h in hits):
+        return ["aucun résultat avec browseId (structure changée ?)"]
+    return []
+
+
+def _probe_discogs() -> list[str]:
+    import os
+
+    if not os.getenv("DISCOGS_USER_TOKEN"):
+        raise ProbeSkipped("DISCOGS_USER_TOKEN absent")
+    resp = requests.get(
+        "https://api.discogs.com/database/search",
+        params={"q": "Daft Punk", "type": "artist", "per_page": 5},
+        headers={
+            "Authorization": f"Discogs token={os.getenv('DISCOGS_USER_TOKEN')}",
+            "User-Agent": _UA,
+        },
+        timeout=_FAST_TIMEOUT,
+    )
+    if resp.status_code == 401:
+        raise ProbeSkipped("token Discogs invalide (401)")
+    resp.raise_for_status()
+    if not (resp.json() or {}).get("results"):
+        return ["recherche sentinelle sans résultat"]
+    return []
+
+
 # ── Déclaration des sources ────────────────────────────────────────────────────
 SOURCES: list[SourceSpec] = [
     SourceSpec(
@@ -191,6 +238,7 @@ SOURCES: list[SourceSpec] = [
         fast_url="https://kworb.net/spotify/",
         fast_marker="Spotify",
         full_probe=_probe_kworb,
+        families=(Family.STREAMS,),
     ),
     SourceSpec(
         key="lrclib",
@@ -199,6 +247,7 @@ SOURCES: list[SourceSpec] = [
         "&artist_name=Josman&album_name=Matrix&duration=243",
         fast_marker="syncedLyrics",
         full_probe=_probe_lrclib,
+        families=(Family.CREDITS,),
     ),
     SourceSpec(
         key="deezer",
@@ -206,6 +255,9 @@ SOURCES: list[SourceSpec] = [
         fast_url=f"https://api.deezer.com/track/{_DEEZER_TRACK_ID}",
         fast_marker="duration",
         full_probe=_probe_deezer,
+        # Deux familles : la durée arbitre le cross-check des paroles
+        # synchronisées, l'ISRC alimente la chaîne BPM.
+        families=(Family.AUDIO, Family.CREDITS),
     ),
     SourceSpec(
         key="getsongbpm",
@@ -213,6 +265,7 @@ SOURCES: list[SourceSpec] = [
         fast_probe=_probe_getsongbpm_fast,
         full_probe=_probe_getsongbpm_full,
         notes="clé GETSONGBPM_API_KEY requise",
+        families=(Family.AUDIO,),
     ),
     SourceSpec(
         key="genius_api",
@@ -220,6 +273,10 @@ SOURCES: list[SourceSpec] = [
         fast_probe=_probe_genius_api_fast,
         full_probe=_probe_genius_api_full,
         notes="token GENIUS_API_KEY requis",
+        families=(Family.CREDITS,),
+        # Un 404 de l'API Genius n'est pas une absence de morceau : ce serait
+        # une rupture de route, donc une casse de structure.
+        absent_statuses=(),
     ),
     SourceSpec(
         key="genius_scrape",
@@ -227,12 +284,14 @@ SOURCES: list[SourceSpec] = [
         fast_url="https://genius.com/",
         tolerate_403=True,
         notes="crédits/paroles via Playwright + llama3.2 ; 403 sur requests = normal",
+        families=(Family.CREDITS,),
     ),
     SourceSpec(
         key="spotify_embed",
         label="Spotify embed (Track ID artistes)",
         fast_url=f"https://open.spotify.com/embed/track/{_SPOTIFY_TRACK_ID}",
         fast_marker="__NEXT_DATA__",
+        families=(Family.AUDIO,),
     ),
     SourceSpec(
         key="riaa",
@@ -240,6 +299,7 @@ SOURCES: list[SourceSpec] = [
         fast_url="https://www.riaa.com/gold-platinum/",
         tolerate_403=True,
         notes="scrape patchright (Cloudflare laxiste)",
+        families=(Family.CERTS,),
     ),
     SourceSpec(
         key="brma",
@@ -247,6 +307,7 @@ SOURCES: list[SourceSpec] = [
         fast_url="https://www.ultratop.be/fr/or-platine/2024/singles",
         tolerate_403=True,
         notes="Cloudflare STRICT : scrape via route CDP (vrai Chrome)",
+        families=(Family.CERTS,),
     ),
     SourceSpec(
         key="songbpm",
@@ -254,12 +315,56 @@ SOURCES: list[SourceSpec] = [
         fast_url="https://songbpm.com/",
         tolerate_403=True,
         notes="dernier recours BPM ; Cloudflare possible",
+        families=(Family.AUDIO,),
     ),
     SourceSpec(
         key="bpmfinder",
         label="BPM Finder (audioaidynamics)",
         fast_url="https://audioaidynamics.com",
         notes="login requis (BPMFINDER_EMAIL/PASSWORD) — sonde complète manuelle",
+        families=(Family.AUDIO,),
+    ),
+    SourceSpec(
+        key="reccobeats",
+        label="ReccoBeats (BPM/key via ISRC)",
+        fast_url="https://api.reccobeats.com/v1/track?ids=4WYhQviUDsXVzLp6oncwJS",
+        fast_marker="content",
+        notes="exige un Spotify Track ID en entrée (étape de scrape séparée)",
+        families=(Family.AUDIO,),
+    ),
+    SourceSpec(
+        key="ytmusic",
+        label="YouTube Music (streams, timestamps)",
+        fast_url="https://music.youtube.com/",
+        tolerate_403=True,
+        full_probe=_probe_ytmusic,
+        notes="via ytmusicapi ; anti-bot sur requête nue = normal",
+        families=(Family.STREAMS, Family.CREDITS),
+    ),
+    SourceSpec(
+        key="discogs",
+        label="Discogs (crédits, labels)",
+        fast_probe=_probe_discogs,
+        full_probe=_probe_discogs,
+        notes="DISCOGS_USER_TOKEN requis ; passe par la lib discogs_client",
+        families=(Family.CREDITS,),
+    ),
+    SourceSpec(
+        key="musixmatch",
+        label="Musixmatch (paroles synchro, repli)",
+        fast_url="https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0",
+        tolerate_403=True,
+        notes="endpoint non officiel : peut bouger sans préavis",
+        families=(Family.CREDITS,),
+    ),
+    SourceSpec(
+        key="snep",
+        label="SNEP (certifications FR)",
+        fast_url="https://snepmusique.com/les-certifications/",
+        fast_marker="certification",
+        tolerate_403=True,
+        notes="le lien du CSV change régulièrement côté SNEP",
+        families=(Family.CERTS,),
     ),
 ]
 
@@ -311,15 +416,21 @@ def _run_fast_get(spec: SourceSpec) -> SourceStatus:
     latency = int((time.monotonic() - start) * 1000)
     code = resp.status_code
     if code in (403, 503) and spec.tolerate_403:
+        # Cette sonde tape en requests nu ; le pipeline, lui, passe par
+        # patchright (profil persistant, cookie cf_clearance, repli en fenêtre
+        # visible) voire par CDP sur un vrai Chrome. Un 403 ici ne dit donc RIEN
+        # de l'état de la source — le peindre en « dégradé » inventerait un
+        # signal là où il n'y a pas de mesure. On avoue l'ignorance : c'est
+        # l'usage réel, qui emprunte le vrai transport, qui renseigne.
         return SourceStatus(
             spec.key,
             spec.label,
-            "degraded",
-            "fast",
+            "unknown",
+            "none",
             latency,
             _now(),
             None,
-            f"anti-bot HTTP {code} (attendu — sonde complète via le scraper)",
+            f"non sondable par requête simple (anti-bot HTTP {code}) — voir l'usage réel",
         )
     if code != 200:
         return SourceStatus(

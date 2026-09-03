@@ -206,3 +206,54 @@ observations = Table(
     UniqueConstraint("track_id", "field", "source"),
     sqlite_autoincrement=True,
 )
+
+
+# Usage réel des sources (chantier « état des sources nourri par l'usage »).
+# Compteurs AGRÉGÉS, en forme longue : une ligne par nature de verdict, si bien
+# qu'ajouter une `IssueKind` ne coûtera aucune migration. `day` est en TEXT et
+# non en TIMESTAMP parce que c'est une CLÉ d'agrégation, pas un instant — cela
+# l'exempte du piège double-face du type TIMESTAMP (bind typé en écriture,
+# reparse en datetime en lecture).
+#
+# PIÈGE SQLITE : dans un index UNIQUE, deux NULL sont DISTINCTS. La contrainte
+# ci-dessous ne se déclenche donc JAMAIS pour les lignes `artist_id IS NULL`
+# (usage hors contexte artiste) : l'upsert du repository est explicite et
+# null-safe (UPDATE ... WHERE artist_id IS :aid, puis INSERT si rowcount == 0),
+# la contrainte n'étant qu'un filet pour les lignes à artiste renseigné.
+source_usage_daily = Table(
+    "source_usage_daily",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("day", Text, nullable=False),
+    Column("source_key", Text, nullable=False),
+    Column("artist_id", Integer, ForeignKey("artists.id")),
+    Column("flow", Text, nullable=False),
+    Column("issue", Text, nullable=False),
+    Column("n_calls", Integer),
+    Column("n_attempts", Integer),
+    Column("expected_blocked", Integer),
+    Column("latency_ms_total", Integer),
+    Column("last_seen", TIMESTAMP),
+    UniqueConstraint("day", "source_key", "artist_id", "flow", "issue"),
+    sqlite_autoincrement=True,
+)
+
+
+# Fenêtre glissante des derniers échecs PAR SOURCE (50), pour le diagnostic.
+# Ne double pas `scraping_errors`, qui est indexée par morceau : celle-ci l'est
+# par source et porte la NATURE de l'échec. Purgée au vidage, jamais à chaque
+# insertion → plafond dur d'environ 800 lignes quelle que soit l'ancienneté de
+# la base.
+source_usage_failures = Table(
+    "source_usage_failures",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("source_key", Text, nullable=False),
+    Column("issue", Text, nullable=False),
+    Column("artist_id", Integer, ForeignKey("artists.id")),
+    Column("track_id", Integer, ForeignKey("tracks.id")),
+    Column("status_code", Integer),
+    Column("message", Text),
+    Column("occurred_at", TIMESTAMP),
+    sqlite_autoincrement=True,
+)

@@ -16,9 +16,18 @@ from src.config import (
     GENIUS_TIMEOUT,
 )
 from src.models import Artist, Track
+from src.observability import source_usage
 from src.utils.logger import get_logger, log_api
 
 logger = get_logger(__name__)
+
+# DEUX sources distinctes derrière le même nom de domaine : `api.genius.com`
+# (API JSON, Bearer) et `genius.com/api/*` (route web derrière Cloudflare).
+# Elles cassent pour des raisons sans rapport — ne pas les confondre.
+_SOURCE = "genius_api"
+_SOURCE_WEB = "genius_scrape"
+#: L'API Genius n'a pas de « pas au catalogue » : un 404 y serait une rupture.
+_ABSENT: tuple[int, ...] = ()
 
 
 class GeniusAPI:
@@ -63,28 +72,38 @@ class GeniusAPI:
         seen_ids: set = set()
         artist_name_lower = artist_name.lower()
 
-        try:
-            resp = requests.get(
-                "https://api.genius.com/search",
-                params={"q": artist_name},
-                headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json().get("response", {})
-            hits = data.get("hits", [])
-            logger.debug(f"Réponse API: {len(hits)} hits, clés response: {list(data.keys())}")
+        with source_usage.observe(
+            _SOURCE, label=f"recherche {artist_name}", absent_statuses=_ABSENT
+        ) as obs:
+            try:
+                resp = source_usage.requests_get(
+                    _SOURCE,
+                    "https://api.genius.com/search",
+                    params={"q": artist_name},
+                    headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                data = resp.json().get("response", {})
+                hits = data.get("hits", [])
+                logger.debug(f"Réponse API: {len(hits)} hits, clés response: {list(data.keys())}")
+                if not hits:
+                    obs.absent(f"aucun hit pour {artist_name!r}")
 
-            for hit in hits:
-                result = hit.get("result", {})
-                primary = result.get("primary_artist", {})
-                artist_id = primary.get("id")
-                found_name = primary.get("name", "")
-                if artist_id and found_name and artist_id not in seen_ids:
-                    seen_ids.add(artist_id)
-                    candidates.append(Artist(name=found_name, genius_id=artist_id))
-        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Recherche Genius échouée: {e}")
+                for hit in hits:
+                    result = hit.get("result", {})
+                    primary = result.get("primary_artist", {})
+                    artist_id = primary.get("id")
+                    found_name = primary.get("name", "")
+                    if artist_id and found_name and artist_id not in seen_ids:
+                        seen_ids.add(artist_id)
+                        candidates.append(Artist(name=found_name, genius_id=artist_id))
+            except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+                # requests_get a déjà qualifié le transport ; ici on ne nomme que
+                # les ruptures de FORME de la réponse.
+                if not isinstance(e, requests.RequestException):
+                    obs.parse_error(f"réponse inexploitable : {e}")
+                logger.warning(f"Recherche Genius échouée: {e}")
 
         # Trier : correspondances exactes en premier, puis par proximité
         def _sort_key(a: Artist) -> int:
@@ -261,7 +280,8 @@ class GeniusAPI:
         if not song_id:
             return None
         try:
-            data = self.genius.song(song_id)
+            with source_usage.attempt(_SOURCE):
+                data = self.genius.song(song_id)
         # lyricsgenius lève un AssertionError quand le statut HTTP n'est ni 200 ni 204.
         except (requests.RequestException, AssertionError) as e:
             logger.warning(f"verify credit échec song {song_id}: {e}")
@@ -305,9 +325,10 @@ class GeniusAPI:
             per_page = 50
 
             while len(tracks) < max_songs:
-                response = self.genius.artist_songs(
-                    artist.genius_id, sort="release_date", per_page=per_page, page=page
-                )
+                with source_usage.attempt(_SOURCE):
+                    response = self.genius.artist_songs(
+                        artist.genius_id, sort="release_date", per_page=per_page, page=page
+                    )
 
                 if not response or "songs" not in response:
                     break
@@ -522,8 +543,8 @@ class GeniusAPI:
         """
         headers = {"Authorization": f"Bearer {GENIUS_API_KEY}"}
         try:
-            resp = requests.get(
-                f"https://api.genius.com/songs/{song_id}", headers=headers, timeout=20
+            resp = source_usage.requests_get(
+                _SOURCE, f"https://api.genius.com/songs/{song_id}", headers=headers, timeout=20
             )
             resp.raise_for_status()
             album = ((resp.json().get("response") or {}).get("song") or {}).get("album") or {}
@@ -532,7 +553,8 @@ class GeniusAPI:
                 logger.warning(f"Aucun album Genius pour le morceau #{song_id}")
                 return None
 
-            tr_resp = requests.get(
+            tr_resp = source_usage.requests_get(
+                _SOURCE,
                 f"https://api.genius.com/albums/{album_id}/tracks",
                 headers=headers,
                 params={"per_page": 50},
@@ -565,11 +587,17 @@ class GeniusAPI:
         """
         if not track.genius_id:
             return False
-        try:
-            data = self.genius.song(track.genius_id)
-        except (requests.RequestException, AssertionError) as e:
-            logger.warning(f"genius.song échec '{track.title}': {e}")
-            return False
+        with source_usage.observe(
+            _SOURCE, label=track.title, track_id=track.id, absent_statuses=_ABSENT
+        ) as obs:
+            try:
+                with source_usage.attempt(_SOURCE):
+                    data = self.genius.song(track.genius_id)
+            except (requests.RequestException, AssertionError) as e:
+                logger.warning(f"genius.song échec '{track.title}': {e}")
+                return False
+            if not data:
+                obs.absent(f"morceau #{track.genius_id} sans détail")
         song = (data or {}).get("song") or {}
         changed = False
 
@@ -642,7 +670,8 @@ class GeniusAPI:
         # 1. URL → album id, via la recherche d'albums (match d'URL exact)
         slug_query = url.rsplit("/", 1)[-1].replace("-", " ")
         try:
-            resp = requests.get(
+            resp = source_usage.requests_get(
+                _SOURCE_WEB,
                 "https://genius.com/api/search/album",
                 params={"q": slug_query},
                 headers=self._WEB_HEADERS,
@@ -673,11 +702,15 @@ class GeniusAPI:
 
         # 2. Métadonnées + tracklist
         try:
-            alb_resp = requests.get(
-                f"https://genius.com/api/albums/{album_id}", headers=self._WEB_HEADERS, timeout=20
+            alb_resp = source_usage.requests_get(
+                _SOURCE_WEB,
+                f"https://genius.com/api/albums/{album_id}",
+                headers=self._WEB_HEADERS,
+                timeout=20,
             )
             album = (alb_resp.json().get("response") or {}).get("album") or {}
-            tr_resp = requests.get(
+            tr_resp = source_usage.requests_get(
+                _SOURCE_WEB,
                 f"https://genius.com/api/albums/{album_id}/tracks",
                 headers=self._WEB_HEADERS,
                 timeout=20,
@@ -747,7 +780,8 @@ class GeniusAPI:
         if not genius_id:
             return None
         try:
-            data = self.genius.artist(genius_id)
+            with source_usage.attempt(_SOURCE):
+                data = self.genius.artist(genius_id)
         except (requests.RequestException, AssertionError) as e:
             logger.warning(f"genius.artist({genius_id}) échec: {e}")
             return None

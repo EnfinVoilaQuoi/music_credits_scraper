@@ -20,10 +20,15 @@ import urllib.parse
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright_async
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 
 logger = logging.getLogger("SpotifyIDScraper")
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "spotify_embed"
 
 
 class SpotifyIDScraperAsync(SpotifyIDScraper):
@@ -129,9 +134,19 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
                 return cached
             # 'not_found' n'est PAS définitif → on retente la recherche
 
+        # L'observation s'ouvre APRÈS le cache : un morceau servi de mémoire ne
+        # sollicite pas la source et ne doit pas peser dans ses compteurs.
+        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
+            return await self._get_spotify_id_async_body(obs, artist, title, cache_key)
+
+    async def _get_spotify_id_async_body(
+        self, obs, artist: str, title: str, cache_key: str
+    ) -> str | None:
+        """Corps de `get_spotify_id_async`, sous l'observation ouverte par elle."""
         try:
             await self._ensure_driver_async()
-        except PlaywrightError:
+        except PlaywrightError as e:
+            obs.fail(IssueKind.CRASH, f"browser indisponible : {e}")
             logger.error("❌ Browser non disponible")
             return None
 
@@ -226,9 +241,16 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
             logger.info(f"✅ SÉLECTIONNÉ: {sid} (relevance: {best['relevance']:.2f})")
             self.cache[cache_key] = sid
             self._save_cache()
+            obs.ok()
             return sid
         else:
             logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
+            # `had_errors` distingue déjà les deux cas à séparer : rien au
+            # catalogue (absence) VS la recherche a cassé.
+            if had_errors:
+                obs.fail(IssueKind.UNREACHABLE, "recherche interrompue par des erreurs techniques")
+            else:
+                obs.absent(f"aucun ID Spotify pour '{title}'")
             # Ne pas cacher l'échec si des erreurs techniques ont eu lieu
             if not had_errors:
                 self.cache[cache_key] = "not_found"

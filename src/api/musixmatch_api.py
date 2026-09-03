@@ -69,7 +69,13 @@ except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
     DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
+from src.observability import source_usage
+from src.observability.issues import IssueKind
+
 logger = logging.getLogger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "musixmatch"
 
 # ── Constantes du client desktop ────────────────────────────────────────────────
 _API_BASE = "https://apic-desktop.musixmatch.com/ws/1.1"
@@ -542,11 +548,19 @@ class MusixmatchAPI:
         """Jumeau async de `get_synced` (passe 1 + retry unique après refresh token)."""
         if not self.enabled or not track_name or not artist_name:
             return None
-        result = await self._try_fetch_async(http, track_name, artist_name, duration, False)
-        if result is _AUTH_FAILURE:
-            logger.debug("Musixmatch: auth échouée → refresh token + retry (async)")
-            result = await self._try_fetch_async(http, track_name, artist_name, duration, True)
-        return None if result is _AUTH_FAILURE else result
+        # Le retry après refresh de token est une SECONDE tentative du même appel
+        # logique : une observation les couvre toutes deux, un seul verdict.
+        with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_name}") as obs:
+            result = await self._try_fetch_async(http, track_name, artist_name, duration, False)
+            if result is _AUTH_FAILURE:
+                logger.debug("Musixmatch: auth échouée → refresh token + retry (async)")
+                result = await self._try_fetch_async(http, track_name, artist_name, duration, True)
+            if result is _AUTH_FAILURE:
+                obs.fail(IssueKind.AUTH, "token refusé même après refresh")
+                return None
+            if not result:
+                obs.absent("aucune parole synchronisée")
+            return result
 
     async def _try_fetch_async(
         self,

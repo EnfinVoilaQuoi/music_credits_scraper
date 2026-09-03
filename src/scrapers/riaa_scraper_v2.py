@@ -29,6 +29,8 @@ from urllib.parse import quote
 from bs4 import BeautifulSoup
 
 from src.concurrency import async_loop
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.utils.logger import get_logger
 
 # patchright est une dépendance OPTIONNELLE (installée avec crawl4ai), importée en
@@ -43,6 +45,9 @@ except ImportError:  # pragma: no cover
 
 
 logger = get_logger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "riaa"
 
 _BASE = "https://www.riaa.com/gold-platinum/"
 _USER_AGENT = (
@@ -138,8 +143,19 @@ class RIAAScraperV2:
             f"&award=&type=&category=&adv=SEARCH#search_section"
         )
         logger.info(f"RIAA artiste '{artist}' (détails={get_details})")
-        html = self._render(url, load_all=True, get_details=get_details)
-        return _parse_results(html, get_details) if html else []
+        with source_usage.observe(_SOURCE, label=f"artiste {artist}") as obs:
+            html = self._render(url, load_all=True, get_details=get_details)
+            if not html:
+                obs.fail(IssueKind.UNREACHABLE, "page non rendue")
+                return []
+            resultats = _parse_results(html, get_details)
+            if not resultats:
+                # Page servie mais rien d'exploitable : soit l'artiste n'a
+                # aucune certification (absence), soit le tableau a changé. On
+                # ne peut pas trancher ici — les deux se distinguent à l'œil
+                # dans le détail, et `absent` évite d'accuser à tort.
+                obs.absent("aucune certification parsée")
+            return resultats
 
     # Compat ancienne API
     def init_driver(self):  # no-op : patchright gère le navigateur à la volée

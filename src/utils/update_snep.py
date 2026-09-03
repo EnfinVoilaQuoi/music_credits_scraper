@@ -14,9 +14,15 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
 
 
 from src.config import DATA_PATH
+from src.observability import repository as usage_repository
+from src.observability import source_usage
+from src.observability.registry import Flow
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "snep"
 
 
 def safe_print(message: str):
@@ -113,7 +119,7 @@ def download_latest_snep_csv():
                 "Accept": "text/csv,application/csv,text/plain,*/*",
             }
 
-            response = requests.get(url, headers=headers, timeout=30)
+            response = source_usage.requests_get(_SOURCE, url, headers=headers, timeout=30)
 
             if response.status_code == 200:
                 # Vérifier que c'est bien un CSV — bloquer si ce n'est pas le cas
@@ -446,7 +452,7 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
             else f"https://snepmusique.com/les-certifications/page/{page}"
         )
         try:
-            resp = requests.get(url, headers=headers, timeout=30)
+            resp = source_usage.requests_get(_SOURCE, url, headers=headers, timeout=30)
             resp.raise_for_status()
         except requests.RequestException as e:
             safe_print(f"❌ Page {page} inaccessible : {e}")
@@ -587,7 +593,7 @@ def fetch_artist_certifications(artist_name: str) -> bool:
     page_url = f"https://snepmusique.com/les-certifications/?interprete={quote(artist_name)}"
     safe_print(f"🌐 {page_url}")
     try:
-        resp = requests.get(page_url, headers=headers, timeout=30)
+        resp = source_usage.requests_get(_SOURCE, page_url, headers=headers, timeout=30)
         resp.raise_for_status()
     except requests.RequestException as e:
         safe_print(f"❌ Page artiste inaccessible : {e}")
@@ -605,7 +611,7 @@ def fetch_artist_certifications(artist_name: str) -> bool:
 
     # 3. Télécharger et valider le CSV
     try:
-        csv_resp = requests.get(csv_url, headers=headers, timeout=30)
+        csv_resp = source_usage.requests_get(_SOURCE, csv_url, headers=headers, timeout=30)
         csv_resp.raise_for_status()
     except requests.RequestException as e:
         safe_print(f"❌ Téléchargement CSV impossible : {e}")
@@ -747,5 +753,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Ce script tourne en SOUS-PROCESSUS (dialog certifs de la GUI) : sans ce
+    # branchement, son usage de la source serait compté nulle part. La base est
+    # la même, les compteurs se rejoignent donc dans les mêmes tables.
+    with usage_repository.script_scope(Flow.CERTS):
+        main()
 # fin — scraper SNEP : parser BS4 par sélecteurs + backfill par année (?annee=)

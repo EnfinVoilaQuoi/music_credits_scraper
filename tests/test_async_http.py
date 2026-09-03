@@ -6,6 +6,7 @@ import httpx
 
 from src.api.async_http import AsyncHttpSession
 from src.concurrency.rate_limiter import DomainRateLimiter
+from src.observability import source_usage as su
 
 
 class FakeClock:
@@ -111,3 +112,65 @@ def test_http_errors_propagate():
         return "not raised"
 
     assert asyncio.run(scenario()) == "raised"
+
+
+# ── Observabilité : le transport nourrit les compteurs, sans rien changer ──────
+def _observer(url: str, session):
+    """Joue un GET sous observation et rend le verdict unique."""
+    su.reset()
+    su.set_sink(None)
+
+    async def scenario():
+        with su.observe("deezer"):
+            try:
+                await session.get(url)
+            except httpx.HTTPError:
+                pass
+
+    asyncio.run(scenario())
+    verdicts = su.flush()
+    su.reset()
+    return verdicts[0]
+
+
+def test_transport_enregistre_les_codes_http():
+    """`get()` ne lève pas sur 4xx/5xx : un capteur qui n'attraperait que les
+    exceptions ne verrait jamais ces codes."""
+    for code, attendu in ((200, "ok"), (429, "throttled"), (500, "unreachable")):
+        session, _ = _session(lambda request, c=code: httpx.Response(c, json={}))
+        assert _observer("https://api.deezer.com/x", session).issue == attendu
+
+
+def test_transport_classe_le_403_anti_bot():
+    def handler(request):
+        return httpx.Response(403, headers={"cf-ray": "8a1b"}, text="Just a moment...")
+
+    session, _ = _session(handler)
+    assert _observer("https://genius.com/x", session).issue == "blocked"
+
+
+def test_transport_classe_les_erreurs_reseau():
+    def handler(request):
+        raise httpx.ConnectError("réseau coupé")
+
+    session, _ = _session(handler)
+    assert _observer("https://api.deezer.com/x", session).issue == "unreachable"
+
+
+def test_le_capteur_ne_change_pas_le_comportement_reseau():
+    """Invariant : `get()` continue de RENDRE les 4xx/5xx au lieu de lever."""
+
+    def handler(request):
+        return httpx.Response(404, json={})
+
+    session, _ = _session(handler)
+    response = asyncio.run(session.get("https://api.deezer.com/x"))
+    assert response.status_code == 404  # aucune exception levée
+
+
+def test_domaine_inconnu_ne_casse_rien():
+    def handler(request):
+        return httpx.Response(200, json={})
+
+    session, _ = _session(handler)
+    assert asyncio.run(session.get("https://site-inconnu.test/x")).status_code == 200

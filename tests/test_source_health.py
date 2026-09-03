@@ -60,12 +60,29 @@ def test_fast_timeout_est_broken(monkeypatch):
     assert st.last_ok is None
 
 
-def test_fast_403_tolere_est_degraded(monkeypatch):
+def test_fast_403_tolere_avoue_l_ignorance(monkeypatch):
+    """La sonde tape en requests nu, le pipeline passe par patchright : un 403
+    ici ne mesure RIEN. Le peindre en « dégradé » inventerait un signal."""
     monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResponse(403, ""))
     spec = SourceSpec(key="cf", label="CF", fast_url="https://cf.test", tolerate_403=True)
     st = check_fast(spec)
-    assert st.status == "degraded"
-    assert "403" in st.message
+    assert st.status == "unknown"
+    assert st.level == "none"
+    assert "non sondable" in st.message
+
+
+def test_fast_tolere_403_garde_la_branche_negative(monkeypatch):
+    """Seule la branche creuse se tait : un site réellement en panne parle."""
+    spec = SourceSpec(key="cf", label="CF", fast_url="https://cf.test", tolerate_403=True)
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResponse(500, ""))
+    assert check_fast(spec).status == "broken"
+
+    def boum(*a, **k):
+        raise requests.ConnectionError("DNS mort")
+
+    monkeypatch.setattr(requests, "get", boum)
+    assert check_fast(spec).status == "broken"
 
 
 def test_fast_403_non_tolere_est_broken(monkeypatch):

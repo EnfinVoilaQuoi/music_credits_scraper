@@ -7,6 +7,8 @@ import customtkinter as ctk
 from src.enrichment.providers.streams import StreamsProvider
 from src.gui.dialogs import kworb_confirm, report
 from src.gui.workers.lifecycle import run_worker, stop_requested
+from src.observability import source_usage
+from src.observability.registry import Flow
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -216,4 +218,10 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
             app.root.after(0, app._hide_progress_bar)
             app.root.after(0, app._update_buttons_state)
 
-    run_worker(run, name="streams")
+    def run_observe():
+        with source_usage.run_scope(
+            Flow.STREAMS, artist_id=app.current_artist.id, artist_name=app.current_artist.name
+        ):
+            return run()
+
+    run_worker(run_observe, name="streams")

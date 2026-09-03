@@ -17,6 +17,7 @@ from src.gui.windows.track_details import TrackDetailsWindow
 from src.gui.workers import enrichment, retrieval, streams
 from src.gui.workers.lifecycle import start_worker
 from src.models import Artist, Track
+from src.observability import repository as usage_repository
 from src.utils.data_enricher import DataEnricher
 from src.utils.data_manager import DataManager
 from src.utils.deleted_tracks_manager import DeletedTracksManager
@@ -41,6 +42,9 @@ class MainWindow:
         # Services
         self.genius_api = GeniusAPI()
         self.data_manager = DataManager()
+        # Branche la persistance de l'usage des sources : hors de l'app (tests,
+        # CLI), le capteur reste actif mais ses verdicts sont jetés.
+        self.source_usage_repo = usage_repository.attach(self.data_manager.engine)
         self.data_enricher = DataEnricher(
             headless_reccobeats=True, headless_songbpm=True, headless_spotify_scraper=True
         )

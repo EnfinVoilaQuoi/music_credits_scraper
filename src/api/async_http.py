@@ -11,11 +11,15 @@ fermé par `aclose()` — appelé par le flux propriétaire en fin de batch
 (« qui crée ferme ») ; rouvert à la demande au batch suivant.
 """
 
+import time
 from urllib.parse import urlsplit
 
 import httpx
 
 from src.concurrency.rate_limiter import DomainRateLimiter
+from src.observability import source_usage
+from src.observability.issues import classify
+from src.observability.registry import key_for_domain
 
 
 class AsyncHttpSession:
@@ -51,10 +55,35 @@ class AsyncHttpSession:
         headers: dict | None = None,
         timeout: float = 15.0,
     ) -> httpx.Response:
-        """GET rate-limité par domaine. Lève les erreurs httpx (frontière appelant)."""
+        """GET rate-limité par domaine. Lève les erreurs httpx (frontière appelant).
+
+        Enregistre au passage une TENTATIVE pour l'observabilité des sources.
+        Le comportement réseau est inchangé : on ne lève toujours pas sur
+        4xx/5xx, les appelants gardent leur `raise_for_status()` — d'où la
+        lecture explicite de `status_code`, un `except httpx.HTTPError` ne
+        verrait rien de ces codes.
+        """
         client = self._ensure_client()
-        async with self._limiter.limit(urlsplit(url).netloc):
-            return await client.get(url, params=params, headers=headers, timeout=timeout)
+        netloc = urlsplit(url).netloc
+        start = time.monotonic()
+        async with self._limiter.limit(netloc):
+            try:
+                response = await client.get(url, params=params, headers=headers, timeout=timeout)
+            except BaseException as exc:
+                source_usage.record_attempt(
+                    key_for_domain(netloc),
+                    classify(exc=exc),
+                    detail=f"{type(exc).__name__}: {exc}",
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                )
+                raise
+        source_usage.record_response(
+            url,
+            response.status_code,
+            headers=response.headers,
+            latency_ms=int((time.monotonic() - start) * 1000),
+        )
+        return response
 
     async def aclose(self) -> None:
         """Ferme le client (idempotent) ; recréé au prochain `get()`."""

@@ -359,7 +359,34 @@ class DiscogsClient:
             "artwork": CreditRole.ARTWORK,
             "design": CreditRole.GRAPHIC_DESIGN,
             "photography": CreditRole.PHOTOGRAPHY,
+            # ── Alias ajoutés le 2026-09-03 ──────────────────────────────────
+            # Relevés sur les libellés réellement rencontrés (les crédits rangés
+            # en OTHER conservent leur libellé Discogs dans `role_detail`, ce qui
+            # a permis de les inventorier en base). Chaque entrée est soit
+            # lexicalement non ambiguë, soit confirmée par l'ORACLE Genius : ce
+            # que Genius dit de la MÊME personne sur le MÊME morceau.
+            # Cf. scripts/discogs_genius_oracle.py pour rejouer la mesure.
+            "songwriter": CreditRole.WRITER,
+            "graphics": CreditRole.GRAPHIC_DESIGN,
+            "logo": CreditRole.GRAPHIC_DESIGN,
+            "cover": CreditRole.ARTWORK,
+            "scratches": CreditRole.SCRATCHES,
+            # Gravure/mastering vinyle. « direct metal mastering by » est
+            # confirmé par l'oracle (6/6 « Mastering Engineer » chez Genius) ;
+            # « lacquer cut by » est le même métier sans recoupement disponible.
+            "direct metal mastering by": CreditRole.MASTERING_ENGINEER,
+            "lacquer cut by": CreditRole.MASTERING_ENGINEER,
+            "editor": CreditRole.VIDEO_EDITOR,
         }
+
+        # NON mappés DÉLIBÉRÉMENT (décision 2026-09-03) — ne pas « compléter »
+        # sans mesurer d'abord. `music by` (109 crédits) et `realization` (42)
+        # ont un oracle PARTAGÉ : Genius appelle ces personnes Producer,
+        # Mixing Engineer ou Recording Engineer selon les cas. Les forcer vers
+        # un rôle unique inventerait une précision que la donnée n'a pas ; le
+        # libellé reste lisible dans `role_detail`. Idem pour `project manager`,
+        # `management`, `production manager` et `stylist`, sans équivalent dans
+        # l'enum. Verrouillé par tests/test_discogs_api.py.
 
         # Chercher une correspondance, de la clé la PLUS SPÉCIFIQUE à la plus
         # générale. Jusqu'au 2026-09-03 la table était parcourue dans son ordre

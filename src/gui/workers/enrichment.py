@@ -21,6 +21,8 @@ import customtkinter as ctk
 from src.concurrency import async_loop
 from src.gui.dialogs import report
 from src.gui.workers.lifecycle import stop_requested
+from src.observability import source_usage
+from src.observability.registry import Flow
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -341,8 +343,19 @@ def run_enrichment(
             app.root.after(0, lambda: app.progress_bar.set(0))
             app.root.after(0, lambda: app.progress_label.configure(text=""))
 
+    async def enrich_batch_observe():
+        """Le scope nomme l'artiste et le flux. Il est porté par une pile de
+        process (pas une contextvar) : c'est ce qui le rend visible aussi bien
+        depuis la boucle que depuis le thread du `sync_runner`."""
+        with source_usage.run_scope(
+            Flow.ENRICHMENT,
+            artist_id=app.current_artist.id if app.current_artist else None,
+            artist_name=app.current_artist.name if app.current_artist else "",
+        ):
+            return await enrich_batch()
+
     async_loop.start()  # idempotent : démarre la boucle au premier flux async
-    async_loop.submit(enrich_batch())
+    async_loop.submit(enrich_batch_observe())
 
 
 def _stop_playwright():

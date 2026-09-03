@@ -7,9 +7,14 @@ import discogs_client
 from discogs_client.exceptions import DiscogsAPIError, HTTPError
 
 from src.models import Credit, CreditRole, Track
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.utils.logger import get_logger, log_api
 
 logger = get_logger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "discogs"
 
 
 class DiscogsClient:
@@ -82,6 +87,13 @@ class DiscogsClient:
             logger.error("❌ Client Discogs non initialisé")
             return None
 
+        with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_title}") as obs:
+            return self._search_track_body(obs, track_title, artist_name, album_name)
+
+    def _search_track_body(
+        self, obs, track_title: str, artist_name: str, album_name: str | None
+    ) -> dict[str, Any] | None:
+        """Corps de `search_track`, sous l'observation ouverte par elle."""
         try:
             self._check_rate_limit()
 
@@ -97,11 +109,15 @@ class DiscogsClient:
                 logger.info(f"🔍 Discogs: Recherche '{track_title}' de {artist_name}")
 
             # Rechercher des releases (albums/singles) contenant ce track
-            results = self.client.search(query, type="release", artist=artist_name)
+            # `attempt` : discogs_client fait ses requêtes lui-même, aucun de
+            # nos capteurs transport ne les voit.
+            with source_usage.attempt(_SOURCE, detail="search"):
+                results = self.client.search(query, type="release", artist=artist_name)
 
             if not results:
                 logger.warning(f"❌ Aucun résultat Discogs pour '{track_title}'")
                 log_api("Discogs", f"search/{track_title}", False)
+                obs.absent("aucun résultat de recherche")
                 return None
 
             # Discogs results is a paginated object, not a list
@@ -123,6 +139,7 @@ class DiscogsClient:
                     if track_data:
                         logger.info(f"✅ Discogs: Correspondance trouvée (résultat #{i})")
                         log_api("Discogs", f"search/{track_title}", True)
+                        obs.ok()
                         return track_data
 
                 # release.* est lazy-loadé par discogs_client → accès = fetch réseau
@@ -135,18 +152,25 @@ class DiscogsClient:
                 f"❌ Aucune correspondance exacte trouvée sur Discogs pour '{track_title}'"
             )
             log_api("Discogs", f"search/{track_title}", False)
+            obs.absent("aucune correspondance exacte")
             return None
 
         except HTTPError as e:
             if e.status_code == 429:
                 logger.error("⏰ Rate limit Discogs atteint, pause de 60s...")
+                obs.fail(IssueKind.THROTTLED, "rate limit Discogs (429)")
                 time.sleep(60)
             else:
                 logger.error(f"❌ Erreur HTTP Discogs: {e}")
+                obs.note_status(e.status_code or 0)
             log_api("Discogs", f"search/{track_title}", False)
             return None
 
         except (DiscogsAPIError, KeyError, TypeError, ValueError) as e:
+            if isinstance(e, (KeyError, TypeError, ValueError)):
+                obs.parse_error(f"réponse inexploitable : {e}")
+            else:
+                obs.fail(IssueKind.UNREACHABLE, f"API Discogs : {e}")
             logger.error(f"❌ Erreur recherche Discogs: {e}")
             log_api("Discogs", f"search/{track_title}", False)
             return None

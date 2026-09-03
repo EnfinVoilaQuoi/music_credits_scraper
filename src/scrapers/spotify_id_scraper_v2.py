@@ -25,10 +25,15 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import build_spotify_match_prompt, get_shared_extractor
 
 logger = logging.getLogger("SpotifyIDScraper")
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "spotify_embed"
 
 
 class SpotifyIDScraper:
@@ -226,9 +231,17 @@ class SpotifyIDScraper:
             # 'not_found' n'est PAS définitif (a pu être causé par une erreur
             # passagère, ex: driver mort) → on retente la recherche
 
+        # L'observation s'ouvre APRÈS le cache : un morceau servi de mémoire ne
+        # sollicite pas la source et ne doit pas peser dans ses compteurs.
+        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
+            return self._get_spotify_id_body(obs, artist, title, cache_key)
+
+    def _get_spotify_id_body(self, obs, artist: str, title: str, cache_key: str) -> str | None:
+        """Corps de `get_spotify_id`, sous l'observation ouverte par elle."""
         try:
             self._ensure_driver()
-        except PlaywrightError:
+        except PlaywrightError as e:
+            obs.fail(IssueKind.CRASH, f"browser indisponible : {e}")
             logger.error("❌ Browser non disponible")
             return None
 
@@ -321,9 +334,16 @@ class SpotifyIDScraper:
             logger.info(f"✅ SÉLECTIONNÉ: {sid} (relevance: {best['relevance']:.2f})")
             self.cache[cache_key] = sid
             self._save_cache()
+            obs.ok()
             return sid
         else:
             logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
+            # `had_errors` distingue déjà les deux cas que le comptage doit
+            # séparer : rien au catalogue (absence) VS la recherche a cassé.
+            if had_errors:
+                obs.fail(IssueKind.UNREACHABLE, "recherche interrompue par des erreurs techniques")
+            else:
+                obs.absent(f"aucun ID Spotify pour '{title}'")
             # Ne pas cacher l'échec si des erreurs techniques ont eu lieu
             if not had_errors:
                 self.cache[cache_key] = "not_found"

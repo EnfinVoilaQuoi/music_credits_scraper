@@ -33,7 +33,8 @@ _scraper: CrawlAIScraperBase | None = None
 def _get_scraper() -> CrawlAIScraperBase:
     global _scraper
     if _scraper is None:
-        _scraper = CrawlAIScraperBase(headless=True)
+        # `health_key` : ces pages comptent pour BRMA, pas pour le scrape Genius.
+        _scraper = CrawlAIScraperBase(headless=True, health_key="brma")
     return _scraper
 
 

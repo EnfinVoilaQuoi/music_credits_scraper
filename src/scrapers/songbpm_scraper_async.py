@@ -17,11 +17,15 @@ from typing import Any
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from src.observability import source_usage
 from src.scrapers.playwright_manager import get_playwright_async
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.utils.logger import log_api
 
 logger = logging.getLogger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "songbpm"
 
 
 class SongBPMScraperAsync(SongBPMScraper):
@@ -353,6 +357,22 @@ class SongBPMScraperAsync(SongBPMScraper):
             return None
 
         logger.info(f"🔍 SongBPM: '{track_title}' par {artist_name}")
+        # UNE observation : recherche + repli « sans parenthèses » = un appel.
+        with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_title}") as obs:
+            return await self._search_track_async_body(
+                obs, track_title, artist_name, spotify_id, max_results_to_check, fetch_details
+            )
+
+    async def _search_track_async_body(
+        self,
+        obs,
+        track_title: str,
+        artist_name: str,
+        spotify_id: str | None,
+        max_results_to_check: int,
+        fetch_details: bool,
+    ):
+        """Corps de `search_track_async`, sous l'observation ouverte par elle."""
         result = await self._perform_search_async(
             track_title=track_title,
             artist_name=artist_name,
@@ -382,4 +402,5 @@ class SongBPMScraperAsync(SongBPMScraper):
                     return result
 
         log_api("SongBPM", f"search/{track_title}", False)
+        obs.absent("aucun résultat retenu")
         return None

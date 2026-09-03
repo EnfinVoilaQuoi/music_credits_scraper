@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING
 import httpx
 import requests
 
+from src.observability import source_usage
+
 if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
 
@@ -37,6 +39,9 @@ except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
 
 logger = logging.getLogger(__name__)
+
+#: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
+_SOURCE = "lrclib"
 
 # User-Agent identifiable, recommandé par LRCLIB (nom + version + lien projet).
 _USER_AGENT = "MusicCreditsScraper/1.0 (+https://github.com/g78rem/music_credits_scraper)"
@@ -156,6 +161,9 @@ class LRCLIBAPI:
         for attempt in range(MAX_RETRIES):
             try:
                 r = self.session.get(url, params=params, timeout=self.timeout)
+                # Une TENTATIVE par essai ; le verdict, lui, reste unique (il
+                # est arrêté par l'observation ouverte plus haut).
+                source_usage.record_response(url, r.status_code, headers=r.headers)
                 if r.status_code == 200:
                     return r.json()
                 if r.status_code == 404:
@@ -163,6 +171,7 @@ class LRCLIBAPI:
                 # 5xx / 429 : on réessaie
                 last_err = f"HTTP {r.status_code}"
             except requests.RequestException as e:
+                source_usage.note_failure(_SOURCE, e)
                 last_err = str(e)
             if attempt < MAX_RETRIES - 1:
                 time.sleep(max(DELAY_BETWEEN_REQUESTS, 0.5) * (attempt + 1))
@@ -241,30 +250,37 @@ class LRCLIBAPI:
         if not track_name or not artist_name:
             return None
 
-        # 1) Match exact si on a la durée ET l'album (les 4 champs requis par /get)
-        if duration and album_name:
-            hit = self.get_exact(track_name, artist_name, album_name, duration)
+        # UNE observation pour les trois stratégies : c'est un seul appel
+        # logique à LRCLIB, quel que soit le nombre de requêtes qu'il coûte.
+        with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_name}") as obs:
+            # 1) Match exact si on a la durée ET l'album (les 4 champs requis par /get)
+            if duration and album_name:
+                hit = self.get_exact(track_name, artist_name, album_name, duration)
+                if hit and hit.get("lyrics_synced"):
+                    logger.info(
+                        f"🎵 LRCLIB /get: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
+                    )
+                    obs.ok()
+                    return hit
+
+            # 2) Fallback recherche (titre fort + départage durée)
+            hit = self.search(track_name, artist_name, duration=duration, require_synced=True)
             if hit and hit.get("lyrics_synced"):
                 logger.info(
-                    f"🎵 LRCLIB /get: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
+                    f"🎵 LRCLIB /search: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
                 )
+                obs.ok()
                 return hit
 
-        # 2) Fallback recherche (titre fort + départage durée)
-        hit = self.search(track_name, artist_name, duration=duration, require_synced=True)
-        if hit and hit.get("lyrics_synced"):
-            logger.info(
-                f"🎵 LRCLIB /search: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
-            )
-            return hit
+            # 3) Dernier recours : texte brut (pas de synchro) via /search
+            hit = self.search(track_name, artist_name, duration=duration, require_synced=False)
+            if hit:
+                logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
+                obs.ok()
+                return hit
 
-        # 3) Dernier recours : texte brut (pas de synchro) via /search
-        hit = self.search(track_name, artist_name, duration=duration, require_synced=False)
-        if hit:
-            logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
-            return hit
-
-        return None
+            obs.absent("aucune parole pour ce morceau")
+            return None
 
     # ── Jumeaux ASYNC (F5) : même logique, sur l'AsyncHttpSession partagée ───────
     async def _request_async(self, http: "AsyncHttpSession", path: str, params: dict):
@@ -332,6 +348,15 @@ class LRCLIBAPI:
         if not track_name or not artist_name:
             return None
 
+        with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_name}") as obs:
+            return await self._get_synced_async_body(
+                obs, http, track_name, artist_name, album_name, duration
+            )
+
+    async def _get_synced_async_body(
+        self, obs, http, track_name, artist_name, album_name, duration
+    ) -> dict | None:
+        """Corps de `get_synced_async`, sous l'observation ouverte par elle."""
         if duration and album_name:
             hit = await self.get_exact_async(http, track_name, artist_name, album_name, duration)
             if hit and hit.get("lyrics_synced"):
@@ -339,6 +364,7 @@ class LRCLIBAPI:
                     f"🎵 LRCLIB /get: '{artist_name} - {track_name}' "
                     f"(synchro, id={hit.get('lrclib_id')})"
                 )
+                obs.ok()
                 return hit
 
         hit = await self.search_async(http, track_name, artist_name, duration=duration)
@@ -347,6 +373,7 @@ class LRCLIBAPI:
                 f"🎵 LRCLIB /search: '{artist_name} - {track_name}' "
                 f"(synchro, id={hit.get('lrclib_id')})"
             )
+            obs.ok()
             return hit
 
         hit = await self.search_async(
@@ -354,6 +381,8 @@ class LRCLIBAPI:
         )
         if hit:
             logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
+            obs.ok()
             return hit
 
+        obs.absent("aucune parole pour ce morceau")
         return None

@@ -23,6 +23,8 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
 
 # Import du scraper principal (patchright v2 — remplace l'ancien Selenium ;
 # API compatible : init_driver/close_driver/scrape_by_date_range/scrape_by_artist)
+from src.observability import repository as usage_repository
+from src.observability.registry import Flow
 from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
 
 
@@ -627,4 +629,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Lancé en SOUS-PROCESSUS par le dialog certifs : on branche les compteurs
+    # d'usage sur la même base, sinon rien de ce run ne serait compté.
+    with usage_repository.script_scope(Flow.CERTS):
+        main()

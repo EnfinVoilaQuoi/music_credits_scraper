@@ -282,14 +282,23 @@ def _parse_certifications_page(html: str) -> list:
 
 
 def _row_key(fields: list) -> tuple:
-    """Clé de déduplication stable (sans le label, qui varie entre sources)."""
+    """Clé de déduplication stable (sans le label, qui varie entre sources).
+
+    Les 4 derniers champs sont indexés par la FIN (2026-09-04). Le label est le
+    seul champ de longueur variable : il peut contenir le séparateur `;`, auquel
+    cas la ligne se découpe en 8 champs (cas réel, unique sur les 12 808 lignes
+    du brut : « AYA NAKAMURA;DNK;"REC; 118 / WARNER MUSIC FRANCE";Albums;… »).
+    Indexée par le DÉBUT, la clé de la ligne ENTRANTE cessait alors de coïncider
+    avec celle de la ligne DÉJÀ EN BASE : la certification n'était jamais
+    reconnue et se ré-ajoutait à chaque passage.
+    """
     return (
         fields[0].strip().lower(),
         fields[1].strip().lower(),
-        fields[3],
-        fields[4],
-        fields[5],
-        fields[6],
+        fields[-4],
+        fields[-3],
+        fields[-2],
+        fields[-1],
     )
 
 
@@ -306,9 +315,7 @@ def _load_existing(dest_path: Path):
             for line in existing_lines:
                 f = line.split(";")
                 if len(f) >= 7:
-                    keys.add(
-                        (f[0].strip().lower(), f[1].strip().lower(), f[-4], f[-3], f[-2], f[-1])
-                    )
+                    keys.add(_row_key(f))
     return header, existing_lines, keys
 
 
@@ -426,23 +433,9 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
         "Referer": "https://snepmusique.com/les-certifications/",
     }
 
-    # Lignes déjà connues (clé = champs normalisés sans le label, plus stable)
-    existing_keys = set()
-    header = "Interprete;Titre;Éditeur / Distributeur;Catégorie;Certification;Date de sortie;Date de constat"
-    existing_lines = []
-    if dest_path.exists():
-        raw = dest_path.read_text(encoding="utf-8-sig")
-        lines = raw.splitlines()
-        if lines:
-            header = lines[0]
-            existing_lines = [line for line in lines[1:] if line.strip()]
-            for line in existing_lines:
-                f = line.split(";")
-                if len(f) >= 7:
-                    # clé sans label (le label peut différer entre export et page)
-                    existing_keys.add(
-                        (f[0].strip().lower(), f[1].strip().lower(), f[-4], f[-3], f[-2], f[-1])
-                    )
+    # Lignes déjà connues : MÊME lecture et MÊME clé que le backfill `scrape_year`.
+    # Elles étaient redéfinies ici, avec une clé divergente (cf. `_row_key`).
+    header, existing_lines, existing_keys = _load_existing(dest_path)
 
     new_lines = []
     for page in range(1, max_pages + 1):
@@ -466,7 +459,9 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
         page_new = 0
         for row in rows:
             f = row.split(";")
-            key = (f[0].strip().lower(), f[1].strip().lower(), f[3], f[4], f[5], f[6])
+            if len(f) < 7:
+                continue
+            key = _row_key(f)
             if key not in existing_keys:
                 existing_keys.add(key)
                 new_lines.append(row)
@@ -478,10 +473,7 @@ def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
             break
         time.sleep(random.uniform(0.6, 1.4))
 
-    if new_lines:
-        dest_path.write_text(
-            "﻿" + header + "\n" + "\n".join(existing_lines + new_lines) + "\n", encoding="utf-8"
-        )
+    _write_merged(dest_path, header, existing_lines, new_lines)
     return len(new_lines)
 
 

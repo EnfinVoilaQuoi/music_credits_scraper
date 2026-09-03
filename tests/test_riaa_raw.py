@@ -4,7 +4,7 @@ Les fonctions de update_riaa écrivent dans des fichiers module-niveau : on
 monkeypatch les chemins vers tmp_path pour tester sans toucher aux vraies données.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -287,3 +287,161 @@ class TestLectureDuClean:
     def test_export_est_un_no_op(self, updater):
         """Conservé pour les appelants du flux bulk : ne doit RIEN faire."""
         assert updater.export_to_csv() is None
+
+
+# ─────────────────────────────── les boucles de période (sans réseau)
+
+
+class _FakeScraper:
+    """Remplace RIAAScraperV2 : compte les appels, sert des résultats par période.
+
+    `resultats` est une liste consommée période par période ; un élément peut
+    être une exception, levée à la place du résultat.
+    """
+
+    def __init__(self, resultats=None, echec_init=False):
+        self.resultats = list(resultats or [])
+        self.echec_init = echec_init
+        self.periodes = []
+        self.init_count = 0
+        self.close_count = 0
+
+    def init_driver(self):
+        self.init_count += 1
+        if self.echec_init:
+            raise RuntimeError("navigateur indisponible")
+
+    def close_driver(self):
+        self.close_count += 1
+
+    def scrape_by_date_range(self, start, end, kind):
+        self.periodes.append((start, end))
+        if not self.resultats:
+            return []
+        item = self.resultats.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+@pytest.fixture
+def scraper_factory(monkeypatch):
+    """Injecte un `_FakeScraper` à la place du scraper patchright."""
+
+    def _install(fake):
+        monkeypatch.setattr(u, "RIAAScraper", lambda *a, **k: fake)
+        monkeypatch.setattr(u.time, "sleep", lambda *_: None)
+        return fake
+
+    return _install
+
+
+def _certif(artist="DRAKE", title="VIEWS", date="January 5, 2018"):
+    return {
+        "artist": artist,
+        "title": title,
+        "format": "ALBUM",
+        "certification_level": "Gold",
+        "certification_date": date,
+    }
+
+
+class TestUpdateRecentCertifications:
+    def test_succes_ferme_le_navigateur(self, updater, riaa_tmp, scraper_factory):
+        fake = scraper_factory(_FakeScraper([[_certif()]]))
+
+        assert updater.update_recent_certifications(months_back=1) is True
+        assert fake.close_count == 1
+        assert u.CERTIF_CSV.exists()
+
+    def test_periode_demandee_couvre_les_mois_voulus(self, updater, riaa_tmp, scraper_factory):
+        fake = scraper_factory(_FakeScraper([[]]))
+        updater.update_recent_certifications(months_back=3)
+
+        debut, fin = fake.periodes[0]
+        ecart = datetime.strptime(fin, "%m/%d/%Y") - datetime.strptime(debut, "%m/%d/%Y")
+        assert ecart.days == 90  # 3 tranches de 30 jours
+
+    def test_echec_de_scrape_rend_false_sans_lever(self, updater, riaa_tmp, scraper_factory):
+        fake = scraper_factory(_FakeScraper([RuntimeError("page cassée")]))
+
+        assert updater.update_recent_certifications() is False
+        assert fake.close_count == 1  # le `finally` ferme malgré l'erreur
+
+
+class TestUpdateMissingMonths:
+    """Comblement des trous : la boucle découpe en tranches de 30 jours depuis la
+    dernière certif connue. Deux régressions y sont déjà documentées (l'écart
+    calculé en jours et non en mois ; `now` figé avant la boucle)."""
+
+    def _figer_derniere_date(self, updater, monkeypatch, date):
+        monkeypatch.setattr(updater, "get_last_update_date", lambda: date)
+
+    def test_deja_a_jour_horodate_quand_meme(self, updater, riaa_tmp, monkeypatch):
+        """Rien à récupérer, mais la fraîcheur est une date de VÉRIFICATION :
+        sans écriture du sidecar la GUI afficherait une MàJ périmée."""
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() + timedelta(days=1))
+
+        assert updater.update_missing_months() is True
+        assert u.RIAA_META.exists()
+
+    def test_trou_inferieur_a_un_mois_declenche_la_recup(
+        self, updater, riaa_tmp, monkeypatch, scraper_factory
+    ):
+        """Le `//30` d'origine arrondissait à 0 et concluait « déjà à jour »,
+        laissant le mois courant non scrapé."""
+        fake = scraper_factory(_FakeScraper())
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=10))
+
+        assert updater.update_missing_months() is True
+        assert len(fake.periodes) == 1
+
+    def test_decoupage_en_tranches_de_30_jours(
+        self, updater, riaa_tmp, monkeypatch, scraper_factory
+    ):
+        fake = scraper_factory(_FakeScraper())
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=95))
+
+        updater.update_missing_months()
+        assert len(fake.periodes) == 4  # 30 + 30 + 30 + 5
+
+    def test_le_navigateur_est_ouvert_une_fois_pour_toutes_les_periodes(
+        self, updater, riaa_tmp, monkeypatch, scraper_factory
+    ):
+        fake = scraper_factory(_FakeScraper())
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=95))
+
+        updater.update_missing_months()
+        assert fake.init_count == 1 and fake.close_count == 1
+
+    def test_une_periode_en_erreur_ne_stoppe_pas_les_suivantes(
+        self, updater, riaa_tmp, monkeypatch, scraper_factory
+    ):
+        """Boucle résiliente : un trou de 3 mois ne doit pas être perdu parce
+        que la 1re tranche a échoué."""
+        fake = scraper_factory(
+            _FakeScraper([RuntimeError("timeout"), [_certif(title="A")], [_certif(title="B")]])
+        )
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=95))
+
+        assert updater.update_missing_months() is True
+        assert len(fake.periodes) == 4
+        assert u.CERTIF_CSV.exists()
+
+    def test_boucle_terminee_horodate_la_verification(
+        self, updater, riaa_tmp, monkeypatch, scraper_factory
+    ):
+        scraper_factory(_FakeScraper())
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=40))
+
+        updater.update_missing_months()
+        assert u.RIAA_META.exists()
+
+    def test_echec_douverture_du_navigateur_rend_false(
+        self, updater, riaa_tmp, monkeypatch, scraper_factory
+    ):
+        fake = scraper_factory(_FakeScraper(echec_init=True))
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=40))
+
+        assert updater.update_missing_months() is False
+        assert fake.periodes == []

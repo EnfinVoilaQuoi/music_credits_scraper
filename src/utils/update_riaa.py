@@ -80,7 +80,13 @@ class RIAADatabaseUpdater:
         fichier canonique alimentant le matcher), pas la base sqlite."""
         try:
             if CERTIF_CSV.exists():
-                df = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str)
+                # `.fillna("")` INDISPENSABLE (comme dans get_statistics juste en
+                # dessous) : sans lui une date vide arrive en NaN (un float) et
+                # `_riaa_iso` lève AttributeError — absent du `except` ci-dessous,
+                # donc l'exception traverse la méthode. Une seule ligne sans date
+                # (un palier scrapé sans date, cf. `_flatten_records`) suffirait à
+                # casser DÉFINITIVEMENT l'affichage de fraîcheur RIAA.
+                df = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna("")
                 dcol = next((c for c in df.columns if c.lower() == "certification_date"), None)
                 if dcol:
                     isod = df[dcol].map(_riaa_iso)

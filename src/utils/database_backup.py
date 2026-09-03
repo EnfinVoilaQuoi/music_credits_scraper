@@ -85,6 +85,7 @@ class DatabaseBackupManager:
 
     def _verify_backup(self, backup_path: Path) -> bool:
         """Vérifie l'intégrité d'un backup"""
+        conn = None
         try:
             conn = sqlite3.connect(backup_path)
             cursor = conn.cursor()
@@ -95,7 +96,6 @@ class DatabaseBackupManager:
 
             if integrity != "ok":
                 logger.warning(f"Intégrité compromise: {integrity}")
-                conn.close()
                 return False
 
             # Vérifier que les tables principales existent
@@ -104,12 +104,8 @@ class DatabaseBackupManager:
 
             # Au minimum, on doit avoir la table artists
             # (tracks et credits peuvent être vides au début)
-            has_artists_table = "artists" in tables
-
-            if not has_artists_table:
+            if "artists" not in tables:
                 logger.debug("Table 'artists' manquante dans le backup")
-
-            conn.close()
 
             # Accepter le backup même s'il est vide (nouvelle installation)
             return len(tables) > 0
@@ -117,6 +113,16 @@ class DatabaseBackupManager:
         except Exception as e:
             logger.error(f"Erreur vérification backup: {e}")
             return False
+        finally:
+            # Fermeture INCONDITIONNELLE : sur le chemin d'erreur la connexion
+            # restait ouverte, et sous Windows un fichier ouvert ne peut pas être
+            # supprimé (WinError 32). Le `unlink()` du backup corrompu échouait
+            # donc en silence : le fichier illisible restait sur le disque, passait
+            # pour un backup valide dans `list_backups()` et occupait un slot de la
+            # rotation à 10 — chassant un backup sain. Vérifié par
+            # tests/test_database_backup.py::test_backup_corrompu_est_supprime.
+            if conn is not None:
+                conn.close()
 
     def _cleanup_old_backups(self, keep: int = 10):
         """Nettoie les anciens backups en ne gardant que les N derniers"""

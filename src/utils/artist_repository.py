@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.models import Artist
 from src.persistence.binding import date_bind
@@ -121,13 +122,13 @@ class ArtistRepository:
             try:
                 artist.tracks = self.get_artist_tracks(artist.id)
                 logger.info(f"🎵 {len(artist.tracks)} morceaux chargés pour {artist.name}")
-            except Exception as tracks_error:
+            except SQLAlchemyError as tracks_error:
                 logger.error(f"⚠️ Erreur chargement tracks: {tracks_error}")
                 artist.tracks = []
 
             return artist
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"❌ Erreur dans get_artist_by_name: {e}")
             return None
 
@@ -196,7 +197,7 @@ class ArtistRepository:
 
                 return deleted_artist > 0
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur lors de la suppression de l'artiste: {e}")
             return False
 
@@ -287,7 +288,7 @@ class ArtistRepository:
                     "credits_by_role": credits_by_role,
                 }
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur lors de la récupération des détails: {e}")
             return {}
 
@@ -301,7 +302,7 @@ class ArtistRepository:
                     .first()
                 )
                 return row["ytm_channel_id"] if row and row["ytm_channel_id"] else None
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur get_artist_ytm_channel: {e}")
             return None
 
@@ -326,7 +327,7 @@ class ArtistRepository:
                 if not row or not row["ytm_channel_id"]:
                     return (None, None)
                 return (row["ytm_channel_id"], row["ytm_channel_source"])
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur get_artist_ytm_channel_info: {e}")
             return (None, None)
 
@@ -348,7 +349,7 @@ class ArtistRepository:
                 conn.execute(stmt)
             logger.info(f"📌 Canal YTM épinglé pour artist_id={artist_id}: {channel_id} ({source})")
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur set_artist_ytm_channel: {e}")
             return False
 
@@ -367,7 +368,7 @@ class ArtistRepository:
                 conn.execute(stmt)
             logger.info(f"📌 Canal YTM dé-épinglé pour artist_id={artist_id}")
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur clear_artist_ytm_channel: {e}")
             return False
 
@@ -398,7 +399,7 @@ class ArtistRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_artist_kworb_totals (artist_id={artist_id}): {e}")
             return False
 
@@ -436,7 +437,7 @@ class ArtistRepository:
                 conn.execute(upd)
                 conn.execute(ins)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_artist_monthly_listeners (id={artist_id}): {e}")
             return False
 
@@ -468,7 +469,7 @@ class ArtistRepository:
                     }
                     for r in rows
                 ]
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur get_monthly_listeners_history (id={artist_id}): {e}")
             return []
 
@@ -484,7 +485,7 @@ class ArtistRepository:
                 conn.execute(stmt)
             logger.info(f"spotify_id artiste #{artist_id} mis à jour: {spotify_id}")
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur update_artist_spotify_id (artist_id={artist_id}): {e}")
             return False
 
@@ -502,6 +503,6 @@ class ArtistRepository:
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur set_artist_image_path (artist_id={artist_id}): {e}")
             return False

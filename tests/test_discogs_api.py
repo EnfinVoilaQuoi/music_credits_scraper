@@ -13,6 +13,7 @@ la forme de `discogs_client` (attributs + le dict `data` des crédits).
 import pytest
 
 from src.api.discogs_api import DiscogsClient
+from src.models import Artist, Track
 from src.models.track import CreditRole
 
 
@@ -304,3 +305,130 @@ class TestRateLimit:
         l'absence ne doit pas interrompre l'enrichissement."""
         client.client = object()
         client._check_rate_limit()  # ne lève pas
+
+
+# ────────────────────────── enrichissement d'un Track (sans réseau)
+
+
+def _track(titre="Titre", artiste="ISHA", **extra):
+    t = Track(title=titre, artist=Artist(name=artiste), **extra)
+    return t
+
+
+def _donnees(**extra):
+    """Le dict rendu par `search_track`, surchargeable."""
+    base = {"discogs_id": 42, "genres": ["Hip Hop"], "styles": ["Boom Bap"], "credits": []}
+    base.update(extra)
+    return base
+
+
+class TestEnrichissementDuTrack:
+    """Trois retours DISTINCTS, et c'est la distinction qui compte : `True` =
+    du neuf, `"not_needed"` = release matchée sans rien de nouveau (ni succès ni
+    échec dans les compteurs), `False` = aucune release ne matche.
+
+    Confondre les deux derniers faisait compter Discogs dans `all_failed` et
+    afficher « ❌ discogs ÉCHEC » alors que tout allait bien.
+    """
+
+    def _stub(self, client, monkeypatch, donnees):
+        monkeypatch.setattr(client, "search_track", lambda *a, **k: donnees)
+
+    def test_aucune_release_ne_matche(self, client, monkeypatch):
+        self._stub(client, monkeypatch, None)
+        assert client.enrich_track_data(_track()) is False
+
+    def test_rien_de_nouveau_a_poser(self, client, monkeypatch):
+        """La release matche, mais l'ID et le genre sont déjà là."""
+        self._stub(client, monkeypatch, _donnees())
+        track = _track(discogs_id=42, genre="Rap")
+
+        assert client.enrich_track_data(track) == "not_needed"
+
+    def test_discogs_id_pose(self, client, monkeypatch):
+        self._stub(client, monkeypatch, _donnees(genres=None))
+        track = _track()
+
+        assert client.enrich_track_data(track) is True
+        assert track.discogs_id == 42
+
+    def test_id_existant_non_ecrase(self, client, monkeypatch):
+        self._stub(client, monkeypatch, _donnees(genres=None))
+        track = _track(discogs_id=7)
+
+        client.enrich_track_data(track)
+        assert track.discogs_id == 7
+
+    def test_force_update_ecrase(self, client, monkeypatch):
+        self._stub(client, monkeypatch, _donnees(genres=None))
+        track = _track(discogs_id=7)
+
+        assert client.enrich_track_data(track, force_update=True) is True
+        assert track.discogs_id == 42
+
+    def test_genres_et_styles_fusionnes_et_plafonnes(self, client, monkeypatch):
+        self._stub(
+            client,
+            monkeypatch,
+            _donnees(genres=["Hip Hop", "Rap"], styles=["Boom Bap", "Trap", "Cloud"]),
+        )
+        track = _track()
+
+        client.enrich_track_data(track)
+        assert track.genre == "Hip Hop, Rap, Boom Bap"  # 3 maximum
+
+    def test_credits_ajoutes(self, client, monkeypatch):
+        credits = [
+            {"name": "Producteur X", "role": "Producer"},
+            {"name": "Ingé Y", "role": "Mixed By"},
+        ]
+        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
+        track = _track()
+
+        assert client.enrich_track_data(track) is True
+        assert {c.name for c in track.credits} == {"Producteur X", "Ingé Y"}
+        assert all(c.source == "discogs" for c in track.credits)
+
+    def test_libelle_brut_conserve_pour_un_role_inconnu(self, client, monkeypatch):
+        """Un rôle sans équivalent dans l'enum tombe en OTHER, mais le libellé
+        Discogs reste lisible dans `role_detail` — c'est ce qui a permis
+        d'inventorier les rôles manquants en base."""
+        credits = [{"name": "Quelqu'un", "role": "Tape Op"}]
+        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
+        track = _track()
+
+        client.enrich_track_data(track)
+        assert track.credits[0].role == CreditRole.OTHER
+        assert track.credits[0].role_detail == "Tape Op"
+
+    def test_le_libelle_est_ECRASE_par_les_pistes(self, client, monkeypatch):
+        """Comportement ACTUEL, documenté : `role_detail` porte DEUX informations
+        concurrentes (les pistes concernées, ou le libellé brut si OTHER) via un
+        `or`. Quand Discogs fournit les deux, le libellé est perdu — mesuré à 21
+        crédits `Other` sur 268 en base. Cf. WIP."""
+        credits = [{"name": "Quelqu'un", "role": "Tape Op", "role_detail": "A1, A2"}]
+        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
+        track = _track()
+
+        client.enrich_track_data(track)
+        assert track.credits[0].role_detail == "A1, A2"  # « Tape Op » a disparu
+
+    def test_credit_malforme_ignore_sans_perdre_les_autres(self, client, monkeypatch):
+        credits = [{"role": "Producer"}, {"name": "Bon", "role": "Producer"}]
+        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
+        track = _track()
+
+        client.enrich_track_data(track)
+        assert [c.name for c in track.credits] == ["Bon"]
+
+    def test_labels_journalises_sans_effet(self, client, monkeypatch):
+        """Les labels sont lus mais n'ont pas de champ de destination."""
+        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, labels=["Def Jam"]))
+        assert client.enrich_track_data(_track()) == "not_needed"
+
+    def test_erreur_inattendue_rend_false(self, client, monkeypatch):
+        def _lever(*a, **k):
+            raise RuntimeError("bug d'orchestration")
+
+        monkeypatch.setattr(client, "search_track", _lever)
+        assert client.enrich_track_data(_track()) is False

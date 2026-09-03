@@ -10,6 +10,10 @@ L'extraction est rejouée sur la page réelle enregistrée
 (`tests/fixtures/brma/`), en plus de HTML minimal construit en ligne.
 """
 
+import json
+from datetime import datetime
+
+import pandas as pd
 import pytest
 from bs4 import BeautifulSoup
 
@@ -160,3 +164,149 @@ class TestSurPageReelle:
     def test_artistes_renseignes(self, updater, soup):
         certs = updater.extract_certifications(soup, 2021, "singles")
         assert all(c["artist"].strip() for c in certs)
+
+
+# ─────────────────────── cycle brut → clean → métadonnées (sans réseau)
+
+
+def _cert(artist="ISHA", title="Titre", date="2021-05-01", level="Or", category="singles"):
+    return {
+        "artist": artist,
+        "title": title,
+        "certification_date": date,
+        "certification_level": level,
+        "category": category,
+        "year_page": 2021,
+    }
+
+
+class TestSauvegardeBrutEtClean:
+    """Convention « brut + clean » : `brma_raw.csv` accumule tout ce qui a été
+    scrapé (dédup EXACTE, aucune perte), `certif_brma.csv` en est DÉRIVÉ par la
+    dédup métier. Le clean ne doit jamais être la seule source."""
+
+    def test_le_brut_et_le_clean_sont_ecrits(self, updater, tmp_path):
+        updater.save_updated_database([_cert()])
+
+        assert updater.raw_path.exists()
+        assert updater.database_path.exists()
+
+    def test_le_brut_accumule_entre_deux_runs(self, updater):
+        updater.save_updated_database([_cert(title="A")])
+        updater.save_updated_database([_cert(title="B")])
+
+        brut = pd.read_csv(updater.raw_path, encoding="utf-8-sig")
+        assert set(brut["title"]) == {"A", "B"}
+
+    def test_le_brut_dedoublonne_a_l_identique(self, updater):
+        updater.save_updated_database([_cert(), _cert()])
+
+        brut = pd.read_csv(updater.raw_path, encoding="utf-8-sig")
+        assert len(brut) == 1
+
+    def test_sans_nouveaute_la_fraicheur_est_quand_meme_horodatee(self, updater):
+        """Ultratop n'a quasi jamais de nouveauté entre deux runs : sans cet
+        horodatage la GUI afficherait éternellement une MàJ périmée."""
+        updater.save_updated_database([_cert()])
+        meta = json.loads((updater.output_dir / "metadata.json").read_text(encoding="utf-8"))
+        premiere = meta["last_update"]
+
+        updater.existing_db = pd.read_csv(updater.database_path, encoding="utf-8-sig")
+        updater.save_updated_database([])
+
+        meta = json.loads((updater.output_dir / "metadata.json").read_text(encoding="utf-8"))
+        assert meta["last_update"] >= premiere
+        assert meta["new_records_added"] == 0
+
+    def test_sans_nouveaute_ni_brut_rien_n_est_ecrit(self, updater):
+        """Premier run à vide : pas de métadonnées inventées sur une base absente."""
+        updater.save_updated_database([])
+        assert not (updater.output_dir / "metadata.json").exists()
+
+    def test_metadonnees_portent_la_source_globale(self, updater):
+        """`cert_source.read_freshness` distingue MàJ globale et récup artiste :
+        un scrape Ultratop est toujours GLOBAL."""
+        updater.save_updated_database([_cert(artist="A"), _cert(artist="B", title="T2")])
+
+        meta = json.loads((updater.output_dir / "metadata.json").read_text(encoding="utf-8"))
+        assert meta["last_source"] == "GLOBAL"
+        assert "GLOBAL" in meta["updates"]
+        assert meta["unique_artists"] == 2
+        assert meta["new_records_added"] == 2
+
+    def test_rapport_genere_avec_le_detail(self, updater):
+        updater.save_updated_database([_cert(title="Mon Titre")])
+
+        rapports = list((updater.output_dir / "reports").glob("update_report_*.txt"))
+        assert len(rapports) == 1
+        assert "Mon Titre" in rapports[0].read_text(encoding="utf-8")
+
+    def test_pas_de_rapport_sans_nouveaute(self, updater):
+        updater.generate_update_report([])
+        assert not (updater.output_dir / "reports").exists()
+
+
+class TestBouclesDAnnees:
+    """`update_current_year` / `update_recent_years` : ce qui est demandé au site,
+    et ce qui arrive quand une page manque."""
+
+    def _pages(self, updater, monkeypatch, reponses):
+        """Stub de `fetch_page` : `reponses[(annee, categorie)]` ou None."""
+        vues = []
+
+        def fake_fetch(year, category):
+            vues.append((year, category))
+            return reponses.get((year, category))
+
+        monkeypatch.setattr(updater, "fetch_page", fake_fetch)
+        monkeypatch.setattr(updater, "random_delay", lambda: None)
+        return vues
+
+    def test_annee_courante_couvre_albums_et_singles(self, updater, monkeypatch):
+        annee = datetime.now().year
+        vues = self._pages(
+            updater,
+            monkeypatch,
+            {
+                (annee, "albums"): _soup(_ligne_html("ISHA", "Un Album", "01/05/2021: Or")),
+                (annee, "singles"): _soup(_ligne_html("ISHA", "Un Single", "01/05/2021: Or")),
+            },
+        )
+
+        certifs = updater.update_current_year()
+
+        assert vues == [(annee, "albums"), (annee, "singles")]
+        assert {c["category"] for c in certifs} == {"albums", "singles"}
+
+    def test_une_meme_certif_sur_les_deux_pages_n_est_comptee_qu_une_fois(
+        self, updater, monkeypatch
+    ):
+        """`existing_keys` (anti-doublon INTRA-run) ne contient PAS la catégorie :
+        une certification vue sur les deux pages reste une seule certification,
+        et garde la catégorie de la page lue en premier."""
+        annee = datetime.now().year
+        soup = _soup(_ligne_html("ISHA", "Titre", "01/05/2021: Or"))
+        self._pages(updater, monkeypatch, {(annee, "albums"): soup, (annee, "singles"): soup})
+
+        certifs = updater.update_current_year()
+
+        assert len(certifs) == 1
+        assert certifs[0]["category"] == "albums"
+
+    def test_page_absente_n_interrompt_pas_la_collecte(self, updater, monkeypatch):
+        """Un 500 sur `albums` ne doit pas faire perdre `singles`."""
+        annee = datetime.now().year
+        soup = _soup(_ligne_html("ISHA", "Titre", "01/05/2021: Or"))
+        self._pages(updater, monkeypatch, {(annee, "singles"): soup})  # albums → None
+
+        assert len(updater.update_current_year()) == 1
+
+    def test_annees_recentes_remonte_le_nombre_demande(self, updater, monkeypatch):
+        annee = datetime.now().year
+        vues = self._pages(updater, monkeypatch, {})
+
+        updater.update_recent_years(years_back=2)
+
+        annees_vues = sorted({y for y, _ in vues})
+        assert annees_vues == [annee - 2, annee - 1, annee]
+        assert len(vues) == 6  # 3 années × 2 catégories

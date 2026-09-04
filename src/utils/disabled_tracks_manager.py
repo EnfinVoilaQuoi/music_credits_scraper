@@ -55,7 +55,7 @@ class DisabledTracksManager:
             )
             return True
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(
                 f"Erreur lors de la sauvegarde des morceaux désactivés pour {artist_name}: {e}"
             )
@@ -102,7 +102,7 @@ class DisabledTracksManager:
                 )
                 return set()
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(
                 f"Erreur lors du chargement des morceaux désactivés pour {artist_name}: {e}"
             )
@@ -134,7 +134,7 @@ class DisabledTracksManager:
                         cleaned_count += 1
                         logger.info(f"Fichier ancien supprimé: {file_path.name}")
 
-                except Exception as e:
+                except (OSError, json.JSONDecodeError, TypeError) as e:
                     logger.warning(f"Erreur lors de la vérification de {file_path}: {e}")
                     continue
 
@@ -143,6 +143,6 @@ class DisabledTracksManager:
 
             return cleaned_count
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(f"Erreur lors du nettoyage: {e}")
             return 0

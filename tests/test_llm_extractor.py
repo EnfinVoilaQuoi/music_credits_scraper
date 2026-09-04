@@ -31,6 +31,9 @@ class _Reponse:
 class _FauxOllama:
     """Remplace le module `ollama` : enregistre les appels, sert des réponses."""
 
+    # Le vrai module expose les DEUX ; le faux doit les refléter, sans quoi un
+    # `except ollama.RequestError` lève AttributeError au lieu de rattraper.
+    RequestError = type("RequestError", (Exception,), {})
     ResponseError = type("ResponseError", (Exception,), {})
 
     def __init__(self, contenu="{}", modeles=("llama3.2:3b",), leve=None):

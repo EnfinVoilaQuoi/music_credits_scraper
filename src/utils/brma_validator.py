@@ -94,7 +94,7 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
 
     try:
         df = _load(csv_path)
-    except Exception as e:
+    except (OSError, ValueError) as e:  # pandas : ParserError/EmptyDataError heritent de ValueError
         report["errors"].append(f"Chargement impossible : {e}")
         return report
 

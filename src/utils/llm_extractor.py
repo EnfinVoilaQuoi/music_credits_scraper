@@ -3,6 +3,7 @@
 import json
 import re
 
+import httpx
 import ollama
 
 from src.utils.logger import get_logger
@@ -51,7 +52,11 @@ class LLMExtractor:
         except json.JSONDecodeError as e:
             logger.warning(f"LLMExtractor: JSON invalide du LLM — {e}")
             return None
-        except Exception as e:
+        # `ollama.RequestError`/`ResponseError` héritent directement d'`Exception`.
+        # Un serveur injoignable, lui, ne passe PAS par elles : ollama-python
+        # laisse remonter l'erreur httpx telle quelle — d'où `httpx.HTTPError`,
+        # et `OSError` pour les ruptures de socket sous-jacentes.
+        except (ollama.RequestError, httpx.HTTPError, OSError) as e:
             logger.error(f"LLMExtractor: erreur inattendue — {e}")
             return None
 
@@ -69,7 +74,7 @@ class LLMExtractor:
                     f"Modèles disponibles: {model_names}"
                 )
             return available
-        except Exception as e:
+        except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, OSError) as e:
             logger.warning(f"LLMExtractor: Ollama non accessible — {e}")
             return False
 

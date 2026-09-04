@@ -144,7 +144,7 @@ class CertMatcher:
             return []
         try:
             df = pd.read_csv(csv, encoding="utf-8-sig", dtype=str).fillna("")
-        except Exception as e:
+        except (OSError, ValueError) as e:  # pandas : ParserError herite de ValueError
             logger.error(f"CertMatcher: chargement SNEP impossible : {e}")
             return []
         rows = []
@@ -176,7 +176,7 @@ class CertMatcher:
             return []
         try:
             df = pd.read_csv(csv, encoding="utf-8-sig", dtype=str).fillna("")
-        except Exception as e:
+        except (OSError, ValueError) as e:  # pandas : ParserError herite de ValueError
             logger.error(f"CertMatcher: chargement BRMA impossible : {e}")
             return []
         rows = []
@@ -215,7 +215,7 @@ class CertMatcher:
             return []
         try:
             df = pd.read_csv(csv, encoding="utf-8-sig", dtype=str).fillna("")
-        except Exception as e:
+        except (OSError, ValueError) as e:  # pandas : ParserError herite de ValueError
             logger.error(f"CertMatcher: chargement RIAA impossible : {e}")
             return []
 

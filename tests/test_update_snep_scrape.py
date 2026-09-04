@@ -8,16 +8,13 @@ la clé de dédup n'était pas construite de la même façon pour la ligne ENTRA
 et pour la ligne DÉJÀ EN BASE.
 """
 
+from datetime import datetime
+
 import pytest
 import requests
 
 import src.utils.update_snep as us
-from src.utils.update_snep import (
-    _load_existing,
-    _row_key,
-    scrape_recent_certifications,
-    scrape_year,
-)
+from src.utils.update_snep import _load_existing, _row_key, scrape_year
 
 HEADER = (
     "Interprete;Titre;Éditeur / Distributeur;Catégorie;Certification;Date de sortie;Date de constat"
@@ -72,14 +69,6 @@ def csv_vide(tmp_path):
     dest = tmp_path / "certif-.csv"
     dest.write_text("﻿" + HEADER + "\n", encoding="utf-8")
     return dest
-
-
-class _FakeResponse:
-    def __init__(self, text):
-        self.text = text
-
-    def raise_for_status(self):
-        return None
 
 
 class TestScrapeYear:
@@ -183,63 +172,29 @@ class TestScrapeYear:
         assert scrape_year(csv_vide, 2020) == 0
 
 
-class TestScrapeRecentCertifications:
-    """Rattrapage incrémental : il s'arrête à la première page intégralement
-    connue. C'est une HEURISTIQUE assumée (les pages sont triées par date de
-    constat décroissante) — mais elle rend l'idempotence indispensable, sans
-    quoi une ligne mal dédupliquée relance la pagination et se duplique."""
+class TestMiseAJourNominale:
+    """`update_snep_database` parcourt désormais l'ANNÉE COMPLÈTE.
 
-    def _requests_sequence(self, monkeypatch, pages):
-        vues = []
+    `scrape_recent_certifications`, qui s'arrêtait à la première page
+    intégralement connue, a été retirée le 2026-09-04 : mesurée sur le site
+    réel elle rendait 0 là où le parcours exhaustif des mêmes années trouvait
+    159 certifications. Le SNEP antidate, il n'y a donc pas de préfixe « récent »
+    sur lequel s'arrêter.
+    """
 
-        def fake_get(source, url, **kwargs):
-            vues.append(url)
-            idx = len(vues) - 1
-            page = pages[idx] if idx < len(pages) else pages[-1]
-            if isinstance(page, Exception):
-                raise page
-            return _FakeResponse(page)
+    def test_annee_courante_seule_hors_debut_dannee(self):
+        assert us._years_to_scrape(datetime(2026, 9, 4)) == [2026]
 
-        monkeypatch.setattr(us.source_usage, "requests_get", fake_get)
-        return vues
+    @pytest.mark.parametrize("mois", [1, 2])
+    def test_annee_precedente_incluse_en_debut_dannee(self, mois):
+        """Une certification publiée en janvier peut porter une date de constat
+        de décembre : elle n'apparaît alors que dans le classement de l'an passé."""
+        assert us._years_to_scrape(datetime(2026, mois, 15)) == [2026, 2025]
 
-    def test_ajoute_les_nouveautes_de_chaque_page(self, csv_vide, monkeypatch):
-        pages = [_page([_certif(1)]), _page([_certif(2)]), _page([])]
-        self._requests_sequence(monkeypatch, pages)
-
-        assert scrape_recent_certifications(csv_vide) == 2
-        contenu = csv_vide.read_text(encoding="utf-8-sig")
-        assert _ligne(_certif(1)) in contenu and _ligne(_certif(2)) in contenu
-
-    def test_sarrete_sur_page_entierement_connue(self, csv_vide, monkeypatch):
-        csv_vide.write_text("﻿" + HEADER + "\n" + _ligne(_certif(2)) + "\n", encoding="utf-8")
-        pages = [_page([_certif(1)]), _page([_certif(2)]), _page([_certif(3)])]
-        vues = self._requests_sequence(monkeypatch, pages)
-
-        assert scrape_recent_certifications(csv_vide) == 1
-        assert len(vues) == 2  # la page 3 n'est jamais demandée
-
-    def test_erreur_reseau_arrete_sans_perdre_le_collecte(self, csv_vide, monkeypatch):
-        pages = [_page([_certif(1)]), requests.RequestException("coupure")]
-        self._requests_sequence(monkeypatch, pages)
-
-        assert scrape_recent_certifications(csv_vide) == 1
-        assert _ligne(_certif(1)) in csv_vide.read_text(encoding="utf-8-sig")
-
-    def test_max_pages_plafonne(self, csv_vide, monkeypatch):
-        pages = [_page([_certif(i)]) for i in range(1, 6)]
-        vues = self._requests_sequence(monkeypatch, pages)
-
-        assert scrape_recent_certifications(csv_vide, max_pages=2) == 2
-        assert len(vues) == 2
-
-    def test_idempotence(self, csv_vide, monkeypatch):
-        """Rejouer la MÊME page ne doit rien ajouter."""
-        self._requests_sequence(monkeypatch, [_page([_certif(1), _certif(2)]), _page([])])
-        assert scrape_recent_certifications(csv_vide) == 2
-
-        self._requests_sequence(monkeypatch, [_page([_certif(1), _certif(2)]), _page([])])
-        assert scrape_recent_certifications(csv_vide) == 0
+    def test_lancienne_fonction_a_bien_disparu(self):
+        """Garde-fou : rebrancher un passage incrémental doit être un choix
+        conscient, pas un retour en arrière silencieux."""
+        assert not hasattr(us, "scrape_recent_certifications")
 
 
 #: Le libellé d'éditeur contient un point-virgule — c'est le séparateur du CSV.
@@ -282,11 +237,7 @@ class TestCleDeDedupAvecSeparateurDansLeLabel:
         dest = tmp_path / "certif-.csv"
         dest.write_text("﻿" + HEADER + "\n" + ligne + "\n", encoding="utf-8")
 
-        monkeypatch.setattr(
-            us.source_usage,
-            "requests_get",
-            lambda *a, **k: _FakeResponse(_page([LABEL_AVEC_SEPARATEUR])),
-        )
+        monkeypatch.setattr(us, "_fetch", lambda *a, **k: _page([LABEL_AVEC_SEPARATEUR]))
 
-        assert scrape_recent_certifications(dest) == 0
+        assert scrape_year(dest, 2023) == 0
         assert dest.read_text(encoding="utf-8-sig").count(ligne) == 1

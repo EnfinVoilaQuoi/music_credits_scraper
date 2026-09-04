@@ -246,3 +246,31 @@ class TestRequeteHttp:
 
         monkeypatch.setattr(api.session, "get", fake_get)
         assert api._request("/get", {}) is None
+
+
+class TestArtisteHeriteDuCorrectifPartage:
+    """`_artist_match` vient désormais de `src/api/_text_match.py`, partagé avec
+    Musixmatch. Chez LRCLIB il ne sert qu'au CLASSEMENT (le seuil d'acceptation
+    porte sur le titre) : ces cas vérifient que le correctif mot-entier n'a pas
+    dégradé le départage."""
+
+    def test_lartiste_exact_est_prefere_a_lhomonyme(self):
+        """Deux candidats au même titre, l'un d'un artiste dont le nom CONTIENT
+        le nôtre sans être le nôtre : c'est le vrai qui doit gagner."""
+        vrai = _cand(id=1, artiste="IAM")
+        homonyme = _cand(id=2, artiste="Williams")
+        assert _best_search_hit([homonyme, vrai], "Dans le vide", "IAM", None, True)["id"] == 1
+
+    def test_le_duo_reste_reconnu(self):
+        duo = _cand(id=1, artiste="Jul & SCH")
+        etranger = _cand(id=2, artiste="Nekfeu")
+        assert _best_search_hit([etranger, duo], "Dans le vide", "Jul", None, True)["id"] == 1
+
+    def test_la_duree_prime_toujours_sur_lartiste(self):
+        """Hiérarchie inchangée : ±2 s vaut +1.0, l'artiste au mieux +0.5."""
+        bon_artiste_loin = _cand(id=1, artiste="Josman", duree=400)
+        autre_artiste_pile = _cand(id=2, artiste="Quelqu'un", duree=243)
+        gagnant = _best_search_hit(
+            [bon_artiste_loin, autre_artiste_pile], "Dans le vide", "Josman", 243, True
+        )
+        assert gagnant["id"] == 2

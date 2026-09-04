@@ -29,6 +29,7 @@ logger = get_logger(__name__)
 
 
 # Normaliseur PARTAGÉ (même matching que update_ytmusic — cf. title_matching.py)
+from src.utils.title_matching import contains_as_words
 from src.utils.title_matching import normalize_title as _normalize_title
 
 
@@ -117,7 +118,10 @@ def _resolve_homonym(candidates, artist_name: str, credited_norm: set[str]):
             else None
         ) or artist_name
         p = _normalize_title(primary)
-        if any(p == c or p in c or c in p for c in credited_norm):
+        # Inclusion en MOTS ENTIERS (2026-09-04) : la comparaison était une
+        # sous-chaîne nue, qui faisait passer « IAM » pour « WILLIAMS ». Le
+        # relâchement voulu reste entier — « Jul » matche toujours « Jul & SCH ».
+        if any(p == c or contains_as_words(p, c) or contains_as_words(c, p) for c in credited_norm):
             matches.append(cand)
     return matches[0] if len(matches) == 1 else None
 

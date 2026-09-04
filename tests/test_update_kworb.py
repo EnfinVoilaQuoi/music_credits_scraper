@@ -183,6 +183,21 @@ class TestHomonymes:
         autre = _track(2, "T", feat=True, primary="Ninho")
         assert _resolve_homonym([cible, autre], "X", {"jul and sch"}) is cible
 
+    def test_sous_chaine_nue_ne_departage_plus(self):
+        """CORRIGÉ le 2026-09-04 : l'inclusion ne compte qu'en MOTS ENTIERS.
+        « IAM » est contenu dans « WILLIAMS » mais n'y est pas un mot — le crédit
+        d'un homonyme faisait donc élire le mauvais morceau, et lui attribuait
+        les streams. Abstention désormais, ce qui est le comportement voulu :
+        ne rien écrire vaut mieux qu'écrire au hasard."""
+        iam = _track(1, "T", feat=True, primary="IAM")
+        autre = _track(2, "T", feat=True, primary="Ninho")
+        assert _resolve_homonym([iam, autre], "X", {"williams"}) is None
+
+    def test_le_vrai_iam_est_toujours_reconnu(self):
+        iam = _track(1, "T", feat=True, primary="IAM")
+        autre = _track(2, "T", feat=True, primary="Ninho")
+        assert _resolve_homonym([iam, autre], "X", {"iam akhenaton"}) is iam
+
 
 class TestRapprochementFlou:
     def test_coquille_rapprochee(self):

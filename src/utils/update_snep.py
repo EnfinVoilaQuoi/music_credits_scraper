@@ -418,63 +418,11 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
     return len(new_lines)
 
 
-def scrape_recent_certifications(dest_path: Path, max_pages: int = 60) -> int:
-    """
-    Scrape les pages récentes de snepmusique.com/les-certifications/ et fusionne
-    les nouveautés dans le CSV. S'arrête dès qu'une page entière est déjà connue.
-    Remplace le CSV téléchargé devenu partiel (le site ne fournit plus l'export complet).
-    Retourne le nombre de certifications ajoutées.
-    """
-    import random
-    import time
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://snepmusique.com/les-certifications/",
-    }
-
-    # Lignes déjà connues : MÊME lecture et MÊME clé que le backfill `scrape_year`.
-    # Elles étaient redéfinies ici, avec une clé divergente (cf. `_row_key`).
-    header, existing_lines, existing_keys = _load_existing(dest_path)
-
-    new_lines = []
-    for page in range(1, max_pages + 1):
-        url = (
-            "https://snepmusique.com/les-certifications/"
-            if page == 1
-            else f"https://snepmusique.com/les-certifications/page/{page}"
-        )
-        try:
-            resp = source_usage.requests_get(_SOURCE, url, headers=headers, timeout=30)
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            safe_print(f"❌ Page {page} inaccessible : {e}")
-            break
-
-        rows = _parse_certifications_page(resp.text)
-        if not rows:
-            safe_print(f"⚠️ Page {page} : aucun bloc certification reconnu — arrêt")
-            break
-
-        page_new = 0
-        for row in rows:
-            f = row.split(";")
-            if len(f) < 7:
-                continue
-            key = _row_key(f)
-            if key not in existing_keys:
-                existing_keys.add(key)
-                new_lines.append(row)
-                page_new += 1
-
-        safe_print(f"📄 Page {page} : {len(rows)} certifs, {page_new} nouvelle(s)")
-        if page_new == 0:
-            safe_print("✅ Page entièrement connue — fin du rattrapage")
-            break
-        time.sleep(random.uniform(0.6, 1.4))
-
-    _write_merged(dest_path, header, existing_lines, new_lines)
-    return len(new_lines)
+# `scrape_recent_certifications` a été RETIRÉE le 2026-09-04. Elle s'arrêtait
+# à la première page intégralement connue ; mesuré sur le site réel, elle
+# rendait 0 là où le parcours complet des mêmes années trouvait 159
+# certifications (le SNEP antidate — cf. `update_snep_database`).
+# Supplantée par `scrape_year`, qui est exhaustive et déjà testée.
 
 
 def _rebuild_canonical(source: str = "GLOBAL") -> tuple[int, int]:
@@ -492,8 +440,19 @@ def _rebuild_canonical(source: str = "GLOBAL") -> tuple[int, int]:
     return before, after
 
 
+def _years_to_scrape(today: datetime | None = None) -> list[int]:
+    """Années à parcourir lors d'une mise à jour nominale.
+
+    L'année courante, plus la précédente pendant les deux premiers mois : le SNEP
+    antidate, donc une certification publiée en janvier peut porter une date de
+    constat de décembre et n'apparaître que dans le classement de l'an passé.
+    """
+    today = today or datetime.now()
+    return [today.year, today.year - 1] if today.month <= 2 else [today.year]
+
+
 def update_snep_database():
-    """Met à jour le CSV canonique avec le dernier export + scraping des pages récentes"""
+    """Met à jour le CSV canonique avec le dernier export + scraping du site."""
     # 1. Télécharger le dernier export CSV (fenêtre partielle, fusionné à l'historique)
     csv_path = download_latest_snep_csv()
 
@@ -501,20 +460,32 @@ def update_snep_database():
         safe_print("❌ Impossible de mettre à jour : pas de fichier CSV disponible")
         return False
 
-    # 2. Scraper les pages récentes du site pour combler les trous de l'export
-    safe_print("\n🌐 Scraping des certifications récentes sur snepmusique.com...")
-    try:
-        added = scrape_recent_certifications(csv_path)
-        safe_print(f"🔀 Scraping : {added} certification(s) ajoutée(s) depuis le site")
-    except (
-        requests.RequestException,
-        AttributeError,
-        KeyError,
-        IndexError,
-        TypeError,
-        ValueError,
-    ) as e:
-        safe_print(f"⚠️ Scraping des pages impossible ({e}) — on continue avec l'export")
+    # 2. Scraper le site pour combler les trous de l'export, ANNÉE COMPLÈTE.
+    #
+    # Jusqu'au 2026-09-04 on appelait ici `scrape_recent_certifications`, qui
+    # s'arrêtait à la première page dont aucune ligne n'était nouvelle. Mesuré
+    # sur le site réel : ce passage rendait 0 alors qu'un parcours exhaustif des
+    # deux mêmes années trouvait **159 certifications**. Le SNEP ANTIDATE — une
+    # certification publiée aujourd'hui porte une date de constat ancienne et
+    # atterrit au milieu du classement, jamais en tête. Le profil relevé sur 2026
+    # est sans appel : 0 sur les pages 10 à 14, puis 150 nouvelles sur les pages
+    # 15 à 18. Aucun seuil « N pages connues d'affilée » ne survit à un trou de
+    # cinq pages ; seul le parcours complet de l'année est correct.
+    annees = _years_to_scrape()
+    safe_print(f"\n🌐 Scraping SNEP, année(s) complète(s) : {', '.join(map(str, annees))}...")
+    for annee in annees:
+        try:
+            added = scrape_year(csv_path, annee)
+            safe_print(f"🔀 Année {annee} : {added} certification(s) ajoutée(s) depuis le site")
+        except (
+            requests.RequestException,
+            AttributeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
+            safe_print(f"⚠️ Scraping {annee} impossible ({e}) — on continue avec l'export")
 
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
     total_before, total_after = _rebuild_canonical(source="GLOBAL")

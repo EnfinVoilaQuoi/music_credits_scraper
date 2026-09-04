@@ -19,15 +19,24 @@ Pas de rate limit annoncé, on respecte quand même DELAY_BETWEEN_REQUESTS.
 
 import asyncio
 import logging
-import re
 import time
-import unicodedata
-from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 import httpx
 import requests
 
+# Comparateurs titre/artiste : définis UNE fois dans `_text_match` (ils étaient
+# dupliqués à l'octet près entre ce module et son jumeau). Ré-exportés sous
+# leurs noms d'origine — les appelants et les tests ne changent pas.
+from src.api._text_match import (  # noqa: F401 — ré-export
+    _FEAT_RE,
+    _PAREN_RE,
+    _artist_match,
+    _norm,
+    _strip_accents,
+    _title_core,
+    _title_match,
+)
 from src.observability import source_usage
 
 if TYPE_CHECKING:
@@ -53,52 +62,6 @@ _ASYNC_HEADERS = {"User-Agent": _USER_AGENT}
 
 # Seuil de similarité de titre pour accepter un candidat /search (« titre fort exigé »).
 _TITLE_MATCH_MIN = 0.72
-
-
-def _strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
-
-
-def _norm(s: str) -> str:
-    """Normalisation robuste : minuscules, sans accents, alphanumérique + espaces."""
-    s = _strip_accents((s or "").lower())
-    return re.sub(r"[^a-z0-9]+", " ", s).strip()
-
-
-# Parenthèses de version/remaster/feat qui parasitent le matching de titre.
-_PAREN_RE = re.compile(r"[\(\[\{].*?[\)\]\}]")
-_FEAT_RE = re.compile(r"\b(feat|ft|featuring|with|avec)\b.*$")
-
-
-def _title_core(title: str) -> str:
-    """Titre nu pour comparaison : retire (feat…), [remaster], suffixes feat."""
-    t = _strip_accents((title or "").lower())
-    t = _PAREN_RE.sub(" ", t)
-    t = _FEAT_RE.sub(" ", t)
-    return re.sub(r"[^a-z0-9]+", " ", t).strip()
-
-
-def _title_match(a: str, b: str) -> float:
-    """Score de correspondance de titre 0..1, tolérant aux variantes de version/feat."""
-    ca, cb = _title_core(a), _title_core(b)
-    if not ca or not cb:
-        return 0.0
-    if ca == cb:
-        return 1.0
-    ratio = SequenceMatcher(None, ca, cb).ratio()
-    # Bonus si l'un est strictement contenu dans l'autre (ex. "song" ⊂ "song pt ii")
-    if ca in cb or cb in ca:
-        ratio = max(ratio, 0.9)
-    return ratio
-
-
-def _artist_match(a: str, b: str) -> float:
-    na, nb = _norm(a), _norm(b)
-    if not na or not nb:
-        return 0.0
-    if na == nb or na in nb or nb in na:
-        return 1.0
-    return SequenceMatcher(None, na, nb).ratio()
 
 
 def _best_search_hit(

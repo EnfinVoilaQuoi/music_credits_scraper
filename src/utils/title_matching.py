@@ -15,6 +15,26 @@ import unicodedata
 _DECORATIVE_OVERLAYS = {0x0335, 0x0336, 0x0337, 0x0338}
 
 
+def contains_as_words(needle: str, haystack: str) -> bool:
+    """`needle` apparaît-il dans `haystack` comme MOT (ou suite de mots) ENTIER ?
+
+    Une comparaison par sous-chaîne nue rend les noms courts dangereux : « IAM »
+    est contenu dans « WILLIAMS », « Jul » dans « Julien ». Le piège a déjà mordu
+    trois fois dans ce projet (certifs, départage d'homonymes Kworb, appariement
+    d'artiste LRCLIB/Musixmatch) — d'où cette fonction unique plutôt qu'une limite
+    de mot recopiée à chaque site.
+
+    Ce qu'elle NE casse PAS : le relâchement utile reste entier, « Jul » matche
+    toujours « Jul & SCH » — c'est bien un mot du tout.
+
+    Les deux arguments doivent être NORMALISÉS par l'appelant (casse, accents,
+    ponctuation) : cette fonction ne fait que l'ancrage.
+    """
+    if not needle or not haystack:
+        return False
+    return re.search(rf"\b{re.escape(needle)}\b", haystack) is not None
+
+
 def clean_display_title(title: str) -> str:
     """Titre prêt à l'affichage : accents recomposés, décorations barrées retirées.
 

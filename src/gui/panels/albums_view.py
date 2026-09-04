@@ -7,7 +7,7 @@ from tkinter import messagebox
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.gui import helpers
+from src.gui import albums_grouping, helpers
 from src.gui.panels import tracks_table
 from src.models import Track
 from src.utils.logger import get_logger
@@ -175,34 +175,9 @@ def populate_albums_table(app):
     if visual_singles:
         groups.setdefault(SINGLES_LABEL, []).extend(visual_singles)
 
-    def earliest_date(tracks):
-        dates = []
-        for t in tracks:
-            d = t.release_date
-            if isinstance(d, str):
-                try:
-                    d = datetime.fromisoformat(d.split("T")[0])
-                except Exception:
-                    d = None
-            if d:
-                dates.append(d)
-        return min(dates) if dates else None
-
-    def fmt_streams(v):
-        return f"{v:,}".replace(",", " ") if v else ""
-
-    # Trier par date de sortie décroissante (Featurings puis Singles en dernier)
-    def _group_rank(name):
-        if name.startswith("—"):
-            return 2
-        if name.startswith("🎤"):
-            return 1
-        return 0
-
-    ordered = sorted(
-        groups.items(),
-        key=lambda kv: (_group_rank(kv[0]), -(earliest_date(kv[1]) or datetime.min).timestamp()),
-    )
+    # Regroupement/tri : logique pure, extraite dans `albums_grouping` (testée).
+    ordered = albums_grouping.sort_groups(groups)
+    fmt_streams = albums_grouping.format_streams
 
     for album, tracks in ordered:
         n = len(tracks)
@@ -234,7 +209,7 @@ def populate_albums_table(app):
         else:
             duree = ""
 
-        date = earliest_date(tracks)
+        date = albums_grouping.earliest_date(tracks)
         date_str = date.strftime("%d/%m/%Y") if date else ""
 
         db = albums_db.get(helpers.normalize_album_title(album), {})

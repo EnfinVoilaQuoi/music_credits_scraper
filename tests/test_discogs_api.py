@@ -401,17 +401,42 @@ class TestEnrichissementDuTrack:
         assert track.credits[0].role == CreditRole.OTHER
         assert track.credits[0].role_detail == "Tape Op"
 
-    def test_le_libelle_est_ECRASE_par_les_pistes(self, client, monkeypatch):
-        """Comportement ACTUEL, documenté : `role_detail` porte DEUX informations
-        concurrentes (les pistes concernées, ou le libellé brut si OTHER) via un
-        `or`. Quand Discogs fournit les deux, le libellé est perdu — mesuré à 21
-        crédits `Other` sur 268 en base. Cf. WIP."""
+    def test_le_libelle_survit_a_la_presence_de_pistes(self, client, monkeypatch):
+        """CORRIGÉ le 2026-09-04. `role_detail` portait DEUX informations
+        concurrentes via un `or` (« pistes OU libellé si OTHER ») : quand Discogs
+        fournissait les deux, le libellé disparaissait — 21 crédits `Other` sur
+        203 en base portent « 16 » ou « 3, 5, 7, 14 » à sa place. Ce n'est pas
+        cosmétique : `Track.get_video_credits` reclasse un OTHER en crédit VIDÉO
+        d'après les mots de `role_detail`, qu'un numéro de piste aveugle."""
         credits = [{"name": "Quelqu'un", "role": "Tape Op", "role_detail": "A1, A2"}]
         self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
         track = _track()
 
         client.enrich_track_data(track)
-        assert track.credits[0].role_detail == "A1, A2"  # « Tape Op » a disparu
+        assert track.credits[0].role_detail == "Tape Op"
+
+    def test_les_pistes_restent_sur_un_role_reconnu(self, client, monkeypatch):
+        """Le libellé ne prime QUE sur OTHER : sur un rôle connu, `role_detail`
+        garde son autre usage — dire sur quelles pistes la personne intervient."""
+        credits = [{"name": "Producteur X", "role": "Producer", "role_detail": "A1, A2"}]
+        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
+        track = _track()
+
+        client.enrich_track_data(track)
+        assert track.credits[0].role == CreditRole.PRODUCER
+        assert track.credits[0].role_detail == "A1, A2"
+
+    def test_un_credit_video_range_en_other_reste_detectable(self, client, monkeypatch):
+        """La conséquence concrète du correctif : `get_video_credits` retrouve le
+        crédit vidéo là où le numéro de piste le lui cachait."""
+        credits = [{"name": "Quelqu'un", "role": "Camera Operator", "role_detail": "16"}]
+        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
+        track = _track()
+
+        client.enrich_track_data(track)
+        assert track.credits[0].role == CreditRole.OTHER
+        assert track.get_video_credits() == track.credits
+        assert track.get_music_credits() == []
 
     def test_credit_malforme_ignore_sans_perdre_les_autres(self, client, monkeypatch):
         credits = [{"role": "Producer"}, {"name": "Bon", "role": "Producer"}]

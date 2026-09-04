@@ -106,9 +106,18 @@ class TestExtraction:
 
     def test_deja_en_base_ecarte(self, updater):
         """`existing_keys` vient du CSV : on ne réimporte pas l'existant."""
-        updater.existing_keys.add("Angèle|Titre|Or|2019-05-01")
+        updater.existing_keys.add("Angèle|Titre|Or|2019-05-01|singles")
         soup = _soup(_ligne_html("Angèle", "Titre", "01/05/2019: Or"))
         assert updater.extract_certifications(soup, 2019, "singles") == []
+
+    def test_lautre_categorie_reste_collectable(self, updater):
+        """La clé porte la CATÉGORIE depuis le 2026-09-04 : avoir le single en
+        base ne doit pas empêcher de collecter l'album du même nom."""
+        updater.existing_keys.add("Angèle|Titre|Or|2019-05-01|singles")
+        soup = _soup(_ligne_html("Angèle", "Titre", "01/05/2019: Or"))
+
+        certs = updater.extract_certifications(soup, 2019, "albums")
+        assert len(certs) == 1 and certs[0]["category"] == "albums"
 
     def test_compilation_sans_titre(self, updater):
         """Ultratop liste des compilations : le nom est seul, sans titre."""
@@ -278,20 +287,24 @@ class TestBouclesDAnnees:
         assert vues == [(annee, "albums"), (annee, "singles")]
         assert {c["category"] for c in certifs} == {"albums", "singles"}
 
-    def test_une_meme_certif_sur_les_deux_pages_n_est_comptee_qu_une_fois(
-        self, updater, monkeypatch
-    ):
-        """`existing_keys` (anti-doublon INTRA-run) ne contient PAS la catégorie :
-        une certification vue sur les deux pages reste une seule certification,
-        et garde la catégorie de la page lue en premier."""
+    def test_un_meme_titre_album_ET_single_donne_DEUX_certifications(self, updater, monkeypatch):
+        """CORRIGÉ le 2026-09-04. `existing_keys` ignorait la CATÉGORIE : un
+        album et son morceau-titre certifiés le même jour au même palier n'en
+        faisaient qu'un, et le second était perdu. Or ce sont deux œuvres
+        distinctes chez Ultratop, avec deux parcours de classement et deux listes
+        « Or & Platine » séparées — cas type « This Is The Life » d'Amy Macdonald.
+
+        Le pire n'était pas la perte intra-run : la clé étant amorcée depuis le
+        CSV clean, la première des deux enregistrée bloquait DÉFINITIVEMENT la
+        collecte de l'autre."""
         annee = datetime.now().year
         soup = _soup(_ligne_html("ISHA", "Titre", "01/05/2021: Or"))
         self._pages(updater, monkeypatch, {(annee, "albums"): soup, (annee, "singles"): soup})
 
         certifs = updater.update_current_year()
 
-        assert len(certifs) == 1
-        assert certifs[0]["category"] == "albums"
+        assert len(certifs) == 2
+        assert {c["category"] for c in certifs} == {"albums", "singles"}
 
     def test_page_absente_n_interrompt_pas_la_collecte(self, updater, monkeypatch):
         """Un 500 sur `albums` ne doit pas faire perdre `singles`."""

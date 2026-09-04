@@ -37,6 +37,25 @@ def safe_print(message: str):
         pass
 
 
+def _cert_key(artist, title, level, date, category, clean=None) -> str:
+    """Clé d'identité d'une certification Ultratop — la CATÉGORIE en fait partie.
+
+    Ajoutée le 2026-09-04. Sans elle, un album et un single de même nom certifiés
+    le même jour au même palier n'en faisaient qu'un — or ce sont deux œuvres
+    distinctes chez Ultratop, avec deux parcours de classement et deux listes
+    « Or & Platine » séparées. Cas type : « This Is The Life » d'Amy Macdonald,
+    album ET chanson. Et comme cette clé est amorcée depuis le CSV clean, la
+    première des deux enregistrée empêchait DÉFINITIVEMENT la collecte de l'autre.
+
+    `clean` : normaliseur optionnel (NaN → '' + strip) appliqué aux champs venant
+    de pandas, où un titre vide est lu `NaN`.
+    """
+    champs = (artist, title, level, date, category)
+    if clean is not None:
+        champs = tuple(clean(v) for v in champs)
+    return "|".join(str(v or "") for v in champs)
+
+
 class UltratopUpdater:
     """Scraper pour mettre à jour la base de données des certifications Ultratop"""
 
@@ -105,11 +124,16 @@ class UltratopUpdater:
 
             self.existing_keys = set()
             for _, row in self.existing_db.iterrows():
-                key = (
-                    f"{_k(row['artist'])}|{_k(row['title'])}|"
-                    f"{_k(row['certification_level'])}|{_k(row['certification_date'])}"
+                self.existing_keys.add(
+                    _cert_key(
+                        row["artist"],
+                        row["title"],
+                        row["certification_level"],
+                        row["certification_date"],
+                        row.get("category"),
+                        clean=_k,
+                    )
                 )
-                self.existing_keys.add(key)
         else:
             self.existing_db = pd.DataFrame()
             self.existing_keys = set()
@@ -250,7 +274,7 @@ class UltratopUpdater:
 
                     for cert_date, cert_level in cert_list:
                         # Vérifier si cette certification existe déjà
-                        key = f"{artist}|{title}|{cert_level}|{cert_date}"
+                        key = _cert_key(artist, title, cert_level, cert_date, category)
 
                         if key not in self.existing_keys:
                             self.existing_keys.add(key)  # anti-doublon INTRA-run

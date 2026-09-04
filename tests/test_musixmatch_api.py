@@ -79,12 +79,22 @@ class TestScoreDArtiste:
         """Relâchement VOULU : « Jul » doit matcher « Jul & SCH »."""
         assert mod._artist_match("Jul", "Jul & SCH") == 1.0
 
-    def test_sous_chaine_sans_garde_de_mot_entier(self):
-        """Comportement ACTUEL, documenté : la comparaison est une SOUS-CHAÎNE
-        nue, donc « IAM » matche « Williams » — le piège déjà relevé côté certifs
-        et côté `_resolve_homonym`. Le titre reste une seconde ancre, ce qui
-        limite la casse. Mesurer avant de resserrer (cf. WIP)."""
-        assert mod._artist_match("IAM", "Williams") == 1.0
+    def test_sous_chaine_nue_ne_vaut_plus_1(self):
+        """CORRIGÉ le 2026-09-04 : l'inclusion ne compte plus qu'en MOTS ENTIERS.
+        « IAM » est bien une sous-chaîne de « Williams », mais pas un mot du tout —
+        avant, ce faux positif valait 1.0 et franchissait la porte d'acceptation.
+        Il retombe désormais sous le seuil (0.55) : le morceau est rejeté."""
+        assert mod._artist_match("IAM", "Williams") < mod._ARTIST_MATCH_MIN
+
+    def test_le_relachement_utile_est_preserve(self):
+        """Le correctif ne devait rien coûter aux cas légitimes."""
+        assert mod._artist_match("Jul", "Jul & SCH") == 1.0
+        assert mod._artist_match("IAM", "IAM & Akhenaton") == 1.0
+
+    def test_graphies_voisines_rattrapees_par_la_similarite(self):
+        """Sans limite de mot, « Alpha Wann » vs « AlphaWann » perd son 1.0 —
+        mais `SequenceMatcher` le garde très au-dessus du seuil."""
+        assert mod._artist_match("Alpha Wann", "AlphaWann") >= mod._ARTIST_MATCH_MIN
 
     def test_artistes_etrangers(self):
         assert mod._artist_match("ISHA", "Nekfeu") < mod._ARTIST_MATCH_MIN

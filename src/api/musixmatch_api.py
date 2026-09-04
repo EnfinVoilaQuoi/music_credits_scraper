@@ -52,8 +52,6 @@ import logging
 import os
 import re
 import time
-import unicodedata
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,6 +67,18 @@ except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
     DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
+# Comparateurs titre/artiste : définis UNE fois dans `_text_match` (ils étaient
+# dupliqués à l'octet près entre ce module et son jumeau). Ré-exportés sous
+# leurs noms d'origine — les appelants et les tests ne changent pas.
+from src.api._text_match import (  # noqa: F401 — ré-export
+    _FEAT_RE,
+    _PAREN_RE,
+    _artist_match,
+    _norm,
+    _strip_accents,
+    _title_core,
+    _title_match,
+)
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 
@@ -109,47 +119,6 @@ _AUTH_FAILURE = object()
 
 
 # ── Normalisation / matching (copies locales : module autonome, comme lrclib_api) ─
-def _strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
-
-
-def _norm(s: str) -> str:
-    s = _strip_accents((s or "").lower())
-    return re.sub(r"[^a-z0-9]+", " ", s).strip()
-
-
-_PAREN_RE = re.compile(r"[\(\[\{].*?[\)\]\}]")
-_FEAT_RE = re.compile(r"\b(feat|ft|featuring|with|avec)\b.*$")
-
-
-def _title_core(title: str) -> str:
-    t = _strip_accents((title or "").lower())
-    t = _PAREN_RE.sub(" ", t)
-    t = _FEAT_RE.sub(" ", t)
-    return re.sub(r"[^a-z0-9]+", " ", t).strip()
-
-
-def _title_match(a: str, b: str) -> float:
-    ca, cb = _title_core(a), _title_core(b)
-    if not ca or not cb:
-        return 0.0
-    if ca == cb:
-        return 1.0
-    ratio = SequenceMatcher(None, ca, cb).ratio()
-    if ca in cb or cb in ca:
-        ratio = max(ratio, 0.9)
-    return ratio
-
-
-def _artist_match(a: str, b: str) -> float:
-    na, nb = _norm(a), _norm(b)
-    if not na or not nb:
-        return 0.0
-    if na == nb or na in nb or nb in na:
-        return 1.0
-    return SequenceMatcher(None, na, nb).ratio()
-
-
 def _looks_synced(lrc: str | None) -> bool:
     """Un LRC exploitable contient au moins une balise `[mm:ss...]`."""
     return bool(lrc) and re.search(r"\[\d+:\d+", lrc) is not None

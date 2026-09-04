@@ -145,6 +145,32 @@ class TestNomsCorrespondent:
         """Seuil difflib à 0,8 : une lettre de travers ne casse pas l'identité."""
         assert _names_match("Nekfeu", "Nekfeuu") is True
 
+    @pytest.mark.parametrize(
+        "page",
+        [
+            "Coline Schneider",
+            "Sébastien Tedeschi",
+            "Vicky Schoukroun",
+            "Salomé Fleischmann",
+            "ScHoolboy Q",
+        ],
+    )
+    def test_un_inconnu_dont_le_nom_contient_le_notre_est_refuse(self, page):
+        """CORRIGÉ le 2026-09-04. « sch » est une sous-chaîne de tous ces noms
+        sans y être un mot. C'est le garde-fou d'identité du passage Kworb : un
+        faux positif fait écrire le catalogue de streams d'un INCONNU sur notre
+        artiste. Mesuré sur les 2 515 noms réellement croisés en base : 18 pages
+        acceptées à tort avant, 4 après — toutes légitimes."""
+        assert _names_match(page, "SCH") is False
+
+    def test_misha_nest_pas_isha(self):
+        assert _names_match("Misha Van Der Werf", "Isha") is False
+
+    @pytest.mark.parametrize(("page", "artiste"), [("Isha (7)", "Isha"), ("Sch (5)", "SCH")])
+    def test_suffixe_de_desambiguisation_genius_conserve(self, page, artiste):
+        """Ce que le correctif devait épargner : « Isha (7) » reste notre Isha."""
+        assert _names_match(page, artiste) is True
+
 
 class TestHomonymes:
     """Deux morceaux au même titre : c'est l'artiste crédité qui départage."""

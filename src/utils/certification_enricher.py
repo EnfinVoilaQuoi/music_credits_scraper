@@ -86,7 +86,9 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
                 ]
             else:
                 track.certs.album_entries = []
-        except Exception as e:
+        # Les objets de match viennent du matcher : une forme inattendue ne doit
+        # pas faire perdre le reste de la discographie.
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Erreur enrichissement {track.title}: {e}")
             track.certs.entries = []
             track.certs.album_entries = []

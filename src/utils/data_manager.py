@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import ARTISTS_DIR, DATABASE_URL
 from src.utils.artist_repository import ArtistRepository
@@ -103,7 +104,7 @@ class DataManager(ArtistRepository, TrackRepository):
 
             return stats
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Erreur lors de la récupération des statistiques: {e}")
             return {
                 "total_artists": 0,

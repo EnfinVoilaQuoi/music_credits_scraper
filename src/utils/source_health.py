@@ -106,6 +106,30 @@ def _probe_kworb() -> list[str]:
     return []
 
 
+def _probe_spotify_web() -> list[str]:
+    """Rejoue le VRAI transport : session patchright + page titre + parse.
+
+    Pas de sonde rapide pour cette source, et c'est délibéré : `open.spotify.com`
+    est une SPA, un GET nu rend **200 avec un HTML creux** (157 Ko sans un seul
+    compteur, mesuré le 2026-09-04). Une telle sonde ne mesurerait rien tout en
+    ayant l'air de mesurer — exactement ce que le projet s'est interdit.
+    """
+    from src.concurrency import async_loop
+    from src.scrapers.spotify_web_scraper import SpotifyWebScraper
+
+    async def _run() -> list[str]:
+        scraper = SpotifyWebScraper(headless=True)
+        async with scraper.session() as sess:
+            data = await scraper.afetch_track(sess, _SPOTIFY_TRACK_ID)
+        if not data:
+            return ["page titre non rendue ou sans aucun compteur"]
+        if _SPOTIFY_TRACK_ID not in data["playcounts"]:
+            return ["compteur principal illisible (data-testid=playcount changé ?)"]
+        return []
+
+    return async_loop.run_sync(_run())
+
+
 def _probe_lrclib() -> list[str]:
     from src.api.lrclib_api import LRCLIBAPI
 
@@ -294,6 +318,17 @@ SOURCES: list[SourceSpec] = [
         families=(Family.AUDIO,),
     ),
     SourceSpec(
+        key="spotify_web",
+        label="Spotify web (streams, auditeurs mensuels)",
+        full_probe=_probe_spotify_web,
+        notes=(
+            "SPA rendue au navigateur (patchright, profil dédié) — PAS de sonde "
+            "rapide : un GET nu rend 200 sur un HTML creux, il ne mesurerait rien"
+        ),
+        families=(Family.STREAMS,),
+        usage_note="repli quand Kworb ignore l'artiste ; seule source des auditeurs mensuels",
+    ),
+    SourceSpec(
         key="riaa",
         label="RIAA (certifications US)",
         fast_url="https://www.riaa.com/gold-platinum/",
@@ -388,7 +423,7 @@ def _run_probe(spec: SourceSpec, probe: Callable[[], list[str]], level: str) -> 
         return SourceStatus(
             spec.key, spec.label, "broken", level, latency, _now(), None, f"réseau : {e}"
         )
-    except Exception as e:  # une sonde qui plante = source cassée, pas un crash de l'app
+    except Exception as e:  # noqa: BLE001 — sonde : code arbitraire par source
         latency = int((time.monotonic() - start) * 1000)
         return SourceStatus(
             spec.key, spec.label, "broken", level, latency, _now(), None, f"erreur : {e}"

@@ -35,7 +35,7 @@ class KworbLinksManager:
     def load(self, artist_name: str) -> dict:
         try:
             data = json.loads(self._path(artist_name).read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError):
             data = {}
         data.setdefault("confirmed", {})
         data.setdefault("rejected", [])
@@ -46,7 +46,7 @@ class KworbLinksManager:
             self._path(artist_name).write_text(
                 json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
             )
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(f"Sauvegarde décisions Kworb échouée ({artist_name}): {e}")
 
     def confirm(self, artist_name: str, kworb_title: str, track_id: int):

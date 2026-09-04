@@ -101,7 +101,7 @@ def validate_riaa_csv(
         return report
     try:
         df = _load(csv_path)
-    except Exception as e:
+    except (OSError, ValueError) as e:  # pandas : ParserError/EmptyDataError heritent de ValueError
         report["errors"].append(f"Chargement impossible : {e}")
         return report
 

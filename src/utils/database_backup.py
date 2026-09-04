@@ -79,7 +79,7 @@ class DatabaseBackupManager:
                 backup_path.unlink()
                 return None
 
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
             logger.error(f"❌ Erreur lors de la création du backup: {e}")
             return None
 
@@ -110,7 +110,7 @@ class DatabaseBackupManager:
             # Accepter le backup même s'il est vide (nouvelle installation)
             return len(tables) > 0
 
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
             logger.error(f"Erreur vérification backup: {e}")
             return False
         finally:
@@ -135,7 +135,7 @@ class DatabaseBackupManager:
                     backup.unlink()
                     logger.debug(f"Ancien backup supprimé: {backup.name}")
 
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
             logger.error(f"Erreur nettoyage backups: {e}")
 
     def restore_backup(self, backup_path: Path) -> bool:
@@ -170,7 +170,7 @@ class DatabaseBackupManager:
                 logger.error("❌ Base restaurée corrompue")
                 return False
 
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
             logger.error(f"❌ Erreur lors de la restauration: {e}")
             return False
 
@@ -196,7 +196,7 @@ class DatabaseBackupManager:
 
             return backup_info
 
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
             logger.error(f"Erreur listage backups: {e}")
             return []
 
@@ -213,7 +213,7 @@ class DatabaseBackupManager:
                 "latest": max(backups, key=lambda p: p.stat().st_mtime).name if backups else None,
             }
 
-        except Exception as e:
+        except (OSError, sqlite3.Error) as e:
             logger.error(f"Erreur stats backups: {e}")
             return {}
 

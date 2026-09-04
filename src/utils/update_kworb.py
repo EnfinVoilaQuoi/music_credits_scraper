@@ -34,16 +34,30 @@ from src.utils.title_matching import normalize_title as _normalize_title
 
 
 def _names_match(page_name: str | None, artist_name: str) -> bool:
-    """Le nom affiché par la page Kworb correspond-il à notre artiste ?"""
+    """Le nom affiché par la page Kworb correspond-il à notre artiste ?
+
+    C'est le GARDE-FOU d'identité de tout le passage Kworb : un faux positif ici
+    ne se trompe pas d'un morceau, il fait écrire le catalogue de streams d'un
+    INCONNU sur notre artiste (plus ses totaux et ses albums).
+
+    L'inclusion ne compte qu'en MOTS ENTIERS (2026-09-04). La comparaison était
+    une sous-chaîne nue : sur les 2 515 noms d'artistes réellement croisés en
+    base, 18 pages étaient acceptées à tort — « SCH » matchait « Coline
+    Schneider », « Sébastien Tedeschi », « ScHoolboy Q » ; « Isha » matchait
+    « Misha Van Der Werf ». Après correctif il en reste 4, toutes légitimes :
+    « ISHA », « Isha (7) », « Sch (5) » (suffixes de désambiguïsation Genius)
+    et « Jazzy Jazz », retenue par le repli difflib et non par l'inclusion.
+    """
     if not page_name:
         return False
     a, b = _normalize_title(page_name), _normalize_title(artist_name)
     if not a or not b:
         return False
-    if a == b or a in b or b in a:
+    if a == b or contains_as_words(a, b) or contains_as_words(b, a):
         return True
     import difflib
 
+    # Repli tolérant aux coquilles (« Nekfeu » / « Nekfeuu »), inchangé.
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
 
 

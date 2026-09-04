@@ -11,6 +11,7 @@ dans `tmp_path` — jamais dans le dépôt.
 """
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -178,17 +179,96 @@ class TestCache:
         assert client._cached_spotify_info(cle, "sp1", use_cache=True, force_refresh=True) is None
         assert cle not in client.cache
 
-    def test_entree_not_found_ne_court_circuite_PAS(self, client):
-        """Comportement ACTUEL, documenté ici parce qu'il surprend : l'entrée
-        écrite par `_cache_not_found` n'a ni bpm ni audio_features, donc elle
-        n'est jamais servie — le cache négatif est en écriture SEULE et l'ID
-        inconnu est re-demandé à chaque passage. L'horodatage suggère qu'un TTL
-        était prévu ; il n'a jamais été branché (cf. WIP)."""
+    def test_entree_not_found_reste_hors_des_lecteurs_de_donnees(self, client):
+        """`_cached_spotify_info` ne sert QUE des données exploitables : une
+        absence n'en est pas une. C'est `_not_found_is_fresh` qui la lit."""
         cle = client._get_cache_key("sp1")
         client._cache_not_found(cle, "sp1")
 
-        assert cle in client.cache  # l'entrée est bien écrite
         assert client._cached_spotify_info(cle, "sp1", use_cache=True, force_refresh=False) is None
+
+
+class TestPeremptionDuCacheNegatif:
+    """CORRIGÉ le 2026-09-04. Les entrées « not_found » étaient ÉCRITES mais
+    jamais relues : 164 identifiants sur 930 étaient re-demandés à ReccoBeats à
+    chaque passage complet, sur une API à débit limité. L'horodatage stocké
+    depuis toujours montrait qu'une péremption était prévue."""
+
+    def test_absence_fraiche_reconnue(self, client):
+        cle = client._get_cache_key("sp1")
+        client._cache_not_found(cle, "sp1")
+
+        assert client._not_found_is_fresh(cle) is True
+
+    def test_absence_perimee(self, client, monkeypatch):
+        import src.api.reccobeats_api as mod
+
+        cle = client._get_cache_key("sp1")
+        client.cache[cle] = {
+            "error": "not_found",
+            "timestamp": time.time() - (mod.RECCOBEATS_NOT_FOUND_TTL_DAYS + 1) * 86_400,
+        }
+        assert client._not_found_is_fresh(cle) is False
+
+    @pytest.mark.parametrize("horodatage", [None, "hier", float("nan")])
+    def test_horodatage_douteux_vaut_perime(self, client, horodatage):
+        """On préfère redemander plutôt que figer une absence sur une donnée
+        qu'on ne sait pas dater."""
+        cle = client._get_cache_key("sp1")
+        entree = {"error": "not_found"}
+        if horodatage is not None:
+            entree["timestamp"] = horodatage
+        client.cache[cle] = entree
+
+        assert client._not_found_is_fresh(cle) is False
+
+    @pytest.mark.parametrize("entree", [None, {"bpm": 142}, {"error": "autre"}, "texte"])
+    def test_ce_qui_n_est_pas_une_absence(self, client, entree):
+        cle = client._get_cache_key("sp1")
+        if entree is not None:
+            client.cache[cle] = entree
+        assert client._not_found_is_fresh(cle) is False
+
+    def test_la_source_n_est_plus_sollicitee(self, client, monkeypatch):
+        """Le bout en bout : 1ʳᵉ passe → une requête et l'absence mémorisée ;
+        2ᵉ passe → aucune requête."""
+        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
+
+        assert client.get_track_info("sp1") is None
+        assert len(vues) == 1
+
+        assert client.get_track_info("sp1") is None
+        assert len(vues) == 1  # rien de plus
+
+    def test_absence_perimee_redemande(self, client, monkeypatch):
+        import src.api.reccobeats_api as mod
+
+        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
+        client.get_track_info("sp1")
+
+        client.cache[client._get_cache_key("sp1")]["timestamp"] = (
+            time.time() - (mod.RECCOBEATS_NOT_FOUND_TTL_DAYS + 1) * 86_400
+        )
+        client.get_track_info("sp1")
+
+        assert len(vues) == 2
+
+    def test_force_refresh_redemande(self, client, monkeypatch):
+        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
+        client.get_track_info("sp1")
+        client.get_track_info("sp1", force_refresh=True)
+
+        assert len(vues) == 2
+
+    def test_voie_isrc_aussi(self, client, monkeypatch):
+        """La voie ISRC portait EXACTEMENT le même trou (82 entrées chacune)."""
+        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
+
+        assert client.get_track_info_by_isrc("FR1234500001") is None
+        assert len(vues) == 1
+
+        assert client.get_track_info_by_isrc("FR1234500001") is None
+        assert len(vues) == 1
 
     def test_statistiques(self, client):
         client.cache = {

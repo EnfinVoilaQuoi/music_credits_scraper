@@ -466,8 +466,19 @@ class DiscogsClient:
                         credit = Credit(
                             name=credit_dict["name"],
                             role=role_enum,
-                            role_detail=credit_dict.get("role_detail")
-                            or (credit_dict["role"] if role_enum == CreditRole.OTHER else None),
+                            # Le LIBELLÉ prime quand le rôle tombe en OTHER (2026-09-04).
+                            # C'était `pistes or (libellé si OTHER)` : quand Discogs
+                            # fournissait les deux, le libellé disparaissait — 21 crédits
+                            # sur 203 en base portent « 16 » ou « 3, 5, 7, 14 » à sa place.
+                            # Ce n'est pas cosmétique : `Track.get_video_credits` reclasse
+                            # un OTHER en crédit VIDÉO d'après les mots de `role_detail`.
+                            # Convention désormais commune aux trois écrivains (Genius
+                            # scraper ×2, `Track.add_credit_from_role`).
+                            role_detail=(
+                                credit_dict["role"]
+                                if role_enum == CreditRole.OTHER
+                                else credit_dict.get("role_detail")
+                            ),
                             source="discogs",
                         )
 

@@ -137,6 +137,20 @@ def test_ytm_identity_thresholds_read_from_env(monkeypatch):
     assert s.ytm_identity_min_ratio == 0.5
 
 
+def test_reccobeats_not_found_ttl_default():
+    """Péremption du cache NÉGATIF ReccoBeats (2026-09-04). Un mois : le
+    catalogue bouge lentement, mais une absence ne doit pas être figée à vie."""
+    assert Settings(_env_file=None).reccobeats_not_found_ttl_days == 30
+    assert config.RECCOBEATS_NOT_FOUND_TTL_DAYS == 30
+
+
+def test_reccobeats_not_found_ttl_read_from_env(monkeypatch):
+    monkeypatch.setenv("RECCOBEATS_NOT_FOUND_TTL_DAYS", "7")
+    s = Settings(_env_file=None)
+    assert s.reccobeats_not_found_ttl_days == 7
+    assert isinstance(s.reccobeats_not_found_ttl_days, int)
+
+
 def test_derived_paths():
     assert config.DATABASE_URL.endswith("data/music_credits.db")
     assert str(config.DATA_DIR) == config.DATA_PATH

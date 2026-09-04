@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import httpx
 import requests
 
+from src.config import RECCOBEATS_NOT_FOUND_TTL_DAYS
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 
@@ -234,6 +235,11 @@ class ReccoBeatsIntegratedClient:
         if cached is not None:
             return cached  # servi par le cache : aucune sollicitation de la source
 
+        if self._not_found_is_fresh(cache_key):
+            # Absence deja constatee et non perimee : on ne resollicite pas la source.
+            logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
+            return None
+
         # UNE observation pour la chaîne track + audio features : c'est un seul
         # appel logique à ReccoBeats, même s'il coûte deux requêtes.
         with source_usage.observe(_SOURCE, label=f"spotify:{spotify_id}") as obs:
@@ -279,6 +285,11 @@ class ReccoBeatsIntegratedClient:
         cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
         if cached is not None:
             return cached  # servi par le cache : aucune sollicitation de la source
+
+        if self._not_found_is_fresh(cache_key):
+            # Absence deja constatee et non perimee : on ne resollicite pas la source.
+            logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
+            return None
 
         with source_usage.observe(_SOURCE, label=f"spotify:{spotify_id}") as obs:
             try:
@@ -330,6 +341,27 @@ class ReccoBeatsIntegratedClient:
         logger.warning(f"❌ Aucune donnée ReccoBeats pour {label}")
         self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
         self._save_cache()
+
+    def _not_found_is_fresh(self, cache_key: str) -> bool:
+        """Une absence déjà constatée, et pas encore périmée ?
+
+        Ces entrées étaient ÉCRITES mais jamais relues (les deux lecteurs de
+        cache n'acceptent qu'une entrée porteuse de `bpm`/`audio_features`) :
+        164 identifiants sur 930 étaient donc re-demandés à ReccoBeats à chaque
+        passage complet, sur une API à débit limité. L'horodatage stocké depuis
+        le début montre qu'une péremption était prévue — la voici, branchée.
+
+        Un `timestamp` absent ou illisible compte comme PÉRIMÉ : on préfère
+        redemander plutôt que de figer une absence sur une donnée douteuse.
+        """
+        entry = self.cache.get(cache_key)
+        if not isinstance(entry, dict) or entry.get("error") != "not_found":
+            return False
+        try:
+            age = time.time() - float(entry["timestamp"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        return 0 <= age < RECCOBEATS_NOT_FOUND_TTL_DAYS * 86_400
 
     @staticmethod
     def _base_spotify_result(spotify_id: str, track_data: dict) -> dict:
@@ -465,6 +497,11 @@ class ReccoBeatsIntegratedClient:
             if cached is not None:
                 return cached
 
+            if self._not_found_is_fresh(cache_key):
+                # Absence deja constatee et non perimee : on ne resollicite pas la source.
+                logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
+                return None
+
             track_data = self.get_track_by_isrc(isrc)
             if not track_data:
                 self._cache_not_found(cache_key, f"ISRC {isrc}")
@@ -499,6 +536,11 @@ class ReccoBeatsIntegratedClient:
             cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
             if cached is not None:
                 return cached
+
+            if self._not_found_is_fresh(cache_key):
+                # Absence deja constatee et non perimee : on ne resollicite pas la source.
+                logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
+                return None
 
             track_data = await self.get_track_by_isrc_async(http, isrc)
             if not track_data:

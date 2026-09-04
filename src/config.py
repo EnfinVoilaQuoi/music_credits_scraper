@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     ytm_identity_min_matched: int = 2  # plancher de titres YTM communs avec la base
     ytm_identity_min_ratio: float = 0.3  # part min des titres YTM retrouvés en base
 
+    # --- ReccoBeats : péremption du cache NÉGATIF ---
+    # Un Spotify ID / ISRC inconnu de ReccoBeats est mémorisé comme tel. Sans
+    # péremption, une absence serait figée pour toujours ; sans lecture du tout
+    # (le cas jusqu'au 2026-09-04), l'ID était re-demandé à CHAQUE passage — 164
+    # entrées sur 930 dans le cache réel. Un mois est le compromis : le catalogue
+    # ReccoBeats bouge lentement, mais un morceau ajouté finit par être repêché.
+    reccobeats_not_found_ttl_days: int = 30
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, value: object) -> str:
@@ -166,6 +174,9 @@ YOUTUBE_AUTO_SELECT_ALBUM_TRACKS = settings.youtube_auto_select_album_tracks
 YOUTUBE_VERIFY_OFFICIAL_CHANNELS = settings.youtube_verify_official_channels
 YOUTUBE_CONFIDENCE_THRESHOLD = settings.youtube_confidence_threshold
 YOUTUBE_PERSIST_CONFIDENCE = settings.youtube_persist_confidence
+
+# ReccoBeats (péremption du cache négatif)
+RECCOBEATS_NOT_FOUND_TTL_DAYS = settings.reccobeats_not_found_ttl_days
 
 # Désambiguïsation canal YTM (gate d'identité)
 YTM_IDENTITY_MIN_MATCHED = settings.ytm_identity_min_matched

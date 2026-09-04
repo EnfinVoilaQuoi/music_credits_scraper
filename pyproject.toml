@@ -63,20 +63,11 @@ ignore = [
 "tests/**" = ["BLE001"]
 # GUI : widgets best-effort + filets top-level des workers (dernier ressort documenté).
 "src/gui/**" = ["BLE001"]
-# Cliquet des utils non encore balayés (à faire décroître) :
-"src/utils/brma_validator.py" = ["BLE001"]
-"src/utils/cert_matcher.py" = ["BLE001"]
-"src/utils/certification_enricher.py" = ["BLE001"]
-"src/utils/data_manager.py" = ["BLE001"]
-"src/utils/database_backup.py" = ["BLE001"]
-"src/utils/deleted_tracks_manager.py" = ["BLE001"]
-"src/utils/disabled_tracks_manager.py" = ["BLE001"]
-"src/utils/kworb_links_manager.py" = ["BLE001"]
-"src/utils/llm_extractor.py" = ["BLE001"]
-"src/utils/media_enricher.py" = ["BLE001"]
-"src/utils/riaa_validator.py" = ["BLE001"]
-"src/utils/snep_validator.py" = ["BLE001"]
-"src/utils/source_health.py" = ["BLE001"]
+# Les 13 modules `src/utils` du cliquet ont été SOLDÉS le 2026-09-04 : leurs 29
+# `except Exception` sont resserrés par domaine (pandas, JSON, sqlite3,
+# SQLAlchemy, ollama, formes de hit Deezer). Seul `source_health` garde un
+# dernier ressort, sous `noqa` commenté : une sonde appelle du code arbitraire
+# propre à chaque source et ne doit jamais crasher l'app.
 "src/utils/update_kworb.py" = ["E402"]
 "src/utils/update_snep.py" = ["E402"]
 "src/utils/update_ytmusic.py" = ["E402"]

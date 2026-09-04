@@ -43,7 +43,7 @@ class DeletedTracksManager:
                 if gid is not None:
                     out[str(gid)] = e
             return out
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(f"Erreur lecture morceaux supprimés pour {artist_name}: {e}")
             return {}
 
@@ -59,7 +59,7 @@ class DeletedTracksManager:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             return True
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(f"Erreur écriture morceaux supprimés pour {artist_name}: {e}")
             return False
 
@@ -105,6 +105,6 @@ class DeletedTracksManager:
             if file_path.exists():
                 file_path.unlink()
             return True
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(f"Erreur suppression historique pour {artist_name}: {e}")
             return False

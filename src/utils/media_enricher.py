@@ -106,7 +106,9 @@ class _MediaRun:
             return None
         try:
             result = self.deezer.search_track(artist_name, title)
-        except Exception as e:  # frontière réseau : ne jamais laisser remonter
+        # `DeezerAPI._make_request` avale deja reseau et JSON et rend None :
+        # ce qui peut encore remonter est une FORME de hit inattendue.
+        except (AttributeError, KeyError, TypeError) as e:
             self.report.errors.append(f"Deezer search_track '{artist_name} - {title}': {e}")
             return None
         finally:
@@ -151,7 +153,7 @@ class _MediaRun:
         if self.deezer:
             try:
                 found = self.deezer.search_artist(artist.name)
-            except Exception as e:
+            except (AttributeError, KeyError, TypeError) as e:
                 self.report.errors.append(f"Deezer search_artist '{artist.name}': {e}")
                 found = None
             finally:
@@ -193,7 +195,7 @@ class _MediaRun:
             if self.deezer:
                 try:
                     found = self.deezer.search_artist(name)
-                except Exception as e:
+                except (AttributeError, KeyError, TypeError) as e:
                     self.report.errors.append(f"Deezer search_artist ({label}) '{name}': {e}")
                     found = None
                 finally:

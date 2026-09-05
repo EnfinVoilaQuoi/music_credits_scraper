@@ -78,6 +78,32 @@ def format_lyrics_for_display(lyrics: str) -> str:
     return "\n".join(formatted_lines)
 
 
+def _streams_complets(track) -> bool:
+    """Le morceau a-t-il ses streams sur TOUTES les plateformes où il existe ?
+
+    La présence sur une plateforme se lit sur son identifiant, pas sur son
+    compteur : `spotify_id` pour Spotify, `youtube_url` pour YouTube. Sans cette
+    distinction, un morceau publié uniquement sur YouTube resterait
+    éternellement « incomplet » faute d'un chiffre Spotify qui n'existera jamais.
+
+    Un morceau qu'on ne sait présent NULLE PART est jugé complet s'il porte au
+    moins un compteur — sinon il n'y a rien à réclamer, et on ne va pas exiger
+    une donnée dont on ignore si elle existe.
+    """
+    sur_spotify = bool(track.spotify_id)
+    sur_youtube = bool(track.youtube_url)
+    spotify_ok = bool(track.streams.spotify_streams)
+    ytm_ok = bool(track.streams.ytm_streams)
+
+    if sur_spotify and not spotify_ok:
+        return False
+    if sur_youtube and not ytm_ok:
+        return False
+    if not sur_spotify and not sur_youtube:
+        return spotify_ok or ytm_ok
+    return True
+
+
 def get_track_status_icon(track, disabled_ids) -> str:
     """Retourne l'icône de statut selon le niveau de complétude des données
 
@@ -88,6 +114,9 @@ def get_track_status_icon(track, disabled_ids) -> str:
     - BPM ✓
     - Key et Mode ✓
     - Durée ✓
+    - Streams ✓ sur chaque plateforme où le morceau EXISTE (cf.
+      `_streams_complets`) — un titre publié seulement sur YouTube est complet
+      avec ses seuls streams YTM
     - Certifications ✓ (ou validation si base à jour)
 
     Note: Album n'est PAS obligatoire (singles, featurings hors projet)
@@ -139,6 +168,15 @@ def get_track_status_icon(track, disabled_ids) -> str:
         # 7. Durée
         if not track.duration:
             missing.append("Durée")
+
+        # 9. Streams — depuis que le scrape Spotify est en place (2026-09-05),
+        # l'absence de compteur est un vrai trou et non plus une fatalité.
+        # Exigés PLATEFORME PAR PLATEFORME : un morceau qui n'existe pas sur
+        # Spotify n'y aura jamais de streams, et le réclamer le marquerait
+        # incomplet à perpétuité. Un morceau publié seulement sur YouTube est
+        # donc COMPLET avec ses seuls streams YTM.
+        if not _streams_complets(track):
+            missing.append("Streams")
 
         # 8. Certifications : le champ existe toujours (dataclass), donc jamais
         # « manquant » — la recherche est réputée faite. (Ancien hasattr mort.)

@@ -29,7 +29,7 @@ def configure_tree_for_tracks(app):
         "Durée": (70, "center"),
         "Certif.": (50, "center"),
         "Streams": (120, "e"),
-        "Statut": (70, "w"),
+        "Statut": (70, "center"),
     }
     for col in app.TRACK_COLUMNS:
         w, anchor = widths[col]

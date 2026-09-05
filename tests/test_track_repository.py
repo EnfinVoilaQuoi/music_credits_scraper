@@ -181,6 +181,29 @@ class TestAlbums:
 
         assert data_manager.get_albums_for_artist(artiste.id)[0]["ytm_streams"] == 42
 
+    def test_la_provenance_du_total_est_rendue(self, data_manager, artiste):
+        """CORRIGÉ le 2026-09-05 : `spotify_streams_source` était SÉLECTIONNÉ par
+        la requête mais absent du dict rendu — lu en base puis jeté avant
+        d'atteindre la GUI. Or Kworb ne somme que les morceaux de notre artiste
+        là où Spotify compte toutes les pistes du disque : un total sans sa
+        provenance n'est pas interprétable."""
+        data_manager.upsert_album(
+            artiste.id, "Album A", streams=10, daily_streams=1, source="spotify_web"
+        )
+
+        album = data_manager.get_albums_for_artist(artiste.id)[0]
+        assert album["spotify_streams_source"] == "spotify_web"
+
+    def test_les_editions_sont_rendues(self, data_manager, artiste):
+        """`spotify_editions_json` était dans le même cas, et n'avait AUCUN
+        consommateur : écrit, sélectionné, jamais lu."""
+        data_manager.upsert_album(
+            artiste.id, "Album A", streams=10, daily_streams=1, editions_json='{"id1": 7}'
+        )
+
+        album = data_manager.get_albums_for_artist(artiste.id)[0]
+        assert album["spotify_editions_json"] == '{"id1": 7}'
+
     def test_artiste_sans_album(self, data_manager, artiste):
         assert data_manager.get_albums_for_artist(artiste.id) == []
 

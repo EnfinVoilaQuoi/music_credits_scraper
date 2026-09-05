@@ -125,3 +125,31 @@ class TestFormatageDesStreams:
     def test_absence_rendue_vide_et_non_zero(self, valeur):
         """Un « 0 » se lirait comme une mesure ; l'absence de collecte n'en est pas une."""
         assert ag.format_streams(valeur) == ""
+
+
+class TestProvenanceDuTotalSpotify:
+    """Kworb et Spotify ne comptent PAS la même chose — Kworb somme les morceaux
+    de notre artiste, Spotify toutes les pistes du disque. Sur un projet commun,
+    le total Kworb n'est donc qu'une part. Et quand aucun total d'album n'existe,
+    la vue somme les streams des MORCEAUX : troisième nature de chiffre.
+
+    La provenance était SÉLECTIONNÉE en base puis jetée avant d'atteindre la GUI
+    (`get_albums_for_artist`) — corrigé le 2026-09-05.
+    """
+
+    def test_total_venu_de_kworb(self):
+        assert ag.streams_source_label("kworb", somme_de_morceaux=False) == "Kworb"
+
+    def test_total_venu_de_spotify(self):
+        assert ag.streams_source_label("spotify_web", somme_de_morceaux=False) == "Spotify"
+
+    def test_somme_des_morceaux_prime_sur_la_source(self):
+        """Pas de total d'album : le chiffre affiché n'en est pas un, quoi que
+        dise la colonne de provenance."""
+        assert ag.streams_source_label("kworb", somme_de_morceaux=True) == ag.SOMME_MORCEAUX
+
+    @pytest.mark.parametrize("source", [None, "", "source_inconnue"])
+    def test_source_absente_ou_inconnue(self, source):
+        """Rien plutôt qu'un libellé inventé : une provenance qu'on ne sait pas
+        nommer ne doit pas passer pour une source connue."""
+        assert ag.streams_source_label(source, somme_de_morceaux=False) == ""

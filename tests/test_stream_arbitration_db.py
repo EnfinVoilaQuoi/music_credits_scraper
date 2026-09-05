@@ -196,3 +196,36 @@ def test_kworb_reste_maitre_entre_deux_passages_kworb(data_manager):
     data_manager.upsert_album(artist.id, "Mon Album", 300, 7, source="kworb")
     data_manager.upsert_album(artist.id, "Mon Album", 350, 8, source="kworb")
     assert _album(data_manager, artist.id)["spotify_streams"] == 350
+
+
+def test_les_ids_d_edition_FUSIONNENT_au_lieu_de_s_ecraser(data_manager):
+    """Chaque source ne connaît que les éditions qu'elle a vues : la page artiste
+    Spotify n'en liste qu'une là où Kworb en a deux. Remplacer perdrait
+    silencieusement l'autre — or c'est précisément la donnée à garder."""
+    artist = _artiste(data_manager)
+    data_manager.upsert_album(artist.id, "Mon Album", 300, 7, "AL1,AL2", source="kworb")
+    data_manager.upsert_album(artist.id, "Mon Album", 1000, None, "AL1", source="spotify_web")
+
+    with data_manager.engine.connect() as conn:
+        ids = conn.execute(
+            text("SELECT spotify_album_ids FROM albums WHERE artist_id = :a"),
+            {"a": artist.id},
+        ).scalar()
+    assert set(ids.split(",")) == {"AL1", "AL2"}
+
+
+def test_kworb_peut_completer_les_ids_d_un_album_arbitre_par_spotify(data_manager):
+    """Le garde ne porte que sur le TOTAL : Kworb reste utile pour enrichir les
+    IDs d'édition, même quand Spotify possède le total du disque."""
+    artist = _artiste(data_manager)
+    data_manager.upsert_album(artist.id, "Mon Album", 1000, None, "AL1", source="spotify_web")
+    data_manager.upsert_album(artist.id, "Mon Album", 300, 7, "AL2", source="kworb")
+
+    ligne = _album(data_manager, artist.id)
+    assert ligne["spotify_streams"] == 1000, "le total Spotify reste maître"
+    with data_manager.engine.connect() as conn:
+        ids = conn.execute(
+            text("SELECT spotify_album_ids FROM albums WHERE artist_id = :a"),
+            {"a": artist.id},
+        ).scalar()
+    assert set(ids.split(",")) == {"AL1", "AL2"}

@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from src.persistence.bootstrap import (
     LEGACY_HEAD_REVISION,
     _head_revision,
+    backup_before_upgrade,
     ensure_stamped,
     make_alembic_config,
 )
@@ -278,3 +279,63 @@ def test_e11_backfill_musical_key_orphans(tmp_path):
             "WHERE source = 'legacy' ORDER BY track_id, field"
         ).fetchall()
     assert legacy == [(1, "key", "11"), (1, "mode", "0")]
+
+
+class TestBackupAvantUpgrade:
+    """Le backup ne jouait que par l'app : `upgrade_to_head` le portait, et un
+    `alembic upgrade head` lancé au TERMINAL passait à côté (constaté le
+    2026-09-05, une migration appliquée sans filet sur la base réelle).
+
+    La décision vit désormais en UN point (`backup_before_upgrade`), appelé par
+    les deux chemins — jamais depuis la branche « connexion injectée » d'`env.py`,
+    par où passent les tests : ils n'ont pas à semer des fichiers de backup.
+    """
+
+    def _backups(self, dossier: Path) -> list[Path]:
+        return sorted(dossier.glob("*.db"))
+
+    def test_une_base_a_jour_ne_declenche_rien(self, tmp_path, monkeypatch):
+        """No-op au démarrage normal : c'est ce qui rend l'appel gratuit."""
+        db = str(tmp_path / "t.db")
+        Database(db_path=db)  # amenée au head
+        dossier = self._pointer_backups(tmp_path, monkeypatch)
+
+        assert backup_before_upgrade(db) is None
+        assert self._backups(dossier) == []
+
+    def test_une_base_vierge_n_a_rien_a_proteger(self, tmp_path, monkeypatch):
+        """Révision courante None ET pas de schéma : sauvegarder un fichier vide
+        n'apporte rien et brouillerait la liste des backups."""
+        db = str(tmp_path / "vierge.db")
+        sqlite3.connect(db).close()
+        dossier = self._pointer_backups(tmp_path, monkeypatch)
+
+        assert backup_before_upgrade(db) is None
+        assert self._backups(dossier) == []
+
+    def test_une_base_en_retard_AVEC_donnees_est_sauvegardee(self, tmp_path, monkeypatch):
+        # Construite en S'ARRÊTANT à e17 : `upgrade` vers une révision antérieure
+        # est un no-op, on ne peut pas faire « redescendre » une base au head.
+        db = str(tmp_path / "retard.db")
+        _upgrade_to(db, "e17_spotify_id_checked")
+        dossier = self._pointer_backups(tmp_path, monkeypatch)
+
+        chemin = backup_before_upgrade(db)
+
+        assert chemin is not None
+        assert len(self._backups(dossier)) == 1
+
+    @staticmethod
+    def _pointer_backups(tmp_path, monkeypatch) -> Path:
+        """Redirige le dossier de backup : aucun test n'écrit dans `data/` réel."""
+        dossier = tmp_path / "backups"
+        dossier.mkdir()
+        import src.utils.database_backup as mod
+
+        original = mod.DatabaseBackupManager.__init__
+
+        def _init(self, db_path=None, backup_dir=None):
+            original(self, db_path=db_path, backup_dir=str(dossier))
+
+        monkeypatch.setattr(mod.DatabaseBackupManager, "__init__", _init)
+        return dossier

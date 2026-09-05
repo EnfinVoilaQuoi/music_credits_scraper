@@ -33,6 +33,7 @@ Trois règles encadrent la récolte, sans lesquelles elle fabrique des faux :
 """
 
 import json
+import re
 from datetime import datetime, timedelta
 
 from src.concurrency import async_loop
@@ -324,6 +325,34 @@ def _record(
             result["harvested_foreign"] += 1
 
 
+#: Suffixes qui désignent une ÉDITION d'un disque, et non un autre disque.
+#: Liste FERMÉE, et c'est le point : un simple préfixe commun rattacherait une
+#: suite (« Matrix II ») à son aînée.
+_MARQUEURS_EDITION = re.compile(
+    r"^\s*(bonus|deluxe|de luxe|reedition|reissue|edition|version|remaster\w*"
+    r"|anniversaire|collector|integrale)\b",
+    re.IGNORECASE,
+)
+
+
+def _album_de_la_base(titre_norm: str, connus: dict) -> str | None:
+    """Album de la base auquel rattacher une entrée d'album Spotify.
+
+    Correspondance exacte d'abord. Sinon, une entrée qui PROLONGE un titre connu
+    par un marqueur d'édition (« [Bonus] », « (Deluxe) »…) est une édition du
+    même disque : ses pistes appartiennent à l'album, et les ignorer les retire
+    purement et simplement du total. Mesuré le 2026-09-05 : « M.A.N (Black Roses
+    & Lost Feelings) » ressortait à 362 M sur 17 pistes là où la base en connaît
+    19 pour 403 M — les pistes de l'édition Bonus manquaient à l'appel.
+    """
+    if titre_norm in connus:
+        return titre_norm
+    for cle in connus:
+        if titre_norm.startswith(cle) and _MARQUEURS_EDITION.match(titre_norm[len(cle) :]):
+            return cle
+    return None
+
+
 async def _totaliser_albums(
     sess,
     scraper,
@@ -379,8 +408,8 @@ async def _totaliser_albums(
     # peuvent désigner le même disque.
     groupes: dict[str, list[str]] = {}
     for album_id, titre in albums_spotify.items():
-        cle = normalize_title(titre or "")
-        if cle in connus:
+        cle = _album_de_la_base(normalize_title(titre or ""), connus)
+        if cle:
             groupes.setdefault(cle, []).append(album_id)
 
     for cle, editions in groupes.items():

@@ -12,20 +12,20 @@ alphanumérique devient une espace. Après passage, une chaîne ne contient donc
 """
 
 import re
-import unicodedata
 from difflib import SequenceMatcher
 
-from src.utils.title_matching import contains_as_words
+from src.utils.title_matching import (
+    _strip_accents,
+    either_contains_as_words,
+    names_match_as_words,
+    normalize_name,
+)
 
-
-def _strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
-
-
-def _norm(s: str) -> str:
-    """Normalisation robuste : minuscules, sans accents, alphanumérique + espaces."""
-    s = _strip_accents((s or "").lower())
-    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+#: Noms d'origine conservés : `lrclib_api` et `musixmatch_api` les ré-exportent,
+#: et les tests les importent ainsi. La définition, elle, a rejoint
+#: `src/utils/title_matching` — seul habitat du matching de noms, partagé avec
+#: les scrapers et `update_kworb`.
+_norm = normalize_name
 
 
 # Parenthèses de version/remaster/feat qui parasitent le matching de titre.
@@ -49,8 +49,12 @@ def _title_match(a: str, b: str) -> float:
     if ca == cb:
         return 1.0
     ratio = SequenceMatcher(None, ca, cb).ratio()
-    # Bonus si l'un est strictement contenu dans l'autre (ex. "song" ⊂ "song pt ii")
-    if ca in cb or cb in ca:
+    # Bonus si l'un est contenu dans l'autre en MOTS ENTIERS (ex. "song" ⊂
+    # "song pt ii"). L'inclusion NUE portait aussi « toi » ⊂ « etoile » et
+    # « quoi » ⊂ « pourquoi » à 0.9, soit au-dessus du seuil d'acceptation :
+    # 942 faux rapprochements mesurés sur le corpus réel (cf.
+    # `either_contains_as_words`).
+    if either_contains_as_words(ca, cb):
         ratio = max(ratio, 0.9)
     return ratio
 
@@ -64,11 +68,9 @@ def _artist_match(a: str, b: str) -> float:
     face à « Jul & SCH ». Les graphies simplement voisines (« Alpha Wann » vs
     « AlphaWann ») restent rattrapées par `SequenceMatcher`, à ~0.94.
     """
+    if names_match_as_words(a, b):
+        return 1.0
     na, nb = _norm(a), _norm(b)
     if not na or not nb:
         return 0.0
-    if na == nb:
-        return 1.0
-    if contains_as_words(na, nb) or contains_as_words(nb, na):
-        return 1.0
     return SequenceMatcher(None, na, nb).ratio()

@@ -26,6 +26,7 @@ import pandas as pd
 from src.config import DATA_PATH
 from src.utils.cert_normalize import normalize_text as _normalize_text
 from src.utils.logger import get_logger
+from src.utils.title_matching import either_contains_as_words, normalize_name
 
 logger = get_logger(__name__)
 
@@ -426,10 +427,18 @@ class CertMatcher:
             ref_cleans = album_cleans if (is_album and album_cleans) else track_cleans
             ref_set = set(ref_cleans)
 
+            # L'inclusion compte en MOTS ENTIERS. Nue, elle déclarait « rattaché »
+            # un titre certifié qui n'était qu'une sous-chaîne d'un des nôtres
+            # (« ares » ⊂ « la paresse ») : l'audit annonçait alors zéro orphelin
+            # là où il y en avait — soit exactement l'inverse de sa raison d'être.
             is_match = (
                 ct in ref_set
                 or (len(ct) >= 8 and any(rc.startswith(ct) for rc in ref_cleans))
-                or any((ct in rc) or (rc in ct) for rc in ref_cleans if rc)
+                or any(
+                    either_contains_as_words(normalize_name(ct), normalize_name(rc))
+                    for rc in ref_cleans
+                    if rc
+                )
             )
             if is_match:
                 if is_album:

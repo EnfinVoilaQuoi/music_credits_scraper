@@ -154,6 +154,30 @@ def _head_revision() -> str:
     return ScriptDirectory.from_config(make_alembic_config()).get_current_head()
 
 
+def backup_before_upgrade(db_path: str) -> "Path | None":
+    """Sauvegarde la base SI un upgrade va réellement s'appliquer.
+
+    No-op dans les deux cas où il n'y a rien à protéger : base déjà à head
+    (démarrage normal, aucun coût) ou base VIERGE (rien dedans).
+
+    **Point unique de décision**, appelé par les DEUX chemins qui migrent :
+    `upgrade_to_head` (l'app) et `alembic/env.py` (la ligne de commande). Le
+    backup ne vivait que dans le premier — un `alembic upgrade head` lancé au
+    terminal migrait donc sans filet, ce qui s'est vu le 2026-09-05.
+
+    N'est PAS appelé depuis la branche « connexion injectée » d'`env.py` : les
+    tests passent par là, et ils n'ont pas à semer des fichiers de backup.
+    """
+    if _current_revision(db_path) == _head_revision():
+        return None
+    if not _has_schema(db_path):
+        return None
+
+    from src.utils.database_backup import DatabaseBackupManager
+
+    return DatabaseBackupManager(db_path=db_path).create_backup("before_alembic_upgrade")
+
+
 def upgrade_to_head(db_path: str) -> None:
     """Applique les révisions Alembic en attente (`alembic upgrade head`).
 
@@ -177,10 +201,8 @@ def upgrade_to_head(db_path: str) -> None:
         return
 
     # Un upgrade va s'appliquer : sauvegarder d'abord si la base a des données.
-    if _has_schema(db_path):
-        from src.utils.database_backup import DatabaseBackupManager
-
-        DatabaseBackupManager(db_path=db_path).create_backup("before_alembic_upgrade")
+    # Décision factorisée (partagée avec `alembic/env.py`, cf. son docstring).
+    backup_before_upgrade(db_path)
 
     engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
     try:

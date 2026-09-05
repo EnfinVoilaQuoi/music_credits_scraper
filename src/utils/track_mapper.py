@@ -107,6 +107,7 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.spotify_id = _clean(row["spotify_id"])
     track.discogs_id = _clean(row["discogs_id"])
     track.isrc = _clean(row["isrc"])
+    track.spotify_id_checked_at = _clean(row["spotify_id_checked_at"])
     # E7-D2 : colonnes AUDIO droppées (bpm, bpm_alt, bpm_source, bpm_confidence,
     # key, mode, key_mode_source, musical_key, time_signature, reccobeats_resolution).
     # Attributs posés à None ici (garantit leur existence) PUIS pilotés par la

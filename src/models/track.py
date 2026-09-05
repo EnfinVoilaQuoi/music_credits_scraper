@@ -384,6 +384,10 @@ class Track:
     spotify_ids: list[str] = field(default_factory=list)
     discogs_id: int | None = None
     isrc: str | None = None  # International Standard Recording Code (pivot inter-sources)
+    # Date de la dernière recherche d'ID Spotify MENÉE À TERME (e17). Sans
+    # elle, un `spotify_id` vide ne dit pas si le morceau est absent de
+    # Spotify ou si personne n'a jamais regardé.
+    spotify_id_checked_at: str | None = None
 
     # Métadonnées
     # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5) :

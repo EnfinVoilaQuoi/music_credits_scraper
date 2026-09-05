@@ -201,13 +201,17 @@ class TestIconeDeStatut:
 
 # ── Statut : les streams comptent, mais pas symétriquement ──────────────────
 class TestStatutStreams:
-    """Depuis que le scrape Spotify est en place (2026-09-05), l'absence de
-    compteur est un trou et non plus une fatalité. Mais les deux absences ne se
-    valent pas, et c'est tout l'objet de ces tests.
+    """Les deux absences ne se valent pas, et c'est tout l'objet de ces tests.
+
+    YouTube : son absence n'est pas OBSERVABLE (catalogue plus large — rips de
+    titres supprimés, versions physiques, inédits, lyrics vidéos de projets
+    jamais sortis), elle ne peut donc jamais servir d'excuse.
+
+    Spotify : son absence se CONSTATE, mais encore faut-il l'avoir constatée.
     """
 
     @staticmethod
-    def _morceau(spotify_id=None, sp=None, yt=None):
+    def _morceau(spotify_id=None, sp=None, yt=None, isrc=None, cherche_le=None):
         from src.models import Artist, Track
 
         t = Track(title="T", artist=Artist(name="A"), release_date="2021-06-15", duration="3:48")
@@ -218,6 +222,8 @@ class TestStatutStreams:
         t.audio.mode = "Major"
         t.add_credit(Credit(name="Producteur X", role=CreditRole.PRODUCER))
         t.spotify_id = spotify_id
+        t.isrc = isrc
+        t.spotify_id_checked_at = cherche_le
         t.streams.spotify_streams = sp
         t.streams.ytm_streams = yt
         return t
@@ -228,19 +234,39 @@ class TestStatutStreams:
     def test_sur_spotify_sans_compteur_spotify(self):
         assert helpers.get_track_status_icon(self._morceau("ID", sp=None, yt=5), set()) == "⚠️"
 
-    def test_absent_de_spotify_les_streams_YT_suffisent(self):
-        """L'absence de Spotify SE CONSTATE (aucun identifiant après résolution) :
-        réclamer un chiffre qui n'existera jamais condamnerait le morceau au
-        triangle à perpétuité."""
-        assert helpers.get_track_status_icon(self._morceau(None, sp=None, yt=5), set()) == "✅"
-
     def test_youtube_est_TOUJOURS_exige(self):
-        """L'asymétrie du dispositif. Un lien YouTube manquant ne prouve rien :
-        son catalogue est plus large que celui des plateformes de streaming
-        (rips de titres supprimés, versions physiques, inédits, lyrics vidéos de
-        projets jamais sortis). L'absence n'y étant pas observable, elle ne peut
-        pas servir d'excuse — même à un morceau parfaitement servi par Spotify."""
+        """L'asymétrie du dispositif : même un morceau parfaitement servi par
+        Spotify reste incomplet sans son compteur YouTube, puisqu'on ne peut pas
+        conclure qu'il en est absent."""
         assert helpers.get_track_status_icon(self._morceau("ID", sp=10, yt=None), set()) == "⚠️"
+
+    def test_absence_CONSTATEE_les_streams_YT_suffisent(self):
+        """Une résolution a été menée à terme sans rien trouver : le morceau
+        n'est pas sur Spotify, lui réclamer un chiffre le condamnerait au
+        triangle à perpétuité."""
+        t = self._morceau(None, yt=5, cherche_le="2026-09-05T10:00:00")
+        assert helpers.get_track_status_icon(t, set()) == "✅"
+
+    def test_JAMAIS_cherche_ne_vaut_pas_absence(self):
+        """Le garde-fou demandé : sans date de recherche, un `spotify_id` vide
+        ne prouve rien. Valider serait affirmer une absence qu'on n'a pas
+        constatée."""
+        t = self._morceau(None, yt=5, cherche_le=None)
+        assert helpers.get_track_status_icon(t, set()) == "⚠️"
+
+    def test_un_ISRC_sans_identifiant_trahit_une_resolution_ratee(self):
+        """Un enregistrement distribué a forcément un ISRC : en avoir un sans
+        identifiant Spotify signale un échec de résolution, pas une absence —
+        même quand la recherche a bien eu lieu. (67 morceaux dans ce cas.)"""
+        t = self._morceau(None, yt=5, isrc="FRX9", cherche_le="2026-09-05T10:00:00")
+        assert helpers.get_track_status_icon(t, set()) == "⚠️"
+
+    def test_l_absence_d_ISRC_ne_prouve_RIEN(self):
+        """L'inverse ne vaut pas : 292 morceaux ont un ID Spotify SANS ISRC en
+        base — le nôtre vient de Deezer. Un morceau sans ISRC mais dont on a
+        constaté l'absence reste donc validable."""
+        t = self._morceau(None, yt=5, isrc=None, cherche_le="2026-09-05T10:00:00")
+        assert helpers.get_track_status_icon(t, set()) == "✅"
 
     def test_aucun_compteur_du_tout(self):
         assert helpers.get_track_status_icon(self._morceau(None), set()) == "⚠️"

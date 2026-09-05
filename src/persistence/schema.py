@@ -136,6 +136,10 @@ tracks = Table(
     Column("youtube_video_kind", Text),  # 'clip'/'show'/'audio'/'unknown'
     Column("youtube_video_views", Integer),  # vues de LA vidéo (≠ ytm_streams)
     Column("youtube_video_views_updated", TIMESTAMP),
+    # Migration e17 : date de la dernière RÉSOLUTION d'ID Spotify menée à
+    # terme, quel qu'en soit le résultat. Distingue « cherché et absent »
+    # de « jamais cherché » — un `spotify_id` vide ne disait pas lequel.
+    Column("spotify_id_checked_at", TIMESTAMP),
     UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )

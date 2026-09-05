@@ -98,6 +98,10 @@ class TrackRepository:
                 "spotify_id": track.spotify_id,
                 "discogs_id": track.discogs_id,
                 "isrc": track.isrc,
+                # e17 : date de la dernière résolution d'ID Spotify menée à
+                # terme. COALESCE à l'UPDATE — un run qui ne cherche pas l'ID
+                # ne doit pas effacer le constat d'un run précédent.
+                "spotify_id_checked_at": track.spotify_id_checked_at,
                 # E7-D1 : les colonnes audio ne sont plus écrites (pilotées par les
                 # observations, reconcile au mapper) → clés retirées de params.
                 "duration": track.duration,
@@ -151,6 +155,8 @@ class TrackRepository:
                         spotify_id = COALESCE(:spotify_id, spotify_id),
                         discogs_id = COALESCE(:discogs_id, discogs_id),
                         isrc = COALESCE(:isrc, isrc),
+                        spotify_id_checked_at = COALESCE(
+                            :spotify_id_checked_at, spotify_id_checked_at),
                         -- E7-D1 : colonnes audio (bpm, bpm_alt, bpm_source,
                         -- bpm_confidence, key, mode, key_mode_source, musical_key,
                         -- time_signature, reccobeats_resolution) NON écrites — la
@@ -194,7 +200,7 @@ class TrackRepository:
                     -- observations (mapper E6). NULL à l'INSERT, gelées jusqu'au drop D2.
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
-                        genius_id, spotify_id, discogs_id, isrc,
+                        genius_id, spotify_id, discogs_id, isrc, spotify_id_checked_at,
                         duration, genre,
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
@@ -204,7 +210,7 @@ class TrackRepository:
                         created_at, updated_at, last_scraped
                     ) VALUES (
                         :title, :artist_id, :album, :track_number, :release_date,
-                        :genius_id, :spotify_id, :discogs_id, :isrc,
+                        :genius_id, :spotify_id, :discogs_id, :isrc, :spotify_id_checked_at,
                         :duration, :genre,
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,

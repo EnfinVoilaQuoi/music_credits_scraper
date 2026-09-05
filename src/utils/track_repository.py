@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, literal, or_, select, text, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import settings
@@ -892,47 +891,100 @@ class TrackRepository:
         la valeur à la somme partielle.
         """
         try:
-            ins = sqlite_insert(albums).values(
-                title=title,
-                artist_id=artist_id,
-                spotify_streams=streams,
-                spotify_daily_streams=daily_streams,
-                spotify_streams_updated=date_bind(updated_at or datetime.now()),
-                spotify_album_ids=spotify_album_ids,
-                spotify_streams_source=source,
-                spotify_editions_json=editions_json,
-            )
-            conflit = {
-                "index_elements": [albums.c.title, albums.c.artist_id],
-                "set_": {
-                    "spotify_streams": ins.excluded.spotify_streams,
-                    # COALESCE : Spotify ne publie aucun chiffre quotidien et
-                    # passe None ici. Sans ce garde, il effacerait celui de
-                    # Kworb, seule source à en donner.
-                    "spotify_daily_streams": func.coalesce(
-                        ins.excluded.spotify_daily_streams, albums.c.spotify_daily_streams
-                    ),
-                    "spotify_streams_updated": ins.excluded.spotify_streams_updated,
-                    "spotify_streams_source": ins.excluded.spotify_streams_source,
-                    "spotify_album_ids": func.coalesce(
-                        ins.excluded.spotify_album_ids, albums.c.spotify_album_ids
-                    ),
-                    "spotify_editions_json": func.coalesce(
-                        ins.excluded.spotify_editions_json, albums.c.spotify_editions_json
-                    ),
-                },
-            }
-            if source != "spotify_web":
-                conflit["where"] = (
-                    func.coalesce(albums.c.spotify_streams_source, "") != "spotify_web"
-                )
-            stmt = ins.on_conflict_do_update(**conflit)
             with self.engine.begin() as conn:
-                conn.execute(stmt)
+                existant = (
+                    conn.execute(
+                        text(
+                            "SELECT spotify_streams, spotify_daily_streams, spotify_album_ids, "
+                            "spotify_streams_source, spotify_editions_json, "
+                            "spotify_streams_updated FROM albums "
+                            "WHERE title = :t AND artist_id = :a"
+                        ),
+                        {"t": title, "a": artist_id},
+                    )
+                    .mappings()
+                    .first()
+                )
+                valeurs = self._valeurs_album(
+                    existant,
+                    streams,
+                    daily_streams,
+                    spotify_album_ids,
+                    updated_at,
+                    source,
+                    editions_json,
+                )
+                if existant:
+                    conn.execute(
+                        update(albums)
+                        .where(albums.c.title == title, albums.c.artist_id == artist_id)
+                        .values(**valeurs)
+                    )
+                else:
+                    conn.execute(
+                        albums.insert().values(title=title, artist_id=artist_id, **valeurs)
+                    )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
             return False
+
+    @staticmethod
+    def _fusion_ids(ancien: str | None, nouveau: str | None) -> str | None:
+        """Union des IDs d'édition, ordre d'apparition conservé.
+
+        Une FUSION, pas un remplacement : chaque source ne connaît que les
+        éditions qu'elle a vues — la page artiste Spotify n'en liste qu'une là où
+        Kworb en a deux. Remplacer perdrait silencieusement l'autre, alors que
+        c'est précisément la donnée qu'on veut garder pour plus tard.
+        """
+        vus: dict[str, None] = {}
+        for source_ids in (ancien, nouveau):
+            for identifiant in (source_ids or "").split(","):
+                if identifiant.strip():
+                    vus.setdefault(identifiant.strip(), None)
+        return ",".join(vus) or None
+
+    def _valeurs_album(
+        self,
+        existant,
+        streams,
+        daily_streams,
+        spotify_album_ids,
+        updated_at,
+        source,
+        editions_json,
+    ) -> dict:
+        """Colonnes à écrire pour un album, provenance arbitrée.
+
+        Le total de Kworb n'écrase JAMAIS celui de Spotify : Kworb ne somme que
+        les morceaux de l'artiste, Spotify toutes les pistes du disque. Mais ce
+        garde ne porte QUE sur le total — les IDs d'édition, eux, fusionnent
+        toujours, quelle que soit la source qui écrit.
+        """
+        valeurs = {
+            "spotify_album_ids": self._fusion_ids(
+                existant["spotify_album_ids"] if existant else None, spotify_album_ids
+            ),
+        }
+        garde = (
+            existant is not None
+            and existant["spotify_streams_source"] == "spotify_web"
+            and source != "spotify_web"
+        )
+        if garde:
+            return valeurs
+
+        valeurs["spotify_streams"] = streams
+        valeurs["spotify_streams_updated"] = date_bind(updated_at or datetime.now())
+        valeurs["spotify_streams_source"] = source
+        # Spotify ne publie aucun chiffre quotidien et passe None : sans ce
+        # garde, il effacerait celui de Kworb, seule source à en donner.
+        if daily_streams is not None:
+            valeurs["spotify_daily_streams"] = daily_streams
+        if editions_json is not None:
+            valeurs["spotify_editions_json"] = editions_json
+        return valeurs
 
     def get_albums_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
         """Retourne les albums d'un artiste triés par streams décroissants."""

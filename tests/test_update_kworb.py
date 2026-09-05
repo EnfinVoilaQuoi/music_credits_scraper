@@ -465,19 +465,23 @@ class TestAgregationEtBackfill:
 
 
 class TestAlbums:
-    def _run(self, tracks, album_entries):
+    def _run(self, tracks, album_entries, song_entries=None):
         dm = _DataManager(tracks)
         scraper = _Scraper(
             # Au moins une entrée songs : une page vide est refusée par la
             # validation d'identité (cf. TestValidationDIdentite).
-            songs=_page([_entry("Morceau quelconque")]),
+            songs=_page(song_entries or [_entry("Morceau quelconque")]),
             albums={"entries": album_entries, "last_updated": datetime(2026, 9, 1)},
         )
         return update_kworb_streams(_Artist(), dm, scraper=scraper), dm
 
     def test_album_propre_ecrit(self):
         tracks = [_track(1, "A", album="Mon Album"), _track(2, "B", album="Mon Album")]
-        res, dm = self._run(tracks, [_entry("Mon Album", 50000, 500)])
+        res, dm = self._run(
+            tracks,
+            [_entry("Mon Album", 50000, 500)],
+            song_entries=[_entry("A", 30000, 300), _entry("B", 20000, 200)],
+        )
         assert res["albums_updated"] == 1
         assert dm.album_writes[0][:3] == ("Mon Album", 50000, 500)
 
@@ -493,24 +497,43 @@ class TestAlbums:
     def test_projet_commun_conserve(self):
         """≥ 2 morceaux en base : c'est un vrai projet (type Bitume Caviar)."""
         tracks = [_track(1, "A", album="Bitume Caviar"), _track(2, "B", album="Bitume Caviar")]
-        res, _ = self._run(tracks, [_entry("Bitume Caviar", 10)])
+        res, _ = self._run(
+            tracks,
+            [_entry("Bitume Caviar", 10)],
+            song_entries=[_entry("A", 7, 1), _entry("B", 3, 1)],
+        )
         assert res["albums_updated"] == 1
 
-    def test_editions_multiples_agregees(self):
-        """Deluxe et édition standard portent le même titre normalisé : leurs
-        streams sont sommés et les deux IDs conservés."""
+    def test_le_total_vient_des_MORCEAUX_pas_des_lignes_d_album(self):
+        """CORRIGÉ le 2026-09-05. Kworb liste une ligne par édition, mais ses
+        compteurs sont ceux de Spotify, **cumulés par ENREGISTREMENT** : une
+        réédition ne repart pas de zéro, donc les deux lignes d'un album réédité
+        portent les mêmes titres. Les sommer comptait deux fois les titres
+        partagés — 99 206 484 sur « Bitume Caviar (vol.1) » au lieu de 50 342 979,
+        la ligne de l'édition originale étant INTÉGRALEMENT constituée des titres
+        que la réédition reprend.
+
+        Le total se calcule donc sur les MORCEAUX, où chaque enregistrement
+        n'apparaît qu'une fois. Les lignes d'album (ici 30 000 + 30 000 = 60 000)
+        ne servent plus qu'à nommer le disque et collecter ses IDs d'édition."""
         tracks = [_track(1, "A", album="Mon Album"), _track(2, "B", album="Mon Album")]
         res, dm = self._run(
             tracks,
-            [
-                _entry("Mon Album", 30000, 300, "AL1"),
-                _entry("mon album", 20000, 200, "AL2"),
-            ],
+            [_entry("Mon Album", 30000, 300, "AL1"), _entry("mon album", 30000, 300, "AL2")],
+            song_entries=[_entry("A", 30000, 300), _entry("B", 20000, 200)],
         )
         assert res["albums_updated"] == 1
         titre, streams, daily, kwargs = dm.album_writes[0]
-        assert (streams, daily) == (50000, 500)
-        assert kwargs["spotify_album_ids"] == "AL1,AL2"
+        assert (streams, daily) == (50000, 500), "somme des MORCEAUX, pas des lignes d'album"
+        assert kwargs["spotify_album_ids"] == "AL1,AL2", "les deux éditions restent tracées"
+
+    def test_album_sans_morceau_chiffre_n_est_pas_remis_a_zero(self):
+        """Aucun morceau de l'album n'a de compteur ce run : écrire 0 effacerait
+        un total valide par une valeur qui n'en est pas une."""
+        tracks = [_track(1, "A", album="Mon Album"), _track(2, "B", album="Mon Album")]
+        res, dm = self._run(tracks, [_entry("Mon Album", 50000, 500)])
+        assert res["albums_updated"] == 0
+        assert dm.album_writes == []
 
     def test_aucun_album(self):
         res, dm = self._run([_track(1, "A")], [])

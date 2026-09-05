@@ -29,6 +29,7 @@ _COLUMNS = [
     "spotify_id",
     "discogs_id",
     "isrc",
+    "spotify_id_checked_at",
     "lyrics_source",
     "lyrics_synced",
     "lyrics_synced_source",

@@ -6,6 +6,8 @@ utilisé QUE pour l'ID (jamais les audio-features). L'unicité d'ID passe par le
 contexte (logique partagée avec ReccoBeats/SongBPM).
 """
 
+from datetime import datetime
+
 from playwright.async_api import Error as PlaywrightError
 
 from src.enrichment.base import Capability, LazyResource
@@ -110,6 +112,11 @@ class SpotifyIdProvider:
         # Utiliser le scraper Spotify_ID pour obtenir le bon ID
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
         spotify_id = scraper.get_spotify_id(artist_name, track.title)
+        # La recherche a été MENÉE À TERME : on date le constat, trouvé ou
+        # non. C'est ce qui sépare « absent de Spotify » de « jamais
+        # cherché » (e17) — sans cette date, un morceau jamais résolu
+        # passerait pour absent, et serait validé à tort sans streams.
+        track.spotify_id_checked_at = datetime.now().isoformat(timespec="seconds")
 
         if not spotify_id:
             logger.warning(f"❌ Aucun Spotify ID trouvé via scraper pour '{track.title}'")

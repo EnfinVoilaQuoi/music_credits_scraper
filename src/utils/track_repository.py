@@ -15,6 +15,7 @@ from sqlalchemy import func, literal, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 
+from src.config import settings
 from src.enrichment.observation import Observation
 from src.models import Credit, Track
 from src.persistence.binding import date_bind
@@ -673,41 +674,159 @@ class TrackRepository:
             return False
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Kworb — streams Spotify
+    # Streams Spotify (Kworb · Spotify web)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def update_track_spotify_streams(
-        self, track_id: int, streams: int, daily_streams: int, updated_at=None
-    ) -> bool:
-        """Met à jour les streams Kworb d'un morceau.
+    @staticmethod
+    def _as_int_or_none(value) -> int | None:
+        """Entier d'une valeur d'observation, rendue BRUTE (souvent en TEXT)."""
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
-        updated_at : date "Last updated" de la page Kworb (fraîcheur réelle),
-        sinon now().
+    def get_track_ids_by_spotify_id(self) -> dict[str, tuple[int, int]]:
+        """Carte `spotify_id → (track_id, artist_id)` sur TOUTE la base.
+
+        C'est elle qui rend possible la RÉCOLTE CROISÉE du scrape Spotify : une
+        page titre expose les compteurs de quinze autres morceaux, souvent ceux de
+        collaborateurs — sur une base de rap français, les featurings sont la
+        norme. Reconnaître ces morceaux suppose de s'appuyer sur un ID et jamais
+        sur un nom : l'attribution par nom est précisément ce qui a fait écrire le
+        catalogue de Limsa d'Aulnay sur Isha (JOURNAL 2026-07-02).
+
+        Le périmètre est volontairement GLOBAL, pas limité à l'artiste du run :
+        c'est tout l'intérêt de la récolte.
         """
         try:
-            stmt = (
-                update(tracks)
-                .where(tracks.c.id == track_id)
-                .values(
-                    spotify_streams=streams,
-                    spotify_daily_streams=daily_streams,
-                    spotify_streams_updated=date_bind(updated_at or datetime.now()),
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT id, artist_id, spotify_id FROM tracks "
+                            "WHERE spotify_id IS NOT NULL AND spotify_id != ''"
+                        )
+                    )
+                    .mappings()
+                    .all()
                 )
-            )
+            return {r["spotify_id"]: (r["id"], r["artist_id"]) for r in rows}
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_track_ids_by_spotify_id: {e}")
+            return {}
+
+    def get_stream_observation_dates(self, source: str) -> dict[int, str | None]:
+        """`{track_id: seen_at brut}` des observations de streams d'une source.
+
+        Sert la FRAÎCHEUR du crawl : on ne redépense pas une page pour un morceau
+        vu récemment, **peu importe quel run l'a vu** — une valeur récoltée
+        pendant le run d'un autre artiste compte comme fraîche. D'où, là encore,
+        un périmètre global.
+
+        `seen_at` est rendu BRUT (string) comme partout sur ce chemin `text()` :
+        le type TIMESTAMP le parserait en datetime et divergerait du legacy
+        (piège E2).
+        """
+        try:
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT track_id, seen_at FROM observations "
+                            "WHERE field = 'spotify_streams' AND source = :src"
+                        ),
+                        {"src": source},
+                    )
+                    .mappings()
+                    .all()
+                )
+            return {r["track_id"]: r["seen_at"] for r in rows}
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_stream_observation_dates({source}): {e}")
+            return {}
+
+    def record_spotify_streams(
+        self,
+        track_id: int,
+        streams: int,
+        source: str,
+        updated_at=None,
+        *,
+        daily_streams: int | None = None,
+    ) -> bool:
+        """Enregistre ce qu'UNE source a vu, puis arbitre la valeur de la colonne.
+
+        updated_at : fraîcheur RÉELLE de la source — date « Last updated » de la
+        page Kworb, instant du scrape pour Spotify web — sinon now().
+
+        `source` nomme qui a lu la valeur. La clé d'upsert d'une observation étant
+        `(track_id, field, source)`, deux sources coexistent sans s'écraser : c'est
+        ce qui rend la comparaison Kworb / Spotify possible sans rien dupliquer.
+
+        **La colonne n'est pas écrite par l'appelant : elle est ARBITRÉE ici.**
+        Chaque source ne déclare que ce qu'elle a vu ; la valeur inscrite est le
+        verdict de `reconcile_spotify_streams`, recalculé dans la MÊME transaction
+        à partir de toutes les observations du morceau. L'ordre d'exécution des
+        sources n'a donc aucun effet : « Kworb puis Spotify » et « Spotify puis
+        Kworb » laissent la base dans le même état.
+
+        `daily_streams=None` laisse `spotify_daily_streams` INTACT : Spotify web
+        ne publie aucun chiffre quotidien, et y écrire None effacerait la valeur
+        de Kworb, seule source à en donner.
+        """
+        try:
             with self.engine.begin() as conn:
-                conn.execute(stmt)
-                # E7e : write-through de la provenance (seen_at = fraîcheur Kworb
-                # verbatim, chemin text() de _upsert_observations). PAS de bascule
-                # lecture (champ mono-source, aucun vote), PAS d'albums.
+                # seen_at = fraîcheur de la source VERBATIM (chemin text() de
+                # `_upsert_observations`) : date « Last updated » pour Kworb,
+                # instant du scrape pour Spotify.
                 self._upsert_observations(
                     conn,
                     track_id,
-                    [Observation("spotify_streams", streams, "kworb", seen_at=updated_at)],
+                    # Champ canonique : `reconcile.SPOTIFY_STREAMS_FIELD` (importé
+                    # localement dans `_arbitrer_streams`, cf. cycle d'imports).
+                    [Observation("spotify_streams", streams, source, seen_at=updated_at)],
                 )
+                values = self._arbitrer_streams(conn, track_id)
+                if daily_streams is not None:
+                    values["spotify_daily_streams"] = daily_streams
+                if values:
+                    conn.execute(update(tracks).where(tracks.c.id == track_id).values(**values))
             return True
         except SQLAlchemyError as e:
-            logger.error(f"Erreur update_track_spotify_streams (track_id={track_id}): {e}")
+            logger.error(f"Erreur record_spotify_streams (track_id={track_id}): {e}")
             return False
+
+    def _arbitrer_streams(self, conn, track_id: int) -> dict:
+        """Colonnes de streams à écrire, d'après TOUTES les observations du morceau.
+
+        Le `seen_at` retenu est celui de l'observation GAGNANTE, pas l'instant du
+        présent appel : sans quoi une écriture Spotify daterait d'aujourd'hui une
+        valeur qui vient en réalité de la dernière mise à jour de Kworb.
+        """
+        # Import LOCAL : `src.enrichment.reconcile` tire `src.utils.*`, dont
+        # l'`__init__` importe `DataEnricher` — un import au sommet reboucle sur
+        # ce module. C'est l'idiome anti-cycle déjà en place chez les providers.
+        from src.enrichment.reconcile import SPOTIFY_STREAMS_FIELD, reconcile_spotify_streams
+
+        observations = [
+            o for o in self._get_observations(conn, track_id) if o.field == SPOTIFY_STREAMS_FIELD
+        ]
+        verdict = reconcile_spotify_streams(observations, settings.streams_master)
+        if verdict is None:
+            return {}
+        value = self._as_int_or_none(verdict.value)
+        if value is None:
+            logger.warning(
+                f"Streams non numériques pour track_id={track_id} "
+                f"(source {verdict.source}, valeur {verdict.value!r}) — colonne inchangée"
+            )
+            return {}
+        gagnante = next((o for o in observations if o.source == verdict.source), None)
+        vue_le = gagnante.seen_at if gagnante is not None else None
+        return {
+            "spotify_streams": value,
+            "spotify_streams_updated": date_bind(vue_le or datetime.now()),
+        }
 
     def update_track_spotify_id(self, track_id: int, spotify_id: str) -> bool:
         """Backfill du Spotify Track ID (ex: depuis les liens des pages Kworb).
@@ -752,12 +871,25 @@ class TrackRepository:
         daily_streams: int,
         spotify_album_ids: str = None,
         updated_at=None,
+        source: str = "kworb",
+        editions_json: str = None,
     ) -> bool:
-        """Insère ou met à jour un album avec ses données Kworb.
+        """Insère ou met à jour le total de streams d'un album.
 
         spotify_album_ids : IDs Spotify des éditions agrégées, séparés par des
         virgules (un même titre peut couvrir plusieurs éditions — streams sommés
         par l'appelant).
+
+        `source` dit QUI a calculé le total, et les deux ne mesurent pas la même
+        chose : Kworb ne somme que les morceaux DE L'ARTISTE, Spotify somme
+        **toutes** les pistes du disque. Sur un album commun ou de groupe — la
+        majorité des cas ici — le total de Kworb est donc incomplet.
+
+        D'où la seule règle d'arbitrage de cette table : **un total Kworb
+        n'écrase jamais un total Spotify**. L'inverse est permis (Spotify est
+        complet par construction : l'appelant ne l'écrit que s'il a TOUTES les
+        pistes). Sans ce garde, un run Kworb postérieur ramènerait silencieusement
+        la valeur à la somme partielle.
         """
         try:
             ins = sqlite_insert(albums).values(
@@ -767,18 +899,34 @@ class TrackRepository:
                 spotify_daily_streams=daily_streams,
                 spotify_streams_updated=date_bind(updated_at or datetime.now()),
                 spotify_album_ids=spotify_album_ids,
+                spotify_streams_source=source,
+                spotify_editions_json=editions_json,
             )
-            stmt = ins.on_conflict_do_update(
-                index_elements=[albums.c.title, albums.c.artist_id],
-                set_={
+            conflit = {
+                "index_elements": [albums.c.title, albums.c.artist_id],
+                "set_": {
                     "spotify_streams": ins.excluded.spotify_streams,
-                    "spotify_daily_streams": ins.excluded.spotify_daily_streams,
+                    # COALESCE : Spotify ne publie aucun chiffre quotidien et
+                    # passe None ici. Sans ce garde, il effacerait celui de
+                    # Kworb, seule source à en donner.
+                    "spotify_daily_streams": func.coalesce(
+                        ins.excluded.spotify_daily_streams, albums.c.spotify_daily_streams
+                    ),
                     "spotify_streams_updated": ins.excluded.spotify_streams_updated,
+                    "spotify_streams_source": ins.excluded.spotify_streams_source,
                     "spotify_album_ids": func.coalesce(
                         ins.excluded.spotify_album_ids, albums.c.spotify_album_ids
                     ),
+                    "spotify_editions_json": func.coalesce(
+                        ins.excluded.spotify_editions_json, albums.c.spotify_editions_json
+                    ),
                 },
-            )
+            }
+            if source != "spotify_web":
+                conflit["where"] = (
+                    func.coalesce(albums.c.spotify_streams_source, "") != "spotify_web"
+                )
+            stmt = ins.on_conflict_do_update(**conflit)
             with self.engine.begin() as conn:
                 conn.execute(stmt)
             return True
@@ -797,7 +945,8 @@ class TrackRepository:
                     conn.execute(
                         text(
                             "SELECT title, spotify_streams, spotify_daily_streams, "
-                            "spotify_streams_updated, ytm_streams FROM albums "
+                            "spotify_streams_updated, spotify_streams_source, spotify_editions_json, "
+                            "ytm_streams FROM albums "
                             "WHERE artist_id = :aid ORDER BY spotify_streams DESC"
                         ),
                         {"aid": artist_id},

@@ -338,7 +338,9 @@ class TestUpdateTrackStreams:
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
-        assert data_manager.update_track_spotify_streams(track_id, 12345, 678) is True
+        assert (
+            data_manager.record_spotify_streams(track_id, 12345, "kworb", daily_streams=678) is True
+        )
         lu = _lire_track(data_manager, artist.id, track_id)
         assert lu.streams.spotify_streams == 12345
         assert lu.streams.spotify_daily_streams == 678
@@ -347,7 +349,9 @@ class TestUpdateTrackStreams:
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
-        data_manager.update_track_spotify_streams(track_id, 100, 1, updated_at="2020-01-01")
+        data_manager.record_spotify_streams(
+            track_id, 100, "kworb", updated_at="2020-01-01", daily_streams=1
+        )
         lu = _lire_track(data_manager, artist.id, track_id)
         assert lu.streams.spotify_streams_updated == "2020-01-01"
 
@@ -363,7 +367,9 @@ class TestUpdateTrackStreams:
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
-        data_manager.update_track_spotify_streams(track_id, 12345, 678, updated_at="2020-01-01")
+        data_manager.record_spotify_streams(
+            track_id, 12345, "kworb", updated_at="2020-01-01", daily_streams=678
+        )
         obs = {o.field: o for o in data_manager.get_observations(track_id)}
         assert obs["spotify_streams"].value == "12345"
         assert obs["spotify_streams"].source == "kworb"
@@ -383,8 +389,8 @@ class TestUpdateTrackStreams:
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
-        data_manager.update_track_spotify_streams(track_id, 100, 1)
-        data_manager.update_track_spotify_streams(track_id, 200, 2)
+        data_manager.record_spotify_streams(track_id, 100, "kworb", daily_streams=1)
+        data_manager.record_spotify_streams(track_id, 200, "kworb", daily_streams=2)
         obs = [o for o in data_manager.get_observations(track_id) if o.field == "spotify_streams"]
         assert len(obs) == 1
         assert obs[0].value == "200"

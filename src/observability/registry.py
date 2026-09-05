@@ -75,6 +75,13 @@ DOMAIN_TO_KEY: dict[str, str] = {
     "api.getsong.co": "getsongbpm",
     "api.reccobeats.com": "reccobeats",
     "api.discogs.com": "discogs",
+    # PIÈGE JUMEAU du précédent, mais INSOLUBLE par cette table : `spotify_embed`
+    # et `spotify_web` tapent le MÊME hôte (seul le chemin `/embed/` les sépare) et
+    # cassent pour des raisons sans rapport. L'entrée reste sur l'embed, qui est le
+    # seul des deux à passer par un capteur transport (`requests`) ; le scrape web
+    # navigue au navigateur et déclare sa clé EXPLICITEMENT. Ne pas « corriger »
+    # cette ligne : la basculer casserait l'attribution de l'embed sans rien
+    # gagner. Cf. `KEYS_WITHOUT_OWN_DOMAIN`.
     "open.spotify.com": "spotify_embed",
     "www.riaa.com": "riaa",
     "riaa.com": "riaa",
@@ -122,8 +129,16 @@ PROVIDER_TO_KEYS: dict[str, tuple[str, ...]] = {
     "reccobeats": ("reccobeats",),
     "songbpm": ("songbpm",),
     "spotify_id": ("spotify_embed",),
-    "streams": ("kworb", "ytmusic"),
+    "streams": ("kworb", "spotify_web", "ytmusic"),
 }
+
+#: Sources qui n'ont AUCUN domaine à elles : elles partagent leur hôte avec une
+#: autre source, donc `key_for_domain` ne peut pas les distinguer. Ce n'est pas un
+#: trou de couverture — leur capteur nomme sa clé au site d'appel — mais une
+#: exception qui doit rester DÉCLARÉE : sans cette liste, la prochaine personne
+#: qui verra la source « manquer » dans `DOMAIN_TO_KEY` l'y ajoutera et volera
+#: silencieusement l'attribution de sa jumelle.
+KEYS_WITHOUT_OWN_DOMAIN: frozenset[str] = frozenset({"spotify_web"})
 
 # ── Sources de certification (protocole `CertificationSource`, en MAJUSCULES) ──
 CERT_SOURCE_TO_KEY: dict[str, str] = {"SNEP": "snep", "RIAA": "riaa", "BRMA": "brma"}
@@ -134,6 +149,8 @@ CERT_SOURCE_TO_KEY: dict[str, str] = {"SNEP": "snep", "RIAA": "riaa", "BRMA": "b
 FIXTURE_TO_KEY: dict[str, str] = {
     "kworb_artist_songs": "kworb",
     "spotify_embed_track": "spotify_embed",
+    "spotify_web_track": "spotify_web",
+    "spotify_web_artist": "spotify_web",
     "genius_song_page": "genius_scrape",
     "riaa_search": "riaa",
     "brma_year": "brma",

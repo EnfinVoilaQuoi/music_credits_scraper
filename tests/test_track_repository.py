@@ -130,7 +130,10 @@ class TestSpotifyId:
 
 class TestStreamsEtVues:
     def test_streams_spotify(self, data_manager, morceau):
-        assert data_manager.update_track_spotify_streams(morceau.id, 1_000, 50) is True
+        assert (
+            data_manager.record_spotify_streams(morceau.id, 1_000, "kworb", daily_streams=50)
+            is True
+        )
         assert _colonne(data_manager, morceau.id, "spotify_streams") == (1_000,)
 
     def test_streams_ytm(self, data_manager, morceau):
@@ -144,7 +147,7 @@ class TestStreamsEtVues:
     def test_replis_si_la_base_est_indisponible(self, data_manager, morceau, moteur_casse):
         moteur_casse(data_manager)
 
-        assert data_manager.update_track_spotify_streams(morceau.id, 1, 0) is False
+        assert data_manager.record_spotify_streams(morceau.id, 1, "kworb", daily_streams=0) is False
         assert data_manager.update_track_ytm_streams(morceau.id, 1) is False
         assert data_manager.update_track_video_views(morceau.id, 1) is False
 
@@ -236,5 +239,8 @@ class TestDatesLibres:
     @pytest.mark.parametrize("valeur", ["2026-01-02 03:04:05", datetime(2026, 1, 2, 3, 4, 5)])
     def test_streams_updated_accepte_les_deux_formes(self, data_manager, morceau, valeur):
         assert (
-            data_manager.update_track_spotify_streams(morceau.id, 10, 1, updated_at=valeur) is True
+            data_manager.record_spotify_streams(
+                morceau.id, 10, "kworb", updated_at=valeur, daily_streams=1
+            )
+            is True
         )

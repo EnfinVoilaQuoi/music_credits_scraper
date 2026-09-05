@@ -59,6 +59,7 @@ class _DataManager:
     def __init__(self, tracks):
         self._tracks = tracks
         self.streams_writes = []
+        self.streams_kwargs = []
         self.album_writes = []
         self.totals = None
         self.artist_spotify_id = None
@@ -67,8 +68,11 @@ class _DataManager:
     def get_artist_tracks(self, artist_id):
         return self._tracks
 
-    def update_track_spotify_streams(self, track_id, streams, daily, updated_at=None):
-        self.streams_writes.append((track_id, streams, daily, updated_at))
+    def record_spotify_streams(self, track_id, streams, source, updated_at=None, **kw):
+        # L'appelant ne DÉCLARE que ce qu'il a vu : la valeur retenue en colonne
+        # est arbitrée côté repository (`reconcile_spotify_streams`).
+        self.streams_writes.append((track_id, streams, kw.get("daily_streams"), updated_at))
+        self.streams_kwargs.append({"source": source, **kw})
         return True
 
     def update_track_spotify_id(self, track_id, spotify_id):
@@ -761,3 +765,26 @@ class TestDesambiguisationParEmbed:
         res, dm = self._run(embed, tracks, [_entry("Meilleur", spotify_id="SPX")])
         assert res["unmatched"] == 1
         assert dm.streams_writes == []
+
+
+class TestKworbDeclareSansArbitrer:
+    """Kworb ne decide pas de ce qui atterrit en colonne.
+
+    Il nomme sa source et livre ce qu'il a vu ; l'arbitrage entre sources vit
+    dans `reconcile_spotify_streams`. C'est ce qui rend l'ordre des passes sans
+    effet sur la donnee.
+    """
+
+    def test_kworb_nomme_sa_source(self):
+        dm = _DataManager([_track(1, "Titre")])
+        update_kworb_streams(_Artist(), dm, scraper=_Scraper(songs=_page([_entry("Titre")])))
+        assert dm.streams_kwargs[0]["source"] == "kworb"
+
+    def test_kworb_transmet_le_quotidien_dont_il_est_seule_source(self):
+        """Spotify n'en publie aucun : c'est la seule donnee que Kworb garde
+        pour lui, et elle ne doit pas se perdre dans le passage a l'arbitrage."""
+        dm = _DataManager([_track(1, "Titre")])
+        update_kworb_streams(
+            _Artist(), dm, scraper=_Scraper(songs=_page([_entry("Titre", daily=42)]))
+        )
+        assert dm.streams_kwargs[0]["daily_streams"] == 42

@@ -447,8 +447,16 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
             pass
 
     for track_id, a in agg.items():
-        data_manager.update_track_spotify_streams(
-            track_id, a["streams"], a["daily"], updated_at=kworb_date
+        # Kworb déclare ce qu'il a vu ; c'est le repository qui ARBITRE la valeur
+        # de la colonne à partir de toutes les observations du morceau. Cet
+        # updater n'a donc pas à savoir s'il est maître — et l'ordre des sources
+        # n'a aucun effet sur le résultat.
+        data_manager.record_spotify_streams(
+            track_id,
+            a["streams"],
+            "kworb",
+            updated_at=kworb_date,
+            daily_streams=a["daily"],
         )
         if a["n"] > 1:
             logger.info(f"🎛️ '{a['title']}': {a['n']} lignes Kworb sommées → {a['streams']:,}")

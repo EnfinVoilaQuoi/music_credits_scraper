@@ -4,6 +4,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from src.config import settings
 from src.enrichment.providers.streams import StreamsProvider
 from src.gui.dialogs import kworb_confirm, report
 from src.gui.workers.lifecycle import run_worker, stop_requested
@@ -12,6 +13,19 @@ from src.observability.registry import Flow
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+#: Les deux sources du champ `spotify_streams`. L'ordre n'a **aucun effet sur la
+#: donnée** : chacune déclare ce qu'elle a vu, et `reconcile_spotify_streams`
+#: (appliqué par le repository) désigne la valeur retenue selon
+#: `settings.streams_master`. On garde la maître en tête par simple courtoisie
+#: d'affichage — sa progression s'affiche en premier.
+_STREAM_SOURCES = ("kworb", "spotify_web")
+
+
+def _stream_sources() -> tuple[str, ...]:
+    master = settings.streams_master
+    return (master, *(s for s in _STREAM_SOURCES if s != master))
 
 
 def start_streams_update(app):
@@ -83,15 +97,33 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
             results = {}
 
             if fetch_spotify and not stop_requested():
-                app.root.after(
-                    0, lambda: app.progress_label.configure(text="Spotify (Kworb) en cours...")
-                )
-                try:
-                    results["spotify"] = provider.fetch_spotify(
-                        app.current_artist, app.data_manager
+                # Deux sources pour le MÊME champ. Chacune ne déclare que ce
+                # qu'elle a vu ; c'est l'arbitrage (`reconcile_spotify_streams`)
+                # qui désigne la valeur en colonne. Le worker n'a donc AUCUNE
+                # priorité à faire respecter, et l'ordre ci-dessous ne change pas
+                # le résultat — seulement l'ordre d'affichage.
+                for source in _stream_sources():
+                    if stop_requested():
+                        break
+                    label = "Spotify (Kworb)" if source == "kworb" else "Spotify (pages web)"
+                    app.root.after(
+                        0, lambda t=label: app.progress_label.configure(text=f"{t} en cours...")
                     )
-                except Exception as e:
-                    results["spotify"] = {"error": str(e)}
+                    try:
+                        if source == "kworb":
+                            results["spotify"] = provider.fetch_spotify(
+                                app.current_artist, app.data_manager
+                            )
+                        else:
+                            results["spotify_web"] = provider.fetch_spotify_web(
+                                app.current_artist,
+                                app.data_manager,
+                                stop_requested=stop_requested,
+                            )
+                    except Exception as e:
+                        results["spotify" if source == "kworb" else "spotify_web"] = {
+                            "error": str(e)
+                        }
 
             if fetch_ytm and not stop_requested():
                 app.root.after(
@@ -161,6 +193,29 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                             lines.append(f"   • {title} — {streams:,} streams".replace(",", " "))
                         if len(details) > 8:
                             lines.append(f"   … et {len(details) - 8} autre(s) (voir logs)")
+            if "spotify_web" in results:
+                r = results["spotify_web"]
+                if "error" in r:
+                    lines.append(f"Spotify (pages web) : ❌ {r['error']}")
+                elif r.get("aborted"):
+                    # Gate d'identité : rien n'a été écrit, et c'est voulu.
+                    lines.append(f"🚨 Spotify (pages web) : {r['aborted']} — aucune écriture.")
+                else:
+                    lines.append(
+                        f"Spotify (pages web) : {r.get('recorded', 0)} morceau(x) relevé(s), "
+                        f"{r.get('pages', 0)} page(s) ouverte(s)"
+                    )
+                    if r.get("monthly_listeners") is not None:
+                        lines.append(
+                            f"   • Auditeurs mensuels : {r['monthly_listeners']:,}".replace(
+                                ",", " "
+                            )
+                        )
+                    if r.get("harvested_foreign"):
+                        lines.append(
+                            f"   • {r['harvested_foreign']} compteur(s) récolté(s) au passage "
+                            "pour d'autres artistes de la base"
+                        )
             if "ytm" in results:
                 r = results["ytm"]
                 if "error" in r:

@@ -41,6 +41,13 @@ _UA = (
 _KWORB_ARTIST_ID = "6dbdXbyAWk2qx8Qttw0knR"  # Josman
 _SPOTIFY_TRACK_ID = "4WYhQviUDsXVzLp6oncwJS"  # Josman — Dans le vide
 _GENIUS_SONG_URL = "https://genius.com/Josman-dans-le-vide-lyrics"
+# Spotify web : sentinelle ISHA, choisie EXPRÈS. C'est l'artiste sur lequel le
+# projet s'est déjà trompé d'identité (streams de Limsa d'Aulnay écrits sur Isha,
+# JOURNAL 2026-07-02), et ses « Recommandés » sont truffés de Limsa d'Aulnay :
+# la fixture éprouve donc le parsing ET le garde-fou d'attribution par ID sur le
+# cas qui a réellement cassé.
+_SPOTIFY_WEB_TRACK_ID = "3EDDunSmj8RbiVGU0Qr0M8"  # ISHA — CR600 (Bonus Track)
+_SPOTIFY_WEB_ARTIST_ID = "0dSh0CIa0HPd9kJmJSmGQo"  # ISHA
 _RIAA_ARTIST = "Daft Punk"  # catalogue RIAA stable et court (pas de rap FR chez RIAA)
 _LRCLIB_PARAMS = {  # /get exact : Josman — Dans le vide (album Matrix, 243 s en base)
     "track_name": "Dans le vide",
@@ -63,6 +70,18 @@ CAPTURES: list[dict] = [
         "url": f"https://open.spotify.com/embed/track/{_SPOTIFY_TRACK_ID}",
         "method": "requests",
         "fallback": "playwright",
+    },
+    {
+        "name": "spotify_web_track",
+        "path": "spotify_web/track.html",
+        "url": f"https://open.spotify.com/intl-fr/track/{_SPOTIFY_WEB_TRACK_ID}",
+        "method": "spotify_web",
+    },
+    {
+        "name": "spotify_web_artist",
+        "path": "spotify_web/artist.html",
+        "url": f"https://open.spotify.com/intl-fr/artist/{_SPOTIFY_WEB_ARTIST_ID}",
+        "method": "spotify_web",
     },
     {
         "name": "genius_song_page",
@@ -136,6 +155,32 @@ def _fetch_playwright(url: str) -> str | None:
         browser.close()
 
 
+def _fetch_spotify_web(url: str) -> str | None:
+    """Spotify web = SPA : `requests` rend 200 sur un HTML VIDE de tout compteur
+    (157 Ko sans un seul `playcount`, mesuré le 2026-09-04). On capture donc la
+    page RENDUE, via la session patchright du scraper — profil dédié et locale
+    épinglée, sinon le libellé des auditeurs mensuels change avec la machine.
+    Le JS déplie les titres populaires (5 → 10) avant la capture."""
+    from src.concurrency import async_loop
+    from src.scrapers.spotify_web_scraper import _EXPAND_JS, SpotifyWebScraper
+
+    async def _run() -> str | None:
+        scraper = SpotifyWebScraper(headless=True)
+        async with scraper.session() as sess:
+            return await sess.fetch(
+                url,
+                wait_for='css:[data-testid="tracklist-row"]',
+                js_before_wait=_EXPAND_JS,
+                delay_before_return=1.0,
+            )
+
+    try:
+        return async_loop.run_sync(_run())
+    except Exception as e:
+        print(f"   erreur Spotify web : {e}")
+        return None
+
+
 def _fetch_riaa(url: str) -> str | None:
     """RIAA est derrière Cloudflare : on réutilise le rendu patchright du scraper
     (get_details=True pour capturer aussi l'historique MORE DETAILS)."""
@@ -201,6 +246,8 @@ def capture_one(entry: dict) -> bool:
             content = _fetch_playwright(entry["url"])
     elif method == "playwright":
         content = _fetch_playwright(entry["url"])
+    elif method == "spotify_web":
+        content = _fetch_spotify_web(entry["url"])
     elif method == "riaa":
         content = _fetch_riaa(entry["url"])
     elif method == "ultratop":

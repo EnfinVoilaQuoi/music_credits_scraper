@@ -17,6 +17,7 @@ from src.observability.registry import (
     FAMILY_LABELS,
     FAMILY_ORDER,
     FIXTURE_TO_KEY,
+    KEYS_WITHOUT_OWN_DOMAIN,
     PROVIDER_TO_KEYS,
     Family,
     fixtures_for_key,
@@ -41,9 +42,28 @@ def test_toute_cle_mappee_existe_dans_le_registre():
 
 
 def test_toute_source_est_atteignable_par_un_domaine():
-    """Une source sans domaine connu échapperait aux capteurs transport."""
+    """Une source sans domaine connu échapperait aux capteurs transport.
+
+    Sauf celles qui n'ont pas d'hôte à elles (`KEYS_WITHOUT_OWN_DOMAIN`) : leur
+    capteur nomme sa clé au site d'appel, il n'a rien à deviner.
+    """
     couvertes = set(DOMAIN_TO_KEY.values())
-    assert set(SOURCES_BY_KEY) - couvertes == set()
+    assert set(SOURCES_BY_KEY) - couvertes - KEYS_WITHOUT_OWN_DOMAIN == set()
+
+
+def test_les_exceptions_de_domaine_sont_de_vraies_sources():
+    """Garde-fou de l'exception : une clé qui disparaîtrait de `SOURCES` doit
+    disparaître de la liste aussi, sinon l'exemption couvre un fantôme et
+    rouvrirait le trou qu'elle prétend justifier."""
+    fantomes = sorted(KEYS_WITHOUT_OWN_DOMAIN - set(SOURCES_BY_KEY))
+    assert not fantomes, f"exemptées mais absentes de SOURCES : {fantomes}"
+
+
+def test_spotify_web_et_embed_partagent_l_hote_sans_se_voler_l_attribution():
+    """Les deux sources vivent sur open.spotify.com. La table ne peut en nommer
+    qu'une : c'est l'embed, seul des deux à passer par un capteur transport."""
+    assert key_for_domain("open.spotify.com") == "spotify_embed"
+    assert "spotify_web" in KEYS_WITHOUT_OWN_DOMAIN
 
 
 # ── Le piège Genius : deux sources sur le même nom de domaine ─────────────────

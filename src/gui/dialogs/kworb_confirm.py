@@ -89,8 +89,12 @@ def confirm_kworb_suggestions(app, suggestions, kworb_date_str):
         n_ok = 0
         for s, var in vars_by_sugg:
             if var.get():
-                if app.data_manager.update_track_spotify_streams(
-                    s["track_id"], s["streams"], s["daily"], updated_at=updated_at
+                if app.data_manager.record_spotify_streams(
+                    s["track_id"],
+                    s["streams"],
+                    "kworb",
+                    updated_at=updated_at,
+                    daily_streams=s["daily"],
                 ):
                     links.confirm(app.current_artist.name, s["kworb_title"], s["track_id"])
                     n_ok += 1

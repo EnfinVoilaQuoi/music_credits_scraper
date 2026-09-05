@@ -13,6 +13,7 @@ pour compatibilité : elles sont désormais dérivées de l'objet ``settings``.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic import field_validator
@@ -111,6 +112,23 @@ class Settings(BaseSettings):
     # entrées sur 930 dans le cache réel. Un mois est le compromis : le catalogue
     # ReccoBeats bouge lentement, mais un morceau ajouté finit par être repêché.
     reccobeats_not_found_ttl_days: int = 30
+
+    # --- Streams Spotify : qui écrit la colonne, et à quel rythme scraper ---
+    # `streams_master` désigne la source qui écrit `tracks.spotify_streams` ;
+    # l'autre ne pose que son observation. La priorité vit ICI et NULLE PART
+    # ailleurs : ni en dur dans un updater, ni déduite de l'ordre des appels du
+    # worker. C'est ce qui rend la bascule triviale — et réversible — le jour où
+    # la comparaison des deux sources tranchera. Les deux updaters restent
+    # symétriques et ignorants de qui est maître.
+    streams_master: Literal["kworb", "spotify_web"] = "kworb"
+    # Le scrape Spotify coûte UNE PAGE PAR MORCEAU (aucune page ne rend un album
+    # d'un coup, mesuré le 2026-09-04) : sans plafond, un gros catalogue ferait
+    # un run interminable. Le rattrapage s'étale sur plusieurs sessions.
+    spotify_web_max_pages_per_run: int = 120
+    # Péremption d'un compteur : en deçà, on ne redépense pas une page. Vaut pour
+    # toute observation `spotify_web`, quel que soit le run qui l'a écrite — une
+    # valeur récoltée sur la page d'un autre artiste compte comme fraîche.
+    spotify_web_freshness_days: int = 14
 
     @field_validator("log_level", mode="before")
     @classmethod

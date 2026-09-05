@@ -93,6 +93,7 @@ scripts/*
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py
+!scripts/spotify_kworb_compare.py
 !scripts/check_sources_health.py
 # Outils sources actifs (contournements documentés dans CLAUDE.md)
 !scripts/bpmfinder_login.py

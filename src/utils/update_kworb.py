@@ -9,9 +9,13 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
     titre normalisé en fallback ; backfill des spotify_id manquants en base.
   · Fraîcheur = date "Last updated" de la page Kworb (pas now()).
   · Totaux artiste (récap Total/As lead/As feature) stockés sur artists.
-  · Albums agrégés par titre (éditions multiples sommées, IDs conservés),
-    filtrés aux albums PROPRES (≥2 morceaux de l'artiste en base sur l'album —
-    garde les projets communs type Bitume Caviar, écarte les simples apparitions).
+  · Albums : total calculé sur les MORCEAUX de l'album, jamais en sommant les
+    lignes d'édition de Kworb (corrigé le 2026-09-05 — ses compteurs sont ceux de
+    Spotify, cumulés PAR ENREGISTREMENT, donc deux éditions d'un même disque
+    portent les mêmes titres et les additionner les compte deux fois). Les IDs
+    d'édition restent conservés. Filtrés aux albums PROPRES (≥2 morceaux de
+    l'artiste en base sur l'album — garde les projets communs type Bitume Caviar,
+    écarte les simples apparitions).
 """
 
 import difflib
@@ -446,6 +450,7 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
         except Exception:  # noqa: BLE001 — fermeture best-effort du scraper embed
             pass
 
+    agg_by_track = agg  # réutilisé plus bas pour le total des albums
     for track_id, a in agg.items():
         # Kworb déclare ce qu'il a vu ; c'est le repository qui ARBITRE la valeur
         # de la colonne à partir de toutes les observations du morceau. Cet
@@ -480,16 +485,40 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
             if getattr(t, "album", None):
                 album_track_counts[_normalize_title(t.album)] += 1
 
-        # Agréger les éditions par titre normalisé (streams sommés, IDs conservés)
+        # Streams des MORCEAUX de chaque album, tels qu'on vient de les écrire.
+        # C'est la seule somme juste (cf. plus bas) : chaque enregistrement y
+        # compte UNE fois, quel que soit le nombre d'éditions qui le portent.
+        par_album = defaultdict(lambda: {"streams": 0, "daily": 0})
+        for track in tracks:
+            piste = agg_by_track.get(track.id)
+            if not piste or not getattr(track, "album", None):
+                continue
+            cumul = par_album[_normalize_title(track.album)]
+            cumul["streams"] += piste["streams"]
+            cumul["daily"] += piste["daily"] or 0
+
+        # Les lignes d'album de Kworb ne servent plus qu'à nommer le disque et à
+        # collecter les IDs de ses éditions.
+        #
+        # ⚠️ Leurs STREAMS ne sont volontairement PAS sommés (corrigé le
+        # 2026-09-05). Kworb liste une ligne par édition, mais ses compteurs sont
+        # ceux de Spotify, qui sont CUMULÉS PAR ENREGISTREMENT : une réédition ne
+        # repart pas de zéro. Les deux lignes d'un album réédité comptent donc les
+        # mêmes titres, et les additionner les compte deux fois. Mesuré sur
+        # « Bitume Caviar (vol.1) » : la ligne de l'édition originale (46 379 590)
+        # est INTÉGRALEMENT constituée des 11 titres que la réédition reprend, et
+        # la somme des deux lignes donnait 99 206 484 pour un total réel de
+        # 50 342 979.
         editions = defaultdict(lambda: {"title": None, "streams": 0, "daily": 0, "ids": []})
         for entry in page_albums["entries"]:
             key = _normalize_title(entry["title"])
             agg = editions[key]
             agg["title"] = agg["title"] or entry["title"]
-            agg["streams"] += entry["streams"]
-            agg["daily"] += entry["daily_streams"]
             if entry.get("spotify_id"):
                 agg["ids"].append(entry["spotify_id"])
+        for key, agg in editions.items():
+            agg["streams"] = par_album.get(key, {}).get("streams", 0)
+            agg["daily"] = par_album.get(key, {}).get("daily", 0)
 
         for key, agg in editions.items():
             n_tracks = album_track_counts.get(key, 0)
@@ -503,6 +532,11 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
                     f"'{agg['title']}'"
                 )
                 continue
+            if not agg["streams"]:
+                # Aucun morceau de cet album n'a de compteur ce run : écrire 0
+                # effacerait un total valide par une valeur qui n'en est pas une.
+                logger.info(f"⏭️ Album sans morceau chiffré, total inchangé : '{agg['title']}'")
+                continue
             ok = data_manager.upsert_album(
                 artist.id,
                 agg["title"],
@@ -515,8 +549,8 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
                 result["albums_updated"] += 1
                 if len(agg["ids"]) > 1:
                     logger.info(
-                        f"💿 '{agg['title']}': {len(agg['ids'])} éditions agrégées "
-                        f"→ {agg['streams']:,} streams"
+                        f"💿 '{agg['title']}': {len(agg['ids'])} éditions, comptées une "
+                        f"seule fois → {agg['streams']:,} streams"
                     )
 
     logger.info(

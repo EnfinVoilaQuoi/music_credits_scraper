@@ -182,11 +182,27 @@ class TestStrategieGetSynced:
         assert "/get" not in vus
 
     def test_dernier_recours_texte_brut(self, api, monkeypatch):
-        """Deux passages sur /search : le 1er exige la synchro, le 2e non."""
+        """Deux SÉLECTIONS sur la même liste : la 1ʳᵉ exige la synchro, la 2ᵉ non."""
         self._stub(api, monkeypatch, {"/search": [_cand(synced=None)]})
 
         res = api.get_synced("Dans le vide", "Josman", duration=243)
         assert res is not None and res["lyrics_synced"] is None and res["lyrics"]
+
+    def test_une_seule_requete_search_pour_les_deux_passes(self, api, monkeypatch):
+        """CORRIGÉ le 2026-09-05 : `require_synced` filtre LOCALEMENT, il n'est pas
+        un paramètre de requête. Les deux passes rejouaient donc `/search` avec une
+        URL identique — mesuré 21 allers-retours inutiles sur un run de 26 morceaux,
+        la moitié du trafic LRCLIB."""
+        vus = self._stub(api, monkeypatch, {"/search": [_cand(synced=None)]})
+
+        api.get_synced("Dans le vide", "Josman", duration=243)
+        assert vus.count("/search") == 1
+
+    def test_aucune_requete_search_quand_la_synchro_est_trouvee(self, api, monkeypatch):
+        vus = self._stub(api, monkeypatch, {"/search": [_cand()]})
+
+        api.get_synced("Dans le vide", "Josman", duration=243)
+        assert vus.count("/search") == 1
 
     def test_aucune_parole(self, api, monkeypatch):
         self._stub(api, monkeypatch, {"/search": []})

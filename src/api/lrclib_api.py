@@ -174,40 +174,6 @@ class LRCLIBAPI:
         )
         return self._pack(obj) if isinstance(obj, dict) else None
 
-    def search(
-        self,
-        track_name: str,
-        artist_name: str | None = None,
-        duration: int | None = None,
-        require_synced: bool = True,
-    ) -> dict | None:
-        """
-        `/search` (titre + artiste) puis sélection du meilleur candidat :
-        titre fort exigé, départage par la durée (±2 s privilégié) si connue.
-        """
-        return self._select_hit(
-            self._search_raw(track_name, artist_name),
-            track_name,
-            artist_name,
-            duration,
-            require_synced,
-        )
-
-    def _search_raw(self, track_name: str, artist_name: str | None) -> list:
-        """Résultats BRUTS de `/search`, sans sélection.
-
-        Séparé de la sélection parce que `require_synced` est un filtre LOCAL et
-        non un paramètre de requête : les deux passes de `get_synced` (synchro
-        exigée, puis texte brut accepté) interrogeaient donc l'API DEUX FOIS avec
-        une URL identique. Mesuré sur un run de 26 morceaux : 21 allers-retours
-        inutiles, la moitié du trafic LRCLIB.
-        """
-        params = {"track_name": track_name}
-        if artist_name:
-            params["artist_name"] = artist_name
-        results = self._request("/search", params)
-        return results if isinstance(results, list) else []
-
     def _select_hit(
         self,
         results: list,
@@ -221,60 +187,6 @@ class LRCLIBAPI:
             return None
         best = _best_search_hit(results, track_name, artist_name, duration, require_synced)
         return self._pack(best) if best else None
-
-    def get_synced(
-        self,
-        track_name: str,
-        artist_name: str,
-        album_name: str | None = None,
-        duration: int | None = None,
-    ) -> dict | None:
-        """
-        Point d'entrée principal (SOURCE 1 des timestamps).
-
-        Stratégie : `/get` exact quand durée + album connus (match ±2 s), sinon/à défaut
-        fallback `/search` (titre fort + départage durée). Renvoie un dict interne
-        {'lyrics_synced', 'lyrics', 'source':'LRCLIB', 'lrclib_id', 'duration',
-        'instrumental'} ou None.
-        """
-        if not track_name or not artist_name:
-            return None
-
-        # UNE observation pour les trois stratégies : c'est un seul appel
-        # logique à LRCLIB, quel que soit le nombre de requêtes qu'il coûte.
-        with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_name}") as obs:
-            # 1) Match exact si on a la durée ET l'album (les 4 champs requis par /get)
-            if duration and album_name:
-                hit = self.get_exact(track_name, artist_name, album_name, duration)
-                if hit and hit.get("lyrics_synced"):
-                    logger.info(
-                        f"🎵 LRCLIB /get: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
-                    )
-                    obs.ok()
-                    return hit
-
-            # 2) et 3) partagent la MÊME requête `/search` : `require_synced` ne
-            # filtre que localement, la relancer était un aller-retour pour rien.
-            results = self._search_raw(track_name, artist_name)
-
-            # 2) Fallback recherche (titre fort + départage durée)
-            hit = self._select_hit(results, track_name, artist_name, duration, True)
-            if hit and hit.get("lyrics_synced"):
-                logger.info(
-                    f"🎵 LRCLIB /search: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
-                )
-                obs.ok()
-                return hit
-
-            # 3) Dernier recours : texte brut (pas de synchro), même liste
-            hit = self._select_hit(results, track_name, artist_name, duration, False)
-            if hit:
-                logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
-                obs.ok()
-                return hit
-
-            obs.absent("aucune parole pour ce morceau")
-            return None
 
     # ── Jumeaux ASYNC (F5) : même logique, sur l'AsyncHttpSession partagée ───────
     async def _request_async(self, http: "AsyncHttpSession", path: str, params: dict):

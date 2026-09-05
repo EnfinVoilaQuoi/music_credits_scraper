@@ -4,6 +4,7 @@ Fixture = réponse /get exacte (Josman — Dans le vide, 243 s).
 Re-capture : scripts/capture_fixtures.py --only lrclib.
 """
 
+import asyncio
 import re
 
 import pytest
@@ -146,30 +147,40 @@ class TestPack:
 
 class TestStrategieGetSynced:
     """`/get` exact d'abord (4 champs, durée ±2 s), puis `/search` synchronisé,
-    puis `/search` brut. C'est l'ordre qui garantit la meilleure synchro."""
+    puis `/search` brut. C'est l'ordre qui garantit la meilleure synchro.
+
+    Porté sur le jumeau ASYNC le 2026-09-05 (A3) : la voie sync `get_synced` a
+    été retirée, elle n'avait plus d'appelant (le provider injecte `_LrclibBridge`,
+    qui expose le nom sync et route vers `get_synced_async`). Le transport est
+    stubé au niveau `_request_async`, donc l'`AsyncHttpSession` n'est pas utilisée.
+    """
 
     def _stub(self, api, monkeypatch, reponses):
-        """`reponses` : dict {chemin: charge} servi par `_request`."""
+        """`reponses` : dict {chemin: charge} servi par `_request_async`."""
         vus = []
 
-        def fake_request(path, params):
+        async def fake_request(http, path, params):
             vus.append(path)
             return reponses.get(path)
 
-        monkeypatch.setattr(api, "_request", fake_request)
+        monkeypatch.setattr(api, "_request_async", fake_request)
         return vus
+
+    @staticmethod
+    def _get_synced(api, *a, **kw):
+        return asyncio.run(api.get_synced_async(None, *a, **kw))
 
     def test_get_exact_suffit(self, api, monkeypatch):
         vus = self._stub(api, monkeypatch, {"/get": _cand()})
 
-        res = api.get_synced("Dans le vide", "Josman", album_name="J.O.S", duration=243)
+        res = self._get_synced(api, "Dans le vide", "Josman", album_name="J.O.S", duration=243)
         assert res["lyrics_synced"]
         assert vus == ["/get"]  # aucun /search
 
     def test_repli_sur_search_si_get_sans_synchro(self, api, monkeypatch):
         vus = self._stub(api, monkeypatch, {"/get": _cand(synced=None), "/search": [_cand()]})
 
-        assert api.get_synced("Dans le vide", "Josman", album_name="J.O.S", duration=243)[
+        assert self._get_synced(api, "Dans le vide", "Josman", album_name="J.O.S", duration=243)[
             "lyrics_synced"
         ]
         assert vus == ["/get", "/search"]
@@ -178,14 +189,14 @@ class TestStrategieGetSynced:
         """`/get` exige les 4 champs : sans album, l'appel serait perdu."""
         vus = self._stub(api, monkeypatch, {"/search": [_cand()]})
 
-        api.get_synced("Dans le vide", "Josman", duration=243)
+        self._get_synced(api, "Dans le vide", "Josman", duration=243)
         assert "/get" not in vus
 
     def test_dernier_recours_texte_brut(self, api, monkeypatch):
         """Deux SÉLECTIONS sur la même liste : la 1ʳᵉ exige la synchro, la 2ᵉ non."""
         self._stub(api, monkeypatch, {"/search": [_cand(synced=None)]})
 
-        res = api.get_synced("Dans le vide", "Josman", duration=243)
+        res = self._get_synced(api, "Dans le vide", "Josman", duration=243)
         assert res is not None and res["lyrics_synced"] is None and res["lyrics"]
 
     def test_une_seule_requete_search_pour_les_deux_passes(self, api, monkeypatch):
@@ -195,22 +206,22 @@ class TestStrategieGetSynced:
         la moitié du trafic LRCLIB."""
         vus = self._stub(api, monkeypatch, {"/search": [_cand(synced=None)]})
 
-        api.get_synced("Dans le vide", "Josman", duration=243)
+        self._get_synced(api, "Dans le vide", "Josman", duration=243)
         assert vus.count("/search") == 1
 
     def test_aucune_requete_search_quand_la_synchro_est_trouvee(self, api, monkeypatch):
         vus = self._stub(api, monkeypatch, {"/search": [_cand()]})
 
-        api.get_synced("Dans le vide", "Josman", duration=243)
+        self._get_synced(api, "Dans le vide", "Josman", duration=243)
         assert vus.count("/search") == 1
 
     def test_aucune_parole(self, api, monkeypatch):
         self._stub(api, monkeypatch, {"/search": []})
-        assert api.get_synced("Dans le vide", "Josman", duration=243) is None
+        assert self._get_synced(api, "Dans le vide", "Josman", duration=243) is None
 
     @pytest.mark.parametrize(("titre", "artiste"), [("", "Josman"), ("Titre", ""), ("", "")])
     def test_champs_obligatoires(self, api, titre, artiste):
-        assert api.get_synced(titre, artiste) is None
+        assert self._get_synced(api, titre, artiste) is None
 
 
 class TestRequeteHttp:

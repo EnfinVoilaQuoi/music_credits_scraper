@@ -103,6 +103,106 @@ def start_streams_update(app):
     ctk.CTkButton(dialog, text="Lancer", command=launch, width=120).pack(pady=18)
 
 
+def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
+    """Résumé affiché après une passe « Nb Streams ».
+
+    Pure : ne lit que le dict `results` rempli par les providers. Extraite de
+    la closure du worker le 2026-09-05 — elle porte une dizaine de décisions
+    (échec, abandon du gate d'identité, troncature des listes à 8 entrées,
+    verdicts du canal YTM) que rien ne vérifiait.
+    """
+    lines = ["Récupération terminée !\n"]
+    if "spotify" in results:
+        r = results["spotify"]
+        if "error" in r:
+            lines.append(f"Spotify : ❌ {r['error']}")
+        else:
+            lines.append(
+                f"Spotify : {r.get('matched', 0)} matchés, "
+                f"{r.get('unmatched', 0)} non matchés, "
+                f"{r.get('albums_updated', 0)} albums"
+            )
+            # Morceaux présents sur Kworb mais introuvables en base :
+            # soit un raté de matching, soit un titre absent de la
+            # discographie — les gros streams méritent un œil.
+            # Rapprochements FLOUS (coquilles/ponctuation) à vérifier :
+            # le stream est écrit mais le match n'est pas exact.
+            fuzzy = r.get("fuzzy_matched") or []
+            if fuzzy:
+                lines.append("\n≈ Rapprochés (vérifie que c'est le bon morceau) :")
+                for kw, db, score in fuzzy[:8]:
+                    lines.append(f"   • Kworb « {kw} » → base « {db} » ({score:.0%})")
+                if len(fuzzy) > 8:
+                    lines.append(f"   … et {len(fuzzy) - 8} autre(s) (voir logs)")
+
+            details = r.get("unmatched_details") or []
+            if details:
+                lines.append("\n⚠️ Sur Kworb mais pas reliés en base :")
+                for title, streams in details[:8]:
+                    lines.append(f"   • {title} — {streams:,} streams".replace(",", " "))
+                if len(details) > 8:
+                    lines.append(f"   … et {len(details) - 8} autre(s) (voir logs)")
+    if "spotify_web" in results:
+        r = results["spotify_web"]
+        if "error" in r:
+            lines.append(f"Spotify (pages web) : ❌ {r['error']}")
+        elif r.get("aborted"):
+            # Gate d'identité : rien n'a été écrit, et c'est voulu.
+            lines.append(f"🚨 Spotify (pages web) : {r['aborted']} — aucune écriture.")
+        else:
+            lines.append(
+                f"Spotify (pages web) : {r.get('recorded', 0)} morceau(x) relevé(s), "
+                f"{r.get('albums_totalises', 0)} album(s) totalisé(s), "
+                f"{r.get('pages', 0)} page(s) ouverte(s)"
+            )
+            if not spotify_full_crawl:
+                lines.append(
+                    "   • page artiste seule — coche « tous les morceaux » "
+                    "pour les streams par titre et les totaux d'album"
+                )
+            if r.get("monthly_listeners") is not None:
+                lines.append(
+                    f"   • Auditeurs mensuels : {r['monthly_listeners']:,}".replace(",", " ")
+                )
+            if r.get("harvested_foreign"):
+                lines.append(
+                    f"   • {r['harvested_foreign']} compteur(s) récolté(s) au passage "
+                    "pour d'autres artistes de la base"
+                )
+    if "ytm" in results:
+        r = results["ytm"]
+        if "error" in r:
+            lines.append(f"YouTube Music : ❌ {r['error']}")
+        else:
+            lines.append(
+                f"YouTube Music : {r.get('matched', 0)} matchés, "
+                f"{r.get('unmatched', 0)} non matchés, "
+                f"{r.get('albums_processed', 0)} albums"
+            )
+            # Verdict du gate d'identité (canal homonyme / divergent).
+            identity = r.get("identity") or {}
+            status = identity.get("status")
+            matched = identity.get("matched", 0)
+            ytm_titles = identity.get("ytm_titles", 0)
+            if status == "aborted":
+                lines.append(
+                    f"🚨 Canal YTM suspect ({matched}/{ytm_titles} titres) — "
+                    "rien n'a été écrit. Renseigne le champ « Canal YTM » "
+                    "(@handle) dans cette fenêtre et relance."
+                )
+            elif status == "warning":
+                lines.append(
+                    f"⚠️ Canal YTM manuel divergent ({matched}/{ytm_titles} titres) "
+                    "— écriture maintenue (saisie manuelle prioritaire)."
+                )
+    if "video_views" in results:
+        v = results["video_views"]
+        by_kind = v.get("by_kind") or {}
+        kinds = ", ".join(f"{k}: {n}" for k, n in sorted(by_kind.items())) or "—"
+        lines.append(f"Vues vidéos : {v.get('updated', 0)} mis à jour ({kinds})")
+    return "\n".join(lines)
+
+
 def run_streams_update(
     app,
     fetch_kworb: bool,
@@ -197,98 +297,7 @@ def run_streams_update(
                     results["ytm"] = {"error": str(e)}
 
             # Construire le message résumé
-            lines = ["Récupération terminée !\n"]
-            if "spotify" in results:
-                r = results["spotify"]
-                if "error" in r:
-                    lines.append(f"Spotify : ❌ {r['error']}")
-                else:
-                    lines.append(
-                        f"Spotify : {r.get('matched', 0)} matchés, "
-                        f"{r.get('unmatched', 0)} non matchés, "
-                        f"{r.get('albums_updated', 0)} albums"
-                    )
-                    # Morceaux présents sur Kworb mais introuvables en base :
-                    # soit un raté de matching, soit un titre absent de la
-                    # discographie — les gros streams méritent un œil.
-                    # Rapprochements FLOUS (coquilles/ponctuation) à vérifier :
-                    # le stream est écrit mais le match n'est pas exact.
-                    fuzzy = r.get("fuzzy_matched") or []
-                    if fuzzy:
-                        lines.append("\n≈ Rapprochés (vérifie que c'est le bon morceau) :")
-                        for kw, db, score in fuzzy[:8]:
-                            lines.append(f"   • Kworb « {kw} » → base « {db} » ({score:.0%})")
-                        if len(fuzzy) > 8:
-                            lines.append(f"   … et {len(fuzzy) - 8} autre(s) (voir logs)")
-
-                    details = r.get("unmatched_details") or []
-                    if details:
-                        lines.append("\n⚠️ Sur Kworb mais pas reliés en base :")
-                        for title, streams in details[:8]:
-                            lines.append(f"   • {title} — {streams:,} streams".replace(",", " "))
-                        if len(details) > 8:
-                            lines.append(f"   … et {len(details) - 8} autre(s) (voir logs)")
-            if "spotify_web" in results:
-                r = results["spotify_web"]
-                if "error" in r:
-                    lines.append(f"Spotify (pages web) : ❌ {r['error']}")
-                elif r.get("aborted"):
-                    # Gate d'identité : rien n'a été écrit, et c'est voulu.
-                    lines.append(f"🚨 Spotify (pages web) : {r['aborted']} — aucune écriture.")
-                else:
-                    lines.append(
-                        f"Spotify (pages web) : {r.get('recorded', 0)} morceau(x) relevé(s), "
-                        f"{r.get('albums_totalises', 0)} album(s) totalisé(s), "
-                        f"{r.get('pages', 0)} page(s) ouverte(s)"
-                    )
-                    if not spotify_full_crawl:
-                        lines.append(
-                            "   • page artiste seule — coche « tous les morceaux » "
-                            "pour les streams par titre et les totaux d'album"
-                        )
-                    if r.get("monthly_listeners") is not None:
-                        lines.append(
-                            f"   • Auditeurs mensuels : {r['monthly_listeners']:,}".replace(
-                                ",", " "
-                            )
-                        )
-                    if r.get("harvested_foreign"):
-                        lines.append(
-                            f"   • {r['harvested_foreign']} compteur(s) récolté(s) au passage "
-                            "pour d'autres artistes de la base"
-                        )
-            if "ytm" in results:
-                r = results["ytm"]
-                if "error" in r:
-                    lines.append(f"YouTube Music : ❌ {r['error']}")
-                else:
-                    lines.append(
-                        f"YouTube Music : {r.get('matched', 0)} matchés, "
-                        f"{r.get('unmatched', 0)} non matchés, "
-                        f"{r.get('albums_processed', 0)} albums"
-                    )
-                    # Verdict du gate d'identité (canal homonyme / divergent).
-                    identity = r.get("identity") or {}
-                    status = identity.get("status")
-                    matched = identity.get("matched", 0)
-                    ytm_titles = identity.get("ytm_titles", 0)
-                    if status == "aborted":
-                        lines.append(
-                            f"🚨 Canal YTM suspect ({matched}/{ytm_titles} titres) — "
-                            "rien n'a été écrit. Renseigne le champ « Canal YTM » "
-                            "(@handle) dans cette fenêtre et relance."
-                        )
-                    elif status == "warning":
-                        lines.append(
-                            f"⚠️ Canal YTM manuel divergent ({matched}/{ytm_titles} titres) "
-                            "— écriture maintenue (saisie manuelle prioritaire)."
-                        )
-            if "video_views" in results:
-                v = results["video_views"]
-                by_kind = v.get("by_kind") or {}
-                kinds = ", ".join(f"{k}: {n}" for k, n in sorted(by_kind.items())) or "—"
-                lines.append(f"Vues vidéos : {v.get('updated', 0)} mis à jour ({kinds})")
-            summary_msg = "\n".join(lines)
+            summary_msg = build_summary(results, spotify_full_crawl=spotify_full_crawl)
 
             app.root.after(
                 0, lambda m=summary_msg: report.show_scrollable_report(app, "Nb Streams", m)

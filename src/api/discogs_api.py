@@ -272,15 +272,18 @@ class DiscogsClient:
 
                     # Extract role from data dictionary
                     role = "Unknown"
-                    role_detail = None
+                    tracks = None
 
                     if hasattr(credit, "data") and isinstance(credit.data, dict):
                         # Role is in credit.data['role']
                         role = credit.data.get("role", "Unknown")
                         # Tracks info (like "A1, B4") is in credit.data['tracks']
-                        role_detail = credit.data.get("tracks")
+                        tracks = credit.data.get("tracks")
 
-                    credit_dict = {"name": name, "role": role, "role_detail": role_detail}
+                    # La clé s'appelait `role_detail` alors qu'elle portait les
+                    # PISTES : c'est cette confusion de nom qui a fait cohabiter
+                    # deux données dans une colonne (e18). Nommée pour ce qu'elle est.
+                    credit_dict = {"name": name, "role": role, "tracks": tracks}
 
                     credits.append(credit_dict)
                     logger.debug(f"Crédit Discogs: {name} - {role}")
@@ -458,6 +461,17 @@ class DiscogsClient:
 
             # Crédits
             if track_data.get("credits"):
+                # IDEMPOTENCE : purger nos propres crédits AVANT de réécrire.
+                # `Track.add_credit` dédoublonne sur (name, role, role_detail) —
+                # un ré-import avec des rôles CORRIGÉS ajoutait donc le nouveau
+                # crédit À CÔTÉ de l'ancien au lieu de le remplacer, puisque la
+                # clé de dédup avait justement changé. Purger nos lignes rend
+                # l'opération rejouable ; les crédits des AUTRES sources ne sont
+                # pas touchés (Discogs est additif, il ne confirme pas Genius —
+                # mesuré le 2026-09-03 : 818 paires propres à Discogs contre 22
+                # concordantes).
+                track.credits = [c for c in track.credits if c.source != "discogs"]
+
                 credits_added = 0
                 for credit_dict in track_data["credits"]:
                     try:
@@ -466,19 +480,22 @@ class DiscogsClient:
                         credit = Credit(
                             name=credit_dict["name"],
                             role=role_enum,
-                            # Le LIBELLÉ prime quand le rôle tombe en OTHER (2026-09-04).
-                            # C'était `pistes or (libellé si OTHER)` : quand Discogs
-                            # fournissait les deux, le libellé disparaissait — 21 crédits
-                            # sur 203 en base portent « 16 » ou « 3, 5, 7, 14 » à sa place.
-                            # Ce n'est pas cosmétique : `Track.get_video_credits` reclasse
-                            # un OTHER en crédit VIDÉO d'après les mots de `role_detail`.
-                            # Convention désormais commune aux trois écrivains (Genius
-                            # scraper ×2, `Track.add_credit_from_role`).
+                            # `role_detail` qualifie le RÔLE — donc le libellé brut
+                            # quand il tombe en OTHER, et rien sinon (le rôle mappé
+                            # dit déjà tout). Convention commune aux trois écrivains
+                            # (Genius scraper ×2, `Track.add_credit_from_role`).
+                            #
+                            # Les PISTES ont leur propre champ depuis e18. Les deux
+                            # se disputaient la colonne : `pistes or (libellé si OTHER)`
+                            # perdait le libellé, l'inverse perdait les pistes. Mesuré
+                            # sur la base réelle : 209 lignes portaient une référence de
+                            # piste dans `role_detail`, dont 21 en OTHER — les seules
+                            # nuisibles, `Track.get_video_credits` reclassant un OTHER
+                            # en crédit VIDÉO d'après les MOTS de `role_detail`.
                             role_detail=(
-                                credit_dict["role"]
-                                if role_enum == CreditRole.OTHER
-                                else credit_dict.get("role_detail")
+                                credit_dict["role"] if role_enum == CreditRole.OTHER else None
                             ),
+                            tracks=credit_dict.get("tracks"),
                             source="discogs",
                         )
 

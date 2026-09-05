@@ -9,6 +9,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
+import pytest
+
 from src.utils.update_spotify_streams import _build_queue, _crawl
 
 _NOUS = 1
@@ -460,3 +462,43 @@ def test_mode_leger_n_ouvre_que_la_page_artiste():
     # Mais l'essentiel est là : les auditeurs mensuels et le top de la page.
     assert result["monthly_listeners"] == 387860
     assert result["recorded"] == 1
+
+
+# ── Éditions « Bonus » / « Deluxe » ───────────────────────────────────────────
+class TestRattachementDesEditions:
+    """Une édition Bonus porte un titre DIFFÉRENT sur Spotify. Sans la rattacher
+    à son album, ses pistes disparaissent purement et simplement du total :
+    mesuré le 2026-09-05, « M.A.N (Black Roses & Lost Feelings) » ressortait à
+    362 M sur 17 pistes là où la base en connaît 19 pour 403 M."""
+
+    CONNUS = {
+        "man black roses lost feelings": "M.A.N (Black Roses & Lost Feelings)",
+        "matrix": "Matrix",
+    }
+
+    @pytest.mark.parametrize(
+        "titre",
+        [
+            "man black roses lost feelings bonus",
+            "matrix deluxe",
+            "matrix reedition",
+            "matrix collector",
+        ],
+    )
+    def test_une_edition_rejoint_son_album(self, titre):
+        from src.utils.update_spotify_streams import _album_de_la_base
+
+        assert _album_de_la_base(titre, self.CONNUS) is not None
+
+    @pytest.mark.parametrize("titre", ["matrix ii", "matrix 2", "matrix reloaded", "autre chose"])
+    def test_une_SUITE_reste_un_autre_album(self, titre):
+        """Le garde qui justifie une liste FERMÉE de marqueurs : un simple
+        préfixe commun rattacherait « Matrix II » à « Matrix »."""
+        from src.utils.update_spotify_streams import _album_de_la_base
+
+        assert _album_de_la_base(titre, self.CONNUS) is None
+
+    def test_correspondance_exacte_d_abord(self):
+        from src.utils.update_spotify_streams import _album_de_la_base
+
+        assert _album_de_la_base("matrix", self.CONNUS) == "matrix"

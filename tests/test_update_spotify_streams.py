@@ -420,3 +420,43 @@ def test_une_tracklist_complete_ecrit_le_total():
     )
     _run(dm, scraper)
     assert dm.album_calls[0]["streams"] == 150
+
+
+# ── Mode léger ────────────────────────────────────────────────────────────────
+def test_mode_leger_n_ouvre_que_la_page_artiste():
+    """Une page pour les auditeurs mensuels et le top 10 : ce qu'on peut se
+    permettre à chaque run. Les pages titre et les albums, eux, coûtent une page
+    par morceau — d'où une case à part dans le dialog."""
+    dm = _DataManager(albums=[{"title": "Mon Album"}])
+    scraper = _Scraper(
+        _page_artiste(playcounts={_ID_A: 100}, albums={_ID_ALBUM: "Mon Album"}),
+        track_pages={_ID_B: {"playcounts": {_ID_B: 5}}},
+        album_pages={_ID_ALBUM: _page_album([(_ID_A, "A")])},
+    )
+    result = asyncio.run(
+        _crawl(
+            _Artist(),
+            dm,
+            scraper,
+            "artistid",
+            None,
+            {
+                "recorded": 0,
+                "harvested_foreign": 0,
+                "unknown_ids": 0,
+                "albums_totalises": 0,
+                "pages": 0,
+                "monthly_listeners": None,
+                "artist_name": None,
+                "spotify_artist_id": None,
+                "aborted": None,
+            },
+            False,
+        )
+    )
+    assert result["pages"] == 1
+    assert scraper.visited == [], "aucune page titre"
+    assert dm.album_calls == [], "aucun total d'album"
+    # Mais l'essentiel est là : les auditeurs mensuels et le top de la page.
+    assert result["monthly_listeners"] == 387860
+    assert result["recorded"] == 1

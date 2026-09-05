@@ -65,7 +65,9 @@ class StreamsProvider:
 
         return update_kworb_streams(artist, data_manager, scraper=self._kworb_client())
 
-    def fetch_spotify_web(self, artist, data_manager, stop_requested=None) -> dict:
+    def fetch_spotify_web(
+        self, artist, data_manager, stop_requested=None, full_crawl: bool = True
+    ) -> dict:
         """Streams lus sur open.spotify.com — repli quand Kworb ignore l'artiste.
 
         Apporte aussi les **auditeurs mensuels**, que Kworb ne donne pas du tout :
@@ -79,6 +81,7 @@ class StreamsProvider:
             data_manager,
             scraper=self._spotify_web_client(),
             stop_requested=stop_requested,
+            full_crawl=full_crawl,
         )
 
     def fetch_ytm(self, artist, data_manager) -> dict:

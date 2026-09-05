@@ -74,3 +74,31 @@ def test_close_ferme_les_clients_qui_l_exposent():
     provider = StreamsProvider(kworb=_Closable(), ytm=object())  # ytm sans close()
     provider.close()  # ne lève pas malgré le client sans close()
     assert closed["k"] is True
+
+
+class _ClientFermable:
+    def __init__(self, casse=False):
+        self.ferme = False
+        self._casse = casse
+
+    def close(self):
+        if self._casse:
+            raise RuntimeError("fermeture impossible")
+        self.ferme = True
+
+
+def test_close_ferme_aussi_le_scraper_spotify_web():
+    """Le 3ᵉ client (pages Spotify) est arrivé après le test ci-dessus : lui
+    aussi doit être fermé — c'est un navigateur, pas une session HTTP."""
+    kworb, ytm, spotify = _ClientFermable(), _ClientFermable(), _ClientFermable()
+    StreamsProvider(kworb=kworb, ytm=ytm, spotify_web=spotify).close()
+    assert (kworb.ferme, ytm.ferme, spotify.ferme) == (True, True, True)
+
+
+def test_close_tolere_un_client_sans_close_ou_qui_leve():
+    """Fermeture best-effort : les clients sont arbitraires (scraper, API, stub
+    de test). Une fermeture qui lève ne doit pas empêcher les suivantes."""
+    sain = _ClientFermable()
+    provider = StreamsProvider(kworb=_ClientFermable(casse=True), ytm=object(), spotify_web=sain)
+    provider.close()
+    assert sain.ferme is True

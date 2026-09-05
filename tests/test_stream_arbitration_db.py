@@ -229,3 +229,28 @@ def test_kworb_peut_completer_les_ids_d_un_album_arbitre_par_spotify(data_manage
             {"a": artist.id},
         ).scalar()
     assert set(ids.split(",")) == {"AL1", "AL2"}
+
+
+def test_la_fusion_resynchronise_la_colonne_arbitree(data_manager):
+    """Constaté le 2026-09-05 sur « My Love (Acoustic) » : après fusion, le
+    morceau conservé portait bien les observations du doublon (Kworb ET Spotify)
+    mais une colonne VIDE — la fusion déplaçait les observations sans jamais
+    retoucher les colonnes qu'elles pilotent."""
+    artist = _artiste(data_manager)
+    garde = _track(data_manager, artist, "Gardé")  # aucune observation
+    doublon = _track(data_manager, artist, "Doublon")
+    data_manager.record_spotify_streams(doublon, 4242, "kworb", _KWORB_DATE)
+
+    assert _colonnes(data_manager, garde)["spotify_streams"] is None
+    assert data_manager.merge_tracks(garde, doublon) is True
+    assert _colonnes(data_manager, garde)["spotify_streams"] == 4242
+
+
+def test_la_fusion_n_invente_rien_sans_observation(data_manager):
+    """Deux morceaux sans aucune observation : la colonne reste vide, la fusion
+    ne fabrique pas de valeur."""
+    artist = _artiste(data_manager)
+    garde = _track(data_manager, artist, "Gardé")
+    doublon = _track(data_manager, artist, "Doublon")
+    assert data_manager.merge_tracks(garde, doublon) is True
+    assert _colonnes(data_manager, garde)["spotify_streams"] is None

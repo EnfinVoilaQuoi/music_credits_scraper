@@ -660,6 +660,14 @@ class TrackRepository:
                     text("UPDATE observations SET track_id = :keep_id WHERE track_id = :delete_id"),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
+                # Les colonnes ARBITRÉES doivent suivre les observations qu'on
+                # vient de déplacer. Sans ça, le morceau conservé porte les
+                # observations du doublon et une colonne restée VIDE — constaté
+                # le 2026-09-05 sur « My Love (Acoustic) », qui avait ses deux
+                # observations (Kworb et Spotify) et aucun stream affiché.
+                valeurs = self._arbitrer_streams(conn, keep_id)
+                if valeurs:
+                    conn.execute(update(tracks).where(tracks.c.id == keep_id).values(**valeurs))
                 conn.execute(
                     text("DELETE FROM tracks WHERE id = :delete_id"), {"delete_id": delete_id}
                 )

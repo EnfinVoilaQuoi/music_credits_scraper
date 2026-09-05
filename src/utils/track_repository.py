@@ -275,14 +275,16 @@ class TrackRepository:
         try:
             conn.execute(
                 text(
-                    "INSERT INTO credits (track_id, name, role, role_detail, source) "
-                    "VALUES (:track_id, :name, :role, :role_detail, :source)"
+                    "INSERT INTO credits "
+                    "(track_id, name, role, role_detail, tracks, source) "
+                    "VALUES (:track_id, :name, :role, :role_detail, :tracks, :source)"
                 ),
                 {
                     "track_id": track_id,
                     "name": credit.name,
                     "role": credit.role.value,
                     "role_detail": credit.role_detail,
+                    "tracks": credit.tracks,
                     "source": credit.source,
                 },
             )
@@ -463,6 +465,7 @@ class TrackRepository:
                             name=str(name),
                             role=role,
                             role_detail=role_detail,
+                            tracks=row["tracks"],
                             source=str(source),
                         )
                         result.append(credit)
@@ -1012,6 +1015,7 @@ class TrackRepository:
                         text(
                             "SELECT title, spotify_streams, spotify_daily_streams, "
                             "spotify_streams_updated, spotify_streams_source, spotify_editions_json, "
+                            "spotify_album_ids, "
                             "ytm_streams FROM albums "
                             "WHERE artist_id = :aid ORDER BY spotify_streams DESC"
                         ),
@@ -1034,6 +1038,12 @@ class TrackRepository:
                         "spotify_streams_updated": row["spotify_streams_updated"],
                         "spotify_streams_source": row["spotify_streams_source"],
                         "spotify_editions_json": row["spotify_editions_json"],
+                        # 3e occurrence du MÊME défaut : une colonne ajoutée au
+                        # SELECT mais oubliée du dict est lue en base puis jetée.
+                        # Celle-ci porte les IDs d'édition, seul moyen pour le
+                        # scrape Spotify d'atteindre une réédition que la page
+                        # artiste ne liste pas.
+                        "spotify_album_ids": row["spotify_album_ids"],
                         "ytm_streams": row["ytm_streams"],
                     }
                     for row in rows

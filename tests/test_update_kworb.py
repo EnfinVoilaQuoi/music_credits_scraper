@@ -527,6 +527,36 @@ class TestAlbums:
         assert (streams, daily) == (50000, 500), "somme des MORCEAUX, pas des lignes d'album"
         assert kwargs["spotify_album_ids"] == "AL1,AL2", "les deux éditions restent tracées"
 
+    def test_une_edition_ecartee_legue_son_identifiant(self):
+        """« … (Bonus) » n'a aucun morceau propre en base : Kworb l'écartait, et
+        son IDENTIFIANT d'édition se perdait avec elle. Le scrape Spotify ne
+        pouvait alors plus atteindre cette édition pour totaliser le disque —
+        constaté sur « DOM PERIGNON CRYING (Bonus) », dont l'album ressortait
+        ~10 % sous son vrai total, sans que rien ne le signale."""
+        tracks = [_track(1, "A", album="Mon Album"), _track(2, "B", album="Mon Album")]
+        res, dm = self._run(
+            tracks,
+            [_entry("Mon Album", 100, 1, "AL1"), _entry("Mon Album (Bonus)", 50, 1, "AL2")],
+            song_entries=[_entry("A", 30000, 300), _entry("B", 20000, 200)],
+        )
+        assert res["albums_updated"] == 1
+        assert res["albums_excluded"] == [], "l'édition n'est plus un album à part"
+        titre, streams, _, kwargs = dm.album_writes[0]
+        assert titre == "Mon Album", "le titre de BASE, pas celui de l'édition"
+        assert kwargs["spotify_album_ids"] == "AL1,AL2"
+        assert streams == 50000, "toujours la somme des MORCEAUX, pas des lignes"
+
+    def test_une_SUITE_reste_un_album_distinct(self):
+        """Le pendant : « Mon Album 2 » n'est pas une édition de « Mon Album »."""
+        tracks = [_track(1, "A", album="Mon Album"), _track(2, "B", album="Mon Album")]
+        res, dm = self._run(
+            tracks,
+            [_entry("Mon Album", 100, 1, "AL1"), _entry("Mon Album 2", 50, 1, "AL2")],
+            song_entries=[_entry("A", 30000, 300), _entry("B", 20000, 200)],
+        )
+        assert res["albums_updated"] == 1
+        assert dm.album_writes[0][3]["spotify_album_ids"] == "AL1"
+
     def test_album_sans_morceau_chiffre_n_est_pas_remis_a_zero(self):
         """Aucun morceau de l'album n'a de compteur ce run : écrire 0 effacerait
         un total valide par une valeur qui n'en est pas une."""

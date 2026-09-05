@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 
 
 # Normaliseur PARTAGÉ (même matching que update_ytmusic — cf. title_matching.py)
-from src.utils.title_matching import contains_as_words
+from src.utils.title_matching import base_album_key, contains_as_words
 from src.utils.title_matching import normalize_title as _normalize_title
 
 
@@ -511,9 +511,17 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
         # 50 342 979.
         editions = defaultdict(lambda: {"title": None, "streams": 0, "daily": 0, "ids": []})
         for entry in page_albums["entries"]:
-            key = _normalize_title(entry["title"])
+            brut = _normalize_title(entry["title"])
+            # Une ligne « … (Bonus) » est une ÉDITION d'un album connu, pas un
+            # autre disque : sans ce rattachement elle partait dans son propre
+            # groupe, était écartée faute de morceaux en base, et son IDENTIFIANT
+            # d'édition se perdait — le scrape Spotify ne pouvait alors plus la
+            # totaliser (constaté sur « DOM PERIGNON CRYING (Bonus) », dont
+            # l'album ressortait ~10 % sous son vrai total).
+            key = base_album_key(brut, album_track_counts) or brut
             agg = editions[key]
-            agg["title"] = agg["title"] or entry["title"]
+            if agg["title"] is None or brut == key:
+                agg["title"] = entry["title"]
             if entry.get("spotify_id"):
                 agg["ids"].append(entry["spotify_id"])
         for key, agg in editions.items():

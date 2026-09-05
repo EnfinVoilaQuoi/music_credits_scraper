@@ -79,29 +79,27 @@ def format_lyrics_for_display(lyrics: str) -> str:
 
 
 def _streams_complets(track) -> bool:
-    """Le morceau a-t-il ses streams sur TOUTES les plateformes où il existe ?
+    """Le morceau a-t-il les streams qu'on peut légitimement lui réclamer ?
 
-    La présence sur une plateforme se lit sur son identifiant, pas sur son
-    compteur : `spotify_id` pour Spotify, `youtube_url` pour YouTube. Sans cette
-    distinction, un morceau publié uniquement sur YouTube resterait
-    éternellement « incomplet » faute d'un chiffre Spotify qui n'existera jamais.
+    La règle est ASYMÉTRIQUE, parce que les deux absences ne se valent pas.
 
-    Un morceau qu'on ne sait présent NULLE PART est jugé complet s'il porte au
-    moins un compteur — sinon il n'y a rien à réclamer, et on ne va pas exiger
-    une donnée dont on ignore si elle existe.
+    **YouTube : toujours exigé.** Un lien manquant ne prouve rien — le catalogue
+    de YouTube est plus large que celui des plateformes de streaming (rips de
+    titres supprimés, versions physiques, inédits, lyrics vidéos de projets
+    jamais sortis). L'absence n'y est pas observable, elle ne peut donc jamais
+    servir d'excuse.
+
+    **Spotify : exigé seulement si le morceau y est.** Là, l'absence SE CONSTATE
+    (aucun identifiant après résolution), et réclamer un chiffre qui n'existera
+    jamais condamnerait le morceau au triangle à perpétuité.
+
+    ⚠️ Réserve : `spotify_id` vide veut aussi dire « jamais cherché ». La règle
+    suppose que la résolution d'ID a tourné — ce qui est le cas des morceaux
+    passés par un enrichissement, pas d'un import brut.
     """
-    sur_spotify = bool(track.spotify_id)
-    sur_youtube = bool(track.youtube_url)
-    spotify_ok = bool(track.streams.spotify_streams)
-    ytm_ok = bool(track.streams.ytm_streams)
-
-    if sur_spotify and not spotify_ok:
+    if not track.streams.ytm_streams:
         return False
-    if sur_youtube and not ytm_ok:
-        return False
-    if not sur_spotify and not sur_youtube:
-        return spotify_ok or ytm_ok
-    return True
+    return not (track.spotify_id and not track.streams.spotify_streams)
 
 
 def get_track_status_icon(track, disabled_ids) -> str:
@@ -114,9 +112,9 @@ def get_track_status_icon(track, disabled_ids) -> str:
     - BPM ✓
     - Key et Mode ✓
     - Durée ✓
-    - Streams ✓ sur chaque plateforme où le morceau EXISTE (cf.
-      `_streams_complets`) — un titre publié seulement sur YouTube est complet
-      avec ses seuls streams YTM
+    - Streams ✓ : YouTube toujours, Spotify seulement si le morceau y est
+      (cf. `_streams_complets`) — un titre publié seulement sur YouTube est donc
+      complet avec ses seuls streams YTM
     - Certifications ✓ (ou validation si base à jour)
 
     Note: Album n'est PAS obligatoire (singles, featurings hors projet)

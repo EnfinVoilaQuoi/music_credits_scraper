@@ -66,6 +66,25 @@ def sort_groups(groups: dict) -> list[tuple]:
     )
 
 
+#: Libellés de provenance du total de streams d'un album.
+#: Les deux sources ne comptent PAS la même chose — Kworb somme les morceaux de
+#: NOTRE artiste, Spotify toutes les pistes du disque. Sur un projet commun, le
+#: total Kworb n'est donc qu'une part. Afficher le nombre sans dire d'où il vient
+#: le rend ininterprétable, et incomparable d'une ligne à l'autre.
+_LIBELLES_SOURCE = {"kworb": "Kworb", "spotify_web": "Spotify"}
+
+#: Aucun total d'album en base : la vue somme les streams des MORCEAUX du groupe.
+#: Troisième nature de chiffre, à ne pas confondre avec les deux autres.
+SOMME_MORCEAUX = "Σ morceaux"
+
+
+def streams_source_label(source: str | None, *, somme_de_morceaux: bool) -> str:
+    """Libellé de provenance du total Spotify affiché sur une ligne d'album."""
+    if somme_de_morceaux:
+        return SOMME_MORCEAUX
+    return _LIBELLES_SOURCE.get(source, "")
+
+
 def format_streams(value) -> str:
     """Nombre de streams avec une espace comme séparateur de milliers.
 

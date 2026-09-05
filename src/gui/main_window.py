@@ -307,6 +307,7 @@ class MainWindow:
             "Paroles",
             "Durée totale",
             "Streams Spotify",
+            "Source",
             "Streams YTM",
         )
         self.tree = ttk.Treeview(

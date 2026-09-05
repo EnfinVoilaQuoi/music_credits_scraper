@@ -1006,12 +1006,20 @@ class TrackRepository:
                     .mappings()
                     .all()
                 )
+                # `spotify_streams_source` et `spotify_editions_json` étaient
+                # SÉLECTIONNÉS mais absents du dict rendu (2026-09-05) : lus en
+                # base puis jetés avant d'atteindre la GUI. Or les deux sources
+                # ne comptent PAS la même chose — Kworb ne somme que les morceaux
+                # de l'artiste, Spotify toutes les pistes du disque — donc un
+                # total sans sa provenance n'est pas interprétable.
                 return [
                     {
                         "title": row["title"],
                         "spotify_streams": row["spotify_streams"],
                         "spotify_daily_streams": row["spotify_daily_streams"],
                         "spotify_streams_updated": row["spotify_streams_updated"],
+                        "spotify_streams_source": row["spotify_streams_source"],
+                        "spotify_editions_json": row["spotify_editions_json"],
                         "ytm_streams": row["ytm_streams"],
                     }
                     for row in rows

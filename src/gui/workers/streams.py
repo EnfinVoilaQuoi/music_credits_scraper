@@ -35,7 +35,7 @@ def start_streams_update(app):
 
     dialog = ctk.CTkToplevel(app.root)
     dialog.title("Nb Streams")
-    dialog.geometry("380x300")
+    dialog.geometry("420x380")
     dialog.resizable(False, False)
     dialog.transient(app.root)
     dialog.grab_set()
@@ -44,12 +44,27 @@ def start_streams_update(app):
         dialog, text="Sources de streams à récupérer :", font=ctk.CTkFont(size=13, weight="bold")
     ).pack(pady=(18, 8))
 
-    spotify_var = ctk.BooleanVar(value=True)
+    # Trois sources Spotify, de coûts TRÈS différents : les mélanger sous une
+    # seule case ferait payer plusieurs minutes de crawl à qui voulait un
+    # rafraîchissement de quelques secondes.
+    kworb_var = ctk.BooleanVar(value=True)
+    spotify_light_var = ctk.BooleanVar(value=True)
+    spotify_full_var = ctk.BooleanVar(value=False)
     ytm_var = ctk.BooleanVar(value=True)
 
-    ctk.CTkCheckBox(dialog, text="Spotify (Kworb)", variable=spotify_var).pack(
+    ctk.CTkCheckBox(dialog, text="Spotify — Kworb (rapide)", variable=kworb_var).pack(
         anchor="w", padx=40, pady=4
     )
+    ctk.CTkCheckBox(
+        dialog,
+        text="Spotify — auditeurs mensuels + top 10 (1 page)",
+        variable=spotify_light_var,
+    ).pack(anchor="w", padx=40, pady=4)
+    ctk.CTkCheckBox(
+        dialog,
+        text="Spotify — tous les morceaux et albums (plusieurs minutes)",
+        variable=spotify_full_var,
+    ).pack(anchor="w", padx=40, pady=4)
     ctk.CTkCheckBox(dialog, text="YouTube Music", variable=ytm_var).pack(
         anchor="w", padx=40, pady=4
     )
@@ -58,7 +73,7 @@ def start_streams_update(app):
     ctk.CTkLabel(
         dialog, text="Canal YTM (optionnel — @handle, lien ou UC...) :", font=ctk.CTkFont(size=11)
     ).pack(anchor="w", padx=40, pady=(10, 2))
-    ytm_channel_entry = ctk.CTkEntry(dialog, width=290, placeholder_text="@ISHAOfficiel")
+    ytm_channel_entry = ctk.CTkEntry(dialog, width=330, placeholder_text="@ISHAOfficiel")
     ytm_channel_entry.pack(padx=40, anchor="w")
     try:
         stored = (
@@ -72,18 +87,36 @@ def start_streams_update(app):
         pass
 
     def launch():
-        fetch_spotify = spotify_var.get()
+        fetch_kworb = kworb_var.get()
+        # La case « tous les morceaux » implique la page artiste : le crawl
+        # complet commence par elle de toute façon.
+        fetch_full = spotify_full_var.get()
+        fetch_light = spotify_light_var.get() or fetch_full
         fetch_ytm = ytm_var.get()
         ytm_channel_raw = ytm_channel_entry.get().strip()
         dialog.destroy()
-        if fetch_spotify or fetch_ytm:
-            run_streams_update(app, fetch_spotify, fetch_ytm, ytm_channel_raw)
+        if fetch_kworb or fetch_light or fetch_ytm:
+            run_streams_update(
+                app, fetch_kworb, fetch_ytm, ytm_channel_raw, fetch_light, fetch_full
+            )
 
     ctk.CTkButton(dialog, text="Lancer", command=launch, width=120).pack(pady=18)
 
 
-def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_raw: str = ""):
-    """Lance la récupération des streams dans un thread daemon."""
+def run_streams_update(
+    app,
+    fetch_kworb: bool,
+    fetch_ytm: bool,
+    ytm_channel_raw: str = "",
+    fetch_spotify_web: bool = False,
+    spotify_full_crawl: bool = False,
+):
+    """Lance la récupération des streams dans un thread daemon.
+
+    `fetch_spotify_web` ouvre la page artiste (auditeurs mensuels + top 10, UNE
+    page) ; `spotify_full_crawl` y ajoute les pages titre et les albums, soit
+    environ une page par morceau — d'où deux drapeaux et non un.
+    """
     if hasattr(app, "streams_button"):
         app.streams_button.configure(state="disabled")
 
@@ -96,15 +129,16 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
             app.root.after(0, app._show_progress_bar)
             results = {}
 
-            if fetch_spotify and not stop_requested():
+            demandees = {"kworb": fetch_kworb, "spotify_web": fetch_spotify_web}
+            if any(demandees.values()) and not stop_requested():
                 # Deux sources pour le MÊME champ. Chacune ne déclare que ce
                 # qu'elle a vu ; c'est l'arbitrage (`reconcile_spotify_streams`)
                 # qui désigne la valeur en colonne. Le worker n'a donc AUCUNE
                 # priorité à faire respecter, et l'ordre ci-dessous ne change pas
                 # le résultat — seulement l'ordre d'affichage.
                 for source in _stream_sources():
-                    if stop_requested():
-                        break
+                    if stop_requested() or not demandees[source]:
+                        continue
                     label = "Spotify (Kworb)" if source == "kworb" else "Spotify (pages web)"
                     app.root.after(
                         0, lambda t=label: app.progress_label.configure(text=f"{t} en cours...")
@@ -119,6 +153,7 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                                 app.current_artist,
                                 app.data_manager,
                                 stop_requested=stop_requested,
+                                full_crawl=spotify_full_crawl,
                             )
                     except Exception as e:
                         results["spotify" if source == "kworb" else "spotify_web"] = {
@@ -203,8 +238,14 @@ def run_streams_update(app, fetch_spotify: bool, fetch_ytm: bool, ytm_channel_ra
                 else:
                     lines.append(
                         f"Spotify (pages web) : {r.get('recorded', 0)} morceau(x) relevé(s), "
+                        f"{r.get('albums_totalises', 0)} album(s) totalisé(s), "
                         f"{r.get('pages', 0)} page(s) ouverte(s)"
                     )
+                    if not spotify_full_crawl:
+                        lines.append(
+                            "   • page artiste seule — coche « tous les morceaux » "
+                            "pour les streams par titre et les totaux d'album"
+                        )
                     if r.get("monthly_listeners") is not None:
                         lines.append(
                             f"   • Auditeurs mensuels : {r['monthly_listeners']:,}".replace(

@@ -33,14 +33,13 @@ Trois règles encadrent la récolte, sans lesquelles elle fabrique des faux :
 """
 
 import json
-import re
 from datetime import datetime, timedelta
 
 from src.concurrency import async_loop
 from src.config import settings
 from src.scrapers.spotify_web_scraper import SpotifyWebScraper
 from src.utils.logger import get_logger
-from src.utils.title_matching import normalize_title
+from src.utils.title_matching import base_album_key, normalize_title
 
 logger = get_logger(__name__)
 
@@ -325,34 +324,6 @@ def _record(
             result["harvested_foreign"] += 1
 
 
-#: Suffixes qui désignent une ÉDITION d'un disque, et non un autre disque.
-#: Liste FERMÉE, et c'est le point : un simple préfixe commun rattacherait une
-#: suite (« Matrix II ») à son aînée.
-_MARQUEURS_EDITION = re.compile(
-    r"^\s*(bonus|deluxe|de luxe|reedition|reissue|edition|version|remaster\w*"
-    r"|anniversaire|collector|integrale)\b",
-    re.IGNORECASE,
-)
-
-
-def _album_de_la_base(titre_norm: str, connus: dict) -> str | None:
-    """Album de la base auquel rattacher une entrée d'album Spotify.
-
-    Correspondance exacte d'abord. Sinon, une entrée qui PROLONGE un titre connu
-    par un marqueur d'édition (« [Bonus] », « (Deluxe) »…) est une édition du
-    même disque : ses pistes appartiennent à l'album, et les ignorer les retire
-    purement et simplement du total. Mesuré le 2026-09-05 : « M.A.N (Black Roses
-    & Lost Feelings) » ressortait à 362 M sur 17 pistes là où la base en connaît
-    19 pour 403 M — les pistes de l'édition Bonus manquaient à l'appel.
-    """
-    if titre_norm in connus:
-        return titre_norm
-    for cle in connus:
-        if titre_norm.startswith(cle) and _MARQUEURS_EDITION.match(titre_norm[len(cle) :]):
-            return cle
-    return None
-
-
 async def _totaliser_albums(
     sess,
     scraper,
@@ -399,18 +370,29 @@ async def _totaliser_albums(
     if budget <= 0 or not albums_spotify:
         return budget
 
-    connus = {
-        normalize_title(a["title"]): a["title"]
-        for a in data_manager.get_albums_for_artist(artist.id)
-        if a.get("title")
-    }
-    # Regrouper les ÉDITIONS par album de la base : plusieurs entrées Spotify
-    # peuvent désigner le même disque.
+    connus: dict[str, str] = {}
     groupes: dict[str, list[str]] = {}
+    for album in data_manager.get_albums_for_artist(artist.id):
+        if not album.get("title"):
+            continue
+        cle = normalize_title(album["title"])
+        connus[cle] = album["title"]
+        # Éditions DÉJÀ connues de la base — Kworb en voit que la page artiste
+        # ne liste pas : celle-ci ne montre qu'une vingtaine d'albums, et une
+        # réédition confidentielle n'y figure pas. Sans cette amorce, son total
+        # restait amputé sans que rien ne le signale (constaté sur « DOM
+        # PERIGNON CRYING », ~10 % sous son vrai total).
+        connues = [
+            i.strip() for i in (album.get("spotify_album_ids") or "").split(",") if i.strip()
+        ]
+        if connues:
+            groupes[cle] = connues
+
+    # Puis les entrées de la page artiste, qui peuvent en révéler d'autres.
     for album_id, titre in albums_spotify.items():
-        cle = _album_de_la_base(normalize_title(titre or ""), connus)
-        if cle:
-            groupes.setdefault(cle, []).append(album_id)
+        cle = base_album_key(normalize_title(titre or ""), connus)
+        if cle and album_id not in groupes.setdefault(cle, []):
+            groupes[cle].append(album_id)
 
     for cle, editions in groupes.items():
         if budget <= 0 or (stop_requested and stop_requested()):

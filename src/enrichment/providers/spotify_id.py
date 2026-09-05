@@ -112,10 +112,30 @@ class SpotifyIdProvider:
         # Utiliser le scraper Spotify_ID pour obtenir le bon ID
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
         spotify_id = scraper.get_spotify_id(artist_name, track.title)
-        # La recherche a été MENÉE À TERME : on date le constat, trouvé ou
-        # non. C'est ce qui sépare « absent de Spotify » de « jamais
-        # cherché » (e17) — sans cette date, un morceau jamais résolu
-        # passerait pour absent, et serait validé à tort sans streams.
+        return self._dater_et_valider(track, ctx, spotify_id)
+
+    @staticmethod
+    def _dater_et_valider(
+        track: Track, ctx: EnrichmentContext, spotify_id: str | None
+    ) -> str | None:
+        """Suite COMMUNE aux deux voies, une fois le scrape rendu : dater le
+        constat puis valider l'unicité.
+
+        Factorisée le 2026-09-05 parce que les deux voies avaient DIVERGÉ ici :
+        seule la voie sync datait `spotify_id_checked_at`, alors que la voie
+        async est celle que l'app emprunte (`data_enricher` fournit une
+        `async_scraper_factory`). La colonne e17, ajoutée la veille pour séparer
+        « absent de Spotify » de « jamais cherché », n'était donc jamais
+        renseignée en production, et `gui/helpers` affichait « jamais cherché »
+        pour des morceaux bel et bien résolus.
+
+        La leçon du jumeau Musixmatch était que la logique PURE était bien
+        partagée et que seuls les GARDES-FOUS ne l'étaient pas : on partage donc
+        le garde-fou lui-même, plutôt que de recopier une ligne dans l'autre voie.
+        """
+        # La recherche a été MENÉE À TERME : on date le constat, trouvé ou non.
+        # Sans cette date, un morceau jamais résolu passerait pour absent, et
+        # serait validé à tort sans streams.
         track.spotify_id_checked_at = datetime.now().isoformat(timespec="seconds")
 
         if not spotify_id:
@@ -123,6 +143,7 @@ class SpotifyIdProvider:
             return None
 
         # Valider l'unicité de l'ID trouvé
+        validate = ctx.validate_spotify_id_unique
         if validate and not validate(spotify_id, track, ctx.artist_tracks):
             logger.error(f"❌ ERREUR: Spotify ID trouvé par scraper est déjà utilisé: {spotify_id}")
             logger.error("   Cela ne devrait pas arriver. Vérifiez la base de données.")
@@ -185,21 +206,10 @@ class SpotifyIdProvider:
         self, track: Track, ctx: EnrichmentContext, scraper
     ) -> str | None:
         """Miroir async de `get_unique_spotify_id(force_scraper=True)` : scrape
-        + validation d'unicité (l'existant a déjà été jugé par le gate)."""
+        + suite commune (datation du constat, validation d'unicité) — l'existant
+        a déjà été jugé par le gate."""
         artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-        validate = ctx.validate_spotify_id_unique
 
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
         spotify_id = await scraper.get_spotify_id_async(artist_name, track.title)
-
-        if not spotify_id:
-            logger.warning(f"❌ Aucun Spotify ID trouvé via scraper pour '{track.title}'")
-            return None
-
-        if validate and not validate(spotify_id, track, ctx.artist_tracks):
-            logger.error(f"❌ ERREUR: Spotify ID trouvé par scraper est déjà utilisé: {spotify_id}")
-            logger.error("   Cela ne devrait pas arriver. Vérifiez la base de données.")
-            return None
-
-        logger.info(f"✅ Spotify ID unique trouvé via scraper: {spotify_id}")
-        return spotify_id
+        return self._dater_et_valider(track, ctx, spotify_id)

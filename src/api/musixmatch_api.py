@@ -20,12 +20,15 @@ Quatre gardes-fous — la partie non triviale, apprise des projets de référenc
   1. **TTL courte** : le token n'est valide que ~10 min côté serveur. On le met en cache
      (mémoire + fichier) avec une TTL prudente sous ce seuil, on ne le refetch pas à
      chaque appel.
-  2. **Token « UpgradeOnly »** : quand l'IP est flaggée ou le CAPTCHA-gate actif,
-     Musixmatch renvoie un token de forme valide mais inutilisable (contient
-     « UpgradeOnly »). On le rejette AVANT de l'utiliser.
-  3. **Retry 401** : un token périmé est rejeté soit au niveau HTTP (401/403), soit dans
-     l'enveloppe JSON (`message.header.status_code == 401`). On invalide le cache et on
-     réessaie une fois avec un token frais.
+  2. **Token factice** : quand l'IP est flaggée ou le CAPTCHA-gate actif, Musixmatch
+     renvoie un token de forme valide mais inutilisable — soit contenant « UpgradeOnly »,
+     soit un seul caractère répété (56 zéros observés le 2026-09-05). `_is_degenerate_token`
+     les rejette AVANT usage ET avant mise en cache : accepté, un leurre empoisonne le
+     cache fichier pour toute la durée du TTL et rend le run silencieusement stérile.
+  3. **Retry 401** : un token périmé est rejeté au niveau HTTP (401/403), dans l'enveloppe
+     JSON racine (`message.header.status_code`) **ou dans un SOUS-APPEL macro** — ce
+     dernier cas ressortait en « absent » (cf. `_macro_auth_failed`). On invalide le cache
+     et on réessaie une fois avec un token frais.
   4. **Dégradation propre** : toute erreur (réseau, parsing, blocage) renvoie None sans
      jamais lever — c'est une source facultative, elle ne doit jamais casser le pipeline.
 
@@ -118,6 +121,25 @@ _ARTIST_MATCH_MIN = 0.55
 _AUTH_FAILURE = object()
 
 
+def _is_degenerate_token(token: str) -> bool:
+    """Token de FORME valide mais inutilisable (leurre servi par Musixmatch).
+
+    Quand l'IP est bridée ou que la requête sent le robot, `token.get` répond
+    HTTP 200 avec un jeton factice au lieu d'une erreur. Deux formes observées :
+    la mention `UpgradeOnly`, et une suite d'un seul caractère répété — mesuré
+    le 2026-09-05, 56 zéros mis en cache puis utilisés pendant tout un run.
+
+    Le tester ici plutôt qu'au site d'appel : c'est la SEULE façon de ne pas
+    empoisonner le cache fichier pour la durée du TTL.
+    """
+    t = (token or "").strip()
+    if not t or "UpgradeOnly" in t:
+        return True
+    # Un vrai usertoken est une empreinte variée ; un seul caractère répété
+    # (zéros, 'x'…) sur toute la longueur ne peut pas en être un.
+    return len(set(t)) == 1
+
+
 # ── Normalisation / matching (copies locales : module autonome, comme lrclib_api) ─
 def _looks_synced(lrc: str | None) -> bool:
     """Un LRC exploitable contient au moins une balise `[mm:ss...]`."""
@@ -154,7 +176,7 @@ class MusixmatchAPI:
 
         # Token épinglé optionnel : amorce le cache, expiry gérée normalement.
         pinned = (os.getenv("MUSIXMATCH_USER_TOKEN") or "").strip()
-        if pinned and "UpgradeOnly" not in pinned:
+        if pinned and not _is_degenerate_token(pinned):
             self._token, self._token_ts = pinned, time.time()
 
     # ── Gestion du token ────────────────────────────────────────────────────────
@@ -167,7 +189,7 @@ class MusixmatchAPI:
             if self.token_file.exists():
                 data = json.loads(self.token_file.read_text(encoding="utf-8"))
                 tok, ts = data.get("token"), float(data.get("obtained_at", 0))
-                if tok and "UpgradeOnly" not in tok and (now - ts) < _TOKEN_TTL:
+                if tok and not _is_degenerate_token(tok) and (now - ts) < _TOKEN_TTL:
                     self._token, self._token_ts = tok, ts
                     return tok
         except (OSError, ValueError, TypeError) as e:  # cache corrompu → on l'ignore
@@ -203,8 +225,8 @@ class MusixmatchAPI:
             return None
         token = ((env.get("message") or {}).get("body") or {}).get("user_token") or ""
         # Garde-fou #2 : token de forme valide mais inutilisable.
-        if not token or "UpgradeOnly" in token:
-            logger.warning("Musixmatch: token 'UpgradeOnly'/vide rejeté (IP restreinte)")
+        if _is_degenerate_token(token):
+            logger.warning(f"Musixmatch: token factice rejeté ({token[:12]!r}…, IP restreinte)")
             return None
         self._save_token(token)
         logger.debug("Musixmatch: nouveau usertoken obtenu")
@@ -265,6 +287,25 @@ class MusixmatchAPI:
         body = (env.get("message") or {}).get("body") or {}
         calls = body.get("macro_calls")
         return calls if isinstance(calls, dict) else {}
+
+    @staticmethod
+    def _macro_auth_failed(calls: dict[str, dict]) -> bool:
+        """Un sous-appel macro porte-t-il un 401 ?
+
+        `macro.subtitles.get` peut répondre 200 à la racine tout en refusant
+        l'authentification DANS ses sous-appels. `_call_body` collapsait tout
+        non-200 en « pas de données » : un token refusé ressortait alors en
+        `absent`, verdict qui — par construction — n'est JAMAIS compté comme un
+        échec. L'auth cassée devenait donc invisible dans le panneau de santé,
+        exactement le trou de capteur que le modèle d'observabilité proscrit.
+        """
+        for call in calls.values():
+            if not isinstance(call, dict):
+                continue
+            header = ((call.get("message") or {}).get("header")) or {}
+            if header.get("status_code") == _STATUS_AUTH:
+                return True
+        return False
 
     @staticmethod
     def _call_body(calls: dict[str, dict], key: str) -> dict | None:
@@ -401,6 +442,9 @@ class MusixmatchAPI:
         calls = self._macro_calls(env)
         if not calls:
             return None
+        if self._macro_auth_failed(calls):
+            self._invalidate_token()
+            return _AUTH_FAILURE
 
         track = self._matched_track(calls)
         if not self._verify_match(track, track_name, artist_name):
@@ -571,6 +615,9 @@ class MusixmatchAPI:
         calls = self._macro_calls(env)
         if not calls:
             return None
+        if self._macro_auth_failed(calls):
+            self._invalidate_token()
+            return _AUTH_FAILURE
 
         track = self._matched_track(calls)
         if not self._verify_match(track, track_name, artist_name):

@@ -94,6 +94,51 @@ def _confidence_key(confidence: float | None) -> float:
     return confidence if confidence is not None else float("-inf")
 
 
+#: Streams Spotify. Deux sources l'alimentent depuis le 2026-09-05 (Kworb et le
+#: scrape des pages Spotify) : c'est ce qui rend l'arbitrage nécessaire, là où
+#: E7e pouvait s'en passer en le déclarant mono-source.
+SPOTIFY_STREAMS_FIELD = "spotify_streams"
+
+#: Ordre de repli par défaut, quand le maître demandé n'a rien observé.
+STREAMS_SOURCES = ("kworb", "spotify_web")
+
+
+def reconcile_spotify_streams(observations: list, master: str) -> Any:
+    """Valeur à inscrire en colonne pour les streams Spotify.
+
+    **Aucun vote numérique, et c'est délibéré** : les deux sources mesurent la
+    MÊME grandeur, et un écart entre elles est un décalage de FRAÎCHEUR (Kworb
+    porte sa date « Last updated », parfois vieille de plusieurs mois), pas un
+    désaccord de mesure. Moyenner, ou prendre le maximum, fabriquerait un nombre
+    que personne ne publie — exactement le genre de chiffre faux qui a l'air
+    juste. On DÉSIGNE donc une source maître ; l'autre ne sert que de repli
+    quand la maître n'a rien pour ce morceau.
+
+    Une observation `manual` court-circuite, comme pour le BPM : une saisie
+    humaine prime sur toute mesure automatique, sinon elle serait écrasée à la
+    relecture suivante.
+    """
+    manual = _manual_obs(observations)
+    if manual is not None:
+        return Resolution(SPOTIFY_STREAMS_FIELD, manual.value, MANUAL_SOURCE)
+
+    by_source = {obs.source: obs for obs in observations if obs.source != LEGACY_SOURCE}
+    ordre = (master, *(s for s in STREAMS_SOURCES if s != master))
+    for source in ordre:
+        obs = by_source.get(source)
+        if obs is not None and obs.value is not None:
+            return Resolution(SPOTIFY_STREAMS_FIELD, obs.value, source, obs.confidence)
+
+    # Source inattendue (renommage, nouvelle source non déclarée) : on ne perd
+    # pas la donnée pour autant, mais on ne la fait pas passer pour un verdict
+    # d'une source connue.
+    restantes = [o for o in observations if o.value is not None]
+    if restantes:
+        best = _best(restantes)
+        return Resolution(SPOTIFY_STREAMS_FIELD, best.value, best.source, best.confidence)
+    return None
+
+
 def _best(observations: list) -> Any:
     """Meilleure observation : confiance décroissante, puis fiabilité de source."""
     return max(
@@ -291,7 +336,9 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
         track.audio.reccobeats_resolution = reccobeats_resolution.value
 
 
-def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolution]:
+def reconcile(
+    observations: list, *, track_duration=None, streams_master: str = "kworb"
+) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.
 
     Renvoie un dict `field -> Resolution` (un champ absent des observations est
@@ -326,8 +373,14 @@ def reconcile(observations: list, *, track_duration=None) -> dict[str, Resolutio
         if lyrics_res is not None:
             resolutions[LYRICS_SYNCED_FIELD] = lyrics_res
 
+    streams_obs = by_field.get(SPOTIFY_STREAMS_FIELD, [])
+    if streams_obs:
+        streams_res = reconcile_spotify_streams(streams_obs, streams_master)
+        if streams_res is not None:
+            resolutions[SPOTIFY_STREAMS_FIELD] = streams_res
+
     # `bpm_alt` est consommé par la stratégie bpm (jamais un verdict autonome).
-    handled = {"bpm", "bpm_alt", *KEY_MODE_FIELDS, LYRICS_SYNCED_FIELD}
+    handled = {"bpm", "bpm_alt", *KEY_MODE_FIELDS, LYRICS_SYNCED_FIELD, SPOTIFY_STREAMS_FIELD}
     for field, obs_list in by_field.items():
         if field in handled:
             continue

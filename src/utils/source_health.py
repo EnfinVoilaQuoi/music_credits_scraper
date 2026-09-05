@@ -48,6 +48,7 @@ _FAST_TIMEOUT = 12
 # ── Sentinelles (mêmes que scripts/capture_fixtures.py) ────────────────────────
 _KWORB_ARTIST_ID = "6dbdXbyAWk2qx8Qttw0knR"  # Josman
 _SPOTIFY_TRACK_ID = "4WYhQviUDsXVzLp6oncwJS"  # Josman — Dans le vide
+_SPOTIFY_WEB_TRACK_ID = "3EDDunSmj8RbiVGU0Qr0M8"  # ISHA — CR600 (Bonus Track)
 _DEEZER_TRACK_ID = 3135556  # Daft Punk — Harder Better Faster Stronger (id stable Deezer)
 _LRCLIB_SENTINEL = {
     "track": "Dans le vide",
@@ -120,10 +121,10 @@ def _probe_spotify_web() -> list[str]:
     async def _run() -> list[str]:
         scraper = SpotifyWebScraper(headless=True)
         async with scraper.session() as sess:
-            data = await scraper.afetch_track(sess, _SPOTIFY_TRACK_ID)
+            data = await scraper.afetch_track(sess, _SPOTIFY_WEB_TRACK_ID)
         if not data:
             return ["page titre non rendue ou sans aucun compteur"]
-        if _SPOTIFY_TRACK_ID not in data["playcounts"]:
+        if _SPOTIFY_WEB_TRACK_ID not in data["playcounts"]:
             return ["compteur principal illisible (data-testid=playcount changé ?)"]
         return []
 
@@ -320,10 +321,18 @@ SOURCES: list[SourceSpec] = [
     SourceSpec(
         key="spotify_web",
         label="Spotify web (streams, auditeurs mensuels)",
+        # La sonde rapide ne mesure QUE la joignabilité : un GET nu rend le shell
+        # du lecteur web (157 Ko sans un seul compteur — la page est rendue côté
+        # client). Elle est verte tant que Spotify répond, y compris si le rendu
+        # des compteurs a cassé. Dire ce qu'elle mesure est ce qui la rend
+        # honnête ; c'est la sonde COMPLÈTE qui juge la donnée.
+        fast_url=f"https://open.spotify.com/intl-fr/track/{_SPOTIFY_WEB_TRACK_ID}",
+        fast_marker="Web Player",
         full_probe=_probe_spotify_web,
         notes=(
-            "SPA rendue au navigateur (patchright, profil dédié) — PAS de sonde "
-            "rapide : un GET nu rend 200 sur un HTML creux, il ne mesurerait rien"
+            "SPA rendue au navigateur (patchright, profil dédié, locale épinglée) ; "
+            "la sonde rapide ne prouve QUE la joignabilité — seule la sonde "
+            "complète vérifie que les compteurs se lisent encore"
         ),
         families=(Family.STREAMS,),
         usage_note="repli quand Kworb ignore l'artiste ; seule source des auditeurs mensuels",

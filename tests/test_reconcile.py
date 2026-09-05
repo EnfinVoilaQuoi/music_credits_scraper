@@ -8,7 +8,13 @@ Le moteur est PUR : il prend des `Observation` et rend un verdict par champ.
 """
 
 from src.enrichment.observation import Observation
-from src.enrichment.reconcile import apply_resolutions, reconcile
+from src.enrichment.reconcile import (
+    LEGACY_SOURCE,
+    MANUAL_SOURCE,
+    apply_resolutions,
+    reconcile,
+    reconcile_spotify_streams,
+)
 from src.models import Artist, Track
 
 # Attrs routés vers le sous-objet track.audio par le helper _track (Phase 5).
@@ -400,3 +406,72 @@ class TestReconcileLegacy:
         res = reconcile([_obs("bpm_alt", 90, "legacy")])
         assert "bpm" not in res
         assert "bpm_alt" not in res
+
+
+# ── Streams Spotify : deux sources, aucun vote numerique ─────────────────────
+class TestArbitrageStreamsSpotify:
+    """Kworb et le scrape des pages Spotify mesurent la MEME grandeur.
+
+    Un ecart entre eux est un decalage de FRAICHEUR (Kworb porte sa date
+    « Last updated », parfois vieille de plusieurs mois), pas un desaccord de
+    mesure : moyenner ou prendre le maximum fabriquerait un nombre que personne
+    ne publie. On designe donc une source maitre, l'autre servant de repli.
+    """
+
+    @staticmethod
+    def _obs(source, value, confidence=None):
+        return Observation(
+            field="spotify_streams", value=value, source=source, confidence=confidence
+        )
+
+    def test_le_maitre_gagne_meme_avec_la_valeur_la_plus_basse(self):
+        """Le point du dispositif : ce n'est PAS le plus grand nombre qui gagne."""
+        obs = [self._obs("kworb", 100), self._obs("spotify_web", 999)]
+        assert reconcile_spotify_streams(obs, "kworb").value == 100
+
+    def test_la_bascule_tient_en_un_reglage(self):
+        obs = [self._obs("kworb", 100), self._obs("spotify_web", 999)]
+        assert reconcile_spotify_streams(obs, "spotify_web").value == 999
+
+    def test_l_ordre_des_observations_est_sans_effet(self):
+        """Consequence recherchee : « Kworb puis Spotify » et l'inverse laissent
+        la base dans le meme etat."""
+        a = [self._obs("kworb", 100), self._obs("spotify_web", 999)]
+        b = [self._obs("spotify_web", 999), self._obs("kworb", 100)]
+        assert reconcile_spotify_streams(a, "kworb") == reconcile_spotify_streams(b, "kworb")
+
+    def test_repli_quand_le_maitre_n_a_rien(self):
+        """La raison d'etre du chantier : Kworb ne couvre pas tous les artistes."""
+        obs = [self._obs("spotify_web", 777)]
+        verdict = reconcile_spotify_streams(obs, "kworb")
+        assert verdict.value == 777
+        assert verdict.source == "spotify_web"
+
+    def test_une_saisie_manuelle_court_circuite(self):
+        obs = [self._obs("kworb", 100), self._obs("manual", 5)]
+        verdict = reconcile_spotify_streams(obs, "kworb")
+        assert verdict.value == 5
+        assert verdict.source == MANUAL_SOURCE
+
+    def test_une_observation_legacy_ne_bat_pas_une_source_reelle(self):
+        obs = [self._obs(LEGACY_SOURCE, 1), self._obs("spotify_web", 777)]
+        assert reconcile_spotify_streams(obs, "kworb").value == 777
+
+    def test_aucune_valeur_exploitable(self):
+        assert reconcile_spotify_streams([self._obs("kworb", None)], "kworb") is None
+        assert reconcile_spotify_streams([], "kworb") is None
+
+    def test_une_source_inattendue_n_est_pas_perdue(self):
+        """Renommage ou source non declaree : on garde la donnee, mais sans la
+        faire passer pour le verdict d'une source connue."""
+        verdict = reconcile_spotify_streams([self._obs("source_inconnue", 42)], "kworb")
+        assert verdict.value == 42
+        assert verdict.source == "source_inconnue"
+
+    def test_le_champ_passe_par_reconcile_complet(self):
+        """L'arbitrage doit etre atteint par `reconcile()`, pas seulement en appel
+        direct : sinon le repli generique (`BPM_SOURCE_RANK`, ou les deux sources
+        valent 0) trancherait au hasard."""
+        obs = [self._obs("kworb", 100), self._obs("spotify_web", 999)]
+        res = reconcile(obs, streams_master="spotify_web")
+        assert res["spotify_streams"].value == 999

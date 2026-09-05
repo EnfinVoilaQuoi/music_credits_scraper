@@ -26,12 +26,13 @@ class StreamsProvider:
     name = "streams"
     capabilities = {Capability.STREAMS}
 
-    def __init__(self, *, kworb=None, ytm=None):
+    def __init__(self, *, kworb=None, ytm=None, spotify_web=None):
         # Clients : injectés (tests) ou créés LAZY au 1er usage. Le client YTM est
         # PARTAGÉ entre les streams YTM et les vues vidéo (un seul `YTMusic()`
         # sur le batch, au lieu de deux instanciations comme avant le packaging).
         self._kworb = kworb
         self._ytm = ytm
+        self._spotify_web = spotify_web
 
     # ── Clients (lazy) ───────────────────────────────────────────────────────
 
@@ -41,6 +42,13 @@ class StreamsProvider:
 
             self._kworb = KworbScraper()
         return self._kworb
+
+    def _spotify_web_client(self):
+        if self._spotify_web is None:
+            from src.scrapers.spotify_web_scraper import SpotifyWebScraper
+
+            self._spotify_web = SpotifyWebScraper(headless=True)
+        return self._spotify_web
 
     def _ytm_client(self):
         if self._ytm is None:
@@ -57,6 +65,22 @@ class StreamsProvider:
 
         return update_kworb_streams(artist, data_manager, scraper=self._kworb_client())
 
+    def fetch_spotify_web(self, artist, data_manager, stop_requested=None) -> dict:
+        """Streams lus sur open.spotify.com — repli quand Kworb ignore l'artiste.
+
+        Apporte aussi les **auditeurs mensuels**, que Kworb ne donne pas du tout :
+        sur ce champ il n'y a pas d'arbitrage possible, Spotify est la seule
+        source.
+        """
+        from src.utils.update_spotify_streams import update_spotify_streams
+
+        return update_spotify_streams(
+            artist,
+            data_manager,
+            scraper=self._spotify_web_client(),
+            stop_requested=stop_requested,
+        )
+
     def fetch_ytm(self, artist, data_manager) -> dict:
         """Streams YouTube Music (gate d'identité de canal E8 inclus)."""
         from src.utils.update_ytmusic import update_ytmusic_streams
@@ -72,7 +96,7 @@ class StreamsProvider:
     def close(self) -> None:
         """Ferme les clients qui l'exposent (défensif — Kworb/YTM n'ont pas de
         ressource persistante ; no-op sinon)."""
-        for client in (self._kworb, self._ytm):
+        for client in (self._kworb, self._ytm, self._spotify_web):
             close = getattr(client, "close", None)
             if callable(close):
                 try:

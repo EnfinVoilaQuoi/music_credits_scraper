@@ -179,6 +179,16 @@ albums = Table(
     Column("ytm_streams", Integer),
     Column("ytm_streams_updated", TIMESTAMP),
     Column("spotify_album_ids", Text),
+    # Migration e14 : QUI a calculé `spotify_streams`. Kworb ne somme que les
+    # morceaux de l'artiste (total INCOMPLET sur un album commun ou de groupe),
+    # Spotify somme toutes les pistes du disque. Sans cette colonne, les deux
+    # sémantiques se mélangeraient en silence.
+    Column("spotify_streams_source", Text),
+    # Migration e15 : total de CHAQUE édition ({album_id: streams}). Le total
+    # du disque est la somme des enregistrements DISTINCTS — Spotify compte par
+    # enregistrement, pas par track_id, donc additionner les éditions
+    # compterait deux fois les titres partagés.
+    Column("spotify_editions_json", Text),
     UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )

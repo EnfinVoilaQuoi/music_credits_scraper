@@ -87,6 +87,7 @@ def update_spotify_streams(
     data_manager,
     scraper=None,
     stop_requested=None,
+    full_crawl: bool = True,
 ) -> dict:
     """Scrape open.spotify.com et met à jour streams et auditeurs mensuels.
 
@@ -96,6 +97,10 @@ def update_spotify_streams(
         scraper: SpotifyWebScraper injecté (tests / provider) ; créé sinon.
         stop_requested: callable testé ENTRE deux morceaux (jamais au milieu
             d'une écriture), pour une fermeture propre du worker.
+        full_crawl: à False, SEULE la page artiste est ouverte — auditeurs
+            mensuels et top 10, pour UNE page. Les passes par morceau et par
+            album, qui coûtent une page chacune, sont sautées. C'est le mode
+            qu'on peut se permettre à chaque run.
 
     Returns:
         dict résumé {recorded, harvested_foreign, unknown_ids, pages,
@@ -129,6 +134,7 @@ def update_spotify_streams(
                 spotify_artist_id,
                 stop_requested,
                 result,
+                full_crawl,
             )
         )
     finally:
@@ -165,6 +171,7 @@ async def _crawl(
     spotify_artist_id: str,
     stop_requested,
     result: dict,
+    full_crawl: bool = True,
 ) -> dict:
     """Les deux passes, sous UNE session navigateur.
 
@@ -204,6 +211,15 @@ async def _crawl(
             result["monthly_listeners"] = page["monthly_listeners"]
 
         _record(page["playcounts"], artist, data_manager, id_map, releves, result)
+
+        if not full_crawl:
+            # Mode léger : la page artiste seule. Elle rend déjà les auditeurs
+            # mensuels — que Kworb ne donne pas du tout — et le top 10, soit
+            # justement les morceaux que Kworb couvre le mieux, donc la
+            # comparaison des deux sources. Tout le reste se paie une page par
+            # morceau : c'est un choix, pas un défaut.
+            logger.info(f"Spotify web '{artist.name}' : page artiste seule (mode léger)")
+            return result
 
         # ── Passe B : les pages titre, par péremption, sous plafond ──────────
         queue = _build_queue(artist, data_manager, seen_dates, now, releves)

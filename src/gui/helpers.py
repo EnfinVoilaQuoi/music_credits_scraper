@@ -89,17 +89,31 @@ def _streams_complets(track) -> bool:
     jamais sortis). L'absence n'y est pas observable, elle ne peut donc jamais
     servir d'excuse.
 
-    **Spotify : exigé seulement si le morceau y est.** Là, l'absence SE CONSTATE
-    (aucun identifiant après résolution), et réclamer un chiffre qui n'existera
-    jamais condamnerait le morceau au triangle à perpétuité.
+    **Spotify : exigé seulement si l'absence est CONSTATÉE.** Un `spotify_id`
+    vide ne suffit pas — il dit aussi bien « pas sur Spotify » que « jamais
+    cherché ». Deux signaux tranchent :
 
-    ⚠️ Réserve : `spotify_id` vide veut aussi dire « jamais cherché ». La règle
-    suppose que la résolution d'ID a tourné — ce qui est le cas des morceaux
-    passés par un enrichissement, pas d'un import brut.
+      · `spotify_id_checked_at` (e17) : une résolution a été menée à terme. Sans
+        cette date, on ne valide pas — affirmer une absence qu'on n'a pas
+        constatée serait pire que de laisser un triangle.
+      · l'ISRC : un enregistrement distribué en a forcément un, donc un ISRC
+        sans identifiant Spotify trahit une résolution ratée, pas une absence.
+        L'inverse ne vaut PAS — 292 morceaux ont un ID Spotify sans ISRC en base
+        (le nôtre vient de Deezer), donc son absence ne prouve rien.
     """
     if not track.streams.ytm_streams:
         return False
-    return not (track.spotify_id and not track.streams.spotify_streams)
+    if track.spotify_id:
+        return bool(track.streams.spotify_streams)
+    if track.isrc:
+        # Un ISRC signe un enregistrement DISTRIBUÉ : il est donc presque
+        # sûrement sur Spotify, et ne pas avoir son identifiant est un échec de
+        # RÉSOLUTION, pas une absence. Mesuré le 2026-09-05 : 67 morceaux dans
+        # ce cas. (L'inverse ne vaut pas : 292 morceaux ont un ID Spotify SANS
+        # ISRC en base — le nôtre vient de Deezer, son absence ne prouve rien.)
+        return False
+    # Ni identifiant ni ISRC : le morceau est-il absent, ou jamais cherché ?
+    return bool(track.spotify_id_checked_at)
 
 
 def get_track_status_icon(track, disabled_ids) -> str:

@@ -28,6 +28,9 @@ def configure_tree_for_albums(app):
         "Paroles": (80, "center"),
         "Durée totale": (90, "center"),
         "Streams Spotify": (130, "e"),
+        # Provenance du total ci-contre : Kworb et Spotify ne comptent pas la
+        # même chose, et « Σ morceaux » n'est pas un total d'album du tout.
+        "Source": (90, "center"),
         "Streams YTM": (130, "e"),
     }
     for col in app.ALBUM_COLUMNS:
@@ -217,12 +220,20 @@ def populate_albums_table(app):
         yt = db.get("ytm_streams")
         # Pas de stats album Kworb (ligne Featurings, apparitions écartées,
         # singles) → fallback : somme des streams MORCEAU du groupe
+        somme_morceaux = not sp
         if not sp:
             sp = sum(t.streams.spotify_streams or 0 for t in tracks) or None
         if not yt:
             yt = sum(t.streams.ytm_streams or 0 for t in tracks) or None
         sp_streams = fmt_streams(sp)
         ytm_streams = fmt_streams(yt)
+        source_str = (
+            albums_grouping.streams_source_label(
+                db.get("spotify_streams_source"), somme_de_morceaux=somme_morceaux
+            )
+            if sp
+            else ""
+        )
 
         all_disabled = n > 0 and n_disabled == n
         item = app.tree.insert(
@@ -237,6 +248,7 @@ def populate_albums_table(app):
                 f"{lyrics}/{n}",
                 duree,
                 sp_streams,
+                source_str,
                 ytm_streams,
             ),
             tags=("disabled",) if all_disabled else (),

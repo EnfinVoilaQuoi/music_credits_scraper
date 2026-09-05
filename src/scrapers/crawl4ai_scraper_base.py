@@ -11,6 +11,7 @@ boucle applicative ; `_crawl_page` n'est plus qu'un pont bloquant
 
 import inspect
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from crawl4ai import BrowserConfig
@@ -87,9 +88,23 @@ class CrawlAIScraperBase:
     #: sert Genius par défaut ; `ultratop_fetch` l'instancie avec sa propre clé.
     HEALTH_KEY = "genius_scrape"
 
-    def __init__(self, headless: bool = True, health_key: str | None = None):
+    def __init__(
+        self,
+        headless: bool = True,
+        health_key: str | None = None,
+        profile_dir: str | None = None,
+        locale: str | None = None,
+    ):
         self.headless = headless
         self.health_key = health_key or self.HEALTH_KEY
+        # Profil PROPRE à ce scraper. Par défaut, le profil anti-Cloudflare partagé
+        # (Genius/RIAA) — mais une source SANS Cloudflare n'a rien à y faire : y
+        # mêler sa session encombrerait le profil qui porte le cf_clearance.
+        self.profile_dir = profile_dir
+        # Locale du contexte. Spotify choisit sa langue sur `navigator.language` et
+        # REDIRIGE l'URL en conséquence (`/intl-fr/…`) : sans épinglage, le libellé
+        # sur lequel s'accrochent les parseurs change avec la machine.
+        self.locale = locale
         self._browser_config = self._make_browser_config(headless)
 
     @staticmethod
@@ -286,6 +301,53 @@ class CrawlAIScraperBase:
                 self.health_key, IssueKind.UNREACHABLE, detail=f"{passe} : page vide"
             )
 
+    def _launch_kwargs(self, headless: bool) -> dict:
+        """Arguments de lancement du contexte persistant, partagés par
+        `_patchright_fetch` (une page) et `session` (N pages)."""
+        kwargs = dict(
+            headless=headless,
+            user_agent=_USER_AGENT,
+            viewport={"width": 1280, "height": 900},
+        )
+        # channel="chrome" → utilise le vrai Chrome installé (passe mieux certains
+        # Cloudflare que le Chromium bundlé)
+        if _BROWSER_CHANNEL:
+            kwargs["channel"] = _BROWSER_CHANNEL
+        if self.locale:
+            kwargs["locale"] = self.locale
+        return kwargs
+
+    @asynccontextmanager
+    async def session(self, headless: bool | None = None):
+        """Ouvre UNE session navigateur pour enchaîner N pages.
+
+        `acrawl_page` ouvre — et referme — un contexte à CHAQUE appel : sur trois
+        cents morceaux, cela fait trois cents lancements de navigateur. Cette
+        session garde une page ouverte, donc le cache JS reste chaud et la session
+        du site continue d'un appel au suivant.
+
+        Elle NE reprend PAS l'échelle CDP → headless → fenêtre visible : cette
+        escalade n'a de sens que face à un challenge Cloudflare, et une source qui
+        n'en a pas n'a aucune raison d'en payer la complexité. `acrawl_page` reste
+        le chemin Cloudflare, inchangé.
+
+        Usage :
+            async with scraper.session() as sess:
+                html = await sess.fetch(url, wait_for="css:…")
+        """
+        from patchright.async_api import async_playwright
+
+        profile_dir = self.profile_dir or _profile_dir()
+        os.makedirs(profile_dir, exist_ok=True)
+        launch = self._launch_kwargs(self.headless if headless is None else headless)
+        async with async_playwright() as pw:
+            ctx = await pw.chromium.launch_persistent_context(profile_dir, **launch)
+            try:
+                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+                yield _BrowserSession(self, page)
+            finally:
+                await ctx.close()
+
     async def _patchright_fetch(
         self,
         url: str,
@@ -310,7 +372,7 @@ class CrawlAIScraperBase:
             )
             return None, None, True
 
-        profile_dir = _profile_dir()
+        profile_dir = self.profile_dir or _profile_dir()
         os.makedirs(profile_dir, exist_ok=True)
         # Sélecteur « vraie page chargée » : conteneur paroles (présent sur toute page Genius)
         sel = (
@@ -329,16 +391,9 @@ class CrawlAIScraperBase:
                     page = await ctx.new_page()
                     logger.info(f"{self.__class__.__name__}: connecté via CDP à {_CDP_URL}")
                 else:
-                    launch_kwargs = dict(
-                        headless=headless,
-                        user_agent=_USER_AGENT,
-                        viewport={"width": 1280, "height": 900},
+                    ctx = await pw.chromium.launch_persistent_context(
+                        profile_dir, **self._launch_kwargs(headless)
                     )
-                    # channel="chrome" → utilise le vrai Chrome installé (passe
-                    # mieux certains Cloudflare que le Chromium bundlé)
-                    if _BROWSER_CHANNEL:
-                        launch_kwargs["channel"] = _BROWSER_CHANNEL
-                    ctx = await pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
                     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
                 try:
@@ -399,3 +454,64 @@ class CrawlAIScraperBase:
                 'id="challenge-form"',
             )
         )
+
+
+class _BrowserSession:
+    """Une page ouverte, N navigations. Rendue par `CrawlAIScraperBase.session`.
+
+    ⚠️ Cette classe n'ouvre **aucune observation** : elle n'enregistre que des
+    TENTATIVES (un aller-retour réseau). L'observation — l'appel LOGIQUE, qui
+    porte le verdict — appartient à l'appelant, parce que lui seul sait où finit
+    l'unité de travail : récupérer la page d'un morceau PUIS la parser, c'est un
+    seul verdict, pas deux. Ouvrir un verdict ici le trancherait trop tôt.
+    """
+
+    def __init__(self, scraper: CrawlAIScraperBase, page):
+        self._scraper = scraper
+        self._page = page
+
+    @property
+    def page(self):
+        """La page patchright, pour les interactions que `fetch` ne couvre pas."""
+        return self._page
+
+    async def fetch(
+        self,
+        url: str,
+        *,
+        wait_for: str | None = None,
+        js_before_wait: str | None = None,
+        wait_timeout: int = 15_000,
+        page_timeout: int = 30_000,
+        delay_before_return: float = 0.0,
+    ) -> str | None:
+        """Navigue et rend le HTML rendu, ou `None` si la page n'est pas venue."""
+        key = self._scraper.health_key
+        try:
+            await self._page.goto(url, wait_until="domcontentloaded", timeout=page_timeout)
+            if wait_for and wait_for.startswith("css:"):
+                try:
+                    await self._page.wait_for_selector(wait_for[4:], timeout=wait_timeout)
+                except PatchrightError:
+                    # Sélecteur absent : on rend quand même le HTML. C'est à
+                    # l'appelant de dire si c'est une donnée absente ou une
+                    # structure changée — lui seul sait ce qu'il cherchait.
+                    logger.debug(f"{url}: sélecteur {wait_for[4:]} non apparu")
+            if js_before_wait:
+                try:
+                    await self._page.evaluate(js_before_wait)
+                except PatchrightError as e:
+                    logger.debug(f"{url}: js_before_wait ignoré ({e})")
+            if delay_before_return:
+                await self._page.wait_for_timeout(int(delay_before_return * 1000))
+            html = await self._page.content()
+        except PatchrightError as e:
+            source_usage.note_failure(key, e, detail=f"session : {e}")
+            logger.error(f"{type(self._scraper).__name__}: session {url}: {e}")
+            return None
+
+        if not html:
+            source_usage.record_attempt(key, IssueKind.UNREACHABLE, detail="session : page vide")
+            return None
+        source_usage.record_attempt(key, IssueKind.OK, detail="session")
+        return html

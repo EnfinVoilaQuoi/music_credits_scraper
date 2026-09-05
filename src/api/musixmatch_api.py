@@ -40,8 +40,15 @@ Vérifications de correspondance :
     approximatif) : rejet si en dessous des seuils → évite d'attacher les mauvaises paroles.
 
 Sortie : dict homogène avec `lrclib_api` (drop-in comme peer source), plus un helper
-`get_synced_as_source3()` qui renvoie directement la forme de `lyrics_sync.compare_synced`
-(`{'lrc','source','confidence','note'}`, confidence=1 = source unique/dernier recours).
+`get_synced_as_source3_async()` qui renvoie directement la forme de
+`lyrics_sync.compare_synced` (`{'lrc','source','confidence','note'}`, confidence=1 =
+source unique/dernier recours).
+
+Voie SYNC retirée le 2026-09-05 (A3) : elle n'avait plus d'appelant depuis le câblage
+des jumeaux async (le provider injecte `_MusixmatchBridge`, qui expose l'interface sync
+et route vers l'async). Ce n'était donc pas un filet — rien n'y basculait — mais deux
+implémentations à corriger en parallèle : les deux défauts trouvés le jour même ont dû
+être appliqués deux fois, et le premier ne l'avait été QUE sur la voie morte.
 
 Coupe-circuit : `MUSIXMATCH_ENABLED=false` (env) désactive la source sans toucher au code
 — utile car cette API privée peut cesser de fonctionner sans préavis.
@@ -59,7 +66,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-import requests
 
 if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
@@ -159,17 +165,6 @@ class MusixmatchAPI:
             enabled = os.getenv("MUSIXMATCH_ENABLED", "true").strip().lower() != "false"
         self.enabled = enabled
 
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": _USER_AGENT,
-                "Accept": "application/json",
-                "Accept-Language": "en",
-                # Amadoue le load-balancer AWS ; inoffensif sinon (cf. plugin de référence).
-                "Cookie": "AWSELB=0; AWSELBCORS=0",
-            }
-        )
-
         # Cache token en mémoire : (token, obtained_at_epoch).
         self._token: str | None = None
         self._token_ts: float = 0.0
@@ -215,72 +210,7 @@ class MusixmatchAPI:
         except OSError:
             pass
 
-    def _fetch_new_token(self) -> str | None:
-        """Appelle `token.get`, applique les gardes-fous, met en cache. None si échec."""
-        status, env = self._api_get("token.get", {"user_language": "en"}, with_token=False)
-        if env is None:
-            return None
-        if status == _STATUS_AUTH or _envelope_status(env) == _STATUS_AUTH:
-            logger.warning("Musixmatch: 401 sur token.get (IP flaggée / CAPTCHA-gate ?)")
-            return None
-        token = ((env.get("message") or {}).get("body") or {}).get("user_token") or ""
-        # Garde-fou #2 : token de forme valide mais inutilisable.
-        if _is_degenerate_token(token):
-            logger.warning(f"Musixmatch: token factice rejeté ({token[:12]!r}…, IP restreinte)")
-            return None
-        self._save_token(token)
-        logger.debug("Musixmatch: nouveau usertoken obtenu")
-        return token
-
-    def _get_token(self, force_refresh: bool = False) -> str | None:
-        if not force_refresh:
-            cached = self._load_cached_token()
-            if cached:
-                return cached
-        else:
-            self._invalidate_token()
-        return self._fetch_new_token()
-
     # ── HTTP ──────────────────────────────────────────────────────────────────────
-    def _api_get(
-        self, action: str, params: dict, with_token: bool = True
-    ) -> tuple[int | None, dict | None]:
-        """
-        GET vers l'endpoint desktop avec retries réseau/5xx (respecte DELAY/MAX_RETRIES).
-        Ajoute `app_id`, `format`, `t` (anti-cache) et le `usertoken` si demandé.
-        Renvoie (http_status, enveloppe_json) ; (status, None) si parsing/échec définitif.
-        """
-        q = dict(params)
-        q["app_id"] = _APP_ID
-        q["format"] = "json"
-        q["t"] = str(int(time.time() * 1000))
-        if with_token:
-            tok = self._load_cached_token() or self._fetch_new_token()
-            if not tok:
-                return _STATUS_AUTH, None
-            q["usertoken"] = tok
-
-        url = f"{_API_BASE}/{action}"
-        last_err = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                r = self.session.get(url, params=q, timeout=self.timeout)
-                if r.status_code == _STATUS_OK:
-                    try:
-                        return _STATUS_OK, r.json()
-                    except ValueError as e:
-                        last_err = f"JSON invalide ({e})"
-                        return _STATUS_OK, None  # 200 mais corps illisible : inutile de réessayer
-                if r.status_code in (401, 403):
-                    return _STATUS_AUTH, None  # auth : ne pas réessayer aveuglément
-                last_err = f"HTTP {r.status_code}"  # 5xx/429 → retry
-            except requests.RequestException as e:
-                last_err = str(e)
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(max(DELAY_BETWEEN_REQUESTS, 0.5) * (attempt + 1))
-        logger.debug(f"Musixmatch {action} échec ({last_err})")
-        return None, None
-
     # ── Extraction depuis la réponse macro ────────────────────────────────────────
     @staticmethod
     def _macro_calls(env: dict) -> dict[str, dict]:
@@ -384,114 +314,6 @@ class MusixmatchAPI:
         return t_ok and a_ok
 
     # ── Point d'entrée ────────────────────────────────────────────────────────────
-    def get_synced(
-        self,
-        track_name: str,
-        artist_name: str,
-        duration: float | None = None,
-        album_name: str | None = None,
-    ) -> dict | None:
-        """
-        Récupère les paroles synchronisées Musixmatch (SOURCE 3, dernier recours).
-
-        Renvoie un dict homogène avec `lrclib_api` :
-        {'lyrics_synced', 'lyrics', 'source':'Musixmatch', 'musixmatch_track_id',
-        'duration', 'instrumental'} ou None (rien trouvé / désactivé / erreur).
-        `album_name` est ignoré (non utilisé par l'endpoint) — présent pour homogénéité
-        de signature avec `LRCLIBAPI.get_synced`.
-        """
-        if not self.enabled or not track_name or not artist_name:
-            return None
-
-        # Passe 1, puis retry unique après refresh si échec d'auth (garde-fou #3).
-        result = self._try_fetch(track_name, artist_name, duration, force_token=False)
-        if result is _AUTH_FAILURE:
-            logger.debug("Musixmatch: auth échouée → refresh token + retry")
-            result = self._try_fetch(track_name, artist_name, duration, force_token=True)
-        return None if result is _AUTH_FAILURE else result
-
-    def _try_fetch(
-        self, track_name: str, artist_name: str, duration: float | None, force_token: bool
-    ):
-        """Une passe complète. Renvoie un dict, None, ou la sentinelle _AUTH_FAILURE."""
-        if force_token and self._get_token(force_refresh=True) is None:
-            return _AUTH_FAILURE
-
-        params = {
-            "q_track": track_name,
-            "q_artist": artist_name,
-            "namespace": "lyrics_richsynced",
-            "optional_calls": "track.richsync",
-            "subtitle_format": "lrc",
-        }
-        # Match serveur par durée réelle quand on la connaît (cohérent projet).
-        if duration and duration > 0:
-            params["f_subtitle_length"] = str(int(round(duration)))
-            params["f_subtitle_length_max_deviation"] = "3"
-
-        status, env = self._api_get("macro.subtitles.get", params, with_token=True)
-        if status == _STATUS_AUTH:
-            self._invalidate_token()
-            return _AUTH_FAILURE
-        if env is None:
-            return None
-        if _envelope_status(env) == _STATUS_AUTH:
-            self._invalidate_token()
-            return _AUTH_FAILURE
-
-        calls = self._macro_calls(env)
-        if not calls:
-            return None
-        if self._macro_auth_failed(calls):
-            self._invalidate_token()
-            return _AUTH_FAILURE
-
-        track = self._matched_track(calls)
-        if not self._verify_match(track, track_name, artist_name):
-            return None  # mauvais morceau → on n'attache rien
-
-        synced = self._subtitle_lrc(calls) or self._richsync_as_lrc(calls)
-        plain, instrumental = self._plain_lyrics(calls)
-        if not synced and not plain and not instrumental:
-            return None
-
-        track = track or {}
-        tid = track.get("track_id")
-        tdur = track.get("track_length") or (int(round(duration)) if duration else None)
-
-        if synced:
-            logger.info("🎵 Musixmatch: '%s - %s' (synchro, id=%s)", artist_name, track_name, tid)
-        else:
-            logger.debug("Musixmatch: seulement texte brut pour '%s - %s'", artist_name, track_name)
-
-        return {
-            "lyrics_synced": synced,
-            "lyrics": plain,
-            "source": "Musixmatch",
-            "musixmatch_track_id": tid,
-            "duration": tdur,
-            "instrumental": instrumental,
-        }
-
-    def get_synced_as_source3(
-        self, track_name: str, artist_name: str, duration: float | None = None
-    ) -> dict | None:
-        """
-        Variante prête à brancher dans la branche « LRCLIB ET YTM vides » du pipeline :
-        renvoie la forme de `lyrics_sync.compare_synced`
-        (`{'lrc','source','confidence','note'}`) ou None. `confidence=1` (source unique,
-        dernier recours → candidate à vérification manuelle, même sémantique que le BPM).
-        """
-        hit = self.get_synced(track_name, artist_name, duration=duration)
-        if not hit or not hit.get("lyrics_synced"):
-            return None
-        return {
-            "lrc": hit["lyrics_synced"],
-            "source": "Musixmatch",
-            "confidence": 1,
-            "note": "source unique (Musixmatch, dernier recours)",
-        }
-
     # ── Jumeaux ASYNC (F5) : même logique + gardes-fous, sur l'AsyncHttpSession ──
     # Le cache token (mémoire + fichier) et les helpers d'extraction/vérification
     # (purs) sont RÉUTILISÉS tels quels : seuls les appels HTTP passent en async.
@@ -543,8 +365,9 @@ class MusixmatchAPI:
             logger.warning("Musixmatch: 401 sur token.get (IP flaggée / CAPTCHA-gate ?)")
             return None
         token = ((env.get("message") or {}).get("body") or {}).get("user_token") or ""
-        if not token or "UpgradeOnly" in token:
-            logger.warning("Musixmatch: token 'UpgradeOnly'/vide rejeté (IP restreinte)")
+        # Garde-fou #2 : token de forme valide mais inutilisable.
+        if _is_degenerate_token(token):
+            logger.warning(f"Musixmatch: token factice rejeté ({token[:12]!r}…, IP restreinte)")
             return None
         self._save_token(token)
         logger.debug("Musixmatch: nouveau usertoken obtenu (async)")

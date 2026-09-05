@@ -8,6 +8,7 @@ contrôle titre/artiste qui rejette les faux positifs, et le choix entre
 Aucun appel réseau ; le cache de jeton est écrit dans `tmp_path`.
 """
 
+import asyncio
 import json
 import time
 
@@ -301,13 +302,13 @@ class TestTokenFactice:
     def test_un_leurre_n_est_pas_mis_en_cache(self, client, monkeypatch):
         """Le point critique : refuser le leurre APRÈS l'avoir écrit ne servirait
         à rien — le fichier resterait empoisonné pour tout le TTL."""
-        monkeypatch.setattr(
-            client,
-            "_api_get",
-            lambda *a, **kw: (200, {"message": {"body": {"user_token": "0" * 56}}}),
-        )
 
-        assert client._fetch_new_token() is None
+        async def faux_get(*a, **kw):
+            return 200, {"message": {"body": {"user_token": "0" * 56}}}
+
+        monkeypatch.setattr(client, "_api_get_async", faux_get)
+
+        assert asyncio.run(client._fetch_new_token_async(None)) is None
         assert not client.token_file.exists()
 
     def test_un_leurre_deja_en_cache_est_ignore(self, client):
@@ -355,11 +356,12 @@ class TestAuthDansUnSousAppelMacro:
         """Bout en bout : la sentinelle d'auth doit remonter pour déclencher le
         refresh + retry, au lieu de rendre None (lu comme « absent »)."""
         client._token, client._token_ts = "un-vrai-token", time.time()
-        monkeypatch.setattr(
-            client,
-            "_api_get",
-            lambda *a, **kw: (200, _macro(**{"track.subtitles.get": _appel({}, statut=401)})),
-        )
 
-        assert client._try_fetch("Titre", "Artiste", None, force_token=False) is mod._AUTH_FAILURE
+        async def faux_get(*a, **kw):
+            return 200, _macro(**{"track.subtitles.get": _appel({}, statut=401)})
+
+        monkeypatch.setattr(client, "_api_get_async", faux_get)
+
+        resultat = asyncio.run(client._try_fetch_async(None, "Titre", "Artiste", None, False))
+        assert resultat is mod._AUTH_FAILURE
         assert client._token is None  # cache invalidé

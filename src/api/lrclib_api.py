@@ -185,13 +185,40 @@ class LRCLIBAPI:
         `/search` (titre + artiste) puis sélection du meilleur candidat :
         titre fort exigé, départage par la durée (±2 s privilégié) si connue.
         """
+        return self._select_hit(
+            self._search_raw(track_name, artist_name),
+            track_name,
+            artist_name,
+            duration,
+            require_synced,
+        )
+
+    def _search_raw(self, track_name: str, artist_name: str | None) -> list:
+        """Résultats BRUTS de `/search`, sans sélection.
+
+        Séparé de la sélection parce que `require_synced` est un filtre LOCAL et
+        non un paramètre de requête : les deux passes de `get_synced` (synchro
+        exigée, puis texte brut accepté) interrogeaient donc l'API DEUX FOIS avec
+        une URL identique. Mesuré sur un run de 26 morceaux : 21 allers-retours
+        inutiles, la moitié du trafic LRCLIB.
+        """
         params = {"track_name": track_name}
         if artist_name:
             params["artist_name"] = artist_name
         results = self._request("/search", params)
-        if not isinstance(results, list) or not results:
-            return None
+        return results if isinstance(results, list) else []
 
+    def _select_hit(
+        self,
+        results: list,
+        track_name: str,
+        artist_name: str | None,
+        duration: int | None,
+        require_synced: bool,
+    ) -> dict | None:
+        """Meilleur candidat d'une liste `/search` déjà obtenue (pur, sans réseau)."""
+        if not results:
+            return None
         best = _best_search_hit(results, track_name, artist_name, duration, require_synced)
         return self._pack(best) if best else None
 
@@ -226,8 +253,12 @@ class LRCLIBAPI:
                     obs.ok()
                     return hit
 
+            # 2) et 3) partagent la MÊME requête `/search` : `require_synced` ne
+            # filtre que localement, la relancer était un aller-retour pour rien.
+            results = self._search_raw(track_name, artist_name)
+
             # 2) Fallback recherche (titre fort + départage durée)
-            hit = self.search(track_name, artist_name, duration=duration, require_synced=True)
+            hit = self._select_hit(results, track_name, artist_name, duration, True)
             if hit and hit.get("lyrics_synced"):
                 logger.info(
                     f"🎵 LRCLIB /search: '{artist_name} - {track_name}' (synchro, id={hit.get('lrclib_id')})"
@@ -235,8 +266,8 @@ class LRCLIBAPI:
                 obs.ok()
                 return hit
 
-            # 3) Dernier recours : texte brut (pas de synchro) via /search
-            hit = self.search(track_name, artist_name, duration=duration, require_synced=False)
+            # 3) Dernier recours : texte brut (pas de synchro), même liste
+            hit = self._select_hit(results, track_name, artist_name, duration, False)
             if hit:
                 logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
                 obs.ok()
@@ -290,14 +321,18 @@ class LRCLIBAPI:
         require_synced: bool = True,
     ) -> dict | None:
         """Jumeau async de `search` (sélection via `_best_search_hit`, partagée)."""
+        results = await self._search_raw_async(http, track_name, artist_name)
+        return self._select_hit(results, track_name, artist_name, duration, require_synced)
+
+    async def _search_raw_async(
+        self, http: "AsyncHttpSession", track_name: str, artist_name: str | None
+    ) -> list:
+        """Jumeau async de `_search_raw` (résultats bruts, sélection séparée)."""
         params = {"track_name": track_name}
         if artist_name:
             params["artist_name"] = artist_name
         results = await self._request_async(http, "/search", params)
-        if not isinstance(results, list) or not results:
-            return None
-        best = _best_search_hit(results, track_name, artist_name, duration, require_synced)
-        return self._pack(best) if best else None
+        return results if isinstance(results, list) else []
 
     async def get_synced_async(
         self,
@@ -330,7 +365,11 @@ class LRCLIBAPI:
                 obs.ok()
                 return hit
 
-        hit = await self.search_async(http, track_name, artist_name, duration=duration)
+        # Une SEULE requête `/search` pour les deux passes : `require_synced`
+        # est un filtre local (cf. `_search_raw`).
+        results = await self._search_raw_async(http, track_name, artist_name)
+
+        hit = self._select_hit(results, track_name, artist_name, duration, True)
         if hit and hit.get("lyrics_synced"):
             logger.info(
                 f"🎵 LRCLIB /search: '{artist_name} - {track_name}' "
@@ -339,9 +378,7 @@ class LRCLIBAPI:
             obs.ok()
             return hit
 
-        hit = await self.search_async(
-            http, track_name, artist_name, duration=duration, require_synced=False
-        )
+        hit = self._select_hit(results, track_name, artist_name, duration, False)
         if hit:
             logger.debug(f"LRCLIB: seulement texte brut pour '{artist_name} - {track_name}'")
             obs.ok()

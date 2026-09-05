@@ -9,6 +9,7 @@ Aucun appel réseau ; le cache de jeton est écrit dans `tmp_path`.
 """
 
 import json
+import time
 
 import pytest
 
@@ -18,8 +19,13 @@ from src.api.musixmatch_api import MusixmatchAPI
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(mod, "_TOKEN_CACHE", tmp_path / "musixmatch_token.json", raising=False)
-    return MusixmatchAPI()
+    # Le cache token passe par le PARAMÈTRE du constructeur. La version d'origine
+    # patchait `mod._TOKEN_CACHE` — un nom qui n'existe pas (la constante est
+    # `_TOKEN_FILE`), neutralisé par `raising=False` : la redirection ne prenait
+    # pas et le client retombait sur le VRAI `data/.musixmatch_token.json`.
+    # Sans écriture dans les tests d'alors c'était inoffensif ; ça ne l'est plus.
+    monkeypatch.delenv("MUSIXMATCH_USER_TOKEN", raising=False)
+    return MusixmatchAPI(token_file=tmp_path / "musixmatch_token.json")
 
 
 class TestNormalisation:
@@ -256,3 +262,104 @@ class TestVerificationDuMatch:
 
     def test_featuring_dans_le_titre_tolere(self, client):
         assert client._verify_match(self._track(titre="Titre"), "Titre (feat. SCH)", "ISHA") is True
+
+
+class TestTokenFactice:
+    """Musixmatch répond HTTP 200 avec un JETON LEURRE quand l'IP est bridée.
+
+    Deux formes observées : la mention `UpgradeOnly`, et un seul caractère
+    répété — 56 zéros mesurés le 2026-09-05, acceptés puis écrits dans le cache
+    fichier, ce qui a rendu tout un run silencieusement stérile pendant la durée
+    du TTL (9 min).
+    """
+
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "0" * 56,
+            "x" * 40,
+            "  " + "0" * 56 + "  ",  # espaces autour : même leurre
+            "",
+            "   ",
+            None,
+            "abc123UpgradeOnlyxyz",
+        ],
+    )
+    def test_leurres_rejetes(self, token):
+        assert mod._is_degenerate_token(token) is True
+
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "1f2e3d4c5b6a7988",
+            "00000000000000000000000000000000000000000000000000000001",  # un seul écart suffit
+        ],
+    )
+    def test_vrais_tokens_acceptes(self, token):
+        assert mod._is_degenerate_token(token) is False
+
+    def test_un_leurre_n_est_pas_mis_en_cache(self, client, monkeypatch):
+        """Le point critique : refuser le leurre APRÈS l'avoir écrit ne servirait
+        à rien — le fichier resterait empoisonné pour tout le TTL."""
+        monkeypatch.setattr(
+            client,
+            "_api_get",
+            lambda *a, **kw: (200, {"message": {"body": {"user_token": "0" * 56}}}),
+        )
+
+        assert client._fetch_new_token() is None
+        assert not client.token_file.exists()
+
+    def test_un_leurre_deja_en_cache_est_ignore(self, client):
+        """Cache écrit par une version antérieure du garde-fou : il doit être
+        écarté à la relecture, pas resservi jusqu'à sa péremption."""
+        client.token_file.parent.mkdir(parents=True, exist_ok=True)
+        client.token_file.write_text(
+            json.dumps({"token": "0" * 56, "obtained_at": time.time()}), encoding="utf-8"
+        )
+        client._token, client._token_ts = None, 0.0
+
+        assert client._load_cached_token() is None
+
+
+class TestAuthDansUnSousAppelMacro:
+    """`macro.subtitles.get` peut répondre 200 à la RACINE et refuser l'auth dans
+    un sous-appel. `_call_body` collapsait tout non-200 en « pas de données » :
+    le verdict sortait en `absent`, qui par construction n'est JAMAIS compté comme
+    un échec — l'auth cassée devenait invisible dans le panneau de santé."""
+
+    def test_401_interne_detecte(self, client):
+        calls = {"track.subtitles.get": _appel({"subtitle": {}}, statut=401)}
+        assert client._macro_auth_failed(calls) is True
+
+    def test_un_seul_sous_appel_suffit(self, client):
+        calls = {
+            "matcher.track.get": _appel({"track": {}}),
+            "track.subtitles.get": _appel({}, statut=401),
+        }
+        assert client._macro_auth_failed(calls) is True
+
+    @pytest.mark.parametrize("statut", [200, 404, 500])
+    def test_les_autres_statuts_ne_sont_pas_de_l_auth(self, client, statut):
+        """Un 404 reste une ABSENCE : ne pas requalifier en panne ce qui n'en est
+        pas une, sinon le taux d'échec se met à compter les morceaux inconnus."""
+        assert client._macro_auth_failed({"k": _appel({}, statut=statut)}) is False
+
+    def test_sous_appels_malformes(self, client):
+        assert client._macro_auth_failed({"k": "pas un dict", "j": {}}) is False
+
+    def test_aucun_sous_appel(self, client):
+        assert client._macro_auth_failed({}) is False
+
+    def test_le_401_interne_invalide_le_token_et_remonte(self, client, monkeypatch):
+        """Bout en bout : la sentinelle d'auth doit remonter pour déclencher le
+        refresh + retry, au lieu de rendre None (lu comme « absent »)."""
+        client._token, client._token_ts = "un-vrai-token", time.time()
+        monkeypatch.setattr(
+            client,
+            "_api_get",
+            lambda *a, **kw: (200, _macro(**{"track.subtitles.get": _appel({}, statut=401)})),
+        )
+
+        assert client._try_fetch("Titre", "Artiste", None, force_token=False) is mod._AUTH_FAILURE
+        assert client._token is None  # cache invalidé

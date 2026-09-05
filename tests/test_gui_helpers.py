@@ -150,6 +150,11 @@ class TestIconeDeStatut:
         t.audio.key = "C"
         t.audio.mode = "Major"
         t.add_credit(Credit(name="Producteur X", role=CreditRole.PRODUCER))
+        # Les streams comptent depuis le 2026-09-05 : un morceau « complet » doit
+        # donc porter les siens (cf. TestStatutStreams pour la règle par
+        # plateforme).
+        t.spotify_id = "0000000000000000000000"
+        t.streams.spotify_streams = 1000
         return t
 
     def test_complet(self):
@@ -190,4 +195,62 @@ class TestIconeDeStatut:
     def test_album_absent_n_est_pas_bloquant(self):
         t = self._track_complet()
         t.album = None
+        assert helpers.get_track_status_icon(t, set()) == "✅"
+
+
+# ── Statut : les streams comptent, plateforme par plateforme ─────────────────
+class TestStatutStreams:
+    """Depuis que le scrape Spotify est en place (2026-09-05), l'absence de
+    compteur est un trou et non plus une fatalité. Mais un morceau qui n'existe
+    pas sur une plateforme n'y aura JAMAIS de streams : l'exiger le marquerait
+    incomplet à perpétuité."""
+
+    @staticmethod
+    def _complet(spotify_id=None, youtube_url=None, sp=None, yt=None):
+        from src.models import Artist, Track
+
+        t = Track(title="T", artist=Artist(name="A"))
+        t.id = 1
+        t.release_date = "2020-01-01"
+        t.duration = 180
+        t.lyrics.text = "des paroles"
+        t.audio.bpm = 120
+        t.audio.musical_key = "C major"
+        t.credits = [Credit(name="X", role=CreditRole.PRODUCER)]
+        t.spotify_id = spotify_id
+        t.youtube_url = youtube_url
+        t.streams.spotify_streams = sp
+        t.streams.ytm_streams = yt
+        return t
+
+    def test_les_deux_plateformes_servies(self):
+        t = self._complet(spotify_id="ID", youtube_url="http://y", sp=10, yt=5)
+        assert helpers.get_track_status_icon(t, set()) == "✅"
+
+    def test_sur_spotify_sans_compteur_spotify(self):
+        t = self._complet(spotify_id="ID", youtube_url="http://y", sp=None, yt=5)
+        assert helpers.get_track_status_icon(t, set()) == "⚠️"
+
+    def test_uniquement_sur_youtube_les_streams_YT_suffisent(self):
+        """Le cas que l'utilisateur a signalé : réclamer un chiffre Spotify à un
+        morceau absent de Spotify le condamnerait au triangle pour toujours."""
+        t = self._complet(spotify_id=None, youtube_url="http://y", sp=None, yt=5)
+        assert helpers.get_track_status_icon(t, set()) == "✅"
+
+    def test_uniquement_sur_spotify_les_streams_Sp_suffisent(self):
+        t = self._complet(spotify_id="ID", youtube_url=None, sp=10, yt=None)
+        assert helpers.get_track_status_icon(t, set()) == "✅"
+
+    def test_sur_youtube_sans_compteur_YT(self):
+        t = self._complet(spotify_id=None, youtube_url="http://y", sp=None, yt=None)
+        assert helpers.get_track_status_icon(t, set()) == "⚠️"
+
+    def test_present_nulle_part_et_sans_aucun_compteur(self):
+        t = self._complet()
+        assert helpers.get_track_status_icon(t, set()) == "⚠️"
+
+    def test_present_nulle_part_mais_un_compteur_connu(self):
+        """Aucun identifiant de plateforme, mais un chiffre : rien de plus à
+        réclamer — on n'exige pas une donnée dont on ignore si elle existe."""
+        t = self._complet(sp=10)
         assert helpers.get_track_status_icon(t, set()) == "✅"

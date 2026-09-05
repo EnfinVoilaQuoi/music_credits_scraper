@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover
 
 
 from src.observability import source_usage
+from src.utils.title_matching import names_match_as_words
 
 logger = logging.getLogger("YTMusicAPI")
 
@@ -396,13 +397,16 @@ class YTMusicAPI:
                 obs.absent("aucun résultat de recherche")
                 return None
 
-            na = _normalize(artist)
             chosen = None
             for r in results:
                 if not r.get("videoId"):
                     continue
                 arts = " ".join(a.get("name", "") for a in (r.get("artists") or []))
-                if na in _normalize(arts) or _normalize(arts) in na:
+                # Inclusion en MOTS ENTIERS : la comparaison par sous-chaîne nue
+                # acceptait « Williams » pour « IAM » et « Misha Van Der Werf »
+                # pour « Isha » — soit les paroles ET les timestamps d'un autre
+                # morceau écrits sur le nôtre. 5ᵉ site du même piège (2026-09-05).
+                if names_match_as_words(artist, arts):
                     chosen = r
                     break
             if not chosen:

@@ -180,6 +180,26 @@ class TestVoteIdentiteArtiste:
         s = self._scraper(tmp_path, [{"name": "Isha", "id": "ISHA"}])
         assert s.get_artist_id_from_track("T1", expected_name="Isha (rappeur)") == "ISHA"
 
+    @pytest.mark.parametrize(
+        ("attendu", "credite"),
+        [
+            ("Isha", "Misha Van Der Werf"),
+            ("SCH", "ScHoolboy Q"),
+            ("IAM", "Williams"),
+        ],
+    )
+    def test_homonyme_par_sous_chaine_ne_vote_pas(self, tmp_path, attendu, credite):
+        """L'inclusion était comparée par SOUS-CHAÎNE nue jusqu'au 2026-09-05 :
+        un homonyme raflait le vote, et cet ID artiste irrigue ensuite ReccoBeats,
+        Kworb et les streams — le faux positif ne se voyait qu'en bout de chaîne."""
+        s = self._scraper(tmp_path, [{"name": credite, "id": "ETRANGER"}])
+        assert s.get_artist_id_from_track("T1", expected_name=attendu) is None
+
+    def test_inclusion_en_mot_entier_conservee(self, tmp_path):
+        """Le relâchement utile survit : « Jul » est bien un mot de « Jul & SCH »."""
+        s = self._scraper(tmp_path, [{"name": "Jul & SCH", "id": "COMMUN"}])
+        assert s.get_artist_id_from_track("T1", expected_name="Jul") == "COMMUN"
+
     def test_apostrophes_typographiques(self, tmp_path):
         s = self._scraper(tmp_path, [{"name": "Limsa d’Aulnay", "id": "LIMSA"}])
         assert s.get_artist_id_from_track("T1", expected_name="Limsa d'Aulnay") == "LIMSA"

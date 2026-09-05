@@ -154,6 +154,11 @@ credits = Table(
     Column("role", Text, nullable=False),
     Column("role_detail", Text),
     Column("source", Text),
+    # Pistes de la galette auxquelles le crédit s'applique (« A1,B3 »), séparées
+    # de `role_detail` qui, lui, qualifie le RÔLE (e18). Déclarée APRÈS `source` :
+    # `ALTER TABLE ADD COLUMN` ajoute en fin de table, et `test_alembic_baseline`
+    # exige que ce fichier rende le MÊME DDL que la suite des migrations.
+    Column("tracks", Text),
     UniqueConstraint("track_id", "name", "role", "role_detail"),
     sqlite_autoincrement=True,
 )

@@ -227,7 +227,11 @@ class Credit:
 
     name: str
     role: CreditRole
-    role_detail: str | None = None  # Ex: "Guitar", "Piano", etc.
+    role_detail: str | None = None  # Qualifie le RÔLE : "Guitar", "Piano"…
+    # Pistes de la galette d'où vient le crédit ("A1,B3") — Discogs seul.
+    # SÉPARÉ de `role_detail` (e18) : les deux y cohabitaient, et le code
+    # écrasait l'un avec l'autre selon le sens du `or`.
+    tracks: str | None = None
     source: str = "genius"  # Source de l'information
 
     def to_dict(self) -> dict:

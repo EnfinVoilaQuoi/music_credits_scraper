@@ -14,7 +14,7 @@ import pytest
 
 from src.api.discogs_api import DiscogsClient
 from src.models import Artist, Track
-from src.models.track import CreditRole
+from src.models.track import Credit, CreditRole
 
 
 @pytest.fixture
@@ -195,13 +195,17 @@ class TestExtractionDesCredits:
     def test_credits_simples(self, client):
         release = _Release(credits=[_Credit("Kore", "Producer")])
         credits = client._extract_credits_from_release(release)
-        assert credits == [{"name": "Kore", "role": "Producer", "role_detail": None}]
+        assert credits == [{"name": "Kore", "role": "Producer", "tracks": None}]
 
     def test_pistes_concernees_conservees(self, client):
         """Discogs précise les pistes d'un crédit (« A1, B4 ») : l'information
-        distingue un producteur d'album d'un producteur d'un seul morceau."""
+        distingue un producteur d'album d'un producteur d'un seul morceau.
+
+        La clé s'appelait `role_detail` (e18) alors qu'elle portait les PISTES :
+        c'est cette confusion de nom qui a fait cohabiter deux données dans une
+        seule colonne."""
         release = _Release(credits=[_Credit("Kore", "Producer", tracks="A1, B4")])
-        assert client._extract_credits_from_release(release)[0]["role_detail"] == "A1, B4"
+        assert client._extract_credits_from_release(release)[0]["tracks"] == "A1, B4"
 
     def test_deux_sources_fusionnees(self, client):
         """Les crédits arrivent dans `credits` ET `extraartists` selon les
@@ -401,35 +405,26 @@ class TestEnrichissementDuTrack:
         assert track.credits[0].role == CreditRole.OTHER
         assert track.credits[0].role_detail == "Tape Op"
 
-    def test_le_libelle_survit_a_la_presence_de_pistes(self, client, monkeypatch):
-        """CORRIGÉ le 2026-09-04. `role_detail` portait DEUX informations
-        concurrentes via un `or` (« pistes OU libellé si OTHER ») : quand Discogs
-        fournissait les deux, le libellé disparaissait — 21 crédits `Other` sur
-        203 en base portent « 16 » ou « 3, 5, 7, 14 » à sa place. Ce n'est pas
-        cosmétique : `Track.get_video_credits` reclasse un OTHER en crédit VIDÉO
-        d'après les mots de `role_detail`, qu'un numéro de piste aveugle."""
-        credits = [{"name": "Quelqu'un", "role": "Tape Op", "role_detail": "A1, A2"}]
+    def test_le_libelle_ET_les_pistes_survivent_ensemble(self, client, monkeypatch):
+        """Deux corrections successives sur le même défaut, et seule la seconde
+        le règle. Le code d'origine posait `pistes or (libellé si OTHER)` : quand
+        Discogs fournissait les deux, le LIBELLÉ disparaissait. Inverser la
+        priorité (2026-09-04) n'a fait que déplacer la perte sur les PISTES.
+
+        Ce test portait alors l'ancienne assertion — il gelait la moitié perdue.
+        Une colonne pour chacune (e18) le rend enfin vrai des deux côtés."""
+        credits = [{"name": "Quelqu'un", "role": "Tape Op", "tracks": "A1, A2"}]
         self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
         track = _track()
 
         client.enrich_track_data(track)
         assert track.credits[0].role_detail == "Tape Op"
-
-    def test_les_pistes_restent_sur_un_role_reconnu(self, client, monkeypatch):
-        """Le libellé ne prime QUE sur OTHER : sur un rôle connu, `role_detail`
-        garde son autre usage — dire sur quelles pistes la personne intervient."""
-        credits = [{"name": "Producteur X", "role": "Producer", "role_detail": "A1, A2"}]
-        self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
-        track = _track()
-
-        client.enrich_track_data(track)
-        assert track.credits[0].role == CreditRole.PRODUCER
-        assert track.credits[0].role_detail == "A1, A2"
+        assert track.credits[0].tracks == "A1, A2"
 
     def test_un_credit_video_range_en_other_reste_detectable(self, client, monkeypatch):
         """La conséquence concrète du correctif : `get_video_credits` retrouve le
         crédit vidéo là où le numéro de piste le lui cachait."""
-        credits = [{"name": "Quelqu'un", "role": "Camera Operator", "role_detail": "16"}]
+        credits = [{"name": "Quelqu'un", "role": "Camera Operator", "tracks": "16"}]
         self._stub(client, monkeypatch, _donnees(discogs_id=None, genres=None, credits=credits))
         track = _track()
 
@@ -457,3 +452,103 @@ class TestEnrichissementDuTrack:
 
         monkeypatch.setattr(client, "search_track", _lever)
         assert client.enrich_track_data(_track()) is False
+
+
+class TestPistesEtLibelleNeSeDisputentPlusLaColonne:
+    """`role_detail` qualifie le RÔLE ; `tracks` dit d'où vient le crédit.
+
+    Les deux partageaient `role_detail` : le code écrivait `pistes or (libellé si
+    OTHER)`, donc perdait le libellé ; l'inverse (2026-09-04) perdait les pistes.
+    Mesuré avant correction : 209 lignes portaient une référence de piste dans
+    `role_detail`, dont 21 en `OTHER` — les seules NUISIBLES, puisque
+    `Track.get_video_credits` reclasse un OTHER en crédit vidéo d'après les MOTS
+    de `role_detail`.
+    """
+
+    def _enrichir(self, client, monkeypatch, role, tracks):
+        monkeypatch.setattr(
+            client,
+            "search_track",
+            lambda *a, **k: _donnees(credits=[{"name": "X", "role": role, "tracks": tracks}]),
+        )
+        track = _track()
+        client.enrich_track_data(track)
+        return track.credits[0]
+
+    def test_un_role_inconnu_garde_son_libelle_ET_ses_pistes(self, client, monkeypatch):
+        """Le cas qui perdait de l'information dans les deux versions du code."""
+        credit = self._enrichir(client, monkeypatch, "Stylist", "A1,B3")
+
+        assert credit.role == CreditRole.OTHER
+        assert credit.role_detail == "Stylist"  # le libellé, lisible
+        assert credit.tracks == "A1,B3"  # et les pistes, à leur place
+
+    def test_un_role_mappe_n_a_pas_de_libelle_redondant(self, client, monkeypatch):
+        """Le rôle mappé dit déjà tout : répéter « Producer » dans `role_detail`
+        n'ajouterait rien et rouvrirait la confusion."""
+        credit = self._enrichir(client, monkeypatch, "Producer", "A1")
+
+        assert credit.role == CreditRole.PRODUCER
+        assert credit.role_detail is None
+        assert credit.tracks == "A1"
+
+    def test_sans_piste_le_libelle_reste(self, client, monkeypatch):
+        credit = self._enrichir(client, monkeypatch, "Stylist", None)
+        assert credit.role_detail == "Stylist" and credit.tracks is None
+
+    def test_une_reference_de_piste_ne_declenche_plus_de_faux_credit_video(
+        self, client, monkeypatch
+    ):
+        """La conséquence concrète du mélange : `get_video_credits` cherche des
+        MOTS dans `role_detail`. Un numéro de piste n'a rien à y faire."""
+        credit = self._enrichir(client, monkeypatch, "Video Editor", "A1")
+
+        assert credit.role_detail != "A1"
+
+
+class TestReimportIdempotent:
+    """`Track.add_credit` dédoublonne sur (name, role, role_detail). Un ré-import
+    avec des rôles CORRIGÉS ajoutait donc le nouveau crédit À CÔTÉ de l'ancien —
+    la clé de dédup ayant justement changé, elle ne pouvait pas les rapprocher.
+    """
+
+    def _client_rendant(self, client, monkeypatch, role):
+        monkeypatch.setattr(
+            client,
+            "search_track",
+            lambda *a, **k: _donnees(credits=[{"name": "Kore", "role": role, "tracks": None}]),
+        )
+
+    def test_deux_imports_identiques_ne_doublent_pas(self, client, monkeypatch):
+        self._client_rendant(client, monkeypatch, "Producer")
+        track = _track()
+
+        client.enrich_track_data(track)
+        client.enrich_track_data(track)
+
+        assert len(track.credits) == 1
+
+    def test_un_role_corrige_REMPLACE_au_lieu_de_s_ajouter(self, client, monkeypatch):
+        """Le cas qui motivait la purge : sans elle, on obtenait deux crédits
+        pour la même personne, l'ancien rôle et le nouveau."""
+        self._client_rendant(client, monkeypatch, "Stylist")
+        track = _track()
+        client.enrich_track_data(track)
+
+        self._client_rendant(client, monkeypatch, "Producer")
+        client.enrich_track_data(track)
+
+        assert [(c.name, c.role) for c in track.credits] == [("Kore", CreditRole.PRODUCER)]
+
+    def test_les_credits_des_AUTRES_sources_sont_epargnes(self, client, monkeypatch):
+        """Discogs est ADDITIF, pas confirmatif (mesuré 2026-09-03 : 818 paires
+        propres à Discogs contre 22 concordantes avec Genius). Purger ses propres
+        lignes ne doit jamais toucher celles de Genius."""
+        self._client_rendant(client, monkeypatch, "Producer")
+        track = _track()
+        track.add_credit(Credit(name="Genius Guy", role=CreditRole.WRITER, source="genius"))
+
+        client.enrich_track_data(track)
+
+        sources = sorted(c.source for c in track.credits)
+        assert sources == ["discogs", "genius"]

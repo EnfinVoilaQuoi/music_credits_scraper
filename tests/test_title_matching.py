@@ -5,7 +5,7 @@ Les cas historiques de faux non-matchés (JOURNAL 2026-07-02) sont verrouillés 
 
 import pytest
 
-from src.utils.title_matching import normalize_title
+from src.utils.title_matching import base_album_key, normalize_title
 
 
 class TestCasHistoriques:
@@ -56,3 +56,37 @@ class TestNormalisation:
     def test_vide_et_none(self):
         assert normalize_title("") == ""
         assert normalize_title(None) == ""
+
+
+# ── Rattachement des éditions ────────────────────────────────────────────────
+class TestBaseAlbumKey:
+    """Une réédition porte un titre DIFFÉRENT (« … [Bonus] »). Sans la rattacher
+    à son album, ses pistes disparaissent du total côté Spotify, et son
+    identifiant d'édition se perd côté Kworb — l'album ressort alors sous son
+    vrai chiffre sans que rien ne le signale.
+    """
+
+    CONNUES = {"man black roses lost feelings", "matrix", "dom perignon crying"}
+
+    @pytest.mark.parametrize(
+        "titre",
+        [
+            "man black roses lost feelings bonus",
+            "dom perignon crying bonus",
+            "matrix deluxe",
+            "matrix reedition",
+            "matrix collector",
+            "matrix remastered",
+        ],
+    )
+    def test_une_edition_rejoint_son_album(self, titre):
+        assert base_album_key(titre, self.CONNUES) is not None
+
+    @pytest.mark.parametrize("titre", ["matrix ii", "matrix 2", "matrix reloaded", "autre chose"])
+    def test_une_SUITE_reste_un_autre_album(self, titre):
+        """Le garde qui justifie une liste FERMÉE de marqueurs : un simple
+        préfixe commun rattacherait « Matrix II » à « Matrix »."""
+        assert base_album_key(titre, self.CONNUES) is None
+
+    def test_correspondance_exacte_d_abord(self):
+        assert base_album_key("matrix", self.CONNUES) == "matrix"

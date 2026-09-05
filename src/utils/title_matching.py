@@ -91,3 +91,34 @@ def normalize_title(s: str) -> str:
     s = re.sub(r"\s+(?=\d)", "", s)
     s = re.sub(r"\s+", " ", s).strip().lower()
     return s
+
+
+#: Suffixes qui désignent une ÉDITION d'un disque, et non un autre disque.
+#: Liste FERMÉE, et c'est le point : un simple préfixe commun rattacherait une
+#: suite (« Matrix II ») à son aînée.
+_MARQUEURS_EDITION = re.compile(
+    r"^\s*(bonus|deluxe|de luxe|reedition|reissue|edition|version|remaster\w*"
+    r"|anniversaire|collector|integrale)\b",
+    re.IGNORECASE,
+)
+
+
+def base_album_key(titre_normalise: str, cles_connues) -> str | None:
+    """Album de la base auquel rattacher une entrée d'album, ou None.
+
+    Correspondance exacte d'abord. Sinon, une entrée qui PROLONGE un titre connu
+    par un marqueur d'édition (« [Bonus] », « (Deluxe) »…) est une édition du
+    même disque, pas un autre album.
+
+    Partagé par le scrape Spotify (pour additionner les pistes d'une réédition)
+    et par Kworb (pour ne pas perdre l'identifiant d'une édition qu'il écarte).
+    Une seule implémentation : deux copies d'un matcher, c'est la garantie qu'un
+    futur correctif n'en touchera qu'une (cf. JOURNAL 2026-09-04).
+    """
+    if titre_normalise in cles_connues:
+        return titre_normalise
+    for cle in cles_connues:
+        reste = titre_normalise[len(cle) :]
+        if titre_normalise.startswith(cle) and _MARQUEURS_EDITION.match(reste):
+            return cle
+    return None

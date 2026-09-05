@@ -119,6 +119,54 @@ class TestParoles:
         api.yt = _YTLyrics(search=[_resultat(artiste="Un Autre Rappeur")])
         assert api.get_lyrics("ISHA", "Titre") is None
 
+    @pytest.mark.parametrize(
+        ("cherche", "credite"),
+        [
+            ("Isha", "Misha Van Der Werf"),
+            ("IAM", "Williams"),
+            ("SCH", "ScHoolboy Q"),
+            ("Jul", "Julien Doré"),
+        ],
+    )
+    def test_homonyme_par_sous_chaine_refuse(self, api, cherche, credite):
+        """Le contrôle comparait par SOUS-CHAÎNE nue jusqu'au 2026-09-05 : ces
+        quatre résultats étaient acceptés, et leurs paroles — timestamps compris —
+        écrites sur notre morceau. `test_artiste_non_confirme` ne le voyait pas :
+        « Un Autre Rappeur » échoue déjà avec l'ancienne règle."""
+        api.yt = _YTLyrics(
+            search=[_resultat(artiste=credite)],
+            watch={"lyrics": "b1"},
+            lyrics_sync={"lyrics": "Les paroles de quelqu'un d'autre"},
+        )
+        assert api.get_lyrics(cherche, "Titre") is None
+
+    @pytest.mark.parametrize(
+        ("cherche", "credite"),
+        [
+            ("Jul", "Jul & SCH"),  # l'inclusion utile : un mot du tout
+            ("Isha", "ISHA"),  # casse
+            ("Isha", "Isha (7)"),  # suffixe de désambiguïsation Genius
+            ("Limsa d'Aulnay", "Limsa d’Aulnay"),  # apostrophe typographique
+        ],
+    )
+    def test_relachement_utile_preserve(self, api, cherche, credite):
+        api.yt = _YTLyrics(
+            search=[_resultat(artiste=credite)],
+            watch={"lyrics": "b1"},
+            lyrics_sync={"lyrics": "Nos paroles"},
+        )
+        assert api.get_lyrics(cherche, "Titre")["lyrics"] == "Nos paroles"
+
+    def test_artiste_confirme_sur_un_credite_secondaire(self, api):
+        """Le champ `artists` d'un résultat concatène tous les crédités : notre
+        artiste peut n'être que le second."""
+        api.yt = _YTLyrics(
+            search=[{"videoId": "v1", "artists": [{"name": "Limsa d'Aulnay"}, {"name": "Isha"}]}],
+            watch={"lyrics": "b1"},
+            lyrics_sync={"lyrics": "Nos paroles"},
+        )
+        assert api.get_lyrics("Isha", "Titre")["lyrics"] == "Nos paroles"
+
     def test_resultat_sans_video_id(self, api):
         api.yt = _YTLyrics(search=[{"artists": [{"name": "ISHA"}]}])
         assert api.get_lyrics("ISHA", "Titre") is None

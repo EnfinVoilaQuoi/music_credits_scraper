@@ -29,6 +29,7 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import build_spotify_match_prompt, get_shared_extractor
+from src.utils.title_matching import names_match_as_words
 
 logger = logging.getLogger("SpotifyIDScraper")
 
@@ -460,10 +461,13 @@ class SpotifyIDScraper:
             return None
 
         if expected_name:
-            exp = self._normalize_apostrophes(expected_name).lower().strip()
             for a in artists:
-                name = self._normalize_apostrophes(a["name"]).lower().strip()
-                if name and (name == exp or name in exp or exp in name):
+                # Inclusion en MOTS ENTIERS. La comparaison par sous-chaîne nue
+                # retenait un homonyme (« Isha » ⊂ « Misha Van Der Werf ») — et
+                # cet ID artiste irrigue ensuite ReccoBeats, Kworb et les streams,
+                # donc le faux positif ne se voyait qu'en bout de chaîne.
+                # `normalize_name` unifie déjà les apostrophes typographiques.
+                if names_match_as_words(a["name"], expected_name):
                     logger.info(f"✅ ID artiste (crédité '{a['name']}'): {a['id']}")
                     return a["id"]
             logger.info(

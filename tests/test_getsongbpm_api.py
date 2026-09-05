@@ -101,6 +101,25 @@ class TestSelectionDuHit:
         hits = [_song(titre="Titre (Remix)"), _song(titre="Titre")]
         assert client._select_hit(hits, "ISHA", "Titre")["title"] == "Titre"
 
+    @pytest.mark.parametrize(
+        ("cherche", "propose"),
+        [("OG", "Yoga"), ("Quoi", "Pourquoi"), ("Pop", "Épopée"), ("Gang", "Gangrène")],
+    )
+    def test_repli_refuse_une_sous_chaine_intra_mot(self, client, cherche, propose):
+        """Le repli acceptait l'inclusion NUE : l'artiste étant ancré strictement,
+        c'est un AUTRE morceau du MÊME artiste qui était retenu — et son BPM
+        écrit sur le nôtre, sans que rien ne le signale."""
+        hits = [_song(titre=propose)]
+        assert client._select_hit(hits, "ISHA", cherche) is None
+
+    @pytest.mark.parametrize(
+        ("cherche", "propose"),
+        [("Titre", "Titre Intro"), ("CEO", "CEO Bonus"), ("Toi", "À cause de toi")],
+    )
+    def test_repli_conserve_l_inclusion_en_mot_entier(self, client, cherche, propose):
+        hits = [_song(titre=propose)]
+        assert client._select_hit(hits, "ISHA", cherche)["title"] == propose
+
     def test_artiste_en_liste(self, client):
         hits = [_song(artist=[{"name": "ISHA"}])]
         assert client._select_hit(hits, "ISHA", "Titre") is not None

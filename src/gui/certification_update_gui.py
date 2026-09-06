@@ -391,7 +391,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             contribue par LECTURE du corpus, complet et continu depuis 1995.
         On le dit à l'écran plutôt que de laisser croire à une requête.
         """
-        from src.utils.cert_artist import bilan_local, evolution, resume_bilan
+        from src.utils.cert_artist import (
+            bilan_de,
+            certifications,
+            evolution,
+            nouveautes,
+            recap,
+            repartition,
+        )
 
         noms = self._noms_artiste()
         if not noms:
@@ -402,7 +409,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             root = Path(__file__).parent.parent.parent
             py = sys.executable
             outputs = []
-            avant = bilan_local(noms)
+            certs_avant = certifications(noms)
             etiquette = " + ".join(noms)
             # `--artist` est RÉPÉTABLE sur les deux scripts : un seul
             # sous-processus par source, quel que soit le nombre de noms.
@@ -447,20 +454,30 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             except Exception:
                 logger.exception("Rafraîchissement du matcher")
 
-            apres = bilan_local(noms)
+            certs_apres = certifications(noms)
             outputs.append("BRMA : corpus local (Ultratop n'a pas de recherche par artiste)")
-            # Un total ne dit pas si le run a servi : « 12 certifications » se
-            # lit pareil qu'on en ait rapporté 12 ou zéro. L'écart, lui, informe.
-            resume = resume_bilan(apres) + "\n\n"
-            resume += f"Apport de ce run : {evolution(avant, apres)}"
+
+            # Le rapport dit CE QU'ON A, pas seulement combien : la liste des
+            # titres avec leur échelle datée. Des compteurs se lisent sans rien
+            # apprendre, et c'est justement l'échelle qui était la question — un
+            # titre Platine deux ans après sa sortie a-t-il eu son Or avant ?
+            neuves = nouveautes(certs_avant, certs_apres)
+            parts = [
+                "\n".join(outputs),
+                # L'écart d'abord : un total ne dit pas si le run a servi,
+                # « 12 certifications » se lit pareil qu'on en ait rapporté
+                # douze ou zéro.
+                f"Apport de ce run : {evolution(bilan_de(certs_avant), bilan_de(certs_apres))}",
+            ]
+            if ligne := repartition(certs_apres, noms):
+                parts.append(ligne)
+            parts.append(recap(certs_apres, neuves))
+            rapport = "\n\n".join(parts)
 
             self._set_progress(f"✅ Certifs récupérées pour {etiquette}")
             self.after(
                 0,
-                lambda: self._show_report_window(
-                    f"Certifs par artiste — {etiquette}",
-                    "\n".join(outputs) + "\n\n" + resume,
-                ),
+                lambda: self._show_report_window(f"Certifs par artiste — {etiquette}", rapport),
             )
             self.after(500, self._update_status)
 

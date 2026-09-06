@@ -138,6 +138,8 @@ class CertMatcher:
         # Normalisation partagée (parité entre sources garantie par cert_normalize)
         self._norm = _normalize_text
         self.df = self._load_all()
+        # Sous-ensembles par artiste (cf. `_sous_ensemble_artiste`).
+        self._cache_artiste: dict[str, pd.DataFrame] = {}
         logger.info(
             f"✅ CertMatcher : {len(self.df)} certifs unifiées "
             f"({self.df['body'].value_counts().to_dict() if not self.df.empty else {}})"
@@ -289,6 +291,26 @@ class CertMatcher:
         return rows
 
     # ------------------------------------------------------------------ matching
+    def _sous_ensemble_artiste(self, a: str) -> pd.DataFrame:
+        """Les seules lignes où `a` figure comme MOT — mémoïsées par artiste.
+
+        Toutes les stratégies commencent par filtrer sur l'artiste, et
+        `apply_certifications` traite un artiste ENTIER : sans mémoïsation, le
+        balayage des 61 015 lignes était refait pour chaque morceau ET chaque
+        stratégie, avec la même aiguille. Une fois réduit, le reste du travail
+        porte sur quelques centaines de lignes.
+
+        Le magasin est immuable pendant la vie du matcher (chargé au `__init__`,
+        `reset_cert_matcher()` en reconstruit un) : le cache n'a rien à invalider.
+        """
+        if a not in self._cache_artiste:
+            self._cache_artiste[a] = (
+                self.df[_contient_en_mots(self.df["artist_clean"], a)]
+                if not self.df.empty and a
+                else self.df
+            )
+        return self._cache_artiste[a]
+
     def _level_rank(self, level: str) -> float:
         lvl = (level or "").strip().lower()
         if lvl in _RANK:
@@ -304,7 +326,7 @@ class CertMatcher:
 
     def _track_match_indices(self, a: str, t: str) -> list[int]:
         """Stratégies SNEP portées (exact → feat → featuring → tronqué)."""
-        df = self.df
+        df = self._sous_ensemble_artiste(a)
         if df.empty or not a:
             return []
         seen: list[int] = []
@@ -326,10 +348,15 @@ class CertMatcher:
             add(df[(ac == a) & (tc == "")])
             return seen
 
-        # S1 : exact (artiste+titre), sinon inclusion en MOTS ENTIERS
+        # `df` est DÉJÀ restreint aux lignes où l'artiste figure en mot entier
+        # (`_sous_ensemble_artiste`) : re-tester l'artiste dans chaque stratégie
+        # serait une tautologie. Seul `ac == a`, plus STRICT que l'ancrage,
+        # garde un sens — c'est ce qui distingue la branche exacte du repli.
+
+        # S1 : exact (artiste+titre), sinon titre en MOTS ENTIERS
         s1 = df[(ac == a) & (tc == t)]
         if s1.empty:
-            s1 = df[_contient_en_mots(ac, a) & _contient_en_mots(tc, t)]
+            s1 = df[_contient_en_mots(tc, t)]
         add(s1)
 
         # S2 : si le titre contient un featuring, retenter avec la partie principale
@@ -338,11 +365,12 @@ class CertMatcher:
             main = m.group(1).strip()
             s2 = df[(ac == a) & (tc == main)]
             if s2.empty and main:
-                s2 = df[_contient_en_mots(ac, a) & _contient_en_mots(tc, main)]
+                s2 = df[_contient_en_mots(tc, main)]
             add(s2)
 
-        # S3 : l'artiste apparaît en featuring (artiste + titre en MOTS ENTIERS)
-        s3 = df[_contient_en_mots(ac, a) & _contient_en_mots(tc, t)]
+        # S3 : l'artiste apparaît en featuring (il est déjà dans `df`) — le titre
+        # en mots entiers suffit à retenir la ligne.
+        s3 = df[_contient_en_mots(tc, t)]
         add(s3)
 
         # S4 : titre de certif TRONQUÉ (préfixe du morceau) — en dernier recours
@@ -381,26 +409,26 @@ class CertMatcher:
         return self._format(self.df.loc[idx]) if idx else []
 
     def get_artist_certifications(self, artist: str) -> list[dict[str, Any]]:
-        """Toutes les certifs (tous pays) de l'artiste (match substring, comme SNEP)."""
+        """Toutes les certifs (tous pays) de l'artiste (artiste en MOT ENTIER)."""
         a = self._norm(artist)
-        df = self.df
-        if df.empty or not a:
+        if self.df.empty or not a:
             return []
-        return self._format(df[_contient_en_mots(df["artist_clean"], a)])
+        return self._format(self._sous_ensemble_artiste(a))
 
     def get_album_certifications(self, artist: str, album: str) -> list[dict[str, Any]]:
         """Certifs d'ALBUM (catégorie album) raccordées à cet album, tous pays."""
         a = self._norm(artist)
         t = self._norm(album)
-        df = self.df
-        if df.empty or not a or not t:
+        if self.df.empty or not a or not t:
             return []
+        # Sous-ensemble artiste d'abord ; le filtre `== a` de la branche EXACTE
+        # est conservé tel quel — il est plus strict que l'ancrage par mot, et
+        # le relâcher changerait quelles lignes sortent (pas seulement leur coût).
+        df = self._sous_ensemble_artiste(a)
         alb = df[df["cat"] == "album"]
         exact = alb[(alb["artist_clean"] == a) & (alb["title_clean"] == t)]
         if exact.empty:
-            exact = alb[
-                _contient_en_mots(alb["artist_clean"], a) & _contient_en_mots(alb["title_clean"], t)
-            ]
+            exact = alb[_contient_en_mots(alb["title_clean"], t)]
         return self._format(exact)
 
     def audit_artist_certifications(
@@ -434,8 +462,8 @@ class CertMatcher:
         # Une seule implémentation de l'ancrage, partagée avec les accesseurs :
         # cet audit portait sa propre copie, et c'est ce qui avait permis aux
         # accesseurs de garder la sous-chaîne nue jusqu'au 2026-09-06.
-        snep = self.df[self.df["body"] == "SNEP"]
-        certs = [r for _, r in snep[_contient_en_mots(snep["artist_clean"], a)].iterrows()]
+        sous = self._sous_ensemble_artiste(a)
+        certs = [r for _, r in sous[sous["body"] == "SNEP"].iterrows()]
 
         track_cleans = [self._norm(t) for t in track_titles if t]
         album_cleans = [self._norm(x) for x in (album_titles or []) if x]

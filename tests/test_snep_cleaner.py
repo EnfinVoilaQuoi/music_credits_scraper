@@ -345,3 +345,54 @@ class TestCLI:
         capsys.readouterr()
         assert vu["path"].name == "certif-.csv"
         assert vu["path"].parts[-3:-1] == ("certifications", "snep")
+
+
+class TestCorrectionsManuelles:
+    """Les libellés que la restauration automatique ne sait pas réparer.
+
+    Mesuré le 2026-09-06 : sur les 102 « ? » du CSV réel, l'écrasante majorité
+    sont de vrais points d'interrogation ; seule une poignée est corrompue
+    (DES?REE, MYTHOS?N, BROTHER LOUI?E). Ces cas-là se saisissent à la main, et
+    la correction doit être RÉAPPLIQUÉE à chaque nettoyage — un ré-import SNEP
+    ressert le libellé fautif, corriger le CSV en place ne tiendrait qu'un tour.
+    """
+
+    def test_la_correction_manuelle_est_appliquee(self, tmp_path, monkeypatch):
+        from src.utils.cert_normalize import cle_correction
+
+        monkeypatch.setattr(
+            sc,
+            "charger_fixes",
+            lambda source: {cle_correction("DES?REE", "LIFE"): {"title": "DES'REE — LIFE"}},
+        )
+        p = _ecrire(tmp_path / "c.csv", [_ligne(artist="DES?REE", title="LIFE")])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["manual_fixes_applied"] == 1
+        assert "DES'REE — LIFE" in format_report(rapport)
+
+    def test_sans_correction_rien_ne_change(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne(artist="DES?REE", title="LIFE")])
+
+        assert clean_snep_csv(p)["manual_fixes_applied"] == 0
+
+    def test_la_correction_manuelle_passe_APRES_la_restauration_auto(self, tmp_path, monkeypatch):
+        """La saisie ne sert qu'aux cas qu'aucun motif ne couvre : elle doit donc
+        s'appliquer au libellé DÉJÀ restauré, sinon sa clé ne correspondrait
+        jamais pour les libellés que l'automatique a modifiés."""
+        from src.utils.cert_normalize import cle_correction
+
+        # « L?EMPIRE » est restauré en « L'EMPIRE » par l'automatique.
+        monkeypatch.setattr(
+            sc,
+            "charger_fixes",
+            lambda source: {cle_correction("JUL", "L'EMPIRE"): {"title": "L'EMPIRE (REMIX)"}},
+        )
+        p = _ecrire(tmp_path / "c.csv", [_ligne(title="L?EMPIRE")])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["apostrophes_restored"] == 1
+        assert rapport["manual_fixes_applied"] == 1

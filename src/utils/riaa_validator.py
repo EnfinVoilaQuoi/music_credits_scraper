@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.utils.cert_normalize import riaa_units
+
 REQUIRED_COLS = ["Artist", "Title", "Certification_Date", "Certification_Type"]
 MEANINGFUL_YEAR_THRESHOLD = 12
 LOW_MONTH_THRESHOLD = 3
@@ -54,10 +56,17 @@ def _level_norm(lvl: str) -> str:
 
 
 def _level_known(lvl: str) -> bool:
-    n = (lvl or "").strip().lower()
-    return n in {"gold", "platinum", "diamond", "multi-platinum", "multi platinum"} or bool(
-        _MULTI_RE.match(n)
-    )
+    """Le niveau appartient-il à un référentiel RIAA connu ?
+
+    Délègue à `cert_normalize`, qui porte les DEUX programmes : le classique
+    (Gold/Platinum/Diamond) et le latin (Oro/Platino/Diamante). Ce validateur
+    avait sa propre liste, restée au seul vocabulaire américain — d'où un
+    verdict « anomalies détectées » portant sur 61 niveaux latins parfaitement
+    valides, pendant que le nettoyeur, lui, déclarait le fichier à jour. Deux
+    outils qui parlent du même fichier ne peuvent pas avoir chacun leur
+    référentiel.
+    """
+    return riaa_units(lvl) is not None
 
 
 def _load(csv_path: Path) -> pd.DataFrame:

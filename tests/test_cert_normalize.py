@@ -194,3 +194,30 @@ class TestSeuilsDEpoque:
         """`MT` (mastertones, observé en 2006) n'a pas de seuils documentés ici :
         on applique le barème commun plutôt que d'inventer une échelle."""
         assert riaa_units("Gold", date="2006-05-01", format_type="SINGLE", famille="MT") == 500_000
+
+
+class TestMultiplicateur:
+    """Le « Nx » ne s'applique qu'au palier PLATINE de chaque échelle.
+
+    Défaut attrapé par les tests du validateur le 2026-09-06 : le commentaire
+    disait déjà « 4x Gold n'existe pas », mais le code multipliait n'importe quel
+    palier — `riaa_units("4x Gold")` rendait 2 000 000, et le validateur
+    acceptait un niveau qui n'existe pas.
+    """
+
+    @pytest.mark.parametrize(
+        "niveau", ["4x Gold", "3x Gold", "2x Diamond", "2x Oro", "3x Diamante"]
+    )
+    def test_un_multiple_hors_platine_nest_pas_un_niveau(self, niveau):
+        assert riaa_units(niveau) is None
+        assert riaa_level(niveau) == niveau  # recopié, pas interprété
+
+    @pytest.mark.parametrize(
+        ("niveau", "unites"), [("4x Platinum", 4_000_000), ("61x Platino", 3_660_000)]
+    )
+    def test_le_platine_se_multiplie(self, niveau, unites):
+        assert riaa_units(niveau) == unites
+
+    def test_un_multiplicateur_de_un_est_absorbe(self):
+        assert riaa_level("1x Platinum") == "Platinum"
+        assert riaa_level("1x Gold") == "Gold"

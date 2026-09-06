@@ -12,6 +12,7 @@ import customtkinter as ctk
 import pandas as pd
 
 from src.gui.workers.lifecycle import start_worker, stop_requested
+from src.utils.cert_normalize import libelle_tronque
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -569,7 +570,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 )
                 actions = [
                     ("🧹 Nettoyer", self._clean_snep),
-                    ("✏️ Corriger les libellés (?)", self._editer_titres_corrompus),
+                    ("✏️ Corriger les libellés", self._editer_titres_corrompus),
                 ]
                 # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
                 # action sans objet, c'est laisser croire qu'il y a à faire.
@@ -847,8 +848,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         if not candidats:
             messagebox.showinfo(
                 "Titres à corriger",
-                "Aucun libellé porteur d'un « ? » que la restauration automatique "
-                "ne sache déjà réparer.",
+                "Aucun libellé cassé ou tronqué à arbitrer : ce que la restauration "
+                "automatique sait réparer l'est déjà.",
                 parent=self,
             )
             return
@@ -869,7 +870,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         Seuls les « ? » ENTRE DEUX LETTRES sont montrés d'emblée.
         """
         win = ctk.CTkToplevel(self)
-        win.title("Corriger les libellés (?)")
+        win.title("Corriger les libellés")
         win.geometry("980x620")
         win.transient(self)
         win.lift()
@@ -878,7 +879,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             win,
-            text="Libellés SNEP portant un « ? »",
+            text="Libellés SNEP cassés ou tronqués",
             font=("Arial", 16, "bold"),
         ).pack(pady=(12, 2))
         suspects = [c for c in candidats if c[0]]
@@ -887,7 +888,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             win,
             text=(
-                "Deux champs : ARTISTE puis TITRE ; le champ encadré porte le « ? ».\n"
+                "Deux champs : ARTISTE puis TITRE ; le champ encadré est celui à revoir.\n"
+                "Orange = « ? » corrompu · Bleu = libellé COUPÉ par la source "
+                "(il manque du texte).\n"
                 "« ✓ correct » mémorise que le libellé est BON tel quel : il ne "
                 "reviendra plus.\n"
                 "Les corrections sont réappliquées à chaque « 🧹 Nettoyer »."
@@ -918,8 +921,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         zone.pack(fill="both", expand=True, padx=12, pady=6)
 
-        # DEUX champs, artiste et titre : le « ? » est tantôt dans l'un, tantôt
-        # dans l'autre (« DES?REE — LIFE » : c'est l'ARTISTE qui est corrompu).
+        # DEUX champs, artiste et titre : le défaut est tantôt dans l'un, tantôt
+        # dans l'autre (« DES?REE — LIFE » : c'est l'ARTISTE qui est corrompu ;
+        # « LES T — QU'EST-CE QU'ON S'FAIT CHIER » : c'est lui qui est coupé).
         # N'offrir que le titre demandait de corriger ce qui n'était pas cassé.
         saisies = []
 
@@ -936,14 +940,21 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
             champs = {}
             for cle, valeur in (("artist", artiste), ("title", titre)):
+                # Deux défauts, deux couleurs : ils n'appellent pas le même
+                # geste. Un « ? » se remplace par le bon caractère ; un libellé
+                # coupé demande de retrouver le texte manquant, que la donnée ne
+                # porte nulle part — c'est une recherche, pas une frappe.
                 corrompu = "?" in valeur
+                couleur = (
+                    "#FFA500" if corrompu else ("#3B8ED0" if libelle_tronque(valeur) else None)
+                )
                 champ = ctk.CTkEntry(
                     ligne,
                     width=300,
                     # Le champ à corriger saute aux yeux ; l'autre reste
                     # modifiable, mais n'attire pas l'attention.
-                    border_color="#FFA500" if corrompu else None,
-                    border_width=2 if corrompu else 1,
+                    border_color=couleur,
+                    border_width=2 if couleur else 1,
                 )
                 champ.insert(0, (correction or {}).get(cle) or valeur)
                 champ.pack(side="left", padx=6, pady=4)

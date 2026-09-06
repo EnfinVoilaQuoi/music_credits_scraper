@@ -345,6 +345,7 @@ def test_track_match_indices_sur_df_vide():
     m = CertMatcher.__new__(CertMatcher)
     m._norm = cm._normalize_text
     m.df = pd.DataFrame()
+    m._cache_artiste = {}  # posé par __init__, que ce harnais court-circuite
     assert m._track_match_indices("JUL", "BANDE ORGANISEE") == []
 
 
@@ -411,3 +412,37 @@ class TestAncrageParMot:
         """`get_artist_certifications` portait le même défaut."""
         noms = {r["artist_name"] for r in matcher_mots.get_artist_certifications("SCH")}
         assert "MARVIN HAMLISCH" not in noms
+
+
+class TestSousEnsembleParArtiste:
+    """Toutes les stratégies commencent par filtrer sur l'artiste, et
+    `apply_certifications` traite un artiste ENTIER. Sans mémoïsation, le
+    balayage du magasin est refait pour CHAQUE morceau et CHAQUE stratégie avec
+    la même aiguille — mesuré sur la base réelle : 23,5 s pour les 374 morceaux
+    d'A2H, 1,3 s une fois mémoïsé (113 s → 7 s sur toute la base)."""
+
+    def test_le_balayage_n_a_lieu_qu_une_fois_par_artiste(self, matcher, monkeypatch):
+        appels = []
+        vrai = cm._contient_en_mots
+
+        def compte(colonne, aiguille):
+            appels.append(aiguille)
+            return vrai(colonne, aiguille)
+
+        monkeypatch.setattr(cm, "_contient_en_mots", compte)
+        for titre in ("Bande organisée", "My World", "La machine", "Sans issue"):
+            matcher.get_track_certifications("JUL", titre)
+
+        assert appels.count("JUL") == 1, f"balayage artiste répété : {appels}"
+
+    def test_le_cache_ne_change_pas_le_resultat(self, matcher):
+        """Deuxième appel servi par le cache : mêmes lignes, au même ordre."""
+        premier = matcher.get_track_certifications("JUL", "Bande organisée")
+        second = matcher.get_track_certifications("JUL", "Bande organisée")
+        assert premier == second
+        assert len(premier) == 2  # les deux paliers Or puis Platine
+
+    def test_chaque_artiste_a_son_entree(self, matcher):
+        matcher.get_track_certifications("JUL", "My World")
+        matcher.get_track_certifications("Drake", "Views")
+        assert {"JUL", "DRAKE"} <= set(matcher._cache_artiste)

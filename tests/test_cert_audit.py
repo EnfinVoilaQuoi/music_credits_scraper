@@ -15,6 +15,7 @@ def _matcher_with(rows) -> CertMatcher:
     m = CertMatcher.__new__(CertMatcher)  # bypass __init__ (pas de chargement)
     m._norm = N
     m.df = pd.DataFrame(rows)
+    m._cache_artiste = {}  # posé par __init__, que ce harnais court-circuite
     return m
 
 

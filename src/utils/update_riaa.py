@@ -794,8 +794,12 @@ def main():
     parser.add_argument(
         "--artist",
         type=str,
+        action="append",
         default=None,
-        help="Récupérer les certifs RIAA d'un artiste (fusion dans certif_riaa.csv)",
+        metavar="NOM",
+        help="Récupérer les certifs RIAA d'un artiste (fusion dans certif_riaa.csv). "
+        "RÉPÉTABLE : un membre de groupe est crédité sous son nom ET sous celui "
+        "du groupe, les deux se cherchent donc en une fois",
     )
     parser.add_argument(
         "--clean", action="store_true", help="Nettoie certif_riaa.csv (dédup + vides) sans scraper"
@@ -834,7 +838,11 @@ def main():
 
     # Récup par artiste : CSV-centré, pas besoin de la base sqlite
     if args.artist:
-        ok = fetch_artist(args.artist)
+        # Un seul nom en échec ne condamne pas les autres : le code de sortie
+        # dit « au moins un nom a rendu quelque chose », pas « tous ».
+        ok = False
+        for nom in args.artist:
+            ok = fetch_artist(nom) or ok
         sys.exit(0 if ok else 1)
 
     # Initialise le gestionnaire

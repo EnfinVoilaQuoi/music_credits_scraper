@@ -11,7 +11,8 @@ from tkinter import messagebox
 import customtkinter as ctk
 import pandas as pd
 
-from src.gui.workers.lifecycle import start_worker
+from src.gui.workers.lifecycle import start_worker, stop_requested
+from src.utils.cert_normalize import libelle_tronque
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -163,8 +164,13 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             fg_color="gray40",
             hover_color="gray30",
         ).pack(side="right", padx=5, pady=5)
+        # Plusieurs noms séparés par « ; » : un membre de groupe est crédité
+        # sous son nom ET sous celui de sa formation (Shurik'N chez IAM), et
+        # chercher un seul des deux ampute la moitié de sa discographie
+        # certifiée. Le lot « groupes » remplira ce champ tout seul depuis les
+        # relations d'artistes ; d'ici là il se saisit à la main.
         self.artist_entry = ctk.CTkEntry(
-            artist_frame, placeholder_text="Nom de l'artiste", width=170
+            artist_frame, placeholder_text="Artiste (; pour un groupe)", width=170
         )
         self.artist_entry.pack(side="right", padx=5, pady=5)
         # Préremplir avec l'artiste courant si fourni
@@ -366,12 +372,37 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         """Lance la mise à jour SNEP"""
         self._run_update_script("update_snep.py", "SNEP")
 
+    def _noms_artiste(self) -> list[str]:
+        """Les noms saisis, séparés par « ; ». Un seul nom reste un seul nom."""
+        from src.utils.cert_artist import noms_de_recherche
+
+        brut = self.artist_entry.get().split(";")
+        return noms_de_recherche(brut[0] if brut else "", brut[1:])
+
     def _fetch_artist_all_sources(self):
-        """Récup UNIFIÉE des certifs d'un artiste : SNEP (?interprete=) + RIAA
-        (?ar=, via CDP). BRMA n'a pas de vraie recherche artiste (substring) →
-        on s'appuie sur les données BRMA déjà chargées. Rafraîchit le matcher."""
-        artist = self.artist_entry.get().strip()
-        if not artist:
+        """Récup des certifs d'un artiste sur les TROIS corps.
+
+        Les trois ne s'interrogent pas de la même façon, et ce n'est pas un
+        choix d'architecture — c'est ce que chaque site permet :
+          · SNEP `?interprete=` rend un CSV portant tous les paliers du titre ;
+          · RIAA `?ar=` déplie la timeline (échelle DATÉE) sur ses DEUX onglets,
+            classique et latin ;
+          · Ultratop n'expose aucune recherche par artiste qui nous soit
+            accessible (Cloudflare, seules les pages par année passent) : BRMA
+            contribue par LECTURE du corpus, complet et continu depuis 1995.
+        On le dit à l'écran plutôt que de laisser croire à une requête.
+        """
+        from src.utils.cert_artist import (
+            bilan_de,
+            certifications,
+            evolution,
+            nouveautes,
+            recap,
+            repartition,
+        )
+
+        noms = self._noms_artiste()
+        if not noms:
             messagebox.showwarning("Artiste manquant", "Saisis un nom d'artiste.", parent=self)
             return
 
@@ -379,36 +410,35 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             root = Path(__file__).parent.parent.parent
             py = sys.executable
             outputs = []
+            certs_avant = certifications(noms)
+            etiquette = " + ".join(noms)
+            # `--artist` est RÉPÉTABLE sur les deux scripts : un seul
+            # sous-processus par source, quel que soit le nombre de noms.
+            args_noms = [a for nom in noms for a in ("--artist", nom)]
 
-            # 1) SNEP par artiste
-            self._set_progress(f"🇫🇷 SNEP : {artist}…")
+            self._set_progress(f"🇫🇷 SNEP : {etiquette}…")
             try:
                 _code, sortie = self._run_streaming(
-                    [py, str(root / "src" / "utils" / "update_snep.py"), "--artist", artist],
-                    f"SNEP {artist}",
+                    [py, str(root / "src" / "utils" / "update_snep.py"), *args_noms],
+                    f"SNEP {etiquette}",
                 )
                 outputs.append("SNEP : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
             except Exception as e:
                 logger.error(f"SNEP artiste : {e}")
                 outputs.append(f"SNEP : erreur ({e})")
 
-            # 2) RIAA par artiste : headless d'abord, CDP en repli (cf. _update_riaa)
-            self._set_progress(f"🇺🇸 RIAA : {artist}…")
+            # RIAA : headless d'abord, CDP en repli (cf. _update_riaa)
+            self._set_progress(f"🇺🇸 RIAA : {etiquette}…")
             try:
-                commande = [
-                    py,
-                    str(root / "src" / "utils" / "update_riaa.py"),
-                    "--artist",
-                    artist,
-                ]
-                code, sortie = self._run_streaming(commande, f"RIAA {artist}")
+                commande = [py, str(root / "src" / "utils" / "update_riaa.py"), *args_noms]
+                code, sortie = self._run_streaming(commande, f"RIAA {etiquette}")
                 if code != 0:
                     self._set_progress("🇺🇸 RIAA : repli via Chrome…")
                     cdp = self._preparer_cdp()
                     if cdp:
                         code, sortie = self._run_streaming(
                             commande,
-                            f"RIAA {artist} (CDP)",
+                            f"RIAA {etiquette} (CDP)",
                             env={**os.environ, "GENIUS_CDP_URL": cdp},
                         )
                 outputs.append("RIAA : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
@@ -416,22 +446,39 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"RIAA artiste : {e}")
                 outputs.append(f"RIAA : erreur ({e})")
 
-            # 3) rafraîchir le matcher (nouvelles certifs sur disque)
+            # Le magasin a changé sur disque : le matcher doit être reconstruit
+            # AVANT le bilan d'après, sinon il relirait l'état d'avant le run.
             try:
                 from src.utils.cert_matcher import reset_cert_matcher
 
                 reset_cert_matcher()
             except Exception:
-                pass
+                logger.exception("Rafraîchissement du matcher")
 
-            self._set_progress(f"✅ Certifs récupérées pour {artist} (SNEP + RIAA)")
+            certs_apres = certifications(noms)
+            outputs.append("BRMA : corpus local (Ultratop n'a pas de recherche par artiste)")
+
+            # Le rapport dit CE QU'ON A, pas seulement combien : la liste des
+            # titres avec leur échelle datée. Des compteurs se lisent sans rien
+            # apprendre, et c'est justement l'échelle qui était la question — un
+            # titre Platine deux ans après sa sortie a-t-il eu son Or avant ?
+            neuves = nouveautes(certs_avant, certs_apres)
+            parts = [
+                "\n".join(outputs),
+                # L'écart d'abord : un total ne dit pas si le run a servi,
+                # « 12 certifications » se lit pareil qu'on en ait rapporté
+                # douze ou zéro.
+                f"Apport de ce run : {evolution(bilan_de(certs_avant), bilan_de(certs_apres))}",
+            ]
+            if ligne := repartition(certs_apres, noms):
+                parts.append(ligne)
+            parts.append(recap(certs_apres, neuves))
+            rapport = "\n\n".join(parts)
+
+            self._set_progress(f"✅ Certifs récupérées pour {etiquette}")
             self.after(
                 0,
-                lambda: messagebox.showinfo(
-                    f"Certifs par artiste — {artist}",
-                    "\n".join(outputs) + "\n\nRecharge l'artiste pour voir les certifs raccordées.",
-                    parent=self,
-                ),
+                lambda: self._show_report_window(f"Certifs par artiste — {etiquette}", rapport),
             )
             self.after(500, self._update_status)
 
@@ -521,6 +568,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} SNEP : {verdict}"
                     f" — {n_gaps} mois sans certif (années actives)"
                 )
+                actions = [
+                    ("🧹 Nettoyer", self._clean_snep),
+                    ("✏️ Corriger les libellés", self._editer_titres_corrompus),
+                ]
+                # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
+                # action sans objet, c'est laisser croire qu'il y a à faire.
+                trous = report.get("month_gaps") or []
+                if trous:
+                    actions.append(
+                        (
+                            "🕳️ Rescraper les périodes",
+                            lambda g=list(trous): self._rescraper_periodes(
+                                "SNEP", ["src", "utils", "update_snep.py"], g
+                            ),
+                        )
+                    )
                 # Rapport détaillé dans une fenêtre dédiée, avec l'accès à la
                 # correction manuelle des libellés que le nettoyeur ne sait pas
                 # réparer tout seul.
@@ -529,10 +592,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     lambda: self._show_report_window(
                         "Validation CSV SNEP",
                         text,
-                        actions=[
-                            ("🧹 Nettoyer", self._clean_snep),
-                            ("✏️ Corriger les libellés (?)", self._editer_titres_corrompus),
-                        ],
+                        actions=actions,
                     ),
                 )
             except Exception as e:
@@ -543,8 +603,17 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
     def _audit_snep_artist(self):
         """Audite les certifs SNEP de l'artiste face à sa discographie :
-        liste les certifs orphelines (rattachées à aucun morceau)."""
-        artist = self.artist_entry.get().strip()
+        liste les certifs orphelines (rattachées à aucun morceau).
+
+        Le champ accepte plusieurs noms, mais l'audit n'en prend qu'UN : il
+        confronte des certifs à la discographie CHARGÉE, et celle-ci est celle
+        de l'artiste principal. Auditer le nom d'un groupe contre les morceaux
+        d'un membre déclarerait orphelin tout ce que le membre n'a pas dans sa
+        propre discographie — ce que le lot « groupes » traitera en réunissant
+        les discographies, pas en changeant ce que compte l'audit.
+        """
+        noms = self._noms_artiste()
+        artist = noms[0] if noms else ""
         if not artist:
             messagebox.showwarning("Artiste manquant", "Saisis un nom d'artiste.", parent=self)
             return
@@ -779,8 +848,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         if not candidats:
             messagebox.showinfo(
                 "Titres à corriger",
-                "Aucun libellé porteur d'un « ? » que la restauration automatique "
-                "ne sache déjà réparer.",
+                "Aucun libellé cassé ou tronqué à arbitrer : ce que la restauration "
+                "automatique sait réparer l'est déjà.",
                 parent=self,
             )
             return
@@ -801,7 +870,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         Seuls les « ? » ENTRE DEUX LETTRES sont montrés d'emblée.
         """
         win = ctk.CTkToplevel(self)
-        win.title("Corriger les libellés (?)")
+        win.title("Corriger les libellés")
         win.geometry("980x620")
         win.transient(self)
         win.lift()
@@ -810,7 +879,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             win,
-            text="Libellés SNEP portant un « ? »",
+            text="Libellés SNEP cassés ou tronqués",
             font=("Arial", 16, "bold"),
         ).pack(pady=(12, 2))
         suspects = [c for c in candidats if c[0]]
@@ -819,7 +888,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             win,
             text=(
-                "Deux champs : ARTISTE puis TITRE ; le champ encadré porte le « ? ».\n"
+                "Deux champs : ARTISTE puis TITRE ; le champ encadré est celui à revoir.\n"
+                "Orange = « ? » corrompu · Bleu = libellé COUPÉ par la source "
+                "(il manque du texte).\n"
                 "« ✓ correct » mémorise que le libellé est BON tel quel : il ne "
                 "reviendra plus.\n"
                 "Les corrections sont réappliquées à chaque « 🧹 Nettoyer »."
@@ -850,8 +921,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         zone.pack(fill="both", expand=True, padx=12, pady=6)
 
-        # DEUX champs, artiste et titre : le « ? » est tantôt dans l'un, tantôt
-        # dans l'autre (« DES?REE — LIFE » : c'est l'ARTISTE qui est corrompu).
+        # DEUX champs, artiste et titre : le défaut est tantôt dans l'un, tantôt
+        # dans l'autre (« DES?REE — LIFE » : c'est l'ARTISTE qui est corrompu ;
+        # « LES T — QU'EST-CE QU'ON S'FAIT CHIER » : c'est lui qui est coupé).
         # N'offrir que le titre demandait de corriger ce qui n'était pas cassé.
         saisies = []
 
@@ -868,14 +940,21 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
             champs = {}
             for cle, valeur in (("artist", artiste), ("title", titre)):
+                # Deux défauts, deux couleurs : ils n'appellent pas le même
+                # geste. Un « ? » se remplace par le bon caractère ; un libellé
+                # coupé demande de retrouver le texte manquant, que la donnée ne
+                # porte nulle part — c'est une recherche, pas une frappe.
                 corrompu = "?" in valeur
+                couleur = (
+                    "#FFA500" if corrompu else ("#3B8ED0" if libelle_tronque(valeur) else None)
+                )
                 champ = ctk.CTkEntry(
                     ligne,
                     width=300,
                     # Le champ à corriger saute aux yeux ; l'autre reste
                     # modifiable, mais n'attire pas l'attention.
-                    border_color="#FFA500" if corrompu else None,
-                    border_width=2 if corrompu else 1,
+                    border_color=couleur,
+                    border_width=2 if couleur else 1,
                 )
                 champ.insert(0, (correction or {}).get(cle) or valeur)
                 champ.pack(side="left", padx=6, pady=4)
@@ -944,11 +1023,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} BRMA : {verdict} — "
                     f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
                 )
+                actions = [("🧹 Nettoyer", self._clean_brma)]
+                # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
+                # action sans objet, c'est laisser croire qu'il y a à faire.
+                trous = report.get("month_gaps") or []
+                if trous:
+                    actions.append(
+                        (
+                            "🕳️ Rescraper les périodes",
+                            lambda g=list(trous): self._rescraper_periodes(
+                                "BRMA", ["src", "utils", "update_brma.py"], g
+                            ),
+                        )
+                    )
                 self.after(
                     0,
-                    lambda: self._show_report_window(
-                        "Validation CSV BRMA", text, actions=[("🧹 Nettoyer", self._clean_brma)]
-                    ),
+                    lambda: self._show_report_window("Validation CSV BRMA", text, actions=actions),
                 )
             except Exception as e:
                 logger.error(f"Erreur validation BRMA : {e}")
@@ -976,11 +1066,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} RIAA : {verdict} — "
                     f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
                 )
+                actions = [("🧹 Nettoyer", self._clean_riaa)]
+                # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
+                # action sans objet, c'est laisser croire qu'il y a à faire.
+                trous = report.get("month_gaps") or []
+                if trous:
+                    actions.append(
+                        (
+                            "🕳️ Rescraper les périodes",
+                            lambda g=list(trous): self._rescraper_periodes(
+                                "RIAA", ["src", "utils", "update_riaa.py"], g
+                            ),
+                        )
+                    )
                 self.after(
                     0,
-                    lambda: self._show_report_window(
-                        "Validation CSV RIAA", text, actions=[("🧹 Nettoyer", self._clean_riaa)]
-                    ),
+                    lambda: self._show_report_window("Validation CSV RIAA", text, actions=actions),
                 )
             except Exception as e:
                 logger.error(f"Erreur validation RIAA : {e}")
@@ -1050,6 +1151,50 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             if ligne.startswith("===="):
                 return "\n".join(lignes[i:])
         return sortie
+
+    def _rescraper_periodes(self, source: str, script: list[str], gaps: list[str]):
+        """Relance la collecte sur les mois signalés par la validation.
+
+        Le chaînon qui manquait : les validateurs savaient DIRE quels mois sont
+        vides, rien ne savait aller les chercher. Les trois sources ne se visent
+        pas à la même maille — le site l'impose — d'où la traduction dans
+        `cert_rescrape`, module pur et donc vérifiable sans réseau.
+        """
+        from src.utils.cert_rescrape import commandes, resume
+
+        chemin = str(Path(__file__).parent.parent.parent.joinpath(*script))
+        a_lancer = commandes(source, gaps, chemin)
+        if not a_lancer:
+            messagebox.showinfo(f"Rescraper {source}", "Aucune période ciblable.", parent=self)
+            return
+
+        apercu = (
+            resume(source, gaps)
+            + "\n\n"
+            + "\n".join(
+                "$ " + " ".join(Path(c[1]).name if i == 1 else c for i, c in enumerate(cmd))
+                for cmd in a_lancer[:8]
+            )
+        )
+        if len(a_lancer) > 8:
+            apercu += f"\n… et {len(a_lancer) - 8} autre(s)"
+        if not messagebox.askyesno(
+            f"Rescraper {source}",
+            f"{apercu}\n\nLancer ? (les données sont fusionnées, jamais remplacées)",
+            parent=self,
+        ):
+            return
+
+        def travail():
+            for i, cmd in enumerate(a_lancer, 1):
+                if stop_requested():
+                    break
+                self._set_progress(f"🕳️ {source} : période {i}/{len(a_lancer)}…")
+                self._run_streaming(cmd, f"{source} rattrapage {i}/{len(a_lancer)}")
+            self._set_progress(f"✅ {source} : {len(a_lancer)} période(s) relancée(s)")
+            self.after(500, self._update_status)
+
+        start_worker(travail)
 
     def _nettoyer_avec_apercu(self, source: str, script: list[str], args: list[str]):
         """Dry-run → rapport → confirmation → application (déroulé commun).

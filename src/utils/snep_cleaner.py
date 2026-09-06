@@ -36,6 +36,7 @@ from src.utils.cert_normalize import (
     repair_extra_separators,
     restore_apostrophes,
 )
+from src.utils.snep_build import purger_fantomes, read_canonical_csv
 
 EXPECTED_NCOLS = 7
 
@@ -93,6 +94,8 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
         "malformed_kept": 0,
         "apostrophes_restored": 0,
         "manual_fixes_applied": 0,
+        "fantomes_retires": 0,
+        "fantome_examples": [],
         "manual_fix_examples": [],
         "empty_examples": [],
         "apostrophe_examples": [],
@@ -181,6 +184,24 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
 
         out_rows.append(cleaned)
 
+    # Lignes FANTÔMES du CSV canonique. Elles ne sont PAS dans ce fichier-ci :
+    # le brut est un ré-export complet, donc à jour. Elles vivent dans le clean,
+    # qui accumule d'un export à l'autre et garde le libellé d'hier même quand
+    # la source a corrigé son encodage depuis. C'est `snep_build.rebuild` qui
+    # les retire — appelé juste en dessous quand on applique.
+    #
+    # On les COMPTE ici pour que le rapport les annonce, et surtout pour que le
+    # verdict « déjà propre » en tienne compte : un nettoyage qui va changer
+    # 130 lignes ne doit pas s'annoncer sans effet. C'est exactement l'erreur du
+    # 2026-09-06, où deux compteurs oubliés faisaient disparaître le bouton
+    # « Appliquer » alors que le rapport listait des anomalies.
+    _, fantomes = purger_fantomes(read_canonical_csv(csv_path.parent / "certif_snep.csv"))
+    if fantomes:
+        report["fantomes_retires"] = len(fantomes)
+        report["fantome_examples"] = [
+            f"{f.get('artist', '')} — {f.get('title', '')}" for f in fantomes[:15]
+        ]
+
     report["rows_out"] = len(out_rows)
     # SNEP nettoie le fichier SUR PLACE : « déjà propre » s'y lit directement du
     # nombre de modifications comptées, sans comparaison de fichiers.
@@ -192,6 +213,7 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
         + report["empty_removed"]
         + report["apostrophes_restored"]
         + report["manual_fixes_applied"]
+        + report["fantomes_retires"]
     )
     report["lignes_modifiees"] = modifiees
     report["deja_propre"] = modifiees == 0
@@ -244,6 +266,7 @@ def format_report(report: dict) -> str:
         ("Caractères restaurés (?→ '/œ)", report.get("apostrophes_restored", 0)),
         ("Corrections manuelles appliquées", report.get("manual_fixes_applied", 0)),
         ("Doublons retirés", report.get("duplicates_removed", 0)),
+        ("Fantômes du CSV canonique (libellé cassé)", report.get("fantomes_retires", 0)),
         ("Lignes vides retirées", report.get("empty_removed", 0)),
     ]
     if report.get("malformed_kept"):
@@ -265,6 +288,10 @@ def format_report(report: dict) -> str:
             (
                 "Corrections manuelles appliquées",
                 [ex[:90] for ex in report.get("manual_fix_examples") or []],
+            ),
+            (
+                "Fantômes retirés de certif_snep.csv — la version SAINE y reste",
+                [ex[:90] for ex in report.get("fantome_examples") or []],
             ),
             (
                 f"Lignes vides retirées ({report.get('empty_removed', 0)})",

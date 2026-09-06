@@ -10,6 +10,7 @@ le golden master.
 
 import re
 import unicodedata
+from collections.abc import Sequence
 
 
 def normalize_text(text: str) -> str:
@@ -218,6 +219,231 @@ def contient_caractere_corrompu(s: str) -> bool:
     propose à la revue manuelle, il ne doit pas exister en deux exemplaires.
     """
     return bool(_CORRUPTION_RE.search(s or ""))
+
+
+#: Mots qui ANNONCENT un nom : après eux, une lettre seule est un mot coupé.
+#: « LA MAIN SUR LE C », « Les plus grandes chansons du si », « LA TOUR DE M ».
+#: « a » en est délibérément ABSENT — il ferait de « A A A » (un vrai titre, des
+#: lettres espacées) un suspect, sans rattraper aucune troncature réelle.
+_ANNONCE_UN_NOM = frozenset(
+    [
+        "le",
+        "la",
+        "les",
+        "l",
+        "du",
+        "de",
+        "des",
+        "d",
+        "au",
+        "aux",
+        "en",
+        "un",
+        "une",
+        "nos",
+        "notre",
+        "mon",
+        "ma",
+        "mes",
+        "ton",
+        "ta",
+        "tes",
+        "son",
+        "sa",
+        "ses",
+        "ce",
+        "cet",
+        "cette",
+        "sur",
+        "dans",
+        "pour",
+        "avec",
+        "sans",
+        "chez",
+        "vers",
+        "par",
+        "the",
+        "of",
+        "my",
+        "your",
+    ]
+)
+
+#: Mots courts en minuscules qui terminent LÉGITIMEMENT un titre. Sans eux,
+#: « I want to know what love is » passerait pour tronqué.
+_FINS_MINUSCULES_LEGITIMES = frozenset(
+    [
+        "is",
+        "in",
+        "on",
+        "up",
+        "to",
+        "me",
+        "my",
+        "it",
+        "of",
+        "so",
+        "no",
+        "go",
+        "do",
+        "be",
+        "we",
+        "us",
+        "or",
+        "at",
+        "if",
+        "an",
+        "as",
+        "by",
+        "he",
+        "she",
+        "you",
+        "the",
+        "and",
+        "for",
+        "out",
+        "off",
+        "ok",
+        "oh",
+        "ah",
+        "eh",
+        "yo",
+        "ça",
+        "la",
+        "le",
+        "tu",
+        "on",
+        "je",
+    ]
+)
+
+
+def libelle_tronque(valeur: str) -> bool:
+    """Le libellé s'arrête-t-il au milieu d'un mot ?
+
+    Le SNEP a exporté certains titres COUPÉS à l'endroit d'un caractère
+    accentué : « L'empire du c » pour « L'empire du côté obscur »,
+    « LA MAIN SUR LE C » pour « LA MAIN SUR LE CŒUR », « Les plus grandes
+    chansons du si » pour « du siècle ». La coupure est dans la SOURCE — les
+    octets du brut s'arrêtent là — donc rien ne la répare automatiquement.
+
+    Il n'existe pas non plus d'oracle interne : cherché le 2026-09-06, sur les
+    12 127 lignes, AUCUN titre tronqué n'a sa version complète ailleurs dans le
+    corpus pour la même certification (les 5 paires « préfixe » trouvées sont
+    des œuvres réellement distinctes, « KILL BILL » contre « KILL BILL Vol.2 »).
+    D'où le choix : SIGNALER pour saisie manuelle, jamais deviner le texte
+    manquant.
+
+    Deux marques, mesurées sur le corpus réel — les signaux évidents ayant
+    d'abord été essayés et écartés : « finit par un mot de 1-2 lettres » sortait
+    759 titres presque tous légitimes (« BEST OF », « AS I AM », « BAD GUY »),
+    et filtrer par la rareté du mot final n'y changeait rien (333 candidats).
+    Ce qui distingue vraiment un fragment, c'est son VOISIN :
+
+      1. un mot de 1-2 lettres en minuscules, hors mots courts légitimes
+         (« du si », « chansons pr », « une g ») ;
+      2. une lettre SEULE précédée d'un mot qui annonce un nom (« LE C »,
+         « DE M », « Nos R ») — un déterminant n'introduit jamais une lettre.
+
+    Rendement mesuré : **24 titres sur 9 764**, dont une vingtaine réellement
+    tronqués. Les faux positifs connus (« C'EST CARRÉ LE S » de SCH, « Le Z »)
+    se règlent par la case « ✓ correct » de la fenêtre de correction, qui
+    mémorise qu'un libellé est bon tel quel — le mécanisme existe déjà pour les
+    vrais points d'interrogation.
+    """
+    mots = (valeur or "").split()
+    if len(mots) < 2:
+        return False
+    # Libellé tout en lettres espacées : une graphie, pas une coupure. Le
+    # corpus en compte plusieurs, et des vrais (« T L C », « K D D », « D O D O »,
+    # « A A A »). Aucune troncature réelle n'a cette forme — toutes gardent au
+    # moins un mot entier avant le fragment.
+    if all(len(m) == 1 for m in mots):
+        return False
+    fin, avant = mots[-1], mots[-2].lower().rstrip("'")
+    if fin.islower() and len(fin) <= 2 and fin not in _FINS_MINUSCULES_LEGITIMES:
+        return True
+    return len(fin) == 1 and fin.isalpha() and avant in _ANNONCE_UN_NOM
+
+
+#: Ce qui reste d'un libellé quand on ne garde que les lettres et les chiffres.
+#: Deux libellés de même squelette ne diffèrent QUE par leur ponctuation et
+#: leurs accents — c'est exactement le périmètre d'une corruption d'encodage.
+_NON_ALPHANUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def squelette_libelle(valeur: str) -> str:
+    """Le libellé réduit à ses lettres et chiffres, en minuscules.
+
+    Sert à reconnaître DEUX ÉCRITURES DU MÊME LIBELLÉ quand l'une est corrompue :
+    « AU C?UR D'IAM » et « AU CŒUR D'IAM » ont le même squelette. Plus brutal
+    que `cle_plate`, qui conserve justement le « ? » — les deux coexistent parce
+    qu'ils répondent à des questions opposées : `cle_plate` pour retrouver un
+    libellé « tel qu'écrit », celui-ci pour l'apparier malgré son écriture.
+    """
+    return _NON_ALPHANUM_RE.sub("", (valeur or "").lower())
+
+
+def reperer_fantomes(
+    lignes: Sequence[Sequence[str]],
+    *,
+    i_artiste: int,
+    i_titre: int,
+    autres: Sequence[int],
+) -> list[int]:
+    """Indices des lignes CASSÉES dont la version saine est déjà dans le fichier.
+
+    Un fantôme n'est pas une ligne que le nettoyeur aurait ratée : c'est le
+    même événement écrit deux fois, une fois avec un caractère corrompu et une
+    fois sans, les deux coexistant parce que le libellé fait partie de la clé de
+    dédoublonnage et que les deux formes ne s'y reconnaissent pas.
+
+    D'où viennent-ils : le CSV clean ACCUMULE d'un export à l'autre — à raison,
+    une certification ancienne peut disparaître de l'export — et garde donc
+    éternellement le libellé d'hier, même quand la source a corrigé son
+    encodage depuis. Mesuré le 2026-09-06 : **130 lignes** côté SNEP (dont
+    « SHURIK?N », qui coupait en deux la discographie certifiée de l'artiste),
+    et **0** côté BRMA comme RIAA — leurs bruts sont de vraies accumulations,
+    qui ne se corrigent jamais toutes seules.
+
+    Ce n'est PAS `restore_apostrophes`, qui devine une réparation et reste donc
+    délibérément timide : ici la version correcte est DÉJÀ dans le fichier, il
+    n'y a rien à deviner — seulement à préférer celle qui n'est pas cassée.
+
+    Deux règles ont été comparées sur les données réelles avant de choisir : un
+    joker caractère à caractère (110 lignes) et ce squelette (114 sur le seul
+    titre). Les 4 de l'écart étaient de vrais doublons que le joker manquait,
+    la corruption ayant mangé un caractère ET son espace (« DONT?SAY GOODBYE »
+    contre « DON'T SAY GOODBYE »). Risque inverse vérifié : **aucune** des
+    lignes retirées ne porte un « ? » en position de vraie question (final ou
+    suivi d'un espace), donc aucune ponctuation légitime n'est perdue.
+    """
+    besoin = max(i_artiste, i_titre, *autres) + 1 if autres else max(i_artiste, i_titre) + 1
+    groupes: dict[tuple, list[tuple[int, bool]]] = {}
+    for i, ligne in enumerate(lignes):
+        # Une ligne malformée est CONSERVÉE telle quelle par les nettoyeurs :
+        # on ne peut pas juger ce qu'on ne sait pas lire, et l'indexer
+        # aveuglément ferait planter le nettoyage sur la seule ligne qu'il
+        # avait justement décidé de ne pas toucher.
+        if len(ligne) < besoin:
+            continue
+        artiste, titre = ligne[i_artiste], ligne[i_titre]
+        cle = (
+            squelette_libelle(artiste),
+            squelette_libelle(titre),
+            *(ligne[j] for j in autres),
+        )
+        cassee = "?" in artiste or "?" in titre
+        groupes.setdefault(cle, []).append((i, cassee))
+
+    fantomes = []
+    for membres in groupes.values():
+        # Il faut une version saine SOUS LA MAIN : sans elle, la ligne cassée
+        # est la seule trace de la certification et la retirer perdrait la
+        # donnée. C'est la différence entre nettoyer et effacer.
+        if any(not cassee for _i, cassee in membres):
+            fantomes.extend(i for i, cassee in membres if cassee)
+    return sorted(fantomes)
 
 
 def cle_plate(valeur: str) -> str:

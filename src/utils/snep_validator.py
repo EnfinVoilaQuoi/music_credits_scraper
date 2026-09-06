@@ -35,7 +35,9 @@ from src.utils.cert_coverage import annee_assez_dense
 from src.utils.cert_normalize import (
     canon_category,
     canon_level,
+    cle_correction,
     clean_field,
+    libelle_tronque,
     repair_extra_separators,
     restore_apostrophes,
 )
@@ -162,6 +164,8 @@ def validate_snep_csv(
         "corrupted_apostrophes_count": 0,
         "corrupted_decided": [],
         "corrupted_decided_count": 0,
+        "truncated_labels": [],
+        "truncated_labels_count": 0,
         "date_parse_failures": 0,
         "invalid_categories": [],
         "invalid_levels": [],
@@ -215,8 +219,6 @@ def validate_snep_csv(
         ""
     ).str.contains(apo_pat, regex=True, na=False)
     if apo_mask.any():
-        from src.utils.cert_normalize import cle_correction
-
         decidees, a_revoir = [], []
         vus = set()
         for a, t in zip(artist.fillna("")[apo_mask], title.fillna("")[apo_mask], strict=True):
@@ -242,6 +244,28 @@ def validate_snep_csv(
                 f"{len(a_revoir)} entrée(s) avec caractère corrompu (?) — "
                 "nettoyeur (élision/œ auto) puis revue manuelle du reste"
             )
+
+    # Libellés TRONQUÉS par la source à l'endroit d'un caractère accentué
+    # (« L'empire du c »). Rien ne les répare : il manque du TEXTE, et le corpus
+    # n'en porte la version complète nulle part (cherché le 2026-09-06). On les
+    # SIGNALE donc, et on n'en devine jamais le contenu — la même règle sert au
+    # tri de la fenêtre de correction, pour que les deux ne divergent pas.
+    coupes, vus_coupes = [], set()
+    for a, t in zip(artist.fillna(""), title.fillna(""), strict=True):
+        if not (libelle_tronque(a) or libelle_tronque(t)):
+            continue
+        cle = cle_correction(a, t)
+        if cle in vus_coupes or cle in (acceptes or set()) or (fixes or {}).get(cle):
+            continue
+        vus_coupes.add(cle)
+        coupes.append(f"{a} — {t}")
+    report["truncated_labels"] = coupes[:15]
+    report["truncated_labels_count"] = len(coupes)
+    if coupes:
+        report["warnings"].append(
+            f"{len(coupes)} libellé(s) COUPÉ(S) par la source — il manque du texte, "
+            "rien ne peut le deviner : revue manuelle"
+        )
 
     # Dates de constat
     constat = pd.to_datetime(constat_raw, format="%d/%m/%Y", errors="coerce")
@@ -423,10 +447,18 @@ def format_report(report: dict) -> str:
             L.append(f"  • {y} : {s[f'count_{y}']} certifications")
 
     L.append("")
-    L.append(
-        f"{'✅' if report['ok'] else '⚠️'} Verdict global : "
-        f"{'RAS' if report['ok'] else 'anomalies détectées'}"
+    # Le verdict porte sur ce que le NETTOYAGE règle. Les libellés cassés ou
+    # coupés n'en sont pas : ils attendent un arbitrage humain. Les taire
+    # derrière un « RAS » ferait dire au rapport le contraire de ce qu'il liste
+    # trois lignes plus bas — le défaut exact relevé le 2026-09-06, où un
+    # validateur et un nettoyeur se contredisaient sur le même fichier.
+    en_attente = report.get("corrupted_apostrophes_count", 0) + report.get(
+        "truncated_labels_count", 0
     )
+    verdict = "RAS" if report["ok"] else "anomalies détectées"
+    if en_attente:
+        verdict += f" — {en_attente} libellé(s) en attente d'un arbitrage manuel"
+    L.append(f"{'✅' if report['ok'] else '⚠️'} Verdict global : {verdict}")
 
     def section(title, items, limit=15):
         if items:
@@ -455,6 +487,12 @@ def format_report(report: dict) -> str:
             f"🩹 Caractères corrompus (?) : {report['corrupted_apostrophes_count']} "
             f"entrée(s) — « Nettoyer » restaure élisions/œ, le reste à vérifier"
         )
+    if report.get("truncated_labels_count"):
+        L.append(
+            f"✂️ Libellés COUPÉS par la source : {report['truncated_labels_count']} "
+            "— il manque du TEXTE, aucun nettoyage ne peut le deviner "
+            "(« ✏️ Corriger les libellés »)"
+        )
     if report["date_parse_failures"]:
         L.append(f"⚠️ Dates de constat illisibles : {report['date_parse_failures']}")
     n_norm = s.get("duplicates_normalized", 0)
@@ -469,6 +507,7 @@ def format_report(report: dict) -> str:
 
     section("Lignes malformées", report["malformed"])
     section("Caractères corrompus (?) — à vérifier", report.get("corrupted_apostrophes", []))
+    section("Libellés COUPÉS par la source — saisie manuelle", report.get("truncated_labels", []))
     section(
         "Déjà décidés — en attente d'un « 🧹 Nettoyer »",
         report.get("corrupted_decided", []),

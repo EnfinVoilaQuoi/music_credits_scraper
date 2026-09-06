@@ -8,6 +8,7 @@ la clé de dédup n'était pas construite de la même façon pour la ligne ENTRA
 et pour la ligne DÉJÀ EN BASE.
 """
 
+import re as _re
 from datetime import datetime
 
 import pytest
@@ -77,19 +78,30 @@ class TestScrapeYear:
     déjà connue."""
 
     def _fetch_sequence(self, monkeypatch, pages):
-        """Stub de `_fetch` servant `pages` dans l'ordre ; mémorise les URL vues."""
+        """Stub de `_fetch` servant `pages[N-1]` pour /page/N ; mémorise les URL vues.
+
+        Adressé par NUMÉRO DE PAGE, pas par ordre d'appel : `scrape_year` sonde
+        d'abord la page cumulative (cf. `_page_cumulative_de_lannee`), et un stub
+        servant dans l'ordre décalerait tout le reste.
+        """
         vues = []
 
         def fake_fetch(session, url, timeout=None):
             vues.append(url)
-            idx = len(vues) - 1
-            page = pages[idx] if idx < len(pages) else pages[-1]
+            m = _re.search(r"/page/(\d+)", url)
+            n = int(m.group(1)) if m else 1
+            page = pages[n - 1] if n - 1 < len(pages) else pages[-1]
             if isinstance(page, Exception):
                 raise page
             return page
 
         monkeypatch.setattr(us, "_fetch", fake_fetch)
         return vues
+
+    @staticmethod
+    def _pages_vues(vues) -> list[int]:
+        """Numéros de page demandés, dans l'ordre (1 pour l'URL sans /page/N)."""
+        return [int(m.group(1)) if (m := _re.search(r"/page/(\d+)", u)) else 1 for u in vues]
 
     def test_parcourt_toutes_les_pages_annoncees(self, csv_vide, monkeypatch):
         pages = [
@@ -100,9 +112,9 @@ class TestScrapeYear:
         vues = self._fetch_sequence(monkeypatch, pages)
 
         assert scrape_year(csv_vide, 2020) == 6
-        assert len(vues) == 3
-        assert "?annee=2020" in vues[0]
-        assert "page/2" in vues[1] and "page/3" in vues[2]
+        # p2 est demandée deux fois : la sonde de page cumulative, puis le
+        # parcours. L'invariant l'a rejetée (2 blocs, hors de ]2, 4]) → repli.
+        assert self._pages_vues(vues) == [1, 2, 2, 3]
 
     def test_page_deja_connue_ne_stoppe_pas_le_backfill(self, csv_vide, monkeypatch):
         """La page 2 est intégralement connue : la 3 doit quand même être lue."""
@@ -118,14 +130,17 @@ class TestScrapeYear:
         vues = self._fetch_sequence(monkeypatch, pages)
 
         assert scrape_year(csv_vide, 2020) == 3  # 1, 2 et 5
-        assert len(vues) == 3
+        assert self._pages_vues(vues) == [1, 2, 2, 3]  # sonde + parcours complet
 
     def test_page_sans_bloc_arrete_la_boucle(self, csv_vide, monkeypatch):
         pages = [_page([_certif(1)], last_page=4), "<html><body></body></html>"]
         vues = self._fetch_sequence(monkeypatch, pages)
 
         assert scrape_year(csv_vide, 2020) == 1
-        assert len(vues) == 2  # la page 3 n'est pas demandée
+        # p2 vide : la couverture géométrique abandonne aussitôt (une page ≤ P
+        # rend au moins une tranche sous le modèle mesuré), puis le parcours
+        # s'arrête sur la même page vide. Ni p3 ni p4 ne sont demandées.
+        assert self._pages_vues(vues) == [1, 2, 2]
 
     def test_erreur_reseau_en_cours_conserve_le_deja_collecte(self, csv_vide, monkeypatch):
         pages = [
@@ -241,3 +256,117 @@ class TestCleDeDedupAvecSeparateurDansLeLabel:
 
         assert scrape_year(dest, 2023) == 0
         assert dest.read_text(encoding="utf-8-sig").count(ligne) == 1
+
+
+class TestCouvertureGeometrique:
+    """Le SNEP applique `LIMIT 30×N OFFSET 30×(N−1)` : la page N ne rend pas la
+    Nᵉ tranche de 30 mais les tranches **N à 2N−1**.
+
+    Mesuré sur le site réel le 2026-09-06 (2025 : 51 tranches, 1 528 certifs) —
+    le modèle `min(30N, total − 30(N−1))` colle à l'unité près sur p1, p2, p3,
+    p19, p25, p26, p27, p50, p51, et le CONTENU le confirme (p2 disjointe de p1,
+    p27 ⊂ p26, p25 ∩ p26 = 720).
+
+    Conséquence : les puissances de deux couvrent tout en lisant chaque
+    certification UNE fois. Vérifié contre le parcours des 51 pages, ensembles
+    IDENTIQUES : **6 requêtes et 1 528 blocs au lieu de 51 et 20 228** (15 s
+    contre 172 s).
+    """
+
+    PAR_PAGE = 30
+
+    def _site_snep(self, monkeypatch, total: int):
+        """Rejoue le bug mesuré : /page/N rend les tranches N..min(2N−1, P)."""
+        certifs = [_certif(i) for i in range(1, total + 1)]
+        P = (total + self.PAR_PAGE - 1) // self.PAR_PAGE
+        vues = []
+
+        def fake_fetch(session, url, timeout=None):
+            vues.append(url)
+            m = _re.search(r"/page/(\d+)", url)
+            n = int(m.group(1)) if m else 1
+            debut, fin = n, min(2 * n - 1, P)
+            tranche = certifs[(debut - 1) * self.PAR_PAGE : fin * self.PAR_PAGE]
+            return _page(tranche, last_page=P)
+
+        monkeypatch.setattr(us, "_fetch", fake_fetch)
+        return vues, P
+
+    def test_le_modele_de_page_est_bien_celui_mesure(self, monkeypatch, csv_vide):
+        """Garde-fou du simulateur lui-même : sans lui, les tests ci-dessous
+        vérifieraient un site imaginaire."""
+        vues, P = self._site_snep(monkeypatch, total=1528)
+        assert P == 51
+        for n, attendu in ((1, 30), (2, 60), (25, 750), (26, 778), (27, 748), (51, 28)):
+            html = us._fetch(None, f"/page/{n}" if n > 1 else "?annee=2025")
+            assert len(us._parse_certifications_page(html)) == attendu, f"page {n}"
+
+    def test_couverture_complete_en_log2_requetes(self, csv_vide, monkeypatch):
+        vues, P = self._site_snep(monkeypatch, total=1528)
+
+        assert scrape_year(csv_vide, 2025) == 1528  # TOUTE l'année
+        assert self._pages_demandees(vues) == [1, 2, 4, 8, 16, 32]
+
+    def test_les_puissances_de_deux_pavent_lintervalle(self):
+        """Propriété structurelle : page 2^k couvre 2^k..2^(k+1)−1."""
+        for nb in (1, 2, 3, 7, 21, 51, 400):
+            couvert = set()
+            for p in us._pages_couvrantes(nb):
+                couvert |= set(range(p, min(2 * p - 1, nb) + 1))
+            assert couvert == set(range(1, nb + 1)), f"trou pour P={nb}"
+
+    def test_annee_tenant_sur_une_page(self, csv_vide, monkeypatch):
+        vues, P = self._site_snep(monkeypatch, total=12)
+        assert P == 1
+        assert scrape_year(csv_vide, 2020) == 12
+        assert self._pages_demandees(vues) == [1]  # page 1 déjà en main
+
+    def test_site_pagine_normalement_retombe_sur_le_parcours(self, csv_vide, monkeypatch):
+        """L'invariant porte sur le TOTAL, pas sur une page : un site où chaque
+        page rend au plus `par_page` éléments ne peut pas l'atteindre dès P ≥ 2.
+
+        C'est la leçon de la première version, qui vérifiait UNE page et acceptait
+        un résultat amputé de moitié sans que rien ne le signale."""
+        pages = [
+            _page([_certif(1), _certif(2)], last_page=3),
+            _page([_certif(3), _certif(4)]),
+            _page([_certif(5), _certif(6)]),
+        ]
+        vues = []
+
+        def fake_fetch(session, url, timeout=None):
+            vues.append(url)
+            m = _re.search(r"/page/(\d+)", url)
+            n = int(m.group(1)) if m else 1
+            return pages[n - 1] if n - 1 < len(pages) else pages[-1]
+
+        monkeypatch.setattr(us, "_fetch", fake_fetch)
+        assert scrape_year(csv_vide, 2020) == 6  # rien de perdu : le repli lit tout
+        assert 3 in self._pages_demandees(vues)
+
+    def test_page_inaccessible_pendant_la_couverture_bascule_sur_le_parcours(
+        self, csv_vide, monkeypatch
+    ):
+        # Corpus réduit : ce test exerce le REPLI, qui parcourt toutes les pages
+        # (coût quadratique du bug du site). À l'échelle réelle il passerait 22 s
+        # à revérifier ce que `test_couverture_complete_en_log2_requetes` établit
+        # déjà — la propriété testée ici est la BASCULE, pas le volume.
+        self._site_snep(monkeypatch, total=200)
+        vrai_fetch = us._fetch
+        echecs = {"restants": 1}
+
+        def fetch_capricieux(session, url, timeout=None):
+            """Échoue UNE fois sur /page/4 — pendant la passe géométrique — puis
+            se rétablit, pour que le repli puisse aller au bout."""
+            if "/page/4?" in url and echecs["restants"]:
+                echecs["restants"] -= 1
+                raise requests.RequestException("503")
+            return vrai_fetch(session, url, timeout)
+
+        monkeypatch.setattr(us, "_fetch", fetch_capricieux)
+        # Le repli parcourt toutes les pages : le résultat reste COMPLET.
+        assert scrape_year(csv_vide, 2025) == 200
+
+    @staticmethod
+    def _pages_demandees(vues) -> list[int]:
+        return [int(m.group(1)) if (m := _re.search(r"/page/(\d+)", u)) else 1 for u in vues]

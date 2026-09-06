@@ -329,13 +329,112 @@ def _write_merged(dest_path: Path, header: str, existing_lines: list, new_lines:
 
 
 def _discover_last_page(html: str) -> int:
-    """Déduit le numéro de dernière page depuis les liens de pagination.
+    """Plus grand numéro de page présent dans les liens de pagination.
 
-    Sur une page filtrée `?annee=YYYY`, tous les liens /page/N pointent vers
-    cette année — le max est donc la dernière page de l'année.
+    C'est bien le nombre de TRANCHES de 30 de l'année (2025 : 51 liens pour
+    1 528 certifications). Ce que ce nombre ne dit pas, c'est combien de blocs
+    chaque page rend : la page N en rend 30×N, pas 30 — cf. `_lignes_de_lannee`.
     """
     nums = [int(n) for n in _re.findall(r"/page/(\d+)", html)]
     return max(nums) if nums else 1
+
+
+def _pages_couvrantes(nb_pages: int) -> list[int]:
+    """Pages à demander pour couvrir les tranches 1..nb_pages : 1, 2, 4, 8, 16…
+
+    La page N rend les tranches **N à 2N−1** (cf. `_lignes_de_lannee`), donc la
+    page 2^k couvre 2^k..2^(k+1)−1 : les puissances de deux pavent [1, P] sans
+    trou ni recouvrement.
+    """
+    pages, n = [], 1
+    while n <= nb_pages:
+        pages.append(n)
+        n *= 2
+    return pages
+
+
+def _lignes_de_lannee(session, year: int, html_p1: str, nb_pages: int) -> list | None:
+    """Toutes les certifications de l'année en ~log₂(P) requêtes, ou None si le
+    site ne se comporte pas comme mesuré (→ repli sur le parcours page à page).
+
+    **Le site applique `LIMIT 30×N OFFSET 30×(N−1)`** — un `posts_per_page` qui
+    suit le numéro de page. La page N ne rend donc pas la Nᵉ tranche de 30 mais
+    les tranches N à min(2N−1, P). Mesuré le 2026-09-06 sur 2025 (P=51, 1 528
+    certifs), le modèle `min(30N, total − 30(N−1))` colle à l'unité près :
+
+        p1=30  p2=60  p3=90  p19=570  p25=750  p26=778  p27=748  p50=58  p51=28
+
+    et le CONTENU le confirme : p2 est disjointe de p1, p27 ⊂ p26, p25 ∩ p26 = 720.
+
+    D'où le coût relevé au WIP : parcourir les 51 pages analyse **20 258 blocs
+    pour 1 528 certifications** (13×) en 248 s. La déduplication rendait le
+    résultat correct — le défaut était le coût, pas la donnée.
+
+    Les puissances de deux couvrent tout en lisant chaque élément UNE fois :
+    vérifié contre le corpus des 51 pages, **6 requêtes, 1 528 blocs, ensembles
+    IDENTIQUES**.
+
+    Piège écarté au passage : le « pic » de 778 blocs à la page 26 n'est PAS le
+    total de l'année (le WIP le croyait). Une première version se contentait donc
+    de lire cette page — elle perdait **la moitié des certifications** sans que
+    rien ne le signale. D'où la vérification ci-dessous, sur le TOTAL et non sur
+    une page : le compte final doit tomber dans ]30×(P−1), 30×P], ce qu'un site
+    paginé normalement (≤ 30 par page) ne peut pas atteindre dès que P ≥ 2.
+    """
+    rows_p1 = _parse_certifications_page(html_p1)
+    par_page = len(rows_p1)
+    if not par_page:
+        return None
+
+    vues, lignes = set(), []
+    for page in _pages_couvrantes(nb_pages):
+        if page == 1:
+            rows = rows_p1
+        else:
+            try:
+                rows = _parse_certifications_page(
+                    _fetch(session, f"{_SNEP_BASE}page/{page}?annee={year}")
+                )
+            except requests.RequestException as e:
+                safe_print(f"⚠️ Année {year} : page {page} inaccessible ({e}) — parcours complet")
+                return None
+            if not rows:
+                # Sous le modèle mesuré, une page ≤ P rend au moins une tranche.
+                # Vide = le site ne se comporte pas comme prévu : on abandonne
+                # tout de suite plutôt que de dépenser les requêtes suivantes.
+                safe_print(f"⚠️ Année {year} : page {page} sans bloc — parcours complet")
+                return None
+            time.sleep(random.uniform(DELAY_BETWEEN_REQUESTS, DELAY_BETWEEN_REQUESTS * 1.8))
+        for row in rows:
+            if row not in vues:
+                vues.add(row)
+                lignes.append(row)
+
+    if par_page * (nb_pages - 1) < len(lignes) <= par_page * nb_pages:
+        return lignes
+    safe_print(
+        f"⚠️ Année {year} : {len(lignes)} certifs collectées, hors de "
+        f"]{par_page * (nb_pages - 1)}, {par_page * nb_pages}] — parcours complet"
+    )
+    return None
+
+
+def _nouvelles_lignes(rows: list, existing_keys: set) -> list:
+    """Lignes encore inconnues, `existing_keys` enrichie au passage.
+
+    Partagée par les deux voies de `scrape_year` : la clé de dédup a déjà divergé
+    une fois entre deux copies (cf. JOURNAL 2026-09-04), on ne la recopie plus.
+    """
+    nouvelles = []
+    for row in rows:
+        f = row.split(";")
+        if len(f) < 7:
+            continue
+        key = _row_key(f)
+        if key not in existing_keys:
+            existing_keys.add(key)
+            nouvelles.append(row)
+    return nouvelles
 
 
 def _norm_for_match(s: str) -> str:
@@ -376,7 +475,24 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
         safe_print(f"❌ Année {year} : page 1 inaccessible : {e}")
         return 0
 
-    last_page = min(_discover_last_page(html), max_pages)
+    nb_pages = _discover_last_page(html)
+
+    # Voie rapide : les pages 1, 2, 4, 8… couvrent l'année entière parce que la
+    # page N rend les tranches N..2N−1 (cf. `_lignes_de_lannee`). ~log₂(P)
+    # requêtes au lieu de P, et chaque certification lue UNE fois.
+    toutes = _lignes_de_lannee(session, year, html, nb_pages) if nb_pages <= max_pages else None
+    if toutes is not None:
+        new_lines = _nouvelles_lignes(toutes, existing_keys)
+        _write_merged(dest_path, header, existing_lines, new_lines)
+        safe_print(
+            f"📅 Année {year} : {len(toutes)} certifs lues en "
+            f"{len(_pages_couvrantes(nb_pages))} requêtes (sur {nb_pages} pages), "
+            f"{len(new_lines)} nouvelle(s)"
+        )
+        return len(new_lines)
+
+    # Repli : parcours page à page, correct en toutes circonstances.
+    last_page = min(nb_pages, max_pages)
     safe_print(f"📅 Année {year} : {last_page} page(s) à parcourir")
 
     new_lines = []
@@ -397,18 +513,13 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
             safe_print(f"⚠️ Année {year} page {page} : aucun bloc — arrêt")
             break
 
-        page_new = 0
-        for row in rows:
-            f = row.split(";")
-            if len(f) < 7:
-                continue
-            key = _row_key(f)
-            if key not in existing_keys:
-                existing_keys.add(key)
-                new_lines.append(row)
-                page_new += 1
+        page_nouvelles = _nouvelles_lignes(rows, existing_keys)
+        new_lines.extend(page_nouvelles)
 
-        safe_print(f"📄 {year} p{page}/{last_page} : {len(rows)} certifs, {page_new} nouvelle(s)")
+        safe_print(
+            f"📄 {year} p{page}/{last_page} : {len(rows)} certifs, "
+            f"{len(page_nouvelles)} nouvelle(s)"
+        )
         page += 1
         if page <= last_page:
             time.sleep(random.uniform(DELAY_BETWEEN_REQUESTS, DELAY_BETWEEN_REQUESTS * 1.8))

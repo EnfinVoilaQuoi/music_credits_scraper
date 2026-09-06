@@ -108,16 +108,64 @@ class TestUpdateNonDestructif:
         (lu,) = data_manager.get_artist_tracks(artist.id)
         assert bool(lu.is_featuring) is False
 
-    def test_certifications_vides_ne_wipent_pas(self, data_manager):
-        # CASE WHEN :certifications_json = '[]' → conserve l'existant.
+    def test_save_track_n_ecrit_plus_les_certifications(self, data_manager):
+        """Ces colonnes ont un écrivain DÉDIÉ depuis le 2026-09-06.
+
+        `save_track` les protégeait par `CASE WHEN … = '[]'` parce que `[]` disait
+        aussi bien « recalculé, aucune » que « cet objet ne porte pas l'info » — et
+        cette protection rendait tout RETRAIT impossible (21 certifications fautives
+        mesurées en base). Le producteur est désormais seul à écrire.
+        """
         artist = _artiste_sauve(data_manager)
         t = Track(title="X", artist=artist)
         t.certs.entries = [{"certification": "Or", "certification_date": "2020-01-01"}]
         data_manager.save_track(t)
-        data_manager.save_track(Track(title="X", artist=artist))
         (lu,) = data_manager.get_artist_tracks(artist.id)
-        assert lu.certs.entries
+        assert lu.certs.entries == []
+
+    def test_un_save_etranger_n_efface_pas_les_certifications(self, data_manager):
+        """Ce que la clause protégeait est toujours vrai, et plus solidement :
+        les dix flux qui ignorent les certifs ne peuvent plus y toucher du tout."""
+        artist = _artiste_sauve(data_manager)
+        t = Track(title="X", artist=artist)
+        t.id = data_manager.save_track(t)
+        data_manager.record_certifications(
+            t.id, [{"certification": "Or", "certification_date": "2020-01-01"}], []
+        )
+
+        data_manager.save_track(Track(title="X", artist=artist))  # flux sans certifs
+
+        (lu,) = data_manager.get_artist_tracks(artist.id)
         assert lu.certs.entries[0]["certification"] == "Or"
+
+    def test_le_vidage_est_desormais_possible(self, data_manager):
+        """LE cas que l'ancien code rendait impossible, et qui a imposé un script
+        écrivant en UPDATE direct : une certification devenue caduque doit pouvoir
+        DISPARAÎTRE."""
+        artist = _artiste_sauve(data_manager)
+        t = Track(title="X", artist=artist)
+        t.id = data_manager.save_track(t)
+        data_manager.record_certifications(
+            t.id, [{"certification": "Or"}], [{"certification": "Or"}]
+        )
+
+        data_manager.record_certifications(t.id, [], [])
+
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.certs.entries == []
+        assert lu.certs.album_entries == []
+
+    def test_relationships_meme_traitement(self, data_manager):
+        artist = _artiste_sauve(data_manager)
+        t = Track(title="X", artist=artist)
+        t.id = data_manager.save_track(t)
+        data_manager.record_relationships(t.id, [{"type": "sample", "title": "Y"}])
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.relationships[0]["title"] == "Y"
+
+        data_manager.record_relationships(t.id, [])
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.relationships == []
 
 
 class TestClearAudio:
@@ -172,3 +220,40 @@ class TestConversionDuree:
         data_manager.save_track(Track(title="Minimal", artist=artist, duration=228))
         (lu,) = data_manager.get_artist_tracks(artist.id)
         assert lu.duration == 228
+
+
+class TestEcrivainsDedies:
+    """Garde-fou STRUCTUREL : `save_track` ne doit plus jamais mentionner les
+    trois colonnes JSON à écrivain dédié.
+
+    Un futur refactor qui les y remettrait rétablirait l'ambiguïté de `[]` sans
+    rien casser visiblement — et donc l'impossibilité de retirer une
+    certification. Même esprit que `tests/test_no_naked_substring_match.py` :
+    interdire le motif plutôt que constater ses effets."""
+
+    COLONNES = ("certifications", "album_certifications", "relationships")
+
+    def _source_save_track(self) -> str:
+        import inspect
+
+        from src.utils.track_repository import TrackRepository
+
+        return inspect.getsource(TrackRepository.save_track)
+
+    def test_save_track_ne_mentionne_plus_ces_colonnes_en_ecriture(self):
+        source = self._source_save_track()
+        # Le commentaire d'explication les nomme : on ne regarde que le SQL.
+        sql = "\n".join(ligne for ligne in source.splitlines() if not ligne.strip().startswith("#"))
+        for colonne in self.COLONNES:
+            assert f"{colonne} =" not in sql, (
+                f"`{colonne}` est réécrite par save_track — elle a un écrivain dédié "
+                f"(`record_certifications` / `record_relationships`). Remettre la "
+                f"clause `CASE WHEN … = '[]'` rendrait tout RETRAIT impossible."
+            )
+            assert f":{colonne}_json" not in sql
+
+    def test_les_ecrivains_dedies_existent(self):
+        from src.utils.track_repository import TrackRepository
+
+        assert callable(TrackRepository.record_certifications)
+        assert callable(TrackRepository.record_relationships)

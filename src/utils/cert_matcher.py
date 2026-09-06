@@ -26,10 +26,45 @@ import pandas as pd
 from src.config import DATA_PATH
 from src.utils.cert_normalize import normalize_text as _normalize_text
 from src.utils.logger import get_logger
+from src.utils.title_matching import either_contains_as_words, normalize_name
 
 logger = get_logger(__name__)
 
 _FEAT_RE = re.compile(r"^(.+?)\s+(?:FEAT\.?|FT\.?|FEATURING)\s+(.+)$", re.IGNORECASE)
+
+
+def _contient_en_mots(colonne: pd.Series, aiguille: str) -> pd.Series:
+    """Équivalent VECTORISÉ de `title_matching.contains_as_words` sur une colonne
+    `*_clean` : l'aiguille doit y figurer comme MOT (ou suite de mots) entier.
+
+    Remplace `str.contains(..., regex=False)` — la sous-chaîne nue, mesurée sur
+    la base réelle le 2026-09-06, rattachait 21 certifications à tort sur 448
+    (« SCH » ⊂ « HAMLI-SCH » et « High **Sch**ool Musical », « RAC » ⊂
+    « SOUNDT-RAC-K », « V » ⊂ « J-V-LIVS », « N » ⊂ « S'E-N ALLER »). Six d'entre
+    elles venaient d'un artiste étranger, les autres du bon artiste mais du
+    mauvais disque.
+
+    Les valeurs `*_clean` sortent de `cert_normalize.normalize_text` : majuscules,
+    sans accents, ponctuation retirée sauf apostrophe et trait d'union, symboles
+    translittérés (« $ » → « S »). Elles commencent et finissent donc par un
+    caractère de mot, ce qui rend l'ancrage `\\b` prévisible.
+
+    Deux passes, pour le coût : la sous-chaîne est une condition NÉCESSAIRE de
+    l'inclusion en mots entiers, et sa recherche littérale est bien plus rapide
+    qu'un balayage regex. On la garde donc en pré-filtre et on n'ancre que les
+    survivants — sur les 61 000 lignes du magasin, la version tout-regex faisait
+    passer un rattachement de quelques millisecondes à plusieurs secondes.
+    """
+    if not aiguille:
+        return pd.Series(False, index=colonne.index)
+    grossier = colonne.str.contains(aiguille, regex=False, na=False)
+    if not grossier.any():
+        return grossier
+    ancre = colonne[grossier].str.contains(
+        r"\b" + re.escape(aiguille) + r"\b", regex=True, na=False
+    )
+    return grossier & ancre.reindex(colonne.index, fill_value=False)
+
 
 # Catégorie unifiée
 _CAT_MAP = {
@@ -103,6 +138,8 @@ class CertMatcher:
         # Normalisation partagée (parité entre sources garantie par cert_normalize)
         self._norm = _normalize_text
         self.df = self._load_all()
+        # Sous-ensembles par artiste (cf. `_sous_ensemble_artiste`).
+        self._cache_artiste: dict[str, pd.DataFrame] = {}
         logger.info(
             f"✅ CertMatcher : {len(self.df)} certifs unifiées "
             f"({self.df['body'].value_counts().to_dict() if not self.df.empty else {}})"
@@ -254,6 +291,26 @@ class CertMatcher:
         return rows
 
     # ------------------------------------------------------------------ matching
+    def _sous_ensemble_artiste(self, a: str) -> pd.DataFrame:
+        """Les seules lignes où `a` figure comme MOT — mémoïsées par artiste.
+
+        Toutes les stratégies commencent par filtrer sur l'artiste, et
+        `apply_certifications` traite un artiste ENTIER : sans mémoïsation, le
+        balayage des 61 015 lignes était refait pour chaque morceau ET chaque
+        stratégie, avec la même aiguille. Une fois réduit, le reste du travail
+        porte sur quelques centaines de lignes.
+
+        Le magasin est immuable pendant la vie du matcher (chargé au `__init__`,
+        `reset_cert_matcher()` en reconstruit un) : le cache n'a rien à invalider.
+        """
+        if a not in self._cache_artiste:
+            self._cache_artiste[a] = (
+                self.df[_contient_en_mots(self.df["artist_clean"], a)]
+                if not self.df.empty and a
+                else self.df
+            )
+        return self._cache_artiste[a]
+
     def _level_rank(self, level: str) -> float:
         lvl = (level or "").strip().lower()
         if lvl in _RANK:
@@ -269,7 +326,7 @@ class CertMatcher:
 
     def _track_match_indices(self, a: str, t: str) -> list[int]:
         """Stratégies SNEP portées (exact → feat → featuring → tronqué)."""
-        df = self.df
+        df = self._sous_ensemble_artiste(a)
         if df.empty or not a:
             return []
         seen: list[int] = []
@@ -291,13 +348,15 @@ class CertMatcher:
             add(df[(ac == a) & (tc == "")])
             return seen
 
-        # S1 : exact (artiste+titre), sinon fuzzy substring
+        # `df` est DÉJÀ restreint aux lignes où l'artiste figure en mot entier
+        # (`_sous_ensemble_artiste`) : re-tester l'artiste dans chaque stratégie
+        # serait une tautologie. Seul `ac == a`, plus STRICT que l'ancrage,
+        # garde un sens — c'est ce qui distingue la branche exacte du repli.
+
+        # S1 : exact (artiste+titre), sinon titre en MOTS ENTIERS
         s1 = df[(ac == a) & (tc == t)]
         if s1.empty:
-            s1 = df[
-                ac.str.contains(a, regex=False, na=False)
-                & tc.str.contains(t, regex=False, na=False)
-            ]
+            s1 = df[_contient_en_mots(tc, t)]
         add(s1)
 
         # S2 : si le titre contient un featuring, retenter avec la partie principale
@@ -306,16 +365,12 @@ class CertMatcher:
             main = m.group(1).strip()
             s2 = df[(ac == a) & (tc == main)]
             if s2.empty and main:
-                s2 = df[
-                    ac.str.contains(a, regex=False, na=False)
-                    & tc.str.contains(main, regex=False, na=False)
-                ]
+                s2 = df[_contient_en_mots(tc, main)]
             add(s2)
 
-        # S3 : l'artiste apparaît en featuring (substring artiste + titre)
-        s3 = df[
-            ac.str.contains(a, regex=False, na=False) & tc.str.contains(t, regex=False, na=False)
-        ]
+        # S3 : l'artiste apparaît en featuring (il est déjà dans `df`) — le titre
+        # en mots entiers suffit à retenir la ligne.
+        s3 = df[_contient_en_mots(tc, t)]
         add(s3)
 
         # S4 : titre de certif TRONQUÉ (préfixe du morceau) — en dernier recours
@@ -354,27 +409,26 @@ class CertMatcher:
         return self._format(self.df.loc[idx]) if idx else []
 
     def get_artist_certifications(self, artist: str) -> list[dict[str, Any]]:
-        """Toutes les certifs (tous pays) de l'artiste (match substring, comme SNEP)."""
+        """Toutes les certifs (tous pays) de l'artiste (artiste en MOT ENTIER)."""
         a = self._norm(artist)
-        df = self.df
-        if df.empty or not a:
+        if self.df.empty or not a:
             return []
-        return self._format(df[df["artist_clean"].str.contains(a, regex=False, na=False)])
+        return self._format(self._sous_ensemble_artiste(a))
 
     def get_album_certifications(self, artist: str, album: str) -> list[dict[str, Any]]:
         """Certifs d'ALBUM (catégorie album) raccordées à cet album, tous pays."""
         a = self._norm(artist)
         t = self._norm(album)
-        df = self.df
-        if df.empty or not a or not t:
+        if self.df.empty or not a or not t:
             return []
+        # Sous-ensemble artiste d'abord ; le filtre `== a` de la branche EXACTE
+        # est conservé tel quel — il est plus strict que l'ancrage par mot, et
+        # le relâcher changerait quelles lignes sortent (pas seulement leur coût).
+        df = self._sous_ensemble_artiste(a)
         alb = df[df["cat"] == "album"]
         exact = alb[(alb["artist_clean"] == a) & (alb["title_clean"] == t)]
         if exact.empty:
-            exact = alb[
-                alb["artist_clean"].str.contains(a, regex=False, na=False)
-                & alb["title_clean"].str.contains(t, regex=False, na=False)
-            ]
+            exact = alb[_contient_en_mots(alb["title_clean"], t)]
         return self._format(exact)
 
     def audit_artist_certifications(
@@ -390,7 +444,6 @@ class CertMatcher:
         comparée aux albums ; une certif single/vidéo aux morceaux.
         """
         import difflib
-        import re as _re
 
         a = self._norm(artist_name)
         empty = {
@@ -405,12 +458,12 @@ class CertMatcher:
         if self.df.empty or not a:
             return empty
 
-        # Certifs SNEP de l'artiste : large (substring) PUIS artiste en MOT ENTIER
-        # (évite IAM ⊂ WILLIAMS).
-        snep = self.df[self.df["body"] == "SNEP"]
-        sub = snep[snep["artist_clean"].str.contains(a, regex=False, na=False)]
-        pat = _re.compile(r"\b" + _re.escape(a) + r"\b")
-        certs = [r for _, r in sub.iterrows() if pat.search(r["artist_clean"] or "")]
+        # Certifs SNEP de l'artiste, en MOT ENTIER (évite IAM ⊂ WILLIAMS).
+        # Une seule implémentation de l'ancrage, partagée avec les accesseurs :
+        # cet audit portait sa propre copie, et c'est ce qui avait permis aux
+        # accesseurs de garder la sous-chaîne nue jusqu'au 2026-09-06.
+        sous = self._sous_ensemble_artiste(a)
+        certs = [r for _, r in sous[sous["body"] == "SNEP"].iterrows()]
 
         track_cleans = [self._norm(t) for t in track_titles if t]
         album_cleans = [self._norm(x) for x in (album_titles or []) if x]
@@ -426,10 +479,18 @@ class CertMatcher:
             ref_cleans = album_cleans if (is_album and album_cleans) else track_cleans
             ref_set = set(ref_cleans)
 
+            # L'inclusion compte en MOTS ENTIERS. Nue, elle déclarait « rattaché »
+            # un titre certifié qui n'était qu'une sous-chaîne d'un des nôtres
+            # (« ares » ⊂ « la paresse ») : l'audit annonçait alors zéro orphelin
+            # là où il y en avait — soit exactement l'inverse de sa raison d'être.
             is_match = (
                 ct in ref_set
                 or (len(ct) >= 8 and any(rc.startswith(ct) for rc in ref_cleans))
-                or any((ct in rc) or (rc in ct) for rc in ref_cleans if rc)
+                or any(
+                    either_contains_as_words(normalize_name(ct), normalize_name(rc))
+                    for rc in ref_cleans
+                    if rc
+                )
             )
             if is_match:
                 if is_album:

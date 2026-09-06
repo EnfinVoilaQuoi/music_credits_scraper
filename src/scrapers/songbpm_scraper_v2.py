@@ -24,6 +24,7 @@ from src.observability import source_usage
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import build_songbpm_prompt, get_shared_extractor
 from src.utils.logger import get_logger, log_api
+from src.utils.title_matching import either_contains_as_words
 
 logger = get_logger(__name__)
 
@@ -191,8 +192,11 @@ class SongBPMScraper:
         if rt == st:
             logger.info("✅ Match titre exact + artiste")
             return True
-        # Inclusion (ex. 'booska pogo' ⊂ 'freestyle booska pogo'), garde-fou longueur
-        if (st in rt or rt in st) and min(len(st), len(rt)) >= 4:
+        # Inclusion (ex. 'booska pogo' ⊂ 'freestyle booska pogo'), garde-fou longueur.
+        # L'ancrage par MOT ENTIER sert mieux cette intention que le plancher, qui
+        # laissait passer « ares » ⊂ « la paresse » ; le plancher est CONSERVÉ
+        # par-dessus, pour n'accepter strictement rien de plus qu'avant.
+        if either_contains_as_words(st, rt) and min(len(st), len(rt)) >= 4:
             logger.info(f"✅ Match titre par inclusion + artiste ('{st}' ↔ '{rt}')")
             return True
         if ratio >= 0.85:

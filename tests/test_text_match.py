@@ -123,3 +123,46 @@ class TestTitleMatch:
 
     def test_titres_etrangers(self):
         assert tm._title_match("Matrix", "Complètement autre") < 0.72
+
+    @pytest.mark.parametrize(
+        ("cherche", "candidat"),
+        [
+            ("Toi", "Étoile"),
+            ("Quoi", "Pourquoi"),
+            ("OG", "Yoga"),
+            ("Gang", "Gangrène"),
+            ("Pop", "Épopée"),
+            ("Nice", "Bérénice"),
+            ("Ares", "La paresse"),
+            ("Baby", "Babygirl"),
+        ],
+    )
+    def test_sous_chaine_a_l_interieur_d_un_mot_ne_donne_plus_le_bonus(self, cherche, candidat):
+        """Le bonus d'inclusion valait 0.9 — au-dessus du seuil d'acceptation
+        0.72 des deux clients de paroles. Mesuré sur les 1 599 titres normalisés
+        de la base : 1 212 rapprochements fabriqués, dont 942 franchissaient le
+        seuil. Ce sont des paroles ET des timestamps d'un autre morceau."""
+        assert tm._title_match(cherche, candidat) < 0.72
+
+    @pytest.mark.parametrize(
+        ("cherche", "candidat"), [("Casse", "Carcasse"), ("Honey", "Honeymoon")]
+    )
+    def test_le_bonus_tombe_meme_quand_la_similarite_brute_suffit(self, cherche, candidat):
+        """Deux titres courts et voisins restent au-dessus du seuil par leur
+        seule similarité (0,77 et 0,71) : c'est le `SequenceMatcher` qui parle,
+        et on ne touche pas à ce réglage-là. Ce qui doit disparaître, c'est le
+        plancher artificiel à 0.9 posé par une sous-chaîne intra-mot."""
+        assert tm._title_match(cherche, candidat) < 0.9
+
+    @pytest.mark.parametrize(
+        ("cherche", "candidat"),
+        [
+            ("Matrix", "Matrix Intro"),  # ce que le bonus visait
+            ("Song", "Song Pt. II"),
+            ("CEO", "CEO Bonus"),
+            ("Au revoir", "Au revoir bb"),
+            ("Toi", "À cause de toi"),  # mot entier, même court
+        ],
+    )
+    def test_inclusion_en_mot_entier_garde_le_bonus(self, cherche, candidat):
+        assert tm._title_match(cherche, candidat) >= 0.9

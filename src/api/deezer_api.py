@@ -256,7 +256,10 @@ class DeezerAPI:
             "deezer_isrc": track_data.get("isrc"),  # pivot inter-sources (présent dès la recherche)
             "deezer_bpm": deezer_bpm,  # opportuniste (souvent absent)
             "deezer_duration": track_data.get("duration"),  # en secondes
-            "deezer_explicit_lyrics": track_data.get("explicit_lyrics", False),
+            # Pas de défaut `False` : le champ absent voudrait alors dire
+            # « Deezer affirme que non », ce qu'il ne dit pas. None = non mesuré
+            # (la colonne e19 est nullable pour exactement cette raison).
+            "deezer_explicit_lyrics": track_data.get("explicit_lyrics"),
             "deezer_readable": track_data.get("readable", False),
             "deezer_release_date": deezer_date,
             "deezer_picture": None,

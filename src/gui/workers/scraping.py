@@ -353,6 +353,9 @@ def start_combined_scraping(
             for track in selected_tracks_list:
                 track.artist = app.current_artist
                 app.data_manager.save_track(track)
+                # Les relations Genius ne passent plus par save_track (écrivain
+                # dédié) : `record_pending` les enregistre, no-op sinon.
+                app.data_manager.record_pending(track)
 
             # Afficher le résumé
             success_msg = "Scraping terminé !\n\n"

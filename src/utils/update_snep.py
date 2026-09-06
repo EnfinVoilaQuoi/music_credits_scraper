@@ -795,8 +795,12 @@ def main():
     parser.add_argument(
         "--artist",
         type=str,
+        action="append",
         default=None,
-        help="Récupérer le CSV complet d'un artiste (filtre ?interprete=) et le fusionner",
+        metavar="NOM",
+        help="Récupérer le CSV complet d'un artiste (filtre ?interprete=) et le fusionner. "
+        "RÉPÉTABLE : un membre de groupe est crédité sous son nom ET sous celui "
+        "du groupe, les deux se cherchent donc en une fois",
     )
     parser.add_argument(
         "--year",
@@ -812,7 +816,9 @@ def main():
     if args.year:
         backfill_years(args.year)
     elif args.artist:
-        fetch_artist_certifications(args.artist)
+        # Un nom inconnu du SNEP ne doit pas empêcher les suivants d'aboutir.
+        for nom in args.artist:
+            fetch_artist_certifications(nom)
     elif args.scheduled:
         # Mode silencieux pour les tâches planifiées
         schedule_monthly_update()

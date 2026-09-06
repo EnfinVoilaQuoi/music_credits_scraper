@@ -316,15 +316,43 @@ class RIAAScraperV2:
             return resultats
 
     def scrape_by_artist(self, artist: str, get_details: bool = True) -> list[dict]:
-        """Par artiste (avec la timeline = historique des paliers)."""
-        url = self._search_url(artist=artist)
-        logger.info(f"RIAA artiste '{artist}' (détails={get_details})")
-        with source_usage.observe(_SOURCE, label=f"artiste {artist}") as obs:
-            html = self._render(url, load_all=True, get_details=get_details)
-            if not html:
-                obs.fail(IssueKind.UNREACHABLE, "page non rendue")
-                return []
-            return self._parse_verifie(html, get_details, obs)
+        """Par artiste, sur les DEUX programmes, avec la timeline.
+
+        Le site sépare le programme classique du programme latin en deux
+        ONGLETS, et une recherche ne rend que l'onglet demandé. Interroger le
+        seul onglet par défaut — ce que faisait cette méthode — revenait donc à
+        déclarer « aucune certification » pour un artiste hispanophone qui en a
+        des dizaines : l'absence était FABRIQUÉE par la requête, pas constatée.
+
+        Le programme n'est pas déduit de l'onglet mais relevé sur le badge de
+        chaque ligne (cf. `_parse_main`), si bien que fusionner les deux
+        réponses ne mélange rien : chaque ligne se déclare elle-même.
+        """
+        vus: set[tuple] = set()
+        sortie: list[dict] = []
+        for programme in (PROGRAMME_US, PROGRAMME_LATIN):
+            url = self._search_url(artist=artist, programme=programme)
+            logger.info(f"RIAA artiste '{artist}' [{programme}] (détails={get_details})")
+            with source_usage.observe(_SOURCE, label=f"artiste {artist} [{programme}]") as obs:
+                html = self._render(url, load_all=True, get_details=get_details)
+                if not html:
+                    # Un onglet muet n'invalide pas l'autre : on le signale et
+                    # on continue, sinon un incident sur le latin effacerait des
+                    # certifications classiques bel et bien récupérées.
+                    obs.fail(IssueKind.UNREACHABLE, "page non rendue")
+                    continue
+                for rec in self._parse_verifie(html, get_details, obs):
+                    cle = (
+                        rec.get("artist", "").upper(),
+                        rec.get("title", "").upper(),
+                        rec.get("certification_date", ""),
+                        rec.get("award_level", ""),
+                    )
+                    if cle not in vus:
+                        vus.add(cle)
+                        sortie.append(rec)
+        logger.info(f"RIAA artiste '{artist}' : {len(sortie)} certification(s), deux programmes")
+        return sortie
 
     @staticmethod
     def _parse_verifie(html: str, get_details: bool, obs) -> list[dict]:

@@ -26,7 +26,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from src.utils import cert_clean_report
+from src.utils.cert_fixes_io import charger_fixes
 from src.utils.cert_normalize import (
+    apply_manual_fixes,
     canon_category,
     canon_level,
     clean_field,
@@ -89,6 +92,8 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
         "empty_removed": 0,
         "malformed_kept": 0,
         "apostrophes_restored": 0,
+        "manual_fixes_applied": 0,
+        "manual_fix_examples": [],
         "empty_examples": [],
         "apostrophe_examples": [],
         "level_changes": {},
@@ -101,6 +106,10 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
 
     header, rows = _read_rows(csv_path)
     report["rows_in"] = len(rows)
+
+    # Corrections saisies à la main : réappliquées à CHAQUE nettoyage, car une
+    # ré-importation SNEP ressert le libellé corrompu (cf. `cert_fixes_io`).
+    fixes = charger_fixes("snep")
 
     seen_keys = set()
     out_rows = []
@@ -124,6 +133,17 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
                 report["apostrophes_restored"] += n_apo
                 if len(report["apostrophe_examples"]) < 15:
                     report["apostrophe_examples"].append(cleaned[i])
+
+        # Après la restauration AUTOMATIQUE : la saisie manuelle a le dernier
+        # mot, elle ne sert justement qu'aux cas qu'aucun motif ne couvre.
+        artiste_fixe, titre_fixe = apply_manual_fixes(cleaned[0], cleaned[1], fixes)
+        if (artiste_fixe, titre_fixe) != (cleaned[0], cleaned[1]):
+            report["manual_fixes_applied"] += 1
+            if len(report["manual_fix_examples"]) < 15:
+                report["manual_fix_examples"].append(
+                    f"{cleaned[0]} — {cleaned[1]}  →  {artiste_fixe} — {titre_fixe}"
+                )
+            cleaned[0], cleaned[1] = artiste_fixe, titre_fixe
 
         artist, title = cleaned[0], cleaned[1]
         category, level = cleaned[3], cleaned[4]
@@ -197,64 +217,52 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
 
 
 def format_report(report: dict) -> str:
-    L = []
-    L.append("=" * 52)
-    L.append(
-        "🧹 NETTOYAGE DU CSV MAÎTRE SNEP"
-        + ("  (DRY-RUN)" if not report.get("applied") else "  (APPLIQUÉ)")
-    )
-    L.append("=" * 52)
-    if report.get("error"):
-        L.append(f"❌ {report['error']}")
-        return "\n".join(L)
+    """Rend le rapport via le formateur COMMUN aux trois sources.
 
-    L.append(f"Fichier : {report['path']}")
-    if report.get("backup"):
-        L.append(f"Backup  : {report['backup']}")
-    L.append(
-        f"Lignes : {report['rows_in']} → {report['rows_out']} "
-        f"({report['rows_out'] - report['rows_in']:+d})"
-    )
-    L.append("")
-    L.append(f"  • Niveaux re-cassés       : {report['levels_recased']}")
-    L.append(f"  • Catégories re-cassées   : {report['categories_recased']}")
-    L.append(f"  • Champs espaces/tab nettoyés : {report['whitespace_fixed']}")
-    L.append(f"  • Caractères restaurés (?→ '/œ) : {report['apostrophes_restored']}")
-    L.append(f"  • Doublons retirés        : {report['duplicates_removed']}")
-    L.append(f"  • Lignes vides retirées   : {report['empty_removed']}")
-    if report["malformed_kept"]:
-        L.append(f"  • Lignes malformées conservées : {report['malformed_kept']}")
+    Le rendu vivait ici, et BRMA/RIAA n'avaient rien d'équivalent : le nettoyage
+    de deux sources sur trois se résumait à « X → Y lignes ». Le squelette est
+    désormais dans `cert_clean_report` ; ce qui reste ici, c'est ce que SNEP
+    compte — le seul choix qui lui appartienne vraiment.
+    """
+    counters = [
+        ("Niveaux re-cassés", report.get("levels_recased", 0)),
+        ("Catégories re-cassées", report.get("categories_recased", 0)),
+        ("Champs espaces/tab nettoyés", report.get("whitespace_fixed", 0)),
+        ("Caractères restaurés (?→ '/œ)", report.get("apostrophes_restored", 0)),
+        ("Corrections manuelles appliquées", report.get("manual_fixes_applied", 0)),
+        ("Doublons retirés", report.get("duplicates_removed", 0)),
+        ("Lignes vides retirées", report.get("empty_removed", 0)),
+    ]
+    if report.get("malformed_kept"):
+        counters.append(("Lignes malformées conservées", report["malformed_kept"]))
 
-    def detail(title, d):
-        if d:
-            L.append("")
-            L.append(f"── {title} ──")
-            for k, n in sorted(d.items(), key=lambda x: -x[1]):
-                L.append(f"  • {k}  ×{n}")
-
-    detail("Niveaux normalisés", report["level_changes"])
-    detail("Catégories normalisées", report["category_changes"])
-
-    if report.get("apostrophe_examples"):
-        L.append("")
-        L.append("── Caractères restaurés ?→ '/œ (exemples) ──")
-        for ex in report["apostrophe_examples"]:
-            L.append(f"  • {ex[:70]}")
-
-    if report["empty_examples"]:
-        L.append("")
-        L.append(f"── Lignes vides retirées ({report['empty_removed']}) ──")
-        for ex in report["empty_examples"]:
-            L.append(f"  • {ex[:90]}")
-
-    if not report.get("applied"):
-        L.append("")
-        L.append(
+    return cert_clean_report.render(
+        report,
+        titre="🧹 NETTOYAGE DU CSV MAÎTRE SNEP",
+        counters=counters,
+        sections=[
+            ("Niveaux normalisés", report.get("level_changes", {})),
+            ("Catégories normalisées", report.get("category_changes", {})),
+        ],
+        examples=[
+            (
+                "Caractères restaurés ?→ '/œ (exemples)",
+                [ex[:70] for ex in report.get("apostrophe_examples") or []],
+            ),
+            (
+                "Corrections manuelles appliquées",
+                [ex[:90] for ex in report.get("manual_fix_examples") or []],
+            ),
+            (
+                f"Lignes vides retirées ({report.get('empty_removed', 0)})",
+                [ex[:90] for ex in report.get("empty_examples") or []],
+            ),
+        ],
+        note_dry_run=(
             "ℹ️  DRY-RUN : rien n'a été écrit. Relance avec --apply pour "
             "appliquer (un backup sera créé)."
-        )
-    L.append("=" * 52)
-    return "\n".join(L)
+        ),
+    )
 
 
 def _default_csv_path() -> Path:

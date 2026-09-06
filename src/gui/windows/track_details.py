@@ -1018,12 +1018,20 @@ class TrackDetailsWindow:
                     "Double Diamant": "💎💎",
                     "Triple Diamant": "💎💎💎",
                     "Quadruple Diamant": "💎💎💎💎",
+                    # Programme latin : mêmes symboles, autre échelle.
+                    "Oro": "🥇",
+                    "Platino": "💿",
+                    "Diamante": "💎",
                 }
 
                 body_label = {
                     "SNEP": "SNEP (France)",
                     "BRMA": "BRMA (Belgique)",
                     "RIAA": "RIAA (USA)",
+                    # Programme distinct, échelle distincte : Oro 30 000 unités,
+                    # Platino 60 000 — sans commune mesure avec les 500 000 /
+                    # 1 000 000 du programme classique. D'où un groupe à part.
+                    "RIAA Latin": "RIAA Latin (USA) — échelle Oro/Platino",
                 }
 
                 def _render_grouped(certs):

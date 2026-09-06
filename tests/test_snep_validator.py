@@ -549,3 +549,56 @@ def test_col_hors_plage_rend_une_colonne_vide():
     serie = sv._col(df, 6)
     assert len(serie) == 2
     assert serie.isna().all()
+
+
+class TestDecisionsDejaPrises:
+    """Le validateur lit le CSV ; les décisions manuelles, elles, vivent à côté.
+
+    Un libellé corrigé dans la fenêtre de correction reste FAUTIF dans le CSV
+    jusqu'au prochain « 🧹 Nettoyer ». Sans en tenir compte, le rapport
+    redemandait d'arbitrer ce qui l'avait déjà été — constaté sur
+    « SHURIK?N — OU JE VIS », corrigé et pourtant toujours listé.
+    """
+
+    def _csv(self, tmp_path):
+        return _ecrire(
+            tmp_path / "certif-.csv",
+            [
+                _ligne(artist="SHURIK?N", title="OU JE VIS"),
+                _ligne(artist="SANDI THOM", title="SMILE?IT CONFUSES PEOPLE"),
+            ],
+        )
+
+    def test_sans_decision_tout_est_a_revoir(self, tmp_path):
+        rapport = validate_snep_csv(self._csv(tmp_path))
+
+        assert rapport["corrupted_apostrophes_count"] == 2
+        assert rapport["corrupted_decided_count"] == 0
+
+    def test_un_libelle_corrige_bascule_en_attente(self, tmp_path):
+        from src.utils.cert_normalize import cle_correction
+
+        fixes = {cle_correction("SHURIK?N", "OU JE VIS"): {"artist": "SHURIK'N"}}
+        rapport = validate_snep_csv(self._csv(tmp_path), fixes=fixes)
+
+        assert rapport["corrupted_apostrophes_count"] == 1
+        assert rapport["corrupted_decided_count"] == 1
+        assert "SHURIK'N" in rapport["corrupted_decided"][0]
+
+    def test_un_libelle_accepte_bascule_aussi(self, tmp_path):
+        from src.utils.cert_normalize import cle_correction
+
+        acceptes = {cle_correction("SANDI THOM", "SMILE?IT CONFUSES PEOPLE")}
+        rapport = validate_snep_csv(self._csv(tmp_path), acceptes=acceptes)
+
+        assert rapport["corrupted_apostrophes_count"] == 1
+        assert "validé tel quel" in rapport["corrupted_decided"][0]
+
+    def test_le_rapport_dit_quoi_faire(self, tmp_path):
+        from src.utils.cert_normalize import cle_correction
+
+        fixes = {cle_correction("SHURIK?N", "OU JE VIS"): {"artist": "SHURIK'N"}}
+        texte = format_report(validate_snep_csv(self._csv(tmp_path), fixes=fixes))
+
+        assert "Décisions en attente" in texte
+        assert "Nettoyer" in texte

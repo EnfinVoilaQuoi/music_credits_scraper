@@ -345,3 +345,105 @@ class TestCLI:
         capsys.readouterr()
         assert vu["path"].name == "certif-.csv"
         assert vu["path"].parts[-3:-1] == ("certifications", "snep")
+
+
+class TestCorrectionsManuelles:
+    """Les libellés que la restauration automatique ne sait pas réparer.
+
+    Mesuré le 2026-09-06 : sur les 102 « ? » du CSV réel, l'écrasante majorité
+    sont de vrais points d'interrogation ; seule une poignée est corrompue
+    (DES?REE, MYTHOS?N, BROTHER LOUI?E). Ces cas-là se saisissent à la main, et
+    la correction doit être RÉAPPLIQUÉE à chaque nettoyage — un ré-import SNEP
+    ressert le libellé fautif, corriger le CSV en place ne tiendrait qu'un tour.
+    """
+
+    def test_la_correction_manuelle_est_appliquee(self, tmp_path, monkeypatch):
+        from src.utils.cert_normalize import cle_correction
+
+        monkeypatch.setattr(
+            sc,
+            "charger_fixes",
+            lambda source: {cle_correction("DES?REE", "LIFE"): {"title": "DES'REE — LIFE"}},
+        )
+        p = _ecrire(tmp_path / "c.csv", [_ligne(artist="DES?REE", title="LIFE")])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["manual_fixes_applied"] == 1
+        assert "DES'REE — LIFE" in format_report(rapport)
+
+    def test_sans_correction_rien_ne_change(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne(artist="DES?REE", title="LIFE")])
+
+        assert clean_snep_csv(p)["manual_fixes_applied"] == 0
+
+    def test_la_correction_manuelle_passe_APRES_la_restauration_auto(self, tmp_path, monkeypatch):
+        """La saisie ne sert qu'aux cas qu'aucun motif ne couvre : elle doit donc
+        s'appliquer au libellé DÉJÀ restauré, sinon sa clé ne correspondrait
+        jamais pour les libellés que l'automatique a modifiés."""
+        from src.utils.cert_normalize import cle_correction
+
+        # « L?EMPIRE » est restauré en « L'EMPIRE » par l'automatique.
+        monkeypatch.setattr(
+            sc,
+            "charger_fixes",
+            lambda source: {cle_correction("JUL", "L'EMPIRE"): {"title": "L'EMPIRE (REMIX)"}},
+        )
+        p = _ecrire(tmp_path / "c.csv", [_ligne(title="L?EMPIRE")])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["apostrophes_restored"] == 1
+        assert rapport["manual_fixes_applied"] == 1
+
+
+class TestVerdictDeNettoyage:
+    """« Déjà propre » se lit dans le RAPPORT, pas dans un second calcul.
+
+    La fenêtre recomptait de son côté — niveaux, catégories, espaces, doublons,
+    vides — en OUBLIANT les apostrophes restaurées et les corrections manuelles.
+    Sur un fichier où seuls ces deux compteurs avaient des valeurs (2 et 13),
+    elle concluait « CSV déjà propre » et n'offrait donc jamais d'appliquer,
+    alors que le rapport annonçait 15 lignes à modifier.
+    """
+
+    def test_un_csv_sans_rien_a_faire(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne()])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["deja_propre"] is True
+        assert rapport["lignes_modifiees"] == 0
+
+    def test_les_apostrophes_comptent_dans_le_verdict(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne(title="L?EMPIRE")])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["apostrophes_restored"] == 1
+        assert rapport["deja_propre"] is False
+        assert rapport["lignes_modifiees"] >= 1
+
+    def test_les_corrections_manuelles_comptent_aussi(self, tmp_path, monkeypatch):
+        from src.utils.cert_normalize import cle_correction
+
+        monkeypatch.setattr(
+            sc,
+            "charger_fixes",
+            lambda source: {cle_correction("JUL", "MY WORLD"): {"title": "MY WORLD (REMIX)"}},
+        )
+        p = _ecrire(tmp_path / "c.csv", [_ligne()])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["manual_fixes_applied"] == 1
+        assert rapport["deja_propre"] is False
+
+    def test_le_verdict_apparait_dans_le_rendu(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne()])
+
+        assert "DÉJÀ à jour" in format_report(clean_snep_csv(p))

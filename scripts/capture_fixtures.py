@@ -21,7 +21,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 import requests
 
@@ -49,6 +49,20 @@ _GENIUS_SONG_URL = "https://genius.com/Josman-dans-le-vide-lyrics"
 _SPOTIFY_WEB_TRACK_ID = "3EDDunSmj8RbiVGU0Qr0M8"  # ISHA — CR600 (Bonus Track)
 _SPOTIFY_WEB_ARTIST_ID = "0dSh0CIa0HPd9kJmJSmGQo"  # ISHA
 _RIAA_ARTIST = "Daft Punk"  # catalogue RIAA stable et court (pas de rap FR chez RIAA)
+
+
+def _riaa_artist_url() -> str:
+    """URL de recherche RIAA par artiste, demandée AU SCRAPER.
+
+    Le formulaire du site a été refait le 2026-09-06 (paramètres renommés) : une
+    URL recopiée dans ce script se serait périmée sans bruit, et la capture
+    aurait enregistré une page vide qu'on aurait prise pour la vérité.
+    """
+    from src.scrapers.riaa_scraper_v2 import RIAAScraperV2
+
+    return RIAAScraperV2._search_url(artist=_RIAA_ARTIST)
+
+
 _LRCLIB_PARAMS = {  # /get exact : Josman — Dans le vide (album Matrix, 243 s en base)
     "track_name": "Dans le vide",
     "artist_name": "Josman",
@@ -93,11 +107,9 @@ CAPTURES: list[dict] = [
     {
         "name": "riaa_search",
         "path": "riaa/search_results.html",
-        "url": (
-            "https://www.riaa.com/gold-platinum/?tab_active=default-award"
-            f"&ar={quote(_RIAA_ARTIST)}&ti=&lab=&genre=&format=&date_option="
-            "&from=&to=&award=&type=&category=&adv=SEARCH#search_section"
-        ),
+        # URL construite par le scraper lui-même : le formulaire du site a changé
+        # (2026-09-06) et une URL recopiée ici se serait périmée en silence.
+        "url": _riaa_artist_url(),
         "method": "riaa",
     },
     {

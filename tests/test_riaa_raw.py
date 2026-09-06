@@ -71,10 +71,49 @@ def test_clean_certif_csv_derive_du_brut(riaa_tmp):
     pd.DataFrame([_row("A", "T"), _row("A", "T")]).to_csv(
         riaa_tmp / "riaa_raw.csv", index=False, encoding="utf-8-sig"
     )
-    before, after = u.clean_certif_csv()
+    rapport = u.clean_certif_csv()
     clean = pd.read_csv(riaa_tmp / "certif_riaa.csv")
-    assert after == 1  # dédup depuis le brut
+    assert rapport["rows_out"] == 1  # dédup depuis le brut
+    assert rapport["duplicates_removed"] == 1
+    assert rapport["applied"] is True
     assert len(clean) == 1
+
+
+def test_clean_certif_csv_dry_run_n_ecrit_rien(riaa_tmp):
+    """Aperçu avant application, comme le nettoyeur SNEP : le bouton « Nettoyer »
+    ne doit plus demander de valider à l'aveugle."""
+    pd.DataFrame([_row("A", "T"), _row("A", "T")]).to_csv(
+        riaa_tmp / "riaa_raw.csv", index=False, encoding="utf-8-sig"
+    )
+    rapport = u.clean_certif_csv(apply=False)
+    assert rapport["applied"] is False
+    assert rapport["rows_out"] == 1
+    assert not (riaa_tmp / "certif_riaa.csv").exists()
+
+
+def test_le_rapport_de_nettoyage_detaille_ce_qui_est_retire(riaa_tmp):
+    """Le nettoyeur RIAA ne disait qu'une chose : « X → Y lignes »."""
+    pd.DataFrame(
+        [
+            _row("A", "T"),
+            _row("A", "T"),
+            _row("", "SANS ARTISTE"),
+            {**_row("B", "U"), "Certification_Type": "3x Multi-Platinum"},
+        ]
+    ).to_csv(riaa_tmp / "riaa_raw.csv", index=False, encoding="utf-8-sig")
+
+    rapport = u.clean_certif_csv(apply=False)
+    assert rapport["empty_removed"] == 1
+    assert rapport["duplicates_removed"] == 1
+    # Niveau non canonique : désormais NORMALISÉ (uniformité du fichier), et
+    # compté comme tel dans le rapport.
+    assert rapport["niveaux_normalises"] == 1
+    assert "3x Multi-Platinum → 3x Platinum" in rapport["level_changes"]
+
+    texte = u.format_clean_report(rapport)
+    assert "DRY-RUN" in texte
+    assert "Doublons retirés" in texte
+    assert "SANS ARTISTE" in texte
 
 
 # ─────────────────────────────────────── aplatissement des données scrapées
@@ -390,7 +429,7 @@ class TestUpdateMissingMonths:
     ):
         """Le `//30` d'origine arrondissait à 0 et concluait « déjà à jour »,
         laissant le mois courant non scrapé."""
-        fake = scraper_factory(_FakeScraper())
+        fake = scraper_factory(_FakeScraper([[_certif(title="A")]]))
         self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=10))
 
         assert updater.update_missing_months() is True
@@ -431,11 +470,28 @@ class TestUpdateMissingMonths:
     def test_boucle_terminee_horodate_la_verification(
         self, updater, riaa_tmp, monkeypatch, scraper_factory
     ):
-        scraper_factory(_FakeScraper())
+        scraper_factory(_FakeScraper([[_certif(title="A")], [_certif(title="B")]]))
         self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=40))
 
         updater.update_missing_months()
         assert u.RIAA_META.exists()
+
+    def test_aucune_ligne_vue_n_horodate_PAS_la_fraicheur(
+        self, updater, riaa_tmp, monkeypatch, scraper_factory
+    ):
+        """La régression de juillet 2026, tenue par un test.
+
+        Le site RIAA a été refait, le scraper rendait 0 ligne pour TOUTE requête,
+        et la MàJ concluait « 0 ajoutée » puis horodatait la fraîcheur : la GUI
+        affichait une base à jour alors que deux mois de certifications
+        manquaient. « 0 ajoutée » est le régime normal d'un ré-run ; « 0 VUE »
+        sur un mois entier ne l'est jamais — la RIAA certifie chaque semaine.
+        """
+        scraper_factory(_FakeScraper())  # toutes les périodes rendent []
+        self._figer_derniere_date(updater, monkeypatch, datetime.now() - timedelta(days=40))
+
+        assert updater.update_missing_months() is False
+        assert not u.RIAA_META.exists()
 
     def test_echec_douverture_du_navigateur_rend_false(
         self, updater, riaa_tmp, monkeypatch, scraper_factory
@@ -445,3 +501,69 @@ class TestUpdateMissingMonths:
 
         assert updater.update_missing_months() is False
         assert fake.periodes == []
+
+
+class TestProgrammeEtUnites:
+    """Les deux colonnes qui portent l'échelle d'un award (2026-09-06).
+
+    Le scraper CALCULAIT déjà les unités et les JETAIT à la frontière du CSV :
+    c'est précisément pourquoi l'erreur latine (un Platino compté comme un
+    Platinum, 60 000 unités contre 1 000 000) est restée invisible si longtemps.
+    """
+
+    def test_le_programme_et_les_unites_sont_ecrits(self, riaa_tmp):
+        rows = u._flatten_records(
+            [
+                {
+                    "artist": "ROMEO SANTOS",
+                    "title": "ODIO",
+                    "certification_date": "2026-08-17",
+                    "award_level": "61x Platino",
+                    "award_programme": "LATIN",
+                }
+            ]
+        )
+
+        assert rows[0]["Award_Programme"] == "LATIN"
+        assert rows[0]["Units"] == str(61 * 60_000)
+
+    def test_le_programme_est_herite_par_chaque_palier(self, riaa_tmp):
+        """Le programme est une propriété de l'AWARD, pas du palier."""
+        rows = u._flatten_records(
+            [
+                {
+                    "artist": "A",
+                    "title": "T",
+                    "award_programme": "LATIN",
+                    "history": [
+                        {"certification_level": "2x Platino", "certification_date": "2020-01-01"},
+                        {"certification_level": "Oro", "certification_date": "2018-01-01"},
+                    ],
+                }
+            ]
+        )
+
+        assert [r["Award_Programme"] for r in rows] == ["LATIN", "LATIN"]
+        assert [r["Units"] for r in rows] == ["120000", "30000"]
+
+    def test_le_nettoyage_complete_les_lignes_historiques(self, riaa_tmp):
+        """Les lignes antérieures à la collecte de la famille d'award n'ont ni
+        programme ni unités : le vocabulaire du niveau les rattrape."""
+        pd.DataFrame(
+            [
+                {**_row("A", "T"), "Certification_Type": "Oro"},
+                {**_row("B", "U"), "Certification_Type": "2x Multi-Platinum"},
+            ]
+        ).to_csv(riaa_tmp / "riaa_raw.csv", index=False, encoding="utf-8-sig")
+
+        u.clean_certif_csv()
+        clean = pd.read_csv(riaa_tmp / "certif_riaa.csv", dtype=str).fillna("")
+
+        par_titre = {r["Title"]: r for _, r in clean.iterrows()}
+        assert par_titre["T"]["Award_Programme"] == "LATIN"
+        assert par_titre["T"]["Units"] == "30000"
+        assert par_titre["U"]["Award_Programme"] == "US"
+        # Uniformité du libellé : le corpus historique dit « Multi-Platinum »,
+        # le scraper « Platinum ». Le fichier ne garde plus les deux formes.
+        assert par_titre["U"]["Certification_Type"] == "2x Platinum"
+        assert par_titre["U"]["Units"] == "2000000"

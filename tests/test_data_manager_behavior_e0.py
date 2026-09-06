@@ -725,11 +725,28 @@ class TestCertificationsPersistence:
         n = apply_certifications(artist, [track], _Matcher())
         assert n == 1
         data_manager.save_track(track)
+        # Depuis le 2026-09-06, `save_track` n'écrit plus ces colonnes : elles ont
+        # un écrivain dédié, appelé APRÈS lui (il attribue l'id des morceaux neufs).
+        data_manager.record_pending(track)
 
         reloaded = _lire_track(data_manager, artist.id, track_id)
         assert reloaded.certs.entries == [cert]
         assert reloaded.certs.has is True
         assert reloaded.certs.level == "Or"
+
+    def test_le_marqueur_est_efface_apres_ecriture(self, data_manager):
+        """Un morceau qui reste marqué en fin de flux = enregistrement oublié ;
+        c'est ce que `certifications_non_enregistrees` détecte."""
+        artist = _artiste(data_manager)
+        track_id = _sauve_track(data_manager, artist, "Hit", album="LP")
+        track = _lire_track(data_manager, artist.id, track_id)
+        track.certs.entries = [self._cert("Hit")]
+        track.certs.needs_write = True
+
+        assert data_manager.certifications_non_enregistrees([track]) == ["Hit"]
+        data_manager.record_pending(track)
+        assert track.certs.needs_write is False
+        assert data_manager.certifications_non_enregistrees([track]) == []
 
 
 class TestLyricsSyncedObservations:

@@ -28,6 +28,7 @@ from src.observability import source_usage
 
 # Import logger
 from src.utils.logger import get_logger
+from src.utils.title_matching import either_contains_as_words, normalize_name
 
 logger = get_logger(__name__)
 
@@ -187,7 +188,11 @@ class GetSongBPMFetcher:
             ht = self._norm(h.get("title", ""))
             if ht == nt:
                 return h  # match parfait titre + artiste
-            if best is None and (nt in ht or ht in nt):
+            # Inclusion en MOTS ENTIERS : nue, elle retenait « yoga » pour « OG »
+            # ou « pourquoi » pour « Quoi » — et ce repli fixe le BPM du morceau.
+            # `normalize_name` ramène à [a-z0-9 ] : `_norm` local garde la
+            # ponctuation, sur laquelle l'ancrage `\b` serait imprévisible.
+            if best is None and either_contains_as_words(normalize_name(nt), normalize_name(ht)):
                 best = h  # titre contenu → candidat de repli
         return best
 

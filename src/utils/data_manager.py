@@ -43,6 +43,42 @@ class DataManager(ArtistRepository, TrackRepository):
         """Moteur SQLAlchemy Core — seul chemin d'accès à la base (E2)."""
         return self._db.engine
 
+    def record_pending(self, track) -> None:
+        """Écrit ce que `save_track` n'écrit plus : certifications et relations.
+
+        À appeler juste APRÈS `save_track` — l'ordre est contraint, `save_track`
+        attribuant l'`id` des morceaux neufs. No-op quand rien n'est marqué, donc
+        l'ajouter à une boucle de sauvegarde ne coûte rien.
+
+        Ces deux colonnes ont des écrivains dédiés parce que `[]` y disait deux
+        choses opposées (cf. `TrackRepository.record_certifications`). Le marqueur
+        distingue « recalculé, et vide » de « cet objet ne porte pas l'info » ; un
+        morceau encore marqué en fin de flux est un enregistrement OUBLIÉ, et les
+        appelants le vérifient (`certifications_non_enregistrees`).
+        """
+        if track.id is None:
+            logger.warning(f"record_pending sans id: '{track.title}' — rien écrit")
+            return
+        if track.certs.needs_write and self.record_certifications(
+            track.id, track.certs.entries, track.certs.album_entries
+        ):
+            track.certs.needs_write = False
+        if track._relationships_pending and self.record_relationships(
+            track.id, track.relationships
+        ):
+            track._relationships_pending = False
+
+    @staticmethod
+    def certifications_non_enregistrees(tracks) -> list[str]:
+        """Titres des morceaux recalculés dont l'enregistrement a été oublié.
+
+        Contrôle de FIN DE FLUX. Il ne peut pas vivre dans `save_track` : celui-ci
+        tourne forcément AVANT l'enregistrement (attribution des ids), donc il
+        verrait tous les morceaux marqués à chaque run et crierait en permanence.
+        Un garde-fou qui crie toujours ne garde rien.
+        """
+        return [t.title for t in tracks if t.certs.needs_write or t._relationships_pending]
+
     def export_to_json(self, artist_name: str, filepath: Path | None = None):
         """Exporte les données d'un artiste en JSON"""
         artist = self.get_artist_by_name(artist_name)

@@ -61,6 +61,9 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
 
             matches = matcher.get_track_certifications(artist.name, title, extra_artists=extra)
             track.certs.entries = [Certification.from_match(m).to_column_dict() for m in matches]
+            # Recalculé : `save_track` n'écrit plus ces colonnes, c'est
+            # `DataManager.record_pending` qui le fera après le save.
+            track.certs.needs_write = True
 
             if track.certs.entries:
                 highest = track.certs.entries[0]  # déjà trié par priorité
@@ -93,6 +96,8 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
             track.certs.entries = []
             track.certs.album_entries = []
             track.certs.has = False
+            # Le repli est un RÉSULTAT lui aussi : deux listes vides à écrire.
+            track.certs.needs_write = True
 
     if enriched:
         logger.info(f"🏆 {enriched}/{len(tracks)} morceaux enrichis avec certifications")

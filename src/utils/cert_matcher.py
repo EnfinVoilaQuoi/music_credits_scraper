@@ -24,6 +24,11 @@ from typing import Any
 import pandas as pd
 
 from src.config import DATA_PATH
+from src.utils.cert_normalize import (
+    PROGRAMME_LATIN,
+    programme_riaa,
+    riaa_level,
+)
 from src.utils.cert_normalize import normalize_text as _normalize_text
 from src.utils.logger import get_logger
 from src.utils.title_matching import either_contains_as_words, normalize_name
@@ -98,6 +103,15 @@ _RANK = {
     "diamond": 4,
     "platinum": 7,
     "gold": 10,
+    # RIAA — programme LATIN. Même ORDRE que les autres échelles (le diamant
+    # au-dessus du platine, le platine au-dessus de l'or), et c'est tout ce que
+    # ce rang exprime : il ne sert qu'à trier des certifs ENTRE ELLES, à
+    # l'intérieur d'un même corps. La comparaison entre échelles se fait en
+    # unités (`cert_normalize.riaa_units`), pas ici — un Platino et un Platinum
+    # partagent ce rang 7 sans valoir la même chose.
+    "diamante": 4,
+    "platino": 7,
+    "oro": 10,
 }
 
 
@@ -120,15 +134,10 @@ def _to_iso_date(s: str) -> str:
     return s
 
 
-def _riaa_level(s: str) -> str:
-    """Normalise un niveau RIAA : « 4x Multi-Platinum » → « 4x Platinum »."""
-    s = (s or "").strip()
-    m = re.match(r"(\d+)\s*x\s*multi-?platinum", s, re.I)
-    if m:
-        return f"{m.group(1)}x Platinum"
-    if re.fullmatch(r"multi-?platinum", s, re.I):
-        return "Platinum"
-    return s  # Gold, Platinum, Diamond, etc.
+#: Ré-export : la normalisation des niveaux RIAA vit dans `cert_normalize`
+#: (elle était dupliquée à l'octet près avec `update_riaa`). Nom local conservé
+#: pour les appelants et les tests.
+_riaa_level = riaa_level
 
 
 class CertMatcher:
@@ -271,6 +280,13 @@ class CertMatcher:
             if not artist or not title:
                 continue
             level = _riaa_level(col(r, "certification_type", "award_level", "certification_level"))
+            # Deux programmes RIAA, deux ÉCHELLES : un Platino vaut 60 000
+            # unités, un Platinum 1 000 000. Les laisser sous le même corps
+            # revenait à présenter comme comparables des récompenses qui ne le
+            # sont pas. La colonne fait foi ; à défaut (lignes du corpus
+            # historique), le vocabulaire du niveau tranche.
+            programme = col(r, "award_programme") or programme_riaa(level)
+            latin = programme == PROGRAMME_LATIN
             rows.append(
                 {
                     "artist_clean": self._norm(artist),
@@ -279,7 +295,7 @@ class CertMatcher:
                     "level": level,
                     "date": _to_iso_date(col(r, "certification_date")),
                     "country": "US",
-                    "body": "RIAA",
+                    "body": "RIAA Latin" if latin else "RIAA",
                     "flag": "🇺🇸",
                     "artist_name": artist,
                     "title": title,
@@ -311,15 +327,40 @@ class CertMatcher:
             )
         return self._cache_artiste[a]
 
+    #: Ordre d'affichage des pays.
+    _ORDRE_PAYS = {"FR": 0, "BE": 1, "US": 2}
+    #: Le CORPS s'intercale entre le pays et le niveau : « RIAA Latin » partage
+    #: le pays « US » avec « RIAA », mais son échelle est autre (Platino
+    #: 60 000 unités contre 1 000 000). Sans ce cran, un Platino se rangerait à
+    #: égalité d'un Platinum — ils partagent le rang 7 — et pourrait passer
+    #: devant lui à la date.
+    _ORDRE_CORPS = {"RIAA Latin": 1}
+
+    def _cle_de_tri(self, cert: dict) -> tuple:
+        """Clé de tri d'une certification : pays, corps, niveau, date CROISSANTE.
+
+        Extraite du tri le 2026-09-06 : elle porte quatre décisions, et un test
+        qui la réécrirait pour la vérifier ne vérifierait que lui-même.
+        La date croissante est voulue — `certification_enricher` prend
+        `entries[0]`, donc à niveau égal on veut la PLUS ANCIENNE (meilleur
+        proxy de la date d'obtention).
+        """
+        return (
+            self._ORDRE_PAYS.get(cert["country"], 9),
+            self._ORDRE_CORPS.get(cert.get("body", ""), 0),
+            self._level_rank(cert["certification"]),
+            cert["certification_date"] or "",
+        )
+
     def _level_rank(self, level: str) -> float:
         lvl = (level or "").strip().lower()
         if lvl in _RANK:
             return _RANK[lvl]
-        m = re.match(r"(\d+)\s*x\s+(platine|platinum|or|gold|diamant|diamond)", lvl)
+        m = re.match(
+            r"(\d+)\s*x\s+(platine|platinum|platino|or|gold|oro|diamant|diamond|diamante)", lvl
+        )
         if m:
-            base = {"platine": 7, "platinum": 7, "or": 10, "gold": 10, "diamant": 4, "diamond": 4}[
-                m.group(2)
-            ]
+            base = _RANK[m.group(2)]
             n = int(m.group(1))
             return base - min(n - 1, 9) * 0.1  # un cran au-dessus du palier simple
         return 99.0
@@ -553,14 +594,7 @@ class CertMatcher:
         # `track.certs.level`/`date`, donc à niveau égal on veut la date la PLUS
         # ANCIENNE (meilleur proxy de la date d'obtention, et `calculate_
         # certification_duration` mesure alors le vrai délai sortie→certif).
-        order = {"FR": 0, "BE": 1, "US": 2}
-        out.sort(
-            key=lambda c: (
-                order.get(c["country"], 9),
-                self._level_rank(c["certification"]),
-                c["certification_date"] or "",
-            ),
-        )
+        out.sort(key=self._cle_de_tri)
         return out
 
 

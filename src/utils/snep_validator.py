@@ -121,6 +121,8 @@ def validate_snep_csv(
     csv_path: str | Path,
     target_years: tuple[int, ...] | None = None,
     recent_years: tuple[int, ...] = (2025, 2026),
+    fixes: dict | None = None,
+    acceptes: set[str] | None = None,
 ) -> dict:
     """Analyse le CSV maître SNEP et retourne un rapport structuré.
 
@@ -129,6 +131,12 @@ def validate_snep_csv(
     target_years=(...) → scan limité à ces années (mode ciblé/rapide).
     recent_years        → années pour lesquelles on signale aussi les mois à
                          faible couverture (signal de scrape récent incomplet).
+    fixes / acceptes    → décisions manuelles DÉJÀ prises sur les libellés à
+                         « ? » (cf. `cert_fixes_io`). Le validateur lit le CSV,
+                         qui porte encore le libellé fautif tant que le
+                         nettoyage n'a pas tourné : sans elles, il redemande
+                         d'arbitrer ce qui l'a déjà été. Elles ne changent pas
+                         le verdict, seulement ce qu'il RESTE à faire.
     """
     csv_path = Path(csv_path)
     full_mode = target_years is None
@@ -152,6 +160,8 @@ def validate_snep_csv(
         "empty_critical": 0,
         "corrupted_apostrophes": [],
         "corrupted_apostrophes_count": 0,
+        "corrupted_decided": [],
+        "corrupted_decided_count": 0,
         "date_parse_failures": 0,
         "invalid_categories": [],
         "invalid_levels": [],
@@ -204,14 +214,34 @@ def validate_snep_csv(
     apo_mask = artist.fillna("").str.contains(apo_pat, regex=True, na=False) | title.fillna(
         ""
     ).str.contains(apo_pat, regex=True, na=False)
-    report["corrupted_apostrophes_count"] = int(apo_mask.sum())
     if apo_mask.any():
-        ex = (artist.fillna("") + " — " + title.fillna(""))[apo_mask].head(15).tolist()
-        report["corrupted_apostrophes"] = ex
-        report["warnings"].append(
-            f"{report['corrupted_apostrophes_count']} entrée(s) avec caractère "
-            f"corrompu (?) — nettoyeur (élision/œ auto) puis revue manuelle du reste"
-        )
+        from src.utils.cert_normalize import cle_correction
+
+        decidees, a_revoir = [], []
+        vus = set()
+        for a, t in zip(artist.fillna("")[apo_mask], title.fillna("")[apo_mask], strict=True):
+            cle = cle_correction(a, t)
+            if cle in vus:
+                continue
+            vus.add(cle)
+            correction = (fixes or {}).get(cle)
+            if correction:
+                apres = f"{correction.get('artist') or a} — {correction.get('title') or t}"
+                decidees.append(f"{a} — {t}  →  {apres}")
+            elif cle in (acceptes or set()):
+                decidees.append(f"{a} — {t}  →  validé tel quel")
+            else:
+                a_revoir.append(f"{a} — {t}")
+
+        report["corrupted_apostrophes"] = a_revoir[:15]
+        report["corrupted_apostrophes_count"] = len(a_revoir)
+        report["corrupted_decided"] = decidees[:15]
+        report["corrupted_decided_count"] = len(decidees)
+        if a_revoir:
+            report["warnings"].append(
+                f"{len(a_revoir)} entrée(s) avec caractère corrompu (?) — "
+                "nettoyeur (élision/œ auto) puis revue manuelle du reste"
+            )
 
     # Dates de constat
     constat = pd.to_datetime(constat_raw, format="%d/%m/%Y", errors="coerce")
@@ -415,6 +445,11 @@ def format_report(report: dict) -> str:
         )
     if report["empty_critical"]:
         L.append(f"❌ Champs critiques vides (artiste/titre) : {report['empty_critical']}")
+    if report.get("corrupted_decided_count"):
+        L.append(
+            f"✏️ Décisions en attente : {report['corrupted_decided_count']} libellé(s) "
+            "corrigé(s) ou validé(s) — lance « 🧹 Nettoyer » pour les appliquer au CSV"
+        )
     if report.get("corrupted_apostrophes_count"):
         L.append(
             f"🩹 Caractères corrompus (?) : {report['corrupted_apostrophes_count']} "
@@ -434,6 +469,10 @@ def format_report(report: dict) -> str:
 
     section("Lignes malformées", report["malformed"])
     section("Caractères corrompus (?) — à vérifier", report.get("corrupted_apostrophes", []))
+    section(
+        "Déjà décidés — en attente d'un « 🧹 Nettoyer »",
+        report.get("corrupted_decided", []),
+    )
     section("Doublons exacts", report["duplicates"])
     section(
         "Doublons visibles seulement après normalisation",

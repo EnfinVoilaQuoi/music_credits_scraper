@@ -1,7 +1,7 @@
 {
   "name": "riaa_search",
-  "url": "https://www.riaa.com/gold-platinum/?tab_active=default-award&ar=Daft%20Punk&ti=&lab=&genre=&format=&date_option=&from=&to=&award=&type=&category=&adv=SEARCH#search_section",
+  "url": "https://www.riaa.com/gold-platinum/?tab_active=default-award&ar=Daft%20Punk&se=&ti=&lab=&from=&to=&release_date_toggle=1#search_section",
   "method": "riaa",
-  "captured_at": "2026-07-11T19:16:44",
-  "size_bytes": 116608
+  "captured_at": "2026-09-06T16:38:35",
+  "size_bytes": 200396
 }

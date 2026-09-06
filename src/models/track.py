@@ -354,6 +354,13 @@ class Certs:
     duration_days: int | None = None  # Durée d'obtention (colonne `certification_duration_days`)
     entries: list[dict[str, Any]] = field(default_factory=list)  # colonne `certifications`
     album_entries: list[dict[str, Any]] = field(default_factory=list)  # `album_certifications`
+    # « Recalculé ce run, pas encore enregistré ». Posé par
+    # `certification_enricher.apply_certifications`, effacé par
+    # `TrackRepository.record_certifications`. Sert à distinguer une liste VIDE
+    # parce qu'on a recalculé d'une liste vide parce que l'objet ne porte pas
+    # l'information — `save_track` n'écrit plus ces colonnes, et un morceau qui
+    # resterait marqué en fin de flux signale un enregistrement oublié.
+    needs_write: bool = field(default=False, repr=False)
 
 
 @dataclass
@@ -385,6 +392,10 @@ class Track:
     # Champs internes de marquage
     _album_from_api: bool = field(default=False, repr=False)
     _release_date_from_api: bool = field(default=False, repr=False)
+    # « Relations posées ce run, pas encore enregistrées » — pendant de
+    # `Certs.needs_write` : `save_track` n'écrit plus la colonne `relationships`,
+    # c'est `TrackRepository.record_relationships` qui le fait.
+    _relationships_pending: bool = field(default=False, repr=False)
 
     # IDs externes
     genius_id: int | None = None

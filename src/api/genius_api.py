@@ -625,6 +625,9 @@ class GeniusAPI:
         rels = self._extract_relationships(song)
         if rels and not track.relationships:
             track.relationships = rels
+            # `save_track` n'écrit plus la colonne : c'est
+            # `DataManager.record_pending` qui l'enregistre après le save.
+            track._relationships_pending = True
             changed = True
 
         # Chantier « Media » : pochettes (morceau + album). Transitoires, non

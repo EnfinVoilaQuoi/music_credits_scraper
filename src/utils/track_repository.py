@@ -76,10 +76,11 @@ class TrackRepository:
                 # en mémoire des données enrichies se fait en amont côté worker
                 # (gui/workers/retrieval.py).
 
-            # Sérialiser les champs JSON une seule fois (partagés UPDATE/INSERT)
-            certifications_json = json.dumps(track.certs.entries)
-            album_certifications_json = json.dumps(track.certs.album_entries)
-            relationships_json = json.dumps(track.relationships or [])
+            # `certifications`, `album_certifications` et `relationships` ne sont
+            # PLUS écrites ici : elles ont leurs écrivains dédiés
+            # (`record_certifications` / `record_relationships`). `save_track` les
+            # protégeait par `CASE WHEN … = '[]'`, ce qui rendait tout RETRAIT
+            # impossible — cf. les 21 certifications fautives du 2026-09-06.
 
             # Paramètres NOMMÉS : un seul dict {colonne: valeur}, lié par nom
             # (:col). L'ordre des ~44 valeurs ne peut plus se désynchroniser du
@@ -126,9 +127,6 @@ class TrackRepository:
                 "lyrics_synced_confidence": track.lyrics.synced_confidence,
                 "has_lyrics": bool(track.lyrics.text),  # INSERT uniquement
                 "anecdotes": track.anecdotes,
-                "certifications_json": certifications_json,
-                "album_certifications_json": album_certifications_json,
-                "relationships_json": relationships_json,
                 "spotify_page_title": getattr(track, "spotify_page_title", None),
                 # Chantier « Media » : chemins d'images (kind/vues vidéo passent par
                 # update_track_video_views, jamais ici).
@@ -190,9 +188,6 @@ class TrackRepository:
                         lyrics_synced_confidence = COALESCE(:lyrics_synced_confidence, lyrics_synced_confidence),
                         has_lyrics = CASE WHEN :lyrics IS NOT NULL THEN 1 ELSE has_lyrics END,
                         anecdotes = COALESCE(:anecdotes, anecdotes),
-                        certifications = CASE WHEN :certifications_json = '[]' THEN certifications ELSE :certifications_json END,
-                        album_certifications = CASE WHEN :album_certifications_json = '[]' THEN album_certifications ELSE :album_certifications_json END,
-                        relationships = CASE WHEN :relationships_json = '[]' THEN relationships ELSE :relationships_json END,
                         cover_path = COALESCE(:cover_path, cover_path),
                         yt_thumbnail_path = COALESCE(:yt_thumbnail_path, yt_thumbnail_path),
                         updated_at = :now,
@@ -216,7 +211,7 @@ class TrackRepository:
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, lyrics_synced_source, lyrics_synced_confidence, has_lyrics, anecdotes,
-                        certifications, album_certifications, relationships, spotify_page_title,
+                        spotify_page_title,
                         cover_path, yt_thumbnail_path,
                         created_at, updated_at, last_scraped
                     ) VALUES (
@@ -227,7 +222,7 @@ class TrackRepository:
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,
                         :lyrics, :lyrics_scraped_at, :lyrics_source, :lyrics_synced, :lyrics_synced_source, :lyrics_synced_confidence, :has_lyrics, :anecdotes,
-                        :certifications_json, :album_certifications_json, :relationships_json, :spotify_page_title,
+                        :spotify_page_title,
                         :cover_path, :yt_thumbnail_path,
                         :now, :now, :last_scraped
                     )
@@ -772,6 +767,59 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur get_stream_observation_dates({source}): {e}")
             return {}
+
+    def record_certifications(self, track_id: int, entries: list, album_entries: list) -> bool:
+        """Écrit les deux colonnes de certifications VERBATIM, `[]` compris.
+
+        Seul écrivain de `certifications` / `album_certifications` — `save_track`
+        n'y touche plus. La raison tient au fait que `[]` disait deux choses
+        opposées : « cet objet ne porte pas l'information » (import Genius, saisie
+        manuelle, merge…) et « recalculé, il n'y en a aucune ». `save_track` étant
+        appelé par treize flux dont dix ignorent les certifs, il se protégeait par
+        `CASE WHEN … = '[]'` — et rendait donc tout RETRAIT impossible. Mesuré le
+        2026-09-06 : 21 rattachements fautifs qu'aucun ré-enrichissement ne pouvait
+        défaire (SCH « R.A.C. » portait le RIAA Gold de Marvin Hamli**sch**).
+
+        Ici, l'appelant est autoritatif par construction : il sort de
+        `certification_enricher.apply_certifications`, seul producteur de la donnée.
+        """
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE tracks SET certifications = :certifs, "
+                        "album_certifications = :album_certifs WHERE id = :id"
+                    ),
+                    {
+                        "certifs": json.dumps(entries or []),
+                        "album_certifs": json.dumps(album_entries or []),
+                        "id": track_id,
+                    },
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_certifications({track_id}): {e}")
+            return False
+
+    def record_relationships(self, track_id: int, relationships: list) -> bool:
+        """Écrit la colonne `relationships` VERBATIM, `[]` compris.
+
+        Pendant de `record_certifications`, pour la même raison de fond. Nuance
+        honnête : le producteur (`genius_api.apply_song_metadata`) est ADDITIF
+        (`if rels and not track.relationships`), donc aucune victime connue — on
+        aligne pour la cohérence et pour rendre le vidage POSSIBLE, pas pour
+        réparer un défaut constaté.
+        """
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE tracks SET relationships = :rels WHERE id = :id"),
+                    {"rels": json.dumps(relationships or []), "id": track_id},
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_relationships({track_id}): {e}")
+            return False
 
     def record_spotify_streams(
         self,

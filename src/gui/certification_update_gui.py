@@ -11,7 +11,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 import pandas as pd
 
-from src.gui.workers.lifecycle import start_worker
+from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -521,6 +521,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} SNEP : {verdict}"
                     f" — {n_gaps} mois sans certif (années actives)"
                 )
+                actions = [
+                    ("🧹 Nettoyer", self._clean_snep),
+                    ("✏️ Corriger les libellés (?)", self._editer_titres_corrompus),
+                ]
+                # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
+                # action sans objet, c'est laisser croire qu'il y a à faire.
+                trous = report.get("month_gaps") or []
+                if trous:
+                    actions.append(
+                        (
+                            "🕳️ Rescraper les périodes",
+                            lambda g=list(trous): self._rescraper_periodes(
+                                "SNEP", ["src", "utils", "update_snep.py"], g
+                            ),
+                        )
+                    )
                 # Rapport détaillé dans une fenêtre dédiée, avec l'accès à la
                 # correction manuelle des libellés que le nettoyeur ne sait pas
                 # réparer tout seul.
@@ -529,10 +545,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     lambda: self._show_report_window(
                         "Validation CSV SNEP",
                         text,
-                        actions=[
-                            ("🧹 Nettoyer", self._clean_snep),
-                            ("✏️ Corriger les libellés (?)", self._editer_titres_corrompus),
-                        ],
+                        actions=actions,
                     ),
                 )
             except Exception as e:
@@ -944,11 +957,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} BRMA : {verdict} — "
                     f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
                 )
+                actions = [("🧹 Nettoyer", self._clean_brma)]
+                # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
+                # action sans objet, c'est laisser croire qu'il y a à faire.
+                trous = report.get("month_gaps") or []
+                if trous:
+                    actions.append(
+                        (
+                            "🕳️ Rescraper les périodes",
+                            lambda g=list(trous): self._rescraper_periodes(
+                                "BRMA", ["src", "utils", "update_brma.py"], g
+                            ),
+                        )
+                    )
                 self.after(
                     0,
-                    lambda: self._show_report_window(
-                        "Validation CSV BRMA", text, actions=[("🧹 Nettoyer", self._clean_brma)]
-                    ),
+                    lambda: self._show_report_window("Validation CSV BRMA", text, actions=actions),
                 )
             except Exception as e:
                 logger.error(f"Erreur validation BRMA : {e}")
@@ -976,11 +1000,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} RIAA : {verdict} — "
                     f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
                 )
+                actions = [("🧹 Nettoyer", self._clean_riaa)]
+                # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
+                # action sans objet, c'est laisser croire qu'il y a à faire.
+                trous = report.get("month_gaps") or []
+                if trous:
+                    actions.append(
+                        (
+                            "🕳️ Rescraper les périodes",
+                            lambda g=list(trous): self._rescraper_periodes(
+                                "RIAA", ["src", "utils", "update_riaa.py"], g
+                            ),
+                        )
+                    )
                 self.after(
                     0,
-                    lambda: self._show_report_window(
-                        "Validation CSV RIAA", text, actions=[("🧹 Nettoyer", self._clean_riaa)]
-                    ),
+                    lambda: self._show_report_window("Validation CSV RIAA", text, actions=actions),
                 )
             except Exception as e:
                 logger.error(f"Erreur validation RIAA : {e}")
@@ -1050,6 +1085,50 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             if ligne.startswith("===="):
                 return "\n".join(lignes[i:])
         return sortie
+
+    def _rescraper_periodes(self, source: str, script: list[str], gaps: list[str]):
+        """Relance la collecte sur les mois signalés par la validation.
+
+        Le chaînon qui manquait : les validateurs savaient DIRE quels mois sont
+        vides, rien ne savait aller les chercher. Les trois sources ne se visent
+        pas à la même maille — le site l'impose — d'où la traduction dans
+        `cert_rescrape`, module pur et donc vérifiable sans réseau.
+        """
+        from src.utils.cert_rescrape import commandes, resume
+
+        chemin = str(Path(__file__).parent.parent.parent.joinpath(*script))
+        a_lancer = commandes(source, gaps, chemin)
+        if not a_lancer:
+            messagebox.showinfo(f"Rescraper {source}", "Aucune période ciblable.", parent=self)
+            return
+
+        apercu = (
+            resume(source, gaps)
+            + "\n\n"
+            + "\n".join(
+                "$ " + " ".join(Path(c[1]).name if i == 1 else c for i, c in enumerate(cmd))
+                for cmd in a_lancer[:8]
+            )
+        )
+        if len(a_lancer) > 8:
+            apercu += f"\n… et {len(a_lancer) - 8} autre(s)"
+        if not messagebox.askyesno(
+            f"Rescraper {source}",
+            f"{apercu}\n\nLancer ? (les données sont fusionnées, jamais remplacées)",
+            parent=self,
+        ):
+            return
+
+        def travail():
+            for i, cmd in enumerate(a_lancer, 1):
+                if stop_requested():
+                    break
+                self._set_progress(f"🕳️ {source} : période {i}/{len(a_lancer)}…")
+                self._run_streaming(cmd, f"{source} rattrapage {i}/{len(a_lancer)}")
+            self._set_progress(f"✅ {source} : {len(a_lancer)} période(s) relancée(s)")
+            self.after(500, self._update_status)
+
+        start_worker(travail)
 
     def _nettoyer_avec_apercu(self, source: str, script: list[str], args: list[str]):
         """Dry-run → rapport → confirmation → application (déroulé commun).

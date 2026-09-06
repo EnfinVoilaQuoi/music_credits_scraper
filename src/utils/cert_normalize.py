@@ -10,6 +10,7 @@ le golden master.
 
 import re
 import unicodedata
+from collections.abc import Sequence
 
 
 def normalize_text(text: str) -> str:
@@ -218,6 +219,86 @@ def contient_caractere_corrompu(s: str) -> bool:
     propose à la revue manuelle, il ne doit pas exister en deux exemplaires.
     """
     return bool(_CORRUPTION_RE.search(s or ""))
+
+
+#: Ce qui reste d'un libellé quand on ne garde que les lettres et les chiffres.
+#: Deux libellés de même squelette ne diffèrent QUE par leur ponctuation et
+#: leurs accents — c'est exactement le périmètre d'une corruption d'encodage.
+_NON_ALPHANUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def squelette_libelle(valeur: str) -> str:
+    """Le libellé réduit à ses lettres et chiffres, en minuscules.
+
+    Sert à reconnaître DEUX ÉCRITURES DU MÊME LIBELLÉ quand l'une est corrompue :
+    « AU C?UR D'IAM » et « AU CŒUR D'IAM » ont le même squelette. Plus brutal
+    que `cle_plate`, qui conserve justement le « ? » — les deux coexistent parce
+    qu'ils répondent à des questions opposées : `cle_plate` pour retrouver un
+    libellé « tel qu'écrit », celui-ci pour l'apparier malgré son écriture.
+    """
+    return _NON_ALPHANUM_RE.sub("", (valeur or "").lower())
+
+
+def reperer_fantomes(
+    lignes: Sequence[Sequence[str]],
+    *,
+    i_artiste: int,
+    i_titre: int,
+    autres: Sequence[int],
+) -> list[int]:
+    """Indices des lignes CASSÉES dont la version saine est déjà dans le fichier.
+
+    Un fantôme n'est pas une ligne que le nettoyeur aurait ratée : c'est le
+    même événement écrit deux fois, une fois avec un caractère corrompu et une
+    fois sans, les deux coexistant parce que le libellé fait partie de la clé de
+    dédoublonnage et que les deux formes ne s'y reconnaissent pas.
+
+    D'où viennent-ils : le CSV clean ACCUMULE d'un export à l'autre — à raison,
+    une certification ancienne peut disparaître de l'export — et garde donc
+    éternellement le libellé d'hier, même quand la source a corrigé son
+    encodage depuis. Mesuré le 2026-09-06 : **130 lignes** côté SNEP (dont
+    « SHURIK?N », qui coupait en deux la discographie certifiée de l'artiste),
+    et **0** côté BRMA comme RIAA — leurs bruts sont de vraies accumulations,
+    qui ne se corrigent jamais toutes seules.
+
+    Ce n'est PAS `restore_apostrophes`, qui devine une réparation et reste donc
+    délibérément timide : ici la version correcte est DÉJÀ dans le fichier, il
+    n'y a rien à deviner — seulement à préférer celle qui n'est pas cassée.
+
+    Deux règles ont été comparées sur les données réelles avant de choisir : un
+    joker caractère à caractère (110 lignes) et ce squelette (114 sur le seul
+    titre). Les 4 de l'écart étaient de vrais doublons que le joker manquait,
+    la corruption ayant mangé un caractère ET son espace (« DONT?SAY GOODBYE »
+    contre « DON'T SAY GOODBYE »). Risque inverse vérifié : **aucune** des
+    lignes retirées ne porte un « ? » en position de vraie question (final ou
+    suivi d'un espace), donc aucune ponctuation légitime n'est perdue.
+    """
+    besoin = max(i_artiste, i_titre, *autres) + 1 if autres else max(i_artiste, i_titre) + 1
+    groupes: dict[tuple, list[tuple[int, bool]]] = {}
+    for i, ligne in enumerate(lignes):
+        # Une ligne malformée est CONSERVÉE telle quelle par les nettoyeurs :
+        # on ne peut pas juger ce qu'on ne sait pas lire, et l'indexer
+        # aveuglément ferait planter le nettoyage sur la seule ligne qu'il
+        # avait justement décidé de ne pas toucher.
+        if len(ligne) < besoin:
+            continue
+        artiste, titre = ligne[i_artiste], ligne[i_titre]
+        cle = (
+            squelette_libelle(artiste),
+            squelette_libelle(titre),
+            *(ligne[j] for j in autres),
+        )
+        cassee = "?" in artiste or "?" in titre
+        groupes.setdefault(cle, []).append((i, cassee))
+
+    fantomes = []
+    for membres in groupes.values():
+        # Il faut une version saine SOUS LA MAIN : sans elle, la ligne cassée
+        # est la seule trace de la certification et la retirer perdrait la
+        # donnée. C'est la différence entre nettoyer et effacer.
+        if any(not cassee for _i, cassee in membres):
+            fantomes.extend(i for i, cassee in membres if cassee)
+    return sorted(fantomes)
 
 
 def cle_plate(valeur: str) -> str:

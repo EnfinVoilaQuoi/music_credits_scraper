@@ -14,13 +14,14 @@ Colonnes canoniques (lues ensuite par `cert_matcher._load_snep`, qui normalise
 import io
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
 from src.models.certification import CertificationCategory, CertificationLevel
-from src.utils.cert_normalize import normalize_text, repair_extra_separators
+from src.utils.cert_normalize import normalize_text, repair_extra_separators, reperer_fantomes
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -192,6 +193,41 @@ def merge_canonical(base: list[dict], new: list[dict]) -> list[dict]:
     return [by_key[k] for k in order]
 
 
+def purger_fantomes(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Retire les lignes au libellé cassé dont la version SAINE est déjà là.
+
+    C'est un défaut de `merge_canonical`, et il faut en nommer la mécanique :
+    sa clé passe par `normalize_text`, qui SUPPRIME le « ? » et développe la
+    ligature (« Œ » → « OE »). « AU C?UR D'IAM » devient donc « AU CUR D'IAM »
+    et « AU CŒUR D'IAM » devient « AU COEUR D'IAM » — deux clés distinctes, deux
+    lignes conservées, pour une seule certification.
+
+    Le clean accumulant d'un export à l'autre — à raison, une certification
+    ancienne peut disparaître de l'export — il gardait ainsi éternellement le
+    libellé d'hier, même après que la source a corrigé son encodage. Mesuré le
+    2026-09-06 : **130 lignes**, dont « SHURIK?N », qui coupait en deux la
+    discographie certifiée de l'artiste.
+
+    Retourne (lignes gardées, lignes retirées). Le tri de `reperer_fantomes`
+    n'est jamais appliqué à l'ordre du fichier : celui de `base` est préservé,
+    comme le promet `merge_canonical`.
+    """
+    if not rows:
+        return rows, []
+    colonnes = list(CANONICAL_COLUMNS)
+    i_artiste, i_titre = colonnes.index("artist"), colonnes.index("title")
+    autres = tuple(colonnes.index(c) for c in ("category", "certification", "certification_date"))
+    lignes = [[str(r.get(c, "")) for c in colonnes] for r in rows]
+
+    retires = set(reperer_fantomes(lignes, i_artiste=i_artiste, i_titre=i_titre, autres=autres))
+    if not retires:
+        return rows, []
+    return (
+        [r for i, r in enumerate(rows) if i not in retires],
+        [r for i, r in enumerate(rows) if i in retires],
+    )
+
+
 def read_canonical_csv(path: Path) -> list[dict]:
     """Relit `certif_snep.csv` (tout en str, vides = '')."""
     if not path.exists():
@@ -229,7 +265,18 @@ def rebuild(raw_path: Path, csv_path: Path, meta_path: Path, source: str = "GLOB
     puis écrit le CSV canonique + le sidecar meta. Retourne le nombre de lignes."""
     existing = read_canonical_csv(csv_path)
     new = canonical_rows_from_raw(read_raw_snep_csv(raw_path))
-    merged = merge_canonical(existing, new)
+    merged, fantomes = purger_fantomes(merge_canonical(existing, new))
+    if fantomes:
+        # `rebuild` n'a jamais RETIRÉ de ligne — il accumulait. La purge en
+        # retire, donc elle passe par un backup, comme toute opération qui peut
+        # faire perdre de la donnée. Seulement quand il y a matière : sauvegarder
+        # un fichier inchangé à chaque rebuild noierait les vraies sauvegardes.
+        backup = csv_path.with_name(f"certif_snep-backup-{datetime.now():%Y%m%d_%H%M%S}.csv")
+        shutil.copy2(csv_path, backup)
+        logger.info(
+            f"🧹 {len(fantomes)} ligne(s) fantôme(s) retirée(s) — libellé cassé dont la "
+            f"version saine est déjà présente. Sauvegarde : {backup.name}"
+        )
     write_canonical_csv(merged, csv_path)
     write_meta(meta_path, source, len(merged))
     logger.info(f"📄 certif_snep.csv : {len(merged)} lignes ({len(new)} depuis le brut)")

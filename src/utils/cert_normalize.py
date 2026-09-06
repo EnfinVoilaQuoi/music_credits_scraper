@@ -334,15 +334,27 @@ _PALIERS_RIAA = {
 _NIVEAU_RIAA_RE = re.compile(r"^(?:(\d+)\s*x\s*)?(?:multi-?\s*)?([A-Za-zÀ-ÿ]+)$", re.I)
 
 
+#: Seuls ces paliers acceptent un multiplicateur. « 4x Gold » n'existe pas — la
+#: RIAA compte les multiples à partir du platine, et le diamant est un palier
+#: fixe. Le commentaire le disait déjà ; le code, lui, multipliait n'importe
+#: quel palier, si bien que `riaa_units("4x Gold")` rendait 2 000 000 et que le
+#: validateur acceptait un niveau qui n'existe pas (attrapé par ses tests).
+_PALIERS_MULTIPLIABLES = {"platinum", "platino"}
+
+
 def _decoder_niveau_riaa(level: str) -> tuple[int, tuple] | None:
     """(multiplicateur, palier) d'un niveau RIAA, ou None s'il est inconnu."""
     m = _NIVEAU_RIAA_RE.match(re.sub(r"\s+", " ", (level or "").strip()))
     if not m:
         return None
-    palier = _PALIERS_RIAA.get(m.group(2).lower())
+    mot = m.group(2).lower()
+    palier = _PALIERS_RIAA.get(mot)
     if not palier:
         return None
-    return int(m.group(1) or 1), palier
+    multiplicateur = int(m.group(1) or 1)
+    if multiplicateur > 1 and mot not in _PALIERS_MULTIPLIABLES:
+        return None
+    return multiplicateur, palier
 
 
 def riaa_level(s: str) -> str:

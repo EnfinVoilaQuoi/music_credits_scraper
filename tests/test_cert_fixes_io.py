@@ -137,3 +137,45 @@ class TestSelectionDesCandidats:
 
     def test_lignes_tronquees_ignorees(self):
         assert cert_fixes_io.candidats_a_corriger([["SEUL CHAMP?"], []], {}) == []
+
+
+class TestAcceptations:
+    """Valider un libellé TEL QUEL est une décision, au même titre qu'une correction.
+
+    Sans elle, la liste des libellés à revoir ne décroît jamais : la plupart des
+    « ? » sont de vrais points d'interrogation (« ET ALORS ? », « YES, AND? »)
+    et reviendraient éternellement demander un arbitrage déjà rendu.
+    """
+
+    def test_un_libelle_accepte_nest_plus_propose(self, fixes_tmp):
+        rows = [["DES?REE", "LIFE", "L", "Singles", "Or", "", "01/01/2020"]]
+        assert cert_fixes_io.candidats_a_corriger(rows, {}, set()) != []
+
+        cert_fixes_io.accepter("snep", "DES?REE", "LIFE")
+        acceptes = cert_fixes_io.charger_acceptes("snep")
+
+        assert cert_fixes_io.candidats_a_corriger(rows, {}, acceptes) == []
+
+    def test_acceptation_et_correction_cohabitent(self, fixes_tmp):
+        cert_fixes_io.enregistrer_fix("snep", "A", "T?", "A", "T!")
+        cert_fixes_io.accepter("snep", "B", "QUI SAIT ?")
+
+        assert cert_fixes_io.charger_fixes("snep")
+        assert len(cert_fixes_io.charger_acceptes("snep")) == 1
+
+    def test_une_correction_nefface_pas_les_acceptations(self, fixes_tmp):
+        """`ecrire_fixes` relit les acceptations quand on ne les lui passe pas."""
+        cert_fixes_io.accepter("snep", "B", "QUI SAIT ?")
+        cert_fixes_io.enregistrer_fix("snep", "A", "T?", "A", "T!")
+
+        assert len(cert_fixes_io.charger_acceptes("snep")) == 1
+
+    def test_sans_fichier(self, fixes_tmp):
+        assert cert_fixes_io.charger_acceptes("snep") == set()
+
+    def test_la_casse_ne_fait_pas_revenir_un_libelle_accepte(self, fixes_tmp):
+        cert_fixes_io.accepter("snep", "Des?ree", "Life")
+        rows = [["DES?REE", "LIFE", "L", "Singles", "Or", "", "01/01/2020"]]
+
+        acceptes = cert_fixes_io.charger_acceptes("snep")
+        assert cert_fixes_io.candidats_a_corriger(rows, {}, acceptes) == []

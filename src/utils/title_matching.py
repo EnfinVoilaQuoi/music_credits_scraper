@@ -35,6 +35,62 @@ def contains_as_words(needle: str, haystack: str) -> bool:
     return re.search(rf"\b{re.escape(needle)}\b", haystack) is not None
 
 
+def either_contains_as_words(a: str, b: str) -> bool:
+    """L'un contient-il l'autre en MOTS ENTIERS, dans un sens ou dans l'autre ?
+
+    Les deux chaînes doivent être NORMALISÉES par l'appelant — pour des TITRES,
+    par `normalize_title` ou l'équivalent local (`_title_core`, `_title_key`).
+
+    Mesuré sur le corpus réel (1 599 titres normalisés distincts, 2026-09-05) :
+    l'inclusion NUE fabrique 1 212 rapprochements entre titres différents, dont
+    **942 franchissent le seuil d'acceptation 0,72** des clients de paroles —
+    « toi » ⊂ « etoile », « quoi » ⊂ « pourquoi », « og » ⊂ « yoga »,
+    « gang » ⊂ « gangrene ». L'ancrage par mot les ramène à 249, en préservant
+    ce que le bonus visait (« song » ⊂ « song pt ii », « ceo » ⊂ « ceo bonus »).
+    Un simple plancher de longueur, lui, n'en écartait que 899 sur 1 212 et
+    gardait « ares » ⊂ « la paresse » ou « casse » ⊂ « carcasse » : le défaut
+    n'est pas la brièveté, c'est le franchissement de frontière de mot.
+    """
+    return contains_as_words(a, b) or contains_as_words(b, a)
+
+
+def _strip_accents(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+
+
+def normalize_name(s: str) -> str:
+    """Normalise un NOM d'artiste pour comparaison : minuscules, sans accents,
+    tout ce qui n'est pas alphanumérique devient une espace.
+
+    Après passage, la chaîne ne contient que ``[a-z0-9 ]`` — ce qui rend l'ancrage
+    par limite de mot de `contains_as_words` prévisible. À ne pas confondre avec
+    `normalize_title`, qui ampute les suffixes « feat. X » : sur un nom d'artiste
+    ce serait une mutilation.
+    """
+    s = _strip_accents((s or "").lower())
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+def names_match_as_words(a: str, b: str) -> bool:
+    """Deux libellés d'artiste désignent-ils le même ? Égalité, ou inclusion en
+    MOTS ENTIERS dans un sens ou dans l'autre.
+
+    Prédicat BOOLÉEN, sans repli flou, destiné aux sites qui confirmaient jusqu'ici
+    par sous-chaîne nue (``a in b or b in a``). Le repli `difflib` de
+    `_artist_match` / `update_kworb._names_match` n'est délibérément PAS repris :
+    on cherche à retirer un faux positif, pas à élargir l'acceptation.
+
+    Ce qui est refusé : « IAM » face à « Williams », « Isha » face à « Misha Van
+    Der Werf », « SCH » face à « ScHoolboy Q ».
+    Ce qui reste accepté : « Jul » face à « Jul & SCH », « Isha » face à
+    « Isha (7) » (suffixe de désambiguïsation Genius).
+    """
+    na, nb = normalize_name(a), normalize_name(b)
+    if not na or not nb:
+        return False
+    return na == nb or either_contains_as_words(na, nb)
+
+
 def clean_display_title(title: str) -> str:
     """Titre prêt à l'affichage : accents recomposés, décorations barrées retirées.
 

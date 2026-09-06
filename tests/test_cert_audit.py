@@ -15,6 +15,7 @@ def _matcher_with(rows) -> CertMatcher:
     m = CertMatcher.__new__(CertMatcher)  # bypass __init__ (pas de chargement)
     m._norm = N
     m.df = pd.DataFrame(rows)
+    m._cache_artiste = {}  # posé par __init__, que ce harnais court-circuite
     return m
 
 
@@ -62,6 +63,26 @@ def test_artiste_mot_entier():
     m = _matcher_with([_row("SNEP", "Williams", "Chanson")])
     res = m.audit_artist_certifications("IAM", ["Chanson"], [])
     assert res["total"] == 0
+
+
+def test_titre_sous_chaine_intra_mot_reste_orphelin():
+    """Le filtre ARTISTE comptait déjà en mots entiers ; le rapprochement de
+    TITRE, lui, se faisait par sous-chaîne nue. Une certification « Ares » était
+    donc déclarée rattachée à notre morceau « La paresse » — et l'audit annonçait
+    zéro orphelin, soit l'inverse de ce qu'on lui demande."""
+    m = _matcher_with([_row("SNEP", "Jul", "Ares")])
+    res = m.audit_artist_certifications("Jul", ["La paresse"], [])
+    assert res["matched_tracks"] == 0
+    assert [o["title"] for o in res["orphans"]] == ["Ares"]
+
+
+def test_titre_inclus_en_mot_entier_reste_rattache():
+    """Le relâchement utile survit : une certification au titre nu se rattache
+    à notre morceau qui le porte augmenté d'une mention."""
+    m = _matcher_with([_row("SNEP", "Jul", "Bande organisée")])
+    res = m.audit_artist_certifications("Jul", ["Bande organisée (Remix)"], [])
+    assert res["matched_tracks"] == 1
+    assert res["orphans"] == []
 
 
 def test_album_compare_aux_albums():

@@ -345,4 +345,104 @@ def test_track_match_indices_sur_df_vide():
     m = CertMatcher.__new__(CertMatcher)
     m._norm = cm._normalize_text
     m.df = pd.DataFrame()
+    m._cache_artiste = {}  # posé par __init__, que ce harnais court-circuite
     assert m._track_match_indices("JUL", "BANDE ORGANISEE") == []
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Ancrage en MOTS ENTIERS sur la voie d'ÉCRITURE (2026-09-06)
+# ────────────────────────────────────────────────────────────────────────
+
+
+_MOTS_ENTIERS_ROWS = [
+    # Les cas RÉELS relevés en base : la sous-chaîne nue rattachait ces
+    # certifications à SCH et Swing. « SCH » ⊂ « HAMLI-SCH » et « High
+    # **Sch**ool », « RAC » ⊂ « SOUNDT-RAC-K », « V » ⊂ « J-V-LIVS »,
+    # « N » ⊂ « S'E-N ALLER ».
+    "MARVIN HAMLISCH,THE STING (SOUNDTRACK),LABEL X,Albums,Or,1974-01-01,1974-04-19",
+    "SCH,CRACK,LABEL D,Singles,Platine,2021-03-19,2023-06-29",
+    "SCH,R.A.C.,LABEL D,Singles,Platine,2019-11-07,2022-06-30",
+    "SCH,JVLIVS II,LABEL D,Albums,Diamant,2021-03-19,2025-10-09",
+    "SCH,V,LABEL D,Albums,Or,2023-01-01,2024-01-01",
+    "SWING FEAT. ANGÈLE,S'EN ALLER,LABEL Y,Singles,Or,2020-01-31,2024-12-19",
+]
+
+
+@pytest.fixture
+def matcher_mots(tmp_path, monkeypatch):
+    _write(tmp_path, "snep", "certif_snep.csv", _SNEP_HEADER, _MOTS_ENTIERS_ROWS)
+    monkeypatch.setattr(cm, "DATA_PATH", str(tmp_path))
+    return CertMatcher()
+
+
+class TestAncrageParMot:
+    """Mesuré sur la base réelle le 2026-09-06 : la sous-chaîne nue rattachait
+    **20** certifications à tort (dont 6 d'un artiste étranger) et l'ancrage par
+    mot n'en fait perdre AUCUNE de légitime. C'est la voie d'ÉCRITURE : ces
+    entrées partaient dans les colonnes `certifications` / `album_certifications`."""
+
+    def test_artiste_etranger_refuse(self, matcher_mots):
+        """« SCH » est une sous-chaîne de « HAMLISCH », pas un mot."""
+        res = matcher_mots.get_track_certifications("SCH", "R.A.C.")
+        assert [r["artist_name"] for r in res] == ["SCH"]
+        assert all("HAMLISCH" not in r["artist_name"] for r in res)
+
+    def test_titre_voisin_refuse(self, matcher_mots):
+        """« RAC » ⊂ « CRACK » : même artiste, autre morceau."""
+        titres = {r["title"] for r in matcher_mots.get_track_certifications("SCH", "R.A.C.")}
+        assert titres == {"R.A.C."}
+
+    def test_album_dune_lettre_ne_rafle_pas_la_discographie(self, matcher_mots):
+        """L'album « V » héritait du Diamant de « JVLIVS II » — dix entrées en
+        base, dont le niveau le plus haut, donc celui AFFICHÉ."""
+        titres = {r["title"] for r in matcher_mots.get_album_certifications("SCH", "V")}
+        assert titres == {"V"}
+
+    def test_titre_dune_lettre_cote_morceau(self, matcher_mots):
+        """« N » ⊂ « S'EN ALLER »."""
+        assert matcher_mots.get_track_certifications("Swing", "N") == []
+
+    def test_inclusion_en_mot_toujours_acceptee(self, matcher_mots):
+        """Le relâchement utile survit : une certif déposée sous « SWING FEAT.
+        ANGÈLE » reste rattachée à l'artiste « Swing »."""
+        res = matcher_mots.get_track_certifications("Swing", "S'en aller")
+        assert [r["artist_name"] for r in res] == ["SWING FEAT. ANGÈLE"]
+
+    def test_recherche_par_artiste_aussi_ancree(self, matcher_mots):
+        """`get_artist_certifications` portait le même défaut."""
+        noms = {r["artist_name"] for r in matcher_mots.get_artist_certifications("SCH")}
+        assert "MARVIN HAMLISCH" not in noms
+
+
+class TestSousEnsembleParArtiste:
+    """Toutes les stratégies commencent par filtrer sur l'artiste, et
+    `apply_certifications` traite un artiste ENTIER. Sans mémoïsation, le
+    balayage du magasin est refait pour CHAQUE morceau et CHAQUE stratégie avec
+    la même aiguille — mesuré sur la base réelle : 23,5 s pour les 374 morceaux
+    d'A2H, 1,3 s une fois mémoïsé (113 s → 7 s sur toute la base)."""
+
+    def test_le_balayage_n_a_lieu_qu_une_fois_par_artiste(self, matcher, monkeypatch):
+        appels = []
+        vrai = cm._contient_en_mots
+
+        def compte(colonne, aiguille):
+            appels.append(aiguille)
+            return vrai(colonne, aiguille)
+
+        monkeypatch.setattr(cm, "_contient_en_mots", compte)
+        for titre in ("Bande organisée", "My World", "La machine", "Sans issue"):
+            matcher.get_track_certifications("JUL", titre)
+
+        assert appels.count("JUL") == 1, f"balayage artiste répété : {appels}"
+
+    def test_le_cache_ne_change_pas_le_resultat(self, matcher):
+        """Deuxième appel servi par le cache : mêmes lignes, au même ordre."""
+        premier = matcher.get_track_certifications("JUL", "Bande organisée")
+        second = matcher.get_track_certifications("JUL", "Bande organisée")
+        assert premier == second
+        assert len(premier) == 2  # les deux paliers Or puis Platine
+
+    def test_chaque_artiste_a_son_entree(self, matcher):
+        matcher.get_track_certifications("JUL", "My World")
+        matcher.get_track_certifications("Drake", "Views")
+        assert {"JUL", "DRAKE"} <= set(matcher._cache_artiste)

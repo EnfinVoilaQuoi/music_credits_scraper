@@ -5,7 +5,13 @@ Les cas historiques de faux non-matchés (JOURNAL 2026-07-02) sont verrouillés 
 
 import pytest
 
-from src.utils.title_matching import base_album_key, normalize_title
+from src.utils.title_matching import (
+    base_album_key,
+    either_contains_as_words,
+    names_match_as_words,
+    normalize_name,
+    normalize_title,
+)
 
 
 class TestCasHistoriques:
@@ -90,3 +96,87 @@ class TestBaseAlbumKey:
 
     def test_correspondance_exacte_d_abord(self):
         assert base_album_key("matrix", self.CONNUES) == "matrix"
+
+
+class TestNormalizeName:
+    """Le normaliseur de NOMS (ex-`_text_match._norm`), remonté ici le 2026-09-05
+    pour que les scrapers et `update_kworb` puissent s'en servir sans importer
+    un module privé de `src/api`."""
+
+    @pytest.mark.parametrize(
+        ("brut", "attendu"),
+        [
+            ("Éléphant", "elephant"),
+            ("A-B_C", "a b c"),
+            ("  Deux  ", "deux"),
+            ("Limsa d’Aulnay", "limsa d aulnay"),
+            ("Limsa d'Aulnay", "limsa d aulnay"),
+            ("Jul & S.C.H. (2024)", "jul s c h 2024"),
+            ("", ""),
+            (None, ""),
+        ],
+    )
+    def test_normalisation(self, brut, attendu):
+        assert normalize_name(brut) == attendu
+
+    def test_ne_coupe_pas_au_featuring(self):
+        """`normalize_title` amputerait « feat. » et la suite — sur un NOM
+        d'artiste ce serait une mutilation, d'où deux normaliseurs distincts."""
+        assert normalize_name("Feat Vincent") == "feat vincent"
+        assert normalize_title("Feat Vincent") == "feat vincent"
+        assert normalize_title("Titre feat. Vincent") == "titre"
+
+
+class TestNamesMatchAsWords:
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("Isha", "ISHA"),  # casse
+            ("Jul", "Jul & SCH"),  # l'inclusion utile
+            ("Jul & SCH", "Jul"),  # dans l'autre sens
+            ("Isha", "Isha (7)"),  # suffixe de désambiguïsation Genius
+            ("Limsa d'Aulnay", "Limsa d’Aulnay"),  # apostrophe typographique
+        ],
+    )
+    def test_meme_artiste(self, a, b):
+        assert names_match_as_words(a, b) is True
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("IAM", "Williams"),
+            ("Isha", "Misha Van Der Werf"),
+            ("SCH", "ScHoolboy Q"),
+            ("SCH", "Coline Schneider"),
+            ("Jul", "Julien Doré"),
+        ],
+    )
+    def test_homonyme_par_sous_chaine_refuse(self, a, b):
+        """Les cinq noms mesurés sur la base réelle au tier 7 (18 pages Kworb
+        acceptées à tort sur 2 515 noms croisés)."""
+        assert names_match_as_words(a, b) is False
+
+    @pytest.mark.parametrize(
+        ("a", "b"), [("", "ISHA"), ("ISHA", ""), (None, "ISHA"), ("!", "ISHA")]
+    )
+    def test_vide_ou_intraduisible(self, a, b):
+        """Un nom qui se normalise en chaîne vide ne matche RIEN — sans quoi il
+        matcherait tout."""
+        assert names_match_as_words(a, b) is False
+
+
+class TestEitherContainsAsWords:
+    """Le prédicat de TITRES : les chaînes arrivent déjà normalisées."""
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [("matrix", "matrix intro"), ("ceo bonus", "ceo"), ("toi", "a cause de toi")],
+    )
+    def test_inclusion_en_mot(self, a, b):
+        assert either_contains_as_words(a, b) is True
+
+    @pytest.mark.parametrize(
+        ("a", "b"), [("toi", "etoile"), ("quoi", "pourquoi"), ("ares", "la paresse")]
+    )
+    def test_sous_chaine_intra_mot(self, a, b):
+        assert either_contains_as_words(a, b) is False

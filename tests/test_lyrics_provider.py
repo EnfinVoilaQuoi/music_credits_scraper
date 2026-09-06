@@ -153,3 +153,54 @@ def test_close_ferme_la_session_async():
     provider.close()
     assert closed["n"] == 1
     assert provider._http is None
+
+
+class _ClientFermable:
+    def __init__(self, casse=False):
+        self.ferme = False
+        self._casse = casse
+
+    def close(self):
+        if self._casse:
+            raise RuntimeError("fermeture impossible")
+        self.ferme = True
+
+
+def test_close_ferme_les_clients_puis_la_session_async():
+    """« Qui crée ferme » : le provider possède ses clients ET la session httpx
+    partagée par les ponts. La session est remise à None → rouverte au batch
+    suivant (le worker appelle close() en finally, fuite corrigée en F5)."""
+    fermetures = []
+    provider = LyricsProvider()
+    provider._lrclib = _ClientFermable()
+    provider._ytm = _ClientFermable()
+    provider._mxm = object()  # sans close() : ignoré
+
+    class _Session:
+        async def aclose(self):
+            fermetures.append("session")
+
+    provider._http = _Session()
+    provider._runner = asyncio.run
+    provider.close()
+
+    assert provider._lrclib.ferme and provider._ytm.ferme
+    assert fermetures == ["session"]
+    assert provider._http is None
+
+
+def test_close_tolere_les_echecs_de_fermeture():
+    provider = LyricsProvider()
+    provider._lrclib = _ClientFermable(casse=True)
+    sain = _ClientFermable()
+    provider._ytm = sain
+
+    class _SessionCassee:
+        async def aclose(self):
+            raise RuntimeError("session déjà morte")
+
+    provider._http = _SessionCassee()
+    provider._runner = asyncio.run
+    provider.close()
+    assert sain.ferme is True
+    assert provider._http is None

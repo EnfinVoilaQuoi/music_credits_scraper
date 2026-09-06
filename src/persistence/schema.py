@@ -140,6 +140,12 @@ tracks = Table(
     # terme, quel qu'en soit le résultat. Distingue « cherché et absent »
     # de « jamais cherché » — un `spotify_id` vide ne disait pas lequel.
     Column("spotify_id_checked_at", TIMESTAMP),
+    # Migration e19 : les trois valeurs que le provider Deezer posait sur le
+    # Track sans qu'aucune colonne ne les attende. `explicit_lyrics` est
+    # NULLABLE à dessein — NULL = jamais mesuré, 0 = Deezer dit que non.
+    Column("deezer_id", Integer),
+    Column("deezer_url", Text),
+    Column("explicit_lyrics", _BOOL),
     UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )

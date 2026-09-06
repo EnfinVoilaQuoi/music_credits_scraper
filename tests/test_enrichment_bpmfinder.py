@@ -163,3 +163,156 @@ def test_enrich_async_natif_avec_factory():
     modes = [o for o in ctx.observations if o.field == "mode" and o.source == "bpmfinder"]
     assert keys and keys[0].value == 5
     assert modes and modes[0].value == 0
+
+
+# ──────────────────────────────────────────────────────────────────────
+# La recherche automatique de lien YouTube
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _FauxChercheurYT:
+    """Faux `YouTubeSearcher` (le vrai fait du réseau)."""
+
+    def __init__(self, resultats):
+        self._resultats = resultats
+        self.appels = []
+
+    def search_track(self, artist, title, max_results=5):
+        self.appels.append((artist, title))
+        return self._resultats
+
+
+def _provider_avec_chercheur(scraper, resultats):
+    provider = BpmFinderProvider(scraper)
+    provider._yt_searcher = _FauxChercheurYT(resultats)
+    return provider
+
+
+class TestRechercheDeLienYouTube:
+    """Un mauvais lien = un mauvais BPM en base : au-dessous du seuil de
+    confiance, le provider refuse de deviner plutôt que de risquer la donnée.
+
+    Sans lien exploitable l'issue est `not_needed`, jamais `skipped` : il n'y a
+    rien à analyser, et cela ne doit pas compter comme une tentative ratée
+    (`skipped` est réservé au disjoncteur).
+
+    (Le chercheur lui-même est stubé : ce test porte sur le CONTRAT du provider,
+    pas sur la façon dont les liens sont trouvés — celle-ci relève de la revue
+    globale de l'intégration YouTube, encore à mener.)"""
+
+    def test_lien_sur_du_persiste(self):
+        p = _provider_avec_chercheur(
+            _FakeScraper({"bpm": 90}),
+            [{"url": "https://youtu.be/ok", "relevance_score": 0.99}],
+        )
+        track = _track(yt=None)
+        assert p.enrich(track, EnrichmentContext()) is True
+        assert track.youtube_url == "https://youtu.be/ok"
+        assert track.youtube_url_source == "search_auto"
+
+    def test_lien_incertain_non_persiste(self):
+        p = _provider_avec_chercheur(
+            _FakeScraper({"bpm": 90}),
+            [{"url": "https://youtu.be/doute", "relevance_score": 0.10}],
+        )
+        track = _track(yt=None)
+        assert p.enrich(track, EnrichmentContext()) == "not_needed"
+        assert track.youtube_url is None
+
+    def test_url_de_recherche_refusee(self):
+        """Une page de RÉSULTATS n'est pas une vidéo : elle n'est pas analysable."""
+        p = _provider_avec_chercheur(
+            _FakeScraper({"bpm": 90}),
+            [
+                {
+                    "url": "https://youtube.com/results?q=x",
+                    "relevance_score": 0.99,
+                    "is_search_url": True,
+                }
+            ],
+        )
+        track = _track(yt=None)
+        assert p.enrich(track, EnrichmentContext()) == "not_needed"
+        assert track.youtube_url is None
+
+    def test_aucun_resultat(self):
+        p = _provider_avec_chercheur(_FakeScraper({"bpm": 90}), [])
+        assert p.enrich(_track(yt=None), EnrichmentContext()) == "not_needed"
+
+    def test_chercheur_en_panne_ne_fait_pas_tomber_le_provider(self):
+        """Lien auxiliaire best-effort : son échec dégrade, il n'interrompt pas."""
+
+        class _Casse(_FauxChercheurYT):
+            def search_track(self, artist, title, max_results=5):
+                raise RuntimeError("recherche indisponible")
+
+        p = BpmFinderProvider(_FakeScraper({"bpm": 90}))
+        p._yt_searcher = _Casse([])
+        assert p.enrich(_track(yt=None), EnrichmentContext()) == "not_needed"
+
+    def test_artiste_principal_utilise_si_featuring(self):
+        p = _provider_avec_chercheur(
+            _FakeScraper({"bpm": 90}),
+            [{"url": "https://youtu.be/ok", "relevance_score": 0.99}],
+        )
+        track = _track(yt=None)
+        track.is_featuring = True
+        track.primary_artist_name = "Principal"
+        p.enrich(track, EnrichmentContext())
+        assert p._yt_searcher.appels[0][0] == "Principal"
+
+
+def test_scraper_increable_compte_comme_crash_pas_comme_echec():
+    """`None` (crash source) ≠ `False` (pas de données) : seul le second entre
+    dans le « tout a échoué » qui déclenche le nettoyage du morceau."""
+    provider = BpmFinderProvider(scraper_factory=lambda: None)
+    assert provider.enrich(_track(), EnrichmentContext()) is None
+
+
+def test_crash_de_l_analyse_est_trace_et_compte_pour_le_disjoncteur(caplog):
+    class _Casse(_FakeScraper):
+        def analyze(self, url):
+            raise RuntimeError("navigateur mort")
+
+    provider = BpmFinderProvider(_Casse())
+    with caplog.at_level("ERROR"):
+        assert provider.enrich(_track(), EnrichmentContext()) is None
+    assert provider._fail_streak == 1
+    assert [r for r in caplog.records if r.exc_info], "traceback attendu"
+
+
+def test_crash_de_l_analyse_async_aussi(caplog):
+    """Jumeau async : même comptage pour le disjoncteur, même traceback."""
+
+    class _Casse(_FakeAsyncScraper):
+        async def analyze_async(self, url):
+            raise RuntimeError("navigateur mort")
+
+    class _Runner:
+        async def run(self, fn, *args):
+            return fn(*args)
+
+    provider = BpmFinderProvider(async_scraper_factory=lambda: _Casse())
+    ctx = EnrichmentContext(sync_runner=_Runner())
+    with caplog.at_level("ERROR"):
+        assert asyncio.run(provider.enrich_async(_track(), ctx)) is None
+    assert provider._fail_streak == 1
+    assert [r for r in caplog.records if r.exc_info], "traceback attendu"
+
+
+def test_gate_ne_skip_jamais_le_gating_vit_dans_enrich():
+    assert BpmFinderProvider().gate(_track(), EnrichmentContext()) is None
+
+
+def test_emprunt_et_fermetures():
+    scraper = _FakeScraper()
+    scraper.close = lambda: setattr(scraper, "ferme", True)
+    provider = BpmFinderProvider(scraper_factory=lambda: scraper)
+    assert provider.scraper is scraper  # point d'emprunt (saisie manuelle GUI)
+    provider.close()
+    assert scraper.ferme is True
+
+
+def test_aclose_sans_variante_async_est_un_no_op():
+    """Aucune factory async fournie → rien n'a été créé, rien à fermer."""
+    asyncio.run(BpmFinderProvider(_FakeScraper()).aclose())

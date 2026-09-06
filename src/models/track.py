@@ -333,6 +333,10 @@ class Lyrics:
     synced: str | None = None  # LRC retenu LRCLIB>YTM (colonne `lyrics_synced`)
     synced_source: str | None = None  # colonne `lyrics_synced_source`
     synced_confidence: int | None = None  # colonne `lyrics_synced_confidence`
+    # Drapeau « parental advisory » de Deezer (colonne `explicit_lyrics`, e19).
+    # TRI-ÉTAT : None = jamais mesuré, False = Deezer dit que non. Ce n'est PAS
+    # un texte — il n'y a rien à croiser avec les paroles de Genius.
+    explicit: bool | None = None
 
 
 @dataclass
@@ -350,6 +354,13 @@ class Certs:
     duration_days: int | None = None  # Durée d'obtention (colonne `certification_duration_days`)
     entries: list[dict[str, Any]] = field(default_factory=list)  # colonne `certifications`
     album_entries: list[dict[str, Any]] = field(default_factory=list)  # `album_certifications`
+    # « Recalculé ce run, pas encore enregistré ». Posé par
+    # `certification_enricher.apply_certifications`, effacé par
+    # `TrackRepository.record_certifications`. Sert à distinguer une liste VIDE
+    # parce qu'on a recalculé d'une liste vide parce que l'objet ne porte pas
+    # l'information — `save_track` n'écrit plus ces colonnes, et un morceau qui
+    # resterait marqué en fin de flux signale un enregistrement oublié.
+    needs_write: bool = field(default=False, repr=False)
 
 
 @dataclass
@@ -381,6 +392,10 @@ class Track:
     # Champs internes de marquage
     _album_from_api: bool = field(default=False, repr=False)
     _release_date_from_api: bool = field(default=False, repr=False)
+    # « Relations posées ce run, pas encore enregistrées » — pendant de
+    # `Certs.needs_write` : `save_track` n'écrit plus la colonne `relationships`,
+    # c'est `TrackRepository.record_relationships` qui le fait.
+    _relationships_pending: bool = field(default=False, repr=False)
 
     # IDs externes
     genius_id: int | None = None
@@ -392,6 +407,10 @@ class Track:
     # elle, un `spotify_id` vide ne dit pas si le morceau est absent de
     # Spotify ou si personne n'a jamais regardé.
     spotify_id_checked_at: str | None = None
+    # Deezer (e19) : identifiant + lien de la page du morceau. Servent à
+    # l'identification et à la vérification, comme les autres IDs externes.
+    deezer_id: int | None = None
+    deezer_url: str | None = None
 
     # Métadonnées
     # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5) :

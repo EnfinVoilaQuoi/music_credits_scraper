@@ -31,6 +31,14 @@ Quatre gardes-fous — la partie non triviale, apprise des projets de référenc
      et on réessaie une fois avec un token frais.
   4. **Dégradation propre** : toute erreur (réseau, parsing, blocage) renvoie None sans
      jamais lever — c'est une source facultative, elle ne doit jamais casser le pipeline.
+  5. **Fenêtre de repos** (2026-09-06) : rejeter le leurre ne suffisait pas. Quand
+     `token.get` ne rend PLUS de jeton utilisable, chaque morceau suivant rejouait
+     deux requêtes sur une IP déjà bridée, et un WARNING par morceau — la « rafale »
+     décrite au WIP. On cesse d'interroger la source pendant
+     `settings.musixmatch_token_cooldown_s`, puis on reprend seul. Ce n'est PAS un
+     disjoncteur : la source doit pouvoir revenir dans le même run. Pendant la
+     fenêtre, l'appel est déclaré `skipped` — hors dénominateur : ne pas appeler
+     n'est pas un échec de la source, et compter 0/0 comme un échec mentirait.
 
 Vérifications de correspondance :
   - Match serveur par durée (`f_subtitle_length` ± `f_subtitle_length_max_deviation`)
@@ -71,9 +79,15 @@ if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
 
 try:
-    from src.config import DATA_DIR, DELAY_BETWEEN_REQUESTS, MAX_RETRIES
+    from src.config import (
+        DATA_DIR,
+        DELAY_BETWEEN_REQUESTS,
+        MAX_RETRIES,
+        MUSIXMATCH_TOKEN_COOLDOWN_S,
+    )
 except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
+    MUSIXMATCH_TOKEN_COOLDOWN_S = 600
     DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
 # Comparateurs titre/artiste : définis UNE fois dans `_text_match` (ils étaient
@@ -169,10 +183,37 @@ class MusixmatchAPI:
         self._token: str | None = None
         self._token_ts: float = 0.0
 
+        # Fenêtre de repos : instant (epoch) avant lequel on n'interroge plus.
+        self._repos_jusqua: float = 0.0
+
         # Token épinglé optionnel : amorce le cache, expiry gérée normalement.
         pinned = (os.getenv("MUSIXMATCH_USER_TOKEN") or "").strip()
         if pinned and not _is_degenerate_token(pinned):
             self._token, self._token_ts = pinned, time.time()
+
+    # ── Fenêtre de repos ────────────────────────────────────────────────────────
+    def _au_repos(self) -> bool:
+        """La source est-elle en repos ? Journalise la reprise, une seule fois."""
+        if not self._repos_jusqua:
+            return False
+        if time.time() < self._repos_jusqua:
+            return True
+        self._repos_jusqua = 0.0
+        logger.info("Musixmatch : fin de la fenêtre de repos, on retente.")
+        return False
+
+    def _mettre_au_repos(self, raison: str) -> None:
+        """Arme la fenêtre. Un SEUL warning par fenêtre, pas un par morceau."""
+        duree = MUSIXMATCH_TOKEN_COOLDOWN_S
+        if duree <= 0:
+            return
+        deja_armee = self._repos_jusqua > time.time()
+        self._repos_jusqua = time.time() + duree
+        if not deja_armee:
+            logger.warning(
+                f"Musixmatch : jeton inutilisable ({raison}) — source mise au repos "
+                f"{duree} s (insister sur une IP bridée ne fait que l'aggraver)."
+            )
 
     # ── Gestion du token ────────────────────────────────────────────────────────
     def _load_cached_token(self) -> str | None:
@@ -362,12 +403,14 @@ class MusixmatchAPI:
         if env is None:
             return None
         if status == _STATUS_AUTH or _envelope_status(env) == _STATUS_AUTH:
-            logger.warning("Musixmatch: 401 sur token.get (IP flaggée / CAPTCHA-gate ?)")
+            logger.debug("Musixmatch: 401 sur token.get (IP flaggée / CAPTCHA-gate ?)")
+            self._mettre_au_repos("401 sur token.get")
             return None
         token = ((env.get("message") or {}).get("body") or {}).get("user_token") or ""
         # Garde-fou #2 : token de forme valide mais inutilisable.
         if _is_degenerate_token(token):
-            logger.warning(f"Musixmatch: token factice rejeté ({token[:12]!r}…, IP restreinte)")
+            logger.debug(f"Musixmatch: token factice rejeté ({token[:12]!r}…, IP restreinte)")
+            self._mettre_au_repos(f"jeton factice {token[:12]!r}…")
             return None
         self._save_token(token)
         logger.debug("Musixmatch: nouveau usertoken obtenu (async)")
@@ -387,6 +430,9 @@ class MusixmatchAPI:
         # Le retry après refresh de token est une SECONDE tentative du même appel
         # logique : une observation les couvre toutes deux, un seul verdict.
         with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_name}") as obs:
+            if self._au_repos():
+                obs.skipped("fenêtre de repos (jeton refusé)")
+                return None
             result = await self._try_fetch_async(http, track_name, artist_name, duration, False)
             if result is _AUTH_FAILURE:
                 logger.debug("Musixmatch: auth échouée → refresh token + retry (async)")

@@ -396,3 +396,54 @@ class TestCorrectionsManuelles:
 
         assert rapport["apostrophes_restored"] == 1
         assert rapport["manual_fixes_applied"] == 1
+
+
+class TestVerdictDeNettoyage:
+    """« Déjà propre » se lit dans le RAPPORT, pas dans un second calcul.
+
+    La fenêtre recomptait de son côté — niveaux, catégories, espaces, doublons,
+    vides — en OUBLIANT les apostrophes restaurées et les corrections manuelles.
+    Sur un fichier où seuls ces deux compteurs avaient des valeurs (2 et 13),
+    elle concluait « CSV déjà propre » et n'offrait donc jamais d'appliquer,
+    alors que le rapport annonçait 15 lignes à modifier.
+    """
+
+    def test_un_csv_sans_rien_a_faire(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne()])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["deja_propre"] is True
+        assert rapport["lignes_modifiees"] == 0
+
+    def test_les_apostrophes_comptent_dans_le_verdict(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne(title="L?EMPIRE")])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["apostrophes_restored"] == 1
+        assert rapport["deja_propre"] is False
+        assert rapport["lignes_modifiees"] >= 1
+
+    def test_les_corrections_manuelles_comptent_aussi(self, tmp_path, monkeypatch):
+        from src.utils.cert_normalize import cle_correction
+
+        monkeypatch.setattr(
+            sc,
+            "charger_fixes",
+            lambda source: {cle_correction("JUL", "MY WORLD"): {"title": "MY WORLD (REMIX)"}},
+        )
+        p = _ecrire(tmp_path / "c.csv", [_ligne()])
+
+        rapport = clean_snep_csv(p)
+
+        assert rapport["manual_fixes_applied"] == 1
+        assert rapport["deja_propre"] is False
+
+    def test_le_verdict_apparait_dans_le_rendu(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
+        p = _ecrire(tmp_path / "c.csv", [_ligne()])
+
+        assert "DÉJÀ à jour" in format_report(clean_snep_csv(p))

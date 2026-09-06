@@ -99,6 +99,15 @@ class Settings(BaseSettings):
     youtube_confidence_threshold: float = 0.85  # seuil auto-sélection
     youtube_persist_confidence: float = 0.90  # seuil pour PERSISTER un lien trouvé par recherche
 
+    # --- Musixmatch : fenêtre de repos après un jeton refusé ---
+    # `token.get` est l'endpoint que Musixmatch bride le plus par IP. Quand il
+    # cesse de rendre un jeton utilisable, insister ne sert à rien : chaque
+    # morceau rejouait DEUX requêtes de plus sur une IP déjà bridée, et un
+    # WARNING par morceau. On cesse d'interroger la source pendant ce délai,
+    # puis on reprend seul — jamais de disjoncteur définitif, la source doit
+    # pouvoir revenir dans le même run. 0 désactive la mise au repos.
+    musixmatch_token_cooldown_s: int = 600
+
     # --- Désambiguïsation canal YTM (gate d'identité, update_ytmusic) ---
     # Un canal inféré/recherché est jugé suspect (→ abort sans écriture) si trop
     # peu de titres communs avec la base, ou ratio faible SANS album commun.
@@ -192,6 +201,9 @@ YOUTUBE_AUTO_SELECT_ALBUM_TRACKS = settings.youtube_auto_select_album_tracks
 YOUTUBE_VERIFY_OFFICIAL_CHANNELS = settings.youtube_verify_official_channels
 YOUTUBE_CONFIDENCE_THRESHOLD = settings.youtube_confidence_threshold
 YOUTUBE_PERSIST_CONFIDENCE = settings.youtube_persist_confidence
+
+# Musixmatch (fenêtre de repos après un jeton refusé)
+MUSIXMATCH_TOKEN_COOLDOWN_S = settings.musixmatch_token_cooldown_s
 
 # ReccoBeats (péremption du cache négatif)
 RECCOBEATS_NOT_FOUND_TTL_DAYS = settings.reccobeats_not_found_ttl_days

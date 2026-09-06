@@ -26,6 +26,8 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
 from src.observability import repository as usage_repository
 from src.observability.registry import Flow
 from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
+from src.utils import cert_clean_report
+from src.utils.cert_normalize import programme_riaa, riaa_level, riaa_units
 
 
 class RIAADatabaseUpdater:
@@ -74,6 +76,11 @@ class RIAADatabaseUpdater:
         self.logger.setLevel(logging.INFO)
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
+        # Sans cela, chaque ligne s'affiche DEUX fois : une par ce handler, une
+        # par celui de la racine (posé par un `basicConfig` d'import). Le bruit
+        # était doublé jusque dans la fenêtre de fin de la GUI, qui relaie cette
+        # sortie.
+        self.logger.propagate = False
 
     def get_last_update_date(self) -> datetime | None:
         """Date de la dernière certif connue — lue depuis certif_riaa.csv (le
@@ -141,6 +148,12 @@ class RIAADatabaseUpdater:
                 results = self.scraper.scrape_by_date_range(start_str, end_str, "certification")
 
                 self.logger.info(f"Trouvé {len(results)} certifications")
+                if not results:
+                    self.logger.error(
+                        "RIAA : aucune certification vue sur la période — scraper cassé "
+                        "ou site modifié. Fraîcheur NON horodatée."
+                    )
+                    return False
 
                 # Met à jour la base de données
                 added, updated = self.update_from_scraped_data(results)
@@ -194,6 +207,13 @@ class RIAADatabaseUpdater:
             current_date = last_date
             total_added = 0
             total_updated = 0
+            # Lignes VUES, distinctes des lignes AJOUTÉES. « 0 ajoutée » est le
+            # régime normal d'un ré-run ; « 0 vue » sur plusieurs tranches d'un
+            # mois ne l'est jamais (la RIAA certifie chaque semaine) et
+            # signalait, en juillet 2026, un parseur mort que personne n'a vu
+            # passer — la MàJ concluait « à jour » et horodatait la fraîcheur.
+            total_seen = 0
+            periodes = 0
 
             while current_date < now:
                 # Période d'un mois
@@ -213,12 +233,20 @@ class RIAADatabaseUpdater:
 
                 try:
                     results = self.scraper.scrape_by_date_range(start_str, end_str, "certification")
+                    periodes += 1
+                    total_seen += len(results)
 
                     if results:
                         added, updated = self.update_from_scraped_data(results)
                         total_added += added
                         total_updated += updated
-                        self.logger.info(f"  -> {added} ajoutées, {updated} mises à jour")
+                        self.logger.info(
+                            f"  -> {len(results)} vues, {added} ajoutées, {updated} mises à jour"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"  -> AUCUNE certification vue sur {start_str}-{end_str}"
+                        )
 
                     # Pause entre les requêtes
                     time.sleep(5)
@@ -237,10 +265,24 @@ class RIAADatabaseUpdater:
                 self.scraper.close_driver()
                 self.scraper = None
 
-            self.logger.info(f"Total: {total_added} ajoutées, {total_updated} mises à jour")
+            self.logger.info(
+                f"Total: {total_seen} vues, {total_added} ajoutées, "
+                f"{total_updated} mises à jour ({periodes} période(s))"
+            )
 
             # Export final
             self.export_to_csv()
+
+            if periodes and total_seen == 0:
+                # Ne PAS horodater : une fraîcheur écrite ici affirmerait que la
+                # base est à jour alors qu'on n'a rien pu lire. C'est exactement
+                # ce qui a masqué la refonte du site pendant deux mois.
+                self.logger.error(
+                    f"RIAA : aucune certification vue sur {periodes} période(s) — "
+                    "scraper cassé ou site modifié. Fraîcheur NON horodatée "
+                    "(re-capturer les fixtures : scripts/capture_fixtures.py --only riaa)."
+                )
+                return False
 
             # Fraîcheur = date de dernière VÉRIFICATION : horodater à la fin du
             # run même si aucune nouvelle certif (_merge_certif_csv ne le fait que
@@ -344,6 +386,26 @@ CERTIF_COLUMNS = [
     "Media_Type",
     "Certification_Type",
     "Genre",
+    # Ajoutées le 2026-09-06, EN FIN de liste (les lignes existantes les
+    # reçoivent vides, `_align_columns` s'en charge).
+    #
+    # `Award_Programme` : « US » ou « LATIN ». La RIAA décerne deux familles
+    # d'awards aux ÉCHELLES différentes ; sans cette colonne, un « Platino »
+    # (60 000 unités) se lit comme un « Platinum » (1 000 000). Relevée à la
+    # source (famille du badge), avec repli sur le vocabulaire du niveau pour
+    # les lignes du corpus historique.
+    #
+    # `Units` : ce que vaut le palier sur l'échelle de SON programme. Le scraper
+    # la calculait déjà et la JETAIT à la frontière du CSV — c'est précisément
+    # pourquoi l'erreur latine est restée invisible si longtemps.
+    "Award_Programme",
+    "Units",
+    # `Award_Family` : ST (physique) / DI (numérique) / LA (latin), verbatim
+    # depuis l'`alt` du badge. Le programme s'en déduit, l'inverse est faux —
+    # c'est elle qui distingue un single physique d'un single numérique, ce que
+    # le libellé de format ne dit pas, et c'est cette distinction qui décide du
+    # seuil d'unités applicable avant août 2006.
+    "Award_Family",
 ]
 
 
@@ -376,15 +438,20 @@ def _norm_format(s: str) -> str:
     return _FORMAT_ALIASES.get(re.sub(r"\s+", " ", s).upper(), s)
 
 
-def _riaa_level(s: str) -> str:
-    """« 4x Multi-Platinum » → « 4x Platinum » (aligne historique et scraper)."""
-    s = (s or "").strip()
-    m = re.match(r"(\d+)\s*x\s*multi-?platinum", s, re.I)
-    if m:
-        return f"{m.group(1)}x Platinum"
-    if re.fullmatch(r"multi-?platinum", s, re.I):
-        return "Platinum"
-    return s
+#: Ré-export : voir `cert_normalize.riaa_level` (la fonction vivait ici ET dans
+#: `cert_matcher`, byte pour byte).
+_riaa_level = riaa_level
+
+
+def _texte_unites(niveau: str, date: str = "", format_type: str = "", famille: str = "") -> str:
+    """Unités du palier, en TEXTE, aux seuils de l'ÉPOQUE quand ils diffèrent.
+
+    Tout le pipeline CSV manipule des chaînes (`dtype=str`) : une colonne
+    d'entiers entre en conflit avec la colonne vide que `_align_columns` pose
+    sur les lignes qui ne l'ont pas.
+    """
+    unites = riaa_units(niveau, date=_riaa_iso(date), format_type=format_type, famille=famille)
+    return str(unites) if unites else ""
 
 
 def _flatten_records(records: list[dict]) -> list[dict]:
@@ -400,6 +467,10 @@ def _flatten_records(records: list[dict]) -> list[dict]:
             "Group_Type": "",
             "Media_Type": "",
             "Genre": "",
+            # Le programme est une propriété de l'AWARD, pas du palier : tous
+            # les paliers d'une même certification en héritent.
+            "Award_Programme": rec.get("award_programme", ""),
+            "Award_Family": rec.get("award_family", ""),
         }
         hist = rec.get("history") or []
         if hist:
@@ -416,16 +487,27 @@ def _flatten_records(records: list[dict]) -> list[dict]:
                         "Media_Type": h.get("category", "") or "",
                         "Genre": h.get("genre", "") or "",
                         "Certification_Type": _riaa_level(lvl),
+                        "Units": _texte_unites(
+                            _riaa_level(lvl),
+                            h.get("certification_date", "") or rec.get("certification_date", ""),
+                            base["Format_Type"],
+                            rec.get("award_family", ""),
+                        ),
                     }
                 )
         else:
+            niveau = _riaa_level(rec.get("award_level") or rec.get("certification_level", ""))
             rows.append(
                 {
                     **base,
                     "Certification_Date": rec.get("certification_date", ""),
                     "Release_Date": rec.get("release_date", ""),
-                    "Certification_Type": _riaa_level(
-                        rec.get("award_level") or rec.get("certification_level", "")
+                    "Certification_Type": niveau,
+                    "Units": _texte_unites(
+                        niveau,
+                        rec.get("certification_date", ""),
+                        base["Format_Type"],
+                        rec.get("award_family", ""),
                     ),
                 }
             )
@@ -460,17 +542,65 @@ def _write_riaa_raw(df: pd.DataFrame) -> None:
     df.to_csv(RIAA_RAW, index=False, encoding="utf-8-sig")
 
 
-def _clean_from_raw(raw_df: pd.DataFrame) -> pd.DataFrame:
+def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.DataFrame:
     """Dérive le CLEAN depuis le brut : retire artiste/titre vides, normalise le
-    Format, dédoublonne (Artist|Title|Format|niveau normalisé|date)."""
+    Format, dédoublonne (Artist|Title|Format|niveau normalisé|date).
+
+    `report` (optionnel) recueille le DÉTAIL de ce qui a été fait. Sans lui, le
+    nettoyage RIAA ne disait qu'une chose — « X → Y lignes » — ce qui ne permet
+    ni de valider l'opération avant de l'appliquer, ni de comprendre après coup
+    d'où vient l'écart.
+    """
     df = _align_columns(raw_df)
+
+    vides = df[(df["Artist"].str.strip() == "") | (df["Title"].str.strip() == "")]
+    if report is not None:
+        report["empty_removed"] = len(vides)
+        report["empty_examples"] = [
+            f"{r.Artist!r} — {r.Title!r} ({r.Certification_Date})"
+            for r in vides.head(20).itertuples()
+        ]
     df = df[(df["Artist"].str.strip() != "") & (df["Title"].str.strip() != "")]
+
+    if report is not None:
+        report["format_changes"] = _compter_changements(df["Format_Type"], _norm_format)
+        report["formats_normalises"] = sum(report["format_changes"].values())
+        report["level_changes"] = _compter_changements(df["Certification_Type"], _riaa_level)
+        report["niveaux_normalises"] = sum(report["level_changes"].values())
+
+    df = df.copy()
     df["Format_Type"] = df["Format_Type"].map(_norm_format)
+    # Niveaux ramenés au vocabulaire canonique : le corpus historique dit
+    # « 2x Multi-Platinum » là où le scraper écrit « 2x Platinum ». Le matcher le
+    # normalisait déjà au chargement, mais le FICHIER gardait les deux formes —
+    # illisible pour un humain, et piégeux pour tout lecteur qui oublierait
+    # l'appel (un export, un script) : il retomberait sur le rang le plus bas.
+    df["Certification_Type"] = df["Certification_Type"].map(_riaa_level)
+    # Programme et unités complétés là où ils manquent (lignes antérieures à la
+    # collecte de la famille d'award). Le programme est DÉDUIT du vocabulaire :
+    # exact pour les libellés latins, et par défaut « US » sinon — les awards
+    # latins écrits en vocabulaire US par l'ancien scraper restent donc
+    # étiquetés US, faute de pouvoir les distinguer sans re-scraper.
+    vide = df["Award_Programme"].astype(str).str.strip() == ""
+    df.loc[vide, "Award_Programme"] = df.loc[vide, "Certification_Type"].map(programme_riaa)
+    # Unités RECALCULÉES pour toutes les lignes, et non seulement complétées :
+    # elles dépendent de la date, du format et de la famille, donc une valeur
+    # écrite avant que ces colonnes existent serait au barème d'aujourd'hui pour
+    # une certification qui n'y a jamais été soumise.
+    df["Units"] = [
+        _texte_unites(niveau, date, fmt, fam)
+        for niveau, date, fmt, fam in zip(
+            df["Certification_Type"],
+            df["Certification_Date"],
+            df["Format_Type"],
+            df["Award_Family"],
+            strict=True,
+        )
+    ]
 
     def norm(s):
         return re.sub(r"\s+", " ", str(s)).strip().upper()
 
-    df = df.copy()
     df["_k"] = (
         df["Artist"].map(norm)
         + "|"
@@ -482,7 +612,22 @@ def _clean_from_raw(raw_df: pd.DataFrame) -> pd.DataFrame:
         + "|"
         + df["Certification_Date"].map(_riaa_iso)
     )
-    return df.drop_duplicates("_k", keep="first").drop(columns="_k")
+    avant = len(df)
+    df = df.drop_duplicates("_k", keep="first").drop(columns="_k")
+    if report is not None:
+        report["duplicates_removed"] = avant - len(df)
+    return df
+
+
+def _compter_changements(colonne, canoniser) -> dict[str, int]:
+    """{« brut → canonique »: n} pour les valeurs que `canoniser` modifierait."""
+    change: dict[str, int] = {}
+    for brut in colonne:
+        canon = canoniser(brut)
+        if canon != brut:
+            cle = f"{brut} → {canon}"
+            change[cle] = change.get(cle, 0) + 1
+    return change
 
 
 def _write_riaa_meta(source: str = "GLOBAL", count: int | None = None) -> None:
@@ -546,26 +691,76 @@ def fetch_artist(artist: str) -> bool:
     return True
 
 
-def clean_certif_csv() -> tuple:
+def clean_certif_csv(apply: bool = True) -> dict:
     """« Nettoyer » : régénère certif_riaa.csv (clean) depuis le brut
     riaa_raw.csv (retire vides, normalise Format, dédoublonne niveau normalisé).
-    Retourne (avant, après)."""
+
+    `apply=False` = DRY-RUN : compte sans rien réécrire, comme le nettoyeur
+    SNEP. Retourne un rapport détaillé (cf. `cert_clean_report`).
+    """
+    report = cert_clean_report.rapport_vierge(CERTIF_CSV)
+    report.update(
+        {
+            "empty_removed": 0,
+            "duplicates_removed": 0,
+            "formats_normalises": 0,
+            "niveaux_normalises": 0,
+            "empty_examples": [],
+            "format_changes": {},
+            "level_changes": {},
+        }
+    )
     raw = _load_riaa_raw()
     if raw.empty:
-        print("Brut RIAA vide, rien à nettoyer")
-        return (0, 0)
-    before = (
-        len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str)) if CERTIF_CSV.exists() else 0
+        report["error"] = "Brut RIAA vide, rien à nettoyer"
+        return report
+
+    report["rows_in"] = len(raw)
+    clean = _clean_from_raw(raw, report)
+    report["rows_out"] = len(clean)
+    report["deja_propre"], report["lignes_modifiees"] = cert_clean_report.comparer_au_fichier(
+        clean, CERTIF_CSV
     )
-    if CERTIF_CSV.exists():
-        bdir = _RIAA_DIR / "backups"
-        bdir.mkdir(exist_ok=True)
-        shutil.copy2(CERTIF_CSV, bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
-    clean = _clean_from_raw(raw)
-    clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
-    _write_riaa_meta(source="CLEAN", count=len(clean))
-    print(f"✅ Nettoyage RIAA : {before} → {len(clean)} lignes (-{before - len(clean)})")
-    return (before, len(clean))
+
+    if apply:
+        if CERTIF_CSV.exists():
+            bdir = _RIAA_DIR / "backups"
+            bdir.mkdir(exist_ok=True)
+            backup = bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
+            shutil.copy2(CERTIF_CSV, backup)
+            report["backup"] = str(backup)
+        clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
+        _write_riaa_meta(source="CLEAN", count=len(clean))
+        report["applied"] = True
+    return report
+
+
+def format_clean_report(report: dict) -> str:
+    """Rendu du rapport de nettoyage (formateur commun aux 3 sources)."""
+    return cert_clean_report.render(
+        report,
+        titre="🧹 NETTOYAGE DU CSV RIAA",
+        counters=[
+            ("Lignes sans artiste/titre retirées", report.get("empty_removed", 0)),
+            ("Doublons retirés", report.get("duplicates_removed", 0)),
+            ("Formats normalisés", report.get("formats_normalises", 0)),
+            ("Niveaux normalisés", report.get("niveaux_normalises", 0)),
+        ],
+        sections=[
+            ("Formats normalisés", report.get("format_changes") or {}),
+            ("Niveaux normalisés", report.get("level_changes") or {}),
+        ],
+        examples=[
+            (
+                f"Lignes retirées ({report.get('empty_removed', 0)})",
+                [ex[:90] for ex in report.get("empty_examples") or []],
+            )
+        ],
+        note_dry_run=(
+            "ℹ️  DRY-RUN : rien n'a été écrit. Relance sans --dry-run pour "
+            "appliquer (un backup sera créé)."
+        ),
+    )
 
 
 def main():
@@ -586,6 +781,11 @@ def main():
     parser.add_argument(
         "--clean", action="store_true", help="Nettoie certif_riaa.csv (dédup + vides) sans scraper"
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Avec --clean : compte sans réécrire (aperçu, comme le nettoyeur SNEP)",
+    )
 
     args = parser.parse_args()
 
@@ -596,7 +796,7 @@ def main():
             pass
 
     if args.clean:
-        clean_certif_csv()
+        print(format_clean_report(clean_certif_csv(apply=not args.dry_run)))
         sys.exit(0)
 
     # Récup par artiste : CSV-centré, pas besoin de la base sqlite

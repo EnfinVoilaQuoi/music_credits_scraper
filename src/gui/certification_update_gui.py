@@ -97,17 +97,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 10), pady=5)
         ctk.CTkButton(
             snep_frame,
-            text="🔎 Valider CSV",
+            text="🔎 Valider / Nettoyer",
             command=self._check_snep,
             width=110,
-            fg_color="gray40",
-            hover_color="gray30",
-        ).pack(side="right", padx=5, pady=5)
-        ctk.CTkButton(
-            snep_frame,
-            text="🧹 Nettoyer",
-            command=self._clean_snep,
-            width=100,
             fg_color="gray40",
             hover_color="gray30",
         ).pack(side="right", padx=5, pady=5)
@@ -126,17 +118,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 10), pady=5)
         ctk.CTkButton(
             brma_frame,
-            text="🔎 Valider CSV",
+            text="🔎 Valider / Nettoyer",
             command=self._check_brma,
             width=110,
-            fg_color="gray40",
-            hover_color="gray30",
-        ).pack(side="right", padx=5, pady=5)
-        ctk.CTkButton(
-            brma_frame,
-            text="🧹 Nettoyer",
-            command=self._clean_brma,
-            width=100,
             fg_color="gray40",
             hover_color="gray30",
         ).pack(side="right", padx=5, pady=5)
@@ -151,17 +135,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 10), pady=5)
         ctk.CTkButton(
             riaa_frame,
-            text="🔎 Valider CSV",
+            text="🔎 Valider / Nettoyer",
             command=self._check_riaa,
             width=110,
-            fg_color="gray40",
-            hover_color="gray30",
-        ).pack(side="right", padx=5, pady=5)
-        ctk.CTkButton(
-            riaa_frame,
-            text="🧹 Nettoyer",
-            command=self._clean_riaa,
-            width=100,
             fg_color="gray40",
             hover_color="gray30",
         ).pack(side="right", padx=5, pady=5)
@@ -546,7 +522,10 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     lambda: self._show_report_window(
                         "Validation CSV SNEP",
                         text,
-                        action=("✏️ Corriger les titres (?)", self._editer_titres_corrompus),
+                        actions=[
+                            ("🧹 Nettoyer", self._clean_snep),
+                            ("✏️ Corriger les libellés (?)", self._editer_titres_corrompus),
+                        ],
                     ),
                 )
             except Exception as e:
@@ -696,13 +675,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         start_worker(run)
 
-    def _show_report_window(self, title: str, text: str, action: tuple | None = None):
+    def _show_report_window(self, title: str, text: str, actions: list | None = None):
         """Affiche un rapport texte dans une fenêtre scrollable + bouton copier.
 
-        `action` : couple `(libellé, callback)` ajouté à côté de « Copier » —
-        c'est par là que la fenêtre de VALIDATION donne accès à la correction
-        des titres, plutôt que d'ouvrir un bouton de plus dans la fenêtre
-        principale pour une action qui ne se comprend qu'au vu du rapport.
+        `actions` : liste de couples `(libellé, callback)` ajoutés à côté de
+        « Copier ». C'est par là que la fenêtre de VALIDATION donne accès au
+        nettoyage et à la correction des libellés : ces deux actions ne se
+        décident qu'au vu du rapport, les proposer ailleurs revenait à demander
+        de choisir avant d'avoir lu.
         """
         win = ctk.CTkToplevel(self)
         win.title(title)
@@ -742,9 +722,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 pass
 
         ctk.CTkButton(btns, text="📋 Copier", command=copy, width=100).pack(side="left", padx=5)
-        if action:
-            libelle, callback = action
-            ctk.CTkButton(btns, text=libelle, command=callback, width=200).pack(side="left", padx=5)
+        for libelle, callback in actions or []:
+            ctk.CTkButton(btns, text=libelle, command=callback, width=190).pack(side="left", padx=5)
         ctk.CTkButton(btns, text="Fermer", command=win.destroy, width=100).pack(
             side="right", padx=5
         )
@@ -765,7 +744,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         """
         from src.config import DATA_PATH
         from src.utils.cert_fixes_io import (
+            accepter,
             candidats_a_corriger,
+            charger_acceptes,
             charger_fixes,
             enregistrer_fix,
         )
@@ -782,7 +763,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             messagebox.showerror("Titres à corriger", f"Lecture impossible : {e}", parent=self)
             return
 
-        candidats = candidats_a_corriger(rows, charger_fixes("snep"))
+        candidats = candidats_a_corriger(rows, charger_fixes("snep"), charger_acceptes("snep"))
         if not candidats:
             messagebox.showinfo(
                 "Titres à corriger",
@@ -792,12 +773,23 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             )
             return
 
-        self._fenetre_correction(candidats, enregistrer_fix)
+        self._fenetre_correction(candidats, enregistrer_fix, accepter)
 
-    def _fenetre_correction(self, candidats: list, enregistrer_fix):
-        """Fenêtre de saisie des corrections (une ligne par libellé)."""
+    def _fenetre_correction(self, candidats: list, enregistrer_fix, accepter):
+        """Fenêtre de saisie des corrections (une ligne par libellé).
+
+        Deux décisions y sont possibles, et la seconde compte autant que la
+        première : CORRIGER un libellé cassé, ou le VALIDER tel quel. Sans cette
+        seconde, la liste ne décroît jamais — or la plupart des « ? » sont de
+        vrais points d'interrogation (« ET ALORS ? », « YES, AND? ») et
+        reviendraient éternellement demander un arbitrage déjà rendu.
+
+        Ceux-là sont d'ailleurs MASQUÉS par défaut : un « ? » en fin de libellé
+        ou suivi d'une espace est un point d'interrogation, pas une corruption.
+        Seuls les « ? » ENTRE DEUX LETTRES sont montrés d'emblée.
+        """
         win = ctk.CTkToplevel(self)
-        win.title("Corriger les titres (?)")
+        win.title("Corriger les libellés (?)")
         win.geometry("980x620")
         win.transient(self)
         win.lift()
@@ -806,30 +798,53 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             win,
-            text="Corrections manuelles des libellés SNEP",
+            text="Libellés SNEP portant un « ? »",
             font=("Arial", 16, "bold"),
         ).pack(pady=(12, 2))
+        suspects = [c for c in candidats if c[0]]
+        legitimes = [c for c in candidats if not c[0]]
+
         ctk.CTkLabel(
             win,
             text=(
-                "⚠️ en tête : « ? » entre deux lettres (corruption quasi certaine).\n"
-                "Les autres sont probablement de vrais points d'interrogation — "
-                "laisse-les tels quels.\n"
-                "Deux champs : ARTISTE puis TITRE. Le champ encadré est celui qui "
-                "porte le « ? ».\n"
+                "Deux champs : ARTISTE puis TITRE ; le champ encadré porte le « ? ».\n"
+                "« ✓ correct » mémorise que le libellé est BON tel quel : il ne "
+                "reviendra plus.\n"
                 "Les corrections sont réappliquées à chaque « 🧹 Nettoyer »."
             ),
             justify="left",
         ).pack(pady=(0, 8))
 
+        montrer_legitimes = ctk.BooleanVar(value=not suspects)
         zone = ctk.CTkScrollableFrame(win)
+
+        def remplir():
+            for enfant in zone.winfo_children():
+                enfant.destroy()
+            saisies.clear()
+            visibles = suspects + (legitimes if montrer_legitimes.get() else [])
+            for candidat in visibles:
+                _ligne_correction(candidat)
+
+        ctk.CTkCheckBox(
+            win,
+            text=(
+                f"Afficher aussi les {len(legitimes)} libellé(s) dont le « ? » est "
+                "probablement un vrai point d'interrogation"
+            ),
+            variable=montrer_legitimes,
+            command=lambda: remplir(),
+        ).pack(anchor="w", padx=16, pady=(0, 6))
+
         zone.pack(fill="both", expand=True, padx=12, pady=6)
 
         # DEUX champs, artiste et titre : le « ? » est tantôt dans l'un, tantôt
         # dans l'autre (« DES?REE — LIFE » : c'est l'ARTISTE qui est corrompu).
         # N'offrir que le titre demandait de corriger ce qui n'était pas cassé.
         saisies = []
-        for suspect, artiste, titre, correction in candidats:
+
+        def _ligne_correction(candidat):
+            suspect, artiste, titre, correction = candidat
             ligne = ctk.CTkFrame(zone)
             ligne.pack(fill="x", pady=3)
             ctk.CTkLabel(
@@ -853,11 +868,22 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 champ.insert(0, (correction or {}).get(cle) or valeur)
                 champ.pack(side="left", padx=6, pady=4)
                 champs[cle] = champ
-            saisies.append((artiste, titre, champs))
+
+            correct = ctk.BooleanVar(value=False)
+            ctk.CTkCheckBox(ligne, text="✓ correct", variable=correct, width=90).pack(
+                side="left", padx=(10, 6)
+            )
+            saisies.append((artiste, titre, champs, correct))
+
+        remplir()
 
         def enregistrer():
-            n = 0
-            for artiste, titre, champs in saisies:
+            n_corrections = n_acceptes = 0
+            for artiste, titre, champs, correct in saisies:
+                if correct.get():
+                    accepter("snep", artiste, titre)
+                    n_acceptes += 1
+                    continue
                 artiste_fixe = champs["artist"].get().strip() or artiste
                 titre_fixe = champs["title"].get().strip() or titre
                 if (artiste_fixe, titre_fixe) != (artiste, titre):
@@ -866,15 +892,16 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                         f"[SNEP] correction manuelle : {artiste!r} — {titre!r} → "
                         f"{artiste_fixe!r} — {titre_fixe!r}"
                     )
-                    n += 1
+                    n_corrections += 1
             win.destroy()
             messagebox.showinfo(
-                "Titres à corriger",
-                f"{n} correction(s) enregistrée(s).\n\n"
-                "Lance « 🧹 Nettoyer » sur le SNEP pour les appliquer au CSV.",
+                "Libellés à corriger",
+                f"{n_corrections} correction(s) et {n_acceptes} libellé(s) validé(s) "
+                "tels quels.\n\nLance « 🧹 Nettoyer » sur le SNEP pour appliquer "
+                "les corrections au CSV.",
                 parent=self,
             )
-            self._set_progress(f"✏️ {n} correction(s) manuelle(s) enregistrée(s)")
+            self._set_progress(f"✏️ {n_corrections} correction(s), {n_acceptes} validation(s)")
 
         barre = ctk.CTkFrame(win)
         barre.pack(fill="x", padx=12, pady=(0, 12))
@@ -905,7 +932,12 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} BRMA : {verdict} — "
                     f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
                 )
-                self.after(0, lambda: self._show_report_window("Validation CSV BRMA", text))
+                self.after(
+                    0,
+                    lambda: self._show_report_window(
+                        "Validation CSV BRMA", text, actions=[("🧹 Nettoyer", self._clean_brma)]
+                    ),
+                )
             except Exception as e:
                 logger.error(f"Erreur validation BRMA : {e}")
                 self._set_progress(f"❌ Erreur validation BRMA : {e}")
@@ -932,7 +964,12 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} RIAA : {verdict} — "
                     f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
                 )
-                self.after(0, lambda: self._show_report_window("Validation CSV RIAA", text))
+                self.after(
+                    0,
+                    lambda: self._show_report_window(
+                        "Validation CSV RIAA", text, actions=[("🧹 Nettoyer", self._clean_riaa)]
+                    ),
+                )
             except Exception as e:
                 logger.error(f"Erreur validation RIAA : {e}")
                 self._set_progress(f"❌ Erreur validation RIAA : {e}")

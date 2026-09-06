@@ -13,13 +13,20 @@ RÉAPPLIQUÉE à chaque nettoyage. Corriger le CSV en place ne tiendrait qu'un
 tour : le SNEP ressert la ligne fautive à la première ré-importation, et la
 correction serait perdue sans que personne s'en aperçoive.
 
+Deux décisions humaines y sont conservées, et elles ont autant de valeur l'une
+que l'autre : une CORRECTION (« ce libellé est cassé, voici le bon ») et une
+ACCEPTATION (« ce ? est un vrai point d'interrogation, ne me le represente
+plus »). Sans la seconde, la liste des libellés à revoir ne décroît jamais et
+redemande éternellement d'arbitrer les mêmes titres.
+
 Format (`data/certifications/<source>/manual_fixes.json`) :
 
     {
       "version": 1,
       "fixes": {
         "LES ENFOIRES|ORGANIZ?": {"artist": "LES ENFOIRES", "title": "ORGANIZÉ"}
-      }
+      },
+      "acceptes": ["ADE|ET ALORS ?"]
     }
 
 La clé est produite par `cert_normalize.cle_correction` (artiste|titre mis à
@@ -69,6 +76,26 @@ def charger_fixes(source: str) -> dict:
     return fixes if isinstance(fixes, dict) else {}
 
 
+def charger_acceptes(source: str) -> set[str]:
+    """Clés des libellés VALIDÉS TELS QUELS (le « ? » y est légitime)."""
+    chemin = chemin_fixes(source)
+    if not chemin.exists():
+        return set()
+    try:
+        data = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    acceptes = data.get("acceptes")
+    return set(acceptes) if isinstance(acceptes, list) else set()
+
+
+def accepter(source: str, artist: str, title: str) -> None:
+    """Mémorise qu'un libellé est CORRECT tel quel : il ne sera plus proposé."""
+    acceptes = charger_acceptes(source)
+    acceptes.add(cle_correction(artist, title))
+    ecrire_fixes(source, charger_fixes(source), acceptes)
+
+
 def enregistrer_fix(
     source: str, artist: str, title: str, artist_fixe: str, title_fixe: str
 ) -> None:
@@ -91,17 +118,28 @@ def retirer_fix(source: str, artist: str, title: str) -> bool:
     return True
 
 
-def ecrire_fixes(source: str, fixes: dict) -> None:
+def ecrire_fixes(source: str, fixes: dict, acceptes: set[str] | None = None) -> None:
     chemin = chemin_fixes(source)
+    if acceptes is None:
+        acceptes = charger_acceptes(source)
     chemin.parent.mkdir(parents=True, exist_ok=True)
     chemin.write_text(
-        json.dumps({"version": 1, "fixes": fixes}, ensure_ascii=False, indent=2),
+        json.dumps(
+            {"version": 1, "fixes": fixes, "acceptes": sorted(acceptes)},
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
-    logger.info(f"Corrections manuelles {source} : {len(fixes)} entrée(s) → {chemin}")
+    logger.info(
+        f"Corrections manuelles {source} : {len(fixes)} correction(s), "
+        f"{len(acceptes)} acceptation(s) → {chemin}"
+    )
 
 
-def candidats_a_corriger(rows: list[list[str]], fixes: dict) -> list[tuple]:
+def candidats_a_corriger(
+    rows: list[list[str]], fixes: dict, acceptes: set[str] | None = None
+) -> list[tuple]:
     """Libellés porteurs d'un « ? » que la restauration AUTOMATIQUE ne règle pas.
 
     `rows` = lignes déjà découpées (champ 0 = artiste, champ 1 = titre).
@@ -123,7 +161,7 @@ def candidats_a_corriger(rows: list[list[str]], fixes: dict) -> list[tuple]:
         if "?" not in artiste + titre:
             continue
         cle = cle_correction(artiste, titre)
-        if cle in vus:
+        if cle in vus or cle in (acceptes or ()):
             continue
         vus.add(cle)
         # Ce que la restauration automatique répare déjà n'a pas à être saisi.

@@ -31,6 +31,7 @@ import pandas as pd
 
 # Fonctions pures partagées avec le nettoyeur (mêmes règles des deux côtés :
 # sans ça les deux outils annonçaient des comptes de doublons incomparables).
+from src.utils.cert_coverage import annee_assez_dense
 from src.utils.cert_normalize import (
     canon_category,
     canon_level,
@@ -62,7 +63,6 @@ LOW_MONTH_THRESHOLD = 3
 # années « actives » (≥ ce nombre de certifs/an). Sous ce seuil, une année est
 # naturellement clairsemée (décennies anciennes) et ses mois vides ne sont pas
 # des anomalies — elle reste visible dans le tableau par année.
-MEANINGFUL_YEAR_THRESHOLD = 12
 
 
 def _load_raw_df(csv_path: Path) -> tuple[pd.DataFrame, list[str], int]:
@@ -355,7 +355,7 @@ def validate_snep_csv(
 
         # Années à scanner pour les trous mensuels
         if full_mode:
-            scan_years = [y for y, c in per_year.items() if c >= MEANINGFUL_YEAR_THRESHOLD]
+            scan_years = [y for y, c in per_year.items() if annee_assez_dense(c)]
         else:
             scan_years = list(target_years)
 
@@ -502,8 +502,14 @@ def format_report(report: dict) -> str:
             by_year[y].append(mo)
         L.append("")
         L.append(f"── Mois SANS certification ({len(gaps)} sur années actives) ──")
+        volumes = report.get("per_year", {})
         for y in sorted(by_year):
-            L.append(f"  • {y} : {len(by_year[y])} mois manquant(s) — " f"{', '.join(by_year[y])}")
+            volume = volumes.get(int(y)) if str(y).isdigit() else None
+            contexte = f"  (sur {volume} certifications cette année-là)" if volume else ""
+            L.append(
+                f"  • {y} : {len(by_year[y])} mois manquant(s) — "
+                f"{', '.join(by_year[y])}{contexte}"
+            )
 
     section("Mois à faible couverture (années récentes)", report["low_months"], limit=24)
 

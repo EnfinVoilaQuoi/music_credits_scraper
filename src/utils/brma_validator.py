@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.utils.cert_coverage import annee_assez_dense
+
 REQUIRED_COLS = ["artist", "title", "category", "certification_level", "certification_date"]
 # Référentiels en MINUSCULES : ce sont des jeux de COMPARAISON (tout est
 # comparé en .lower()), pas des formes canoniques d'affichage. D'où l'absence
@@ -49,7 +51,6 @@ def _level_known(level: str, lvl_known: set) -> bool:
     return lvl.lower() in lvl_known or bool(_MULTI_LEVEL_RE.match(lvl))
 
 
-MEANINGFUL_YEAR_THRESHOLD = 12
 LOW_MONTH_THRESHOLD = 3
 
 
@@ -175,7 +176,7 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
             for y, c in per_year.items()
             if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
         ]
-        scan_years = [y for y, c in per_year.items() if c >= MEANINGFUL_YEAR_THRESHOLD]
+        scan_years = [y for y, c in per_year.items() if annee_assez_dense(c)]
         for y in scan_years:
             for m in range(1, 13):
                 per = pd.Period(f"{y}-{m:02d}", freq="M")
@@ -276,8 +277,11 @@ def format_report(report: dict) -> str:
             by_year[y].append(mo)
         L.append("")
         L.append(f"── Mois SANS certification ({len(gaps)} sur années actives) ──")
+        volumes = report.get("per_year", {})
         for y in sorted(by_year):
-            L.append(f"  • {y} : {len(by_year[y])} mois — {', '.join(by_year[y])}")
+            volume = volumes.get(int(y)) if str(y).isdigit() else None
+            contexte = f"  (sur {volume} certifications cette année-là)" if volume else ""
+            L.append(f"  • {y} : {len(by_year[y])} mois — {', '.join(by_year[y])}{contexte}")
 
     section("Mois à faible couverture (années récentes)", report["low_months"], limit=24)
 

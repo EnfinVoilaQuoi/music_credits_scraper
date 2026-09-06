@@ -21,10 +21,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.utils.cert_coverage import annee_assez_dense
 from src.utils.cert_normalize import riaa_units
 
 REQUIRED_COLS = ["Artist", "Title", "Certification_Date", "Certification_Type"]
-MEANINGFUL_YEAR_THRESHOLD = 12
 LOW_MONTH_THRESHOLD = 3
 
 _MULTI_RE = re.compile(r"^\d+\s*x\s*(multi-?)?platinum$", re.I)
@@ -193,7 +193,7 @@ def validate_riaa_csv(
             for y, c in per_year.items()
             if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
         ]
-        for y in [y for y, c in per_year.items() if c >= MEANINGFUL_YEAR_THRESHOLD]:
+        for y in [y for y, c in per_year.items() if annee_assez_dense(c)]:
             for m in range(1, 13):
                 per = pd.Period(f"{y}-{m:02d}", freq="M")
                 if per > cur:
@@ -274,8 +274,11 @@ def format_report(report: dict) -> str:
             by_year[y].append(mo)
         L.append("")
         L.append(f"── Mois SANS certification ({len(gaps)} sur années actives) ──")
+        volumes = report.get("per_year", {})
         for y in sorted(by_year):
-            L.append(f"  • {y} : {len(by_year[y])} mois — {', '.join(by_year[y])}")
+            volume = volumes.get(int(y)) if str(y).isdigit() else None
+            contexte = f"  (sur {volume} certifications cette année-là)" if volume else ""
+            L.append(f"  • {y} : {len(by_year[y])} mois — {', '.join(by_year[y])}{contexte}")
     section("Mois à faible couverture (années récentes)", report["low_months"], limit=24)
     if report.get("formats"):
         L.append("")

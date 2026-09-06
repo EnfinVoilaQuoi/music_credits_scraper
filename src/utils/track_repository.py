@@ -102,6 +102,10 @@ class TrackRepository:
                 # terme. COALESCE à l'UPDATE — un run qui ne cherche pas l'ID
                 # ne doit pas effacer le constat d'un run précédent.
                 "spotify_id_checked_at": track.spotify_id_checked_at,
+                # e19 : identifiants Deezer + drapeau « paroles explicites ».
+                "deezer_id": track.deezer_id,
+                "deezer_url": track.deezer_url,
+                "explicit_lyrics": track.lyrics.explicit,
                 # E7-D1 : les colonnes audio ne sont plus écrites (pilotées par les
                 # observations, reconcile au mapper) → clés retirées de params.
                 "duration": track.duration,
@@ -157,6 +161,12 @@ class TrackRepository:
                         isrc = COALESCE(:isrc, isrc),
                         spotify_id_checked_at = COALESCE(
                             :spotify_id_checked_at, spotify_id_checked_at),
+                        deezer_id = COALESCE(:deezer_id, deezer_id),
+                        deezer_url = COALESCE(:deezer_url, deezer_url),
+                        -- COALESCE aussi : un run sans passage Deezer laisse
+                        -- NULL, et NULL veut dire « jamais mesuré » — il ne
+                        -- doit pas effacer un constat précédent.
+                        explicit_lyrics = COALESCE(:explicit_lyrics, explicit_lyrics),
                         -- E7-D1 : colonnes audio (bpm, bpm_alt, bpm_source,
                         -- bpm_confidence, key, mode, key_mode_source, musical_key,
                         -- time_signature, reccobeats_resolution) NON écrites — la
@@ -201,6 +211,7 @@ class TrackRepository:
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id, isrc, spotify_id_checked_at,
+                        deezer_id, deezer_url, explicit_lyrics,
                         duration, genre,
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
@@ -211,6 +222,7 @@ class TrackRepository:
                     ) VALUES (
                         :title, :artist_id, :album, :track_number, :release_date,
                         :genius_id, :spotify_id, :discogs_id, :isrc, :spotify_id_checked_at,
+                        :deezer_id, :deezer_url, :explicit_lyrics,
                         :duration, :genre,
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,

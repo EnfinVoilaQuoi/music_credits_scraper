@@ -333,6 +333,10 @@ class Lyrics:
     synced: str | None = None  # LRC retenu LRCLIB>YTM (colonne `lyrics_synced`)
     synced_source: str | None = None  # colonne `lyrics_synced_source`
     synced_confidence: int | None = None  # colonne `lyrics_synced_confidence`
+    # Drapeau « parental advisory » de Deezer (colonne `explicit_lyrics`, e19).
+    # TRI-ÉTAT : None = jamais mesuré, False = Deezer dit que non. Ce n'est PAS
+    # un texte — il n'y a rien à croiser avec les paroles de Genius.
+    explicit: bool | None = None
 
 
 @dataclass
@@ -392,6 +396,10 @@ class Track:
     # elle, un `spotify_id` vide ne dit pas si le morceau est absent de
     # Spotify ou si personne n'a jamais regardé.
     spotify_id_checked_at: str | None = None
+    # Deezer (e19) : identifiant + lien de la page du morceau. Servent à
+    # l'identification et à la vérification, comme les autres IDs externes.
+    deezer_id: int | None = None
+    deezer_url: str | None = None
 
     # Métadonnées
     # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5) :

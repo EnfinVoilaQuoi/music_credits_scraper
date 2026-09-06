@@ -104,7 +104,17 @@ class TestExtraction:
     def test_hit_vide_ne_leve_pas(self, client):
         donnees = client.extract_enrichment_data({})
         assert donnees["deezer_track_id"] is None
-        assert donnees["deezer_explicit_lyrics"] is False
+
+    def test_champ_explicite_absent_reste_indetermine(self):
+        """Le défaut valait `False` jusqu'au 2026-09-06 : un champ ABSENT
+        passait pour « Deezer affirme que le morceau n'est pas explicite ».
+        Depuis e19 la colonne est nullable et distingue les deux."""
+        client = DeezerAPI()
+        assert client.extract_enrichment_data({})["deezer_explicit_lyrics"] is None
+        assert (
+            client.extract_enrichment_data({"explicit_lyrics": False})["deezer_explicit_lyrics"]
+            is False
+        )
 
 
 class TestExtractionDesImages:

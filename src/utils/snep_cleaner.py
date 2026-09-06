@@ -182,6 +182,19 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
         out_rows.append(cleaned)
 
     report["rows_out"] = len(out_rows)
+    # SNEP nettoie le fichier SUR PLACE : « déjà propre » s'y lit directement du
+    # nombre de modifications comptées, sans comparaison de fichiers.
+    modifiees = (
+        report["levels_recased"]
+        + report["categories_recased"]
+        + report["whitespace_fixed"]
+        + report["duplicates_removed"]
+        + report["empty_removed"]
+        + report["apostrophes_restored"]
+        + report["manual_fixes_applied"]
+    )
+    report["lignes_modifiees"] = modifiees
+    report["deja_propre"] = modifiees == 0
 
     if apply:
         # Backup horodaté AVANT toute écriture (règle projet)

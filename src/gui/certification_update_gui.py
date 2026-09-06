@@ -1,5 +1,6 @@
 """Interface graphique pour la mise à jour des certifications musicales"""
 
+import os
 import subprocess
 import sys
 import time
@@ -399,8 +400,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             return
 
         def run():
-            import os
-
             root = Path(__file__).parent.parent.parent
             py = sys.executable
             outputs = []
@@ -417,24 +416,25 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"SNEP artiste : {e}")
                 outputs.append(f"SNEP : erreur ({e})")
 
-            # 2) RIAA par artiste (route CDP anti-Cloudflare)
-            self._set_progress("🇺🇸 RIAA : préparation Chrome…")
-            env = None
-            try:
-                from src.scrapers.cdp_chrome import ensure_cdp_chrome
-
-                cdp = ensure_cdp_chrome()
-                if cdp:
-                    env = {**os.environ, "GENIUS_CDP_URL": cdp}
-            except Exception as e:
-                logger.error(f"CDP RIAA : {e}")
+            # 2) RIAA par artiste : headless d'abord, CDP en repli (cf. _update_riaa)
             self._set_progress(f"🇺🇸 RIAA : {artist}…")
             try:
-                _code, sortie = self._run_streaming(
-                    [py, str(root / "src" / "utils" / "update_riaa.py"), "--artist", artist],
-                    f"RIAA {artist}",
-                    env=env,
-                )
+                commande = [
+                    py,
+                    str(root / "src" / "utils" / "update_riaa.py"),
+                    "--artist",
+                    artist,
+                ]
+                code, sortie = self._run_streaming(commande, f"RIAA {artist}")
+                if code != 0:
+                    self._set_progress("🇺🇸 RIAA : repli via Chrome…")
+                    cdp = self._preparer_cdp()
+                    if cdp:
+                        code, sortie = self._run_streaming(
+                            commande,
+                            f"RIAA {artist} (CDP)",
+                            env={**os.environ, "GENIUS_CDP_URL": cdp},
+                        )
                 outputs.append("RIAA : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
             except Exception as e:
                 logger.error(f"RIAA artiste : {e}")
@@ -462,20 +462,17 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         start_worker(run)
 
     def _update_brma(self):
-        """Lance la mise à jour BRMA. Ultratop est derrière un Cloudflare strict :
-        on prépare d'abord un Chrome 'debug' (route CDP) puis on passe son URL au
-        sous-processus, sinon le scraper boucle sur le challenge."""
+        """Lance la mise à jour BRMA.
+
+        Ici le Chrome de debug est préparé EN AMONT, contrairement à RIAA : le
+        Cloudflare d'ultratop est strict et fait boucler tout navigateur lancé
+        par de l'automation, même le vrai Chrome (piège documenté, JOURNAL
+        2026-06-29). Le CDP n'y est pas un repli mais la seule route qui passe.
+        """
 
         def prepare_and_run():
-            try:
-                from src.scrapers.cdp_chrome import ensure_cdp_chrome
-
-                self._set_progress("🌐 Préparation de Chrome (Cloudflare ultratop)...")
-                cdp_url = ensure_cdp_chrome()
-            except Exception as e:
-                logger.error(f"Préparation CDP BRMA échouée : {e}")
-                cdp_url = None
-
+            self._set_progress("🌐 Préparation de Chrome (Cloudflare ultratop)...")
+            cdp_url = self._preparer_cdp()
             env_extra = {"GENIUS_CDP_URL": cdp_url} if cdp_url else None
             if not cdp_url:
                 self.after(
@@ -500,34 +497,21 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         start_worker(prepare_and_run)
 
     def _update_riaa(self):
-        """RIAA via patchright. Comme BRMA, on prépare un Chrome debug (route CDP)
-        pour contourner Cloudflare, puis MàJ auto (mois manquants) non-interactive."""
+        """MàJ RIAA : **headless d'abord, CDP en repli**.
 
-        def prepare_and_run():
-            try:
-                from src.scrapers.cdp_chrome import ensure_cdp_chrome
+        Le Chrome de debug était préparé à CHAQUE mise à jour, comme pour BRMA.
+        C'était injustifié : mesuré le 2026-09-06, patchright headless passe sur
+        riaa.com, profil chaud comme froid. Le coût n'était pas seulement un
+        lancement de navigateur pour rien — cela faisait du CDP la route
+        NORMALE, donc celle qu'on n'a jamais vue échouer, et qu'on avait oublié
+        de vérifier après la refonte du scraper.
 
-                self._set_progress("🌐 Préparation de Chrome (RIAA / Cloudflare)...")
-                cdp_url = ensure_cdp_chrome()
-            except Exception as e:
-                logger.error(f"Préparation CDP RIAA échouée : {e}")
-                cdp_url = None
-            env_extra = {"GENIUS_CDP_URL": cdp_url} if cdp_url else None
-            if not cdp_url:
-                self.after(
-                    0,
-                    lambda: messagebox.showwarning(
-                        "Chrome requis (Cloudflare)",
-                        "Impossible de préparer Chrome debug pour RIAA.\nVérifie que Google "
-                        "Chrome est installé (ou CHROME_PATH).\nLa MàJ va tenter quand même.",
-                        parent=self,
-                    ),
-                )
-            self._run_update_script(
-                "update_riaa.py", "RIAA", extra_args=["--auto"], env_extra=env_extra
-            )
-
-        start_worker(prepare_and_run)
+        Le repli sert aussi de DIAGNOSTIC : s'il réussit là où le headless a
+        échoué, c'était bien un problème d'accès et non un parseur cassé.
+        (BRMA garde sa préparation en amont : le Cloudflare d'ultratop est
+        strict et fait boucler tout navigateur d'automation — cf. CLAUDE.md.)
+        """
+        self._run_update_script("update_riaa.py", "RIAA", extra_args=["--auto"], repli_cdp=True)
 
     def _check_snep(self):
         """Lance le validateur complet du CSV maître SNEP et affiche le rapport."""
@@ -814,7 +798,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         """Fenêtre de saisie des corrections (une ligne par libellé)."""
         win = ctk.CTkToplevel(self)
         win.title("Corriger les titres (?)")
-        win.geometry("820x620")
+        win.geometry("980x620")
         win.transient(self)
         win.lift()
         win.attributes("-topmost", True)
@@ -831,6 +815,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 "⚠️ en tête : « ? » entre deux lettres (corruption quasi certaine).\n"
                 "Les autres sont probablement de vrais points d'interrogation — "
                 "laisse-les tels quels.\n"
+                "Deux champs : ARTISTE puis TITRE. Le champ encadré est celui qui "
+                "porte le « ? ».\n"
                 "Les corrections sont réappliquées à chaque « 🧹 Nettoyer »."
             ),
             justify="left",
@@ -839,29 +825,47 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         zone = ctk.CTkScrollableFrame(win)
         zone.pack(fill="both", expand=True, padx=12, pady=6)
 
+        # DEUX champs, artiste et titre : le « ? » est tantôt dans l'un, tantôt
+        # dans l'autre (« DES?REE — LIFE » : c'est l'ARTISTE qui est corrompu).
+        # N'offrir que le titre demandait de corriger ce qui n'était pas cassé.
         saisies = []
         for suspect, artiste, titre, correction in candidats:
             ligne = ctk.CTkFrame(zone)
             ligne.pack(fill="x", pady=3)
             ctk.CTkLabel(
                 ligne,
-                text=f"{'⚠️' if suspect else '  '} {artiste} — {titre}",
-                anchor="w",
-                width=380,
+                text="⚠️" if suspect else "  ",
+                width=24,
                 text_color="#FFA500" if suspect else None,
-            ).pack(side="left", padx=(6, 8))
-            champ = ctk.CTkEntry(ligne, width=330)
-            champ.insert(0, (correction or {}).get("title") or titre)
-            champ.pack(side="left", padx=6, pady=4)
-            saisies.append((artiste, titre, champ))
+            ).pack(side="left", padx=(6, 0))
+
+            champs = {}
+            for cle, valeur in (("artist", artiste), ("title", titre)):
+                corrompu = "?" in valeur
+                champ = ctk.CTkEntry(
+                    ligne,
+                    width=300,
+                    # Le champ à corriger saute aux yeux ; l'autre reste
+                    # modifiable, mais n'attire pas l'attention.
+                    border_color="#FFA500" if corrompu else None,
+                    border_width=2 if corrompu else 1,
+                )
+                champ.insert(0, (correction or {}).get(cle) or valeur)
+                champ.pack(side="left", padx=6, pady=4)
+                champs[cle] = champ
+            saisies.append((artiste, titre, champs))
 
         def enregistrer():
             n = 0
-            for artiste, titre, champ in saisies:
-                nouveau = champ.get().strip()
-                if nouveau and nouveau != titre:
-                    enregistrer_fix("snep", artiste, titre, artiste, nouveau)
-                    logger.info(f"[SNEP] correction manuelle : {titre!r} → {nouveau!r}")
+            for artiste, titre, champs in saisies:
+                artiste_fixe = champs["artist"].get().strip() or artiste
+                titre_fixe = champs["title"].get().strip() or titre
+                if (artiste_fixe, titre_fixe) != (artiste, titre):
+                    enregistrer_fix("snep", artiste, titre, artiste_fixe, titre_fixe)
+                    logger.info(
+                        f"[SNEP] correction manuelle : {artiste!r} — {titre!r} → "
+                        f"{artiste_fixe!r} — {titre_fixe!r}"
+                    )
                     n += 1
             win.destroy()
             messagebox.showinfo(
@@ -957,6 +961,34 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         )
 
     @staticmethod
+    def _resume_humain(sortie: str, lignes_max: int = 8) -> str:
+        """Ce qu'un humain veut lire à la fin d'une MàJ, pas le journal brut.
+
+        La sortie relayée porte les préfixes de logging des sous-processus
+        (`INFO:module:`, `2026-… - INFO - `) et l'initialisation d'Alembic : de
+        quoi noyer les deux lignes qui comptent. On dépréfixe, on écarte le
+        bruit d'amorçage, on dédoublonne — le détail complet reste en console et
+        dans le fichier de log du jour.
+        """
+        import re
+
+        bruit = (
+            "alembic.",
+            "Base de données initialisée",
+            "setup plugin",
+            "Context impl",
+            "non-transactional DDL",
+        )
+        vues, propres = set(), []
+        for ligne in sortie.splitlines():
+            texte = re.sub(r"^(?:\w+:[\w.]+:|[\d-]{10} [\d:,]+ - \w+ - )+", "", ligne).strip()
+            if not texte or any(motif in texte for motif in bruit) or texte in vues:
+                continue
+            vues.add(texte)
+            propres.append(texte)
+        return "\n".join(propres[-lignes_max:])
+
+    @staticmethod
     def _extraire_rapport(sortie: str) -> str:
         """Isole le rapport encadré des lignes de log qui le précèdent.
 
@@ -989,8 +1021,15 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 )
                 apercu = self._extraire_rapport(sortie)
 
+                # Verdict du rapport : inutile de faire valider une réécriture
+                # qui ne changerait rien (même déroulé que le nettoyeur SNEP).
+                deja_propre = "DÉJÀ à jour" in apercu
+
                 def demander_puis_appliquer():
                     self._show_report_window(f"Nettoyage CSV {source} — aperçu", apercu)
+                    if deja_propre:
+                        self._set_progress(f"✅ {source} : le CSV est déjà propre")
+                        return
                     if not messagebox.askyesno(
                         f"Nettoyer {source}",
                         f"Appliquer le nettoyage {source} ?\n\n"
@@ -1059,13 +1098,31 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         start_worker(update_all)
 
+    def _preparer_cdp(self) -> str | None:
+        """Lance (ou retrouve) un Chrome de debug et rend son URL CDP."""
+        try:
+            from src.scrapers.cdp_chrome import ensure_cdp_chrome
+
+            return ensure_cdp_chrome()
+        except Exception as e:
+            logger.error(f"Préparation CDP échouée : {e}")
+            return None
+
     def _run_update_script(
-        self, script_name: str, source_name: str, extra_args=None, env_extra=None
+        self,
+        script_name: str,
+        source_name: str,
+        extra_args=None,
+        env_extra=None,
+        repli_cdp: bool = False,
     ):
         """Lance un script de mise à jour dans un thread.
 
         `env_extra` : variables d'environnement à injecter dans le sous-processus
         (ex: GENIUS_CDP_URL pour la route CDP de BRMA).
+        `repli_cdp` : en cas d'échec, retenter UNE fois via un Chrome de debug.
+        Réservé aux sources dont la route normale est le headless — c'est-à-dire
+        celles où le CDP répond à un problème d'ACCÈS, pas à un besoin permanent.
         """
 
         def run_script():
@@ -1091,11 +1148,33 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     env=run_env,
                 )
 
+                if code != 0 and repli_cdp:
+                    self._set_progress(
+                        f"{source_name} : échec en headless — seconde tentative via Chrome…"
+                    )
+                    logger.warning(
+                        f"[{source_name}] échec en headless, repli sur la route CDP "
+                        "(si elle réussit, c'était un problème d'accès et non un parseur cassé)"
+                    )
+                    cdp_url = self._preparer_cdp()
+                    if cdp_url:
+                        code, sortie_cdp = self._run_streaming(
+                            [sys.executable, str(script_path), *(extra_args or [])],
+                            f"{source_name} (CDP)",
+                            env={**os.environ, "GENIUS_CDP_URL": cdp_url},
+                        )
+                        sortie = sortie_cdp or sortie
+                    else:
+                        logger.error(
+                            f"[{source_name}] repli CDP impossible : Chrome introuvable "
+                            "(installe Google Chrome ou définis CHROME_PATH)"
+                        )
+
                 if code == 0:
                     self._set_progress(f"✅ Mise à jour {source_name} réussie")
                     self.after(500, self._update_status)
-                    # Retour visible : dernières lignes de sortie du script
-                    summary = "\n".join(sortie.strip().splitlines()[-8:]) or "Mise à jour terminée."
+                    # Retour visible, DÉBRUITÉ : la console garde le détail.
+                    summary = self._resume_humain(sortie) or "Mise à jour terminée."
                     self.after(
                         0,
                         lambda: messagebox.showinfo(
@@ -1103,7 +1182,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                         ),
                     )
                 else:
-                    error_msg = sortie or "Erreur inconnue"
+                    error_msg = self._resume_humain(sortie, lignes_max=12) or "Erreur inconnue"
                     self._set_progress(f"❌ Erreur {source_name}: {error_msg[:50]}...")
                     logger.error(f"Erreur script {script_name}: {error_msg}")
                     self.after(

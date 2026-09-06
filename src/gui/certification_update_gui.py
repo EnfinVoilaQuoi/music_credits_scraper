@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox
@@ -399,7 +400,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         def run():
             import os
-            import subprocess
 
             root = Path(__file__).parent.parent.parent
             py = sys.executable
@@ -408,17 +408,11 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             # 1) SNEP par artiste
             self._set_progress(f"🇫🇷 SNEP : {artist}…")
             try:
-                r = subprocess.run(
+                _code, sortie = self._run_streaming(
                     [py, str(root / "src" / "utils" / "update_snep.py"), "--artist", artist],
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
+                    f"SNEP {artist}",
                 )
-                outputs.append(
-                    "SNEP : " + ((r.stdout or "").strip().splitlines()[-1:] or ["ok"])[0]
-                )
+                outputs.append("SNEP : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
             except Exception as e:
                 logger.error(f"SNEP artiste : {e}")
                 outputs.append(f"SNEP : erreur ({e})")
@@ -436,18 +430,12 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 logger.error(f"CDP RIAA : {e}")
             self._set_progress(f"🇺🇸 RIAA : {artist}…")
             try:
-                r = subprocess.run(
+                _code, sortie = self._run_streaming(
                     [py, str(root / "src" / "utils" / "update_riaa.py"), "--artist", artist],
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
+                    f"RIAA {artist}",
                     env=env,
                 )
-                outputs.append(
-                    "RIAA : " + ((r.stdout or "").strip().splitlines()[-1:] or ["ok"])[0]
-                )
+                outputs.append("RIAA : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
             except Exception as e:
                 logger.error(f"RIAA artiste : {e}")
                 outputs.append(f"RIAA : erreur ({e})")
@@ -566,8 +554,17 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"{'✅' if report.get('ok') else '⚠️'} SNEP : {verdict}"
                     f" — {n_gaps} mois sans certif (années actives)"
                 )
-                # Rapport détaillé dans une fenêtre dédiée
-                self.after(0, lambda: self._show_report_window("Validation CSV SNEP", text))
+                # Rapport détaillé dans une fenêtre dédiée, avec l'accès à la
+                # correction manuelle des libellés que le nettoyeur ne sait pas
+                # réparer tout seul.
+                self.after(
+                    0,
+                    lambda: self._show_report_window(
+                        "Validation CSV SNEP",
+                        text,
+                        action=("✏️ Corriger les titres (?)", self._editer_titres_corrompus),
+                    ),
+                )
             except Exception as e:
                 logger.error(f"Erreur validation SNEP : {e}")
                 self._set_progress(f"❌ Erreur validation SNEP : {e}")
@@ -715,8 +712,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         start_worker(run)
 
-    def _show_report_window(self, title: str, text: str):
-        """Affiche un rapport texte dans une fenêtre scrollable + bouton copier."""
+    def _show_report_window(self, title: str, text: str, action: tuple | None = None):
+        """Affiche un rapport texte dans une fenêtre scrollable + bouton copier.
+
+        `action` : couple `(libellé, callback)` ajouté à côté de « Copier » —
+        c'est par là que la fenêtre de VALIDATION donne accès à la correction
+        des titres, plutôt que d'ouvrir un bouton de plus dans la fenêtre
+        principale pour une action qui ne se comprend qu'au vu du rapport.
+        """
         win = ctk.CTkToplevel(self)
         win.title(title)
         win.geometry("640x560")
@@ -755,7 +758,126 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 pass
 
         ctk.CTkButton(btns, text="📋 Copier", command=copy, width=100).pack(side="left", padx=5)
+        if action:
+            libelle, callback = action
+            ctk.CTkButton(btns, text=libelle, command=callback, width=200).pack(side="left", padx=5)
         ctk.CTkButton(btns, text="Fermer", command=win.destroy, width=100).pack(
+            side="right", padx=5
+        )
+
+    def _editer_titres_corrompus(self):
+        """Édite à la main les libellés SNEP porteurs d'un « ? ».
+
+        La restauration automatique (`cert_normalize.restore_apostrophes`) ne
+        touche QUE des contextes sûrs — élisions, contractions, mots en Œ connus.
+        Mesuré sur le CSV réel : des 102 « ? » restants, l'écrasante majorité
+        sont de vrais points d'interrogation (« QUI SAIT ? ») ; seule une poignée
+        est corrompue. Les élargir par motif ferait plus de dégâts que de bien,
+        d'où cette saisie.
+
+        Ce qui est saisi ne va PAS dans le CSV : il part dans
+        `manual_fixes.json` et est réappliqué à chaque « 🧹 Nettoyer » — une
+        ré-importation SNEP ressert sinon le libellé fautif.
+        """
+        from src.config import DATA_PATH
+        from src.utils.cert_fixes_io import (
+            candidats_a_corriger,
+            charger_fixes,
+            enregistrer_fix,
+        )
+        from src.utils.snep_cleaner import _read_rows
+
+        csv_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
+        if not csv_path.exists():
+            messagebox.showinfo("Titres à corriger", "CSV SNEP introuvable.", parent=self)
+            return
+
+        try:
+            _header, rows = _read_rows(csv_path)
+        except (OSError, ValueError) as e:
+            messagebox.showerror("Titres à corriger", f"Lecture impossible : {e}", parent=self)
+            return
+
+        candidats = candidats_a_corriger(rows, charger_fixes("snep"))
+        if not candidats:
+            messagebox.showinfo(
+                "Titres à corriger",
+                "Aucun libellé porteur d'un « ? » que la restauration automatique "
+                "ne sache déjà réparer.",
+                parent=self,
+            )
+            return
+
+        self._fenetre_correction(candidats, enregistrer_fix)
+
+    def _fenetre_correction(self, candidats: list, enregistrer_fix):
+        """Fenêtre de saisie des corrections (une ligne par libellé)."""
+        win = ctk.CTkToplevel(self)
+        win.title("Corriger les titres (?)")
+        win.geometry("820x620")
+        win.transient(self)
+        win.lift()
+        win.attributes("-topmost", True)
+        win.after(200, lambda: (win.lift(), win.focus_force(), win.attributes("-topmost", False)))
+
+        ctk.CTkLabel(
+            win,
+            text="Corrections manuelles des libellés SNEP",
+            font=("Arial", 16, "bold"),
+        ).pack(pady=(12, 2))
+        ctk.CTkLabel(
+            win,
+            text=(
+                "⚠️ en tête : « ? » entre deux lettres (corruption quasi certaine).\n"
+                "Les autres sont probablement de vrais points d'interrogation — "
+                "laisse-les tels quels.\n"
+                "Les corrections sont réappliquées à chaque « 🧹 Nettoyer »."
+            ),
+            justify="left",
+        ).pack(pady=(0, 8))
+
+        zone = ctk.CTkScrollableFrame(win)
+        zone.pack(fill="both", expand=True, padx=12, pady=6)
+
+        saisies = []
+        for suspect, artiste, titre, correction in candidats:
+            ligne = ctk.CTkFrame(zone)
+            ligne.pack(fill="x", pady=3)
+            ctk.CTkLabel(
+                ligne,
+                text=f"{'⚠️' if suspect else '  '} {artiste} — {titre}",
+                anchor="w",
+                width=380,
+                text_color="#FFA500" if suspect else None,
+            ).pack(side="left", padx=(6, 8))
+            champ = ctk.CTkEntry(ligne, width=330)
+            champ.insert(0, (correction or {}).get("title") or titre)
+            champ.pack(side="left", padx=6, pady=4)
+            saisies.append((artiste, titre, champ))
+
+        def enregistrer():
+            n = 0
+            for artiste, titre, champ in saisies:
+                nouveau = champ.get().strip()
+                if nouveau and nouveau != titre:
+                    enregistrer_fix("snep", artiste, titre, artiste, nouveau)
+                    logger.info(f"[SNEP] correction manuelle : {titre!r} → {nouveau!r}")
+                    n += 1
+            win.destroy()
+            messagebox.showinfo(
+                "Titres à corriger",
+                f"{n} correction(s) enregistrée(s).\n\n"
+                "Lance « 🧹 Nettoyer » sur le SNEP pour les appliquer au CSV.",
+                parent=self,
+            )
+            self._set_progress(f"✏️ {n} correction(s) manuelle(s) enregistrée(s)")
+
+        barre = ctk.CTkFrame(win)
+        barre.pack(fill="x", padx=12, pady=(0, 12))
+        ctk.CTkButton(barre, text="💾 Enregistrer", command=enregistrer, width=140).pack(
+            side="left", padx=5
+        )
+        ctk.CTkButton(barre, text="Fermer", command=win.destroy, width=100).pack(
             side="right", padx=5
         )
 
@@ -814,78 +936,97 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         start_worker(run)
 
     def _clean_riaa(self):
-        """Nettoie le CSV RIAA (dédup + vides) après confirmation (backup créé)."""
-        if not messagebox.askyesno(
-            "Nettoyer RIAA",
-            "Dédoublonner certif_riaa.csv (niveau normalisé) et retirer les "
-            "lignes sans artiste/titre ? Un backup sera créé.",
-            parent=self,
-        ):
-            return
+        """Aperçu (dry-run) du nettoyage RIAA, puis application sur confirmation.
 
-        def run():
-            try:
-                self._set_progress("🧹 Nettoyage du CSV RIAA...")
-                root = Path(__file__).parent.parent.parent
-                result = subprocess.run(
-                    [sys.executable, str(root / "src" / "utils" / "update_riaa.py"), "--clean"],
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                summary = "\n".join((result.stdout or "").strip().splitlines()[-6:]) or "Terminé."
-                try:
-                    from src.utils.cert_matcher import reset_cert_matcher
-
-                    reset_cert_matcher()
-                except Exception:
-                    pass
-                self._set_progress("✅ RIAA nettoyé")
-                self.after(0, lambda: self._show_report_window("Nettoyage CSV RIAA", summary))
-                self.after(500, self._update_status)
-            except Exception as e:
-                logger.error(f"Erreur nettoyage RIAA : {e}")
-                self._set_progress(f"❌ Erreur nettoyage RIAA : {e}")
-
-        start_worker(run)
+        Même déroulé que SNEP : on ne demande plus de valider à l'aveugle une
+        réécriture de plusieurs dizaines de milliers de lignes — on montre
+        d'abord ce qui serait retiré.
+        """
+        self._nettoyer_avec_apercu(
+            "RIAA",
+            ["src", "utils", "update_riaa.py"],
+            ["--clean"],
+        )
 
     def _clean_brma(self):
-        """Régénère le clean BRMA depuis le brut (dédup) après confirmation."""
-        if not messagebox.askyesno(
-            "Nettoyer BRMA",
-            "Régénérer certif_brma.csv depuis le brut (dédup + collapse des "
-            "niveaux vides) ? Un backup sera créé.",
-            parent=self,
-        ):
-            return
+        """Aperçu (dry-run) du nettoyage BRMA, puis application sur confirmation."""
+        self._nettoyer_avec_apercu(
+            "BRMA",
+            ["src", "utils", "update_brma.py"],
+            ["--dedup"],
+        )
+
+    @staticmethod
+    def _extraire_rapport(sortie: str) -> str:
+        """Isole le rapport encadré des lignes de log qui le précèdent.
+
+        Les scripts sont lancés en sous-processus : leur sortie porte aussi
+        l'initialisation Alembic et les logs du module. Le rapport commence à sa
+        première ligne de séparation.
+        """
+        lignes = sortie.splitlines()
+        for i, ligne in enumerate(lignes):
+            if ligne.startswith("===="):
+                return "\n".join(lignes[i:])
+        return sortie
+
+    def _nettoyer_avec_apercu(self, source: str, script: list[str], args: list[str]):
+        """Dry-run → rapport → confirmation → application (déroulé commun).
+
+        Factorisé entre BRMA et RIAA : ces deux boutons faisaient la même chose
+        à la ligne près, et c'est exactement ainsi que leurs comportements
+        avaient fini par diverger de celui de SNEP.
+        """
 
         def run():
             try:
-                self._set_progress("🧹 Nettoyage du CSV BRMA...")
-                root = Path(__file__).parent.parent.parent
-                result = subprocess.run(
-                    [sys.executable, str(root / "src" / "utils" / "update_brma.py"), "--dedup"],
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                summary = "\n".join((result.stdout or "").strip().splitlines()[-6:]) or "Terminé."
-                try:
-                    from src.utils.cert_matcher import reset_cert_matcher
+                racine = Path(__file__).parent.parent.parent
+                chemin = str(racine.joinpath(*script))
 
-                    reset_cert_matcher()
-                except Exception:
-                    pass
-                self._set_progress("✅ BRMA nettoyé")
-                self.after(0, lambda: self._show_report_window("Nettoyage CSV BRMA", summary))
-                self.after(500, self._update_status)
-            except Exception as e:
-                logger.error(f"Erreur nettoyage BRMA : {e}")
-                self._set_progress(f"❌ Erreur nettoyage BRMA : {e}")
+                self._set_progress(f"🧹 {source} : analyse (aperçu)…")
+                _code, sortie = self._run_streaming(
+                    [sys.executable, chemin, *args, "--dry-run"], f"{source} aperçu"
+                )
+                apercu = self._extraire_rapport(sortie)
+
+                def demander_puis_appliquer():
+                    self._show_report_window(f"Nettoyage CSV {source} — aperçu", apercu)
+                    if not messagebox.askyesno(
+                        f"Nettoyer {source}",
+                        f"Appliquer le nettoyage {source} ?\n\n"
+                        "Un backup horodaté sera créé avant réécriture.",
+                        parent=self,
+                    ):
+                        self._set_progress(f"{source} : nettoyage annulé")
+                        return
+
+                    def appliquer():
+                        self._set_progress(f"🧹 {source} : nettoyage en cours…")
+                        _c, sortie_appliquee = self._run_streaming(
+                            [sys.executable, chemin, *args], f"{source} nettoyage"
+                        )
+                        try:
+                            from src.utils.cert_matcher import reset_cert_matcher
+
+                            reset_cert_matcher()
+                        except ImportError as e:
+                            logger.warning(f"Matcher non rafraîchi : {e}")
+                        self._set_progress(f"✅ {source} nettoyé")
+                        self.after(
+                            0,
+                            lambda: self._show_report_window(
+                                f"Nettoyage CSV {source} — appliqué",
+                                self._extraire_rapport(sortie_appliquee),
+                            ),
+                        )
+                        self.after(500, self._update_status)
+
+                    start_worker(appliquer)
+
+                self.after(0, demander_puis_appliquer)
+            except OSError as e:
+                logger.error(f"Erreur nettoyage {source} : {e}")
+                self._set_progress(f"❌ Erreur nettoyage {source} : {e}")
 
         start_worker(run)
 
@@ -942,25 +1083,19 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
                     run_env = {**os.environ, **{k: v for k, v in env_extra.items() if v}}
 
-                # Lancer le script avec encodage UTF-8
-                result = subprocess.run(
-                    [sys.executable, str(script_path)] + list(extra_args or []),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    cwd=Path(__file__).parent.parent.parent,
+                # Sortie RELAYÉE en direct (console + log du jour), au lieu
+                # d'être avalée jusqu'à la fin du processus.
+                code, sortie = self._run_streaming(
+                    [sys.executable, str(script_path), *(extra_args or [])],
+                    source_name,
                     env=run_env,
                 )
 
-                if result.returncode == 0:
+                if code == 0:
                     self._set_progress(f"✅ Mise à jour {source_name} réussie")
                     self.after(500, self._update_status)
                     # Retour visible : dernières lignes de sortie du script
-                    summary = (
-                        "\n".join((result.stdout or "").strip().splitlines()[-8:])
-                        or "Mise à jour terminée."
-                    )
+                    summary = "\n".join(sortie.strip().splitlines()[-8:]) or "Mise à jour terminée."
                     self.after(
                         0,
                         lambda: messagebox.showinfo(
@@ -968,7 +1103,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                         ),
                     )
                 else:
-                    error_msg = result.stderr or result.stdout or "Erreur inconnue"
+                    error_msg = sortie or "Erreur inconnue"
                     self._set_progress(f"❌ Erreur {source_name}: {error_msg[:50]}...")
                     logger.error(f"Erreur script {script_name}: {error_msg}")
                     self.after(
@@ -995,18 +1130,12 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         if not script_path.exists():
             raise FileNotFoundError(f"Script non trouvé: {script_path}")
 
-        result = subprocess.run(
-            [sys.executable, str(script_path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=Path(__file__).parent.parent.parent,
+        code, sortie = self._run_streaming(
+            [sys.executable, str(script_path)], script_name.replace("update_", "").upper()
         )
 
-        if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Erreur inconnue"
-            raise Exception(f"Erreur script {script_name}: {error_msg}")
+        if code != 0:
+            raise RuntimeError(f"Erreur script {script_name}: {sortie or 'Erreur inconnue'}")
 
     def _set_progress(self, message: str):
         """Met à jour le message de progression"""
@@ -1015,6 +1144,48 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             self.progress_label.configure(text=message)
 
         self.after(0, update)
+
+    def _run_streaming(self, cmd: list[str], tag: str, env: dict | None = None) -> tuple[int, str]:
+        """Lance un script de certifs en RELAYANT sa sortie ligne à ligne.
+
+        `subprocess.run(capture_output=True)` avalait tout jusqu'à la fin du
+        processus, puis n'en montrait que les dernières lignes dans une boîte de
+        dialogue : pendant une MàJ RIAA de plusieurs minutes, la console de
+        l'application ne disait rien — alors que le reste de l'app y trace tout.
+        On relaie donc chaque ligne dans le logger, ce qui la fait apparaître en
+        console ET dans le fichier de log du jour.
+
+        `-u` est INDISPENSABLE : la sortie d'un Python dont stdout est un tuyau
+        est bufferisée par blocs, et « relayer » l'aurait simplement livrée d'un
+        coup à la fin — le défaut qu'on corrige, à l'identique.
+        """
+        proc = subprocess.Popen(
+            [cmd[0], "-u", *cmd[1:]],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            cwd=Path(__file__).parent.parent.parent,
+            env=env,
+        )
+        lignes: list[str] = []
+        dernier_affichage = 0.0
+        with proc.stdout:
+            for ligne in proc.stdout:
+                ligne = ligne.rstrip()
+                if not ligne:
+                    continue
+                lignes.append(ligne)
+                logger.info(f"[{tag}] {ligne}")
+                # Le bandeau ne suit pas chaque ligne : un `after(0, …)` par
+                # ligne noierait la boucle Tk sur un script bavard.
+                maintenant = time.monotonic()
+                if maintenant - dernier_affichage > 0.3:
+                    dernier_affichage = maintenant
+                    self._set_progress(f"{tag} : {ligne[:70]}")
+        return proc.wait(), "\n".join(lignes)
 
     def _check_missing_periods_all(self):
         """Lance la vérification des périodes manquantes pour chaque source.

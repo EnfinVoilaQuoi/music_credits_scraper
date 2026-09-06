@@ -18,6 +18,8 @@ import pandas as pd
 import requests
 import schedule
 
+from src.utils import cert_clean_report
+
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
 # vaut alors src/utils/, donc `import src.*` (ajouté pour le fetch anti-Cloudflare)
 # échouerait. On ajoute la racine du projet au path.
@@ -351,7 +353,7 @@ class UltratopUpdater:
 
         return new_certifications
 
-    def _dedup_df(self, df):
+    def _dedup_df(self, df, report: dict | None = None):
         """Dédup clé métier + collapse niveau VIDE/RENSEIGNÉ (NaN normalisé).
 
         1) retire les doublons exacts (artiste+titre+catégorie+niveau+date) ;
@@ -359,6 +361,11 @@ class UltratopUpdater:
            niveau renseigné existe, retire la(les) ligne(s) au niveau vide.
         La normalisation NaN→'' évite que titre vide (NaN) et '' soient vus
         comme différents.
+
+        `report` (optionnel) reçoit le détail : les deux étages n'ont pas la
+        même signification et un total unique ne permet pas de juger. Un
+        nettoyage qui retire 300 doublons de scrape n'a rien à voir avec un qui
+        absorbe 300 niveaux vides.
         """
         key_cols = ["artist", "title", "category", "certification_level", "certification_date"]
         if df.empty or not all(c in df.columns for c in key_cols):
@@ -373,9 +380,12 @@ class UltratopUpdater:
         df["_kt"] = df["title"].str.upper()
 
         # 1) Doublons EXACTS (même certif scrapée 2× / variante de casse)
+        avant_doublons = len(df)
         df = df.drop_duplicates(
             ["_ka", "_kt", "category", "certification_level", "certification_date"], keep="first"
         )
+        if report is not None:
+            report["duplicates_removed"] = avant_doublons - len(df)
 
         # 2) Collapse SÛR : on retire UNIQUEMENT les lignes au niveau VIDE qui ont
         #    une contrepartie renseignée pour la même certif (artiste+titre+
@@ -387,7 +397,14 @@ class UltratopUpdater:
             lambda s: (s.str.strip() != "").any()
         )
         is_empty = df["certification_level"].str.strip() == ""
+        absorbees = df[is_empty & has_filled]
         df = df[~(is_empty & has_filled)]
+        if report is not None:
+            report["empty_levels_absorbed"] = len(absorbees)
+            report["empty_level_examples"] = [
+                f"{r.artist} — {r.title} ({r.category}, {r.certification_date})"
+                for r in absorbees.head(15).itertuples()
+            ]
 
         df = df.drop(columns=["_ka", "_kt"])
         removed = before - len(df)
@@ -395,17 +412,69 @@ class UltratopUpdater:
             self.logger.info(f"Déduplication : {removed} doublon(s)/vide(s) retiré(s)")
         return df
 
-    def dedup_database(self):
+    def dedup_database(self, apply: bool = True) -> dict:
         """« Nettoyer » : régénère le CLEAN (certif_brma.csv) depuis le BRUT
-        (dédup métier + tri) SANS scraper. Backup du clean avant écriture."""
+        (dédup métier + tri) SANS scraper. Backup du clean avant écriture.
+
+        `apply=False` = DRY-RUN : on compte ce qui serait retiré sans rien
+        écrire, comme le nettoyeur SNEP — de sorte que la confirmation demandée
+        à l'utilisateur porte sur des chiffres et non sur un pari.
+        """
+        report = cert_clean_report.rapport_vierge(self.database_path)
+        report.update(
+            {
+                "duplicates_removed": 0,
+                "empty_levels_absorbed": 0,
+                "empty_removed": 0,
+                "empty_level_examples": [],
+                "levels": {},
+            }
+        )
         raw = self._load_raw()
         if raw.empty:
-            self.logger.info("Brut vide, rien à nettoyer")
-            return
-        before = len(self.existing_db)
-        cleaned = self._clean_from(raw)
-        self._write_clean(cleaned)
-        self.logger.info(f"Clean régénéré depuis le brut : {before} → {len(cleaned)} ligne(s)")
+            report["error"] = "Brut BRMA vide, rien à nettoyer"
+            self.logger.info(report["error"])
+            return report
+
+        report["rows_in"] = len(raw)
+        cleaned = self._clean_from(raw, report)
+        report["rows_out"] = len(cleaned)
+        if "certification_level" in cleaned.columns:
+            report["levels"] = (
+                cleaned["certification_level"].fillna("(vide)").replace("", "(vide)").value_counts()
+            ).to_dict()
+
+        if apply:
+            self._write_clean(cleaned)
+            report["applied"] = True
+            self.logger.info(
+                f"Clean régénéré depuis le brut : {report['rows_in']} → "
+                f"{report['rows_out']} ligne(s)"
+            )
+        return report
+
+    @staticmethod
+    def format_clean_report(report: dict) -> str:
+        """Rendu du rapport de nettoyage (formateur commun aux 3 sources)."""
+        return cert_clean_report.render(
+            report,
+            titre="🧹 NETTOYAGE DU CSV BRMA (Ultratop)",
+            counters=[
+                ("Doublons exacts retirés", report.get("duplicates_removed", 0)),
+                ("Niveaux vides absorbés", report.get("empty_levels_absorbed", 0)),
+            ],
+            sections=[("Répartition des niveaux (après)", report.get("levels") or {})],
+            examples=[
+                (
+                    "Niveaux vides absorbés (exemples)",
+                    [ex[:90] for ex in report.get("empty_level_examples") or []],
+                )
+            ],
+            note_dry_run=(
+                "ℹ️  DRY-RUN : rien n'a été écrit. Relance avec --dedup pour "
+                "appliquer (un backup sera créé)."
+            ),
+        )
 
     def _load_raw(self):
         """Charge le brut `brma_raw.csv` (union permanente des scrapes). Seedé
@@ -451,9 +520,9 @@ class UltratopUpdater:
                 tmp_path.unlink()
             raise
 
-    def _clean_from(self, raw_df):
+    def _clean_from(self, raw_df, report: dict | None = None):
         """Dérive le clean depuis un brut : dédup métier + tri (date desc)."""
-        return self._dedup_df(raw_df).sort_values(
+        return self._dedup_df(raw_df, report).sort_values(
             ["certification_date", "artist", "title"], ascending=[False, True, True]
         )
 
@@ -723,6 +792,11 @@ def main():
         action="store_true",
         help="Nettoie le CSV existant (dédup + collapse niveau vide) sans scraper",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Avec --dedup : compte sans réécrire (aperçu, comme le nettoyeur SNEP)",
+    )
 
     args = parser.parse_args()
 
@@ -735,7 +809,8 @@ def main():
     )
 
     if args.dedup:
-        updater.dedup_database()
+        rapport = updater.dedup_database(apply=not args.dry_run)
+        safe_print(UltratopUpdater.format_clean_report(rapport))
         sys.exit(0)
 
     if args.mode == "manual":

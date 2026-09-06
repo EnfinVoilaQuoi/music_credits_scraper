@@ -637,45 +637,40 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
                 self._set_progress("🧹 Analyse du nettoyage (aperçu)...")
                 dry = clean_snep_csv(csv_path, apply=False)
-                n_changes = (
-                    dry["levels_recased"]
-                    + dry["categories_recased"]
-                    + dry["whitespace_fixed"]
-                    + dry["duplicates_removed"]
-                    + dry["empty_removed"]
-                )
 
-                def ask_and_apply():
-                    self._show_report_window("Nettoyage CSV SNEP — aperçu", format_report(dry))
-                    if n_changes == 0:
+                def appliquer():
+                    def travail():
+                        self._set_progress("🧹 Nettoyage en cours...")
+                        res = clean_snep_csv(csv_path, apply=True)
+                        self.after(
+                            0,
+                            lambda: self._show_report_window(
+                                "Nettoyage CSV SNEP — appliqué", format_report(res)
+                            ),
+                        )
+                        self._set_progress(
+                            f"✅ SNEP nettoyé : {res['rows_in']}→{res['rows_out']} lignes"
+                        )
+                        self.after(500, self._update_status)
+
+                    start_worker(travail)
+
+                def montrer():
+                    # Le verdict vient du RAPPORT et de lui seul. La GUI le
+                    # recalculait de son côté, en oubliant les apostrophes
+                    # restaurées et les corrections manuelles : elle concluait
+                    # « déjà propre » et n'offrait donc jamais d'appliquer, alors
+                    # que le rapport annonçait 15 lignes à modifier.
+                    actions = None
+                    if dry.get("deja_propre"):
                         self._set_progress("✅ SNEP : CSV déjà propre")
-                        return
-                    msg = (
-                        f"{dry['duplicates_removed']} doublon(s), "
-                        f"{dry['empty_removed']} ligne(s) vide(s), "
-                        f"{dry['levels_recased'] + dry['categories_recased']} casse(s), "
-                        f"{dry['whitespace_fixed']} champ(s) espaces/tab.\n\n"
-                        f"Un backup horodaté sera créé. Appliquer le nettoyage ?"
+                    else:
+                        actions = [("✅ Appliquer le nettoyage", appliquer)]
+                    self._show_report_window(
+                        "Nettoyage CSV SNEP — aperçu", format_report(dry), actions=actions
                     )
-                    if messagebox.askyesno("Appliquer le nettoyage", msg, parent=self):
 
-                        def apply():
-                            self._set_progress("🧹 Nettoyage en cours...")
-                            res = clean_snep_csv(csv_path, apply=True)
-                            self.after(
-                                0,
-                                lambda: self._show_report_window(
-                                    "Nettoyage CSV SNEP — appliqué", format_report(res)
-                                ),
-                            )
-                            self._set_progress(
-                                f"✅ SNEP nettoyé : {res['rows_in']}→{res['rows_out']} lignes"
-                            )
-                            self.after(500, self._update_status)
-
-                        start_worker(apply)
-
-                self.after(0, ask_and_apply)
+                self.after(0, montrer)
             except Exception as e:
                 logger.error(f"Erreur nettoyage SNEP : {e}")
                 self._set_progress(f"❌ Erreur nettoyage SNEP : {e}")
@@ -729,8 +724,18 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 pass
 
         ctk.CTkButton(btns, text="📋 Copier", command=copy, width=100).pack(side="left", padx=5)
+
+        def _lancer(callback):
+            # Refermer le rapport AVANT : l'action ouvre sa propre fenêtre, et
+            # une boîte de dialogue qui s'empile derrière celle-ci passe pour
+            # une absence de réponse.
+            win.destroy()
+            callback()
+
         for libelle, callback in actions or []:
-            ctk.CTkButton(btns, text=libelle, command=callback, width=190).pack(side="left", padx=5)
+            ctk.CTkButton(
+                btns, text=libelle, command=lambda cb=callback: _lancer(cb), width=190
+            ).pack(side="left", padx=5)
         ctk.CTkButton(btns, text="Fermer", command=win.destroy, width=100).pack(
             side="right", padx=5
         )
@@ -1065,25 +1070,12 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 )
                 apercu = self._extraire_rapport(sortie)
 
-                # Verdict du rapport : inutile de faire valider une réécriture
-                # qui ne changerait rien (même déroulé que le nettoyeur SNEP).
+                # Verdict du rapport : inutile de proposer une réécriture qui
+                # ne changerait rien (même déroulé que le nettoyeur SNEP).
                 deja_propre = "DÉJÀ à jour" in apercu
 
-                def demander_puis_appliquer():
-                    self._show_report_window(f"Nettoyage CSV {source} — aperçu", apercu)
-                    if deja_propre:
-                        self._set_progress(f"✅ {source} : le CSV est déjà propre")
-                        return
-                    if not messagebox.askyesno(
-                        f"Nettoyer {source}",
-                        f"Appliquer le nettoyage {source} ?\n\n"
-                        "Un backup horodaté sera créé avant réécriture.",
-                        parent=self,
-                    ):
-                        self._set_progress(f"{source} : nettoyage annulé")
-                        return
-
-                    def appliquer():
+                def appliquer():
+                    def travail():
                         self._set_progress(f"🧹 {source} : nettoyage en cours…")
                         _c, sortie_appliquee = self._run_streaming(
                             [sys.executable, chemin, *args], f"{source} nettoyage"
@@ -1104,9 +1096,19 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                         )
                         self.after(500, self._update_status)
 
-                    start_worker(appliquer)
+                    start_worker(travail)
 
-                self.after(0, demander_puis_appliquer)
+                def montrer():
+                    actions = None
+                    if deja_propre:
+                        self._set_progress(f"✅ {source} : le CSV est déjà propre")
+                    else:
+                        actions = [("✅ Appliquer le nettoyage", appliquer)]
+                    self._show_report_window(
+                        f"Nettoyage CSV {source} — aperçu", apercu, actions=actions
+                    )
+
+                self.after(0, montrer)
             except OSError as e:
                 logger.error(f"Erreur nettoyage {source} : {e}")
                 self._set_progress(f"❌ Erreur nettoyage {source} : {e}")

@@ -316,43 +316,36 @@ class RIAAScraperV2:
             return resultats
 
     def scrape_by_artist(self, artist: str, get_details: bool = True) -> list[dict]:
-        """Par artiste, sur les DEUX programmes, avec la timeline.
+        """Par artiste (avec la timeline = historique des paliers).
 
-        Le site sépare le programme classique du programme latin en deux
-        ONGLETS, et une recherche ne rend que l'onglet demandé. Interroger le
-        seul onglet par défaut — ce que faisait cette méthode — revenait donc à
-        déclarer « aucune certification » pour un artiste hispanophone qui en a
-        des dizaines : l'absence était FABRIQUÉE par la requête, pas constatée.
+        **UNE seule requête, sur l'onglet par défaut.** Le site affiche deux
+        onglets — classique et « Premios de Oro y Platino » — et il est tentant
+        d'en déduire qu'une recherche ne rend que l'onglet demandé, donc qu'il
+        faut interroger les deux pour un artiste hispanophone. C'est faux, et
+        mesuré le 2026-09-06 sur deux artistes : `tab_active` pilote
+        l'AFFICHAGE, pas la recherche. L'onglet par défaut rend TOUT, latin
+        compris (Luis Fonsi 14 lignes dont 13 latines ; Bad Bunny 93 dont 90),
+        et l'onglet latin en est un sous-ensemble STRICT — sa différence avec
+        l'autre est vide dans les deux cas.
 
-        Le programme n'est pas déduit de l'onglet mais relevé sur le badge de
-        chaque ligne (cf. `_parse_main`), si bien que fusionner les deux
-        réponses ne mélange rien : chaque ligne se déclare elle-même.
+        Une seconde requête ne rapporterait donc rien tout en doublant le coût :
+        avec `get_details`, ce sont 90 allers-retours AJAX de plus pour Bad
+        Bunny. `_search_url` garde son paramètre `programme` — il documente la
+        mécanique du site et sert à la mesure — mais l'appeler ici serait payer
+        pour un sous-ensemble de ce qu'on a déjà.
+
+        Le programme de chaque ligne est de toute façon relevé sur son BADGE
+        (cf. `_parse_main`), jamais déduit de l'onglet : c'est ce qui rend
+        l'onglet inutile à la classification.
         """
-        vus: set[tuple] = set()
-        sortie: list[dict] = []
-        for programme in (PROGRAMME_US, PROGRAMME_LATIN):
-            url = self._search_url(artist=artist, programme=programme)
-            logger.info(f"RIAA artiste '{artist}' [{programme}] (détails={get_details})")
-            with source_usage.observe(_SOURCE, label=f"artiste {artist} [{programme}]") as obs:
-                html = self._render(url, load_all=True, get_details=get_details)
-                if not html:
-                    # Un onglet muet n'invalide pas l'autre : on le signale et
-                    # on continue, sinon un incident sur le latin effacerait des
-                    # certifications classiques bel et bien récupérées.
-                    obs.fail(IssueKind.UNREACHABLE, "page non rendue")
-                    continue
-                for rec in self._parse_verifie(html, get_details, obs):
-                    cle = (
-                        rec.get("artist", "").upper(),
-                        rec.get("title", "").upper(),
-                        rec.get("certification_date", ""),
-                        rec.get("award_level", ""),
-                    )
-                    if cle not in vus:
-                        vus.add(cle)
-                        sortie.append(rec)
-        logger.info(f"RIAA artiste '{artist}' : {len(sortie)} certification(s), deux programmes")
-        return sortie
+        url = self._search_url(artist=artist)
+        logger.info(f"RIAA artiste '{artist}' (détails={get_details})")
+        with source_usage.observe(_SOURCE, label=f"artiste {artist}") as obs:
+            html = self._render(url, load_all=True, get_details=get_details)
+            if not html:
+                obs.fail(IssueKind.UNREACHABLE, "page non rendue")
+                return []
+            return self._parse_verifie(html, get_details, obs)
 
     @staticmethod
     def _parse_verifie(html: str, get_details: bool, obs) -> list[dict]:

@@ -182,10 +182,10 @@ class DeezerProvider:
             elif date_check.get("dates_match") is False:
                 logger.warning("   ⚠️ Release date Deezer ignorée (différente du scraping)")
 
-        # Stocker les métadonnées supplémentaires (toujours, pas de vérification nécessaire)
-        if data.get("deezer_track_id") and (
-            not hasattr(track, "deezer_id") or force_update or not track.deezer_id
-        ):
+        # Stocker les métadonnées supplémentaires (toujours, pas de vérification nécessaire).
+        # e19 : ce sont désormais de VRAIES colonnes — jusque-là ces valeurs étaient
+        # posées sur l'objet puis perdues en fin de run, faute de place en base.
+        if data.get("deezer_track_id") and (force_update or not track.deezer_id):
             track.deezer_id = data["deezer_track_id"]
             logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
             updated = True
@@ -205,26 +205,28 @@ class DeezerProvider:
             logger.info(f"   ✅ BPM (Deezer, opportuniste, candidat): {sbpm}")
             updated = True
 
-        if data.get("deezer_link") and (
-            not hasattr(track, "deezer_url") or force_update or not track.deezer_url
-        ):
+        if data.get("deezer_link") and (force_update or not track.deezer_url):
             track.deezer_url = data["deezer_link"]
             logger.info(f"   ✅ Deezer URL: {track.deezer_url}")
             updated = True
 
+        # Drapeau « parental advisory » (booléen, pas un texte). `is not None`
+        # des deux côtés : False est une MESURE (« Deezer dit que non »), None
+        # une absence de mesure — les confondre est l'erreur qu'e17 a réparée
+        # pour la résolution d'ID Spotify.
         if data.get("deezer_explicit_lyrics") is not None and (
-            not hasattr(track, "explicit_lyrics") or force_update or track.explicit_lyrics is None
+            force_update or track.lyrics.explicit is None
         ):
-            track.explicit_lyrics = data["deezer_explicit_lyrics"]
-            logger.info(f"   ✅ Explicit lyrics: {track.explicit_lyrics}")
+            track.lyrics.explicit = data["deezer_explicit_lyrics"]
+            logger.info(f"   ✅ Paroles explicites: {track.lyrics.explicit}")
             updated = True
 
-        if data.get("deezer_picture") and (
-            not hasattr(track, "deezer_picture_url") or force_update or not track.deezer_picture_url
-        ):
-            track.deezer_picture_url = data["deezer_picture"]
-            logger.info("   ✅ Deezer picture URL stockée")
-            updated = True
+        # `deezer_picture` (cover_medium) n'est PAS repris ici : le chantier
+        # Media récupère la même image en haute résolution (`deezer_cover_xl`,
+        # `deezer_picture_xl`) et la RANGE sur le disque via `media_enricher`,
+        # qui utilise d'ailleurs `deezer_picture` comme repli. Poser l'URL
+        # medium sur le Track était un doublon dégradé, et il ne survivait pas
+        # au run.
 
         if updated:
             logger.info(f"✅ Deezer: Enrichissement réussi pour '{track.title}'")

@@ -267,3 +267,52 @@ class TestDatesLibres:
             )
             is True
         )
+
+
+class TestPersistanceDeezer:
+    """e19 : `deezer_id`, `deezer_url` et le drapeau « paroles explicites »
+    étaient posés sur l'objet puis perdus faute de colonne. Ces tests vérifient
+    l'aller-retour — c'est tout l'objet de la migration."""
+
+    def test_aller_retour(self, data_manager, artiste):
+        t = Track(title="Aller-retour", artist=artiste)
+        t.deezer_id = 3135556
+        t.deezer_url = "https://www.deezer.com/track/3135556"
+        t.lyrics.explicit = True
+        data_manager.save_track(t)
+
+        relu = next(x for x in data_manager.get_artist_tracks(artiste.id) if x.title == t.title)
+        assert relu.deezer_id == 3135556
+        assert relu.deezer_url == "https://www.deezer.com/track/3135556"
+        assert relu.lyrics.explicit is True
+
+    def test_faux_est_une_mesure_distincte_de_l_absence(self, data_manager, artiste):
+        """`False` (« Deezer dit que non ») ne doit pas se relire en `None`
+        (« jamais mesuré ») : c'est la distinction qui a motivé une colonne
+        NULLABLE plutôt qu'un booléen à défaut `False`."""
+        mesure = Track(title="Mesuré non explicite", artist=artiste)
+        mesure.lyrics.explicit = False
+        data_manager.save_track(mesure)
+        jamais = Track(title="Jamais mesuré", artist=artiste)
+        data_manager.save_track(jamais)
+
+        relus = {x.title: x for x in data_manager.get_artist_tracks(artiste.id)}
+        assert relus["Mesuré non explicite"].lyrics.explicit is False
+        assert relus["Jamais mesuré"].lyrics.explicit is None
+
+    def test_un_run_sans_deezer_n_efface_pas_le_constat(self, data_manager, artiste):
+        """COALESCE à l'UPDATE : un second passage qui ne voit pas Deezer laisse
+        les trois valeurs telles quelles."""
+        t = Track(title="Persistant", artist=artiste)
+        t.deezer_id = 42
+        t.deezer_url = "https://www.deezer.com/track/42"
+        t.lyrics.explicit = True
+        t.id = data_manager.save_track(t)
+
+        muet = Track(title="Persistant", artist=artiste)
+        muet.id = t.id
+        data_manager.save_track(muet)
+
+        relu = next(x for x in data_manager.get_artist_tracks(artiste.id) if x.title == t.title)
+        assert (relu.deezer_id, relu.lyrics.explicit) == (42, True)
+        assert relu.deezer_url == "https://www.deezer.com/track/42"

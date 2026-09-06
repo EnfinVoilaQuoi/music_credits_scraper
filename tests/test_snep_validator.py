@@ -385,7 +385,7 @@ class TestCouvertureTemporelle:
         assert validate_snep_csv(p)["month_gaps"] == []
 
     def test_annee_active_scannee_mois_par_mois(self, tmp_path):
-        p = _ecrire(tmp_path / "c.csv", self._annee(2020, 12, mois=1))
+        p = _ecrire(tmp_path / "c.csv", self._annee(2020, 30, mois=1))
         gaps = validate_snep_csv(p)["month_gaps"]
         assert gaps == [f"2020-{m:02d}" for m in range(2, 13)]  # janvier est couvert
 
@@ -481,7 +481,7 @@ class TestRapport:
             assert attendu in texte, attendu
 
     def test_sections_temporelles(self, tmp_path):
-        lignes = [_ligne(title=f"T{i}", constat=f"15/01/{2020}") for i in range(12)]
+        lignes = [_ligne(title=f"T{i}", constat=f"15/01/{2020}") for i in range(30)]
         lignes += [_ligne(title="vieux", constat="15/06/2018")]
         texte = format_report(validate_snep_csv(_ecrire(tmp_path / "c.csv", lignes)))
         assert "Années ENTIÈREMENT absentes" in texte

@@ -263,12 +263,12 @@ class TestCouvertureTemporelle:
         assert validate_riaa_csv(p)["month_gaps"] == []
 
     def test_annee_active_scannee(self, tmp_path):
-        p = _ecrire(tmp_path / "c.csv", self._annee(2020, 12))
+        p = _ecrire(tmp_path / "c.csv", self._annee(2020, 30))
         assert validate_riaa_csv(p)["month_gaps"] == [f"2020-{m:02d}" for m in range(2, 13)]
 
     def test_mois_futurs_ignores(self, tmp_path):
         annee = datetime.now().year
-        p = _ecrire(tmp_path / "c.csv", self._annee(annee, 12))
+        p = _ecrire(tmp_path / "c.csv", self._annee(annee, 30))
         mois = [int(g.split("-")[1]) for g in validate_riaa_csv(p)["month_gaps"]]
         assert mois
         assert max(mois) <= datetime.now().month
@@ -314,7 +314,7 @@ class TestRapport:
             assert attendu in texte, attendu
 
     def test_sections_temporelles(self, tmp_path):
-        lignes = [_ligne(title=f"T{i}", date=f"2020-01-{i + 1:02d}") for i in range(12)]
+        lignes = [_ligne(title=f"T{i}", date=f"2020-01-{i + 1:02d}") for i in range(30)]
         lignes += [_ligne(title="vieux", date="2018-06-15")]
         texte = format_report(validate_riaa_csv(_ecrire(tmp_path / "c.csv", lignes)))
         assert "Années ENTIÈREMENT absentes" in texte

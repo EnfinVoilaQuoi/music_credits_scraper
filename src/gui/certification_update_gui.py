@@ -504,7 +504,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     return
 
                 self._set_progress("🔎 Validation du CSV SNEP...")
-                report = validate_snep_csv(csv_path)
+                # Le validateur lit le CSV, qui porte encore les libellés
+                # fautifs tant que le nettoyage n'a pas tourné : on lui passe
+                # les décisions déjà prises pour qu'il n'en redemande pas.
+                from src.utils.cert_fixes_io import charger_acceptes, charger_fixes
+
+                report = validate_snep_csv(
+                    csv_path, fixes=charger_fixes("snep"), acceptes=charger_acceptes("snep")
+                )
                 text = format_report(report)
 
                 # Synthèse courte dans le bandeau de progression

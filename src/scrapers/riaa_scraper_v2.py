@@ -316,7 +316,28 @@ class RIAAScraperV2:
             return resultats
 
     def scrape_by_artist(self, artist: str, get_details: bool = True) -> list[dict]:
-        """Par artiste (avec la timeline = historique des paliers)."""
+        """Par artiste (avec la timeline = historique des paliers).
+
+        **UNE seule requête, sur l'onglet par défaut.** Le site affiche deux
+        onglets — classique et « Premios de Oro y Platino » — et il est tentant
+        d'en déduire qu'une recherche ne rend que l'onglet demandé, donc qu'il
+        faut interroger les deux pour un artiste hispanophone. C'est faux, et
+        mesuré le 2026-09-06 sur deux artistes : `tab_active` pilote
+        l'AFFICHAGE, pas la recherche. L'onglet par défaut rend TOUT, latin
+        compris (Luis Fonsi 14 lignes dont 13 latines ; Bad Bunny 93 dont 90),
+        et l'onglet latin en est un sous-ensemble STRICT — sa différence avec
+        l'autre est vide dans les deux cas.
+
+        Une seconde requête ne rapporterait donc rien tout en doublant le coût :
+        avec `get_details`, ce sont 90 allers-retours AJAX de plus pour Bad
+        Bunny. `_search_url` garde son paramètre `programme` — il documente la
+        mécanique du site et sert à la mesure — mais l'appeler ici serait payer
+        pour un sous-ensemble de ce qu'on a déjà.
+
+        Le programme de chaque ligne est de toute façon relevé sur son BADGE
+        (cf. `_parse_main`), jamais déduit de l'onglet : c'est ce qui rend
+        l'onglet inutile à la classification.
+        """
         url = self._search_url(artist=artist)
         logger.info(f"RIAA artiste '{artist}' (détails={get_details})")
         with source_usage.observe(_SOURCE, label=f"artiste {artist}") as obs:

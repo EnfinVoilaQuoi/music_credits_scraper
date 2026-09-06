@@ -365,3 +365,66 @@ class TestAuthDansUnSousAppelMacro:
         resultat = asyncio.run(client._try_fetch_async(None, "Titre", "Artiste", None, False))
         assert resultat is mod._AUTH_FAILURE
         assert client._token is None  # cache invalidé
+
+
+class TestFenetreDeRepos:
+    """Rejeter le jeton leurre ne suffisait pas.
+
+    Le garde-fou du 2026-09-05 empêchait bien le leurre d'empoisonner le cache,
+    mais la source restait interrogée morceau après morceau : deux `token.get`
+    par titre sur une IP déjà bridée, et un WARNING à chaque fois — c'est la
+    « rafale » décrite au WIP. La fenêtre de repos cesse d'insister, puis
+    reprend SEULE (jamais de disjoncteur définitif).
+    """
+
+    def test_un_jeton_refuse_arme_la_fenetre(self, client, monkeypatch):
+        async def faux_get(*a, **kw):
+            return 200, {"message": {"body": {"user_token": "0" * 56}}}
+
+        monkeypatch.setattr(client, "_api_get_async", faux_get)
+        assert client._au_repos() is False
+
+        assert asyncio.run(client._fetch_new_token_async(None)) is None
+        assert client._au_repos() is True
+
+    def test_un_401_sur_token_get_arme_aussi(self, client, monkeypatch):
+        async def faux_get(*a, **kw):
+            return mod._STATUS_AUTH, {"message": {"header": {"status_code": 401}}}
+
+        monkeypatch.setattr(client, "_api_get_async", faux_get)
+        assert asyncio.run(client._fetch_new_token_async(None)) is None
+        assert client._au_repos() is True
+
+    def test_la_fenetre_expire_toute_seule(self, client):
+        """La source doit pouvoir revenir DANS le même run."""
+        client._mettre_au_repos("test")
+        client._repos_jusqua = time.time() - 1
+        assert client._au_repos() is False
+        assert client._repos_jusqua == 0.0
+
+    def test_un_seul_avertissement_par_fenetre(self, client, caplog):
+        """Le symptôme rapporté était le WARNING en boucle, pas la panne."""
+        with caplog.at_level("WARNING", logger=mod.logger.name):
+            client._mettre_au_repos("premier")
+            client._mettre_au_repos("deuxieme")
+            client._mettre_au_repos("troisieme")
+        assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 1
+
+    def test_reglage_a_zero_desactive_la_mise_au_repos(self, client, monkeypatch):
+        monkeypatch.setattr(mod, "MUSIXMATCH_TOKEN_COOLDOWN_S", 0)
+        client._mettre_au_repos("test")
+        assert client._au_repos() is False
+
+    def test_au_repos_aucune_requete_n_est_emise(self, client, monkeypatch):
+        """Le point de la fenêtre : ne plus taper l'IP bridée."""
+        appels = []
+
+        async def faux_get(*a, **kw):
+            appels.append(a)
+            return 200, {}
+
+        monkeypatch.setattr(client, "_api_get_async", faux_get)
+        client._mettre_au_repos("test")
+
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        assert appels == []

@@ -261,6 +261,50 @@ class TestIsrcEtMetadonnees:
     def test_aucune_donnee_utile(self):
         assert _provider(_resultat({})).enrich(_track(), EnrichmentContext()) is False
 
+    def test_identifiants_deezer_poses(self):
+        """e19 : ces valeurs ont enfin des colonnes. Jusqu'au 2026-09-06 elles
+        étaient posées sur l'objet puis perdues en fin de run, tout en comptant
+        dans `updated` — Deezer annonçait donc « réussi » sur du vent."""
+        data = {
+            "deezer_track_id": 3135556,
+            "deezer_link": "https://www.deezer.com/track/3135556",
+            "deezer_explicit_lyrics": True,
+        }
+        track = _track()
+        assert _provider(_resultat(data)).enrich(track, EnrichmentContext()) is True
+        assert track.deezer_id == 3135556
+        assert track.deezer_url == "https://www.deezer.com/track/3135556"
+        assert track.lyrics.explicit is True
+
+    def test_identifiants_existants_non_ecrases_sans_force(self):
+        data = {"deezer_track_id": 999, "deezer_link": "https://neuf"}
+        track = _track()
+        track.deezer_id = 42
+        track.deezer_url = "https://ancien"
+        assert _provider(_resultat(data)).enrich(track, EnrichmentContext()) is False
+        assert (track.deezer_id, track.deezer_url) == (42, "https://ancien")
+
+    def test_explicite_faux_est_une_mesure_qui_ne_se_refait_pas(self):
+        """`False` est un constat : une fois posé, il ne doit pas être re-posé
+        comme s'il manquait (le test distingue False de None)."""
+        track = _track()
+        track.lyrics.explicit = False
+        p = _provider(_resultat({"deezer_explicit_lyrics": True}))
+        assert p.enrich(track, EnrichmentContext()) is False
+        assert track.lyrics.explicit is False
+        assert p.enrich(track, EnrichmentContext(force_update=True)) is True
+        assert track.lyrics.explicit is True
+
+    def test_pochette_deezer_non_posee_sur_le_track(self):
+        """Le chantier Media récupère la même image en HAUTE résolution et la
+        range sur le disque : poser l'URL medium ici était un doublon dégradé,
+        retiré le 2026-09-06. `deezer_picture` reste le repli de
+        `media_enricher`, ce n'est pas le champ API qui disparaît."""
+        data = {"deezer_picture": "https://img/medium.jpg"}
+        track = _track()
+        assert _provider(_resultat(data)).enrich(track, EnrichmentContext()) is False
+        assert not hasattr(track, "deezer_picture_url")
+
 
 class TestVoieAsync:
     """Jumeau async : même `_apply_result`, donc mêmes décisions. Ce test est le

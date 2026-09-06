@@ -691,6 +691,25 @@ def fetch_artist(artist: str) -> bool:
     return True
 
 
+def fetch_periode(debut: str, fin: str) -> bool:
+    """Rescrape une période PRÉCISE et la fusionne dans le corpus.
+
+    `--auto` repart toujours de la dernière certification connue : il ne sait
+    pas revenir en arrière. Or les trous que signale la validation sont
+    justement DERRIÈRE cette date (un mois de 2006 manquant ne sera jamais
+    rattrapé par une MàJ de 2026). D'où cette entrée, qui vise une fenêtre.
+    """
+    scraper = RIAAScraper(headless=True)
+    print(f"=== RIAA, période {debut} → {fin} ===")
+    resultats = scraper.scrape_by_date_range(debut, fin, "certification")
+    if not resultats:
+        print("❌ Aucune certification vue — période réellement vide, ou accès bloqué")
+        return False
+    total, ajoutees = _merge_certif_csv(_flatten_records(resultats))
+    print(f"✅ {len(resultats)} vue(s), {ajoutees} ajoutée(s) (total {total})")
+    return True
+
+
 def clean_certif_csv(apply: bool = True) -> dict:
     """« Nettoyer » : régénère certif_riaa.csv (clean) depuis le brut
     riaa_raw.csv (retire vides, normalise Format, dédoublonne niveau normalisé).
@@ -782,6 +801,14 @@ def main():
         "--clean", action="store_true", help="Nettoie certif_riaa.csv (dédup + vides) sans scraper"
     )
     parser.add_argument(
+        "--from",
+        dest="debut",
+        metavar="AAAA-MM-JJ",
+        help="Rescraper une PÉRIODE précise (avec --to) : sert à combler un trou "
+        "signalé par la validation, sans repartir de la dernière date connue",
+    )
+    parser.add_argument("--to", dest="fin", metavar="AAAA-MM-JJ", help="Fin de la période")
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Avec --clean : compte sans réécrire (aperçu, comme le nettoyeur SNEP)",
@@ -798,6 +825,12 @@ def main():
     if args.clean:
         print(format_clean_report(clean_certif_csv(apply=not args.dry_run)))
         sys.exit(0)
+
+    if args.debut or args.fin:
+        if not (args.debut and args.fin):
+            print("❌ --from et --to vont ensemble")
+            sys.exit(2)
+        sys.exit(0 if fetch_periode(args.debut, args.fin) else 1)
 
     # Récup par artiste : CSV-centré, pas besoin de la base sqlite
     if args.artist:

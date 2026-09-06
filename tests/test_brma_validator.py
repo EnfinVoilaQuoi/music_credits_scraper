@@ -214,7 +214,7 @@ class TestCouvertureTemporelle:
         assert validate_brma_csv(p)["month_gaps"] == []
 
     def test_annee_active_scannee(self, tmp_path):
-        p = _ecrire(tmp_path / "c.csv", self._annee(2020, 12))
+        p = _ecrire(tmp_path / "c.csv", self._annee(2020, 30))
         assert validate_brma_csv(p)["month_gaps"] == [f"2020-{m:02d}" for m in range(2, 13)]
 
     def test_mois_futurs_ignores(self, tmp_path):
@@ -224,7 +224,7 @@ class TestCouvertureTemporelle:
         qu'elle soit scannée : seuls les mois DÉJÀ ÉCOULÉS doivent manquer.
         """
         annee = datetime.now().year
-        p = _ecrire(tmp_path / "c.csv", self._annee(annee, 12))
+        p = _ecrire(tmp_path / "c.csv", self._annee(annee, 30))
         gaps = validate_brma_csv(p)["month_gaps"]
         mois_signales = [int(g.split("-")[1]) for g in gaps]
         assert mois_signales  # au moins un mois écoulé sans certif
@@ -270,7 +270,7 @@ class TestRapport:
             assert attendu in texte, attendu
 
     def test_sections_temporelles(self, tmp_path):
-        lignes = [_ligne(title=f"T{i}", date=f"2020-01-{i + 1:02d}") for i in range(12)]
+        lignes = [_ligne(title=f"T{i}", date=f"2020-01-{i + 1:02d}") for i in range(30)]
         lignes += [_ligne(title="vieux", date="2018-06-15")]
         texte = format_report(validate_brma_csv(_ecrire(tmp_path / "c.csv", lignes)))
         assert "Années ENTIÈREMENT absentes" in texte

@@ -439,6 +439,9 @@ class UltratopUpdater:
         report["rows_in"] = len(raw)
         cleaned = self._clean_from(raw, report)
         report["rows_out"] = len(cleaned)
+        report["deja_propre"], report["lignes_modifiees"] = cert_clean_report.comparer_au_fichier(
+            cleaned, self.database_path
+        )
         if "certification_level" in cleaned.columns:
             report["levels"] = (
                 cleaned["certification_level"].fillna("(vide)").replace("", "(vide)").value_counts()

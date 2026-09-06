@@ -76,6 +76,11 @@ class RIAADatabaseUpdater:
         self.logger.setLevel(logging.INFO)
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
+        # Sans cela, chaque ligne s'affiche DEUX fois : une par ce handler, une
+        # par celui de la racine (posé par un `basicConfig` d'import). Le bruit
+        # était doublé jusque dans la fenêtre de fin de la GUI, qui relaie cette
+        # sortie.
+        self.logger.propagate = False
 
     def get_last_update_date(self) -> datetime | None:
         """Date de la dernière certif connue — lue depuis certif_riaa.csv (le
@@ -713,6 +718,9 @@ def clean_certif_csv(apply: bool = True) -> dict:
     report["rows_in"] = len(raw)
     clean = _clean_from_raw(raw, report)
     report["rows_out"] = len(clean)
+    report["deja_propre"], report["lignes_modifiees"] = cert_clean_report.comparer_au_fichier(
+        clean, CERTIF_CSV
+    )
 
     if apply:
         if CERTIF_CSV.exists():

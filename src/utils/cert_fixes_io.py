@@ -42,6 +42,7 @@ from pathlib import Path
 from src.utils.cert_normalize import (
     cle_correction,
     contient_caractere_corrompu,
+    libelle_tronque,
     restore_apostrophes,
 )
 from src.utils.logger import get_logger
@@ -140,16 +141,27 @@ def ecrire_fixes(source: str, fixes: dict, acceptes: set[str] | None = None) -> 
 def candidats_a_corriger(
     rows: list[list[str]], fixes: dict, acceptes: set[str] | None = None
 ) -> list[tuple]:
-    """Libellés porteurs d'un « ? » que la restauration AUTOMATIQUE ne règle pas.
+    """Libellés qu'aucune réparation automatique ne sait remettre d'aplomb.
+
+    DEUX défauts y mènent, et aucun des deux n'est devinable :
+
+      · un « ? » que `restore_apostrophes` ne couvre pas. Elle ne traite que les
+        contextes sûrs (élisions, contractions, mots en Œ connus) parce que la
+        plupart des « ? » sont de VRAIS points d'interrogation — mesuré, 78 sur
+        91. Élargir les motifs abîmerait plus de titres qu'il n'en réparerait.
+      · un libellé TRONQUÉ par la source à l'endroit d'un caractère accentué
+        (« L'empire du c »). Là il ne manque pas un caractère mais du TEXTE, et
+        rien ne dit lequel : cherché le 2026-09-06, aucun titre tronqué n'a sa
+        version complète ailleurs dans le corpus. Il n'y a donc rien à deviner,
+        seulement quelqu'un à qui demander.
 
     `rows` = lignes déjà découpées (champ 0 = artiste, champ 1 = titre).
     Retourne `[(suspect, artiste, titre, correction_existante), …]`, les cas
-    SUSPECTS d'abord — « ? » entre deux lettres, donc corruption quasi certaine.
-    Le reste (« QUI SAIT ? », « ...READY FOR IT? ») est presque toujours un vrai
-    point d'interrogation : on le montre pour permettre de trancher, jamais pour
-    suggérer qu'il faut le corriger.
+    SUSPECTS d'abord : « ? » entre deux lettres ou libellé coupé, donc défaut
+    quasi certain. Le reste (« QUI SAIT ? », « ...READY FOR IT? ») est montré
+    pour permettre de trancher, jamais pour suggérer qu'il faut le corriger.
 
-    Fonction PURE (aucune E/S, aucun widget) : c'est elle qui porte les trois
+    Fonction PURE (aucune E/S, aucun widget) : c'est elle qui porte les
     décisions du tri, et elle serait intestable enfouie dans la fenêtre.
     """
     vus: set[str] = set()
@@ -158,18 +170,22 @@ def candidats_a_corriger(
         if len(champs) < 2:
             continue
         artiste, titre = champs[0].strip(), champs[1].strip()
-        if "?" not in artiste + titre:
+        tronque = libelle_tronque(artiste) or libelle_tronque(titre)
+        if "?" not in artiste + titre and not tronque:
             continue
         cle = cle_correction(artiste, titre)
         if cle in vus or cle in (acceptes or ()):
             continue
         vus.add(cle)
-        # Ce que la restauration automatique répare déjà n'a pas à être saisi.
+        # Ce que la restauration automatique répare déjà n'a pas à être saisi —
+        # sauf si le libellé est AUSSI tronqué, auquel cas il reste à voir.
         auto_artiste, _ = restore_apostrophes(artiste)
         auto_titre, _ = restore_apostrophes(titre)
-        if "?" not in auto_artiste + auto_titre:
+        if "?" not in auto_artiste + auto_titre and not tronque:
             continue
-        suspect = contient_caractere_corrompu(artiste) or contient_caractere_corrompu(titre)
+        suspect = (
+            tronque or contient_caractere_corrompu(artiste) or contient_caractere_corrompu(titre)
+        )
         candidats.append((suspect, artiste, titre, fixes.get(cle)))
 
     candidats.sort(key=lambda c: (not c[0], c[1], c[2]))

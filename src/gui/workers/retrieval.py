@@ -490,9 +490,20 @@ def start_track_retrieval(
                         break
                     try:
                         app.data_manager.save_track(track)
+                        # APRÈS le save : c'est lui qui attribue l'id d'un morceau
+                        # neuf. Écrit les certifs/relations, que save_track ne
+                        # touche plus (elles ont leurs écrivains dédiés).
+                        app.data_manager.record_pending(track)
                         saved_count += 1
                     except Exception as e:
                         logger.warning(f"Erreur sauvegarde {track.title}: {e}")
+
+                oublies = app.data_manager.certifications_non_enregistrees(new_tracks)
+                if oublies:
+                    logger.error(
+                        f"Certifs/relations recalculées mais NON enregistrées "
+                        f"({len(oublies)}): {', '.join(oublies[:8])}"
+                    )
 
                 # ✅ CORRECTION : Recharger TOUS les tracks depuis la base après sauvegarde
                 app.current_artist.tracks = app.data_manager.get_artist_tracks(

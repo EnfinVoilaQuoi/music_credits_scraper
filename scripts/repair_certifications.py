@@ -150,20 +150,19 @@ def rapport(changements: list[dict]) -> None:
                     )
 
 
-def ecrire(changements: list[dict]) -> int:
-    """UPDATE direct des deux colonnes JSON — `save_track` ne sait pas RETIRER."""
-    with sqlite3.connect(DB_PATH) as conn:
-        for c in changements:
-            conn.execute(
-                "update tracks set certifications = ?, album_certifications = ? where id = ?",
-                (
-                    json.dumps(c["morceau"][0], ensure_ascii=False),
-                    json.dumps(c["album_entries"][0], ensure_ascii=False),
-                    c["track_id"],
-                ),
-            )
-        conn.commit()
-    return len(changements)
+def ecrire(dm: DataManager, changements: list[dict]) -> int:
+    """Passe par l'écrivain dédié de la façade.
+
+    Ce script écrivait en `UPDATE` direct tant que `save_track` était le seul
+    chemin et refusait de RETIRER une certification. Depuis le 2026-09-06 la
+    façade expose `record_certifications`, qui écrit verbatim : le script cesse
+    d'être un contournement et redevient un appelant ordinaire.
+    """
+    n = 0
+    for c in changements:
+        if dm.record_certifications(c["track_id"], c["morceau"][0], c["album_entries"][0]):
+            n += 1
+    return n
 
 
 def main() -> int:
@@ -188,7 +187,7 @@ def main() -> int:
         print("❌ Backup impossible — abandon (règle projet : jamais d'écriture sans backup).")
         return 1
     print(f"\n💾 Backup : {backup}")
-    print(f"✅ {ecrire(changements)} morceau(x) réécrit(s).")
+    print(f"✅ {ecrire(dm, changements)} morceau(x) réécrit(s).")
     return 0
 
 

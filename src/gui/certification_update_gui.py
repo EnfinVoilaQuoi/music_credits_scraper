@@ -349,8 +349,18 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
                 reset_cert_matcher()  # repartir des CSV clean (MàJ de la session)
                 n = apply_certifications(artist, artist.tracks, get_cert_matcher())
+                # `record_pending` au lieu de `save_track` : seules les deux
+                # colonnes de certifs sont concernées. Le save complet réécrivait
+                # une quarantaine de colonnes par morceau pour rien — et il ne
+                # savait pas RETIRER une certification devenue caduque.
                 for track in artist.tracks:
-                    app.data_manager.save_track(track)
+                    app.data_manager.record_pending(track)
+                oublies = app.data_manager.certifications_non_enregistrees(artist.tracks)
+                if oublies:
+                    logger.error(
+                        f"Certifs recalculées mais NON enregistrées ({len(oublies)}): "
+                        f"{', '.join(oublies[:8])}"
+                    )
             except Exception as e:
                 logger.error(f"Application certifs échouée: {e}")
                 # `e` est effacé à la sortie du except → capture par défaut.

@@ -285,3 +285,35 @@ def _cert(artist="A", title="T", level="Or", date="2021-01-01", category="single
         "detail_url": "https://www.ultratop.be/x",
         "scraped_at": "2026-09-07 00:00:00",
     }
+
+
+class TestCodeDeSortie:
+    """Ce que la GUI lit pour juger d'un run — et qui valait 0 en toutes
+    circonstances, y compris scrape entièrement bloqué."""
+
+    def _lancer(self, monkeypatch, tmp_path, reussi):
+        monkeypatch.setattr(
+            m.UltratopUpdater, "run_manual_update", lambda self, years_back=2: reussi
+        )
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "update_brma.py",
+                "--mode",
+                "once",
+                "--database",
+                str(tmp_path / "c.csv"),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        with pytest.raises(SystemExit) as sortie:
+            m.main()
+        return sortie.value.code
+
+    def test_un_run_reussi_sort_en_0(self, monkeypatch, tmp_path):
+        assert self._lancer(monkeypatch, tmp_path, True) == 0
+
+    def test_un_run_echoue_sort_en_1(self, monkeypatch, tmp_path):
+        """Sans ça, la GUI annonce « ✅ Mise à jour BRMA réussie » sur une panne."""
+        assert self._lancer(monkeypatch, tmp_path, False) == 1

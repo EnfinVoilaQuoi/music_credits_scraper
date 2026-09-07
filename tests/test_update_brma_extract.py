@@ -174,6 +174,16 @@ class TestSurPageReelle:
         certs = updater.extract_certifications(soup, 2021, "singles")
         assert all(c["artist"].strip() for c in certs)
 
+    def test_categorie_et_annee_de_page_reportees(self, updater, soup):
+        """Reprises de `test_brma_fixtures.py`, retiré avec le parseur jumeau."""
+        certs = updater.extract_certifications(soup, 2021, "singles")
+        assert all(c["category"] == "singles" for c in certs)
+        assert all(c["year_page"] == 2021 for c in certs)
+
+    def test_lien_de_detail_absolu(self, updater, soup):
+        certs = updater.extract_certifications(soup, 2021, "singles")
+        assert all(c["detail_url"].startswith("https://www.ultratop.be") for c in certs)
+
 
 # ─────────────────────── cycle brut → clean → métadonnées (sans réseau)
 

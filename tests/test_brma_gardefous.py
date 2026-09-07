@@ -37,6 +37,30 @@ def _page(*lignes):
     return BeautifulSoup(f"<div>{''.join(lignes)}</div>", "html.parser")
 
 
+@pytest.fixture(autouse=True)
+def _sans_llm(monkeypatch):
+    """Aucun test ne parle à Ollama.
+
+    Sans ça, le verdict `parse` déclenche le repli LLM, qui tente de joindre le
+    service local : 34 s de timeout sur une machine sans Ollama, et une VRAIE
+    inférence sur une machine où il tourne. Un test qui sort de la machine n'est
+    plus un test unitaire — même règle que « aucun test ne lit `data/` réel ».
+    """
+    monkeypatch.setattr("src.utils.llm_extractor.get_shared_extractor", lambda *a, **k: None)
+
+
+class FauxLLM:
+    """Extracteur simulé : rend le JSON qu'on lui donne, sans réseau."""
+
+    def __init__(self, reponse):
+        self.reponse = reponse
+        self.prompts = []
+
+    def extract_json(self, prompt, max_tokens=512):
+        self.prompts.append(prompt)
+        return self.reponse
+
+
 @pytest.fixture
 def updater(tmp_path):
     return UltratopUpdater(
@@ -317,3 +341,98 @@ class TestCodeDeSortie:
     def test_un_run_echoue_sort_en_1(self, monkeypatch, tmp_path):
         """Sans ça, la GUI annonce « ✅ Mise à jour BRMA réussie » sur une panne."""
         assert self._lancer(monkeypatch, tmp_path, False) == 1
+
+
+# ── Le repli LLM (famille A : les sélecteurs sont cassés) ─────────────────────
+class TestReplitLLM:
+    """Récupéré de `scraper_brma`, où il était orphelin.
+
+    BRMA est la SEULE source de certifs où ce repli a un sens, et c'est mesuré :
+    le texte d'une ligne Ultratop porte tout (artiste, titre, date, palier). Chez
+    la RIAA le palier n'est pas dans le texte mais dans l'`alt` du badge ; chez
+    BPI l'identité est dans `hx-get`. Les y porter ferait inventer une donnée ou
+    fabriquer des doublons.
+    """
+
+    PAGE_CASSEE = '<div class="autre">24kGoldn feat. Iann Dior Mood 26/03/2021 2x Platine</div>'
+
+    def _avec_llm(self, monkeypatch, reponse):
+        faux = FauxLLM(reponse)
+        monkeypatch.setattr("src.utils.llm_extractor.get_shared_extractor", lambda *a, **k: faux)
+        return faux
+
+    def _certif(self, **kw):
+        base = {
+            "artist": "24kGoldn feat. Iann Dior",
+            "title": "Mood",
+            "certification": "2x Platine",
+            "date": "2021-03-26",
+        }
+        return {**base, **kw}
+
+    def test_il_sauve_ce_que_les_selecteurs_ont_perdu(self, updater, monkeypatch):
+        self._avec_llm(monkeypatch, {"certifications": [self._certif()]})
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        certs = updater._extract_with_llm(soup, 2021, "singles")
+        assert len(certs) == 1
+        assert certs[0]["certification_level"] == "2x Platine"
+        assert certs[0]["certification_date"] == "2021-03-26"
+
+    def test_garde_1_un_artiste_absent_de_la_page_est_rejete(self, updater, monkeypatch):
+        """L'anti-hallucination d'origine : le LLM ne peut pas inventer un nom."""
+        self._avec_llm(monkeypatch, {"certifications": [self._certif(artist="Johnny Hallyday")]})
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        assert updater._extract_with_llm(soup, 2021, "singles") == []
+
+    def test_garde_2_un_palier_hors_vocabulaire_est_rejete(self, updater, monkeypatch):
+        """Garde AJOUTÉE : on écrit dans un magasin de certifications.
+
+        Le référentiel est demandé à `brma_validator`, jamais recopié — deux
+        outils qui parlent du même fichier ne peuvent pas avoir chacun le leur.
+        """
+        self._avec_llm(monkeypatch, {"certifications": [self._certif(certification="Bronze")]})
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        assert updater._extract_with_llm(soup, 2021, "singles") == []
+
+    @pytest.mark.parametrize("niveau", ["Or", "Platine", "Diamant", "2x Platine", "3x Or"])
+    def test_garde_2_accepte_le_vrai_vocabulaire_belge(self, updater, monkeypatch, niveau):
+        self._avec_llm(monkeypatch, {"certifications": [self._certif(certification=niveau)]})
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        assert len(updater._extract_with_llm(soup, 2021, "singles")) == 1
+
+    def test_garde_3_une_date_hors_de_l_annee_de_la_page_est_rejetee(self, updater, monkeypatch):
+        """Garde AJOUTÉE : une certif de 2019 sur la page 2021 est inventée."""
+        self._avec_llm(monkeypatch, {"certifications": [self._certif(date="2019-03-26")]})
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        assert updater._extract_with_llm(soup, 2021, "singles") == []
+
+    def test_garde_3_une_date_informe_est_rejetee(self, updater, monkeypatch):
+        self._avec_llm(monkeypatch, {"certifications": [self._certif(date="26/03/2021")]})
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        assert updater._extract_with_llm(soup, 2021, "singles") == []
+
+    def test_une_reponse_llm_informe_ne_casse_rien(self, updater, monkeypatch):
+        self._avec_llm(monkeypatch, {"certifications": "pas une liste"})
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        assert updater._extract_with_llm(soup, 2021, "singles") == []
+
+    def test_le_sauvetage_ne_rend_PAS_la_page_saine(self, updater, monkeypatch):
+        """LE point de conception : signaler ET sauver, jamais sauver AU LIEU DE.
+
+        Si le sauvetage verdissait la page, un LLM tiendrait lieu de parseur à
+        notre insu et le site resterait cassé indéfiniment.
+        """
+        self._avec_llm(monkeypatch, {"certifications": [self._certif()]})
+        monkeypatch.setattr(
+            updater, "fetch_page", lambda y, c: BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        )
+        certs = updater._lire_page(2021, "singles")
+
+        assert len(certs) == 1, "le sauvetage a bien eu lieu"
+        assert updater.bilan_run["muettes"] == 1, "la page reste comptée MUETTE"
+        assert updater.bilan_run["lues"] == 0, "elle ne compte pas comme lue"
+
+    def test_sans_ollama_le_repli_est_un_no_op(self, updater, monkeypatch):
+        """Ollama absent ne doit jamais faire échouer un scrape."""
+        soup = BeautifulSoup(self.PAGE_CASSEE, "html.parser")
+        assert updater._extract_with_llm(soup, 2021, "singles") == []

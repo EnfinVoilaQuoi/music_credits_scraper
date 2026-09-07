@@ -11,8 +11,22 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Limites pour RTX 3050 Ti (4 GB VRAM) avec Llama 3.2 3B (Q4_K_M ~2.2 GB)
+#
+# ⚠️ `_DEFAULT_MAX_INPUT_CHARS` plafonne le PROMPT ENTIER, consignes comprises —
+# pas le seul texte de page. Le budget réellement disponible pour le texte est
+# donc `6000 − len(consignes)`, mesuré le 2026-09-07 : crédits 4 901, songbpm
+# 4 999, streams 5 449, certifications 5 415.
+#
+# C'est ce qui rendait les troncatures des appelants trompeuses : kworb et BRMA
+# coupaient à 5500, AU-DESSUS du plafond réel, si bien que c'était l'extracteur
+# qui tranchait. Ces découpes ont été retirées — un nombre en dur qui ne fait
+# rien est pire qu'aucun nombre, il fait croire à une maîtrise.
 _DEFAULT_MAX_INPUT_CHARS = 6000  # ≈ 1500 tokens
 _DEFAULT_MAX_TOKENS = 512
+
+#: Budget de texte de SongBPM, délibérément SOUS le plafond : la réponse
+#: attendue est minuscule (`max_tokens=128`) et la page très bavarde.
+BUDGET_TEXTE_SONGBPM = 4000
 
 
 class LLMExtractor:
@@ -146,6 +160,29 @@ def get_shared_extractor(model: str = "llama3.2") -> LLMExtractor | None:
         if not _shared_available:
             logger.warning("LLMExtractor partagé indisponible — les fallbacks LLM seront ignorés")
     return _shared_extractor if _shared_available else None
+
+
+def secours_apres_panne(obs, detail: str, extraire):
+    """Signale la panne PUIS tente le sauvetage. **L'ordre EST le garde-fou.**
+
+    Quand un parseur rend zéro résultat sur une page qui a été servie, la
+    structure du site a changé : c'est un scrape CASSÉ, pas une absence de
+    donnée. Le repli LLM peut alors sauver les meubles, mais il ne doit jamais
+    masquer le signal — sans quoi le site resterait cassé indéfiniment, un LLM
+    tenant lieu de parseur à notre insu.
+
+    Cette règle était écrite en commentaire à UN seul endroit (`kworb_scraper`).
+    Elle porte maintenant un nom, pour que le prochain repli ne puisse pas
+    l'oublier — c'est exactement ce qui manquait à BRMA.
+
+    ⚠️ Ne concerne QUE les replis « les sélecteurs sont cassés ». Ceux qui
+    complètent une donnée partielle (SongBPM : un champ absent de la page) ou
+    départagent des candidats (Spotify ID : le LLM choisit un index, il ne génère
+    rien) ne sont pas des pannes et ne doivent RIEN signaler.
+    """
+    obs.parse_error(detail)
+    logger.warning(f"🤖 Repli LLM déclenché — {detail}")
+    return extraire()
 
 
 # ──────────────────────────────────────────────────────────────────────────────

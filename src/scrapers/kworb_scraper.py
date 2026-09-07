@@ -21,7 +21,11 @@ import requests
 from bs4 import BeautifulSoup
 
 from src.observability import source_usage
-from src.utils.llm_extractor import build_streams_table_prompt, get_shared_extractor
+from src.utils.llm_extractor import (
+    build_streams_table_prompt,
+    get_shared_extractor,
+    secours_apres_panne,
+)
 
 logger = logging.getLogger("KworbScraper")
 
@@ -107,9 +111,15 @@ class KworbScraper:
             if not page["entries"]:
                 # 0 entrée sur une page servie : la structure a changé. C'est un
                 # scrape cassé, pas une absence de donnée — le repli LLM ne doit
-                # pas masquer le signal.
-                obs.parse_error("0 entrée parsée (structure de table changée ?)")
-                page["entries"] = self._extract_with_llm(soup.get_text(separator="\n", strip=True))
+                # pas masquer le signal. La règle porte désormais un NOM, pour
+                # que l'ordre (signaler PUIS sauver) ne dépende plus d'un
+                # commentaire qu'on peut oublier de recopier ailleurs.
+                texte = soup.get_text(separator="\n", strip=True)
+                page["entries"] = secours_apres_panne(
+                    obs,
+                    "0 entrée parsée (structure de table changée ?)",
+                    lambda: self._extract_with_llm(texte),
+                )
 
             logger.info(
                 f"Kworb: {len(page['entries'])} entrées pour "
@@ -214,8 +224,10 @@ class KworbScraper:
         if not llm or not page_text:
             return []
 
-        logger.info("🤖 Kworb: parsing HTML sans résultat, fallback LLM")
-        data = llm.extract_json(build_streams_table_prompt(page_text[:5500]))
+        # Pas de troncature ici : `extract_json` plafonne le prompt ENTIER, et
+        # le 5500 qui figurait là était au-dessus du budget réel (5449) — il ne
+        # coupait donc jamais rien.
+        data = llm.extract_json(build_streams_table_prompt(page_text))
         if not data or not isinstance(data.get("tracks"), list):
             return []
 

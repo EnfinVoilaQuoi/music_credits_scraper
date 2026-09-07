@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import settings
 from src.enrichment.observation import Observation
-from src.models import Credit, Track
+from src.models import Credit, Track, TrackVideo
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.logger import get_logger
@@ -28,6 +28,33 @@ logger = get_logger(__name__)
 # ensemble quand un morceau est « nettoyé » (E7-D1) : sinon la réconciliation les
 # ressusciterait à la lecture. bpm_alt suit bpm (octave dérivée).
 _AUDIO_OBS_FIELDS = ("bpm", "bpm_alt", "key", "mode", "time_signature")
+
+#: Provenances de lien YouTube qu'un choix AUTOMATIQUE ne peut pas supplanter :
+#: `manual` est un choix explicite de l'utilisateur, `genius_media` vient du
+#: catalogue Genius. Règle UNIQUE, partagée par la colonne `tracks.youtube_url`
+#: (`update_track_youtube_url`) et par la table `track_videos`
+#: (`record_track_videos`) — deux magasins qui portent la même notion ne peuvent
+#: pas avoir chacun leur ordre de priorité (leçon du 2026-09-06).
+_YT_SOURCES_PROTEGEES = ("manual", "genius_media")
+
+
+def source_lien_retenue(ancienne: str | None, nouvelle: str | None) -> str | None:
+    """Provenance à conserver quand deux passes désignent la MÊME vidéo.
+
+    Fonction pure. Une provenance protégée n'est délogée que par une autre
+    provenance protégée (un `manual` postérieur corrige un `genius_media`) ;
+    entre deux provenances ordinaires, la plus récente gagne — elle vient de la
+    passe qui vient de voir la vidéo.
+    """
+    if not ancienne:
+        return nouvelle
+    if not nouvelle:
+        return ancienne
+    if nouvelle in _YT_SOURCES_PROTEGEES:
+        return nouvelle
+    if ancienne in _YT_SOURCES_PROTEGEES:
+        return ancienne
+    return nouvelle
 
 
 class TrackRepository:
@@ -378,6 +405,10 @@ class TrackRepository:
                 observations_by_track = self._observations_by_artist(conn, artist_id)
                 _t_obs = time.monotonic()
 
+                # e20 : vidéos YouTube de tout l'artiste en 1 requête, même
+                # motif que les observations (surtout pas un N+1 par morceau).
+                videos_by_track = self._videos_by_artist(conn, artist_id)
+
                 # Volume des LRC bruts chargés (`lyrics_synced`) : champ lourd
                 # (~3-10 Ko × sources × morceaux), cible désignée de l'optim E7d.
                 _n_obs = sum(len(v) for v in observations_by_track.values())
@@ -397,6 +428,8 @@ class TrackRepository:
                         )
                         if track is None:
                             continue
+
+                        track.videos = videos_by_track.get(row["id"], [])
 
                         # Chargement crédits (a besoin de la connexion → hors mapper)
                         try:
@@ -624,6 +657,10 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM observations WHERE track_id = :tid"), {"tid": track_id}
                 )
+                # Vidéos (e20) : même absence de cascade FK.
+                conn.execute(
+                    text("DELETE FROM track_videos WHERE track_id = :tid"), {"tid": track_id}
+                )
                 deleted = conn.execute(
                     text("DELETE FROM tracks WHERE id = :tid"), {"tid": track_id}
                 ).rowcount
@@ -674,6 +711,25 @@ class TrackRepository:
                 )
                 conn.execute(
                     text("UPDATE observations SET track_id = :keep_id WHERE track_id = :delete_id"),
+                    {"keep_id": keep_id, "delete_id": delete_id},
+                )
+                # Vidéos (e20) : la fusion les RÉUNIT. Deux doublons portent
+                # souvent chacun un lien différent — le clip d'un côté, l'audio
+                # du canal Topic de l'autre — et faire CHOISIR, comme le dialog
+                # de fusion le fait pour les colonnes, jetait des vues qui
+                # comptent. Seule une vidéo déjà présente sur le morceau conservé
+                # est écartée (clé `video_id`, pas l'URL : `youtu.be/X` et
+                # `watch?v=X` sont la même vidéo).
+                conn.execute(
+                    text("""
+                    DELETE FROM track_videos WHERE track_id = :delete_id AND EXISTS (
+                        SELECT 1 FROM track_videos k WHERE k.track_id = :keep_id
+                          AND k.video_id = track_videos.video_id
+                    )"""),
+                    {"delete_id": delete_id, "keep_id": keep_id},
+                )
+                conn.execute(
+                    text("UPDATE track_videos SET track_id = :keep_id WHERE track_id = :delete_id"),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
                 # Les colonnes ARBITRÉES doivent suivre les observations qu'on
@@ -1220,6 +1276,185 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur clear_track_youtube_link (track_id={track_id}): {e}")
             return False
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Vidéos YouTube d'un morceau (table `track_videos`, e20)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def record_track_videos(self, track_id: int, videos) -> int:
+        """Enregistre ce qu'UNE passe a vu des vidéos d'un morceau. Écrivain DÉDIÉ.
+
+        `save_track` n'écrit JAMAIS cette table — même raison que pour
+        `certifications` et `relationships` (2026-09-06) : une façade appelée par
+        treize flux dont douze ignorent la donnée ne peut pas l'écrire sans
+        rendre tout retrait impossible.
+
+        **Additif par construction**, à la manière des observations : aucun
+        producteur ne connaît la liste COMPLÈTE des vidéos d'un morceau — le
+        catalogue Genius en donne une, le canal YTM une autre, la recherche une
+        troisième. Une écriture « autoritative » qui remplacerait tout ferait
+        perdre à chaque passe ce que les autres ont trouvé. Le retrait est donc
+        un geste EXPLICITE (`forget_track_video`), jamais un effet de bord.
+
+        Un champ à None laisse la valeur en place : la passe des vues ne connaît
+        pas la provenance du lien, celle des streams ne connaît pas les vues.
+        `views_updated` n'est daté que quand des vues sont réellement écrites —
+        sinon une passe de streams daterait d'aujourd'hui des vues qu'elle n'a
+        pas relevées. La provenance suit `source_lien_retenue`, la même règle que
+        la colonne `tracks.youtube_url`.
+
+        Returns:
+            Nombre de vidéos écrites (insérées ou mises à jour).
+        """
+        videos = [v for v in (videos or []) if v and v.video_id]
+        if not videos:
+            return 0
+        now = datetime.now()
+        ecrites = 0
+        try:
+            with self.engine.begin() as conn:
+                existantes = {
+                    r["video_id"]: r
+                    for r in conn.execute(
+                        text(
+                            "SELECT video_id, url, kind, source, views FROM track_videos "
+                            "WHERE track_id = :tid"
+                        ),
+                        {"tid": track_id},
+                    )
+                    .mappings()
+                    .all()
+                }
+                for video in videos:
+                    ancienne = existantes.get(video.video_id)
+                    if ancienne is None:
+                        conn.execute(
+                            text(
+                                "INSERT INTO track_videos (track_id, video_id, url, kind, "
+                                "source, views, views_updated, created_at) VALUES "
+                                "(:tid, :vid, :url, :kind, :source, :views, :vu, :now)"
+                            ),
+                            {
+                                "tid": track_id,
+                                "vid": video.video_id,
+                                "url": video.url,
+                                "kind": video.kind,
+                                "source": video.source,
+                                "views": video.views,
+                                "vu": now if video.views is not None else None,
+                                "now": now,
+                            },
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "UPDATE track_videos SET url = :url, kind = :kind, "
+                                "source = :source, views = :views, "
+                                "views_updated = COALESCE(:vu, views_updated) "
+                                "WHERE track_id = :tid AND video_id = :vid"
+                            ),
+                            {
+                                "tid": track_id,
+                                "vid": video.video_id,
+                                "url": video.url or ancienne["url"],
+                                "kind": video.kind or ancienne["kind"],
+                                "source": source_lien_retenue(ancienne["source"], video.source),
+                                "views": (
+                                    video.views if video.views is not None else ancienne["views"]
+                                ),
+                                "vu": now if video.views is not None else None,
+                            },
+                        )
+                    ecrites += 1
+            return ecrites
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_track_videos (track_id={track_id}): {e}")
+            return 0
+
+    def forget_track_video(self, track_id: int, video_id: str) -> bool:
+        """Retire UNE vidéo d'un morceau (rejet d'un lien automatique erroné).
+
+        Pendant explicite de l'additivité de `record_track_videos` : c'est le
+        seul chemin par lequel une vidéo quitte la table.
+        """
+        try:
+            with self.engine.begin() as conn:
+                supprimees = conn.execute(
+                    text("DELETE FROM track_videos WHERE track_id = :tid AND video_id = :vid"),
+                    {"tid": track_id, "vid": video_id},
+                ).rowcount
+            return supprimees > 0
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur forget_track_video({track_id}, {video_id!r}): {e}")
+            return False
+
+    def get_track_videos(self, track_id: int) -> list[TrackVideo]:
+        """Vidéos connues d'un morceau, les plus vues d'abord."""
+        try:
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT track_id, video_id, url, kind, source, views, views_updated "
+                            "FROM track_videos WHERE track_id = :tid"
+                        ),
+                        {"tid": track_id},
+                    )
+                    .mappings()
+                    .all()
+                )
+            return self._grouper_videos(rows).get(track_id, [])
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_track_videos({track_id}): {e}")
+            return []
+
+    def get_artist_track_videos(self, artist_id: int) -> dict[int, list[TrackVideo]]:
+        """Vidéos de TOUS les morceaux d'un artiste, groupées par `track_id`."""
+        try:
+            with self.engine.connect() as conn:
+                return self._videos_by_artist(conn, artist_id)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_artist_track_videos({artist_id}): {e}")
+            return {}
+
+    def _videos_by_artist(self, conn, artist_id: int) -> dict[int, list[TrackVideo]]:
+        """Vidéos de tous les morceaux d'un artiste, en UNE requête (pas de N+1)."""
+        rows = (
+            conn.execute(
+                text(
+                    "SELECT v.track_id, v.video_id, v.url, v.kind, v.source, v.views, "
+                    "v.views_updated FROM track_videos v "
+                    "JOIN tracks t ON t.id = v.track_id WHERE t.artist_id = :aid"
+                ),
+                {"aid": artist_id},
+            )
+            .mappings()
+            .all()
+        )
+        return self._grouper_videos(rows)
+
+    @staticmethod
+    def _grouper_videos(rows) -> dict[int, list[TrackVideo]]:
+        """Lignes `track_videos` → `TrackVideo` groupés par morceau.
+
+        Tri : les plus vues d'abord, puis par `video_id`. Un ordre STABLE, pour
+        que l'affichage ne danse pas d'une lecture à l'autre.
+        """
+        par_track: dict[int, list[TrackVideo]] = {}
+        for r in rows:
+            par_track.setdefault(r["track_id"], []).append(
+                TrackVideo(
+                    video_id=r["video_id"],
+                    url=r["url"],
+                    kind=r["kind"],
+                    source=r["source"],
+                    views=r["views"],
+                    views_updated=r["views_updated"],
+                )
+            )
+        for videos in par_track.values():
+            videos.sort(key=lambda v: (-(v.views or 0), v.video_id))
+        return par_track
 
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:
         """Met à jour les streams YouTube Music d'un album."""

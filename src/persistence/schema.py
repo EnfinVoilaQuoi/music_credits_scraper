@@ -209,6 +209,39 @@ albums = Table(
 )
 
 
+# Vidéos YouTube d'un morceau (e20). Un morceau en a souvent DEUX — le clip
+# officiel et la version « audio » servie par YouTube Music (chaîne « - Topic »)
+# — et les colonnes `tracks.youtube_*` n'en tenaient qu'UNE : la seconde était
+# perdue, avec ses vues (mesuré sur « Magot » et « Déluge »).
+#
+# `video_id` est la clé métier (11 caractères), `url` n'en est que la forme
+# affichable : deux URL différentes (youtu.be / watch?v=) désignent la même
+# vidéo, l'unicité porte donc sur (track_id, video_id).
+#
+# `kind` ∈ clip · audio · show · unknown (cf. `youtube_utils.classify_video_kind`).
+# `source` ∈ genius_media · search_auto · ytm_album · manual — la provenance du
+# LIEN, qui décide de sa priorité (cf. `update_track_youtube_url`).
+#
+# Les colonnes `tracks.youtube_url` / `youtube_video_*` RESTENT en place : elles
+# portent la vidéo « principale » affichée par la GUI. Cette table les complète,
+# elle ne les remplace pas encore.
+track_videos = Table(
+    "track_videos",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("track_id", Integer, ForeignKey("tracks.id"), nullable=False),
+    Column("video_id", Text, nullable=False),
+    Column("url", Text),
+    Column("kind", Text),
+    Column("source", Text),
+    Column("views", Integer),
+    Column("views_updated", TIMESTAMP),
+    Column("created_at", TIMESTAMP),
+    UniqueConstraint("track_id", "video_id"),
+    sqlite_autoincrement=True,
+)
+
+
 # Observations (phase E4) : provenance scalaire par (morceau, champ, source).
 # Modèle UPSERT — au plus une valeur par (track_id, field, source), la dernière
 # vue (`seen_at`). Alimentée par backfill E4 (bpm/key/mode depuis les colonnes

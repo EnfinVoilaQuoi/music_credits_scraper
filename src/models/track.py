@@ -379,6 +379,28 @@ class Media:
     youtube_video_views_updated: datetime | None = None
 
 
+@dataclass
+class TrackVideo:
+    """UNE vidéo YouTube d'un morceau (table `track_videos`, e20).
+
+    Un morceau en a souvent deux — le clip et la version « audio » du canal
+    « - Topic » — et n'en garder qu'une perdait les vues de l'autre. La clé est
+    le `video_id` (11 caractères) et non l'URL : `youtu.be/X` et `watch?v=X`
+    désignent la même vidéo, les sommer la compterait deux fois.
+
+    `kind` ∈ clip · audio · show · unknown (`youtube_utils.classify_video_kind`).
+    `source` ∈ genius_media · search_auto · ytm_album · manual — provenance du
+    LIEN, qui décide de sa priorité.
+    """
+
+    video_id: str = ""
+    url: str | None = None
+    kind: str | None = None
+    source: str | None = None
+    views: int | None = None
+    views_updated: datetime | None = None
+
+
 @dataclass(eq=False)
 class Track:
     """Représente un morceau musical"""
@@ -482,6 +504,11 @@ class Track:
     # Streams (Spotify via kworb.net + YouTube Music) regroupés en sous-objet
     # `streams` (Phase 5) : accès via track.streams.<champ>.
     streams: Streams = field(default_factory=Streams)
+
+    # Vidéos YouTube connues du morceau (e20). Peuplée à la LECTURE par
+    # `get_artist_tracks` ; écrite par l'écrivain dédié
+    # `TrackRepository.record_track_videos`, jamais par `save_track`.
+    videos: list[TrackVideo] = field(default_factory=list)
 
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.

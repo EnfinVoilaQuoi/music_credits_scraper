@@ -165,6 +165,7 @@ FIXTURE_TO_KEY: dict[str, str] = {
     "riaa_search": "riaa",
     "brma_year": "brma",
     "bpi_list": "bpi",
+    "bpi_list_page2": "bpi",
     "bpi_detail": "bpi",
     "bpi_artists": "bpi",
     "lrclib_get": "lrclib",

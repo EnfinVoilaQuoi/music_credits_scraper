@@ -131,8 +131,19 @@ class UltratopScraperInitial:
         """
         certifications = []
 
-        # Sélectionner tous les conteneurs de certification
-        containers = soup.find_all("div", style=lambda x: x and "display:table-row" in x)
+        # Sélection PARTAGÉE avec `update_brma` (voie de style + repli sémantique).
+        # Ces deux parseurs sont des jumeaux de longue date ; la sélection de
+        # lignes, elle, n'existe désormais qu'à un endroit — corriger un jumeau
+        # sans l'autre est le défaut que ce projet a déjà payé deux fois.
+        #
+        # ⚠️ Les GARDES-FOUS d'exécution (verdict de page, comptage, observation)
+        # ne sont PAS repris ici, et c'est délibéré : cette classe est le scraper
+        # de reprise historique 1995-2024, plus appelée par personne dans `src/`
+        # ni `scripts/` — seul son test la maintient en vie. Y dupliquer la
+        # logique en ferait une troisième copie à maintenir sans rien protéger.
+        from src.utils.update_brma import lignes_de_page
+
+        containers, _voie = lignes_de_page(soup)
 
         for container in containers:
             try:

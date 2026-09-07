@@ -273,6 +273,38 @@ def _probe_bpi() -> list[str]:
     return []
 
 
+def _probe_brma_full() -> list[str]:
+    """Rejoue le VRAI transport BRMA : navigateur anti-Cloudflare + parse.
+
+    La sonde RAPIDE de cette source tape la page en `requests` nu et prend un 403
+    (d'où `tolerate_403`) : elle dit seulement que le domaine répond, jamais que
+    le parseur fonctionne. C'est exactement le reproche fait aux sondes RIAA — un
+    contrôle qui n'emprunte pas le chemin réel ne mesure rien.
+
+    Celle-ci passe par `ultratop_fetch` (patchright + profil persistant), donc
+    elle est LENTE et réservée au niveau « full ». Elle vise une année RÉVOLUE :
+    toute année d'Ultratop depuis 1995 contient des certifications, une page vide
+    y est forcément une panne.
+    """
+    from src.scrapers.ultratop_fetch import fetch_ultratop_soup
+    from src.utils.update_brma import lignes_de_page
+
+    annee = datetime.now().year - 1
+    soup = fetch_ultratop_soup(annee, "singles")
+    if soup is None:
+        raise ProbeSkipped("page non rendue (Cloudflare non résolu, ou Chrome absent)")
+
+    lignes, voie = lignes_de_page(soup)
+    if not lignes:
+        return [f"aucune ligne de certification sur {annee}/singles (gabarit changé ?)"]
+    if voie != "style":
+        return [
+            f"lignes trouvées seulement par le repli sémantique ({len(lignes)}) — "
+            "le style `display:table-row` a disparu du gabarit"
+        ]
+    return []
+
+
 def _probe_discogs() -> list[str]:
     import os
 
@@ -390,7 +422,12 @@ SOURCES: list[SourceSpec] = [
         label="BRMA / Ultratop (certifications BE)",
         fast_url="https://www.ultratop.be/fr/or-platine/2024/singles",
         tolerate_403=True,
-        notes="Cloudflare STRICT : scrape via route CDP (vrai Chrome)",
+        full_probe=_probe_brma_full,
+        notes=(
+            "Cloudflare STRICT : scrape via route CDP (vrai Chrome). La sonde "
+            "RAPIDE ne voit que le domaine — seule la sonde COMPLÈTE lit vraiment "
+            "une page et peut donc constater un parseur cassé."
+        ),
         families=(Family.CERTS,),
     ),
     SourceSpec(

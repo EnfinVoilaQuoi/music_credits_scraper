@@ -239,3 +239,131 @@ class TestSondeComplete:
         status = check_fast(SourceSpec(key="x", label="X"))
         assert status.status == "unknown"
         assert status.message == "aucune sonde rapide"
+
+
+class TestSondeBpi:
+    """La sonde BPI emprunte le VRAI transport, et sa valeur est de virer au ROUGE.
+
+    Une sonde qui taperait simplement l'URL rendrait 200 même parseur mort : sans
+    l'en-tête `HX-Request`, le site sert la coquille de l'application, sans une
+    seule ligne. Ces tests vérifient donc surtout les échecs — le chemin nominal
+    ne prouve rien à lui seul.
+    """
+
+    ENTETES = (
+        "Artist",
+        "Title",
+        "Award",
+        "Format",
+        "Corporate Group/Label",
+        "Latest Certification",
+        "Released",
+    )
+
+    def _page(self, entetes=None, lignes=1):
+        th = "".join(f"<th>{n}</th>" for n in (entetes or self.ENTETES))
+        tr = (
+            '<tr hx-get="/format/2/artist/1/title/1">'
+            "<td>A</td><td>T</td><td><span>Gold</span></td><td>Single</td>"
+            "<td>LABEL</td><td>24.01.2020</td><td>01.01.2019</td></tr>"
+        ) * lignes
+        return f"<table><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table>"
+
+    def _reponse(self, monkeypatch, texte, status=200):
+        capture = {}
+
+        class R:
+            status_code = status
+            text = texte
+
+        def faux_get(url, **kw):
+            capture["url"] = url
+            capture["headers"] = kw.get("headers", {})
+            return R()
+
+        monkeypatch.setattr("httpx.get", faux_get)
+        return capture
+
+    def test_page_saine_aucune_anomalie(self, monkeypatch):
+        capture = self._reponse(monkeypatch, self._page())
+        assert sh._probe_bpi() == []
+        assert (
+            capture["headers"].get("HX-Request") == "true"
+        ), "sans cet en-tête la sonde mesurerait une coquille vide"
+
+    def test_sans_tableau_c_est_ROUGE(self, monkeypatch):
+        """Ce que rend le site quand l'en-tête HX est ignoré, ou après refonte."""
+        self._reponse(monkeypatch, "<div>coquille de l'application</div>")
+        anomalies = sh._probe_bpi()
+        assert anomalies and "en-tête" in anomalies[0]
+
+    def test_un_entete_renomme_c_est_ROUGE(self, monkeypatch):
+        entetes = list(self.ENTETES[:-1]) + ["Release Date"]
+        self._reponse(monkeypatch, self._page(entetes=entetes))
+        anomalies = sh._probe_bpi()
+        assert anomalies and "Released" in anomalies[0]
+
+    def test_entetes_bons_mais_aucune_ligne_extraite_c_est_ROUGE(self, monkeypatch):
+        vide = self._page(lignes=0).replace("<tbody></tbody>", "<tbody><tr><td>x</td></tr></tbody>")
+        self._reponse(monkeypatch, vide)
+        assert sh._probe_bpi() == ["en-têtes corrects mais aucune ligne extraite"]
+
+    def test_un_statut_non_200_est_rapporte(self, monkeypatch):
+        self._reponse(monkeypatch, "", status=503)
+        assert sh._probe_bpi() == ["HTTP 503"]
+
+    def test_une_erreur_reseau_ne_leve_pas(self, monkeypatch):
+        import httpx
+
+        def faux_get(*a, **k):
+            raise httpx.ConnectError("boom")
+
+        monkeypatch.setattr("httpx.get", faux_get)
+        anomalies = sh._probe_bpi()
+        assert anomalies and "ConnectError" in anomalies[0]
+
+
+class TestSondeBrmaComplete:
+    """La sonde RAPIDE de BRMA ne voit que le domaine (403 anti-bot attendu) ;
+    seule la complète lit une page et peut donc constater un parseur cassé."""
+
+    def _fetch(self, monkeypatch, soup):
+        monkeypatch.setattr("src.scrapers.ultratop_fetch.fetch_ultratop_soup", lambda y, c: soup)
+
+    def test_page_lisible_aucune_anomalie(self, monkeypatch):
+        from bs4 import BeautifulSoup
+
+        html = (
+            '<div style="display:table-row">'
+            '<div class="chart_title"><a href="/x">A<br>T</a></div>'
+            '<div class="company">01/01/2021: Or</div></div>'
+        )
+        self._fetch(monkeypatch, BeautifulSoup(html, "html.parser"))
+        assert sh._probe_brma_full() == []
+
+    def test_page_non_rendue_est_un_SKIP_pas_un_rouge(self, monkeypatch):
+        """Cloudflare non résolu n'est pas un parseur cassé : on ne mesure rien,
+        et peindre en rouge ce qu'on n'a pas mesuré est le piège du projet."""
+        self._fetch(monkeypatch, None)
+        with pytest.raises(sh.ProbeSkipped):
+            sh._probe_brma_full()
+
+    def test_aucune_ligne_sur_une_annee_revolue_est_ROUGE(self, monkeypatch):
+        from bs4 import BeautifulSoup
+
+        self._fetch(monkeypatch, BeautifulSoup("<div>rien</div>", "html.parser"))
+        anomalies = sh._probe_brma_full()
+        assert anomalies and "aucune ligne" in anomalies[0]
+
+    def test_le_recours_au_repli_semantique_est_SIGNALE(self, monkeypatch):
+        """Le scrape continue, mais le gabarit a changé : il faut le savoir."""
+        from bs4 import BeautifulSoup
+
+        html = (
+            '<div class="row">'
+            '<div class="chart_title"><a href="/x">A<br>T</a></div>'
+            '<div class="company">01/01/2021: Or</div></div>'
+        )
+        self._fetch(monkeypatch, BeautifulSoup(html, "html.parser"))
+        anomalies = sh._probe_brma_full()
+        assert anomalies and "repli sémantique" in anomalies[0]

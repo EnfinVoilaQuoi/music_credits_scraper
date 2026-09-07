@@ -95,6 +95,12 @@ class SourceSpec:
     usage_note: str = ""  # précision affichée dans la colonne d'usage réel
 
 
+#: Sentinelle MusicBrainz : un groupe ancien, stable et richement documenté.
+_MB_SENTINELLE = "IAM"
+#: Son MBID, pour la sonde rapide (un lookup direct, sans recherche).
+_MB_SENTINELLE_MBID = "7aa4a16e-9d5a-41d3-968e-fae1a2c84d05"
+
+
 # ── Sondes complètes (imports paresseux : aucun coût à l'import du module) ──────
 def _probe_kworb() -> list[str]:
     from src.scrapers.kworb_scraper import KworbScraper
@@ -104,6 +110,58 @@ def _probe_kworb() -> list[str]:
         return ["page songs introuvable (404 / réseau)"]
     if not page.get("entries"):
         return ["0 entrée parsée (structure de table changée ?)"]
+    return []
+
+
+def _probe_musicbrainz_rapide() -> list[str]:
+    """UNE requête, mais par le VRAI transport (en-tête identifiant compris).
+
+    Il ne peut pas y avoir de `fast_url` ici : `check_fast` fait un GET nu, et
+    `/ws/2` rend **503 sans User-Agent identifiable** (mesuré le 2026-09-07).
+    Une sonde nue serait donc rouge en permanence sur une source qui marche —
+    l'inverse exact du service qu'on attend d'elle.
+
+    Lookup par MBID (pas de recherche) : c'est le plus court chemin qui prouve
+    que la route répond et rend du JSON exploitable.
+    """
+    from src.api.musicbrainz_api import MusicBrainzAPI
+
+    api = MusicBrainzAPI()
+    try:
+        detail = api.details_artiste(_MB_SENTINELLE_MBID, inc="")
+    except Exception as e:  # noqa: BLE001 — sonde : toute panne est un constat
+        return [f"lookup impossible : {e}"]
+    finally:
+        api.close()
+    if detail is None:
+        return ["503 — cadence dépassée ou serveur saturé (pas une panne de parseur)"]
+    if not detail.get("name"):
+        return ["réponse sans champ `name` (schéma /ws/2 changé ?)"]
+    return []
+
+
+def _probe_musicbrainz() -> list[str]:
+    """Rejoue le VRAI transport : l'en-tête identifiant, puis le parse.
+
+    La sonde RAPIDE de cette source serait un piège : `musicbrainz.org` répond
+    parfaitement à un GET nu, mais l'API `/ws/2` rend **503 sans User-Agent
+    identifiable** (mesuré le 2026-09-07). Une sonde qui ne pose pas l'en-tête
+    mesurerait donc la joignabilité du site et non l'accès à l'API — le défaut
+    qu'on s'interdit depuis le 2026-09-03.
+    """
+    from src.api.musicbrainz_api import MusicBrainzAPI, candidats_exacts
+
+    api = MusicBrainzAPI()
+    try:
+        resultats = api.rechercher_artiste(_MB_SENTINELLE, limite=5)
+    except Exception as e:  # noqa: BLE001 — sonde : toute panne est un constat
+        return [f"recherche impossible : {e}"]
+    finally:
+        api.close()
+    if not resultats:
+        return ["0 candidat (503 de cadence, ou route /ws/2 changée)"]
+    if not candidats_exacts(_MB_SENTINELLE, resultats):
+        return [f"aucun artiste nommé exactement « {_MB_SENTINELLE} » (schéma changé ?)"]
     return []
 
 
@@ -329,6 +387,20 @@ def _probe_discogs() -> list[str]:
 
 # ── Déclaration des sources ────────────────────────────────────────────────────
 SOURCES: list[SourceSpec] = [
+    SourceSpec(
+        key="musicbrainz",
+        label="MusicBrainz (groupes & formations)",
+        # Pas de `fast_url` : `check_fast` fait un GET nu, et `/ws/2` rend 503
+        # sans User-Agent identifiable — la source serait rouge en permanence
+        # alors qu'elle marche. Les DEUX sondes empruntent donc le vrai
+        # transport ; la rapide coûte une requête, la complète en ajoute une et
+        # vérifie en plus que le schéma se lit encore.
+        fast_probe=_probe_musicbrainz_rapide,
+        full_probe=_probe_musicbrainz,
+        notes="1 req/s par IP ; User-Agent obligatoire (sinon 503) ; aucune clé",
+        families=(Family.IDENTITE,),
+        usage_note="503 = notre cadence, pas une panne de la source",
+    ),
     SourceSpec(
         key="kworb",
         label="Kworb (streams Spotify)",

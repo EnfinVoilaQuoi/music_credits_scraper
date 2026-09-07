@@ -14,10 +14,11 @@ from typing import Any
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.models import Artist
+from src.models import Artist, ArtistRelation
 from src.persistence.binding import date_bind
 from src.persistence.schema import artists, monthly_listeners_history
 from src.utils.logger import get_logger
+from src.utils.title_matching import normalize_name
 
 logger = get_logger(__name__)
 
@@ -371,6 +372,162 @@ class ArtistRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur clear_artist_ytm_channel: {e}")
             return False
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Appartenance à une formation (table `artist_relations`, e22)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def record_artist_relations(self, artist_id: int, relations) -> int:
+        """Enregistre des liens CONFIRMÉS. Écrivain dédié, jamais `save_artist`.
+
+        La règle du 2026-09-06 s'applique telle quelle : une façade générique ne
+        peut pas écrire une donnée que la plupart de ses appelants ignorent, sous
+        peine de rendre tout retrait impossible.
+
+        **Additif**, comme les vidéos : MusicBrainz et Discogs ne voient pas les
+        mêmes formations, et une passe qui remplacerait tout ferait perdre ce que
+        l'autre a trouvé. Le retrait est explicite (`forget_artist_relation`) —
+        c'est le geste que fait l'utilisateur quand il décoche un lien.
+
+        `related_artist_id` est résolu ICI par le NOM, en base : le groupe entre
+        souvent dans la discothèque APRÈS le lien qui le mentionne, et on veut
+        que la jointure se fasse alors sans avoir à re-confirmer quoi que ce soit.
+
+        Returns:
+            Nombre de liens écrits (insérés ou mis à jour).
+        """
+        relations = [r for r in (relations or []) if r and r.related_name and r.kind]
+        if not relations:
+            return 0
+        maintenant = datetime.now()
+        ecrits = 0
+        try:
+            with self.engine.begin() as conn:
+                for rel in relations:
+                    lie = rel.related_artist_id or self._id_par_nom(conn, rel.related_name)
+                    deja = conn.execute(
+                        text(
+                            "SELECT id FROM artist_relations WHERE artist_id = :aid "
+                            "AND related_name = :nom AND kind = :kind"
+                        ),
+                        {"aid": artist_id, "nom": rel.related_name, "kind": rel.kind},
+                    ).first()
+                    params = {
+                        "aid": artist_id,
+                        "lie": lie,
+                        "nom": rel.related_name,
+                        "kind": rel.kind,
+                        "source": rel.source,
+                        "debut": rel.begin_date,
+                        "fin": rel.end_date,
+                        "quand": maintenant,
+                    }
+                    if deja:
+                        conn.execute(
+                            text(
+                                "UPDATE artist_relations SET related_artist_id = :lie, "
+                                "source = :source, begin_date = :debut, end_date = :fin, "
+                                "confirmed_at = :quand WHERE artist_id = :aid "
+                                "AND related_name = :nom AND kind = :kind"
+                            ),
+                            params,
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "INSERT INTO artist_relations (artist_id, related_artist_id, "
+                                "related_name, kind, source, begin_date, end_date, "
+                                "confirmed_at, created_at) VALUES (:aid, :lie, :nom, :kind, "
+                                ":source, :debut, :fin, :quand, :quand)"
+                            ),
+                            params,
+                        )
+                    ecrits += 1
+            return ecrits
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_artist_relations({artist_id}): {e}")
+            return 0
+
+    @staticmethod
+    def _id_par_nom(conn, nom: str) -> int | None:
+        """id de l'artiste portant CE nom, ou None s'il n'est pas en base.
+
+        Comparaison par nom NORMALISÉ : MusicBrainz écrit « Shurik’n » là où
+        notre base écrit « Shurik'N ». Une égalité brute raterait la jointure et
+        laisserait le lien orphelin alors que l'artiste est là.
+        """
+        cible = normalize_name(nom)
+        if not cible:
+            return None
+        for ligne in conn.execute(text("SELECT id, name FROM artists")).mappings():
+            if normalize_name(ligne["name"]) == cible:
+                return ligne["id"]
+        return None
+
+    def forget_artist_relation(self, artist_id: int, related_name: str, kind: str) -> bool:
+        """Retire UN lien (l'utilisateur le décoche). Pendant de l'additivité."""
+        try:
+            with self.engine.begin() as conn:
+                n = conn.execute(
+                    text(
+                        "DELETE FROM artist_relations WHERE artist_id = :aid "
+                        "AND related_name = :nom AND kind = :kind"
+                    ),
+                    {"aid": artist_id, "nom": related_name, "kind": kind},
+                ).rowcount
+            return n > 0
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur forget_artist_relation({artist_id}, {related_name!r}): {e}")
+            return False
+
+    def get_artist_relations(self, artist_id: int) -> list[ArtistRelation]:
+        """Liens confirmés d'un artiste, ordre stable (nature puis nom)."""
+        try:
+            with self.engine.connect() as conn:
+                lignes = conn.execute(
+                    text(
+                        "SELECT related_artist_id, related_name, kind, source, "
+                        "begin_date, end_date FROM artist_relations "
+                        "WHERE artist_id = :aid ORDER BY kind, related_name"
+                    ),
+                    {"aid": artist_id},
+                ).mappings()
+                return [
+                    ArtistRelation(
+                        related_name=r["related_name"],
+                        kind=r["kind"],
+                        related_artist_id=r["related_artist_id"],
+                        source=r["source"],
+                        begin_date=r["begin_date"],
+                        end_date=r["end_date"],
+                    )
+                    for r in lignes
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_artist_relations({artist_id}): {e}")
+            return []
+
+    def ids_discographie_reunie(self, artist_id: int) -> list[int]:
+        """`artist_id` + ceux des formations liées, pour une lecture par UNION.
+
+        **Le cœur du lot 3, et sa seule implémentation légitime.** La
+        discographie d'un membre inclut ce qu'il a sorti avec ses groupes ; on
+        l'obtient en élargissant la LECTURE, jamais en recopiant des morceaux —
+        `UNIQUE(title, artist_id)` l'interdirait, et cela doublerait streams et
+        certifications.
+
+        Seuls les liens `member_of` élargissent : un GROUPE ne récupère pas les
+        albums solo de ses membres. IAM n'est pas l'auteur de « Où je vis ».
+
+        Un seul niveau, volontairement : pas de transitivité. Un membre d'un
+        groupe dont un membre est dans un autre groupe n'hérite pas du troisième.
+        L'ordre est stable, l'artiste lui-même toujours en tête.
+        """
+        ids = [artist_id]
+        for rel in self.get_artist_relations(artist_id):
+            if rel.kind == "member_of" and rel.related_artist_id not in (None, *ids):
+                ids.append(rel.related_artist_id)
+        return ids
 
     def update_artist_kworb_totals(
         self,

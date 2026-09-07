@@ -69,11 +69,16 @@ jobs:
       # → 74 (tier 5-6 : collecteurs de certifs + chemins d'erreur des repositories)
       # → 77 (tier 7 : les 8 clients d'API, 61 % → 80 % sur `src/api`)
       # → 78 (tier 9 : les providers d'enrichissement et leurs jumeaux ASYNC —
-      #      `src/enrichment` 79 % → 93 %, mesuré 78,46 %).
+      #      `src/enrichment` 79 % → 93 %, mesuré 78,46 %)
+      # → 80 (lot 2 « YouTube » : la table `track_videos` et ses deux updaters,
+      #      plus la couverture que le WIP avait DIFFÉRÉE à ce tour global —
+      #      `youtube_integration` 26 → 95 %, `track_classifier` 64 → 100 %.
+      #      Le report tenait à ce que les décisions allaient changer ; le lot
+      #      les a laissées intactes, elles sont donc gelées. Mesuré 81 %).
       # Le reste du hors-GUI est du PILOTAGE (navigateur Playwright, flux réseau
       # bout en bout) : le monter davantage demanderait un harnais de session,
       # pas des tests unitaires. Ne remonter ce seuil qu'avec du code réellement
       # couvert, jamais pour « faire un chiffre » — les fabriques paresseuses qui
       # instancient un vrai client réseau restent délibérément non couvertes.
       - name: Cliquet de couverture (hors GUI)
-        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=78
+        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=80

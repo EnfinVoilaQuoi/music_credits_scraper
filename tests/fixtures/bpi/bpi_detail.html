@@ -1,0 +1,49 @@
+<html data-theme="bpi"><head><title>Certified Awards</title><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><meta name="color-scheme" content="light dark"/><script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js"></script><script src="/push-url-notify.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"/><script src="https://cdn.jsdelivr.net/npm/flatpickr"></script><link href="/styles.css" rel="stylesheet"/></head><body class="min-h-dvh bg-base-100 text-base-content"><main id="certified-awards-app" class="container mx-auto p-4"><div class="container mx-auto p-4 md:p-8 space-y-6 bg-base-100 rounded-lg"><button class="btn btn-ghost mb-4" onclick="var b=htmx.find(&#39;#certified-awards-body&#39;);if(b){htmx.find(&#39;#certified-awards-detail&#39;).classList.add(&#39;hidden&#39;);b.classList.remove(&#39;hidden&#39;);window.scrollTo(0,sessionStorage.getItem(&#39;scrollPosition&#39;)||0);}else{window.location.href=&#39;/&#39;;}window.dispatchEvent(new CustomEvent(&#39;certified-awards:back&#39;));"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"></path></svg>Back to search</button><div class="card bg-base-200 shadow-md rounded-lg w-full p-6 mb-6"><div class="flex flex-col sm:flex-row items-center gap-6"><div class="w-24 h-24 sm:w-32 sm:h-32 md:w-40 md:h-40 rounded-lg flex items-center justify-center flex-shrink-0"><img src="/images/EL_BPI_BRITCERTIFIED_ICONS_PLACEHOLDER_IMAGE.png" alt="Album artwork" class="w-full h-full object-cover rounded-lg"/></div><div cless="flex-1"><p class="text-sm font-semibold f">Single</p><h2 class="card-title text-3xl font-bold mb-1">SIGALA</h2><p class="text-2xl italic">EASY LOVE</p></div></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:auto-rows-fr"><div class="card bg-base-200 shadow-md rounded-lg p-6 lg:row-span-1 flex flex-col"><p class="text-sm font-semibold mb-4">Most Recent Certification</p><div class="flex items-center justify-between gap-4 flex-grow"><h3 class="text-3xl md:text-4xl font-bold flex-1 self-center">2x Platinum</h3><div class="w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 lg:w-32 lg:h-32 flex items-center justify-center flex-shrink-0 self-center"><img src="/images/EL_BPI_BRITCERTIFIED_ICONS_MULTI_PLATINUM.png" alt="2x Platinum" class="w-full h-full object-contain"/></div></div></div><div class="card bg-primary text-primary-content shadow-md rounded-lg p-6 lg:row-span-1 flex flex-col"><p class="text-sm font-semibold mb-4">Release Date</p><div class="flex-grow flex items-center"><h3 class="text-3xl md:text-4xl font-bold">21 August 2015</h3></div></div><div class="card bg-base-200 shadow-md rounded-lg p-6 lg:row-span-1 flex flex-col"><p class="text-sm font-semibold mb-4">Corporate Group/Label</p><div class="flex-grow flex flex-col justify-center"><h3 class="text-3xl md:text-4xl font-bold">SONY MUSIC</h3><p class="text-xl md:text-1xl font-medium">MINISTRY OF SOUND</p></div></div><div class="card bg-primary text-primary-content shadow-md rounded-lg p-6 lg:row-span-1 flex flex-col"><p class="text-sm font-semibold mb-4">Most Recent Certification Date</p><div class="flex-grow flex items-center"><h3 class="text-3xl md:text-4xl font-bold">28 August 2026</h3></div></div></div><div class="card bg-base-200 shadow-md rounded-lg p-6"><p class="text-sm font-semibold mb-6">Certification history</p><div class="space-y-3 sm:space-y-4"><div class="bg-base-100 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6"><div class="flex-1 text-left min-w-0"><p class="font-bold text-sm sm:text-base md:text-lg whitespace-nowrap">28 August 2026</p></div><div class="flex-shrink-0"><p class="font-bold text-base sm:text-lg truncate">2x Platinum</p></div><div class="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24"><img src="/images/EL_BPI_BRITCERTIFIED_ICONS_MULTI_PLATINUM.png" alt="2x Platinum" class="w-full h-full object-contain"/></div></div><div class="bg-base-100 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6"><div class="flex-1 text-left min-w-0"><p class="font-bold text-sm sm:text-base md:text-lg whitespace-nowrap">24 June 2016</p></div><div class="flex-shrink-0"><p class="font-bold text-base sm:text-lg truncate">Platinum</p></div><div class="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24"><img src="/images/EL_BPI_BRITCERTIFIED_ICONS_PLATINUM.png" alt="Platinum" class="w-full h-full object-contain"/></div></div><div id="middle-awards" class="hidden space-y-3 sm:space-y-4"><div class="bg-base-100 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6"><div class="flex-1 text-left min-w-0"><p class="font-bold text-sm sm:text-base md:text-lg whitespace-nowrap">04 December 2015</p></div><div class="flex-shrink-0"><p class="font-bold text-base sm:text-lg truncate">Gold</p></div><div class="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24"><img src="/images/EL_BPI_BRITCERTIFIED_ICONS_GOLD.png" alt="Gold" class="w-full h-full object-contain"/></div></div></div><div class="flex justify-center"><button id="toggle-history-btn" class="btn btn-ghost text-base sm:text-lg font-semibold" onclick="
+                  const middleAwards = document.getElementById(&#39;middle-awards&#39;);
+                  const bottomAward = document.getElementById(&#39;bottom-award&#39;);
+                  const icon = document.getElementById(&#39;toggle-icon&#39;);
+                  const text = document.getElementById(&#39;toggle-text&#39;);
+                  
+                  if (middleAwards.classList.contains(&#39;hidden&#39;)) {
+                    middleAwards.classList.remove(&#39;hidden&#39;);
+                    icon.style.transform = &#39;rotate(180deg)&#39;;
+                    text.textContent = &#39;Show less&#39;;
+                  } else {
+                    middleAwards.classList.add(&#39;hidden&#39;);
+                    icon.style.transform = &#39;rotate(0deg)&#39;;
+                    text.textContent = &#39;Show 1 more&#39;;
+                  }
+                "><span id="toggle-text">Show 1 more</span><svg id="toggle-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" class="w-5 h-5 sm:w-6 sm:h-6 ml-2 transition-transform"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path></svg></button></div></div></div></div></main><div id="toast-container" class="toast toast-top toast-end z-[100]"></div><script>
+            document.addEventListener('DOMContentLoaded', function() {
+                document.body.addEventListener('showToast', function(evt) {
+                    var detail = evt.detail || {};
+                    var message = detail.message || 'Notification';
+                    var type = detail.type || 'info';
+                    var id = 'toast-' + Date.now();
+                    var alertClass = type === 'error' ? 'alert-error'
+                        : type === 'success' ? 'alert-success'
+                        : type === 'warning' ? 'alert-warning'
+                        : 'alert-info';
+
+                    var container = document.getElementById('toast-container');
+                    if (!container) return;
+
+                    var toast = document.createElement('div');
+                    toast.id = id;
+                    toast.className = 'alert ' + alertClass + ' shadow-lg animate-slide-in-right max-w-md mb-2';
+                    toast.innerHTML = '<span>' + message + '</span>' +
+                        '<button class="btn btn-sm btn-ghost btn-circle" onclick="document.getElementById(\'' + id + '\').remove()" aria-label="Close">✕</button>';
+
+                    container.appendChild(toast);
+
+                    setTimeout(function() {
+                        var toastEl = document.getElementById(id);
+                        if (toastEl) {
+                            toastEl.style.opacity = '0';
+                            toastEl.style.transition = 'opacity 0.3s ease-out';
+                            setTimeout(function() { toastEl.remove(); }, 300);
+                        }
+                    }, 5000);
+                });
+            });
+        </script><button id="back-to-top-btn" class="btn btn-primary btn-circle fixed bottom-4 right-4 z-50" onclick="window.scrollTo({top: 0, behavior: &#39;smooth&#39;})" aria-label="Back to top"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg></button></body></html>

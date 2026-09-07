@@ -5,6 +5,8 @@ forme lisible des certifications (emoji, texte, durées) vit ici.
 """
 
 _EMOJI_MAP = {
+    # BPI (UK) : palier SOUS l'or, propre à ce corps.
+    "Silver": "🥈",
     "Or": "🥇",
     "Double Or": "🥇🥇",
     "Triple Or": "🥇🥇🥇",

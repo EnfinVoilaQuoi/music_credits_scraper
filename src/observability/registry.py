@@ -75,6 +75,11 @@ DOMAIN_TO_KEY: dict[str, str] = {
     "api.getsong.co": "getsongbpm",
     "api.reccobeats.com": "reccobeats",
     "api.discogs.com": "discogs",
+    # BPI : la page publique `bpi.co.uk` n'est qu'une IFRAME (site Hivebrite) ;
+    # tout le trafic utile va au sous-domaine de l'application htmx. Les deux
+    # sont mappés, le second parce qu'il porte réellement les requêtes.
+    "certified-awards.bpi.co.uk": "bpi",
+    "bpi.co.uk": "bpi",
     # PIÈGE JUMEAU du précédent, mais INSOLUBLE par cette table : `spotify_embed`
     # et `spotify_web` tapent le MÊME hôte (seul le chemin `/embed/` les sépare) et
     # cassent pour des raisons sans rapport. L'entrée reste sur l'embed, qui est le
@@ -141,7 +146,12 @@ PROVIDER_TO_KEYS: dict[str, tuple[str, ...]] = {
 KEYS_WITHOUT_OWN_DOMAIN: frozenset[str] = frozenset({"spotify_web"})
 
 # ── Sources de certification (protocole `CertificationSource`, en MAJUSCULES) ──
-CERT_SOURCE_TO_KEY: dict[str, str] = {"SNEP": "snep", "RIAA": "riaa", "BRMA": "brma"}
+CERT_SOURCE_TO_KEY: dict[str, str] = {
+    "SNEP": "snep",
+    "RIAA": "riaa",
+    "BRMA": "brma",
+    "BPI": "bpi",
+}
 
 # ── Captures de `scripts/capture_fixtures.py` ─────────────────────────────────
 #: Rend enfin exécutable l'étape 2 de `BREAKAGE_PROCEDURE` (« re-capturer la
@@ -154,6 +164,9 @@ FIXTURE_TO_KEY: dict[str, str] = {
     "genius_song_page": "genius_scrape",
     "riaa_search": "riaa",
     "brma_year": "brma",
+    "bpi_list": "bpi",
+    "bpi_detail": "bpi",
+    "bpi_artists": "bpi",
     "lrclib_get": "lrclib",
     "getsongbpm_search": "getsongbpm",
 }

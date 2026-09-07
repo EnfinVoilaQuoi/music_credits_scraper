@@ -1,0 +1,489 @@
+"""Mise à jour des certifications BPI (Royaume-Uni) — CLI + brut → clean.
+
+Même chaîne que les trois autres organismes : un BRUT permanent qui accumule
+tout ce qu'on a vu, un CLEAN dérivé qui est le SEUL fichier lu par le matcher,
+et un sidecar de fraîcheur. Rien d'original ici, et c'est voulu.
+
+**Ce qui est propre à la BPI**, en revanche, tient en deux points :
+
+· `--full` existe, et les autres sources n'en ont pas besoin. La fenêtre de
+  dates du site ne filtre que la DERNIÈRE certification d'un titre : une ligne
+  réhaussée quitte la fenêtre de son palier d'origine. Un balayage par dates ne
+  reconstitue donc PAS l'historique, seul un balayage non filtré le donne.
+
+· La clé de dédup est le triplet d'ids STABLES (format, artiste, titre) plus le
+  palier et sa date, là où les trois autres sources se rabattent sur des clés
+  textuelles. La dédup reste ADDITIVE : le niveau étant dans la clé, les paliers
+  successifs d'un même titre coexistent au lieu de s'écraser.
+
+Lancement (la GUI l'appelle en sous-processus) :
+
+    python -u src/utils/update_bpi.py --auto
+    python -u src/utils/update_bpi.py --artist "Shurik'N" --artist IAM
+    python -u src/utils/update_bpi.py --from 2020-01-01 --to 2020-01-31
+    python -u src/utils/update_bpi.py --full
+    python -u src/utils/update_bpi.py --clean --dry-run
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import pandas as pd
+
+from src.concurrency import async_loop
+from src.observability import repository as usage_repository
+from src.observability.registry import Flow
+from src.scrapers.bpi_scraper import PAR_PAGE, BpiScraper
+from src.utils import cert_clean_report
+from src.utils.cert_normalize import bpi_level, bpi_units
+from src.utils.logger import get_logger
+
+if sys.stdout and "pytest" not in sys.modules:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+logger = get_logger(__name__)
+
+_BPI_DIR = Path(__file__).parent.parent.parent / "data" / "certifications" / "bpi"
+CERTIF_CSV = _BPI_DIR / "certif_bpi.csv"  # CLEAN (lu par le matcher)
+BPI_RAW = _BPI_DIR / "bpi_raw.csv"  # BRUT permanent (union des scrapes)
+BPI_META = _BPI_DIR / "metadata.json"  # fraîcheur (sidecar)
+
+CERTIF_COLUMNS = [
+    "artist",
+    "title",
+    "category",
+    "certification_level",
+    "certification_date",
+    "release_date",
+    "label",
+    # `units` : ce que vaut le palier POUR CE FORMAT. Calculée ici et écrite,
+    # pas jetée à la frontière du CSV — c'est exactement ce que faisait le
+    # scraper RIAA, et c'est pourquoi son erreur d'échelle est restée invisible
+    # des années. Un Silver d'album (60 000) et un Silver de single (200 000)
+    # portent le même mot sans valoir la même chose.
+    "units",
+    # Identité STABLE de la ligne côté source. C'est elle qui fait la clé de
+    # dédup, bien plus sûre que les clés textuelles des trois autres sources.
+    "format_id",
+    "artist_id",
+    "title_id",
+    "detail_url",
+    "scraped_at",
+]
+
+
+# ── Brut / clean ──────────────────────────────────────────────────────────────
+def _texte(valeur) -> str:
+    """Valeur → texte, l'absence donnant «  » et jamais « None » ni « nan ».
+
+    Un `str(None)` qui produit la chaîne « None » est le genre de littéral qui
+    finit par se retrouver dans un CSV puis affiché à l'utilisateur — le projet
+    en a déjà nettoyé une génération à la frontière DB→objet.
+    """
+    if valeur is None or (isinstance(valeur, float) and pd.isna(valeur)):
+        return ""
+    return str(valeur).strip()
+
+
+def _align_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Restreint/complète aux CERTIF_COLUMNS et RAMÈNE TOUT AU TEXTE.
+
+    La coercition n'est pas cosmétique, c'est ce qui rend l'accumulation
+    idempotente : le brut est relu depuis un CSV, donc en `str`, alors que les
+    lignes fraîches du scraper portent de vrais entiers (`format_id`,
+    `artist_id`, `title_id`, `units`). Sans normalisation commune, la dédup
+    EXACTE de `_merge_certif_csv` ne reconnaît pas ses propres lignes et le brut
+    double à chaque ré-import — en silence, puisque le clean, lui, dédoublonne
+    sur sa clé métier et reste juste.
+    """
+    df = df[[c for c in df.columns if c in CERTIF_COLUMNS]].copy()
+    for col in CERTIF_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    df = df[CERTIF_COLUMNS]
+    return df.apply(lambda colonne: colonne.map(_texte))
+
+
+def _load_bpi_raw() -> pd.DataFrame:
+    """Brut permanent. Seedé depuis le clean au premier appel (meilleur dispo)."""
+    for chemin in (BPI_RAW, CERTIF_CSV):
+        if chemin.exists():
+            return _align_columns(pd.read_csv(chemin, encoding="utf-8-sig", dtype=str).fillna(""))
+    return pd.DataFrame(columns=CERTIF_COLUMNS)
+
+
+def _write_bpi_raw(df: pd.DataFrame) -> None:
+    """Écrit le brut, backup horodaté avant toute réécriture."""
+    _BPI_DIR.mkdir(parents=True, exist_ok=True)
+    if BPI_RAW.exists():
+        bdir = _BPI_DIR / "backups"
+        bdir.mkdir(exist_ok=True)
+        shutil.copy2(BPI_RAW, bdir / f"bpi_raw_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    df.to_csv(BPI_RAW, index=False, encoding="utf-8-sig")
+
+
+def _norm(valeur) -> str:
+    return re.sub(r"\s+", " ", str(valeur or "")).strip().upper()
+
+
+def _cle_dedup(df: pd.DataFrame) -> pd.Series:
+    """Identité métier d'une ligne.
+
+    Le triplet d'ids quand la source l'a donné ; sinon un repli textuel, pour
+    que les lignes d'un parseur dégradé ne se dédoublonnent pas toutes ensemble
+    sur « 0|0|0 ».
+
+    **Le palier fait partie de la clé** : c'est ce qui rend la dédup ADDITIVE et
+    préserve l'historique d'un titre réhaussé, exactement comme sur les trois
+    autres sources.
+    """
+    ids = (
+        df["format_id"].map(_norm)
+        + "|"
+        + df["artist_id"].map(_norm)
+        + "|"
+        + df["title_id"].map(_norm)
+    )
+    textuel = (
+        df["artist"].map(_norm) + "|" + df["title"].map(_norm) + "|" + df["category"].map(_norm)
+    )
+    identite = ids.where(~ids.isin(["0|0|0", "||"]), textuel)
+    return (
+        identite
+        + "|"
+        + df["certification_level"].map(lambda x: _norm(bpi_level(x)))
+        + "|"
+        + df["certification_date"].map(_norm)
+    )
+
+
+def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.DataFrame:
+    """Dérive le CLEAN : retire les lignes creuses, canonise, dédoublonne, trie.
+
+    `report` recueille le DÉTAIL de ce qui a été fait — sans lui, un nettoyage ne
+    dit qu'une chose (« X → Y lignes »), ce qui ne permet ni de valider avant
+    d'appliquer, ni de comprendre après coup d'où vient l'écart.
+    """
+    df = _align_columns(raw_df)
+
+    vides = df[(df["artist"].str.strip() == "") | (df["title"].str.strip() == "")]
+    if report is not None:
+        report["empty_removed"] = len(vides)
+        report["empty_examples"] = [
+            f"{r.artist!r} — {r.title!r} ({r.certification_date})"
+            for r in vides.head(8).itertuples()
+        ]
+    df = df.drop(vides.index)
+
+    if report is not None:
+        report["level_changes"] = _compter_changements(df["certification_level"], bpi_level)
+    df["certification_level"] = df["certification_level"].map(bpi_level)
+
+    # Les unités sont RECALCULÉES à chaque nettoyage : elles dérivent du couple
+    # (niveau, format) et n'ont pas à être une donnée de saisie qu'on traînerait.
+    df["units"] = [
+        str(bpi_units(niv, format_type=cat) or "")
+        for niv, cat in zip(df["certification_level"], df["category"], strict=False)
+    ]
+
+    avant = len(df)
+    df = df.assign(_k=_cle_dedup(df)).drop_duplicates("_k", keep="first").drop(columns="_k")
+    if report is not None:
+        report["duplicates_removed"] = avant - len(df)
+
+    return df.sort_values(
+        ["artist", "title", "certification_date"], kind="stable", ignore_index=True
+    )
+
+
+def _compter_changements(colonne, canoniser) -> dict[str, int]:
+    """{« brut → canonique »: n} pour les valeurs que `canoniser` modifierait."""
+    change: dict[str, int] = {}
+    for brut in colonne:
+        canon = canoniser(brut)
+        if canon != brut:
+            cle = f"{brut} → {canon}"
+            change[cle] = change.get(cle, 0) + 1
+    return change
+
+
+def _write_bpi_meta(source: str = "GLOBAL", count: int | None = None) -> None:
+    """Sidecar de fraîcheur (updates par source), aligné sur SNEP/BRMA/RIAA."""
+    meta: dict = {}
+    if BPI_META.exists():
+        try:
+            meta = json.loads(BPI_META.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+    now = datetime.now().isoformat()
+    updates = meta.get("updates") or {}
+    updates[source] = now
+    if count is None and CERTIF_CSV.exists():
+        try:
+            count = len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str))
+        except (OSError, ValueError):
+            count = meta.get("count")
+    meta.update({"last_update": now, "last_source": source, "count": count, "updates": updates})
+    _BPI_DIR.mkdir(parents=True, exist_ok=True)
+    BPI_META.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+#: Colonnes qui font l'identité d'une ligne du BRUT — c'est-à-dire toutes SAUF
+#: la date de collecte. `scraped_at` est de la provenance, pas de la donnée : le
+#: laisser dans la dédup fait que deux scrapes du même jour produisent deux
+#: lignes différant d'une seconde, et le brut DOUBLE à chaque ré-import. Le
+#: clean, lui, resterait juste (il dédoublonne sur sa clé métier), donc le
+#: gonflement passerait inaperçu — mesuré sur un vrai run : 18 lignes devenues
+#: 36 alors que les tests unitaires étaient verts, faute d'y avoir mis un
+#: `scraped_at`.
+_COLONNES_IDENTITE = [c for c in CERTIF_COLUMNS if c != "scraped_at"]
+
+
+def _merge_certif_csv(new_rows: list[dict], source: str = "GLOBAL") -> tuple[int, int]:
+    """Accumule dans le BRUT (dédup hors provenance) puis dérive le CLEAN.
+
+    Retourne (total_clean, ajoutées_au_brut).
+
+    **Aucune ligne = aucune écriture, et surtout aucun horodatage.** C'est le
+    garde-fou G6 : la RIAA horodatait sa fraîcheur sur un run vide, si bien que
+    deux mois de panne se sont lus comme deux mois de succès.
+    """
+    if not new_rows:
+        return (0, 0)
+
+    new_df = _align_columns(pd.DataFrame(new_rows))
+    raw = _load_bpi_raw()
+
+    # Le brut est d'abord dédoublonné SUR LUI-MÊME, avant la fusion. Sans cette
+    # étape, « ajoutées » mélangeait deux mouvements de sens contraire et
+    # pouvait sortir NÉGATIF (mesuré : « -18 ajoutée(s) » en réparant un brut
+    # gonflé). Un compteur qui agrège un ajout et une purge n'apprend rien ;
+    # deux compteurs disent ce qui s'est passé.
+    avant = len(raw)
+    if not raw.empty:
+        raw = raw.drop_duplicates(subset=_COLONNES_IDENTITE, keep="first", ignore_index=True)
+    purgees = avant - len(raw)
+    if purgees:
+        logger.warning(f"BPI : {purgees} doublon(s) purgé(s) du brut au passage")
+
+    combine = (
+        pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
+    ).drop_duplicates(subset=_COLONNES_IDENTITE, keep="first", ignore_index=True)
+    ajoutees = len(combine) - len(raw)
+    _write_bpi_raw(combine)
+
+    clean = _clean_from_raw(combine)
+    if CERTIF_CSV.exists():
+        bdir = _BPI_DIR / "backups"
+        bdir.mkdir(exist_ok=True)
+        shutil.copy2(CERTIF_CSV, bdir / f"certif_bpi_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
+    _write_bpi_meta(source=source, count=len(clean))
+
+    from src.utils.cert_matcher import reset_cert_matcher
+
+    reset_cert_matcher()
+    return (len(clean), ajoutees)
+
+
+# ── Exécution des scrapes ─────────────────────────────────────────────────────
+def _collecte(travail) -> list[dict]:
+    """Lance `travail(scraper)` sur LA boucle applicative et ferme la session.
+
+    Un seul chemin async, pas de jumeau sync : c'est la voie que la production
+    emprunte, donc la seule que les tests aient à couvrir. Deux voies jumelles
+    ont déjà laissé un garde-fou sur celle que personne n'emprunte.
+    """
+
+    async def _run():
+        scraper = BpiScraper()
+        try:
+            return await travail(scraper)
+        finally:
+            await scraper.aclose()
+
+    return async_loop.run_sync(_run())
+
+
+def _horodater(lignes: list[dict]) -> list[dict]:
+    marque = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for ligne in lignes:
+        ligne.setdefault("scraped_at", marque)
+        ligne["units"] = bpi_units(
+            ligne.get("certification_level", ""), format_type=ligne.get("category", "")
+        )
+    return lignes
+
+
+def fetch_artists(noms: list[str]) -> bool:
+    """Certifications BPI d'un ou plusieurs artistes (avec paliers datés).
+
+    `--artist` est RÉPÉTABLE : un membre de groupe est crédité sous son nom ET
+    sous celui de sa formation, chercher un seul des deux ampute la moitié de sa
+    discographie certifiée.
+    """
+
+    async def travail(scraper):
+        sorties: list[dict] = []
+        for nom in noms:
+            print(f"--- BPI : {nom}")
+            sorties.extend(await scraper.scrape_by_artist(nom, get_details=True))
+        return sorties
+
+    lignes = _horodater(_collecte(travail))
+    if not lignes:
+        print("❌ Aucune certification BPI trouvée pour ces artistes")
+        return False
+    total, ajoutees = _merge_certif_csv(lignes, source="ARTIST")
+    print(f"✅ BPI : {len(lignes)} vue(s), {ajoutees} ajoutée(s) au brut (clean : {total})")
+    return True
+
+
+def fetch_periode(debut: str, fin: str) -> bool:
+    """Rescrape une fenêtre PRÉCISE (dates de dernière certification).
+
+    ⚠️ Ne reconstitue pas l'historique : un titre réhaussé depuis ne ressort pas
+    dans la fenêtre de son palier d'origine. Pour l'historique, `--full`.
+    """
+    print(f"=== BPI, période {debut} → {fin} ===")
+    lignes = _horodater(_collecte(lambda s: s.scrape_by_date_range(debut, fin, get_details=True)))
+    if not lignes:
+        # G6 : on ne consigne RIEN. Une période réellement vide et un accès cassé
+        # se ressemblent ; horodater les confondrait pour toujours.
+        print("❌ Aucune certification vue — période réellement vide, ou source cassée")
+        return False
+    total, ajoutees = _merge_certif_csv(lignes, source="SCRAPE")
+    print(f"✅ {len(lignes)} vue(s), {ajoutees} ajoutée(s) (clean : {total})")
+    return True
+
+
+def update_auto(months: int = 1) -> bool:
+    """Fenêtre glissante des N derniers mois."""
+    fin = datetime.now().date()
+    debut = fin - timedelta(days=31 * max(1, months))
+    return fetch_periode(debut.isoformat(), fin.isoformat())
+
+
+def full_sweep(get_details: bool = True) -> bool:
+    """Balayage COMPLET du corpus — la reprise initiale.
+
+    ~26 500 lignes sur ~1 105 pages au 2026-09-07, plus une page de détail par
+    titre dont le dernier palier n'est pas Silver (Silver étant le plancher, ces
+    titres n'ont qu'un palier par construction).
+    """
+    print("=== BPI : balayage COMPLET (long — ~1 100 pages + les détails) ===")
+    lignes = _horodater(_collecte(lambda s: s.scrape_all(get_details=get_details)))
+    if not lignes:
+        print("❌ Balayage vide — la source est cassée (le corpus n'est jamais vide)")
+        return False
+    titres = len({(r["format_id"], r["artist_id"], r["title_id"]) for r in lignes})
+    print(
+        f"   {titres} titre(s) distinct(s), {len(lignes)} palier(s) — soit ~{titres / PAR_PAGE:.0f} pages"
+    )
+    total, ajoutees = _merge_certif_csv(lignes, source="GLOBAL")
+    print(f"✅ {ajoutees} ligne(s) ajoutée(s) au brut (clean : {total})")
+    return True
+
+
+# ── Nettoyage ─────────────────────────────────────────────────────────────────
+def clean_certif_csv(apply: bool = True) -> dict:
+    """Régénère le clean depuis le brut. `apply=False` = DRY-RUN."""
+    report = cert_clean_report.rapport_vierge(CERTIF_CSV)
+    raw = _load_bpi_raw()
+    report["rows_in"] = len(raw)
+    clean = _clean_from_raw(raw, report)
+    report["rows_out"] = len(clean)
+    report["deja_propre"], report["lignes_modifiees"] = cert_clean_report.comparer_au_fichier(
+        clean, CERTIF_CSV
+    )
+    if apply and not clean.empty:
+        if CERTIF_CSV.exists():
+            bdir = _BPI_DIR / "backups"
+            bdir.mkdir(exist_ok=True)
+            sauvegarde = bdir / f"certif_bpi_backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
+            shutil.copy2(CERTIF_CSV, sauvegarde)
+            report["backup"] = str(sauvegarde)
+        clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
+        _write_bpi_meta(source="CLEAN", count=len(clean))
+        report["applied"] = True
+    return report
+
+
+def format_clean_report(report: dict) -> str:
+    """Rendu par le formateur UNIQUE des trois sources (`cert_clean_report`)."""
+    return cert_clean_report.render(
+        report,
+        titre="NETTOYAGE BPI",
+        counters=[
+            ("Lignes en entrée (brut)", report.get("rows_in", 0)),
+            ("Lignes en sortie (clean)", report.get("rows_out", 0)),
+            ("Lignes creuses retirées", report.get("empty_removed", 0)),
+            ("Doublons retirés", report.get("duplicates_removed", 0)),
+        ],
+        sections=[("Niveaux canonisés", report.get("level_changes", {}))],
+        examples=[("Lignes creuses", report.get("empty_examples", []))],
+        note_dry_run="Relancer sans --dry-run pour appliquer.",
+    )
+
+
+def stats() -> None:
+    if not CERTIF_CSV.exists():
+        print("Aucun CSV BPI — lancer --full pour la reprise initiale.")
+        return
+    df = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna("")
+    print(f"=== BPI : {len(df)} certification(s) ===")
+    print(f"Artistes distincts : {df['artist'].nunique()}")
+    for colonne in ("category", "certification_level"):
+        print(f"\n{colonne} :")
+        for valeur, n in df[colonne].value_counts().head(12).items():
+            print(f"  {valeur or '(vide)':20} {n}")
+    dates = df["certification_date"][df["certification_date"] != ""]
+    if not dates.empty:
+        print(f"\nPériode couverte : {dates.min()} → {dates.max()}")
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+def main() -> int:
+    parseur = argparse.ArgumentParser(description="Certifications BPI (UK)")
+    parseur.add_argument("--auto", action="store_true", help="fenêtre des N derniers mois")
+    parseur.add_argument("--months", type=int, default=1)
+    parseur.add_argument("--full", action="store_true", help="balayage complet (reprise initiale)")
+    parseur.add_argument("--artist", action="append", default=[], help="répétable")
+    parseur.add_argument("--from", dest="debut", default="", help="AAAA-MM-JJ")
+    parseur.add_argument("--to", dest="fin", default="", help="AAAA-MM-JJ")
+    parseur.add_argument("--clean", action="store_true")
+    parseur.add_argument("--dry-run", action="store_true")
+    parseur.add_argument("--stats", action="store_true")
+    args = parseur.parse_args()
+
+    try:
+        if args.clean:
+            print(format_clean_report(clean_certif_csv(apply=not args.dry_run)))
+            return 0
+        if args.stats:
+            stats()
+            return 0
+        if args.artist:
+            return 0 if fetch_artists(args.artist) else 1
+        if args.debut and args.fin:
+            return 0 if fetch_periode(args.debut, args.fin) else 1
+        if args.full:
+            return 0 if full_sweep() else 1
+        if args.auto:
+            return 0 if update_auto(args.months) else 1
+        parseur.print_help()
+        return 0
+    finally:
+        async_loop.shutdown()
+
+
+if __name__ == "__main__":
+    with usage_repository.script_scope(Flow.CERTS):
+        sys.exit(main())

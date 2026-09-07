@@ -28,6 +28,7 @@ data/certifications/brma/backups/*
 data/certifications/brma/logs/*
 data/certifications/brma/reports/*
 data/certifications/riaa/backups/*
+data/certifications/bpi/backups/*
 data/certifications/snep/certif-backup-*.csv
 # Backup du CSV canonique, cree par la purge des fantomes (snep_build.rebuild)
 data/certifications/snep/certif_snep-backup-*.csv

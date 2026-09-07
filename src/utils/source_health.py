@@ -233,6 +233,46 @@ def _probe_ytmusic() -> list[str]:
     return []
 
 
+def _probe_bpi() -> list[str]:
+    """Rejoue le VRAI transport BPI : en-tête htmx + tableau nommé.
+
+    Une sonde qui taperait simplement l'URL rendrait 200 même parseur mort : sans
+    `HX-Request`, le site sert la coquille de l'application, sans la moindre
+    ligne. Elle ne mesurerait donc RIEN — exactement le reproche fait aux sondes
+    RIAA et BRMA, qui ne peuvent pas voir un parseur cassé.
+
+    Ici on peut faire mieux pour trois fois rien : on demande une fenêtre d'un
+    jour et on vérifie les en-têtes attendus. C'est le garde-fou G1 du scraper,
+    joué en sonde.
+    """
+    import httpx
+
+    from src.scrapers import bpi_scraper
+
+    url = bpi_scraper.BpiScraper().url_liste(debut="2020-01-24", fin="2020-01-24")
+    try:
+        reponse = httpx.get(
+            url,
+            headers={**bpi_scraper._UA, **bpi_scraper._HX},
+            timeout=20,
+            follow_redirects=True,
+        )
+    except httpx.HTTPError as e:
+        return [f"requête impossible : {type(e).__name__}"]
+    if reponse.status_code != 200:
+        return [f"HTTP {reponse.status_code}"]
+
+    presents = bpi_scraper.entetes(reponse.text)
+    if not presents:
+        return ["aucun en-tête de tableau (en-tête HX ignoré, ou gabarit changé)"]
+    manquants = [n for n in bpi_scraper.ENTETES_ATTENDUES if n not in presents]
+    if manquants:
+        return [f"en-tête(s) manquant(s) : {manquants}"]
+    if not bpi_scraper.parse_liste(reponse.text):
+        return ["en-têtes corrects mais aucune ligne extraite"]
+    return []
+
+
 def _probe_discogs() -> list[str]:
     import os
 
@@ -400,6 +440,14 @@ SOURCES: list[SourceSpec] = [
         tolerate_403=True,
         notes="endpoint non officiel : peut bouger sans préavis",
         families=(Family.CREDITS,),
+    ),
+    SourceSpec(
+        key="bpi",
+        label="BPI / BRIT Certified (certifications UK)",
+        fast_probe=_probe_bpi,
+        full_probe=_probe_bpi,
+        notes="htmx server-rendered : GET nu + en-tête HX-Request, aucun navigateur",
+        families=(Family.CERTS,),
     ),
     SourceSpec(
         key="snep",

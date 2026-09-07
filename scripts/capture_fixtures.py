@@ -71,6 +71,25 @@ _LRCLIB_PARAMS = {  # /get exact : Josman — Dans le vide (album Matrix, 243 s 
 }
 _GETSONGBPM_LOOKUP = "song:Harder, Better, Faster, Stronger artist:Daft Punk"
 
+# BPI : fenêtre d'UN MOIS figée dans le passé. Le mois (et non le jour) parce
+# qu'il faut une page PLEINE — 24 lignes — pour que la fixture éprouve aussi la
+# pagination ; et le passé parce que la page d'accueil changerait toutes les
+# semaines et périmerait la fixture sans que rien n'ait cassé.
+_BPI_DEBUT, _BPI_FIN = "2020-01-01", "2020-01-31"
+# SIGALA — EASY LOVE : trois paliers datés dont UN replié derrière « Show 1 more »
+# (`div.hidden`). C'est précisément la page qui prouve qu'il ne faut pas se fier
+# au texte visible.
+_BPI_DETAIL = "/format/2/artist/3345/title/16392"
+_BPI_ARTISTE = "sigala"  # 18 entités : l'artiste dont le nom EST une famille d'ids
+
+
+def _bpi_liste_url() -> str:
+    """URL de recherche BPI, demandée AU SCRAPER (cf. `_riaa_artist_url`)."""
+    from src.scrapers.bpi_scraper import BpiScraper
+
+    return BpiScraper().url_liste(debut=_BPI_DEBUT, fin=_BPI_FIN)
+
+
 CAPTURES: list[dict] = [
     {
         "name": "kworb_artist_songs",
@@ -111,6 +130,24 @@ CAPTURES: list[dict] = [
         # (2026-09-06) et une URL recopiée ici se serait périmée en silence.
         "url": _riaa_artist_url(),
         "method": "riaa",
+    },
+    {
+        "name": "bpi_list",
+        "path": "bpi/bpi_list.html",
+        "url": _bpi_liste_url(),
+        "method": "bpi",
+    },
+    {
+        "name": "bpi_detail",
+        "path": "bpi/bpi_detail.html",
+        "url": f"https://certified-awards.bpi.co.uk{_BPI_DETAIL}",
+        "method": "bpi_nu",
+    },
+    {
+        "name": "bpi_artists",
+        "path": "bpi/bpi_artists.html",
+        "url": f"https://certified-awards.bpi.co.uk/artists?q={_BPI_ARTISTE}",
+        "method": "bpi_nu",
     },
     {
         "name": "brma_year",
@@ -221,6 +258,28 @@ def _fetch_ultratop(params: dict) -> str | None:
     return fetch_ultratop_html(params["year"], params["category"])
 
 
+def _fetch_bpi(url: str, *, hx: bool = True) -> str | None:
+    """GET nu + en-tête htmx. Aucun navigateur : le site est rendu côté serveur.
+
+    `hx=False` pour les pages complètes (détail, annuaire), qui n'attendent pas
+    l'en-tête — seul l'endpoint de résultats en dépend, et sans lui il rend une
+    coquille vide qu'on prendrait pour une page valide.
+    """
+    import httpx
+
+    from src.scrapers.bpi_scraper import _HX, _UA
+
+    try:
+        reponse = httpx.get(
+            url, headers={**_UA, **(_HX if hx else {})}, timeout=30, follow_redirects=True
+        )
+        reponse.raise_for_status()
+        return reponse.text
+    except httpx.HTTPError as e:
+        print(f"  ✗ BPI : {type(e).__name__}: {e}")
+        return None
+
+
 def _fetch_getsongbpm() -> str | None:
     api_key = os.getenv("GETSONGBPM_API_KEY")
     if not api_key:
@@ -264,6 +323,10 @@ def capture_one(entry: dict) -> bool:
         content = _fetch_riaa(entry["url"])
     elif method == "ultratop":
         content = _fetch_ultratop(entry["params"])
+    elif method == "bpi":
+        content = _fetch_bpi(entry["url"])
+    elif method == "bpi_nu":
+        content = _fetch_bpi(entry["url"], hx=False)
     elif method == "getsongbpm":
         content = _fetch_getsongbpm()
     else:

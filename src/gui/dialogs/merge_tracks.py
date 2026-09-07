@@ -245,7 +245,9 @@ class _ConflictDialog:
             justify="left",
             text="Les champs manquants de la fiche gardée seront complétés depuis l'autre,\n"
             "ses crédits transférés (sans doublons). L'autre fiche est supprimée\n"
-            "(backup DB automatique avant la fusion).",
+            "(backup DB automatique avant la fusion).\n"
+            "Le choix du « Lien YouTube » ne porte que sur la vidéo PRINCIPALE :\n"
+            "les vidéos des deux fiches sont réunies, aucune vue n'est perdue.",
         ).pack(anchor="w", padx=15)
 
         btns = ctk.CTkFrame(win, fg_color="transparent")

@@ -139,6 +139,15 @@ class Settings(BaseSettings):
     # valeur récoltée sur la page d'un autre artiste compte comme fraîche.
     spotify_web_freshness_days: int = 14
 
+    # --- BPI (certifications UK) : plafond de pagination ---
+    # Le corpus fait ~26 500 lignes à 24 par page, soit ~1 105 pages (mesuré le
+    # 2026-09-07). Le plafond n'est PAS une limite de collecte mais un cran
+    # d'arrêt : il n'existe que pour qu'une pagination qui ne se terminerait plus
+    # (page N rendant éternellement des lignes) s'arrête au lieu de tourner sans
+    # fin. Le dépassement est SIGNALÉ, jamais silencieux. À relever si le corpus
+    # grossit — le franchir doit rester un événement, pas la normale.
+    bpi_max_pages: int = 1500
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, value: object) -> str:
@@ -211,6 +220,9 @@ RECCOBEATS_NOT_FOUND_TTL_DAYS = settings.reccobeats_not_found_ttl_days
 # Désambiguïsation canal YTM (gate d'identité)
 YTM_IDENTITY_MIN_MATCHED = settings.ytm_identity_min_matched
 YTM_IDENTITY_MIN_RATIO = settings.ytm_identity_min_ratio
+
+# BPI (cran d'arrêt de pagination)
+BPI_MAX_PAGES = settings.bpi_max_pages
 
 # Chemins dérivés (non configurables par l'environnement)
 DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"

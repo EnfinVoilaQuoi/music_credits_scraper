@@ -140,10 +140,20 @@ class RiaaCertificationSource(_FileCertificationSource):
     _meta = "metadata.json"
 
 
+class BpiCertificationSource(_FileCertificationSource):
+    """BPI 🇬🇧 — clean `certif_bpi.csv`, sidecar `metadata.json`."""
+
+    name = "BPI"
+    _subdir = "bpi"
+    _clean = "certif_bpi.csv"
+    _meta = "metadata.json"
+
+
 def all_certification_sources() -> list[CertificationSource]:
-    """Les 3 sources de certification, dans l'ordre d'affichage GUI."""
+    """Les 4 sources de certification, dans l'ordre d'affichage GUI."""
     return [
         SnepCertificationSource(),
         BrmaCertificationSource(),
         RiaaCertificationSource(),
+        BpiCertificationSource(),
     ]

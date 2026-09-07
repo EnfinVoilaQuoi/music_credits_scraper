@@ -7,7 +7,7 @@ cosmétique — sans le détail, on ne peut pas juger si un nettoyage a fait ce
 qu'il fallait, et l'utilisateur doit valider à l'aveugle une opération qui
 réécrit un fichier de plusieurs dizaines de milliers de lignes.
 
-Ce module ne contient QUE la mise en forme, partagée par les trois sources : un
+Ce module ne contient QUE la mise en forme, partagée par les quatre sources : un
 second formateur « du même genre mais pas tout à fait » finirait par diverger,
 et c'est précisément l'écart qu'on répare ici. Chaque nettoyeur reste maître de
 CE qu'il compte ; il décrit son rapport en trois listes (compteurs, sections de

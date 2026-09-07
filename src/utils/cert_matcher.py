@@ -81,6 +81,10 @@ _CAT_MAP = {
     "videos": "video",
     "vidéo": "video",
     "video": "video",
+    # BPI : le site écrit « Music DVDs » (au pluriel) pour ce que les trois
+    # autres sources appellent une vidéo.
+    "music dvds": "video",
+    "music dvd": "video",
 }
 
 _COUNTRY = {"SNEP": "FR", "BRMA": "BE", "RIAA": "US"}
@@ -112,6 +116,10 @@ _RANK = {
     "diamante": 4,
     "platino": 7,
     "oro": 10,
+    # BPI (UK) : le Silver est un palier SOUS l'or, que les trois autres corps
+    # n'ont pas. Il ne s'insère donc pas dans l'échelle existante, il la
+    # prolonge par le bas.
+    "silver": 11,
 }
 
 
@@ -160,6 +168,7 @@ class CertMatcher:
         rows += self._load_snep()
         rows += self._load_brma()
         rows += self._load_riaa()
+        rows += self._load_bpi()
         if not rows:
             return pd.DataFrame(
                 columns=[
@@ -248,6 +257,45 @@ class CertMatcher:
             )
         return rows
 
+    def _load_bpi(self) -> list[dict]:
+        """Charge les certifs BPI (UK) — « BRIT Certified ».
+
+        Schéma minuscule (`certif_bpi.csv`), le plus riche des quatre : il porte
+        la date de sortie, le label, l'URL de détail ET l'identité stable de la
+        ligne côté source. Seules les colonnes utiles au magasin sont reprises —
+        les ids servent à la dédup de l'updater, pas au rapprochement.
+        """
+        csv = Path(DATA_PATH) / "certifications" / "bpi" / "certif_bpi.csv"
+        if not csv.exists():
+            return []
+        try:
+            df = pd.read_csv(csv, encoding="utf-8-sig", dtype=str).fillna("")
+        except (OSError, ValueError) as e:  # pandas : ParserError herite de ValueError
+            logger.error(f"CertMatcher: chargement BPI impossible : {e}")
+            return []
+        rows = []
+        for _, r in df.iterrows():
+            artist = str(r.get("artist", "")).strip()
+            title = str(r.get("title", "")).strip()
+            rows.append(
+                {
+                    "artist_clean": self._norm(artist),
+                    "title_clean": self._norm(title),
+                    "cat": _norm_cat(r.get("category", "")),
+                    "level": str(r.get("certification_level", "")).strip(),
+                    "date": str(r.get("certification_date", "")).strip()[:10],
+                    "country": "GB",
+                    "body": "BPI",
+                    "flag": "🇬🇧",
+                    "artist_name": artist,
+                    "title": title,
+                    "release_date": str(r.get("release_date", "")).strip()[:10],
+                    "publisher": str(r.get("label", "")).strip(),
+                    "detail_url": str(r.get("detail_url", "")).strip(),
+                }
+            )
+        return rows
+
     def _load_riaa(self) -> list[dict]:
         """Charge les certifs RIAA (US). Fichier historique : certif_riaa.csv.
 
@@ -328,7 +376,7 @@ class CertMatcher:
         return self._cache_artiste[a]
 
     #: Ordre d'affichage des pays.
-    _ORDRE_PAYS = {"FR": 0, "BE": 1, "US": 2}
+    _ORDRE_PAYS = {"FR": 0, "BE": 1, "US": 2, "GB": 3}
     #: Le CORPS s'intercale entre le pays et le niveau : « RIAA Latin » partage
     #: le pays « US » avec « RIAA », mais son échelle est autre (Platino
     #: 60 000 unités contre 1 000 000). Sans ce cran, un Platino se rangerait à

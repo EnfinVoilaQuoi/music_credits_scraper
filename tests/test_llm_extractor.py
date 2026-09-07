@@ -242,3 +242,50 @@ def test_extraction_de_bout_en_bout(ollama):
     data = LLMExtractor().extract_json(build_credits_prompt("Produced by Kore"))
     assert data["credits"][0]["names"] == ["Kore"]
     assert json.dumps(data)  # sérialisable, donc exploitable en aval
+
+
+class TestSecoursApresPanne:
+    """La règle famille A : signaler PUIS sauver. **L'ordre EST le garde-fou.**
+
+    Elle n'existait qu'en commentaire chez kworb avant le 2026-09-07 ; BRMA
+    l'avait justement oubliée. Lui donner un nom ne sert à rien si personne ne
+    vérifie qu'elle tient : la couverture de LIGNES disait 100 % alors que
+    l'enchaînement n'était asserté nulle part.
+    """
+
+    class ObsEspion:
+        def __init__(self):
+            self.journal = []
+
+        def parse_error(self, detail):
+            self.journal.append(("signal", detail))
+
+    def test_le_signal_precede_le_sauvetage(self):
+        """Si le sauvetage passait d'abord, une extraction réussie pourrait
+        conduire à ne jamais signaler — et le site resterait cassé."""
+        from src.utils.llm_extractor import secours_apres_panne
+
+        obs = self.ObsEspion()
+
+        def extraire():
+            obs.journal.append(("sauvetage", None))
+            return [{"x": 1}]
+
+        resultat = secours_apres_panne(obs, "0 ligne parsée", extraire)
+
+        assert [etape for etape, _ in obs.journal] == ["signal", "sauvetage"]
+        assert resultat == [{"x": 1}]
+
+    def test_le_signal_est_pose_MEME_si_le_sauvetage_echoue(self):
+        from src.utils.llm_extractor import secours_apres_panne
+
+        obs = self.ObsEspion()
+        assert secours_apres_panne(obs, "gabarit changé", lambda: []) == []
+        assert obs.journal == [("signal", "gabarit changé")]
+
+    def test_le_detail_du_signal_est_transmis_verbatim(self):
+        from src.utils.llm_extractor import secours_apres_panne
+
+        obs = self.ObsEspion()
+        secours_apres_panne(obs, "207 ligne(s) candidate(s), aucune lue", lambda: [])
+        assert obs.journal[0][1] == "207 ligne(s) candidate(s), aucune lue"

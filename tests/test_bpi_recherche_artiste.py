@@ -302,3 +302,33 @@ class TestRequete:
         scraper.reponses["/"] = [PAGE_VIDE]
         run(scraper.scrape_all())
         assert scraper.appels[0][1]["sort"] == "artist.name asc"
+
+
+# ── Les verdicts d'absence ────────────────────────────────────────────────────
+class TestVerdictsDAbsence:
+    """`absent` doit être posé sciemment, jamais par défaut.
+
+    C'est le seul verdict exclu du numérateur des échecs, donc le seul capable
+    de rendre une panne muette — ces branches méritent d'être gelées.
+    """
+
+    def test_aucune_entite_pour_cet_artiste(self, scraper):
+        scraper.reponses["/artists"] = [""]
+        assert run(scraper.scrape_by_artist("Inconnu Total")) == []
+        # Aucune requête de résultats : sans id, il n'y a rien à demander.
+        assert [c for c, _, _ in scraper.appels if c == "/"] == []
+
+    def test_entites_trouvees_mais_aucune_certification(self, scraper):
+        scraper.reponses["/artists"] = [page_annuaire((1, "MOZART")), ""]
+        scraper.reponses["/"] = [PAGE_VIDE]
+        assert run(scraper.scrape_by_artist("Mozart")) == []
+        assert len([c for c, _, _ in scraper.appels if c == "/"]) == 1
+
+    def test_une_fenetre_sans_certification(self, scraper):
+        scraper.reponses["/"] = [PAGE_VIDE]
+        assert run(scraper.scrape_by_date_range("1900-01-01", "1900-12-31")) == []
+
+    def test_un_corpus_vide_est_anormal_mais_ne_leve_pas(self, scraper):
+        """Le corpus BPI n'est jamais vide ; on le signale sans planter."""
+        scraper.reponses["/"] = [PAGE_VIDE]
+        assert run(scraper.scrape_all()) == []

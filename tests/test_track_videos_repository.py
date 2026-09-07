@@ -221,3 +221,42 @@ class TestTitreDeLaVideo:
         data_manager.record_track_videos(track.id, [TrackVideo(video_id="aaaaaaaaaaa", views=5)])
         (lue,) = data_manager.get_track_videos(track.id)
         assert (lue.title, lue.views) == ("Donjon & 2h22", 5)
+
+
+class TestTitresInvisibles:
+    """`save_track` est le point de passage UNIQUE d'un titre vers la base : le
+    nettoyage y est posé, ce qui rend le doublon IMPOSSIBLE plutôt que réparable."""
+
+    def test_un_titre_pollue_est_enregistre_propre(self, data_manager):
+        artist = _artiste(data_manager)
+        track = Track(title="\u200bbank", artist=artist)
+        data_manager.save_track(track)
+
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.title == "bank"
+
+    def test_lobjet_en_memoire_est_corrige_lui_aussi(self, data_manager):
+        """Sans ça, l'objet et la base divergent jusqu'au prochain rechargement."""
+        artist = _artiste(data_manager)
+        track = Track(title="\u200bbank", artist=artist)
+        data_manager.save_track(track)
+        assert track.title == "bank"
+
+    def test_la_variante_polluee_retombe_sur_la_fiche_existante(self, data_manager):
+        """LE point : c'est ainsi que le doublon Josman ne peut plus naître."""
+        artist = _artiste(data_manager)
+        data_manager.save_track(Track(title="bank", artist=artist))
+        data_manager.save_track(Track(title="\u200b\u200bbank", artist=artist))
+
+        tracks = data_manager.get_artist_tracks(artist.id)
+        assert [t.title for t in tracks] == ["bank"]
+
+    def test_rename_track_nettoie_aussi(self, data_manager):
+        """Un titre collé depuis Genius emporte volontiers un invisible."""
+        artist = _artiste(data_manager)
+        track = Track(title="ancien", artist=artist)
+        data_manager.save_track(track)
+
+        assert data_manager.rename_track(track.id, "\u200bbank") is True
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.title == "bank"

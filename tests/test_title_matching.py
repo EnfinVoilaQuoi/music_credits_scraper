@@ -7,6 +7,8 @@ import pytest
 
 from src.utils.title_matching import (
     base_album_key,
+    clean_display_title,
+    clean_stored_title,
     either_contains_as_words,
     names_match_as_words,
     normalize_name,
@@ -180,3 +182,54 @@ class TestEitherContainsAsWords:
     )
     def test_sous_chaine_intra_mot(self, a, b):
         assert either_contains_as_words(a, b) is False
+
+
+class TestCleanStoredTitle:
+    """Les caractères SANS LARGEUR fabriquent des doublons invisibles.
+
+    Genius en sème : « ​bank » (Josman) porte un `U+200B` en tête, et
+    « très tard le soir » en portait QUATRE — d'où deux fiches pour un seul
+    morceau, chacune détenant des données que l'autre n'avait pas (fusionnées à
+    la main le 2026-09-07). Comme l'unicité d'un morceau est
+    `UNIQUE(title, artist_id)`, l'œil ne voit rien et la base voit deux titres.
+    """
+
+    @pytest.mark.parametrize(
+        "sale, propre",
+        [
+            ("\u200bbank", "bank"),
+            ("\u200b\u200b\u200b\u200btrès tard le soir", "très tard le soir"),
+            ("mi\u200bdi", "midi"),  # au milieu aussi
+            ("titre\ufeff", "titre"),  # BOM en fin
+            ("a\u200cb\u200dc\u2060d", "abcd"),  # liants et joint insécable
+        ],
+    )
+    def test_les_caracteres_sans_largeur_sont_retires(self, sale, propre):
+        assert clean_stored_title(sale) == propre
+
+    def test_un_titre_propre_est_rendu_tel_quel(self):
+        assert clean_stored_title("Bande organisée") == "Bande organisée"
+
+    def test_les_espaces_de_bordure_sont_coupes(self):
+        assert clean_stored_title("  bank  ") == "bank"
+
+    def test_rien(self):
+        assert clean_stored_title("") == ""
+        assert clean_stored_title(None) == ""
+
+    def test_les_decorations_barrees_RESTENT(self):
+        """Contrairement à `clean_display_title` : « F̶i̶e̶s̶t̶a̶ » est le titre
+        que Genius publie, il doit être stocké tel quel. Seul l'affichage le
+        déshabille."""
+        barre = "F\u0336i\u0336e\u0336s\u0336t\u0336a\u0336"
+        assert clean_stored_title(barre) == barre
+        assert clean_display_title(barre) == "Fiesta"
+
+    def test_laffichage_nettoie_AUSSI_les_invisibles(self):
+        assert clean_display_title("\u200bbank") == "bank"
+
+    def test_ne_touche_ni_a_la_casse_ni_a_la_ponctuation(self):
+        """C'est `normalize_title` qui écrase tout ça, et son résultat est
+        illisible : les deux fonctions ne servent pas au même usage."""
+        assert clean_stored_title("S.O.A.B (feat. X)") == "S.O.A.B (feat. X)"
+        assert normalize_title("S.O.A.B (feat. X)") == "soab"

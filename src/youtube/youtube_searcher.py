@@ -10,8 +10,55 @@ from ytmusicapi.exceptions import YTMusicError
 
 from src.config import DATA_DIR, YOUTUBE_CACHE_TTL_HOURS
 from src.utils.logger import get_logger
+from src.utils.title_matching import normalize_name, normalize_title
 
 logger = get_logger(__name__)
+
+
+def cache_key(artist: str, title: str) -> str:
+    """Clé de cache d'une recherche. UN seul calcul, pour que la lecture,
+    l'écriture et la PURGE (rejet d'un lien) visent la même entrée."""
+    return f"{artist}::{title}".replace(" ", "_").lower()
+
+
+def relevance_score(
+    result_title: str, result_artists: list[str], target_artist: str, target_title: str
+) -> float:
+    """Pertinence d'un résultat de recherche, entre 0 et 1 (titre 60 %, artiste 40 %).
+
+    Fonction PURE, extraite de la méthode pour être mesurable hors réseau.
+
+    Les deux côtés sont NORMALISÉS avant comparaison (`title_matching`) : la
+    version brute comparait « S.O.A.B » à « SOAB », « Mauvaise Humeur » à
+    « Mauvaise Humeur (feat. Leto) » ou « ISHA » à « isha », et faisait donc
+    plafonner à 0,7-0,8 des paires PARFAITES — sous le seuil de persistance
+    (0,90), si bien que le lien n'était jamais enregistré et les vues de la
+    vidéo jamais comptées. Mesuré sur les 401 recherches du cache réel
+    (2026-09-07) : **77 meilleurs résultats remontent**, dont 72 de « < 0,85 »
+    à « ≥ 0,90 », et les exemples sont tous des appariements justes.
+
+    Compromis ASSUMÉ : `normalize_title` ampute les suffixes « feat. X » des
+    DEUX côtés — deux morceaux au même titre mais aux invités différents ne se
+    distinguent donc plus par le titre. C'est la part artiste qui les sépare, et
+    le cas des vrais homonymes reste traité en amont (`ambiguous` d'
+    `update_ytmusic`). Le seuil de persistance, lui, n'est PAS abaissé : la
+    contrepartie de ce relâchement est la validation humaine (✔️/✖️).
+    """
+    cible_titre = normalize_title(target_title)
+    title_similarity = difflib.SequenceMatcher(
+        None, cible_titre, normalize_title(result_title or "")
+    ).ratio()
+
+    cible_artiste = normalize_name(target_artist)
+    artist_similarity = max(
+        (
+            difflib.SequenceMatcher(None, cible_artiste, normalize_name(a)).ratio()
+            for a in result_artists
+        ),
+        default=0.0,
+    )
+
+    return (title_similarity * 0.6) + (artist_similarity * 0.4)
 
 
 class YouTubeSearcher:
@@ -57,8 +104,8 @@ class YouTubeSearcher:
         """Recherche principale avec cache et fallbacks"""
 
         # Vérifier le cache d'abord
-        cache_key = f"{artist}::{title}".replace(" ", "_").lower()
-        cached_result = self._get_cached_result(cache_key)
+        cle = cache_key(artist, title)
+        cached_result = self._get_cached_result(cle)
         if cached_result:
             logger.debug(f"Cache hit pour {artist} - {title}")
             return cached_result
@@ -85,9 +132,29 @@ class YouTubeSearcher:
         if results:
             results = sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True)
             # Mettre en cache
-            self._cache_result(cache_key, results)
+            self._cache_result(cle, results)
 
         return results
+
+    def forget(self, artist: str, title: str) -> bool:
+        """Oublie la recherche mise en cache pour ce couple artiste/titre.
+
+        Appelée quand l'utilisateur REJETTE un lien proposé automatiquement :
+        sans elle, la prochaine ouverture de la fiche reproposerait le même
+        mauvais résultat jusqu'à expiration du cache
+        (`YOUTUBE_CACHE_TTL_HOURS`), et le rejet donnerait l'impression de
+        n'avoir servi à rien.
+        """
+        try:
+            with sqlite3.connect(self.cache_db) as conn:
+                supprimees = conn.execute(
+                    "DELETE FROM youtube_search_cache WHERE query_hash = ?",
+                    (cache_key(artist, title),),
+                ).rowcount
+            return supprimees > 0
+        except (sqlite3.Error, OSError) as e:
+            logger.warning(f"Purge du cache YouTube échouée ({artist} - {title}): {e}")
+            return False
 
     def _search_with_ytmusic(self, artist: str, title: str, max_results: int) -> list[dict]:
         """Recherche avec ytmusicapi"""
@@ -186,30 +253,12 @@ class YouTubeSearcher:
     def _calculate_relevance_score(
         self, result: dict, target_artist: str, target_title: str
     ) -> float:
-        """Calcule un score de pertinence"""
-
-        result_title = result.get("title", "").lower()
-
-        # Récupérer les artistes
-        result_artists = []
-        for artist in result.get("artists", []):
-            if isinstance(artist, dict):
-                result_artists.append(artist.get("name", "").lower())
-            else:
-                result_artists.append(str(artist).lower())
-
-        # Similarité du titre
-        title_similarity = difflib.SequenceMatcher(None, target_title.lower(), result_title).ratio()
-
-        # Similarité de l'artiste
-        artist_similarity = 0
-        target_artist_lower = target_artist.lower()
-        for result_artist in result_artists:
-            similarity = difflib.SequenceMatcher(None, target_artist_lower, result_artist).ratio()
-            artist_similarity = max(artist_similarity, similarity)
-
-        # Score composite (titre 60%, artiste 40%)
-        return (title_similarity * 0.6) + (artist_similarity * 0.4)
+        """Score de pertinence d'un résultat ytmusicapi (délègue au calcul pur)."""
+        result_artists = [
+            (a.get("name", "") if isinstance(a, dict) else str(a))
+            for a in result.get("artists", [])
+        ]
+        return relevance_score(result.get("title", ""), result_artists, target_artist, target_title)
 
     def _get_best_thumbnail(self, thumbnails: list[dict]) -> str | None:
         """Récupère la meilleure thumbnail disponible"""

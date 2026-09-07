@@ -29,6 +29,7 @@ from src.utils.logger import get_logger
 
 # Extraction du video id : helper partagé (factorisé, cf. youtube_utils). Alias
 # privé conservé pour ne pas toucher les appelants internes.
+from src.utils.youtube_utils import artiste_de_recherche
 from src.utils.youtube_utils import extract_video_id as _extract_video_id
 
 logger = get_logger(__name__)
@@ -489,9 +490,12 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
             if not searcher:
                 continue
             try:
-                # Pour un feat, chercher sous l'artiste PRINCIPAL (meilleur rappel)
-                search_artist = (t.primary_artist_name if t.is_featuring else None) or artist.name
-                results = searcher.search_track(search_artist, t.title, max_results=5)
+                # Pour un feat, chercher sous l'artiste PRINCIPAL (meilleur rappel).
+                # Règle PARTAGÉE (`youtube_utils`) : c'est elle qui détermine la
+                # clé du cache de recherche, qu'un rejet doit pouvoir purger.
+                results = searcher.search_track(
+                    artiste_de_recherche(t, artist.name), t.title, max_results=5
+                )
                 best = results[0] if results else None
                 if (
                     best

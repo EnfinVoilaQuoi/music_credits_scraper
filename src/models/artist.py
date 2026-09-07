@@ -48,3 +48,25 @@ class Artist:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
+
+
+@dataclass
+class ArtistRelation:
+    """Un lien d'appartenance CONFIRMÉ entre deux artistes (table `artist_relations`, e22).
+
+    `kind` :
+      · `member_of`  — cet artiste est membre de `related_name` ;
+      · `has_member` — `related_name` est un de ses membres ;
+      · `alias`      — même personne, autre nom de scène.
+
+    `related_artist_id` peut être None : le groupe lié n'est pas forcément dans
+    notre base, et le lien vaut quand même. Les dates sont du TEXTE brut de la
+    source — MusicBrainz en rend des partielles (« 1989-10 »).
+    """
+
+    related_name: str = ""
+    kind: str = "member_of"
+    related_artist_id: int | None = None
+    source: str | None = None
+    begin_date: str | None = None
+    end_date: str | None = None

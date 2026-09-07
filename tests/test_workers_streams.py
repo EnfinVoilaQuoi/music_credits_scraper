@@ -9,6 +9,8 @@ d'identité. Sorti en fonction pure (`build_summary`) le 2026-09-05.
 Le module s'importe sans display — aucun widget n'est construit ici.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 import src.gui.workers.streams as ws
@@ -391,3 +393,34 @@ class TestCanalYtm:
 
     def test_sans_saisie_aucune_resolution(self, harnais, monkeypatch):
         assert self._lancer(harnais, monkeypatch, "UC123", brut="") == []
+
+
+class TestIdsDesMorceauxCoches:
+    """`app.selected_tracks` porte des INDEX de la vue, pas des identifiants.
+
+    Les passer tels quels aux updaters filtrerait sur des numéros de ligne,
+    c'est-à-dire sur les mauvais morceaux — une confusion silencieuse : le run
+    se déroulerait normalement et écrirait ailleurs.
+    """
+
+    class _Artiste:
+        def __init__(self, ids):
+            self.tracks = [SimpleNamespace(id=i) for i in ids]
+
+    def test_les_index_sont_traduits_en_identifiants(self):
+        artiste = self._Artiste([101, 202, 303])
+        assert ws.ids_des_morceaux_coches(artiste, {0, 2}) == {101, 303}
+
+    def test_aucune_selection(self):
+        assert ws.ids_des_morceaux_coches(self._Artiste([101]), set()) == set()
+        assert ws.ids_des_morceaux_coches(self._Artiste([101]), None) == set()
+
+    def test_sans_artiste(self):
+        assert ws.ids_des_morceaux_coches(None, {0}) == set()
+
+    def test_un_index_hors_limites_est_ecarte(self):
+        """La vue a pu être rechargée depuis que la case a été cochée."""
+        assert ws.ids_des_morceaux_coches(self._Artiste([101]), {0, 5}) == {101}
+
+    def test_un_morceau_jamais_enregistre_est_ecarte(self):
+        assert ws.ids_des_morceaux_coches(self._Artiste([None, 202]), {0, 1}) == {202}

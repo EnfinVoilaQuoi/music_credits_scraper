@@ -28,6 +28,25 @@ def _stream_sources() -> tuple[str, ...]:
     return (master, *(s for s in _STREAM_SOURCES if s != master))
 
 
+def ids_des_morceaux_coches(artist, indices) -> set[int]:
+    """Identifiants des morceaux cochés dans la vue.
+
+    `app.selected_tracks` porte des INDEX de la liste affichée, pas des
+    identifiants : les passer tels quels aux updaters filtrerait sur des
+    numéros de ligne, c'est-à-dire sur les mauvais morceaux. Un index hors
+    limites (vue rechargée entre-temps) ou un morceau jamais enregistré (pas
+    d'`id`) est écarté plutôt que de faire échouer le lancement.
+    """
+    if not artist or not indices:
+        return set()
+    tracks = artist.tracks or []
+    retenus = set()
+    for i in indices:
+        if 0 <= i < len(tracks) and tracks[i].id is not None:
+            retenus.add(tracks[i].id)
+    return retenus
+
+
 def start_streams_update(app):
     """Ouvre le dialog de récupération des streams Spotify + YouTube Music."""
     if not app.current_artist:
@@ -35,7 +54,7 @@ def start_streams_update(app):
 
     dialog = ctk.CTkToplevel(app.root)
     dialog.title("Nb Streams")
-    dialog.geometry("420x380")
+    dialog.geometry("460x470")
     dialog.resizable(False, False)
     dialog.transient(app.root)
     dialog.grab_set()
@@ -69,22 +88,62 @@ def start_streams_update(app):
         anchor="w", padx=40, pady=4
     )
 
+    # Limiter aux morceaux cochés : le quota YouTube et les écritures ne portent
+    # que sur eux. Le parcours du canal reste entier (le gate d'identité en a
+    # besoin) — c'est pourquoi la case ne dit pas « ne traiter que ».
+    coches = ids_des_morceaux_coches(app.current_artist, app.selected_tracks)
+    limiter_var = ctk.BooleanVar(value=False)
+    case_limiter = ctk.CTkCheckBox(
+        dialog,
+        text=f"Limiter aux {len(coches)} morceau(x) coché(s) — YouTube Music",
+        variable=limiter_var,
+    )
+    case_limiter.pack(anchor="w", padx=40, pady=(12, 4))
+    if not coches:
+        case_limiter.configure(
+            state="disabled", text="Limiter aux morceaux cochés — aucun n'est coché"
+        )
+
     # Canal YTM épinglé (résout les homonymes : @handle, lien ou UC...)
     ctk.CTkLabel(
         dialog, text="Canal YTM (optionnel — @handle, lien ou UC...) :", font=ctk.CTkFont(size=11)
     ).pack(anchor="w", padx=40, pady=(10, 2))
     ytm_channel_entry = ctk.CTkEntry(dialog, width=330, placeholder_text="@ISHAOfficiel")
     ytm_channel_entry.pack(padx=40, anchor="w")
-    try:
-        stored = (
-            app.data_manager.get_artist_ytm_channel(app.current_artist.id)
-            if app.current_artist
-            else None
-        )
-        if stored:
-            ytm_channel_entry.insert(0, stored)
-    except Exception:
-        pass
+
+    # Seul un canal MANUEL pré-remplit le champ. Un canal `inferred` affiché à
+    # l'identique se lisait comme une saisie de l'utilisateur : d'un artiste à
+    # l'autre, le champ semblait garder la même valeur « collée » — alors que
+    # les canaux étaient bien distincts, mais déduits. Il s'affiche donc en
+    # indication grisée, avec de quoi l'oublier.
+    stored, stored_source = app.data_manager.get_artist_ytm_channel_info(app.current_artist.id)
+    if stored and stored_source == "manual":
+        ytm_channel_entry.insert(0, stored)
+    elif stored:
+        ligne_deduit = ctk.CTkFrame(dialog, fg_color="transparent")
+        ligne_deduit.pack(anchor="w", padx=40, pady=(4, 0))
+        ctk.CTkLabel(
+            ligne_deduit,
+            text=f"↳ canal déduit : {stored}",
+            text_color="gray",
+            font=ctk.CTkFont(size=10),
+        ).pack(side="left")
+
+        def oublier_canal():
+            app.data_manager.clear_artist_ytm_channel(app.current_artist.id)
+            ligne_deduit.destroy()
+            logger.info(f"🗑️ Canal YTM déduit oublié pour '{app.current_artist.name}'")
+
+        ctk.CTkButton(
+            ligne_deduit,
+            text="🗑️ Oublier ce canal",
+            width=140,
+            height=22,
+            font=ctk.CTkFont(size=10),
+            fg_color="gray30",
+            hover_color="gray40",
+            command=oublier_canal,
+        ).pack(side="left", padx=(8, 0))
 
     def launch():
         fetch_kworb = kworb_var.get()
@@ -94,10 +153,17 @@ def start_streams_update(app):
         fetch_light = spotify_light_var.get() or fetch_full
         fetch_ytm = ytm_var.get()
         ytm_channel_raw = ytm_channel_entry.get().strip()
+        track_ids = coches if (limiter_var.get() and coches) else None
         dialog.destroy()
         if fetch_kworb or fetch_light or fetch_ytm:
             run_streams_update(
-                app, fetch_kworb, fetch_ytm, ytm_channel_raw, fetch_light, fetch_full
+                app,
+                fetch_kworb,
+                fetch_ytm,
+                ytm_channel_raw,
+                fetch_light,
+                fetch_full,
+                track_ids=track_ids,
             )
 
     ctk.CTkButton(dialog, text="Lancer", command=launch, width=120).pack(pady=18)
@@ -215,12 +281,17 @@ def run_streams_update(
     ytm_channel_raw: str = "",
     fetch_spotify_web: bool = False,
     spotify_full_crawl: bool = False,
+    track_ids=None,
 ):
     """Lance la récupération des streams dans un thread daemon.
 
     `fetch_spotify_web` ouvre la page artiste (auditeurs mensuels + top 10, UNE
     page) ; `spotify_full_crawl` y ajoute les pages titre et les albums, soit
     environ une page par morceau — d'où deux drapeaux et non un.
+
+    `track_ids` restreint le volet YouTube (streams YTM et vues) aux morceaux
+    cochés. Il ne touche PAS aux sources Spotify : Kworb rend une page entière
+    quoi qu'on demande, et le crawl Spotify a sa propre case de coût.
     """
     if hasattr(app, "streams_button"):
         app.streams_button.configure(state="disabled")
@@ -285,16 +356,21 @@ def run_streams_update(
                                 "recherche automatique utilisée"
                             )
 
-                    results["ytm"] = provider.fetch_ytm(app.current_artist, app.data_manager)
+                    results["ytm"] = provider.fetch_ytm(
+                        app.current_artist, app.data_manager, track_ids=track_ids
+                    )
 
-                    # Media 5 : vues + nature (clip/show/audio) de LA vidéo — batch
+                    # Media 5 : vues + nature (clip/show/audio) des vidéos — batch
                     # YT mutualisé avec les streams. SÉPARÉ de ytm_streams. Défensif :
                     # n'interrompt pas la récupération des streams en cas d'échec.
                     if not stop_requested():
                         try:
                             fresh_tracks = app.data_manager.get_artist_tracks(app.current_artist.id)
                             results["video_views"] = provider.fetch_video_views(
-                                app.current_artist, fresh_tracks, app.data_manager
+                                app.current_artist,
+                                fresh_tracks,
+                                app.data_manager,
+                                track_ids=track_ids,
                             )
                         except Exception as e:
                             logger.warning(f"Vues clips échouées: {e}")

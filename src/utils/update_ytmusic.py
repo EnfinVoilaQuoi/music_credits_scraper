@@ -212,13 +212,25 @@ def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
     return cid, info
 
 
-def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
+def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> dict:
     """Met à jour les streams YouTube Music des morceaux et albums de l'artiste.
 
     Args:
         artist: objet Artist avec `id` et `name`
         data_manager: instance de DataManager
         api: YTMusicAPI injecté (StreamsProvider) ; créé en interne si None
+        track_ids: restreint les ÉCRITURES et le batch YouTube à ces morceaux
+            (case « limiter aux morceaux cochés ») ; None = toute la discographie.
+
+    Le PARCOURS du canal reste entier même sous sélection : le gate d'identité
+    confronte la discographie COMPLÈTE du canal à la base, et le restreindre lui
+    ôterait ce qui lui permet de conclure. Seul le coûteux — les compteurs de
+    vues — est restreint.
+
+    Sous sélection, les TOTAUX D'ALBUM ne sont pas écrits : ils s'additionnent
+    sur tous les morceaux du disque, dont les compteurs ne sont justement plus
+    demandés. Les écrire donnerait un total silencieusement amputé, plus faux
+    que pas de total du tout.
 
     Returns:
         dict résumé {matched, unmatched, albums_processed, yt_api_calls, unmatched_titles}
@@ -363,16 +375,38 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
         data_manager.update_artist_monthly_listeners(artist.id, ytm_listeners=ytm_monthly_listeners)
         logger.info(f"Auditeurs mensuels YTMusic : {ytm_monthly_listeners:,}")
 
+    # Index titre normalisé → morceaux de la base. Construit AVANT le batch : il
+    # sert aussi à savoir quelles vidéos du canal appartiennent aux morceaux
+    # retenus, donc quelles vues demander.
+    track_index: dict[str, list] = {}
+    for t in db_tracks:
+        track_index.setdefault(_normalize_title(t.title), []).append(t)
+
+    def retenu(track_id) -> bool:
+        """Ce morceau fait-il partie de la sélection ? (True si aucune sélection)"""
+        return track_ids is None or track_id in track_ids
+
+    if track_ids is not None:
+        interessantes = {
+            entry["video_id"]
+            for raw_tracks in tracks_by_album.values()
+            for entry in raw_tracks
+            if entry.get("video_id")
+            for candidats in [track_index.get(_normalize_title(entry["title"]), [])]
+            if len(candidats) == 1 and retenu(candidats[0].id)
+        }
+        all_video_ids = [v for v in all_video_ids if v in interessantes]
+        logger.info(
+            f"🎯 Sélection : {len(track_ids)} morceau(x) coché(s), "
+            f"{len(all_video_ids)} vidéo(s) du canal à mesurer"
+        )
+
     # ── Étape 2 : UNE seule passe YouTube Data API v3 pour tous les IDs ──────
     view_counts = api.fetch_view_counts_batch(all_video_ids)
     # Estimer le nb de requêtes effectuées
     result["yt_api_calls"] = (len(all_video_ids) + 49) // 50 if all_video_ids else 0
 
     # ── Étape 3 : matching DB + vidéos du CANAL ───────────────────────────────
-    track_index: dict[str, list] = {}
-    for t in db_tracks:
-        track_index.setdefault(_normalize_title(t.title), []).append(t)
-
     covered_track_ids = set()  # tracks dont les streams ont été résolus (passe albums)
     # track_id → {videoId: count} : un morceau sur PLUSIEURS éditions d'album a
     # des videoIds distincts → SOMME des compteurs, dédupliquée par videoId
@@ -406,7 +440,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
 
             matched_track = candidates[0] if candidates else None
             if matched_track:
-                if streams is not None:
+                if streams is not None and retenu(matched_track.id):
                     video_id = entry.get("video_id")
                     vid = video_id or f"_novid_{album_title}_{norm}"
                     vid_counts.setdefault(matched_track.id, {})[vid] = streams
@@ -434,7 +468,10 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
                 result["unmatched_titles"].append(entry["title"])
                 logger.debug(f"⚠️ Pas de match DB: '{entry['title']}'")
 
-        if album_total_streams > 0:
+        # Sous SÉLECTION, pas de total d'album : il s'additionne sur tous les
+        # morceaux du disque, dont les compteurs ne sont plus demandés. L'écrire
+        # donnerait un total amputé — plus faux que pas de total du tout.
+        if album_total_streams > 0 and track_ids is None:
             data_manager.update_album_ytm_streams(artist.id, album_title, album_total_streams)
 
         result["albums_processed"] += 1
@@ -451,6 +488,8 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
     # ils rejoignent simplement le batch de l'étape 5.
     extras: dict[int, dict[str, TrackVideo]] = {}
     for t in db_tracks:
+        if not retenu(t.id):
+            continue
         connues = {v.video_id: v for v in t.videos if v.video_id}
         clip_vid = _extract_video_id(t.youtube_url)
         if clip_vid and clip_vid not in connues:
@@ -475,6 +514,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
         for t in db_tracks
         if t.id not in covered_track_ids
         and t.streams.spotify_streams is not None  # repéré sur Kworb
+        and retenu(t.id)
     ]
     if candidates:
         try:

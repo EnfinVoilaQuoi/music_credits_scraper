@@ -18,6 +18,8 @@ import pandas as pd
 import requests
 import schedule
 
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.utils import cert_clean_report
 
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
@@ -56,6 +58,80 @@ def _cert_key(artist, title, level, date, category, clean=None) -> str:
     if clean is not None:
         champs = tuple(clean(v) for v in champs)
     return "|".join(str(v or "") for v in champs)
+
+
+#: Clé de la source dans le registre d'observabilité.
+_SOURCE = "brma"
+
+#: Marqueur de ligne dans le style EN LIGNE des pages Ultratop.
+_STYLE_LIGNE = "display:table-row"
+
+
+def lignes_de_page(soup) -> tuple[list, str]:
+    """Lignes candidates d'une page Ultratop + le nom de la voie qui les a trouvées.
+
+    **Deux voies, et la seconde existe parce que la première est le sélecteur le
+    plus fragile du projet** : elle matche une CHAÎNE DE STYLE EN LIGNE
+    (`display:table-row`). Qu'Ultratop la déplace vers une classe CSS — un
+    changement cosmétique qu'aucun de leurs utilisateurs ne remarquerait — et la
+    page devient muette pour nous.
+
+    La voie de repli est SÉMANTIQUE : une ligne de certification est le plus
+    proche ancêtre d'un `div.chart_title` qui porte aussi un `div.company`,
+    c'est-à-dire un titre ET ses paliers. Elle ne dépend d'aucune mise en forme.
+
+    La primaire reste la voie de style, non par préférence mais par prudence :
+    elle est celle qui tourne depuis toujours, et un repli ne se promeut pas sans
+    preuve. Les deux rendent les mêmes certifications sur la page réelle
+    enregistrée (`tests/test_update_brma_extract.py`), ce qui est justement la
+    preuve qu'il fallait avant de s'y fier.
+
+    Le NOM de la voie est rendu pour que l'usage du repli soit DIT : le jour où
+    il sert, le site a changé et on doit le savoir avant que la voie primaire ne
+    soit devenue un vestige.
+    """
+    lignes = soup.find_all("div", style=lambda x: x and _STYLE_LIGNE in x)
+    if lignes:
+        return lignes, "style"
+
+    lignes = []
+    for titre in soup.select("div.chart_title"):
+        noeud = titre.parent
+        while noeud is not None:
+            if noeud.find("div", class_="company"):
+                lignes.append(noeud)
+                break
+            noeud = noeud.parent
+    return lignes, "semantique"
+
+
+def verdict_page(bilan: dict, *, annee_revolue: bool) -> tuple[str, str]:
+    """Verdict d'observabilité d'UNE page. Fonction PURE, testable sans réseau.
+
+    Rend `("", "")` quand tout va bien, sinon `(kind, detail)`.
+
+    Ce qui compte ici est la distinction que le code d'origine ne faisait pas :
+    **« aucune nouveauté » n'est PAS « page illisible »**. `extract_certifications`
+    ne rend que ce qui n'est pas déjà en base, et chez Ultratop c'est vide la
+    plupart du temps — un run sain. Le signal d'alarme n'est donc pas le nombre de
+    NOUVELLES certifications mais le nombre de LIGNES LUES.
+
+    · aucune ligne sur une année RÉVOLUE → `parse` : toute année d'Ultratop
+      depuis 1995 en contient, une page vide est une page qu'on ne sait plus lire
+      (ou un mur anti-bot) ;
+    · aucune ligne sur l'année EN COURS → `absent`, c'est plausible en janvier ;
+    · des lignes candidates mais aucune certification lue → `parse`.
+    """
+    candidates = bilan.get("candidates", 0)
+    lues = bilan.get("certifs_lues", 0)
+
+    if not candidates:
+        if annee_revolue:
+            return ("parse", "aucune ligne sur une année révolue")
+        return ("absent", "aucune ligne (année en cours)")
+    if not lues:
+        return ("parse", f"{candidates} ligne(s) candidate(s), aucune certification lue")
+    return ("", "")
 
 
 class UltratopUpdater:
@@ -106,6 +182,15 @@ class UltratopUpdater:
             "Sec-Fetch-Site": "none",
             "Cache-Control": "max-age=0",
         }
+
+        # Santé du run : None tant qu'aucune page n'a été demandée DANS CE
+        # PROCESSUS. C'est ce qui permet à `save_updated_database` de garder son
+        # comportement d'origine quand on l'appelle seul, sans scrape.
+        self.pages_demandees = None
+        self.pages_lues = 0
+        self.pages_muettes = 0
+        self.pages_echouees = 0
+        self.voie_de_repli = False
 
         # Session pour maintenir les cookies
         self.session = requests.Session()
@@ -240,21 +325,39 @@ class UltratopUpdater:
 
         return certifications
 
-    def extract_certifications(self, soup, year, category):
-        """Extrait les certifications d'une page"""
+    def extract_certifications(self, soup, year, category, bilan: dict | None = None):
+        """Extrait les certifications d'une page.
+
+        `bilan` (optionnel) recueille ce que la page a MONTRÉ, et pas seulement ce
+        qu'elle a rapporté. La distinction est le cœur du problème : cette méthode
+        ne rend que les certifications ABSENTES de la base, donc une liste vide est
+        le cas NORMAL d'un re-run — impossible d'en déduire quoi que ce soit sur la
+        santé du parseur. Sans ce bilan, « 0 certifications, 0 erreurs » se lisait
+        pareil qu'un site devenu illisible.
+        """
         certifications = []
         error_count = 0
+        candidates_ignorees = 0
+        certifs_lues = 0
 
-        containers = soup.find_all("div", style=lambda x: x and "display:table-row" in x)
+        containers, voie = lignes_de_page(soup)
+        if voie != "style" and containers:
+            self.logger.warning(
+                f"BRMA {year}/{category} : lignes trouvées par le repli SÉMANTIQUE — "
+                "le style en ligne `display:table-row` a disparu de la page. "
+                "Le scrape continue, mais le gabarit du site a changé."
+            )
 
         for container in containers:
             try:
                 title_div = container.find("div", class_="chart_title")
                 if not title_div:
+                    candidates_ignorees += 1
                     continue
 
                 link_elem = title_div.find("a")
                 if not link_elem:
+                    candidates_ignorees += 1
                     continue
 
                 detail_link = urljoin("https://www.ultratop.be", link_elem.get("href", ""))
@@ -270,9 +373,12 @@ class UltratopUpdater:
                     title = ""
 
                 company_div = container.find("div", class_="company")
+                if not company_div:
+                    candidates_ignorees += 1
                 if company_div:
                     cert_text = company_div.get_text(strip=True)
                     cert_list = self.parse_certification_date(cert_text)
+                    certifs_lues += len(cert_list)
 
                     for cert_date, cert_level in cert_list:
                         # Vérifier si cette certification existe déjà
@@ -298,10 +404,111 @@ class UltratopUpdater:
                 error_count += 1
                 continue
 
+        if bilan is not None:
+            bilan.update(
+                {
+                    "voie": voie,
+                    "candidates": len(containers),
+                    "candidates_ignorees": candidates_ignorees,
+                    "certifs_lues": certifs_lues,
+                    "nouvelles": len(certifications),
+                    "erreurs": error_count,
+                }
+            )
         self.logger.info(
-            f"Extraction {year}/{category}: {len(certifications)} certifications, {error_count} erreurs"
+            f"Extraction {year}/{category}: {len(containers)} ligne(s) candidate(s), "
+            f"{certifs_lues} certification(s) lue(s), {len(certifications)} nouvelle(s), "
+            f"{error_count} erreur(s)"
         )
         return certifications
+
+    def _lire_page(self, year, category, *, avec_retry: bool = False) -> list:
+        """Récupère UNE page, l'extrait, et rend un verdict d'observabilité.
+
+        Point de passage UNIQUE des trois flux (année courante, années récentes,
+        rattrapage) : ils faisaient chacun leur `fetch` + `extract` + log, si bien
+        qu'aucun ne comptait rien et qu'aucun n'était observé. C'est aussi
+        pourquoi une panne d'Ultratop n'apparaissait nulle part ailleurs que dans
+        le transport — le panneau de santé voyait un HTTP 200 et concluait au
+        succès, parseur mort ou vif.
+        """
+        if self.pages_demandees is None:
+            self._demarrer_run()
+        self.pages_demandees += 1
+        bilan: dict = {}
+        with source_usage.observe(_SOURCE, label=f"{year}/{category}") as obs:
+            soup = (
+                self.fetch_page_with_retry(year, category)
+                if avec_retry
+                else self.fetch_page(year, category)
+            )
+            if soup is None:
+                obs.fail(IssueKind.UNREACHABLE, "page non rendue")
+                self.pages_echouees += 1
+                return []
+
+            certifications = self.extract_certifications(soup, year, category, bilan)
+            kind, detail = verdict_page(bilan, annee_revolue=year < datetime.now().year)
+            if kind == "parse":
+                self.logger.error(f"❌ BRMA {year}/{category} : {detail}")
+                obs.fail(IssueKind.PARSE, detail)
+                self.pages_muettes += 1
+                return certifications
+            if kind == "absent":
+                obs.absent(detail)
+                self.pages_muettes += 1
+                return certifications
+
+            self.pages_lues += 1
+            if bilan.get("voie") != "style":
+                self.voie_de_repli = True
+            return certifications
+
+    def _demarrer_run(self) -> None:
+        """Remet à zéro les compteurs de santé du run.
+
+        `bilan_run` vaut None tant qu'aucun scrape n'a eu lieu DANS CE PROCESSUS :
+        c'est ce qui permet à `save_updated_database` de garder son comportement
+        d'origine quand on l'appelle seul (les tests le font, et à raison).
+        """
+        self.pages_demandees = 0
+        self.pages_lues = 0
+        self.pages_muettes = 0
+        self.pages_echouees = 0
+        self.voie_de_repli = False
+
+    def _run_reussi(self) -> bool:
+        """Un run est réussi si au moins une page a été LUE.
+
+        Volontairement indulgent : Ultratop tombe régulièrement sur une page ou
+        deux et la collecte est de toute façon redondante d'un run à l'autre.
+        Ce qui est intolérable, c'est zéro — cela ne signifie jamais « rien à
+        faire », toujours « on n'a rien pu voir ».
+        """
+        bilan = self.bilan_run
+        if bilan is None or not bilan["demandees"]:
+            return True
+        if not bilan["lues"]:
+            return False
+        if bilan["echouees"] or bilan["muettes"]:
+            self.logger.warning(
+                f"⚠️ BRMA : {bilan['lues']}/{bilan['demandees']} page(s) lue(s) "
+                f"({bilan['echouees']} inaccessible(s), {bilan['muettes']} muette(s))"
+            )
+        return True
+
+    @property
+    def bilan_run(self) -> dict | None:
+        """Santé du scrape de ce processus, ou None si aucun n'a eu lieu."""
+        if self.pages_demandees is None:
+            return None
+        return {
+            "demandees": self.pages_demandees,
+            "lues": self.pages_lues,
+            "muettes": self.pages_muettes,
+            "echouees": self.pages_echouees,
+            "repli": self.voie_de_repli,
+        }
 
     def update_current_year(self):
         """Met à jour les certifications de l'année en cours"""
@@ -313,14 +520,7 @@ class UltratopUpdater:
 
         for category in categories:
             self.random_delay()
-
-            soup = self.fetch_page(current_year, category)
-            if soup:
-                certifications = self.extract_certifications(soup, current_year, category)
-                new_certifications.extend(certifications)
-                self.logger.info(
-                    f"Trouvé {len(certifications)} nouvelles certifications pour {current_year}/{category}"
-                )
+            new_certifications.extend(self._lire_page(current_year, category))
 
         return new_certifications
 
@@ -340,16 +540,7 @@ class UltratopUpdater:
 
             for category in categories:
                 self.random_delay()
-
-                soup = self.fetch_page(year, category)
-                if soup:
-                    certifications = self.extract_certifications(soup, year, category)
-                    new_certifications.extend(certifications)
-
-                    if certifications:
-                        self.logger.info(
-                            f"Trouvé {len(certifications)} nouvelles certifications pour {year}/{category}"
-                        )
+                new_certifications.extend(self._lire_page(year, category))
 
         return new_certifications
 
@@ -537,6 +728,21 @@ class UltratopUpdater:
             # Fraîcheur = date de dernière VÉRIFICATION, pas de dernier ajout : on
             # horodate même sans nouveauté, sinon la GUI affiche une MàJ périmée
             # (Ultratop n'a quasi jamais de nouvelle certif entre deux runs).
+            #
+            # MAIS : « rien de neuf » et « rien de LU » ne sont pas la même chose,
+            # et c'est tout le défaut que ce garde-fou ferme. Si des pages ont été
+            # demandées et qu'AUCUNE n'a été lue, le run a échoué — l'horodater
+            # ferait passer une panne pour une vérification, exactement comme la
+            # RIAA l'a fait pendant deux mois. Sans scrape dans ce processus
+            # (`bilan_run is None`, cas des appels directs), on horodate comme avant.
+            bilan = self.bilan_run
+            if bilan and bilan["demandees"] and not bilan["lues"]:
+                self.logger.error(
+                    f"❌ BRMA : {bilan['demandees']} page(s) demandée(s), AUCUNE lue "
+                    f"({bilan['echouees']} inaccessible(s), {bilan['muettes']} muette(s)) — "
+                    "fraîcheur NON horodatée, ce run n'a rien vérifié."
+                )
+                return
             raw = self._load_raw()
             if not raw.empty:
                 self.update_metadata(self._clean_from(raw), 0)
@@ -662,24 +868,7 @@ class UltratopUpdater:
                 time.sleep(random.uniform(5, 10))
 
                 try:
-                    # Récupérer la page avec retry
-                    soup = self.fetch_page_with_retry(year, category, max_retries=3)
-
-                    if soup:
-                        # Extraire les certifications
-                        certifications = self.extract_certifications(soup, year, category)
-
-                        if certifications:
-                            self.logger.info(
-                                f"✅ Récupéré {len(certifications)} certifications pour {year}/{category}"
-                            )
-                            all_recovered.extend(certifications)
-                        else:
-                            self.logger.warning(
-                                f"⚠️ Aucune certification trouvée pour {year}/{category}"
-                            )
-                    else:
-                        self.logger.error(f"❌ Impossible de récupérer {year}/{category}")
+                    all_recovered.extend(self._lire_page(year, category, avec_retry=True))
 
                 except (
                     requests.RequestException,
@@ -695,9 +884,16 @@ class UltratopUpdater:
         self.logger.info(f"Total pages manquantes récupérées: {len(all_recovered)} certifications")
         return all_recovered
 
-    def run_manual_update(self, years_back=2):
-        """Lance une mise à jour manuelle"""
+    def run_manual_update(self, years_back=2) -> bool:
+        """Lance une mise à jour manuelle. Rend False si le run a échoué.
+
+        Le booléen n'existait pas : la méthode avalait ses exceptions et ne
+        rendait rien, et `main()` sortait de toute façon en 0. La GUI voyait donc
+        « succès » quoi qu'il arrive — un scrape entièrement bloqué par Cloudflare
+        compris.
+        """
         self.logger.info("=== MISE À JOUR MANUELLE ===")
+        self._demarrer_run()
 
         try:
             # Tenter d'abord de récupérer les pages manquantes
@@ -711,13 +907,16 @@ class UltratopUpdater:
             self.save_updated_database(new_certifications)
 
             self.logger.info("=== FIN DE LA MISE À JOUR MANUELLE ===")
+            return self._run_reussi()
 
         except Exception:
             self.logger.exception("Erreur lors de la mise à jour")
+            return False
 
-    def run_scheduled_update(self):
-        """Lance une mise à jour programmée (mensuelle)"""
+    def run_scheduled_update(self) -> bool:
+        """Lance une mise à jour programmée (mensuelle). Rend False si échec."""
         self.logger.info("=== MISE À JOUR PROGRAMMÉE ===")
+        self._demarrer_run()
 
         try:
             # Tenter d'abord de récupérer les pages manquantes
@@ -731,9 +930,11 @@ class UltratopUpdater:
             self.save_updated_database(new_certifications)
 
             self.logger.info("=== FIN DE LA MISE À JOUR PROGRAMMÉE ===")
+            return self._run_reussi()
 
         except Exception:
             self.logger.exception("Erreur lors de la mise à jour programmée")
+            return False
 
     def schedule_monthly_updates(self, day_of_month=1, hour=3):
         """
@@ -876,8 +1077,13 @@ def main():
             safe_print("\nArrêt des mises à jour programmées")
 
     elif args.mode == "once":
-        # Mode une seule fois (pour cron ou scripts)
-        updater.run_manual_update(years_back=args.years_back)
+        # Mode une seule fois (pour cron ou scripts). Le code de sortie REMONTE
+        # l'échec : la GUI lance ce script en sous-processus et ne dispose que de
+        # lui pour savoir si la MàJ a servi à quelque chose. Il valait 0 en toutes
+        # circonstances, y compris scrape entièrement bloqué.
+        if not updater.run_manual_update(years_back=args.years_back):
+            safe_print("❌ BRMA : aucune page lue — voir le journal")
+            sys.exit(1)
 
     sys.exit(0)
 

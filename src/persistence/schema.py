@@ -231,6 +231,10 @@ artist_relations = Table(
     Column("related_name", Text, nullable=False),
     Column("kind", Text, nullable=False),  # member_of | has_member | alias
     Column("source", Text),  # musicbrainz | discogs | manual
+    # Nature de la formation : un GROUPE apporte tous ses morceaux au membre,
+    # un COLLECTIF seulement ceux où le membre est présent (écriture, prod,
+    # performance). Nulle pour un alias.
+    Column("formation", Text),  # groupe | collectif
     Column("begin_date", Text),
     Column("end_date", Text),
     Column("confirmed_at", TIMESTAMP),

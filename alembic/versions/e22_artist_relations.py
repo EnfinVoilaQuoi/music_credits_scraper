@@ -27,6 +27,20 @@ Ce que la table porte :
     le point de vue observé : déduire l'inverse fabriquerait une donnée que
     personne n'a confirmée ;
   · `source`            — `musicbrainz` / `discogs` / `manual` ;
+  · `formation`         — la NATURE de l'autre bout : `groupe` ou `collectif`.
+    Elle décide de la lecture, et c'est toute la difficulté du lot :
+      - un **groupe** (IAM, L'Or du Commun, Bavoog Avers) — tous ses morceaux
+        entrent dans la discographie de chaque membre ;
+      - un **collectif** (L'Animalerie) — SEULS entrent les morceaux où le
+        membre est réellement présent, à l'écriture, à la production ou à la
+        performance. Un collectif est une maison, pas une formation : tout le
+        monde n'y travaille pas toujours ensemble, et il peut abriter un groupe
+        plus petit (Bavoog Avers, quatuor issu de L'Animalerie), auquel cas les
+        deux liens coexistent sur la personne, sans transitivité.
+    Nulle pour un `alias`, où la question ne se pose pas. C'est une propriété de
+    la FORMATION, pas du lien — elle est stockée ici parce que la formation
+    n'est pas toujours en base, et la fenêtre pré-remplit la nature déjà choisie
+    pour le même nom afin qu'elle ne diverge pas d'un membre à l'autre.
   · `begin_date`/`end_date` — dates d'appartenance, en TEXTE brut de la source
     (« 1989-10 », « 2009 ») : MusicBrainz rend des dates PARTIELLES, qu'un type
     date refuserait ou mutilerait.
@@ -66,6 +80,7 @@ def upgrade() -> None:
         sa.Column("related_name", sa.Text(), nullable=False),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("source", sa.Text(), nullable=True),
+        sa.Column("formation", sa.Text(), nullable=True),  # groupe | collectif
         sa.Column("begin_date", sa.Text(), nullable=True),
         sa.Column("end_date", sa.Text(), nullable=True),
         sa.Column("confirmed_at", sa.TIMESTAMP(), nullable=True),

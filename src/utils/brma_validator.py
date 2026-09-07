@@ -46,6 +46,18 @@ VALID_LEVELS = {
 _MULTI_LEVEL_RE = re.compile(r"^\d+\s*x\s+(or|platine|diamant)$", re.IGNORECASE)
 
 
+def niveau_connu(level: str) -> bool:
+    """Ce libellé appartient-il au vocabulaire de certification belge ?
+
+    Rendue PUBLIQUE le 2026-09-07 pour que le repli LLM d'`update_brma` valide
+    ses paliers contre CE référentiel et non contre une seconde liste. Un verdict
+    ne se calcule qu'à un endroit : le validateur RIAA avait sa propre liste de
+    niveaux, restée au vocabulaire américain, et déclarait « anomalies » sur des
+    awards latins parfaitement valides.
+    """
+    return _level_known(level, {lvl.lower() for lvl in VALID_LEVELS})
+
+
 def _level_known(level: str, lvl_known: set) -> bool:
     lvl = (level or "").strip()
     return lvl.lower() in lvl_known or bool(_MULTI_LEVEL_RE.match(lvl))

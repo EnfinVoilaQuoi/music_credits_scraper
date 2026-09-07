@@ -21,6 +21,7 @@ import schedule
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils import cert_clean_report
+from src.utils.llm_extractor import secours_apres_panne
 
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
 # vaut alors src/utils/, donc `import src.*` (ajouté pour le fetch anti-Cloudflare)
@@ -422,6 +423,93 @@ class UltratopUpdater:
         )
         return certifications
 
+    def _extract_with_llm(self, soup, year, category) -> list:
+        """Repli LLM quand les sélecteurs ne trouvent plus rien.
+
+        Récupéré de `scraper_brma.UltratopScraperInitial` le 2026-09-07, où il
+        était orphelin : plus rien n'appelait cette classe, donc BRMA était la
+        seule source à posséder un filet qui ne se déclenchait jamais. C'est le
+        motif maison — kworb, SongBPM et Spotify ID ont le leur.
+
+        **BRMA est la seule source de certifs où ce repli a un sens**, et c'est
+        mesuré : le texte d'une ligne Ultratop porte tout (« 24kGoldn feat. Iann
+        Dior | Mood | 26/03/2021: 2x Platine »). Chez la RIAA le palier n'est PAS
+        dans le texte — il vit dans l'`alt` du badge, avec la famille d'award qui
+        décide de l'échelle : un LLM devrait l'inventer, exactement le défaut
+        corrigé le 2026-09-06. Chez BPI le texte est complet mais l'IDENTITÉ ne
+        l'est pas (elle est dans `hx-get`), et des lignes sans identité prendraient
+        une clé de dédup textuelle, donc différente de celle des mêmes
+        certifications reparsées ensuite : doublons permanents.
+
+        Trois gardes, dont deux que la version d'origine n'avait pas — parce
+        qu'ici on écrit dans le magasin de certifications, où une donnée fausse
+        coûte plus cher qu'une donnée absente :
+          1. l'artiste doit APPARAÎTRE dans la page (déjà présent) ;
+          2. le palier doit appartenir au vocabulaire belge — demandé à
+             `brma_validator`, jamais à une seconde liste ;
+          3. la date doit tomber dans l'ANNÉE de la page ; une certification de
+             2019 sur la page 2021 est une hallucination, pas une trouvaille.
+        """
+        from src.utils.brma_validator import niveau_connu
+        from src.utils.llm_extractor import build_certifications_prompt, get_shared_extractor
+
+        llm = get_shared_extractor()
+        if not llm:
+            return []
+
+        page_text = soup.get_text(separator="\n", strip=True)
+        data = llm.extract_json(build_certifications_prompt(page_text, source="Ultratop Belgique"))
+        if not data or not isinstance(data.get("certifications"), list):
+            return []
+
+        page_minuscule = page_text.lower()
+        certifications, rejets = [], 0
+        for entree in data["certifications"]:
+            if not isinstance(entree, dict):
+                continue
+            artist = str(entree.get("artist", "")).strip()
+            title = str(entree.get("title", "")).strip()
+            level = str(entree.get("certification", "")).strip()
+            date = entree.get("date")
+
+            if not artist or not level:
+                continue
+            if artist.lower() not in page_minuscule:  # garde 1
+                rejets += 1
+                continue
+            if not niveau_connu(level):  # garde 2
+                rejets += 1
+                continue
+            if not (isinstance(date, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)):
+                rejets += 1
+                continue
+            if not date.startswith(str(year)):  # garde 3
+                rejets += 1
+                continue
+
+            cle = _cert_key(artist, title, level, date, category)
+            if cle in self.existing_keys:
+                continue
+            self.existing_keys.add(cle)
+            certifications.append(
+                {
+                    "artist": artist,
+                    "title": title,
+                    "category": category,
+                    "certification_level": level,
+                    "certification_date": date,
+                    "year_page": year,
+                    "detail_url": "",
+                    "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
+
+        self.logger.info(
+            f"🤖 BRMA LLM {year}/{category} : {len(certifications)} certification(s) "
+            f"retenue(s), {rejets} rejetée(s) par les gardes"
+        )
+        return certifications
+
     def _lire_page(self, year, category, *, avec_retry: bool = False) -> list:
         """Récupère UNE page, l'extrait, et rend un verdict d'observabilité.
 
@@ -451,9 +539,18 @@ class UltratopUpdater:
             kind, detail = verdict_page(bilan, annee_revolue=year < datetime.now().year)
             if kind == "parse":
                 self.logger.error(f"❌ BRMA {year}/{category} : {detail}")
-                obs.fail(IssueKind.PARSE, detail)
                 self.pages_muettes += 1
-                return certifications
+                # Signaler PUIS sauver — l'ordre est le garde-fou, et il porte un
+                # nom pour qu'on ne puisse pas l'inverser par distraction. Le
+                # sauvetage LLM ne rend PAS la page saine : elle reste comptée
+                # muette et le verdict reste `parse`, parce que les sélecteurs
+                # SONT cassés et doivent être réparés. Un LLM qui tiendrait lieu
+                # de parseur à notre insu serait la pire des issues.
+                return secours_apres_panne(
+                    obs,
+                    f"{year}/{category} : {detail}",
+                    lambda: self._extract_with_llm(soup, year, category) or certifications,
+                )
             if kind == "absent":
                 obs.absent(detail)
                 self.pages_muettes += 1

@@ -22,7 +22,11 @@ from playwright.sync_api import (
 from src.models import Track
 from src.observability import source_usage
 from src.scrapers.playwright_manager import get_playwright
-from src.utils.llm_extractor import build_songbpm_prompt, get_shared_extractor
+from src.utils.llm_extractor import (
+    BUDGET_TEXTE_SONGBPM,
+    build_songbpm_prompt,
+    get_shared_extractor,
+)
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import either_contains_as_words
 
@@ -313,7 +317,9 @@ class SongBPMScraper:
         if not llm or not clean_text:
             return details
 
-        data = llm.extract_json(build_songbpm_prompt(clean_text[:4000]), max_tokens=128)
+        data = llm.extract_json(
+            build_songbpm_prompt(clean_text[:BUDGET_TEXTE_SONGBPM]), max_tokens=128
+        )
         if not data:
             return details
 

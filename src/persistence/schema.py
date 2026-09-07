@@ -209,6 +209,37 @@ albums = Table(
 )
 
 
+# Appartenance à une formation (e22). Table de LIENS : la discographie d'un
+# membre est réunie par UNION d'`artist_id` à la lecture, jamais en dupliquant
+# des morceaux (`UNIQUE(title, artist_id)` l'interdit, et cela doublerait
+# streams et certifications).
+#
+# `related_artist_id` est NULLABLE à dessein : le groupe lié n'est pas forcément
+# en base, et le lien reste une information — il deviendra une jointure le jour
+# où on l'ajoutera. C'est pourquoi la clé d'unicité porte sur le NOM.
+#
+# `begin_date`/`end_date` en TEXTE : MusicBrainz rend des dates PARTIELLES
+# (« 1989-10 », « 2009 ») qu'un type date refuserait ou mutilerait. Et surtout,
+# la colonne ne s'appelle PAS `end` — mot réservé SQL, que les nombreux `text()`
+# du projet devraient quoter à chaque fois (la colonne `key` a déjà imposé ça).
+artist_relations = Table(
+    "artist_relations",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("related_artist_id", Integer, ForeignKey("artists.id")),
+    Column("related_name", Text, nullable=False),
+    Column("kind", Text, nullable=False),  # member_of | has_member | alias
+    Column("source", Text),  # musicbrainz | discogs | manual
+    Column("begin_date", Text),
+    Column("end_date", Text),
+    Column("confirmed_at", TIMESTAMP),
+    Column("created_at", TIMESTAMP),
+    UniqueConstraint("artist_id", "related_name", "kind"),
+    sqlite_autoincrement=True,
+)
+
+
 # Vidéos YouTube d'un morceau (e20). Un morceau en a souvent DEUX — le clip
 # officiel et la version « audio » servie par YouTube Music (chaîne « - Topic »)
 # — et les colonnes `tracks.youtube_*` n'en tenaient qu'UNE : la seconde était

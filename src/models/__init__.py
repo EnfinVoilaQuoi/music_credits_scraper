@@ -1,4 +1,4 @@
-from .artist import Artist
+from .artist import Artist, ArtistRelation
 from .track import Credit, CreditRole, Track, TrackVideo
 
-__all__ = ["Artist", "Track", "TrackVideo", "Credit", "CreditRole"]
+__all__ = ["Artist", "ArtistRelation", "Track", "TrackVideo", "Credit", "CreditRole"]

@@ -299,3 +299,37 @@ class TestGardeFous:
         mixte = [{"certification_date": "2020-01-15"}, {"certification_date": "2020-02-01"}]
         verifier_fenetre(mixte, "2020-01-01", "2020-01-31", obs)
         assert obs.echecs == []
+
+
+class TestGardesDeParseur:
+    """Cas dégradés des parseurs purs — bon marché, et ils évitent qu'une page
+    inattendue fasse lever une exception au milieu d'un balayage de 4 heures."""
+
+    def test_un_annuaire_aux_entrees_incompletes(self):
+        html = (
+            "<li><span>SANS CHAMP</span></li>"
+            '<li><input value="abc"/><span>ID NON NUMÉRIQUE</span></li>'
+            '<li><input value="42"/></li>'
+            '<li><input value="7"/><span>VALIDE</span></li>'
+        )
+        assert parse_annuaire(html) == [(7, "VALIDE")]
+
+    def test_un_annuaire_vide(self):
+        assert parse_annuaire("") == []
+
+    def test_un_historique_sans_parent(self):
+        assert parse_historique("<p>Certification history</p>") == []
+
+    def test_une_fenetre_sans_aucune_date_ne_dit_rien(self):
+        from src.scrapers.bpi_scraper import verifier_fenetre
+
+        obs = ObsFactice()
+        verifier_fenetre([{"certification_date": ""}], "2020-01-01", "2020-01-31", obs)
+        assert obs.echecs == []
+
+    def test_sans_bornes_la_verification_ne_s_applique_pas(self):
+        from src.scrapers.bpi_scraper import verifier_fenetre
+
+        obs = ObsFactice()
+        verifier_fenetre([{"certification_date": "1990-01-01"}], "", "", obs)
+        assert obs.echecs == []

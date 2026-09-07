@@ -9,7 +9,12 @@ from src.enrichment.observation import Observation
 from src.gui import helpers
 from src.gui.workers.lifecycle import start_worker
 from src.utils.logger import get_logger
-from src.utils.youtube_integration import youtube_integration
+from src.utils.youtube_integration import (
+    clear_youtube_link,
+    set_youtube_link,
+    youtube_integration,
+)
+from src.utils.youtube_utils import artiste_de_recherche
 
 logger = get_logger(__name__)
 
@@ -186,7 +191,7 @@ def manual_youtube_link(app, index: int):
         try:
             artist_name = track.artist.name if track.artist else app.current_artist.name
             res = youtube_integration.get_youtube_link_for_track(
-                (track.primary_artist_name if track.is_featuring else None) or artist_name,
+                artiste_de_recherche(track, artist_name),
                 track.title,
                 track.album,
                 helpers.get_release_year_safely(track),
@@ -210,18 +215,10 @@ def manual_youtube_link(app, index: int):
 
     if not url:
         # Vider = repasser en recherche live (source effacée)
-        track.youtube_url = None
-        track.youtube_url_source = None
-        app.data_manager.clear_track_youtube_link(track.id)
-        logger.info(f"🔗 Lien YouTube retiré : '{track.title}'")
-    else:
-        if "youtube.com/watch" not in url and "youtu.be/" not in url:
-            messagebox.showerror("Lien YouTube", f"Lien YouTube invalide : {url!r}")
-            return
-        track.youtube_url = url
-        track.youtube_url_source = "manual"
-        app.data_manager.update_track_youtube_url(track.id, url, "manual")
-        logger.info(f"🔗 Lien YouTube validé (manuel) : '{track.title}' → {url}")
+        clear_youtube_link(app.data_manager, track)
+    elif not set_youtube_link(app.data_manager, track, url):
+        messagebox.showerror("Lien YouTube", f"Lien YouTube invalide : {url!r}")
+        return
     app._populate_tracks_table()
 
 

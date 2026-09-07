@@ -90,7 +90,7 @@ def test_report_album_overlap_normalise():
 # ── Intégration à stubs ──────────────────────────────────────────────────────
 
 
-def _track(idx, title, album="Alb", spotify_streams=None):
+def _track(idx, title, album="Alb", spotify_streams=None, youtube_url=None, videos=None):
     return SimpleNamespace(
         id=idx,
         title=title,
@@ -98,7 +98,9 @@ def _track(idx, title, album="Alb", spotify_streams=None):
         streams=SimpleNamespace(spotify_streams=spotify_streams),  # Phase 5 : sous-objet
         is_featuring=False,
         primary_artist_name=None,
-        youtube_url=None,
+        youtube_url=youtube_url,
+        youtube_url_source="genius_media" if youtube_url else None,
+        videos=videos or [],  # e20 : vidéos connues, peuplées par get_artist_tracks
     )
 
 
@@ -139,6 +141,7 @@ class FakeDM:
         self.monthly_writes = []
         self.set_calls = []
         self.cleared = False
+        self.video_writes = []
 
     def get_artist_ytm_channel_info(self, artist_id):
         return self._channel
@@ -169,6 +172,10 @@ class FakeDM:
     def update_album_ytm_streams(self, artist_id, album_title, total):
         self.album_writes.append((album_title, total))
         return True
+
+    def record_track_videos(self, track_id, videos):
+        self.video_writes.append((track_id, [v.video_id for v in videos]))
+        return len(videos)
 
 
 _ARTIST = SimpleNamespace(id=1, name="Isha")

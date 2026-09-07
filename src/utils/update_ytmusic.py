@@ -1,9 +1,18 @@
 """Mise à jour des streams YouTube Music pour les morceaux et albums d'un artiste.
 
 Architecture quota-optimisée :
-  Étape 1 — ytmusicapi collecte tous les videoId (tous albums, zéro quota YT)
-  Étape 2 — UN seul passage YouTube Data API v3 avec tous les IDs en batch
-  Étape 3 — Matching normalisé titre → DB + écriture en base
+  Étape 1  — ytmusicapi collecte tous les videoId (tous albums, zéro quota YT)
+  Étape 2  — UN seul passage YouTube Data API v3 avec tous les IDs en batch
+  Étape 3  — Matching normalisé titre → DB, vidéos du CANAL par morceau
+  Étape 3b — Vidéos HORS canal déjà connues de la base (`track_videos`, e20)
+  Étape 4  — Découverte d'une version audio pour les morceaux hors canal
+  Étape 5  — UN second batch pour toutes ces vidéos hors canal
+  Étape 6  — Un total par morceau : somme DÉDUPLIQUÉE par videoId
+
+Ce que les étapes 3b/6 ont réparé (2026-09-07) : le clip officiel d'un morceau
+porte un videoId DIFFÉRENT de sa version audio et ne vit pas sur le canal
+« - Topic ». Il n'était additionné que pour les feats repérés par Kworb — les
+vues du clip d'un morceau d'album n'étaient donc comptées nulle part.
 """
 
 import logging
@@ -15,6 +24,7 @@ from ytmusicapi.exceptions import YTMusicError
 
 from src.api.ytmusic_api import YTMusicAPI
 from src.config import YTM_IDENTITY_MIN_MATCHED, YTM_IDENTITY_MIN_RATIO
+from src.models import TrackVideo
 from src.utils.logger import get_logger
 
 # Extraction du video id : helper partagé (factorisé, cf. youtube_utils). Alias
@@ -218,8 +228,12 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
         "albums_processed": 0,
         "yt_api_calls": 0,
         "unmatched_titles": [],
-        "feats_covered": 0,  # feats hors canal résolus via lien YouTube (repérés Kworb)
+        "feats_covered": 0,  # morceaux hors canal résolus via un lien YouTube
         "ambiguous": 0,  # titres homonymes passés à l'étape 4 (pas d'écriture au hasard)
+        # Morceaux dont le total additionne PLUSIEURS vidéos (clip + audio, ou
+        # plusieurs éditions). C'est la mesure de ce que la table `track_videos`
+        # apporte : avant e20, ces morceaux ne comptaient qu'une de leurs vidéos.
+        "multi_video": 0,
     }
 
     if api is None:
@@ -353,7 +367,7 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
     # Estimer le nb de requêtes effectuées
     result["yt_api_calls"] = (len(all_video_ids) + 49) // 50 if all_video_ids else 0
 
-    # ── Étape 3 : matching DB + mise à jour ───────────────────────────────────
+    # ── Étape 3 : matching DB + vidéos du CANAL ───────────────────────────────
     track_index: dict[str, list] = {}
     for t in db_tracks:
         track_index.setdefault(_normalize_title(t.title), []).append(t)
@@ -362,7 +376,12 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
     # track_id → {videoId: count} : un morceau sur PLUSIEURS éditions d'album a
     # des videoIds distincts → SOMME des compteurs, dédupliquée par videoId
     # (la même vidéo listée sur deux éditions n'est comptée qu'une fois).
+    # C'est le dictionnaire LUI-MÊME qui déduplique : il n'y a pas de somme sur
+    # une liste où une vidéo pourrait figurer deux fois.
     vid_counts: dict[int, dict[str, int]] = {}
+    # track_id → {videoId: TrackVideo} à enregistrer (e20). Ce que CETTE passe a
+    # vu, pas la liste complète : l'écrivain est additif.
+    videos_vues: dict[int, dict[str, TrackVideo]] = {}
 
     for album_title, raw_tracks in tracks_by_album.items():
         album_total_streams = 0
@@ -375,22 +394,34 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
             if len(candidates) > 1:
                 # HOMONYMES en base (deux morceaux distincts au même titre, ex.
                 # "MEILLEUR" Souffrance vs "Meilleur" Goldee Money) : ne pas
-                # écrire au hasard — l'étape 4 (lien YouTube exact par morceau)
-                # couvrira chacun individuellement.
+                # écrire au hasard — les étapes 3b/4 (lien YouTube EXACT par
+                # morceau) couvriront chacun individuellement.
                 result["ambiguous"] += 1
                 logger.info(
                     f"⚠️ Titre ambigu ({len(candidates)} morceaux en base), "
-                    f"passé à l'étape 4: '{entry['title']}'"
+                    f"laissé aux liens par morceau : '{entry['title']}'"
                 )
                 continue
 
             matched_track = candidates[0] if candidates else None
             if matched_track:
                 if streams is not None:
-                    vid = entry.get("video_id") or f"_novid_{album_title}_{norm}"
+                    video_id = entry.get("video_id")
+                    vid = video_id or f"_novid_{album_title}_{norm}"
                     vid_counts.setdefault(matched_track.id, {})[vid] = streams
                     album_total_streams += streams
                     covered_track_ids.add(matched_track.id)
+                    if video_id:
+                        videos_vues.setdefault(matched_track.id, {})[video_id] = TrackVideo(
+                            video_id=video_id,
+                            url=f"https://www.youtube.com/watch?v={video_id}",
+                            source="ytm_album",
+                            # Vues enregistrées SEULEMENT quand elles viennent du
+                            # compteur exact de l'API : `resolve_streams` retombe
+                            # sinon sur le « 1,2 M » arrondi d'ytmusicapi, qu'on
+                            # ne veut pas figer comme une mesure.
+                            views=view_counts.get(video_id),
+                        )
                 result["matched"] += 1
                 logger.debug(
                     f"✅ Match YTM: '{entry['title']}' → " f"{streams:,}"
@@ -407,21 +438,37 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
 
         result["albums_processed"] += 1
 
-    for track_id, vids in vid_counts.items():
-        total = sum(vids.values())
-        data_manager.update_track_ytm_streams(track_id, total)
-        if len(vids) > 1:
-            logger.debug(f"🎛️ Track #{track_id}: {len(vids)} vidéos sommées → {total:,}")
+    # ── Étape 3b : les vidéos HORS canal DÉJÀ connues de la base ──────────────
+    # Le clip officiel d'un morceau ne vit presque jamais sur le canal
+    # « - Topic » : il vient du catalogue Genius (`youtube_url`) ou d'une
+    # validation manuelle, et porte un videoId DIFFÉRENT de la version audio.
+    # Jusqu'au 2026-09-07 il n'était additionné qu'à l'étape 4, réservée aux
+    # feats repérés par Kworb — un morceau d'album gardait donc les seules vues
+    # de son audio, et celles de son clip n'étaient comptées nulle part
+    # (mesuré sur « Magot » et « Déluge »). Elles le sont ici, pour TOUS les
+    # morceaux, et sans requête supplémentaire : les identifiants sont en base,
+    # ils rejoignent simplement le batch de l'étape 5.
+    extras: dict[int, dict[str, TrackVideo]] = {}
+    for t in db_tracks:
+        connues = {v.video_id: v for v in t.videos if v.video_id}
+        clip_vid = _extract_video_id(t.youtube_url)
+        if clip_vid and clip_vid not in connues:
+            connues[clip_vid] = TrackVideo(
+                video_id=clip_vid, url=t.youtube_url, source=t.youtube_url_source
+            )
+        # Ce que la passe canal vient de chiffrer n'a pas à être redemandé.
+        deja_chiffrees = set(vid_counts.get(t.id, {}))
+        for video_id, video in connues.items():
+            if video_id not in deja_chiffrees:
+                extras.setdefault(t.id, {})[video_id] = video
 
-    # ── Étape 4 : feats hors canal, repérés sur Kworb ─────────────────────────
+    # ── Étape 4 : DÉCOUVRIR une version audio pour les morceaux hors canal ────
     # Les feats sortis sur les albums d'AUTRES artistes ne passent pas par le
-    # canal YTM de l'artiste. Pour ceux que Kworb a repérés (spotify_streams
-    # présent), on additionne :
-    #   · le CLIP : lien YouTube en base (Genius media / recherche persistée) ;
-    #   · la version AUDIO YTM : recherche ytmusicapi (filter=songs, avec cache),
-    #     retenue seulement si confiance ≥ YOUTUBE_CONFIDENCE_THRESHOLD.
-    # Somme dédupliquée par videoId (si le lien Genius EST l'audio, compté 1×).
-    extras = []  # (track, {videoId, ...})
+    # canal YTM de l'artiste : leur audio n'est connu de personne. On la cherche
+    # (ytmusicapi, filter=songs, avec cache), et seulement pour ceux que Kworb a
+    # repérés — une recherche coûte une requête par morceau, et ce gate est ce
+    # qui empêche d'en lancer une pour toute la discographie.
+    tracks_par_id = {t.id: t for t in db_tracks}
     candidates = [
         t
         for t in db_tracks
@@ -439,57 +486,72 @@ def update_ytmusic_streams(artist, data_manager, api=None) -> dict:
             searcher, YOUTUBE_CONFIDENCE_THRESHOLD = None, 1.1
 
         for t in candidates:
-            vids = set()
-            clip_vid = _extract_video_id(getattr(t, "youtube_url", None))
-            if clip_vid:
-                vids.add(clip_vid)
-            if searcher:
-                try:
-                    # Pour un feat, chercher sous l'artiste PRINCIPAL (meilleur rappel)
-                    search_artist = (
-                        getattr(t, "primary_artist_name", None)
-                        if getattr(t, "is_featuring", False)
-                        else None
-                    ) or artist.name
-                    results = searcher.search_track(search_artist, t.title, max_results=5)
-                    best = results[0] if results else None
-                    if (
-                        best
-                        and not best.get("is_search_url")
-                        and best.get("relevance_score", 0) >= YOUTUBE_CONFIDENCE_THRESHOLD
-                        and best.get("video_id")
-                    ):
-                        vids.add(best["video_id"])
-                except (AttributeError, TypeError, KeyError, IndexError) as e:
-                    logger.debug(f"Recherche audio YTM échouée '{t.title}': {e}")
-            if vids:
-                extras.append((t, vids))
+            if not searcher:
+                continue
+            try:
+                # Pour un feat, chercher sous l'artiste PRINCIPAL (meilleur rappel)
+                search_artist = (t.primary_artist_name if t.is_featuring else None) or artist.name
+                results = searcher.search_track(search_artist, t.title, max_results=5)
+                best = results[0] if results else None
+                if (
+                    best
+                    and not best.get("is_search_url")
+                    and best.get("relevance_score", 0) >= YOUTUBE_CONFIDENCE_THRESHOLD
+                    and best.get("video_id")
+                ):
+                    video_id = best["video_id"]
+                    extras.setdefault(t.id, {}).setdefault(
+                        video_id,
+                        TrackVideo(
+                            video_id=video_id,
+                            url=f"https://www.youtube.com/watch?v={video_id}",
+                            source="search_auto",
+                        ),
+                    )
+            except (AttributeError, TypeError, KeyError, IndexError) as e:
+                logger.debug(f"Recherche audio YTM échouée '{t.title}': {e}")
 
+    # ── Étape 5 : UN batch pour toutes les vidéos hors canal ──────────────────
     if extras:
-        all_extra_vids = sorted({v for _, vids in extras for v in vids})
+        all_extra_vids = sorted({v for videos in extras.values() for v in videos})
         logger.info(
-            f"🎤 Feats hors canal repérés Kworb : {len(extras)} morceau(x), "
-            f"{len(all_extra_vids)} vidéo(s) (clip + audio)"
+            f"🎬 Vidéos hors canal : {len(extras)} morceau(x), "
+            f"{len(all_extra_vids)} vidéo(s) (clip Genius, lien manuel, audio trouvée)"
         )
         extra_counts = api.fetch_view_counts_batch(all_extra_vids)
         result["yt_api_calls"] += (len(all_extra_vids) + 49) // 50
-        for t, vids in extras:
-            counts = [extra_counts[v] for v in vids if extra_counts.get(v) is not None]
-            if counts:
-                total = sum(counts)
-                data_manager.update_track_ytm_streams(t.id, total)
-                result["feats_covered"] += 1
-                logger.debug(
-                    f"✅ Feat: '{t.title}' → {total:,} "
-                    f"({len(counts)} vidéo(s) : clip et/ou audio)"
-                )
-            else:
-                logger.debug(f"⚠️ Feat sans viewCount: '{t.title}' ({sorted(vids)})")
+        for track_id, videos in extras.items():
+            for video_id, video in videos.items():
+                vues = extra_counts.get(video_id)
+                if vues is None:
+                    logger.debug(f"⚠️ Vidéo sans viewCount : {video_id} (track #{track_id})")
+                    continue
+                vid_counts.setdefault(track_id, {})[video_id] = vues
+                video.views = vues
+                videos_vues.setdefault(track_id, {})[video_id] = video
+                if track_id not in covered_track_ids:
+                    covered_track_ids.add(track_id)
+                    result["feats_covered"] += 1
+
+    # ── Étape 6 : écriture — un total par morceau, une vidéo comptée une fois ─
+    # La somme porte sur un dict indexé par videoId : si le lien Genius EST la
+    # vidéo audio du canal, elle n'est comptée qu'une fois.
+    for track_id, vids in sorted(vid_counts.items()):
+        total = sum(vids.values())
+        data_manager.update_track_ytm_streams(track_id, total)
+        if len(vids) > 1:
+            result["multi_video"] += 1
+            titre = tracks_par_id[track_id].title if track_id in tracks_par_id else track_id
+            logger.debug(f"🎛️ « {titre} » : {len(vids)} vidéos sommées → {total:,}")
+
+    for track_id, videos in videos_vues.items():
+        data_manager.record_track_videos(track_id, list(videos.values()))
 
     logger.info(
         f"YTMusic terminé : {result['matched']} matchés, "
         f"{result['unmatched']} non matchés, "
-        f"{result['feats_covered']} feat(s) via lien YouTube, "
+        f"{result['feats_covered']} morceau(x) hors canal via lien YouTube, "
+        f"{result['multi_video']} morceau(x) à plusieurs vidéos, "
         f"{result['albums_processed']} albums, "
         f"{result['yt_api_calls']} requête(s) YouTube API"
     )
@@ -530,7 +592,8 @@ if __name__ == "__main__":
     summary = update_ytmusic_streams(artist, dm)
     print("\n── Résumé YTMusic ──────────────────────────────────")
     print(f"Morceaux matchés      : {summary['matched']}")
-    print(f"Feats via lien YouTube: {summary['feats_covered']}")
+    print(f"Hors canal (lien YT)  : {summary['feats_covered']}")
+    print(f"À plusieurs vidéos    : {summary['multi_video']}")
     print(f"Morceaux non matchés  : {summary['unmatched']}")
     print(f"Albums traités        : {summary['albums_processed']}")
     print(f"Requêtes YouTube API  : {summary['yt_api_calls']}")

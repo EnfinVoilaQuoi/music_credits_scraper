@@ -149,6 +149,16 @@ CAPTURES: list[dict] = [
         "method": "bpi",
     },
     {
+        # DERNIÈRE page d'une liste : elle porte encore des lignes ET la
+        # sentinelle « No more certified awards found ». Un motif trop tolérant
+        # y voyait une recherche vide et jetait la page — 22 titres perdus au
+        # balayage complet. Cette fixture existe pour que ça ne repasse pas.
+        "name": "bpi_list_derniere",
+        "path": "bpi/bpi_list_derniere.html",
+        "url": _bpi_liste_url(page=3),
+        "method": "bpi",
+    },
+    {
         "name": "bpi_detail",
         "path": "bpi/bpi_detail.html",
         "url": f"https://certified-awards.bpi.co.uk{_BPI_DETAIL}",

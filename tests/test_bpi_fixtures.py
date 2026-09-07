@@ -333,3 +333,45 @@ class TestGardesDeParseur:
         obs = ObsFactice()
         verifier_fenetre([{"certification_date": "1990-01-01"}], "", "", obs)
         assert obs.echecs == []
+
+
+class TestDernierePageDeListe:
+    """La page qui TERMINE une liste porte encore des lignes ET une sentinelle.
+
+    Le site sert deux messages que rien ne distingue à l'œil nu :
+      · « No certified awards found matching your criteria. » → recherche vide ;
+      · « **No more** certified awards found » → fin de liste, sur une page qui
+        contient ENCORE des lignes.
+
+    Un motif tolérant les confondait : la dernière page partielle de toute
+    requête multi-pages était jetée. Mesuré le 2026-09-07 — 22 titres perdus au
+    balayage complet (toute la fin de l'alphabet, de ZIEZIE à ZIV ZAIFMAN), 6 sur
+    une simple fenêtre d'un mois. Et le verdict produit était `absent`, c'est-à-
+    dire le SEUL exclu du numérateur des échecs : la perte était donc muette.
+    """
+
+    @pytest.fixture
+    def derniere(self):
+        return load_fixture("bpi/bpi_list_derniere.html")
+
+    def test_elle_porte_bien_la_sentinelle_de_fin(self, derniere):
+        assert "No more certified awards found" in derniere
+
+    def test_et_pourtant_elle_n_est_PAS_vide(self, derniere):
+        assert lignes_de_donnees(derniere), "des lignes réelles restent à lire"
+        assert est_vide(derniere) is False
+
+    def test_ses_lignes_sont_extraites(self, derniere):
+        lignes = parse_liste(derniere, ENTETES_ATTENDUES)
+        assert lignes, "la dernière page partielle doit être collectée"
+        assert all(r["artist"] and r["title"] and r["title_id"] for r in lignes)
+
+    def test_parse_verifie_la_rend_sans_verdict_d_echec(self, derniere):
+        obs = ObsFactice()
+        assert parse_verifie(derniere, obs, ENTETES_ATTENDUES)
+        assert obs.echecs == []
+
+    def test_le_message_ne_compte_que_SANS_lignes(self):
+        """Le critère est l'absence de LIGNES, pas la présence d'un message."""
+        assert est_vide("<div>No more certified awards found</div>") is True
+        assert est_vide("<div>No certified awards found matching your criteria.</div>") is True

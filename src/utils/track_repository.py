@@ -20,6 +20,7 @@ from src.models import Credit, Track, TrackVideo
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.logger import get_logger
+from src.utils.title_matching import clean_stored_title
 from src.utils.track_mapper import track_from_row
 
 logger = get_logger(__name__)
@@ -78,6 +79,15 @@ class TrackRepository:
         with self.engine.begin() as conn:
             if not track.artist or not track.artist.id:
                 raise ValueError("Le morceau doit avoir un artiste avec un ID")
+
+            # Point de passage UNIQUE de tout titre vers la base : c'est ici que
+            # les caractères invisibles sont retirés. Le SELECT ci-dessous
+            # cherche donc la fiche par son titre PROPRE — un titre pollué
+            # retombe sur l'existante au lieu d'en créer une seconde, et le
+            # doublon devient impossible plutôt que réparable. L'objet en
+            # mémoire est corrigé lui aussi, sans quoi il divergerait de la base
+            # jusqu'au prochain rechargement.
+            track.title = clean_stored_title(track.title)
 
             existing_track = (
                 conn.execute(
@@ -1248,12 +1258,16 @@ class TrackRepository:
     def rename_track(self, track_id: int, new_title: str) -> bool:
         """Renomme un morceau en base (ex. « Matrix (Intro) » → « Matrix » pour
         aligner sur Kworb). Échoue si le titre existe déjà pour l'artiste
-        (contrainte UNIQUE(title, artist_id))."""
+        (contrainte UNIQUE(title, artist_id)).
+
+        Même nettoyage qu'à l'enregistrement : un titre collé depuis Genius
+        emporte volontiers un caractère invisible avec lui.
+        """
         try:
             stmt = (
                 update(tracks)
                 .where(tracks.c.id == track_id)
-                .values(title=new_title.strip(), updated_at=datetime.now())
+                .values(title=clean_stored_title(new_title), updated_at=datetime.now())
             )
             with self.engine.begin() as conn:
                 conn.execute(stmt)

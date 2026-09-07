@@ -91,6 +91,36 @@ def names_match_as_words(a: str, b: str) -> bool:
     return na == nb or either_contains_as_words(na, nb)
 
 
+#: Caractères SANS LARGEUR : espace de largeur nulle, liants, joint insécable,
+#: BOM. Ils ne se voient pas — et c'est précisément le danger : ils DISTINGUENT
+#: deux chaînes que l'œil lit comme identiques. Genius en sème dans ses titres
+#: (« ​bank », et quatre `U+200B` devant « très tard le soir »), et comme
+#: l'unicité d'un morceau est `UNIQUE(title, artist_id)`, deux fiches naissent
+#: pour un seul morceau — doublon fusionné à la main le 2026-09-07, dont chaque
+#: moitié portait des données que l'autre n'avait pas.
+_SANS_LARGEUR = {0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF}
+
+
+def clean_stored_title(title: str) -> str:
+    """Titre tel qu'il doit être ENREGISTRÉ : sans caractère invisible.
+
+    À ne pas confondre avec ses deux voisines : `normalize_title` sert au
+    MATCHING (elle écrase casse, accents et ponctuation, et ampute les
+    featurings — illisible), `clean_display_title` sert à l'AFFICHAGE (elle
+    retire en plus les barres décoratives, qui font pourtant partie du titre et
+    doivent rester en base). Celle-ci ne retire que ce qui n'a AUCUN sens : des
+    caractères qui ne s'impriment pas et ne servent qu'à fabriquer des doublons.
+
+    Appliquée à l'écriture (`save_track`, `rename_track`), elle est ce qui rend
+    le défaut auto-correctif : un titre pollué ne crée plus une seconde fiche,
+    il retombe sur l'existante.
+    """
+    if not title:
+        return ""
+    propre = "".join(ch for ch in title if ord(ch) not in _SANS_LARGEUR)
+    return unicodedata.normalize("NFC", propre).strip()
+
+
 def clean_display_title(title: str) -> str:
     """Titre prêt à l'affichage : accents recomposés, décorations barrées retirées.
 
@@ -99,7 +129,7 @@ def clean_display_title(title: str) -> str:
     """
     if not title:
         return ""
-    text = unicodedata.normalize("NFC", title)
+    text = clean_stored_title(title)
     return "".join(ch for ch in text if ord(ch) not in _DECORATIVE_OVERLAYS).strip()
 
 

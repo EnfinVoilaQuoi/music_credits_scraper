@@ -143,12 +143,29 @@ def entetes(html: str) -> tuple[str, ...]:
 
 
 def est_vide(html: str) -> bool:
-    """Le site dit-il explicitement « aucun résultat » ?
+    """La page ne porte-t-elle AUCUNE ligne ?
 
-    Cet état ne rend AUCUN tableau (ni `<thead>`, ni `<tr>`) : sans ce test, le
-    garde-fou d'en-têtes prendrait une recherche légitimement vide pour une
-    refonte du site.
+    L'état « aucun résultat » ne rend aucun tableau (ni `<thead>`, ni `<tr>`) :
+    sans ce test, le garde-fou d'en-têtes prendrait une recherche légitimement
+    vide pour une refonte du site.
+
+    ⚠️ **Le critère est l'ABSENCE DE LIGNES, pas la présence d'un message** — et
+    cette précision a coûté 22 titres, mesurés le 2026-09-07. Le site sert DEUX
+    messages différents :
+
+      · « No certified awards found matching your criteria. » — recherche vide ;
+      · « **No more** certified awards found » — sentinelle de FIN DE LISTE,
+        posée sur la dernière page… **qui contient encore des lignes**.
+
+    Un motif tolérant les confond, si bien que la dernière page partielle de
+    TOUTE requête multi-pages était jetée : 22 titres au balayage complet (la fin
+    de l'alphabet), 6 sur une fenêtre d'un mois. Le message ne compte donc que
+    lorsqu'il n'y a rien à lire — et c'est la bonne hiérarchie, puisque `absent`
+    est le seul verdict exclu du numérateur des échecs, donc le seul capable de
+    rendre une perte silencieuse.
     """
+    if lignes_de_donnees(html):
+        return False
     return bool(_VIDE_RE.search(html or ""))
 
 

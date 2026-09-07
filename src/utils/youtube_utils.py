@@ -19,6 +19,18 @@ def extract_video_id(url: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def artiste_de_recherche(track, artiste_courant: str) -> str:
+    """Sous quel nom chercher CE morceau sur YouTube.
+
+    Un featuring est publié sous le nom de l'artiste PRINCIPAL : chercher sous
+    celui de l'invité rate la vidéo. La règle vivait en double
+    (`update_ytmusic` étape 4, `manual_entry`), et c'est elle qui décide aussi
+    de la clé du cache de recherche — deux endroits qui la calculeraient
+    différemment purgeraient une entrée que l'autre n'a pas écrite.
+    """
+    return (track.primary_artist_name if track.is_featuring else None) or artiste_courant
+
+
 def thumbnail_urls(video_id: str) -> list[str]:
     """URLs de vignette à essayer dans l'ordre pour un video id.
 

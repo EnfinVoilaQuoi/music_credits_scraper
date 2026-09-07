@@ -4,19 +4,121 @@ import webbrowser
 from urllib.parse import quote
 
 from src.config import YOUTUBE_AUTO_SELECT_ALBUM_TRACKS
+from src.models import TrackVideo
 from src.utils.logger import get_logger
+from src.utils.youtube_utils import artiste_de_recherche, extract_video_id
 from src.youtube.track_classifier import TrackClassifier, TrackType
 from src.youtube.youtube_searcher import YouTubeSearcher
 
 logger = get_logger(__name__)
 
 
+# ── Fixer / retirer le lien d'un morceau ─────────────────────────────────────
+# Extraites de `manual_entry.manual_youtube_link`, qui en était le seul appelant :
+# la fiche morceau doit pouvoir VALIDER ou REJETER le lien proposé
+# automatiquement, et ce sont exactement les mêmes gestes.
+
+
+def lien_youtube_valide(url: str | None) -> str | None:
+    """Video id d'une URL de VIDÉO YouTube, ou None si ce n'en est pas une.
+
+    Un lien de RECHERCHE (`/results?search_query=…`) est un faux ami : il
+    s'ouvre dans le navigateur mais ne désigne aucune vidéo — l'enregistrer
+    poserait en base un lien dont aucune vue ne pourra jamais être comptée.
+    """
+    if not url:
+        return None
+    if "youtube.com/watch" not in url and "youtu.be/" not in url:
+        return None
+    return extract_video_id(url)
+
+
+def set_youtube_link(data_manager, track, url: str, *, source: str = "manual") -> bool:
+    """Fixe le lien YouTube d'un morceau et enregistre la vidéo correspondante.
+
+    `source='manual'` est prioritaire : ni la recherche ni Genius ne l'écrasent
+    (cf. `source_lien_retenue`). Écrit dans les DEUX magasins — la colonne, qui
+    porte la vidéo principale, et `track_videos`, dont dépend la somme des vues.
+    N'écrire que la première laisserait le total ignorer la vidéo validée.
+
+    Returns:
+        False si l'URL ne désigne pas une vidéo (rien n'est écrit).
+    """
+    video_id = lien_youtube_valide(url)
+    if not video_id:
+        return False
+
+    data_manager.update_track_youtube_url(track.id, url, source)
+    data_manager.record_track_videos(
+        track.id, [TrackVideo(video_id=video_id, url=url, source=source)]
+    )
+    track.youtube_url = url
+    track.youtube_url_source = source
+    if not any(v.video_id == video_id for v in track.videos):
+        track.videos.append(TrackVideo(video_id=video_id, url=url, source=source))
+    logger.info(f"🔗 Lien YouTube {source} : '{track.title}' → {url}")
+    return True
+
+
+def clear_youtube_link(data_manager, track) -> None:
+    """Retire le lien YouTube d'un morceau (retour à la recherche live).
+
+    La vidéo est AUSSI oubliée de `track_videos` : depuis que `ytm_streams`
+    somme toutes les vidéos connues, la laisser en base ferait continuer de
+    compter les vues d'un lien que l'utilisateur vient de juger faux.
+    """
+    video_id = extract_video_id(track.youtube_url)
+    data_manager.clear_track_youtube_link(track.id)
+    if video_id:
+        data_manager.forget_track_video(track.id, video_id)
+        track.videos = [v for v in track.videos if v.video_id != video_id]
+    track.youtube_url = None
+    track.youtube_url_source = None
+    logger.info(f"🔗 Lien YouTube retiré : '{track.title}'")
+
+
+def reject_youtube_link(data_manager, track, url: str, artiste_courant: str, searcher=None) -> None:
+    """Rejette un lien proposé automatiquement.
+
+    Trois gestes, et il les faut tous les trois : oublier la vidéo (sinon ses
+    vues restent sommées), effacer la colonne si c'est bien ce lien qu'elle
+    porte, et PURGER la recherche mise en cache — sans quoi la fiche
+    reproposerait le même mauvais résultat jusqu'à expiration du cache, et le
+    rejet donnerait l'impression de n'avoir servi à rien.
+    """
+    video_id = extract_video_id(url)
+    if video_id:
+        data_manager.forget_track_video(track.id, video_id)
+        track.videos = [v for v in track.videos if v.video_id != video_id]
+    if video_id and extract_video_id(track.youtube_url) == video_id:
+        data_manager.clear_track_youtube_link(track.id)
+        track.youtube_url = None
+        track.youtube_url_source = None
+
+    searcher = searcher if searcher is not None else youtube_integration.searcher
+    searcher.forget(artiste_de_recherche(track, artiste_courant), track.title)
+    logger.info(f"🚫 Lien YouTube rejeté : '{track.title}' → {url}")
+
+
 class YouTubeIntegration:
     """Interface simplifiée pour l'intégration YouTube dans l'interface"""
 
     def __init__(self):
-        self.searcher = YouTubeSearcher()
+        self._searcher = None
         self.classifier = TrackClassifier()
+
+    @property
+    def searcher(self) -> YouTubeSearcher:
+        """Chercheur créé au PREMIER usage (idiome des clients paresseux).
+
+        Ce module expose un singleton construit à l'import ; construire le
+        chercheur dans `__init__` ouvrait donc `data/youtube_cache.db` et un
+        client `YTMusic` — un aller-retour réseau — du seul fait d'importer le
+        module. Un test qui importe ces fonctions n'a rien à demander à YouTube.
+        """
+        if self._searcher is None:
+            self._searcher = YouTubeSearcher()
+        return self._searcher
 
     def get_youtube_link_for_track(
         self,

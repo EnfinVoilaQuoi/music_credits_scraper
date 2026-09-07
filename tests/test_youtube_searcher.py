@@ -239,3 +239,54 @@ class TestRepliSansYtMusic:
         res = searcher.search_track("Jul", "Bande organisée")
         assert res
         assert all("youtube.com" in r["url"] for r in res)
+
+
+class TestScoreNormalise:
+    """Le score compare des formes NORMALISÉES (lot 2 — la bande 0,85-0,90).
+
+    En brut, une paire PARFAITE écrite autrement plafonnait à 0,7-0,8 : sous le
+    seuil de persistance (0,90), donc jamais enregistrée, donc des vues jamais
+    comptées. Mesuré sur les 401 recherches du cache réel (2026-09-07) :
+    77 meilleurs résultats remontent, dont 72 de « < 0,85 » à « ≥ 0,90 ».
+    """
+
+    @pytest.mark.parametrize(
+        "titre_resultat, titre_cible",
+        [
+            ("SOAB", "S.O.A.B"),  # acronyme pointé
+            ("Mauvaise Humeur (feat. Leto)", "Mauvaise Humeur"),  # suffixe featuring
+            ("La vie qu'on mène", "La vie qu’on mène"),  # apostrophe typographique
+            ("RAZ DE MARÉE", "Raz de marée"),  # casse
+        ],
+    )
+    def test_une_paire_juste_ecrite_autrement_atteint_1(self, titre_resultat, titre_cible):
+        assert ys.relevance_score(titre_resultat, ["ISHA"], "Isha", titre_cible) == pytest.approx(
+            1.0
+        )
+
+    def test_un_mauvais_appariement_reste_bas(self):
+        """La normalisation ne doit pas rapprocher n'importe quoi."""
+        assert ys.relevance_score("Chicago Freestyle", ["Drake"], "Josman", "Ecstasy") < 0.5
+
+    def test_sans_artiste_le_titre_seul_plafonne_a_0_6(self):
+        assert ys.relevance_score("Magot", [], "Isha", "Magot") == pytest.approx(0.6)
+
+
+class TestPurgeDuCache:
+    def test_forget_retire_lentree(self, searcher):
+        """Sans purge, la fiche reproposerait le même mauvais résultat jusqu'à
+        expiration du cache — le rejet semblerait sans effet."""
+        searcher._cache_result(ys.cache_key("Isha", "Magot"), [{"video_id": "X"}])
+        assert searcher.search_track("Isha", "Magot")[0]["video_id"] == "X"
+
+        assert searcher.forget("Isha", "Magot") is True
+        assert searcher._get_cached_result(ys.cache_key("Isha", "Magot")) is None
+
+    def test_forget_sur_une_entree_absente(self, searcher):
+        assert searcher.forget("Isha", "Jamais cherché") is False
+
+    def test_la_cle_est_la_meme_a_la_lecture_et_a_la_purge(self, searcher):
+        """Casse et espaces : la purge doit viser l'entrée que la recherche a
+        écrite, pas une clé voisine."""
+        searcher.search_track("JUL", "Bande Organisée")
+        assert searcher.forget("jul", "bande organisée") is True

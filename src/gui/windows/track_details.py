@@ -12,7 +12,11 @@ from src.config import YOUTUBE_PERSIST_CONFIDENCE
 from src.gui import helpers
 from src.models import Track
 from src.utils.logger import get_logger
-from src.utils.youtube_integration import youtube_integration
+from src.utils.youtube_integration import (
+    reject_youtube_link,
+    set_youtube_link,
+    youtube_integration,
+)
 
 logger = get_logger(__name__)
 
@@ -407,6 +411,16 @@ class TrackDetailsWindow:
                 f"Titre: {youtube_result.get('title', 'N/A')}\n"
                 f"URL: {youtube_result.get('url', 'N/A')}"
             )
+        elif _yt_source == "manual":
+            # Choix EXPLICITE de l'utilisateur : il ne s'affichait pas comme tel
+            # (il tombait dans la branche « auto • 100 % », qui proposerait de
+            # valider ce qui l'a déjà été).
+            label_text = "▶️ Voir (validé ✓)"
+            label_color = "#1DB954"
+            tooltip_text = (
+                f"Lien validé à la main (priorité maximale)\n"
+                f"URL: {youtube_result.get('url', 'N/A')}"
+            )
         elif _yt_source == "search_auto" and youtube_result.get("method") == "stored":
             # Lien trouvé par recherche lors d'une session précédente, persisté en base
             label_text = "▶️ Voir (auto ✓)"
@@ -440,6 +454,16 @@ class TrackDetailsWindow:
             youtube_frame, text=label_text, text_color=label_color, cursor="hand2"
         )
         youtube_label.pack(side="left")
+
+        # ✔️/✖️ sur un lien PROPOSÉ par la recherche. La bande 0,85-0,90 était un
+        # cul-de-sac : le lien s'affichait « auto • 87 % », n'atteignait pas le
+        # seuil de persistance, n'était donc jamais enregistré — et ses vues
+        # jamais comptées. Le seuil n'est PAS abaissé : c'est la validation
+        # humaine qui fait sortir de la bande, dans un sens ou dans l'autre.
+        if _yt_source == "search_auto" and youtube_result.get("method") == "auto_selected":
+            self._boutons_valider_rejeter(
+                youtube_frame, track, youtube_result, youtube_label, artist_name
+            )
 
         # Fonction pour ouvrir YouTube
         def open_youtube():
@@ -1254,3 +1278,39 @@ class TrackDetailsWindow:
             details_window, text="Fermer", command=details_window.destroy, width=100
         )
         close_button.pack(pady=10)
+
+    def _boutons_valider_rejeter(self, parent, track, youtube_result, label, artist_name):
+        """✔️ Valider / ✖️ Rejeter à côté d'un lien PROPOSÉ par la recherche.
+
+        Valider l'enregistre en source `manual` (priorité maximale) et l'ajoute
+        aux vidéos du morceau, donc à la somme des vues. Rejeter fait les trois
+        gestes symétriques — oublier la vidéo, effacer la colonne si c'est bien
+        ce lien qu'elle porte, purger la recherche en cache — sans quoi la
+        fiche reproposerait le même mauvais résultat au prochain affichage.
+        """
+        boutons = ctk.CTkFrame(parent, fg_color="transparent")
+        boutons.pack(side="left", padx=(8, 0))
+
+        def _conclure(texte: str, couleur: str) -> None:
+            label.configure(text=texte, text_color=couleur)
+            boutons.destroy()
+            self.app._populate_tracks_table()
+
+        def valider() -> None:
+            if set_youtube_link(self.app.data_manager, track, youtube_result["url"]):
+                _conclure("▶️ Voir (validé ✓)", "#1DB954")
+            else:
+                messagebox.showerror(
+                    "Lien YouTube", f"Ce lien ne désigne pas une vidéo : {youtube_result['url']!r}"
+                )
+
+        def rejeter() -> None:
+            reject_youtube_link(self.app.data_manager, track, youtube_result["url"], artist_name)
+            _conclure("🚫 Lien rejeté", "gray")
+
+        ctk.CTkButton(
+            boutons, text="✔️", width=30, command=valider, fg_color="#1DB954", hover_color="#169c45"
+        ).pack(side="left", padx=2)
+        ctk.CTkButton(
+            boutons, text="✖️", width=30, command=rejeter, fg_color="gray30", hover_color="gray40"
+        ).pack(side="left", padx=2)

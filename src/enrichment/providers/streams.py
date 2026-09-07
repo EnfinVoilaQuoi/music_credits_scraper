@@ -84,17 +84,25 @@ class StreamsProvider:
             full_crawl=full_crawl,
         )
 
-    def fetch_ytm(self, artist, data_manager) -> dict:
-        """Streams YouTube Music (gate d'identité de canal E8 inclus)."""
+    def fetch_ytm(self, artist, data_manager, track_ids=None) -> dict:
+        """Streams YouTube Music (gate d'identité de canal E8 inclus).
+
+        `track_ids` restreint les écritures et le quota YouTube aux morceaux
+        cochés ; le parcours du canal, lui, reste entier (le gate en a besoin).
+        """
         from src.utils.update_ytmusic import update_ytmusic_streams
 
-        return update_ytmusic_streams(artist, data_manager, api=self._ytm_client())
+        return update_ytmusic_streams(
+            artist, data_manager, api=self._ytm_client(), track_ids=track_ids
+        )
 
-    def fetch_video_views(self, artist, tracks, data_manager) -> dict:
-        """Vues + nature (clip/show/audio) de LA vidéo — batch YT (client partagé)."""
+    def fetch_video_views(self, artist, tracks, data_manager, track_ids=None) -> dict:
+        """Vues + nature (clip/show/audio) des vidéos — batch YT (client partagé)."""
         from src.utils.update_video_views import update_video_views
 
-        return update_video_views(artist, tracks, data_manager, api=self._ytm_client())
+        return update_video_views(
+            artist, tracks, data_manager, api=self._ytm_client(), track_ids=track_ids
+        )
 
     def close(self) -> None:
         """Ferme les clients qui l'exposent (défensif — Kworb/YTM n'ont pas de

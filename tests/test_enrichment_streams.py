@@ -30,12 +30,14 @@ def test_fetch_ytm_delegue_avec_le_client_ytm(monkeypatch):
     monkeypatch.setattr(
         ytm_mod,
         "update_ytmusic_streams",
-        lambda a, d, api=None: seen.update(api=api) or {"matched": 2},
+        lambda a, d, api=None, track_ids=None: seen.update(api=api, ids=track_ids)
+        or {"matched": 2},
     )
     ytm = object()
     provider = StreamsProvider(ytm=ytm)
     assert provider.fetch_ytm("A", "DM") == {"matched": 2}
     assert seen["api"] is ytm
+    assert seen["ids"] is None  # aucune sélection = toute la discographie
 
 
 def test_client_ytm_cree_lazy_une_seule_fois_et_partage(monkeypatch):
@@ -49,10 +51,14 @@ def test_client_ytm_cree_lazy_une_seule_fois_et_partage(monkeypatch):
     monkeypatch.setattr(ytmapi_mod, "YTMusicAPI", FakeYTM)
     captured = []
     monkeypatch.setattr(
-        ytm_mod, "update_ytmusic_streams", lambda a, d, api=None: captured.append(api) or {}
+        ytm_mod,
+        "update_ytmusic_streams",
+        lambda a, d, api=None, track_ids=None: captured.append(api) or {},
     )
     monkeypatch.setattr(
-        vv_mod, "update_video_views", lambda a, t, d, api=None: captured.append(api) or {}
+        vv_mod,
+        "update_video_views",
+        lambda a, t, d, api=None, track_ids=None: captured.append(api) or {},
     )
 
     provider = StreamsProvider()  # ytm non injecté → lazy

@@ -252,8 +252,14 @@ class TestEcrivainsDedies:
             )
             assert f":{colonne}_json" not in sql
 
+    def test_save_track_nectrit_pas_la_table_des_videos(self):
+        """e20 : `track_videos` rejoint la règle. Une façade appelée par treize
+        flux ne peut pas écrire une donnée que douze d'entre eux ignorent."""
+        assert "track_videos" not in self._source_save_track()
+
     def test_les_ecrivains_dedies_existent(self):
         from src.utils.track_repository import TrackRepository
 
         assert callable(TrackRepository.record_certifications)
         assert callable(TrackRepository.record_relationships)
+        assert callable(TrackRepository.record_track_videos)

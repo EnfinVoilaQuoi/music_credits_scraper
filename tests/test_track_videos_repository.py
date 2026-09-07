@@ -193,3 +193,31 @@ class TestSuppressionEtFusion:
         assert data_manager.merge_tracks(garde.id, doublon.id)
 
         assert len(data_manager.get_track_videos(garde.id)) == 1
+
+
+class TestTitreDeLaVideo:
+    """e21 — le titre est ce qui rend VÉRIFIABLE une vidéo partagée : « Donjon
+    & 2h22 » est un clip double légitime, un titre qui ne nomme qu'un morceau
+    trahit un lien fautif."""
+
+    def test_aller_retour(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(
+            track.id,
+            [TrackVideo(video_id="aaaaaaaaaaa", title="B.B. Jacques - Donjon & 2h22")],
+        )
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert lue.title == "B.B. Jacques - Donjon & 2h22"
+
+    def test_une_passe_sans_titre_ne_lefface_pas(self, data_manager):
+        """La passe des streams ne connaît pas les titres : elle ne doit pas
+        effacer ce que la passe des vues a relevé."""
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(
+            track.id, [TrackVideo(video_id="aaaaaaaaaaa", title="Donjon & 2h22")]
+        )
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="aaaaaaaaaaa", views=5)])
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert (lue.title, lue.views) == ("Donjon & 2h22", 5)

@@ -258,3 +258,101 @@ class TestSelectionDeMorceaux:
         mod.update_ytmusic_streams(_ARTIST, dm, api=self._api())
         assert sorted(dm.stream_writes) == [(1, 500), (2, 800)]
         assert dm.album_writes == [("Alb", 1300)]
+
+
+class TestVideoPartagee:
+    """Une vidéo rattachée à PLUSIEURS morceaux n'est comptée pour aucun.
+
+    Mesuré sur la base réelle : 15 cas, 32 morceaux. Deux causes, et la règle
+    vaut pour les deux — un lien Genius fautif (« Innocent » et « Interlude »
+    de Jazzy Bazz), et un CLIP DOUBLE légitime (`iIHdTMHWAic` =
+    « B.B. Jacques - Donjon & 2h22 », dont les deux morceaux existent par
+    ailleurs séparément en audio). Dans les deux cas, attribuer les vues
+    entières à chacun les MULTIPLIE : l'album « Honeymoon » affichait
+    3 × 531 930 pour une vidéo vue 531 930 fois.
+    """
+
+    def test_la_regle_est_pure(self):
+        assert mod.videos_partagees({1: {"a": 10}, 2: {"a": 10, "b": 5}}) == {"a"}
+        assert mod.videos_partagees({1: {"a": 10}, 2: {"b": 5}}) == set()
+        assert mod.videos_partagees({}) == set()
+
+    def _clip_double(self):
+        """« Donjon & 2h22 » : un clip pour deux morceaux, chacun ayant son audio."""
+        api = FakeAPI(
+            raw_tracks=[
+                {"title": "Donjon", "video_id": "audiodonjon", "views_str": None},
+                {"title": "2h22", "video_id": "audio2h22aa", "views_str": None},
+            ],
+            vues={"audiodonjon": 100, "audio2h22aa": 200, "clipdouble0": 5252528},
+        )
+        tracks = [
+            _track(1, "Donjon", youtube_url="https://youtu.be/clipdouble0"),
+            _track(2, "2h22", youtube_url="https://youtu.be/clipdouble0"),
+        ]
+        return api, tracks
+
+    def test_le_clip_double_nest_compte_pour_aucun_des_deux(self, sans_recherche):
+        dm, result = _lancer(*self._clip_double())
+        # Chacun garde SON audio, et rien de la vidéo commune.
+        assert sorted(dm.stream_writes) == [(1, 100), (2, 200)]
+        assert result["vues_non_attribuees"] == 5252528
+
+    def test_le_rapport_nomme_la_video_et_ses_morceaux(self, sans_recherche):
+        api, tracks = self._clip_double()
+        # Titre connu d'une passe « vues des vidéos » précédente (e21).
+        tracks[0].videos = [
+            TrackVideo(video_id="clipdouble0", title="B.B. Jacques - Donjon & 2h22")
+        ]
+        dm, result = _lancer(api, tracks)
+
+        (partagee,) = result["videos_partagees"]
+        assert partagee["video_id"] == "clipdouble0"
+        assert partagee["titre_video"] == "B.B. Jacques - Donjon & 2h22"
+        assert partagee["morceaux"] == ["2h22", "Donjon"]
+        assert partagee["url"].endswith("clipdouble0")
+        assert partagee["vues"] == 5252528
+
+    def test_sans_titre_connu_le_lien_suffit_a_verifier(self, sans_recherche):
+        _, result = _lancer(*self._clip_double())
+        (partagee,) = result["videos_partagees"]
+        assert partagee["titre_video"] is None
+        assert partagee["url"] == "https://www.youtube.com/watch?v=clipdouble0"
+
+    def test_un_morceau_sans_video_propre_nest_pas_ecrit_a_zero(self, sans_recherche):
+        """0 se lirait comme « jamais écouté » : on préfère ne rien écrire."""
+        api = FakeAPI(raw_tracks=[], vues={"partageeee0": 900})
+        tracks = [
+            _track(1, "Innocent", youtube_url="https://youtu.be/partageeee0"),
+            _track(2, "Interlude", youtube_url="https://youtu.be/partageeee0"),
+        ]
+        dm, _ = _lancer(api, tracks)
+        assert dm.stream_writes == []
+
+    def test_la_regle_se_resout_quand_lambiguite_est_levee(self, sans_recherche):
+        """Après un ✖️ Rejeter sur le mauvais lien, la vidéo n'est plus partagée
+        et recompte pour le morceau qui la garde. Ce n'est pas une amputation."""
+        api = FakeAPI(raw_tracks=[], vues={"partageeee0": 900})
+        tracks = [_track(1, "Innocent", youtube_url="https://youtu.be/partageeee0")]
+        dm, result = _lancer(api, tracks)
+        assert dm.stream_writes == [(1, 900)]
+        assert result["videos_partagees"] == []
+
+
+class TestTotalDalbum:
+    def test_une_video_listee_sur_deux_pistes_ne_compte_quune_fois(self, sans_recherche):
+        """Le clip double appartient à l'album UNE fois. L'additionner par piste
+        gonflerait le total du disque — l'alerte de l'utilisateur, 2026-09-07."""
+        api = FakeAPI(
+            raw_tracks=[
+                {"title": "Donjon", "video_id": "clipdouble0", "views_str": None},
+                {"title": "2h22", "video_id": "clipdouble0", "views_str": None},
+                {"title": "Autre", "video_id": "autreautre0", "views_str": None},
+            ],
+            vues={"clipdouble0": 1000, "autreautre0": 7},
+        )
+        tracks = [_track(1, "Donjon"), _track(2, "2h22"), _track(3, "Autre")]
+
+        dm, _ = _lancer(api, tracks)
+
+        assert dm.album_writes == [("Alb", 1007)]  # et non 2007

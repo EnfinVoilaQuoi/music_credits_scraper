@@ -261,6 +261,27 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                     f"⚠️ Canal YTM manuel divergent ({matched}/{ytm_titles} titres) "
                     "— écriture maintenue (saisie manuelle prioritaire)."
                 )
+            # Vidéos rattachées à plusieurs morceaux : écartées de la somme,
+            # parce qu'attribuer les mêmes vues à chacun les multiplierait. Deux
+            # causes possibles, que seul un œil tranche — d'où le titre et le
+            # lien : « Donjon & 2h22 » est un clip double légitime, un titre qui
+            # ne nomme qu'un morceau trahit un lien fautif à rejeter (✖️).
+            partagees = r.get("videos_partagees") or []
+            if partagees:
+                non_attribuees = r.get("vues_non_attribuees") or 0
+                lines.append(
+                    f"\n🔗 {len(partagees)} vidéo(s) rattachée(s) à plusieurs morceaux — "
+                    f"non comptées ({non_attribuees:,} vues laissées de côté) :".replace(",", " ")
+                )
+                for v in partagees[:8]:
+                    nom = v.get("titre_video") or v["url"]
+                    lines.append(f"   • « {nom} » → {', '.join(v['morceaux'])}")
+                if len(partagees) > 8:
+                    lines.append(f"   … et {len(partagees) - 8} autre(s) (voir logs)")
+                lines.append(
+                    "   Clip double = normal, on le laisse. Sinon, ✖️ Rejeter le "
+                    "mauvais lien dans la fiche : la vidéo recomptera pour l'autre."
+                )
     if "video_views" in results:
         v = results["video_views"]
         by_kind = v.get("by_kind") or {}

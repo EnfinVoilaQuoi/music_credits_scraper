@@ -80,7 +80,14 @@ def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -
                 report["no_meta"] += 1
                 continue
             kind = classify_video_kind(info.get("title"), info.get("channel"))
-            mesurees.append(TrackVideo(video_id=vid, kind=kind, views=info.get("views")))
+            # Le TITRE est conservé (e21) : c'est lui qui dit ce que la vidéo
+            # COUVRE, donc ce qui rend vérifiable une vidéo partagée par
+            # plusieurs morceaux — « Donjon & 2h22 » est un clip double.
+            mesurees.append(
+                TrackVideo(
+                    video_id=vid, kind=kind, views=info.get("views"), title=info.get("title")
+                )
+            )
             report["videos"] += 1
             report["by_kind"][kind] = report["by_kind"].get(kind, 0) + 1
 
@@ -106,6 +113,7 @@ def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -
                 else:
                     existante.kind = mesuree.kind
                     existante.views = mesuree.views
+                    existante.title = mesuree.title
             report["updated"] += 1
 
     logger.info(

@@ -212,6 +212,73 @@ def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
     return cid, info
 
 
+# ── Vidéos partagées entre plusieurs morceaux ────────────────────────────────
+# Mesuré sur la base réelle le 2026-09-07 : 15 vidéos sont rattachées à
+# plusieurs morceaux d'un MÊME artiste, 32 morceaux concernés. Deux causes, que
+# rien ne distingue automatiquement :
+#
+#   · un lien Genius fautif — « Innocent » et « Interlude » (Jazzy Bazz)
+#     pointent sur la même vidéo, qui n'appartient qu'à l'un des deux ;
+#   · un CLIP DOUBLE légitime — `iIHdTMHWAic` s'intitule « B.B. Jacques -
+#     Donjon & 2h22 » et couvre réellement les deux morceaux, qui existent par
+#     ailleurs séparément en audio sur le canal « - Topic ».
+#
+# Dans les DEUX cas, attribuer les vues entières à chaque morceau les
+# multiplie : l'album « Honeymoon » affichait 3 × 531 930 pour une vidéo vue
+# 531 930 fois. Et aucune répartition n'est défendable — la vidéo est un objet,
+# les morceaux sont trois.
+#
+# La règle est donc de NE PAS COMPTER, et de SIGNALER : c'est la doctrine du
+# projet quand il n'y a pas d'oracle (cf. les titres tronqués du SNEP). Elle
+# n'ampute rien définitivement — dès que le mauvais lien est rejeté (bouton ✖️),
+# la vidéo cesse d'être partagée et recompte pour le morceau qui la garde.
+def videos_partagees(vid_counts: dict) -> set:
+    """videoId rattachés à PLUSIEURS morceaux, donc non attribuables à un seul.
+
+    Fonction pure. `vid_counts` : `{track_id: {video_id: vues}}`.
+    """
+    vus_par = {}
+    for track_id, vids in vid_counts.items():
+        for video_id in vids:
+            vus_par.setdefault(video_id, set()).add(track_id)
+    return {video_id for video_id, tracks in vus_par.items() if len(tracks) > 1}
+
+
+def _rapport_partagees(partagees: set, vid_counts: dict, tracks_par_id: dict) -> list:
+    """De quoi VÉRIFIER chaque vidéo partagée : son titre, son lien, ses morceaux.
+
+    Le titre de la vidéo (`track_videos.title`, e21) est ce qui tranche entre le
+    clip double et le lien fautif — quand il est connu, c'est-à-dire après une
+    passe « vues des vidéos ». Sinon l'URL suffit à aller voir.
+    """
+    rapport = []
+    for video_id in sorted(partagees):
+        morceaux = sorted(
+            tracks_par_id[tid].title for tid, vids in vid_counts.items() if video_id in vids
+        )
+        titre_video = next(
+            (
+                v.title
+                for tid, vids in vid_counts.items()
+                if video_id in vids
+                for v in tracks_par_id[tid].videos
+                if v.video_id == video_id and v.title
+            ),
+            None,
+        )
+        vues = next(vids[video_id] for vids in vid_counts.values() if video_id in vids)
+        rapport.append(
+            {
+                "video_id": video_id,
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "titre_video": titre_video,
+                "vues": vues,
+                "morceaux": morceaux,
+            }
+        )
+    return rapport
+
+
 def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> dict:
     """Met à jour les streams YouTube Music des morceaux et albums de l'artiste.
 
@@ -247,6 +314,11 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         # plusieurs éditions). C'est la mesure de ce que la table `track_videos`
         # apporte : avant e20, ces morceaux ne comptaient qu'une de leurs vidéos.
         "multi_video": 0,
+        # Vidéos rattachées à plusieurs morceaux : écartées de la somme, et
+        # décrites pour que l'utilisateur puisse trancher (clip double légitime
+        # ou lien fautif). `vues_non_attribuees` chiffre ce que ça laisse de côté.
+        "videos_partagees": [],
+        "vues_non_attribuees": 0,
     }
 
     if api is None:
@@ -419,7 +491,10 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     videos_vues: dict[int, dict[str, TrackVideo]] = {}
 
     for album_title, raw_tracks in tracks_by_album.items():
-        album_total_streams = 0
+        # Total d'album indexé PAR VIDEOID, comme les totaux par morceau : une
+        # vidéo qui couvre deux titres du disque (clip double) est listée sur
+        # les deux, et l'additionner deux fois gonflerait le total de l'album.
+        album_vid_counts: dict[str, int] = {}
 
         for entry in raw_tracks:
             streams = api.resolve_streams(entry, view_counts)
@@ -444,7 +519,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                     video_id = entry.get("video_id")
                     vid = video_id or f"_novid_{album_title}_{norm}"
                     vid_counts.setdefault(matched_track.id, {})[vid] = streams
-                    album_total_streams += streams
+                    album_vid_counts[vid] = streams
                     covered_track_ids.add(matched_track.id)
                     if video_id:
                         videos_vues.setdefault(matched_track.id, {})[video_id] = TrackVideo(
@@ -471,6 +546,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         # Sous SÉLECTION, pas de total d'album : il s'additionne sur tous les
         # morceaux du disque, dont les compteurs ne sont plus demandés. L'écrire
         # donnerait un total amputé — plus faux que pas de total du tout.
+        album_total_streams = sum(album_vid_counts.values())
         if album_total_streams > 0 and track_ids is None:
             data_manager.update_album_ytm_streams(artist.id, album_title, album_total_streams)
 
@@ -580,13 +656,33 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     # ── Étape 6 : écriture — un total par morceau, une vidéo comptée une fois ─
     # La somme porte sur un dict indexé par videoId : si le lien Genius EST la
     # vidéo audio du canal, elle n'est comptée qu'une fois.
+    #
+    # Les vidéos PARTAGÉES entre plusieurs morceaux sont écartées de la somme
+    # (cf. `videos_partagees`) et signalées : on refuse de conclure plutôt que
+    # de multiplier un même compteur.
+    partagees = videos_partagees(vid_counts)
+    vues_par_video = {vid: n for vids in vid_counts.values() for vid, n in vids.items()}
+    result["videos_partagees"] = _rapport_partagees(partagees, vid_counts, tracks_par_id)
+    # Montant que la règle laisse de côté : une perte assumée doit être VISIBLE,
+    # sans quoi elle se lit comme une baisse inexpliquée des compteurs.
+    result["vues_non_attribuees"] = sum(vues_par_video.get(vid, 0) for vid in partagees)
+
     for track_id, vids in sorted(vid_counts.items()):
-        total = sum(vids.values())
+        comptees = {v: n for v, n in vids.items() if v not in partagees}
+        total = sum(comptees.values())
+        if not comptees:
+            # Toutes ses vidéos sont ambiguës : ne rien écrire vaut mieux
+            # qu'écrire 0, qui se lirait comme « jamais écouté ».
+            logger.info(
+                f"⏸️ « {tracks_par_id[track_id].title} » : "
+                "aucune vidéo qui lui soit propre — total inchangé"
+            )
+            continue
         data_manager.update_track_ytm_streams(track_id, total)
-        if len(vids) > 1:
+        if len(comptees) > 1:
             result["multi_video"] += 1
             titre = tracks_par_id[track_id].title if track_id in tracks_par_id else track_id
-            logger.debug(f"🎛️ « {titre} » : {len(vids)} vidéos sommées → {total:,}")
+            logger.debug(f"🎛️ « {titre} » : {len(comptees)} vidéos sommées → {total:,}")
 
     for track_id, videos in videos_vues.items():
         data_manager.record_track_videos(track_id, list(videos.values()))
@@ -638,6 +734,13 @@ if __name__ == "__main__":
     print(f"Morceaux matchés      : {summary['matched']}")
     print(f"Hors canal (lien YT)  : {summary['feats_covered']}")
     print(f"À plusieurs vidéos    : {summary['multi_video']}")
+    if summary["videos_partagees"]:
+        print(
+            f"Vidéos partagées      : {len(summary['videos_partagees'])} "
+            f"({summary['vues_non_attribuees']:,} vues non attribuées)".replace(",", " ")
+        )
+        for v in summary["videos_partagees"]:
+            print(f"   • {v['titre_video'] or v['url']} → {', '.join(v['morceaux'])}")
     print(f"Morceaux non matchés  : {summary['unmatched']}")
     print(f"Albums traités        : {summary['albums_processed']}")
     print(f"Requêtes YouTube API  : {summary['yt_api_calls']}")

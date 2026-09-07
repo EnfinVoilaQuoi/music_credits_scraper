@@ -85,9 +85,9 @@ class TestReadFreshness:
 
 
 class TestAdapters:
-    def test_les_trois_sources_conformes_au_protocole(self):
+    def test_les_quatre_sources_conformes_au_protocole(self):
         sources = all_certification_sources()
-        assert {s.name for s in sources} == {"SNEP", "BRMA", "RIAA"}
+        assert {s.name for s in sources} == {"SNEP", "BRMA", "RIAA", "BPI"}
         for s in sources:
             assert isinstance(s, CertificationSource)
             assert s.capabilities == {Capability.CERTS}

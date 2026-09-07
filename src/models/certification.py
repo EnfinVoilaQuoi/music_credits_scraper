@@ -22,6 +22,10 @@ class CertificationLevel(Enum):
     QUADRUPLE_DIAMANT = "Quadruple Diamant"
 
     # Certifications internationales (pour extension future)
+    # SILVER n'existe QUE chez la BPI (UK) : c'est un palier sous l'or, que les
+    # trois autres organismes n'ont pas. Il prolonge l'échelle par le bas au lieu
+    # de s'y insérer.
+    SILVER = "Silver"
     GOLD = "Gold"
     PLATINUM = "Platinum"
     DIAMOND = "Diamond"
@@ -43,6 +47,7 @@ class CertificationLevel(Enum):
             "DOUBLE_DIAMANT": cls.DOUBLE_DIAMANT,
             "TRIPLE_DIAMANT": cls.TRIPLE_DIAMANT,
             "QUADRUPLE_DIAMANT": cls.QUADRUPLE_DIAMANT,
+            "SILVER": cls.SILVER,
             "GOLD": cls.GOLD,
             "PLATINUM": cls.PLATINUM,
             "DIAMOND": cls.DIAMOND,

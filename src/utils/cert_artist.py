@@ -38,7 +38,14 @@ logger = get_logger(__name__)
 
 #: Sources réellement interrogeables par un nom d'artiste, dans l'ordre
 #: d'affichage. BRMA n'y est pas : voir le docstring du module.
-SOURCES_INTERROGEABLES = ("SNEP", "RIAA")
+#:
+#: La BPI est la mieux lotie des quatre : elle expose un ANNUAIRE d'ids
+#: (`/artists?q=`), donc le rapprochement de noms se fait chez elle et non chez
+#: nous. Corollaire à connaître : une entité BPI est la chaîne de crédit
+#: FACTURÉE (« SIGALA FT ELLA HENDERSON » est une entité distincte de
+#: « SIGALA »), ce qui rejoint exactement le problème que `noms_de_recherche`
+#: traite pour les groupes.
+SOURCES_INTERROGEABLES = ("SNEP", "RIAA", "BPI")
 
 #: Au-delà, le récapitulatif d'un corps est tronqué. Un rapport qu'on ne lit
 #: pas ne vaut pas mieux qu'un compteur — et 120 titres tiennent déjà de la

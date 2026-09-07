@@ -143,6 +143,29 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             hover_color="gray30",
         ).pack(side="right", padx=5, pady=5)
 
+        # BPI (UK). Pas de préparation CDP, contrairement à BRMA : le site est
+        # rendu côté serveur et un GET nu passe (mesuré). Lui coller la plomberie
+        # navigateur « par symétrie » coûterait un Chrome pour rien.
+        bpi_frame = ctk.CTkFrame(buttons_frame)
+        bpi_frame.pack(fill="x", pady=5)
+
+        ctk.CTkLabel(bpi_frame, text="🇬🇧 BPI (UK)").pack(side="left", padx=10)
+        ctk.CTkButton(
+            bpi_frame,
+            text="Mettre à jour",
+            command=self._update_bpi,
+            width=120,
+            fg_color="#1f4e8c",
+        ).pack(side="right", padx=(5, 10), pady=5)
+        ctk.CTkButton(
+            bpi_frame,
+            text="🔎 Valider / Nettoyer",
+            command=self._check_bpi,
+            width=110,
+            fg_color="gray40",
+            hover_color="gray30",
+        ).pack(side="right", padx=5, pady=5)
+
         # SNEP par artiste : récupère le CSV complet via ?interprete=
         # (seul export SNEP encore complet depuis le changement du site)
         artist_frame = ctk.CTkFrame(buttons_frame)
@@ -258,7 +281,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             # mtime que bumpe une recherche artiste). Plus de code ad-hoc par pays.
             from src.enrichment.cert_source import all_certification_sources
 
-            flags = {"SNEP": "🇫🇷", "BRMA": "🇧🇪", "RIAA": "🇺🇸"}
+            flags = {"SNEP": "🇫🇷", "BRMA": "🇧🇪", "RIAA": "🇺🇸", "BPI": "🇬🇧"}
             for source in all_certification_sources():
                 flag = flags.get(source.name, "🏳️")
                 fresh = source.freshness()
@@ -380,13 +403,17 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         return noms_de_recherche(brut[0] if brut else "", brut[1:])
 
     def _fetch_artist_all_sources(self):
-        """Récup des certifs d'un artiste sur les TROIS corps.
+        """Récup des certifs d'un artiste sur les QUATRE corps.
 
-        Les trois ne s'interrogent pas de la même façon, et ce n'est pas un
-        choix d'architecture — c'est ce que chaque site permet :
+        Ils ne s'interrogent pas de la même façon, et ce n'est pas un choix
+        d'architecture — c'est ce que chaque site permet :
           · SNEP `?interprete=` rend un CSV portant tous les paliers du titre ;
           · RIAA `?ar=` déplie la timeline (échelle DATÉE) sur ses DEUX onglets,
             classique et latin ;
+          · BPI expose un ANNUAIRE d'ids (`/artists?q=`) et un filtre cumulatif :
+            c'est la seule des quatre où le rapprochement de noms se fait CHEZ
+            ELLE. Corollaire : une entité BPI est la chaîne de crédit facturée,
+            donc « Sigala » y rend 18 entités, toutes retenues ;
           · Ultratop n'expose aucune recherche par artiste qui nous soit
             accessible (Cloudflare, seules les pages par année passent) : BRMA
             contribue par LECTURE du corpus, complet et continu depuis 1995.
@@ -445,6 +472,18 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             except Exception as e:
                 logger.error(f"RIAA artiste : {e}")
                 outputs.append(f"RIAA : erreur ({e})")
+
+            # BPI : HTTP nu, aucun navigateur, donc aucun repli à prévoir.
+            self._set_progress(f"🇬🇧 BPI : {etiquette}…")
+            try:
+                _code, sortie = self._run_streaming(
+                    [py, str(root / "src" / "utils" / "update_bpi.py"), *args_noms],
+                    f"BPI {etiquette}",
+                )
+                outputs.append("BPI : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
+            except Exception as e:
+                logger.error(f"BPI artiste : {e}")
+                outputs.append(f"BPI : erreur ({e})")
 
             # Le magasin a changé sur disque : le matcher doit être reconstruit
             # AVANT le bilan d'après, sinon il relirait l'état d'avant le run.
@@ -518,6 +557,15 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             )
 
         start_worker(prepare_and_run)
+
+    def _update_bpi(self):
+        """MàJ BPI : fenêtre glissante, en HTTP nu.
+
+        Aucun navigateur, donc aucun repli CDP : le site est du htmx rendu côté
+        serveur et un client non-navigateur y passe sans défi (mesuré le
+        2026-09-07). C'est la source la plus légère des quatre.
+        """
+        self._run_update_script("update_bpi.py", "BPI", extra_args=["--auto"])
 
     def _update_riaa(self):
         """MàJ RIAA : **headless d'abord, CDP en repli**.
@@ -1003,27 +1051,36 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             side="right", padx=5
         )
 
-    def _check_brma(self):
-        """Valide le CSV BRMA (Ultratop) et affiche le rapport."""
+    def _valider_source(self, source, dossier, fichier, importer, nettoyeur, script):
+        """Valide le CSV d'une source, affiche le rapport et propose les suites.
+
+        Factorisé entre BRMA, RIAA et BPI : les trois boutons faisaient
+        exactement la même chose à trois noms près. Une troisième copie aurait
+        été la copie de trop — ce projet a déjà payé le prix d'un garde-fou posé
+        sur une seule de deux voies jumelles.
+
+        `importer` diffère l'import du validateur (qui charge pandas) jusqu'au
+        thread de fond, comme le faisait chaque copie.
+        """
 
         def run():
             try:
                 from src.config import DATA_PATH
-                from src.utils.brma_validator import format_report, validate_brma_csv
 
-                csv_path = Path(DATA_PATH) / "certifications" / "brma" / "certif_brma.csv"
+                valider, formater = importer()
+                csv_path = Path(DATA_PATH) / "certifications" / dossier / fichier
                 if not csv_path.exists():
-                    self._set_progress("❌ BRMA : fichier introuvable")
+                    self._set_progress(f"❌ {source} : fichier introuvable")
                     return
-                self._set_progress("🔎 Validation du CSV BRMA...")
-                report = validate_brma_csv(csv_path)
-                text = format_report(report)
+                self._set_progress(f"🔎 Validation du CSV {source}...")
+                report = valider(csv_path)
+                text = formater(report)
                 verdict = "RAS" if report.get("ok") else "anomalies"
                 self._set_progress(
-                    f"{'✅' if report.get('ok') else '⚠️'} BRMA : {verdict} — "
+                    f"{'✅' if report.get('ok') else '⚠️'} {source} : {verdict} — "
                     f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
                 )
-                actions = [("🧹 Nettoyer", self._clean_brma)]
+                actions = [("🧹 Nettoyer", nettoyeur)]
                 # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
                 # action sans objet, c'est laisser croire qu'il y a à faire.
                 trous = report.get("month_gaps") or []
@@ -1031,63 +1088,71 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     actions.append(
                         (
                             "🕳️ Rescraper les périodes",
-                            lambda g=list(trous): self._rescraper_periodes(
-                                "BRMA", ["src", "utils", "update_brma.py"], g
-                            ),
+                            lambda g=list(trous): self._rescraper_periodes(source, script, g),
                         )
                     )
                 self.after(
                     0,
-                    lambda: self._show_report_window("Validation CSV BRMA", text, actions=actions),
+                    lambda: self._show_report_window(
+                        f"Validation CSV {source}", text, actions=actions
+                    ),
                 )
             except Exception as e:
-                logger.error(f"Erreur validation BRMA : {e}")
-                self._set_progress(f"❌ Erreur validation BRMA : {e}")
+                logger.error(f"Erreur validation {source} : {e}")
+                self._set_progress(f"❌ Erreur validation {source} : {e}")
 
         start_worker(run)
+
+    def _check_brma(self):
+        """Valide le CSV BRMA (Ultratop) et affiche le rapport."""
+
+        def importer():
+            from src.utils.brma_validator import format_report, validate_brma_csv
+
+            return validate_brma_csv, format_report
+
+        self._valider_source(
+            "BRMA",
+            "brma",
+            "certif_brma.csv",
+            importer,
+            self._clean_brma,
+            ["src", "utils", "update_brma.py"],
+        )
 
     def _check_riaa(self):
         """Valide le CSV RIAA (certif_riaa.csv) et affiche le rapport."""
 
-        def run():
-            try:
-                from src.config import DATA_PATH
-                from src.utils.riaa_validator import format_report, validate_riaa_csv
+        def importer():
+            from src.utils.riaa_validator import format_report, validate_riaa_csv
 
-                csv_path = Path(DATA_PATH) / "certifications" / "riaa" / "certif_riaa.csv"
-                if not csv_path.exists():
-                    self._set_progress("❌ RIAA : fichier introuvable")
-                    return
-                self._set_progress("🔎 Validation du CSV RIAA...")
-                report = validate_riaa_csv(csv_path)
-                text = format_report(report)
-                verdict = "RAS" if report.get("ok") else "anomalies"
-                self._set_progress(
-                    f"{'✅' if report.get('ok') else '⚠️'} RIAA : {verdict} — "
-                    f"{len(report.get('month_gaps', []))} mois sans certif (années actives)"
-                )
-                actions = [("🧹 Nettoyer", self._clean_riaa)]
-                # Le rattrapage n'apparaît QUE s'il y a des trous : proposer une
-                # action sans objet, c'est laisser croire qu'il y a à faire.
-                trous = report.get("month_gaps") or []
-                if trous:
-                    actions.append(
-                        (
-                            "🕳️ Rescraper les périodes",
-                            lambda g=list(trous): self._rescraper_periodes(
-                                "RIAA", ["src", "utils", "update_riaa.py"], g
-                            ),
-                        )
-                    )
-                self.after(
-                    0,
-                    lambda: self._show_report_window("Validation CSV RIAA", text, actions=actions),
-                )
-            except Exception as e:
-                logger.error(f"Erreur validation RIAA : {e}")
-                self._set_progress(f"❌ Erreur validation RIAA : {e}")
+            return validate_riaa_csv, format_report
 
-        start_worker(run)
+        self._valider_source(
+            "RIAA",
+            "riaa",
+            "certif_riaa.csv",
+            importer,
+            self._clean_riaa,
+            ["src", "utils", "update_riaa.py"],
+        )
+
+    def _check_bpi(self):
+        """Valide le CSV BPI (certif_bpi.csv) et affiche le rapport."""
+
+        def importer():
+            from src.utils.bpi_validator import format_report, validate_bpi_csv
+
+            return validate_bpi_csv, format_report
+
+        self._valider_source(
+            "BPI",
+            "bpi",
+            "certif_bpi.csv",
+            importer,
+            self._clean_bpi,
+            ["src", "utils", "update_bpi.py"],
+        )
 
     def _clean_riaa(self):
         """Aperçu (dry-run) du nettoyage RIAA, puis application sur confirmation.
@@ -1099,6 +1164,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self._nettoyer_avec_apercu(
             "RIAA",
             ["src", "utils", "update_riaa.py"],
+            ["--clean"],
+        )
+
+    def _clean_bpi(self):
+        """Aperçu (dry-run) du nettoyage BPI, puis application sur confirmation."""
+        self._nettoyer_avec_apercu(
+            "BPI",
+            ["src", "utils", "update_bpi.py"],
             ["--clean"],
         )
 
@@ -1278,6 +1351,10 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 # RIAA
                 self._set_progress("Mise à jour RIAA en cours...")
                 self._run_script_sync("update_riaa.py")
+
+                # BPI
+                self._set_progress("Mise à jour BPI en cours...")
+                self._run_script_sync("update_bpi.py")
 
                 self._set_progress("Toutes les mises à jour terminées !")
                 self.after(2000, lambda: self._set_progress(""))
@@ -1469,6 +1546,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             ("SNEP", "snep", "certif-.csv"),
             ("BRMA", "brma", "brma_raw.csv"),
             ("RIAA", "riaa", "riaa_raw.csv"),
+            ("BPI", "bpi", "bpi_raw.csv"),
         ):
             self._check_missing_periods(source_name, folder, filename)
 
@@ -1528,6 +1606,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             date_columns = {
                 "SNEP": "Date de constat",
                 "BRMA": "certification_date",
+                "BPI": "certification_date",
                 "RIAA": "Certification_Date",
             }
 

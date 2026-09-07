@@ -1,7 +1,7 @@
 """Normalisation de texte pour le rapprochement des certifications.
 
 Fonctions **pures** (aucun état, aucune DB) partagées par le matcher unifié
-(`cert_matcher`) et les « clean steps » des trois sources (SNEP/BRMA/RIAA).
+(`cert_matcher`) et les « clean steps » des quatre sources (SNEP/BRMA/RIAA/BPI).
 Extrait de `SNEPCertificationManager.normalize_text` — la parité de
 normalisation entre sources en dépend (test de caractérisation
 `tests/test_cert_normalize.py`). Ne pas modifier la logique sans mettre à jour
@@ -666,6 +666,130 @@ def riaa_units(
     mult, (canon, _programme, unites) = decode
     epoque = _seuils_d_epoque(canon, date, format_type, famille)
     return (epoque if epoque is not None else unites) * mult
+
+
+# ---------------------------------------------------------------------------
+# Niveaux BPI (Royaume-Uni) — « BRIT Certified ».
+#
+# Trois paliers, et le multiplicateur ne s'applique qu'au platine, comme chez la
+# RIAA (« 4x Gold » n'existe pas plus à Londres qu'à Washington). Le site écrit
+# aussi bien « Platinum » que « 2x Platinum » et « Multi-Platinum » ; son filtre
+# expose 1x à 26x Platinum.
+#
+# **L'échelle dépend du FORMAT**, et c'est la différence de fond avec la RIAA :
+# un Silver d'album (60 000) et un Silver de single (200 000) portent le même mot
+# sans valoir la même chose. Une fonction d'unités qui ignorerait le format
+# rendrait un chiffre faux deux fois sur trois.
+#
+# ⚠️ **Le Music DVD n'a pas de Silver** : le barème BPI commence à Gold pour ce
+# format. `bpi_units("Silver", format_type="Music DVDs")` rend donc None — ce
+# n'est pas un trou de la table, c'est le barème.
+#
+# ⚠️ **Seuils d'époque : NON traités, délibérément.** La BPI a bougé ses seuils
+# au fil des décennies (et a basculé des expéditions vers les ventes réelles en
+# juillet 2013), mais aucune source datée fiable n'a été retenue ici. Le barème
+# ACTUEL est donc appliqué à tout l'historique. Contrairement à la RIAA, où les
+# communiqués d'origine documentent précisément les deux exceptions, on ne
+# fabrique pas ici de seuils d'époque : mieux vaut un barème uniforme et dit que
+# des chiffres inventés. Si une source datée apparaît, c'est ici que ça se règle.
+# ---------------------------------------------------------------------------
+
+#: Mot du palier → forme canonique. Pas de programme parallèle chez la BPI
+#: (le BRIT Billion est un award d'ARTISTE, hors de cette échelle de titres).
+_PALIERS_BPI = {
+    "silver": "Silver",
+    "gold": "Gold",
+    "platinum": "Platinum",
+}
+
+#: Seuls les platine se multiplient (cf. RIAA, même raison).
+_PALIERS_BPI_MULTIPLIABLES = {"platinum"}
+
+#: « 2x Platinum », « Multi-Platinum », « SILVER »…
+_NIVEAU_BPI_RE = re.compile(r"^(?:(\d+)\s*x\s*)?(?:multi-?\s*)?([A-Za-z]+)$", re.I)
+
+#: Format canonique → palier → unités. Les libellés du site (« Album »,
+#: « Single », « Music DVDs ») passent d'abord par `_format_bpi`.
+_SEUILS_BPI = {
+    "album": {"Silver": 60_000, "Gold": 100_000, "Platinum": 300_000},
+    "single": {"Silver": 200_000, "Gold": 400_000, "Platinum": 600_000},
+    "video": {"Gold": 25_000, "Platinum": 50_000},  # pas de Silver : voir plus haut
+}
+
+
+def _format_bpi(format_type: str) -> str:
+    """Libellé de format BPI → clé de `_SEUILS_BPI` (« » si inconnu)."""
+    f = re.sub(r"\s+", " ", (format_type or "").strip().lower())
+    if f.startswith("album"):
+        return "album"
+    if f.startswith("single"):
+        return "single"
+    if "dvd" in f or "video" in f:
+        return "video"
+    return ""
+
+
+def _decoder_niveau_bpi(level: str) -> tuple[int, str] | None:
+    """(multiplicateur, palier canonique) d'un niveau BPI, ou None si inconnu."""
+    m = _NIVEAU_BPI_RE.match(re.sub(r"\s+", " ", (level or "").strip()))
+    if not m:
+        return None
+    mot = m.group(2).lower()
+    canon = _PALIERS_BPI.get(mot)
+    if not canon:
+        return None
+    multiplicateur = int(m.group(1) or 1)
+    if multiplicateur > 1 and mot not in _PALIERS_BPI_MULTIPLIABLES:
+        return None
+    return multiplicateur, canon
+
+
+def bpi_level(s: str) -> str:
+    """Forme canonique d'un niveau BPI.
+
+    « 2X PLATINUM » → « 2x Platinum » ・ « Multi-Platinum » → « Platinum »
+    ・ « silver » → « Silver ».
+
+    Un libellé non reconnu est rendu TEL QUEL (espaces normalisés), comme
+    `riaa_level` : recopier la source vaut mieux qu'inventer une correspondance.
+    Pour SAVOIR si le libellé a été compris, demander `bpi_level_connu` — c'est
+    la question que pose le garde-fou du scraper, et elle ne se déduit pas de la
+    valeur rendue ici.
+    """
+    s = re.sub(r"\s+", " ", (s or "").strip())
+    decode = _decoder_niveau_bpi(s)
+    if decode is None:
+        return s
+    mult, canon = decode
+    return f"{mult}x {canon}" if mult > 1 else canon
+
+
+def bpi_level_connu(s: str) -> bool:
+    """Ce libellé de niveau appartient-il au vocabulaire BPI ?
+
+    Prédicat SÉPARÉ de `bpi_units` à dessein : un Silver de Music DVD est un
+    niveau parfaitement connu dont les unités sont indéfinies. Confondre les deux
+    ferait crier le garde-fou sur une donnée saine.
+    """
+    return _decoder_niveau_bpi(s) is not None
+
+
+def bpi_units(level: str, *, format_type: str = "") -> int | None:
+    """Unités d'un niveau BPI POUR CE FORMAT, ou None.
+
+    « Gold » + « Album » → 100 000 ・ « Gold » + « Single » → 400 000
+    ・ « 2x Platinum » + « Album » → 600 000.
+
+    None quand le niveau est inconnu, quand le format n'est pas fourni (l'échelle
+    en dépend : répondre sans lui serait deviner) ou quand le couple n'existe pas
+    au barème (Silver de Music DVD).
+    """
+    decode = _decoder_niveau_bpi(level)
+    if decode is None:
+        return None
+    mult, canon = decode
+    unites = _SEUILS_BPI.get(_format_bpi(format_type), {}).get(canon)
+    return None if unites is None else unites * mult
 
 
 def canon_category(cat: str) -> str:

@@ -199,7 +199,12 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
         v = results["video_views"]
         by_kind = v.get("by_kind") or {}
         kinds = ", ".join(f"{k}: {n}" for k, n in sorted(by_kind.items())) or "—"
-        lines.append(f"Vues vidéos : {v.get('updated', 0)} mis à jour ({kinds})")
+        # `by_kind` compte des VIDÉOS, `updated` des MORCEAUX : un morceau porte
+        # souvent son clip ET son audio, les deux nombres ne coïncident pas.
+        lines.append(
+            f"Vues vidéos : {v.get('updated', 0)} morceau(x), "
+            f"{v.get('videos', 0)} vidéo(s) ({kinds})"
+        )
     return "\n".join(lines)
 
 

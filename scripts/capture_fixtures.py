@@ -83,11 +83,11 @@ _BPI_DETAIL = "/format/2/artist/3345/title/16392"
 _BPI_ARTISTE = "sigala"  # 18 entités : l'artiste dont le nom EST une famille d'ids
 
 
-def _bpi_liste_url() -> str:
+def _bpi_liste_url(page: int = 1) -> str:
     """URL de recherche BPI, demandée AU SCRAPER (cf. `_riaa_artist_url`)."""
     from src.scrapers.bpi_scraper import BpiScraper
 
-    return BpiScraper().url_liste(debut=_BPI_DEBUT, fin=_BPI_FIN)
+    return BpiScraper().url_liste(debut=_BPI_DEBUT, fin=_BPI_FIN, page=page)
 
 
 CAPTURES: list[dict] = [
@@ -135,6 +135,17 @@ CAPTURES: list[dict] = [
         "name": "bpi_list",
         "path": "bpi/bpi_list.html",
         "url": _bpi_liste_url(),
+        "method": "bpi",
+    },
+    {
+        # Page de CONTINUATION : le site rend un `<table>` complet à la page 1
+        # puis des `<tr>` NUS ensuite (htmx les ajoute au tableau affiché). Cette
+        # fixture existe parce que la première version du scraper cherchait un
+        # `<tbody>` ancêtre et s'arrêtait donc à la page 1, soit 24 titres sur
+        # ~26 500 — un test bâti sur la seule page 1 ne l'aurait jamais montré.
+        "name": "bpi_list_page2",
+        "path": "bpi/bpi_list_page2.html",
+        "url": _bpi_liste_url(page=2),
         "method": "bpi",
     },
     {

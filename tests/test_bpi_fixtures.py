@@ -52,6 +52,11 @@ def liste():
 
 
 @pytest.fixture
+def page2():
+    return load_fixture("bpi/bpi_list_page2.html")
+
+
+@pytest.fixture
 def detail():
     return load_fixture("bpi/bpi_detail.html")
 
@@ -116,6 +121,59 @@ class TestListe:
         on retomberait sur des clés textuelles comme les trois autres sources."""
         for r in parse_liste(liste):
             assert r["format_id"] and r["artist_id"] and r["title_id"]
+
+
+# ── Les pages de continuation ─────────────────────────────────────────────────
+class TestPageDeContinuation:
+    """La page 1 rend un `<table>`, les suivantes des `<tr>` NUS.
+
+    Ce n'est pas un détail de gabarit : la première version du scraper
+    sélectionnait `tbody tr` et ne trouvait donc RIEN dès la page 2. Le balayage
+    complet s'est arrêté à 24 titres sur ~26 500. Ce que le test de pagination
+    existant ne pouvait pas voir : sa fabrique de pages mettait toujours un
+    `<thead>` — une fixture trop propre pour le défaut qu'elle devait attraper.
+    """
+
+    def test_une_page_2_n_a_ni_table_ni_thead(self, page2):
+        assert "<table" not in page2[:200]
+        assert entetes(page2) == ()
+        assert page2.lstrip().startswith("<tr")
+
+    def test_ses_lignes_sont_quand_meme_comptees(self, page2):
+        assert len(lignes_de_donnees(page2)) == PAR_PAGE
+
+    def test_elle_se_parse_avec_les_entetes_de_la_page_1(self, page2):
+        lignes = parse_liste(page2, ENTETES_ATTENDUES)
+        assert len(lignes) == PAR_PAGE
+        assert all(r["artist"] and r["title"] and r["title_id"] for r in lignes)
+        assert all(r["certification_date"] for r in lignes)
+
+    def test_sans_entetes_transmis_elle_ne_rend_rien(self, page2):
+        """Le parseur ne DEVINE pas l'ordre des colonnes : sans en-têtes, rien.
+
+        C'est voulu — inventer un ordre par défaut, c'est accepter de lire un
+        label en guise de date le jour où le site réordonne ses colonnes.
+        """
+        assert parse_liste(page2) == []
+
+    def test_g1_ne_crie_PAS_sur_une_page_de_continuation(self, page2):
+        obs = ObsFactice()
+        assert len(parse_verifie(page2, obs, ENTETES_ATTENDUES)) == PAR_PAGE
+        assert obs.echecs == []
+
+    def test_mais_g1_crie_toujours_sur_une_PREMIERE_page_sans_entetes(self, page2):
+        """L'absence de `<thead>` reste une anomalie quand rien ne précède."""
+        obs = ObsFactice()
+        assert parse_verifie(page2, obs) == []
+        assert [kind for kind, _ in obs.echecs] == ["parse"]
+
+    def test_les_pages_1_et_2_ne_se_recouvrent_pas(self, liste, page2):
+        """Vérifié aussi contre le site réel : 4 pages, 96 lignes, 0 doublon."""
+        cle = lambda r: (r["format_id"], r["artist_id"], r["title_id"])  # noqa: E731
+        p1 = {cle(r) for r in parse_liste(liste)}
+        p2 = {cle(r) for r in parse_liste(page2, ENTETES_ATTENDUES)}
+        assert len(p1) == len(p2) == PAR_PAGE
+        assert p1 & p2 == set()
 
 
 # ── L'historique des paliers ──────────────────────────────────────────────────

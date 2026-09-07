@@ -40,7 +40,7 @@ import pandas as pd
 from src.concurrency import async_loop
 from src.observability import repository as usage_repository
 from src.observability.registry import Flow
-from src.scrapers.bpi_scraper import PAR_PAGE, BpiScraper
+from src.scrapers.bpi_scraper import BpiScraper
 from src.utils import cert_clean_report
 from src.utils.cert_normalize import bpi_level, bpi_units
 from src.utils.logger import get_logger
@@ -312,6 +312,31 @@ def _collecte(travail) -> list[dict]:
     return async_loop.run_sync(_run())
 
 
+def _cle_palier(ligne) -> tuple:
+    """Identité d'un palier : le titre côté source, son niveau, sa date.
+
+    Sert la REPRISE du balayage complet. Le niveau et la date en font partie
+    parce qu'un titre réhaussé depuis notre dernier passage doit être redemandé :
+    sa page de détail porte un palier de plus.
+    """
+    lire = ligne.get if hasattr(ligne, "get") else (lambda k, d="": ligne[k])
+    return (
+        _texte(lire("format_id", "")),
+        _texte(lire("artist_id", "")),
+        _texte(lire("title_id", "")),
+        _norm(bpi_level(_texte(lire("certification_level", "")))),
+        _texte(lire("certification_date", "")),
+    )
+
+
+def _paliers_connus() -> set[tuple]:
+    """Paliers déjà présents dans le brut, pour ne pas re-scraper leurs détails."""
+    raw = _load_bpi_raw()
+    if raw.empty:
+        return set()
+    return {_cle_palier(r) for r in raw.to_dict("records")}
+
+
 def _horodater(lignes: list[dict]) -> list[dict]:
     marque = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for ligne in lignes:
@@ -379,16 +404,42 @@ def full_sweep(get_details: bool = True) -> bool:
     titres n'ont qu'un palier par construction).
     """
     print("=== BPI : balayage COMPLET (long — ~1 100 pages + les détails) ===")
-    lignes = _horodater(_collecte(lambda s: s.scrape_all(get_details=get_details)))
-    if not lignes:
+
+    # REPRISE : ce qu'on a déjà, à l'identité ET au palier près. Un titre dont
+    # on connaît déjà le dernier palier a déjà livré son historique — inutile de
+    # redemander sa page de détail. Le re-balayage des listes coûte ~20 minutes,
+    # les détails plusieurs heures : c'est là que la reprise se joue.
+    connus = _paliers_connus()
+    if connus:
+        print(f"   {len(connus)} palier(s) déjà en base — leurs détails ne seront pas redemandés")
+
+    total_ecrit = 0
+
+    def vider(lot: list[dict]) -> None:
+        """Écrit un lot en cours de route.
+
+        Sans cela, ~26 500 titres restaient en mémoire jusqu'à la fin : une
+        coupure à la troisième heure perdait les trois heures.
+        """
+        nonlocal total_ecrit
+        if not lot:
+            return
+        total, _ = _merge_certif_csv(_horodater(lot), source="GLOBAL")
+        total_ecrit = total
+        print(f"   … {total} ligne(s) en base", flush=True)
+
+    reste = _collecte(
+        lambda s: s.scrape_all(
+            get_details=get_details,
+            deja_connu=lambda ligne: _cle_palier(ligne) in connus,
+            vidage=vider,
+        )
+    )
+    if not reste and not total_ecrit:
         print("❌ Balayage vide — la source est cassée (le corpus n'est jamais vide)")
         return False
-    titres = len({(r["format_id"], r["artist_id"], r["title_id"]) for r in lignes})
-    print(
-        f"   {titres} titre(s) distinct(s), {len(lignes)} palier(s) — soit ~{titres / PAR_PAGE:.0f} pages"
-    )
-    total, ajoutees = _merge_certif_csv(lignes, source="GLOBAL")
-    print(f"✅ {ajoutees} ligne(s) ajoutée(s) au brut (clean : {total})")
+    vider(reste)
+    print(f"✅ Balayage terminé — {total_ecrit} ligne(s) dans le clean")
     return True
 
 

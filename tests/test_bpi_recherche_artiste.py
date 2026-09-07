@@ -37,9 +37,21 @@ def ligne(artiste, titre, *, niveau="Silver", fmt="Single", fid=2, aid=1, tid=1)
 
 
 def page_liste(*lignes):
+    """PAGE 1 : un `<table>` complet, avec ses en-têtes."""
     entetes = "".join(f"<th>{nom}</th>" for nom in ENTETES_ATTENDUES)
     corps = "".join(lignes)
     return f"<table><thead><tr>{entetes}</tr></thead><tbody>{corps}</tbody></table>"
+
+
+def page_suite(*lignes):
+    """PAGES 2+ : des `<tr>` NUS, que htmx ajoute au tableau déjà affiché.
+
+    Fabrique distincte de `page_liste` À DESSEIN. Les tests de pagination
+    servaient auparavant des pages 2+ avec un `<thead>` — une forme que le site
+    ne produit jamais — et laissaient donc passer le défaut qui a tronqué le
+    balayage complet à 24 titres sur ~26 500.
+    """
+    return "".join(lignes)
 
 
 def page_annuaire(*paires):
@@ -130,8 +142,8 @@ class TestPagination:
         """
         scraper.reponses["/"] = [
             page_liste(*[ligne(f"A{i}", f"T{i}", tid=i) for i in range(24)]),
-            page_liste(ligne("B1", "U1", tid=101), ligne("B2", "U2", tid=102)),
-            page_liste(*[ligne(f"C{i}", f"V{i}", tid=200 + i) for i in range(5)]),
+            page_suite(ligne("B1", "U1", tid=101), ligne("B2", "U2", tid=102)),
+            page_suite(*[ligne(f"C{i}", f"V{i}", tid=200 + i) for i in range(5)]),
             PAGE_VIDE,
         ]
         lignes = run(scraper.scrape_by_date_range("2020-01-01", "2020-12-31"))
@@ -142,6 +154,22 @@ class TestPagination:
         scraper.reponses["/"] = [page_liste(ligne("A", "T")), PAGE_VIDE]
         run(scraper.scrape_by_date_range("2020-01-01", "2020-12-31"))
         assert pages_demandees(scraper) == [1, 2]
+
+    def test_les_pages_2_et_suivantes_sont_des_TR_NUS(self, scraper):
+        """Le cas qui a tronqué le balayage complet.
+
+        Sans `<thead>` ni `<tbody>`, un sélecteur `tbody tr` ne trouve rien et la
+        collecte s'arrête à la page 1. L'ordre des colonnes vient de la page 1 et
+        doit être transmis aux suivantes.
+        """
+        scraper.reponses["/"] = [
+            page_liste(ligne("A", "T", tid=1)),
+            page_suite(ligne("B", "U", tid=2), ligne("C", "V", tid=3)),
+            PAGE_VIDE,
+        ]
+        lignes = run(scraper.scrape_by_date_range("2020-01-01", "2020-12-31"))
+        assert [r["title"] for r in lignes] == ["T", "U", "V"]
+        assert pages_demandees(scraper) == [1, 2, 3]
 
     def test_le_plafond_de_pagination_est_signale(self, scraper, monkeypatch):
         """Un plafond atteint n'est pas la normale : il vaut `parse`, pas silence."""
@@ -191,6 +219,63 @@ class TestPaliers:
         lignes = run(scraper.scrape_by_date_range("2020-01-01", "2020-12-31", get_details=True))
         assert len(lignes) == 1
         assert lignes[0]["certification_level"] == "Gold"
+
+
+# ── Reprise et vidage (balayage complet) ──────────────────────────────────────
+class TestReprise:
+    """Un balayage de quatre heures doit survivre à une coupure.
+
+    Deux mécanismes, tous deux nécessaires : ne pas redemander les détails déjà
+    connus (sinon reprendre coûte aussi cher que recommencer), et écrire en cours
+    de route (sinon une coupure à la troisième heure perd les trois heures).
+    """
+
+    def test_un_palier_deja_connu_ne_coute_aucune_requete(self, scraper):
+        scraper.reponses["/"] = [page_liste(ligne("A", "T", niveau="Gold", tid=7)), PAGE_VIDE]
+        lignes = run(scraper.scrape_all(get_details=True, deja_connu=lambda r: r["title_id"] == 7))
+        assert [c for c, _, _ in scraper.appels if c.startswith("/format/")] == []
+        assert len(lignes) == 1
+
+    def test_un_titre_REHAUSSE_est_bien_redemande(self, scraper):
+        """Le palier fait partie de la clé de reprise : un titre passé de
+        Platinum à 2x Platinum a un palier de plus à raconter."""
+        scraper.reponses["/"] = [
+            page_liste(ligne("A", "T", niveau="2x Platinum", tid=7)),
+            PAGE_VIDE,
+        ]
+        scraper.reponses["/format/2/artist/1/title/7"] = [
+            page_detail(("28 August 2026", "2x Platinum"), ("24 June 2016", "Platinum"))
+        ]
+        connus = {("2", "1", "7", "PLATINUM", "2016-06-24")}
+
+        def deja_connu(r):
+            cle = (
+                str(r["format_id"]),
+                str(r["artist_id"]),
+                str(r["title_id"]),
+                r["certification_level"].upper(),
+                r["certification_date"],
+            )
+            return cle in connus
+
+        lignes = run(scraper.scrape_all(get_details=True, deja_connu=deja_connu))
+        assert [c for c, _, _ in scraper.appels if c.startswith("/format/")] == [
+            "/format/2/artist/1/title/7"
+        ]
+        assert len(lignes) == 2
+
+    def test_le_vidage_ecrit_en_cours_de_route(self, scraper, monkeypatch):
+        monkeypatch.setattr("src.scrapers.bpi_scraper._LOT_DE_VIDAGE", 2)
+        scraper.reponses["/"] = [
+            page_liste(*[ligne(f"A{i}", f"T{i}", tid=i) for i in range(5)]),
+            PAGE_VIDE,
+        ]
+        lots = []
+        reste = run(scraper.scrape_all(get_details=True, vidage=lots.append))
+        # 5 titres, vidage tous les 2 → deux lots de 2, et 1 qui reste à l'appelant
+        assert [len(x) for x in lots] == [2, 2]
+        assert len(reste) == 1
+        assert len([r for lot in lots for r in lot]) + len(reste) == 5
 
 
 # ── La requête ────────────────────────────────────────────────────────────────

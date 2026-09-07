@@ -182,6 +182,27 @@ class TestNettoyage:
         assert list((bpi_tmp / "backups").glob("certif_bpi_backup_*.csv"))
 
 
+class TestReprise:
+    def test_les_paliers_connus_sortent_du_brut(self, bpi_tmp):
+        u._merge_certif_csv([_ligne(level="Gold"), _ligne(level="Platinum", date="2021-01-01")])
+        connus = u._paliers_connus()
+        assert len(connus) == 2
+        assert u._cle_palier(_ligne(level="Gold")) in connus
+
+    def test_un_rehaussement_n_est_PAS_connu(self, bpi_tmp):
+        """Sinon la reprise sauterait la page de détail qui porte le palier neuf."""
+        u._merge_certif_csv([_ligne(level="Platinum", date="2016-06-24")])
+        connus = u._paliers_connus()
+        assert u._cle_palier(_ligne(level="2x Platinum", date="2026-08-28")) not in connus
+
+    def test_la_cle_ignore_la_casse_du_niveau(self, bpi_tmp):
+        u._merge_certif_csv([_ligne(level="Gold")])
+        assert u._cle_palier(_ligne(level="GOLD")) in u._paliers_connus()
+
+    def test_sans_brut_aucun_palier_connu(self, bpi_tmp):
+        assert u._paliers_connus() == set()
+
+
 class TestCLI:
     """Le dispatch des arguments : du câblage pur, qui casse en silence.
 

@@ -32,6 +32,7 @@ ligne, sans toucher au réseau.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from bs4 import BeautifulSoup
 
@@ -58,6 +59,11 @@ _HX = {"HX-Request": "true"}
 
 #: Lignes rendues par page. Constante du site, sert au recoupement de complétude.
 PAR_PAGE = 24
+
+#: Titres traités entre deux vidages du balayage complet. Assez grand pour que
+#: l'écriture reste marginale, assez petit pour qu'une coupure ne coûte que
+#: quelques minutes de détails sur les quatre heures que dure la reprise.
+_LOT_DE_VIDAGE = 250
 
 #: En-têtes du tableau `view=list`, dans l'ordre où le site les sert. Ils sont le
 #: garde-fou G1 : les colonnes sont lues PAR LEUR NOM et jamais par leur rang.
@@ -149,28 +155,40 @@ def est_vide(html: str) -> bool:
 def lignes_de_donnees(html: str) -> list:
     """Lignes PORTEUSES du tableau (≥ 7 cellules).
 
-    Le `<tbody>` contient une ligne sentinelle d'une seule cellule, sans
-    `hx-get` : la compter ferait passer une page vide pour une page pleine, et
-    inversement. Le critère est le nombre de cellules et non la présence de
-    `hx-get` — sur une refonte qui retirerait l'attribut, il faut que le compte
-    reste > 0 pour que le verdict soit `parse` et non `absent`.
+    `find_all("tr")` et NON `select("tbody tr")` : **la page 1 rend un `<table>`
+    complet, les pages suivantes rendent des `<tr>` NUS** que htmx ajoute dans le
+    tableau déjà affiché. Chercher un `<tbody>` ancêtre ne trouve donc rien dès la
+    page 2 — mesuré le 2026-09-07, et le balayage complet s'arrêtait à 24 titres
+    sur ~26 500 (le garde-fou d'en-têtes criait `parse`, ce qui l'a rendu visible
+    au lieu de tronquer en silence).
+
+    Le tableau porte aussi une ligne sentinelle d'une seule cellule : la compter
+    ferait passer une page vide pour une page pleine. Le critère est le nombre de
+    cellules et non la présence de `hx-get` — sur une refonte qui retirerait
+    l'attribut, il faut que le compte reste > 0 pour que le verdict soit `parse`
+    et non `absent`.
     """
-    return [tr for tr in _soupe(html).select("tbody tr") if len(tr.find_all("td")) >= 7]
+    return [tr for tr in _soupe(html).find_all("tr") if len(tr.find_all("td")) >= 7]
 
 
-def parse_liste(html: str) -> list[dict]:
+def parse_liste(html: str, entetes_connus: Sequence[str] = ()) -> list[dict]:
     """Lignes du tableau `view=list` → dicts.
 
     Les colonnes sont repérées par le NOM de leur `<th>`, jamais par leur rang :
     la refonte RIAA de 2026 avait réordonné ses cellules, et une lecture
     positionnelle y rendait un label en guise de date sans que rien ne proteste.
+
+    `entetes_connus` sert les pages de CONTINUATION, qui n'ont pas de `<thead>` :
+    l'appelant y passe l'ordre relevé sur la page 1 de la MÊME requête. C'est
+    plus solide qu'un ordre en dur — si le site réordonne ses colonnes, la
+    page 1 le dit et les suivantes suivent.
     """
     soup = _soupe(html)
-    noms = [th.get_text(strip=True) for th in soup.select("thead th")]
+    noms = [th.get_text(strip=True) for th in soup.select("thead th")] or list(entetes_connus)
     rang = {nom: i for i, nom in enumerate(noms)}
     sorties: list[dict] = []
 
-    for tr in soup.select("tbody tr"):
+    for tr in soup.find_all("tr"):
         cellules = tr.find_all("td")
         if len(cellules) < 7:
             continue  # ligne sentinelle
@@ -307,35 +325,44 @@ def verifier_fenetre(lignes: list[dict], debut: str, fin: str, obs) -> None:
         )
 
 
-def parse_verifie(html: str, obs) -> list[dict]:
+def parse_verifie(html: str, obs, entetes_connus: Sequence[str] = ()) -> list[dict]:
     """Parse en distinguant « rien à dire » de « on ne sait plus lire ».
 
-    Trois verdicts possibles, dans cet ordre — l'ordre EST le garde-fou :
+    Les verdicts sont ordonnés, et **l'ordre EST le garde-fou** :
       · G3 · le site dit « aucun résultat » → liste vide, l'appelant conclura
-        `absent` ; c'est légitime et fréquent.
-      · G1 · pas d'en-têtes, ou un en-tête attendu manquant → `parse`. C'est le
-        détecteur de refonte le plus direct, et le moins cher.
+        `absent` ; c'est légitime et fréquent. Ce test vient EN PREMIER parce que
+        l'état vide ne rend aucun tableau : le placer après G1 ferait crier à la
+        refonte sur une recherche parfaitement normale.
+      · G1 · un en-tête attendu manque → `parse`. Le détecteur de refonte le plus
+        direct, et le moins cher.
       · G2 · des lignes porteuses existent mais aucune ne s'extrait → `parse`.
+
+    `entetes_connus` distingue la page 1 des pages de CONTINUATION. Le site rend
+    un `<table>` complet à la page 1 puis des `<tr>` NUS ensuite : sur ces
+    pages-là il n'y a pas de `<thead>` à contrôler, et exiger G1 y transformait
+    une pagination normale en fausse panne — le balayage complet s'arrêtait à
+    24 titres sur ~26 500. Sur la PREMIÈRE page, en revanche, l'absence
+    d'en-têtes reste une vraie anomalie.
     """
     if est_vide(html):
         return []
 
     presents = entetes(html)
-    if not presents:
+    if presents:
+        manquants = [nom for nom in ENTETES_ATTENDUES if nom not in presents]
+        if manquants:
+            logger.error(
+                f"BPI : en-tête(s) manquant(s) {manquants} — servis : {list(presents)}. "
+                "Le gabarit du site a changé (re-capturer les fixtures)."
+            )
+            obs.fail(IssueKind.PARSE, f"en-têtes manquants : {manquants}")
+            return []
+    elif not entetes_connus:
         logger.error("BPI : aucun en-tête de tableau dans la réponse (gabarit changé ?)")
         obs.fail(IssueKind.PARSE, "aucun en-tête de tableau")
         return []
 
-    manquants = [nom for nom in ENTETES_ATTENDUES if nom not in presents]
-    if manquants:
-        logger.error(
-            f"BPI : en-tête(s) manquant(s) {manquants} — servis : {list(presents)}. "
-            "Le gabarit du site a changé (re-capturer les fixtures)."
-        )
-        obs.fail(IssueKind.PARSE, f"en-têtes manquants : {manquants}")
-        return []
-
-    lignes = parse_liste(html)
+    lignes = parse_liste(html, presents or entetes_connus)
     if not lignes:
         vues = len(lignes_de_donnees(html))
         if vues:
@@ -440,10 +467,16 @@ class BpiScraper:
         """
         plafond = max_pages or BPI_MAX_PAGES
         lignes: list[dict] = []
+        # Ordre des colonnes relevé sur la PAGE 1 et transmis aux suivantes, qui
+        # ne rendent que des `<tr>` nus. On le relève au lieu de le figer : si le
+        # site réordonne ses colonnes, la page 1 le dit et les suivantes suivent.
+        entetes_connus: tuple[str, ...] = ()
         page = 1
         while page <= plafond:
             html = await self._get("/", params=self.params_liste(page=page, **filtres))
-            lot = parse_verifie(html, obs)
+            lot = parse_verifie(html, obs, entetes_connus)
+            if not entetes_connus:
+                entetes_connus = entetes(html)
             if not lot:
                 break
             lignes.extend(lot)
@@ -456,15 +489,22 @@ class BpiScraper:
             obs.fail(IssueKind.PARSE, f"plafond de pagination atteint ({plafond})")
         return lignes
 
-    async def _paliers(self, ligne: dict, obs) -> list[dict]:
+    async def _paliers(self, ligne: dict, obs, deja_connu=None) -> list[dict]:
         """Une ligne PAR PALIER daté, via la page de détail.
 
-        Un titre dont le dernier palier est Silver est rendu tel quel, sans
-        requête : Silver est le plancher du barème, il n'a par construction rien
-        à raconter de plus. C'est cette économie qui rend le balayage complet
-        praticable.
+        Deux économies, et elles sont ce qui rend le balayage complet praticable :
+
+        · un titre dont le dernier palier est **Silver** est rendu tel quel, sans
+          requête — Silver est le plancher du barème, il n'a par construction rien
+          à raconter de plus ;
+        · `deja_connu(ligne)` permet à l'appelant de dire « j'ai déjà l'historique
+          de ce titre À CE PALIER-LÀ ». C'est ce qui rend un balayage interrompu
+          REPRENABLE : le re-balayage des listes coûte ~20 minutes, mais les
+          milliers de pages de détail déjà vues ne sont pas redemandées.
         """
         if not ligne.get("detail_url") or ligne["certification_level"] == "Silver":
+            return [ligne]
+        if deja_connu is not None and deja_connu(ligne):
             return [ligne]
 
         chemin = ligne["detail_url"][len(self.base_url) :]
@@ -480,10 +520,25 @@ class BpiScraper:
 
         return [{**ligne, **palier} for palier in historique]
 
-    async def _avec_paliers(self, lignes: list[dict], obs) -> list[dict]:
+    async def _avec_paliers(
+        self, lignes: list[dict], obs, deja_connu=None, vidage=None
+    ) -> list[dict]:
+        """Déplie les paliers, en vidant périodiquement si l'appelant le demande.
+
+        `vidage(lot)` est appelé tous les `_LOT_DE_VIDAGE` titres. Sans lui, un
+        balayage complet garderait ses ~26 500 titres en mémoire et n'écrirait
+        qu'à la toute fin : une coupure à la troisième heure perdrait les trois
+        heures. Ce qui est vidé est retiré du retour — l'appelant l'a déjà.
+        """
         sorties: list[dict] = []
+        depuis_vidage = 0
         for ligne in lignes:
-            sorties.extend(await self._paliers(ligne, obs))
+            sorties.extend(await self._paliers(ligne, obs, deja_connu))
+            depuis_vidage += 1
+            if vidage is not None and depuis_vidage >= _LOT_DE_VIDAGE:
+                vidage(sorties)
+                sorties = []
+                depuis_vidage = 0
         return sorties
 
     # -- entrées publiques ---------------------------------------------------
@@ -569,7 +624,9 @@ class BpiScraper:
             logger.info(f"BPI : {len(lignes)} certification(s) entre {debut} et {fin}")
             return lignes
 
-    async def scrape_all(self, get_details: bool = True) -> list[dict]:
+    async def scrape_all(
+        self, get_details: bool = True, deja_connu=None, vidage=None
+    ) -> list[dict]:
         """Corpus COMPLET (~26 500 lignes, ~1 105 pages au 2026-09-07).
 
         Trié par nom d'artiste et non par date : une re-certification déplace une
@@ -583,7 +640,7 @@ class BpiScraper:
             if not lignes:
                 obs.absent("corpus vide")
                 return []
-            logger.info(f"BPI : {len(lignes)} ligne(s) au balayage complet")
+            logger.info(f"BPI : {len(lignes)} titre(s) au balayage complet")
             if get_details:
-                lignes = await self._avec_paliers(lignes, obs)
+                lignes = await self._avec_paliers(lignes, obs, deja_connu, vidage)
             return lignes

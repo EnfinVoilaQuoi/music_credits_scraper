@@ -137,6 +137,73 @@ _PRODUCER_ROLES = frozenset(
 
 _WRITER_ROLES = frozenset({CreditRole.WRITER, CreditRole.COMPOSER, CreditRole.LYRICIST})
 
+
+#: Rôles qui valent PRÉSENCE d'une personne sur un morceau : écriture,
+#: production, performance (décision utilisateur du 2026-09-08).
+#:
+#: Sert à la discographie réunie d'un **collectif** — L'Animalerie n'est pas un
+#: groupe, tout le monde n'y travaille pas sur tout, donc seuls les morceaux où
+#: le membre est réellement là lui reviennent. Pour un GROUPE la question ne se
+#: pose pas : tous ses morceaux comptent.
+#:
+#: Volontairement plus ÉTROIT que `get_music_credits()`, qui rend tout ce qui
+#: n'est pas de la vidéo : quelqu'un qui a seulement mixé, masterisé, distribué
+#: ou édité un morceau du collectif n'a pas ce morceau dans SA discographie.
+#: Les métiers du son, le label, l'édition, la pochette et la vidéo sont donc
+#: exclus — de même que `TRANSLATOR`, traduire un texte n'étant pas l'écrire.
+#:
+#: `EXECUTIVE_PRODUCER` est le seul arbitrage discutable : c'est souvent un rôle
+#: de financement. Il est retenu parce que l'énumération le range elle-même sous
+#: « production musicale », et l'en retirer serait imposer ma taxinomie à celle
+#: du projet. Une ligne à ôter si l'usage le dément.
+ROLES_DE_PRESENCE: frozenset = frozenset(
+    {
+        # Écriture
+        CreditRole.WRITER,
+        CreditRole.COMPOSER,
+        CreditRole.LYRICIST,
+        # Production musicale
+        CreditRole.PRODUCER,
+        CreditRole.CO_PRODUCER,
+        CreditRole.EXECUTIVE_PRODUCER,
+        CreditRole.VOCAL_PRODUCER,
+        CreditRole.ADDITIONAL_PRODUCTION,
+        CreditRole.PROGRAMMER,
+        CreditRole.DRUM_PROGRAMMER,
+        CreditRole.ARRANGER,
+        # Performance — voix
+        CreditRole.FEATURED,
+        CreditRole.VOCALS,
+        CreditRole.LEAD_VOCALS,
+        CreditRole.BACKGROUND_VOCALS,
+        CreditRole.ADDITIONAL_VOCALS,
+        CreditRole.CHOIR,
+        CreditRole.AD_LIBS,
+        # Performance — instruments (jouer EST une performance)
+        CreditRole.GUITAR,
+        CreditRole.BASS_GUITAR,
+        CreditRole.ACOUSTIC_GUITAR,
+        CreditRole.ELECTRIC_GUITAR,
+        CreditRole.RHYTHM_GUITAR,
+        CreditRole.CELLO,
+        CreditRole.DRUMS,
+        CreditRole.BASS,
+        CreditRole.KEYBOARD,
+        CreditRole.PERCUSSION,
+        CreditRole.PIANO,
+        CreditRole.VIOLIN,
+        CreditRole.ORGAN,
+        CreditRole.SYNTHESIZER,
+        CreditRole.STRINGS,
+        CreditRole.TRUMPET,
+        CreditRole.VIOLA,
+        CreditRole.SAXOPHONE,
+        CreditRole.TROMBONE,
+        CreditRole.SCRATCHES,
+        CreditRole.INSTRUMENTATION,
+    }
+)
+
 _VIDEO_ROLES = frozenset(
     {
         CreditRole.VIDEO_DIRECTOR,
@@ -703,6 +770,40 @@ class Track:
         if len(music_credits) < 2:
             return False
         return bool(self.get_producers()) or bool(self.get_writers())
+
+    def personne_presente(self, noms: set[str]) -> bool:
+        """Cette personne figure-t-elle au générique de CE morceau ?
+
+        « Présente » au sens du lot 3 : à l'écriture, à la production ou à la
+        performance (`ROLES_DE_PRESENCE`) — pas au mixage, pas au label. C'est
+        ce qui décide si un morceau de COLLECTIF entre dans la discographie d'un
+        de ses membres.
+
+        `noms` : le nom de la personne ET ses alias connus, en clair. Le
+        rapprochement se fait par MOTS ENTIERS, ce qui est indispensable ici :
+        `featured_artists` est une liste (« S.Pri Noir, Eazy Dew, 3010, Josman »)
+        où il faut reconnaître un nom sans qu'« IAM » ne matche « Williams ».
+
+        Ce que la règle rate ASSUME de le rater : un morceau où la personne joue
+        sans être créditée reste invisible. Mieux vaut une discographie
+        incomplète qu'une discographie inventée — et le crédit manquant est un
+        défaut de source, réparable par un ré-enrichissement.
+        """
+        # Import LOCAL : `src/utils/__init__` charge DataManager/DataEnricher,
+        # qui importent Track — un import module-niveau reboucle (cf. l'en-tête).
+        from src.utils.title_matching import names_match_as_words
+
+        if not noms:
+            return False
+        for credit in self.credits:
+            if credit.role in ROLES_DE_PRESENCE and any(
+                names_match_as_words(nom, credit.name) for nom in noms
+            ):
+                return True
+        for champ in (self.featured_artists, self.primary_artist_name):
+            if champ and any(names_match_as_words(nom, champ) for nom in noms):
+                return True
+        return False
 
     def get_music_credits(self) -> list[Credit]:
         """Retourne les crédits musicaux (tout ce qui n'est pas un crédit vidéo)."""

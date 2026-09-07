@@ -59,6 +59,11 @@ class ArtistRelation:
       · `has_member` — `related_name` est un de ses membres ;
       · `alias`      — même personne, autre nom de scène.
 
+    `formation` dit la NATURE de l'autre bout, et c'est elle qui décide de la
+    lecture : un `groupe` apporte TOUS ses morceaux au membre, un `collectif`
+    seulement ceux où le membre est réellement présent (écriture, production,
+    performance). Nulle pour un `alias`.
+
     `related_artist_id` peut être None : le groupe lié n'est pas forcément dans
     notre base, et le lien vaut quand même. Les dates sont du TEXTE brut de la
     source — MusicBrainz en rend des partielles (« 1989-10 »).
@@ -66,6 +71,7 @@ class ArtistRelation:
 
     related_name: str = ""
     kind: str = "member_of"
+    formation: str | None = None  # groupe | collectif
     related_artist_id: int | None = None
     source: str | None = None
     begin_date: str | None = None

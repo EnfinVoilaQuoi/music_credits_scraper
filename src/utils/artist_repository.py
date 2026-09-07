@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.models import Artist, ArtistRelation
+from src.models import Artist, ArtistRelation, Track
 from src.persistence.binding import date_bind
 from src.persistence.schema import artists, monthly_listeners_history
 from src.utils.logger import get_logger
@@ -181,10 +181,33 @@ class ArtistRepository:
                     {"aid": artist_id},
                 )
 
+                # 2c. Supprimer les vidéos des morceaux (e20) — même absence de
+                # cascade FK : sans ça, des lignes pointeraient sur des morceaux
+                # supprimés et resteraient invisibles autant qu'indélébiles.
+                conn.execute(
+                    text(
+                        "DELETE FROM track_videos WHERE track_id IN "
+                        "(SELECT id FROM tracks WHERE artist_id = :aid)"
+                    ),
+                    {"aid": artist_id},
+                )
+
                 # 3. Supprimer les morceaux
                 deleted_tracks = conn.execute(
                     text("DELETE FROM tracks WHERE artist_id = :aid"), {"aid": artist_id}
                 ).rowcount
+
+                # 3b. Supprimer les liens de formation (e22), DANS LES DEUX SENS :
+                # l'artiste supprimé est aussi cité comme `related_artist_id`
+                # chez ses coéquipiers, dont la discographie réunie irait alors
+                # chercher un artiste qui n'existe plus.
+                conn.execute(
+                    text(
+                        "DELETE FROM artist_relations "
+                        "WHERE artist_id = :aid OR related_artist_id = :aid"
+                    ),
+                    {"aid": artist_id},
+                )
 
                 # 4. Supprimer l'artiste
                 deleted_artist = conn.execute(
@@ -418,6 +441,7 @@ class ArtistRepository:
                         "nom": rel.related_name,
                         "kind": rel.kind,
                         "source": rel.source,
+                        "formation": rel.formation,
                         "debut": rel.begin_date,
                         "fin": rel.end_date,
                         "quand": maintenant,
@@ -426,7 +450,8 @@ class ArtistRepository:
                         conn.execute(
                             text(
                                 "UPDATE artist_relations SET related_artist_id = :lie, "
-                                "source = :source, begin_date = :debut, end_date = :fin, "
+                                "source = :source, formation = :formation, "
+                                "begin_date = :debut, end_date = :fin, "
                                 "confirmed_at = :quand WHERE artist_id = :aid "
                                 "AND related_name = :nom AND kind = :kind"
                             ),
@@ -436,9 +461,9 @@ class ArtistRepository:
                         conn.execute(
                             text(
                                 "INSERT INTO artist_relations (artist_id, related_artist_id, "
-                                "related_name, kind, source, begin_date, end_date, "
-                                "confirmed_at, created_at) VALUES (:aid, :lie, :nom, :kind, "
-                                ":source, :debut, :fin, :quand, :quand)"
+                                "related_name, kind, source, formation, begin_date, "
+                                "end_date, confirmed_at, created_at) VALUES (:aid, :lie, "
+                                ":nom, :kind, :source, :formation, :debut, :fin, :quand, :quand)"
                             ),
                             params,
                         )
@@ -487,7 +512,7 @@ class ArtistRepository:
                 lignes = conn.execute(
                     text(
                         "SELECT related_artist_id, related_name, kind, source, "
-                        "begin_date, end_date FROM artist_relations "
+                        "formation, begin_date, end_date FROM artist_relations "
                         "WHERE artist_id = :aid ORDER BY kind, related_name"
                     ),
                     {"aid": artist_id},
@@ -498,6 +523,7 @@ class ArtistRepository:
                         kind=r["kind"],
                         related_artist_id=r["related_artist_id"],
                         source=r["source"],
+                        formation=r["formation"],
                         begin_date=r["begin_date"],
                         end_date=r["end_date"],
                     )
@@ -507,16 +533,50 @@ class ArtistRepository:
             logger.error(f"Erreur get_artist_relations({artist_id}): {e}")
             return []
 
-    def ids_discographie_reunie(self, artist_id: int) -> list[int]:
-        """`artist_id` + ceux des formations liées, pour une lecture par UNION.
+    def nature_connue_pour(self, related_name: str) -> str | None:
+        """Nature déjà choisie pour CETTE formation, quel qu'en soit le membre.
 
-        **Le cœur du lot 3, et sa seule implémentation légitime.** La
-        discographie d'un membre inclut ce qu'il a sorti avec ses groupes ; on
+        La nature est une propriété de la FORMATION : L'Animalerie est un
+        collectif pour tout le monde. Elle est pourtant stockée sur le lien —
+        parce que la formation n'est pas toujours en base — donc rien
+        n'empêcherait structurellement qu'un membre la déclare « groupe » et un
+        autre « collectif ». La fenêtre pré-remplit avec ce que renvoie cette
+        méthode : la divergence devient un geste délibéré au lieu d'un oubli.
+
+        Comparaison par nom NORMALISÉ, comme le rattachement.
+        """
+        cible = normalize_name(related_name)
+        if not cible:
+            return None
+        try:
+            with self.engine.connect() as conn:
+                lignes = conn.execute(
+                    text(
+                        "SELECT related_name, formation FROM artist_relations "
+                        "WHERE formation IS NOT NULL"
+                    )
+                ).mappings()
+                for ligne in lignes:
+                    if normalize_name(ligne["related_name"]) == cible:
+                        return ligne["formation"]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur nature_connue_pour({related_name!r}): {e}")
+        return None
+
+    def ids_discographie_reunie(self, artist_id: int) -> list[int]:
+        """`artist_id` + ceux de ses GROUPES, pour une lecture par UNION.
+
+        La discographie d'un membre inclut ce qu'il a sorti avec ses groupes ; on
         l'obtient en élargissant la LECTURE, jamais en recopiant des morceaux —
         `UNIQUE(title, artist_id)` l'interdirait, et cela doublerait streams et
         certifications.
 
-        Seuls les liens `member_of` élargissent : un GROUPE ne récupère pas les
+        **Ne concerne que les `groupe`.** Un COLLECTIF n'apporte pas tous ses
+        morceaux : seulement ceux où le membre est présent, ce qui n'est pas une
+        union d'identifiants mais un filtrage morceau par morceau — voir
+        `discographie_reunie`.
+
+        Seuls les liens `member_of` élargissent : un groupe ne récupère pas les
         albums solo de ses membres. IAM n'est pas l'auteur de « Où je vis ».
 
         Un seul niveau, volontairement : pas de transitivité. Un membre d'un
@@ -525,9 +585,69 @@ class ArtistRepository:
         """
         ids = [artist_id]
         for rel in self.get_artist_relations(artist_id):
-            if rel.kind == "member_of" and rel.related_artist_id not in (None, *ids):
+            if (
+                rel.kind == "member_of"
+                and rel.formation != "collectif"
+                and rel.related_artist_id not in (None, *ids)
+            ):
                 ids.append(rel.related_artist_id)
         return ids
+
+    def ids_collectifs(self, artist_id: int) -> list[int]:
+        """Identifiants des COLLECTIFS dont l'artiste est membre (et qui sont en base)."""
+        return [
+            rel.related_artist_id
+            for rel in self.get_artist_relations(artist_id)
+            if rel.kind == "member_of"
+            and rel.formation == "collectif"
+            and rel.related_artist_id is not None
+        ]
+
+    def noms_de_lartiste(self, artist_id: int, nom: str) -> set[str]:
+        """Le nom de l'artiste et ses alias confirmés — sous lesquels le chercher.
+
+        Un membre est crédité tantôt sous son nom, tantôt sous un alias : ne
+        chercher que le premier raterait les morceaux du collectif signés de
+        l'autre.
+        """
+        noms = {nom} if nom else set()
+        noms |= {
+            rel.related_name
+            for rel in self.get_artist_relations(artist_id)
+            if rel.kind == "alias" and rel.related_name
+        }
+        return noms
+
+    def discographie_reunie(self, artist: "Artist") -> list["Track"]:
+        """Morceaux de l'artiste, de ses GROUPES, et sa part dans ses COLLECTIFS.
+
+        **Le cœur du lot 3.** Les deux natures de formation ne se lisent pas de
+        la même façon, et c'est la seule chose qui les distingue vraiment :
+
+          · un **groupe** (IAM, L'Or du Commun) apporte TOUS ses morceaux — ses
+            membres font la formation, ce qu'elle sort est à eux ;
+          · un **collectif** (L'Animalerie) n'apporte que les morceaux où le
+            membre est PRÉSENT (écriture, production, performance). Un collectif
+            est une maison : tout le monde n'y travaille pas toujours ensemble.
+
+        Aucune ligne n'est dupliquée : on lit plus large, on n'écrit rien. Les
+        doublons de morceaux (un même titre lu deux fois par deux chemins) sont
+        écartés sur l'identité métier de `Track`.
+        """
+        vus, resultat = set(), []
+        for aid in self.ids_discographie_reunie(artist.id):
+            for track in self.get_artist_tracks(aid):
+                if track not in vus:
+                    vus.add(track)
+                    resultat.append(track)
+
+        noms = self.noms_de_lartiste(artist.id, artist.name)
+        for collectif_id in self.ids_collectifs(artist.id):
+            for track in self.get_artist_tracks(collectif_id):
+                if track not in vus and track.personne_presente(noms):
+                    vus.add(track)
+                    resultat.append(track)
+        return resultat
 
     def update_artist_kworb_totals(
         self,

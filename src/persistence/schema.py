@@ -237,6 +237,11 @@ track_videos = Table(
     Column("views", Integer),
     Column("views_updated", TIMESTAMP),
     Column("created_at", TIMESTAMP),
+    # Titre de la vidéo (e21), EN FIN de table (ordre d'`add_column` Alembic).
+    # C'est lui qui rend VÉRIFIABLE une vidéo partagée par plusieurs morceaux :
+    # « B.B. Jacques - Donjon & 2h22 » est un clip double légitime, un titre qui
+    # ne nomme qu'un morceau trahit un lien fautif.
+    Column("title", Text),
     UniqueConstraint("track_id", "video_id"),
     sqlite_autoincrement=True,
 )

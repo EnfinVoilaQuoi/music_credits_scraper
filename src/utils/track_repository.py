@@ -1317,8 +1317,8 @@ class TrackRepository:
                     r["video_id"]: r
                     for r in conn.execute(
                         text(
-                            "SELECT video_id, url, kind, source, views FROM track_videos "
-                            "WHERE track_id = :tid"
+                            "SELECT video_id, url, kind, source, views, title "
+                            "FROM track_videos WHERE track_id = :tid"
                         ),
                         {"tid": track_id},
                     )
@@ -1331,8 +1331,8 @@ class TrackRepository:
                         conn.execute(
                             text(
                                 "INSERT INTO track_videos (track_id, video_id, url, kind, "
-                                "source, views, views_updated, created_at) VALUES "
-                                "(:tid, :vid, :url, :kind, :source, :views, :vu, :now)"
+                                "source, views, views_updated, created_at, title) VALUES "
+                                "(:tid, :vid, :url, :kind, :source, :views, :vu, :now, :title)"
                             ),
                             {
                                 "tid": track_id,
@@ -1343,13 +1343,14 @@ class TrackRepository:
                                 "views": video.views,
                                 "vu": now if video.views is not None else None,
                                 "now": now,
+                                "title": video.title,
                             },
                         )
                     else:
                         conn.execute(
                             text(
                                 "UPDATE track_videos SET url = :url, kind = :kind, "
-                                "source = :source, views = :views, "
+                                "source = :source, views = :views, title = :title, "
                                 "views_updated = COALESCE(:vu, views_updated) "
                                 "WHERE track_id = :tid AND video_id = :vid"
                             ),
@@ -1358,6 +1359,7 @@ class TrackRepository:
                                 "vid": video.video_id,
                                 "url": video.url or ancienne["url"],
                                 "kind": video.kind or ancienne["kind"],
+                                "title": video.title or ancienne["title"],
                                 "source": source_lien_retenue(ancienne["source"], video.source),
                                 "views": (
                                     video.views if video.views is not None else ancienne["views"]
@@ -1395,8 +1397,8 @@ class TrackRepository:
                 rows = (
                     conn.execute(
                         text(
-                            "SELECT track_id, video_id, url, kind, source, views, views_updated "
-                            "FROM track_videos WHERE track_id = :tid"
+                            "SELECT track_id, video_id, url, kind, source, views, "
+                            "views_updated, title FROM track_videos WHERE track_id = :tid"
                         ),
                         {"tid": track_id},
                     )
@@ -1423,7 +1425,7 @@ class TrackRepository:
             conn.execute(
                 text(
                     "SELECT v.track_id, v.video_id, v.url, v.kind, v.source, v.views, "
-                    "v.views_updated FROM track_videos v "
+                    "v.views_updated, v.title FROM track_videos v "
                     "JOIN tracks t ON t.id = v.track_id WHERE t.artist_id = :aid"
                 ),
                 {"aid": artist_id},
@@ -1450,6 +1452,7 @@ class TrackRepository:
                     source=r["source"],
                     views=r["views"],
                     views_updated=r["views_updated"],
+                    title=r["title"],
                 )
             )
         for videos in par_track.values():

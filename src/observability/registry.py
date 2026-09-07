@@ -32,6 +32,10 @@ class Family(StrEnum):
     AUDIO = "audio"  # BPM, key, mode — « données additionnelles »
     CERTS = "certs"
     STREAMS = "streams"
+    # Qui est qui : appartenance à un groupe, alias. Ni un crédit, ni une donnée
+    # audio — c'est de l'IDENTITÉ d'artiste, et la confondre avec les crédits
+    # rendrait la section « crédits » du panneau illisible (lot 3).
+    IDENTITE = "identite"
 
 
 FAMILY_LABELS: dict[Family, str] = {
@@ -39,10 +43,17 @@ FAMILY_LABELS: dict[Family, str] = {
     Family.AUDIO: "Données additionnelles (BPM · Key · Mode)",
     Family.CERTS: "Certifications",
     Family.STREAMS: "Streams",
+    Family.IDENTITE: "Identité · Groupes & formations",
 }
 
 #: Ordre d'affichage des sections du panneau.
-FAMILY_ORDER: tuple[Family, ...] = (Family.CREDITS, Family.AUDIO, Family.CERTS, Family.STREAMS)
+FAMILY_ORDER: tuple[Family, ...] = (
+    Family.CREDITS,
+    Family.AUDIO,
+    Family.CERTS,
+    Family.STREAMS,
+    Family.IDENTITE,
+)
 
 
 class Flow(StrEnum):
@@ -98,6 +109,7 @@ DOMAIN_TO_KEY: dict[str, str] = {
     "www.youtube.com": "ytmusic",
     "apic-desktop.musixmatch.com": "musixmatch",
     "snepmusique.com": "snep",
+    "musicbrainz.org": "musicbrainz",
 }
 
 

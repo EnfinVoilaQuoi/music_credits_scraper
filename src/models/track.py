@@ -399,6 +399,9 @@ class TrackVideo:
     source: str | None = None
     views: int | None = None
     views_updated: datetime | None = None
+    # Titre de la vidéo tel que YouTube le publie (e21). Il dit ce que la vidéo
+    # COUVRE : « B.B. Jacques - Donjon & 2h22 » est un clip double légitime.
+    title: str | None = None
 
 
 @dataclass(eq=False)

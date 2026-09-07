@@ -424,3 +424,56 @@ class TestIdsDesMorceauxCoches:
 
     def test_un_morceau_jamais_enregistre_est_ecarte(self):
         assert ws.ids_des_morceaux_coches(self._Artiste([None, 202]), {0, 1}) == {202}
+
+
+class TestResumeVideosPartagees:
+    """Une perte assumée doit être VISIBLE : sans le montant, la baisse des
+    compteurs se lirait comme une panne."""
+
+    def _r(self, **kw):
+        base = {
+            "videos_partagees": [
+                {
+                    "video_id": "clipdouble0",
+                    "url": "https://www.youtube.com/watch?v=clipdouble0",
+                    "titre_video": "B.B. Jacques - Donjon & 2h22",
+                    "vues": 5252528,
+                    "morceaux": ["2h22", "Donjon"],
+                }
+            ],
+            "vues_non_attribuees": 5252528,
+        }
+        base.update(kw)
+        return _resume({"ytm": base})
+
+    def test_le_montant_laisse_de_cote_est_chiffre(self):
+        texte = self._r()
+        assert "1 vidéo(s)" in texte and "5 252 528 vues laissées de côté" in texte
+
+    def test_la_video_est_nommee_avec_ses_morceaux(self):
+        texte = self._r()
+        assert "Donjon & 2h22" in texte and "2h22, Donjon" in texte
+
+    def test_sans_titre_connu_le_lien_est_affiche(self):
+        texte = self._r(
+            videos_partagees=[
+                {
+                    "video_id": "x",
+                    "url": "https://www.youtube.com/watch?v=x",
+                    "titre_video": None,
+                    "vues": 1,
+                    "morceaux": ["A", "B"],
+                }
+            ]
+        )
+        assert "watch?v=x" in texte
+
+    def test_la_marche_a_suivre_est_dite(self):
+        """Clip double = normal ; sinon rejeter. Sans ça, le signal n'appelle
+        aucune action et devient du bruit."""
+        texte = self._r()
+        assert "Clip double" in texte and "Rejeter" in texte
+
+    def test_rien_a_signaler_reste_silencieux(self):
+        texte = _resume({"ytm": {"matched": 3, "videos_partagees": []}})
+        assert "rattachée" not in texte

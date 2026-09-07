@@ -208,3 +208,53 @@ def test_une_video_sans_compteur_nest_pas_sommee(sans_recherche):
 
     assert dm.stream_writes == [(1, 500)]
     assert dm.video_writes == [(1, ["audioaudioa"])]
+
+
+class TestSelectionDeMorceaux:
+    """« Limiter aux morceaux cochés » : le quota et les écritures, pas le parcours."""
+
+    def _api(self):
+        return FakeAPI(
+            raw_tracks=[
+                {"title": "Coché", "video_id": "cocheococh", "views_str": None},
+                {"title": "Ignoré", "video_id": "ignoreigno", "views_str": None},
+            ],
+            vues={"cocheococh": 500, "ignoreigno": 800},
+        )
+
+    def _tracks(self):
+        return [_track(1, "Coché"), _track(2, "Ignoré")]
+
+    def test_seules_les_ecritures_des_morceaux_coches_ont_lieu(self, sans_recherche):
+        dm = FakeDM(self._tracks())
+        mod.update_ytmusic_streams(_ARTIST, dm, api=self._api(), track_ids={1})
+        assert dm.stream_writes == [(1, 500)]
+        assert dm.video_writes == [(1, ["cocheococh"])]
+
+    def test_le_batch_youtube_est_restreint(self, sans_recherche):
+        """Demander des vues qu'on n'écrira pas coûterait du quota pour rien."""
+        api = self._api()
+        mod.update_ytmusic_streams(_ARTIST, FakeDM(self._tracks()), api=api, track_ids={1})
+        assert api.batches[0] == ["cocheococh"]
+
+    def test_le_parcours_du_canal_reste_entier(self, sans_recherche):
+        """Le gate d'identité confronte la discographie COMPLÈTE du canal à la
+        base : la restreindre lui ôterait ce qui lui permet de conclure."""
+        result = mod.update_ytmusic_streams(
+            _ARTIST, FakeDM(self._tracks()), api=self._api(), track_ids={1}
+        )
+        assert result["identity"]["ytm_titles"] == 2
+        assert result["matched"] == 2  # les deux titres sont bien reconnus
+
+    def test_aucun_total_dalbum_sous_selection(self, sans_recherche):
+        """Il s'additionne sur tous les morceaux du disque, dont les compteurs ne
+        sont plus demandés : l'écrire donnerait un total amputé."""
+        dm = FakeDM(self._tracks())
+        mod.update_ytmusic_streams(_ARTIST, dm, api=self._api(), track_ids={1})
+        assert dm.album_writes == []
+
+    def test_sans_selection_rien_ne_change(self, sans_recherche):
+        dm = FakeDM(self._tracks())
+        mod.update_ytmusic_streams(_ARTIST, dm, api=self._api())
+        assert sorted(dm.stream_writes) == [(1, 500), (2, 800)]
+        assert dm.album_writes == [("Alb", 1300)]

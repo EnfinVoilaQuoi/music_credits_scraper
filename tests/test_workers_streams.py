@@ -132,9 +132,15 @@ class TestResumeYtm:
 
 class TestResumeVues:
     def test_ventilation_par_nature(self):
-        r = {"video_views": {"updated": 12, "by_kind": {"clip": 8, "audio": 4}}}
+        r = {"video_views": {"updated": 12, "videos": 19, "by_kind": {"clip": 8, "audio": 11}}}
         texte = _resume(r)
-        assert "12 mis à jour" in texte and "audio: 4" in texte and "clip: 8" in texte
+        assert "12 morceau(x)" in texte and "audio: 11" in texte and "clip: 8" in texte
+
+    def test_les_morceaux_et_les_videos_sont_deux_nombres_distincts(self):
+        """e20 : un morceau porte souvent son clip ET son audio. Confondre les
+        deux comptes ferait croire à un doublon d'écriture."""
+        texte = _resume({"video_views": {"updated": 12, "videos": 19, "by_kind": {}}})
+        assert "12 morceau(x)" in texte and "19 vidéo(s)" in texte
 
     def test_sans_ventilation(self):
         assert "—" in _resume({"video_views": {"updated": 0}})

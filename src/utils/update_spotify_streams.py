@@ -312,16 +312,20 @@ def _record(
     seen_at = datetime.now()
     for spotify_id, streams in playcounts.items():
         releves[spotify_id] = streams
-        entry = id_map.get(spotify_id)
-        if entry is None:
+        lignes = id_map.get(spotify_id)
+        if not lignes:
             result["unknown_ids"] += 1
             continue
-        track_id, owner_id = entry
-        data_manager.record_spotify_streams(track_id, streams, _SOURCE, seen_at)
-        if owner_id == artist.id:
-            result["recorded"] += 1
-        else:
-            result["harvested_foreign"] += 1
+        # TOUTES les lignes de l'ID, pas une seule : un même enregistrement
+        # existe une fois par artiste crédité (`UNIQUE(title, artist_id)`), et
+        # n'en servir qu'une laissait l'autre éternellement sans observation —
+        # donc éternellement « périmée », donc revisitée à chaque run.
+        for track_id, owner_id in lignes:
+            data_manager.record_spotify_streams(track_id, streams, _SOURCE, seen_at)
+            if owner_id == artist.id:
+                result["recorded"] += 1
+            else:
+                result["harvested_foreign"] += 1
 
 
 async def _totaliser_albums(

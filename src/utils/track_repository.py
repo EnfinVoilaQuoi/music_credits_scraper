@@ -11,17 +11,18 @@ import time
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, literal, or_, select, text, update
+from sqlalchemy import bindparam, func, literal, or_, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import settings
 from src.enrichment.observation import Observation
-from src.models import Credit, Track, TrackVideo
+from src.models import Credit, Track, TrackSpotifyId, TrackVideo
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.logger import get_logger
 from src.utils.title_matching import clean_stored_title
 from src.utils.track_mapper import track_from_row
+from src.utils.track_soeurs import synchroniser_soeurs
 
 logger = get_logger(__name__)
 
@@ -93,7 +94,9 @@ class TrackRepository:
                 conn.execute(
                     text(
                         "SELECT id, is_featuring, primary_artist_name, featured_artists, "
-                        "lyrics, has_lyrics, lyrics_scraped_at FROM tracks "
+                        "lyrics, has_lyrics, lyrics_scraped_at, "
+                        # Les colonnes d'IDENTITÉ, pour comparer avant d'écrire.
+                        "genius_id, spotify_id, isrc, discogs_id, deezer_id FROM tracks "
                         "WHERE title = :title AND artist_id = :artist_id"
                     ),
                     {"title": track.title, "artist_id": track.artist.id},
@@ -104,6 +107,7 @@ class TrackRepository:
 
             if existing_track:
                 track.id = existing_track["id"]
+                self._signaler_identites_concurrentes(track, existing_track)
                 # NB : plus de « préservation » ici. Les anciens blocs gardés par
                 # `not hasattr(track, "is_featuring"/"lyrics")` étaient morts (champs
                 # de la dataclass → hasattr toujours vrai) et, de toute façon,
@@ -190,13 +194,33 @@ class TrackRepository:
                     SET album = COALESCE(:album, album),
                         track_number = COALESCE(:track_number, track_number),
                         release_date = COALESCE(:release_date, release_date),
-                        genius_id = COALESCE(:genius_id, genius_id),
-                        spotify_id = COALESCE(:spotify_id, spotify_id),
-                        discogs_id = COALESCE(:discogs_id, discogs_id),
-                        isrc = COALESCE(:isrc, isrc),
+                        -- IDENTITÉ : « le premier renseigne, personne ne
+                        -- remplace » (2026-09-08). Le COALESCE d'avant rendait
+                        -- la valeur ENTRANTE dès qu'elle était non nulle — et
+                        -- ATTENTION, pas de « deux-points » dans un commentaire
+                        -- de `text()` : SQLAlchemy y verrait un paramètre lié.
+                        -- Le commentaire d'origine disait
+                        -- « non destructif », ce qui n'est vrai que face à un
+                        -- NULL : un identifiant entrant écrasait en silence celui
+                        -- qui était en base, et « la dernière écriture gagne »
+                        -- n'est pas une règle, c'est un effet de bord de l'ordre
+                        -- d'exécution. Rien n'est perdu pour autant : un second
+                        -- ID Spotify est presque toujours une autre ÉDITION du
+                        -- même enregistrement, et `track_spotify_ids` (e23) la
+                        -- garde. Changer le principal redevient un geste
+                        -- EXPLICITE (`clear_track_spotify_id` puis réécriture).
+                        genius_id = CASE WHEN genius_id IS NULL
+                                         THEN :genius_id ELSE genius_id END,
+                        spotify_id = CASE WHEN spotify_id IS NULL OR spotify_id = ''
+                                          THEN :spotify_id ELSE spotify_id END,
+                        discogs_id = CASE WHEN discogs_id IS NULL
+                                          THEN :discogs_id ELSE discogs_id END,
+                        isrc = CASE WHEN isrc IS NULL OR isrc = ''
+                                    THEN :isrc ELSE isrc END,
                         spotify_id_checked_at = COALESCE(
                             :spotify_id_checked_at, spotify_id_checked_at),
-                        deezer_id = COALESCE(:deezer_id, deezer_id),
+                        deezer_id = CASE WHEN deezer_id IS NULL
+                                         THEN :deezer_id ELSE deezer_id END,
                         deezer_url = COALESCE(:deezer_url, deezer_url),
                         -- COALESCE aussi : un run sans passage Deezer laisse
                         -- NULL, et NULL veut dire « jamais mesuré » — il ne
@@ -225,6 +249,12 @@ class TrackRepository:
                         lyrics_synced_confidence = COALESCE(:lyrics_synced_confidence, lyrics_synced_confidence),
                         has_lyrics = CASE WHEN :lyrics IS NOT NULL THEN 1 ELSE has_lyrics END,
                         anecdotes = COALESCE(:anecdotes, anecdotes),
+                        -- Absente de cet UPDATE jusqu'au 2026-09-08, alors
+                        -- qu'à l'enrichissement la ligne existe DÉJÀ : le
+                        -- scraper la récupérait, les providers la posaient, la
+                        -- GUI l'affichait en infobulle « pour vérification »…
+                        -- et elle valait NULL sur 2 116 morceaux sur 2 116.
+                        spotify_page_title = COALESCE(:spotify_page_title, spotify_page_title),
                         cover_path = COALESCE(:cover_path, cover_path),
                         yt_thumbnail_path = COALESCE(:yt_thumbnail_path, yt_thumbnail_path),
                         updated_at = :now,
@@ -307,12 +337,58 @@ class TrackRepository:
                 # E7-D2 : plus de colonnes audio à vider (droppées) — la suppression
                 # des observations suffit (le mapper n'a plus de fallback colonne).
 
+            # Lignes SŒURS (lot C) : un même enregistrement existe une fois par
+            # artiste crédité, et ces lignes étaient enrichies indépendamment —
+            # « Grünt #33 » portait 36 crédits chez Swing et 0 chez Isha. La
+            # synchronisation vit DANS cette transaction : une ligne neuve hérite
+            # donc de ses sœurs au moment même où elle naît, ce qui rend l'ajout
+            # d'un artiste déjà couvert par un autre presque gratuit.
+            if track.id:
+                synchroniser_soeurs(conn, track.id, track.genius_id)
+
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
                 f"Morceau sauvegardé: {track.title} (ID: {track.id}, "
                 f"Featuring: {track.is_featuring}, Paroles: {bool(track.lyrics.text)})"
             )
             return track.id
+
+    #: Colonnes d'identité qui se REMPLISSENT sans jamais se REMPLACER, et ce
+    #: qu'un changement veut dire. `genius_id` est la seule SIGNALÉE : c'est la
+    #: clé de l'ENREGISTREMENT, celle par laquelle les lignes sœurs se
+    #: retrouvent, donc la réécrire en silence ferait fusionner les données de
+    #: deux enregistrements différents. Les autres sont des identifiants externes
+    #: mono-source dont une seconde valeur n'a pas de sens légitime — sauf
+    #: `spotify_id`, dont les éditions multiples vivent dans `track_spotify_ids`.
+    IDENTITES_NON_REMPLACABLES = ("genius_id", "spotify_id", "isrc", "discogs_id", "deezer_id")
+    IDENTITES_SIGNALEES = ("genius_id",)
+
+    def _signaler_identites_concurrentes(self, track: Track, existante) -> None:
+        """Journalise les identités que l'UPDATE va REFUSER de remplacer.
+
+        Un refus silencieux serait aussi opaque que l'écrasement qu'il remplace.
+        `genius_id` monte en ERROR : un changement y veut dire soit une erreur,
+        soit une ré-identification volontaire, et les deux méritent un humain.
+        """
+        entrantes = {
+            "genius_id": track.genius_id,
+            "spotify_id": track.spotify_id,
+            "isrc": track.isrc,
+            "discogs_id": track.discogs_id,
+            "deezer_id": track.deezer_id,
+        }
+        for colonne in self.IDENTITES_NON_REMPLACABLES:
+            ancienne, nouvelle = existante[colonne], entrantes[colonne]
+            if not ancienne or not nouvelle or str(ancienne) == str(nouvelle):
+                continue
+            message = (
+                f"{colonne} concurrent sur « {track.title} » (id={track.id}) : "
+                f"{ancienne} conservé, {nouvelle} REFUSÉ"
+            )
+            if colonne in self.IDENTITES_SIGNALEES:
+                logger.error(f"🚨 {message} — clé d'enregistrement, à vérifier")
+            else:
+                logger.info(f"↩️ {message}")
 
     def _save_credit(self, conn, track_id: int, credit: Credit):
         """Sauvegarde un crédit (connexion Core fournie par l'appelant)."""
@@ -419,6 +495,12 @@ class TrackRepository:
                 # motif que les observations (surtout pas un N+1 par morceau).
                 videos_by_track = self._videos_by_artist(conn, artist_id)
 
+                # e23 : IDs Spotify de tout l'artiste, même motif. C'est ce qui
+                # RANIME `Track.spotify_ids` — écrit et testé de longue date,
+                # mais jamais peuplé faute de table (le sélecteur « (N versions) »
+                # de la fiche morceau n'avait donc jamais pu s'afficher).
+                spotify_ids_by_track = self._spotify_ids_by_artist(conn, artist_id)
+
                 # Volume des LRC bruts chargés (`lyrics_synced`) : champ lourd
                 # (~3-10 Ko × sources × morceaux), cible désignée de l'optim E7d.
                 _n_obs = sum(len(v) for v in observations_by_track.values())
@@ -440,6 +522,12 @@ class TrackRepository:
                             continue
 
                         track.videos = videos_by_track.get(row["id"], [])
+                        # Peuplée à la lecture, donc RIEN n'est en attente
+                        # d'écriture : on pose la liste directement au lieu de
+                        # passer par `add_spotify_id`, qui marquerait à tort ces
+                        # IDs comme « vus ce run ».
+                        track.spotify_id_entries = spotify_ids_by_track.get(row["id"], [])
+                        track.spotify_ids = [e.spotify_id for e in track.spotify_id_entries]
 
                         # Chargement crédits (a besoin de la connexion → hors mapper)
                         try:
@@ -671,6 +759,10 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM track_videos WHERE track_id = :tid"), {"tid": track_id}
                 )
+                # IDs Spotify (e23) : idem.
+                conn.execute(
+                    text("DELETE FROM track_spotify_ids WHERE track_id = :tid"), {"tid": track_id}
+                )
                 deleted = conn.execute(
                     text("DELETE FROM tracks WHERE id = :tid"), {"tid": track_id}
                 ).rowcount
@@ -742,6 +834,36 @@ class TrackRepository:
                     text("UPDATE track_videos SET track_id = :keep_id WHERE track_id = :delete_id"),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
+                # IDs Spotify (e23) : la fusion les RÉUNIT elle aussi. Deux
+                # doublons portent souvent chacun une édition différente (le
+                # single d'un côté, l'album de l'autre) : en faire choisir une
+                # perdrait la reconnaissance de l'autre à la récolte croisée.
+                conn.execute(
+                    text("""
+                    DELETE FROM track_spotify_ids WHERE track_id = :delete_id AND EXISTS (
+                        SELECT 1 FROM track_spotify_ids k WHERE k.track_id = :keep_id
+                          AND k.spotify_id = track_spotify_ids.spotify_id
+                    )"""),
+                    {"delete_id": delete_id, "keep_id": keep_id},
+                )
+                conn.execute(
+                    text(
+                        "UPDATE track_spotify_ids SET track_id = :keep_id "
+                        "WHERE track_id = :delete_id"
+                    ),
+                    {"keep_id": keep_id, "delete_id": delete_id},
+                )
+                # `is_primary` recopie `tracks.spotify_id` : après réunion, les
+                # IDs venus du doublon ne sont plus principaux (leur ligne n'existe
+                # plus), seul celui du morceau conservé l'est.
+                conn.execute(
+                    text(
+                        "UPDATE track_spotify_ids SET is_primary = "
+                        "(spotify_id = (SELECT spotify_id FROM tracks WHERE id = :keep_id)) "
+                        "WHERE track_id = :keep_id"
+                    ),
+                    {"keep_id": keep_id},
+                )
                 # Les colonnes ARBITRÉES doivent suivre les observations qu'on
                 # vient de déplacer. Sans ça, le morceau conservé porte les
                 # observations du doublon et une colonne restée VIDE — constaté
@@ -774,8 +896,8 @@ class TrackRepository:
         except (TypeError, ValueError):
             return None
 
-    def get_track_ids_by_spotify_id(self) -> dict[str, tuple[int, int]]:
-        """Carte `spotify_id → (track_id, artist_id)` sur TOUTE la base.
+    def get_track_ids_by_spotify_id(self) -> dict[str, list[tuple[int, int]]]:
+        """Carte `spotify_id → [(track_id, artist_id), …]` sur TOUTE la base.
 
         C'est elle qui rend possible la RÉCOLTE CROISÉE du scrape Spotify : une
         page titre expose les compteurs de quinze autres morceaux, souvent ceux de
@@ -786,6 +908,22 @@ class TrackRepository:
 
         Le périmètre est volontairement GLOBAL, pas limité à l'artiste du run :
         c'est tout l'intérêt de la récolte.
+
+        **Une LISTE, pas une paire** (2026-09-08). Un même `spotify_id` porte
+        plusieurs lignes — l'enregistrement chez son auteur, la ligne « feat »
+        chez l'invité — et l'ancienne compréhension de dict, sur un SELECT sans
+        `ORDER BY`, n'en gardait qu'une (en pratique le plus haut `rowid`). Ce
+        n'était pas une perte ponctuelle mais une BOUCLE : la ligne perdante
+        n'avait jamais d'observation, restait donc éternellement « périmée » pour
+        `_build_queue`, et consommait une page du plafond à chaque run pour un
+        résultat qui ne l'atteindrait jamais. Mesuré : 6 IDs partagés, 12 lignes,
+        6 invisibles.
+
+        Deux magasins alimentent la carte, et il en faut deux : `tracks.spotify_id`
+        (l'ID PRINCIPAL, seul écrit par `save_track`) et `track_spotify_ids`
+        (e23, les éditions alternatives, qui ne passent que par l'écrivain dédié).
+        Ignorer le premier rendrait la carte aveugle à tout ID posé par un
+        enrichissement ; ignorer le second ferait retomber le pluriel d'éditions.
         """
         try:
             with self.engine.connect() as conn:
@@ -793,16 +931,64 @@ class TrackRepository:
                     conn.execute(
                         text(
                             "SELECT id, artist_id, spotify_id FROM tracks "
-                            "WHERE spotify_id IS NOT NULL AND spotify_id != ''"
+                            "WHERE spotify_id IS NOT NULL AND spotify_id != '' "
+                            "UNION "
+                            "SELECT t.id, t.artist_id, s.spotify_id "
+                            "FROM track_spotify_ids s JOIN tracks t ON t.id = s.track_id "
+                            "WHERE s.spotify_id IS NOT NULL AND s.spotify_id != ''"
                         )
                     )
                     .mappings()
                     .all()
                 )
-            return {r["spotify_id"]: (r["id"], r["artist_id"]) for r in rows}
+            carte: dict[str, list[tuple[int, int]]] = {}
+            for r in rows:
+                carte.setdefault(r["spotify_id"], []).append((r["id"], r["artist_id"]))
+            # Ordre STABLE : deux runs successifs doivent rapporter la même
+            # chose, et `harvested_foreign` compter la même ligne.
+            for lignes in carte.values():
+                lignes.sort()
+            return carte
         except SQLAlchemyError as e:
             logger.error(f"Erreur get_track_ids_by_spotify_id: {e}")
             return {}
+
+    def lignes_du_spotify_id(self, spotify_id: str) -> list[dict[str, Any]]:
+        """Les lignes qui revendiquent un `spotify_id`, sur TOUTE la base.
+
+        Portée GLOBALE, et c'est le point : un `spotify_id` est un identifiant
+        mondial, alors que le garde-fou d'unicité ne regardait que les morceaux
+        de l'artiste courant. Il était donc aveugle au cas mesuré le 2026-09-08 —
+        « Rentre dans le Cercle - Belgique #1 » (Swing) et « 13 Organisé » (SCH)
+        portaient le MÊME ID, et la durée avait suivi.
+
+        Les deux magasins sont interrogés pour la même raison que
+        `get_track_ids_by_spotify_id` : la colonne porte l'ID principal, la table
+        les éditions alternatives.
+        """
+        if not spotify_id:
+            return []
+        try:
+            with self.engine.connect() as conn:
+                return [
+                    dict(r)
+                    for r in conn.execute(
+                        text(
+                            "SELECT id, artist_id, title FROM tracks "
+                            "WHERE spotify_id = :sid "
+                            "UNION "
+                            "SELECT t.id, t.artist_id, t.title "
+                            "FROM track_spotify_ids s JOIN tracks t ON t.id = s.track_id "
+                            "WHERE s.spotify_id = :sid"
+                        ),
+                        {"sid": spotify_id},
+                    )
+                    .mappings()
+                    .all()
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur lignes_du_spotify_id({spotify_id!r}): {e}")
+            return []
 
     def get_stream_observation_dates(self, source: str) -> dict[int, str | None]:
         """`{track_id: seen_at brut}` des observations de streams d'une source.
@@ -970,9 +1156,17 @@ class TrackRepository:
             "spotify_streams_updated": date_bind(vue_le or datetime.now()),
         }
 
-    def update_track_spotify_id(self, track_id: int, spotify_id: str) -> bool:
+    def update_track_spotify_id(
+        self, track_id: int, spotify_id: str, source: str = "kworb"
+    ) -> bool:
         """Backfill du Spotify Track ID (ex: depuis les liens des pages Kworb).
-        Ne remplace jamais un ID existant."""
+        Ne remplace jamais un ID PRINCIPAL existant.
+
+        L'ID est en revanche TOUJOURS indexé dans `track_spotify_ids` (e23) : un
+        morceau a couramment plusieurs éditions, et « il en existe déjà un » ne
+        veut pas dire « celui-ci est faux ». C'est précisément ce que l'ancienne
+        version perdait — un second ID découvert par Kworb n'allait nulle part.
+        """
         try:
             stmt = (
                 update(tracks)
@@ -984,6 +1178,9 @@ class TrackRepository:
             )
             with self.engine.begin() as conn:
                 conn.execute(stmt)
+            self.record_track_spotify_ids(
+                track_id, [TrackSpotifyId(spotify_id=spotify_id, source=source)]
+            )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_spotify_id (track_id={track_id}): {e}")
@@ -1471,6 +1668,351 @@ class TrackRepository:
             )
         for videos in par_track.values():
             videos.sort(key=lambda v: (-(v.views or 0), v.video_id))
+        return par_track
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Identifiants Spotify d'un morceau (table `track_spotify_ids`, e23)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def record_track_spotify_ids(self, track_id: int, entries) -> int:
+        """Enregistre ce qu'UNE passe a vu des IDs Spotify d'un morceau. Écrivain DÉDIÉ.
+
+        `save_track` n'écrit JAMAIS cette table — même règle que `track_videos`
+        (e20), `certifications` et `relationships` (2026-09-06).
+
+        **Additif par construction** : aucun producteur ne connaît la liste
+        complète — Genius en donne un, Kworb un autre, le scraper un troisième,
+        et un même morceau existe en single ET sur l'album. Une écriture
+        « autoritative » ferait perdre à chaque passe ce que les autres ont
+        trouvé ; le retrait est donc un geste EXPLICITE
+        (`forget_track_spotify_id`).
+
+        `is_primary` n'est pas décidé ici : il RECOPIE `tracks.spotify_id`, seul
+        verdict de « l'ID qu'on ouvre ». Un drapeau qui trancherait de son côté
+        serait un second endroit où se calcule le même jugement.
+
+        Returns:
+            Nombre d'IDs écrits (insérés ou mis à jour).
+        """
+        entries = [e for e in (entries or []) if e and e.spotify_id]
+        if not entries:
+            return 0
+        now = datetime.now()
+        ecrites = 0
+        try:
+            with self.engine.begin() as conn:
+                principal = conn.execute(
+                    text("SELECT spotify_id FROM tracks WHERE id = :tid"), {"tid": track_id}
+                ).scalar()
+                connus = {
+                    r["spotify_id"]: r
+                    for r in conn.execute(
+                        text(
+                            "SELECT spotify_id, source FROM track_spotify_ids "
+                            "WHERE track_id = :tid"
+                        ),
+                        {"tid": track_id},
+                    )
+                    .mappings()
+                    .all()
+                }
+                for entry in entries:
+                    ancienne = connus.get(entry.spotify_id)
+                    est_principal = bool(principal) and entry.spotify_id == principal
+                    if ancienne is None:
+                        conn.execute(
+                            text(
+                                "INSERT INTO track_spotify_ids "
+                                "(track_id, spotify_id, source, is_primary, seen_at) "
+                                "VALUES (:tid, :sid, :source, :prim, :now)"
+                            ),
+                            {
+                                "tid": track_id,
+                                "sid": entry.spotify_id,
+                                "source": entry.source,
+                                "prim": est_principal,
+                                "now": now,
+                            },
+                        )
+                    else:
+                        # Une provenance connue ne se laisse pas écraser par un
+                        # None : la passe qui redécouvre un ID ne sait pas
+                        # toujours d'où il venait.
+                        conn.execute(
+                            text(
+                                "UPDATE track_spotify_ids SET source = :source, "
+                                "is_primary = :prim, seen_at = :now "
+                                "WHERE track_id = :tid AND spotify_id = :sid"
+                            ),
+                            {
+                                "tid": track_id,
+                                "sid": entry.spotify_id,
+                                "source": entry.source or ancienne["source"],
+                                "prim": est_principal,
+                                "now": now,
+                            },
+                        )
+                    ecrites += 1
+                # Re-synchronisation COMPLÈTE du drapeau : il RECOPIE la colonne,
+                # donc il doit la suivre sur TOUTES les lignes du morceau, pas
+                # seulement sur celles que cette passe écrit. Sans ça, une ligne
+                # marquée principale peut survivre à un changement de colonne et
+                # devenir un second verdict qui contredit le premier — 19 cas
+                # constatés en base le 2026-09-08.
+                conn.execute(
+                    text(
+                        "UPDATE track_spotify_ids SET is_primary = "
+                        "(:principal IS NOT NULL AND spotify_id = :principal) "
+                        "WHERE track_id = :tid"
+                    ),
+                    {"tid": track_id, "principal": principal},
+                )
+            return ecrites
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_track_spotify_ids (track_id={track_id}): {e}")
+            return 0
+
+    def forget_track_spotify_id(self, track_id: int, spotify_id: str) -> bool:
+        """Retire UN identifiant Spotify d'un morceau (rejet d'un ID erroné).
+
+        Pendant explicite de l'additivité de `record_track_spotify_ids` : le seul
+        chemin par lequel un ID quitte la table.
+        """
+        try:
+            with self.engine.begin() as conn:
+                supprimes = conn.execute(
+                    text(
+                        "DELETE FROM track_spotify_ids WHERE track_id = :tid AND spotify_id = :sid"
+                    ),
+                    {"tid": track_id, "sid": spotify_id},
+                ).rowcount
+            return supprimes > 0
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur forget_track_spotify_id({track_id}, {spotify_id!r}): {e}")
+            return False
+
+    #: Sources qui n'existent QUE parce qu'un `spotify_id` était posé : elles
+    #: sont interrogées AVEC lui, donc tout ce qu'elles ont dit décrit le morceau
+    #: que cet ID désigne — un autre morceau, quand l'ID est faux. ReccoBeats
+    #: prend le Track ID en entrée (et rend `durationMs`, d'où des durées qui
+    #: « suivent » l'ID) ; Kworb et le scrape des pages Spotify attribuent leurs
+    #: compteurs PAR ID. SongBPM n'y est PAS : il cherche par artiste et titre,
+    #: ses mesures survivent au rejet de l'ID.
+    SOURCES_LIEES_A_L_ID_SPOTIFY = ("reccobeats", "spotify_web", "kworb")
+
+    def clear_track_spotify_id(self, track_id: int, spotify_id: str | None = None) -> dict:
+        """Rejette l'ID Spotify d'un morceau — les trois gestes indissociables.
+
+        Même forme que le rejet d'une vidéo YouTube (2026-09-07), et pour la même
+        raison : un identifiant faux ne se retire pas d'un seul endroit.
+
+        1. **oublier** la ligne de `track_spotify_ids` (e23) ;
+        2. **effacer** `tracks.spotify_id` si c'est bien cet ID — et avec lui
+           `spotify_page_title` (qui décrit la page de l'autre morceau) et
+           `spotify_id_checked_at` (le morceau redevient « jamais cherché », donc
+           le prochain run le résout au lieu de le croire absent de Spotify) ;
+        3. **retirer ce qui en découlait** : les observations des sources
+           interrogées PAR l'ID, puis ré-arbitrer les colonnes de streams.
+
+        Le troisième geste est le seul qui ne va pas de soi, et c'est le plus
+        important : sans lui la ligne garde le BPM, la tonalité et les streams
+        d'un autre morceau, sans que rien ne le signale plus — l'ID fautif, lui,
+        aurait disparu.
+
+        Ce que la fonction NE fait PAS, faute de pouvoir le prouver : effacer
+        `duration`. ReccoBeats l'écrit *si elle est vide* — une durée déjà venue
+        de Deezer ne vient donc pas de l'ID, et rien en base ne dit aujourd'hui
+        laquelle des deux on a. Le rapport la SIGNALE (`duree_suspecte`) et
+        l'appelant tranche. Le lot B (provenance de `duration` en observations)
+        rendra ce doute caduc.
+
+        Returns:
+            Un rapport de ce qui a été retiré (et de ce qui reste à trancher).
+        """
+        rapport = {
+            "id_retire": None,
+            "colonne_effacee": False,
+            "observations_retirees": [],
+            "duree_suspecte": None,
+        }
+        try:
+            with self.engine.begin() as conn:
+                ligne = (
+                    conn.execute(
+                        text("SELECT spotify_id, duration FROM tracks WHERE id = :tid"),
+                        {"tid": track_id},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if ligne is None:
+                    logger.warning(f"clear_track_spotify_id : morceau {track_id} introuvable")
+                    return rapport
+                vise = spotify_id or ligne["spotify_id"]
+                if not vise:
+                    return rapport
+                rapport["id_retire"] = vise
+
+                conn.execute(
+                    text(
+                        "DELETE FROM track_spotify_ids WHERE track_id = :tid AND spotify_id = :sid"
+                    ),
+                    {"tid": track_id, "sid": vise},
+                )
+
+                if ligne["spotify_id"] == vise:
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET spotify_id = NULL, spotify_page_title = NULL, "
+                            "spotify_id_checked_at = NULL, updated_at = :now WHERE id = :tid"
+                        ),
+                        {"tid": track_id, "now": datetime.now()},
+                    )
+                    rapport["colonne_effacee"] = True
+                    # `is_primary` RECOPIE la colonne : celle-ci étant vide,
+                    # plus aucune édition n'est principale. Laisser le drapeau
+                    # levé sur une édition survivante en ferait un second
+                    # verdict, qui contredirait le premier. On ne PROMEUT pas
+                    # non plus l'édition restante : elle n'a pas été jugée digne
+                    # d'être celle qu'on ouvre, et la promouvoir d'office
+                    # ressusciterait peut-être un autre ID fautif.
+                    conn.execute(
+                        text("UPDATE track_spotify_ids SET is_primary = 0 WHERE track_id = :tid"),
+                        {"tid": track_id},
+                    )
+
+                # `expanding=True` : sans lui, SQLAlchemy passe le tuple comme
+                # UN paramètre et SQLite refuse « IN ? ».
+                sources = bindparam("sources", expanding=True)
+                params = {"tid": track_id, "sources": list(self.SOURCES_LIEES_A_L_ID_SPOTIFY)}
+                retirees = (
+                    conn.execute(
+                        text(
+                            "SELECT field, source FROM observations WHERE track_id = :tid "
+                            "AND source IN :sources"
+                        ).bindparams(sources),
+                        params,
+                    )
+                    .mappings()
+                    .all()
+                )
+                if retirees:
+                    conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :tid AND source IN :sources"
+                        ).bindparams(sources),
+                        params,
+                    )
+                rapport["observations_retirees"] = [(r["field"], r["source"]) for r in retirees]
+
+                # Les colonnes de streams suivent les observations qui restent.
+                # `_arbitrer_streams` rend {} quand il n'en reste AUCUNE : c'est
+                # justement le cas où la colonne doit être vidée, pas laissée
+                # telle quelle avec le chiffre d'un autre morceau.
+                # NB : itérer les `RowMapping` de `retirees` donnerait leurs CLÉS
+                # (« field », « source »), pas leurs valeurs — d'où la liste de
+                # tuples ci-dessus, qui est la forme du rapport.
+                liees = rapport["observations_retirees"]
+                valeurs = self._arbitrer_streams(conn, track_id)
+                if not valeurs and any(f == "spotify_streams" for f, _ in liees):
+                    valeurs = {"spotify_streams": None, "spotify_streams_updated": None}
+                # Le QUOTIDIEN ne vient que de Kworb, qui attribue PAR ID Spotify
+                # et n'est pas arbitré (aucune autre source ne le publie) : il
+                # n'a donc pas de verdict qui le remette d'aplomb, et rester en
+                # place ferait de lui le seul reliquat visible du morceau de
+                # quelqu'un d'autre. Oublié au premier jet — 3 lignes le
+                # portaient encore après le nettoyage du 2026-09-08.
+                if any(src == "kworb" for _, src in liees):
+                    valeurs["spotify_daily_streams"] = None
+                if valeurs:
+                    conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
+
+                if ligne["duration"] and any(src == "reccobeats" for _, src in liees):
+                    rapport["duree_suspecte"] = ligne["duration"]
+
+            logger.info(
+                f"🧹 ID Spotify {vise} retiré du morceau {track_id} "
+                f"({len(rapport['observations_retirees'])} observation(s) liée(s))"
+            )
+            return rapport
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur clear_track_spotify_id (track_id={track_id}): {e}")
+            return rapport
+
+    def clear_track_duration(self, track_id: int) -> bool:
+        """Efface la durée d'un morceau (elle a suivi un ID Spotify fautif).
+
+        Geste SÉPARÉ de `clear_track_spotify_id`, et c'est délibéré : la durée
+        n'a pas de provenance en base (lot B), donc l'effacer est une décision
+        humaine, pas une conséquence prouvée.
+        """
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE tracks SET duration = NULL, updated_at = :now WHERE id = :tid"),
+                    {"tid": track_id, "now": datetime.now()},
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur clear_track_duration (track_id={track_id}): {e}")
+            return False
+
+    def get_track_spotify_ids(self, track_id: int) -> list[TrackSpotifyId]:
+        """IDs Spotify connus d'un morceau, le principal d'abord."""
+        try:
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT track_id, spotify_id, source, is_primary, seen_at "
+                            "FROM track_spotify_ids WHERE track_id = :tid"
+                        ),
+                        {"tid": track_id},
+                    )
+                    .mappings()
+                    .all()
+                )
+            return self._grouper_spotify_ids(rows).get(track_id, [])
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_track_spotify_ids({track_id}): {e}")
+            return []
+
+    def _spotify_ids_by_artist(self, conn, artist_id: int) -> dict[int, list[TrackSpotifyId]]:
+        """IDs Spotify de tous les morceaux d'un artiste, en UNE requête (pas de N+1)."""
+        rows = (
+            conn.execute(
+                text(
+                    "SELECT s.track_id, s.spotify_id, s.source, s.is_primary, s.seen_at "
+                    "FROM track_spotify_ids s JOIN tracks t ON t.id = s.track_id "
+                    "WHERE t.artist_id = :aid"
+                ),
+                {"aid": artist_id},
+            )
+            .mappings()
+            .all()
+        )
+        return self._grouper_spotify_ids(rows)
+
+    @staticmethod
+    def _grouper_spotify_ids(rows) -> dict[int, list[TrackSpotifyId]]:
+        """Lignes `track_spotify_ids` → `TrackSpotifyId` groupés par morceau.
+
+        Tri : le principal d'abord (c'est lui que la GUI ouvre par défaut), puis
+        par identifiant — un ordre STABLE, pour que le sélecteur de version ne
+        danse pas d'une lecture à l'autre.
+        """
+        par_track: dict[int, list[TrackSpotifyId]] = {}
+        for r in rows:
+            par_track.setdefault(r["track_id"], []).append(
+                TrackSpotifyId(
+                    spotify_id=r["spotify_id"],
+                    source=r["source"],
+                    is_primary=bool(r["is_primary"]),
+                    seen_at=r["seen_at"],
+                )
+            )
+        for ids in par_track.values():
+            ids.sort(key=lambda s: (not s.is_primary, s.spotify_id))
         return par_track
 
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:

@@ -27,6 +27,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     Table,
@@ -242,6 +243,50 @@ artist_relations = Table(
     UniqueConstraint("artist_id", "related_name", "kind"),
     sqlite_autoincrement=True,
 )
+
+
+# Identifiants Spotify d'un morceau (e23) — un morceau en a souvent PLUSIEURS :
+# le single et l'album, une réédition, un intl. Le pluriel était déjà modélisé
+# côté objet (`Track.spotify_ids`, `add_spotify_id`) et affiché par la GUI
+# (sélecteur « Version 1 / Version 2 »), mais AUCUNE colonne ne le portait : la
+# liste mourait au `save_track`, et « accepter un ID alternatif » dégénérait en
+# « écraser l'ID de l'autre ligne ».
+#
+# Calque exact de `track_videos` (e20), pour les mêmes raisons : écrivain DÉDIÉ
+# et ADDITIF (`record_track_spotify_ids`), retrait EXPLICITE
+# (`forget_track_spotify_id`), lecture groupée par artiste. Aucun producteur ne
+# connaît la liste complète — Genius en donne un, Kworb un autre, le scraper un
+# troisième.
+#
+# `tracks.spotify_id` RESTE et désigne l'ID PRINCIPAL (celui qu'on ouvre, celui
+# qu'on interroge) : même partage des rôles que `tracks.youtube_url` face à
+# `track_videos`. `is_primary` en est la matérialisation, maintenue par
+# l'écrivain — le verdict reste la colonne, jamais ce drapeau.
+#
+# ⚠️ Plusieurs IDs = plusieurs ÉDITIONS DU MÊME enregistrement : elles portent
+# les MÊMES compteurs. On visite UNE page (l'ID principal) mais on RECONNAÎT
+# toutes les IDs, et on ne SOMME JAMAIS deux éditions (JOURNAL 2026-09-05 :
+# 99 M au lieu de 50 M sur « Bitume Caviar »).
+track_spotify_ids = Table(
+    "track_spotify_ids",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("track_id", Integer, ForeignKey("tracks.id"), nullable=False),
+    Column("spotify_id", Text, nullable=False),
+    Column("source", Text),
+    Column("is_primary", _BOOL, server_default=_FALSE),
+    Column("seen_at", TIMESTAMP),
+    UniqueConstraint("track_id", "spotify_id"),
+    sqlite_autoincrement=True,
+)
+
+
+# Index de la clé d'enregistrement (e23). `genius_id` identifie l'ENREGISTREMENT
+# là où `tracks.id` identifie la ligne d'UN artiste : c'est par lui que se
+# retrouvent les lignes sœurs d'un même morceau (le titre chez son auteur, la
+# ligne « feat » chez l'invité). La colonne était nue, ce parcours est désormais
+# fait à chaque écriture de donnée d'enregistrement.
+Index("ix_tracks_genius_id", tracks.c.genius_id)
 
 
 # Vidéos YouTube d'un morceau (e20). Un morceau en a souvent DEUX — le clip

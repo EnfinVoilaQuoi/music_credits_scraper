@@ -274,6 +274,13 @@ def run_enrichment(
 
                 # Sauvegarder après chaque enrichissement (SQLite hors boucle)
                 await asyncio.to_thread(app.data_manager.save_track, track)
+                # `save_track` n'écrit PAS ce qui a un écrivain dédié (certifs,
+                # relations, IDs Spotify e23) : sans cet appel, les IDs trouvés
+                # par les providers mouraient avec l'objet — mesuré le
+                # 2026-09-08, 5 IDs découverts, 0 ligne dans `track_spotify_ids`.
+                # APRÈS le save, qui attribue l'id des morceaux neufs. No-op
+                # quand rien n'est marqué.
+                await asyncio.to_thread(app.data_manager.record_pending, track)
 
             disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
             summary = _build_summary(

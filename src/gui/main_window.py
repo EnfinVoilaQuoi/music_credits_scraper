@@ -47,7 +47,12 @@ class MainWindow:
         # CLI), le capteur reste actif mais ses verdicts sont jetés.
         self.source_usage_repo = usage_repository.attach(self.data_manager.engine)
         self.data_enricher = DataEnricher(
-            headless_reccobeats=True, headless_songbpm=True, headless_spotify_scraper=True
+            headless_reccobeats=True,
+            headless_songbpm=True,
+            headless_spotify_scraper=True,
+            # Sans lui, le garde-fou d'unicité d'ID Spotify ne verrait que
+            # l'artiste courant — or un `spotify_id` est mondial (e23).
+            data_manager=self.data_manager,
         )
         self.current_artist: Artist | None = None
         self.tracks: list[Track] = []

@@ -152,6 +152,19 @@ class TestGardeFousSync:
 # ────────────────────────────────────────────────────── logique pure héritée
 
 
+def _fonction_nue(cls, nom):
+    """La fonction SOUS-JACENTE d'un attribut de classe.
+
+    Une `staticmethod` s'accède comme une fonction nue, une `classmethod` crée
+    un objet LIÉ différent par sous-classe : comparer les deux à l'identique
+    demande de descendre au `__func__` quand il existe. Sans ça, transformer une
+    staticmethod partagée en classmethod partagée ferait rougir le test alors que
+    rien n'a été recopié.
+    """
+    attribut = getattr(cls, nom)
+    return getattr(attribut, "__func__", attribut)
+
+
 class TestLogiquePureHeritee:
     """Les jumeaux SOUS-CLASSENT : la logique de décision ne doit pas être
     redéfinie, sinon les deux voies pourraient diverger sans qu'on le voie."""
@@ -162,8 +175,20 @@ class TestLogiquePureHeritee:
         assert SongBPMScraperAsync._details_from_text is SongBPMScraper._details_from_text
 
     def test_spotify_logique_identique(self):
-        assert SpotifyIDScraperAsync._parse_embed_artists is SpotifyIDScraper._parse_embed_artists
         assert SpotifyIDScraperAsync._calculate_relevance is SpotifyIDScraper._calculate_relevance
+        # Lecture de l'embed : le point d'entrée du `__NEXT_DATA__` et les deux
+        # vues qui en dérivent (artistes, identité) sont PARTAGÉS — seul le
+        # TRANSPORT diffère entre les jumeaux. C'est ce qui a permis de corriger
+        # `get_spotify_page_title` des deux côtés à la fois (2026-09-08 : il
+        # interrogeait la SPA et rendait donc toujours None).
+        for nom in (
+            "_parse_embed_entity",
+            "_parse_embed_artists",
+            "_identite_depuis_embed",
+            "_titre_de_page",
+            "_url_embed",
+        ):
+            assert _fonction_nue(SpotifyIDScraperAsync, nom) is _fonction_nue(SpotifyIDScraper, nom)
         # `_clean_page_title` est une classmethod : l'accès crée un objet lié
         # DIFFÉRENT à chaque fois (lié à la sous-classe), d'où la comparaison sur
         # la fonction sous-jacente.

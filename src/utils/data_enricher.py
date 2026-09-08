@@ -16,6 +16,7 @@ from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 from src.utils.bpm_vote import BpmBallot
 from src.utils.logger import get_logger
+from src.utils.title_matching import normalize_title
 
 # NB : les modules de src.enrichment sont importés LOCALEMENT (dans __init__ /
 # enrich_track), pas au niveau module : src/utils/__init__ charge ce fichier,
@@ -32,6 +33,7 @@ class DataEnricher:
         headless_reccobeats: bool = False,
         headless_songbpm: bool = True,
         headless_spotify_scraper: bool = True,
+        data_manager=None,
     ):
         """
         Compose les providers d'enrichissement (ownership Refacto Phase 3.5).
@@ -46,7 +48,15 @@ class DataEnricher:
             headless_reccobeats: conservé pour compatibilité (client HTTP)
             headless_songbpm: Si True, lance SongBPM en mode headless
             headless_spotify_scraper: Si True, lance le scraper Spotify en headless
+            data_manager: accès base pour la validation GLOBALE d'unicité d'ID
+                Spotify (2026-09-08). Optionnel : sans lui, le contrôle retombe
+                sur le seul périmètre de l'artiste courant — c'est le cas des
+                tests, jamais celui de l'application.
         """
+        # Portée globale du garde-fou d'unicité d'ID Spotify, et journal des
+        # refus (un conflit d'identité doit se VOIR, cf. _refuser_spotify_id).
+        self.data_manager = data_manager
+        self.spotify_id_conflits: list[tuple[str, str, str]] = []
         # NB : imports providers LOCAUX (règle anti-boucle src.utils ↔ src.enrichment).
         from src.enrichment.providers.bpmfinder import BpmFinderProvider
         from src.enrichment.providers.deezer import DeezerProvider
@@ -168,34 +178,78 @@ class DataEnricher:
     def validate_spotify_id_unique(
         self, spotify_id: str, current_track: Track, artist_tracks: list[Track]
     ) -> bool:
+        """Un `spotify_id` est-il libre pour ce titre ?
+
+        Intention CONSERVÉE depuis l'origine : plusieurs IDs pour le MÊME titre
+        sont normaux (un morceau sort en single puis sur l'album) — ils vivent
+        désormais dans `track_spotify_ids` (e23) au lieu de s'écraser l'un
+        l'autre. Ce qui est refusé, c'est un ID revendiqué par un AUTRE titre.
+
+        Deux défauts corrigés le 2026-09-08, qui laissaient passer deux paires
+        de morceaux sans aucun rapport portant le même ID (et la même durée,
+        qui avait suivi) :
+
+        1. **Portée GLOBALE.** Le contrôle ne regardait que `artist_tracks`,
+           les morceaux de l'artiste courant, alors qu'un `spotify_id` est
+           mondial : le cas Swing / SCH lui était structurellement invisible.
+           La base entière est désormais consultée (`lignes_du_spotify_id`), et
+           `artist_tracks` reste examiné pour ce qui n'est pas encore persisté.
+        2. **Normaliseur PARTAGÉ.** `_normalize_title` était une copie privée qui
+           avait divergé : elle EFFAÇAIT les parenthèses, si bien que « Un pour
+           la plume » et « Un pour la plume (Version équipe) » devenaient le même
+           titre et que le second ID passait pour « une version alternative ».
+           `title_matching.normalize_title`, le normaliseur du projet, les
+           distingue. La copie est supprimée — un verdict ne se calcule qu'à UN
+           endroit.
+
+        Un refus est SIGNALÉ (log d'erreur + `self.spotify_id_conflits`) : il
+        était jusqu'ici écrit en silence, et rien ne le rendait consultable.
         """
-        Valide qu'un Spotify ID n'est pas utilisé par un AUTRE titre
-        VERSION AMÉLIORÉE: Accepte plusieurs IDs pour le MÊME titre
-        """
-        if not spotify_id or not artist_tracks:
+        if not spotify_id:
             return True
 
-        current_title_normalized = self._normalize_title(current_track.title)
+        titre_courant = normalize_title(current_track.title)
 
-        for track in artist_tracks:
-            # Tous les IDs de ce track (méthode du modèle : [] si aucun)
-            track_ids = track.get_all_spotify_ids()
+        # ── Portée globale : ce que la base sait déjà de cet ID ──────────────
+        if self.data_manager is not None:
+            for ligne in self.data_manager.lignes_du_spotify_id(spotify_id):
+                if current_track.id is not None and ligne["id"] == current_track.id:
+                    continue
+                if normalize_title(ligne["title"]) == titre_courant:
+                    # Même titre : soit une autre ÉDITION du morceau, soit la
+                    # ligne SŒUR du même enregistrement chez un autre artiste
+                    # crédité. Les deux sont légitimes.
+                    continue
+                return self._refuser_spotify_id(spotify_id, current_track, ligne["title"])
 
-            # Vérifier si cet ID est déjà utilisé
-            if spotify_id in track_ids:
-                track_title_normalized = self._normalize_title(track.title)
-
-                # ✅ C'est le MÊME morceau : OK
-                if track_title_normalized == current_title_normalized:
-                    logger.info("✅ ID déjà utilisé par le même titre (version alternative)")
-                    return True
-
-                # ❌ C'est un AUTRE morceau : REJET
-                else:
-                    logger.warning(f"❌ ID déjà utilisé par un autre titre: '{track.title}'")
-                    return False
+        # ── Ce que le run porte en mémoire et qui n'est pas encore en base ───
+        for track in artist_tracks or []:
+            if track is current_track:
+                continue
+            if spotify_id not in track.get_all_spotify_ids():
+                continue
+            if normalize_title(track.title) == titre_courant:
+                logger.info("✅ ID déjà utilisé par le même titre (version alternative)")
+                return True
+            return self._refuser_spotify_id(spotify_id, current_track, track.title)
 
         return True
+
+    def _refuser_spotify_id(self, spotify_id: str, current_track: Track, titre_tiers: str) -> bool:
+        """Refuse un ID revendiqué par un autre titre, et le rend CONSULTABLE.
+
+        Le refus existait déjà ; ce qui manquait, c'est qu'il laisse une trace.
+        Un conflit d'identité n'est pas un échec de SOURCE — il n'a donc pas sa
+        place dans `source_usage`, dont toute la taxonomie dit « échec de
+        communication ». Il est journalisé en ERROR (le seul niveau qui atteigne
+        les fichiers de log) et accumulé pour la fin de run.
+        """
+        self.spotify_id_conflits.append((spotify_id, current_track.title, titre_tiers))
+        logger.error(
+            f"❌ Spotify ID {spotify_id} REFUSÉ pour '{current_track.title}' : "
+            f"déjà revendiqué par un autre titre, '{titre_tiers}'"
+        )
+        return False
 
     # get_unique_spotify_id : déplacé dans src/enrichment/providers/spotify_id.py
     # (SpotifyIdProvider.get_unique_spotify_id). L'unicité d'ID reste
@@ -288,34 +342,6 @@ class DataEnricher:
             logger.info(f"ℹ️ Aucune donnée à nettoyer pour '{track.title}'")
 
         return cleaned
-
-    def _normalize_title(self, title: str) -> str:
-        """
-        Normalise un titre pour comparaison
-        """
-        import re
-        import unicodedata
-
-        title = title.lower()
-
-        # Supprimer les accents
-        title = "".join(
-            c for c in unicodedata.normalize("NFD", title) if unicodedata.category(c) != "Mn"
-        )
-
-        # Supprimer feat., parenthèses, etc.
-        title = re.sub(r"\(.*?\)", "", title)
-        title = re.sub(r"\[.*?\]", "", title)
-        title = re.sub(r"feat\..*$", "", title, flags=re.IGNORECASE)
-        title = re.sub(r"ft\..*$", "", title, flags=re.IGNORECASE)
-
-        # Supprimer la ponctuation
-        title = re.sub(r"[^\w\s]", "", title)
-
-        # Supprimer les espaces multiples
-        title = " ".join(title.split())
-
-        return title.strip()
 
     # ================================================================
 
@@ -676,7 +702,7 @@ class DataEnricher:
             track.observations = []
             track.clear_audio_observations = True
 
-    def _collect_run_observations(self, bpm_candidates, key_mode_observations):
+    def _collect_run_observations(self, bpm_candidates, observations_providers):
         """Observations PAR SOURCE de ce run (phase E5c-2b-i).
 
         - **BPM** : une observation par source ayant voté (candidats bruts du
@@ -686,9 +712,12 @@ class DataEnricher:
           que les observations FRAÎCHES du run, pas l'union persistée — le
           nettoyage des lignes combinées accompagnera l'introduction de l'union
           (vote inter-runs, étape ultérieure).
-        - **key/mode** : observations PAR SOURCE normalisées, émises par les
-          providers dans `ctx.observations` (chaque source qui a mesuré, pas
-          seulement le last-writer legacy).
+        - **le reste** : observations PAR SOURCE émises par les providers dans
+          `ctx.observations` — chaque source qui a MESURÉ, pas seulement le
+          dernier à avoir écrit. key/mode (normalisés) depuis E5c-2b, et depuis
+          le lot B `duration`, `release_date` et `isrc`, qui n'avaient jusque-là
+          aucune provenance. Le paramètre s'appelait `key_mode_observations` :
+          il ne portait plus ce qu'il disait.
 
         Sans effet de bord : renvoie la liste, l'orchestrateur la pose sur
         `track.observations` (drainé par `save_track`).
@@ -696,5 +725,5 @@ class DataEnricher:
         from src.enrichment.observation import Observation
 
         observations = [Observation("bpm", value, source) for source, value in bpm_candidates]
-        observations.extend(key_mode_observations)
+        observations.extend(observations_providers)
         return observations

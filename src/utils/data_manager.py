@@ -67,6 +67,12 @@ class DataManager(ArtistRepository, TrackRepository):
             track.id, track.relationships
         ):
             track._relationships_pending = False
+        # IDs Spotify découverts ce run (e23) : même raison d'être qu'au-dessus,
+        # `save_track` n'écrit pas `track_spotify_ids`.
+        if track._spotify_ids_pending and self.record_track_spotify_ids(
+            track.id, track._spotify_ids_pending
+        ):
+            track._spotify_ids_pending = []
 
     @staticmethod
     def certifications_non_enregistrees(tracks) -> list[str]:

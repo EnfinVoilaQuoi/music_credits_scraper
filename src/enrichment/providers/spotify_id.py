@@ -14,6 +14,7 @@ from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.logger import get_logger
+from src.utils.spotify_identity import valider_identite, valider_identite_async
 
 logger = get_logger(__name__)
 
@@ -112,10 +113,10 @@ class SpotifyIdProvider:
         # Utiliser le scraper Spotify_ID pour obtenir le bon ID
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
         spotify_id = scraper.get_spotify_id(artist_name, track.title)
-        return self._dater_et_valider(track, ctx, spotify_id)
+        return self._dater_et_valider(track, ctx, spotify_id, scraper.get_track_identity)
 
     @staticmethod
-    def _dater_et_valider(
+    def _dater_et_prevalider(
         track: Track, ctx: EnrichmentContext, spotify_id: str | None
     ) -> str | None:
         """Suite COMMUNE aux deux voies, une fois le scrape rendu : dater le
@@ -152,6 +153,36 @@ class SpotifyIdProvider:
         logger.info(f"✅ Spotify ID unique trouvé via scraper: {spotify_id}")
         return spotify_id
 
+    @staticmethod
+    def _dater_et_valider(
+        track: Track, ctx: EnrichmentContext, spotify_id: str | None, lire_identite=None
+    ) -> str | None:
+        """Unicité PUIS justesse — deux questions distinctes.
+
+        L'unicité demande « cet ID est-il déjà pris ? » et ne dit RIEN de « est-ce
+        le bon morceau ? ». Mesuré le 2026-09-08 sur un run réel : **52 IDs sur
+        152 (34 %) désignaient le morceau de quelqu'un d'autre**, tous
+        parfaitement uniques — le scraper ne trouve pas (freestyles, lives et
+        inédits ne sont pas sur Spotify) et retient le résultat le plus proche.
+
+        Refuser est un BON résultat : `spotify_id_checked_at` (e17) date le
+        constat, donc la recherche ne recommencera pas en boucle.
+        """
+        valide = SpotifyIdProvider._dater_et_prevalider(track, ctx, spotify_id)
+        if valide is None:
+            return None
+        return valide if valider_identite(track, valide, lire_identite) else None
+
+    @staticmethod
+    async def _dater_et_valider_async(
+        track: Track, ctx: EnrichmentContext, spotify_id: str | None, lire_identite
+    ) -> str | None:
+        """Miroir async : MÊME décision, seul le transport de l'oracle diffère."""
+        valide = SpotifyIdProvider._dater_et_prevalider(track, ctx, spotify_id)
+        if valide is None:
+            return None
+        return valide if await valider_identite_async(track, valide, lire_identite) else None
+
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Scrape un Spotify ID unique et le pose (+ titre de page pour vérif)."""
         spotify_id = self.get_unique_spotify_id(track, ctx, force_scraper=True)
@@ -160,6 +191,7 @@ class SpotifyIdProvider:
             return False
 
         track.spotify_id = spotify_id
+        track.add_spotify_id(spotify_id, source="scraper")
         logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
 
         # Récupérer le titre de la page Spotify pour vérification
@@ -189,6 +221,7 @@ class SpotifyIdProvider:
             return False
 
         track.spotify_id = spotify_id
+        track.add_spotify_id(spotify_id, source="scraper")
         logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
 
         # Récupérer le titre de la page Spotify pour vérification
@@ -212,4 +245,6 @@ class SpotifyIdProvider:
 
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
         spotify_id = await scraper.get_spotify_id_async(artist_name, track.title)
-        return self._dater_et_valider(track, ctx, spotify_id)
+        return await self._dater_et_valider_async(
+            track, ctx, spotify_id, scraper.get_track_identity_async
+        )

@@ -184,21 +184,29 @@ class TestReconcileManual:
 
 
 class TestReconcileDefault:
+    """Le repli GÉNÉRIQUE : les champs sans stratégie déclarée.
+
+    Ces tests utilisaient `duration` comme exemple ; il a depuis (lot B) son
+    propre ordre de priorité et ne passe donc plus par ici. `genre` reste un
+    vrai champ générique — c'est-à-dire un champ dont personne n'a encore eu
+    besoin de trancher les sources.
+    """
+
     def test_meilleure_confiance_gagne(self):
         res = reconcile(
             [
-                _obs("duration", 200, "deezer", confidence=1),
-                _obs("duration", 210, "songbpm", confidence=3),
+                _obs("genre", "rap", "deezer", confidence=1),
+                _obs("genre", "trap", "songbpm", confidence=3),
             ]
         )
-        assert res["duration"].value == 210
-        assert res["duration"].source == "songbpm"
+        assert res["genre"].value == "trap"
+        assert res["genre"].source == "songbpm"
 
     def test_confiance_none_perd_contre_numerique(self):
         res = reconcile(
-            [_obs("duration", 200, "deezer"), _obs("duration", 210, "songbpm", confidence=0)]
+            [_obs("genre", "rap", "deezer"), _obs("genre", "trap", "songbpm", confidence=0)]
         )
-        assert res["duration"].value == 210
+        assert res["genre"].value == "trap"
 
     def test_egalite_confiance_la_fiabilite_tranche(self):
         # reccobeats (rang 3) > deezer (rang 0) à confiance égale.

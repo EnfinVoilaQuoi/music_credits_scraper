@@ -46,10 +46,13 @@ class _DataManager:
         self.album_calls = []
 
     def get_track_ids_by_spotify_id(self):
+        # Une LISTE par ID (2026-09-08) : un même enregistrement existe une fois
+        # par artiste crédité, et l'ancienne carte `id → une paire` en écrasait
+        # silencieusement toutes les lignes sauf une.
         return {
-            _ID_A: (10, _NOUS),
-            _ID_B: (11, _NOUS),
-            _ID_ETRANGER: (99, _AUTRE),
+            _ID_A: [(10, _NOUS)],
+            _ID_B: [(11, _NOUS)],
+            _ID_ETRANGER: [(99, _AUTRE)],
         }
 
     def get_stream_observation_dates(self, source):

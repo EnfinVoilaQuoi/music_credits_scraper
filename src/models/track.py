@@ -580,6 +580,12 @@ class Track:
     # `TrackRepository.record_track_videos`, jamais par `save_track`.
     videos: list[TrackVideo] = field(default_factory=list)
 
+    # D'où ce morceau arrive-t-il dans la discographie AFFICHÉE (lot 3) : None
+    # s'il est à l'artiste, sinon le nom de la formation qui l'apporte. Champ
+    # TRANSITOIRE — aucune colonne, il décrit une LECTURE et non le morceau, et
+    # le même morceau est « via IAM » chez Shurik'N et rien du tout chez IAM.
+    via_group: str | None = field(default=None, repr=False)
+
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.
 

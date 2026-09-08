@@ -7,7 +7,7 @@ import os
 
 from src.api.async_http import AsyncHttpSession
 from src.api.deezer_api import DeezerAPI
-from src.api.discogs_api import DiscogsClient
+from src.api.discogs_api import DiscogsClient, token_discogs
 from src.api.getsongbpm_api import GetSongBPMFetcher
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.concurrency.serial_worker import SerialWorker
@@ -117,7 +117,7 @@ class DataEnricher:
             self._bpmfinder_provider = BpmFinderProvider()
             logger.info("⏭️ BPM Finder non configuré (BPMFINDER_EMAIL/PASSWORD ou session absents)")
         self._deezer_provider = DeezerProvider(self.deezer_client)
-        discogs_token = os.getenv("DISCOGS_TOKEN") or os.getenv("DISCOGS_USER_TOKEN")
+        discogs_token = token_discogs()
         self._discogs_provider = DiscogsProvider(
             client_factory=lambda: (
                 DiscogsClient(user_token=discogs_token) if discogs_token else DiscogsClient()

@@ -21,6 +21,39 @@ from src.utils.youtube_integration import (
 logger = get_logger(__name__)
 
 
+#: Provenances d'ID Spotify, telles que les posent les producteurs (e23).
+#: `legacy` = backfill de la colonne au moment d'e23 : la provenance réelle
+#: n'était nulle part, et elle ne s'invente pas.
+_LIBELLES_SOURCE_SPOTIFY = {
+    "genius_media": "Genius media",
+    "scraper": "scrape Spotify",
+    "songbpm": "SongBPM",
+    "kworb": "Kworb",
+    "manual": "saisi manuellement ✎",
+    "legacy": "inconnue (avant e23)",
+}
+
+
+def _provenance_spotify(track) -> str:
+    """D'où vient l'ID Spotify PRINCIPAL du morceau, et combien y en a-t-il ?
+
+    Fonction pure : elle ne lit que l'objet, ce qui la rend testable sans GUI.
+    """
+    if not track.spotify_id:
+        return "—"
+    entrees = track.spotify_id_entries
+    principale = next((e for e in entrees if e.spotify_id == track.spotify_id), None)
+    if principale is None:
+        # Un ID en colonne sans ligne dans la table : un producteur a posé la
+        # colonne sans passer par `record_pending`. Le dire, plutôt que
+        # d'inventer une source.
+        return "non tracée"
+    libelle = _LIBELLES_SOURCE_SPOTIFY.get(principale.source, principale.source or "non tracée")
+    if len(entrees) > 1:
+        libelle += f", {len(entrees)} éditions"
+    return libelle
+
+
 class TrackDetailsWindow:
     """Fenêtre de détails d'un morceau. S'enregistre dans app.open_detail_windows
     (même sémantique que l'ancienne méthode MainWindow._show_track_details_for_track)."""
@@ -363,6 +396,8 @@ class TrackDetailsWindow:
                         tooltip.after(3000, tooltip.destroy)
 
                     spotify_label.bind("<Enter>", show_spotify_tooltip)
+
+            self._boutons_verifier_rejeter_spotify(spotify_frame, track, all_spotify_ids)
 
         # YouTube intelligent - ROUGE
         youtube_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
@@ -862,16 +897,14 @@ class TrackDetailsWindow:
         tech_textbox.insert(
             "end", f"• Date de sortie : {track.release_date or 'N/A'}  ({_rd_src})\n"
         )
-        _sp_src = (
-            "Genius media"
-            if getattr(track, "_spotify_from_api", None)
-            else (
-                "scrape Spotify"
-                if getattr(track, "spotify_page_title", None)
-                else ("—" if not track.spotify_id else "Genius media?")
-            )
+        # La provenance se LIT (table `track_spotify_ids`, e23) au lieu de se
+        # deviner. L'ancienne version la déduisait de `spotify_page_title` —
+        # colonne absente de l'UPDATE de `save_track`, donc vide sur 2 116
+        # morceaux sur 2 116 : elle affichait « Genius media? » pour les 1 071
+        # IDs de la base, quelle qu'en fût l'origine.
+        tech_textbox.insert(
+            "end", f"• Spotify ID : {_yn(track.spotify_id)}  ({_provenance_spotify(track)})\n"
         )
-        tech_textbox.insert("end", f"• Spotify ID : {_yn(track.spotify_id)}  ({_sp_src})\n")
         # youtube_url persisté en DB avec sa provenance : 'genius_media' (prioritaire)
         # ou 'search_auto' (fallback recherche, persisté si confiance ≥ YOUTUBE_PERSIST_CONFIDENCE)
         _yt_url = track.youtube_url
@@ -1278,6 +1311,83 @@ class TrackDetailsWindow:
             details_window, text="Fermer", command=details_window.destroy, width=100
         )
         close_button.pack(pady=10)
+
+    def _boutons_verifier_rejeter_spotify(self, parent, track, ids: list[str]) -> None:
+        """🔎 Vérifier / ✖️ Rejeter l'ID Spotify — le pendant des boutons YouTube.
+
+        **L'oracle est demandé À LA DEMANDE, jamais à l'ouverture** : la page
+        `/embed/` coûte une requête, et l'ouverture d'une fiche n'a pas à parler
+        au réseau. Le clic sur 🔎 la demande, affiche ce que Spotify sert
+        vraiment (titre, artistes, durée) et le verdict du MÊME prédicat que le
+        garde-fou — corriger `identite_concorde` corrige ce que ce bouton dit.
+
+        ✖️ délègue à `rejeter_spotify_id`, donc aux trois gestes : oublier la
+        ligne, effacer la colonne, retirer les observations venues de l'ID
+        (ReccoBeats en tête — son BPM et sa tonalité décrivent le morceau que
+        l'ID désigne). La confirmation ANNONCE ce qui sera retiré : un rejet qui
+        emporte 4 observations sans le dire serait une mauvaise surprise.
+        """
+        from src.utils.spotify_audit import rejeter_spotify_id
+        from src.utils.spotify_identity import identite_concorde, lire_identite_http
+
+        principal = track.spotify_id
+        if not principal:
+            return
+
+        boutons = ctk.CTkFrame(parent, fg_color="transparent")
+        boutons.pack(side="left", padx=(8, 0))
+
+        def verifier() -> None:
+            identite = lire_identite_http(principal)
+            if identite is None:
+                messagebox.showwarning(
+                    "Vérification Spotify",
+                    "Page illisible — on ne peut pas conclure.\n\n"
+                    "Un identifiant non vérifiable n'est pas pour autant fautif.",
+                )
+                return
+            ok, motif = identite_concorde(track, identite)
+            artistes = ", ".join(identite["artists"])
+            duree = f"{identite['duration']} s" if identite["duration"] else "durée inconnue"
+            detail = f"Spotify sert :\n\n« {identite['name'] }»\n{artistes}\n{duree}"
+            if ok:
+                messagebox.showinfo("Vérification Spotify", f"✅ Concordant.\n\n{detail}")
+            else:
+                messagebox.showwarning("Vérification Spotify", f"🚨 Écart : {motif}\n\n{detail}")
+
+        def rejeter() -> None:
+            if not messagebox.askyesno(
+                "Rejeter l'identifiant Spotify",
+                f"Retirer {principal} de « {track.title} » ?\n\n"
+                "Seront aussi retirées les données qui EN DÉCOULENT : le BPM, la "
+                "tonalité et le mode mesurés par ReccoBeats (qui s'interroge par "
+                "cet identifiant), ainsi que les streams Spotify et Kworb.\n\n"
+                "Le morceau repassera en « jamais cherché » : le prochain "
+                "enrichissement lui cherchera un identifiant.",
+            ):
+                return
+            rapport = rejeter_spotify_id(self.app.data_manager, track, principal)
+            retirees = len(rapport["observations_retirees"])
+            if rapport["duree_suspecte"] and messagebox.askyesno(
+                "Durée suspecte",
+                f"La durée en base ({rapport['duree_suspecte']} s) vient "
+                "probablement de cet identifiant (ReccoBeats). L'effacer aussi ?",
+            ):
+                self.app.data_manager.clear_track_duration(track.id)
+                track.duration = None
+            boutons.destroy()
+            messagebox.showinfo(
+                "Identifiant rejeté",
+                f"{principal} retiré, avec {retirees} observation(s) qui en découlaient.",
+            )
+            self.app._populate_tracks_table()
+
+        ctk.CTkButton(
+            boutons, text="🔎", width=30, command=verifier, fg_color="gray30", hover_color="gray40"
+        ).pack(side="left", padx=2)
+        ctk.CTkButton(
+            boutons, text="✖️", width=30, command=rejeter, fg_color="gray30", hover_color="gray40"
+        ).pack(side="left", padx=2)
 
     def _boutons_valider_rejeter(self, parent, track, youtube_result, label, artist_name):
         """✔️ Valider / ✖️ Rejeter à côté d'un lien PROPOSÉ par la recherche.

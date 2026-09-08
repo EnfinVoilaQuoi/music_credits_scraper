@@ -1,0 +1,103 @@
+"""Relecture des identifiants Spotify déjà en base, confrontés à l'oracle.
+
+Vit dans `src/` et non dans un script parce que **deux CLI en dépendent** —
+`audit_spotify_ids.py` qui SIGNALE et `repair_spotify_ids.py` qui RETIRE — et
+qu'un script ne s'importe pas (`scripts/` n'est pas un package). Les deux
+doivent balayer exactement les mêmes lignes et juger avec exactement le même
+prédicat : si le rapport et la réparation divergeaient, on retirerait des IDs
+que le rapport n'a jamais montrés.
+
+Aucune règle ici : le verdict vient d'`identite_concorde`
+(`src/utils/spotify_identity.py`), et le balayage n'est qu'une requête.
+"""
+
+from sqlalchemy import text
+
+from src.models import Artist, Track
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = None) -> list[dict]:
+    """Toutes les lignes portant un ID Spotify — colonne ET table (e23).
+
+    Une ligne par (morceau, ID) : deux morceaux peuvent partager un ID — c'est
+    précisément ce qu'on cherche — et un morceau peut porter plusieurs éditions.
+
+    Les deux magasins sont interrogés pour la même raison que
+    `get_track_ids_by_spotify_id` : la colonne porte l'ID PRINCIPAL (seul écrit
+    par `save_track`), la table les éditions alternatives.
+    """
+    filtre = "AND a.name = :artiste" if artiste else ""
+    params = {"artiste": artiste} if artiste else {}
+    requete = f"""
+        SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
+               a.name AS artiste, t.spotify_id AS sid, 1 AS principal
+          FROM tracks t JOIN artists a ON a.id = t.artist_id
+         WHERE t.spotify_id IS NOT NULL AND t.spotify_id != '' {filtre}
+         UNION
+        SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
+               a.name, s.spotify_id, 0
+          FROM track_spotify_ids s
+          JOIN tracks t ON t.id = s.track_id
+          JOIN artists a ON a.id = t.artist_id
+         WHERE 1=1 {filtre}
+         ORDER BY 6, 2
+    """
+    with engine.connect() as conn:
+        lignes = [dict(r) for r in conn.execute(text(requete), params).mappings().all()]
+
+    # Dédup : dans le cas courant la colonne ET la table portent le même ID, ce
+    # qui donne deux lignes ne différant que par `principal`. On garde la
+    # PRINCIPALE — sinon le rapport dirait « édition » d'un ID qu'on ouvre.
+    par_cle: dict[tuple, dict] = {}
+    for ligne in lignes:
+        cle = (ligne["id"], ligne["sid"])
+        connue = par_cle.get(cle)
+        if connue is None or ligne["principal"] > connue["principal"]:
+            par_cle[cle] = ligne
+    uniques = list(par_cle.values())
+    return uniques[:limite] if limite else uniques
+
+
+def track_de_la_ligne(ligne: dict) -> Track:
+    """Le morceau tel que le prédicat l'attend — un vrai `Track`, pas un dict.
+
+    C'est ce qui permet d'appeler `identite_concorde` sans en recopier la moindre
+    règle : l'audit, la réparation et le garde-fou jugent avec le MÊME code.
+    `is_featuring` et `primary_artist_name` comptent autant que le titre —
+    c'est sur l'artiste PRINCIPAL qu'un featuring se juge.
+    """
+    track = Track(title=ligne["title"], artist=Artist(name=ligne["artiste"]))
+    track.id = ligne["id"]
+    track.duration = ligne["duration"]
+    track.is_featuring = bool(ligne["is_featuring"])
+    track.primary_artist_name = ligne["primary_artist_name"]
+    return track
+
+
+def rejeter_spotify_id(data_manager, track, spotify_id: str) -> dict:
+    """Rejette un ID Spotify depuis l'interface, et remet l'objet d'aplomb.
+
+    Pendant du rejet d'un lien YouTube (`youtube_integration.reject_youtube_link`)
+    et, comme lui, une affaire de gestes COORDONNÉS : la base est nettoyée par
+    `clear_track_spotify_id` (les trois gestes, dont les observations venues de
+    l'ID), mais l'objet en mémoire doit suivre — sans quoi la fiche continuerait
+    d'afficher l'ID rejeté jusqu'au prochain rechargement de l'artiste, et un
+    `save_track` le RÉÉCRIRAIT depuis l'objet.
+
+    Returns:
+        Le rapport de `clear_track_spotify_id` (ce qui a été retiré).
+    """
+    rapport = data_manager.clear_track_spotify_id(track.id, spotify_id)
+    track.spotify_ids = [s for s in track.spotify_ids if s != spotify_id]
+    track.spotify_id_entries = [e for e in track.spotify_id_entries if e.spotify_id != spotify_id]
+    if track.spotify_id == spotify_id:
+        track.spotify_id = None
+        track.spotify_id_checked_at = None
+        # `spotify_page_title` décrit la page de l'ID qu'on vient de rejeter.
+        if hasattr(track, "spotify_page_title"):
+            track.spotify_page_title = None
+    logger.info(f"🚫 ID Spotify rejeté : « {track.title} » → {spotify_id}")
+    return rapport

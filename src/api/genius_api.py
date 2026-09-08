@@ -18,6 +18,7 @@ from src.config import (
 from src.models import Artist, Track
 from src.observability import source_usage
 from src.utils.logger import get_logger, log_api
+from src.utils.spotify_identity import valider_identite
 
 logger = get_logger(__name__)
 
@@ -609,8 +610,13 @@ class GeniusAPI:
             changed = True
 
         sid, yt = self._extract_media(song)
-        if sid and not track.spotify_id:
+        # Le lien media de Genius n'est pas plus sûr qu'un autre : 3,1 % du stock
+        # historique — largement du `genius_media` — désigne un artiste étranger
+        # (mesuré 2026-09-08). Le contrôle coûte UNE requête légère sur l'embed,
+        # sans navigateur, et seulement quand un ID est proposé.
+        if sid and not track.spotify_id and valider_identite(track, sid):
             track.spotify_id = sid
+            track.add_spotify_id(sid, source="genius_media")
             track._spotify_from_api = True
             changed = True
         # Genius pose le lien si absent, et remplace un 'search_auto'. MAIS

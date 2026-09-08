@@ -36,6 +36,14 @@ logger = logging.getLogger("SpotifyIDScraper")
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "spotify_embed"
 
+#: User-Agent des lectures d'embed en `requests` NU (artistes, identité). Une
+#: seule définition : deux copies divergent, et celle qu'on ne regarde pas est
+#: toujours la mauvaise.
+_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 
 class SpotifyIDScraper:
     """Scraper pour récupérer les IDs Spotify via recherche directe (Playwright)"""
@@ -385,28 +393,67 @@ class SpotifyIDScraper:
     # __NEXT_DATA__ avec les crédits EXACTS du morceau : [{name, uri}].
 
     @staticmethod
-    def _parse_embed_artists(html: str) -> list[dict[str, str]]:
-        """Extrait [{'name', 'id'}] du __NEXT_DATA__ d'une page embed."""
+    def _parse_embed_entity(html: str) -> dict | None:
+        """L'entité du `__NEXT_DATA__` d'une page embed, ou None.
+
+        Point de lecture UNIQUE de ce JSON : le titre, les artistes et la durée
+        y vivent ensemble, et les extraire à deux endroits ferait deux fois le
+        même travail avec deux fois l'occasion de diverger.
+        """
         m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html or "", re.S)
         if not m:
-            return []
+            return None
         try:
             data = json.loads(m.group(1))
-            entity = (
+            return (
                 (((data.get("props") or {}).get("pageProps") or {}).get("state") or {}).get("data")
                 or {}
-            ).get("entity") or {}
-            out = []
-            for a in entity.get("artists") or []:
-                uri = a.get("uri") or ""
-                if uri.startswith("spotify:artist:"):
-                    out.append(
-                        {"name": (a.get("name") or "").strip(), "id": uri.rsplit(":", 1)[-1]}
-                    )
-            return out
+            ).get("entity") or None
         except (ValueError, AttributeError, TypeError) as e:
             logger.debug(f"Parse __NEXT_DATA__ embed échoué: {e}")
-            return []
+            return None
+
+    @classmethod
+    def _parse_embed_artists(cls, html: str) -> list[dict[str, str]]:
+        """Extrait [{'name', 'id'}] du __NEXT_DATA__ d'une page embed."""
+        entity = cls._parse_embed_entity(html) or {}
+        out = []
+        for a in entity.get("artists") or []:
+            uri = a.get("uri") or ""
+            if uri.startswith("spotify:artist:"):
+                out.append({"name": (a.get("name") or "").strip(), "id": uri.rsplit(":", 1)[-1]})
+        return out
+
+    @classmethod
+    def _identite_depuis_embed(cls, html: str) -> dict | None:
+        """Ce que Spotify dit d'un morceau : titre, artistes, durée en secondes.
+
+        C'est l'ORACLE d'identité d'un `spotify_id` — le seul moyen de savoir
+        qu'un ID écrit en base désigne bien le morceau qui le porte. La durée
+        compte autant que le titre : elle est objective là où un titre peut
+        s'écrire de dix façons.
+        """
+        entity = cls._parse_embed_entity(html)
+        if not entity or not entity.get("name"):
+            return None
+        ms = entity.get("duration")
+        return {
+            "name": (entity.get("name") or "").strip(),
+            "artists": [(a.get("name") or "").strip() for a in entity.get("artists") or []],
+            "duration": round(ms / 1000) if isinstance(ms, (int, float)) and ms > 0 else None,
+        }
+
+    @staticmethod
+    def _titre_de_page(identite: dict | None) -> str | None:
+        """« Titre • Artiste, Artiste » — la forme stockée en `spotify_page_title`."""
+        if not identite:
+            return None
+        artistes = ", ".join(a for a in identite["artists"] if a)
+        return f"{identite['name']} • {artistes}" if artistes else identite["name"]
+
+    @staticmethod
+    def _url_embed(track_spotify_id: str) -> str:
+        return f"https://open.spotify.com/embed/track/{track_spotify_id}"
 
     def get_track_artists(self, track_spotify_id: str) -> list[dict[str, str]]:
         """Artistes crédités sur un track : [{'name', 'id'}], ordre Spotify.
@@ -414,20 +461,10 @@ class SpotifyIDScraper:
         Voie 1 : requests sur la page embed (léger, server-rendered).
         Voie 2 : Playwright sur la même page si requests échoue.
         """
-        url = f"https://open.spotify.com/embed/track/{track_spotify_id}"
+        url = self._url_embed(track_spotify_id)
 
         try:
-            resp = requests.get(
-                url,
-                timeout=15,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    )
-                },
-            )
+            resp = requests.get(url, timeout=15, headers={"User-Agent": _UA})
             if resp.ok:
                 resp.encoding = "utf-8"  # noms d'artistes accentués (anti-mojibake)
                 artists = self._parse_embed_artists(resp.text)
@@ -498,18 +535,44 @@ class SpotifyIDScraper:
             return None
         return cleaned
 
-    def get_spotify_page_title(self, spotify_id: str) -> str | None:
+    def get_track_identity(self, spotify_id: str) -> dict | None:
+        """Ce que Spotify dit du morceau derrière un ID : titre, artistes, durée.
+
+        Passe par `/embed/track/{id}`, **server-rendered**, en `requests` NU :
+        aucun navigateur n'est nécessaire (mêmes deux voies que
+        `get_track_artists`, dont la seconde n'existe que pour le jour où
+        l'embed exigerait du JS).
+
+        ⚠️ La page `/track/{id}` ne convient PAS : c'est une application JS dont
+        le `<title>` vaut « Spotify » tant que le rendu n'a pas eu lieu. C'est
+        exactement ce que faisait `get_spotify_page_title` avec un
+        `wait_until="domcontentloaded"` — il rendait donc **toujours** `None`
+        (`_clean_page_title` écarte les titres génériques), et `spotify_page_title`
+        était vide sur 2 116 morceaux sur 2 116 pour DEUX raisons indépendantes :
+        celle-ci, et la colonne absente de l'UPDATE de `save_track` (e23).
+        """
+        url = self._url_embed(spotify_id)
+        try:
+            resp = requests.get(url, timeout=15, headers={"User-Agent": _UA})
+            if resp.ok:
+                resp.encoding = "utf-8"  # titres et noms accentués (anti-mojibake)
+                identite = self._identite_depuis_embed(resp.text)
+                if identite:
+                    return identite
+        except requests.RequestException as e:
+            logger.debug(f"Embed via requests échoué ({spotify_id}): {e}")
+
         try:
             self._ensure_driver()
-        except PlaywrightError:
-            return None
-        try:
-            spotify_url = f"https://open.spotify.com/track/{spotify_id}"
-            self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
-            return self._clean_page_title(self.page.title())
+            self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            return self._identite_depuis_embed(self.page.content())
         except (PlaywrightError, AttributeError, TypeError, ValueError) as e:
-            logger.error(f"❌ Erreur récupération titre: {e}")
-        return None
+            logger.error(f"❌ Identité embed via Playwright échouée ({spotify_id}): {e}")
+            return None
+
+    def get_spotify_page_title(self, spotify_id: str) -> str | None:
+        """Titre lisible de la page Spotify d'un ID, pour VÉRIFICATION humaine."""
+        return self._titre_de_page(self.get_track_identity(spotify_id))
 
     def get_artist_spotify_id(self, artist_name: str) -> str | None:
         """Récupère l'ID Spotify (22 chars) d'un artiste depuis la page de recherche Spotify."""

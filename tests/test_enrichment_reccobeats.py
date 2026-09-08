@@ -25,15 +25,20 @@ class _FakeReccoClient:
 
 
 class _FakeSpotifyScraper:
-    def __init__(self, spotify_id=None, page_title=None):
+    def __init__(self, spotify_id=None, page_title=None, identite=None):
         self._id = spotify_id
         self._title = page_title
+        self._identite = identite
 
     def get_spotify_id(self, artist, title):
         return self._id
 
     def get_spotify_page_title(self, spotify_id):
         return self._title
+
+    def get_track_identity(self, spotify_id):
+        """Oracle d'identité. `None` = « on ne conclut pas » (défaut hermétique)."""
+        return self._identite
 
 
 def _track():
@@ -169,15 +174,20 @@ class _FakeDeezerAsync:
 
 
 class _FakeScraperAsync:
-    def __init__(self, spotify_id=None, page_title=None):
+    def __init__(self, spotify_id=None, page_title=None, identite=None):
         self._id = spotify_id
         self._title = page_title
+        self._identite = identite
 
     async def get_spotify_id_async(self, artist, title):
         return self._id
 
     async def get_spotify_page_title_async(self, spotify_id):
         return self._title
+
+    async def get_track_identity_async(self, spotify_id):
+        """Miroir async de l'oracle d'identité."""
+        return self._identite
 
 
 class _SyncRunner:

@@ -447,6 +447,29 @@ class Media:
 
 
 @dataclass
+class TrackSpotifyId:
+    """UN identifiant Spotify d'un morceau (table `track_spotify_ids`, e23).
+
+    Un morceau en a souvent plusieurs — le single et l'album, une réédition —
+    et n'en garder qu'un faisait qu'« accepter un ID alternatif » revenait à
+    écraser le précédent.
+
+    `source` ∈ genius_media · kworb · scraper · manual · legacy — la provenance
+    de l'ID. `is_primary` matérialise `tracks.spotify_id`, l'ID qu'on OUVRE et
+    qu'on INTERROGE ; le verdict reste la colonne, ce drapeau n'en est que le
+    reflet, maintenu par l'écrivain.
+
+    ⚠️ Plusieurs IDs = plusieurs ÉDITIONS DU MÊME enregistrement, qui portent
+    les MÊMES compteurs : on les RECONNAÎT toutes, on n'en SOMME jamais deux.
+    """
+
+    spotify_id: str = ""
+    source: str | None = None
+    is_primary: bool = False
+    seen_at: datetime | None = None
+
+
+@dataclass
 class TrackVideo:
     """UNE vidéo YouTube d'un morceau (table `track_videos`, e20).
 
@@ -492,7 +515,17 @@ class Track:
     # IDs externes
     genius_id: int | None = None
     spotify_id: str | None = None
+    # Tous les IDs Spotify connus du morceau (table `track_spotify_ids`, e23),
+    # peuplés à la LECTURE, le principal d'abord. `spotify_ids` reste la liste
+    # nue — c'est elle que la GUI affiche depuis toujours ; `spotify_id_entries`
+    # y ajoute la provenance, seule capable de dire d'où vient un ID (la fiche
+    # morceau la DEVINAIT jusqu'ici, et se trompait pour les 1 071 IDs de la base).
     spotify_ids: list[str] = field(default_factory=list)
+    spotify_id_entries: list["TrackSpotifyId"] = field(default_factory=list)
+    # IDs découverts CE RUN, pas encore écrits : pendant de `Certs.needs_write`.
+    # `save_track` n'écrit pas `track_spotify_ids` (écrivain dédié) — c'est
+    # `DataManager.record_pending` qui les verse, juste après.
+    _spotify_ids_pending: list["TrackSpotifyId"] = field(default_factory=list, repr=False)
     discogs_id: int | None = None
     isrc: str | None = None  # International Standard Recording Code (pivot inter-sources)
     # Date de la dernière recherche d'ID Spotify MENÉE À TERME (e17). Sans
@@ -950,9 +983,14 @@ class Track:
             return self.spotify_ids[0]
         return self.spotify_id
 
-    def add_spotify_id(self, new_id: str) -> bool:
-        """
-        Ajoute un Spotify ID à la liste (sans doublons)
+    def add_spotify_id(self, new_id: str, source: str | None = None) -> bool:
+        """Ajoute un Spotify ID à la liste (sans doublons) et le marque à écrire.
+
+        Le marquage est ce qui manquait : la liste existait, était testée et
+        affichée par la GUI, mais aucune table ne la portait — elle mourait au
+        `save_track`. `_spotify_ids_pending` la fait vivre jusqu'à
+        `DataManager.record_pending`, comme `Certs.needs_write` pour les
+        certifications.
 
         Returns:
             bool: True si l'ID a été ajouté, False s'il existait déjà
@@ -966,6 +1004,7 @@ class Track:
 
         # Ajouter le nouvel ID
         self.spotify_ids.append(new_id)
+        self._spotify_ids_pending.append(TrackSpotifyId(spotify_id=new_id, source=source))
 
         # Mettre à jour spotify_id (compatibilité)
         if not self.spotify_id:

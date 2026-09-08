@@ -12,7 +12,12 @@ from types import SimpleNamespace
 
 from src.api.musicbrainz_api import RelationGroupe
 from src.models import Artist, ArtistRelation
-from src.utils.formations import Candidat, chercher_formations, fusionner
+from src.utils.formations import (
+    Candidat,
+    chercher_formations,
+    fusionner,
+    trier_confirmations,
+)
 
 
 def _mb(nom, kind="member_of", begin=None, end=None):
@@ -243,3 +248,52 @@ class TestRecherche:
         dm = _FauxDM()
         chercher_formations(_artiste(), dm, mb=_FauxMB([_mb("IAM")]), discogs=_FauxDiscogs())
         assert not hasattr(dm, "record_artist_relations")
+
+
+class TestTrierConfirmations:
+    """La décision d'écriture/retrait, extraite de la fenêtre.
+
+    C'est le point où une erreur coûterait : sans le RETRAIT, une confirmation
+    fautive deviendrait définitive et la fenêtre ne saurait qu'ajouter.
+    """
+
+    def _c(self, nom, kind="member_of", deja=False):
+        return Candidat(related_name=nom, kind=kind, sources={"musicbrainz"}, deja_confirme=deja)
+
+    def test_un_lien_coche_est_ecrit_avec_sa_nature(self):
+        a_ecrire, a_oublier = trier_confirmations([(self._c("IAM"), True, "groupe")])
+        assert [(r.related_name, r.formation) for r in a_ecrire] == [("IAM", "groupe")]
+        assert a_oublier == []
+
+    def test_decocher_un_lien_DEJA_en_base_le_retire(self):
+        a_ecrire, a_oublier = trier_confirmations([(self._c("IAM", deja=True), False, "groupe")])
+        assert a_ecrire == []
+        assert a_oublier == [("IAM", "member_of")]
+
+    def test_decocher_un_lien_jamais_confirme_ne_fait_rien(self):
+        """Il n'y a rien à retirer — et tenter de le faire signalerait à tort
+        un retrait à l'utilisateur."""
+        a_ecrire, a_oublier = trier_confirmations([(self._c("IAM"), False, "groupe")])
+        assert (a_ecrire, a_oublier) == ([], [])
+
+    def test_un_alias_ne_recoit_jamais_de_nature(self):
+        """Même si l'interface en proposait une : la question groupe/collectif
+        ne se pose pas pour un autre nom de scène."""
+        a_ecrire, _ = trier_confirmations(
+            [(self._c("Chien de la casse", kind="alias"), True, "groupe")]
+        )
+        assert a_ecrire[0].formation is None
+
+    def test_ecritures_et_retraits_dans_la_meme_passe(self):
+        a_ecrire, a_oublier = trier_confirmations(
+            [
+                (self._c("IAM"), True, "groupe"),
+                (self._c("One Shot", deja=True), False, "groupe"),
+                (self._c("L'Animalerie"), True, "collectif"),
+            ]
+        )
+        assert {r.related_name for r in a_ecrire} == {"IAM", "L'Animalerie"}
+        assert a_oublier == [("One Shot", "member_of")]
+
+    def test_aucune_decision(self):
+        assert trier_confirmations([]) == ([], [])

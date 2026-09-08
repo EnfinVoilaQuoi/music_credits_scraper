@@ -9,9 +9,10 @@ from src.config import THEME, WINDOW_HEIGHT, WINDOW_WIDTH
 from src.gui import helpers
 from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
-from src.gui.panels import albums_view, tracks_table
+from src.gui.panels import albums_view, formations_panel, tracks_table
 from src.gui.windows import artist_loader
 from src.gui.windows.export_studio import show_export_studio
+from src.gui.windows.formations import show_formations
 from src.gui.windows.source_health import show_source_health
 from src.gui.windows.track_details import TrackDetailsWindow
 from src.gui.workers import enrichment, retrieval, streams
@@ -129,9 +130,28 @@ class MainWindow:
         self.tracks_info_label = ctk.CTkLabel(info_frame, text="")
         self.tracks_info_label.pack()
 
+        # Formations confirmées (lot 3) : la page d'un GROUPE ne montre que ce
+        # qu'il a sorti — ce panneau donne accès à ses membres. Navigation, pas
+        # agrégation (décision utilisateur du 2026-09-08).
+        self.formations_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        self.formations_frame.pack(fill="x", padx=10, pady=(2, 6))
+
         # === Section contrôles ===
         control_frame = ctk.CTkFrame(main_frame)
         control_frame.pack(fill="x", padx=5, pady=5)
+
+        # 0. Groupes / formations — après la Discographie dans l'usage : l'oracle
+        # d'identité a besoin des albums pour départager les homonymes.
+        self.formations_button = ctk.CTkButton(
+            control_frame,
+            text="Groupes",
+            command=lambda: show_formations(self),
+            state="disabled",
+            width=110,
+            fg_color="#5e35b1",
+            hover_color="#4527a0",
+        )
+        self.formations_button.pack(side="left", padx=5)
 
         # 1. Récupérer les morceaux
         self.get_tracks_button = ctk.CTkButton(
@@ -571,6 +591,7 @@ class MainWindow:
         self._close_all_detail_windows()
         if self.current_artist:
             self.artist_info_label.configure(text=f"Artiste: {self.current_artist.name}")
+            formations_panel.build(self.formations_frame, self)
 
             if self.current_artist.tracks:
                 # Calculs des statistiques
@@ -841,6 +862,8 @@ class MainWindow:
                 self.lyrics_button.configure(state="disabled")
             if hasattr(self, "streams_button"):
                 self.streams_button.configure(state="disabled")
+            if hasattr(self, "formations_button"):
+                self.formations_button.configure(state="disabled")
         elif not self.current_artist.tracks:
             # Artiste chargé mais pas de morceaux
             self.get_tracks_button.configure(state="normal")
@@ -854,6 +877,8 @@ class MainWindow:
                 self.lyrics_button.configure(state="disabled")
             if hasattr(self, "streams_button"):
                 self.streams_button.configure(state="disabled")
+            if hasattr(self, "formations_button"):
+                self.formations_button.configure(state="disabled")
         else:
             # Artiste avec morceaux
             self.get_tracks_button.configure(state="normal")
@@ -867,6 +892,11 @@ class MainWindow:
                 self.lyrics_button.configure(state="normal")
             if hasattr(self, "streams_button"):
                 self.streams_button.configure(state="normal")
+            if hasattr(self, "formations_button"):
+                # Actif SEULEMENT ici : l'oracle d'identité départage les
+                # homonymes par recouvrement d'albums, il lui faut la
+                # discographie. Sans elle, « Swing » reste indécidable.
+                self.formations_button.configure(state="normal")
 
     def _show_progress_bar(self):
         """Affiche la barre de progression"""

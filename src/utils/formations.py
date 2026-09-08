@@ -127,6 +127,29 @@ def fusionner(
     )
 
 
+def trier_confirmations(decisions) -> tuple[list[ArtistRelation], list[tuple[str, str]]]:
+    """Ce que l'utilisateur vient de décider → (liens à écrire, liens à oublier).
+
+    Fonction PURE, extraite de la fenêtre parce que c'est là qu'une erreur
+    coûterait : oublier le RETRAIT ferait d'une confirmation fautive quelque
+    chose de définitif, et la fenêtre ne saurait qu'ajouter.
+
+    `decisions` : des triplets `(candidat, coché, nature)`. Décocher un lien
+    déjà en base est le geste de retrait ; décocher un lien qui n'y était pas
+    ne fait rien — il n'y a rien à retirer.
+
+    Un `alias` ne reçoit jamais de nature : la question groupe/collectif ne se
+    pose pas pour un autre nom de scène.
+    """
+    a_ecrire, a_oublier = [], []
+    for candidat, coche, nature in decisions:
+        if coche:
+            a_ecrire.append(candidat.vers_relation(None if candidat.kind == "alias" else nature))
+        elif candidat.deja_confirme:
+            a_oublier.append((candidat.related_name, candidat.kind))
+    return a_ecrire, a_oublier
+
+
 def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportFormations:
     """Interroge les deux sources pour un artiste et rend des candidats.
 

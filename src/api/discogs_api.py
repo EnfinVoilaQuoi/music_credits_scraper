@@ -1,5 +1,6 @@
 """Client pour l'API Discogs - Enrichissement des crédits et métadonnées"""
 
+import os
 import re
 import time
 from typing import Any
@@ -17,6 +18,17 @@ logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "discogs"
+
+
+def token_discogs() -> str | None:
+    """Token personnel Discogs, ou None (l'API reste lisible sans, à 25 req/min).
+
+    DEUX noms de variable sont acceptés, pour une raison purement historique.
+    La lecture vivait en double, à l'octet près, dans `data_enricher` et le
+    worker de scraping ; un troisième appelant (les formations, lot 3) allait en
+    faire un triplé. Le nom des clés n'a pas à être connu de trois modules.
+    """
+    return os.getenv("DISCOGS_TOKEN") or os.getenv("DISCOGS_USER_TOKEN")
 
 
 # ── Formations : groupes, membres, alias (lot 3) ──────────────────────────────

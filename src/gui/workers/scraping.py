@@ -170,11 +170,9 @@ def start_combined_scraping(
                 current_task += 1
                 logger.info(f"[{current_task}/{total_tasks}] Scraping des crédits Discogs...")
 
-                import os
+                from src.api.discogs_api import DiscogsClient, token_discogs
 
-                from src.api.discogs_api import DiscogsClient
-
-                discogs_token = os.getenv("DISCOGS_TOKEN") or os.getenv("DISCOGS_USER_TOKEN")
+                discogs_token = token_discogs()
                 discogs_client = DiscogsClient(user_token=discogs_token)
 
                 if force_credits:

@@ -21,7 +21,7 @@ from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.logger import get_logger
 from src.utils.title_matching import clean_stored_title
-from src.utils.track_mapper import track_from_row
+from src.utils.track_mapper import _clean_duration, track_from_row
 from src.utils.track_soeurs import synchroniser_soeurs
 
 logger = get_logger(__name__)
@@ -89,6 +89,25 @@ class TrackRepository:
             # mémoire est corrigé lui aussi, sans quoi il divergerait de la base
             # jusqu'au prochain rechargement.
             track.title = clean_stored_title(track.title)
+
+            # Second point de passage unique, même principe (lot B-bis) : toute
+            # durée entrant en base est ramenée en SECONDES ici. SQLite accepte
+            # n'importe quel type dans une colonne INTEGER, et 19 valeurs y
+            # étaient écrites « 2:30 » — e24 les a normalisées, mais normaliser
+            # n'est pas réparer : sans garde à l'entrée, la passe suivante en
+            # réintroduit, et tout lecteur en `text()` brut s'y casse (l'audit
+            # Spotify l'a fait). La coercition est celle du mapper, PARTAGÉE.
+            #
+            # Le log SIGNALE l'écrivain fautif, qu'aucun grep n'avait su
+            # nommer : la valeur est corrigée, mais on veut savoir d'où elle
+            # vient — c'est le diagnostic ET le correctif au même endroit.
+            if track.duration is not None and not isinstance(track.duration, int):
+                brute = track.duration
+                track.duration = _clean_duration(brute)
+                logger.warning(
+                    f"⏱️ Durée non entière reçue pour « {track.title} » : "
+                    f"{brute!r} → {track.duration!r} (normalisée à l'entrée)"
+                )
 
             existing_track = (
                 conn.execute(

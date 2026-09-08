@@ -190,15 +190,16 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         # Plusieurs noms séparés par « ; » : un membre de groupe est crédité
         # sous son nom ET sous celui de sa formation (Shurik'N chez IAM), et
         # chercher un seul des deux ampute la moitié de sa discographie
-        # certifiée. Le lot « groupes » remplira ce champ tout seul depuis les
-        # relations d'artistes ; d'ici là il se saisit à la main.
+        # certifiée. Depuis le lot « groupes », ce champ se remplit tout seul
+        # depuis les formations CONFIRMÉES — il reste éditable, parce que la
+        # base ne connaît pas toutes les formations du monde.
         self.artist_entry = ctk.CTkEntry(
             artist_frame, placeholder_text="Artiste (; pour un groupe)", width=170
         )
         self.artist_entry.pack(side="right", padx=5, pady=5)
-        # Préremplir avec l'artiste courant si fourni
-        if getattr(self, "default_artist", None):
-            self.artist_entry.insert(0, self.default_artist)
+        prerempli = self._noms_a_preremplir()
+        if prerempli:
+            self.artist_entry.insert(0, " ; ".join(prerempli))
 
         # Section actions globales
         actions_frame = ctk.CTkFrame(main_frame)
@@ -394,6 +395,33 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
     def _update_snep(self):
         """Lance la mise à jour SNEP"""
         self._run_update_script("update_snep.py", "SNEP")
+
+    def _noms_a_preremplir(self) -> list[str]:
+        """L'artiste courant, puis les formations sous lesquelles il est crédité.
+
+        Seuls les liens `member_of` comptent : on cherche les certifications de
+        l'artiste sous le nom de SES groupes, pas sous celui de ses membres — un
+        groupe n'est pas crédité sous le nom de chacun d'eux. Les `alias`
+        comptent aussi : ils désignent la même personne.
+
+        Les liens sont ceux CONFIRMÉS à la main. Une formation devinée par un
+        rapprochement de noms n'a rien à faire dans une URL de recherche.
+        """
+        from src.utils.cert_artist import noms_de_recherche
+
+        principal = getattr(self, "default_artist", None) or ""
+        formations: list[str] = []
+        artiste = getattr(self.app, "current_artist", None) if self.app else None
+        if artiste and artiste.id:
+            try:
+                formations = [
+                    rel.related_name
+                    for rel in self.app.data_manager.get_artist_relations(artiste.id)
+                    if rel.kind in ("member_of", "alias")
+                ]
+            except Exception as e:  # noqa: BLE001 — le champ reste saisissable
+                logger.warning(f"Formations indisponibles pour le préremplissage : {e}")
+        return noms_de_recherche(principal, formations)
 
     def _noms_artiste(self) -> list[str]:
         """Les noms saisis, séparés par « ; ». Un seul nom reste un seul nom."""

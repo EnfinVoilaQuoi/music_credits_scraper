@@ -45,7 +45,9 @@ from __future__ import annotations
 
 import os
 import re
-from contextlib import asynccontextmanager
+import time
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -54,7 +56,7 @@ from bs4 import BeautifulSoup
 
 from src.concurrency import async_loop
 from src.observability import source_usage
-from src.observability.issues import IssueKind
+from src.observability.issues import IssueKind, classify
 from src.utils.cert_normalize import (
     FAMILLE_LATINE,
     PROGRAMME_LATIN,
@@ -79,6 +81,56 @@ logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "riaa"
+
+
+@dataclass
+class _Tentatives:
+    """Allers-retours réseau relevés pendant le rendu, REJOUÉS côté appelant.
+
+    Pourquoi ce détour plutôt qu'un `source_usage.record_attempt` posé
+    directement dans le code async : une tentative se rattache à l'observation
+    ouverte sur le **carrier** courant — la Task asyncio, sinon le thread.
+    `observe()` est ouvert par `scrape_by_*` sur le thread appelant, tandis que
+    `_render_async` s'exécute comme Task sur la boucle applicative (pont
+    `async_loop.run_sync`). Les deux carriers DIFFÈRENT : enregistrée là-bas, la
+    tentative ne trouverait pas son observation et partirait en verdict isolé —
+    l'observation, elle, resterait `indeterminate`. C'est exactement le piège
+    déjà documenté pour les `ContextVar` traversant `async_loop.submit`.
+
+    On collecte donc pendant le rendu et on rejoue dans `_render`, qui tourne,
+    lui, dans le thread de l'observation.
+    """
+
+    relevees: list[tuple[IssueKind, str, int | None]] = field(default_factory=list)
+
+    def note(self, kind: IssueKind, detail: str = "", latency_ms: int | None = None) -> None:
+        self.relevees.append((kind, detail, latency_ms))
+
+    @contextmanager
+    def aller_retour(self, detail: str):
+        """Encadre UN aller-retour : `OK` s'il aboutit, exception classée sinon.
+
+        Ne rattrape rien — le flux d'erreur existant est inchangé, on ne fait
+        que le rendre visible.
+        """
+        debut = time.monotonic()
+        try:
+            yield
+        except BaseException as e:  # noqa: BLE001 — classée puis RÉ-ÉLEVÉE
+            self.note(classify(exc=e), f"{detail}: {type(e).__name__}", _ms(debut))
+            raise
+        self.note(IssueKind.OK, detail, _ms(debut))
+
+    def rejouer(self) -> None:
+        """Verse les tentatives dans l'observation ouverte sur CE carrier."""
+        for kind, detail, latency_ms in self.relevees:
+            source_usage.record_attempt(_SOURCE, kind, detail=detail, latency_ms=latency_ms)
+        self.relevees.clear()
+
+
+def _ms(debut: float) -> int:
+    return int((time.monotonic() - debut) * 1000)
+
 
 _BASE = "https://www.riaa.com/gold-platinum/"
 _USER_AGENT = (
@@ -381,11 +433,17 @@ class RIAAScraperV2:
     # ------------------------------------------------------------------ rendu
     def _render(self, url: str, load_all: bool, get_details: bool) -> str | None:
         # Pont F4 : rendu sur LA boucle applicative (plus d'asyncio.run par appel).
+        # Les tentatives sont collectées de l'autre côté du pont puis rejouées ICI,
+        # seul endroit qui partage le carrier de l'observation (cf. `_Tentatives`).
+        tentatives = _Tentatives()
         try:
-            return async_loop.run_sync(self._render_async(url, load_all, get_details))
+            return async_loop.run_sync(self._render_async(url, load_all, get_details, tentatives))
         except (PatchrightError, RuntimeError, OSError) as e:
+            tentatives.note(classify(exc=e), f"rendu: {type(e).__name__}")
             logger.error(f"RIAA: rendu patchright échoué : {e}")
             return None
+        finally:
+            tentatives.rejouer()
 
     @asynccontextmanager
     async def _page_ouverte(self, pw):
@@ -431,7 +489,9 @@ class RIAAScraperV2:
             finally:
                 await ctx.close()
 
-    async def _render_async(self, url: str, load_all: bool, get_details: bool) -> str | None:
+    async def _render_async(
+        self, url: str, load_all: bool, get_details: bool, tentatives: _Tentatives
+    ) -> str | None:
         try:
             from patchright.async_api import async_playwright
         except ImportError as e:
@@ -441,21 +501,25 @@ class RIAAScraperV2:
             return None
 
         async with async_playwright() as pw, self._page_ouverte(pw) as page:
-            await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+            with tentatives.aller_retour("goto"):
+                await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
             try:
                 await page.wait_for_selector("tr.table_award_row", timeout=20_000)
             except PatchrightError:
+                # La page a bien répondu (le `goto` est compté OK) : l'absence de
+                # lignes est un constat de CONTENU, que `_parse_verifie` tranchera
+                # en `absent` ou `parse`. Rien à imputer au transport ici.
                 logger.warning("RIAA : aucune ligne (page vide / Cloudflare ?)")
                 return await page.content()
 
             if load_all:
-                await self._click_load_more(page)
+                await self._click_load_more(page, tentatives)
             if get_details:
-                await self._trigger_details(page)
+                await self._trigger_details(page, tentatives)
 
             return await page.content()
 
-    async def _click_load_more(self, page) -> None:
+    async def _click_load_more(self, page, tentatives: _Tentatives) -> None:
         """Clique « Show More » jusqu'à épuisement.
 
         Le bouton se SUPPRIME lui-même quand le serveur répond `has_more: false`
@@ -471,14 +535,18 @@ class RIAAScraperV2:
             if not btn or not await btn.is_visible():
                 break
             before = len(await page.query_selector_all("tr.table_award_row"))
-            try:
-                await btn.scroll_into_view_if_needed()
-                await btn.click()
-            except PatchrightError:
-                await page.evaluate(
-                    "var b=document.querySelector('button.tw-gnp-show-more')"
-                    "||document.getElementById('loadmore'); if(b){b.click();}"
-                )
+            # Un clic = une requête AJAX qui rapporte une page de résultats.
+            # C'est le gros du trafic d'un balayage : sans ce compteur, vingt
+            # heures de scrape ne laissent aucune trace de transport.
+            with tentatives.aller_retour("show-more"):
+                try:
+                    await btn.scroll_into_view_if_needed()
+                    await btn.click()
+                except PatchrightError:
+                    await page.evaluate(
+                        "var b=document.querySelector('button.tw-gnp-show-more')"
+                        "||document.getElementById('loadmore'); if(b){b.click();}"
+                    )
             clicks += 1
             if not await _attendre_croissance(page, before):
                 break
@@ -487,7 +555,7 @@ class RIAAScraperV2:
         total = len(await page.query_selector_all("tr.table_award_row"))
         logger.info(f"RIAA : {clicks} page(s) supplémentaire(s), {total} ligne(s) au total")
 
-    async def _trigger_details(self, page) -> None:
+    async def _trigger_details(self, page, tentatives: _Tentatives) -> None:
         """Charge la timeline (historique des paliers) de chaque ligne.
 
         Une requête AJAX par ligne, séquentielle, exactement celle que le bouton
@@ -501,12 +569,24 @@ class RIAAScraperV2:
         if not ids:
             return
         logger.info(f"RIAA : chargement de la timeline de {len(ids)} ligne(s)…")
+        debut = time.monotonic()
         try:
             n = await page.evaluate(_TIMELINE_JS, {"ids": ids, "ajaxUrl": _AJAX_URL})
         except PatchrightError as e:
+            tentatives.note(classify(exc=e), "timelines", _ms(debut))
             logger.warning(f"RIAA : timelines non chargées ({e})")
             return
+        # Le JS avale les échecs ligne par ligne et rend le nombre de timelines
+        # RÉELLEMENT déposées : ce sont autant d'allers-retours aboutis. Les
+        # manquantes ne sont PAS comptées en échec — un award sans historique est
+        # courant, et le faire remonter ferait échouer tout le run pour une ligne.
+        # Seul le zéro absolu accuse le transport : c'est le cas que le site a
+        # produit en déplaçant son endpoint.
+        moyenne = _ms(debut) // max(n, 1)
+        for _ in range(n):
+            tentatives.note(IssueKind.OK, "timeline", moyenne)
         if not n:
+            tentatives.note(IssueKind.PARSE, f"0 timeline sur {len(ids)} demandées", _ms(debut))
             logger.warning(
                 "RIAA : aucune timeline récupérée — endpoint AJAX déplacé ? "
                 "(l'historique des paliers manquera, la ligne principale reste bonne)"

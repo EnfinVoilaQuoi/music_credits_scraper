@@ -506,7 +506,19 @@ class ArtistRepository:
             return False
 
     def get_artist_relations(self, artist_id: int) -> list[ArtistRelation]:
-        """Liens confirmés d'un artiste, ordre stable (nature puis nom)."""
+        """Liens confirmés d'un artiste, ordre stable (nature puis nom).
+
+        **L'identifiant de l'autre bout est résolu À LA LECTURE** quand il
+        manque. C'est le cas NORMAL, et pas un accident : on confirme presque
+        toujours « Swing est membre de L'Or du Commun » avant d'avoir ajouté le
+        groupe à la discothèque. Sans cette résolution, le lien resterait mort
+        jusqu'à ce que quelqu'un pense à rouvrir la fenêtre pour re-confirmer —
+        un no-op silencieux, et l'utilisateur conclurait à juste titre que la
+        fonctionnalité ne marche pas (constaté le 2026-09-08).
+
+        La clé est donc le NOM ; l'identifiant n'est qu'un cache. Le résoudre
+        ici le fait apparaître dès que l'artiste entre en base, sans geste.
+        """
         try:
             with self.engine.connect() as conn:
                 lignes = conn.execute(
@@ -517,7 +529,7 @@ class ArtistRepository:
                     ),
                     {"aid": artist_id},
                 ).mappings()
-                return [
+                relations = [
                     ArtistRelation(
                         related_name=r["related_name"],
                         kind=r["kind"],
@@ -529,6 +541,10 @@ class ArtistRepository:
                     )
                     for r in lignes
                 ]
+                for relation in relations:
+                    if relation.related_artist_id is None:
+                        relation.related_artist_id = self._id_par_nom(conn, relation.related_name)
+                return relations
         except SQLAlchemyError as e:
             logger.error(f"Erreur get_artist_relations({artist_id}): {e}")
             return []

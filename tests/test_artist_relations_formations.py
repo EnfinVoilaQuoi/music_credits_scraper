@@ -258,3 +258,42 @@ class TestMarquageViaGroup:
 
         assert data_manager.discographie_reunie(shurikn)[0].via_group == "IAM"
         assert data_manager.discographie_reunie(iam)[0].via_group is None
+
+
+class TestJointureTardive:
+    """Le groupe entre en base APRÈS le lien — c'est le cas NORMAL.
+
+    On confirme presque toujours « Swing est membre de L'Or du Commun » avant
+    d'avoir ajouté le groupe. Constaté en vrai le 2026-09-08 : les deux liens
+    confirmés portaient `related_artist_id = NULL`, la discographie ne
+    s'élargissait pas, et rien ne le disait.
+    """
+
+    def test_le_lien_prend_vie_des_que_le_groupe_entre_en_base(self, data_manager):
+        swing = _artiste(data_manager, "Swing")
+        data_manager.record_artist_relations(swing.id, [_rel("L’Or du Commun", formation="groupe")])
+        assert data_manager.ids_discographie_reunie(swing.id) == [swing.id]
+
+        # Le groupe est ajouté ensuite, SANS re-confirmer quoi que ce soit.
+        groupe = _artiste(data_manager, "L'Or du Commun")
+        _morceau(data_manager, groupe, "Trèfle d'Or")
+
+        assert data_manager.ids_discographie_reunie(swing.id) == [swing.id, groupe.id]
+        assert [t.title for t in data_manager.discographie_reunie(swing)] == ["Trèfle d'Or"]
+
+    def test_la_jointure_tardive_passe_par_le_nom_NORMALISE(self, data_manager):
+        """Le lien dit « L’Or du Commun » (apostrophe typographique de
+        MusicBrainz), la base « L'Or du Commun » : une égalité brute laisserait
+        le lien mort à côté de l'artiste."""
+        swing = _artiste(data_manager, "Swing")
+        data_manager.record_artist_relations(swing.id, [_rel("L’Or du Commun", formation="groupe")])
+        groupe = _artiste(data_manager, "L'Or Du Commun")
+
+        (lu,) = data_manager.get_artist_relations(swing.id)
+        assert lu.related_artist_id == groupe.id
+
+    def test_un_groupe_toujours_absent_reste_sans_identifiant(self, data_manager):
+        swing = _artiste(data_manager, "Swing")
+        data_manager.record_artist_relations(swing.id, [_rel("Inconnu", formation="groupe")])
+        (lu,) = data_manager.get_artist_relations(swing.id)
+        assert lu.related_artist_id is None

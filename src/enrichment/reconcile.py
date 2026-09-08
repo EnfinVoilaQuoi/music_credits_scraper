@@ -454,6 +454,23 @@ def reconcile(
     for field, obs_list in by_field.items():
         if field in handled:
             continue
-        resolutions[field] = _as_resolution(field, _best(_drop_legacy(obs_list)))
+        candidats = _drop_legacy(obs_list)
+        # Le repli générique départage par `_source_rank`, c'est-à-dire par la
+        # fiabilité BPM des sources — un classement qui n'a de sens QUE pour le
+        # BPM. Tant qu'un champ n'a qu'une source, cela ne se voit pas ; le jour
+        # où il en a deux, il est arbitré par une échelle qui ne le concerne pas
+        # (mesuré : « genre » tranché en faveur de ReccoBeats contre Deezer,
+        # parce que ReccoBeats a le rang BPM 3). Le piège était SILENCIEUX : il
+        # s'annonce désormais, et la réponse est de déclarer un ordre dans
+        # `DISCOGRAPHY_PRIORITIES` ou une stratégie dédiée.
+        if len({o.source for o in candidats}) > 1:
+            logger.warning(
+                f"⚖️ Champ « {field} » arbitré par le repli GÉNÉRIQUE alors que "
+                f"{len({o.source for o in candidats})} sources le mesurent "
+                f"({sorted({o.source for o in candidats})}) — ce repli classe par "
+                f"fiabilité BPM, ce qui n'a de sens que pour le BPM. "
+                f"Lui déclarer une règle."
+            )
+        resolutions[field] = _as_resolution(field, _best(candidats))
 
     return resolutions

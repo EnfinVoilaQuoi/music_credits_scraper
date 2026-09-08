@@ -158,3 +158,38 @@ class TestMaterialisation:
         track.duration = 249
         apply_resolutions(track, reconcile([_obs("bpm", 92, "deezer")]))
         assert track.duration == 249
+
+
+class TestRepliGeneriqueSAnnonce:
+    """Un champ sans règle déclarée est arbitré par la fiabilité **BPM**.
+
+    C'est le sens de `_best` : il classe par `BPM_SOURCE_RANK`. Tant qu'un champ
+    n'a qu'une source, cela ne se voit pas ; à deux, il est tranché par une
+    échelle qui ne le concerne en rien — « genre » revient à ReccoBeats contre
+    Deezer parce que ReccoBeats a le rang BPM 3.
+
+    Le piège était SILENCIEUX. Il ne l'est plus : la réponse attendue est de
+    déclarer un ordre dans `DISCOGRAPHY_PRIORITIES`, ou une stratégie dédiée.
+    """
+
+    def test_deux_sources_sur_un_champ_sans_regle_declenchent_un_avertissement(self, caplog):
+        with caplog.at_level("WARNING"):
+            reconcile([_obs("genre", "Rap", "deezer"), _obs("genre", "Hip-Hop", "reccobeats")])
+
+        assert any("repli GÉNÉRIQUE" in m for m in caplog.messages)
+        assert any("genre" in m for m in caplog.messages)
+
+    def test_une_seule_source_reste_muette(self, caplog):
+        """Un garde-fou qui crie toujours ne garde rien : le cas mono-source est
+        le cas NORMAL de ce repli."""
+        with caplog.at_level("WARNING"):
+            reconcile([_obs("genre", "Rap", "deezer")])
+
+        assert not any("repli GÉNÉRIQUE" in m for m in caplog.messages)
+
+    def test_les_champs_a_regle_ne_declenchent_rien(self, caplog):
+        """`duration` a un ordre déclaré : il ne passe pas par le repli."""
+        with caplog.at_level("WARNING"):
+            reconcile([_obs("duration", 249, "deezer"), _obs("duration", 241, "reccobeats")])
+
+        assert not any("repli GÉNÉRIQUE" in m for m in caplog.messages)

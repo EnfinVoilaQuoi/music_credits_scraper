@@ -18,9 +18,25 @@ from src.models import Artist, ArtistRelation, Track
 from src.persistence.binding import date_bind
 from src.persistence.schema import artists, monthly_listeners_history
 from src.utils.logger import get_logger
-from src.utils.title_matching import normalize_name
+from src.utils.title_matching import names_match_as_words, normalize_name
 
 logger = get_logger(__name__)
+
+
+def _signe_par_une_formation(track, formations: set[str]) -> bool:
+    """Ce morceau est-il signé par une formation dont l'artiste est membre ?
+
+    On regarde l'artiste PRINCIPAL du morceau — celui qui le signe — et non
+    l'artiste de la ligne : c'est justement le cas où les deux diffèrent
+    (Shurik'n crédité « Additional Voices » sur un morceau d'IAM).
+
+    Comparaison par MOTS ENTIERS, jamais par sous-chaîne : « IAM » ⊂ « Williams »
+    (JOURNAL 2026-09-04).
+    """
+    signataire = track.primary_artist_name or (track.artist.name if track.artist else None)
+    if not signataire or not formations:
+        return False
+    return any(names_match_as_words(signataire, nom) for nom in formations)
 
 
 class ArtistRepository:
@@ -619,6 +635,18 @@ class ArtistRepository:
             and rel.related_artist_id is not None
         ]
 
+    def noms_des_formations(self, artist_id: int) -> set[str]:
+        """Les noms des GROUPES et COLLECTIFS dont l'artiste est membre.
+
+        Sert à savoir si un morceau est signé par une de ses formations — ce qui
+        change le SENS d'un rôle secondaire, sans rien changer à la donnée.
+        """
+        return {
+            rel.related_name
+            for rel in self.get_artist_relations(artist_id)
+            if rel.kind == "member_of" and rel.related_name
+        }
+
     def noms_de_lartiste(self, artist_id: int, nom: str) -> set[str]:
         """Le nom de l'artiste et ses alias confirmés — sous lesquels le chercher.
 
@@ -651,9 +679,11 @@ class ArtistRepository:
         écartés sur l'identité métier de `Track`.
         """
         vus, resultat = set(), []
+        formations = self.noms_des_formations(artist.id)
         for aid in self.ids_discographie_reunie(artist.id):
             for track in self.get_artist_tracks(aid):
                 if track not in vus:
+                    track.membre_de_la_formation = _signe_par_une_formation(track, formations)
                     # Marqué dès qu'il vient d'ailleurs : sans ça, on ne
                     # distinguerait plus ce que l'artiste a sorti de ce que sa
                     # formation a sorti, et le tableau mentirait par omission.

@@ -9,6 +9,7 @@ ReccoBeats (pivot inter-sources, non destructif).
 from src.api.deezer_api import DeezerAPI
 from src.enrichment.base import Capability
 from src.enrichment.context import EnrichmentContext
+from src.enrichment.observation import Observation
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
@@ -160,7 +161,19 @@ class DeezerProvider:
                 force_update or not previous_duration or duration_check.get("is_valid", False)
             )
 
+            # L'observation n'est émise QUE si la mesure est RETENUE — correction
+            # du 2026-09-08, quelques heures après le lot B. « Déclarer même ce
+            # qu'on ne suit pas » semblait être l'esprit de la provenance ;
+            # c'était un contresens. Une observation n'est pas une note de bas de
+            # page, c'est un BULLETIN : Deezer étant en TÊTE de l'ordre de
+            # priorité, la valeur écartée ici pour incohérence regagnait la
+            # colonne à la relecture (mesuré : refusée à 999, relue à 999). La
+            # vérification juge de la VALIDITÉ de la mesure — un mauvais
+            # rapprochement Deezer —, pas d'une préférence : ce qu'on juge
+            # invalide n'entre pas au vote, comme un ID Spotify refusé n'est pas
+            # enregistré « pour mémoire ».
             if should_update_duration:
+                ctx.observations.append(Observation("duration", data["deezer_duration"], self.name))
                 track.duration = data["deezer_duration"]
                 logger.info(f"   ✅ Duration mise à jour: {track.duration}s")
                 updated = True
@@ -175,6 +188,11 @@ class DeezerProvider:
             )
 
             if should_update_date:
+                # Même règle que pour la durée : une date écartée parce qu'elle
+                # contredit le scrape ne doit pas revenir par l'observation.
+                ctx.observations.append(
+                    Observation("release_date", data["deezer_release_date"], self.name)
+                )
                 # Convertir au format utilisé dans la base de données
                 track.release_date = data["deezer_release_date"]
                 logger.info(f"   ✅ Release date mise à jour: {track.release_date}")
@@ -191,6 +209,8 @@ class DeezerProvider:
             updated = True
 
         # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
+        if data.get("deezer_isrc"):
+            ctx.observations.append(Observation("isrc", data["deezer_isrc"], self.name))
         if data.get("deezer_isrc") and (not track.isrc or force_update):
             track.isrc = data["deezer_isrc"]
             logger.info(f"   ✅ ISRC: {track.isrc}")

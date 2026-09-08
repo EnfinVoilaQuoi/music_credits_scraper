@@ -81,6 +81,10 @@ def manual_audio_entry(app, index: int):
 
     bpm_str, key_str, duration_str = _result["bpm"], _result["key"], _result["dur"]
     changed = []
+    # UN horodatage pour toute la saisie, lié quelle que soit la branche
+    # empruntée : il ne l'était que dans celle de la tonalité, si bien qu'une
+    # observation émise ailleurs aurait planté sur un nom non défini.
+    _now = datetime.now()
     bpm_str = (bpm_str or "").strip()
     if bpm_str:
         try:
@@ -89,9 +93,7 @@ def manual_audio_entry(app, index: int):
             # Observation `manual` : court-circuite le vote à la relecture (E7a),
             # sinon la réconciliation E6 réécraserait la valeur saisie.
             track.observations.append(
-                Observation(
-                    field="bpm", value=track.audio.bpm, source="manual", seen_at=datetime.now()
-                )
+                Observation(field="bpm", value=track.audio.bpm, source="manual", seen_at=_now)
             )
             changed.append(f"BPM = {track.audio.bpm}")
         except ValueError:
@@ -120,7 +122,6 @@ def manual_audio_entry(app, index: int):
         track.audio.musical_key = canonical
         track.audio.key_mode_source = "manual"
         # Paire key/mode `manual` : court-circuite l'appariement à la relecture (E7a).
-        _now = datetime.now()
         if track.audio.key is not None:
             track.observations.append(
                 Observation(field="key", value=track.audio.key, source="manual", seen_at=_now)
@@ -156,6 +157,15 @@ def manual_audio_entry(app, index: int):
             )
             return
         track.duration = seconds
+        # Observation `manual` INDISPENSABLE depuis que la durée est un champ
+        # arbitré (lot B) : sans elle, la saisie ne vit que dans la colonne, et
+        # la réconciliation la remplace à la relecture par l'observation
+        # `legacy` restée à l'ancienne valeur. C'est très exactement le bug de
+        # tête de phase E7 — « une saisie manuelle disparaissait au rechargement
+        # de l'artiste » — que `manual` court-circuite le vote pour éviter.
+        track.observations.append(
+            Observation(field="duration", value=seconds, source="manual", seen_at=_now)
+        )
         changed.append(f"Durée = {seconds // 60}:{seconds % 60:02d}")
 
     if not changed:

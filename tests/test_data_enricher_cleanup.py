@@ -7,9 +7,11 @@ par aucun test, alors qu'il porte deux promesses fortes :
   · il pose `clear_audio_observations`, sans quoi les valeurs effacées
     RESSUSCITENT à la relecture par la réconciliation (piège E7-D1).
 
-Harnais `DataEnricher.__new__` : ces deux méthodes n'utilisent aucun état
-d'instance, le `__init__` réel monterait tout le pipeline pour rien (même
-approche que test_enrich_track_orchestration.py).
+Harnais `DataEnricher.__new__` : le `__init__` réel monterait tout le pipeline
+pour rien (même approche que test_enrich_track_orchestration.py). Depuis le
+2026-09-08, `validate_spotify_id_unique` a deux collaborateurs — l'accès base
+(portée GLOBALE : un `spotify_id` est mondial, pas propre à un artiste) et le
+journal de ses refus — que la fixture pose à la main.
 """
 
 import pytest
@@ -20,7 +22,21 @@ from src.utils.data_enricher import DataEnricher
 
 @pytest.fixture
 def enricher():
-    return DataEnricher.__new__(DataEnricher)
+    e = DataEnricher.__new__(DataEnricher)
+    e.data_manager = None  # pas de base : seul le périmètre en mémoire est vu
+    e.spotify_id_conflits = []
+    return e
+
+
+class _BaseFictive:
+    """Le minimum de `DataManager` dont le validateur a besoin : qui revendique
+    un ID sur TOUTE la base (et non chez le seul artiste courant)."""
+
+    def __init__(self, lignes):
+        self._lignes = lignes
+
+    def lignes_du_spotify_id(self, spotify_id):
+        return [ligne for ligne in self._lignes if ligne["spotify_id"] == spotify_id]
 
 
 def _track_rempli(**kw):
@@ -157,18 +173,70 @@ class TestUniciteSpotifyId:
         assert enricher.validate_spotify_id_unique("SP1", self._t("A"), []) is True
 
 
-class TestNormalisationDeTitre:
-    @pytest.mark.parametrize(
-        ("entree", "attendu"),
-        [
-            ("Bande Organisée", "bande organisee"),
-            ("Titre (feat. SCH)", "titre"),
-            ("Titre [Remix]", "titre"),
-            ("Titre feat. SCH", "titre"),
-            ("Titre ft. SCH", "titre"),
-            ("Titre !!!", "titre"),
-            ("Titre   espacé", "titre espace"),
-        ],
-    )
-    def test_normalisation(self, enricher, entree, attendu):
-        assert enricher._normalize_title(entree) == attendu
+class TestUniciteSpotifyIdGlobale:
+    """Portée GLOBALE : le garde-fou consulte la base, pas le seul artiste.
+
+    C'est le défaut qui a laissé « Rentre dans le Cercle - Belgique #1 » (Swing)
+    et « 13 Organisé » (SCH) porter le MÊME `spotify_id`, durée comprise : deux
+    artistes différents, donc deux `artist_tracks` disjoints, donc aucun des
+    deux runs ne pouvait voir l'autre.
+    """
+
+    def test_id_pris_chez_un_autre_artiste(self, enricher):
+        enricher.data_manager = _BaseFictive(
+            [{"id": 1157, "artist_id": 9, "title": "13 Organisé", "spotify_id": "SP1"}]
+        )
+        courant = Track(title="Rentre dans le Cercle - Belgique #1")
+        assert enricher.validate_spotify_id_unique("SP1", courant, []) is False
+        assert enricher.spotify_id_conflits == [
+            ("SP1", "Rentre dans le Cercle - Belgique #1", "13 Organisé")
+        ]
+
+    def test_ligne_soeur_acceptee(self, enricher):
+        """Même titre chez un autre artiste = la ligne SŒUR du même
+        enregistrement (le morceau chez son auteur, le « feat » chez l'invité).
+        Elle partage légitimement l'ID."""
+        enricher.data_manager = _BaseFictive(
+            [{"id": 42, "artist_id": 9, "title": "À la base", "spotify_id": "SP1"}]
+        )
+        assert enricher.validate_spotify_id_unique("SP1", Track(title="À la base"), []) is True
+
+    def test_sa_propre_ligne_ne_se_contredit_pas(self, enricher):
+        enricher.data_manager = _BaseFictive(
+            [{"id": 7, "artist_id": 1, "title": "Titre A", "spotify_id": "SP1"}]
+        )
+        courant = Track(title="Titre A")
+        courant.id = 7
+        assert enricher.validate_spotify_id_unique("SP1", courant, []) is True
+
+    def test_version_entre_parentheses_est_un_autre_morceau(self, enricher):
+        """NON-RÉGRESSION NOMMÉE — c'est la suppression de `_normalize_title`
+        qui se vérifie ici.
+
+        La copie privée effaçait les parenthèses : « Un pour la plume » et
+        « Un pour la plume (Version équipe) » devenaient le même titre, donc le
+        second ID passait pour « une version alternative » et s'écrivait en
+        silence (mesuré : les deux morceaux de Flynt partagent un ID et une
+        durée de 249 s alors qu'ils durent 249 s et 230 s). Le normaliseur
+        partagé du projet les distingue.
+        """
+        enricher.data_manager = _BaseFictive(
+            [
+                {
+                    "id": 1233,
+                    "artist_id": 3,
+                    "title": "Un pour la plume",
+                    "spotify_id": "5go793BaOjzfop2JwctQ0r",
+                }
+            ]
+        )
+        courant = Track(title="Un pour la plume (Version équipe)")
+        assert enricher.validate_spotify_id_unique("5go793BaOjzfop2JwctQ0r", courant, []) is False
+
+    def test_le_feat_reste_le_meme_morceau(self, enricher):
+        """Le relâchement utile est CONSERVÉ : « Titre (feat. X) » et « Titre »
+        sont bien le même morceau pour le normaliseur partagé."""
+        enricher.data_manager = _BaseFictive(
+            [{"id": 5, "artist_id": 2, "title": "Titre A (feat. SCH)", "spotify_id": "SP1"}]
+        )
+        assert enricher.validate_spotify_id_unique("SP1", Track(title="Titre A"), []) is True

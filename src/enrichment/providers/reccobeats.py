@@ -18,6 +18,7 @@ from src.enrichment.observation import Observation
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
+from src.utils.spotify_identity import valider_identite, valider_identite_async
 
 logger = get_logger(__name__)
 # playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
@@ -105,10 +106,16 @@ class ReccoBeatsProvider:
         if track_info.get("key") is not None:
             applied = True
 
-        # Durée (ne pas écraser une durée déjà présente)
+        # Durée. ReccoBeats s'interroge PAR le Track ID Spotify : sa durée est
+        # celle du morceau que cet ID désigne, donc fausse quand l'ID l'est —
+        # c'est elle qui a contaminé 66 morceaux avant le 2026-09-08. La DÉCLARER
+        # est précisément ce qui aurait permis de le voir ; l'ordre de priorité
+        # la place en queue, derrière Deezer et YTM.
         dur = track_info.get("duration")
-        if isinstance(dur, (int, float)) and dur > 0 and not track.duration:
-            track.duration = int(dur)
+        if isinstance(dur, (int, float)) and dur > 0:
+            ctx.observations.append(Observation("duration", int(dur), self.name))
+            if not track.duration:
+                track.duration = int(dur)
 
         return applied
 
@@ -241,9 +248,15 @@ class ReccoBeatsProvider:
                 ):
                     logger.error(f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}")
                     spotify_id = None
+                # La JUSTESSE est une autre question que l'unicité : un ID unique
+                # peut parfaitement désigner le morceau de quelqu'un d'autre
+                # (mesuré le 2026-09-08 : 34 % des IDs d'un run réel).
+                elif not valider_identite(track, spotify_id, spotify_scraper.get_track_identity):
+                    spotify_id = None
                 else:
                     logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
                     track.spotify_id = spotify_id
+                    track.add_spotify_id(spotify_id, source="scraper")
 
                     # Récupérer le titre de la page Spotify pour vérification
                     try:
@@ -293,9 +306,17 @@ class ReccoBeatsProvider:
                 ):
                     logger.error(f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}")
                     spotify_id = None
+                # La JUSTESSE est une autre question que l'unicité : un ID unique
+                # peut parfaitement désigner le morceau de quelqu'un d'autre
+                # (mesuré le 2026-09-08 : 34 % des IDs d'un run réel).
+                elif not await valider_identite_async(
+                    track, spotify_id, scraper.get_track_identity_async
+                ):
+                    spotify_id = None
                 else:
                     logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
                     track.spotify_id = spotify_id
+                    track.add_spotify_id(spotify_id, source="scraper")
 
                     # Récupérer le titre de la page Spotify pour vérification
                     try:
@@ -434,6 +455,7 @@ class ReccoBeatsProvider:
         if "duration" in track_info and track_info["duration"] is not None:
             duration_value = track_info["duration"]
             if isinstance(duration_value, (int, float)) and duration_value > 0:
+                ctx.observations.append(Observation("duration", int(duration_value), self.name))
                 track.duration = int(duration_value)
                 logger.info(f"ReccoBeats: ✅ Duration: {track.duration}s")
             else:

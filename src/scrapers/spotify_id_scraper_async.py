@@ -259,15 +259,21 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
 
     # ── Titre de page (miroir async) ────────────────────────────────────────
 
-    async def get_spotify_page_title_async(self, spotify_id: str) -> str | None:
+    async def get_track_identity_async(self, spotify_id: str) -> dict | None:
+        """Miroir async de `get_track_identity` : l'embed, jamais la SPA.
+
+        La logique PURE (`_identite_depuis_embed`, `_titre_de_page`) est héritée
+        et partagée — seul le TRANSPORT diffère.
+        """
+        url = self._url_embed(spotify_id)
         try:
             await self._ensure_driver_async()
-        except PlaywrightError:
-            return None
-        try:
-            spotify_url = f"https://open.spotify.com/track/{spotify_id}"
-            await self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
-            return self._clean_page_title(await self.page.title())
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            return self._identite_depuis_embed(await self.page.content())
         except (PlaywrightError, AttributeError, TypeError, ValueError) as e:
-            logger.error(f"❌ Erreur récupération titre: {e}")
-        return None
+            logger.error(f"❌ Identité embed échouée ({spotify_id}): {e}")
+            return None
+
+    async def get_spotify_page_title_async(self, spotify_id: str) -> str | None:
+        """Titre lisible de la page Spotify d'un ID, pour VÉRIFICATION humaine."""
+        return self._titre_de_page(await self.get_track_identity_async(spotify_id))

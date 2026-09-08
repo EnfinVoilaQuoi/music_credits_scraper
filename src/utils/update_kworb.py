@@ -28,6 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.scrapers.kworb_scraper import KworbScraper
 from src.utils.logger import get_logger
+from src.utils.spotify_identity import valider_identite
 
 logger = get_logger(__name__)
 
@@ -419,7 +420,14 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
             # L'if interne est volontairement séparé : c'est une écriture DB dont
             # le résultat conditionne la suite, pas une simple condition.
             if (  # noqa: SIM102
-                track and entry.get("spotify_id") and not getattr(track, "spotify_id", None)
+                track
+                and entry.get("spotify_id")
+                and not getattr(track, "spotify_id", None)
+                # Kworb rapproche par titre avant de livrer son lien : l'ID qu'il
+                # propose peut désigner un autre morceau (1 cas sur les 130 qu'il
+                # a posés). Une requête n'est dépensée que lorsqu'un ID est sur le
+                # point d'être écrit.
+                and valider_identite(track, entry["spotify_id"])
             ):
                 if data_manager.update_track_spotify_id(track.id, entry["spotify_id"]):
                     track.spotify_id = entry["spotify_id"]

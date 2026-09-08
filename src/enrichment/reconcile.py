@@ -94,6 +94,23 @@ def _confidence_key(confidence: float | None) -> float:
     return confidence if confidence is not None else float("-inf")
 
 
+#: Champs de DISCOGRAPHIE arbitrés par priorité (lot B, 2026-09-08), avec
+#: l'ordre de leurs sources. Ils n'avaient AUCUNE provenance jusque-là : c'est
+#: précisément ce qui manquait pour voir qu'une durée avait suivi un mauvais
+#: identifiant Spotify (99 lignes nettoyées le même jour).
+#:
+#: ⚠️ `reccobeats` est VOLONTAIREMENT en queue de l'ordre `duration` : c'est la
+#: source qui a écrit les durées contaminées, parce qu'elle s'interroge PAR le
+#: Track ID Spotify et rend la durée du morceau que cet ID désigne. Deezer est
+#: canonique (`CLAUDE.md` l'énonçait déjà en prose ; l'ordre le fait descendre
+#: dans le moteur), YTM son secours.
+DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
+    "duration": ("deezer", "ytmusic", "reccobeats"),
+    "release_date": ("genius", "deezer"),
+    "isrc": ("deezer",),
+}
+
+
 #: Streams Spotify. Deux sources l'alimentent depuis le 2026-09-05 (Kworb et le
 #: scrape des pages Spotify) : c'est ce qui rend l'arbitrage nécessaire, là où
 #: E7e pouvait s'en passer en le déclarant mono-source.
@@ -103,40 +120,55 @@ SPOTIFY_STREAMS_FIELD = "spotify_streams"
 STREAMS_SOURCES = ("kworb", "spotify_web")
 
 
-def reconcile_spotify_streams(observations: list, master: str) -> Any:
-    """Valeur à inscrire en colonne pour les streams Spotify.
+def resolve_by_priority(observations: list, field: str, ordre) -> Resolution | None:
+    """Verdict d'un champ dont les sources mesurent la MÊME grandeur.
 
-    **Aucun vote numérique, et c'est délibéré** : les deux sources mesurent la
-    MÊME grandeur, et un écart entre elles est un décalage de FRAÎCHEUR (Kworb
-    porte sa date « Last updated », parfois vieille de plusieurs mois), pas un
-    désaccord de mesure. Moyenner, ou prendre le maximum, fabriquerait un nombre
-    que personne ne publie — exactement le genre de chiffre faux qui a l'air
-    juste. On DÉSIGNE donc une source maître ; l'autre ne sert que de repli
-    quand la maître n'a rien pour ce morceau.
+    **Aucun vote numérique, et c'est délibéré** : quand deux sources mesurent la
+    même chose, un écart entre elles est un décalage de FRAÎCHEUR ou d'édition,
+    pas un désaccord de mesure. Moyenner, ou prendre le maximum, fabriquerait un
+    nombre que personne ne publie — exactement le genre de chiffre faux qui a
+    l'air juste. On ORDONNE donc les sources ; la suivante ne sert que de repli
+    quand la précédente n'a rien pour ce morceau.
 
-    Une observation `manual` court-circuite, comme pour le BPM : une saisie
-    humaine prime sur toute mesure automatique, sinon elle serait écrasée à la
-    relecture suivante.
+    C'est l'inverse du BPM, où les sources mesurent la même grandeur mais se
+    trompent INDÉPENDAMMENT (octave, arrondi) — là, la concordance de plusieurs
+    sources est une information, et le vote a un sens.
+
+    Trois règles héritées, valables pour tous les champs :
+      · `manual` COURT-CIRCUITE — une saisie humaine prime sur toute mesure
+        automatique, sinon elle serait écrasée à la relecture suivante ;
+      · `legacy` est écarté de l'ordre, mais sert de dernier recours s'il est
+        SEUL (`_drop_legacy`, même règle que partout) ;
+      · une source hors de l'ordre (renommage, source non déclarée) ne fait pas
+        perdre la donnée, mais ne passe pas pour un verdict d'une source connue.
     """
     manual = _manual_obs(observations)
     if manual is not None:
-        return Resolution(SPOTIFY_STREAMS_FIELD, manual.value, MANUAL_SOURCE)
+        return Resolution(field, manual.value, MANUAL_SOURCE)
 
     by_source = {obs.source: obs for obs in observations if obs.source != LEGACY_SOURCE}
-    ordre = (master, *(s for s in STREAMS_SOURCES if s != master))
     for source in ordre:
         obs = by_source.get(source)
         if obs is not None and obs.value is not None:
-            return Resolution(SPOTIFY_STREAMS_FIELD, obs.value, source, obs.confidence)
+            return Resolution(field, obs.value, source, obs.confidence)
 
-    # Source inattendue (renommage, nouvelle source non déclarée) : on ne perd
-    # pas la donnée pour autant, mais on ne la fait pas passer pour un verdict
-    # d'une source connue.
     restantes = [o for o in observations if o.value is not None]
     if restantes:
         best = _best(restantes)
-        return Resolution(SPOTIFY_STREAMS_FIELD, best.value, best.source, best.confidence)
+        return Resolution(field, best.value, best.source, best.confidence)
     return None
+
+
+def reconcile_spotify_streams(observations: list, master: str) -> Any:
+    """Valeur à inscrire en colonne pour les streams Spotify.
+
+    Cas particulier de `resolve_by_priority` : la source MAÎTRE est un réglage
+    (`settings.streams_master`), l'autre son repli. L'écart entre Kworb et le
+    scrape des pages Spotify est un décalage de FRAÎCHEUR — Kworb porte sa date
+    « Last updated », parfois vieille de plusieurs mois.
+    """
+    ordre = (master, *(s for s in STREAMS_SOURCES if s != master))
+    return resolve_by_priority(observations, SPOTIFY_STREAMS_FIELD, ordre)
 
 
 def _best(observations: list) -> Any:
@@ -282,6 +314,7 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     arrivent normalisés du moteur (pitch class / 0-1) → corrige `mode="minor"`.
     """
     from src.utils.music_theory import key_mode_to_french, note_to_pitch_class, parse_mode
+    from src.utils.track_mapper import _clean_duration
 
     bpm = resolutions.get("bpm")
     if bpm is not None:
@@ -327,6 +360,24 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     time_signature = resolutions.get("time_signature")
     if time_signature is not None:
         track.audio.time_signature = time_signature.value
+
+    # Discographie (lot B) : la colonne SUBSISTE — la GUI, les exports,
+    # `cert_matcher` et `structure` lisent tous `track.duration`. Triple
+    # écriture, comme pour les paroles et les streams. La durée passe par
+    # `_clean_duration`, la coercition PARTAGÉE de la frontière DB→objet : la
+    # colonne est hétérogène (1 288 entiers, 19 chaînes « 2:30 »), et une
+    # observation `legacy` backfillée depuis elle peut donc porter une chaîne.
+    duration = resolutions.get("duration")
+    if duration is not None:
+        track.duration = _clean_duration(duration.value)
+
+    release_date = resolutions.get("release_date")
+    if release_date is not None:
+        track.release_date = release_date.value
+
+    isrc = resolutions.get("isrc")
+    if isrc is not None:
+        track.isrc = isrc.value
 
     # reccobeats_resolution : provenance mono-source (voie ISRC/Spotify ID de
     # ReccoBeats) préservée en observation, reposée telle quelle (survit au drop
@@ -379,8 +430,27 @@ def reconcile(
         if streams_res is not None:
             resolutions[SPOTIFY_STREAMS_FIELD] = streams_res
 
+    # Champs de discographie : ordre EXPLICITE par champ. Sans cette branche ils
+    # tomberaient dans le repli générique ci-dessous, dont le `_best` départage
+    # par la fiabilité BPM des sources — un classement qui n'a aucun sens pour
+    # une durée ou une date de sortie.
+    for field, ordre in DISCOGRAPHY_PRIORITIES.items():
+        obs_list = by_field.get(field, [])
+        if not obs_list:
+            continue
+        res = resolve_by_priority(obs_list, field, ordre)
+        if res is not None:
+            resolutions[field] = res
+
     # `bpm_alt` est consommé par la stratégie bpm (jamais un verdict autonome).
-    handled = {"bpm", "bpm_alt", *KEY_MODE_FIELDS, LYRICS_SYNCED_FIELD, SPOTIFY_STREAMS_FIELD}
+    handled = {
+        "bpm",
+        "bpm_alt",
+        *KEY_MODE_FIELDS,
+        LYRICS_SYNCED_FIELD,
+        SPOTIFY_STREAMS_FIELD,
+        *DISCOGRAPHY_PRIORITIES,
+    }
     for field, obs_list in by_field.items():
         if field in handled:
             continue

@@ -28,6 +28,7 @@ from src.utils.llm_extractor import (
     get_shared_extractor,
 )
 from src.utils.logger import get_logger, log_api
+from src.utils.spotify_identity import valider_identite
 from src.utils.title_matching import either_contains_as_words
 
 logger = get_logger(__name__)
@@ -603,7 +604,16 @@ class SongBPMScraper:
                 updated = True
 
             songbpm_sid = track_data.get("spotify_id")
-            if songbpm_sid and (force_update or not getattr(track, "spotify_id", None)):
+            # Un ID proposé par SongBPM se valide comme les autres. Ce chemin
+            # est aujourd'hui SANS APPELANT (le provider `enrichment/providers/
+            # songbpm.py` l'a supplanté, avec l'unicité en plus) — raison de plus
+            # pour qu'il ne soit pas la porte dérobée du garde-fou le jour où on
+            # le rebranche.
+            if (
+                songbpm_sid
+                and (force_update or not getattr(track, "spotify_id", None))
+                and valider_identite(track, songbpm_sid)
+            ):
                 track.spotify_id = songbpm_sid
                 updated = True
 

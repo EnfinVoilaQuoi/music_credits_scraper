@@ -12,10 +12,11 @@ from src.models.track import Track
 
 
 class _FakeScraper:
-    def __init__(self, spotify_id=None, page_title=None, titre_leve=None):
+    def __init__(self, spotify_id=None, page_title=None, titre_leve=None, identite=None):
         self._id = spotify_id
         self._title = page_title
         self._titre_leve = titre_leve
+        self._identite = identite
         self.calls = []
 
     def get_spotify_id(self, artist, title):
@@ -27,6 +28,10 @@ class _FakeScraper:
             raise self._titre_leve
         return self._title
 
+    def get_track_identity(self, spotify_id):
+        """Oracle d'identité. `None` = « on ne conclut pas » (défaut hermétique)."""
+        return self._identite
+
 
 class _FakeScraperAsync(_FakeScraper):
     async def get_spotify_id_async(self, artist, title):
@@ -37,6 +42,10 @@ class _FakeScraperAsync(_FakeScraper):
         if self._titre_leve:
             raise self._titre_leve
         return self._title
+
+    async def get_track_identity_async(self, spotify_id):
+        """Miroir async de l'oracle d'identité."""
+        return self._identite
 
 
 class _RunnerSync:

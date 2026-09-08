@@ -16,6 +16,7 @@ from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
+from src.utils.spotify_identity import valider_identite
 
 logger = get_logger(__name__)
 # playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
@@ -213,8 +214,12 @@ class SongBpmProvider:
                 artist_tracks
                 and ctx.validate_spotify_id_unique
                 and ctx.validate_spotify_id_unique(songbpm_spotify_id, track, artist_tracks)
+                # Unique ne veut pas dire juste : SongBPM rapproche par artiste
+                # et titre, il se trompe de morceau comme un autre.
+                and valider_identite(track, songbpm_spotify_id)
             ):
                 track.spotify_id = songbpm_spotify_id
+                track.add_spotify_id(songbpm_spotify_id, source="songbpm")
                 logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id}")
                 updated = True
             else:

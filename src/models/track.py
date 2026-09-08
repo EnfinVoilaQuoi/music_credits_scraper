@@ -618,6 +618,13 @@ class Track:
     # TRANSITOIRE — aucune colonne, il décrit une LECTURE et non le morceau, et
     # le même morceau est « via IAM » chez Shurik'N et rien du tout chez IAM.
     via_group: str | None = field(default=None, repr=False)
+    # « L'artiste affiché est MEMBRE de la formation qui signe ce morceau »
+    # (posé par `discographie_reunie`, jamais en base). Un rôle secondaire dit
+    # « il n'est ni l'auteur ni l'invité, il a juste une petite contribution » —
+    # ce qui devient FAUX quand il est membre du groupe : sa présence est déjà
+    # expliquée par son appartenance, et le marqueur sous-entendrait le
+    # contraire. La donnée reste intacte, seul son AFFICHAGE est levé.
+    membre_de_la_formation: bool = field(default=False, repr=False)
 
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.

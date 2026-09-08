@@ -84,8 +84,14 @@ def populate_tracks_table(app):
             else:
                 artist_display = track.artist.name if track.artist else ""
 
-            # Rôle secondaire (Additional Voices…) : marqueur distinct du feat
-            _sec_role = track.secondary_role
+            # Rôle secondaire (Additional Voices…) : marqueur distinct du feat.
+            # Il est TU quand le morceau est signé par une formation dont
+            # l'artiste est membre : le marqueur veut dire « il n'est ni
+            # l'auteur ni l'invité, juste une petite contribution », ce qui
+            # devient faux quand il fait partie du groupe — sa présence est déjà
+            # expliquée par son appartenance. La donnée reste en base et dans la
+            # fiche technique ; seul le marqueur du tableau se tait.
+            _sec_role = None if track.membre_de_la_formation else track.secondary_role
             if _sec_role:
                 artist_display = f"{artist_display} · 🎙️ {_sec_role}"
                 title = f"🎙️ {title}"

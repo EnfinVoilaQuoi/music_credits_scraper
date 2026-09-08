@@ -257,6 +257,12 @@ class TestRoleSecondaireEtGroupes:
         data_manager.save_track(chez_iam)
         chez_membre = Track(title="Petit frère", artist=membre)
         chez_membre.genius_id = 4242
+        # Tel que l'import Genius le produit RÉELLEMENT : un rôle secondaire
+        # s'accompagne toujours de `is_featuring` et du nom de l'artiste
+        # principal (`genius_api`, verdict « secondary »). Un fixture qui les
+        # omettait faisait passer le marqueur pour muet à tort.
+        chez_membre.is_featuring = True
+        chez_membre.primary_artist_name = "IAM"
         chez_membre.secondary_role = "Additional Voices"
         data_manager.save_track(chez_membre)
         return iam, membre, chez_iam, chez_membre
@@ -269,10 +275,57 @@ class TestRoleSecondaireEtGroupes:
 
     def test_la_discographie_reunie_garde_la_ligne_du_MEMBRE(self, data_manager):
         """Le morceau n'apparaît qu'une fois, et c'est la version qui porte le
-        rôle — donc l'icône reste. `via_group` est None : c'est bien SON morceau,
-        pas un morceau qu'il reçoit de sa formation."""
+        rôle. `via_group` est None : c'est bien SON morceau, pas un morceau qu'il
+        reçoit de sa formation."""
         _, membre, _, _ = self._famille_de_groupe(data_manager)
 
         (track,) = data_manager.discographie_reunie(membre)
         assert track.secondary_role == "Additional Voices"
         assert track.via_group is None
+
+    def test_le_marqueur_de_role_secondaire_se_TAIT_chez_le_membre(self, data_manager):
+        """Un rôle secondaire dit « ni auteur, ni invité, juste une petite
+        contribution » — ce qui devient FAUX quand l'artiste est membre du groupe
+        qui signe : sa présence est déjà expliquée par son appartenance, et le
+        marqueur sous-entendrait le contraire.
+
+        La DONNÉE reste (base et fiche technique) ; seul l'affichage du tableau
+        se tait. C'est un jugement sur le SENS, pas une correction : effacer
+        `secondary_role` perdrait un fait vrai que Genius a publié.
+        """
+        _, membre, _, _ = self._famille_de_groupe(data_manager)
+
+        (track,) = data_manager.discographie_reunie(membre)
+        assert track.membre_de_la_formation is True
+        assert track.secondary_role == "Additional Voices"  # la donnée est intacte
+
+    def test_le_marqueur_reste_hors_formation(self, data_manager):
+        """Un rôle secondaire sur le morceau d'un artiste QUELCONQUE garde son
+        sens plein — c'est justement ce que le marqueur sert à dire."""
+        from src.models.artist import ArtistRelation
+
+        iam = Artist(name="IAM")
+        iam.id = data_manager.save_artist(iam)
+        membre = Artist(name="Shurik'n")
+        membre.id = data_manager.save_artist(membre)
+        data_manager.record_artist_relations(
+            membre.id,
+            [
+                ArtistRelation(
+                    related_artist_id=iam.id,
+                    related_name="IAM",
+                    kind="member_of",
+                    formation="groupe",
+                    source="manuel",
+                )
+            ],
+        )
+        ailleurs = Track(title="Un morceau de SCH", artist=membre)
+        ailleurs.genius_id = 777
+        ailleurs.primary_artist_name = "SCH"
+        ailleurs.secondary_role = "Additional Voices"
+        data_manager.save_track(ailleurs)
+
+        (track,) = data_manager.discographie_reunie(membre)
+        assert track.membre_de_la_formation is False
+        assert track.secondary_role == "Additional Voices"

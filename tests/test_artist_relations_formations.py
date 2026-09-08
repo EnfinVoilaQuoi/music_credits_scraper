@@ -212,3 +212,49 @@ class TestSuppressionArtiste:
 
         with data_manager.engine.connect() as conn:
             assert conn.exec_driver_sql("SELECT COUNT(*) FROM track_videos").scalar() == 0
+
+
+class TestMarquageViaGroup:
+    """Un morceau qui vient d'ailleurs est MARQUÉ.
+
+    Sans ça, le tableau ne distinguerait plus ce que l'artiste a sorti de ce
+    que sa formation a sorti — il mentirait par omission. Le champ est
+    transitoire : le même morceau est « via IAM » chez Shurik'N et rien du tout
+    chez IAM.
+    """
+
+    def test_les_morceaux_propres_ne_sont_pas_marques(self, data_manager):
+        shurikn = _artiste(data_manager, "Shurik'N")
+        _morceau(data_manager, shurikn, "Où je vis")
+        (lu,) = data_manager.discographie_reunie(shurikn)
+        assert lu.via_group is None
+
+    def test_les_morceaux_du_groupe_portent_son_nom(self, data_manager):
+        iam = _artiste(data_manager, "IAM")
+        shurikn = _artiste(data_manager, "Shurik'N")
+        _morceau(data_manager, iam, "Petit frère")
+        data_manager.record_artist_relations(shurikn.id, [_rel("IAM", formation="groupe")])
+
+        (lu,) = data_manager.discographie_reunie(shurikn)
+        assert lu.via_group == "IAM"
+
+    def test_les_morceaux_du_collectif_aussi(self, data_manager):
+        collectif = _artiste(data_manager, "L'Animalerie")
+        membre = _artiste(data_manager, "Membre")
+        _morceau(data_manager, collectif, "Avec lui", [("Membre", CreditRole.WRITER)])
+        data_manager.record_artist_relations(
+            membre.id, [_rel("L'Animalerie", formation="collectif")]
+        )
+
+        (lu,) = data_manager.discographie_reunie(membre)
+        assert lu.via_group == "L'Animalerie"
+
+    def test_le_meme_morceau_nest_PAS_marque_chez_son_propre_artiste(self, data_manager):
+        """Le marquage décrit une LECTURE, pas le morceau."""
+        iam = _artiste(data_manager, "IAM")
+        shurikn = _artiste(data_manager, "Shurik'N")
+        _morceau(data_manager, iam, "Petit frère")
+        data_manager.record_artist_relations(shurikn.id, [_rel("IAM", formation="groupe")])
+
+        assert data_manager.discographie_reunie(shurikn)[0].via_group == "IAM"
+        assert data_manager.discographie_reunie(iam)[0].via_group is None

@@ -387,8 +387,8 @@ class MainWindow:
         """
         try:
             if self.current_artist:
-                self.current_artist.tracks = self.data_manager.get_artist_tracks(
-                    self.current_artist.id
+                self.current_artist.tracks = self.data_manager.discographie_reunie(
+                    self.current_artist
                 )
         except Exception as e:
             logger.error(f"Rechargement des morceaux échoué: {e}")
@@ -496,6 +496,12 @@ class MainWindow:
                 # Vérifier d'abord dans la base de données locale
                 artist = self.data_manager.get_artist_by_name(artist_name)
                 if artist:
+                    # Discographie RÉUNIE (lot 3) : ce que l'artiste a sorti,
+                    # plus ce que ses groupes ont sorti, plus sa part dans ses
+                    # collectifs. Câblé ICI et non dans `get_artist_by_name` :
+                    # le reset de données et les CLI de streams passent par la
+                    # même façade et ne doivent PAS voir les morceaux d'autrui.
+                    artist.tracks = self.data_manager.discographie_reunie(artist)
                     logger.info(
                         f"✅ Artiste trouvé en base: {artist.name} avec {len(artist.tracks)} morceaux"
                     )

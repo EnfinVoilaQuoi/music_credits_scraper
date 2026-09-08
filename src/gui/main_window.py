@@ -736,8 +736,6 @@ class MainWindow:
                     info_text += f"\n{line3}"
                 self.tracks_info_label.configure(text=info_text)
 
-                self._populate_tracks_table()
-
                 # Activer les boutons
                 self.scrape_button.configure(state="normal")
                 self.export_button.configure(state="normal")
@@ -754,7 +752,21 @@ class MainWindow:
                 if hasattr(self, "lyrics_button"):
                     self.lyrics_button.configure(state="disabled")
 
+            # Le tableau se rafraîchit TOUJOURS, y compris quand l'artiste n'a
+            # aucun morceau : l'appel vivait dans la branche « il y en a », si
+            # bien qu'ouvrir un artiste vide laissait à l'écran la discographie
+            # du précédent. Un tableau qui ne se vide pas ment sur l'artiste
+            # affiché — et c'est exactement le cas où l'on doute de ses données.
+            self._populate_tracks_table()
+
             self.get_tracks_button.configure(state="normal")
+        else:
+            # Plus d'artiste courant du tout : même raison, on ne laisse pas
+            # la table du précédent derrière soi.
+            self.artist_info_label.configure(text="Aucun artiste sélectionné")
+            self.tracks_info_label.configure(text="")
+            formations_panel.build(self.formations_frame, self)
+            self._populate_tracks_table()
 
     def _update_statistics(self):
         """Met à jour les statistiques affichées"""

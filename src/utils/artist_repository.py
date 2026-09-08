@@ -638,6 +638,10 @@ class ArtistRepository:
         for aid in self.ids_discographie_reunie(artist.id):
             for track in self.get_artist_tracks(aid):
                 if track not in vus:
+                    # Marqué dès qu'il vient d'ailleurs : sans ça, on ne
+                    # distinguerait plus ce que l'artiste a sorti de ce que sa
+                    # formation a sorti, et le tableau mentirait par omission.
+                    track.via_group = None if aid == artist.id else track.artist.name
                     vus.add(track)
                     resultat.append(track)
 
@@ -645,6 +649,7 @@ class ArtistRepository:
         for collectif_id in self.ids_collectifs(artist.id):
             for track in self.get_artist_tracks(collectif_id):
                 if track not in vus and track.personne_presente(noms):
+                    track.via_group = track.artist.name
                     vus.add(track)
                     resultat.append(track)
         return resultat

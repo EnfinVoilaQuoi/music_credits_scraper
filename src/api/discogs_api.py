@@ -1,20 +1,39 @@
 """Client pour l'API Discogs - Enrichissement des crédits et métadonnées"""
 
+import re
 import time
 from typing import Any
 
 import discogs_client
 from discogs_client.exceptions import DiscogsAPIError, HTTPError
 
-from src.models import Credit, CreditRole, Track
+from src.models import ArtistRelation, Credit, CreditRole, Track
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils.logger import get_logger, log_api
+from src.utils.title_matching import normalize_name
 
 logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "discogs"
+
+
+# ── Formations : groupes, membres, alias (lot 3) ──────────────────────────────
+
+#: Discogs désambiguïse les homonymes par un SUFFIXE NUMÉRIQUE : notre rappeur
+#: belge s'appelle « Swing (20) », pas « Swing ». Mesuré le 2026-09-08, et le
+#: piège est vicieux : sans retirer ce suffixe, la recherche « Swing » ne rend
+#: qu'UN homonyme exact — « Swing » tout court, qui n'est PAS le nôtre. On
+#: obtiendrait donc une confirmation confiante et fausse, ce qui est pire que
+#: pas de confirmation du tout. Le motif est volontairement étroit (un entier
+#: nu, en fin de nom) pour ne pas amputer un titre légitimement parenthésé.
+_SUFFIXE_HOMONYME = re.compile(r"\s*\(\d+\)$")
+
+
+def nom_sans_suffixe(nom: str) -> str:
+    """« Swing (20) » → « Swing ». Fonction pure."""
+    return _SUFFIXE_HOMONYME.sub("", nom or "").strip()
 
 
 class DiscogsClient:
@@ -407,6 +426,88 @@ class DiscogsClient:
 
         # Pas de correspondance → OTHER
         return CreditRole.OTHER
+
+    # ── Formations (lot 3) ───────────────────────────────────────────────────
+
+    def _candidats_formation(self, nom: str) -> list:
+        """Artistes Discogs dont le nom, SUFFIXE RETIRÉ, est exactement le nôtre."""
+        cible = normalize_name(nom)
+        if not cible:
+            return []
+        with source_usage.observe(_SOURCE, label=f"recherche artiste {nom}") as obs:
+            resultats = list(self.client.search(nom, type="artist").page(0))
+            exacts = [a for a in resultats if normalize_name(nom_sans_suffixe(a.name)) == cible]
+            if not exacts:
+                obs.absent()
+            return exacts
+
+    def get_artist_groups(self, nom: str, attendues: set[str] | None = None) -> dict:
+        """Ce que Discogs sait des formations de cet artiste.
+
+        Discogs est la source de **confirmation** du lot 3, pas la source
+        primaire — et sa façon de désambiguïser lui interdit de trancher seul :
+        « Swing » rend SEPT homonymes exacts une fois le suffixe retiré. Choisir
+        parmi eux sans oracle reviendrait à jouer à pile ou face sur l'identité
+        de quelqu'un.
+
+        D'où deux régimes, et c'est tout l'intérêt :
+
+          · **un seul candidat** (« Shurik'n ») → on lit ses groupes, ses membres
+            et ses alias, qui deviennent des PROPOSITIONS ;
+          · **plusieurs candidats** → on ne propose rien, mais on peut encore
+            CONFIRMER : si l'un d'eux déclare une des formations `attendues`
+            (celles que MusicBrainz vient de nommer), l'ambiguïté est levée par
+            la chose même qu'on cherchait à vérifier.
+
+        Returns:
+            ``{"proposees": [ArtistRelation], "confirmees": {noms}, "candidats": n}``
+        """
+        candidats = self._candidats_formation(nom)
+        attendues_norm = {normalize_name(f) for f in (attendues or set())}
+        proposees: list[ArtistRelation] = []
+        confirmees: set[str] = set()
+
+        for artiste in candidats:
+            with source_usage.observe(_SOURCE, label=f"formations {artiste.name}"):
+                liens = self._liens_de(artiste)
+            noms_lies = {normalize_name(nom_sans_suffixe(rel.related_name)) for rel in liens}
+            communs = noms_lies & attendues_norm
+            if communs:
+                confirmees |= communs
+                if len(candidats) > 1:
+                    # L'ambiguïté est levée : ce candidat-là est le bon, ses
+                    # autres liens valent donc aussi comme propositions.
+                    proposees = liens
+            elif len(candidats) == 1:
+                proposees = liens
+
+        if len(candidats) > 1 and not confirmees:
+            logger.info(
+                f"Discogs : {len(candidats)} homonymes exacts pour « {nom} » et aucun ne "
+                "déclare les formations attendues — aucune confirmation, et rien d'inventé."
+            )
+        return {"proposees": proposees, "confirmees": confirmees, "candidats": len(candidats)}
+
+    @staticmethod
+    def _liens_de(artiste) -> list:
+        """Groupes, membres et alias d'un artiste Discogs, en `ArtistRelation`.
+
+        Le nom est conservé VERBATIM (suffixe compris) : c'est ce que Discogs
+        affiche, et le retirer ici ferait perdre l'information qui distingue
+        « Swing (20) » de « Swing (6) ». Le retrait n'a lieu qu'à la COMPARAISON.
+        """
+        liens = []
+        for groupe in artiste.groups or []:
+            liens.append(
+                ArtistRelation(related_name=groupe.name, kind="member_of", source="discogs")
+            )
+        for membre in artiste.members or []:
+            liens.append(
+                ArtistRelation(related_name=membre.name, kind="has_member", source="discogs")
+            )
+        for alias in artiste.aliases or []:
+            liens.append(ArtistRelation(related_name=alias.name, kind="alias", source="discogs"))
+        return liens
 
     def enrich_track_data(self, track: Track, force_update: bool = False) -> bool | str:
         """

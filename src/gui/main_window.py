@@ -138,7 +138,13 @@ class MainWindow:
         # Formations confirmées (lot 3) : la page d'un GROUPE ne montre que ce
         # qu'il a sorti — ce panneau donne accès à ses membres. Navigation, pas
         # agrégation (décision utilisateur du 2026-09-08).
-        self.formations_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        # `height=1` n'est PAS cosmétique : un `CTkFrame` naît en 200 × 200, et
+        # la propagation de `pack` ne le rétrécit qu'à la taille de ses ENFANTS.
+        # Ce panneau sort en avance quand l'artiste n'a aucun lien confirmé — il
+        # restait donc vide ET haut de 200 px, un trou noir sous le cartouche
+        # pour tout artiste sans formation (constaté sur A2H). Avec 1, le cadre
+        # vide est invisible et les enfants le font grandir quand il y en a.
+        self.formations_frame = ctk.CTkFrame(info_frame, fg_color="transparent", height=1)
         self.formations_frame.pack(fill="x", padx=10, pady=(2, 6))
 
         # === Section contrôles ===

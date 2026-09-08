@@ -216,3 +216,63 @@ class TestHeritageALaCreation:
         assert relu.lyrics.text == "Premier couplet…"
         assert [c.name for c in relu.credits] == ["Doums"]
         assert relu.audio.bpm == 92
+
+
+class TestRoleSecondaireEtGroupes:
+    """Le 🎙️ d'un rôle secondaire survit à l'association de groupe.
+
+    La question se pose vraiment : un membre crédité « Additional Voices » sur un
+    morceau de son groupe a DEUX lignes pour le même enregistrement — la sienne,
+    qui porte le rôle, et celle du groupe, qui ne le porte pas. Deux mécanismes
+    pouvaient le faire disparaître, et aucun ne le fait :
+
+    · la SYNCHRONISATION des sœurs ne touche pas `secondary_role`, qui décrit la
+      ligne d'UN artiste et non l'enregistrement (`COLONNES_DE_CONTEXTE`) ;
+    · la DISCOGRAPHIE RÉUNIE lit l'artiste lui-même en TÊTE et dédoublonne sur
+      l'identité métier — c'est donc sa ligne à lui, celle qui porte le rôle,
+      qui est retenue.
+    """
+
+    def _famille_de_groupe(self, data_manager):
+        from src.models.artist import ArtistRelation
+
+        iam = Artist(name="IAM")
+        iam.id = data_manager.save_artist(iam)
+        membre = Artist(name="Shurik'n")
+        membre.id = data_manager.save_artist(membre)
+        data_manager.record_artist_relations(
+            membre.id,
+            [
+                ArtistRelation(
+                    related_artist_id=iam.id,
+                    related_name="IAM",
+                    kind="member_of",
+                    formation="groupe",
+                    source="manuel",
+                )
+            ],
+        )
+        chez_iam = Track(title="Petit frère", artist=iam)
+        chez_iam.genius_id = 4242
+        data_manager.save_track(chez_iam)
+        chez_membre = Track(title="Petit frère", artist=membre)
+        chez_membre.genius_id = 4242
+        chez_membre.secondary_role = "Additional Voices"
+        data_manager.save_track(chez_membre)
+        return iam, membre, chez_iam, chez_membre
+
+    def test_le_role_ne_fuit_pas_vers_la_ligne_du_groupe(self, data_manager):
+        iam, _, chez_iam, chez_membre = self._famille_de_groupe(data_manager)
+
+        assert _colonne(data_manager, chez_membre.id, "secondary_role") == "Additional Voices"
+        assert _colonne(data_manager, chez_iam.id, "secondary_role") is None
+
+    def test_la_discographie_reunie_garde_la_ligne_du_MEMBRE(self, data_manager):
+        """Le morceau n'apparaît qu'une fois, et c'est la version qui porte le
+        rôle — donc l'icône reste. `via_group` est None : c'est bien SON morceau,
+        pas un morceau qu'il reçoit de sa formation."""
+        _, membre, _, _ = self._famille_de_groupe(data_manager)
+
+        (track,) = data_manager.discographie_reunie(membre)
+        assert track.secondary_role == "Additional Voices"
+        assert track.via_group is None

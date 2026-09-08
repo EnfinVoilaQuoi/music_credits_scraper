@@ -48,6 +48,15 @@ def populate_tracks_table(app):
     for item in app.tree.get_children():
         app.tree.delete(item)
 
+    # Les cases cochées portent des INDEX de ligne, pas des identifiants : les
+    # laisser survivre à un changement d'artiste ferait pointer les mêmes
+    # numéros sur d'autres morceaux — silencieusement, et jusque dans le filtre
+    # « limiter aux morceaux cochés » du run de streams.
+    artiste_id = app.current_artist.id if app.current_artist else None
+    if getattr(app, "_selection_artiste_id", None) != artiste_id:
+        app.selected_tracks.clear()
+        app._selection_artiste_id = artiste_id
+
     if not app.current_artist or not app.current_artist.tracks:
         return
 

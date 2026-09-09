@@ -11,6 +11,8 @@ Aucune règle ici : le verdict vient d'`identite_concorde`
 (`src/utils/spotify_identity.py`), et le balayage n'est qu'une requête.
 """
 
+import time
+
 from sqlalchemy import text
 
 from src.models import Artist, Track
@@ -119,3 +121,76 @@ def rejeter_spotify_id(data_manager, track, spotify_id: str) -> dict:
             track.spotify_page_title = None
     logger.info(f"🚫 ID Spotify rejeté : « {track.title} » → {spotify_id}")
     return rapport
+
+
+def verifier_lignes(
+    lignes: list[dict],
+    lire_identite=None,
+    *,
+    tolerance: int | None = None,
+    pause: float = 0.2,
+    progression=None,
+    interrompu=None,
+) -> dict:
+    """Confronte chaque ligne à l'oracle embed et rend le rapport.
+
+    Ce balayage vivait dans `scripts/audit_spotify_ids.py`. Le câbler à la GUI
+    (bouton « Vérifier les identifiants Spotify ») l'aurait recopié, et deux
+    copies d'un verdict divergent — c'est le défaut du 2026-09-06, où le même
+    jugement porté à deux endroits contredisait le nettoyeur. Le CLI et la
+    fenêtre balaient donc les mêmes lignes avec le même prédicat.
+
+    Args:
+        lire_identite: l'oracle, INJECTÉ — `lire_identite_http` en production,
+            un double en test (aucun test ne parle à Spotify).
+        progression: rappel `(faits, total)` pour l'affichage ; la GUI en a
+            besoin, le CLI imprime tous les 50.
+        interrompu: prédicat d'arrêt (`stop_requested`), testé ENTRE deux
+            requêtes — jamais au milieu d'une.
+
+    Returns:
+        `{"verifies", "illisibles", "ecarts": [...]}`. Une page illisible
+        n'accuse personne : elle est comptée à part, comme `absent`.
+    """
+    from src.utils.spotify_identity import (
+        TOLERANCE_DUREE,
+        artiste_etranger,
+        identite_concorde,
+        lire_identite_http,
+    )
+
+    lire_identite = lire_identite or lire_identite_http
+    tolerance = TOLERANCE_DUREE if tolerance is None else tolerance
+
+    ecarts: list[dict] = []
+    illisibles = 0
+    faits = 0
+    for ligne in lignes:
+        if interrompu is not None and interrompu():
+            break
+        identite = lire_identite(ligne["sid"])
+        faits += 1
+        if identite is None:
+            illisibles += 1
+        else:
+            track = track_de_la_ligne(ligne)
+            ok, motif = identite_concorde(track, identite, tolerance=tolerance)
+            if not ok:
+                ecarts.append(
+                    {
+                        "track_id": ligne["id"],
+                        "artiste": ligne["artiste"],
+                        "titre": ligne["title"],
+                        "spotify_id": ligne["sid"],
+                        "principal": bool(ligne["principal"]),
+                        "motif": motif,
+                        "artiste_etranger": artiste_etranger(track, identite),
+                        "spotify": identite,
+                    }
+                )
+        if progression is not None:
+            progression(faits, len(lignes))
+        if pause:
+            time.sleep(pause)
+
+    return {"verifies": faits - illisibles, "illisibles": illisibles, "ecarts": ecarts}

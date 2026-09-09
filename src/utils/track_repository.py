@@ -1959,14 +1959,23 @@ class TrackRepository:
             return rapport
 
     def clear_track_duration(self, track_id: int) -> bool:
-        """Efface la durée d'un morceau (elle a suivi un ID Spotify fautif).
+        """Efface la durée d'un morceau, **colonne ET observations**.
 
-        Geste SÉPARÉ de `clear_track_spotify_id`, et c'est délibéré : la durée
-        n'a pas de provenance en base (lot B), donc l'effacer est une décision
-        humaine, pas une conséquence prouvée.
+        Geste SÉPARÉ de `clear_track_spotify_id`, et c'est délibéré : effacer une
+        durée est une décision humaine, pas une conséquence prouvée.
+
+        ⚠️ Les OBSERVATIONS partent avec la colonne, et c'est indispensable
+        depuis que la durée est un champ ARBITRÉ (lot B) : la colonne n'en est
+        que la matérialisation. Vider la seule colonne laissait l'observation
+        `legacy` en place, et la réconciliation la restaurait à la relecture
+        suivante — constaté le 2026-09-09 sur « Yacht Music », effacée puis
+        relue à 248 s. C'est la troisième forme du même défaut dans ce chantier :
+        rendre un champ arbitrable oblige à faire passer TOUTES ses voies
+        d'écriture ET d'effacement par les observations.
         """
         try:
             with self.engine.begin() as conn:
+                self._delete_observations(conn, track_id, "duration")
                 conn.execute(
                     text("UPDATE tracks SET duration = NULL, updated_at = :now WHERE id = :tid"),
                     {"tid": track_id, "now": datetime.now()},

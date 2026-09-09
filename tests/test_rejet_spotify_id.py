@@ -205,6 +205,33 @@ class TestRejetDeLId:
                 is None
             )
 
+    def test_effacer_la_duree_retire_AUSSI_ses_observations(self, data_manager):
+        """Vider la seule colonne ne suffit plus depuis le lot B.
+
+        La durée est un champ ARBITRÉ : la colonne n'en est que la
+        matérialisation, et la réconciliation la restaure depuis les
+        observations à la relecture. Constaté sur « Yacht Music » le 2026-09-09 —
+        effacée, puis relue à 248 s parce que l'observation `legacy` la portait
+        encore.
+
+        C'est la TROISIÈME forme du même défaut dans ce chantier : la valeur
+        refusée par Deezer qui gagnait, la saisie manuelle annulée, et
+        maintenant l'effacement qui ne prend pas. Rendre un champ arbitrable
+        oblige à faire passer toutes ses voies d'écriture ET d'effacement par
+        les observations.
+        """
+        track = _morceau(data_manager, duree=248)
+        data_manager.upsert_observations(
+            track.id, [Observation(field="duration", value=248, source="legacy")]
+        )
+
+        assert data_manager.clear_track_duration(track.id) is True
+
+        assert [o for o in data_manager.get_observations(track.id) if o.field == "duration"] == []
+        # Le test qui compte : la relecture par le MOTEUR, pas la colonne seule.
+        (relu,) = data_manager.get_artist_tracks(track.artist.id)
+        assert relu.duration is None
+
     def test_sans_observation_reccobeats_la_duree_nest_pas_suspecte(self, data_manager):
         track = _morceau(data_manager, duree=249)
         rapport = data_manager.clear_track_spotify_id(track.id)

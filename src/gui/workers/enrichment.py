@@ -136,23 +136,34 @@ def start_enrichment(app):
     # Séparateur
     ctk.CTkLabel(force_frame, text="", height=10).pack()
 
-    # Checkbox pour reset Spotify ID
-    reset_spotify_var = ctk.BooleanVar(value=False)
-    reset_spotify_checkbox = ctk.CTkCheckBox(
-        force_frame,
-        text="🔄 Réinitialiser les Spotify IDs",
-        variable=reset_spotify_var,
-        font=("Arial", 12),
-    )
-    reset_spotify_checkbox.pack(anchor="w", pady=5)
+    # ⚠️ Ici vivait « 🔄 Réinitialiser les Spotify IDs », qui effaçait TOUS les
+    # identifiants de l'artiste pour les re-scraper. Elle emportait les bons avec
+    # les mauvais, et le re-scrape reproposait les fautifs depuis le cache : un
+    # scrape complet pour revenir au même état. Le besoin — « mes identifiants
+    # sont douteux, reprends-les » — est réel ; la réponse est de n'effacer que
+    # ce qu'on peut MONTRER. D'où un bouton, et non une case : vérifier n'est pas
+    # un réglage d'enrichissement, c'est un geste avec son propre rapport.
+    def _verifier_spotify() -> None:
+        from src.gui.windows.verification_spotify import show_verification_spotify
 
-    reset_info_label = ctk.CTkLabel(
+        dialog.destroy()
+        show_verification_spotify(app)
+
+    ctk.CTkButton(
         force_frame,
-        text="Efface les Spotify IDs existants pour permettre\nleur re-scraping (utile si IDs incorrects)",
+        text="🔍 Vérifier les identifiants Spotify",
+        command=_verifier_spotify,
+        font=("Arial", 12),
+        fg_color="gray30",
+        hover_color="gray40",
+    ).pack(anchor="w", pady=5)
+
+    ctk.CTkLabel(
+        force_frame,
+        text="Confronte chaque identifiant de l'artiste à ce que Spotify sert\nvraiment. N'efface QUE sur validation, ligne par ligne.",
         font=("Arial", 9),
         text_color="gray",
-    )
-    reset_info_label.pack(anchor="w", padx=25, pady=2)
+    ).pack(anchor="w", padx=25, pady=2)
 
     # Séparateur
     ctk.CTkLabel(force_frame, text="", height=10).pack()
@@ -191,7 +202,6 @@ def start_enrichment(app):
         selected_sources.append("spotify_id")
 
         force_update = force_var.get()
-        reset_spotify_id = reset_spotify_var.get()
         clear_on_failure = clear_on_failure_var.get()
 
         dialog.destroy()
@@ -199,7 +209,6 @@ def start_enrichment(app):
             app,
             selected_sources,
             force_update=force_update,
-            reset_spotify_id=reset_spotify_id,
             clear_on_failure=clear_on_failure,
         )
 
@@ -210,7 +219,6 @@ def run_enrichment(
     app,
     sources: list[str],
     force_update: bool = False,
-    reset_spotify_id: bool = False,
     clear_on_failure: bool = True,
 ):
     """Exécute l'enrichissement avec les sources sélectionnées"""
@@ -226,14 +234,6 @@ def run_enrichment(
     if not selected_tracks_list:
         messagebox.showwarning("Attention", "Tous les morceaux sélectionnés sont désactivés")
         return
-
-    # Reset des Spotify IDs si demandé
-    if reset_spotify_id:
-        for track in selected_tracks_list:
-            if hasattr(track, "spotify_id") and track.spotify_id:
-                old_id = track.spotify_id
-                track.spotify_id = None
-                logger.info(f"🔄 Spotify ID reset pour '{track.title}' (ancien: {old_id})")
 
     app.enrich_button.configure(state="disabled", text="Enrichissement...")
     app.progress_bar.set(0)
@@ -297,7 +297,6 @@ def run_enrichment(
                 treated_count=len(selected_tracks_list),
                 disabled_count=disabled_count,
                 force_update=force_update,
-                reset_spotify_id=reset_spotify_id,
                 clear_on_failure=clear_on_failure,
                 cleaned_count=cleaned_count,
             )
@@ -422,7 +421,6 @@ def _build_summary(
     treated_count: int,
     disabled_count: int,
     force_update: bool,
-    reset_spotify_id: bool,
     clear_on_failure: bool,
     cleaned_count: int,
 ) -> str:
@@ -432,9 +430,6 @@ def _build_summary(
 
     if force_update:
         summary += "✅ Mode force update activé\n"
-
-    if reset_spotify_id:
-        summary += "🔄 Spotify IDs réinitialisés\n"
 
     if clear_on_failure and cleaned_count > 0:
         summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"

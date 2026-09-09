@@ -77,6 +77,23 @@ def track_de_la_ligne(ligne: dict) -> Track:
     return track
 
 
+def purger_cache_scraper(spotify_id: str) -> int:
+    """Retire un identifiant du cache du scraper, sur disque.
+
+    Import LOCAL : le module de scraping tire Playwright, et ni l'audit ni la
+    réparation n'ont besoin d'un navigateur pour purger un fichier JSON. Le
+    scraper est instancié SANS driver (il est créé paresseusement) — on ne fait
+    que lire et réécrire son cache.
+    """
+    from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+
+    try:
+        return SpotifyIDScraper(headless=True).oublier_identifiant(spotify_id)
+    except OSError as e:
+        logger.warning(f"Cache du scraper non purgé pour {spotify_id} : {e}")
+        return 0
+
+
 def rejeter_spotify_id(data_manager, track, spotify_id: str) -> dict:
     """Rejette un ID Spotify depuis l'interface, et remet l'objet d'aplomb.
 
@@ -91,6 +108,7 @@ def rejeter_spotify_id(data_manager, track, spotify_id: str) -> dict:
         Le rapport de `clear_track_spotify_id` (ce qui a été retiré).
     """
     rapport = data_manager.clear_track_spotify_id(track.id, spotify_id)
+    rapport["cache_purge"] = purger_cache_scraper(spotify_id)
     track.spotify_ids = [s for s in track.spotify_ids if s != spotify_id]
     track.spotify_id_entries = [e for e in track.spotify_id_entries if e.spotify_id != spotify_id]
     if track.spotify_id == spotify_id:

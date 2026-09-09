@@ -99,6 +99,20 @@ class Settings(BaseSettings):
     youtube_confidence_threshold: float = 0.85  # seuil auto-sélection
     youtube_persist_confidence: float = 0.90  # seuil pour PERSISTER un lien trouvé par recherche
 
+    # --- Spotify ID : plancher de pertinence du scraper ---
+    # CALIBRÉ sur données le 2026-09-09, jamais au jugé (36 requêtes réelles,
+    # chaque identifiant retenu confronté à l'oracle embed) :
+    #
+    #   score ≥ 0,80  →  15 identifiants, 0 faux
+    #   score = 0,60  →   1 juste, 3 faux        (zone grise, arbitrée par le LLM)
+    #   score ≤ 0,50  →   0 juste, 16 faux
+    #
+    # 0,60 est le seul plancher qui écarte les faux SANS perdre un seul
+    # identifiant juste : à 0,70 on en perd un, à 0,50 on garde 14 faux.
+    # YouTube avait son seuil depuis toujours ; ce chemin-là n'en avait aucun,
+    # et rendait donc `found_tracks[0]` quel que fût son score.
+    spotify_id_min_relevance: float = 0.60
+
     # --- Musixmatch : fenêtre de repos après un jeton refusé ---
     # `token.get` est l'endpoint que Musixmatch bride le plus par IP. Quand il
     # cesse de rendre un jeton utilisable, insister ne sert à rien : chaque
@@ -210,6 +224,7 @@ YOUTUBE_AUTO_SELECT_ALBUM_TRACKS = settings.youtube_auto_select_album_tracks
 YOUTUBE_VERIFY_OFFICIAL_CHANNELS = settings.youtube_verify_official_channels
 YOUTUBE_CONFIDENCE_THRESHOLD = settings.youtube_confidence_threshold
 YOUTUBE_PERSIST_CONFIDENCE = settings.youtube_persist_confidence
+SPOTIFY_ID_MIN_RELEVANCE = settings.spotify_id_min_relevance
 
 # Musixmatch (fenêtre de repos après un jeton refusé)
 MUSIXMATCH_TOKEN_COOLDOWN_S = settings.musixmatch_token_cooldown_s

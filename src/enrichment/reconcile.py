@@ -103,9 +103,13 @@ def _confidence_key(confidence: float | None) -> float:
 #: source qui a écrit les durées contaminées, parce qu'elle s'interroge PAR le
 #: Track ID Spotify et rend la durée du morceau que cet ID désigne. Deezer est
 #: canonique (`CLAUDE.md` l'énonçait déjà en prose ; l'ordre le fait descendre
-#: dans le moteur), YTM son secours.
+#: dans le moteur), YTM son secours. `songbpm` s'intercale devant `reccobeats`
+#: (2026-09-09) : sa durée accompagne le morceau que SA recherche a rapproché,
+#: elle ne suit pas un identifiant venu d'ailleurs — mais elle est lue au texte
+#: d'une page (« 2:30 »), donc à la seconde affichée, ce qui la place derrière
+#: les deux sources qui donnent la valeur du fichier.
 DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
-    "duration": ("deezer", "ytmusic", "reccobeats"),
+    "duration": ("deezer", "ytmusic", "songbpm", "reccobeats"),
     "release_date": ("genius", "deezer"),
     "isrc": ("deezer",),
 }

@@ -61,7 +61,7 @@ def test_is_available():
 
 def test_bpm_candidat_key_mode_duration():
     # E7 : BPM au scrutin, key/mode en observations PAR SOURCE (plus de pose
-    # legacy directe). Duration reste une colonne (posée telle quelle).
+    # legacy directe). La durée est en colonne ET en observation depuis le lot B.
     data = {"bpm": 90, "key": 5, "mode": 1, "duration": 200}
     provider = SongBpmProvider(_FakeScraper(data))
     track = _track()
@@ -73,6 +73,59 @@ def test_bpm_candidat_key_mode_duration():
     assert keys and keys[0].value == 5
     assert modes and modes[0].value == 1
     assert track.duration == 200
+
+
+class TestLaDureeDeSongBPM:
+    """L'écrivain que le lot B-bis cherchait, et le défaut qu'il portait.
+
+    SongBPM rend la durée telle que sa PAGE l'écrit — « 2:30 », du texte. C'est
+    de là que venaient les 19 durées mal typées d'une colonne INTEGER. Et elle
+    était posée SANS observation : arbitrée à la relecture contre des
+    observations qui l'ignoraient, l'écriture était devenue une suggestion
+    (mesuré le 2026-09-09 : 12 durées en colonne sans la moindre observation,
+    toutes de cette source).
+    """
+
+    def test_le_mm_ss_de_la_page_devient_des_SECONDES(self):
+        provider = SongBpmProvider(_FakeScraper({"duration": "2:30"}))
+        track = _track()
+        ctx = EnrichmentContext()
+        provider.enrich(track, ctx)
+        assert track.duration == 150
+
+    def test_la_duree_est_DECLAREE_et_non_seulement_posee(self):
+        provider = SongBpmProvider(_FakeScraper({"duration": "2:30"}))
+        ctx = EnrichmentContext()
+        provider.enrich(_track(), ctx)
+        (obs,) = [o for o in ctx.observations if o.field == "duration"]
+        assert obs.source == "songbpm"
+        assert obs.value == 150, "l'observation doit porter l'entier, pas « 2:30 »"
+
+    def test_une_duree_illisible_ne_devient_ni_colonne_ni_observation(self):
+        """Mieux vaut vide que faux — même règle qu'à l'entrée de `save_track`."""
+        provider = SongBpmProvider(_FakeScraper({"duration": "n/a"}))
+        track = _track()
+        ctx = EnrichmentContext()
+        provider.enrich(track, ctx)
+        assert track.duration is None
+        assert [o for o in ctx.observations if o.field == "duration"] == []
+
+    def test_une_duree_deja_presente_n_est_pas_ecrasee_sans_force(self):
+        provider = SongBpmProvider(_FakeScraper({"duration": "2:30"}))
+        track = _track()
+        track.duration = 200
+        provider.enrich(track, EnrichmentContext())
+        assert track.duration == 200
+
+
+def test_songbpm_a_sa_place_dans_l_ordre_des_durees():
+    """Devant `reccobeats`, qui suit un identifiant venu d'ailleurs ; derrière
+    Deezer et YTM, qui donnent la valeur du fichier et non celle affichée."""
+    from src.enrichment.reconcile import DISCOGRAPHY_PRIORITIES
+
+    ordre = DISCOGRAPHY_PRIORITIES["duration"]
+    assert ordre.index("songbpm") < ordre.index("reccobeats")
+    assert ordre.index("deezer") < ordre.index("songbpm")
 
 
 def test_candidat_bpm_compte_comme_succes_meme_si_bpm_deja_present():

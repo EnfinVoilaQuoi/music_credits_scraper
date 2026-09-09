@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from src.enrichment.observation import Observation
 from src.gui import albums_grouping, helpers
 from src.gui.panels import tracks_table
 from src.models import Track
@@ -323,6 +324,17 @@ def import_genius_album(app):
         track.album = album_name
         track.track_number = tr.get("track_number")
         track.release_date = release_date
+        if release_date:
+            # La date est un champ ARBITRÉ depuis le lot B : une écriture qui
+            # n'émet pas d'observation ne vit que dans la colonne, et la
+            # réconciliation la remplace à la relecture par ce que portent les
+            # observations. C'est le défaut qui a annulé une durée saisie à la
+            # main le 2026-09-08 — 230 posé, 249 relu. Inoffensif ici tant que
+            # personne ne contredit Genius, mais on ne laisse pas une écriture
+            # devenir une suggestion.
+            track.observations.append(
+                Observation(field="release_date", value=release_date, source="genius")
+            )
         primary = tr.get("primary_artist") or ""
         if primary and _nt(primary) != artist_key:
             track.is_featuring = True

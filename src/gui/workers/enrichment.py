@@ -42,8 +42,15 @@ def start_enrichment(app):
 
     # Variables pour les checkboxes
     sources_vars = {}
+    # `spotify_id` n'est PAS dans cette liste, et ce n'est pas un oubli : ce
+    # n'est pas à l'utilisateur de décider si le scraper sert. La fenêtre
+    # l'avouait elle-même — « laisser coché suffit » — et une case dont la
+    # notice dit de ne pas y toucher n'est pas un réglage, c'est un piège à
+    # clic. Le source est AUTO-RÉGULÉ : `SpotifyIdProvider.gate()` saute quand
+    # un identifiant valide existe déjà ou quand la voie ISRC a satisfait
+    # ReccoBeats. Il est injecté de force dans `start_enrichment` (voir la
+    # raison là-bas, qui n'est pas celle qu'on croit).
     sources_info = {
-        "spotify_id": "Spotify ID Scraper (fallback automatique) 🎯",
         "reccobeats": "ReccoBeats (BPM/Key/Mode via ISRC) 🎵",
         "getsongbpm": "GetSongBPM API (2ᵉ vote BPM/Key/Mode) 🎹",
         "songbpm": "SongBPM Scraper (départage BPM/Key) 🎼",
@@ -85,13 +92,6 @@ def start_enrichment(app):
                 "Dernier recours si BPM/Key manquent : analyse le lien YouTube.\n"
                 "Compte requis (BPMFINDER_EMAIL/PASSWORD) ; session réutilisée."
             )
-            ctk.CTkLabel(frame, text=info_text, font=("Arial", 9), text_color="gray").pack(
-                anchor="w", padx=25
-            )
-
-        # Info supplémentaire pour spotify_id
-        if source == "spotify_id":
-            info_text = "Fallback : ReccoBeats résout d'abord via l'ISRC (Deezer).\nCe scraper n'est lancé que si aucun ISRC n'est trouvé — laisser coché suffit."
             ctk.CTkLabel(frame, text=info_text, font=("Arial", 9), text_color="gray").pack(
                 anchor="w", padx=25
             )
@@ -180,6 +180,15 @@ def start_enrichment(app):
         if not selected_sources:
             messagebox.showwarning("Attention", "Sélectionnez au moins une source")
             return
+
+        # ⚠️ `spotify_id` est ajouté de FORCE, et pas seulement parce que l'app
+        # décide seule de s'en servir. `data_enricher` calcule
+        # `allow_spotify_scrape=("spotify_id" not in sources)` : la présence de
+        # la clé dit à ReccoBeats de NE PAS scraper l'identifiant de son côté.
+        # L'omettre déclencherait donc un SECOND scrape Playwright par morceau —
+        # l'inverse exact de ce qu'on cherche. Retirer cette ligne « puisque la
+        # case n'existe plus » doublerait le coût du run en silence.
+        selected_sources.append("spotify_id")
 
         force_update = force_var.get()
         reset_spotify_id = reset_spotify_var.get()

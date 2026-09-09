@@ -54,6 +54,18 @@ _FILL_ONLY = [
     "anecdotes",
     "lyrics.present",
     "genius_url",
+    # Les vues YouTube Music, recopiées si la fiche gardée n'en a pas.
+    #
+    # `merge_tracks` ré-arbitre les streams SPOTIFY depuis les observations, mais
+    # `ytm_streams` n'est arbitré par personne — aucune autre source ne publie de
+    # compteur YTM — donc rien ne le remet d'aplomb après une fusion. Mesuré le
+    # 2026-09-08 sur le doublon Josman « BOSS »/« Boss » : garder la ligne à
+    # 66 vues aurait perdu les 68 182 de l'autre, en silence.
+    #
+    # Le recopier ICI rend l'erreur IMPOSSIBLE plutôt que de demander à
+    # l'utilisateur de se souvenir laquelle des deux lignes garder.
+    "streams.ytm_streams",
+    "streams.ytm_streams_updated",
 ]
 
 

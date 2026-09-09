@@ -54,6 +54,63 @@ def either_contains_as_words(a: str, b: str) -> bool:
     return contains_as_words(a, b) or contains_as_words(b, a)
 
 
+#: Lettres que la décomposition Unicode NE TRAITE PAS, et qu'un passage en ASCII
+#: SUPPRIME donc en silence. NFKD ne décompose `œ` ni `æ` — elles n'ont pas de
+#: décomposition de compatibilité — et `ß`, `ø`, `ł`, `đ`, `þ`, `ð` sont des
+#: lettres à part entière, pas des lettres accentuées.
+#:
+#: Sans cette table, `normalize_title('Peine de cœur')` rendait « peine de cur »
+#: et `normalize_name('Sœur')` « s ur » : deux façons différentes de casser le
+#: même mot, l'une en avalant la lettre, l'autre en la remplaçant par une
+#: coupure de mot. Constaté le 2026-09-09 dans les logs — un identifiant Spotify
+#: JUSTE refusé parce que « Peine de coeur » ne rejoignait pas « Peine de cœur ».
+#:
+#: Les deux casses sont présentes : ces fonctions ne normalisent pas la casse au
+#: même moment, et une table à sens unique manquerait la moitié des titres.
+_LIGATURES = {
+    "œ": "oe",
+    "Œ": "OE",
+    "æ": "ae",
+    "Æ": "AE",
+    "ß": "ss",
+    "ø": "o",
+    "Ø": "O",
+    "ł": "l",
+    "Ł": "L",
+    "đ": "d",
+    "Đ": "D",
+    "þ": "th",
+    "Þ": "TH",
+    "ð": "d",
+    "Ð": "D",
+}
+
+
+def developper_ligatures(s: str) -> str:
+    """Développe les ligatures AVANT toute décomposition Unicode.
+
+    L'ordre n'est pas indifférent : après un passage en ASCII, il n'y a plus rien
+    à développer — le caractère a disparu. C'est pour la même raison que
+    `cert_normalize` place ses remplacements après sa suppression d'accents mais
+    avant son filtre de ponctuation.
+
+    ⚠️ `cert_normalize.normalize_text` porte sa PROPRE table, limitée à `Œ` et
+    `Æ`, et ne l'a pas encore adoptée : mesuré le 2026-09-09, les fichiers de
+    certifications contiennent `ß` (6), `ø` (12), `Ø` (63) et `ð` (6) qu'elle ne
+    traite pas. Élargir sa table changerait ses clés de fusion — et son magasin
+    ACCUMULE, ce qui fabriquerait des lignes fantômes exactement comme le
+    2026-09-06 (130 lignes, « AU C?UR D'IAM » face à « AU CŒUR D'IAM »). Cette
+    adoption demande sa propre passe mesurée, avec reconstruction et détection
+    de fantômes. La divergence est donc CONNUE et datée, pas oubliée.
+    """
+    if not s:
+        return ""
+    for ligature, developpe in _LIGATURES.items():
+        if ligature in s:
+            s = s.replace(ligature, developpe)
+    return s
+
+
 def _strip_accents(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
 
@@ -67,7 +124,7 @@ def normalize_name(s: str) -> str:
     `normalize_title`, qui ampute les suffixes « feat. X » : sur un nom d'artiste
     ce serait une mutilation.
     """
-    s = _strip_accents((s or "").lower())
+    s = _strip_accents(developper_ligatures(s or "").lower())
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
 
@@ -168,6 +225,8 @@ def normalize_title(s: str) -> str:
     s = re.sub(r"\s+(?:feat|ft)\.?\s+.*$", "", s, flags=re.IGNORECASE)
     # Unifier/supprimer les apostrophes (typographiques ou droites)
     s = re.sub(r"['’‘`´]", "", s)
+    # AVANT le passage en ASCII : après, la ligature a disparu (cf. la table).
+    s = developper_ligatures(s)
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
     # Points supprimés (acronymes : "S.O.A.B"→"SOAB", "Pt. 2"→"Pt 2")
     s = s.replace(".", "")

@@ -25,14 +25,15 @@ fermeture des browsers (garde-fou : annuler les tasks avant de fermer
 Playwright async).
 """
 
-import logging
 import threading
 
 from playwright.async_api import Playwright as AsyncPlaywright
 from playwright.async_api import async_playwright
 from playwright.sync_api import Playwright, sync_playwright
 
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 _local = threading.local()
 _async_instance: AsyncPlaywright | None = None

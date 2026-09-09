@@ -18,7 +18,6 @@ Pas de rate limit annoncé, on respecte quand même DELAY_BETWEEN_REQUESTS.
 """
 
 import asyncio
-import logging
 import time
 from typing import TYPE_CHECKING
 
@@ -38,6 +37,7 @@ from src.api._text_match import (  # noqa: F401 — ré-export
     _title_match,
 )
 from src.observability import source_usage
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
@@ -47,7 +47,7 @@ try:
 except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "lrclib"

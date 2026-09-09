@@ -14,7 +14,6 @@ neutralisées (RuntimeError) pour éviter tout usage accidentel.
 """
 
 import asyncio
-import logging
 import urllib.parse
 
 from playwright.async_api import Error as PlaywrightError
@@ -24,8 +23,9 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright_async
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+from src.utils.logger import get_logger
 
-logger = logging.getLogger("SpotifyIDScraper")
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "spotify_embed"

@@ -28,6 +28,7 @@ from src.observability.registry import Flow
 from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
 from src.utils import cert_clean_report
 from src.utils.cert_normalize import programme_riaa, riaa_level, riaa_units
+from src.utils.logger import get_logger
 
 
 class RIAADatabaseUpdater:
@@ -72,7 +73,7 @@ class RIAADatabaseUpdater:
         console_handler.setFormatter(logging.Formatter(log_format))
 
         # Configuration du logger
-        self.logger = logging.getLogger("RIAA_Updater")
+        self.logger = get_logger(__name__)
         self.logger.setLevel(logging.INFO)
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)

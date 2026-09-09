@@ -19,7 +19,6 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from src.models import Track
 from src.observability import source_usage
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import (
@@ -28,7 +27,6 @@ from src.utils.llm_extractor import (
     get_shared_extractor,
 )
 from src.utils.logger import get_logger, log_api
-from src.utils.spotify_identity import valider_identite
 from src.utils.title_matching import either_contains_as_words
 
 logger = get_logger(__name__)
@@ -577,92 +575,6 @@ class SongBPMScraper:
         log_api("SongBPM", f"search/{track_title}", False)
         obs.absent("aucun résultat retenu")
         return None
-
-    def enrich_track_data(
-        self, track: Track, force_update: bool = False, artist_tracks: list[Track] | None = None
-    ) -> bool:
-        try:
-            self._ensure_driver()
-            artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-            spotify_id = getattr(track, "spotify_id", None)
-
-            track_data = self.search_track(
-                track.title, artist_name, spotify_id=spotify_id, fetch_details=False
-            )
-            if not track_data:
-                return False
-
-            updated = False
-
-            if (force_update or not track.audio.bpm) and track_data.get("bpm"):
-                track.audio.bpm = track_data["bpm"]
-                updated = True
-
-            key_value = track_data.get("key")
-            if key_value and (force_update or not track.audio.key):
-                track.audio.key = key_value
-                updated = True
-
-            songbpm_sid = track_data.get("spotify_id")
-            # Un ID proposé par SongBPM se valide comme les autres. Ce chemin
-            # est aujourd'hui SANS APPELANT (le provider `enrichment/providers/
-            # songbpm.py` l'a supplanté, avec l'unicité en plus) — raison de plus
-            # pour qu'il ne soit pas la porte dérobée du garde-fou le jour où on
-            # le rebranche.
-            if (
-                songbpm_sid
-                and (force_update or not getattr(track, "spotify_id", None))
-                and valider_identite(track, songbpm_sid)
-            ):
-                track.spotify_id = songbpm_sid
-                updated = True
-
-            if (force_update or not getattr(track, "duration", None)) and track_data.get(
-                "duration"
-            ):
-                duration_str = track_data["duration"]
-                try:
-                    if isinstance(duration_str, str) and ":" in duration_str:
-                        parts = duration_str.split(":")
-                        track.duration = int(parts[0]) * 60 + int(parts[1])
-                        updated = True
-                    elif isinstance(duration_str, (int, float)):
-                        track.duration = int(duration_str)
-                        updated = True
-                except ValueError:
-                    pass
-
-            detail_url = track_data.get("detail_url")
-            if detail_url and key_value:
-                try:
-                    details = self._extract_track_details(detail_url, timeout=30)
-                    if details.get("mode") and (force_update or not track.audio.mode):
-                        track.audio.mode = details["mode"]
-                        updated = True
-                    if details.get("key_from_paragraph") and (force_update or not track.audio.key):
-                        track.audio.key = details["key_from_paragraph"]
-                        updated = True
-                    final_key = track.audio.key
-                    final_mode = track.audio.mode
-                    if final_key and final_mode and (force_update or not track.audio.musical_key):
-                        try:
-                            from src.utils.music_theory import key_mode_to_french_from_string
-
-                            _mk = key_mode_to_french_from_string(final_key, final_mode)
-                            if _mk:  # None si key/mode non interprétables
-                                track.audio.musical_key = _mk
-                                updated = True
-                        except (ValueError, TypeError, KeyError, IndexError):
-                            pass
-                except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
-                    logger.warning(f"⚠️ Erreur mode pour '{track.title}': {e}")
-
-            return updated
-
-        except Exception:
-            # Dernier ressort de la méthode d'application (scrape + parse) → trace.
-            logger.exception(f"❌ SongBPM ERREUR pour {track.title}")
-            return False
 
     def _reset_browser_on_error(self):
         logger.warning("⚠️ Réinitialisation du browser après erreur")

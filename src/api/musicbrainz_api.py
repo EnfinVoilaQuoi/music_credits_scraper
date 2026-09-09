@@ -31,7 +31,6 @@ serait pas le même sans ces mesures :
 
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -40,9 +39,10 @@ import requests
 
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "musicbrainz"

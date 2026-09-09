@@ -7,7 +7,6 @@ l'`AsyncHttpSession` partagée (httpx + rate-limit par domaine) ; la logique
 pure (extraction, vérifications) est commune aux deux voies.
 """
 
-import logging
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -16,13 +15,16 @@ import httpx
 import requests
 
 from src.observability import source_usage
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
 
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Le logging n'est PAS configure ici : `logging.basicConfig()` au chargement du
+# module posait un handler sur la RACINE, d'ou chaque ligne affichee en double
+# avec celui de `coloredlogs` (CLAUDE.md). Une brique de bibliotheque ne
+# configure pas le logging de l'application qui l'importe.
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "deezer"

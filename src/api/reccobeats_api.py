@@ -15,11 +15,12 @@ import requests
 from src.config import RECCOBEATS_NOT_FOUND_TTL_DAYS
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.api.async_http import AsyncHttpSession
 
-logger = logging.getLogger("ReccoBeatsAPI")
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "reccobeats"

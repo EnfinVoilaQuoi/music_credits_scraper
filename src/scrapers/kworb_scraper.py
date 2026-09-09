@@ -13,7 +13,6 @@ Structure des pages artiste (kworb.net/spotify/artist/{id}_{songs|albums}.html) 
     · daily parfois vide
 """
 
-import logging
 import re
 from datetime import datetime
 
@@ -26,8 +25,9 @@ from src.utils.llm_extractor import (
     get_shared_extractor,
     secours_apres_panne,
 )
+from src.utils.logger import get_logger
 
-logger = logging.getLogger("KworbScraper")
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "kworb"

@@ -22,6 +22,7 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils import cert_clean_report
 from src.utils.llm_extractor import secours_apres_panne
+from src.utils.logger import get_logger
 
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
 # vaut alors src/utils/, donc `import src.*` (ajouté pour le fetch anti-Cloudflare)
@@ -254,7 +255,7 @@ class UltratopUpdater:
                 logging.StreamHandler(sys.stdout),
             ],
         )
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
 
     def random_delay(self):
         """Délai aléatoire entre les requêtes"""

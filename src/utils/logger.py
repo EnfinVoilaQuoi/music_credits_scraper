@@ -22,6 +22,7 @@ hors de la file).
 
 import logging
 import queue
+import sys
 from datetime import datetime
 from logging.handlers import QueueHandler, QueueListener
 
@@ -129,19 +130,36 @@ class Logger:
             )
             _console_non_bloquante(logger)
 
-        # Handler fichier
-        log_file = LOGS_DIR / f"{datetime.now().strftime('%Y%m%d')}_scraper.log"
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
-        file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        # Handlers FICHIER — jamais sous pytest.
+        #
+        # La règle « aucun test ne doit lire `data/` réel » valait aussi en
+        # ÉCRITURE, et elle n'était pas posée : la suite versait ses doubles dans
+        # les journaux de production. Mesuré le 2026-09-09 sur la seule journée
+        # du 8 — **23 Mo, 190 128 lignes**, et un journal d'erreurs à ~95 % de
+        # bruit de test : « RuntimeError: navigateur mort », « page morte »,
+        # « BPI : le gabarit du site a changé » (une occurrence par run de suite).
+        #
+        # Ce n'est pas qu'une question de volume. Qui ouvre ce fichier pour
+        # diagnostiquer une panne lit « le gabarit du site a changé » et court
+        # après un fantôme : un journal pollué est PIRE qu'un journal absent,
+        # parce qu'il a l'air d'être une preuve. Même garde que celle des
+        # reconfigurations de `stdout` (`"pytest" not in sys.modules`).
+        if "pytest" not in sys.modules:
+            horodatage = datetime.now().strftime("%Y%m%d")
 
-        # Handler pour les erreurs
-        error_file = LOGS_DIR / f"{datetime.now().strftime('%Y%m%d')}_errors.log"
-        error_handler = logging.FileHandler(error_file, encoding="utf-8")
-        error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(formatter)
-        logger.addHandler(error_handler)
+            file_handler = logging.FileHandler(
+                LOGS_DIR / f"{horodatage}_scraper.log", encoding="utf-8"
+            )
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+            error_handler = logging.FileHandler(
+                LOGS_DIR / f"{horodatage}_errors.log", encoding="utf-8"
+            )
+            error_handler.setLevel(logging.ERROR)
+            error_handler.setFormatter(formatter)
+            logger.addHandler(error_handler)
 
         cls._loggers[name] = logger
         return logger

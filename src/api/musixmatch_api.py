@@ -66,7 +66,6 @@ d'auth, on retombe automatiquement sur `token.get`.
 
 import asyncio
 import json
-import logging
 import os
 import re
 import time
@@ -104,8 +103,9 @@ from src.api._text_match import (  # noqa: F401 — ré-export
 )
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "musixmatch"

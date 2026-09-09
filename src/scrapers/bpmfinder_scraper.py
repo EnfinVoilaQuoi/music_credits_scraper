@@ -13,7 +13,6 @@ l'UI (pas d'API documentée) et on parse les cartes par diff avant/après.
 """
 
 import json
-import logging
 import re
 import threading
 import time
@@ -31,9 +30,10 @@ from src.config import (
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
+from src.utils.logger import get_logger
 from src.utils.music_theory import note_to_pitch_class, parse_mode
 
-logger = logging.getLogger("BPMFinderScraper")
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "bpmfinder"

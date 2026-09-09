@@ -13,10 +13,12 @@ from playwright.async_api import Error as PlaywrightError
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
+from src.enrichment.observation import Observation
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import valider_identite
+from src.utils.track_mapper import _clean_duration
 
 logger = get_logger(__name__)
 # playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
@@ -227,10 +229,24 @@ class SongBpmProvider:
                     f"⚠️ REJET: Spotify ID de SongBPM déjà utilisé: {songbpm_spotify_id}"
                 )
 
-        # Duration
-        if (force_update or not track.duration) and track_data.get("duration"):
-            track.duration = track_data["duration"]
-            logger.info(f"⏱️ Duration ajoutée depuis SongBPM: {track.duration} pour {track.title}")
+        # Durée. SongBPM la rend telle que sa PAGE l'écrit — « 2:30 », du texte.
+        # C'est l'écrivain que le lot B-bis cherchait : les 19 durées mal typées
+        # d'une colonne INTEGER venaient d'ici, recopiées verbatim. Elles passent
+        # désormais par `_clean_duration`, la coercition PARTAGÉE du mapper, AVANT
+        # d'aller où que ce soit — normaliser à l'entrée de `save_track` protégeait
+        # la colonne, pas l'observation, qui aurait gelé « 2:30 » comme valeur.
+        #
+        # Et elle est DÉCLARÉE. Sans cela l'écriture était devenue une suggestion :
+        # arbitrée à la relecture contre des observations qui l'ignoraient, elle
+        # ne survivait que faute de concurrente (mesuré le 2026-09-09 : 12 durées
+        # en colonne sans la moindre observation, toutes écrites ici). C'est la
+        # troisième fois de ce chantier qu'un champ rendu arbitrable oblige à
+        # vérifier que TOUTES ses voies d'écriture émettent une observation.
+        duree = _clean_duration(track_data.get("duration"))
+        if duree and (force_update or not track.duration):
+            ctx.observations.append(Observation("duration", duree, self.name))
+            track.duration = duree
+            logger.info(f"⏱️ Duration ajoutée depuis SongBPM: {duree}s pour {track.title}")
             updated = True
 
         return updated

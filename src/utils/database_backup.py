@@ -9,8 +9,9 @@ from datetime import datetime
 from pathlib import Path
 
 from src.config import DATA_DIR, DATABASE_URL
+from src.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Chemins par défaut alignés sur config.py — l'ancien défaut relatif
 # ("music_credits.db" depuis le cwd) ne pointait sur rien : le backup

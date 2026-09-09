@@ -20,7 +20,6 @@ au `BpmFinderProvider` (montage `DataEnricher`) et ajouter le provider à
 `DataEnricher.aclose_async_scrapers` (fermeture des browsers de la boucle).
 """
 
-import logging
 import re
 import time
 from pathlib import Path
@@ -36,8 +35,9 @@ from src.config import (
 )
 from src.scrapers.bpmfinder_scraper import ANALYZER_URL, BPMFinderScraper
 from src.scrapers.playwright_manager import get_playwright_async
+from src.utils.logger import get_logger
 
-logger = logging.getLogger("BPMFinderScraper")
+logger = get_logger(__name__)
 
 
 class BPMFinderScraperAsync(BPMFinderScraper):

@@ -4,7 +4,6 @@ Recherche directe sur open.spotify.com/search
 """
 
 import json
-import logging
 import re
 import threading
 import urllib.parse
@@ -29,9 +28,10 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import build_spotify_match_prompt, get_shared_extractor
+from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
 
-logger = logging.getLogger("SpotifyIDScraper")
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "spotify_embed"

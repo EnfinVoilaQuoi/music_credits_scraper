@@ -8,7 +8,6 @@ Stratégie quota-optimisée :
   3. Fallback sur le champ `views` formaté de ytmusicapi si pas de clé ou erreur API
 """
 
-import logging
 import re
 import unicodedata
 
@@ -29,9 +28,10 @@ except ImportError:  # pragma: no cover
 
 
 from src.observability import source_usage
+from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
 
-logger = logging.getLogger("YTMusicAPI")
+logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "ytmusic"

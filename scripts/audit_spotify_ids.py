@@ -27,7 +27,6 @@ Usage :
 import argparse
 import json
 import sys
-import time
 
 # Fix encodage Windows (règle projet : reconfigure, jamais de re-wrapping)
 if sys.platform == "win32":
@@ -35,13 +34,8 @@ if sys.platform == "win32":
 
 
 from src.utils.data_manager import DataManager
-from src.utils.spotify_audit import lignes_a_verifier, track_de_la_ligne
-from src.utils.spotify_identity import (
-    TOLERANCE_DUREE,
-    artiste_etranger,
-    identite_concorde,
-    lire_identite_http,
-)
+from src.utils.spotify_audit import lignes_a_verifier, verifier_lignes
+from src.utils.spotify_identity import TOLERANCE_DUREE
 
 
 def main() -> int:
@@ -62,37 +56,23 @@ def main() -> int:
     lignes = lignes_a_verifier(dm.engine, args.artiste, args.limite)
     print(f"🔎 {len(lignes)} identifiant(s) à vérifier sur l'embed Spotify\n")
 
-    ecarts: list[dict] = []
-    illisibles = 0
-    for i, ligne in enumerate(lignes, start=1):
-        identite = lire_identite_http(ligne["sid"])
-        if identite is None:
-            # Une page illisible ne prouve RIEN sur l'ID — elle n'accuse personne
-            # (même raisonnement qu'`absent` côté observabilité).
-            illisibles += 1
-        else:
-            track = track_de_la_ligne(ligne)
-            ok, motif = identite_concorde(track, identite, tolerance=args.tolerance)
-            if not ok:
-                ecarts.append(
-                    {
-                        "track_id": ligne["id"],
-                        "artiste": ligne["artiste"],
-                        "titre": ligne["title"],
-                        "spotify_id": ligne["sid"],
-                        "principal": bool(ligne["principal"]),
-                        "motif": motif,
-                        "artiste_etranger": artiste_etranger(track, identite),
-                        "spotify": identite,
-                    }
-                )
-        if i % 50 == 0:
-            print(f"   … {i}/{len(lignes)}  ({len(ecarts)} écart(s))")
-        time.sleep(args.pause)
+    def avancement(faits: int, total: int) -> None:
+        if faits % 50 == 0:
+            print(f"   … {faits}/{total}")
+
+    # Le balayage vit dans `spotify_audit` : la fenêtre GUI « Vérifier les
+    # identifiants Spotify » l'emprunte aussi, et deux copies d'un verdict
+    # divergent. Une page illisible n'accuse personne — elle est comptée à
+    # part, même raisonnement qu'`absent` côté observabilité.
+    rapport = verifier_lignes(
+        lignes, tolerance=args.tolerance, pause=args.pause, progression=avancement
+    )
+    ecarts = rapport["ecarts"]
+    illisibles = rapport["illisibles"]
 
     etrangers = [e for e in ecarts if e["artiste_etranger"]]
     print(f"\n{'─' * 78}")
-    print(f"Vérifiés : {len(lignes) - illisibles}   ·   illisibles : {illisibles}")
+    print(f"Vérifiés : {rapport['verifies']}   ·   illisibles : {illisibles}")
     print(f"Écarts : {len(ecarts)}   ·   dont ARTISTE ÉTRANGER : {len(etrangers)}\n")
     for e in ecarts:
         marque = "🚨" if e["artiste_etranger"] else "  "

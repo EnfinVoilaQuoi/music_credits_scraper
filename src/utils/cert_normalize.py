@@ -35,6 +35,13 @@ def normalize_text(text: str) -> str:
     text = text.upper()
 
     # ÉTAPE 4: Remplacer les caractères spéciaux et ligatures
+    #
+    # ⚠️ Cette table est un SOUS-ENSEMBLE de `title_matching._LIGATURES` : elle
+    # ignore `ß`, `ø`, `Ø`, `ð`, présents dans les fichiers de certifications
+    # (mesuré le 2026-09-09 : 6, 12, 63 et 6 occurrences). L'aligner changerait
+    # les clés de `merge_canonical`, et ce magasin ACCUMULE — on fabriquerait des
+    # lignes fantômes comme le 2026-09-06. À faire dans une passe dédiée, avec
+    # reconstruction du clean et comptage des fantômes, pas en passant.
     replacements = {
         "&": "AND",
         "$": "S",

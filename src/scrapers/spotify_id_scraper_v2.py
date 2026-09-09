@@ -24,6 +24,7 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
+from src.config import settings
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
@@ -35,6 +36,10 @@ logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "spotify_embed"
+
+#: Plancher de pertinence sous lequel AUCUN identifiant n'est retenu
+#: (`Settings.spotify_id_min_relevance`, calibré sur données — cf. config.py).
+_MIN_RELEVANCE = settings.spotify_id_min_relevance
 
 #: User-Agent des lectures d'embed en `requests` NU (artistes, identité). Une
 #: seule définition : deux copies divergent, et celle qu'on ne regarde pas est
@@ -146,6 +151,35 @@ class SpotifyIDScraper:
 
     def _get_cache_key(self, artist: str, title: str) -> str:
         return f"{artist.lower().strip()}::{title.lower().strip()}"
+
+    def oublier_identifiant(self, spotify_id: str) -> int:
+        """Retire un identifiant du cache, sous TOUTES les requêtes qui le servent.
+
+        Pendant du rejet d'un identifiant en base. Sans lui, le cache le
+        resservait sans toucher au réseau — d'où les mêmes refus run après run :
+        mesuré le 2026-09-09, 29 identifiants du cache répondaient à plusieurs
+        requêtes, dont un à **onze** titres différents, et
+        `3VXzVGAWFSrH47dBtTOPws` répondait encore à six requêtes après avoir été
+        retiré de la base la veille.
+
+        C'est le troisième des gestes indissociables du rejet YouTube — oublier
+        la vidéo, effacer la colonne, PURGER LE CACHE DE RECHERCHE — dont il
+        manquait ici l'équivalent. La clé étant `artiste::titre` et non l'ID, il
+        faut balayer les valeurs : un même identifiant fautif peut répondre à
+        des dizaines de requêtes sans rapport.
+
+        Returns:
+            Nombre d'entrées de cache retirées.
+        """
+        cles = [k for k, v in self.cache.items() if v == spotify_id]
+        for cle in cles:
+            del self.cache[cle]
+        if cles:
+            self._save_cache()
+            logger.info(
+                f"🧹 Cache Spotify ID : {len(cles)} requête(s) oubliée(s) pour {spotify_id}"
+            )
+        return len(cles)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Logique pure (inchangée)
@@ -335,9 +369,37 @@ class SpotifyIDScraper:
             # Fallback LLM : si le choix heuristique est ambigu, demander au LLM
             if len(found_tracks) > 1 and best["relevance"] < 0.8:
                 llm_choice = self._select_track_with_llm(artist, title, found_tracks)
-                if llm_choice is not None:
+                # Le choix du LLM franchit le plancher LUI AUSSI. Sans cette
+                # condition il réintroduirait par la bande ce que le seuil vient
+                # d'écarter — il choisit un INDEX parmi les candidats présentés,
+                # y compris les mauvais.
+                if llm_choice is not None and llm_choice["relevance"] >= _MIN_RELEVANCE:
                     best = llm_choice
                     logger.info(f"🤖 SpotifyID LLM: choix affiné → {best['id']}")
+
+            # PLANCHER de pertinence. La recherche Spotify rend TOUJOURS quelque
+            # chose — titres voisins, recommandations — donc `found_tracks` n'est
+            # jamais vide et, sans plancher, un identifiant était toujours
+            # produit : littéralement `found_tracks[0]`, même à 0,0. Mesuré le
+            # 2026-09-09 sur 36 requêtes réelles : **36 identifiants rendus, 19
+            # faux** (53 %), et 16 des 17 sous 0,60 étaient tous faux.
+            #
+            # Refuser est un BON résultat : « pas sur Spotify » est un verdict
+            # légitime (freestyles, Booska, lives, inédits), et
+            # `spotify_id_checked_at` (e17) le date pour qu'on ne cherche pas en
+            # boucle. Le garde-fou de justesse (`spotify_identity`) reste la
+            # dernière ligne ; ce plancher lui épargne le travail et surtout
+            # empêche le cache de se remplir de faux.
+            if best["relevance"] < _MIN_RELEVANCE:
+                logger.warning(
+                    f"❌ Meilleur candidat trop peu pertinent pour '{title}' : "
+                    f"{best['id']} à {best['relevance']:.2f} < {_MIN_RELEVANCE:.2f} — "
+                    f"aucun identifiant retenu"
+                )
+                obs.absent(f"aucun candidat pertinent pour '{title}'")
+                self.cache[cache_key] = "not_found"
+                self._save_cache()
+                return None
 
             sid = best["id"]
             logger.info(f"✅ SÉLECTIONNÉ: {sid} (relevance: {best['relevance']:.2f})")

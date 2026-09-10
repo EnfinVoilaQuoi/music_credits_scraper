@@ -13,7 +13,6 @@ actives, et niveaux/catégories hors référentiel (insensible à la casse).
 
 from __future__ import annotations
 
-import re
 import sys
 from collections import defaultdict
 from datetime import datetime
@@ -22,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.utils.cert_coverage import annee_assez_dense
+from src.utils.cert_normalize import NIVEAUX_BRMA, brma_niveau_connu
 
 REQUIRED_COLS = ["artist", "title", "category", "certification_level", "certification_date"]
 # Référentiels en MINUSCULES : ce sont des jeux de COMPARAISON (tout est
@@ -31,36 +31,18 @@ REQUIRED_COLS = ["artist", "title", "category", "certification_level", "certific
 # morte a traîné jusqu'au 2026-09-03 ; y brancher la formule SNEP signalerait
 # 5 148 des 5 826 lignes réelles (« Or », « Platine ») — mesuré, ne pas refaire.
 VALID_CATEGORIES = {"singles", "albums"}
-VALID_LEVELS = {
-    "or",
-    "platine",
-    "double platine",
-    "triple platine",
-    "quadruple platine",
-    "diamant",
-    "double diamant",
-    "triple diamant",
-}
-# Ultratop note les multi-platine/or/diamant en multiplicateur (ex: '2x Platine',
-# '12x Platine') — niveaux VALIDES à reconnaître en plus du référentiel ci-dessus.
-_MULTI_LEVEL_RE = re.compile(r"^\d+\s*x\s+(or|platine|diamant)$", re.IGNORECASE)
 
+#: Ré-exports : le vocabulaire belge vit dans `cert_normalize`, avec ceux des
+#: trois autres organismes. Il était le seul rangé ailleurs que ses pairs, et
+#: portait sa propre copie du découpage « Nx » — la quatrième du projet.
+VALID_LEVELS = NIVEAUX_BRMA
 
-def niveau_connu(level: str) -> bool:
-    """Ce libellé appartient-il au vocabulaire de certification belge ?
-
-    Rendue PUBLIQUE le 2026-09-07 pour que le repli LLM d'`update_brma` valide
-    ses paliers contre CE référentiel et non contre une seconde liste. Un verdict
-    ne se calcule qu'à un endroit : le validateur RIAA avait sa propre liste de
-    niveaux, restée au vocabulaire américain, et déclarait « anomalies » sur des
-    awards latins parfaitement valides.
-    """
-    return _level_known(level, {lvl.lower() for lvl in VALID_LEVELS})
-
-
-def _level_known(level: str, lvl_known: set) -> bool:
-    lvl = (level or "").strip()
-    return lvl.lower() in lvl_known or bool(_MULTI_LEVEL_RE.match(lvl))
+#: Rendue PUBLIQUE le 2026-09-07 pour que le repli LLM d'`update_brma` valide ses
+#: paliers contre CE référentiel et non contre une seconde liste. Un verdict ne
+#: se calcule qu'à un endroit : le validateur RIAA avait sa propre liste de
+#: niveaux, restée au vocabulaire américain, et déclarait « anomalies » sur des
+#: awards latins parfaitement valides.
+niveau_connu = brma_niveau_connu
 
 
 LOW_MONTH_THRESHOLD = 3
@@ -171,9 +153,9 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
     cats = set(c for c in category.dropna() if c)
     lvls = set(lvl for lvl in level.dropna() if lvl)
     cat_known = {c.lower() for c in VALID_CATEGORIES}
-    lvl_known = {lvl.lower() for lvl in VALID_LEVELS}
+    # (référentiel partagé — cf. `niveau_connu`)
     report["invalid_categories"] = sorted(c for c in cats if c.lower() not in cat_known)
-    report["invalid_levels"] = sorted(lvl for lvl in lvls if not _level_known(lvl, lvl_known))
+    report["invalid_levels"] = sorted(lvl for lvl in lvls if not niveau_connu(lvl))
 
     # Couverture temporelle
     if not valid_dates.empty:

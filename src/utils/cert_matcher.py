@@ -17,7 +17,6 @@ lignes au même format ; le matcher ne change pas.
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +25,9 @@ import pandas as pd
 from src.config import DATA_PATH
 from src.utils.cert_normalize import (
     PROGRAMME_LATIN,
+    RANG_PALIERS,
+    date_riaa,
+    decouper_multiplicateur,
     programme_riaa,
     riaa_level,
 )
@@ -92,35 +94,11 @@ _FLAG = {"SNEP": "🇫🇷", "BRMA": "🇧🇪", "RIAA": "🇺🇸"}
 
 # Priorité d'affichage (plus petit = plus haut). Les multi-platine BE sont
 # classés juste au-dessus de Platine selon le multiplicateur.
-_RANK = {
-    "quadruple diamant": 1,
-    "triple diamant": 2,
-    "double diamant": 3,
-    "diamant": 4,
-    "triple platine": 5,
-    "double platine": 6,
-    "platine": 7,
-    "triple or": 8,
-    "double or": 9,
-    "or": 10,
-    # RIAA (anglais)
-    "diamond": 4,
-    "platinum": 7,
-    "gold": 10,
-    # RIAA — programme LATIN. Même ORDRE que les autres échelles (le diamant
-    # au-dessus du platine, le platine au-dessus de l'or), et c'est tout ce que
-    # ce rang exprime : il ne sert qu'à trier des certifs ENTRE ELLES, à
-    # l'intérieur d'un même corps. La comparaison entre échelles se fait en
-    # unités (`cert_normalize.riaa_units`), pas ici — un Platino et un Platinum
-    # partagent ce rang 7 sans valoir la même chose.
-    "diamante": 4,
-    "platino": 7,
-    "oro": 10,
-    # BPI (UK) : le Silver est un palier SOUS l'or, que les trois autres corps
-    # n'ont pas. Il ne s'insère donc pas dans l'échelle existante, il la
-    # prolonge par le bas.
-    "silver": 11,
-}
+#: Ré-export : le rang des paliers vit dans `cert_normalize`, avec les autres
+#: référentiels. `cert_artist` allait le chercher ICI, sous son nom PRIVÉ — la
+#: façon la plus discrète de créer une dépendance qu'aucun outil ne signale.
+#: Nom local conservé pour les appelants et les tests.
+_RANK = RANG_PALIERS
 
 
 def _norm_cat(cat: str) -> str:
@@ -128,18 +106,14 @@ def _norm_cat(cat: str) -> str:
 
 
 def _to_iso_date(s: str) -> str:
-    """« October 17, 2017 » → « 2017-10-17 ». Laisse tel quel si déjà ISO."""
-    s = (s or "").strip()
-    if not s or s.lower() == "none":
-        return ""
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
-        return s
-    for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(s.title() if "," in s else s, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return s
+    """« October 17, 2017 » → « 2017-10-17 », la valeur telle quelle si illisible.
+
+    Ré-export : le lecteur de dates RIAA vit dans `cert_normalize`. Il en
+    existait TROIS copies, qui divergeaient sur ce seul point — que faire d'une
+    date illisible — sans que rien ne dise laquelle avait raison. C'est
+    désormais un paramètre nommé, décidé au site d'appel.
+    """
+    return date_riaa(s, verbatim=True)
 
 
 #: Ré-export : la normalisation des niveaux RIAA vit dans `cert_normalize`
@@ -401,16 +375,18 @@ class CertMatcher:
         )
 
     def _level_rank(self, level: str) -> float:
+        """Rang d'affichage d'un palier. Le découpage « Nx » est PARTAGÉ.
+
+        Il était refait ici avec sa propre liste de paliers multipliables, une
+        troisième copie de la même expression rationnelle.
+        """
         lvl = (level or "").strip().lower()
         if lvl in _RANK:
             return _RANK[lvl]
-        m = re.match(
-            r"(\d+)\s*x\s+(platine|platinum|platino|or|gold|oro|diamant|diamond|diamante)", lvl
-        )
-        if m:
-            base = _RANK[m.group(2)]
-            n = int(m.group(1))
-            return base - min(n - 1, 9) * 0.1  # un cran au-dessus du palier simple
+        multiplicateur, palier = decouper_multiplicateur(lvl)
+        if multiplicateur > 1 and palier in _RANK:
+            # Un cran au-dessus du palier simple, sans jamais le dépasser.
+            return _RANK[palier] - min(multiplicateur - 1, 9) * 0.1
         return 99.0
 
     def _track_match_indices(self, a: str, t: str) -> list[int]:

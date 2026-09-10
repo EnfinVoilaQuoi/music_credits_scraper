@@ -29,9 +29,9 @@ d'un artiste précisément là où il collabore le plus avec son groupe.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 
+from src.utils.cert_normalize import RANG_PALIERS, decouper_multiplicateur
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -220,17 +220,16 @@ def _ordre_palier(niveau: str) -> tuple:
 
     Deux composantes, parce que les libellés en portent deux : le palier de
     base (Or < Platine < Diamant) et son multiplicateur. Le rang de base vient
-    de `cert_matcher._RANK` — le référentiel partagé, où le PLUS PETIT nombre
-    est le plus haut palier, d'où le signe. Le multiplicateur, lui, doit être
-    lu comme un NOMBRE : trié en texte, « 10x » se range avant « 2x ».
-    """
-    from src.utils.cert_matcher import _RANK
+    de `cert_normalize.RANG_PALIERS`, où le PLUS PETIT nombre est le plus haut
+    palier, d'où le signe. Le multiplicateur, lui, doit être lu comme un
+    NOMBRE : trié en texte, « 10x » se range avant « 2x ».
 
-    lvl = (niveau or "").strip().lower()
-    multiplicateur = 1
-    if (m := re.match(r"(\d+)\s*x\s+(.*)", lvl)) is not None:
-        multiplicateur, lvl = int(m.group(1)), m.group(2).strip()
-    return (-_RANK.get(lvl, 99), multiplicateur)
+    Le rang était auparavant importé de `cert_matcher._RANK` — un nom PRIVÉ
+    d'un autre module — et le découpage « Nx » refait ici. Deux référentiels
+    pour un seul verdict, dont l'un ne s'annonçait même pas comme partagé.
+    """
+    multiplicateur, palier = decouper_multiplicateur(niveau)
+    return (-RANG_PALIERS.get(palier, 99), multiplicateur)
 
 
 def _paliers(certs: list[dict]) -> list[str]:

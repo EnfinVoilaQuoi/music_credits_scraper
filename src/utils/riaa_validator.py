@@ -13,7 +13,6 @@ niveaux hors référentiel.
 
 from __future__ import annotations
 
-import re
 import sys
 from collections import defaultdict
 from datetime import datetime
@@ -22,37 +21,39 @@ from pathlib import Path
 import pandas as pd
 
 from src.utils.cert_coverage import annee_assez_dense
-from src.utils.cert_normalize import riaa_units
+from src.utils.cert_normalize import date_riaa, riaa_level, riaa_units
 
 REQUIRED_COLS = ["Artist", "Title", "Certification_Date", "Certification_Type"]
 LOW_MONTH_THRESHOLD = 3
 
-_MULTI_RE = re.compile(r"^\d+\s*x\s*(multi-?)?platinum$", re.I)
-
 
 def _to_iso(s: str) -> str:
-    s = (s or "").strip()
-    if not s or s.lower() == "none":
-        return ""
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
-        return s
-    for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(s.title() if "," in s else s, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return ""
+    """Date RIAA → ISO, "" si ILLISIBLE.
+
+    Le "" est ce qui permet de compter les dates illisibles : ce validateur est
+    le seul des trois appelants à en avoir besoin, d'où le défaut par défaut de
+    `date_riaa`. Les deux autres passent `verbatim=True`.
+    """
+    return date_riaa(s)
 
 
 def _level_norm(lvl: str) -> str:
-    """« 4x Multi-Platinum » → « 4X PLATINUM » (clé de dédup/référentiel)."""
-    lvl = (lvl or "").strip()
-    m = re.match(r"(\d+)\s*x\s*multi-?platinum", lvl, re.I)
-    if m:
-        return f"{m.group(1)}X PLATINUM"
-    if re.fullmatch(r"multi-?platinum", lvl, re.I):
-        return "PLATINUM"
-    return re.sub(r"\s+", " ", lvl).strip().upper()
+    """Niveau canonique en MAJUSCULES (clé de dédup du validateur).
+
+    **Délègue à `cert_normalize`**, comme `_level_known` le fait déjà pour le
+    référentiel. Cette fonction en gardait une copie privée, restée au seul
+    vocabulaire américain : elle ne connaissait que « platinum », pas
+    « platino ». Le nettoyeur et le validateur portaient donc deux jugements
+    différents sur le même fichier — et ils avaient DÉJÀ divergé, mesuré sur le
+    brut réel du 2026-09-09 : « 1x Multi-Platinum » (38 lignes) que le nettoyeur
+    ramène à « Platinum » et que cette copie gardait distinct sous « 1X
+    PLATINUM ».
+
+    Le verdict n'était pas encore faux, parce que ce validateur lit le CLEAN,
+    déjà canonisé. Il l'aurait été le jour où on l'aurait pointé sur le brut —
+    ce que la fenêtre GUI fait déjà pour SNEP.
+    """
+    return riaa_level(lvl).upper()
 
 
 def _level_known(lvl: str) -> bool:

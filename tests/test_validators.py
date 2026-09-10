@@ -4,7 +4,7 @@ et du formateur LRC de ytmusic_api."""
 import pytest
 
 from src.api.ytmusic_api import YTMusicAPI
-from src.utils.brma_validator import _level_known as brma_level_known
+from src.utils.brma_validator import niveau_connu as brma_niveau_connu
 from src.utils.riaa_validator import _level_known as riaa_level_known
 from src.utils.riaa_validator import _level_norm, _to_iso
 
@@ -35,7 +35,17 @@ class TestRiaaLevelNorm:
             ("4x Multi-Platinum", "4X PLATINUM"),
             ("Multi-Platinum", "PLATINUM"),
             ("gold", "GOLD"),
-            ("  Double   Or ", "DOUBLE OR"),  # espaces normalisés + majuscules
+            # Le programme LATIN, que la copie privée du validateur ne
+            # connaissait pas — elle ne savait lire que « platinum ».
+            ("2x Multi-Platino", "2X PLATINO"),
+            ("Multi-Platino", "PLATINO"),
+            # « 1x » est un multiplicateur qui ne multiplie rien : le nettoyeur
+            # le ramène au palier simple, le validateur le gardait distinct.
+            ("1x Multi-Platinum", "PLATINUM"),
+            # Hors vocabulaire RIAA : PRÉSERVÉ tel quel (espaces normalisés,
+            # majuscules). Déléguer ne doit pas mangler ce qu'on ne connaît pas.
+            ("  Double   Or ", "DOUBLE OR"),
+            ("Titane", "TITANE"),
         ],
     )
     def test_normalisation(self, entree, attendu):
@@ -54,21 +64,26 @@ class TestRiaaLevelKnown:
         assert not riaa_level_known(invalide)
 
 
-class TestBrmaLevelKnown:
-    REFERENTIEL = {"or", "platine", "diamant"}
+class TestBrmaNiveauConnu:
+    """Le prédicat belge, sur le VRAI référentiel.
 
-    def test_niveau_du_referentiel(self):
-        assert brma_level_known("Or", self.REFERENTIEL)
-        assert brma_level_known("PLATINE", self.REFERENTIEL)
+    Il prenait le référentiel en PARAMÈTRE, et ces tests lui injectaient un jeu
+    à eux (`{"or", "platine", "diamant"}`) — ils vérifiaient donc la mécanique
+    du prédicat sans jamais toucher au vocabulaire réel. « Quadruple Platine »,
+    qui existe chez Ultratop, n'était couvert par rien. Depuis le 2026-09-09 le
+    vocabulaire vit dans `cert_normalize` et le prédicat n'a plus de paramètre :
+    les tests portent sur ce qui tourne.
+    """
 
-    def test_multiplicateur_ultratop(self):
-        # '2x Platine', '12x Or' : notés en multiplicateur sur Ultratop
-        assert brma_level_known("2x Platine", self.REFERENTIEL)
-        assert brma_level_known("12x Or", self.REFERENTIEL)
+    @pytest.mark.parametrize(
+        "valide", ["Or", "PLATINE", "Quadruple Platine", "2x Platine", "12x Or", "3x Diamant"]
+    )
+    def test_niveaux_valides(self, valide):
+        assert brma_niveau_connu(valide)
 
-    def test_niveau_inconnu(self):
-        assert not brma_level_known("Ruby", self.REFERENTIEL)
-        assert not brma_level_known("", self.REFERENTIEL)
+    @pytest.mark.parametrize("invalide", ["Ruby", "", "2x Quadruple Platine"])
+    def test_niveaux_invalides(self, invalide):
+        assert not brma_niveau_connu(invalide)
 
 
 class TestFormatLrc:

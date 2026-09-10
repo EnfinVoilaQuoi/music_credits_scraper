@@ -311,7 +311,9 @@ def _default_csv_path() -> Path:
     return Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
 
 
-def main():
+def main() -> int:
+    """Rend le CODE DE SORTIE : il valait 0 en toutes circonstances, y compris
+    sur un rapport porteur d'`error`. La GUI ne décide que sur ce code."""
     import argparse
 
     # Forcer l'UTF-8 sans ré-emballer stdout (un nouveau TextIOWrapper sur
@@ -338,7 +340,8 @@ def main():
     path = Path(args.path) if args.path else _default_csv_path()
     report = clean_snep_csv(path, apply=args.apply, reimport=not args.no_reimport)
     print(format_report(report))
+    return 1 if report.get("error") else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

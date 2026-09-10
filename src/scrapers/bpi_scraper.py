@@ -415,6 +415,11 @@ class BpiScraper:
         self._http = http
         self._proprietaire = http is None  # « qui crée ferme »
         self.base_url = base_url.rstrip("/")
+        #: Une collecte a-t-elle buté sur `BPI_MAX_PAGES` ? Le plafond était
+        #: signalé au log et à l'observabilité, mais **pas à l'appelant** :
+        #: `full_sweep` annonçait « ✅ Balayage terminé » sur un corpus tronqué.
+        #: Même défaut que RIAA, corrigé le même jour (2026-09-09).
+        self.tronque: bool = False
 
     # -- transport -----------------------------------------------------------
     def _session(self) -> AsyncHttpSession:
@@ -499,9 +504,10 @@ class BpiScraper:
             lignes.extend(lot)
             page += 1
         else:
+            self.tronque = True
             logger.error(
                 f"BPI : plafond de {plafond} pages atteint sans page vide — "
-                "collecte possiblement TRONQUÉE (relever `bpi_max_pages`)."
+                "collecte TRONQUÉE (relever `bpi_max_pages`)."
             )
             obs.fail(IssueKind.PARSE, f"plafond de pagination atteint ({plafond})")
         return lignes
@@ -588,6 +594,18 @@ class BpiScraper:
                     break
                 trouves.extend(lot)
                 page += 1
+            else:
+                # La même boucle que `_collecter`, mais elle n'avait AUCUN
+                # garde-fou : ni log, ni verdict, ni drapeau. Un plafond
+                # inatteignable en pratique ne dispense pas de le dire —
+                # c'est justement ce silence qui rend une troncature muette
+                # le jour où le site change de pagination.
+                self.tronque = True
+                logger.error(
+                    f"BPI : annuaire « {nom} » — plafond de {BPI_MAX_PAGES} pages "
+                    "atteint, liste d'entités TRONQUÉE."
+                )
+                obs.fail(IssueKind.PARSE, f"plafond annuaire atteint ({BPI_MAX_PAGES})")
 
             retenus = [
                 (ident, libelle)

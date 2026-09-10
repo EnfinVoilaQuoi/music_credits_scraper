@@ -307,6 +307,20 @@ class RIAAScraperV2:
 
     def __init__(self, headless: bool = True):
         self.headless = headless
+        #: Le dernier rendu a-t-il buté sur `_MAX_LOAD_MORE` ? **C'est le signal
+        #: de troncature**, et il doit REMONTER : jusqu'au 2026-09-09 il ne
+        #: vivait que dans un `logger.warning`, si bien qu'un balayage de 14 h
+        #: rendait 6 029 lignes sur ~37 000 en affichant un ✅ franc. L'appelant
+        #: qui découpe une fenêtre (`update_riaa.fetch_periode`) le lit après
+        #: chaque tranche pour décider s'il faut redécouper.
+        self.tronque: bool = False
+        #: Le dernier rendu a-t-il ÉCHOUÉ ? Distinct de `tronque`, et distinct
+        #: d'un résultat vide : un scrape qui rend `[]` parce que la page n'a
+        #: pas été rendue est indiscernable d'une période réellement creuse, et
+        #: l'appelant qui découpe une fenêtre en tirait la pire conclusion —
+        #: avancer le curseur (fenêtre définitivement sautée) puis RALLONGER la
+        #: tranche suivante, l'échec accélérant ainsi le balayage.
+        self.lecture_echouee: bool = False
 
     # ------------------------------------------------------------------ public
     @staticmethod
@@ -436,11 +450,16 @@ class RIAAScraperV2:
         # Les tentatives sont collectées de l'autre côté du pont puis rejouées ICI,
         # seul endroit qui partage le carrier de l'observation (cf. `_Tentatives`).
         tentatives = _Tentatives()
+        self.tronque = False
+        self.lecture_echouee = False
         try:
-            return async_loop.run_sync(self._render_async(url, load_all, get_details, tentatives))
+            html = async_loop.run_sync(self._render_async(url, load_all, get_details, tentatives))
+            self.lecture_echouee = html is None
+            return html
         except (PatchrightError, RuntimeError, OSError) as e:
             tentatives.note(classify(exc=e), f"rendu: {type(e).__name__}")
             logger.error(f"RIAA: rendu patchright échoué : {e}")
+            self.lecture_echouee = True
             return None
         finally:
             tentatives.rejouer()
@@ -551,7 +570,8 @@ class RIAAScraperV2:
             if not await _attendre_croissance(page, before):
                 break
         if clicks >= _MAX_LOAD_MORE:
-            logger.warning(f"RIAA : plafond de {_MAX_LOAD_MORE} pages atteint (résultat tronqué ?)")
+            self.tronque = True
+            logger.warning(f"RIAA : plafond de {_MAX_LOAD_MORE} pages atteint (résultat TRONQUÉ)")
         total = len(await page.query_selector_all("tr.table_award_row"))
         logger.info(f"RIAA : {clicks} page(s) supplémentaire(s), {total} ligne(s) au total")
 
@@ -619,9 +639,34 @@ def _norm_date(d: str) -> str:
     return d
 
 
+#: Un saut de ligne (avec les blancs qui l'entourent) → un espace. Voir `_plat`.
+_SAUT_DE_LIGNE = re.compile(r"\s*[\r\n\t]+\s*")
+
+
+def _plat(s: str) -> str:
+    """Aplatit les blancs d'un texte lu dans la page.
+
+    `get_text(strip=True)` ne retire que les blancs de BORD : un retour à la
+    ligne au MILIEU d'une cellule survit, alors que c'est un artefact du rendu
+    HTML et jamais une donnée. Il a coûté deux fois, mesuré les 08 et
+    09/09/2026 :
+
+    - dans le TITRE, un libellé à saut de ligne ne se rapproche JAMAIS d'un
+      morceau (« SNOW THA PRODUCT: BZRP MUSIC\nSESSIONS, VOL. 39 ») ;
+    - dans le LABEL, il rend instable la clé de dédup du brut, qui est une
+      égalité EXACTE : le même retour à la ligne relu tantôt en CRLF tantôt en
+      LF fabrique un doublon parfait. L'unique « ajout » du balayage de 14 h du
+      09/09 était ce fantôme-là (YUNG KAI – BLUE), et trois lignes avaient déjà
+      paru « disparaître » d'un run à l'autre pour la même raison.
+
+    D'où l'aplatissement à la LECTURE, au seul endroit où le texte entre.
+    """
+    return _SAUT_DE_LIGNE.sub(" ", s or "").strip()
+
+
 def _txt(node, sel) -> str:
     el = node.select_one(sel)
-    return el.get_text(strip=True) if el else ""
+    return _plat(el.get_text(strip=True)) if el else ""
 
 
 def _verifier_fenetre(resultats: list[dict], start: str, end: str, obs) -> None:
@@ -666,7 +711,7 @@ def _parse_main(row) -> dict | None:
     """
     artist = _txt(row, "td.tw-artists_cell") or _txt(row, "td.artists_cell")
     fmt = _txt(row, "td.format_cell").replace("MORE DETAILS", "").strip()
-    cells = [c.get_text(strip=True) for c in row.select("td.others_cell")]
+    cells = [_plat(c.get_text(strip=True)) for c in row.select("td.others_cell")]
     cells = [c for c in cells if c]
     if not cells:
         return None
@@ -709,7 +754,7 @@ def _parse_timeline_details(det) -> dict:
     """Bloc « Label / Format / Genre / Released on » de la timeline."""
     infos = {}
     for bloc in det.select(".tw-molecule-timeline-details > div"):
-        champs = [d.get_text(strip=True) for d in bloc.select("div")]
+        champs = [_plat(d.get_text(strip=True)) for d in bloc.select("div")]
         if len(champs) >= 2:
             infos[champs[0].lower()] = champs[1]
     return infos
@@ -755,7 +800,7 @@ def _parse_details_legacy(det, base: dict) -> list[dict]:
     """Ancien bloc `tr.content_recent_table` — gardé pour les vieilles fixtures."""
     history = []
     for cr in det.select("tr.content_recent_table"):
-        cells = [c.get_text(strip=True) for c in cr.select("td")]
+        cells = [_plat(c.get_text(strip=True)) for c in cr.select("td")]
         lvl_cell = next((c for c in cells if "|" in c), "")
         if lvl_cell:
             parts = lvl_cell.split("|", 1)

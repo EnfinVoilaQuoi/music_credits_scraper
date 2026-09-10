@@ -30,10 +30,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -41,7 +41,7 @@ from src.concurrency import async_loop
 from src.observability import repository as usage_repository
 from src.observability.registry import Flow
 from src.scrapers.bpi_scraper import BpiScraper
-from src.utils import cert_clean_report
+from src.utils import cert_clean_report, cert_store
 from src.utils.cert_normalize import bpi_level, bpi_units
 from src.utils.logger import get_logger
 
@@ -119,13 +119,17 @@ def _load_bpi_raw() -> pd.DataFrame:
     return pd.DataFrame(columns=CERTIF_COLUMNS)
 
 
-def _write_bpi_raw(df: pd.DataFrame) -> None:
-    """Écrit le brut, backup horodaté avant toute réécriture."""
+def _write_bpi_raw(df: pd.DataFrame, backup: bool = True) -> None:
+    """Écrit le brut, backup horodaté avant réécriture.
+
+    `backup=False` : l'unité de travail qu'on protège est le RUN, pas le vidage.
+    Un `--full` vide son lot tous les N titres ; sauvegarder à chaque fois
+    laissait une vingtaine de copies de plusieurs Mo, et le bruit finit par
+    cacher la sauvegarde qui compte (règle tranchée sur RIAA le 2026-09-09).
+    """
     _BPI_DIR.mkdir(parents=True, exist_ok=True)
-    if BPI_RAW.exists():
-        bdir = _BPI_DIR / "backups"
-        bdir.mkdir(exist_ok=True)
-        shutil.copy2(BPI_RAW, bdir / f"bpi_raw_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    if backup:
+        cert_store.sauvegarder(BPI_RAW)
     df.to_csv(BPI_RAW, index=False, encoding="utf-8-sig")
 
 
@@ -246,7 +250,9 @@ def _write_bpi_meta(source: str = "GLOBAL", count: int | None = None) -> None:
 _COLONNES_IDENTITE = [c for c in CERTIF_COLUMNS if c != "scraped_at"]
 
 
-def _merge_certif_csv(new_rows: list[dict], source: str = "GLOBAL") -> tuple[int, int]:
+def _merge_certif_csv(
+    new_rows: list[dict], source: str = "GLOBAL", backup: bool = True
+) -> tuple[int, int]:
     """Accumule dans le BRUT (dédup hors provenance) puis dérive le CLEAN.
 
     Retourne (total_clean, ajoutées_au_brut).
@@ -277,13 +283,11 @@ def _merge_certif_csv(new_rows: list[dict], source: str = "GLOBAL") -> tuple[int
         pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
     ).drop_duplicates(subset=_COLONNES_IDENTITE, keep="first", ignore_index=True)
     ajoutees = len(combine) - len(raw)
-    _write_bpi_raw(combine)
+    _write_bpi_raw(combine, backup=backup)
 
     clean = _clean_from_raw(combine)
-    if CERTIF_CSV.exists():
-        bdir = _BPI_DIR / "backups"
-        bdir.mkdir(exist_ok=True)
-        shutil.copy2(CERTIF_CSV, bdir / f"certif_bpi_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    if backup:
+        cert_store.sauvegarder(CERTIF_CSV)
     clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
     _write_bpi_meta(source=source, count=len(clean))
 
@@ -294,7 +298,19 @@ def _merge_certif_csv(new_rows: list[dict], source: str = "GLOBAL") -> tuple[int
 
 
 # ── Exécution des scrapes ─────────────────────────────────────────────────────
-def _collecte(travail) -> list[dict]:
+class Collecte(NamedTuple):
+    """Ce qu'une collecte a rendu, ET si elle est complète.
+
+    Le scraper est créé puis fermé DANS `_collecte` : sans ce retour, son
+    drapeau de troncature mourait avec lui et l'appelant annonçait un balayage
+    terminé sur un corpus coupé.
+    """
+
+    lignes: list[dict]
+    tronque: bool
+
+
+def _collecte(travail) -> Collecte:
     """Lance `travail(scraper)` sur LA boucle applicative et ferme la session.
 
     Un seul chemin async, pas de jumeau sync : c'est la voie que la production
@@ -305,11 +321,18 @@ def _collecte(travail) -> list[dict]:
     async def _run():
         scraper = BpiScraper()
         try:
-            return await travail(scraper)
+            return Collecte(await travail(scraper), scraper.tronque)
         finally:
             await scraper.aclose()
 
     return async_loop.run_sync(_run())
+
+
+def _dire_troncature(quoi: str) -> None:
+    print(
+        f"⚠️  {quoi} TRONQUÉ : le plafond de pagination a été atteint. "
+        "Relever `bpi_max_pages` puis relancer — le corpus est incomplet."
+    )
 
 
 def _cle_palier(ligne) -> tuple:
@@ -362,12 +385,16 @@ def fetch_artists(noms: list[str]) -> bool:
             sorties.extend(await scraper.scrape_by_artist(nom, get_details=True))
         return sorties
 
-    lignes = _horodater(_collecte(travail))
+    collecte = _collecte(travail)
+    lignes = _horodater(collecte.lignes)
     if not lignes:
         print("❌ Aucune certification BPI trouvée pour ces artistes")
         return False
     total, ajoutees = _merge_certif_csv(lignes, source="ARTIST")
     print(f"✅ BPI : {len(lignes)} vue(s), {ajoutees} ajoutée(s) au brut (clean : {total})")
+    if collecte.tronque:
+        _dire_troncature("Relevé par artiste")
+        return False
     return True
 
 
@@ -378,7 +405,8 @@ def fetch_periode(debut: str, fin: str) -> bool:
     dans la fenêtre de son palier d'origine. Pour l'historique, `--full`.
     """
     print(f"=== BPI, période {debut} → {fin} ===")
-    lignes = _horodater(_collecte(lambda s: s.scrape_by_date_range(debut, fin, get_details=True)))
+    collecte = _collecte(lambda s: s.scrape_by_date_range(debut, fin, get_details=True))
+    lignes = _horodater(collecte.lignes)
     if not lignes:
         # G6 : on ne consigne RIEN. Une période réellement vide et un accès cassé
         # se ressemblent ; horodater les confondrait pour toujours.
@@ -386,6 +414,9 @@ def fetch_periode(debut: str, fin: str) -> bool:
         return False
     total, ajoutees = _merge_certif_csv(lignes, source="SCRAPE")
     print(f"✅ {len(lignes)} vue(s), {ajoutees} ajoutée(s) (clean : {total})")
+    if collecte.tronque:
+        _dire_troncature("Balayage de la période")
+        return False
     return True
 
 
@@ -415,30 +446,39 @@ def full_sweep(get_details: bool = True) -> bool:
 
     total_ecrit = 0
 
+    vidages = 0
+
     def vider(lot: list[dict]) -> None:
         """Écrit un lot en cours de route.
 
         Sans cela, ~26 500 titres restaient en mémoire jusqu'à la fin : une
         coupure à la troisième heure perdait les trois heures.
+
+        La sauvegarde n'a lieu qu'au PREMIER vidage : l'unité de travail qu'on
+        protège est le run, et un balayage complet en compte une vingtaine.
         """
-        nonlocal total_ecrit
+        nonlocal total_ecrit, vidages
         if not lot:
             return
-        total, _ = _merge_certif_csv(_horodater(lot), source="GLOBAL")
+        total, _ = _merge_certif_csv(_horodater(lot), source="GLOBAL", backup=(vidages == 0))
+        vidages += 1
         total_ecrit = total
         print(f"   … {total} ligne(s) en base", flush=True)
 
-    reste = _collecte(
+    collecte = _collecte(
         lambda s: s.scrape_all(
             get_details=get_details,
             deja_connu=lambda ligne: _cle_palier(ligne) in connus,
             vidage=vider,
         )
     )
-    if not reste and not total_ecrit:
+    if not collecte.lignes and not total_ecrit:
         print("❌ Balayage vide — la source est cassée (le corpus n'est jamais vide)")
         return False
-    vider(reste)
+    vider(collecte.lignes)
+    if collecte.tronque:
+        _dire_troncature("Balayage COMPLET")
+        return False
     print(f"✅ Balayage terminé — {total_ecrit} ligne(s) dans le clean")
     return True
 
@@ -455,11 +495,7 @@ def clean_certif_csv(apply: bool = True) -> dict:
         clean, CERTIF_CSV
     )
     if apply and not clean.empty:
-        if CERTIF_CSV.exists():
-            bdir = _BPI_DIR / "backups"
-            bdir.mkdir(exist_ok=True)
-            sauvegarde = bdir / f"certif_bpi_backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
-            shutil.copy2(CERTIF_CSV, sauvegarde)
+        if (sauvegarde := cert_store.sauvegarder(CERTIF_CSV)) is not None:
             report["backup"] = str(sauvegarde)
         clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
         _write_bpi_meta(source="CLEAN", count=len(clean))

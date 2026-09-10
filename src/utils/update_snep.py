@@ -667,7 +667,7 @@ def check_for_updates():
     return update_snep_database()
 
 
-def schedule_monthly_update():
+def schedule_monthly_update() -> bool:
     """Programme une mise à jour mensuelle (à utiliser avec cron ou task scheduler)"""
     import logging
 
@@ -682,6 +682,7 @@ def schedule_monthly_update():
     logging.info("=" * 50)
     logging.info("Début de la mise à jour mensuelle programmée")
 
+    success = False
     try:
         success = update_snep_database()
         if success:
@@ -693,6 +694,7 @@ def schedule_monthly_update():
 
     logging.info("Fin de la mise à jour mensuelle")
     logging.info("=" * 50)
+    return success
 
 
 def fetch_artist_certifications(artist_name: str) -> bool:
@@ -804,7 +806,7 @@ def fetch_artist_certifications(artist_name: str) -> bool:
     return True
 
 
-def backfill_years(years) -> int:
+def backfill_years(years) -> BilanAnnee:
     """Scrape intégralement une ou plusieurs années (filtre ?annee=) dans le
     CSV maître puis réimporte en base. Brique de comblement de trous.
     """
@@ -828,13 +830,22 @@ def backfill_years(years) -> int:
     if incompletes:
         safe_print(f"⚠️ Backfill PARTIEL : {total} ajoutée(s), mais {', '.join(incompletes)}")
         safe_print("   Relancer ces années — le corpus est incomplet.")
-    else:
-        safe_print(f"✅ Backfill terminé : {total} nouvelle(s) certification(s) au total")
-    return total
+        return BilanAnnee(total, False, "; ".join(incompletes))
+    safe_print(f"✅ Backfill terminé : {total} nouvelle(s) certification(s) au total")
+    return BilanAnnee(total, True)
 
 
-def main():
-    """Point d'entrée principal du script"""
+def main() -> int:
+    """Point d'entrée principal du script. Rend le CODE DE SORTIE.
+
+    Il n'y en avait AUCUN : `main()` appelait ses entrées et jetait ce qu'elles
+    rendaient, si bien que le processus sortait en 0 en toutes circonstances —
+    y compris quand `update_snep_database` venait de rendre False sur une année
+    lue à moitié. Or la GUI ne décide QUE sur ce code : elle affichait
+    « ✅ Mise à jour SNEP réussie » sur un corpus tronqué. Les trois autres
+    organismes rendaient déjà un code honnête ; SNEP était le seul à ne pas le
+    faire, et cela annulait tout son travail de complétude en amont.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Mise à jour automatique des certifications SNEP")
@@ -871,22 +882,24 @@ def main():
     args = parser.parse_args()
 
     if args.year:
-        backfill_years(args.year)
-    elif args.artist:
-        # Un nom inconnu du SNEP ne doit pas empêcher les suivants d'aboutir.
+        return 0 if backfill_years(args.year).complete else 1
+    if args.artist:
+        # Un nom inconnu du SNEP ne doit pas empêcher les suivants d'aboutir : le
+        # code dit « au moins un nom a rendu quelque chose », pas « tous », comme
+        # sur RIAA et BPI.
+        ok = False
         for nom in args.artist:
-            fetch_artist_certifications(nom)
-    elif args.scheduled:
+            ok = fetch_artist_certifications(nom) or ok
+        return 0 if ok else 1
+    if args.scheduled:
         # Mode silencieux pour les tâches planifiées
-        schedule_monthly_update()
-    elif args.update:
-        update_snep_database()
-    elif args.check:
-        check_for_updates()
-    else:
+        return 0 if schedule_monthly_update() else 1
+    if args.check:
+        return 0 if check_for_updates() else 1
+    if not args.update:
         # Par défaut, lancer la mise à jour
         safe_print("💡 Conseil : Utilisez --help pour voir toutes les options\n")
-        update_snep_database()
+    return 0 if update_snep_database() else 1
 
 
 if __name__ == "__main__":
@@ -894,5 +907,5 @@ if __name__ == "__main__":
     # branchement, son usage de la source serait compté nulle part. La base est
     # la même, les compteurs se rejoignent donc dans les mêmes tables.
     with usage_repository.script_scope(Flow.CERTS):
-        main()
+        sys.exit(main())
 # fin — scraper SNEP : parser BS4 par sélecteurs + backfill par année (?annee=)

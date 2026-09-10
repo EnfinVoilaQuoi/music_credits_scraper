@@ -129,3 +129,59 @@ class TestApplyCertifications:
 
     def test_liste_vide_renvoie_zero(self):
         assert apply_certifications(self._artist(), [], _FakeMatcher()) == 0
+
+
+class TestUneExceptionNEfaceRien:
+    """Un matcher qui hoquette ne doit pas VIDER les certifs en base (2026-09-09).
+
+    `record_certifications` est délibérément AUTORITATIF : il peut retirer. Le
+    repli d'exception posait pourtant deux listes vides avec
+    `needs_write = True`, soit « recalculé, et vide » — indiscernable d'un vrai
+    retrait. Une seule ligne du magasin à la date illisible (un `NaN` là où on
+    attend une chaîne, cas déjà rencontré côté RIAA) suffisait donc à effacer en
+    base les certifications d'un morceau, sans qu'aucun garde-fou ne bronche :
+    l'écriture, elle, réussissait.
+
+    Une exception est un REFUS DE CONCLURE, jamais un résultat vide.
+    """
+
+    class _MatcherQuiCasse(_FakeMatcher):
+        def get_track_certifications(self, artist, title, extra_artists=None):
+            if title == "Casse":
+                raise TypeError("date en NaN")
+            return self._tracks.get(title, [])
+
+    def test_le_morceau_fautif_n_est_PAS_marque_a_ecrire(self):
+        artist = Artist(name="Isha")
+        track = Track(title="Casse", artist=artist)
+
+        apply_certifications(artist, [track], self._MatcherQuiCasse())
+
+        assert track.certs.needs_write is False, "le vide serait écrit et écraserait la base"
+
+    def test_les_autres_morceaux_sont_enrichis_normalement(self):
+        """Le reste de la discographie ne doit pas payer pour un morceau."""
+        artist = Artist(name="Isha")
+        casse = Track(title="Casse", artist=artist)
+        sain = Track(title="Mon Titre", artist=artist)
+        matcher = self._MatcherQuiCasse(tracks={"Mon Titre": [_match()]})
+
+        n = apply_certifications(artist, [casse, sain], matcher)
+
+        assert n == 1
+        assert sain.certs.entries == [_match()]
+        assert sain.certs.needs_write is True
+
+    def test_un_vrai_retrait_reste_ecrit(self):
+        """Le pendant : sans exception, « aucune certif » est un VERDICT.
+
+        C'est ce qui permet à `record_certifications` de retirer un rattachement
+        fautif — la distinction que le repli avait effacée.
+        """
+        artist = Artist(name="Isha")
+        track = Track(title="Mon Titre", artist=artist)
+
+        apply_certifications(artist, [track], _FakeMatcher())
+
+        assert track.certs.entries == []
+        assert track.certs.needs_write is True

@@ -7,9 +7,9 @@ Couvre le mapping/nettoyage (canonical_rows_from_raw), la fusion accumulante
 from pathlib import Path
 
 from src.config import DATA_PATH
-from src.utils.cert_normalize import normalize_text
 from src.utils.snep_build import (
     CANONICAL_COLUMNS,
+    _key,
     canonical_rows_from_raw,
     merge_canonical,
     read_canonical_csv,
@@ -100,6 +100,35 @@ class TestMergeCanonical:
         m = merge_canonical(base, new)
         assert {r["certification"] for r in m} == {"Or", "Diamant"}
 
+    def test_la_CATEGORIE_distingue_les_cles(self):
+        """Un album et un single ne sont pas le même événement (2026-09-09).
+
+        La clé reproduisait l'ancienne contrainte DB (artiste, titre,
+        certification), héritage d'un schéma qui ignorait le format. Mesuré sur
+        le corpus réel : **52 certifications masquées**, dont NINHO « M.I.L.S »
+        Platine en Albums (2017-12-15) ET en Singles (2025-03-27) — huit ans
+        d'écart, fusionnés en une ligne dont seule la date la plus récente
+        survivait. BRMA l'avait déjà compris (`_cert_key` inclut la catégorie).
+        """
+        base = [self._row("NINHO", "M.I.L.S", "Platine", "2017-12-15")]
+        base[0]["category"] = "Albums"
+        new = [self._row("NINHO", "M.I.L.S", "Platine", "2025-03-27")]  # Singles
+
+        m = merge_canonical(base, new)
+
+        assert len(m) == 2, "l'album et le single ont fusionné"
+        assert {r["category"] for r in m} == {"Albums", "Singles"}
+        assert {r["certification_date"] for r in m} == {"2017-12-15", "2025-03-27"}
+
+    def test_meme_categorie_fusionne_toujours(self):
+        """Le pendant : à catégorie égale, la fusion reste celle d'avant."""
+        base = [self._row("A", "T", "Or", "2020-01-01")]
+        new = [self._row("A", "T", "Or", "2021-01-01")]
+
+        (m,) = merge_canonical(base, new)
+
+        assert m["certification_date"] == "2021-01-01"
+
 
 class TestFichierCanoniqueCommitte:
     """Invariants du certif_snep.csv versionné (généré par la migration)."""
@@ -124,10 +153,10 @@ class TestFichierCanoniqueCommitte:
 
             pytest.skip("certif_snep.csv pas encore généré")
         rows = read_canonical_csv(p)
-        keys = [
-            (normalize_text(r["artist"]), normalize_text(r["title"]), r["certification"])
-            for r in rows
-        ]
-        assert len(keys) == len(
-            set(keys)
-        ), "doublon de clé (artist_clean, title_clean, certification)"
+        # La clé de PRODUCTION, pas une copie : ce test la réimplémentait, et la
+        # copie a divergé le jour où la catégorie a rejoint la vraie clé
+        # (2026-09-09). Deux définitions du même verdict, c'est justement ce que
+        # le projet s'interdit — un test qui recopie la règle ne garde plus la
+        # règle, il garde son propre souvenir de la règle.
+        keys = [_key(r) for r in rows]
+        assert len(keys) == len(set(keys)), "doublon sous la clé de dédup de snep_build"

@@ -11,6 +11,7 @@ le golden master.
 import re
 import unicodedata
 from collections.abc import Sequence
+from datetime import datetime
 
 
 def normalize_text(text: str) -> str:
@@ -547,6 +548,126 @@ PROGRAMME_LATIN = "LATIN"
 FAMILLE_STANDARD = "ST"  # support physique
 FAMILLE_NUMERIQUE = "DI"  # digital
 FAMILLE_LATINE = "LA"
+
+#: Vocabulaire de certification BELGE (Ultratop), en MINUSCULES : c'est un jeu
+#: de COMPARAISON, pas des formes canoniques d'affichage — d'où l'absence de
+#: détection de « variantes de casse » côté validateur BRMA, contrairement à
+#: SNEP. (Y brancher la formule SNEP signalerait 5 148 des 5 826 lignes réelles.
+#: Mesuré le 2026-09-03, ne pas refaire.)
+#:
+#: Il vivait dans `brma_validator`, seul des quatre vocabulaires à ne pas être
+#: ici. L'échelle belge n'est PAS celle du SNEP — « quadruple platine » existe
+#: chez Ultratop et pas au SNEP — donc ce n'est pas un doublon de `LEVEL_CANON`,
+#: seulement un référentiel rangé ailleurs que ses pairs.
+NIVEAUX_BRMA = {
+    "or",
+    "platine",
+    "double platine",
+    "triple platine",
+    "quadruple platine",
+    "diamant",
+    "double diamant",
+    "triple diamant",
+}
+
+#: Paliers belges qui acceptent un multiplicateur (« 2x Platine », « 12x Platine »).
+_PALIERS_BRMA_MULTIPLIABLES = {"or", "platine", "diamant"}
+
+
+def brma_niveau_connu(level: str) -> bool:
+    """Ce libellé appartient-il au vocabulaire de certification belge ?
+
+    Le multiplicateur passe par `decouper_multiplicateur`, comme partout
+    ailleurs : c'était la QUATRIÈME copie de la même expression rationnelle.
+    """
+    multiplicateur, palier = decouper_multiplicateur(level)
+    if multiplicateur > 1:
+        return palier in _PALIERS_BRMA_MULTIPLIABLES
+    return palier in NIVEAUX_BRMA
+
+
+#: Rang d'un palier dans une échelle qui DESCEND (1 = le plus haut).
+#:
+#: Il ne sert qu'à TRIER des certifications entre elles, à l'intérieur d'un même
+#: corps : un Platino et un Platinum partagent le rang 7 sans valoir la même
+#: chose, et la comparaison entre échelles se fait en unités (`riaa_units`).
+#:
+#: Il vit ici parce que c'est un RÉFÉRENTIEL, et que les référentiels de ce
+#: projet vivent dans ce module. Il était défini dans `cert_matcher`, d'où
+#: `cert_artist` l'importait — en allant chercher un nom PRIVÉ dans un autre
+#: module, ce qui est la façon la plus discrète de créer une dépendance qu'aucun
+#: outil ne signale. `cert_matcher` le ré-exporte, comme il ré-exporte déjà
+#: `riaa_level`.
+RANG_PALIERS = {
+    "quadruple diamant": 1,
+    "triple diamant": 2,
+    "double diamant": 3,
+    "diamant": 4,
+    "triple platine": 5,
+    "double platine": 6,
+    "platine": 7,
+    "triple or": 8,
+    "double or": 9,
+    "or": 10,
+    # RIAA (anglais)
+    "diamond": 4,
+    "platinum": 7,
+    "gold": 10,
+    # RIAA — programme LATIN. Même ORDRE que les autres échelles.
+    "diamante": 4,
+    "platino": 7,
+    "oro": 10,
+    # BPI (UK) : le Silver est un palier SOUS l'or, que les trois autres corps
+    # n'ont pas. Il ne s'insère pas dans l'échelle existante, il la prolonge.
+    "silver": 11,
+}
+
+#: « 4x Platine », « 2X PLATINO » → le multiplicateur et le palier nu.
+_MULTIPLICATEUR_RE = re.compile(r"^(\d+)\s*x\s*(.+)$", re.I)
+
+
+def decouper_multiplicateur(niveau: str) -> tuple[int, str]:
+    """« 4x Platine » → (4, « platine »). Sans multiplicateur → (1, le niveau).
+
+    Le DÉCOUPAGE seul, sans jugement sur ce qui a le droit d'être multiplié —
+    cette politique-là vit dans `_PALIERS_MULTIPLIABLES`, parce qu'elle ne
+    concerne que les unités. Trois copies de cette expression rationnelle
+    coexistaient (`cert_matcher._level_rank`, `cert_artist._ordre_palier`,
+    `_decoder_niveau_riaa`), et elles ne s'accordaient déjà pas sur les paliers
+    acceptés.
+    """
+    lvl = re.sub(r"\s+", " ", (niveau or "").strip()).lower()
+    if (m := _MULTIPLICATEUR_RE.match(lvl)) is not None:
+        return int(m.group(1)), m.group(2).strip()
+    return 1, lvl
+
+
+def date_riaa(s: str, *, verbatim: bool = False) -> str:
+    """« October 17, 2017 » → « 2017-10-17 ». Tolère déjà-ISO et vide.
+
+    `verbatim` décide de ce qu'on fait d'une date ILLISIBLE, et ce n'est pas un
+    détail de goût : les deux usages sont incompatibles, et c'est exactement
+    pourquoi trois copies de cette fonction coexistaient en divergeant sur ce
+    seul point.
+
+    · `verbatim=False` (défaut) rend "" — le VALIDATEUR compte les dates
+      illisibles, il lui faut un résultat reconnaissable ;
+    · `verbatim=True` rend la valeur telle quelle — le NETTOYEUR met la date
+      dans sa clé de dédup, où deux valeurs illisibles différentes doivent
+      rester deux lignes.
+    """
+    s = (s or "").strip()
+    if not s or s.lower() == "none":
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        return s
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(s.title() if "," in s else s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return s if verbatim else ""
+
 
 #: Mot du palier → (forme canonique, programme, unités du palier simple).
 #: Le multiplicateur « Nx » ne s'applique qu'au palier PLATINE de chaque échelle

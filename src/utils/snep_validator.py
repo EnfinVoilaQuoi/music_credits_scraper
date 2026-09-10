@@ -33,6 +33,8 @@ import pandas as pd
 # sans ça les deux outils annonçaient des comptes de doublons incomparables).
 from src.utils.cert_coverage import annee_assez_dense
 from src.utils.cert_normalize import (
+    LEVEL_CANON,
+    apply_manual_fixes,
     canon_category,
     canon_level,
     cle_correction,
@@ -45,18 +47,12 @@ from src.utils.cert_normalize import (
 EXPECTED_NCOLS = 7
 
 VALID_CATEGORIES = {"Singles", "Albums", "Vidéos", "Single", "Album", "Vidéo"}
-VALID_LEVELS = {
-    "Or",
-    "Double Or",
-    "Triple Or",
-    "Platine",
-    "Double Platine",
-    "Triple Platine",
-    "Diamant",
-    "Double Diamant",
-    "Triple Diamant",
-    "Quadruple Diamant",
-}
+#: DÉRIVÉ de `cert_normalize`, pas recopié. Les deux listes étaient identiques
+#: le 2026-09-09 — donc aucune dérive à réparer, seulement une à empêcher : un
+#: palier ajouté d'un seul côté rendrait soit le validateur muet, soit son
+#: verdict « anomalies » permanent, ce qui revient au même (un signal qui crie
+#: toujours ne signale plus rien). `bpi_validator` faisait déjà ainsi.
+VALID_LEVELS = set(LEVEL_CANON.values())
 
 # Seuil en dessous duquel un mois est jugé « suspect » (possiblement incomplet).
 LOW_MONTH_THRESHOLD = 3
@@ -313,8 +309,22 @@ def validate_snep_csv(
     def _norm_texte(s: str) -> str:
         return restore_apostrophes(clean_field(s))[0]
 
-    n_artist = artist.fillna("").map(_norm_texte)
-    n_title = title.fillna("").map(_norm_texte)
+    # `apply_manual_fixes` MANQUAIT, alors que le commentaire ci-dessus annonce
+    # « SA clé, à l'identique » et que `fixes` est déjà reçu en paramètre. Le
+    # nettoyeur les applique AVANT de construire sa clé : deux libellés qu'une
+    # correction manuelle rend identiques y fusionnent, et le validateur ne les
+    # voyait pas. Il sous-estimait donc ce que « Nettoyer » allait retirer —
+    # exactement le reproche qui avait motivé l'ajout de ce compteur.
+    #
+    # Mesuré sur le corpus réel du 2026-09-09 : 13 corrections, et l'écart est
+    # de ZÉRO doublon. La correction ne répare rien aujourd'hui ; elle rend
+    # vraie une promesse que le code faisait déjà par écrit.
+    def _norm_paire(a: str, t: str) -> tuple[str, str]:
+        return apply_manual_fixes(_norm_texte(a), _norm_texte(t), fixes)
+
+    paires = [_norm_paire(a, t) for a, t in zip(artist.fillna(""), title.fillna(""), strict=True)]
+    n_artist = pd.Series([p[0] for p in paires], index=artist.index)
+    n_title = pd.Series([p[1] for p in paires], index=title.index)
     norm_key = (
         n_artist.str.lower()
         + " | "

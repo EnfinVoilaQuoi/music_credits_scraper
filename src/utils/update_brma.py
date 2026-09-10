@@ -17,6 +17,7 @@ import pandas as pd
 import requests
 import schedule
 
+from src.config import DATA_PATH
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils import cert_clean_report, cert_store
@@ -60,6 +61,31 @@ def _cert_key(artist, title, level, date, category, clean=None) -> str:
         champs = tuple(clean(v) for v in champs)
     return "|".join(str(v or "") for v in champs)
 
+
+#: Racine des fichiers BRMA. ABSOLUE — voir le constructeur.
+_BRMA_DIR = Path(DATA_PATH) / "certifications" / "brma"
+
+#: Colonnes qui font l'IDENTITÉ d'une ligne du brut, c'est-à-dire toutes sauf la
+#: date de collecte. `scraped_at` est de la provenance, pas de la donnée : le
+#: laisser dans la dédup fait que la même certification re-scrapée un autre jour
+#: devient une seconde ligne, et le brut grossit à chaque run. BPI l'a mesuré
+#: chez lui — 18 lignes devenues 36, tests unitaires verts — et le clean, qui
+#: dédoublonne sur sa clé métier, resterait juste : le gonflement passerait
+#: inaperçu.
+#:
+#: Mesuré ici le 2026-09-10 : **0 ligne** dans cette situation aujourd'hui. Le
+#: mécanisme est réel mais DORMANT — il demande qu'une graphie soit retenue par
+#: le brut et écartée par le clean, or leur dédup ne diverge sur rien
+#: actuellement (5 847 lignes des deux côtés, la casse ne collapse rien).
+_COLONNES_IDENTITE = [
+    "artist",
+    "title",
+    "category",
+    "certification_level",
+    "certification_date",
+    "year_page",
+    "detail_url",
+]
 
 #: Clé de la source dans le registre d'observabilité.
 _SOURCE = "brma"
@@ -140,8 +166,8 @@ class UltratopUpdater:
 
     def __init__(
         self,
-        database_path="./data/certifications/brma/certif_brma.csv",
-        output_dir="./data/certifications/brma",
+        database_path=None,
+        output_dir=None,
         delay_min=2,
         delay_max=5,
     ):
@@ -155,8 +181,16 @@ class UltratopUpdater:
             delay_max: Délai maximum entre requêtes (secondes)
         """
         self.base_url = "https://www.ultratop.be/fr/or-platine"
-        self.database_path = Path(database_path)  # CLEAN (lu par le matcher)
-        self.output_dir = Path(output_dir)
+        # Défauts ABSOLUS. Ils étaient relatifs (« ./data/… »), donc résolus
+        # depuis le RÉPERTOIRE COURANT : BRMA était la seule des quatre sources
+        # à en dépendre, et cela ne marchait que par chance — la GUI lance ses
+        # sous-processus avec le cwd sur la racine du projet. Lancé à la main
+        # depuis ailleurs, le scraper écrivait un corpus FANTÔME
+        # (`<cwd>/data/certifications/brma`), ne trouvait rien à charger, et
+        # re-scrapait tout dans un dossier que personne ne lit. `update_riaa`
+        # porte déjà le même constat, pour la même cause.
+        self.database_path = Path(database_path or _BRMA_DIR / "certif_brma.csv")
+        self.output_dir = Path(output_dir or _BRMA_DIR)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         # BRUT permanent (union des scrapes) — le clean en est dérivé (dédup+tri).
         # Convention brut+clean, alignée sur SNEP/RIAA.
@@ -808,6 +842,17 @@ class UltratopUpdater:
                 tmp_path.unlink()
             raise
 
+        # Le magasin a changé sur disque : le matcher, s'il est vivant dans CE
+        # processus, sert encore l'état d'avant. SNEP et BPI le rafraîchissaient
+        # depuis leur écriture, BRMA et RIAA non — quatre sources écrivant le
+        # même genre de fichier, deux comportements. C'est l'ÉCRIVAIN qui sait
+        # que le fichier a changé ; le consommateur ne peut que le supposer.
+        # (En sous-processus — le cas de la GUI — c'est un no-op : le matcher
+        # n'y a jamais été instancié.)
+        from src.utils.cert_matcher import reset_cert_matcher
+
+        reset_cert_matcher()
+
     def _clean_from(self, raw_df, report: dict | None = None):
         """Dérive le clean depuis un brut : dédup métier + tri (date desc)."""
         return self._dedup_df(raw_df, report).sort_values(
@@ -846,9 +891,13 @@ class UltratopUpdater:
 
         # 1. BRUT : union de tout ce qui a été scrapé (dédup EXACTE, aucune perte)
         raw = self._load_raw()
-        raw_updated = (
-            pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
-        ).drop_duplicates(ignore_index=True)
+        fusion = pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
+        # Croisé avec les colonnes RÉELLEMENT présentes : contrairement à BPI,
+        # BRMA n'a pas d'`_align_columns` qui garantisse le schéma, et un
+        # `subset` nommant une colonne absente lève. Aucune colonne connue →
+        # `None`, c'est-à-dire l'ancien comportement (dédup sur tout).
+        identite = [c for c in _COLONNES_IDENTITE if c in fusion.columns] or None
+        raw_updated = fusion.drop_duplicates(subset=identite, keep="first", ignore_index=True)
         self._write_raw(raw_updated)
 
         # 2. CLEAN dérivé du brut : dédup métier + tri → certif_brma.csv
@@ -1088,12 +1137,10 @@ def main():
     parser.add_argument(
         "--database",
         type=str,
-        default="./data/certifications/brma/certif_brma.csv",
+        default=None,
         help="Chemin vers la base de données",
     )
-    parser.add_argument(
-        "--output-dir", type=str, default="./data/certifications/brma", help="Répertoire de sortie"
-    )
+    parser.add_argument("--output-dir", type=str, default=None, help="Répertoire de sortie")
     parser.add_argument(
         "--delay-min", type=float, default=2, help="Délai minimum entre requêtes (secondes)"
     )

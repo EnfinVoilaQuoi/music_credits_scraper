@@ -4,7 +4,6 @@ Script 2: Mise à jour automatique et manuelle de la base de données
 """
 
 import argparse
-import json
 import logging
 import random
 import re
@@ -840,7 +839,7 @@ class UltratopUpdater:
                 return
             raw = self._load_raw()
             if not raw.empty:
-                self.update_metadata(self._clean_from(raw), 0)
+                self.update_metadata(self._clean_from(raw), 0, partial=self._motif_partiel())
             return
 
         new_df = pd.DataFrame(new_certifications)
@@ -861,35 +860,50 @@ class UltratopUpdater:
             f"Brut: {len(raw_updated)} lignes ; ajouté {len(new_certifications)} scrapée(s)"
         )
 
-        self.update_metadata(clean, len(new_certifications))
+        # Le bilan est consulté ICI AUSSI. Le garde-fou d'origine ne vivait que
+        # sur la branche « aucune nouveauté » : dès qu'une seule certification
+        # était ramenée, la fraîcheur s'écrivait sans que personne ne regarde
+        # combien de pages avaient échoué. Cinq pages muettes sur six passaient
+        # donc pour une vérification complète.
+        self.update_metadata(clean, len(new_certifications), partial=self._motif_partiel())
         self.generate_update_report(new_certifications)
 
-    def update_metadata(self, updated_db, new_count):
-        """Met à jour le fichier de métadonnées"""
-        metadata_path = self.output_dir / "metadata.json"
+    def _motif_partiel(self) -> str:
+        """Ce qui manque à ce run, en une phrase — vide s'il est complet.
 
-        if metadata_path.exists():
-            with open(metadata_path, encoding="utf-8") as f:
-                metadata = json.load(f)
-        else:
-            metadata = {}
+        Le bilan existait déjà (`demandees/lues/muettes/echouees`) et ne servait
+        qu'à décider d'un code de sortie. Il dit pourtant précisément ce que le
+        panneau doit montrer : une MàJ horodatée d'aujourd'hui qui n'a lu que
+        deux pages sur six n'est pas la même chose qu'une MàJ complète.
+        """
+        bilan = self.bilan_run
+        if not bilan or not bilan["demandees"] or bilan["lues"] == bilan["demandees"]:
+            return ""
+        return (
+            f"{bilan['lues']}/{bilan['demandees']} page(s) lue(s) "
+            f"({bilan['echouees']} inaccessible(s), {bilan['muettes']} muette(s))"
+        )
 
-        now = datetime.now().isoformat()
-        metadata["last_update"] = now
-        metadata["total_records"] = len(updated_db)
-        metadata["new_records_added"] = new_count
-        metadata["unique_artists"] = updated_db["artist"].nunique()
-        # Fraîcheur par source (uniforme avec SNEP/RIAA) : BRMA = scrape global
-        # d'Ultratop, donc une seule source logique « GLOBAL ». Permet à
-        # cert_source.read_freshness de distinguer MàJ globale / récup artiste.
-        updates = metadata.get("updates") or {}
-        updates["GLOBAL"] = now
-        metadata["updates"] = updates
-        metadata["last_source"] = "GLOBAL"
-        metadata["count"] = len(updated_db)
+    def update_metadata(self, updated_db, new_count, *, partial: str = ""):
+        """Sidecar de fraîcheur — la FORME est portée par `cert_store`.
 
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
+        Les trois champs propres à BRMA (`total_records`, `new_records_added`,
+        `unique_artists`) passent par `extra` : ce module-ci connaît ses
+        particularités, `cert_store` connaît la forme commune. C'était la seule
+        des quatre sources à réimplémenter le sidecar au lieu de le recopier —
+        elle lisait son JSON sans `try/except` et ne paramétrait pas sa source.
+        """
+        cert_store.ecrire_fraicheur(
+            self.output_dir / "metadata.json",
+            "GLOBAL",
+            count=len(updated_db),
+            partial=partial,
+            extra={
+                "total_records": len(updated_db),
+                "new_records_added": new_count,
+                "unique_artists": int(updated_db["artist"].nunique()),
+            },
+        )
 
     def generate_update_report(self, new_certifications):
         """Génère un rapport de mise à jour"""

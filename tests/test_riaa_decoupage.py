@@ -43,7 +43,7 @@ def sans_fusion(monkeypatch):
     """Débranche l'écriture CSV : ces tests portent sur le parcours de dates."""
     fusions: list[int] = []
 
-    def _stub(rows, backup=True):
+    def _stub(rows, backup=True, *, partial=""):
         fusions.append(len(rows))
         return (sum(fusions), len(rows))
 
@@ -238,8 +238,8 @@ class TestPersistanceParTranche:
         vu: list[bool] = []
         vrai = u._merge_certif_csv
 
-        def espion(rows, backup=True):
-            resultat = vrai(rows, backup=backup)
+        def espion(rows, backup=True, *, partial=""):
+            resultat = vrai(rows, backup=backup, partial=partial)
             vu.append(u.CERTIF_CSV.exists())
             return resultat
 

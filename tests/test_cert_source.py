@@ -98,4 +98,4 @@ class TestAdapters:
         # Sur la vraie arbo data/ : au minimum la forme du dict est respectée.
         for s in all_certification_sources():
             fresh = s.freshness()
-            assert set(fresh) == {"available", "last_global", "last_artist", "count"}
+            assert set(fresh) == {"available", "last_global", "last_artist", "count", "partial"}

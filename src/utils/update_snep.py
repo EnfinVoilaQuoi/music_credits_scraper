@@ -571,7 +571,7 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> BilanAnnee:
 # Supplantée par `scrape_year`, qui est exhaustive et déjà testée.
 
 
-def _rebuild_canonical(source: str = "GLOBAL") -> tuple[int, int]:
+def _rebuild_canonical(source: str = "GLOBAL", *, partial: str = "") -> tuple[int, int]:
     """Régénère `certif_snep.csv` (+ meta) depuis le brut `certif-.csv` courant
     (fusion accumulante) et rafraîchit le matcher unifié. Retourne (nb lignes
     avant, nb lignes après)."""
@@ -581,7 +581,13 @@ def _rebuild_canonical(source: str = "GLOBAL") -> tuple[int, int]:
     snep = Path(DATA_PATH) / "certifications" / "snep"
     csv_path = snep / "certif_snep.csv"
     before = len(read_canonical_csv(csv_path)) if csv_path.exists() else 0
-    after = rebuild(snep / "certif-.csv", csv_path, snep / "certif_snep.meta.json", source=source)
+    after = rebuild(
+        snep / "certif-.csv",
+        csv_path,
+        snep / "certif_snep.meta.json",
+        source=source,
+        partial=partial,
+    )
     reset_cert_matcher()
     return before, after
 
@@ -640,7 +646,7 @@ def update_snep_database():
             incompletes.append(f"{annee} ({type(e).__name__})")
 
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
-    total_before, total_after = _rebuild_canonical(source="GLOBAL")
+    total_before, total_after = _rebuild_canonical(source="GLOBAL", partial="; ".join(incompletes))
 
     safe_print("\n📊 Résumé :")
     safe_print(f"  • Certifications avant : {total_before}")
@@ -826,7 +832,7 @@ def backfill_years(years) -> BilanAnnee:
             incompletes.append(f"{y} ({bilan.motif})")
 
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
-    _rebuild_canonical(source="SCRAPE")
+    _rebuild_canonical(source="SCRAPE", partial="; ".join(incompletes))
     if incompletes:
         safe_print(f"⚠️ Backfill PARTIEL : {total} ajoutée(s), mais {', '.join(incompletes)}")
         safe_print("   Relancer ces années — le corpus est incomplet.")

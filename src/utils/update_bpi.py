@@ -28,7 +28,6 @@ Lancement (la GUI l'appelle en sous-processus) :
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from datetime import datetime, timedelta
@@ -218,25 +217,14 @@ def _compter_changements(colonne, canoniser) -> dict[str, int]:
     return change
 
 
-def _write_bpi_meta(source: str = "GLOBAL", count: int | None = None) -> None:
-    """Sidecar de fraîcheur (updates par source), aligné sur SNEP/BRMA/RIAA."""
-    meta: dict = {}
-    if BPI_META.exists():
-        try:
-            meta = json.loads(BPI_META.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            meta = {}
-    now = datetime.now().isoformat()
-    updates = meta.get("updates") or {}
-    updates[source] = now
+def _write_bpi_meta(source: str = "GLOBAL", count: int | None = None, *, partial: str = "") -> None:
+    """Sidecar de fraîcheur — la FORME est portée par `cert_store`."""
     if count is None and CERTIF_CSV.exists():
         try:
             count = len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str))
         except (OSError, ValueError):
-            count = meta.get("count")
-    meta.update({"last_update": now, "last_source": source, "count": count, "updates": updates})
-    _BPI_DIR.mkdir(parents=True, exist_ok=True)
-    BPI_META.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            count = None
+    cert_store.ecrire_fraicheur(BPI_META, source, count=count, partial=partial)
 
 
 #: Colonnes qui font l'identité d'une ligne du BRUT — c'est-à-dire toutes SAUF
@@ -416,7 +404,9 @@ def fetch_periode(debut: str, fin: str) -> bool:
     print(f"✅ {len(lignes)} vue(s), {ajoutees} ajoutée(s) (clean : {total})")
     if collecte.tronque:
         _dire_troncature("Balayage de la période")
+        _write_bpi_meta(source="SCRAPE", partial=f"{debut} → {fin} : plafond atteint")
         return False
+    _write_bpi_meta(source="SCRAPE")
     return True
 
 
@@ -478,7 +468,9 @@ def full_sweep(get_details: bool = True) -> bool:
     vider(collecte.lignes)
     if collecte.tronque:
         _dire_troncature("Balayage COMPLET")
+        _write_bpi_meta(source="GLOBAL", partial="plafond de pagination atteint — corpus tronqué")
         return False
+    _write_bpi_meta(source="GLOBAL")  # efface un éventuel motif précédent
     print(f"✅ Balayage terminé — {total_ecrit} ligne(s) dans le clean")
     return True
 

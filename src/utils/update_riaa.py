@@ -5,7 +5,6 @@ Compatible avec le système de gestion unifié des certifications
 """
 
 import argparse
-import json
 import logging
 import re
 import sys
@@ -674,27 +673,23 @@ def _compter_changements(colonne, canoniser) -> dict[str, int]:
     return change
 
 
-def _write_riaa_meta(source: str = "GLOBAL", count: int | None = None) -> None:
-    """Sidecar de fraîcheur (updates par source), aligné sur SNEP/BRMA."""
-    meta: dict = {}
-    if RIAA_META.exists():
-        try:
-            meta = json.loads(RIAA_META.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            meta = {}
-    now = datetime.now().isoformat()
-    updates = meta.get("updates") or {}
-    updates[source] = now
+def _write_riaa_meta(
+    source: str = "GLOBAL", count: int | None = None, *, partial: str = ""
+) -> None:
+    """Sidecar de fraîcheur — la FORME est portée par `cert_store`.
+
+    Ne reste ici que ce qui est propre à RIAA : le chemin, et le recompte depuis
+    le clean quand l'appelant ne donne pas de total.
+    """
     if count is None and CERTIF_CSV.exists():
         try:
             count = len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str))
         except (OSError, ValueError):
-            count = meta.get("count")
-    meta.update({"last_update": now, "last_source": source, "count": count, "updates": updates})
-    RIAA_META.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            count = None
+    cert_store.ecrire_fraicheur(RIAA_META, source, count=count, partial=partial)
 
 
-def _merge_certif_csv(new_rows: list[dict], backup: bool = True) -> tuple:
+def _merge_certif_csv(new_rows: list[dict], backup: bool = True, *, partial: str = "") -> tuple:
     """Accumule les lignes scrapées dans le BRUT (riaa_raw.csv, dédup EXACTE) puis
     dérive le CLEAN certif_riaa.csv. Retourne (total_clean, ajoutées_au_brut).
 
@@ -716,7 +711,7 @@ def _merge_certif_csv(new_rows: list[dict], backup: bool = True) -> tuple:
     if backup:
         cert_store.sauvegarder(CERTIF_CSV)
     clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
-    _write_riaa_meta(source="GLOBAL", count=len(clean))
+    _write_riaa_meta(source="GLOBAL", count=len(clean), partial=partial)
     return (len(clean), len(combined) - before)
 
 
@@ -870,8 +865,15 @@ def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
         if resultats:
             # Ce qu'une tranche tronquée a rendu est BON, seulement partiel : on
             # le garde avant de redécouper, la dédup absorbe le recouvrement.
+            # Tant que la boucle tourne, le corpus est incomplet PAR
+            # CONSTRUCTION : on le dit, et la fin de run efface ou remplace le
+            # motif. Un balayage tué en route laisse donc « en cours », ce qui
+            # est exactement vrai — c'est ce que le panneau doit montrer plutôt
+            # qu'une coche verte héritée de la dernière tranche écrite.
             total_clean, ajoutees = _merge_certif_csv(
-                _flatten_records(resultats), backup=(fusions == 0)
+                _flatten_records(resultats),
+                backup=(fusions == 0),
+                partial=f"balayage {d0} → {d1} en cours (tranche {tranches})",
             )
             fusions += 1
             total_ajoutees += ajoutees
@@ -909,16 +911,21 @@ def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
         f"✅ {tranches} tranche(s), {total_vues} vue(s), "
         f"{total_ajoutees} ajoutée(s) (total {total_clean})"
     )
-    complet = True
+    motifs = []
     if irreductibles:
         jours_txt = ", ".join(str(j) for j in irreductibles[:5])
         print(f"⚠️  {len(irreductibles)} journée(s) restée(s) tronquée(s) : {jours_txt}")
-        complet = False
+        motifs.append(f"{len(irreductibles)} journée(s) tronquée(s) : {jours_txt}")
     if non_lues:
         fen = ", ".join(f"{a}→{b}" for a, b in non_lues[:5])
         print(f"⚠️  {len(non_lues)} tranche(s) NON LUE(S) : {fen}")
-        complet = False
-    return complet
+        motifs.append(f"{len(non_lues)} tranche(s) non lue(s) : {fen}")
+
+    # EFFACE le « en cours » quand tout est passé, le REMPLACE sinon. Les deux
+    # moitiés comptent : sans l'effacement, le drapeau du dernier balayage
+    # collerait au suivant et le panneau crierait pour toujours.
+    _write_riaa_meta(source="GLOBAL", partial=" ; ".join(motifs))
+    return not motifs
 
 
 def clean_certif_csv(apply: bool = True) -> dict:

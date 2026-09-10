@@ -712,6 +712,17 @@ def _merge_certif_csv(new_rows: list[dict], backup: bool = True, *, partial: str
         cert_store.sauvegarder(CERTIF_CSV)
     clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
     _write_riaa_meta(source="GLOBAL", count=len(clean), partial=partial)
+
+    # Le magasin a changé sur disque : le matcher, s'il est vivant dans CE
+    # processus, sert encore l'état d'avant. SNEP et BPI le rafraîchissaient
+    # depuis leur fusion, BRMA et RIAA non — trois sources sur quatre écrivant
+    # le même genre de fichier, deux comportements. C'est l'ÉCRIVAIN qui sait
+    # que le fichier a changé ; le consommateur, lui, ne peut que le supposer.
+    # (En sous-processus — le cas de la GUI — c'est un no-op : le matcher n'y a
+    # jamais été instancié.)
+    from src.utils.cert_matcher import reset_cert_matcher
+
+    reset_cert_matcher()
     return (len(clean), len(combined) - before)
 
 

@@ -1,4 +1,4 @@
-"""Les fichiers d'une source de certification : sauvegardes (et, à terme, le sidecar).
+"""Les fichiers d'une source de certification : sauvegardes et sidecar de fraîcheur.
 
 Chaque organisme avait inventé sa propre sauvegarde, et le relevé du 2026-09-09
 montre qu'aucune convention n'était partagée — quatre sources, quatre façons :
@@ -27,6 +27,7 @@ qui écrivent en boucle passent donc `backup=False` après la première fois.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from datetime import datetime
@@ -98,3 +99,79 @@ def _purger(bdir: Path, base: str, suffixe: str, garder: int) -> None:
             vieille.unlink()
         except OSError as e:  # un fichier verrouillé ne doit pas casser le run
             logger.warning(f"Sauvegarde {vieille.name} non retirée : {e}")
+
+
+# ── Sidecar de fraîcheur ──────────────────────────────────────────────────────
+#
+# Les quatre sources écrivaient le leur : trois copies quasi littérales du même
+# corps, plus une réimplémentation divergente chez BRMA. Le format est pourtant
+# commun, et il est LU par un seul endroit — `cert_source.read_freshness`, qui
+# alimente le panneau « État des certifications ». Aucune décision de scrape
+# n'en dépend : `--auto` repart de la dernière date de certification connue
+# (RIAA), de l'année courante (SNEP, BRMA) ou d'une fenêtre glissante (BPI), et
+# la détection de trous lit les dates dans les CSV bruts.
+#
+# L'enjeu est donc un AFFICHAGE, mais un affichage qui dure : un run partiel
+# horodatait comme un run complet, et la coche verte survivait à la boîte
+# d'erreur qui la contredisait. D'où `partial`.
+
+
+def ecrire_fraicheur(
+    meta_path: Path,
+    source: str,
+    *,
+    count: int | None = None,
+    partial: str = "",
+    extra: dict | None = None,
+) -> None:
+    """Écrit le sidecar : `updates[source]`, `count`, et l'état d'incomplétude.
+
+    `partial` est POSÉ ou EFFACÉ à chaque écriture, **par clé de source**. C'est
+    la moitié qui compte : sans l'effacement, l'avertissement d'un run raté
+    collerait au suivant qui a réussi, et un panneau qui crie toujours ne
+    signale plus rien. Par clé, parce qu'une récupération par ARTISTE ne doit ni
+    lever ni poser le drapeau d'un balayage GLOBAL.
+
+    `count=None` conserve le compte déjà écrit — c'est à l'appelant, qui connaît
+    son CSV, de le recalculer s'il veut le rafraîchir.
+
+    `extra` absorbe les champs propres à une source (BRMA écrit `total_records`,
+    `new_records_added`, `unique_artists`). Ils n'ont pas à remonter ici : ce
+    module connaît la FORME commune, pas les particularités.
+    """
+    meta: dict = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            logger.warning(f"Sidecar {meta_path.name} illisible, réécrit : {e}")
+            meta = {}
+
+    now = datetime.now().isoformat()
+    updates = meta.get("updates") or {}
+    updates[source] = now
+
+    partiels = meta.get("partial") or {}
+    if partial:
+        partiels[source] = partial
+    else:
+        partiels.pop(source, None)
+
+    meta.update(
+        {
+            "last_update": now,
+            "last_source": source,
+            "count": count if count is not None else meta.get("count"),
+            "updates": updates,
+        }
+    )
+    # Absente quand tout va bien : un sidecar sain n'a pas à porter une clé vide.
+    if partiels:
+        meta["partial"] = partiels
+    else:
+        meta.pop("partial", None)
+    if extra:
+        meta.update(extra)
+
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")

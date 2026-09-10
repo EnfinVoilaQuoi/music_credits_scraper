@@ -111,7 +111,7 @@ class TestScrapeYear:
         ]
         vues = self._fetch_sequence(monkeypatch, pages)
 
-        assert scrape_year(csv_vide, 2020) == 6
+        assert scrape_year(csv_vide, 2020).ajoutees == 6
         # p2 est demandée deux fois : la sonde de page cumulative, puis le
         # parcours. L'invariant l'a rejetée (2 blocs, hors de ]2, 4]) → repli.
         assert self._pages_vues(vues) == [1, 2, 2, 3]
@@ -129,14 +129,14 @@ class TestScrapeYear:
         ]
         vues = self._fetch_sequence(monkeypatch, pages)
 
-        assert scrape_year(csv_vide, 2020) == 3  # 1, 2 et 5
+        assert scrape_year(csv_vide, 2020).ajoutees == 3  # 1, 2 et 5
         assert self._pages_vues(vues) == [1, 2, 2, 3]  # sonde + parcours complet
 
     def test_page_sans_bloc_arrete_la_boucle(self, csv_vide, monkeypatch):
         pages = [_page([_certif(1)], last_page=4), "<html><body></body></html>"]
         vues = self._fetch_sequence(monkeypatch, pages)
 
-        assert scrape_year(csv_vide, 2020) == 1
+        assert scrape_year(csv_vide, 2020).ajoutees == 1
         # p2 vide : la couverture géométrique abandonne aussitôt (une page ≤ P
         # rend au moins une tranche sous le modèle mesuré), puis le parcours
         # s'arrête sur la même page vide. Ni p3 ni p4 ne sont demandées.
@@ -149,28 +149,49 @@ class TestScrapeYear:
         ]
         self._fetch_sequence(monkeypatch, pages)
 
-        assert scrape_year(csv_vide, 2020) == 1
+        bilan = scrape_year(csv_vide, 2020)
+
+        assert bilan.ajoutees == 1
         assert _ligne(_certif(1)) in csv_vide.read_text(encoding="utf-8-sig")
+        # Ce qui a été collecté est BON — mais l'année n'a pas été finie, et
+        # l'appelant doit pouvoir le savoir pour ne pas horodater sa fraîcheur.
+        assert not bilan.complete
+        assert "coupure" in bilan.motif
 
     def test_page_1_inaccessible_ne_touche_pas_le_csv(self, csv_vide, monkeypatch):
         avant = csv_vide.read_text(encoding="utf-8-sig")
         self._fetch_sequence(monkeypatch, [requests.RequestException("503")])
 
-        assert scrape_year(csv_vide, 2020) == 0
-        assert csv_vide.read_text(encoding="utf-8-sig") == avant
+        bilan = scrape_year(csv_vide, 2020)
 
-    def test_max_pages_plafonne_la_pagination(self, csv_vide, monkeypatch):
+        assert bilan.ajoutees == 0
+        assert csv_vide.read_text(encoding="utf-8-sig") == avant
+        # « 0 ajoutée » ne doit pas se lire comme « rien de neuf cette année ».
+        assert not bilan.complete
+
+    def test_max_pages_tronque_mais_le_DIT(self, csv_vide, monkeypatch):
+        """Le plafond rabotait l'année EN SILENCE (`min(nb_pages, max_pages)`).
+
+        Ce test gelait ce silence : il vérifiait qu'on lit 2 pages sur 10 et
+        n'exigeait rien de plus. Or 8 pages d'une année perdues sans un mot,
+        c'est exactement le défaut RIAA du 2026-09-09 — un corpus tronqué
+        annoncé comme complet, et une fraîcheur horodatée par-dessus.
+        """
         pages = [_page([_certif(i)], last_page=10) for i in range(1, 11)]
         vues = self._fetch_sequence(monkeypatch, pages)
 
-        assert scrape_year(csv_vide, 2020, max_pages=2) == 2
+        bilan = scrape_year(csv_vide, 2020, max_pages=2)
+
+        assert bilan.ajoutees == 2
         assert len(vues) == 2
+        assert not bilan.complete, "l'année est amputée de 8 pages sans le dire"
+        assert "plafond" in bilan.motif
 
     def test_dedup_contre_lexistant(self, csv_vide, monkeypatch):
         csv_vide.write_text("﻿" + HEADER + "\n" + _ligne(_certif(1)) + "\n", encoding="utf-8")
         self._fetch_sequence(monkeypatch, [_page([_certif(1), _certif(2)])])
 
-        assert scrape_year(csv_vide, 2020) == 1
+        assert scrape_year(csv_vide, 2020).ajoutees == 1
         contenu = csv_vide.read_text(encoding="utf-8-sig")
         assert contenu.count(_ligne(_certif(1))) == 1
 
@@ -184,7 +205,7 @@ class TestScrapeYear:
         </div>
         """
         self._fetch_sequence(monkeypatch, [f"<html><body>{bloc_partiel}</body></html>"])
-        assert scrape_year(csv_vide, 2020) == 0
+        assert scrape_year(csv_vide, 2020).ajoutees == 0
 
 
 class TestMiseAJourNominale:
@@ -254,7 +275,7 @@ class TestCleDeDedupAvecSeparateurDansLeLabel:
 
         monkeypatch.setattr(us, "_fetch", lambda *a, **k: _page([LABEL_AVEC_SEPARATEUR]))
 
-        assert scrape_year(dest, 2023) == 0
+        assert scrape_year(dest, 2023).ajoutees == 0
         assert dest.read_text(encoding="utf-8-sig").count(ligne) == 1
 
 
@@ -304,7 +325,9 @@ class TestCouvertureGeometrique:
     def test_couverture_complete_en_log2_requetes(self, csv_vide, monkeypatch):
         vues, P = self._site_snep(monkeypatch, total=1528)
 
-        assert scrape_year(csv_vide, 2025) == 1528  # TOUTE l'année
+        bilan = scrape_year(csv_vide, 2025)
+        assert bilan.ajoutees == 1528  # TOUTE l'année
+        assert bilan.complete and not bilan.motif
         assert self._pages_demandees(vues) == [1, 2, 4, 8, 16, 32]
 
     def test_les_puissances_de_deux_pavent_lintervalle(self):
@@ -318,7 +341,7 @@ class TestCouvertureGeometrique:
     def test_annee_tenant_sur_une_page(self, csv_vide, monkeypatch):
         vues, P = self._site_snep(monkeypatch, total=12)
         assert P == 1
-        assert scrape_year(csv_vide, 2020) == 12
+        assert scrape_year(csv_vide, 2020).ajoutees == 12
         assert self._pages_demandees(vues) == [1]  # page 1 déjà en main
 
     def test_site_pagine_normalement_retombe_sur_le_parcours(self, csv_vide, monkeypatch):
@@ -341,7 +364,7 @@ class TestCouvertureGeometrique:
             return pages[n - 1] if n - 1 < len(pages) else pages[-1]
 
         monkeypatch.setattr(us, "_fetch", fake_fetch)
-        assert scrape_year(csv_vide, 2020) == 6  # rien de perdu : le repli lit tout
+        assert scrape_year(csv_vide, 2020).ajoutees == 6  # rien de perdu : le repli lit tout
         assert 3 in self._pages_demandees(vues)
 
     def test_page_inaccessible_pendant_la_couverture_bascule_sur_le_parcours(
@@ -365,7 +388,7 @@ class TestCouvertureGeometrique:
 
         monkeypatch.setattr(us, "_fetch", fetch_capricieux)
         # Le repli parcourt toutes les pages : le résultat reste COMPLET.
-        assert scrape_year(csv_vide, 2025) == 200
+        assert scrape_year(csv_vide, 2025).ajoutees == 200
 
     @staticmethod
     def _pages_demandees(vues) -> list[int]:

@@ -8,10 +8,9 @@ import argparse
 import json
 import logging
 import re
-import shutil
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -26,9 +25,11 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
 from src.observability import repository as usage_repository
 from src.observability.registry import Flow
 from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
-from src.utils import cert_clean_report
+from src.utils import cert_clean_report, cert_store
 from src.utils.cert_normalize import programme_riaa, riaa_level, riaa_units
 from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class RIAADatabaseUpdater:
@@ -515,13 +516,35 @@ def _flatten_records(records: list[dict]) -> list[dict]:
     return rows
 
 
+#: Un saut de ligne (avec les blancs qui l'entourent) → un espace.
+_SAUT_DE_LIGNE = re.compile(r"\s*[\r\n\t]+\s*")
+
+
 def _align_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Restreint/complète aux CERTIF_COLUMNS (colonnes manquantes → '')."""
+    """Restreint/complète aux CERTIF_COLUMNS (colonnes manquantes → '') et
+    aplatit les sauts de ligne des colonnes de TEXTE.
+
+    L'aplatissement est ici, et pas dans le seul parseur, parce que
+    `_align_columns` est le point de passage des DEUX côtés de la fusion — le
+    brut relu et les lignes qui arrivent. C'est ce qui rend stable la dédup du
+    brut, laquelle est une égalité EXACTE : un retour à la ligne relu tantôt en
+    CRLF tantôt en LF fabriquait sinon un doublon parfait (mesuré le 2026-09-09,
+    YUNG KAI – BLUE, unique « ajout » d'un balayage de 14 h). Le corriger à la
+    lecture du site n'aurait valu que pour les lignes à venir, alors que le brut
+    en porte déjà.
+
+    Volontairement TIMIDE : on ne touche PAS aux doubles espaces, qui peuplent
+    les labels par milliers. Les écraser aurait fait de chaque ligne re-scrapée
+    le doublon de celle en base — 2 696 lignes réécrites contre 9.
+    """
     df = df[[c for c in df.columns if c in CERTIF_COLUMNS]].copy()
     for c in CERTIF_COLUMNS:
         if c not in df.columns:
             df[c] = ""
-    return df[CERTIF_COLUMNS]
+    df = df[CERTIF_COLUMNS]
+    for colonne in ("Artist", "Title", "Label"):
+        df[colonne] = df[colonne].map(lambda s: _SAUT_DE_LIGNE.sub(" ", str(s)).strip())
+    return df
 
 
 def _load_riaa_raw() -> pd.DataFrame:
@@ -534,12 +557,16 @@ def _load_riaa_raw() -> pd.DataFrame:
     return pd.DataFrame(columns=CERTIF_COLUMNS)
 
 
-def _write_riaa_raw(df: pd.DataFrame) -> None:
-    """Écrit le brut (backup horodaté avant écriture)."""
-    if RIAA_RAW.exists():
-        bdir = _RIAA_DIR / "backups"
-        bdir.mkdir(exist_ok=True)
-        shutil.copy2(RIAA_RAW, bdir / f"riaa_raw_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+def _write_riaa_raw(df: pd.DataFrame, backup: bool = True) -> None:
+    """Écrit le brut (backup horodaté avant écriture).
+
+    `backup=False` sert au balayage par tranches : l'unité de travail qu'on
+    protège est le RUN, pas la tranche. Sauvegarder à chaque fusion ferait
+    trente copies de 5 Mo pour un seul balayage — le bruit finirait par cacher
+    la sauvegarde qui compte.
+    """
+    if backup:
+        cert_store.sauvegarder(RIAA_RAW)
     df.to_csv(RIAA_RAW, index=False, encoding="utf-8-sig")
 
 
@@ -651,9 +678,13 @@ def _write_riaa_meta(source: str = "GLOBAL", count: int | None = None) -> None:
     RIAA_META.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _merge_certif_csv(new_rows: list[dict]) -> tuple:
+def _merge_certif_csv(new_rows: list[dict], backup: bool = True) -> tuple:
     """Accumule les lignes scrapées dans le BRUT (riaa_raw.csv, dédup EXACTE) puis
-    dérive le CLEAN certif_riaa.csv. Retourne (total_clean, ajoutées_au_brut)."""
+    dérive le CLEAN certif_riaa.csv. Retourne (total_clean, ajoutées_au_brut).
+
+    `backup=False` : voir `_write_riaa_raw`. Le balayage par tranches sauvegarde
+    à sa PREMIÈRE fusion et pas aux suivantes.
+    """
     if not new_rows:
         return (0, 0)
     new_df = _align_columns(pd.DataFrame(new_rows))
@@ -663,13 +694,11 @@ def _merge_certif_csv(new_rows: list[dict]) -> tuple:
     combined = (
         pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
     ).drop_duplicates(ignore_index=True)
-    _write_riaa_raw(combined)
+    _write_riaa_raw(combined, backup=backup)
 
     clean = _clean_from_raw(combined)
-    if CERTIF_CSV.exists():
-        bdir = _RIAA_DIR / "backups"
-        bdir.mkdir(exist_ok=True)
-        shutil.copy2(CERTIF_CSV, bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    if backup:
+        cert_store.sauvegarder(CERTIF_CSV)
     clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
     _write_riaa_meta(source="GLOBAL", count=len(clean))
     return (len(clean), len(combined) - before)
@@ -692,23 +721,188 @@ def fetch_artist(artist: str) -> bool:
     return True
 
 
-def fetch_periode(debut: str, fin: str) -> bool:
-    """Rescrape une période PRÉCISE et la fusionne dans le corpus.
+#: Nombre de lignes VISÉ par tranche de balayage.
+#:
+#: Le site plafonne à ~6 000 lignes par requête (`_MAX_LOAD_MORE` × 30 lignes),
+#: mais ce n'est PAS le plafond qui commande la taille d'une tranche : le coût
+#: d'un « Show More » croît avec la taille du DOM déjà chargé, et il croît vite.
+#: Mesuré du 07 au 09/09/2026 sur des fenêtres réelles — 65 pages en 45 min
+#: (41 s/clic), 102 pages en 2 h 25 (85 s/clic), 200 pages en 14 h (253 s/clic).
+#: Le coût total DÉCROÎT donc quand les tranches raccourcissent, jusqu'à ce que
+#: le coût fixe d'une requête (lancement du navigateur + `goto`) reprenne le
+#: dessus. La cible est calée sur la seule tranche complète réellement mesurée —
+#: 1 957 lignes en 45 min — et non sur une fraction du plafond, qui serait un
+#: chiffre inventé.
+_CIBLE_LIGNES = 2000
+
+#: Longueur de la PREMIÈRE tranche, en jours. Volontairement courte : la seule
+#: chose qui coûte vraiment cher est une tranche tronquée (on paie le plafond
+#: plein tarif, puis on recommence), donc on part sous la densité de l'année la
+#: plus dense connue (2025 : ~5 000 certifications) et on laisse le contrôle
+#: proportionnel rallonger sur les périodes creuses.
+_JOURS_DEPART = 180
+_JOURS_MIN = 1
+_JOURS_MAX = 3653  # 10 ans
+
+#: Tentatives d'une MÊME tranche avant de la déclarer non lue et de passer à la
+#: suivante. Une page RIAA qui ne se rend pas est souvent passagère (Cloudflare,
+#: navigateur mort) ; insister indéfiniment bloquerait le balayage, ne pas
+#: insister du tout sauterait la fenêtre au premier hoquet.
+_ESSAIS_PAR_TRANCHE = 3
+
+#: Tranches consécutives SANS la moindre ligne avant de conclure « accès bloqué ».
+#: Avec la croissance sur période vide, trois tranches couvrent déjà ~10 ans :
+#: au-delà, ce n'est plus une période sans certification, c'est un mur.
+_TRANCHES_A_VIDE = 3
+
+
+def ajuster_tranche(
+    jours: int, lignes: int, *, tronque: bool = False, cible: int = _CIBLE_LIGNES
+) -> int:
+    """Longueur de la PROCHAINE tranche, d'après ce qu'a rendu la précédente.
+
+    Contrôle proportionnel borné, volontairement ASYMÉTRIQUE selon ce que
+    `lignes` vaut comme mesure :
+
+    - tranche TRONQUÉE : `lignes` n'est plus une mesure mais un PLANCHER — on
+      ignore ce que la fenêtre contenait vraiment. On prend donc le plus
+      contractant des deux estimateurs, la moitié ou le prorata. Une bissection
+      seule suffirait à terminer, mais pas à finir vite : lancée sur 26 ans, elle
+      paierait cinq troncatures à 14 h avant d'atteindre la bonne taille.
+    - tranche VIDE : rien à mesurer, on rallonge d'un facteur borné plutôt que
+      de traverser une période sans certification tranche par tranche.
+    - sinon : prorata simple, facteur bridé dans [0,25 ; 4] pour que la longueur
+      n'oscille pas sur une tranche atypique.
+    """
+    if tronque:
+        prorata = int(jours * cible / lignes) if lignes else jours // 2
+        return max(_JOURS_MIN, min(jours // 2, prorata))
+    if lignes <= 0:
+        return min(_JOURS_MAX, jours * 4)
+    facteur = min(4.0, max(0.25, cible / lignes))
+    return max(_JOURS_MIN, min(_JOURS_MAX, int(jours * facteur)))
+
+
+def _jour(s: str) -> date:
+    """« AAAA-MM-JJ » (ou « MM/JJ/AAAA ») → date, via le seul lecteur de dates
+    RIAA du module."""
+    return datetime.strptime(_riaa_iso(s), "%Y-%m-%d").date()
+
+
+def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
+    """Rescrape une période et la fusionne dans le corpus — en la DÉCOUPANT.
 
     `--auto` repart toujours de la dernière certification connue : il ne sait
     pas revenir en arrière. Or les trous que signale la validation sont
     justement DERRIÈRE cette date (un mois de 2006 manquant ne sera jamais
     rattrapé par une MàJ de 2026). D'où cette entrée, qui vise une fenêtre.
+
+    **Le découpage est fait ICI, pas par l'utilisateur.** Une requête RIAA rend
+    au plus ~6 000 lignes : demander « 2000 → 2026 » d'un bloc rendait le bout
+    RÉCENT de la fenêtre et laissait croire au succès (mesuré le 2026-09-09 :
+    6 029 lignes sur ~37 000, 14 h de scrape, un ✅ à l'écran et le seul signal
+    de troncature au fond d'un fichier de log). La fenêtre est donc parcourue à
+    rebours, du plus récent au plus ancien — l'ordre dans lequel le site sert
+    ses résultats —, en tranches dont la longueur s'ajuste sur la densité RÉELLE
+    de certifications rencontrée, laquelle varie d'un facteur dix entre 2004 et
+    2025 : aucune découpe fixe ne peut convenir aux deux.
+
+    Chaque tranche est fusionnée AUSSITÔT. Un balayage complet dure des heures ;
+    accumuler en mémoire pour tout écrire à la fin, c'est tout perdre sur une
+    coupure.
     """
+    d0, d1 = _jour(debut), _jour(fin)
+    if d0 >= d1:
+        print("❌ --from doit précéder --to")
+        return False
+
     scraper = RIAAScraper(headless=True)
-    print(f"=== RIAA, période {debut} → {fin} ===")
-    resultats = scraper.scrape_by_date_range(debut, fin, "certification")
-    if not resultats:
+    print(f"=== RIAA, période {d0} → {d1} (découpage automatique) ===")
+
+    curseur, jours = d1, min((d1 - d0).days, _JOURS_DEPART)
+    total_vues = total_ajoutees = tranches = fusions = total_clean = 0
+    irreductibles: list[date] = []
+    non_lues: list[tuple[date, date]] = []
+    essais = 0
+
+    while curseur > d0:
+        borne = max(d0, curseur - timedelta(days=jours))
+        tranches += 1
+        resultats = scraper.scrape_by_date_range(
+            borne.isoformat(), curseur.isoformat(), "certification"
+        )
+        vues = len(resultats)
+        total_vues += vues
+        ajoutees = 0
+
+        # « PAS LU » n'est ni « vide » ni « tronqué ». Sans ce troisième état, une
+        # page non rendue passait pour une période creuse : le curseur avançait
+        # (fenêtre définitivement sautée) et `ajuster_tranche(jours, 0)` rallongeait
+        # la suivante — l'échec ACCÉLÉRAIT le balayage, et le run se terminait sur
+        # un ✅. On retente la même tranche, puis on la consigne.
+        if scraper.lecture_echouee:
+            essais += 1
+            if essais < _ESSAIS_PAR_TRANCHE:
+                print(f"  {borne} → {curseur} : page non rendue, essai {essais + 1}")
+                continue  # curseur inchangé : c'est la MÊME tranche
+            non_lues.append((borne, curseur))
+            logger.error(f"RIAA : tranche {borne} → {curseur} NON LUE après {essais} essais")
+            print(f"  {borne} → {curseur} : NON LUE — corpus incomplet sur cette fenêtre")
+            curseur, essais = borne, 0
+            continue
+        essais = 0
+        if resultats:
+            # Ce qu'une tranche tronquée a rendu est BON, seulement partiel : on
+            # le garde avant de redécouper, la dédup absorbe le recouvrement.
+            total_clean, ajoutees = _merge_certif_csv(
+                _flatten_records(resultats), backup=(fusions == 0)
+            )
+            fusions += 1
+            total_ajoutees += ajoutees
+        print(
+            f"  {borne} → {curseur} : {vues} vue(s), {ajoutees} ajoutée(s)"
+            + (" — TRONQUÉE" if scraper.tronque else "")
+        )
+
+        if scraper.tronque and (curseur - borne).days > _JOURS_MIN:
+            jours = ajuster_tranche(jours, vues, tronque=True, cible=cible)
+            print(f"    ↳ tranche incomplète, redécoupage à {jours} jour(s)")
+            continue  # le curseur NE bouge PAS : la tranche est à refaire
+
+        if scraper.tronque:
+            # Une seule journée dépasse le plafond : indivisible, on le DIT
+            # plutôt que de la compter pour vue.
+            irreductibles.append(borne)
+            logger.error(
+                f"RIAA : la journée du {borne} dépasse à elle seule le plafond du "
+                "site — corpus incomplet ce jour-là"
+            )
+
+        curseur = borne
+        jours = ajuster_tranche(jours, vues, cible=cible)
+
+        if total_vues == 0 and tranches >= _TRANCHES_A_VIDE:
+            print(f"❌ {tranches} tranches sans la moindre ligne — période vide ou accès bloqué")
+            return False
+
+    if total_vues == 0:
         print("❌ Aucune certification vue — période réellement vide, ou accès bloqué")
         return False
-    total, ajoutees = _merge_certif_csv(_flatten_records(resultats))
-    print(f"✅ {len(resultats)} vue(s), {ajoutees} ajoutée(s) (total {total})")
-    return True
+
+    print(
+        f"✅ {tranches} tranche(s), {total_vues} vue(s), "
+        f"{total_ajoutees} ajoutée(s) (total {total_clean})"
+    )
+    complet = True
+    if irreductibles:
+        jours_txt = ", ".join(str(j) for j in irreductibles[:5])
+        print(f"⚠️  {len(irreductibles)} journée(s) restée(s) tronquée(s) : {jours_txt}")
+        complet = False
+    if non_lues:
+        fen = ", ".join(f"{a}→{b}" for a, b in non_lues[:5])
+        print(f"⚠️  {len(non_lues)} tranche(s) NON LUE(S) : {fen}")
+        complet = False
+    return complet
 
 
 def clean_certif_csv(apply: bool = True) -> dict:
@@ -743,11 +937,7 @@ def clean_certif_csv(apply: bool = True) -> dict:
     )
 
     if apply:
-        if CERTIF_CSV.exists():
-            bdir = _RIAA_DIR / "backups"
-            bdir.mkdir(exist_ok=True)
-            backup = bdir / f"certif_riaa_backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
-            shutil.copy2(CERTIF_CSV, backup)
+        if (backup := cert_store.sauvegarder(CERTIF_CSV)) is not None:
             report["backup"] = str(backup)
         clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
         _write_riaa_meta(source="CLEAN", count=len(clean))

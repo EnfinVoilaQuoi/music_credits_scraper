@@ -14,13 +14,13 @@ Colonnes canoniques (lues ensuite par `cert_matcher._load_snep`, qui normalise
 import io
 import json
 import re
-import shutil
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
 from src.models.certification import CertificationCategory, CertificationLevel
+from src.utils import cert_store
 from src.utils.cert_normalize import normalize_text, repair_extra_separators, reperer_fantomes
 from src.utils.logger import get_logger
 
@@ -170,9 +170,33 @@ def canonical_rows_from_raw(df: pd.DataFrame) -> list[dict]:
 
 
 def _key(row: dict) -> tuple:
-    """Clé de dédup, identique à l'ancienne contrainte DB
-    (artist_clean, title_clean, certification)."""
-    return (normalize_text(row["artist"]), normalize_text(row["title"]), row["certification"])
+    """Clé de dédup : artiste, titre, certification **et CATÉGORIE**.
+
+    La catégorie manquait — la clé reproduisait l'ancienne contrainte DB
+    (artist_clean, title_clean, certification), héritage d'un schéma qui ne
+    distinguait pas les formats. Conséquence mesurée le 2026-09-09 sur le corpus
+    réel : **52 certifications masquées**, un même titre certifié dans les deux
+    catégories fusionnant en une ligne dont `merge_canonical` ne gardait que la
+    date la plus récente.
+
+        NINHO | M.I.L.S      | Platine : Albums 2017-12-15  +  Singles 2025-03-27
+        JUL   | ÉMOTIONS     | Diamant : Albums 2023-10-05  +  Singles 2025-09-04
+        NINHO | M.I.L.S. 2.0 | Diamant : Singles 2021-03-11 +  Albums 2025-07-17
+
+    Huit ans séparent l'album et le single de NINHO : ce sont deux événements,
+    pas un doublon. BRMA l'avait déjà compris (`update_brma._cert_key` inclut la
+    catégorie).
+
+    Aucun risque de scission par variante d'orthographe : la catégorie ne prend
+    que trois valeurs canoniques (`Singles`, `Albums`, `Vidéos`), vérifié
+    identique dans le brut et dans le clean.
+    """
+    return (
+        normalize_text(row["artist"]),
+        normalize_text(row["title"]),
+        row["certification"],
+        row["category"],
+    )
 
 
 def merge_canonical(base: list[dict], new: list[dict]) -> list[dict]:
@@ -266,16 +290,16 @@ def rebuild(raw_path: Path, csv_path: Path, meta_path: Path, source: str = "GLOB
     existing = read_canonical_csv(csv_path)
     new = canonical_rows_from_raw(read_raw_snep_csv(raw_path))
     merged, fantomes = purger_fantomes(merge_canonical(existing, new))
+    # `rebuild` RÉÉCRIT le clean à chaque appel : il se sauvegarde donc toujours,
+    # et plus seulement lorsqu'une purge de fantômes retire quelque chose. La
+    # rétention de `cert_store` (les 10 plus récentes) répond au motif qui avait
+    # fait choisir l'inverse — sauvegarder à chaque fois n'enterre plus rien.
+    backup = cert_store.sauvegarder(csv_path)
     if fantomes:
-        # `rebuild` n'a jamais RETIRÉ de ligne — il accumulait. La purge en
-        # retire, donc elle passe par un backup, comme toute opération qui peut
-        # faire perdre de la donnée. Seulement quand il y a matière : sauvegarder
-        # un fichier inchangé à chaque rebuild noierait les vraies sauvegardes.
-        backup = csv_path.with_name(f"certif_snep-backup-{datetime.now():%Y%m%d_%H%M%S}.csv")
-        shutil.copy2(csv_path, backup)
+        nom = backup.name if backup else "aucune (fichier neuf)"
         logger.info(
             f"🧹 {len(fantomes)} ligne(s) fantôme(s) retirée(s) — libellé cassé dont la "
-            f"version saine est déjà présente. Sauvegarde : {backup.name}"
+            f"version saine est déjà présente. Sauvegarde : {nom}"
         )
     write_canonical_csv(merged, csv_path)
     write_meta(meta_path, source, len(merged))

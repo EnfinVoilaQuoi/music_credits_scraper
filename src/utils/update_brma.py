@@ -20,7 +20,7 @@ import schedule
 
 from src.observability import source_usage
 from src.observability.issues import IssueKind
-from src.utils import cert_clean_report
+from src.utils import cert_clean_report, cert_store
 from src.utils.llm_extractor import secours_apres_panne
 from src.utils.logger import get_logger
 
@@ -778,12 +778,8 @@ class UltratopUpdater:
     def _write_raw(self, df):
         """Écrit le brut (backup avant écriture, écriture atomique)."""
         import os
-        import shutil
 
-        if self.raw_path.exists():
-            bdir = self.output_dir / "backups"
-            bdir.mkdir(exist_ok=True)
-            shutil.copy2(self.raw_path, bdir / f"raw_backup_{datetime.now():%Y%m%d_%H%M%S}.csv")
+        cert_store.sauvegarder(self.raw_path)
         tmp = self.raw_path.with_suffix(".rawtmp")
         try:
             df.to_csv(tmp, index=False, encoding="utf-8-sig")
@@ -797,11 +793,12 @@ class UltratopUpdater:
         """Écrit le clean `certif_brma.csv` (backup du clean avant, atomique)."""
         import os
 
-        if self.database_path.exists():
-            bdir = self.output_dir / "backups"
-            bdir.mkdir(exist_ok=True)
-            bf = bdir / f"backup_{datetime.now():%Y%m%d_%H%M%S}.csv"
-            self.existing_db.to_csv(bf, index=False, encoding="utf-8-sig")
+        # `self.existing_db.to_csv(...)` re-SÉRIALISAIT l'état chargé au
+        # démarrage au lieu de COPIER le fichier : ce qui était sauvegardé
+        # n'était pas ce qui était écrasé, et deux enregistrements successifs
+        # dans la même session sauvegardaient deux fois le même état initial.
+        # `_write_raw`, juste au-dessus, faisait pourtant un vrai `copy2`.
+        if (bf := cert_store.sauvegarder(self.database_path)) is not None:
             self.logger.info(f"Backup créé: {bf}")
         tmp_path = self.database_path.with_suffix(".tmp")
         try:

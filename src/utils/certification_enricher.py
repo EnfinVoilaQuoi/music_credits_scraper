@@ -52,6 +52,7 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
         return 0
 
     enriched = 0
+    echecs = 0
     album_cache: dict[str, list[dict]] = {}  # évite de re-chercher le même album
 
     for track in tracks:
@@ -93,15 +94,32 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
         # pas faire perdre le reste de la discographie.
         except (AttributeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Erreur enrichissement {track.title}: {e}")
-            track.certs.entries = []
-            track.certs.album_entries = []
-            track.certs.has = False
-            # Le repli est un RÉSULTAT lui aussi : deux listes vides à écrire.
-            track.certs.needs_write = True
+            echecs += 1
+            # **On n'écrit RIEN.** Le repli posait deux listes vides avec
+            # `needs_write = True`, or `record_certifications` est délibérément
+            # AUTORITATIF : il peut retirer. « Recalculé, et vide » était donc
+            # indiscernable d'un vrai retrait, et une seule ligne du magasin à
+            # la date illisible suffisait à effacer en base les certifications
+            # d'un morceau — sans qu'aucun garde-fou ne bronche, puisque
+            # l'écriture, elle, réussissait.
+            #
+            # Une exception est un REFUS DE CONCLURE, jamais un résultat vide :
+            # c'est la même règle qu'`indeterminate` côté observabilité. On garde
+            # ce qui est en base et on le fait savoir en fin de flux.
+            track.certs.needs_write = False
 
     if enriched:
         logger.info(f"🏆 {enriched}/{len(tracks)} morceaux enrichis avec certifications")
     albums_with_certs = sum(1 for t in tracks if t.certs.album_entries)
     if albums_with_certs:
         logger.info(f"💿 {albums_with_certs}/{len(tracks)} morceaux ont des certifs d'album")
+    if echecs:
+        # En ERROR, et en fin de flux : le compte doit être visible même quand
+        # le run par ailleurs réussit. Ces morceaux gardent ce qu'ils avaient en
+        # base — ils n'ont pas été recalculés, c'est tout, et c'est ce qu'il faut
+        # savoir avant de conclure que la discographie est à jour.
+        logger.error(
+            f"⚠️ {echecs}/{len(tracks)} morceau(x) NON recalculé(s) (forme inattendue "
+            "côté matcher) — leurs certifications en base sont conservées telles quelles"
+        )
     return enriched

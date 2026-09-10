@@ -4,6 +4,7 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import requests
 
@@ -456,14 +457,37 @@ def _artist_matches(artist_field: str, query: str) -> bool:
     return _re.search(r"\b" + _re.escape(q) + r"\b", _norm_for_match(artist_field)) is not None
 
 
-def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
+class BilanAnnee(NamedTuple):
+    """Ce qu'a donné le scrape d'une année, ET s'il est complet.
+
+    Le compte d'ajouts ne pouvait pas distinguer « rien de nouveau » de « on
+    s'est arrêté à la page 12 sur 51 » : les deux valaient 0, les deux appelants
+    enchaînaient sur un ✅, et la fraîcheur était horodatée comme si l'année
+    entière avait été relue. C'est la faute corrigée le même jour sur RIAA, où
+    elle a coûté 14 h de scrape pour un corpus tronqué.
+
+    `complete` est un booléen d'HONNÊTETÉ, pas de succès : une année sans
+    nouveauté est complète, une année interrompue au premier timeout ne l'est
+    pas même si elle a ramené 300 lignes.
+    """
+
+    ajoutees: int
+    complete: bool
+    motif: str = ""
+
+
+def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> BilanAnnee:
     """Scrape l'intégralité d'une année via le filtre serveur `?annee=YYYY`,
     page par page, et fusionne les nouveautés dans le CSV maître.
 
     C'est la brique de backfill / comblement de trous : contrairement au
     rattrapage incrémental (qui s'arrête à la 1re page déjà connue), on
     parcourt toutes les pages de l'année pour garantir la complétude.
-    Retourne le nombre de certifications ajoutées.
+
+    Retourne un `BilanAnnee` : ce qui a été ajouté, et si l'année a VRAIMENT
+    été parcourue jusqu'au bout. Les deux arrêts prématurés (coupure réseau,
+    page sans bloc) conservent délibérément ce qui a été collecté — c'est bon,
+    seulement partiel — mais ils le DISENT.
     """
     session = _get_session()
     header, existing_lines, existing_keys = _load_existing(dest_path)
@@ -473,7 +497,7 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
         html = _fetch(session, url1)
     except requests.RequestException as e:
         safe_print(f"❌ Année {year} : page 1 inaccessible : {e}")
-        return 0
+        return BilanAnnee(0, False, "page 1 inaccessible")
 
     nb_pages = _discover_last_page(html)
 
@@ -489,10 +513,19 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
             f"{len(_pages_couvrantes(nb_pages))} requêtes (sur {nb_pages} pages), "
             f"{len(new_lines)} nouvelle(s)"
         )
-        return len(new_lines)
+        return BilanAnnee(len(new_lines), True)
 
     # Repli : parcours page à page, correct en toutes circonstances.
     last_page = min(nb_pages, max_pages)
+    complete, motif = True, ""
+    if nb_pages > max_pages:
+        # Le plafond tronquait EN SILENCE : `min()` rabotait la dernière page et
+        # personne n'en savait rien. Un plafond qu'on n'atteint jamais en
+        # pratique doit quand même se dire — sinon il devient muet le jour où le
+        # site change de pagination.
+        complete = False
+        motif = f"plafond de {max_pages} pages atteint ({nb_pages} annoncées)"
+        safe_print(f"⚠️ Année {year} : {motif} — année TRONQUÉE")
     safe_print(f"📅 Année {year} : {last_page} page(s) à parcourir")
 
     new_lines = []
@@ -506,11 +539,13 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
                 cur_html = _fetch(session, url)
             except requests.RequestException as e:
                 safe_print(f"❌ Année {year} page {page} : {e} — arrêt")
+                complete, motif = False, f"coupure réseau page {page}/{last_page}"
                 break
 
         rows = _parse_certifications_page(cur_html)
         if not rows:
             safe_print(f"⚠️ Année {year} page {page} : aucun bloc — arrêt")
+            complete, motif = False, f"page {page}/{last_page} sans bloc"
             break
 
         page_nouvelles = _nouvelles_lignes(rows, existing_keys)
@@ -526,7 +561,7 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> int:
 
     _write_merged(dest_path, header, existing_lines, new_lines)
     safe_print(f"🔀 Année {year} : {len(new_lines)} nouvelle(s) certification(s) fusionnée(s)")
-    return len(new_lines)
+    return BilanAnnee(len(new_lines), complete, motif)
 
 
 # `scrape_recent_certifications` a été RETIRÉE le 2026-09-04. Elle s'arrêtait
@@ -584,10 +619,15 @@ def update_snep_database():
     # cinq pages ; seul le parcours complet de l'année est correct.
     annees = _years_to_scrape()
     safe_print(f"\n🌐 Scraping SNEP, année(s) complète(s) : {', '.join(map(str, annees))}...")
+    incompletes: list[str] = []
     for annee in annees:
         try:
-            added = scrape_year(csv_path, annee)
-            safe_print(f"🔀 Année {annee} : {added} certification(s) ajoutée(s) depuis le site")
+            bilan = scrape_year(csv_path, annee)
+            safe_print(
+                f"🔀 Année {annee} : {bilan.ajoutees} certification(s) ajoutée(s) depuis le site"
+            )
+            if not bilan.complete:
+                incompletes.append(f"{annee} ({bilan.motif})")
         except (
             requests.RequestException,
             AttributeError,
@@ -597,15 +637,24 @@ def update_snep_database():
             ValueError,
         ) as e:
             safe_print(f"⚠️ Scraping {annee} impossible ({e}) — on continue avec l'export")
+            incompletes.append(f"{annee} ({type(e).__name__})")
 
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
     total_before, total_after = _rebuild_canonical(source="GLOBAL")
 
-    safe_print("\n✅ MISE À JOUR TERMINÉE")
     safe_print("\n📊 Résumé :")
     safe_print(f"  • Certifications avant : {total_before}")
     safe_print(f"  • Certifications après : {total_after}")
     safe_print(f"  • Nouvelles/mises à jour : {total_after - total_before}")
+    if incompletes:
+        # Un ✅ sur une année qu'on n'a pas fini de lire, c'est le défaut RIAA :
+        # le prochain run repartira de cette fraîcheur comme si tout était vu.
+        safe_print(
+            f"\n⚠️ MISE À JOUR PARTIELLE — année(s) non terminée(s) : {', '.join(incompletes)}"
+        )
+        safe_print("   Relancer pour ces années (`--backfill AAAA`) : le corpus est incomplet.")
+        return False
+    safe_print("\n✅ MISE À JOUR TERMINÉE")
     return True
 
 
@@ -767,12 +816,20 @@ def backfill_years(years) -> int:
     safe_print("=" * 60)
 
     total = 0
+    incompletes: list[str] = []
     for y in years:
-        total += scrape_year(dest_path, int(y))
+        bilan = scrape_year(dest_path, int(y))
+        total += bilan.ajoutees
+        if not bilan.complete:
+            incompletes.append(f"{y} ({bilan.motif})")
 
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
     _rebuild_canonical(source="SCRAPE")
-    safe_print(f"✅ Backfill terminé : {total} nouvelle(s) certification(s) au total")
+    if incompletes:
+        safe_print(f"⚠️ Backfill PARTIEL : {total} ajoutée(s), mais {', '.join(incompletes)}")
+        safe_print("   Relancer ces années — le corpus est incomplet.")
+    else:
+        safe_print(f"✅ Backfill terminé : {total} nouvelle(s) certification(s) au total")
     return total
 
 

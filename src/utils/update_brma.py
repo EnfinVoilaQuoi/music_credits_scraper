@@ -1110,7 +1110,9 @@ def main():
     if args.dedup:
         rapport = updater.dedup_database(apply=not args.dry_run)
         safe_print(UltratopUpdater.format_clean_report(rapport))
-        sys.exit(0)
+        # Un rapport porteur d'`error` sortait en 0 : la GUI concluait au succès
+        # et proposait « Appliquer » pour une opération qui ne pouvait rien faire.
+        sys.exit(1 if rapport.get("error") else 0)
 
     if args.mode == "manual":
         # Mode interactif

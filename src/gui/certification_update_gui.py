@@ -18,6 +18,20 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _ligne_bilan(source: str, code: int, sortie: str) -> str:
+    """Une ligne de bilan par source, qui DIT si le script a échoué.
+
+    La dernière ligne de sortie était reprise telle quelle, code de retour
+    ignoré : un script planté produisait « SNEP : <dernière ligne quelconque> »,
+    indiscernable d'un succès. Seul RIAA exploitait son code, et seulement pour
+    déclencher le repli CDP.
+    """
+    derniere = (sortie.strip().splitlines()[-1:] or ["ok"])[0]
+    return (
+        f"{source} : {derniere}" if code == 0 else f"{source} : ❌ ÉCHEC (code {code}) — {derniere}"
+    )
+
+
 class CertificationUpdateDialog(ctk.CTkToplevel):
     """Fenêtre de gestion des mises à jour de certifications"""
 
@@ -473,11 +487,11 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
             self._set_progress(f"🇫🇷 SNEP : {etiquette}…")
             try:
-                _code, sortie = self._run_streaming(
+                code, sortie = self._run_streaming(
                     [py, str(root / "src" / "utils" / "update_snep.py"), *args_noms],
                     f"SNEP {etiquette}",
                 )
-                outputs.append("SNEP : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
+                outputs.append(_ligne_bilan("SNEP", code, sortie))
             except Exception as e:
                 logger.error(f"SNEP artiste : {e}")
                 outputs.append(f"SNEP : erreur ({e})")
@@ -496,7 +510,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                             f"RIAA {etiquette} (CDP)",
                             env={**os.environ, "GENIUS_CDP_URL": cdp},
                         )
-                outputs.append("RIAA : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
+                outputs.append(_ligne_bilan("RIAA", code, sortie))
             except Exception as e:
                 logger.error(f"RIAA artiste : {e}")
                 outputs.append(f"RIAA : erreur ({e})")
@@ -504,11 +518,11 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             # BPI : HTTP nu, aucun navigateur, donc aucun repli à prévoir.
             self._set_progress(f"🇬🇧 BPI : {etiquette}…")
             try:
-                _code, sortie = self._run_streaming(
+                code, sortie = self._run_streaming(
                     [py, str(root / "src" / "utils" / "update_bpi.py"), *args_noms],
                     f"BPI {etiquette}",
                 )
-                outputs.append("BPI : " + (sortie.strip().splitlines()[-1:] or ["ok"])[0])
+                outputs.append(_ligne_bilan("BPI", code, sortie))
             except Exception as e:
                 logger.error(f"BPI artiste : {e}")
                 outputs.append(f"BPI : erreur ({e})")
@@ -1287,12 +1301,35 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             return
 
         def travail():
+            # Les codes de retour étaient JETÉS : douze rattrapages qui échouent
+            # tous s'affichaient « ✅ 12 période(s) relancée(s) ». C'est le seul
+            # chemin de comblement de trous du logiciel — il ne pouvait pas dire
+            # qu'il n'avait rien comblé.
+            echecs = []
             for i, cmd in enumerate(a_lancer, 1):
                 if stop_requested():
                     break
                 self._set_progress(f"🕳️ {source} : période {i}/{len(a_lancer)}…")
-                self._run_streaming(cmd, f"{source} rattrapage {i}/{len(a_lancer)}")
-            self._set_progress(f"✅ {source} : {len(a_lancer)} période(s) relancée(s)")
+                code, _ = self._run_streaming(cmd, f"{source} rattrapage {i}/{len(a_lancer)}")
+                if code != 0:
+                    echecs.append(i)
+            if echecs:
+                self._set_progress(
+                    f"❌ {source} : {len(echecs)}/{len(a_lancer)} période(s) en ÉCHEC"
+                )
+                self.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        f"Rescraper {source}",
+                        f"{len(echecs)} période(s) sur {len(a_lancer)} ont échoué "
+                        f"(n° {', '.join(map(str, echecs[:10]))}).\n\n"
+                        "Les trous correspondants n'ont PAS été comblés — "
+                        "voir la console pour le détail.",
+                        parent=self,
+                    ),
+                )
+            else:
+                self._set_progress(f"✅ {source} : {len(a_lancer)} période(s) relancée(s)")
             self.after(500, self._update_status)
 
         start_worker(travail)
@@ -1323,7 +1360,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 def appliquer():
                     def travail():
                         self._set_progress(f"🧹 {source} : nettoyage en cours…")
-                        _c, sortie_appliquee = self._run_streaming(
+                        code, sortie_appliquee = self._run_streaming(
                             [sys.executable, chemin, *args], f"{source} nettoyage"
                         )
                         try:
@@ -1332,7 +1369,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                             reset_cert_matcher()
                         except ImportError as e:
                             logger.warning(f"Matcher non rafraîchi : {e}")
-                        self._set_progress(f"✅ {source} nettoyé")
+                        # « ✅ nettoyé » s'affichait même quand le script sortait
+                        # en erreur : le rapport à l'écran décrivait alors une
+                        # réécriture qui n'avait pas eu lieu.
+                        self._set_progress(
+                            f"✅ {source} nettoyé"
+                            if code == 0
+                            else f"❌ {source} : nettoyage ÉCHOUÉ"
+                        )
                         self.after(
                             0,
                             lambda: self._show_report_window(

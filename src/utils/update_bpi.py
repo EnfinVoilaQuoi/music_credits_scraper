@@ -552,14 +552,25 @@ def main() -> int:
 
     try:
         if args.clean:
-            print(format_clean_report(clean_certif_csv(apply=not args.dry_run)))
-            return 0
+            rapport = clean_certif_csv(apply=not args.dry_run)
+            print(format_clean_report(rapport))
+            # Un rapport porteur d'`error` (« brut vide, rien à nettoyer ») sortait
+            # en 0 : la GUI concluait au succès et proposait « Appliquer » pour une
+            # opération qui ne pouvait rien faire.
+            return 1 if rapport.get("error") else 0
         if args.stats:
             stats()
             return 0
         if args.artist:
             return 0 if fetch_artists(args.artist) else 1
-        if args.debut and args.fin:
+        if args.debut or args.fin:
+            # `and` laissait `--from` SEUL tomber dans `print_help()` et sortir en
+            # 0 : rien n'était scrapé, et le code de sortie disait que tout allait
+            # bien. Sur le chemin GUI, une commande mal formée passait donc pour
+            # une période relancée. RIAA exigeait déjà les deux.
+            if not (args.debut and args.fin):
+                print("❌ --from et --to vont ensemble")
+                return 2
             return 0 if fetch_periode(args.debut, args.fin) else 1
         if args.full:
             return 0 if full_sweep() else 1

@@ -215,7 +215,7 @@ class RIAADatabaseUpdater:
             # signalait, en juillet 2026, un parseur mort que personne n'a vu
             # passer — la MàJ concluait « à jour » et horodatait la fraîcheur.
             total_seen = 0
-            periodes = 0
+            periodes = lues = 0
 
             while current_date < now:
                 # Période d'un mois
@@ -233,9 +233,11 @@ class RIAADatabaseUpdater:
                     self.scraper = RIAAScraper(headless=True)
                     self.scraper.init_driver()
 
+                periodes += 1  # TENTÉE — compter les seules réussies rendait
+                # la garde ci-dessous inopérante DANS LE PIRE DES CAS (voir plus bas).
                 try:
                     results = self.scraper.scrape_by_date_range(start_str, end_str, "certification")
-                    periodes += 1
+                    lues += 1
                     total_seen += len(results)
 
                     if results:
@@ -269,18 +271,32 @@ class RIAADatabaseUpdater:
 
             self.logger.info(
                 f"Total: {total_seen} vues, {total_added} ajoutées, "
-                f"{total_updated} mises à jour ({periodes} période(s))"
+                f"{total_updated} mises à jour ({lues}/{periodes} période(s) lue(s))"
             )
 
             # Export final
             self.export_to_csv()
 
-            if periodes and total_seen == 0:
-                # Ne PAS horodater : une fraîcheur écrite ici affirmerait que la
-                # base est à jour alors qu'on n'a rien pu lire. C'est exactement
-                # ce qui a masqué la refonte du site pendant deux mois.
+            if periodes and not lues:
+                # AUCUNE période n'a pu être lue : le scraper lève à chaque appel
+                # (navigateur absent, Cloudflare). C'est le pire des cas, et
+                # c'était le SEUL que la garde ne couvrait pas — elle testait
+                # `periodes and total_seen == 0` en ne comptant `periodes` qu'en
+                # cas de SUCCÈS, si bien qu'un échec intégral la court-circuitait
+                # par sa propre garde et horodatait la fraîcheur.
                 self.logger.error(
-                    f"RIAA : aucune certification vue sur {periodes} période(s) — "
+                    f"RIAA : {periodes} période(s) demandée(s), AUCUNE lue — "
+                    "scraper cassé, navigateur absent ou accès bloqué. "
+                    "Fraîcheur NON horodatée."
+                )
+                return False
+
+            if total_seen == 0:
+                # Des pages ont été lues, mais pas une seule certification : le
+                # parseur ne comprend plus la page. C'est exactement ce qui a
+                # masqué la refonte du site pendant deux mois.
+                self.logger.error(
+                    f"RIAA : aucune certification vue sur {lues} période(s) lue(s) — "
                     "scraper cassé ou site modifié. Fraîcheur NON horodatée "
                     "(re-capturer les fixtures : scripts/capture_fixtures.py --only riaa)."
                 )
@@ -1018,8 +1034,12 @@ def main():
             pass
 
     if args.clean:
-        print(format_clean_report(clean_certif_csv(apply=not args.dry_run)))
-        sys.exit(0)
+        rapport = clean_certif_csv(apply=not args.dry_run)
+        print(format_clean_report(rapport))
+        # Un rapport porteur d'`error` (« brut vide, rien à nettoyer ») sortait
+        # en 0 : la GUI concluait au succès et proposait « Appliquer » pour une
+        # opération qui ne pouvait rien faire.
+        sys.exit(1 if rapport.get("error") else 0)
 
     if args.debut or args.fin:
         if not (args.debut and args.fin):

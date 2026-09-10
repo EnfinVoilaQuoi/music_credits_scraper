@@ -304,10 +304,18 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     status_text += f"{flag} {source.name}: ❌ Pas de données\n"
                     continue
                 if fresh["last_global"]:
+                    # La date reste VRAIE — on a bien vérifié à cette heure-là.
+                    # Ce qui manquait est à côté d'elle : sans le motif, un run
+                    # partiel affiche la même coche verte qu'un run complet, et
+                    # la boîte d'erreur qui le contredisait a disparu depuis
+                    # longtemps quand on revient regarder le panneau.
+                    marque = "⚠️" if fresh["partial"] else "✅"
                     status_text += (
-                        f"{flag} {source.name}: ✅ Dernière MàJ globale: "
+                        f"{flag} {source.name}: {marque} Dernière MàJ globale: "
                         f"{_fmt(fresh['last_global'])}\n"
                     )
+                    if fresh["partial"]:
+                        status_text += f"   ⚠️ PARTIELLE — {fresh['partial']}\n"
                 else:
                     # Aucune MàJ globale tracée : repli sur le mtime, signalé.
                     mod_time = datetime.fromtimestamp(source.clean_path.stat().st_mtime)

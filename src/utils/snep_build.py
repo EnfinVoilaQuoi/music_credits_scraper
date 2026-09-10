@@ -12,9 +12,7 @@ Colonnes canoniques (lues ensuite par `cert_matcher._load_snep`, qui normalise
 """
 
 import io
-import json
 import re
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -266,25 +264,19 @@ def write_canonical_csv(rows: list[dict], path: Path) -> None:
     df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
-def write_meta(path: Path, source: str, count: int) -> None:
-    """Écrit/met à jour le sidecar meta en gardant un historique PAR SOURCE
-    (`updates`). Indispensable pour distinguer une MàJ globale d'une récup par
-    artiste (fix JOURNAL 2026-06-25 : une recherche ARTISTE ne doit pas passer
-    pour une MàJ globale)."""
-    meta: dict = {}
-    if path.exists():
-        try:
-            meta = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            meta = {}
-    now = datetime.now().isoformat()
-    updates = meta.get("updates") or {}
-    updates[source] = now
-    meta.update({"last_update": now, "last_source": source, "count": count, "updates": updates})
-    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+def write_meta(path: Path, source: str, count: int, *, partial: str = "") -> None:
+    """Sidecar de fraîcheur — la FORME est portée par `cert_store`."""
+    cert_store.ecrire_fraicheur(path, source, count=count, partial=partial)
 
 
-def rebuild(raw_path: Path, csv_path: Path, meta_path: Path, source: str = "GLOBAL") -> int:
+def rebuild(
+    raw_path: Path,
+    csv_path: Path,
+    meta_path: Path,
+    source: str = "GLOBAL",
+    *,
+    partial: str = "",
+) -> int:
     """Régénère le clean en fusionnant le brut courant dans l'existant (accumule),
     puis écrit le CSV canonique + le sidecar meta. Retourne le nombre de lignes."""
     existing = read_canonical_csv(csv_path)
@@ -302,7 +294,7 @@ def rebuild(raw_path: Path, csv_path: Path, meta_path: Path, source: str = "GLOB
             f"version saine est déjà présente. Sauvegarde : {nom}"
         )
     write_canonical_csv(merged, csv_path)
-    write_meta(meta_path, source, len(merged))
+    write_meta(meta_path, source, len(merged), partial=partial)
     logger.info(f"📄 certif_snep.csv : {len(merged)} lignes ({len(new)} depuis le brut)")
     return len(merged)
 

@@ -31,18 +31,27 @@ _CERT_DIR = Path(DATA_PATH) / "certifications"
 def read_freshness(meta_path: Path, clean_path: Path) -> dict:
     """Fraîcheur normalisée d'une source depuis son sidecar + présence du clean.
 
-    Renvoie `{available, last_global, last_artist, count}` :
+    Renvoie `{available, last_global, last_artist, count, partial}` :
       - `available` : le CSV clean (lu par le matcher) existe ;
-      - `last_global` : MàJ NON-artiste la plus récente (`updates` hors ARTIST),
-        repli `last_update` si l'ancien format n'a pas de dict `updates` ;
+      - `last_global` : MàJ NON-artiste la plus récente (`updates` hors ARTIST
+        et hors CLEAN), repli `last_update` si l'ancien format n'a pas de dict
+        `updates` ;
       - `last_artist` : `updates['ARTIST']` (récup par artiste), sinon None ;
-      - `count` : nb de lignes clean (`count` ou `total_records` legacy BRMA).
+      - `count` : nb de lignes clean (`count` ou `total_records` legacy BRMA) ;
+      - `partial` : motif d'INCOMPLÉTUDE du dernier run non-artiste, ou "".
+        Un run partiel horodate comme un run complet — c'est délibéré, retenir
+        l'horodatage ferait afficher « jamais mise à jour » à un balayage qui a
+        ramené 300 vraies lignes. Ce qui manquait n'est donc pas une date
+        retenue, c'est ce motif à côté d'elle : sans lui, la coche verte survit
+        à la boîte d'erreur qui la contredit, et il ne reste plus, une semaine
+        après, qu'une date du jour rassurante.
     """
     fresh = {
         "available": clean_path.exists(),
         "last_global": None,
         "last_artist": None,
         "count": None,
+        "partial": "",
     }
     if not meta_path.exists():
         return fresh
@@ -54,10 +63,18 @@ def read_freshness(meta_path: Path, clean_path: Path) -> dict:
 
     updates = data.get("updates") or {}
     fresh["last_artist"] = updates.get("ARTIST")
-    non_artist = [t for s, t in updates.items() if s != "ARTIST"]
-    if non_artist:
-        fresh["last_global"] = max(non_artist)
-    elif data.get("last_source", data.get("source")) != "ARTIST":
+    # CLEAN est écarté au même titre qu'ARTIST : un nettoyage est une opération
+    # 100 % LOCALE, il ne prouve pas qu'on a vérifié la source. Le compter
+    # rajeunissait une source en panne depuis six semaines dès qu'on cliquait
+    # « Nettoyer » — le seul verdict censé répondre à « quand a-t-on VÉRIFIÉ ? »
+    # répondait « quand a-t-on TOUCHÉ le fichier ? ». BRMA, seul des quatre, ne
+    # produisait pas ce faux signal parce que son dédup n'horodate pas.
+    globales = [(t, s) for s, t in updates.items() if s not in ("ARTIST", "CLEAN")]
+    if globales:
+        horodatage, source_gagnante = max(globales)
+        fresh["last_global"] = horodatage
+        fresh["partial"] = (data.get("partial") or {}).get(source_gagnante, "")
+    elif data.get("last_source", data.get("source")) not in ("ARTIST", "CLEAN"):
         # Ancien format sans `updates` : `last_update` vaut MàJ globale.
         fresh["last_global"] = data.get("last_update")
     fresh["count"] = data.get("count", data.get("total_records"))

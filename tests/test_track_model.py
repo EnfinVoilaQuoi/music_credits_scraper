@@ -215,6 +215,40 @@ class TestCertificationMilestoneDurations:
         assert t.certification_milestone_durations() == []
 
 
+class TestCalculateCertificationDuration:
+    """La durée d'obtention est DÉRIVÉE (aucune colonne DB), posée sur
+    `certs.duration_days`. Elle doit être EFFACÉE, pas laissée fantôme, quand
+    une date manque ou devient illisible."""
+
+    def test_duree_positive(self):
+        t = Track(title="X")
+        t.release_date = "2020-01-01"
+        t.certs.date = "2020-07-01"
+        assert (
+            t.calculate_certification_duration()
+            == (datetime(2020, 7, 1) - datetime(2020, 1, 1)).days
+        )
+        assert t.certs.duration_days == (datetime(2020, 7, 1) - datetime(2020, 1, 1)).days
+
+    def test_date_illisible_efface_la_valeur_precedente(self):
+        t = Track(title="X")
+        t.release_date = "2020-01-01"
+        t.certs.date = "2020-07-01"
+        t.calculate_certification_duration()
+        assert t.certs.duration_days is not None
+        # La certif devient illisible → la durée d'avant ne doit PAS survivre
+        t.certs.date = "date pourrie"
+        assert t.calculate_certification_duration() is None
+        assert t.certs.duration_days is None
+
+    def test_duree_negative_devient_none(self):
+        t = Track(title="X")
+        t.release_date = "2021-01-01"
+        t.certs.date = "2020-01-01"  # certif AVANT la sortie → aberrant
+        assert t.calculate_certification_duration() is None
+        assert t.certs.duration_days is None
+
+
 class TestCertificationEmoji:
     def test_paliers_connus(self):
         assert certification_emoji("Or") == "🥇"

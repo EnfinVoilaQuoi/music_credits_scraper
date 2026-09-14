@@ -18,7 +18,7 @@ from src.config import DATA_PATH
 from src.observability import repository as usage_repository
 from src.observability import source_usage
 from src.observability.registry import Flow
-from src.utils import cert_store
+from src.utils import cert_store, snep_vues
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -314,6 +314,17 @@ def _row_key(fields: list) -> tuple:
     )
 
 
+def _champs(line: str) -> list:
+    """Champs d'une ligne du brut, guillemets CSV résolus (`snep_vues.champs`).
+
+    Un `split(";")` voyait deux titres là où l'export SNEP quote un champ à
+    guillemets (`"… (FROM ""SING"" …)"`) et le parseur de page l'écrit nu :
+    8 lignes sur 323 confrontées au site le 2026-09-14, et chacune re-ajoutable
+    à chaque passage sous l'autre écriture.
+    """
+    return snep_vues.champs(line)
+
+
 def _load_existing(dest_path: Path):
     """Charge le CSV maître : retourne (header, lignes_existantes, set_de_clés)."""
     header = _CSV_HEADER
@@ -325,7 +336,7 @@ def _load_existing(dest_path: Path):
             header = lines[0]
             existing_lines = [line for line in lines[1:] if line.strip()]
             for line in existing_lines:
-                f = line.split(";")
+                f = _champs(line)
                 if len(f) >= 7:
                     keys.add(_row_key(f))
     return header, existing_lines, keys
@@ -439,7 +450,7 @@ def _nouvelles_lignes(rows: list, existing_keys: set) -> list:
     """
     nouvelles = []
     for row in rows:
-        f = row.split(";")
+        f = _champs(row)
         if len(f) < 7:
             continue
         key = _row_key(f)
@@ -487,13 +498,19 @@ class BilanAnnee(NamedTuple):
     motif: str = ""
 
 
-def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> BilanAnnee:
+def scrape_year(
+    dest_path: Path, year: int, max_pages: int = 400, *, site: list | None = None
+) -> BilanAnnee:
     """Scrape l'intégralité d'une année via le filtre serveur `?annee=YYYY`,
     page par page, et fusionne les nouveautés dans le CSV maître.
 
     C'est la brique de backfill / comblement de trous : contrairement au
     rattrapage incrémental (qui s'arrête à la 1re page déjà connue), on
     parcourt toutes les pages de l'année pour garantir la complétude.
+
+    `site`, s'il est fourni, reçoit TOUTES les lignes lues quand l'année est
+    complète — c'est la matière de `_reconcilier`, qui les jetait jusqu'au
+    2026-09-14 après le calcul des nouveautés.
 
     Retourne un `BilanAnnee` : ce qui a été ajouté, et si l'année a VRAIMENT
     été parcourue jusqu'au bout. Les deux arrêts prématurés (coupure réseau,
@@ -524,6 +541,8 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> BilanAnnee:
             f"{len(_pages_couvrantes(nb_pages))} requêtes (sur {nb_pages} pages), "
             f"{len(new_lines)} nouvelle(s)"
         )
+        if site is not None:
+            site.extend(toutes)
         return BilanAnnee(len(new_lines), True)
 
     # Repli : parcours page à page, correct en toutes circonstances.
@@ -540,6 +559,7 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> BilanAnnee:
     safe_print(f"📅 Année {year} : {last_page} page(s) à parcourir")
 
     new_lines = []
+    toutes = []
     page = 1
     while page <= last_page:
         if page == 1:
@@ -559,6 +579,7 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> BilanAnnee:
             complete, motif = False, f"page {page}/{last_page} sans bloc"
             break
 
+        toutes.extend(rows)
         page_nouvelles = _nouvelles_lignes(rows, existing_keys)
         new_lines.extend(page_nouvelles)
 
@@ -572,7 +593,64 @@ def scrape_year(dest_path: Path, year: int, max_pages: int = 400) -> BilanAnnee:
 
     _write_merged(dest_path, header, existing_lines, new_lines)
     safe_print(f"🔀 Année {year} : {len(new_lines)} nouvelle(s) certification(s) fusionnée(s)")
+    if complete and site is not None:
+        site.extend(toutes)
     return BilanAnnee(len(new_lines), complete, motif)
+
+
+def _reconcilier(dest_path: Path, annees: list[int], site: list) -> int:
+    """Ce que le site ne montre plus, sur les années lues ENTIÈREMENT.
+
+    `toutes` était jeté après le calcul des nouveautés — la différence dans
+    l'autre sens (local − site) est pourtant la seule façon de voir un retrait.
+    Deux règles, toutes deux apprises en mesurant :
+
+    - ne PAS conclure sur une année partielle : chaque page manquante
+      « retirerait » trente lignes ;
+    - confronter les années ENSEMBLE, contre l'UNION de ce que le site montre :
+      le palier qui remplace un Or de 2024 est daté 2025 ou 2026. Année par
+      année, le premier essai a marqué 250 retraits là où il y en a 8.
+
+    Les paliers intermédiaires que le site efface en montant ne sont PAS des
+    retraits (94 % des absences mesurées) : ils restent, c'est la valeur du
+    magasin. Rend le nombre de lignes marquées retirées.
+    """
+    if not annees:
+        return 0
+    _, locales, _ = _load_existing(dest_path)
+    suffixes = tuple(f"/{a}" for a in annees)
+    de_ces_annees = [
+        ligne
+        for ligne in locales
+        if len(f := _champs(ligne)) >= 7 and f[-1].strip().endswith(suffixes)
+    ]
+    r = snep_vues.reconcilier(de_ces_annees, site)
+    candidates = len(r.retirees)
+    # Le classement par année n'est pas fiable ligne à ligne (cache par page) :
+    # chaque candidate est confrontée à la page filtrée par ARTISTE avant de
+    # conclure — ~25 requêtes, pas 4 000.
+    r = snep_vues.confirmer(r, de_ces_annees, _page_artiste)
+    n = snep_vues.enregistrer(dest_path, r)
+    safe_print(
+        f"👁️ {', '.join(map(str, annees))} : {len(r.vues)} ligne(s) revue(s), "
+        f"{len(r.remplacees)} palier(s) remplacé(s) par un supérieur (conservés), "
+        f"{n} RETIRÉE(S) par le SNEP ({candidates} candidate(s) avant confirmation par artiste)"
+    )
+    return n
+
+
+def _page_artiste(nom: str) -> list | None:
+    """Les blocs de `?interprete=<nom>` ; None si la page est inaccessible."""
+    from urllib.parse import quote
+
+    time.sleep(random.uniform(DELAY_BETWEEN_REQUESTS, DELAY_BETWEEN_REQUESTS * 1.8))
+    try:
+        return _parse_certifications_page(
+            _fetch(_get_session(), f"{_SNEP_BASE}?interprete={quote(nom)}")
+        )
+    except requests.RequestException as e:
+        safe_print(f"⚠️ Confirmation impossible pour « {nom} » ({e}) — candidate laissée indécise")
+        return None
 
 
 # `scrape_recent_certifications` a été RETIRÉE le 2026-09-04. Elle s'arrêtait
@@ -592,26 +670,36 @@ def _rebuild_canonical(source: str = "GLOBAL", *, partial: str = "") -> tuple[in
     snep = Path(DATA_PATH) / "certifications" / "snep"
     csv_path = snep / "certif_snep.csv"
     before = len(read_canonical_csv(csv_path)) if csv_path.exists() else 0
+    brut = snep / "certif-.csv"
     after = rebuild(
-        snep / "certif-.csv",
+        brut,
         csv_path,
         snep / "certif_snep.meta.json",
         source=source,
         partial=partial,
+        retirees=snep_vues.cles_retirees(brut),
     )
     reset_cert_matcher()
     return before, after
 
 
-def _years_to_scrape(today: datetime | None = None) -> list[int]:
-    """Années à parcourir lors d'une mise à jour nominale.
+#: Années relues ENTIÈREMENT à chaque mise à jour nominale.
+_ANNEES_RELUES = 3
 
-    L'année courante, plus la précédente pendant les deux premiers mois : le SNEP
-    antidate, donc une certification publiée en janvier peut porter une date de
-    constat de décembre et n'apparaître que dans le classement de l'an passé.
+
+def _years_to_scrape(today: datetime | None = None) -> list[int]:
+    """Années à parcourir lors d'une mise à jour nominale : la courante et les
+    deux précédentes.
+
+    L'année courante seule ne suffisait pas (jusqu'au 2026-09-14 : la courante,
+    plus la précédente en janvier-février). Le SNEP ANTIDATE bien au-delà de
+    deux mois — 26 certifications de 2024 sont apparues sur le site après notre
+    dernier passage (FAUVE, Stromae, Booba, constats d'octobre-novembre 2024) —
+    et surtout, seule une année relue entièrement permet de voir ce que le site
+    a RETIRÉ (`snep_vues`). Six requêtes par année : trois années coûtent 45 s.
     """
     today = today or datetime.now()
-    return [today.year, today.year - 1] if today.month <= 2 else [today.year]
+    return [today.year - i for i in range(_ANNEES_RELUES)]
 
 
 def update_snep_database():
@@ -637,13 +725,17 @@ def update_snep_database():
     annees = _years_to_scrape()
     safe_print(f"\n🌐 Scraping SNEP, année(s) complète(s) : {', '.join(map(str, annees))}...")
     incompletes: list[str] = []
+    completes: list[int] = []
+    site: list[str] = []
     for annee in annees:
         try:
-            bilan = scrape_year(csv_path, annee)
+            bilan = scrape_year(csv_path, annee, site=site)
             safe_print(
                 f"🔀 Année {annee} : {bilan.ajoutees} certification(s) ajoutée(s) depuis le site"
             )
-            if not bilan.complete:
+            if bilan.complete:
+                completes.append(annee)
+            else:
                 incompletes.append(f"{annee} ({bilan.motif})")
         except (
             requests.RequestException,
@@ -656,6 +748,7 @@ def update_snep_database():
             safe_print(f"⚠️ Scraping {annee} impossible ({e}) — on continue avec l'export")
             incompletes.append(f"{annee} ({type(e).__name__})")
 
+    _reconcilier(csv_path, completes, site)
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
     total_before, total_after = _rebuild_canonical(source="GLOBAL", partial="; ".join(incompletes))
 
@@ -836,12 +929,17 @@ def backfill_years(years) -> BilanAnnee:
 
     total = 0
     incompletes: list[str] = []
+    completes: list[int] = []
+    site: list[str] = []
     for y in years:
-        bilan = scrape_year(dest_path, int(y))
+        bilan = scrape_year(dest_path, int(y), site=site)
         total += bilan.ajoutees
-        if not bilan.complete:
+        if bilan.complete:
+            completes.append(int(y))
+        else:
             incompletes.append(f"{y} ({bilan.motif})")
 
+    _reconcilier(dest_path, completes, site)
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
     _rebuild_canonical(source="SCRAPE", partial="; ".join(incompletes))
     if incompletes:

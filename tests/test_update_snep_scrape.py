@@ -218,14 +218,13 @@ class TestMiseAJourNominale:
     sur lequel s'arrêter.
     """
 
-    def test_annee_courante_seule_hors_debut_dannee(self):
-        assert us._years_to_scrape(datetime(2026, 9, 4)) == [2026]
-
-    @pytest.mark.parametrize("mois", [1, 2])
-    def test_annee_precedente_incluse_en_debut_dannee(self, mois):
-        """Une certification publiée en janvier peut porter une date de constat
-        de décembre : elle n'apparaît alors que dans le classement de l'an passé."""
-        assert us._years_to_scrape(datetime(2026, mois, 15)) == [2026, 2025]
+    @pytest.mark.parametrize("mois", [1, 2, 9])
+    def test_trois_annees_relues_quelle_que_soit_la_saison(self, mois):
+        """Depuis le 2026-09-14 : la courante et les deux précédentes, toute
+        l'année. Le SNEP antidate bien au-delà de janvier-février (26 lignes
+        de 2024 apparues après notre passage), et seule une année relue
+        ENTIÈREMENT permet de voir ce qu'il a RETIRÉ (`snep_vues`)."""
+        assert us._years_to_scrape(datetime(2026, mois, 15)) == [2026, 2025, 2024]
 
     def test_lancienne_fonction_a_bien_disparu(self):
         """Garde-fou : rebrancher un passage incrémental doit être un choix

@@ -90,6 +90,19 @@ class TestResoudre:
             artiste.resoudre(_runtime(_FakeDM(), _FakeGenius([candidat])), "Swing")
         assert exc.value.candidats == [candidat]
 
+    def test_recherche_de_candidats_qui_leve_rend_ambigu_sans_candidat(self, monkeypatch):
+        """Genius injoignable : on ne conclut pas « inconnu », on remonte
+        l'ambiguïté avec une liste vide — la CLI dit « (aucun) »."""
+        monkeypatch.setattr(artiste, "fetch_artist_from_genius_url", lambda *a: None)
+
+        class _GeniusCasse:
+            def search_artist_candidates(self, nom, max_candidates=6):
+                raise RuntimeError("api down")
+
+        with pytest.raises(artiste.ArtisteAmbigu) as exc:
+            artiste.resoudre(_runtime(_FakeDM(), _GeniusCasse()), "Swing")
+        assert exc.value.candidats == [] and exc.value.nom == "Swing"
+
 
 class TestChargerOuAjouter:
     def test_ajoute_et_sauve_quand_absent(self, monkeypatch):

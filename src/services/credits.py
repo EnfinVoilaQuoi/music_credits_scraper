@@ -260,7 +260,7 @@ def run(
                         try:
                             provider.close()
                         except Exception:  # noqa: BLE001 — fermeture best-effort
-                            logger.debug("Fermeture provider paroles échouée", exc_info=True)
+                            logger.warning("Fermeture provider paroles échouée", exc_info=True)
 
             if bilan.paroles is None:
                 n_ok = sum(1 for t in tracks if t.lyrics.present and t.lyrics.text)
@@ -277,7 +277,7 @@ def run(
             try:
                 scraper.close()
             except Exception:  # noqa: BLE001 — fermeture best-effort
-                logger.debug("Fermeture scraper Genius échouée", exc_info=True)
+                logger.warning("Fermeture scraper Genius échouée", exc_info=True)
 
 
 def _sauver(

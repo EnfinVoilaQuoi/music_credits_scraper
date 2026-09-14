@@ -73,7 +73,10 @@ async def _teardown(runtime: Runtime) -> None:
         try:
             await etape()
         except Exception:  # noqa: BLE001 — fermeture best-effort, l'ordre doit continuer
-            logger.debug(f"Teardown enrichissement — {nom} a échoué", exc_info=True)
+            # `warning`, pas `debug` : le fichier de log est à INFO, et l'ordre
+            # de ce teardown est GELÉ pour cause de hangs — une étape qui casse
+            # doit laisser une trace.
+            logger.warning(f"Teardown enrichissement — {nom} a échoué", exc_info=True)
 
 
 async def _stop_playwright_async() -> None:

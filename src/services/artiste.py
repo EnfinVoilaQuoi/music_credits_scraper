@@ -93,7 +93,10 @@ def fetch_artist_from_genius_url(url: str, fallback_name: str) -> Artist | None:
         if result and result.get("id"):
             return Artist(name=result.get("name") or fallback_name, genius_id=result["id"])
     except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
-        logger.debug(f"Fetch artiste depuis {url} échoué: {e}")
+        # `warning` : sans trace, un 403 Cloudflare et un meta absent se
+        # confondent avec « slug inconnu » et l'utilisateur ne voit que le
+        # dialog des candidats.
+        logger.warning(f"Fetch artiste depuis {url} échoué: {e}")
     finally:
         if browser:
             try:

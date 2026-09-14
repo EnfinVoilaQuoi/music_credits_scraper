@@ -6,7 +6,6 @@ IMPORTANT: Backlink obligatoire vers getsongbpm.com pour usage gratuit
 """
 
 import asyncio
-import csv
 import json
 import os
 import sys
@@ -407,111 +406,6 @@ class GetSongBPMFetcher:
                 obs.absent("aucun hit validé")
             return self._song_from_track_data(artist, title, track_data)
 
-    def fetch_artist_discography(self, artist: str, track_list: list[str]) -> list[SongData]:
-        """
-        Récupère les métadonnées pour toute une discographie
-
-        Args:
-            artist: Nom de l'artiste
-            track_list: Liste des titres
-
-        Returns:
-            Liste d'objets SongData
-        """
-        print(f"\n{'='*70}")
-        print(f"🎵 GetSongBPM: Analyse de {artist}")
-        print(f"📊 {len(track_list)} morceaux à traiter")
-        print("⚠️  RAPPEL: Backlink obligatoire vers getsongbpm.com")
-        print(f"{'='*70}\n")
-
-        results = []
-
-        for i, title in enumerate(track_list, 1):
-            print(f"[{i}/{len(track_list)}] {title}")
-
-            song_data = self.fetch_track_bpm(artist, title)
-            results.append(song_data)
-
-            # Rate limiting respectueux
-            if i < len(track_list):
-                time.sleep(self.RATE_LIMIT_DELAY)
-
-        # Résumé
-        successful = sum(1 for r in results if r.bpm is not None)
-        print(f"\n{'='*70}")
-        print(f"✅ Terminé: {successful}/{len(track_list)} morceaux avec données")
-        print("⚠️  N'oubliez pas d'ajouter le backlink vers getsongbpm.com!")
-        print(f"{'='*70}\n")
-
-        return results
-
-    def search_by_bpm(self, target_bpm: int, limit: int = 50) -> list[dict]:
-        """
-        Recherche des morceaux par BPM
-
-        Args:
-            target_bpm: BPM cible (40-220)
-            limit: Nombre de résultats (max 250)
-
-        Returns:
-            Liste de morceaux correspondants
-        """
-        if not 40 <= target_bpm <= 220:
-            raise ValueError("BPM doit être entre 40 et 220")
-
-        params = {"api_key": self.api_key, "bpm": target_bpm, "limit": min(limit, 250)}
-
-        url = f"{self.BASE_URL}/tempo/"
-
-        try:
-            response = self.session.get(url, params=params, timeout=15)
-
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("tempo", [])
-            else:
-                print(f"⚠ Erreur recherche BPM: Status {response.status_code}")
-                return []
-
-        except requests.exceptions.RequestException as e:
-            print(f"⚠ Erreur recherche BPM: {e}")
-            return []
-
-    def export_to_csv(self, results: list[SongData], output_file: str = "getsongbpm_results.csv"):
-        """
-        Exporte les résultats vers un fichier CSV
-
-        Args:
-            results: Liste d'objets SongData
-            output_file: Nom du fichier de sortie
-        """
-        with open(output_file, "w", newline="", encoding="utf-8") as f:
-            fieldnames = [
-                "artist",
-                "title",
-                "song_id",
-                "bpm",
-                "key",
-                "mode",
-                "time_signature",
-                "open_key",
-                "danceability",
-                "acousticness",
-                "genres",
-                "error",
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-
-            writer.writeheader()
-            for song in results:
-                row = song.__dict__.copy()
-                # Convertir la liste genres en string
-                if row.get("genres"):
-                    row["genres"] = ", ".join(row["genres"])
-                writer.writerow(row)
-
-        print(f"✅ Résultats exportés vers {output_file}")
-
     def get_attribution_html(self) -> str:
         """
         Retourne le HTML d'attribution OBLIGATOIRE
@@ -525,56 +419,3 @@ class GetSongBPMFetcher:
     Données musicales fournies par GetSongBPM.com
 </a>
 """
-
-
-# =============================================================================
-# EXEMPLE D'UTILISATION
-# =============================================================================
-if __name__ == "__main__":
-    # La clé API sera chargée automatiquement depuis GETSONGBPM_API_KEY
-    # Ou vous pouvez la passer manuellement: GetSongBPMFetcher(api_key="YOUR_KEY")
-
-    try:
-        # Initialiser le client (charge automatiquement depuis l'environnement)
-        fetcher = GetSongBPMFetcher()
-        print("✅ Client initialisé avec API key depuis environnement")
-    except ValueError as e:
-        print(f"❌ Erreur: {e}")
-        print("💡 Définissez GETSONGBPM_API_KEY dans vos variables d'environnement")
-        exit(1)
-
-    # Exemple 1: Récupérer BPM pour une liste de morceaux
-    artist = "Django"
-    tracks = ["Juin", "Fichu", "Fusil", "Saturne", "Dans le noir"]
-
-    results = fetcher.fetch_artist_discography(artist, tracks)
-
-    # Exporter vers CSV
-    fetcher.export_to_csv(results, "django_bpm.csv")
-
-    # Afficher les résultats
-    print("\n📊 RÉSULTATS DÉTAILLÉS:")
-    print("=" * 70)
-    for song in results:
-        if song.bpm:
-            print(f"🎵 {song.artist} - {song.title}")
-            print(f"   BPM: {song.bpm} | Key: {song.key} ({song.mode})")
-            print(f"   Time: {song.time_signature} | OpenKey: {song.open_key}")
-            print(f"   Danceability: {song.danceability} | Acousticness: {song.acousticness}")
-            if song.genres:
-                print(f"   Genres: {', '.join(song.genres)}")
-            print()
-        else:
-            print(f"❌ {song.artist} - {song.title}: {song.error}\n")
-
-    # Exemple 2: Recherche par BPM
-    print("\n🔍 Recherche morceaux à 120 BPM:")
-    bpm_results = fetcher.search_by_bpm(120, limit=10)
-    for track in bpm_results[:5]:
-        print(f"  • {track.get('artist', {}).get('name')} - {track.get('song_title')}")
-
-    # Afficher l'attribution HTML
-    print("\n" + "=" * 70)
-    print("⚠️  IMPORTANT: Ajoutez cette attribution à votre site/app:")
-    print("=" * 70)
-    print(fetcher.get_attribution_html())

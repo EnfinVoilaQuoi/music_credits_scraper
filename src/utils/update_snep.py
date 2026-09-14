@@ -18,6 +18,7 @@ from src.config import DATA_PATH
 from src.observability import repository as usage_repository
 from src.observability import source_usage
 from src.observability.registry import Flow
+from src.utils import cert_store
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -98,11 +99,15 @@ def download_latest_snep_csv():
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / "certif-.csv"
 
-    # Backup du fichier existant si présent
-    backup_path = None
-    if dest_path.exists():
-        backup_path = dest_dir / f"certif-backup-{datetime.now():%Y%m%d_%H%M%S}.csv"
-        shutil.copy2(dest_path, backup_path)
+    # Sauvegarde du brut existant — via la brique partagée, comme les trois
+    # autres organismes et comme `snep_build.rebuild`. Ce site et celui du
+    # nettoyeur y avaient échappé au lot 1 (2026-09-09) : nommage propre, à
+    # côté du fichier, hors rétention — 16 copies de 1,2 Mo accumulées depuis
+    # juin, que rien ne purgeait. Le chemin rendu sert ENSUITE d'historique à
+    # `_merge_csv_history` : la copie est faite avant toute écriture, la
+    # rétention ne peut pas l'atteindre (elle ne retire que les plus anciennes).
+    backup_path = cert_store.sauvegarder(dest_path)
+    if backup_path is not None:
         safe_print(f"✅ Backup créé : {backup_path.name}")
 
     # Essayer de télécharger le fichier

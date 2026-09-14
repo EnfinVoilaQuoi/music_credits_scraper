@@ -492,33 +492,39 @@ class ReccoBeatsIntegratedClient:
             return None
 
         logger.info(f"🎵 get_track_info_by_isrc pour ISRC: {isrc}")
-        try:
-            cache_key = f"isrc::{isrc}"
-            cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
-            if cached is not None:
-                return cached
+        cache_key = f"isrc::{isrc}"
+        cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
+        if cached is not None:
+            return cached  # servi par le cache : aucune sollicitation de la source
 
-            if self._not_found_is_fresh(cache_key):
-                # Absence deja constatee et non perimee : on ne resollicite pas la source.
-                logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
-                return None
-
-            track_data = self.get_track_by_isrc(isrc)
-            if not track_data:
-                self._cache_not_found(cache_key, f"ISRC {isrc}")
-                return None
-
-            result = self._enrich_result_with_features(
-                self._base_isrc_result(isrc, track_data), track_data
-            )
-
-            self.cache[cache_key] = result
-            self._save_cache()
-            logger.info(f"✅ Succès complet pour ISRC: {isrc}")
-            return result
-        except Exception:
-            logger.exception("❌ Erreur get_track_info_by_isrc")
+        if self._not_found_is_fresh(cache_key):
+            # Absence deja constatee et non perimee : on ne resollicite pas la source.
+            logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
             return None
+
+        # Observée comme la voie Spotify ID : sans `observe`, chaque aller-retour
+        # devenait son propre verdict et un ISRC inconnu (200, `content: []`)
+        # comptait comme un OK — or l'ISRC est tenté EN PREMIER (2026-09-15).
+        with source_usage.observe(_SOURCE, label=f"isrc:{isrc}") as obs:
+            try:
+                track_data = self.get_track_by_isrc(isrc)
+                if not track_data:
+                    obs.absent(f"ISRC {isrc} inconnu de ReccoBeats")
+                    self._cache_not_found(cache_key, f"ISRC {isrc}")
+                    return None
+
+                result = self._enrich_result_with_features(
+                    self._base_isrc_result(isrc, track_data), track_data
+                )
+
+                self.cache[cache_key] = result
+                self._save_cache()
+                logger.info(f"✅ Succès complet pour ISRC: {isrc}")
+                return result
+            except Exception as e:
+                obs.fail(IssueKind.CRASH, f"{type(e).__name__}: {e}")
+                logger.exception("❌ Erreur get_track_info_by_isrc")
+                return None
 
     async def get_track_info_by_isrc_async(
         self,
@@ -532,33 +538,37 @@ class ReccoBeatsIntegratedClient:
             return None
 
         logger.info(f"🎵 get_track_info_by_isrc pour ISRC: {isrc}")
-        try:
-            cache_key = f"isrc::{isrc}"
-            cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
-            if cached is not None:
-                return cached
+        cache_key = f"isrc::{isrc}"
+        cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
+        if cached is not None:
+            return cached  # servi par le cache : aucune sollicitation de la source
 
-            if self._not_found_is_fresh(cache_key):
-                # Absence deja constatee et non perimee : on ne resollicite pas la source.
-                logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
-                return None
-
-            track_data = await self.get_track_by_isrc_async(http, isrc)
-            if not track_data:
-                self._cache_not_found(cache_key, f"ISRC {isrc}")
-                return None
-
-            result = await self._enrich_result_with_features_async(
-                http, self._base_isrc_result(isrc, track_data), track_data
-            )
-
-            self.cache[cache_key] = result
-            self._save_cache()
-            logger.info(f"✅ Succès complet pour ISRC: {isrc}")
-            return result
-        except Exception:
-            logger.exception("❌ Erreur get_track_info_by_isrc")
+        if self._not_found_is_fresh(cache_key):
+            # Absence deja constatee et non perimee : on ne resollicite pas la source.
+            logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
             return None
+
+        # Même observation que le jumeau sync (voir son commentaire).
+        with source_usage.observe(_SOURCE, label=f"isrc:{isrc}") as obs:
+            try:
+                track_data = await self.get_track_by_isrc_async(http, isrc)
+                if not track_data:
+                    obs.absent(f"ISRC {isrc} inconnu de ReccoBeats")
+                    self._cache_not_found(cache_key, f"ISRC {isrc}")
+                    return None
+
+                result = await self._enrich_result_with_features_async(
+                    http, self._base_isrc_result(isrc, track_data), track_data
+                )
+
+                self.cache[cache_key] = result
+                self._save_cache()
+                logger.info(f"✅ Succès complet pour ISRC: {isrc}")
+                return result
+            except Exception as e:
+                obs.fail(IssueKind.CRASH, f"{type(e).__name__}: {e}")
+                logger.exception("❌ Erreur get_track_info_by_isrc")
+                return None
 
     def _cached_isrc_info(
         self, cache_key: str, use_cache: bool, force_refresh: bool

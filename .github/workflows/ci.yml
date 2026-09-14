@@ -78,10 +78,14 @@ jobs:
       # → 81 (2026-09-14 : mesuré 82 % après les services GUI-indépendants et
       #      la CLI ; `dataviz/debug_preview.py` — aperçu matplotlib des CLIs,
       #      0 % et sans logique — sort du périmètre plutôt que d'être couvert).
+      # → 84 (2026-09-15, chantier « couverture = prétexte, audit = but » : les
+      #      chemins d'erreur des services (74 → 97 %), des scripts de certifs
+      #      (BRMA 86, SNEP 95, RIAA 95) et du reliquat utils/observability, lus
+      #      deux fois — sept défauts réels corrigés en passant. Mesuré 85 %).
       # Le reste du hors-GUI est du PILOTAGE (navigateur Playwright, flux réseau
       # bout en bout) : le monter davantage demanderait un harnais de session,
       # pas des tests unitaires. Ne remonter ce seuil qu'avec du code réellement
       # couvert, jamais pour « faire un chiffre » — les fabriques paresseuses qui
       # instancient un vrai client réseau restent délibérément non couvertes.
       - name: Cliquet de couverture (hors GUI)
-        run: coverage report --omit="src/gui/*,src/main.py,src/dataviz/debug_preview.py" --fail-under=81
+        run: coverage report --omit="src/gui/*,src/main.py,src/dataviz/debug_preview.py" --fail-under=84

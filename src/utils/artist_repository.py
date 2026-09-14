@@ -99,6 +99,12 @@ class ArtistRepository:
             logger.info(f"Artiste sauvegardé: {artist.name} (ID: {artist.id})")
             return artist.id
 
+    def get_artist_names(self) -> list[str]:
+        """Tous les noms d'artistes en base (référence pour repérer les fichiers
+        annexes orphelins : désactivations, suppressions…)."""
+        with self.engine.connect() as conn:
+            return [r[0] for r in conn.execute(select(artists.c.name)).fetchall()]
+
     def get_artist_by_name(self, name: str) -> Artist | None:
         """Récupère un artiste par son nom - VERSION CORRIGÉE"""
         try:

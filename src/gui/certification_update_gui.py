@@ -7,15 +7,48 @@ import time
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox
+from typing import NamedTuple
 
 import customtkinter as ctk
-import pandas as pd
 
+from src.config import DATA_PATH
 from src.gui.workers.lifecycle import start_worker, stop_requested
-from src.utils.cert_normalize import libelle_tronque
+from src.utils.cert_normalize import drapeau, libelle_tronque
+from src.utils.cert_trous import BRUTS_PAR_SOURCE as _BRUTS_PAR_SOURCE
+from src.utils.cert_trous import periodes_manquantes
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class MiseAJour(NamedTuple):
+    """Ce qu'il faut lancer pour mettre à jour une source.
+
+    UNE déclaration, consommée par le bouton individuel ET par « 🔄 Tout mettre
+    à jour ». Ce dernier appelait `_run_script_sync(script)` **sans aucun
+    argument** : trois sources sur quatre en sortaient cassées — BRMA
+    (`--mode manual` par défaut) et RIAA (`manual_update()`) partaient en mode
+    INTERACTIF face à un stdin invalide, et BPI affichait son aide en sortant
+    en 0, donc en succès. BRMA perdait en prime sa préparation de Chrome,
+    décrite dans son propre code comme « la seule route qui passe ».
+    """
+
+    script: str
+    args: tuple[str, ...] = ()
+    #: Chrome de debug préparé EN AMONT (BRMA : le Cloudflare d'ultratop fait
+    #: boucler tout navigateur d'automation, le CDP n'y est pas un repli).
+    cdp_amont: bool = False
+    #: Chrome de debug en REPLI d'un échec (RIAA : le headless passe, et un
+    #: repli qui réussit dit que c'était un problème d'accès, pas un parseur).
+    repli_cdp: bool = False
+
+
+MISES_A_JOUR: dict[str, MiseAJour] = {
+    "SNEP": MiseAJour("update_snep.py"),
+    "BRMA": MiseAJour("update_brma.py", ("--mode", "once", "--years-back", "1"), cdp_amont=True),
+    "RIAA": MiseAJour("update_riaa.py", ("--auto",), repli_cdp=True),
+    "BPI": MiseAJour("update_bpi.py", ("--auto",)),
+}
 
 
 def _ligne_bilan(source: str, code: int, sortie: str) -> str:
@@ -52,6 +85,11 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self.artist_tracks = artist_tracks or []  # Morceaux pour l'audit
         self.artist_albums = artist_albums or []  # Albums pour l'audit
         self.missing_periods = {}  # Stocke les périodes manquantes par source
+        #: Travaux en cours, par CLÉ. Aucune ré-entrance n'était gardée et aucun
+        #: bouton n'était désactivé : deux clics sur « Mettre à jour » lançaient
+        #: deux sous-processus écrivant le MÊME CSV.
+        self._en_cours: dict[str, str] = {}
+        self._ferme = False
         self.title("Mise à jour des certifications")
         self.geometry("600x700")
 
@@ -64,7 +102,59 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self.lift()
         self.focus_force()
 
+        # Fermer pendant un run faisait exploser `after` sur un widget détruit,
+        # au milieu de la boucle de relais de `_run_streaming`.
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+
         self._create_widgets()
+        self._update_status()
+
+    def _on_closing(self):
+        """Ferme, en prévenant les fils de fond qu'ils écrivent dans le vide."""
+        self._ferme = True
+        if self._en_cours:
+            logger.info(f"Fenêtre certifs fermée pendant : {', '.join(self._en_cours.values())}")
+        self.destroy()
+
+    def _demarrer(self, cle: str, travail, libelle: str = "") -> bool:
+        """Lance `travail` dans un fil, en refusant les lancements CONCURRENTS.
+
+        Les clés se PARTAGENT volontairement : tout ce qui écrit un magasin
+        porte « ecriture », de sorte qu'une validation (lecture seule) reste
+        possible pendant une mise à jour, mais que deux écritures ne se croisent
+        jamais sur les mêmes CSV.
+        """
+        if cle in self._en_cours:
+            messagebox.showinfo(
+                "Déjà en cours",
+                f"« {self._en_cours[cle]} » n'est pas terminé.\n\n"
+                "Attends la fin — deux traitements qui écrivent les mêmes "
+                "fichiers en même temps se marcheraient dessus.",
+                parent=self,
+            )
+            return False
+
+        self._en_cours[cle] = libelle or cle
+
+        def enveloppe():
+            try:
+                travail()
+            finally:
+                self._en_cours.pop(cle, None)
+
+        start_worker(enveloppe)
+        return True
+
+    def _rafraichir_apres_ecriture(self):
+        """Rafraîchit l'état APRÈS une écriture, en INVALIDANT ce qui a vieilli.
+
+        `missing_periods` n'était jamais vidé : le pavé « périodes manquantes »
+        survivait à un rescrape réussi, affiché sous un horodatage
+        « Vérification : maintenant » qui le démentait dans la même fenêtre.
+        Les trous se recalculent depuis les CSV, qui viennent de changer — les
+        garder, c'est afficher la mesure d'avant sous la date d'après.
+        """
+        self.missing_periods.clear()
         self._update_status()
 
     def _create_widgets(self):
@@ -102,83 +192,40 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         buttons_frame = ctk.CTkFrame(sources_frame)
         buttons_frame.pack(fill="x", padx=10, pady=10)
 
-        # SNEP (France)
-        snep_frame = ctk.CTkFrame(buttons_frame)
-        snep_frame.pack(fill="x", pady=5)
+        # Une LIGNE PAR SOURCE, construites par une boucle. C'étaient quatre
+        # blocs isomorphes de vingt lignes, où seuls variaient le libellé et la
+        # couleur — la cinquième des six énumérations parallèles des quatre
+        # sources qu'il fallait éditer pour en ajouter une. Le libellé et la
+        # couleur restent ici : ce sont des choix d'affichage, ils n'ont rien à
+        # faire dans un référentiel de données.
+        for nom, pays, couleur in (
+            ("SNEP", "France", "blue"),
+            ("BRMA", "Belgique", "orange"),
+            ("RIAA", "USA", "red"),
+            # BPI n'a aucune préparation CDP, contrairement à BRMA : son site est
+            # rendu côté serveur et un GET nu passe (mesuré). Lui coller la
+            # plomberie navigateur « par symétrie » coûterait un Chrome pour rien.
+            ("BPI", "UK", "#1f4e8c"),
+        ):
+            ligne = ctk.CTkFrame(buttons_frame)
+            ligne.pack(fill="x", pady=5)
 
-        ctk.CTkLabel(snep_frame, text="🇫🇷 SNEP (France)").pack(side="left", padx=10)
-        ctk.CTkButton(
-            snep_frame, text="Mettre à jour", command=self._update_snep, width=120, fg_color="blue"
-        ).pack(side="right", padx=(5, 10), pady=5)
-        ctk.CTkButton(
-            snep_frame,
-            text="🔎 Valider / Nettoyer",
-            command=self._check_snep,
-            width=110,
-            fg_color="gray40",
-            hover_color="gray30",
-        ).pack(side="right", padx=5, pady=5)
-
-        # BRMA (Belgique)
-        brma_frame = ctk.CTkFrame(buttons_frame)
-        brma_frame.pack(fill="x", pady=5)
-
-        ctk.CTkLabel(brma_frame, text="🇧🇪 BRMA (Belgique)").pack(side="left", padx=10)
-        ctk.CTkButton(
-            brma_frame,
-            text="Mettre à jour",
-            command=self._update_brma,
-            width=120,
-            fg_color="orange",
-        ).pack(side="right", padx=(5, 10), pady=5)
-        ctk.CTkButton(
-            brma_frame,
-            text="🔎 Valider / Nettoyer",
-            command=self._check_brma,
-            width=110,
-            fg_color="gray40",
-            hover_color="gray30",
-        ).pack(side="right", padx=5, pady=5)
-
-        # RIAA (USA) - Maintenant disponible
-        riaa_frame = ctk.CTkFrame(buttons_frame)
-        riaa_frame.pack(fill="x", pady=5)
-
-        ctk.CTkLabel(riaa_frame, text="🇺🇸 RIAA (USA)").pack(side="left", padx=10)
-        ctk.CTkButton(
-            riaa_frame, text="Mettre à jour", command=self._update_riaa, width=120, fg_color="red"
-        ).pack(side="right", padx=(5, 10), pady=5)
-        ctk.CTkButton(
-            riaa_frame,
-            text="🔎 Valider / Nettoyer",
-            command=self._check_riaa,
-            width=110,
-            fg_color="gray40",
-            hover_color="gray30",
-        ).pack(side="right", padx=5, pady=5)
-
-        # BPI (UK). Pas de préparation CDP, contrairement à BRMA : le site est
-        # rendu côté serveur et un GET nu passe (mesuré). Lui coller la plomberie
-        # navigateur « par symétrie » coûterait un Chrome pour rien.
-        bpi_frame = ctk.CTkFrame(buttons_frame)
-        bpi_frame.pack(fill="x", pady=5)
-
-        ctk.CTkLabel(bpi_frame, text="🇬🇧 BPI (UK)").pack(side="left", padx=10)
-        ctk.CTkButton(
-            bpi_frame,
-            text="Mettre à jour",
-            command=self._update_bpi,
-            width=120,
-            fg_color="#1f4e8c",
-        ).pack(side="right", padx=(5, 10), pady=5)
-        ctk.CTkButton(
-            bpi_frame,
-            text="🔎 Valider / Nettoyer",
-            command=self._check_bpi,
-            width=110,
-            fg_color="gray40",
-            hover_color="gray30",
-        ).pack(side="right", padx=5, pady=5)
+            ctk.CTkLabel(ligne, text=f"{drapeau(nom)} {nom} ({pays})").pack(side="left", padx=10)
+            ctk.CTkButton(
+                ligne,
+                text="Mettre à jour",
+                command=lambda n=nom: self._lancer_maj(n),
+                width=120,
+                fg_color=couleur,
+            ).pack(side="right", padx=(5, 10), pady=5)
+            ctk.CTkButton(
+                ligne,
+                text="🔎 Valider / Nettoyer",
+                command=getattr(self, f"_check_{nom.lower()}"),
+                width=110,
+                fg_color="gray40",
+                hover_color="gray30",
+            ).pack(side="right", padx=5, pady=5)
 
         # SNEP par artiste : récupère le CSV complet via ?interprete=
         # (seul export SNEP encore complet depuis le changement du site)
@@ -279,8 +326,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             status_text += "=" * 40 + "\n\n"
 
             # Vérifier les fichiers de données
-            from src.config import DATA_PATH
-
             data_path = Path(DATA_PATH) / "certifications"
 
             def _fmt(iso):
@@ -296,9 +341,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             # mtime que bumpe une recherche artiste). Plus de code ad-hoc par pays.
             from src.enrichment.cert_source import all_certification_sources
 
-            flags = {"SNEP": "🇫🇷", "BRMA": "🇧🇪", "RIAA": "🇺🇸", "BPI": "🇬🇧"}
             for source in all_certification_sources():
-                flag = flags.get(source.name, "🏳️")
+                flag = drapeau(source.name)
                 fresh = source.freshness()
                 if not fresh["available"]:
                     status_text += f"{flag} {source.name}: ❌ Pas de données\n"
@@ -416,7 +460,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
     def _update_snep(self):
         """Lance la mise à jour SNEP"""
-        self._run_update_script("update_snep.py", "SNEP")
+        self._lancer_maj("SNEP")
 
     def _noms_a_preremplir(self) -> list[str]:
         """L'artiste courant, puis les formations sous lesquelles il est crédité.
@@ -574,39 +618,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         start_worker(run)
 
     def _update_brma(self):
-        """Lance la mise à jour BRMA.
-
-        Ici le Chrome de debug est préparé EN AMONT, contrairement à RIAA : le
-        Cloudflare d'ultratop est strict et fait boucler tout navigateur lancé
-        par de l'automation, même le vrai Chrome (piège documenté, JOURNAL
-        2026-06-29). Le CDP n'y est pas un repli mais la seule route qui passe.
-        """
-
-        def prepare_and_run():
-            self._set_progress("🌐 Préparation de Chrome (Cloudflare ultratop)...")
-            cdp_url = self._preparer_cdp()
-            env_extra = {"GENIUS_CDP_URL": cdp_url} if cdp_url else None
-            if not cdp_url:
-                self.after(
-                    0,
-                    lambda: messagebox.showwarning(
-                        "Chrome requis (Cloudflare)",
-                        "Impossible de préparer Chrome en mode debug pour contourner le "
-                        "Cloudflare d'ultratop.\nVérifie que Google Chrome est installé "
-                        "(ou définis la variable CHROME_PATH).\n\nLa mise à jour va tenter "
-                        "quand même, mais risque de boucler sur le challenge.",
-                        parent=self,
-                    ),
-                )
-
-            self._run_update_script(
-                "update_brma.py",
-                "BRMA",
-                extra_args=["--mode", "once", "--years-back", "1"],
-                env_extra=env_extra,
-            )
-
-        start_worker(prepare_and_run)
+        """MàJ BRMA — Chrome préparé EN AMONT (cf. `MISES_A_JOUR`)."""
+        self._lancer_maj("BRMA")
 
     def _update_bpi(self):
         """MàJ BPI : fenêtre glissante, en HTTP nu.
@@ -615,7 +628,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         serveur et un client non-navigateur y passe sans défi (mesuré le
         2026-09-07). C'est la source la plus légère des quatre.
         """
-        self._run_update_script("update_bpi.py", "BPI", extra_args=["--auto"])
+        self._lancer_maj("BPI")
 
     def _update_riaa(self):
         """MàJ RIAA : **headless d'abord, CDP en repli**.
@@ -629,17 +642,14 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         Le repli sert aussi de DIAGNOSTIC : s'il réussit là où le headless a
         échoué, c'était bien un problème d'accès et non un parseur cassé.
-        (BRMA garde sa préparation en amont : le Cloudflare d'ultratop est
-        strict et fait boucler tout navigateur d'automation — cf. CLAUDE.md.)
         """
-        self._run_update_script("update_riaa.py", "RIAA", extra_args=["--auto"], repli_cdp=True)
+        self._lancer_maj("RIAA")
 
     def _check_snep(self):
         """Lance le validateur complet du CSV maître SNEP et affiche le rapport."""
 
         def run():
             try:
-                from src.config import DATA_PATH
                 from src.utils.snep_validator import format_report, validate_snep_csv
 
                 csv_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
@@ -794,7 +804,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         def run():
             try:
-                from src.config import DATA_PATH
                 from src.utils.snep_cleaner import clean_snep_csv, format_report
 
                 csv_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
@@ -921,7 +930,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         `manual_fixes.json` et est réappliqué à chaque « 🧹 Nettoyer » — une
         ré-importation SNEP ressert sinon le libellé fautif.
         """
-        from src.config import DATA_PATH
         from src.utils.cert_fixes_io import (
             accepter,
             candidats_a_corriger,
@@ -1115,8 +1123,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         def run():
             try:
-                from src.config import DATA_PATH
-
                 valider, formater = importer()
                 csv_path = Path(DATA_PATH) / "certifications" / dossier / fichier
                 if not csv_path.exists():
@@ -1414,37 +1420,45 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         start_worker(run)
 
     def _update_all(self):
-        """Lance toutes les mises à jour"""
+        """Les quatre sources, EN SÉRIE et avec leurs vrais arguments.
+
+        Elles étaient lancées par `_run_script_sync(script)` **sans aucun
+        argument** : BRMA et RIAA partaient en mode interactif, BPI affichait son
+        aide et sortait en 0 — et la fenêtre annonçait « Toutes les mises à jour
+        terminées ! ». En série et non en parallèle : quatre sous-processus
+        écrivant leurs CSV en même temps ne se surveillent pas l'un l'autre.
+        """
 
         def update_all():
-            try:
-                self._set_progress("Mise à jour de toutes les sources...")
+            bilans: list[str] = []
+            for nom in MISES_A_JOUR:
+                if stop_requested():
+                    bilans.append(f"{nom} : interrompu")
+                    break
+                try:
+                    code, sortie = self._executer_maj(nom)
+                    bilans.append(_ligne_bilan(nom, code, sortie))
+                except Exception as e:
+                    logger.exception(f"Mise à jour globale — {nom}")
+                    bilans.append(f"{nom} : ❌ {e}")
 
-                # SNEP
-                self._set_progress("Mise à jour SNEP en cours...")
-                self._run_script_sync("update_snep.py")
+            echecs = [b for b in bilans if "❌" in b or "interrompu" in b]
+            self._set_progress(
+                f"❌ {len(echecs)}/{len(bilans)} source(s) en échec"
+                if echecs
+                else "Toutes les mises à jour terminées !"
+            )
+            self.after(3000, lambda: self._set_progress(""))
+            self.after(500, self._rafraichir_apres_ecriture)
+            rapport = "\n".join(bilans)
+            self.after(
+                0,
+                lambda: (messagebox.showerror if echecs else messagebox.showinfo)(
+                    "Mise à jour de toutes les sources", rapport, parent=self
+                ),
+            )
 
-                # BRMA
-                self._set_progress("Mise à jour BRMA en cours...")
-                self._run_script_sync("update_brma.py")
-
-                # RIAA
-                self._set_progress("Mise à jour RIAA en cours...")
-                self._run_script_sync("update_riaa.py")
-
-                # BPI
-                self._set_progress("Mise à jour BPI en cours...")
-                self._run_script_sync("update_bpi.py")
-
-                self._set_progress("Toutes les mises à jour terminées !")
-                self.after(2000, lambda: self._set_progress(""))
-                self.after(500, self._update_status)
-
-            except Exception as e:
-                logger.error(f"Erreur mise à jour globale: {e}")
-                self._set_progress(f"❌ Erreur: {e}")
-
-        start_worker(update_all)
+        self._demarrer("maj-toutes", update_all)
 
     def _preparer_cdp(self) -> str | None:
         """Lance (ou retrouve) un Chrome de debug et rend son URL CDP."""
@@ -1456,116 +1470,104 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             logger.error(f"Préparation CDP échouée : {e}")
             return None
 
-    def _run_update_script(
-        self,
-        script_name: str,
-        source_name: str,
-        extra_args=None,
-        env_extra=None,
-        repli_cdp: bool = False,
-    ):
-        """Lance un script de mise à jour dans un thread.
+    def _executer_maj(self, nom: str) -> tuple[int, str]:
+        """Met à jour UNE source, de façon SYNCHRONE. Rend (code, sortie).
 
-        `env_extra` : variables d'environnement à injecter dans le sous-processus
-        (ex: GENIUS_CDP_URL pour la route CDP de BRMA).
-        `repli_cdp` : en cas d'échec, retenter UNE fois via un Chrome de debug.
-        Réservé aux sources dont la route normale est le headless — c'est-à-dire
-        celles où le CDP répond à un problème d'ACCÈS, pas à un besoin permanent.
+        Le corps est séparé du worker pour que « Tout mettre à jour » puisse
+        enchaîner les quatre sources DANS UN SEUL fil : appeler les quatre
+        boutons les lancerait en parallèle, donc quatre sous-processus écrivant
+        leurs CSV en même temps.
         """
+        maj = MISES_A_JOUR[nom]
+        script_path = Path(__file__).parent.parent / "utils" / maj.script
+        if not script_path.exists():
+            raise FileNotFoundError(f"Script non trouvé: {script_path}")
+
+        commande = [sys.executable, str(script_path), *maj.args]
+        run_env = None
+
+        if maj.cdp_amont:
+            # Le Cloudflare d'ultratop fait boucler tout navigateur lancé par de
+            # l'automation, même le vrai Chrome (JOURNAL 2026-06-29) : ici le CDP
+            # n'est pas un repli, c'est la seule route qui passe.
+            self._set_progress(f"🌐 {nom} : préparation de Chrome (Cloudflare)…")
+            cdp_url = self._preparer_cdp()
+            if cdp_url:
+                run_env = {**os.environ, "GENIUS_CDP_URL": cdp_url}
+            else:
+                self.after(
+                    0,
+                    lambda: messagebox.showwarning(
+                        "Chrome requis (Cloudflare)",
+                        "Impossible de préparer Chrome en mode debug pour contourner le "
+                        "Cloudflare d'ultratop.\nVérifie que Google Chrome est installé "
+                        "(ou définis la variable CHROME_PATH).\n\nLa mise à jour va tenter "
+                        "quand même, mais risque de boucler sur le challenge.",
+                        parent=self,
+                    ),
+                )
+
+        self._set_progress(f"Mise à jour {nom} en cours...")
+        # Sortie RELAYÉE en direct (console + log du jour), au lieu d'être
+        # avalée jusqu'à la fin du processus.
+        code, sortie = self._run_streaming(commande, nom, env=run_env)
+
+        if code != 0 and maj.repli_cdp:
+            self._set_progress(f"{nom} : échec en headless — seconde tentative via Chrome…")
+            logger.warning(
+                f"[{nom}] échec en headless, repli sur la route CDP "
+                "(si elle réussit, c'était un problème d'accès et non un parseur cassé)"
+            )
+            cdp_url = self._preparer_cdp()
+            if cdp_url:
+                code, sortie_cdp = self._run_streaming(
+                    commande, f"{nom} (CDP)", env={**os.environ, "GENIUS_CDP_URL": cdp_url}
+                )
+                sortie = sortie_cdp or sortie
+            else:
+                logger.error(
+                    f"[{nom}] repli CDP impossible : Chrome introuvable "
+                    "(installe Google Chrome ou définis CHROME_PATH)"
+                )
+        return code, sortie
+
+    def _lancer_maj(self, nom: str):
+        """Un bouton de mise à jour : le corps ci-dessus, dans un fil, avec dialogue."""
 
         def run_script():
             try:
-                self._set_progress(f"Mise à jour {source_name} en cours...")
-
-                script_path = Path(__file__).parent.parent / "utils" / script_name
-
-                if not script_path.exists():
-                    raise FileNotFoundError(f"Script non trouvé: {script_path}")
-
-                run_env = None
-                if env_extra:
-                    import os
-
-                    run_env = {**os.environ, **{k: v for k, v in env_extra.items() if v}}
-
-                # Sortie RELAYÉE en direct (console + log du jour), au lieu
-                # d'être avalée jusqu'à la fin du processus.
-                code, sortie = self._run_streaming(
-                    [sys.executable, str(script_path), *(extra_args or [])],
-                    source_name,
-                    env=run_env,
-                )
-
-                if code != 0 and repli_cdp:
-                    self._set_progress(
-                        f"{source_name} : échec en headless — seconde tentative via Chrome…"
-                    )
-                    logger.warning(
-                        f"[{source_name}] échec en headless, repli sur la route CDP "
-                        "(si elle réussit, c'était un problème d'accès et non un parseur cassé)"
-                    )
-                    cdp_url = self._preparer_cdp()
-                    if cdp_url:
-                        code, sortie_cdp = self._run_streaming(
-                            [sys.executable, str(script_path), *(extra_args or [])],
-                            f"{source_name} (CDP)",
-                            env={**os.environ, "GENIUS_CDP_URL": cdp_url},
-                        )
-                        sortie = sortie_cdp or sortie
-                    else:
-                        logger.error(
-                            f"[{source_name}] repli CDP impossible : Chrome introuvable "
-                            "(installe Google Chrome ou définis CHROME_PATH)"
-                        )
-
+                code, sortie = self._executer_maj(nom)
                 if code == 0:
-                    self._set_progress(f"✅ Mise à jour {source_name} réussie")
-                    self.after(500, self._update_status)
+                    self._set_progress(f"✅ Mise à jour {nom} réussie")
+                    self.after(500, self._rafraichir_apres_ecriture)
                     # Retour visible, DÉBRUITÉ : la console garde le détail.
                     summary = self._resume_humain(sortie) or "Mise à jour terminée."
                     self.after(
                         0,
-                        lambda: messagebox.showinfo(
-                            f"Mise à jour {source_name}", summary, parent=self
-                        ),
+                        lambda: messagebox.showinfo(f"Mise à jour {nom}", summary, parent=self),
                     )
                 else:
                     error_msg = self._resume_humain(sortie, lignes_max=12) or "Erreur inconnue"
-                    self._set_progress(f"❌ Erreur {source_name}: {error_msg[:50]}...")
-                    logger.error(f"Erreur script {script_name}: {error_msg}")
+                    self._set_progress(f"❌ Erreur {nom}: {error_msg[:50]}...")
+                    logger.error(f"Erreur mise à jour {nom}: {error_msg}")
                     self.after(
                         0,
                         lambda: messagebox.showerror(
-                            f"Erreur {source_name}", error_msg[-600:], parent=self
+                            f"Erreur {nom}", error_msg[-600:], parent=self
                         ),
                     )
-
-                # Effacer le message après 3 secondes
                 self.after(3000, lambda: self._set_progress(""))
-
             except Exception as e:
-                logger.error(f"Erreur lors de l'exécution de {script_name}: {e}")
+                logger.exception(f"Erreur lors de la mise à jour {nom}")
                 self._set_progress(f"❌ Erreur: {e}")
                 self.after(3000, lambda: self._set_progress(""))
 
-        start_worker(run_script)
-
-    def _run_script_sync(self, script_name: str):
-        """Lance un script de façon synchrone"""
-        script_path = Path(__file__).parent.parent / "utils" / script_name
-
-        if not script_path.exists():
-            raise FileNotFoundError(f"Script non trouvé: {script_path}")
-
-        code, sortie = self._run_streaming(
-            [sys.executable, str(script_path)], script_name.replace("update_", "").upper()
-        )
-
-        if code != 0:
-            raise RuntimeError(f"Erreur script {script_name}: {sortie or 'Erreur inconnue'}")
+        self._demarrer(f"maj-{nom}", run_script)
 
     def _set_progress(self, message: str):
-        """Met à jour le message de progression"""
+        """Met à jour le message de progression (depuis n'importe quel fil)."""
+        if self._ferme:
+            return
 
         def update():
             self.progress_label.configure(text=message)
@@ -1615,142 +1617,42 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         return proc.wait(), "\n".join(lignes)
 
     def _check_missing_periods_all(self):
-        """Lance la vérification des périodes manquantes pour chaque source.
+        """Cherche les périodes manquantes des quatre sources, EN UN SEUL fil.
 
-        Analyse le CSV BRUT de chaque source (accumulation complète, avec sa
-        colonne de date native) — distinct de l'audit PAR ARTISTE
-        (`_audit_snep_artist`). Chaque appel s'exécute dans son propre worker et
-        rafraîchit l'état à la fin.
+        Il en lançait QUATRE d'un coup, qui écrivaient tous dans
+        `self.missing_periods` puis réécrivaient la même `CTkTextbox` — depuis
+        leur propre fil, qui plus est. Quatre fils Tcl non synchronisés sur le
+        même widget.
         """
-        for source_name, folder, filename in (
-            ("SNEP", "snep", "certif-.csv"),
-            ("BRMA", "brma", "brma_raw.csv"),
-            ("RIAA", "riaa", "riaa_raw.csv"),
-            ("BPI", "bpi", "bpi_raw.csv"),
-        ):
-            self._check_missing_periods(source_name, folder, filename)
 
-    def _check_missing_periods(self, source_name: str, folder: str, filename: str):
-        """Vérifie les périodes manquantes dans un CSV de certification"""
-
-        def check_async():
-            try:
-                from src.config import DATA_PATH
-
-                csv_path = Path(DATA_PATH) / "certifications" / folder / filename
-
-                if not csv_path.exists():
-                    self._set_progress(f"❌ {source_name}: Fichier introuvable")
+        def travail():
+            for nom, (dossier, brut) in _BRUTS_PAR_SOURCE.items():
+                if stop_requested() or self._ferme:
                     return
+                self._analyser_trous(nom, dossier, brut)
+            # UN seul rendu, sur le fil Tk : `_update_status` touche la textbox.
+            self.after(0, self._update_status)
 
-                self._set_progress(f"🔍 Analyse de {source_name}...")
+        self._demarrer("trous", travail, "Vérification des périodes manquantes")
 
-                # Analyser le CSV
-                missing = self._analyze_csv_gaps(csv_path, source_name)
-
-                # Stocker les résultats
-                self.missing_periods[source_name] = missing
-
-                # Mettre à jour l'affichage
-                self._update_status()
-
-                if missing["gaps"]:
-                    gap_count = len(missing["gaps"])
-                    self._set_progress(
-                        f"⚠️ {source_name}: {gap_count} période(s) manquante(s) détectée(s)"
-                    )
-                else:
-                    self._set_progress(f"✅ {source_name}: Aucune période manquante")
-
-            except Exception as e:
-                logger.error(f"Erreur vérification {source_name}: {e}")
-                self._set_progress(f"❌ Erreur vérification {source_name}: {e}")
-
-        start_worker(check_async)
-
-    def _analyze_csv_gaps(self, csv_path: Path, source: str) -> dict:
-        """Analyse un CSV pour détecter les périodes manquantes"""
+    def _analyser_trous(self, source_name: str, folder: str, filename: str) -> None:
+        """Analyse le CSV BRUT d'UNE source (accumulation complète, avec sa
+        colonne de date native) — distinct de l'audit PAR ARTISTE."""
         try:
-            # Charger le CSV : séparateur auto-détecté (SNEP=';', BRMA/RIAA=',')
-            # via le moteur python, avec repli d'encodage.
-            try:
-                df = pd.read_csv(csv_path, encoding="utf-8", sep=None, engine="python")
-            except Exception:
-                df = pd.read_csv(csv_path, encoding="latin1", sep=None, engine="python")
+            csv_path = Path(DATA_PATH) / "certifications" / folder / filename
+            if not csv_path.exists():
+                self._set_progress(f"❌ {source_name}: Fichier introuvable")
+                return
 
-            if df.empty:
-                return {"total": 0, "gaps": [], "date_range": None}
+            self._set_progress(f"🔍 Analyse de {source_name}...")
+            self.missing_periods[source_name] = periodes_manquantes(csv_path, source_name)
 
-            # Colonne de date par source (nom brut). Match insensible à la casse,
-            # puis repli sur toute colonne contenant « date ».
-            date_columns = {
-                "SNEP": "Date de constat",
-                "BRMA": "certification_date",
-                "BPI": "certification_date",
-                "RIAA": "Certification_Date",
-            }
-
-            date_col = date_columns.get(source)
-            if not date_col or date_col not in df.columns:
-                lowered = {c.lower(): c for c in df.columns}
-                if date_col and date_col.lower() in lowered:
-                    date_col = lowered[date_col.lower()]
-                else:
-                    possible_cols = [col for col in df.columns if "date" in col.lower()]
-                    if possible_cols:
-                        date_col = possible_cols[0]
-                    else:
-                        return {
-                            "total": len(df),
-                            "gaps": ["Colonne de date non trouvée"],
-                            "date_range": None,
-                        }
-
-            # Convertir les dates
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
-            df = df.dropna(subset=[date_col])
-
-            if df.empty:
-                return {"total": 0, "gaps": ["Aucune date valide"], "date_range": None}
-
-            # Analyser par année/mois
-            df["year_month"] = df[date_col].dt.to_period("M")
-            monthly_counts = df.groupby("year_month").size()
-
-            # Détecter les gaps (mois sans certifications)
-            if len(monthly_counts) == 0:
-                return {"total": len(df), "gaps": [], "date_range": None}
-
-            min_period = monthly_counts.index.min()
-            max_period = monthly_counts.index.max()
-
-            # Générer tous les mois entre min et max
-            all_months = pd.period_range(start=min_period, end=max_period, freq="M")
-
-            # Trouver les mois manquants (avec tolérance pour les mois récents)
-            gaps = []
-            current_month = pd.Period(datetime.now(), freq="M")
-
-            for month in all_months:
-                # Ne pas signaler comme manquant si c'est le mois en cours ou suivant
-                if month >= current_month:
-                    continue
-
-                if month not in monthly_counts.index:
-                    # Mois sans aucune certification
-                    gaps.append(f"{month.strftime('%Y-%m')} (0 certifications)")
-                elif monthly_counts[month] < 5:  # Seuil minimal de certifications par mois
-                    gaps.append(
-                        f"{month.strftime('%Y-%m')} ({monthly_counts[month]} certifications - possiblement incomplet)"
-                    )
-
-            return {
-                "total": len(df),
-                "gaps": gaps,
-                "date_range": f"{min_period.strftime('%Y-%m')} à {max_period.strftime('%Y-%m')}",
-                "monthly_avg": monthly_counts.mean(),
-            }
-
-        except Exception as e:
-            logger.error(f"Erreur analyse CSV {source}: {e}")
-            return {"total": 0, "gaps": [f"Erreur: {str(e)}"], "date_range": None}
+            gaps = self.missing_periods[source_name]["gaps"]
+            self._set_progress(
+                f"⚠️ {source_name}: {len(gaps)} période(s) manquante(s) détectée(s)"
+                if gaps
+                else f"✅ {source_name}: Aucune période manquante"
+            )
+        except (OSError, ValueError, KeyError) as e:
+            logger.exception(f"Vérification {source_name}")
+            self._set_progress(f"❌ Erreur vérification {source_name}: {e}")

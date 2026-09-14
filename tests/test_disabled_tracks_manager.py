@@ -101,37 +101,44 @@ class TestLecture:
         assert "Structure invalide" in caplog.text
 
 
-class TestNettoyage:
-    def _fichier_age(self, manager, nom, jours):
-        p = manager.disabled_tracks_dir / nom
+class TestNettoyageOrphelins:
+    """`cleanup_orphans` remplace la purge par ÂGE (2026-09-14) : un fichier de
+    désactivation ne périme pas, seul celui d'un artiste absent de la base est
+    un déchet. L'ancienne règle effaçait les désactivés de tout artiste non
+    ouvert depuis 30 jours — et « tous les morceaux » les retraitait."""
+
+    def _fichier(self, manager, nom, jours=0):
+        p = manager._get_artist_file(nom)
         p.write_text("{}", encoding="utf-8")
         t = (datetime.now() - timedelta(days=jours)).timestamp()
         os.utime(p, (t, t))
         return p
 
-    def test_supprime_les_anciens(self, manager):
-        vieux = self._fichier_age(manager, "vieux_disabled.json", 60)
-        recent = self._fichier_age(manager, "recent_disabled.json", 5)
-        assert manager.cleanup_old_files(days_old=30) == 1
-        assert not vieux.exists()
-        assert recent.exists()
+    def test_un_vieux_fichier_d_artiste_en_base_est_GARDE(self, manager):
+        vieux = self._fichier(manager, "Jul", jours=400)
+        assert manager.cleanup_orphans(["Jul"]) == 0
+        assert vieux.exists()
+
+    def test_l_orphelin_est_supprime_quel_que_soit_son_age(self, manager):
+        orphelin = self._fichier(manager, "Disparu", jours=1)
+        garde = self._fichier(manager, "Jul", jours=1)
+        assert manager.cleanup_orphans(["Jul"]) == 1
+        assert not orphelin.exists() and garde.exists()
 
     def test_ne_touche_pas_aux_autres_fichiers(self, manager):
         """Le glob est ciblé : un fichier étranger déposé là n'est pas supprimé."""
         etranger = manager.disabled_tracks_dir / "notes.txt"
         etranger.write_text("x", encoding="utf-8")
-        t = (datetime.now() - timedelta(days=99)).timestamp()
-        os.utime(etranger, (t, t))
-        assert manager.cleanup_old_files(days_old=30) == 0
+        assert manager.cleanup_orphans([]) == 0
         assert etranger.exists()
 
     def test_dossier_vide(self, manager):
-        assert manager.cleanup_old_files() == 0
+        assert manager.cleanup_orphans(["Jul"]) == 0
 
-    def test_fichier_recalcitrant_saute(self, manager, monkeypatch, caplog):
+    def test_fichier_recalcitrant_saute(self, manager, monkeypatch):
         """Un fichier verrouillé ne doit pas interrompre le nettoyage des autres."""
-        self._fichier_age(manager, "a_disabled.json", 60)
-        self._fichier_age(manager, "b_disabled.json", 60)
+        self._fichier(manager, "A")
+        self._fichier(manager, "B")
         vus = []
 
         def _unlink(self, *a, **k):
@@ -140,12 +147,12 @@ class TestNettoyage:
                 raise OSError("verrouillé")
 
         monkeypatch.setattr("pathlib.Path.unlink", _unlink)
-        assert manager.cleanup_old_files(days_old=30) == 1
+        assert manager.cleanup_orphans([]) == 1
         assert len(vus) == 2  # le second a bien été tenté
 
     def test_parcours_impossible(self, manager, monkeypatch, caplog):
         monkeypatch.setattr(
             "pathlib.Path.glob", lambda *a, **k: (_ for _ in ()).throw(OSError("dossier hs"))
         )
-        assert manager.cleanup_old_files() == 0
+        assert manager.cleanup_orphans([]) == 0
         assert "Erreur lors du nettoyage" in caplog.text

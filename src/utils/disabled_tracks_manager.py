@@ -1,6 +1,7 @@
 """Gestionnaire de mémoire pour les morceaux désactivés"""
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -108,34 +109,32 @@ class DisabledTracksManager:
             )
             return set()
 
-    def cleanup_old_files(self, days_old: int = 30) -> int:
-        """
-        Nettoie les fichiers anciens
+    def cleanup_orphans(self, artist_names: Iterable[str]) -> int:
+        """Supprime les fichiers dont AUCUN artiste de la base ne porte le nom.
 
-        Args:
-            days_old: Nombre de jours après lequel considérer un fichier comme ancien
+        Remplace `cleanup_old_files(days_old=30)` (2026-09-14) : la date de
+        modification n'a aucun rapport avec la validité — un artiste qu'on
+        n'ouvre pas pendant un mois voyait ses morceaux désactivés REVENIR en
+        silence, et « tous les morceaux » (GUI comme CLI) les retraitait. Une
+        désactivation est une saisie, elle ne périme pas ; seul le fichier d'un
+        artiste disparu (supprimé, renommé, fusionné) est un déchet.
 
         Returns:
             int: Nombre de fichiers supprimés
         """
-        from datetime import datetime, timedelta
-
-        cutoff_date = datetime.now() - timedelta(days=days_old)
+        attendus = {self._get_artist_file(nom).name for nom in artist_names}
         cleaned_count = 0
 
         try:
             for file_path in self.disabled_tracks_dir.glob("*_disabled.json"):
+                if file_path.name in attendus:
+                    continue
                 try:
-                    # Vérifier la date de modification du fichier
-                    file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-
-                    if file_mtime < cutoff_date:
-                        file_path.unlink()
-                        cleaned_count += 1
-                        logger.info(f"Fichier ancien supprimé: {file_path.name}")
-
-                except (OSError, json.JSONDecodeError, TypeError) as e:
-                    logger.warning(f"Erreur lors de la vérification de {file_path}: {e}")
+                    file_path.unlink()
+                    cleaned_count += 1
+                    logger.info(f"Fichier de désactivation orphelin supprimé: {file_path.name}")
+                except OSError as e:
+                    logger.warning(f"Erreur lors de la suppression de {file_path}: {e}")
                     continue
 
             if cleaned_count > 0:

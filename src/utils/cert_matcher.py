@@ -24,6 +24,7 @@ import pandas as pd
 
 from src.config import DATA_PATH
 from src.utils.cert_normalize import (
+    ORGANISMES,
     PROGRAMME_LATIN,
     RANG_PALIERS,
     date_riaa,
@@ -89,8 +90,6 @@ _CAT_MAP = {
     "music dvd": "video",
 }
 
-_COUNTRY = {"SNEP": "FR", "BRMA": "BE", "RIAA": "US"}
-_FLAG = {"SNEP": "🇫🇷", "BRMA": "🇧🇪", "RIAA": "🇺🇸"}
 
 # Priorité d'affichage (plus petit = plus haut). Les multi-platine BE sont
 # classés juste au-dessus de Platine selon le multiplicateur.
@@ -187,9 +186,9 @@ class CertMatcher:
                     "cat": _norm_cat(r.get("category", "")),
                     "level": str(r.get("certification", "")).strip(),
                     "date": str(r.get("certification_date", "")).strip()[:10],
-                    "country": "FR",
+                    "country": ORGANISMES["SNEP"][0],
                     "body": "SNEP",
-                    "flag": "🇫🇷",
+                    "flag": ORGANISMES["SNEP"][1],
                     "artist_name": artist,
                     "title": title,
                     "release_date": str(r.get("release_date", "")).strip()[:10],
@@ -219,9 +218,9 @@ class CertMatcher:
                     "cat": _norm_cat(r.get("category", "")),
                     "level": str(r.get("certification_level", "")).strip(),
                     "date": str(r.get("certification_date", "")).strip()[:10],
-                    "country": "BE",
+                    "country": ORGANISMES["BRMA"][0],
                     "body": "BRMA",
-                    "flag": "🇧🇪",
+                    "flag": ORGANISMES["BRMA"][1],
                     "artist_name": artist,
                     "title": title,
                     "release_date": "",
@@ -258,9 +257,9 @@ class CertMatcher:
                     "cat": _norm_cat(r.get("category", "")),
                     "level": str(r.get("certification_level", "")).strip(),
                     "date": str(r.get("certification_date", "")).strip()[:10],
-                    "country": "GB",
+                    "country": ORGANISMES["BPI"][0],
                     "body": "BPI",
-                    "flag": "🇬🇧",
+                    "flag": ORGANISMES["BPI"][1],
                     "artist_name": artist,
                     "title": title,
                     "release_date": str(r.get("release_date", "")).strip()[:10],
@@ -316,9 +315,9 @@ class CertMatcher:
                     "cat": _norm_cat(col(r, "format_type", "format")),
                     "level": level,
                     "date": _to_iso_date(col(r, "certification_date")),
-                    "country": "US",
+                    "country": ORGANISMES["RIAA"][0],
                     "body": "RIAA Latin" if latin else "RIAA",
-                    "flag": "🇺🇸",
+                    "flag": ORGANISMES["RIAA"][1],
                     "artist_name": artist,
                     "title": title,
                     "release_date": _to_iso_date(col(r, "release_date")),

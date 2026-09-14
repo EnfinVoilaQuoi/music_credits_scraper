@@ -425,3 +425,65 @@ class TestLotDeTracks:
     def test_statut_non_200(self, client, monkeypatch):
         _stub_get(client, monkeypatch, _Reponse({}, statut=500))
         assert client.get_multiple_tracks_with_bpm(["sp1"]) == []
+
+
+# ── Miettes de branches de la voie SYNC ──────────────────────────────────────
+class TestMiettesSync:
+    @pytest.mark.parametrize("statut", [404, 500])
+    def test_track_statuts_non_200(self, client, monkeypatch, statut):
+        rep = _Reponse({}, statut=statut)
+        rep.text = "erreur"
+        _stub_get(client, monkeypatch, rep)
+        assert client.get_track_from_reccobeats("sp") is None
+
+    def test_audio_features_non_200_et_reseau(self, client, monkeypatch):
+        _stub_get(client, monkeypatch, _Reponse({}, statut=500))
+        assert client.get_track_audio_features("r") is None
+        _stub_get(client, monkeypatch, requests.ConnectionError("x"))
+        assert client.get_track_audio_features("r") is None
+
+    def test_crash_dans_get_track_info_est_consigne(self, client, monkeypatch):
+        from src.observability import source_usage
+        from src.observability.issues import IssueKind
+
+        source_usage.reset()
+
+        def casse(sid):
+            raise RuntimeError("bug")
+
+        monkeypatch.setattr(client, "get_track_from_reccobeats", casse)
+        assert client.get_track_info("sp9") is None
+        assert [v.issue for v in source_usage.flush()] == [IssueKind.CRASH]
+
+    def test_musical_key_inconvertible_est_signalee_sans_casser(self, client, caplog, monkeypatch):
+        def casse(key, mode):
+            raise ValueError("hors gamme")
+
+        monkeypatch.setattr("src.utils.music_theory.key_mode_to_french", casse)
+        result = {}
+        with caplog.at_level("WARNING"):
+            client._apply_audio_features(result, {"tempo": 100, "key": 0, "mode": 1})
+        assert result["bpm"] == 100 and "musical_key" not in result
+        assert any("musical_key" in r.message for r in caplog.records)
+
+    def test_isrc_429_puis_chaine_complete_puis_force_refresh(self, client, monkeypatch):
+        _stub_get(client, monkeypatch, _Reponse({}, statut=429))
+        assert client.get_track_by_isrc("FR") is None
+        assert client.get_track_info_by_isrc("") is None
+        vues = _stub_get(
+            client,
+            monkeypatch,
+            _Reponse({"content": [{"id": "b", "popularity": 9}]}),
+            _Reponse({"tempo": 120}),
+            _Reponse({"content": [{"id": "b", "popularity": 9}]}),
+            _Reponse({"tempo": 121}),
+        )
+        assert client.get_track_info_by_isrc("FR1")["bpm"] == 120
+        assert client.get_track_info_by_isrc("FR1")["bpm"] == 120 and len(vues) == 2  # cache
+        assert client.get_track_info_by_isrc("FR1", force_refresh=True)["bpm"] == 121
+        assert len(vues) == 4
+
+    def test_lots_sur_reseau_coupe(self, client, monkeypatch):
+        _stub_get(client, monkeypatch, requests.ConnectionError("x"))
+        assert client.get_audio_features_batch(["a"]) == {}
+        assert client.get_multiple_tracks_with_bpm(["sp"]) == []

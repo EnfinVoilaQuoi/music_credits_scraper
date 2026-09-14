@@ -11,7 +11,7 @@ le golden master.
 import re
 import unicodedata
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 
 
 def normalize_text(text: str) -> str:
@@ -658,6 +658,35 @@ def decouper_multiplicateur(niveau: str) -> tuple[int, str]:
     if (m := _MULTIPLICATEUR_RE.match(lvl)) is not None:
         return int(m.group(1)), m.group(2).strip()
     return 1, lvl
+
+
+FORMAT_JOUR_CLI = "JJ-MM-AAAA"
+_JOUR_CLI = re.compile(r"^\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\s*$")
+_JOUR_ISO = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$")
+
+
+def lire_jour_cli(s: str) -> date:
+    """Une date tapée sur la ligne de commande des scripts de certifs.
+
+    Forme attendue : **« JJ-MM-AAAA »** (2026-09-14, demande utilisateur : avec
+    `--from 2000-01-01` on ne sait jamais lequel est le mois). « JJ/MM/AAAA »
+    passe aussi ; et l'ISO « AAAA-MM-JJ » reste ACCEPTÉ — l'année en tête lève
+    toute ambiguïté, et les commandes fabriquées avant ce jour (GUI, scripts,
+    historique du shell) ne doivent pas casser. Lève `ValueError` sinon.
+    """
+    m = _JOUR_CLI.match(s or "")
+    if m:
+        return date(int(m[3]), int(m[2]), int(m[1]))
+    m = _JOUR_ISO.match(s or "")
+    if m:
+        return date(int(m[1]), int(m[2]), int(m[3]))
+    raise ValueError(f"date illisible « {s} » — attendu {FORMAT_JOUR_CLI}")
+
+
+def jour_cli(d: date) -> str:
+    """L'inverse : une date → « JJ-MM-AAAA », pour fabriquer ou afficher une
+    commande."""
+    return d.strftime("%d-%m-%Y")
 
 
 def date_riaa(s: str, *, verbatim: bool = False) -> str:

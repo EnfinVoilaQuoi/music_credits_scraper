@@ -25,7 +25,14 @@ from src.observability import repository as usage_repository
 from src.observability.registry import Flow
 from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
 from src.utils import cert_clean_report, cert_store
-from src.utils.cert_normalize import programme_riaa, riaa_level, riaa_units
+from src.utils.cert_normalize import (
+    FORMAT_JOUR_CLI,
+    jour_cli,
+    lire_jour_cli,
+    programme_riaa,
+    riaa_level,
+    riaa_units,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -788,9 +795,9 @@ def ajuster_tranche(
 
 
 def _jour(s: str) -> date:
-    """« AAAA-MM-JJ » (ou « MM/JJ/AAAA ») → date, via le seul lecteur de dates
-    RIAA du module."""
-    return datetime.strptime(_riaa_iso(s), "%Y-%m-%d").date()
+    """Une date de ligne de commande, « JJ-MM-AAAA » (ISO accepté) — le lecteur
+    commun des CLI de certifs, `cert_normalize.lire_jour_cli`."""
+    return lire_jour_cli(s)
 
 
 def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
@@ -815,13 +822,17 @@ def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
     accumuler en mémoire pour tout écrire à la fin, c'est tout perdre sur une
     coupure.
     """
-    d0, d1 = _jour(debut), _jour(fin)
+    try:
+        d0, d1 = _jour(debut), _jour(fin)
+    except ValueError as e:
+        print(f"❌ {e}")
+        return False
     if d0 >= d1:
         print("❌ --from doit précéder --to")
         return False
 
     scraper = RIAAScraper(headless=True)
-    print(f"=== RIAA, période {d0} → {d1} (découpage automatique) ===")
+    print(f"=== RIAA, période {jour_cli(d0)} → {jour_cli(d1)} (découpage automatique) ===")
 
     curseur, jours = d1, min((d1 - d0).days, _JOURS_DEPART)
     total_vues = total_ajoutees = tranches = fusions = total_clean = 0
@@ -1014,11 +1025,11 @@ def main():
     parser.add_argument(
         "--from",
         dest="debut",
-        metavar="AAAA-MM-JJ",
+        metavar=FORMAT_JOUR_CLI,
         help="Rescraper une PÉRIODE précise (avec --to) : sert à combler un trou "
         "signalé par la validation, sans repartir de la dernière date connue",
     )
-    parser.add_argument("--to", dest="fin", metavar="AAAA-MM-JJ", help="Fin de la période")
+    parser.add_argument("--to", dest="fin", metavar=FORMAT_JOUR_CLI, help="Fin de la période")
     parser.add_argument(
         "--dry-run",
         action="store_true",

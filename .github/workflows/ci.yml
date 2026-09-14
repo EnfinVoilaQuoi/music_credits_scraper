@@ -75,10 +75,13 @@ jobs:
       #      `youtube_integration` 26 → 95 %, `track_classifier` 64 → 100 %.
       #      Le report tenait à ce que les décisions allaient changer ; le lot
       #      les a laissées intactes, elles sont donc gelées. Mesuré 81 %).
+      # → 81 (2026-09-14 : mesuré 82 % après les services GUI-indépendants et
+      #      la CLI ; `dataviz/debug_preview.py` — aperçu matplotlib des CLIs,
+      #      0 % et sans logique — sort du périmètre plutôt que d'être couvert).
       # Le reste du hors-GUI est du PILOTAGE (navigateur Playwright, flux réseau
       # bout en bout) : le monter davantage demanderait un harnais de session,
       # pas des tests unitaires. Ne remonter ce seuil qu'avec du code réellement
       # couvert, jamais pour « faire un chiffre » — les fabriques paresseuses qui
       # instancient un vrai client réseau restent délibérément non couvertes.
       - name: Cliquet de couverture (hors GUI)
-        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=80
+        run: coverage report --omit="src/gui/*,src/main.py,src/dataviz/debug_preview.py" --fail-under=81

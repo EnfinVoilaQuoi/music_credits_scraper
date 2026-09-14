@@ -159,24 +159,21 @@ class RIAADatabaseUpdater:
                 # Met à jour la base de données
                 added, updated = self.update_from_scraped_data(results)
 
-                # Enregistre l'historique
-                self.log_update(start_str, end_str, added, updated, "SUCCESS")
+                # Fraîcheur = date de dernière vérification (sidecar meta).
+                _write_riaa_meta(source="GLOBAL")
 
                 self.logger.info(f"✓ Ajoutées: {added}")
                 self.logger.info(f"✓ Mises à jour: {updated}")
-
-                # Export vers CSV
-                self.export_to_csv()
 
                 return True
 
             finally:
                 self.scraper.close_driver()
 
-        except Exception as e:
+        except Exception:
             # Dernier ressort de l'orchestrateur (subprocess certifs) : trace + statut.
             self.logger.exception("Erreur mise à jour")
-            self.log_update(start_str, end_str, 0, 0, f"ERROR: {e}")
+            _write_riaa_meta(source="GLOBAL")
             return False
 
     def update_missing_months(self) -> bool:
@@ -273,9 +270,6 @@ class RIAADatabaseUpdater:
                 f"{total_updated} mises à jour ({lues}/{periodes} période(s) lue(s))"
             )
 
-            # Export final
-            self.export_to_csv()
-
             if periodes and not lues:
                 # AUCUNE période n'a pu être lue : le scraper lève à chaque appel
                 # (navigateur absent, Cloudflare). C'est le pire des cas, et
@@ -312,16 +306,6 @@ class RIAADatabaseUpdater:
             self.logger.exception("Erreur mise à jour complète")
             return False
 
-    def log_update(self, start: str, end: str, added: int, updated: int, status: str):
-        """Trace la fraîcheur de la MàJ dans le sidecar metadata.json (plus de
-        base riaa.db)."""
-        _write_riaa_meta(source="GLOBAL")
-
-    def export_to_csv(self):
-        """Obsolète : certif_riaa.csv est écrit directement (raw→clean) par
-        _merge_certif_csv. Conservé en no-op pour les appelants du flux bulk."""
-        return
-
     def manual_update(self):
         """Interface de mise à jour manuelle"""
         print("\n=== MISE À JOUR MANUELLE RIAA ===")
@@ -350,7 +334,6 @@ class RIAADatabaseUpdater:
                 results = self.scraper.scrape_by_date_range(start, end)
                 added, updated = self.update_from_scraped_data(results)
                 self.logger.info(f"Ajoutées: {added}, Mises à jour: {updated}")
-                self.export_to_csv()
             finally:
                 self.scraper.close_driver()
 
@@ -364,7 +347,6 @@ class RIAADatabaseUpdater:
                 results = self.scraper.scrape_by_artist(artist)
                 added, updated = self.update_from_scraped_data(results)
                 self.logger.info(f"Ajoutées: {added}, Mises à jour: {updated}")
-                self.export_to_csv()
             finally:
                 self.scraper.close_driver()
 

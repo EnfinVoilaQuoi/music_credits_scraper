@@ -993,27 +993,16 @@ class UltratopUpdater:
         """
         self.logger.info("=== RÉCUPÉRATION DES PAGES MANQUANTES ===")
 
-        # Années connues pour avoir des problèmes (erreur 500)
-        # Ajustez cette liste selon vos observations
-        problematic_years = []
-
-        # Vérifier quelles années ont des données manquantes ou incomplètes
-        if hasattr(self, "existing_db") and not self.existing_db.empty:
-            # Analyser la base existante pour détecter les années avec peu de données
-            year_counts = self.existing_db.groupby("year_page").size()
-            avg_count = year_counts.mean()
-
-            # Identifier les années avec moins de 50% des données moyennes
-            for year, count in year_counts.items():
-                if count < avg_count * 0.5:
-                    problematic_years.append(int(year))
-
-            self.logger.info(f"Années avec données incomplètes détectées: {problematic_years}")
-        else:
-            # Si pas de base existante, essayer les années récentes qui posent souvent problème
-            current_year = datetime.now().year
-            problematic_years = [current_year - 1, current_year - 2]
-            self.logger.info(f"Tentative sur les années récentes: {problematic_years}")
+        # On retente les années RÉCENTES, celles où un 500 ponctuel prive d'une
+        # publication fraîche. L'ancienne heuristique « année sous 50 % de la
+        # moyenne » désignait systématiquement les années 90 : elles sont
+        # LÉGITIMEMENT peu fournies (le marché certifiait moins), pas victimes
+        # d'un scrape incomplet — un compte bas ne mesure pas un échec, et une
+        # moyenne tirée vers le haut par les années récentes ne faisait que
+        # re-scraper les vieilles à chaque run, pour rien.
+        current_year = datetime.now().year
+        problematic_years = [current_year, current_year - 1, current_year - 2]
+        self.logger.info(f"Tentative sur les années récentes: {problematic_years}")
 
         all_recovered = []
         categories = ["albums", "singles"]

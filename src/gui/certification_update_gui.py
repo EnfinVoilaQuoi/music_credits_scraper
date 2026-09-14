@@ -236,9 +236,12 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             valider = self._check_snep if nom == "SNEP" else (lambda n=nom: self._check_source(n))
             ctk.CTkButton(
                 ligne,
-                text="🔎 Valider / Nettoyer",
+                # Le brut PARTOUT (SNEP comme les trois autres) : c'est lui qui
+                # porte les trous et ce que « Nettoyer » corrige. Dit dans le
+                # libellé pour lever l'ambiguïté d'avant (brut/clean selon la ligne).
+                text="🔎 Valider le brut",
                 command=valider,
-                width=110,
+                width=130,
                 fg_color="gray40",
                 hover_color="gray30",
             ).pack(side="right", padx=5, pady=5)
@@ -385,10 +388,17 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     )
                 if fresh["last_artist"]:
                     status_text += f"   ↳ Dernière récup. artiste: {_fmt(fresh['last_artist'])}\n"
+                # `count` (nb de lignes clean) était calculé par freshness() et
+                # jamais montré — on le raccorde, c'est le volume que le panneau
+                # est censé donner.
+                if fresh.get("count") is not None:
+                    status_text += f"   ↳ {fresh['count']} certification(s) au total\n"
                 if source.name in self.missing_periods:
-                    gaps = self.missing_periods[source.name].get("gaps", [])
-                    if gaps:
-                        status_text += f"   ⚠️ {len(gaps)} période(s) manquante(s)\n"
+                    infos = self.missing_periods[source.name]
+                    if infos.get("erreur"):
+                        status_text += f"   ⚠️ trous non calculés : {infos['erreur']}\n"
+                    elif infos.get("gaps"):
+                        status_text += f"   ⚠️ {len(infos['gaps'])} période(s) manquante(s)\n"
 
             # Informations système
             status_text += f"\n📅 Vérification: {datetime.now():%d/%m/%Y %H:%M:%S}\n"
@@ -401,6 +411,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 status_text += "=" * 40 + "\n"
 
                 for source, data in self.missing_periods.items():
+                    if data.get("erreur"):
+                        status_text += f"\n🔍 {source}: ⚠️ {data['erreur']}\n"
+                        continue
                     gaps = data.get("gaps", [])
                     if gaps:
                         status_text += f"\n🔍 {source}:\n"
@@ -1186,17 +1199,21 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
     _ARG_NETTOYAGE = {"BRMA": "--dedup", "RIAA": "--clean", "BPI": "--clean"}
 
     def _check_source(self, nom: str):
-        """Valide le CSV d'une source non-SNEP (BRMA/RIAA/BPI), affiche le
+        """Valide le CSV BRUT d'une source non-SNEP (BRMA/RIAA/BPI), affiche le
         rapport et propose le nettoyage et le rescrape des trous.
 
-        Tout se DÉRIVE du nom — dossier, fichier clean, validateur, script — au
-        lieu des trois méthodes jumelles `_check_brma/riaa/bpi` + `_clean_*`, qui
-        étaient la sixième énumération parallèle des quatre sources. Le script
-        vit déjà dans `MISES_A_JOUR`, on ne le recopie plus.
+        Tout se DÉRIVE du nom — dossier, fichier, validateur, script — au lieu
+        des trois méthodes jumelles `_check_brma/riaa/bpi` + `_clean_*`, qui
+        étaient la sixième énumération parallèle des quatre sources.
+
+        C'est le BRUT qui est validé, comme pour SNEP : c'est lui qui porte les
+        trous (l'accumulation complète, avant dérivation) et ce que le nettoyage
+        va corriger. Le validateur accepte l'un ou l'autre — brut et clean ont
+        le même schéma pour ces trois sources, seul le contenu diffère.
         """
         import importlib
 
-        folder = nom.lower()
+        folder, fichier = _BRUTS_PAR_SOURCE[nom]
         script = ["src", "utils", MISES_A_JOUR[nom].script]
 
         def importer():
@@ -1206,7 +1223,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self._valider_source(
             nom,
             folder,
-            f"certif_{folder}.csv",
+            fichier,
             importer,
             lambda n=nom, s=script: self._nettoyer_avec_apercu(n, s, [self._ARG_NETTOYAGE[n]]),
             script,
@@ -1623,14 +1640,17 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 return
 
             self._set_progress(f"🔍 Analyse de {source_name}...")
-            self.missing_periods[source_name] = periodes_manquantes(csv_path, source_name)
+            infos = periodes_manquantes(csv_path, source_name)
+            self.missing_periods[source_name] = infos
 
-            gaps = self.missing_periods[source_name]["gaps"]
-            self._set_progress(
-                f"⚠️ {source_name}: {len(gaps)} période(s) manquante(s) détectée(s)"
-                if gaps
-                else f"✅ {source_name}: Aucune période manquante"
-            )
+            if infos.get("erreur"):
+                self._set_progress(f"❌ {source_name}: {infos['erreur']}")
+            elif infos["gaps"]:
+                self._set_progress(
+                    f"⚠️ {source_name}: {len(infos['gaps'])} période(s) manquante(s) détectée(s)"
+                )
+            else:
+                self._set_progress(f"✅ {source_name}: Aucune période manquante")
         except (OSError, ValueError, KeyError) as e:
             logger.exception(f"Vérification {source_name}")
             self._set_progress(f"❌ Erreur vérification {source_name}: {e}")

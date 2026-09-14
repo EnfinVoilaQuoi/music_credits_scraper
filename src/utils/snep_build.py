@@ -2,9 +2,9 @@
 
 Convention « brut + clean » (voir plan certifs). Le CLEAN **accumule** : les
 certifs de l'export SNEP (fenêtre glissante) sont fusionnées sans jamais rien
-retirer — sinon on perd l'historique (l'ancien `certifications.db`, gitignoré,
-en contenait 292 de plus que le brut courant). Aucune dépendance DB en régime
-permanent ; `bootstrap_rows_from_db` ne sert qu'à la migration initiale.
+retirer — sinon on perd l'historique (l'ancien `certifications.db`, migré une
+fois en 2026-07 puis retiré avec son script le 2026-09-15, en contenait 292 de
+plus que le brut courant). Aucune dépendance DB.
 
 Colonnes canoniques (lues ensuite par `cert_matcher._load_snep`, qui normalise
 à la volée comme pour BRMA/RIAA) :
@@ -548,31 +548,3 @@ def rebuild(
     write_meta(meta_path, source, len(merged), partial=partial)
     logger.info(f"📄 certif_snep.csv : {len(merged)} lignes ({len(new)} depuis le brut)")
     return len(merged)
-
-
-def bootstrap_rows_from_db(db_path: Path) -> list[dict]:
-    """MIGRATION UNIQUE : lit l'ancien `certifications.db` → lignes canoniques,
-    pour préserver l'historique accumulé (non présent dans le brut). Ne pas
-    utiliser en régime permanent (la DB est retirée en fin de chantier)."""
-    import sqlite3
-
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cur = conn.execute(
-            "SELECT artist_name, title, publisher, category, certification, "
-            "release_date, certification_date FROM certifications"
-        )
-        return [
-            {
-                "artist": an or "",
-                "title": ti or "",
-                "publisher": pub or "",
-                "category": cat or "Singles",
-                "certification": lvl or "Or",
-                "release_date": (str(rel)[:10] if rel else ""),
-                "certification_date": (str(cdate)[:10] if cdate else ""),
-            }
-            for an, ti, pub, cat, lvl, rel, cdate in cur.fetchall()
-        ]
-    finally:
-        conn.close()

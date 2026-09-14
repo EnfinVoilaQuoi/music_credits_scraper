@@ -129,8 +129,14 @@ def download_latest_snep_csv():
 
             if response.status_code == 200:
                 # Vérifier que c'est bien un CSV — bloquer si ce n'est pas le cas
-                content_type = response.headers.get("Content-Type", "")
-                if "csv" not in content_type.lower() and "text" not in content_type.lower():
+                # « text » couvrait `text/html` : une page d'erreur WordPress servie
+                # en 200 passait pour un export et écrasait le brut (vu en test,
+                # 2026-09-15). `text/plain` reste accepté (l'hébergeur ne type pas
+                # toujours les CSV), `text/html` jamais.
+                content_type = response.headers.get("Content-Type", "").lower()
+                if "html" in content_type or (
+                    "csv" not in content_type and "text" not in content_type
+                ):
                     safe_print(
                         f"⚠️ Contenu ignoré (type inattendu : {content_type}), fichier existant conservé"
                     )
@@ -191,10 +197,7 @@ import random
 import re as _re
 import time
 
-try:
-    from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT
-except ImportError:  # repli si config minimale
-    DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT = 1, 3, 30
+from src.config import DELAY_BETWEEN_REQUESTS, MAX_RETRIES, SELENIUM_TIMEOUT
 
 _SNEP_BASE = "https://snepmusique.com/les-certifications/"
 _HTTP_HEADERS = {

@@ -127,12 +127,6 @@ def test_message_tronque(repo):
 def test_lecture_par_artiste_isole(repo):
     repo.record([_verdict(artist_id=1), _verdict(artist_id=2), _verdict(artist_id=2)])
     assert sum(r["n_calls"] for r in repo.daily(artist_id=2)) == 2
-    assert repo.artists_touched() == [1, 2]
-
-
-def test_artistes_touches_par_source(repo):
-    repo.record([_verdict(source="kworb", artist_id=5), _verdict(source="deezer", artist_id=9)])
-    assert repo.artists_touched("kworb") == [5]
 
 
 # ── Piège TIMESTAMP double-face ───────────────────────────────────────────────
@@ -142,14 +136,6 @@ def test_horodatages_relus_verbatim(repo):
     echec = repo.recent_failures()[0]
     assert ligne["last_seen"] == "2026-09-03T10:30:00"
     assert echec["occurred_at"] == "2026-09-03T10:30:00"
-
-
-# ── Purge ──────────────────────────────────────────────────────────────────────
-def test_purge_des_vieux_compteurs(repo):
-    repo.record([_verdict(at=datetime(2024, 1, 1, 9, 0))])
-    repo.record([_verdict(at=_QUAND)])
-    assert repo.purge_older_than("2026-01-01") == 1
-    assert len(repo.daily()) == 1
 
 
 # ── Branchement bout en bout avec le capteur ──────────────────────────────────

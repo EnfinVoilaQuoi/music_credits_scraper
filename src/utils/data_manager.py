@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import ARTISTS_DIR, DATABASE_URL
+from src.models import Artist
 from src.utils.artist_repository import ArtistRepository
 from src.utils.db import Database
 from src.utils.logger import get_logger
@@ -85,12 +86,20 @@ class DataManager(ArtistRepository, TrackRepository):
         """
         return [t.title for t in tracks if t.certs.needs_write or t._relationships_pending]
 
-    def export_to_json(self, artist_name: str, filepath: Path | None = None):
-        """Exporte les données d'un artiste en JSON"""
-        artist = self.get_artist_by_name(artist_name)
-        if not artist:
-            logger.error(f"Artiste non trouvé: {artist_name}")
-            return None
+    def export_to_json(self, artist: Artist | str, filepath: Path | None = None):
+        """Exporte les données d'un artiste en JSON.
+
+        `artist` = un `Artist` DÉJÀ chargé (exporté tel quel, morceaux compris)
+        ou un nom (rechargé depuis la base). La GUI construisait un artiste
+        FILTRÉ des morceaux désactivés puis passait son NOM : l'export
+        rechargeait tout et la boîte annonçait pourtant « M désactivés exclus ».
+        """
+        if isinstance(artist, str):
+            nom = artist
+            artist = self.get_artist_by_name(nom)
+            if not artist:
+                logger.error(f"Artiste non trouvé: {nom}")
+                return None
 
         # Déterminer le chemin du fichier
         if filepath is None:

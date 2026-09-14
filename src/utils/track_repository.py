@@ -616,6 +616,12 @@ class TrackRepository:
                         try:
                             role = CreditRole(role_str)
                         except ValueError:
+                            # Une valeur d'enum inconnue en base est le symptôme
+                            # « clé masquée » (2026-09-03) : elle doit se voir.
+                            logger.warning(
+                                f"Rôle de crédit inconnu en base : {role_str!r} "
+                                f"(track_id={track_id}) — classé OTHER"
+                            )
                             role = CreditRole.OTHER
 
                         credit = Credit(
@@ -632,7 +638,9 @@ class TrackRepository:
                     continue
 
         except (SQLAlchemyError, KeyError, ValueError, TypeError) as e:
-            logger.debug(f"Erreur _get_track_credits: {e}")
+            # `warning`, pas `debug` : une lecture qui casse rendrait des
+            # morceaux SANS crédit sans aucune trace dans les fichiers de log.
+            logger.warning(f"Erreur _get_track_credits (track_id={track_id}): {e}")
 
         return result
 

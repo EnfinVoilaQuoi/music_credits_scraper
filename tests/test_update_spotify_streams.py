@@ -486,3 +486,59 @@ def test_les_editions_connues_de_la_BASE_sont_visitees():
     (album,) = dm.album_calls
     assert album["streams"] == 150, "l'édition connue de la base est comptée"
     assert album["spotify_album_ids"].count(",") == 1
+
+
+# ── Entrée publique : résolution de l'ID artiste et propriété du scraper ──────
+class TestEntreePublique:
+    def test_sans_id_artiste_le_vote_tranche(self, monkeypatch):
+        """Le vote (Playwright SYNC) se fait AVANT d'entrer dans la boucle."""
+        import src.utils.update_spotify_streams as uss
+
+        artist = _Artist()
+        artist.spotify_id = None
+        dm = _DataManager()
+        dm.ids_poses = []
+        dm.update_artist_spotify_id = lambda aid, sid: dm.ids_poses.append((aid, sid))
+
+        monkeypatch.setattr("src.utils.update_kworb._vote_artist_spotify_id", lambda a, d: None)
+        result = uss.update_spotify_streams(artist, dm)
+        assert result["aborted"].startswith("aucun ID artiste") and result["pages"] == 0
+
+        monkeypatch.setattr(
+            "src.utils.update_kworb._vote_artist_spotify_id", lambda a, d: "voted0000000000000000x"
+        )
+        ferme = []
+
+        class _ScraperMuet:
+            def close(self):
+                ferme.append(True)
+
+        monkeypatch.setattr(uss, "SpotifyWebScraper", lambda headless=True: _ScraperMuet())
+
+        async def faux_crawl(artist, dm, scraper, sid, stop, result, full):
+            result["spotify_artist_id_vu"] = sid
+            return result
+
+        monkeypatch.setattr(uss, "_crawl", faux_crawl)
+        monkeypatch.setattr(uss.async_loop, "run_sync", lambda coro: asyncio.run(coro))
+        result = uss.update_spotify_streams(artist, dm)
+        assert dm.ids_poses == [(_NOUS, "voted0000000000000000x")]
+        assert result["spotify_artist_id"] == "voted0000000000000000x"
+        assert ferme == [True]  # scraper créé ici → fermé ici
+
+    def test_scraper_fourni_n_est_pas_ferme(self, monkeypatch):
+        import src.utils.update_spotify_streams as uss
+
+        ferme = []
+
+        class _Fourni:
+            def close(self):
+                ferme.append(True)
+
+        async def faux_crawl(artist, dm, scraper, sid, stop, result, full):
+            return result
+
+        monkeypatch.setattr(uss, "_crawl", faux_crawl)
+        monkeypatch.setattr(uss.async_loop, "run_sync", lambda coro: asyncio.run(coro))
+        uss.update_spotify_streams(_Artist(), _DataManager(), scraper=_Fourni())
+        assert ferme == []

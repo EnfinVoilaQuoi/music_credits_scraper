@@ -26,6 +26,7 @@ normal (base déjà stampée) ne paie jamais le coût d'import.
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from src.utils.logger import get_logger
@@ -54,7 +55,10 @@ def make_alembic_config(connection=None):
 
 
 def _has_alembic_version(db_path: str) -> bool:
-    with sqlite3.connect(db_path) as conn:
+    # `closing` : le gestionnaire de contexte d'une connexion sqlite3 ne fait que
+    # commit/rollback, il ne FERME pas — d'où les `ResourceWarning: unclosed
+    # database` semés dans la suite de tests (Python 3.13 les signale au GC).
+    with closing(sqlite3.connect(db_path)) as conn:
         row = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='alembic_version'"
         ).fetchone()
@@ -65,7 +69,7 @@ def _has_schema(db_path: str) -> bool:
     """La base a-t-elle déjà le schéma métier (table `artists`) ? Sert à
     distinguer une base VIERGE (à créer par `alembic upgrade head`) d'une base
     pré-Alembic AVEC schéma (à stamper)."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         row = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artists'"
         ).fetchone()
@@ -82,7 +86,7 @@ def _catch_up_legacy(db_path: str) -> None:
     """
     from src.persistence.legacy_migrations import run_migrations
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         run_migrations(conn.cursor())
         conn.commit()
 

@@ -4,7 +4,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
-from src.api.genius_api import GeniusAPI
+from src.concurrency.lifecycle import start_worker
 from src.config import THEME, WINDOW_HEIGHT, WINDOW_WIDTH
 from src.gui import helpers
 from src.gui.certification_update_gui import CertificationUpdateDialog
@@ -16,13 +16,10 @@ from src.gui.windows.formations import show_formations
 from src.gui.windows.source_health import show_source_health
 from src.gui.windows.track_details import TrackDetailsWindow
 from src.gui.workers import enrichment, retrieval, streams
-from src.gui.workers.lifecycle import start_worker
 from src.models import Artist, Track
 from src.observability import repository as usage_repository
-from src.utils.data_enricher import DataEnricher
-from src.utils.data_manager import DataManager
-from src.utils.deleted_tracks_manager import DeletedTracksManager
-from src.utils.disabled_tracks_manager import DisabledTracksManager
+from src.services import artiste as artiste_service
+from src.services.runtime import Runtime
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,20 +37,15 @@ class MainWindow:
         self.root.title("Music Credits Scraper")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
 
-        # Services
-        self.genius_api = GeniusAPI()
-        self.data_manager = DataManager()
-        # Branche la persistance de l'usage des sources : hors de l'app (tests,
-        # CLI), le capteur reste actif mais ses verdicts sont jetés.
+        # Services : les MÊMES objets que la CLI (`Runtime.build`), exposés
+        # sous leurs noms historiques pour les workers/panneaux.
+        self.runtime = Runtime.build()
+        self.genius_api = self.runtime.genius_api
+        self.data_manager = self.runtime.data_manager
+        self.data_enricher = self.runtime.data_enricher
+        # Branche la persistance de l'usage des sources : hors de l'app (tests),
+        # le capteur reste actif mais ses verdicts sont jetés.
         self.source_usage_repo = usage_repository.attach(self.data_manager.engine)
-        self.data_enricher = DataEnricher(
-            headless_reccobeats=True,
-            headless_songbpm=True,
-            headless_spotify_scraper=True,
-            # Sans lui, le garde-fou d'unicité d'ID Spotify ne verrait que
-            # l'artiste courant — or un `spotify_id` est mondial (e23).
-            data_manager=self.data_manager,
-        )
         self.current_artist: Artist | None = None
         self.tracks: list[Track] = []
 
@@ -64,11 +56,11 @@ class MainWindow:
         self.sort_column = None
         self.sort_reverse = False
         self.last_selected_index = None  # Sélection multiple
-        self.disabled_tracks_manager = DisabledTracksManager()
+        self.disabled_tracks_manager = self.runtime.disabled
         # Purge des fichiers de désactivation ORPHELINS (artiste plus en base) —
         # jamais sur l'âge : une désactivation ne périme pas (2026-09-14).
         self.disabled_tracks_manager.cleanup_orphans(self.data_manager.get_artist_names())
-        self.deleted_tracks_manager = DeletedTracksManager()
+        self.deleted_tracks_manager = self.runtime.deleted
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         self.source_health_window = None  # Fenêtre « État des sources » (singleton)
         self.export_studio_window = None  # Fenêtre « Export studio » (singleton)
@@ -505,18 +497,10 @@ class MainWindow:
             try:
                 logger.info(f"🔍 Recherche de l'artiste: '{artist_name}'")
 
-                # Vérifier d'abord dans la base de données locale
-                artist = self.data_manager.get_artist_by_name(artist_name)
+                # Vérifier d'abord dans la base de données locale (service :
+                # discographie RÉUNIE, même chemin que la CLI)
+                artist = artiste_service.charger(self.runtime, artist_name)
                 if artist:
-                    # Discographie RÉUNIE (lot 3) : ce que l'artiste a sorti,
-                    # plus ce que ses groupes ont sorti, plus sa part dans ses
-                    # collectifs. Câblé ICI et non dans `get_artist_by_name` :
-                    # le reset de données et les CLI de streams passent par la
-                    # même façade et ne doivent PAS voir les morceaux d'autrui.
-                    artist.tracks = self.data_manager.discographie_reunie(artist)
-                    logger.info(
-                        f"✅ Artiste trouvé en base: {artist.name} avec {len(artist.tracks)} morceaux"
-                    )
                     self.current_artist = artist
                     self.root.after(0, self._update_artist_info)
                     self.root.after(0, lambda: tracks_table.apply_default_sort(self))
@@ -532,26 +516,22 @@ class MainWindow:
                     )
                     return
 
-                # Construire l'URL Genius depuis le nom (sans appel API)
-                logger.info("🌐 Artiste non trouvé en base, recherche via URL Genius...")
-                slug = helpers.build_genius_slug(artist_name)
-                genius_url = f"https://genius.com/artists/{slug}"
-                logger.info(f"🔗 Tentative : {genius_url}")
-
-                genius_artist = artist_selection.fetch_artist_from_genius_url(
-                    self, genius_url, artist_name
-                )
-
-                if not (genius_artist and genius_artist.genius_id):
-                    # Slug incorrect ou page inexistante → dialog de saisie manuelle
-                    logger.info(f"⚠️ Artiste non trouvé sur {genius_url}, affichage du dialog")
+                # Résolution Genius (slug → page) par le service ; le cas
+                # AMBIGU remonte ici avec les candidats de l'API et c'est la
+                # GUI qui ouvre le dialog — la CLI, elle, liste et refuse.
+                try:
+                    genius_artist = artiste_service.resoudre(self.runtime, artist_name)
+                except artiste_service.ArtisteAmbigu as ambigu:
+                    logger.info("⚠️ Artiste non résolu par slug, affichage du dialog")
                     import queue as _queue
 
+                    # `ambigu` est effacé à la sortie du except : lier la liste.
+                    candidats = ambigu.candidats
                     result_q = _queue.Queue()
                     self.root.after(
                         0,
                         lambda: artist_selection.show_artist_selection_dialog(
-                            self, [], artist_name, result_q
+                            self, candidats, artist_name, result_q
                         ),
                     )
                     genius_artist = result_q.get()
@@ -820,7 +800,7 @@ class MainWindow:
         # join avec budget de temps — un save_track en cours se termine au lieu
         # d'être tué net (AUDIT §4 « threads démons sans arrêt propre »).
         try:
-            from src.gui.workers.lifecycle import shutdown_workers
+            from src.concurrency.lifecycle import shutdown_workers
 
             try:
                 self.progress_label.configure(text="⏳ Finalisation des tâches en cours…")

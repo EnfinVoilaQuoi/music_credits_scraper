@@ -18,25 +18,12 @@ def normalize_album_title(s: str) -> str:
 
 
 def build_genius_slug(name: str) -> str:
-    """Construit le slug Genius depuis un nom d'artiste.
+    """Slug Genius d'un nom d'artiste — vit dans `src/services/artiste.py`
+    depuis 2026-09-14 (la CLI en a besoin). Import paresseux : le service tire
+    `Runtime`, donc le pipeline, et ce module doit rester léger."""
+    from src.services.artiste import build_genius_slug as _slug
 
-    Règles :
-    - Tout en minuscules
-    - Supprime '.' et "'"
-    - Remplace les espaces par '-'
-    - Première lettre en majuscule
-
-    Ex: 'Sofiane Pamart' → 'Sofiane-pamart'
-        "L'Or du Commun" → 'Lor-du-commun'
-        'NWA'            → 'Nwa'
-    """
-    slug = name.lower()
-    for ch in (".", "'", "’"):  # point, apostrophe droite, apostrophe typographique
-        slug = slug.replace(ch, "")
-    slug = slug.replace(" ", "-")
-    if slug:
-        slug = slug[0].upper() + slug[1:]
-    return slug
+    return _slug(name)
 
 
 def format_lyrics_for_display(lyrics: str) -> str:

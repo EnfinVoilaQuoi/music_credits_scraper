@@ -21,7 +21,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from src.gui.workers.lifecycle import start_worker, stop_requested
+from src.concurrency.lifecycle import start_worker, stop_requested
 from src.utils.logger import get_logger
 from src.utils.spotify_audit import (
     lignes_a_verifier,

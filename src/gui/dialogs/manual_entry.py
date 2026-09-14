@@ -5,9 +5,9 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from src.concurrency.lifecycle import start_worker
 from src.enrichment.observation import Observation
 from src.gui import helpers
-from src.gui.workers.lifecycle import start_worker
 from src.utils.logger import get_logger
 from src.utils.youtube_integration import (
     clear_youtube_link,

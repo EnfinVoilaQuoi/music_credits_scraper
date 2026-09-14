@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from src.gui.workers import lifecycle
+from src.concurrency import lifecycle
 
 
 @pytest.fixture(autouse=True)

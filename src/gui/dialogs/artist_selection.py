@@ -1,70 +1,17 @@
-"""Dialogue de désambiguïsation d'artiste Genius (choix parmi candidats, slug manuel)"""
+"""Dialogue de désambiguïsation d'artiste Genius (choix parmi candidats, slug manuel).
+
+La résolution par page Genius (`fetch_artist_from_genius_url`) vit dans
+`src/services/artiste.py` depuis 2026-09-14 : ce module ne garde que l'UI.
+"""
 
 from tkinter import messagebox
 
-from playwright.sync_api import Error as PlaywrightError
-
-from src.gui.workers.lifecycle import start_worker
+from src.concurrency.lifecycle import start_worker
 from src.models import Artist
-from src.scrapers.playwright_manager import get_playwright
+from src.services.artiste import fetch_artist_from_genius_url
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
-
-
-def fetch_artist_from_genius_url(app, url: str, fallback_name: str) -> "Artist | None":
-    """Charge la page Genius d'un artiste via Playwright et extrait l'ID depuis le meta tag.
-
-    Utilise :
-        JSON.parse(document.querySelector('meta[itemprop="page_data"]').content).artist.id
-
-    NOTE : utilisait GeniusScraper v2 (supprimé) uniquement comme porte-page
-    Playwright — remplacé par un browser éphémère sur l'instance partagée,
-    avec la même config furtive (user-agent + masquage navigator.webdriver).
-    """
-    browser = None
-    try:
-        pw = get_playwright()
-        browser = pw.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-        )
-        context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=_USER_AGENT,
-        )
-        page = context.new_page()
-        page.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-        page.goto(url, wait_until="domcontentloaded", timeout=15_000)
-        result = page.evaluate("""() => {
-            const meta = document.querySelector('meta[itemprop="page_data"]');
-            if (!meta) return null;
-            try {
-                const data = JSON.parse(meta.content);
-                if (!data.artist || !data.artist.id) return null;
-                return {id: data.artist.id, name: data.artist.name};
-            } catch(e) {
-                return null;
-            }
-        }""")
-        if result and result.get("id"):
-            return Artist(name=result.get("name") or fallback_name, genius_id=result["id"])
-    except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
-        logger.debug(f"Fetch artiste depuis {url} échoué: {e}")
-    finally:
-        if browser:
-            try:
-                browser.close()  # ne PAS stopper l'instance Playwright partagée
-            except PlaywrightError:
-                pass
-    return None
 
 
 def show_artist_selection_dialog(app, candidates, artist_name: str, result_queue):
@@ -155,7 +102,7 @@ def resolve_genius_slug(app, slug: str, artist_name: str, result_queue, parent_d
 
     def fetch():
         url = f"https://genius.com/artists/{slug}"
-        artist = fetch_artist_from_genius_url(app, url, artist_name)
+        artist = fetch_artist_from_genius_url(url, artist_name)
         if artist and artist.genius_id:
             result_queue.put(artist)
             app.root.after(0, parent_dialog.destroy)

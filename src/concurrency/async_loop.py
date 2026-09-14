@@ -6,7 +6,7 @@ Contrat (REFONTE Phase F1) :
   · `submit(coro) -> concurrent.futures.Future` via `run_coroutine_threadsafe` —
     utilisable depuis n'importe quel thread (GUI comprise) ;
   · `shutdown(timeout=8.0)` — annule les tasks en cours puis join le thread ;
-    appelé par `shutdown_workers()` de `src/gui/workers/lifecycle.py` dans le
+    appelé par `shutdown_workers()` de `src/concurrency/lifecycle.py` dans le
     même budget global de fermeture.
 
 Le thread est daemon, comme les workers : une task réellement bloquée (appel

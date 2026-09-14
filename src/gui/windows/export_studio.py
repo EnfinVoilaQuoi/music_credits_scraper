@@ -16,6 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from src.concurrency.lifecycle import start_worker, stop_requested
 from src.dataviz.bubble_overrides_io import get_override, load_overrides, save_override
 from src.dataviz.bubble_prod import (
     PREVIEW_SEEDS,
@@ -27,7 +28,6 @@ from src.dataviz.bubble_style_io import load_style as load_bubble_style
 from src.dataviz.structure import generate_structure
 from src.dataviz.structure_style_io import load_style
 from src.gui.dialogs import report
-from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

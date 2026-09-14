@@ -29,7 +29,7 @@ data/certifications/brma/logs/*
 data/certifications/brma/reports/*
 data/certifications/riaa/backups/*
 data/certifications/bpi/backups/*
-data/certifications/snep/certif-backup-*.csv
+data/certifications/snep/backups/*
 data/audios/*
 data/images/*
 data/diagnostics/*

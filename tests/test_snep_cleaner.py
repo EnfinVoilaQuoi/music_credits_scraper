@@ -52,7 +52,7 @@ class TestDryRun:
 
     def test_aucun_backup_cree(self, csv_path, tmp_path):
         clean_snep_csv(csv_path)
-        assert list(tmp_path.glob("certif-backup-*.csv")) == []
+        assert list((tmp_path / "backups").glob("*_backup_*.csv")) == []
 
     def test_compte_quand_meme_les_corrections(self, tmp_path):
         """Le dry-run doit RAPPORTER ce qu'il ferait, pas se contenter de ne rien faire."""
@@ -73,7 +73,7 @@ class TestApplication:
         avant = csv_path.read_bytes()
         rapport = clean_snep_csv(csv_path, apply=True, reimport=False)
 
-        backups = list(tmp_path.glob("certif-backup-*.csv"))
+        backups = list((tmp_path / "backups").glob("*_backup_*.csv"))
         assert len(backups) == 1
         assert rapport["backup"] == str(backups[0])
         # Le backup porte l'état d'AVANT nettoyage, à l'octet près.

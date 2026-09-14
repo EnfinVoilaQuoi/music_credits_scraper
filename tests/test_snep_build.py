@@ -11,6 +11,7 @@ from src.utils.snep_build import (
     CANONICAL_COLUMNS,
     _fusionner_groupe,
     _key,
+    _meme_evenement,
     canonical_rows_from_raw,
     merge_canonical,
     read_canonical_csv,
@@ -188,6 +189,29 @@ class TestEvenementDeCertification:
         new = [self._row("1997-09-09", publisher="BMG France/DANCENET", release="")]
         (m,) = merge_canonical(base, new)
         assert m["certification_date"] == "1997-09-10"
+
+    def test_la_relation_se_ferme_par_composantes_connexes(self):
+        """`_meme_evenement` n'est PAS transitive : A~B et B~C (constats à 20 j)
+        n'impliquent pas A~C (40 j, labels différents). Une clé de hachage n'en
+        ferait rien de stable — l'événement retenu dépendrait de l'ORDRE des
+        lignes. L'union-find ferme la chaîne : un seul événement, daté du constat
+        le plus récent, quel que soit l'ordre d'arrivée."""
+        a = self._row("2021-03-01", publisher="LABEL A")
+        b = self._row("2021-03-21", publisher="LABEL B")
+        c = self._row("2021-04-10", publisher="LABEL C")
+        assert _meme_evenement(a, b) and _meme_evenement(b, c)
+        assert not _meme_evenement(a, c)
+        for ordre in ([a, b, c], [c, a, b], [a, c, b]):
+            (m,) = _fusionner_groupe(ordre)
+            assert m["certification_date"] == "2021-04-10"
+
+    def test_sans_maillon_les_evenements_restent_distincts(self):
+        """Contre-épreuve : retirer B laisse A et C sans lien — deux événements.
+        C'est ce qui prouve que la fusion vient bien de la CHAÎNE et non d'une
+        tolérance trop large."""
+        a = self._row("2021-03-01", publisher="LABEL A")
+        c = self._row("2021-04-10", publisher="LABEL C")
+        assert len(_fusionner_groupe([a, c])) == 2
 
 
 class TestFichierCanoniqueCommitte:

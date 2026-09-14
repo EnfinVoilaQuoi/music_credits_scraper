@@ -21,12 +21,10 @@ from __future__ import annotations
 
 import csv
 import io
-import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
-from src.utils import cert_clean_report
+from src.utils import cert_clean_report, cert_store
 from src.utils.cert_fixes_io import charger_fixes
 from src.utils.cert_normalize import (
     apply_manual_fixes,
@@ -219,10 +217,10 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
     report["deja_propre"] = modifiees == 0
 
     if apply:
-        # Backup horodaté AVANT toute écriture (règle projet)
-        backup = csv_path.with_name(f"certif-backup-{datetime.now():%Y%m%d_%H%M%S}.csv")
-        shutil.copy2(csv_path, backup)
-        report["backup"] = str(backup)
+        # Sauvegarde AVANT toute écriture, via la brique partagée (rétention,
+        # dossier `backups/`) — ce site y avait échappé au lot 1.
+        backup = cert_store.sauvegarder(csv_path)
+        report["backup"] = str(backup) if backup else None
 
         buf = io.StringIO()
         writer = csv.writer(

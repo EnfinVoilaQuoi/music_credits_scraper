@@ -65,8 +65,9 @@ class MainWindow:
         self.sort_reverse = False
         self.last_selected_index = None  # Sélection multiple
         self.disabled_tracks_manager = DisabledTracksManager()
-        # Purge des fichiers de désactivation orphelins (> 30 j sans modif)
-        self.disabled_tracks_manager.cleanup_old_files()
+        # Purge des fichiers de désactivation ORPHELINS (artiste plus en base) —
+        # jamais sur l'âge : une désactivation ne périme pas (2026-09-14).
+        self.disabled_tracks_manager.cleanup_orphans(self.data_manager.get_artist_names())
         self.deleted_tracks_manager = DeletedTracksManager()
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         self.source_health_window = None  # Fenêtre « État des sources » (singleton)

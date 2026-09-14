@@ -290,13 +290,13 @@ def _fermer(runtime: Runtime) -> None:
     try:
         runtime.data_enricher.close()
     except Exception:  # noqa: BLE001 — fermeture best-effort
-        logger.debug("Fermeture DataEnricher", exc_info=True)
+        logger.warning("Fermeture DataEnricher", exc_info=True)
     try:
         from src.scrapers.playwright_manager import stop_playwright
 
         stop_playwright()
     except Exception:  # noqa: BLE001 — fermeture best-effort
-        logger.debug("Arrêt Playwright", exc_info=True)
+        logger.warning("Arrêt Playwright", exc_info=True)
 
 
 def _charger(runtime: Runtime, a: argparse.Namespace, *, creer: bool):

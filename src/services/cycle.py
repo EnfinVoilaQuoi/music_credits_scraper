@@ -84,6 +84,10 @@ def executer_etape(
 ) -> Bilan:
     """UNE étape, sous son scope d'observabilité. C'est aussi ce qu'appelle
     chaque sous-commande de la CLI."""
+    if etape not in _FLOWS:
+        # Même exception qu'`OptionsCycle.etapes()` — le `raise` en fin de
+        # fonction était mort, `_FLOWS[etape]` levait KeyError avant lui.
+        raise ValueError(f"étape inconnue : {etape!r}")
     with source_usage.run_scope(_FLOWS[etape], artist_id=artist.id, artist_name=artist.name):
         if etape == "disco":
             return discographie.run(runtime, artist, options.disco, hooks)
@@ -126,7 +130,7 @@ def executer_etape(
             bilan.erreurs.extend(appli.erreurs)
             bilan.rapport += f"\n\n{appli.rapport}"
             return bilan
-        raise ValueError(etape)
+        raise AssertionError(etape)  # toutes les clés de _FLOWS sont traitées ci-dessus
 
 
 def run(runtime: Runtime, nom: str, options: OptionsCycle, hooks: Hooks) -> BilanCycle:

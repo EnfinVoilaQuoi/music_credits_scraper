@@ -20,7 +20,7 @@ Lancement (la GUI l'appelle en sous-processus) :
 
     python -u src/utils/update_bpi.py --auto
     python -u src/utils/update_bpi.py --artist "Shurik'N" --artist IAM
-    python -u src/utils/update_bpi.py --from 2020-01-01 --to 2020-01-31
+    python -u src/utils/update_bpi.py --from 01-01-2020 --to 31-01-2020
     python -u src/utils/update_bpi.py --full
     python -u src/utils/update_bpi.py --clean --dry-run
 """
@@ -41,7 +41,7 @@ from src.observability import repository as usage_repository
 from src.observability.registry import Flow
 from src.scrapers.bpi_scraper import BpiScraper
 from src.utils import cert_clean_report, cert_store
-from src.utils.cert_normalize import bpi_level, bpi_units
+from src.utils.cert_normalize import FORMAT_JOUR_CLI, bpi_level, bpi_units, jour_cli, lire_jour_cli
 from src.utils.logger import get_logger
 
 if sys.stdout and "pytest" not in sys.modules:
@@ -392,7 +392,14 @@ def fetch_periode(debut: str, fin: str) -> bool:
     ⚠️ Ne reconstitue pas l'historique : un titre réhaussé depuis ne ressort pas
     dans la fenêtre de son palier d'origine. Pour l'historique, `--full`.
     """
-    print(f"=== BPI, période {debut} → {fin} ===")
+    try:
+        d0, d1 = lire_jour_cli(debut), lire_jour_cli(fin)
+    except ValueError as e:
+        print(f"❌ {e}")
+        return False
+    print(f"=== BPI, période {jour_cli(d0)} → {jour_cli(d1)} ===")
+    # Le site, lui, parle ISO.
+    debut, fin = d0.isoformat(), d1.isoformat()
     collecte = _collecte(lambda s: s.scrape_by_date_range(debut, fin, get_details=True))
     lignes = _horodater(collecte.lignes)
     if not lignes:
@@ -535,8 +542,8 @@ def main() -> int:
     parseur.add_argument("--months", type=int, default=1)
     parseur.add_argument("--full", action="store_true", help="balayage complet (reprise initiale)")
     parseur.add_argument("--artist", action="append", default=[], help="répétable")
-    parseur.add_argument("--from", dest="debut", default="", help="AAAA-MM-JJ")
-    parseur.add_argument("--to", dest="fin", default="", help="AAAA-MM-JJ")
+    parseur.add_argument("--from", dest="debut", default="", metavar=FORMAT_JOUR_CLI)
+    parseur.add_argument("--to", dest="fin", default="", metavar=FORMAT_JOUR_CLI)
     parseur.add_argument("--clean", action="store_true")
     parseur.add_argument("--dry-run", action="store_true")
     parseur.add_argument("--stats", action="store_true")

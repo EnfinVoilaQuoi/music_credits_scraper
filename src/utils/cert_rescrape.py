@@ -34,7 +34,7 @@ from datetime import date
 
 def _mois_suivant(annee: int, mois: int) -> str:
     """Premier jour du mois suivant, borne HAUTE exclusive de la période."""
-    return f"{annee + 1}-01-01" if mois == 12 else f"{annee}-{mois + 1:02d}-01"
+    return f"01-01-{annee + 1}" if mois == 12 else f"01-{mois + 1:02d}-{annee}"
 
 
 def annees(gaps: list[str]) -> list[int]:
@@ -48,7 +48,11 @@ def annees(gaps: list[str]) -> list[int]:
 
 
 def _par_mois(python: str, script: str, gaps: list[str]) -> list[list[str]]:
-    """Une invocation `--from`/`--to` par mois, borne haute EXCLUSIVE."""
+    """Une invocation `--from`/`--to` par mois, borne haute EXCLUSIVE.
+
+    Dates en « JJ-MM-AAAA » (`cert_normalize.FORMAT_JOUR_CLI`) : c'est ce que
+    l'utilisateur lit dans la fenêtre et ce qu'il retape dans un terminal.
+    """
     sorties = []
     for gap in sorted(set(gaps)):
         morceaux = str(gap).strip().split("-")
@@ -58,7 +62,7 @@ def _par_mois(python: str, script: str, gaps: list[str]) -> list[list[str]]:
         if not 1 <= mo <= 12:
             continue
         sorties.append(
-            [python, script, "--from", f"{an}-{mo:02d}-01", "--to", _mois_suivant(an, mo)]
+            [python, script, "--from", f"01-{mo:02d}-{an}", "--to", _mois_suivant(an, mo)]
         )
     return sorties
 

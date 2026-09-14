@@ -355,12 +355,11 @@ def _cle_canonique_depuis_brut(cle: tuple) -> tuple | None:
     """Traduit une clé de ligne du BRUT (`snep_vues.cle_ligne`) dans l'espace du
     clean, par les MÊMES conversions que `canonical_rows_from_raw` — sans quoi
     une exclusion raterait sa cible sur un simple « Platine » vs « platine »."""
-    artiste, titre, categorie, palier, sortie, constat = cle
+    _, titre, categorie, palier, sortie, constat = cle
     level = CertificationLevel.from_string(palier)
     if level is None:
         return None
     return (
-        artiste,
         titre,
         CertificationCategory.from_string(categorie).value,
         level.value,
@@ -370,8 +369,10 @@ def _cle_canonique_depuis_brut(cle: tuple) -> tuple | None:
 
 
 def _cle_canonique(row: dict) -> tuple:
+    """SANS l'artiste : le clean UNIFIE les crédits d'une œuvre
+    (`unifier_credits`), la ligne retirée du brut porte l'ancien. Titre,
+    catégorie, palier, sortie ET constat au jour près suffisent à viser."""
     return (
-        normalize_text(row["artist"]),
         normalize_text(row["title"]),
         row["category"],
         row["certification"],
@@ -393,6 +394,60 @@ def exclure_retirees(rows: list[dict], cles_brut: set[tuple]) -> tuple[list[dict
     for row in rows:
         (exclues if _cle_canonique(row) in cibles else gardees).append(row)
     return gardees, exclues
+
+
+_SEPARATEURS_DE_NOMS = re.compile(r"\s*(?:,|&| feat\.?\s| x | and |;)\s*", re.IGNORECASE)
+
+
+def _noms(credit: str) -> set[str]:
+    """Les noms d'un crédit SNEP, normalisés : « GIMS, DAMSO » → {GIMS, DAMSO}.
+    Découpé sur le crédit BRUT — `normalize_text` supprime la virgule."""
+    return {normalize_text(n) for n in _SEPARATEURS_DE_NOMS.split(credit or "") if n.strip()}
+
+
+def unifier_credits(rows: list[dict]) -> tuple[list[dict], int]:
+    """Un seul crédit d'artiste par ŒUVRE : celui de la ligne la plus récente.
+
+    Le SNEP RÉÉCRIT le crédit quand il monte un palier — « GIMS, DAMSO » devient
+    « GIMS & DAMSO », « HAMZA FEAT. WERENOI » → « HAMZA & WERENOI », un feat
+    s'ajoute (« LUIDJI » → « LUIDJI FEAT. RYAN KOFFI »), l'ordre change (« TIITOF,
+    SKUNK, LETO » → « SKUNK, TIITOF & LETO »). Mesuré le 2026-09-14 : 33 œuvres
+    sur trois ans. Le clean accumulant, l'Or vivait sous l'ancien crédit et le
+    Platine sous le nouveau : deux « artistes » pour une œuvre, et la fiche des
+    paliers d'un titre les voyait en deux lignes.
+
+    Une œuvre = même titre, même catégorie, même date de sortie, ET au moins un
+    NOM en commun entre les deux crédits — sans cette dernière condition, deux
+    titres homonymes sortis le même jour chez deux artistes fusionneraient. Le
+    crédit retenu est le plus RICHE en noms, le plus récent ne départageant
+    qu'à égalité : « le plus récent gagne » seul faisait perdre l'invité dans
+    une trentaine de cas (« MAÎTRE GIMS & STING » → « STING », « DADJU FEAT.
+    TIAKOLA » → « DADJU »), et un nom perdu, c'est la discographie certifiée de
+    l'invité qui perd la ligne — `cert_matcher` rattache par mots. Mesuré sur
+    le clean entier : 131 lignes réécrites. Idempotent. Le brut n'est pas touché.
+    """
+    par_oeuvre: dict[tuple, list[dict]] = {}
+    for row in rows:
+        cle = (normalize_text(row["title"]), row["category"], row["release_date"])
+        par_oeuvre.setdefault(cle, []).append(row)
+
+    reecrites = 0
+    for groupe in par_oeuvre.values():
+        credits = {normalize_text(r["artist"]) for r in groupe}
+        if len(credits) < 2:
+            continue
+        # Composantes de crédits qui partagent un nom (union-find minimal sur
+        # des groupes de 2-4 lignes).
+        retenu = max(
+            groupe,
+            key=lambda r: (len(_noms(r["artist"])), r.get("certification_date") or ""),
+        )
+        noms_retenus = _noms(retenu["artist"])
+        for r in groupe:
+            if r["artist"] != retenu["artist"] and _noms(r["artist"]) & noms_retenus:
+                r["artist"] = retenu["artist"]
+                reecrites += 1
+    return rows, reecrites
 
 
 def purger_fantomes(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -472,6 +527,12 @@ def rebuild(
             f"🚫 {len(exclues)} ligne(s) retirée(s) par le SNEP exclue(s) du clean "
             "(conservées dans le brut, cf. certif-.vues.json)"
         )
+    merged, reecrites = unifier_credits(merged)
+    if reecrites:
+        # Deux lignes d'un même événement pouvaient vivre sous deux crédits : une
+        # fois le crédit unifié, elles se retrouvent dans le même groupe.
+        merged = merge_canonical([], merged)
+        logger.info(f"🖊️ {reecrites} crédit(s) d'artiste unifié(s) sur le crédit courant du site")
     # `rebuild` RÉÉCRIT le clean à chaque appel : il se sauvegarde donc toujours,
     # et plus seulement lorsqu'une purge de fantômes retire quelque chose. La
     # rétention de `cert_store` (les 10 plus récentes) répond au motif qui avait

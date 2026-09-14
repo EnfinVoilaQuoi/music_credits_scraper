@@ -549,6 +549,24 @@ FAMILLE_STANDARD = "ST"  # support physique
 FAMILLE_NUMERIQUE = "DI"  # digital
 FAMILLE_LATINE = "LA"
 
+#: Identité d'un organisme : code pays ISO et drapeau. `cert_matcher` portait un
+#: `_FLAG` et un `_COUNTRY`… MORTS, chaque chargeur écrivant ses deux littéraux
+#: en dur — et `_FLAG` avait d'ailleurs perdu BPI en route, sans conséquence
+#: puisque personne ne le lisait. Cinq déclarations pour une information, dont
+#: une fausse et invisible : exactement ce qu'une table unique évite.
+ORGANISMES = {
+    "SNEP": ("FR", "🇫🇷"),
+    "BRMA": ("BE", "🇧🇪"),
+    "RIAA": ("US", "🇺🇸"),
+    "BPI": ("GB", "🇬🇧"),
+}
+
+
+def drapeau(organisme: str) -> str:
+    """Le drapeau d'un organisme, « 🏳️ » si inconnu."""
+    return ORGANISMES.get(organisme, ("", "🏳️"))[1]
+
+
 #: Vocabulaire de certification BELGE (Ultratop), en MINUSCULES : c'est un jeu
 #: de COMPARAISON, pas des formes canoniques d'affichage — d'où l'absence de
 #: détection de « variantes de casse » côté validateur BRMA, contrairement à

@@ -308,3 +308,83 @@ class TestLaFenetreSeConstruitEncore:
                 if isinstance(defaut, str):
                     vus.add(defaut)
         assert {"SNEP", "BRMA", "RIAA", "BPI"} <= vus, vus
+
+
+class TestLesGardeFousDeLaFenetre:
+    """Ré-entrance, invalidation, fermeture — les trois n'avaient pas de test.
+
+    Relevé le 2026-09-14 : posés au lot 6, vérifiés à l'œil, jamais figés.
+    """
+
+    @pytest.fixture
+    def fenetre(self):
+        ctk = pytest.importorskip("customtkinter")
+        try:
+            racine = ctk.CTk()
+        except Exception:  # noqa: BLE001 — pas d'affichage (CI headless)
+            pytest.skip("aucun affichage disponible")
+        racine.withdraw()
+        dialogue = CertificationUpdateDialog(racine)
+        dialogue.withdraw()
+        yield dialogue
+        try:
+            dialogue.destroy()
+        except Exception:  # noqa: BLE001 — déjà détruite par un test
+            pass
+        racine.destroy()
+
+    def test_deux_lancements_sur_la_meme_cle_le_second_est_REFUSE(self, fenetre, monkeypatch):
+        """Deux clics = deux sous-processus sur le même CSV, avant."""
+        import threading
+
+        lances = []
+        monkeypatch.setattr(
+            "src.gui.certification_update_gui.start_worker",
+            lambda travail: lances.append(travail),
+        )
+        refus = []
+        monkeypatch.setattr(
+            "src.gui.certification_update_gui.messagebox.showinfo",
+            lambda *a, **k: refus.append(a),
+        )
+        barriere = threading.Event()
+
+        assert fenetre._demarrer("ecriture", barriere.wait, "MàJ SNEP") is True
+        assert fenetre._demarrer("ecriture", barriere.wait, "MàJ RIAA") is False
+
+        assert len(lances) == 1, "le second travail est parti quand même"
+        assert refus and "MàJ SNEP" in refus[0][1], "le refus ne nomme pas ce qui tourne"
+
+    def test_une_cle_differente_passe(self, fenetre, monkeypatch):
+        """Une validation (lecture seule) reste possible pendant une écriture."""
+        monkeypatch.setattr("src.gui.certification_update_gui.start_worker", lambda t: None)
+        fenetre._en_cours["ecriture"] = "MàJ SNEP"
+
+        assert fenetre._demarrer("trous", lambda: None) is True
+
+    def test_la_cle_est_LIBEREE_a_la_fin_meme_sur_exception(self, fenetre, monkeypatch):
+        """Sinon un travail planté verrouille le bouton pour toute la session."""
+        monkeypatch.setattr("src.gui.certification_update_gui.start_worker", lambda t: t())
+
+        def plante():
+            raise RuntimeError("boum")
+
+        with pytest.raises(RuntimeError):
+            fenetre._demarrer("ecriture", plante)
+
+        assert "ecriture" not in fenetre._en_cours
+
+    def test_rafraichir_apres_ecriture_VIDE_les_periodes_manquantes(self, fenetre):
+        """Le pavé survivait au rescrape, sous « Vérification : maintenant »."""
+        fenetre.missing_periods["SNEP"] = {"gaps": ["2020-02"], "total": 1}
+
+        fenetre._rafraichir_apres_ecriture()
+
+        assert fenetre.missing_periods == {}
+
+    def test_apres_fermeture_set_progress_est_un_no_op(self, fenetre):
+        """Fermer pendant un run faisait exploser `after` sur un widget détruit."""
+        fenetre._on_closing()
+
+        assert fenetre._ferme is True
+        fenetre._set_progress("ceci ne doit pas lever")  # widget détruit

@@ -124,7 +124,7 @@ class GeniusAPI:
     def get_artist_songs(
         self,
         artist: Artist,
-        max_songs: int = 500,
+        max_songs: int | None = None,
         include_features: bool = False,
         prefill: bool = True,
         known_genius_ids: set | None = None,
@@ -135,7 +135,10 @@ class GeniusAPI:
 
         Args:
             artist: L'artiste dont récupérer les morceaux
-            max_songs: Nombre maximum de morceaux à récupérer
+            max_songs: Plafond DUR sur le nombre de morceaux. `None` (défaut) =
+                ILLIMITÉ : un plafond ampute la discographie et des morceaux
+                manquants sont des données manquantes. N'utiliser une valeur
+                qu'en DEBUG (Kanye West déborde 2000).
             include_features: Si True, inclut les morceaux où l'artiste est en featuring
             prefill: Si True, appelle l'API détail (album + Spotify/YouTube media + relations).
             known_genius_ids: genius_id à exclure du prefill (mode MàJ). L'appelant
@@ -309,7 +312,7 @@ class GeniusAPI:
     def _get_artist_songs_manual(
         self,
         artist: Artist,
-        max_songs: int,
+        max_songs: int | None,
         include_features: bool = False,
         include_secondary: bool = False,
     ) -> list[Track]:
@@ -325,7 +328,7 @@ class GeniusAPI:
             page = 1
             per_page = 50
 
-            while len(tracks) < max_songs:
+            while max_songs is None or len(tracks) < max_songs:
                 with source_usage.attempt(_SOURCE):
                     response = self.genius.artist_songs(
                         artist.genius_id, sort="release_date", per_page=per_page, page=page
@@ -425,7 +428,7 @@ class GeniusAPI:
 
                     tracks.append(track)
 
-                    if len(tracks) >= max_songs:
+                    if max_songs is not None and len(tracks) >= max_songs:
                         break
 
                     time.sleep(DELAY_BETWEEN_REQUESTS)

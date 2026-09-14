@@ -415,10 +415,14 @@ class Certs:
     .entries … Les colonnes/JSON DB gardent leurs noms.
     """
 
-    has: bool = False  # colonne DB `has_certification`
-    level: str | None = None  # Plus haute certif (colonne `certification_level`)
-    date: datetime | None = None  # Date de la plus haute (colonne `certification_date`)
-    duration_days: int | None = None  # Durée d'obtention (colonne `certification_duration_days`)
+    # Ces quatre champs sont DÉRIVÉS de `entries` (la plus haute certification),
+    # recalculés à la lecture (track_mapper) comme à l'enrichissement
+    # (certification_enricher) : AUCUN n'a de colonne DB. Seules `certifications`
+    # et `album_certifications` (les listes JSON ci-dessous) sont persistées.
+    has: bool = False  # y a-t-il au moins une certification ?
+    level: str | None = None  # palier de la plus haute (entries[0])
+    date: datetime | None = None  # date de la plus haute
+    duration_days: int | None = None  # écart sortie→certif de la plus haute
     entries: list[dict[str, Any]] = field(default_factory=list)  # colonne `certifications`
     album_entries: list[dict[str, Any]] = field(default_factory=list)  # `album_certifications`
     # « Recalculé ce run, pas encore enregistré ». Posé par
@@ -741,21 +745,28 @@ class Track:
 
     # Méthode pour calculer la durée d'obtention
     def calculate_certification_duration(self) -> int | None:
-        """Calcule la durée (en jours) entre la sortie et la certification."""
+        """Durée (jours) sortie→plus haute certif, POSÉE sur
+        `certs.duration_days` (valeur DÉRIVÉE, aucune colonne DB).
+
+        La valeur est toujours réécrite — y compris à None quand une date
+        manque, est illisible ou mélange aware/naive. L'ancienne version rendait
+        None AVANT d'effacer le champ : une date devenue illisible laissait alors
+        la durée d'un état précédent (fantôme).
+        """
         from src.utils.dates import parse_flexible
 
         cert_date = parse_flexible(self.certs.date)
         rel_date = parse_flexible(self.release_date)
-        if cert_date is None or rel_date is None:
-            return None
-
-        try:
-            duration = (cert_date - rel_date).days
-        except TypeError:
-            # Mélange aware/naive (une date ISO avec 'Z', l'autre non)
-            return None
-        self.certs.duration_days = duration if duration >= 0 else None
-        return self.certs.duration_days
+        duration = None
+        if cert_date is not None and rel_date is not None:
+            try:
+                jours = (cert_date - rel_date).days
+                duration = jours if jours >= 0 else None
+            except TypeError:
+                # Mélange aware/naive (une date ISO avec 'Z', l'autre non)
+                duration = None
+        self.certs.duration_days = duration
+        return duration
 
     def certification_milestone_durations(self) -> list[tuple[str, int]]:
         """Délai (jours) sortie→certif pour chaque palier IMPORTANT atteint.

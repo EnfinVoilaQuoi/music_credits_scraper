@@ -4,8 +4,7 @@ import threading
 
 import pytest
 
-from src.concurrency import async_loop
-from src.gui.workers import lifecycle
+from src.concurrency import async_loop, lifecycle
 
 
 @pytest.fixture(autouse=True)

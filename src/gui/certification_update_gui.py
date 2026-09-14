@@ -1,18 +1,16 @@
 """Interface graphique pour la mise à jour des certifications musicales"""
 
-import os
-import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from tkinter import TclError, messagebox
-from typing import NamedTuple
 
 import customtkinter as ctk
 
+from src.concurrency.lifecycle import start_worker, stop_requested
 from src.config import DATA_PATH
-from src.gui.workers.lifecycle import start_worker, stop_requested
+from src.services import certifs
+from src.services.certifs import MISES_A_JOUR, MiseAJour  # noqa: F401 — ré-export
 from src.utils.cert_normalize import drapeau, libelle_tronque
 from src.utils.cert_trous import BRUTS_PAR_SOURCE as _BRUTS_PAR_SOURCE
 from src.utils.cert_trous import periodes_manquantes
@@ -21,48 +19,9 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-class MiseAJour(NamedTuple):
-    """Ce qu'il faut lancer pour mettre à jour une source.
-
-    UNE déclaration, consommée par le bouton individuel ET par « 🔄 Tout mettre
-    à jour ». Ce dernier appelait `_run_script_sync(script)` **sans aucun
-    argument** : trois sources sur quatre en sortaient cassées — BRMA
-    (`--mode manual` par défaut) et RIAA (`manual_update()`) partaient en mode
-    INTERACTIF face à un stdin invalide, et BPI affichait son aide en sortant
-    en 0, donc en succès. BRMA perdait en prime sa préparation de Chrome,
-    décrite dans son propre code comme « la seule route qui passe ».
-    """
-
-    script: str
-    args: tuple[str, ...] = ()
-    #: Chrome de debug préparé EN AMONT (BRMA : le Cloudflare d'ultratop fait
-    #: boucler tout navigateur d'automation, le CDP n'y est pas un repli).
-    cdp_amont: bool = False
-    #: Chrome de debug en REPLI d'un échec (RIAA : le headless passe, et un
-    #: repli qui réussit dit que c'était un problème d'accès, pas un parseur).
-    repli_cdp: bool = False
-
-
-MISES_A_JOUR: dict[str, MiseAJour] = {
-    "SNEP": MiseAJour("update_snep.py"),
-    "BRMA": MiseAJour("update_brma.py", ("--mode", "once", "--years-back", "1"), cdp_amont=True),
-    "RIAA": MiseAJour("update_riaa.py", ("--auto",), repli_cdp=True),
-    "BPI": MiseAJour("update_bpi.py", ("--auto",)),
-}
-
-
-def _ligne_bilan(source: str, code: int, sortie: str) -> str:
-    """Une ligne de bilan par source, qui DIT si le script a échoué.
-
-    La dernière ligne de sortie était reprise telle quelle, code de retour
-    ignoré : un script planté produisait « SNEP : <dernière ligne quelconque> »,
-    indiscernable d'un succès. Seul RIAA exploitait son code, et seulement pour
-    déclencher le repli CDP.
-    """
-    derniere = (sortie.strip().splitlines()[-1:] or ["ok"])[0]
-    return (
-        f"{source} : {derniere}" if code == 0 else f"{source} : ❌ ÉCHEC (code {code}) — {derniere}"
-    )
+# `MiseAJour`, `MISES_A_JOUR` et `ligne_bilan` vivent dans `src/services/certifs`
+# depuis 2026-09-14 (partagés avec la CLI) ; ré-exportés ici pour les tests.
+_ligne_bilan = certifs.ligne_bilan
 
 
 class CertificationUpdateDialog(ctk.CTkToplevel):
@@ -450,23 +409,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         def run():
             try:
-                from src.utils.cert_matcher import get_cert_matcher, reset_cert_matcher
-                from src.utils.certification_enricher import apply_certifications
-
-                reset_cert_matcher()  # repartir des CSV clean (MàJ de la session)
-                n = apply_certifications(artist, artist.tracks, get_cert_matcher())
-                # `record_pending` au lieu de `save_track` : seules les deux
-                # colonnes de certifs sont concernées. Le save complet réécrivait
-                # une quarantaine de colonnes par morceau pour rien — et il ne
-                # savait pas RETIRER une certification devenue caduque.
-                for track in artist.tracks:
-                    app.data_manager.record_pending(track)
-                oublies = app.data_manager.certifications_non_enregistrees(artist.tracks)
-                if oublies:
-                    logger.error(
-                        f"Certifs recalculées mais NON enregistrées ({len(oublies)}): "
-                        f"{', '.join(oublies[:8])}"
-                    )
+                bilan = certifs.appliquer(app.runtime, artist)
+                n = bilan.certifies
             except Exception as e:
                 logger.exception("Application des certifications à l'artiste courant")
                 # `e` est effacé à la sortie du except → capture par défaut.
@@ -508,18 +452,10 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         from src.utils.cert_artist import noms_de_recherche
 
         principal = getattr(self, "default_artist", None) or ""
-        formations: list[str] = []
         artiste = getattr(self.app, "current_artist", None) if self.app else None
-        if artiste and artiste.id:
-            try:
-                formations = [
-                    rel.related_name
-                    for rel in self.app.data_manager.get_artist_relations(artiste.id)
-                    if rel.kind in ("member_of", "alias")
-                ]
-            except Exception as e:  # noqa: BLE001 — le champ reste saisissable
-                logger.warning(f"Formations indisponibles pour le préremplissage : {e}")
-        return noms_de_recherche(principal, formations)
+        if artiste and artiste.id and principal == artiste.name:
+            return certifs.noms_de_recherche_pour(self.app.runtime, artiste)
+        return noms_de_recherche(principal, [])
 
     def _noms_artiste(self) -> list[str]:
         """Les noms saisis, séparés par « ; ». Un seul nom reste un seul nom."""
@@ -545,14 +481,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             contribue par LECTURE du corpus, complet et continu depuis 1995.
         On le dit à l'écran plutôt que de laisser croire à une requête.
         """
-        from src.utils.cert_artist import (
-            bilan_de,
-            certifications,
-            evolution,
-            nouveautes,
-            recap,
-            repartition,
-        )
 
         noms = self._noms_artiste()
         if not noms:
@@ -560,92 +488,18 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             return
 
         def run():
-            root = Path(__file__).parent.parent.parent
-            py = sys.executable
-            outputs = []
-            certs_avant = certifications(noms)
             etiquette = " + ".join(noms)
-            # `--artist` est RÉPÉTABLE sur les deux scripts : un seul
-            # sous-processus par source, quel que soit le nombre de noms.
-            args_noms = [a for nom in noms for a in ("--artist", nom)]
-
-            self._set_progress(f"🇫🇷 SNEP : {etiquette}…")
-            try:
-                code, sortie = self._run_streaming(
-                    [py, str(root / "src" / "utils" / "update_snep.py"), *args_noms],
-                    f"SNEP {etiquette}",
-                )
-                outputs.append(_ligne_bilan("SNEP", code, sortie))
-            except Exception as e:
-                # Boucle résiliente : une source qui tombe ne doit pas priver
-                # des trois autres. Trace complète en dernier ressort.
-                logger.exception("Récupération SNEP par artiste")
-                outputs.append(f"SNEP : erreur ({e})")
-
-            # RIAA : headless d'abord, CDP en repli (cf. _update_riaa)
-            self._set_progress(f"🇺🇸 RIAA : {etiquette}…")
-            try:
-                commande = [py, str(root / "src" / "utils" / "update_riaa.py"), *args_noms]
-                code, sortie = self._run_streaming(commande, f"RIAA {etiquette}")
-                if code != 0:
-                    self._set_progress("🇺🇸 RIAA : repli via Chrome…")
-                    cdp = self._preparer_cdp()
-                    if cdp:
-                        code, sortie = self._run_streaming(
-                            commande,
-                            f"RIAA {etiquette} (CDP)",
-                            env={**os.environ, "GENIUS_CDP_URL": cdp},
-                        )
-                outputs.append(_ligne_bilan("RIAA", code, sortie))
-            except Exception as e:
-                logger.exception("Récupération RIAA par artiste")
-                outputs.append(f"RIAA : erreur ({e})")
-
-            # BPI : HTTP nu, aucun navigateur, donc aucun repli à prévoir.
-            self._set_progress(f"🇬🇧 BPI : {etiquette}…")
-            try:
-                code, sortie = self._run_streaming(
-                    [py, str(root / "src" / "utils" / "update_bpi.py"), *args_noms],
-                    f"BPI {etiquette}",
-                )
-                outputs.append(_ligne_bilan("BPI", code, sortie))
-            except Exception as e:
-                logger.exception("Récupération BPI par artiste")
-                outputs.append(f"BPI : erreur ({e})")
-
-            # Le magasin a changé sur disque : le matcher doit être reconstruit
-            # AVANT le bilan d'après, sinon il relirait l'état d'avant le run.
-            try:
-                from src.utils.cert_matcher import reset_cert_matcher
-
-                reset_cert_matcher()
-            except Exception:
-                logger.exception("Rafraîchissement du matcher")
-
-            certs_apres = certifications(noms)
-            outputs.append("BRMA : corpus local (Ultratop n'a pas de recherche par artiste)")
-
-            # Le rapport dit CE QU'ON A, pas seulement combien : la liste des
-            # titres avec leur échelle datée. Des compteurs se lisent sans rien
-            # apprendre, et c'est justement l'échelle qui était la question — un
-            # titre Platine deux ans après sa sortie a-t-il eu son Or avant ?
-            neuves = nouveautes(certs_avant, certs_apres)
-            parts = [
-                "\n".join(outputs),
-                # L'écart d'abord : un total ne dit pas si le run a servi,
-                # « 12 certifications » se lit pareil qu'on en ait rapporté
-                # douze ou zéro.
-                f"Apport de ce run : {evolution(bilan_de(certs_avant), bilan_de(certs_apres))}",
-            ]
-            if ligne := repartition(certs_apres, noms):
-                parts.append(ligne)
-            parts.append(recap(certs_apres, neuves))
-            rapport = "\n\n".join(parts)
-
-            self._set_progress(f"✅ Certifs récupérées pour {etiquette}")
+            bilan = certifs.rechercher_artiste(noms, progres=self._set_progress)
+            self._set_progress(
+                f"✅ Certifs récupérées pour {etiquette}"
+                if bilan.complete
+                else f"⚠️ Certifs {etiquette} : {bilan.motif}"
+            )
             self.after(
                 0,
-                lambda: self._show_report_window(f"Certifs par artiste — {etiquette}", rapport),
+                lambda: self._show_report_window(
+                    f"Certifs par artiste — {etiquette}", bilan.rapport
+                ),
             )
             self.after(500, self._update_status)
 
@@ -1420,27 +1274,20 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         """
 
         def update_all():
-            bilans: list[str] = []
-            for nom in MISES_A_JOUR:
-                if stop_requested():
-                    bilans.append(f"{nom} : interrompu")
-                    break
-                try:
-                    code, sortie = self._executer_maj(nom)
-                    bilans.append(_ligne_bilan(nom, code, sortie))
-                except Exception as e:
-                    logger.exception(f"Mise à jour globale — {nom}")
-                    bilans.append(f"{nom} : ❌ {e}")
-
-            echecs = [b for b in bilans if "❌" in b or "interrompu" in b]
+            bilan = certifs.mettre_a_jour(
+                should_stop=stop_requested,
+                progres=self._set_progress,
+                sur_cdp_absent=self._avertir_cdp_absent,
+            )
+            echecs = bilan.echecs
             self._set_progress(
-                f"❌ {len(echecs)}/{len(bilans)} source(s) en échec"
+                f"❌ {len(echecs)}/{len(bilan.lignes)} source(s) en échec"
                 if echecs
                 else "Toutes les mises à jour terminées !"
             )
             self.after(3000, lambda: self._set_progress(""))
             self.after(500, self._rafraichir_apres_ecriture)
-            rapport = "\n".join(bilans)
+            rapport = "\n".join(bilan.lignes)
             self.after(
                 0,
                 lambda: (messagebox.showerror if echecs else messagebox.showinfo)(
@@ -1450,76 +1297,29 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         self._demarrer("maj-toutes", update_all)
 
+    def _avertir_cdp_absent(self, nom: str) -> None:
+        """BRMA sans Chrome de debug : on prévient, la MàJ tente quand même."""
+        self.after(
+            0,
+            lambda: messagebox.showwarning(
+                "Chrome requis (Cloudflare)",
+                "Impossible de préparer Chrome en mode debug pour contourner le "
+                "Cloudflare d'ultratop.\nVérifie que Google Chrome est installé "
+                "(ou définis la variable CHROME_PATH).\n\nLa mise à jour va tenter "
+                "quand même, mais risque de boucler sur le challenge.",
+                parent=self,
+            ),
+        )
+
     def _preparer_cdp(self) -> str | None:
         """Lance (ou retrouve) un Chrome de debug et rend son URL CDP."""
-        try:
-            from src.scrapers.cdp_chrome import ensure_cdp_chrome
-
-            return ensure_cdp_chrome()
-        except Exception:
-            logger.exception("Préparation du Chrome de debug (CDP)")
-            return None
+        return certifs.preparer_cdp()
 
     def _executer_maj(self, nom: str) -> tuple[int, str]:
-        """Met à jour UNE source, de façon SYNCHRONE. Rend (code, sortie).
-
-        Le corps est séparé du worker pour que « Tout mettre à jour » puisse
-        enchaîner les quatre sources DANS UN SEUL fil : appeler les quatre
-        boutons les lancerait en parallèle, donc quatre sous-processus écrivant
-        leurs CSV en même temps.
-        """
-        maj = MISES_A_JOUR[nom]
-        script_path = Path(__file__).parent.parent / "utils" / maj.script
-        if not script_path.exists():
-            raise FileNotFoundError(f"Script non trouvé: {script_path}")
-
-        commande = [sys.executable, str(script_path), *maj.args]
-        run_env = None
-
-        if maj.cdp_amont:
-            # Le Cloudflare d'ultratop fait boucler tout navigateur lancé par de
-            # l'automation, même le vrai Chrome (JOURNAL 2026-06-29) : ici le CDP
-            # n'est pas un repli, c'est la seule route qui passe.
-            self._set_progress(f"🌐 {nom} : préparation de Chrome (Cloudflare)…")
-            cdp_url = self._preparer_cdp()
-            if cdp_url:
-                run_env = {**os.environ, "GENIUS_CDP_URL": cdp_url}
-            else:
-                self.after(
-                    0,
-                    lambda: messagebox.showwarning(
-                        "Chrome requis (Cloudflare)",
-                        "Impossible de préparer Chrome en mode debug pour contourner le "
-                        "Cloudflare d'ultratop.\nVérifie que Google Chrome est installé "
-                        "(ou définis la variable CHROME_PATH).\n\nLa mise à jour va tenter "
-                        "quand même, mais risque de boucler sur le challenge.",
-                        parent=self,
-                    ),
-                )
-
-        self._set_progress(f"Mise à jour {nom} en cours...")
-        # Sortie RELAYÉE en direct (console + log du jour), au lieu d'être
-        # avalée jusqu'à la fin du processus.
-        code, sortie = self._run_streaming(commande, nom, env=run_env)
-
-        if code != 0 and maj.repli_cdp:
-            self._set_progress(f"{nom} : échec en headless — seconde tentative via Chrome…")
-            logger.warning(
-                f"[{nom}] échec en headless, repli sur la route CDP "
-                "(si elle réussit, c'était un problème d'accès et non un parseur cassé)"
-            )
-            cdp_url = self._preparer_cdp()
-            if cdp_url:
-                code, sortie_cdp = self._run_streaming(
-                    commande, f"{nom} (CDP)", env={**os.environ, "GENIUS_CDP_URL": cdp_url}
-                )
-                sortie = sortie_cdp or sortie
-            else:
-                logger.error(
-                    f"[{nom}] repli CDP impossible : Chrome introuvable "
-                    "(installe Google Chrome ou définis CHROME_PATH)"
-                )
-        return code, sortie
+        """Met à jour UNE source, de façon SYNCHRONE (service `certifs.executer_maj`)."""
+        return certifs.executer_maj(
+            nom, progres=self._set_progress, sur_cdp_absent=self._avertir_cdp_absent
+        )
 
     def _lancer_maj(self, nom: str):
         """Un bouton de mise à jour : le corps ci-dessus, dans un fil, avec dialogue."""
@@ -1565,46 +1365,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         self.after(0, update)
 
     def _run_streaming(self, cmd: list[str], tag: str, env: dict | None = None) -> tuple[int, str]:
-        """Lance un script de certifs en RELAYANT sa sortie ligne à ligne.
-
-        `subprocess.run(capture_output=True)` avalait tout jusqu'à la fin du
-        processus, puis n'en montrait que les dernières lignes dans une boîte de
-        dialogue : pendant une MàJ RIAA de plusieurs minutes, la console de
-        l'application ne disait rien — alors que le reste de l'app y trace tout.
-        On relaie donc chaque ligne dans le logger, ce qui la fait apparaître en
-        console ET dans le fichier de log du jour.
-
-        `-u` est INDISPENSABLE : la sortie d'un Python dont stdout est un tuyau
-        est bufferisée par blocs, et « relayer » l'aurait simplement livrée d'un
-        coup à la fin — le défaut qu'on corrige, à l'identique.
-        """
-        proc = subprocess.Popen(
-            [cmd[0], "-u", *cmd[1:]],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-            cwd=Path(__file__).parent.parent.parent,
-            env=env,
-        )
-        lignes: list[str] = []
-        dernier_affichage = 0.0
-        with proc.stdout:
-            for ligne in proc.stdout:
-                ligne = ligne.rstrip()
-                if not ligne:
-                    continue
-                lignes.append(ligne)
-                logger.info(f"[{tag}] {ligne}")
-                # Le bandeau ne suit pas chaque ligne : un `after(0, …)` par
-                # ligne noierait la boucle Tk sur un script bavard.
-                maintenant = time.monotonic()
-                if maintenant - dernier_affichage > 0.3:
-                    dernier_affichage = maintenant
-                    self._set_progress(f"{tag} : {ligne[:70]}")
-        return proc.wait(), "\n".join(lignes)
+        """Lance un script de certifs en RELAYANT sa sortie (service `run_streaming`),
+        le bandeau suivant au plus toutes les 0,3 s."""
+        return certifs.run_streaming(cmd, tag, env=env, progres=self._set_progress)
 
     def _check_missing_periods_all(self):
         """Cherche les périodes manquantes des quatre sources, EN UN SEUL fil.

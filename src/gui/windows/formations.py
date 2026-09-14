@@ -23,7 +23,7 @@ pur, à 1 req/s côté MusicBrainz, elle ne doit pas figer l'interface.
 
 import customtkinter as ctk
 
-from src.gui.workers.lifecycle import start_worker
+from src.concurrency.lifecycle import start_worker
 from src.utils.formations import chercher_formations, trier_confirmations
 from src.utils.logger import get_logger
 

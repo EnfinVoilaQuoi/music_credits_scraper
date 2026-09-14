@@ -12,8 +12,8 @@ from concurrent.futures import CancelledError
 
 import pytest
 
+from src.concurrency import lifecycle
 from src.concurrency.async_loop import AsyncLoopThread
-from src.gui.workers import lifecycle
 
 
 @pytest.fixture()

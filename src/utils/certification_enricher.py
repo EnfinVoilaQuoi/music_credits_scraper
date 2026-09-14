@@ -15,8 +15,9 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Substitutions Unicode courantes des titres avant le matching (apostrophes
-# courbes, ligatures œ) — alignées sur l'historique de enrich_tracks.
-_TITLE_SUBS = {"’": "'", "‘": "'", "œ": "œ", "Œ": "Œ"}
+# courbes). Les entrées « œ→œ »/« Œ→Œ » d'origine étaient des no-op (même
+# codepoint des deux côtés) — retirées.
+_TITLE_SUBS = {"’": "'", "‘": "'"}
 
 
 def _normalize_title(title: str) -> str:

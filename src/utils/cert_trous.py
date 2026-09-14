@@ -101,24 +101,25 @@ def colonne_de_date(df: pd.DataFrame, source: str) -> str | None:
 def periodes_manquantes(csv_path: Path, source: str) -> dict:
     """Mois sans certification (ou trop peu) entre la plus vieille et la plus récente.
 
-    Rend `{total, gaps, date_range, monthly_avg}`. `gaps` porte aussi les
-    messages d'ERREUR, ce qui est un défaut assumé de la forme : l'appelant les
-    affiche comme des périodes manquantes. À séparer le jour où quelqu'un lit
-    ces chiffres autrement qu'à l'œil.
+    Rend `{total, gaps, erreur, date_range, monthly_avg}`. `gaps` ne porte QUE de
+    vraies périodes manquantes ; les défauts d'analyse (fichier illisible,
+    colonne absente, aucune date valide) vont dans `erreur`. Ils partageaient
+    `gaps` auparavant, et l'appelant les affichait comme des périodes manquantes
+    — un fichier introuvable comptait pour un « trou ».
     """
-    vide = {"total": 0, "gaps": [], "date_range": None}
+    vide = {"total": 0, "gaps": [], "erreur": None, "date_range": None}
     try:
         df = _lire(csv_path)
     except (OSError, ValueError) as e:
         logger.exception(f"Lecture du brut {source}")
-        return {**vide, "gaps": [f"Erreur de lecture : {e}"]}
+        return {**vide, "erreur": f"Erreur de lecture : {e}"}
 
     if df.empty:
         return vide
 
     date_col = colonne_de_date(df, source)
     if not date_col:
-        return {"total": len(df), "gaps": ["Colonne de date non trouvée"], "date_range": None}
+        return {**vide, "total": len(df), "erreur": "Colonne de date non trouvée"}
 
     df = df.copy()
     jour_en_tete = _LECTURE_DATE.get(source, (None, False))[1]
@@ -135,11 +136,11 @@ def periodes_manquantes(csv_path: Path, source: str) -> dict:
     )
     df = df.dropna(subset=[date_col])
     if df.empty:
-        return {**vide, "gaps": ["Aucune date valide"]}
+        return {**vide, "erreur": "Aucune date valide"}
 
     par_mois = df.groupby(df[date_col].dt.to_period("M")).size()
     if par_mois.empty:
-        return {"total": len(df), "gaps": [], "date_range": None}
+        return {**vide, "total": len(df)}
 
     debut, fin = par_mois.index.min(), par_mois.index.max()
     # Le mois COURANT n'est pas un trou : il n'est pas fini. Celui d'après non
@@ -161,6 +162,7 @@ def periodes_manquantes(csv_path: Path, source: str) -> dict:
     return {
         "total": len(df),
         "gaps": trous,
+        "erreur": None,
         "date_range": f"{debut.strftime('%Y-%m')} à {fin.strftime('%Y-%m')}",
         "monthly_avg": float(par_mois.mean()),
     }

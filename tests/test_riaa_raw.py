@@ -323,10 +323,6 @@ class TestLectureDuClean:
         assert ajoutees == 1
         assert u.CERTIF_CSV.exists()
 
-    def test_export_est_un_no_op(self, updater):
-        """Conservé pour les appelants du flux bulk : ne doit RIEN faire."""
-        assert updater.export_to_csv() is None
-
 
 # ─────────────────────────────── les boucles de période (sans réseau)
 

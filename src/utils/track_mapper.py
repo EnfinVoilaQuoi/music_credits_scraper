@@ -186,12 +186,15 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     try:
         if certifications_json:
             track.certs.entries = json.loads(certifications_json)
-            # Champs de rétrocompatibilité (plus haute certification)
+            # Champs DÉRIVÉS de la plus haute certification (aucune colonne DB) :
+            # recalculés ici comme dans certification_enricher — un seul verdict,
+            # `duration_days` inclus (via calculate_certification_duration).
             if track.certs.entries:
                 highest = track.certs.entries[0]
                 track.certs.has = True
                 track.certs.level = highest.get("certification")
                 track.certs.date = highest.get("certification_date")
+                track.calculate_certification_duration()
         else:
             track.certs.entries = []
     except (ValueError, TypeError, json.JSONDecodeError):

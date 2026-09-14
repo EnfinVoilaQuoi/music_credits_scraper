@@ -47,6 +47,54 @@ class TestMergeCsvHistory:
         assert _merge_csv_history(history, new) == 0
 
 
+class _ReponseCsv:
+    """Réponse HTTP minimale pour `download_latest_snep_csv` (content-type CSV)."""
+
+    def __init__(self, text):
+        self.content = ("﻿" + text).encode("utf-8")
+        self.status_code = 200
+        self.headers = {"Content-Type": "text/csv"}
+
+
+class TestTelechargementAtomique:
+    """Le brut ne doit JAMAIS rester amputé (A6). L'export SNEP est une fenêtre
+    glissante ; la fusion avec l'historique a lieu DANS le fichier temporaire,
+    avant `os.replace`. Si la fusion lève, le brut en place est intact — pas
+    remplacé par le seul export récent."""
+
+    def test_merge_qui_leve_laisse_le_brut_intact(self, tmp_path, monkeypatch):
+        from src.utils import update_snep as us
+
+        monkeypatch.setattr(us, "DATA_PATH", str(tmp_path))
+        snep = tmp_path / "certifications" / "snep"
+        snep.mkdir(parents=True)
+        dest = snep / "certif-.csv"
+        # Brut historique complet, déjà en place (12 000 lignes en vrai)
+        historique = "﻿" + HEADER + "\n" + ROW_A + "\n" + ROW_B + "\n" + ROW_C + "\n"
+        dest.write_text(historique, encoding="utf-8")
+        octets_avant = dest.read_bytes()
+
+        # L'export récent ne porte qu'une fenêtre (ici ROW_C seul)
+        monkeypatch.setattr(
+            us.source_usage,
+            "requests_get",
+            lambda source, url, **kw: _ReponseCsv(HEADER + "\n" + ROW_C + "\n"),
+        )
+
+        # La fusion échoue en plein milieu
+        def _boom(*a, **k):
+            raise OSError("disque plein")
+
+        monkeypatch.setattr(us, "_merge_csv_history", _boom)
+
+        us.download_latest_snep_csv()
+
+        # Le brut n'a pas bougé : ni tronqué à la fenêtre, ni corrompu
+        assert dest.read_bytes() == octets_avant
+        # Aucun fichier temporaire abandonné
+        assert not list(snep.glob("*.tmp"))
+
+
 BLOC_COMPLET = """
 <div class="certification">
   <div class="description">

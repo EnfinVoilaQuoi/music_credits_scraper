@@ -131,14 +131,24 @@ def download_latest_snep_csv():
                     )
                     continue
 
-                # Écriture atomique : temp → rename pour éviter la corruption partielle
+                # Écriture atomique : temp → rename pour éviter la corruption
+                # partielle. La FUSION avec l'historique a lieu DANS le fichier
+                # temporaire, AVANT le `os.replace` : l'export SNEP est une
+                # fenêtre glissante (quelques centaines de lignes) et l'écraser
+                # ferait perdre les 12 000 lignes d'historique. Si la fusion
+                # levait après le remplacement (ancien ordre), le brut restait
+                # amputé alors que `os.replace` prétend être atomique — et c'est
+                # le brut que lisent le validateur, le nettoyeur et cert_trous.
                 import os
                 import tempfile
 
                 tmp_fd, tmp_name = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
+                added = None
                 try:
                     with os.fdopen(tmp_fd, "wb") as f:
                         f.write(response.content)
+                    if backup_path and backup_path.exists():
+                        added = _merge_csv_history(backup_path, Path(tmp_name))
                     os.replace(tmp_name, dest_path)
                 except Exception:
                     try:
@@ -150,11 +160,7 @@ def download_latest_snep_csv():
                 file_size = dest_path.stat().st_size
                 safe_print("✅ Fichier téléchargé avec succès !")
                 safe_print(f"   Taille : {file_size / 1024:.1f} KB")
-
-                # FUSION avec l'historique : l'export SNEP est une fenêtre
-                # glissante — l'écraser ferait perdre les certifications anciennes
-                if backup_path and backup_path.exists():
-                    added = _merge_csv_history(backup_path, dest_path)
+                if added is not None:
                     safe_print(
                         f"🔀 Fusion avec l'historique : {added} nouvelle(s) certification(s) ajoutée(s)"
                     )

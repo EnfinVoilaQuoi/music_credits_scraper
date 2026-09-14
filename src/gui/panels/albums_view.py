@@ -426,8 +426,8 @@ def number_all_albums(app):
     Deux appels API par album : la boucle est trop longue pour le thread Tk, elle
     part donc en worker (réseau + DB purement sync → `start_worker`).
     """
+    from src.concurrency.lifecycle import start_worker, stop_requested
     from src.gui.dialogs import report
-    from src.gui.workers.lifecycle import start_worker, stop_requested
 
     if not app.current_artist or not app.current_artist.tracks:
         messagebox.showinfo("Numéroter les pistes", "Charge un artiste d'abord.")

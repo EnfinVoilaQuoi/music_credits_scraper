@@ -29,8 +29,8 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from src.concurrency.lifecycle import start_worker, stop_requested
 from src.config import BASE_DIR
-from src.gui.workers.lifecycle import start_worker, stop_requested
 from src.observability import rollup
 from src.observability.registry import FAMILY_LABELS, FAMILY_ORDER
 from src.observability.repository import SourceUsageRepository

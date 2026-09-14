@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 import src.gui.workers.streams as ws
+import src.services.streams as ss
 
 
 class TestOrdreDesSources:
@@ -22,23 +23,23 @@ class TestOrdreDesSources:
     source maître passe en tête pour que sa progression s'affiche en premier."""
 
     def test_la_maitre_passe_en_tete(self, monkeypatch):
-        monkeypatch.setattr(ws.settings, "streams_master", "spotify_web")
-        assert ws._stream_sources() == ("spotify_web", "kworb")
+        monkeypatch.setattr(ss.settings, "streams_master", "spotify_web")
+        assert ss._stream_sources() == ("spotify_web", "kworb")
 
     def test_les_deux_sources_sont_toujours_la(self, monkeypatch):
         """Changer de maître ne doit JAMAIS faire disparaître l'autre source :
         elle garde sa valeur de comparaison même quand elle perd la colonne."""
         for master in ("kworb", "spotify_web"):
-            monkeypatch.setattr(ws.settings, "streams_master", master)
-            assert set(ws._stream_sources()) == {"kworb", "spotify_web"}
+            monkeypatch.setattr(ss.settings, "streams_master", master)
+            assert set(ss._stream_sources()) == {"kworb", "spotify_web"}
 
     def test_maitre_inconnu_ne_perd_aucune_source(self, monkeypatch):
-        monkeypatch.setattr(ws.settings, "streams_master", "autre")
-        assert set(ws._stream_sources()) >= {"kworb", "spotify_web"}
+        monkeypatch.setattr(ss.settings, "streams_master", "autre")
+        assert set(ss._stream_sources()) >= {"kworb", "spotify_web"}
 
 
 def _resume(results, full_crawl=True):
-    return ws.build_summary(results, spotify_full_crawl=full_crawl)
+    return ss.build_summary(results, spotify_full_crawl=full_crawl)
 
 
 class TestResumeKworb:
@@ -205,6 +206,10 @@ class _FauxApp:
         self.root = _FauxRoot()
         self.current_artist = type("A", (), {"id": 1, "name": "ISHA"})()
         self.data_manager = _Faux()
+        self.runtime = SimpleNamespace(
+            data_manager=self.data_manager,
+            disabled=SimpleNamespace(load_disabled_tracks=lambda nom: set()),
+        )
         self.progress_label = _Faux()
         self.streams_button = _Faux()
         self._show_progress_bar = lambda: None
@@ -293,7 +298,7 @@ class TestOrchestration:
         assert "spotify" not in p.appelees
 
     def test_ordre_pilote_par_la_source_maitre(self, harnais, monkeypatch):
-        monkeypatch.setattr(ws.settings, "streams_master", "spotify_web")
+        monkeypatch.setattr(ss.settings, "streams_master", "spotify_web")
         p = _FauxProvider()
         self._lancer(harnais, p, fetch_spotify_web=True)
         assert p.appelees[:2] == ["spotify_web", "spotify"]

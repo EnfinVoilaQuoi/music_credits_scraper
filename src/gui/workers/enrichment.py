@@ -13,16 +13,17 @@ save en cours se termine dans son thread (commit SQLite atomique), puis le
 budget global de 8 s.
 """
 
-import asyncio
 from tkinter import messagebox
 
 import customtkinter as ctk
 
 from src.concurrency import async_loop
+from src.concurrency.lifecycle import stop_requested
 from src.gui.dialogs import report
-from src.gui.workers.lifecycle import stop_requested
 from src.observability import source_usage
 from src.observability.registry import Flow
+from src.services import enrichissement
+from src.services.runtime import Hooks
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -221,93 +222,53 @@ def run_enrichment(
     force_update: bool = False,
     clear_on_failure: bool = True,
 ):
-    """Exécute l'enrichissement avec les sources sélectionnées"""
+    """Exécute l'enrichissement avec les sources sélectionnées.
+
+    Adaptateur GUI : la boucle par morceau, les saves et le teardown vivent dans
+    `src/services/enrichissement.run_async`, partagé avec la CLI.
+    """
     if not app.selected_tracks:
         messagebox.showwarning("Attention", "Aucun morceau sélectionné")
         return
 
-    selected_tracks_list = []
-    for i in sorted(app.selected_tracks):
-        if not app._is_track_disabled_by_index(i) and i < len(app.current_artist.tracks):
-            selected_tracks_list.append(app.current_artist.tracks[i])
-
+    selected_tracks_list = [
+        app.current_artist.tracks[i]
+        for i in sorted(app.selected_tracks)
+        if not app._is_track_disabled_by_index(i) and i < len(app.current_artist.tracks)
+    ]
     if not selected_tracks_list:
         messagebox.showwarning("Attention", "Tous les morceaux sélectionnés sont désactivés")
         return
 
+    options = enrichissement.OptionsEnrich(
+        sources=tuple(sources), force_update=force_update, clear_on_failure=clear_on_failure
+    )
+    disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
+    artist = app.current_artist
     app.enrich_button.configure(state="disabled", text="Enrichissement...")
     app.progress_bar.set(0)
 
-    def update_progress(current, total, info):
-        """Callback de progression"""
-        progress = current / total
+    def update_progress(current, total, libelle, tache=""):
+        progress = current / total if total else 0
         app.root.after(0, lambda: app.progress_var.set(progress))
-        app.root.after(0, lambda: app.progress_label.configure(text=info))
+        app.root.after(0, lambda: app.progress_label.configure(text=f"{tache}: {libelle}"))
 
     async def enrich_batch():
         try:
-            # Ré-armer le disjoncteur BPM Finder (coupé après 3 échecs consécutifs
-            # au run précédent — l'enricher vit toute la session GUI)
-            app.data_enricher.reset_bpmfinder_breaker()
-
-            # Préparer la liste complète des tracks de l'artiste pour validation
-            all_artist_tracks = app.current_artist.tracks if app.current_artist else []
-
-            # Compteurs pour le résumé
-            cleaned_count = 0
-            track_results = []  # Pour stocker les résultats détaillés par track
-
-            # Enrichir chaque track individuellement
-            for i, track in enumerate(selected_tracks_list):
-                if stop_requested():
-                    logger.info(
-                        "⏹️ Fermeture demandée — enrichissement interrompu entre deux morceaux"
-                    )
-                    break
-                update_progress(i, len(selected_tracks_list), f"Enrichissement: {track.title}")
-
-                results = await app.data_enricher.enrich_track_async(
-                    track,
-                    sources=sources,
-                    force_update=force_update,
-                    artist_tracks=all_artist_tracks,
-                    clear_on_failure=clear_on_failure,
-                )
-
-                # Compter les nettoyages
-                if results.get("cleaned", False):
-                    cleaned_count += 1
-
-                # Stocker les résultats pour ce track
-                track_results.append({"title": track.title, "results": results})
-
-                # Sauvegarder après chaque enrichissement (SQLite hors boucle)
-                await asyncio.to_thread(app.data_manager.save_track, track)
-                # `save_track` n'écrit PAS ce qui a un écrivain dédié (certifs,
-                # relations, IDs Spotify e23) : sans cet appel, les IDs trouvés
-                # par les providers mouraient avec l'objet — mesuré le
-                # 2026-09-08, 5 IDs découverts, 0 ligne dans `track_spotify_ids`.
-                # APRÈS le save, qui attribue l'id des morceaux neufs. No-op
-                # quand rien n'est marqué.
-                await asyncio.to_thread(app.data_manager.record_pending, track)
-
-            disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
-            summary = _build_summary(
-                track_results,
-                treated_count=len(selected_tracks_list),
-                disabled_count=disabled_count,
-                force_update=force_update,
-                clear_on_failure=clear_on_failure,
-                cleaned_count=cleaned_count,
+            bilan = await enrichissement.run_async(
+                app.runtime,
+                artist,
+                selected_tracks_list,
+                options,
+                Hooks(progress=update_progress, should_stop=stop_requested),
             )
-
+            texte = enrichissement.resume(bilan, options, desactives=disabled_count)
             app.root.after(
-                0, lambda s=summary: report.show_scrollable_report(app, "Enrichissement terminé", s)
+                0, lambda: report.show_scrollable_report(app, "Enrichissement terminé", texte)
             )
             app.root.after(0, app._update_artist_info)
             app.root.after(0, app._update_statistics)
             app.root.after(0, app._populate_tracks_table)
-
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Erreur lors de l'enrichissement: {error_msg}")
@@ -318,40 +279,6 @@ def run_enrichment(
                 ),
             )
         finally:
-            # Scrapers Playwright ASYNC d'abord (F3) : browsers de la boucle
-            # fermés PUIS l'instance async partagée stoppée (garde-fou : tasks
-            # annulées avant de fermer Playwright async).
-            try:
-                await app.data_enricher.aclose_async_scrapers()
-            except Exception:
-                pass
-            try:
-                from src.scrapers.playwright_manager import stop_playwright_async
-
-                await stop_playwright_async()
-            except Exception:
-                pass
-            # Fermer les ressources SYNC des providers SUR LE THREAD SYNC DU RUN
-            # (celui qui a créé les browsers — Playwright est thread-affine ;
-            # ils seront recréés à la demande au batch suivant). Sans ça, un
-            # browser survivait au batch et son pipe Playwright cassait à
-            # l'arrêt de l'app (EPIPE cosmétique mais alarmant).
-            runner = app.data_enricher.sync_runner
-            try:
-                await runner.run(app.data_enricher.close)
-            except Exception:
-                pass
-            # Arrêter aussi l'instance Playwright THREAD-LOCALE du thread sync :
-            # browsers fermés, le driver Node n'a plus de raison de survivre.
-            try:
-                await runner.run(_stop_playwright)
-            except Exception:
-                pass
-            # Session httpx du batch (rouverte à la demande au suivant)
-            try:
-                await app.data_enricher.aclose_http()
-            except Exception:
-                pass
             app.root.after(
                 0, lambda: app.enrich_button.configure(state="normal", text="Enrichir données")
             )
@@ -362,110 +289,8 @@ def run_enrichment(
         """Le scope nomme l'artiste et le flux. Il est porté par une pile de
         process (pas une contextvar) : c'est ce qui le rend visible aussi bien
         depuis la boucle que depuis le thread du `sync_runner`."""
-        with source_usage.run_scope(
-            Flow.ENRICHMENT,
-            artist_id=app.current_artist.id if app.current_artist else None,
-            artist_name=app.current_artist.name if app.current_artist else "",
-        ):
+        with source_usage.run_scope(Flow.ENRICHMENT, artist_id=artist.id, artist_name=artist.name):
             return await enrich_batch()
 
     async_loop.start()  # idempotent : démarre la boucle au premier flux async
     async_loop.submit(enrich_batch_observe())
-
-
-def _stop_playwright():
-    """Arrêt de l'instance Playwright du thread appelant (helper picklable/nommé)."""
-    from src.scrapers.playwright_manager import stop_playwright
-
-    stop_playwright()
-
-
-# Étiquettes courtes des sources (générique : toute source présente dans
-# results est affichée, y compris bpmfinder — l'ancien code ne gérait qu'un
-# sous-ensemble en dur → ligne vide si on ne cochait que BPM Finder).
-_SRC_LABELS = {
-    "spotify_id": "SP",
-    "reccobeats": "RC",
-    "getsongbpm": "GS",
-    "songbpm": "SB",
-    "bpmfinder": "BF",
-    "deezer": "DZ",
-    "discogs": "DC",
-}
-_META_KEYS = {"cleaned"}
-
-
-def _status_char(v):
-    if v == "not_needed":
-        return "-"
-    if v is None:
-        return "?"  # crash/timeout
-    return "✓" if v else "✗"
-
-
-def _overall(results):
-    vals = [v for k, v in results.items() if k not in _META_KEYS]
-    chars = [_status_char(v) for v in vals]
-    if "✓" in chars:
-        return "✓"
-    if "?" in chars:
-        return "?"
-    if chars and all(c == "-" for c in chars):
-        return "-"
-    return "✗"
-
-
-def _build_summary(
-    track_results,
-    *,
-    treated_count: int,
-    disabled_count: int,
-    force_update: bool,
-    clear_on_failure: bool,
-    cleaned_count: int,
-) -> str:
-    """Message de fin avec détails par morceau (pur — extrait du worker F2)."""
-    summary = "Enrichissement terminé!\n\n"
-    summary += f"Morceaux traités: {treated_count}\n\n"
-
-    if force_update:
-        summary += "✅ Mode force update activé\n"
-
-    if clear_on_failure and cleaned_count > 0:
-        summary += f"🗑️ {cleaned_count} morceau(x) nettoyé(s) (données erronées effacées)\n"
-
-    summary += "\nDÉTAIL PAR MORCEAU:\n"
-    summary += "Légende: ✓=succès | ✗=échec/absent | ?=crash/timeout | -=déjà présent\n\n"
-
-    n_ok = n_fail = 0
-    for track_result in track_results:
-        title = track_result["title"]
-        results = track_result["results"]
-        if len(title) > 30:
-            title = title[:27] + "..."
-
-        overall = _overall(results)
-        if overall == "✓":
-            n_ok += 1
-        elif overall in ("✗", "?"):
-            n_fail += 1
-
-        parts = [
-            f"{_SRC_LABELS.get(k, k)}:{_status_char(v)}"
-            for k, v in results.items()
-            if k not in _META_KEYS
-        ]
-        detail = f"  {' | '.join(parts)}" if parts else ""
-        summary += f"{overall} {title}\n{detail}\n" if detail else f"{overall} {title}\n"
-
-    # Bilan chiffré en tête du détail
-    summary = summary.replace(
-        "\nDÉTAIL PAR MORCEAU:\n",
-        f"\n✅ {n_ok} réussi(s) · ❌ {n_fail} échec(s)\n\nDÉTAIL PAR MORCEAU:\n",
-        1,
-    )
-
-    if disabled_count > 0:
-        summary += f"\n⚠️ {disabled_count} morceaux désactivés ignorés"
-
-    return summary

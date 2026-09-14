@@ -77,8 +77,15 @@ class TestToutMettreAJourPasseParLaMemeTable:
         assert "_run_script_sync" not in source.replace(
             "`_run_script_sync(script)`", ""
         ), "la voie sans arguments est de retour"
-        assert source.count("MISES_A_JOUR[") >= 1
-        assert "for nom in MISES_A_JOUR" in source, "le global n'itère pas la table"
+        # Depuis 2026-09-14 la table et son itération vivent dans le service
+        # `src/services/certifs` (partagé avec la CLI) : la GUI doit DÉLÉGUER
+        # les deux chemins, pas réimplémenter l'un d'eux.
+        assert "certifs.executer_maj(" in source, "le bouton individuel ne délègue pas"
+        assert "certifs.mettre_a_jour(" in source, "le global ne délègue pas"
+        service = (Path(__file__).parent.parent / "src" / "services" / "certifs.py").read_text(
+            encoding="utf-8"
+        )
+        assert "MISES_A_JOUR[nom]" in service and "list(MISES_A_JOUR)" in service
 
     def test_les_quatre_boutons_delèguent(self):
         for nom in ("snep", "brma", "bpi", "riaa"):

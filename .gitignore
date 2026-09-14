@@ -58,6 +58,9 @@ lib/*
 # (convention brut+clean : le clean et sa meta accompagnent la source).
 !data/certifications/**/*.meta.json
 !data/certifications/**/metadata.json
+# Ce que le site SNEP montre encore, ligne par ligne du brut (snep_vues) : le
+# clean en dépend, il se versionne avec lui.
+!data/certifications/snep/*.vues.json
 
 # Claude
 .claude/

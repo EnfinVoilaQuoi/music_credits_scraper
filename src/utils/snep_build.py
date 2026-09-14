@@ -319,12 +319,13 @@ def merge_canonical(base: list[dict], new: list[dict]) -> list[dict]:
     gardait que la date la plus récente, faisant DISPARAÎTRE l'Or d'origine.
     L'ordre de `base` est préservé, les nouvelles clés ajoutées à la suite.
 
-    HORS DE PORTÉE, et c'est dit : **le SNEP RETIRE des certifications.** Le brut
-    de JUL *MIMI* porte encore un Platine 07/2025 que le site ne montre plus. Le
-    clean ACCUMULE par construction (une certif ancienne peut simplement sortir
-    de la fenêtre glissante de l'export) : il ne peut pas distinguer « sortie de
-    la fenêtre » de « retirée par le SNEP » sans interroger le site titre par
-    titre. Un retrait réel survit donc dans le clean.
+    **Le SNEP RETIRE des certifications**, et le clean ne peut pas le voir seul :
+    il ACCUMULE par construction (une certif ancienne peut simplement sortir de
+    la fenêtre glissante de l'export). C'est `snep_vues` qui le sait, en
+    confrontant chaque année relue ENTIÈREMENT à ce que le site montre encore ;
+    `rebuild` exclut ce qu'il a marqué retiré (`exclure_retirees`). Mesuré le
+    2026-09-14 : 8 vrais retraits sur 3 ans, contre 305 paliers intermédiaires
+    que le site efface en montant — ceux-là RESTENT, c'est la valeur du magasin.
 
     Second risque assumé : le label est comparé via `normalize_text` ; une dérive
     d'orthographe entre deux lignes du groupe C-même-label fabriquerait un faux
@@ -342,6 +343,56 @@ def merge_canonical(base: list[dict], new: list[dict]) -> list[dict]:
     for k in ordre:
         resultat.extend(_fusionner_groupe(groupes[k]))
     return resultat
+
+
+def _iso_depuis_brut(s: str) -> str:
+    """« JJ/MM/AAAA » du brut → « AAAA-MM-JJ » canonique ; verbatim si illisible."""
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", (s or "").strip())
+    return f"{m[3]}-{int(m[2]):02d}-{int(m[1]):02d}" if m else (s or "").strip()[:10]
+
+
+def _cle_canonique_depuis_brut(cle: tuple) -> tuple | None:
+    """Traduit une clé de ligne du BRUT (`snep_vues.cle_ligne`) dans l'espace du
+    clean, par les MÊMES conversions que `canonical_rows_from_raw` — sans quoi
+    une exclusion raterait sa cible sur un simple « Platine » vs « platine »."""
+    artiste, titre, categorie, palier, sortie, constat = cle
+    level = CertificationLevel.from_string(palier)
+    if level is None:
+        return None
+    return (
+        artiste,
+        titre,
+        CertificationCategory.from_string(categorie).value,
+        level.value,
+        _iso_depuis_brut(sortie),
+        _iso_depuis_brut(constat),
+    )
+
+
+def _cle_canonique(row: dict) -> tuple:
+    return (
+        normalize_text(row["artist"]),
+        normalize_text(row["title"]),
+        row["category"],
+        row["certification"],
+        row["release_date"],
+        row["certification_date"],
+    )
+
+
+def exclure_retirees(rows: list[dict], cles_brut: set[tuple]) -> tuple[list[dict], list[dict]]:
+    """Écarte du clean les lignes que `snep_vues` a marquées RETIRÉES par le SNEP.
+
+    Le brut les garde (sidecar réversible) ; seul le clean, lu par le matcher,
+    ne doit plus les servir. Rend (conservées, exclues).
+    """
+    cibles = {c for c in map(_cle_canonique_depuis_brut, cles_brut) if c}
+    if not cibles:
+        return rows, []
+    gardees, exclues = [], []
+    for row in rows:
+        (exclues if _cle_canonique(row) in cibles else gardees).append(row)
+    return gardees, exclues
 
 
 def purger_fantomes(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -405,12 +456,22 @@ def rebuild(
     source: str = "GLOBAL",
     *,
     partial: str = "",
+    retirees: set[tuple] | frozenset = frozenset(),
 ) -> int:
     """Régénère le clean en fusionnant le brut courant dans l'existant (accumule),
-    puis écrit le CSV canonique + le sidecar meta. Retourne le nombre de lignes."""
+    puis écrit le CSV canonique + le sidecar meta. Retourne le nombre de lignes.
+
+    `retirees` : clés de lignes du brut que le site ne montre plus (cf.
+    `snep_vues.cles_retirees`) — exclues du clean, jamais du brut."""
     existing = read_canonical_csv(csv_path)
     new = canonical_rows_from_raw(read_raw_snep_csv(raw_path))
     merged, fantomes = purger_fantomes(merge_canonical(existing, new))
+    merged, exclues = exclure_retirees(merged, set(retirees))
+    if exclues:
+        logger.info(
+            f"🚫 {len(exclues)} ligne(s) retirée(s) par le SNEP exclue(s) du clean "
+            "(conservées dans le brut, cf. certif-.vues.json)"
+        )
     # `rebuild` RÉÉCRIT le clean à chaque appel : il se sauvegarde donc toujours,
     # et plus seulement lorsqu'une purge de fantômes retire quelque chose. La
     # rétention de `cert_store` (les 10 plus récentes) répond au motif qui avait

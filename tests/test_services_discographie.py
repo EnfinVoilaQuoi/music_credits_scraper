@@ -129,6 +129,9 @@ def _sans_effets(monkeypatch):
         lambda: SimpleNamespace(create_backup=lambda tag: None),
     )
     monkeypatch.setattr("src.utils.certification_enricher.apply_certifications", lambda *a, **k: 0)
+    # Sans lui, `run()` instanciait le VRAI CertMatcher : 17 s par test à
+    # charger les CSV de `data/certifications/` (interdit, et lent).
+    monkeypatch.setattr("src.utils.cert_matcher.get_cert_matcher", lambda: None)
 
 
 class TestRun:

@@ -19,6 +19,7 @@ from typing import NamedTuple
 
 from src.models import Artist
 from src.services.runtime import Bilan, Runtime
+from src.utils.cert_normalize import drapeau
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -131,6 +132,39 @@ def _env_cdp(url: str) -> dict:
     return {**os.environ, "GENIUS_CDP_URL": url}
 
 
+def _relancer_via_cdp(
+    nom: str,
+    commande: list[str],
+    tag: str,
+    code: int,
+    sortie: str,
+    *,
+    progres: Callable[[str], None],
+    lancer: Callable[..., tuple[int, str]],
+) -> tuple[int, str]:
+    """Seconde tentative via Chrome après un échec headless (RIAA).
+
+    UN seul chemin pour la MàJ globale et la recherche par artiste : la copie
+    de la recherche ne loggait RIEN quand Chrome était introuvable et
+    remplaçait la sortie headless par une sortie CDP même vide. Si le repli
+    réussit, c'était un problème d'accès et non un parseur cassé.
+    """
+    progres(f"{nom} : échec en headless — seconde tentative via Chrome…")
+    logger.warning(
+        f"[{nom}] échec en headless, repli sur la route CDP "
+        "(si elle réussit, c'était un problème d'accès et non un parseur cassé)"
+    )
+    url = preparer_cdp()
+    if not url:
+        logger.error(
+            f"[{nom}] repli CDP impossible : Chrome introuvable "
+            "(installe Google Chrome ou définis CHROME_PATH)"
+        )
+        return code, sortie
+    code, sortie_cdp = lancer(commande, f"{tag} (CDP)", env=_env_cdp(url), progres=progres)
+    return code, sortie_cdp or sortie
+
+
 def executer_maj(
     nom: str,
     *,
@@ -173,20 +207,9 @@ def executer_maj(
     code, sortie = lancer(commande, nom, env=env, progres=progres)
 
     if code != 0 and maj.repli_cdp:
-        progres(f"{nom} : échec en headless — seconde tentative via Chrome…")
-        logger.warning(
-            f"[{nom}] échec en headless, repli sur la route CDP "
-            "(si elle réussit, c'était un problème d'accès et non un parseur cassé)"
+        code, sortie = _relancer_via_cdp(
+            nom, commande, nom, code, sortie, progres=progres, lancer=lancer
         )
-        url = preparer_cdp()
-        if url:
-            code, sortie_cdp = lancer(commande, f"{nom} (CDP)", env=_env_cdp(url), progres=progres)
-            sortie = sortie_cdp or sortie
-        else:
-            logger.error(
-                f"[{nom}] repli CDP impossible : Chrome introuvable "
-                "(installe Google Chrome ou définis CHROME_PATH)"
-            )
     return code, sortie
 
 
@@ -284,23 +307,20 @@ def rechercher_artiste(
     etiquette = " + ".join(noms)
     args_noms = [a for nom in noms for a in ("--artist", nom)]
     certs_avant = certifications(noms)
-    drapeaux = {"SNEP": "🇫🇷", "RIAA": "🇺🇸", "BPI": "🇬🇧"}
 
     for source in sources:
         if source not in SOURCES_PAR_ARTISTE:
             bilan.lignes.append(f"{source} : pas de recherche par artiste (corpus local)")
             continue
-        progres(f"{drapeaux.get(source, '')} {source} : {etiquette}…")
+        progres(f"{drapeau(source)} {source} : {etiquette}…")
         commande = [py, str(SCRIPTS / MISES_A_JOUR[source].script), *args_noms]
+        tag = f"{source} {etiquette}"
         try:
-            code, sortie = lancer(commande, f"{source} {etiquette}", progres=progres)
+            code, sortie = lancer(commande, tag, progres=progres)
             if code != 0 and MISES_A_JOUR[source].repli_cdp:
-                progres(f"{source} : repli via Chrome…")
-                url = preparer_cdp()
-                if url:
-                    code, sortie = lancer(
-                        commande, f"{source} {etiquette} (CDP)", env=_env_cdp(url), progres=progres
-                    )
+                code, sortie = _relancer_via_cdp(
+                    source, commande, tag, code, sortie, progres=progres, lancer=lancer
+                )
             bilan.lignes.append(ligne_bilan(source, code, sortie))
         except Exception as e:
             # Boucle résiliente : une source qui tombe ne doit pas priver des

@@ -42,17 +42,17 @@ class TestRiaa:
     def test_un_mois_par_commande_borne_haute_exclusive(self):
         cmds = commandes("RIAA", ["1962-04"], "u.py", "py")
 
-        assert cmds == [["py", "u.py", "--from", "1962-04-01", "--to", "1962-05-01"]]
+        assert cmds == [["py", "u.py", "--from", "01-04-1962", "--to", "01-05-1962"]]
 
     def test_decembre_bascule_sur_lannee_suivante(self):
         cmds = commandes("RIAA", ["2020-12"], "u.py", "py")
 
-        assert cmds[0][-1] == "2021-01-01"
+        assert cmds[0][-1] == "01-01-2021"
 
     def test_les_mois_sont_dedoublonnes_et_ordonnes(self):
         cmds = commandes("RIAA", ["1962-05", "1962-04", "1962-04"], "u.py", "py")
 
-        assert [c[3] for c in cmds] == ["1962-04-01", "1962-05-01"]
+        assert [c[3] for c in cmds] == ["01-04-1962", "01-05-1962"]
 
     @pytest.mark.parametrize("invalide", ["1962-13", "1962-00", "1962"])
     def test_un_mois_hors_bornes_est_ecarte(self, invalide):

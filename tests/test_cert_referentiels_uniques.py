@@ -190,3 +190,60 @@ class TestAucuneTableRECOPIEE:
             f"(ligne(s) {[ligne for ligne, _ in trouvés]}) — "
             "il vit dans cert_normalize, importer plutôt que recopier"
         )
+
+
+class TestDatesDeLigneDeCommande:
+    """Les CLI de certifs lisent leurs dates en « JJ-MM-AAAA » (demande
+    utilisateur du 2026-09-14 : « --from 2000-01-01, je ne sais jamais lequel
+    est le mois »). Un seul lecteur, `cert_normalize.lire_jour_cli`."""
+
+    def test_jour_mois_annee(self):
+        from datetime import date
+
+        from src.utils.cert_normalize import lire_jour_cli
+
+        assert lire_jour_cli("14-09-2026") == date(2026, 9, 14)
+        assert lire_jour_cli("1-2-2003") == date(2003, 2, 1)
+        assert lire_jour_cli("14/09/2026") == date(2026, 9, 14)
+
+    def test_iso_reste_accepte_sans_ambiguite(self):
+        """L'année en tête lève l'ambiguïté ; les commandes fabriquées avant ce
+        jour (historique du shell, GUI) ne doivent pas casser."""
+        from datetime import date
+
+        from src.utils.cert_normalize import lire_jour_cli
+
+        assert lire_jour_cli("2003-02-01") == date(2003, 2, 1)
+
+    def test_illisible_leve(self):
+        import pytest
+
+        from src.utils.cert_normalize import lire_jour_cli
+
+        with pytest.raises(ValueError):
+            lire_jour_cli("septembre 2026")
+        with pytest.raises(ValueError):
+            lire_jour_cli("31-02-2026")  # le 31 février n'existe pas
+
+    def test_aller_retour(self):
+        from datetime import date
+
+        from src.utils.cert_normalize import jour_cli, lire_jour_cli
+
+        assert jour_cli(date(2026, 9, 14)) == "14-09-2026"
+        assert lire_jour_cli(jour_cli(date(2000, 1, 2))) == date(2000, 1, 2)
+
+    def test_les_deux_cli_a_dates_partagent_le_lecteur(self):
+        """RIAA et BPI (SNEP prend `--year`, BRMA `--years-back`)."""
+        import ast
+        from pathlib import Path
+
+        for module in ("update_riaa", "update_bpi"):
+            arbre = ast.parse(Path(f"src/utils/{module}.py").read_text(encoding="utf-8"))
+            importes = {
+                a.name
+                for n in ast.walk(arbre)
+                if isinstance(n, ast.ImportFrom) and n.module == "src.utils.cert_normalize"
+                for a in n.names
+            }
+            assert {"lire_jour_cli", "FORMAT_JOUR_CLI"} <= importes, module

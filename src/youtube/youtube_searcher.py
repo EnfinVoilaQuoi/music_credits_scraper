@@ -3,6 +3,7 @@
 import difflib
 import pickle
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta
 
 import requests
@@ -146,7 +147,9 @@ class YouTubeSearcher:
         n'avoir servi à rien.
         """
         try:
-            with sqlite3.connect(self.cache_db) as conn:
+            # `closing` ferme (le contexte d'une connexion ne fait que
+            # commit/rollback) ; le second `conn` garde le COMMIT à la sortie.
+            with closing(sqlite3.connect(self.cache_db)) as conn, conn:
                 supprimees = conn.execute(
                     "DELETE FROM youtube_search_cache WHERE query_hash = ?",
                     (cache_key(artist, title),),

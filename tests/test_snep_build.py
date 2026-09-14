@@ -9,6 +9,7 @@ from pathlib import Path
 from src.config import DATA_PATH
 from src.utils.snep_build import (
     CANONICAL_COLUMNS,
+    _fusionner_groupe,
     _key,
     canonical_rows_from_raw,
     merge_canonical,
@@ -64,29 +65,25 @@ class TestCanonicalRowsFromRaw:
 
 
 class TestMergeCanonical:
-    def _row(self, artist, title, cert, cdate, publisher=""):
+    def _row(self, artist, title, cert, cdate, publisher="", release="", category="Singles"):
         return {
             "artist": artist,
             "title": title,
             "publisher": publisher,
-            "category": "Singles",
+            "category": category,
             "certification": cert,
-            "release_date": "",
+            "release_date": release,
             "certification_date": cdate,
         }
 
-    def test_meme_cle_date_recente_gagne(self):
-        base = [self._row("A", "T", "Or", "2020-01-01", publisher="Old")]
-        new = [self._row("A", "T", "Or", "2021-01-01", publisher="New")]
-        (m,) = merge_canonical(base, new)
-        assert m["certification_date"] == "2021-01-01"  # date la plus récente
-        assert m["publisher"] == "Old"  # première occurrence gagne pour les champs
-
     def test_date_plus_ancienne_ignoree(self):
-        base = [self._row("A", "T", "Or", "2021-01-01")]
-        new = [self._row("A", "T", "Or", "2019-01-01")]
+        """Au sein d'un événement (même sortie, même label), la date de constat la
+        plus récente gagne et les champs viennent de la première occurrence."""
+        base = [self._row("A", "T", "Or", "2021-01-01", "Label", "2020-01-01")]
+        new = [self._row("A", "T", "Or", "2019-01-01", "Label", "2020-01-01")]
         (m,) = merge_canonical(base, new)
         assert m["certification_date"] == "2021-01-01"
+        assert m["publisher"] == "Label"  # première occurrence
 
     def test_cle_differente_ajoutee(self):
         base = [self._row("A", "T1", "Or", "2020-01-01")]
@@ -110,9 +107,8 @@ class TestMergeCanonical:
         d'écart, fusionnés en une ligne dont seule la date la plus récente
         survivait. BRMA l'avait déjà compris (`_cert_key` inclut la catégorie).
         """
-        base = [self._row("NINHO", "M.I.L.S", "Platine", "2017-12-15")]
-        base[0]["category"] = "Albums"
-        new = [self._row("NINHO", "M.I.L.S", "Platine", "2025-03-27")]  # Singles
+        base = [self._row("NINHO", "M.I.L.S", "Platine", "2017-12-15", category="Albums")]
+        new = [self._row("NINHO", "M.I.L.S", "Platine", "2025-03-27", category="Singles")]
 
         m = merge_canonical(base, new)
 
@@ -120,14 +116,78 @@ class TestMergeCanonical:
         assert {r["category"] for r in m} == {"Albums", "Singles"}
         assert {r["certification_date"] for r in m} == {"2017-12-15", "2025-03-27"}
 
-    def test_meme_categorie_fusionne_toujours(self):
-        """Le pendant : à catégorie égale, la fusion reste celle d'avant."""
-        base = [self._row("A", "T", "Or", "2020-01-01")]
-        new = [self._row("A", "T", "Or", "2021-01-01")]
 
+class TestEvenementDeCertification:
+    """Les quatre populations d'un groupe `(artiste, titre, catégorie, palier)`
+    à plusieurs dates, confrontées au site (l'oracle) le 2026-09-14. Aucun champ
+    seul ne les discrimine : la sortie sépare les re-sorties, le label sépare les
+    re-certifications, et un décalage ≤ 31 j des deux dates est une correction.
+    """
+
+    def _row(self, cdate, publisher="Label", release="2020-01-01"):
+        return {
+            "artist": "ARTISTE",
+            "title": "TITRE",
+            "publisher": publisher,
+            "category": "Singles",
+            "certification": "Or",
+            "release_date": release,
+            "certification_date": cdate,
+        }
+
+    def test_A_correction_snep_fusionne_meme_si_label_diverge(self):
+        """Groupe A : sortie ±31 j ET constat ±31 j = une correction SNEP re-datée
+        de quelques jours ; le label peut avoir divergé (concaténation corrompue),
+        il ne scinde PAS. Un seul événement, la date la plus récente l'emporte."""
+        base = [self._row("2020-06-10", publisher="EMI MUSIC FRANCE", release="2020-01-01")]
+        new = [
+            self._row("2020-06-11", publisher="EMI MUSIC FRANCE/EMI MUSIC", release="2020-01-02")
+        ]
         (m,) = merge_canonical(base, new)
+        assert m["certification_date"] == "2020-06-11"
 
-        assert m["certification_date"] == "2021-01-01"
+    def test_B_re_sortie_reste_distincte(self):
+        """Groupe B : sortie à > 31 j = re-sortie = événement distinct.
+        Nathalie Cardone *Hasta Siempre* : Or 1997, puis Or 2025 (re-sortie 2019)."""
+        base = [self._row("1997-12-17", release="1997-07-04")]
+        new = [self._row("2025-06-26", publisher="CALLIPHORA", release="2019-06-30")]
+        m = merge_canonical(base, new)
+        assert len(m) == 2
+        assert {r["certification_date"] for r in m} == {"1997-12-17", "2025-06-26"}
+
+    def test_C_meme_label_est_une_republication_fusionnee(self):
+        """Groupe C même label : même sortie, constat à > 31 j, MÊME label =
+        re-publication ou retrait — le site ne montre que le dernier constat.
+        JUL *MIMI* : Or 05/2025 puis 11/2025, même label → 1 Or (11/2025)."""
+        base = [
+            self._row("2025-05-29", publisher="D'OR ET DE PLATINE / BELIEVE", release="2025-04-25")
+        ]
+        new = [
+            self._row("2025-11-27", publisher="D'OR ET DE PLATINE / BELIEVE", release="2025-04-25")
+        ]
+        (m,) = merge_canonical(base, new)
+        assert m["certification_date"] == "2025-11-27"
+
+    def test_C_label_different_est_une_re_certification_distincte(self):
+        """Groupe C label différent : même sortie, constat à > 31 j, LABEL
+        différent = re-certification sous un autre distributeur. Selena Gomez
+        *Lose You To Love Me* : deux Or (Polydor/Universal vs Universal)."""
+        base = [self._row("2024-05-16", publisher="UNIVERSAL / POLYDOR", release="2019-10-23")]
+        new = [
+            self._row("2020-09-04", publisher="UNIVERSAL / UNIVERSAL FRANCE", release="2019-10-23")
+        ]
+        m = merge_canonical(base, new)
+        assert len(m) == 2
+        assert {r["certification_date"] for r in m} == {"2024-05-16", "2020-09-04"}
+
+    def test_sortie_manquante_ne_force_pas_la_scission(self):
+        """Une lacune d'export sur la sortie ne doit pas scinder : DOMINO « Baila
+        Baila Comigo », une seule sortie connue, deux constats à un jour = une
+        correction SNEP à fusionner, pas deux événements."""
+        base = [self._row("1997-09-10", publisher="BMG France/DANCENET", release="1996-09-10")]
+        new = [self._row("1997-09-09", publisher="BMG France/DANCENET", release="")]
+        (m,) = merge_canonical(base, new)
+        assert m["certification_date"] == "1997-09-10"
 
 
 class TestFichierCanoniqueCommitte:
@@ -146,17 +206,23 @@ class TestFichierCanoniqueCommitte:
         assert rows, "certif_snep.csv vide"
         assert list(rows[0].keys()) == CANONICAL_COLUMNS
 
-    def test_pas_de_doublon_de_cle(self):
+    def test_pas_de_doublon_d_evenement(self):
         p = self._path()
         if not p.exists():
             import pytest
 
             pytest.skip("certif_snep.csv pas encore généré")
         rows = read_canonical_csv(p)
-        # La clé de PRODUCTION, pas une copie : ce test la réimplémentait, et la
-        # copie a divergé le jour où la catégorie a rejoint la vraie clé
-        # (2026-09-09). Deux définitions du même verdict, c'est justement ce que
-        # le projet s'interdit — un test qui recopie la règle ne garde plus la
-        # règle, il garde son propre souvenir de la règle.
-        keys = [_key(r) for r in rows]
-        assert len(keys) == len(set(keys)), "doublon sous la clé de dédup de snep_build"
+        # Depuis le lot 7, une même clé de GROUPE (artiste, titre, catégorie,
+        # palier) porte légitimement plusieurs ÉVÉNEMENTS (re-sortie, autre
+        # distributeur). L'invariant n'est donc plus « clé unique » mais
+        # « aucun événement dédoublonnable » : re-passer `_fusionner_groupe` sur
+        # chaque groupe ne doit RIEN fusionner de plus. On appelle la fonction de
+        # PRODUCTION, jamais une copie de la règle (elle a déjà divergé une fois).
+        groupes: dict[tuple, list[dict]] = {}
+        for r in rows:
+            groupes.setdefault(_key(r), []).append(r)
+        for k, groupe in groupes.items():
+            assert len(_fusionner_groupe(groupe)) == len(
+                groupe
+            ), f"événements dédoublonnables sous {k}"

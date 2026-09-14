@@ -13,6 +13,7 @@ Colonnes canoniques (lues ensuite par `cert_matcher._load_snep`, qui normalise
 
 import io
 import re
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -168,7 +169,7 @@ def canonical_rows_from_raw(df: pd.DataFrame) -> list[dict]:
 
 
 def _key(row: dict) -> tuple:
-    """Clé de dédup : artiste, titre, certification **et CATÉGORIE**.
+    """Clé de GROUPE : artiste, titre, certification **et CATÉGORIE**.
 
     La catégorie manquait — la clé reproduisait l'ancienne contrainte DB
     (artist_clean, title_clean, certification), héritage d'un schéma qui ne
@@ -188,6 +189,10 @@ def _key(row: dict) -> tuple:
     Aucun risque de scission par variante d'orthographe : la catégorie ne prend
     que trois valeurs canoniques (`Singles`, `Albums`, `Vidéos`), vérifié
     identique dans le brut et dans le clean.
+
+    Depuis le lot 7 (2026-09-14), ce n'est plus la clé de dédup mais la clé de
+    GROUPE : à l'intérieur d'un groupe, `merge_canonical` distingue plusieurs
+    ÉVÉNEMENTS de certification (cf. `_meme_evenement`).
     """
     return (
         normalize_text(row["artist"]),
@@ -197,22 +202,146 @@ def _key(row: dict) -> tuple:
     )
 
 
+#: Tolérance (jours) sous laquelle deux dates comptent pour la même : au-delà,
+#: une re-sortie ou une re-certification distincte. 31 j absorbe un décalage de
+#: fin de mois (une correction SNEP « 09/10 → 10/10 ») sans mordre sur les
+#: écarts de re-sortie, qui se comptent en mois ou en années.
+_MEME_EVENEMENT_JOURS = 31
+
+
+def _parse_iso(value: str) -> date | None:
+    """`'YYYY-MM-DD'` → date, ou None si vide/illisible (verbatim comme stocké)."""
+    if not value:
+        return None
+    try:
+        y, m, d = value[:10].split("-")
+        return date(int(y), int(m), int(d))
+    except (ValueError, TypeError):
+        return None
+
+
+def _proches(d1: str, d2: str) -> bool | None:
+    """True/False si les deux dates sont à ≤ 31 j ; None si l'une manque.
+
+    Le None est distinct de False : une date ABSENTE n'est pas un signal
+    d'événement distinct (elle ne le refute pas non plus), elle laisse la
+    décision aux autres règles — sans quoi une simple lacune d'export scinderait
+    un titre en deux (mesuré : DOMINO « Baila Baila Comigo », une seule sortie
+    connue, deux constats à un jour = correction SNEP à ne PAS scinder)."""
+    a, b = _parse_iso(d1), _parse_iso(d2)
+    if a is None or b is None:
+        return None
+    return abs((a - b).days) <= _MEME_EVENEMENT_JOURS
+
+
+def _meme_evenement(a: dict, b: dict) -> bool:
+    """Deux lignes canoniques sont-elles la MÊME certification ?
+
+    Confronté au site (l'oracle) le 2026-09-14, un groupe `(artiste, titre,
+    catégorie, palier)` à plusieurs dates de constat recouvre trois populations
+    qu'aucun champ seul ne discrimine :
+
+      - **correction SNEP** (sortie ±31 j ET constat ±31 j) — un même événement
+        re-daté à quelques jours ; le label peut diverger (« EMI MUSIC FRANCE »
+        vs sa concaténation corrompue), il ne tranche donc pas ici ;
+      - **re-sortie** (sortie à > 31 j d'écart) — événement DISTINCT (Nathalie
+        Cardone *Hasta Siempre* : Or 1997, puis Or 2025 pour la re-sortie 2019) ;
+      - **re-certification sous un autre distributeur** (même sortie, constat à
+        > 31 j, LABEL différent) — événement distinct (Selena Gomez : deux Or,
+        Polydor/Universal puis Universal, les deux sur le site).
+
+    D'où la relation, du plus fort au plus faible :
+
+      1. sorties proches ET constats proches → correction, quel que soit le label ;
+      2. sorties proches ET même label → re-publication ou retrait (le site ne
+         montre alors que le dernier constat — JUL *MIMI*, Or 05/2025 puis
+         11/2025, même label) ;
+
+    sinon deux événements distincts (re-sortie, ou autre distributeur).
+    """
+    sorties = _proches(a["release_date"], b["release_date"])
+    if sorties is False:
+        # Sorties connues et à > 31 j : re-sortie, événement distinct.
+        return False
+    # Sorties proches, ou l'une inconnue (une lacune ne force pas la scission).
+    if _proches(a["certification_date"], b["certification_date"]):
+        return True  # règle 1 : correction SNEP
+    return normalize_text(a["publisher"]) == normalize_text(b["publisher"])  # règle 2
+
+
+def _fusionner_groupe(rows: list[dict]) -> list[dict]:
+    """Réduit un groupe `_key` à ses ÉVÉNEMENTS distincts.
+
+    La relation `_meme_evenement` n'est pas une clé de hachage (elle n'est pas
+    transitive en général) : on forme les composantes connexes par PAIRES
+    (union-find). Les groupes sont petits (≤ 6 lignes en pratique, 8 au pire),
+    le coût quadratique est sans enjeu. Au sein d'un événement : la première
+    occurrence gagne pour les champs, la date de constat la plus récente
+    l'emporte — c'est ce que montre le site.
+    """
+    n = len(rows)
+    if n == 1:
+        return [dict(rows[0])]
+
+    parent = list(range(n))
+
+    def trouver(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _meme_evenement(rows[i], rows[j]):
+                parent[trouver(i)] = trouver(j)
+
+    evenements: dict[int, dict] = {}
+    ordre: list[int] = []
+    for i in range(n):
+        racine = trouver(i)
+        if racine not in evenements:
+            evenements[racine] = dict(rows[i])
+            ordre.append(racine)
+        else:
+            cur = evenements[racine]
+            if (rows[i].get("certification_date") or "") > (cur.get("certification_date") or ""):
+                cur["certification_date"] = rows[i]["certification_date"]
+    return [evenements[r] for r in ordre]
+
+
 def merge_canonical(base: list[dict], new: list[dict]) -> list[dict]:
-    """Fusion ACCUMULANTE : première occurrence gagne pour les champs, la date de
-    certif la plus récente l'emporte (mime l'upsert DB). L'ordre de `base` est
-    préservé, les nouvelles clés ajoutées à la suite."""
-    by_key: dict[tuple, dict] = {}
-    order: list[tuple] = []
+    """Fusion ACCUMULANTE par ÉVÉNEMENT de certification.
+
+    Regroupe par `(artiste, titre, catégorie, palier)` puis, à l'intérieur de
+    chaque groupe, distingue les événements distincts (re-sorties, autres
+    distributeurs) que l'ancienne clé de hachage écrasait en une ligne — elle ne
+    gardait que la date la plus récente, faisant DISPARAÎTRE l'Or d'origine.
+    L'ordre de `base` est préservé, les nouvelles clés ajoutées à la suite.
+
+    HORS DE PORTÉE, et c'est dit : **le SNEP RETIRE des certifications.** Le brut
+    de JUL *MIMI* porte encore un Platine 07/2025 que le site ne montre plus. Le
+    clean ACCUMULE par construction (une certif ancienne peut simplement sortir
+    de la fenêtre glissante de l'export) : il ne peut pas distinguer « sortie de
+    la fenêtre » de « retirée par le SNEP » sans interroger le site titre par
+    titre. Un retrait réel survit donc dans le clean.
+
+    Second risque assumé : le label est comparé via `normalize_text` ; une dérive
+    d'orthographe entre deux lignes du groupe C-même-label fabriquerait un faux
+    événement. Marginal (spot-check de l'oracle), non gardé automatiquement.
+    """
+    groupes: dict[tuple, list[dict]] = {}
+    ordre: list[tuple] = []
     for row in [*base, *new]:
         k = _key(row)
-        if k not in by_key:
-            by_key[k] = dict(row)
-            order.append(k)
-        else:
-            cur = by_key[k]
-            if (row.get("certification_date") or "") > (cur.get("certification_date") or ""):
-                cur["certification_date"] = row["certification_date"]
-    return [by_key[k] for k in order]
+        if k not in groupes:
+            groupes[k] = []
+            ordre.append(k)
+        groupes[k].append(row)
+    resultat: list[dict] = []
+    for k in ordre:
+        resultat.extend(_fusionner_groupe(groupes[k]))
+    return resultat
 
 
 def purger_fantomes(rows: list[dict]) -> tuple[list[dict], list[dict]]:

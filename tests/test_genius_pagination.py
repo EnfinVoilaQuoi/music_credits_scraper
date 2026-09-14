@@ -80,3 +80,18 @@ def test_tri_par_date_de_sortie(api):
         Artist(name="SCH", genius_id=ARTIST_ID), max_songs=10, include_features=False
     )
     assert set(fake.sorts_seen) == {"release_date"}
+
+
+def test_max_songs_none_est_illimite(api):
+    """`max_songs=None` (défaut) = ILLIMITÉ : on ramène toute la discographie.
+
+    Un plafond ampute la liste (Kanye West déborde 2000) et des morceaux
+    manquants sont des données manquantes ; l'arrêt se fait sur la page vide.
+    """
+    fake = _FakeGenius(PAGE_SIZES)
+    api.genius = fake
+    tracks = api._get_artist_songs_manual(
+        Artist(name="SCH", genius_id=ARTIST_ID), max_songs=None, include_features=False
+    )
+    assert len(tracks) == sum(PAGE_SIZES)  # 329, aucun plafond
+    assert fake.pages_seen == list(range(1, len(PAGE_SIZES) + 2))  # jusqu'à la page vide

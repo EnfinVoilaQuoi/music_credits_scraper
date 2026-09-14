@@ -179,17 +179,6 @@ class SourceUsageRepository:
             params,
         )
 
-    def artists_touched(self, source_key: str | None = None) -> list[int]:
-        """Artistes pour lesquels au moins une source a été sollicitée."""
-        where = " AND source_key = :src" if source_key else ""
-        params = {"src": source_key} if source_key else {}
-        rows = self._rows(
-            "SELECT DISTINCT artist_id FROM source_usage_daily "
-            f"WHERE artist_id IS NOT NULL{where}",
-            params,
-        )
-        return sorted(r["artist_id"] for r in rows)
-
     def artists_with_usage(self) -> list[tuple[int, str]]:
         """(id, nom) des artistes pour lesquels des sources ont été sollicitées."""
         rows = self._rows(
@@ -199,17 +188,6 @@ class SourceUsageRepository:
             {},
         )
         return [(r["id"], r["name"]) for r in rows]
-
-    def purge_older_than(self, day: str) -> int:
-        """Supprime les compteurs antérieurs à `day` (jamais appelé en usage normal)."""
-        try:
-            with self.engine.begin() as conn:
-                return conn.execute(
-                    text("DELETE FROM source_usage_daily WHERE day < :day"), {"day": day}
-                ).rowcount
-        except SQLAlchemyError:
-            _log().exception("source_usage: purge impossible")
-            return 0
 
     def _rows(self, sql: str, params: dict) -> list[dict]:
         try:

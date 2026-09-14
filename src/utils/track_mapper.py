@@ -13,6 +13,7 @@ Le chargement des crédits reste à l'appelant (il a besoin du curseur).
 """
 
 import json
+from datetime import datetime
 
 from src.models import Artist, Track
 from src.utils.logger import get_logger
@@ -27,6 +28,23 @@ def _clean(value, default=None):
     if value is None or str(value) in _NULL_LITERALS:
         return default
     return value
+
+
+def _clean_datetime(value):
+    """Horodatage DB (chemin `text()` : string ISO verbatim) → `datetime`.
+
+    `created_at`/`updated_at` arrivaient en STRING et `Track.to_dict()` (export
+    JSON) appelait `.isoformat()` dessus : l'export d'un artiste chargé depuis
+    la base crashait (trouvé en test, 2026-09-15). Une valeur non parsable est
+    rendue telle quelle plutôt que perdue.
+    """
+    value = _clean(value)
+    if value is None or isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return value
 
 
 def _clean_int(value, default=None, allow_string=False):
@@ -165,9 +183,9 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.genius_url = _clean(row["genius_url"])
     track.spotify_url = _clean(row["spotify_url"])
     track.spotify_page_title = _clean(row["spotify_page_title"])
-    track.created_at = _clean(row["created_at"])
-    track.updated_at = _clean(row["updated_at"])
-    track.last_scraped = _clean(row["last_scraped"])
+    track.created_at = _clean_datetime(row["created_at"])
+    track.updated_at = _clean_datetime(row["updated_at"])
+    track.last_scraped = _clean_datetime(row["last_scraped"])
 
     # Propriétés featuring
     track.is_featuring = bool(_clean(row["is_featuring"], False))

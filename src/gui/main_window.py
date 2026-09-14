@@ -461,8 +461,9 @@ class MainWindow:
                         if not self._is_track_disabled(track):
                             temp_artist.tracks.append(track)
 
-                    # Exporter l'artiste filtré
-                    self.data_manager.export_to_json(temp_artist.name, filepath)
+                    # Exporter l'artiste filtré — l'OBJET, pas son nom (par le
+                    # nom, l'export rechargeait tout depuis la base).
+                    self.data_manager.export_to_json(temp_artist, filepath)
 
                     disabled_count = len(self.disabled_tracks)
                     messagebox.showinfo(

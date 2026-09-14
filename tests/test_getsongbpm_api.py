@@ -14,7 +14,7 @@ Aucun appel réseau, cache toujours dans `tmp_path`.
 
 import pytest
 
-from src.api.getsongbpm_api import GetSongBPMFetcher, SongData
+from src.api.getsongbpm_api import GetSongBPMFetcher
 
 
 @pytest.fixture
@@ -236,33 +236,137 @@ class TestFetchTrackBpm:
         song = client.fetch_track_bpm("ISHA", "Inconnu")
         assert song.bpm is None and song.error
 
-    def test_discographie(self, client, monkeypatch):
-        import src.api.getsongbpm_api as mod
+    def test_jumeau_async_meme_cache_meme_verdict(self, client, monkeypatch):
+        """La voie ASYNC est celle de l'app : elle n'était pas couverte alors que
+        la sync l'était — le symptôme de divergence à chercher (2026-09-05)."""
+        import asyncio
 
-        monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
-        monkeypatch.setattr(client, "_search_track", lambda a, t: _song(titre=t))
+        from src.observability import source_usage
+        from src.observability.issues import IssueKind
 
-        resultats = client.fetch_artist_discography("ISHA", ["A", "B", "C"])
-        assert [s.title for s in resultats] == ["A", "B", "C"]
-        assert all(s.bpm == 142 for s in resultats)
+        source_usage.reset()
+        appels = []
+
+        async def fake_search(http, artist, title):
+            appels.append(title)
+            return _song(titre=title) if title == "Titre" else None
+
+        monkeypatch.setattr(client, "_search_track_async", fake_search)
+        song = asyncio.run(client.fetch_track_bpm_async(None, "ISHA", "Titre"))
+        assert song.bpm == 142
+        asyncio.run(client.fetch_track_bpm_async(None, "ISHA", "Titre"))
+        assert appels == ["Titre"]  # servi par le cache, aucune observation
+        inconnu = asyncio.run(client.fetch_track_bpm_async(None, "ISHA", "Inconnu"))
+        assert inconnu.bpm is None and inconnu.error
+        # Le succès sort en INDETERMINATE : le faux `_search_track_async` ne
+        # passe pas par `AsyncHttpSession`, seul capteur de transport de cette
+        # voie — un trou de capteur se signale lui-même, on ne le maquille pas.
+        assert [v.issue for v in source_usage.flush()] == [
+            IssueKind.INDETERMINATE,
+            IssueKind.ABSENT,
+        ]
 
 
-class TestExportEtAttribution:
+class TestAttribution:
     def test_backlink_obligatoire(self, client):
         """Condition de l'usage gratuit : ne jamais retirer le backlink."""
         assert "getsongbpm.com" in client.get_attribution_html()
 
-    def test_export_csv(self, client, tmp_path):
-        sortie = tmp_path / "resultats.csv"
-        client.export_to_csv(
-            [SongData(artist="ISHA", title="Titre", bpm=142, key="Em", mode="minor")],
-            output_file=str(sortie),
+
+# ── `_search_track` et son jumeau async : mêmes retries, mêmes verdicts ─────
+class _Reponse:
+    def __init__(self, status, payload=None):
+        self.status_code = status
+        self.headers = {}
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+
+def _hit_isha():
+    return {"search": [_song()]}
+
+
+class TestSearchTrackJumeaux:
+    """Le piège des jumeaux (2026-09-05) : une correction posée sur une seule
+    voie ne corrige rien. Chaque cas est joué sur les DEUX."""
+
+    def _sync(self, client, monkeypatch, reponses):
+        import src.api.getsongbpm_api as mod
+
+        attentes = []
+        monkeypatch.setattr(mod.time, "sleep", attentes.append)
+        it = iter(reponses)
+
+        def get(url, params=None, timeout=None):
+            r = next(it)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+        client.session = type("S", (), {"get": staticmethod(get)})()
+        return client._search_track("ISHA", "Titre"), attentes
+
+    def _async(self, client, monkeypatch, reponses):
+        import asyncio
+
+        import src.api.getsongbpm_api as mod
+
+        attentes = []
+
+        async def sleep(s):
+            attentes.append(s)
+
+        monkeypatch.setattr(mod.asyncio, "sleep", sleep)
+        it = iter(reponses)
+
+        class _Http:
+            async def get(self, url, params=None, headers=None, timeout=None):
+                r = next(it)
+                if isinstance(r, Exception):
+                    raise r
+                return r
+
+        return asyncio.run(client._search_track_async(_Http(), "ISHA", "Titre")), attentes
+
+    @pytest.mark.parametrize("voie", ["sync", "async"])
+    def test_200_rend_le_hit_valide(self, client, monkeypatch, voie):
+        hit, _ = getattr(self, f"_{voie}")(client, monkeypatch, [_Reponse(200, _hit_isha())])
+        assert hit and hit["title"] == "Titre"
+
+    @pytest.mark.parametrize("voie", ["sync", "async"])
+    def test_429_attend_puis_reessaie(self, client, monkeypatch, voie):
+        hit, attentes = getattr(self, f"_{voie}")(
+            client, monkeypatch, [_Reponse(429), _Reponse(429), _Reponse(200, _hit_isha())]
         )
+        assert hit and attentes == [10, 20]  # 10 s × (tentative + 1)
 
-        contenu = sortie.read_text(encoding="utf-8-sig")
-        assert "ISHA" in contenu and "142" in contenu
+    @pytest.mark.parametrize("voie", ["sync", "async"])
+    def test_429_epuise_rend_none(self, client, monkeypatch, voie):
+        hit, attentes = getattr(self, f"_{voie}")(client, monkeypatch, [_Reponse(429)] * 3)
+        assert hit is None and attentes == [10, 20, 30]
 
-    def test_export_vide(self, client, tmp_path):
-        sortie = tmp_path / "vide.csv"
-        client.export_to_csv([], output_file=str(sortie))
-        assert not sortie.exists() or sortie.read_text(encoding="utf-8-sig")
+    @pytest.mark.parametrize("voie", ["sync", "async"])
+    @pytest.mark.parametrize("status", [401, 404, 500])
+    def test_autres_statuts_sortent_sans_reessayer(self, client, monkeypatch, voie, status):
+        hit, attentes = getattr(self, f"_{voie}")(client, monkeypatch, [_Reponse(status)])
+        assert hit is None and attentes == []
+
+    def test_reseau_backoff_exponentiel_sync(self, client, monkeypatch):
+        import requests
+
+        erreurs = [requests.ConnectionError("x")] * 2 + [_Reponse(200, _hit_isha())]
+        hit, attentes = self._sync(client, monkeypatch, erreurs)
+        assert hit and attentes == [1, 2]
+        hit, attentes = self._sync(client, monkeypatch, [requests.ConnectionError("x")] * 3)
+        assert hit is None and attentes == [1, 2]  # pas d'attente après le dernier
+
+    def test_reseau_backoff_exponentiel_async(self, client, monkeypatch):
+        import httpx
+
+        erreurs = [httpx.ConnectError("x")] * 2 + [_Reponse(200, _hit_isha())]
+        hit, attentes = self._async(client, monkeypatch, erreurs)
+        assert hit and attentes == [1, 2]
+        hit, attentes = self._async(client, monkeypatch, [httpx.ConnectError("x")] * 3)
+        assert hit is None and attentes == [1, 2]

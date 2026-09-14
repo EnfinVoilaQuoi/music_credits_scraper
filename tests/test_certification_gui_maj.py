@@ -110,8 +110,8 @@ class TestCheckSourceDerivDuNom:
         cap = self._capture(nom)
         source, dossier, fichier, importer, nettoyeur, script = cap["valider"]
         assert source == nom
-        assert dossier == folder
-        assert fichier == f"certif_{folder}.csv"
+        # Le BRUT partout (c'est lui qui porte les trous), pas le clean.
+        assert (dossier, fichier) == BRUTS_PAR_SOURCE[nom]
         assert script == ["src", "utils", MISES_A_JOUR[nom].script]
         # Le validateur s'importe vraiment et expose ses deux fonctions.
         valide, formate = importer()
@@ -184,12 +184,17 @@ class TestPeriodesManquantes:
         assert periodes_manquantes(chemin, "BRMA")["total"] == 0
 
     def test_dates_illisibles(self, tmp_path):
+        # Un défaut d'analyse va dans `erreur`, PAS dans `gaps` (qui ne porte que
+        # de vraies périodes manquantes).
         res = periodes_manquantes(self._csv(tmp_path, ["pas une date"] * 3), "BRMA")
-        assert res["gaps"] == ["Aucune date valide"]
+        assert res["gaps"] == []
+        assert res["erreur"] == "Aucune date valide"
 
     def test_fichier_absent_ne_leve_pas(self, tmp_path):
         res = periodes_manquantes(tmp_path / "jamais.csv", "BRMA")
-        assert res["total"] == 0 and res["gaps"]
+        assert res["total"] == 0
+        assert res["gaps"] == []
+        assert res["erreur"] and "lecture" in res["erreur"].lower()
 
     def test_le_separateur_du_SNEP_est_detecte(self, tmp_path):
         """SNEP écrit en « ; », les trois autres en « , »."""
@@ -341,7 +346,7 @@ class TestLaFenetreSeConstruitEncore:
     def test_chaque_source_a_ses_deux_boutons(self, fenetre):
         boutons = [txt for typ, txt in self._widgets(fenetre) if typ == "CTkButton"]
         assert boutons.count("Mettre à jour") == 4
-        assert boutons.count("🔎 Valider / Nettoyer") == 4
+        assert boutons.count("🔎 Valider le brut") == 4
 
     def test_le_command_capture_la_VALEUR_et_pas_la_variable(self, fenetre):
         """Le piège classique de la boucle : les quatre boutons finiraient tous

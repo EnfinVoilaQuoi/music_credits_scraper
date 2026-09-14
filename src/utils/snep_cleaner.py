@@ -262,7 +262,7 @@ def format_report(report: dict) -> str:
     counters = [
         ("Niveaux re-cassés", report.get("levels_recased", 0)),
         ("Catégories re-cassées", report.get("categories_recased", 0)),
-        ("Champs espaces/tab nettoyés", report.get("whitespace_fixed", 0)),
+        ("Lignes espaces/tab nettoyées", report.get("whitespace_fixed", 0)),
         ("Caractères restaurés (?→ '/œ)", report.get("apostrophes_restored", 0)),
         ("Corrections manuelles appliquées", report.get("manual_fixes_applied", 0)),
         ("Doublons retirés", report.get("duplicates_removed", 0)),

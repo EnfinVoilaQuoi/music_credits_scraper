@@ -250,3 +250,76 @@ class TestFichierCanoniqueCommitte:
             assert len(_fusionner_groupe(groupe)) == len(
                 groupe
             ), f"événements dédoublonnables sous {k}"
+
+
+class TestUnifierCredits:
+    """Le SNEP réécrit le crédit d'artiste en montant un palier (131 lignes sur
+    le clean réel, 2026-09-14). Une œuvre = titre + catégorie + sortie + au
+    moins un nom commun ; le crédit le plus riche en noms l'emporte."""
+
+    def _row(self, artist, cert, cdate, title="TU ME RENDS BÊTE", release="2025-08-15"):
+        return {
+            "artist": artist,
+            "title": title,
+            "publisher": "PLAY TWO / BELIEVE",
+            "category": "Singles",
+            "certification": cert,
+            "release_date": release,
+            "certification_date": cdate,
+        }
+
+    def test_le_credit_du_palier_recent_gagne_a_richesse_egale(self):
+        from src.utils.snep_build import unifier_credits
+
+        rows = [
+            self._row("GIMS, DAMSO", "Or", "2025-10-02"),
+            self._row("GIMS & DAMSO", "Platine", "2025-12-11"),
+        ]
+        rows, n = unifier_credits(rows)
+        assert n == 1 and {r["artist"] for r in rows} == {"GIMS & DAMSO"}
+
+    def test_le_credit_le_plus_riche_gagne_meme_ancien(self):
+        """« MAÎTRE GIMS & STING » ne doit pas devenir « STING » : un nom perdu,
+        c'est la discographie certifiée de l'invité qui perd la ligne."""
+        from src.utils.snep_build import unifier_credits
+
+        rows = [
+            self._row(
+                "MAÎTRE GIMS & STING", "Or", "2018-01-01", title="RESTE", release="2017-11-24"
+            ),
+            self._row("STING", "Platine", "2019-01-01", title="RESTE", release="2017-11-24"),
+        ]
+        rows, _ = unifier_credits(rows)
+        assert {r["artist"] for r in rows} == {"MAÎTRE GIMS & STING"}
+
+    def test_homonymes_sans_nom_commun_restent_distincts(self):
+        from src.utils.snep_build import unifier_credits
+
+        rows = [
+            self._row("SCH", "Or", "2017-07-01", title="LA NUIT", release="2017-05-05"),
+            self._row("PLK, TIF", "Or", "2024-08-08", title="LA NUIT", release="2017-05-05"),
+        ]
+        _, n = unifier_credits(rows)
+        assert n == 0
+
+    def test_idempotent(self):
+        from src.utils.snep_build import unifier_credits
+
+        rows = [
+            self._row("HAMZA FEAT. WERENOI", "Or", "2025-09-18"),
+            self._row("HAMZA & WERENOI", "Platine", "2026-07-23"),
+        ]
+        rows, _ = unifier_credits(rows)
+        assert unifier_credits(rows)[1] == 0
+
+    def test_lexclusion_des_retirees_vise_sans_lartiste(self):
+        """La ligne retirée du brut porte l'ANCIEN crédit ; le clean, l'unifié."""
+        from src.utils.snep_build import exclure_retirees
+        from src.utils.snep_vues import champs, cle_ligne
+
+        rows = [self._row("GIMS & DAMSO", "Or", "2025-10-02")]
+        cle = cle_ligne(
+            champs("GIMS, DAMSO;TU ME RENDS BÊTE;PLAY TWO;Singles;Or;15/08/2025;02/10/2025")
+        )
+        gardees, exclues = exclure_retirees(rows, {cle})
+        assert not gardees and len(exclues) == 1

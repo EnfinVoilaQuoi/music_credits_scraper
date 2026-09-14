@@ -6,7 +6,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox
+from tkinter import TclError, messagebox
 from typing import NamedTuple
 
 import customtkinter as ctk
@@ -145,6 +145,19 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         start_worker(enveloppe)
         return True
 
+    def _signaler_erreur(self, titre: str, message: str) -> None:
+        """Erreur AUSSI visible qu'un succès (depuis un fil de fond).
+
+        Les succès de validation/nettoyage ouvrent une fenêtre de rapport ; les
+        échecs ne posaient qu'un `_set_progress` — un label de 20 px qui s'efface
+        au bout de quelques secondes. Une messagebox reste, elle, jusqu'à ce
+        qu'on la ferme. Le bandeau garde son rôle de trace courte.
+        """
+        self._set_progress(f"❌ {message}")
+        if self._ferme:
+            return
+        self.after(0, lambda: messagebox.showerror(titre, message, parent=self))
+
     def _rafraichir_apres_ecriture(self):
         """Rafraîchit l'état APRÈS une écriture, en INVALIDANT ce qui a vieilli.
 
@@ -218,10 +231,13 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 width=120,
                 fg_color=couleur,
             ).pack(side="right", padx=(5, 10), pady=5)
+            # SNEP a son validateur/nettoyeur Python propres (`_check_snep`) ; les
+            # trois autres passent par la méthode générique dérivée du nom.
+            valider = self._check_snep if nom == "SNEP" else (lambda n=nom: self._check_source(n))
             ctk.CTkButton(
                 ligne,
                 text="🔎 Valider / Nettoyer",
-                command=getattr(self, f"_check_{nom.lower()}"),
+                command=valider,
                 width=110,
                 fg_color="gray40",
                 hover_color="gray30",
@@ -402,7 +418,10 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             self.status_text.insert("0.0", status_text)
 
         except Exception as e:
-            logger.error(f"Erreur lors de la mise à jour du statut: {e}")
+            # Dernier ressort : construire l'état touche le code arbitraire de
+            # chaque CertificationSource (freshness, fichiers) ; il ne doit
+            # jamais laisser le panneau vide sans rien dire.
+            logger.exception("Mise à jour de l'état des certifications")
             self.status_text.delete("0.0", "end")
             self.status_text.insert("0.0", f"❌ Erreur: {e}")
 
@@ -436,7 +455,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                         f"{', '.join(oublies[:8])}"
                     )
             except Exception as e:
-                logger.error(f"Application certifs échouée: {e}")
+                logger.exception("Application des certifications à l'artiste courant")
                 # `e` est effacé à la sortie du except → capture par défaut.
                 self.after(
                     0,
@@ -545,7 +564,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 )
                 outputs.append(_ligne_bilan("SNEP", code, sortie))
             except Exception as e:
-                logger.error(f"SNEP artiste : {e}")
+                # Boucle résiliente : une source qui tombe ne doit pas priver
+                # des trois autres. Trace complète en dernier ressort.
+                logger.exception("Récupération SNEP par artiste")
                 outputs.append(f"SNEP : erreur ({e})")
 
             # RIAA : headless d'abord, CDP en repli (cf. _update_riaa)
@@ -564,7 +585,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                         )
                 outputs.append(_ligne_bilan("RIAA", code, sortie))
             except Exception as e:
-                logger.error(f"RIAA artiste : {e}")
+                logger.exception("Récupération RIAA par artiste")
                 outputs.append(f"RIAA : erreur ({e})")
 
             # BPI : HTTP nu, aucun navigateur, donc aucun repli à prévoir.
@@ -576,7 +597,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 )
                 outputs.append(_ligne_bilan("BPI", code, sortie))
             except Exception as e:
-                logger.error(f"BPI artiste : {e}")
+                logger.exception("Récupération BPI par artiste")
                 outputs.append(f"BPI : erreur ({e})")
 
             # Le magasin a changé sur disque : le matcher doit être reconstruit
@@ -704,8 +725,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     ),
                 )
             except Exception as e:
-                logger.error(f"Erreur validation SNEP : {e}")
-                self._set_progress(f"❌ Erreur validation SNEP : {e}")
+                logger.exception("Validation du CSV SNEP")
+                self._signaler_erreur("Validation SNEP", f"Erreur validation SNEP : {e}")
 
         start_worker(run)
 
@@ -793,8 +814,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     f"sur {res['total']}"
                 )
             except Exception as e:
-                logger.error(f"Erreur audit {artist} : {e}")
-                self._set_progress(f"❌ Erreur audit : {e}")
+                logger.exception(f"Audit des certifications de {artist}")
+                self._signaler_erreur("Audit certifs", f"Erreur audit {artist} : {e}")
 
         start_worker(run)
 
@@ -848,8 +869,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
                 self.after(0, montrer)
             except Exception as e:
-                logger.error(f"Erreur nettoyage SNEP : {e}")
-                self._set_progress(f"❌ Erreur nettoyage SNEP : {e}")
+                logger.exception("Nettoyage du CSV SNEP")
+                self._signaler_erreur("Nettoyage SNEP", f"Erreur nettoyage SNEP : {e}")
 
         start_worker(run)
 
@@ -896,8 +917,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 self.clipboard_clear()
                 self.clipboard_append(text)
                 self._set_progress("📋 Rapport copié")
-            except Exception:
-                pass
+            except TclError:
+                pass  # presse-papier indisponible : copie best-effort
 
         ctk.CTkButton(btns, text="📋 Copier", command=copy, width=100).pack(side="left", padx=5)
 
@@ -1154,89 +1175,41 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     ),
                 )
             except Exception as e:
-                logger.error(f"Erreur validation {source} : {e}")
-                self._set_progress(f"❌ Erreur validation {source} : {e}")
+                logger.exception(f"Validation du CSV {source}")
+                self._signaler_erreur(f"Validation {source}", f"Erreur validation {source} : {e}")
 
         start_worker(run)
 
-    def _check_brma(self):
-        """Valide le CSV BRMA (Ultratop) et affiche le rapport."""
+    #: Argument de nettoyage du script de chaque source non-SNEP (SNEP a son
+    #: propre nettoyeur Python, appelé en direct). BRMA déduplique, les deux
+    #: autres nettoient.
+    _ARG_NETTOYAGE = {"BRMA": "--dedup", "RIAA": "--clean", "BPI": "--clean"}
 
-        def importer():
-            from src.utils.brma_validator import format_report, validate_brma_csv
+    def _check_source(self, nom: str):
+        """Valide le CSV d'une source non-SNEP (BRMA/RIAA/BPI), affiche le
+        rapport et propose le nettoyage et le rescrape des trous.
 
-            return validate_brma_csv, format_report
-
-        self._valider_source(
-            "BRMA",
-            "brma",
-            "certif_brma.csv",
-            importer,
-            self._clean_brma,
-            ["src", "utils", "update_brma.py"],
-        )
-
-    def _check_riaa(self):
-        """Valide le CSV RIAA (certif_riaa.csv) et affiche le rapport."""
-
-        def importer():
-            from src.utils.riaa_validator import format_report, validate_riaa_csv
-
-            return validate_riaa_csv, format_report
-
-        self._valider_source(
-            "RIAA",
-            "riaa",
-            "certif_riaa.csv",
-            importer,
-            self._clean_riaa,
-            ["src", "utils", "update_riaa.py"],
-        )
-
-    def _check_bpi(self):
-        """Valide le CSV BPI (certif_bpi.csv) et affiche le rapport."""
-
-        def importer():
-            from src.utils.bpi_validator import format_report, validate_bpi_csv
-
-            return validate_bpi_csv, format_report
-
-        self._valider_source(
-            "BPI",
-            "bpi",
-            "certif_bpi.csv",
-            importer,
-            self._clean_bpi,
-            ["src", "utils", "update_bpi.py"],
-        )
-
-    def _clean_riaa(self):
-        """Aperçu (dry-run) du nettoyage RIAA, puis application sur confirmation.
-
-        Même déroulé que SNEP : on ne demande plus de valider à l'aveugle une
-        réécriture de plusieurs dizaines de milliers de lignes — on montre
-        d'abord ce qui serait retiré.
+        Tout se DÉRIVE du nom — dossier, fichier clean, validateur, script — au
+        lieu des trois méthodes jumelles `_check_brma/riaa/bpi` + `_clean_*`, qui
+        étaient la sixième énumération parallèle des quatre sources. Le script
+        vit déjà dans `MISES_A_JOUR`, on ne le recopie plus.
         """
-        self._nettoyer_avec_apercu(
-            "RIAA",
-            ["src", "utils", "update_riaa.py"],
-            ["--clean"],
-        )
+        import importlib
 
-    def _clean_bpi(self):
-        """Aperçu (dry-run) du nettoyage BPI, puis application sur confirmation."""
-        self._nettoyer_avec_apercu(
-            "BPI",
-            ["src", "utils", "update_bpi.py"],
-            ["--clean"],
-        )
+        folder = nom.lower()
+        script = ["src", "utils", MISES_A_JOUR[nom].script]
 
-    def _clean_brma(self):
-        """Aperçu (dry-run) du nettoyage BRMA, puis application sur confirmation."""
-        self._nettoyer_avec_apercu(
-            "BRMA",
-            ["src", "utils", "update_brma.py"],
-            ["--dedup"],
+        def importer():
+            mod = importlib.import_module(f"src.utils.{folder}_validator")
+            return getattr(mod, f"validate_{folder}_csv"), mod.format_report
+
+        self._valider_source(
+            nom,
+            folder,
+            f"certif_{folder}.csv",
+            importer,
+            lambda n=nom, s=script: self._nettoyer_avec_apercu(n, s, [self._ARG_NETTOYAGE[n]]),
+            script,
         )
 
     @staticmethod
@@ -1414,8 +1387,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
                 self.after(0, montrer)
             except OSError as e:
-                logger.error(f"Erreur nettoyage {source} : {e}")
-                self._set_progress(f"❌ Erreur nettoyage {source} : {e}")
+                logger.exception(f"Nettoyage du CSV {source}")
+                self._signaler_erreur(f"Nettoyage {source}", f"Erreur nettoyage {source} : {e}")
 
         start_worker(run)
 
@@ -1466,8 +1439,8 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             from src.scrapers.cdp_chrome import ensure_cdp_chrome
 
             return ensure_cdp_chrome()
-        except Exception as e:
-            logger.error(f"Préparation CDP échouée : {e}")
+        except Exception:
+            logger.exception("Préparation du Chrome de debug (CDP)")
             return None
 
     def _executer_maj(self, nom: str) -> tuple[int, str]:
@@ -1626,19 +1599,24 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         """
 
         def travail():
-            for nom, (dossier, brut) in _BRUTS_PAR_SOURCE.items():
+            for nom in _BRUTS_PAR_SOURCE:
                 if stop_requested() or self._ferme:
                     return
-                self._analyser_trous(nom, dossier, brut)
+                self._analyser_trous(nom)
             # UN seul rendu, sur le fil Tk : `_update_status` touche la textbox.
             self.after(0, self._update_status)
 
         self._demarrer("trous", travail, "Vérification des périodes manquantes")
 
-    def _analyser_trous(self, source_name: str, folder: str, filename: str) -> None:
+    def _analyser_trous(self, source_name: str) -> None:
         """Analyse le CSV BRUT d'UNE source (accumulation complète, avec sa
-        colonne de date native) — distinct de l'audit PAR ARTISTE."""
+        colonne de date native) — distinct de l'audit PAR ARTISTE.
+
+        Dossier et fichier viennent de `BRUTS_PAR_SOURCE` (le référentiel
+        partagé) : les recevoir en argument, c'était les redonner à l'appel
+        alors que la table les porte déjà."""
         try:
+            folder, filename = _BRUTS_PAR_SOURCE[source_name]
             csv_path = Path(DATA_PATH) / "certifications" / folder / filename
             if not csv_path.exists():
                 self._set_progress(f"❌ {source_name}: Fichier introuvable")

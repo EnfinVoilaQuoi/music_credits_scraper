@@ -86,6 +86,58 @@ class TestToutMettreAJourPasseParLaMemeTable:
             assert "_lancer_maj" in methode.__code__.co_names, nom
 
 
+class TestCheckSourceDerivDuNom:
+    """La sixième énumération : `_check_brma/riaa/bpi` + `_clean_*` étaient six
+    méthodes jumelles. Une seule, `_check_source`, dérive tout du nom."""
+
+    def _capture(self, nom):
+        from types import SimpleNamespace
+
+        captures = {}
+        stub = SimpleNamespace(
+            _ARG_NETTOYAGE=CertificationUpdateDialog._ARG_NETTOYAGE,
+            _valider_source=lambda *a: captures.update(valider=a),
+            _nettoyer_avec_apercu=lambda *a: captures.update(nettoyage=a),
+        )
+        CertificationUpdateDialog._check_source(stub, nom)
+        return captures
+
+    @pytest.mark.parametrize(
+        "nom,folder,arg",
+        [("BRMA", "brma", "--dedup"), ("RIAA", "riaa", "--clean"), ("BPI", "bpi", "--clean")],
+    )
+    def test_tout_se_derive_du_nom(self, nom, folder, arg):
+        cap = self._capture(nom)
+        source, dossier, fichier, importer, nettoyeur, script = cap["valider"]
+        assert source == nom
+        assert dossier == folder
+        assert fichier == f"certif_{folder}.csv"
+        assert script == ["src", "utils", MISES_A_JOUR[nom].script]
+        # Le validateur s'importe vraiment et expose ses deux fonctions.
+        valide, formate = importer()
+        assert callable(valide) and callable(formate)
+        # Le nettoyeur porte le bon argument (BRMA déduplique, les autres nettoient).
+        nettoyeur()
+        assert cap["nettoyage"] == (nom, script, [arg])
+
+    def test_les_jumelles_ont_disparu(self):
+        for mort in (
+            "_check_brma",
+            "_check_riaa",
+            "_check_bpi",
+            "_clean_brma",
+            "_clean_riaa",
+            "_clean_bpi",
+        ):
+            assert not hasattr(CertificationUpdateDialog, mort), mort
+
+    def test_analyser_trous_ne_reprend_plus_dossier_ni_fichier(self):
+        import inspect
+
+        params = list(inspect.signature(CertificationUpdateDialog._analyser_trous).parameters)
+        assert params == ["self", "source_name"], params
+
+
 class TestPeriodesManquantes:
     """La logique sortie de la fenêtre : 86 lignes de pandas, zéro widget.
 

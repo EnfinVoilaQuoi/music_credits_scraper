@@ -92,25 +92,35 @@ class RIAADatabaseUpdater:
 
     def get_last_update_date(self) -> datetime | None:
         """Date de la dernière certif connue — lue depuis certif_riaa.csv (le
-        fichier canonique alimentant le matcher), pas la base sqlite."""
+        fichier canonique alimentant le matcher), pas la base sqlite.
+
+        Fichier ABSENT → amorçage depuis la fin de la base historique (2017).
+        Fichier présent mais ILLISIBLE → `None` : le repli 2017 y faisait
+        repartir `update_missing_months` sur ~108 tranches mensuelles (des
+        heures de scrape) à cause d'un simple fichier corrompu, avec pour seul
+        signal une ligne de log.
+        """
+        if not CERTIF_CSV.exists():
+            return datetime(2017, 10, 1)
         try:
-            if CERTIF_CSV.exists():
-                # `.fillna("")` INDISPENSABLE (comme dans get_statistics juste en
-                # dessous) : sans lui une date vide arrive en NaN (un float) et
-                # `_riaa_iso` lève AttributeError — absent du `except` ci-dessous,
-                # donc l'exception traverse la méthode. Une seule ligne sans date
-                # (un palier scrapé sans date, cf. `_flatten_records`) suffirait à
-                # casser DÉFINITIVEMENT l'affichage de fraîcheur RIAA.
-                df = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna("")
-                dcol = next((c for c in df.columns if c.lower() == "certification_date"), None)
-                if dcol:
-                    isod = df[dcol].map(_riaa_iso)
-                    isod = isod[isod != ""]
-                    if len(isod):
-                        return datetime.strptime(isod.max(), "%Y-%m-%d")
+            # `.fillna("")` INDISPENSABLE (comme dans get_statistics juste en
+            # dessous) : sans lui une date vide arrive en NaN (un float) et
+            # `_riaa_iso` lève AttributeError — absent du `except` ci-dessous,
+            # donc l'exception traverse la méthode. Une seule ligne sans date
+            # (un palier scrapé sans date, cf. `_flatten_records`) suffirait à
+            # casser DÉFINITIVEMENT l'affichage de fraîcheur RIAA.
+            df = pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str).fillna("")
+            dcol = next((c for c in df.columns if c.lower() == "certification_date"), None)
+            if dcol:
+                isod = df[dcol].map(_riaa_iso)
+                isod = isod[isod != ""]
+                if len(isod):
+                    return datetime.strptime(isod.max(), "%Y-%m-%d")
         except (OSError, ValueError, KeyError, TypeError) as e:
             self.logger.error(f"Lecture dernière date (certif_riaa.csv) : {e}")
-        # Repli : fin de la base historique
+            return None
+        # Fichier présent, aucune date exploitable : le clean est vide ou sans
+        # colonne de date — on repart de la base historique, comme à l'amorçage.
         return datetime(2017, 10, 1)
 
     def update_from_scraped_data(self, data: list[dict]) -> tuple:
@@ -188,6 +198,12 @@ class RIAADatabaseUpdater:
         try:
             # Détermine la dernière date
             last_date = self.get_last_update_date()
+            if last_date is None:
+                self.logger.error(
+                    "certif_riaa.csv présent mais illisible : MàJ REFUSÉE (un repli "
+                    "sur 2017 rescraperait neuf ans sans le dire)"
+                )
+                return False
             self.logger.info(f"Dernière mise à jour: {last_date:%Y-%m-%d}")
 
             # Écart en JOURS : un trou < 30 j (ex. 28 j entre le 02/06 et fin juin)
@@ -331,31 +347,16 @@ class RIAADatabaseUpdater:
             self.update_missing_months()
 
         elif choice == "3":
-            start = input("Date début (MM/DD/YYYY): ").strip()
-            end = input("Date fin (MM/DD/YYYY): ").strip()
-
-            self.scraper = RIAAScraper(headless=False)
-            self.scraper.init_driver()
-
-            try:
-                results = self.scraper.scrape_by_date_range(start, end)
-                added, updated = self.update_from_scraped_data(results)
-                self.logger.info(f"Ajoutées: {added}, Mises à jour: {updated}")
-            finally:
-                self.scraper.close_driver()
+            # Même entrée que `--from/--to` : `fetch_periode` DÉCOUPE la fenêtre.
+            # L'ancien branchement appelait `scrape_by_date_range` d'un bloc —
+            # la route qui tronque à ~6 000 lignes sans le dire (2026-09-09).
+            start = input(f"Date début ({FORMAT_JOUR_CLI}): ").strip()
+            end = input(f"Date fin ({FORMAT_JOUR_CLI}): ").strip()
+            fetch_periode(start, end)
 
         elif choice == "4":
-            artist = input("Nom de l'artiste: ").strip()
-
-            self.scraper = RIAAScraper(headless=False)
-            self.scraper.init_driver()
-
-            try:
-                results = self.scraper.scrape_by_artist(artist)
-                added, updated = self.update_from_scraped_data(results)
-                self.logger.info(f"Ajoutées: {added}, Mises à jour: {updated}")
-            finally:
-                self.scraper.close_driver()
+            # Même entrée que `--artist` (timeline des paliers incluse).
+            fetch_artist(input("Nom de l'artiste: ").strip())
 
     def get_statistics(self) -> dict:
         """Statistiques lues depuis certif_riaa.csv (le clean) — plus de riaa.db."""

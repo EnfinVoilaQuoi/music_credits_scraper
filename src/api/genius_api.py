@@ -26,7 +26,6 @@ logger = get_logger(__name__)
 # (API JSON, Bearer) et `genius.com/api/*` (route web derrière Cloudflare).
 # Elles cassent pour des raisons sans rapport — ne pas les confondre.
 _SOURCE = "genius_api"
-_SOURCE_WEB = "genius_scrape"
 #: L'API Genius n'a pas de « pas au catalogue » : un 404 y serait une rupture.
 _ABSENT: tuple[int, ...] = ()
 
@@ -650,87 +649,159 @@ class GeniusAPI:
 
         return changed
 
-    # ── Import d'album complet via l'API WEB genius.com ───────────────────────
-    # /artists/{id}/songs OMET les morceaux aux paroles 'incomplete' (cas
-    # "Vas-y chante" : 2/14 récupérés). La page album les liste tous →
-    # genius.com/api/albums/{id}/tracks. Résolution URL→id : recherche d'album
-    # + match d'URL exact (ne PAS regexer albums/\d+ dans le HTML de la page :
-    # le premier id venu appartient aux albums recommandés).
+    # ── Import d'un album par URL (vue Albums) ────────────────────────────────
+    # Sert à AJOUTER les morceaux absents de la base (ceux aux paroles
+    # incomplètes, que `/artists/{id}/songs` omet — « Vas-y chante » : 2/14).
+    #
+    # CASSÉ du 2026-08-24 au 2026-09-15 : la résolution URL → id passait par
+    # `genius.com/api/search/album`, derrière Cloudflare (403). L'API
+    # AUTHENTIFIÉE n'a pas de recherche d'album (`/search/album`, `/search/multi`
+    # et `/artists/{id}/albums` rendent 403 « forbidden for current scope »,
+    # mesuré), mais une route INDIRECTE existe : `/search` rend des MORCEAUX,
+    # `/songs/{id}` porte `song.album.url`, et `/albums/{id}` + `/albums/{id}/
+    # tracks` passent. Mesuré sur Josman « M.A.N » : trouvé au 2ᵉ détail avec
+    # la requête « Josman M.A.N » ; le slug entier (7 mots) ne rendait aucun hit
+    # du bon artiste — d'où des requêtes de plus en plus COURTES, et le filtre
+    # GRATUIT sur `primary_artist` du hit avant tout appel détail.
+    # (Ne PAS regexer `albums/\d+` dans le HTML d'une page : le premier id venu
+    # appartient aux albums recommandés.)
 
-    _WEB_HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    }
+    #: Détails `/songs/{id}` au plus par requête de recherche (~1 s chacun).
+    _ALBUM_MAX_DETAILS = 10
+
+    @staticmethod
+    def _album_url_parts(album_url: str) -> tuple[str, str, str] | None:
+        """(url normalisée, slug artiste, slug album) ou None si ce n'est pas
+        une URL d'album Genius."""
+        url = (album_url or "").split("?")[0].strip().rstrip("/")
+        marqueur = "/albums/"
+        if marqueur not in url:
+            return None
+        reste = url.split(marqueur, 1)[1]
+        if "/" not in reste:
+            return None
+        artiste, album = reste.split("/", 1)
+        if not artiste or not album or "/" in album:
+            return None
+        return url, artiste, album
+
+    @staticmethod
+    def _album_queries(artiste_slug: str, album_slug: str) -> list[str]:
+        """Requêtes `/search` candidates, de la plus précise à la plus courte.
+
+        Les slugs perdent la ponctuation (« M.A.N » → « M-a-n ») : on cherche
+        par MOTS. Le slug entier noie souvent la recherche ; on retente avec
+        les 3 puis les 2 premiers mots de l'album, puis l'artiste seul."""
+        artiste = artiste_slug.replace("-", " ")
+        mots = [m for m in album_slug.split("-") if m]
+        requetes = []
+        for n in (len(mots), 3, 2, 0):
+            q = " ".join([artiste, *mots[:n]]).strip()
+            if q and q not in requetes:
+                requetes.append(q)
+        return requetes
+
+    @staticmethod
+    def _meme_artiste(hit: dict, artiste_slug: str) -> bool:
+        """`primary_artist` du hit ≈ slug d'artiste de l'URL (par mots entiers,
+        insensible à la casse et aux tirets)."""
+        from src.utils.title_matching import names_match_as_words
+
+        nom = ((hit.get("result") or {}).get("primary_artist") or {}).get("name") or ""
+        return names_match_as_words(nom, artiste_slug.replace("-", " "))
+
+    def _resolve_album_id(self, url: str, artiste_slug: str, album_slug: str) -> int | None:
+        """URL d'album → id, via les morceaux : `/search` puis `/songs/{id}`
+        jusqu'à ce que `song.album.url` soit l'URL demandée."""
+        headers = {"Authorization": f"Bearer {GENIUS_API_KEY}"}
+        wanted = url.lower()
+        vus: set[int] = set()
+        for q in self._album_queries(artiste_slug, album_slug):
+            try:
+                resp = source_usage.requests_get(
+                    _SOURCE,
+                    "https://api.genius.com/search",
+                    params={"q": q},
+                    headers=headers,
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                hits = (resp.json().get("response") or {}).get("hits") or []
+            except (requests.RequestException, ValueError, TypeError) as e:
+                logger.error(f"Recherche Genius « {q} » échouée: {e}")
+                return None
+            details = 0
+            for hit in hits:
+                if details >= self._ALBUM_MAX_DETAILS:
+                    break
+                sid = (hit.get("result") or {}).get("id")
+                if not sid or sid in vus or not self._meme_artiste(hit, artiste_slug):
+                    continue
+                vus.add(sid)
+                details += 1
+                try:
+                    s_resp = source_usage.requests_get(
+                        _SOURCE, f"https://api.genius.com/songs/{sid}", headers=headers, timeout=20
+                    )
+                    s_resp.raise_for_status()
+                    album = ((s_resp.json().get("response") or {}).get("song") or {}).get(
+                        "album"
+                    ) or {}
+                except (requests.RequestException, ValueError, TypeError) as e:
+                    logger.warning(f"Détail Genius #{sid} échoué: {e}")
+                    continue
+                if (album.get("url") or "").split("?")[0].rstrip("/").lower() == wanted:
+                    logger.info(
+                        f"🎼 Album Genius résolu : {url} → #{album.get('id')} "
+                        f"(requête « {q} », {details} détail(s))"
+                    )
+                    return album.get("id")
+        logger.error(f"Album introuvable via /search : {url} ({len(vus)} morceau(x) examinés)")
+        return None
 
     def get_album_tracks_from_url(self, album_url: str) -> dict[str, Any] | None:
         """Tracklist COMPLÈTE d'un album Genius depuis son URL publique.
 
         Returns:
-            {'album': {id, name, artist, release_date, url},
+            {'album': {id, name, artist, release_date, url, cover_art_url},
              'tracks': [{genius_id, title, track_number, primary_artist, url,
-                         lyrics_state}]}
+                         lyrics_state, song_art_image_url}]}
             ou None si introuvable.
         """
-        url = (album_url or "").split("?")[0].strip().rstrip("/")
-        if "/albums/" not in url:
+        parts = self._album_url_parts(album_url)
+        if parts is None:
             logger.error(f"URL d'album Genius invalide: {album_url!r}")
             return None
+        url, artiste_slug, album_slug = parts
 
-        # 1. URL → album id, via la recherche d'albums (match d'URL exact)
-        slug_query = url.rsplit("/", 1)[-1].replace("-", " ")
-        try:
-            resp = source_usage.requests_get(
-                _SOURCE_WEB,
-                "https://genius.com/api/search/album",
-                params={"q": slug_query},
-                headers=self._WEB_HEADERS,
-                timeout=20,
-            )
-            resp.raise_for_status()
-            sections = (resp.json().get("response") or {}).get("sections") or []
-            hits = sections[0].get("hits", []) if sections else []
-        except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as e:
-            logger.error(f"Recherche album Genius échouée ({slug_query!r}): {e}")
-            return None
+        with source_usage.observe(_SOURCE, label=f"album:{artiste_slug}/{album_slug}") as obs:
+            album_id = self._resolve_album_id(url, artiste_slug, album_slug)
+            if not album_id:
+                obs.absent("aucun morceau de la recherche ne mène à cet album")
+                return None
 
-        album_id = None
-        wanted = url.lower()
-        for h in hits:
-            res = h.get("result") or {}
-            if (res.get("url") or "").split("?")[0].rstrip("/").lower() == wanted:
-                album_id = res.get("id")
-                break
-        if not album_id and len(hits) == 1:
-            album_id = (hits[0].get("result") or {}).get("id")
-        if not album_id:
-            logger.error(
-                f"Album introuvable via la recherche: {url} — candidats: "
-                f"{[(h.get('result') or {}).get('url') for h in hits[:5]]}"
-            )
-            return None
-
-        # 2. Métadonnées + tracklist
-        try:
-            alb_resp = source_usage.requests_get(
-                _SOURCE_WEB,
-                f"https://genius.com/api/albums/{album_id}",
-                headers=self._WEB_HEADERS,
-                timeout=20,
-            )
-            album = (alb_resp.json().get("response") or {}).get("album") or {}
-            tr_resp = source_usage.requests_get(
-                _SOURCE_WEB,
-                f"https://genius.com/api/albums/{album_id}/tracks",
-                headers=self._WEB_HEADERS,
-                timeout=20,
-            )
-            raw_tracks = (tr_resp.json().get("response") or {}).get("tracks") or []
-        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-            logger.error(f"Tracklist album Genius {album_id} échouée: {e}")
-            return None
+            headers = {"Authorization": f"Bearer {GENIUS_API_KEY}"}
+            try:
+                alb_resp = source_usage.requests_get(
+                    _SOURCE,
+                    f"https://api.genius.com/albums/{album_id}",
+                    headers=headers,
+                    timeout=20,
+                )
+                alb_resp.raise_for_status()
+                album = (alb_resp.json().get("response") or {}).get("album") or {}
+                tr_resp = source_usage.requests_get(
+                    _SOURCE,
+                    f"https://api.genius.com/albums/{album_id}/tracks",
+                    headers=headers,
+                    params={"per_page": 50},
+                    timeout=20,
+                )
+                tr_resp.raise_for_status()
+                raw_tracks = (tr_resp.json().get("response") or {}).get("tracks") or []
+            except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+                logger.error(f"Tracklist album Genius {album_id} échouée: {e}")
+                return None
 
         tracks = []
         for t in raw_tracks:

@@ -117,6 +117,7 @@ scripts/*
 !scripts/bubble_prod.py
 !scripts/bubble_compare.py
 !scripts/structure.py
+!scripts/timeline.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

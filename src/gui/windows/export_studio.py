@@ -1,9 +1,10 @@
 """Fenêtre « Export studio » — générateurs de visuels par produit final.
 
-Trois onglets : **Analyse de Projet** (8 générateurs prévus, « Bubble Prod »,
-« Bubble Feat » et « Structure » sont câblés), **Timeline** et **Stats en Vrac** (à venir).
-L'export JSON historique (bouton « Exporter » d'origine) vit désormais ici, en
-bas de fenêtre, et délègue à `app._export_data()` (inchangé).
+Quatre onglets : **Analyse de Projet** (8 générateurs prévus, « Bubble Prod »
+et « Structure » sont câblés), **Timeline** (`panels/timeline_panel.py`, qui
+porte aussi « Télécharger les images… »), **Stats en Vrac** (à venir) et
+**Export Brut** — l'export JSON historique (bouton « Exporter » d'origine), qui
+délègue à `app._export_data()` (inchangé).
 
 Couche mince : tout le moteur est dans `src.dataviz` (pilotable aussi via
 `scripts/bubble_prod.py`). Threads via `start_worker` (contrat lifecycle.py) ;
@@ -28,6 +29,7 @@ from src.dataviz.bubble_style_io import load_style as load_bubble_style
 from src.dataviz.structure import generate_structure
 from src.dataviz.structure_style_io import load_style
 from src.gui.dialogs import report
+from src.gui.panels.timeline_panel import TimelinePanel
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -55,12 +57,11 @@ class ExportStudioWindow:
 
         self.window = ctk.CTkToplevel(app.root)
         self.window.title("Export studio")
-        self.window.geometry("640x560")
+        self.window.geometry("900x640")
         self.window.transient(app.root)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_tabs()
-        self._build_footer()
         self.refresh_albums()
 
     # ── Construction ───────────────────────────────────────────────────────────
@@ -71,11 +72,27 @@ class ExportStudioWindow:
         tab_project = self.tabview.add("Analyse de Projet")
         tab_timeline = self.tabview.add("Timeline")
         tab_stats = self.tabview.add("Stats en Vrac")
+        tab_brut = self.tabview.add("Export Brut")
 
-        for tab in (tab_timeline, tab_stats):
-            ctk.CTkLabel(tab, text="À venir…", text_color="gray", font=("Arial", 14)).pack(
-                expand=True, pady=40
-            )
+        ctk.CTkLabel(tab_stats, text="À venir…", text_color="gray", font=("Arial", 14)).pack(
+            expand=True, pady=40
+        )
+        self.timeline_panel = TimelinePanel(
+            tab_timeline, self.app, safe_after=self._safe_after, media_command=self._start_media
+        )
+        self.media_button = self.timeline_panel.media_button
+
+        # ── Onglet Export Brut : les DONNÉES, pas un visuel ──
+        ctk.CTkLabel(
+            tab_brut,
+            text="Export des données de l'artiste (discographie, crédits, paroles, streams…)\n"
+            "en un fichier JSON — les morceaux désactivés sont exclus.",
+            text_color="gray",
+            justify="left",
+        ).pack(anchor="w", padx=12, pady=(16, 8))
+        ctk.CTkButton(
+            tab_brut, text="Export JSON (données)…", width=220, command=self.app._export_data
+        ).pack(anchor="w", padx=12)
 
         # ── Onglet Analyse de Projet ──
         album_row = ctk.CTkFrame(tab_project, fg_color="transparent")
@@ -146,28 +163,10 @@ class ExportStudioWindow:
         self.status_label = ctk.CTkLabel(tab_project, text="", text_color="gray", anchor="w")
         self.status_label.pack(fill="x", padx=12, pady=(0, 8))
 
-    def _build_footer(self):
-        footer = ctk.CTkFrame(self.window, fg_color="transparent")
-        footer.pack(fill="x", padx=10, pady=(0, 10))
-        # Export JSON packé en premier → le plus à droite ; « Télécharger les
-        # images… » packé ensuite → à sa gauche.
-        ctk.CTkButton(
-            footer,
-            text="Export JSON (données)…",
-            width=200,
-            command=self.app._export_data,
-        ).pack(side="right")
-        self.media_button = ctk.CTkButton(
-            footer,
-            text="Télécharger les images…",
-            width=200,
-            command=self._start_media,
-        )
-        self.media_button.pack(side="right", padx=(0, 8))
-
     # ── Données ────────────────────────────────────────────────────────────────
     def refresh_albums(self):
         """(Re)peuple la liste d'albums depuis l'artiste courant (appelé au refocus)."""
+        self.timeline_panel.refresh()
         artist = getattr(self.app, "current_artist", None)
         if artist is None or not artist.tracks:
             self.album_menu.configure(values=[""])
@@ -395,7 +394,7 @@ class ExportStudioWindow:
             return
         self._stop = False
         self.media_button.configure(state="disabled")
-        self.status_label.configure(text="Téléchargement des images…")
+        self.timeline_panel.status_label.configure(text="Téléchargement des images…")
         tracks = list(artist.tracks)
 
         def worker():
@@ -404,7 +403,9 @@ class ExportStudioWindow:
                 from src.utils.media_enricher import apply_images
 
                 def progress(msg):
-                    self._safe_after(lambda m=msg: self.status_label.configure(text=m))
+                    self._safe_after(
+                        lambda m=msg: self.timeline_panel.status_label.configure(text=m)
+                    )
 
                 media_report = apply_images(
                     artist,
@@ -439,9 +440,9 @@ class ExportStudioWindow:
         except Exception:
             pass
         if self._stop:
-            self.status_label.configure(text="Téléchargement interrompu")
+            self.timeline_panel.status_label.configure(text="Téléchargement interrompu")
         else:
-            self.status_label.configure(
+            self.timeline_panel.status_label.configure(
                 text=f"✅ Images : {media_report.total_downloaded()} téléchargée(s)"
             )
         report.show_scrollable_report(self.app, "Téléchargement des images", media_report.summary())
@@ -456,7 +457,7 @@ class ExportStudioWindow:
             self.media_button.configure(state="normal")
         except Exception:
             pass
-        self.status_label.configure(text="❌ Échec du téléchargement")
+        self.timeline_panel.status_label.configure(text="❌ Échec du téléchargement")
         messagebox.showerror("Export studio", message)
 
     def _on_error(self, message: str):

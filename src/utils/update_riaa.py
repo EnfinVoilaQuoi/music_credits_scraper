@@ -616,20 +616,6 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
     # étiquetés US, faute de pouvoir les distinguer sans re-scraper.
     vide = df["Award_Programme"].astype(str).str.strip() == ""
     df.loc[vide, "Award_Programme"] = df.loc[vide, "Certification_Type"].map(programme_riaa)
-    # Unités RECALCULÉES pour toutes les lignes, et non seulement complétées :
-    # elles dépendent de la date, du format et de la famille, donc une valeur
-    # écrite avant que ces colonnes existent serait au barème d'aujourd'hui pour
-    # une certification qui n'y a jamais été soumise.
-    df["Units"] = [
-        _texte_unites(niveau, date, fmt, fam)
-        for niveau, date, fmt, fam in zip(
-            df["Certification_Type"],
-            df["Certification_Date"],
-            df["Format_Type"],
-            df["Award_Family"],
-            strict=True,
-        )
-    ]
 
     def norm(s):
         return re.sub(r"\s+", " ", str(s)).strip().upper()
@@ -646,10 +632,68 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
         + df["Certification_Date"].map(_riaa_iso)
     )
     avant = len(df)
-    df = df.drop_duplicates("_k", keep="first").drop(columns="_k")
+    df = _combiner_representations(df).drop(columns="_k")
     if report is not None:
         report["duplicates_removed"] = avant - len(df)
+
+    # Unités RECALCULÉES pour toutes les lignes, et non seulement complétées :
+    # elles dépendent de la date, du format et de la FAMILLE, donc une valeur
+    # écrite avant que ces colonnes existent serait au barème d'aujourd'hui pour
+    # une certification qui n'y a jamais été soumise. APRÈS la combinaison : la
+    # famille peut venir de l'autre représentation de la même certification.
+    df["Units"] = [
+        _texte_unites(niveau, date, fmt, fam)
+        for niveau, date, fmt, fam in zip(
+            df["Certification_Type"],
+            df["Certification_Date"],
+            df["Format_Type"],
+            df["Award_Family"],
+            strict=True,
+        )
+    ]
     return df
+
+
+def _combiner_representations(df: pd.DataFrame) -> pd.DataFrame:
+    """Une ligne par clé `_k`, qui COMBINE ses représentations au lieu d'en
+    garder une.
+
+    Le brut porte souvent la même certification deux fois : la ligne de
+    l'import historique (H3nrycrosby — date « October 17, 2017 », `Release_Date`,
+    `Genre`, `Group_Type`, mais AUCUNE famille d'award) et celle du scraper
+    (date ISO, `Award_Family` lue sur le badge, mais sans date de sortie ni
+    genre). `keep="first"` gardait l'import. Mesuré le 2026-09-15, après le
+    balayage 2000-2026 : **17 150 lignes du clean sans famille alors que le
+    brut l'avait**, dont 12 401 singles — là où la famille (physique `ST` /
+    numérique `DI`) décide des seuils d'époque de `riaa_units`. Le run avait
+    ramené l'information ; le clean ne la servait pas.
+
+    La ligne AVEC famille sert de base (elle vient du site, le plus récent
+    lecteur), chaque colonne vide y est comblée par la première autre
+    représentation qui la renseigne. Ordre de première apparition conservé,
+    donc stable d'un rebuild à l'autre.
+    """
+    if not df["_k"].duplicated().any():
+        return df
+    avec_famille = df["Award_Family"].astype(str).str.strip() != ""
+    # Tri STABLE : la ligne à famille passe devant sa jumelle, rien d'autre ne
+    # bouge — `groupby(sort=False).first()` prend alors la première valeur non
+    # vide de chaque colonne.
+    ordre = df.assign(_sans=~avec_famille).sort_values("_sans", kind="stable")
+    colonnes = [c for c in df.columns if c != "_k"]
+    combine = (
+        ordre[colonnes + ["_k"]]
+        .replace("", pd.NA)
+        .groupby("_k", sort=False, dropna=False)
+        .first()
+        .reset_index()
+        .fillna("")
+    )
+    # `groupby(sort=False)` ordonne par première apparition dans `ordre`, qui a
+    # été trié : on rétablit l'ordre d'apparition dans `df`.
+    rang = {k: i for i, k in enumerate(df["_k"].drop_duplicates())}
+    combine["_rang"] = combine["_k"].map(rang)
+    return combine.sort_values("_rang", kind="stable").drop(columns="_rang")[df.columns]
 
 
 def _compter_changements(colonne, canoniser) -> dict[str, int]:
@@ -677,6 +721,16 @@ def _write_riaa_meta(
         except (OSError, ValueError):
             count = None
     cert_store.ecrire_fraicheur(RIAA_META, source, count=count, partial=partial)
+
+
+def _compter_clean() -> int:
+    """Nombre de lignes du clean sur disque (0 s'il n'existe pas encore)."""
+    if not CERTIF_CSV.exists():
+        return 0
+    try:
+        return len(pd.read_csv(CERTIF_CSV, encoding="utf-8-sig", dtype=str))
+    except (OSError, ValueError):
+        return 0
 
 
 def _merge_certif_csv(new_rows: list[dict], backup: bool = True, *, partial: str = "") -> tuple:
@@ -836,7 +890,14 @@ def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
     print(f"=== RIAA, période {jour_cli(d0)} → {jour_cli(d1)} (découpage automatique) ===")
 
     curseur, jours = d1, min((d1 - d0).days, _JOURS_DEPART)
-    total_vues = total_ajoutees = tranches = fusions = total_clean = 0
+    total_vues = total_ajoutees = tranches = fusions = 0
+    # Deux comptes, et le bandeau les DISTINGUE : les lignes ajoutées au BRUT
+    # (dédup exacte — une certification déjà connue par l'import historique y
+    # entre une seconde fois dès que le site la représente autrement, famille
+    # d'award ou date ISO) et les CERTIFICATIONS nouvelles dans le clean. Le
+    # balayage 2000-2026 du 2026-09-15 annonçait « 11 504 ajoutées » : c'était
+    # le brut ; le clean n'en comptait que 2 779, et rien ne le disait.
+    clean_depart = total_clean = _compter_clean()
     irreductibles: list[date] = []
     non_lues: list[tuple[date, date]] = []
     essais = 0
@@ -849,7 +910,7 @@ def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
         )
         vues = len(resultats)
         total_vues += vues
-        ajoutees = 0
+        ajoutees = nouvelles = 0
 
         # « PAS LU » n'est ni « vide » ni « tronqué ». Sans ce troisième état, une
         # page non rendue passait pour une période creuse : le curseur avançait
@@ -875,15 +936,18 @@ def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
             # motif. Un balayage tué en route laisse donc « en cours », ce qui
             # est exactement vrai — c'est ce que le panneau doit montrer plutôt
             # qu'une coche verte héritée de la dernière tranche écrite.
+            clean_avant = total_clean
             total_clean, ajoutees = _merge_certif_csv(
                 _flatten_records(resultats),
                 backup=(fusions == 0),
                 partial=f"balayage {d0} → {d1} en cours (tranche {tranches})",
             )
+            nouvelles = total_clean - clean_avant
             fusions += 1
             total_ajoutees += ajoutees
         print(
-            f"  {borne} → {curseur} : {vues} vue(s), {ajoutees} ajoutée(s)"
+            f"  {jour_cli(borne)} → {jour_cli(curseur)} : {vues} vue(s), "
+            f"{nouvelles} nouvelle(s) certif, {ajoutees:+d} ligne(s) au brut"
             + (" — TRONQUÉE" if scraper.tronque else "")
         )
 
@@ -914,7 +978,8 @@ def fetch_periode(debut: str, fin: str, *, cible: int = _CIBLE_LIGNES) -> bool:
 
     print(
         f"✅ {tranches} tranche(s), {total_vues} vue(s), "
-        f"{total_ajoutees} ajoutée(s) (total {total_clean})"
+        f"{total_clean - clean_depart} nouvelle(s) certification(s) "
+        f"(clean {clean_depart} → {total_clean}), {total_ajoutees:+d} ligne(s) au brut"
     )
     motifs = []
     if irreductibles:

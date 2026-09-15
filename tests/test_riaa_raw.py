@@ -563,3 +563,51 @@ class TestProgrammeEtUnites:
         # le scraper « Platinum ». Le fichier ne garde plus les deux formes.
         assert par_titre["U"]["Certification_Type"] == "2x Platinum"
         assert par_titre["U"]["Units"] == "2000000"
+
+
+class TestDeuxRepresentationsUneCertification:
+    """Le brut porte souvent la même certification deux fois : la ligne de
+    l'import historique (date « October 17, 2017 », `Release_Date`, `Genre`,
+    pas de famille) et celle du scraper (ISO, `Award_Family`, sans sortie ni
+    genre). Le clean COMBINE au lieu de garder la première — mesuré le
+    2026-09-15 : 17 150 lignes du clean sans famille alors que le brut l'avait."""
+
+    def _deux(self):
+        historique = _row(date="October 17, 2017")
+        historique.update({"Release_Date": "JANUARY 6, 2017", "Genre": "POP", "Award_Family": ""})
+        site = _row(date="2017-10-17")
+        site.update({"Release_Date": "", "Genre": "", "Award_Family": "DI"})
+        return historique, site
+
+    def test_une_seule_ligne_qui_porte_les_deux(self):
+        historique, site = self._deux()
+        clean = u._clean_from_raw(u._align_columns(pd.DataFrame([historique, site])))
+        assert len(clean) == 1
+        (ligne,) = clean.to_dict("records")
+        assert ligne["Award_Family"] == "DI"
+        assert ligne["Release_Date"] == "JANUARY 6, 2017"
+        assert ligne["Genre"] == "POP"
+
+    def test_lordre_du_brut_ne_change_rien(self):
+        historique, site = self._deux()
+        a = u._clean_from_raw(u._align_columns(pd.DataFrame([historique, site])))
+        b = u._clean_from_raw(u._align_columns(pd.DataFrame([site, historique])))
+        assert a.to_dict("records") == b.to_dict("records")
+
+    def test_les_unites_suivent_la_famille_combinee(self):
+        """Single numérique de 2005 : Gold = 100 000 à l'époque, pas 500 000.
+        La famille vient de la ligne du site, les unités doivent la voir."""
+        historique = _row(date="March 1, 2005")
+        historique.update({"Award_Family": ""})
+        site = _row(date="2005-03-01")
+        site.update({"Award_Family": "DI"})
+        clean = u._clean_from_raw(u._align_columns(pd.DataFrame([historique, site])))
+        (ligne,) = clean.to_dict("records")
+        assert ligne["Units"] == "100000"
+
+    def test_ordre_de_premiere_apparition_conserve(self):
+        lignes = [_row(title="A"), _row(title="B"), _row(title="A")]
+        lignes[2]["Award_Family"] = "ST"
+        clean = u._clean_from_raw(u._align_columns(pd.DataFrame(lignes)))
+        assert list(clean["Title"]) == ["A", "B"]
+        assert list(clean["Award_Family"]) == ["ST", ""]

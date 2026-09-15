@@ -29,6 +29,7 @@ from src.utils.cert_normalize import (
     FORMAT_JOUR_CLI,
     jour_cli,
     lire_jour_cli,
+    normalize_text,
     programme_riaa,
     riaa_level,
     riaa_units,
@@ -620,10 +621,15 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
     def norm(s):
         return re.sub(r"\s+", " ", str(s)).strip().upper()
 
+    # Artiste et titre par `normalize_text` — la normalisation du MATCHER, pas
+    # un simple upper : « #BEAUTIFUL » et « BEAUTIFUL », « FAST CAR (FEAT.
+    # DAKOTA) » et « FAST CAR FEAT. DAKOTA » sont la même certification écrite
+    # par l'import et par le site (mesuré le 2026-09-15 : 3 clés, 6 lignes, et
+    # rien d'autre ne bouge sur 48 254). Format et niveau restent en upper.
     df["_k"] = (
-        df["Artist"].map(norm)
+        df["Artist"].map(normalize_text)
         + "|"
-        + df["Title"].map(norm)
+        + df["Title"].map(normalize_text)
         + "|"
         + df["Format_Type"].map(norm)
         + "|"

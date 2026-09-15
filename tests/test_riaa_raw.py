@@ -611,3 +611,15 @@ class TestDeuxRepresentationsUneCertification:
         clean = u._clean_from_raw(u._align_columns(pd.DataFrame(lignes)))
         assert list(clean["Title"]) == ["A", "B"]
         assert list(clean["Award_Family"]) == ["ST", ""]
+
+    def test_la_cle_du_clean_ignore_la_ponctuation_du_titre(self):
+        """« #BEAUTIFUL » (site) et « BEAUTIFUL » (import), « FAST CAR (FEAT.
+        DAKOTA) » et « FAST CAR FEAT. DAKOTA » : la même certification. La clé
+        passe par `normalize_text`, comme le matcher — un upper ne suffisait pas
+        (3 clés doublées sur 48 254, mesuré le 2026-09-15)."""
+        site = _row(title="#BEAUTIFUL", level="2x Platinum", date="2017-07-21")
+        site["Award_Family"] = "DI"
+        imp = _row(title="BEAUTIFUL", level="2x Platinum", date="July 21, 2017")
+        clean = u._clean_from_raw(u._align_columns(pd.DataFrame([imp, site])))
+        assert len(clean) == 1
+        assert clean.iloc[0]["Award_Family"] == "DI"

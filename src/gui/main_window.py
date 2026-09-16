@@ -326,6 +326,7 @@ class MainWindow:
         self.ALBUM_COLUMNS = (
             "Album",
             "Date sortie",
+            "Type",
             "Morceaux",
             "Crédits",
             "Paroles",

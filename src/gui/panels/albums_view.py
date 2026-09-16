@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from src.enrichment.album_types import LIBELLES, RECORD_TYPES
 from src.enrichment.observation import Observation
 from src.gui import albums_grouping, helpers
 from src.gui.panels import tracks_table
@@ -24,6 +25,10 @@ def configure_tree_for_albums(app):
     widths = {
         "Album": (260, "w"),
         "Date sortie": (90, "w"),
+        # Nature du disque telle que le distributeur la déclare (Deezer, e26) ou
+        # saisie au clic droit (« ✎ »). VIDE sans donnée : ici c'est une donnée,
+        # pas un libellé de visuel — un « Album » par défaut mentirait.
+        "Type": (70, "center"),
         "Morceaux": (80, "center"),
         "Crédits": (70, "center"),
         "Paroles": (80, "center"),
@@ -105,6 +110,27 @@ def unset_album_view_pref(app, key: str):
     save_album_view_prefs(app, prefs)
     if removed:
         logger.info(f"👁 Ligne d'album rétablie : « {removed.get('label', key)} »")
+    populate_albums_table(app)
+
+
+def type_album_str(db: dict) -> str:
+    """Cellule « Type » : libellé du `record_type`, « ✎ » si saisi à la main, vide sinon."""
+    rt = db.get("record_type") if db else None
+    if not rt:
+        return ""
+    libelle = LIBELLES.get(rt, rt)
+    return f"{libelle} ✎" if db.get("record_type_source") == "manual" else libelle
+
+
+def set_album_record_type(app, album: str, record_type: str | None):
+    """Saisie manuelle de la nature du disque (clic droit) : `manual` prime sur
+    Deezer et n'est jamais écrasé par un run ; `None` efface la saisie."""
+    ok = app.data_manager.set_album_record_type(
+        app.current_artist.id, album, record_type, source="manual"
+    )
+    if not ok:
+        messagebox.showerror("Type d'album", f"Écriture impossible pour « {album} ».")
+        return
     populate_albums_table(app)
 
 
@@ -236,6 +262,8 @@ def populate_albums_table(app):
             else ""
         )
 
+        type_str = type_album_str(db)
+
         all_disabled = n > 0 and n_disabled == n
         item = app.tree.insert(
             "",
@@ -244,6 +272,7 @@ def populate_albums_table(app):
             values=(
                 album,
                 date_str,
+                type_str,
                 n_display,
                 credits,
                 f"{lyrics}/{n}",
@@ -512,6 +541,20 @@ def on_album_right_click(app, event):
             label="🔢 Numéroter les pistes (Genius)",
             command=lambda a=album, t=tracks: number_album_tracks(app, a, t),
         )
+        context_menu.add_separator()
+        # Nature du disque, à la main : ce que Deezer n'a pas (ou a mal) vu.
+        type_menu = tkinter.Menu(context_menu, tearoff=0)
+        for rt in RECORD_TYPES:
+            type_menu.add_command(
+                label=LIBELLES[rt],
+                command=lambda a=album, r=rt: set_album_record_type(app, a, r),
+            )
+        type_menu.add_separator()
+        type_menu.add_command(
+            label="Effacer la saisie (retour à Deezer)",
+            command=lambda a=album: set_album_record_type(app, a, None),
+        )
+        context_menu.add_cascade(label="💿 Type (Album / EP / Single…)", menu=type_menu)
         context_menu.add_separator()
         # Classement VISUEL (réversible, base intacte) — pour les albums
         # hôtes (feats) ou compilations qu'on ne veut pas voir en ligne

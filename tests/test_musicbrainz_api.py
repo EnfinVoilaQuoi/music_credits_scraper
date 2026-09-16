@@ -212,3 +212,99 @@ class TestContratDuModule:
             api.close()
         assert "MusicCreditsScraper" in ua
         assert "(" in ua and ")" in ua  # contact exigé par MusicBrainz
+
+
+# ── Transport : le 503 est un ALÉA, pas un verdict ───────────────────────────
+
+
+class _Reponse:
+    def __init__(self, status, payload=None, retry_after=None):
+        self.status_code = status
+        self._payload = payload
+        self.headers = {} if retry_after is None else {"Retry-After": retry_after}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+def _client(monkeypatch, reponses):
+    """Client dont la session sert `reponses` dans l'ordre, sans réseau ni attente."""
+    import src.api.musicbrainz_api as mb
+
+    monkeypatch.setattr(mb.time, "sleep", lambda s: None)
+    api = mb.MusicBrainzAPI()
+    file = list(reponses)
+    api.session.get = lambda *a, **k: file.pop(0)
+    return api, file
+
+
+class TestReessaiSur503:
+    """Mesuré le 2026-09-15 : à cadence respectée, 3 lookups sur 6 rendaient
+    « server is currently busy » avec `Retry-After: 0`. Un lookup en 503 sauté
+    (`continue`) faisait disparaître le SEUL homonyme exact de Kid Cudi, et la
+    GUI concluait « ambiguïté » sur un aléa de transport."""
+
+    def test_un_503_puis_200_rend_le_200(self, monkeypatch):
+        api, file = _client(
+            monkeypatch, [_Reponse(503, retry_after="0"), _Reponse(200, {"name": "Kid Cudi"})]
+        )
+        assert api.details_artiste("mbid")["name"] == "Kid Cudi"
+        assert file == []
+
+    def test_503_persistant_leve_et_ne_rend_jamais_none(self, monkeypatch):
+        from src.api.musicbrainz_api import _TENTATIVES, MusicBrainzSature
+
+        api, file = _client(monkeypatch, [_Reponse(503)] * (_TENTATIVES + 2))
+        with pytest.raises(MusicBrainzSature):
+            api.details_artiste("mbid")
+        assert len(file) == 2  # exactement _TENTATIVES essais, pas un de plus
+
+    def test_recherche_saturee_leve_plutot_que_liste_vide(self, monkeypatch):
+        """`[]` se lirait « aucun artiste de ce nom » : un verdict, sur une panne."""
+        from src.api.musicbrainz_api import _TENTATIVES, MusicBrainzSature
+
+        api, _ = _client(monkeypatch, [_Reponse(503)] * _TENTATIVES)
+        with pytest.raises(MusicBrainzSature):
+            api.rechercher_artiste("Kid Cudi")
+
+    def test_resoudre_propage_la_saturation_au_lieu_de_conclure_ambigu(self, monkeypatch):
+        from src.api.musicbrainz_api import _TENTATIVES, MusicBrainzSature
+
+        recherche = _Reponse(
+            200, {"artists": [{"id": "e0e1", "name": "Kid Cudi", "type": "Person"}]}
+        )
+        api, _ = _client(monkeypatch, [recherche] + [_Reponse(503)] * _TENTATIVES)
+        with pytest.raises(MusicBrainzSature):
+            api.resoudre_artiste("Kid Cudi", set())
+
+    def test_un_seul_homonyme_dont_le_lookup_passe_au_2e_essai_est_retenu(self, monkeypatch):
+        recherche = _Reponse(
+            200, {"artists": [{"id": "e0e1", "name": "Kid Cudi", "type": "Person"}]}
+        )
+        lookup = _Reponse(200, {"name": "Kid Cudi", "relations": [], "release-groups": []})
+        api, _ = _client(monkeypatch, [recherche, _Reponse(503), lookup])
+        assert api.resoudre_artiste("Kid Cudi", set()).mbid == "e0e1"
+
+    def test_autre_erreur_http_nest_pas_reessayee(self, monkeypatch):
+        api, file = _client(monkeypatch, [_Reponse(500), _Reponse(200, {})])
+        with pytest.raises(RuntimeError, match="HTTP 500"):
+            api.details_artiste("mbid")
+        assert len(file) == 1
+
+
+class TestRetryAfter:
+    def test_jamais_sous_la_cadence(self):
+        from src.api.musicbrainz_api import _INTERVALLE_MIN_S, _retry_after
+
+        assert _retry_after("0") == _INTERVALLE_MIN_S
+        assert _retry_after(None) == _INTERVALLE_MIN_S
+        assert _retry_after("n'importe quoi") == _INTERVALLE_MIN_S
+
+    def test_honore_un_delai_plus_long(self):
+        from src.api.musicbrainz_api import _retry_after
+
+        assert _retry_after("5") == 5.0

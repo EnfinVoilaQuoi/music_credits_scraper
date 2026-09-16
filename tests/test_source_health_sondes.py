@@ -39,10 +39,6 @@ class TestSondeMusicBrainzRapide:
         api = _brancher(monkeypatch, _MB(leve=RuntimeError("dns")))
         assert sh._probe_musicbrainz_rapide() == ["lookup impossible : dns"] and api.closed
 
-    def test_none_est_un_503_de_cadence(self, monkeypatch):
-        _brancher(monkeypatch, _MB(detail=None))
-        assert sh._probe_musicbrainz_rapide()[0].startswith("503")
-
     def test_sans_name_est_un_schema_change(self, monkeypatch):
         _brancher(monkeypatch, _MB(detail={"id": "x"}))
         assert "name" in sh._probe_musicbrainz_rapide()[0]

@@ -133,8 +133,8 @@ def _probe_musicbrainz_rapide() -> list[str]:
         return [f"lookup impossible : {e}"]
     finally:
         api.close()
-    if detail is None:
-        return ["503 — cadence dépassée ou serveur saturé (pas une panne de parseur)"]
+    # Un 503 persistant LÈVE (`MusicBrainzSature`, réessayé par le client) :
+    # il ressort ci-dessus en « lookup impossible », jamais en `None`.
     if not detail.get("name"):
         return ["réponse sans champ `name` (schéma /ws/2 changé ?)"]
     return []
@@ -159,7 +159,7 @@ def _probe_musicbrainz() -> list[str]:
     finally:
         api.close()
     if not resultats:
-        return ["0 candidat (503 de cadence, ou route /ws/2 changée)"]
+        return ["0 candidat (route /ws/2 changée ?)"]
     if not candidats_exacts(_MB_SENTINELLE, resultats):
         return [f"aucun artiste nommé exactement « {_MB_SENTINELLE} » (schéma changé ?)"]
     return []

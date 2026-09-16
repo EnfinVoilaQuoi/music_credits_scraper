@@ -41,6 +41,8 @@ metadata = MetaData()
 # Booléen legacy : "BOOLEAN DEFAULT 0" SANS contrainte CHECK.
 _BOOL = Boolean(create_constraint=False)
 _FALSE = text("0")
+# Statut par défaut d'un lien d'artiste (e26).
+_CONFIRMED = text("'confirmed'")
 
 
 artists = Table(
@@ -205,6 +207,16 @@ albums = Table(
     # enregistrement, pas par track_id, donc additionner les éditions
     # compterait deux fois les titres partagés.
     Column("spotify_editions_json", Text),
+    # Migration e26 : nature du disque telle que le DISTRIBUTEUR la déclare
+    # (album | ep | single | compile — `record_type` de Deezer). Mesuré sur
+    # Isha : ni le nombre de titres ni la durée ne la déduisent (des EP de
+    # 10 titres et 26 min, un EP de 8 titres à côté d'un album de 12 à 32 min).
+    # La donnée est SOURCÉE (`deezer` | `manual`), comme les streams : une
+    # saisie manuelle n'est jamais écrasée par un run Deezer.
+    Column("record_type", Text),
+    Column("record_type_source", Text),
+    Column("record_type_updated", TIMESTAMP),
+    Column("deezer_album_id", Integer),
     UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )
@@ -214,6 +226,12 @@ albums = Table(
 # membre est réunie par UNION d'`artist_id` à la lecture, jamais en dupliquant
 # des morceaux (`UNIQUE(title, artist_id)` l'interdit, et cela doublerait
 # streams et certifications).
+#
+# Depuis e26 la table porte aussi des liens PROPOSÉS par l'enrichissement
+# (MusicBrainz + Discogs, en fin de run), REFUSÉS (une mémoire : le run ne les
+# repropose pas) et « pour info » (alias d'un type non proposable : état civil,
+# indice de recherche, variante de graphie). Seuls les CONFIRMÉS se LISENT —
+# `get_artist_relations` filtre sur `status` par défaut.
 #
 # `related_artist_id` est NULLABLE à dessein : le groupe lié n'est pas forcément
 # en base, et le lien reste une information — il deviendra une jointure le jour
@@ -240,6 +258,12 @@ artist_relations = Table(
     Column("end_date", Text),
     Column("confirmed_at", TIMESTAMP),
     Column("created_at", TIMESTAMP),
+    # Migration e26 : proposed | confirmed | refused | info (défaut `confirmed`
+    # = tout l'existant, confirmé à la main par la fenêtre « Groupes »).
+    Column("status", Text, nullable=False, server_default=_CONFIRMED),
+    # Type d'alias tel que la source le nomme (« Artist name », « Legal name »,
+    # « Search hint », « name_variation ») ; NULL pour une formation.
+    Column("detail", Text),
     UniqueConstraint("artist_id", "related_name", "kind"),
     sqlite_autoincrement=True,
 )

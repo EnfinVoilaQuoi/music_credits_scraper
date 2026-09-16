@@ -111,6 +111,26 @@ def start_enrichment(app):
                 anchor="w", padx=25
             )
 
+    # Identité en FIN de run (2026-09-16) : hors de la boucle des providers —
+    # ce n'est pas une source par morceau mais un appel par artiste, après que
+    # les albums sont connus (oracle d'identité). Les alias sont PROPOSÉS, à
+    # arbitrer dans « Groupes » ; rien n'est confirmé automatiquement.
+    mb_frame = ctk.CTkFrame(dialog)
+    mb_frame.pack(fill="x", padx=20, pady=5)
+    musicbrainz_var = ctk.BooleanVar(value=True)
+    ctk.CTkCheckBox(
+        mb_frame,
+        text="MusicBrainz (identité : alias de scène, Discogs en confirmation) 🪪",
+        variable=musicbrainz_var,
+    ).pack(anchor="w")
+    ctk.CTkLabel(
+        mb_frame,
+        text="En fin de run, une fois par artiste. Les alias sont PROPOSÉS — à arbitrer "
+        "dans « Groupes ».",
+        font=("Arial", 9),
+        text_color="gray",
+    ).pack(anchor="w", padx=25)
+
     separator = ctk.CTkFrame(dialog, height=2, fg_color="gray")
     separator.pack(fill="x", padx=20, pady=15)
 
@@ -205,12 +225,15 @@ def start_enrichment(app):
         force_update = force_var.get()
         clear_on_failure = clear_on_failure_var.get()
 
+        musicbrainz = musicbrainz_var.get()
+
         dialog.destroy()
         run_enrichment(
             app,
             selected_sources,
             force_update=force_update,
             clear_on_failure=clear_on_failure,
+            musicbrainz=musicbrainz,
         )
 
     ctk.CTkButton(dialog, text="Démarrer", command=start_enrichment).pack(pady=20)
@@ -221,6 +244,7 @@ def run_enrichment(
     sources: list[str],
     force_update: bool = False,
     clear_on_failure: bool = True,
+    musicbrainz: bool = True,
 ):
     """Exécute l'enrichissement avec les sources sélectionnées.
 
@@ -241,7 +265,10 @@ def run_enrichment(
         return
 
     options = enrichissement.OptionsEnrich(
-        sources=tuple(sources), force_update=force_update, clear_on_failure=clear_on_failure
+        sources=tuple(sources),
+        force_update=force_update,
+        clear_on_failure=clear_on_failure,
+        musicbrainz=musicbrainz,
     )
     disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
     artist = app.current_artist

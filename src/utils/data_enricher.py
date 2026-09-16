@@ -605,6 +605,11 @@ class DataEnricher:
             logger.exception(f"❌ Erreur {name} pour {track.title}")
             results[name] = provider.error_result
 
+    @property
+    def http(self) -> AsyncHttpSession:
+        """La session HTTP partagée du run (pour les pas de fin de run du service)."""
+        return self._http
+
     async def aclose_http(self) -> None:
         """Ferme la session httpx partagée (fin de batch async) ; rouverte à la
         demande au batch suivant. À appeler DANS la boucle asyncio."""

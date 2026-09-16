@@ -52,7 +52,7 @@ class Artist:
 
 @dataclass
 class ArtistRelation:
-    """Un lien d'appartenance CONFIRMÉ entre deux artistes (table `artist_relations`, e22).
+    """Un lien entre deux artistes (table `artist_relations`, e22 ; statut e26).
 
     `kind` :
       · `member_of`  — cet artiste est membre de `related_name` ;
@@ -67,6 +67,12 @@ class ArtistRelation:
     `related_artist_id` peut être None : le groupe lié n'est pas forcément dans
     notre base, et le lien vaut quand même. Les dates sont du TEXTE brut de la
     source — MusicBrainz en rend des partielles (« 1989-10 »).
+
+    `status` (e26) : `confirmed` (validé à la main — le SEUL statut que les
+    lecteurs voient), `proposed` (trouvé par l'enrichissement, à arbitrer),
+    `refused` (une mémoire : jamais reproposé), `info` (alias d'un type non
+    proposable — état civil, indice de recherche, variante de graphie — gardé
+    pour consultation). `detail` = ce type, tel que la source le nomme.
     """
 
     related_name: str = ""
@@ -76,3 +82,5 @@ class ArtistRelation:
     source: str | None = None
     begin_date: str | None = None
     end_date: str | None = None
+    status: str = "confirmed"
+    detail: str | None = None

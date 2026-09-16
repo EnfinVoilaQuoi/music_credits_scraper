@@ -99,6 +99,9 @@ def _enrich_args(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--force", action="store_true", help="force_update")
     _bool_flags(p, "clear-on-failure", True, "effacer les données erronées en cas d'échec")
+    _bool_flags(
+        p, "musicbrainz", True, "identité en fin de run (alias PROPOSÉS, à arbitrer dans Groupes)"
+    )
 
 
 def _streams_args(p: argparse.ArgumentParser) -> None:
@@ -208,6 +211,7 @@ def options_enrich(a: argparse.Namespace) -> enrichissement.OptionsEnrich:
         sources=_liste(a.sources) or None,
         force_update=a.force,
         clear_on_failure=a.clear_on_failure,
+        musicbrainz=a.musicbrainz,
     )
 
 

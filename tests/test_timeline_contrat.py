@@ -12,6 +12,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -263,6 +264,7 @@ def test_export_studio_layout(racine, monkeypatch, tmp_path):
         root = racine
         current_artist = Artist(id=7, name="Isha", tracks=_corpus())
         export_studio_window = None
+        data_manager = SimpleNamespace(get_albums_for_artist=lambda artist_id: [])
 
         def _is_track_disabled(self, track):
             return False

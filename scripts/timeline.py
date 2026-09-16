@@ -26,6 +26,7 @@ from src.dataviz.timeline import (
     default_selection,
     generate_timeline,
     generate_timeline_preview,
+    record_types_par_titre,
     sort_candidates,
 )
 from src.dataviz.timeline_overrides_io import (
@@ -65,7 +66,9 @@ def main() -> int:
     disabled = frozenset(DisabledTracksManager().load_disabled_tracks(artist.name))
     tracks = list(artist.tracks or [])
 
-    candidates = build_candidates(tracks, artist.name, disabled)
+    # « EP » / « Album » : ce que Deezer (ou une saisie) a déclaré, en base.
+    record_types = record_types_par_titre(dm.get_albums_for_artist(artist.id))
+    candidates = build_candidates(tracks, artist.name, disabled, record_types)
     override = {} if args.defaut else get_override(load_overrides(), artist.name)
     entries = entries_from_override(override)
     pages = args.pages or pages_from_override(override) or default_page_count(candidates)
@@ -100,6 +103,7 @@ def main() -> int:
                 pages=pages,
                 style=load_style(),
                 disabled=disabled,
+                record_types=record_types,
             )
         except ValueError as exc:
             print(f"❌ {exc}")

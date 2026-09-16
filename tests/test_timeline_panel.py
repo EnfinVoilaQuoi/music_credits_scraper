@@ -6,6 +6,8 @@ les saisies, et que « Mémoriser » puis `refresh()` reprend la sélection. Le
 moteur n'est pas retesté ici ; les overrides vont dans `tmp_path`.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from src.dataviz import timeline as tl
@@ -19,6 +21,9 @@ class _App:
 
         self.current_artist = Artist(id=7, name="Isha", tracks=tracks)
         self.disabled = set()
+        # Types d'albums (e26) : la table `albums` du faux est vide, sauf demande.
+        self.albums: list[dict] = []
+        self.data_manager = SimpleNamespace(get_albums_for_artist=lambda artist_id: self.albums)
 
     def _is_track_disabled(self, track):
         return track.id in self.disabled

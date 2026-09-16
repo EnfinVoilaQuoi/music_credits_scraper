@@ -13,15 +13,26 @@ Ce que l'assemblage apporte, et qu'aucune source ne donne seule :
     l'écran ;
   · **la levée d'ambiguïté croisée** — Discogs ne peut pas choisir parmi ses
     sept « Swing », mais il peut confirmer celui que MusicBrainz a nommé ;
-  · **la mémoire** — ce qui est déjà confirmé en base est marqué comme tel, et
-    la nature (groupe/collectif) déjà choisie pour une formation est
-    pré-remplie, pour qu'elle ne diverge pas d'un membre à l'autre.
+  · **la mémoire** — ce qui est déjà en base (confirmé, refusé, proposé, pour
+    info) est marqué de son statut, et la nature (groupe/collectif) déjà
+    choisie pour une formation est pré-remplie, pour qu'elle ne diverge pas
+    d'un membre à l'autre.
+
+Depuis le 2026-09-16, l'enrichissement appelle `chercher_formations` en fin de
+run et DÉPOSE des propositions (`aliases_a_proposer` → `propose_artist_relations`)
+— toujours sans confirmer : la fenêtre « Groupes » arbitre. Garde-fous : oracle
+d'identité obligatoire (pas de MBID retenu ⇒ rien n'est proposé, même si Discogs
+avait un candidat unique), seuls les alias MusicBrainz « Artist name » et les
+alias Discogs (de vraies pages d'artiste) sont proposés, le reste part « pour
+info » ; un alias égal au nom de l'artiste est écarté ; ce qui a déjà un statut
+en base n'est jamais reproposé.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.api.musicbrainz_api import ALIAS_NOM_DE_SCENE
 from src.models import ArtistRelation
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
@@ -39,7 +50,22 @@ class Candidat:
     formation: str | None = None  # groupe | collectif — pré-rempli si déjà connu
     begin_date: str | None = None
     end_date: str | None = None
-    deja_confirme: bool = False
+    # Statut EN BASE (None = jamais vu) et type d'alias tel que la source le dit.
+    status: str | None = None
+    detail: str | None = None
+
+    @property
+    def deja_confirme(self) -> bool:
+        return self.status == "confirmed"
+
+    @property
+    def proposable(self) -> bool:
+        """Un alias ne vaut PROPOSITION que s'il est une identité : « Artist name »
+        chez MusicBrainz, page d'artiste chez Discogs (detail None). Les états
+        civils, indices de recherche et variantes de graphie partent « pour info »."""
+        if self.kind != "alias":
+            return True
+        return self.detail in (None, ALIAS_NOM_DE_SCENE)
 
     @property
     def croise(self) -> bool:
@@ -55,6 +81,7 @@ class Candidat:
             source="+".join(sorted(self.sources)) or None,
             begin_date=self.begin_date,
             end_date=self.end_date,
+            detail=self.detail,
         )
 
 
@@ -64,6 +91,8 @@ class RapportFormations:
 
     candidats: list[Candidat] = field(default_factory=list)
     identite_mb: str | None = None  # désambiguïsation de l'artiste retenu chez MB
+    mbid: str | None = None  # l'oracle a désigné quelqu'un (sinon rien n'est proposé)
+    panne_mb: str | None = None  # MusicBrainz en PANNE ≠ « pas d'alias »
     diagnostics: list[str] = field(default_factory=list)
 
 
@@ -81,8 +110,15 @@ def fusionner(
     relations_mb: list,
     proposees_discogs: list[ArtistRelation],
     confirmees_discogs: set[str],
+    alias_mb: list = (),
+    nom_artiste: str = "",
 ) -> list[Candidat]:
     """Assemble les réponses des deux sources en candidats. Fonction PURE.
+
+    `alias_mb` = les `AliasArtiste` du candidat MusicBrainz retenu ; ils
+    entrent en `kind="alias"` avec leur type en `detail`. Un alias égal au nom
+    de l'artiste (normalisé) est écarté, quelle que soit la source : ce n'est
+    pas une information.
 
     `confirmees_discogs` porte des noms DÉJÀ normalisés (c'est ce que rend
     `discogs_api.get_artist_groups`) : ce sont les formations que Discogs
@@ -91,6 +127,7 @@ def fusionner(
     que d'en créer un — sans quoi on afficherait un doublon.
     """
     par_cle: dict[tuple[str, str], Candidat] = {}
+    moi = normalize_name(nom_artiste)
 
     for rel in relations_mb:
         candidat = Candidat(
@@ -102,14 +139,35 @@ def fusionner(
         )
         par_cle[_cle(rel.nom, rel.kind)] = candidat
 
+    for alias in alias_mb:
+        if moi and normalize_name(alias.nom) == moi:
+            continue
+        par_cle[_cle(alias.nom, "alias")] = Candidat(
+            related_name=alias.nom,
+            kind="alias",
+            sources={"musicbrainz"},
+            begin_date=alias.begin,
+            end_date=alias.end,
+            detail=alias.type,
+        )
+
     for rel in proposees_discogs:
+        if rel.kind == "alias" and moi and normalize_name(rel.related_name) == moi:
+            continue
         cle = _cle(rel.related_name, rel.kind)
         existant = par_cle.get(cle)
         if existant:
             existant.sources.add("discogs")
+            # Une identité Discogs (page d'artiste) prime sur un simple type
+            # MusicBrainz non proposable : le croisement DIT que c'est un pseudo.
+            if rel.kind == "alias" and rel.detail is None:
+                existant.detail = existant.detail if existant.proposable else None
         else:
             par_cle[cle] = Candidat(
-                related_name=rel.related_name, kind=rel.kind, sources={"discogs"}
+                related_name=rel.related_name,
+                kind=rel.kind,
+                sources={"discogs"},
+                detail=rel.detail,
             )
 
     # Confirmations sans proposition : Discogs reconnaît le nom mais n'a pas su
@@ -150,6 +208,84 @@ def trier_confirmations(decisions) -> tuple[list[ArtistRelation], list[tuple[str
     return a_ecrire, a_oublier
 
 
+def aliases_a_proposer(
+    rapport: RapportFormations, nom_artiste: str
+) -> tuple[list[ArtistRelation], list[ArtistRelation]]:
+    """(alias à PROPOSER, alias à garder POUR INFO) — fonction PURE.
+
+    Rien sans oracle (`rapport.mbid` absent) : un Discogs seul, même à candidat
+    unique, ne suffit pas à mettre un nom en face de l'artiste. Ce qui a déjà
+    un statut en base n'est jamais reproposé (le refus est une mémoire).
+    """
+    if not rapport.mbid:
+        return [], []
+    moi = normalize_name(nom_artiste)
+    proposes: list[ArtistRelation] = []
+    infos: list[ArtistRelation] = []
+    for c in rapport.candidats:
+        if c.kind != "alias" or c.status is not None:
+            continue
+        if moi and normalize_name(c.related_name) == moi:
+            continue
+        (proposes if c.proposable else infos).append(c.vers_relation(None))
+    return proposes, infos
+
+
+def candidats_de_base(relations) -> list[Candidat]:
+    """Les liens EN BASE (tous statuts) présentés comme des candidats — ce que
+    la fenêtre montre à l'ouverture, SANS réseau. Fonction pure."""
+    out = []
+    for rel in relations:
+        out.append(
+            Candidat(
+                related_name=rel.related_name,
+                kind=rel.kind,
+                sources=set((rel.source or "").split("+")) - {""},
+                formation=rel.formation,
+                begin_date=rel.begin_date,
+                end_date=rel.end_date,
+                status=rel.status,
+                detail=rel.detail,
+            )
+        )
+    return out
+
+
+def reunir(base: list[Candidat], trouves: list[Candidat]) -> list[Candidat]:
+    """Base ∪ résultats d'une recherche, par clé (nom normalisé, kind) : ce que
+    la base connaît garde son statut, ce que la recherche apporte de neuf est
+    ajouté (statut None = jamais vu). Fonction pure, ordre stable."""
+    par_cle = {_cle(c.related_name, c.kind): c for c in base}
+    for c in trouves:
+        cle = _cle(c.related_name, c.kind)
+        if cle in par_cle:
+            par_cle[cle].sources |= c.sources
+            if par_cle[cle].detail is None:
+                par_cle[cle].detail = c.detail
+        else:
+            par_cle[cle] = c
+    return sorted(
+        par_cle.values(),
+        key=lambda c: (not c.croise, c.kind, normalize_name(c.related_name)),
+    )
+
+
+def trier_decisions(lignes) -> list[tuple[Candidat, str, str | None]]:
+    """Ce que la fenêtre vient d'arbitrer → ce qui CHANGE. Fonction PURE.
+
+    `lignes` : des triplets `(candidat, statut_choisi, nature)`. Ne rend que les
+    lignes dont le statut diffère de celui en base — un candidat jamais vu
+    (`status None`) laissé « proposed » est rendu aussi : il faut l'insérer pour
+    que la mémoire le garde. Un `alias` ne reçoit jamais de nature.
+    """
+    changes = []
+    for candidat, statut, nature in lignes:
+        if statut == candidat.status:
+            continue
+        changes.append((candidat, statut, None if candidat.kind == "alias" else nature))
+    return changes
+
+
 def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportFormations:
     """Interroge les deux sources pour un artiste et rend des candidats.
 
@@ -168,6 +304,7 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
         )
 
     relations_mb = []
+    alias_mb = []
     try:
         if mb is None:
             from src.api.musicbrainz_api import MusicBrainzAPI
@@ -175,14 +312,21 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
             mb = MusicBrainzAPI()
         retenu = mb.resoudre_artiste(artist.name, nos_albums)
         if retenu is None:
+            # `None` n'a que deux causes (une panne LÈVE) : aucun artiste de ce
+            # nom exact, ou des homonymes qu'aucun album commun ne départage.
             rapport.diagnostics.append(
-                f"MusicBrainz n'a pas pu désigner « {artist.name} » sans ambiguïté."
+                f"MusicBrainz n'a pas pu désigner « {artist.name} » sans ambiguïté : "
+                "aucun artiste de ce nom exact, ou plusieurs homonymes qu'aucun album "
+                "commun ne départage (vérifie l'orthographe et la discographie)."
             )
         else:
             relations_mb = retenu.relations
+            alias_mb = retenu.aliases
+            rapport.mbid = retenu.mbid
             rapport.identite_mb = retenu.desambiguation or retenu.type
     except Exception as e:  # noqa: BLE001 — une source en panne ne vide pas la fenêtre
         logger.warning(f"MusicBrainz indisponible pour « {artist.name} » : {e}")
+        rapport.panne_mb = str(e)
         rapport.diagnostics.append(f"MusicBrainz indisponible : {e}")
 
     proposees, confirmees = [], set()
@@ -204,18 +348,21 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
         logger.warning(f"Discogs indisponible pour « {artist.name} » : {e}")
         rapport.diagnostics.append(f"Discogs indisponible : {e}")
 
-    rapport.candidats = fusionner(relations_mb, proposees, confirmees)
+    rapport.candidats = fusionner(relations_mb, proposees, confirmees, alias_mb, artist.name)
 
-    # Mémoire : ce qui est déjà en base, et la nature déjà choisie ailleurs.
+    # Mémoire : ce qui est déjà en base (TOUS statuts), et la nature déjà
+    # choisie ailleurs.
     deja = {
         _cle(rel.related_name, rel.kind): rel
-        for rel in data_manager.get_artist_relations(artist.id)
+        for rel in data_manager.get_artist_relations(artist.id, status=None)
     }
     for candidat in rapport.candidats:
         connu = deja.get(_cle(candidat.related_name, candidat.kind))
         if connu is not None:
-            candidat.deja_confirme = True
+            candidat.status = connu.status
             candidat.formation = connu.formation
+            if connu.detail and candidat.detail is None:
+                candidat.detail = connu.detail
         elif candidat.kind != "alias":
             candidat.formation = data_manager.nature_connue_pour(candidat.related_name)
 

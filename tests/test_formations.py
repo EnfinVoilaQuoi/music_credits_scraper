@@ -90,8 +90,9 @@ class TestVersRelation:
 
 
 class _FauxMB:
-    def __init__(self, relations=None, retenu=True, boum=False):
+    def __init__(self, relations=None, retenu=True, boum=False, aliases=None):
         self._relations = relations or []
+        self._aliases = aliases or []
         self._retenu = retenu
         self._boum = boum
         self.albums_recus = None
@@ -103,7 +104,11 @@ class _FauxMB:
         if not self._retenu:
             return None
         return SimpleNamespace(
-            relations=self._relations, desambiguation="Belgian rapper", type="Person"
+            mbid="mb-1",
+            relations=self._relations,
+            aliases=self._aliases,
+            desambiguation="Belgian rapper",
+            type="Person",
         )
 
 
@@ -133,8 +138,8 @@ class _FauxDM:
     def get_artist_tracks(self, artist_id):
         return self._tracks
 
-    def get_artist_relations(self, artist_id):
-        return self._relations
+    def get_artist_relations(self, artist_id, status="confirmed"):
+        return [r for r in self._relations if status is None or r.status == status]
 
     def nature_connue_pour(self, nom):
         return self._natures.get(nom)
@@ -258,7 +263,12 @@ class TestTrierConfirmations:
     """
 
     def _c(self, nom, kind="member_of", deja=False):
-        return Candidat(related_name=nom, kind=kind, sources={"musicbrainz"}, deja_confirme=deja)
+        return Candidat(
+            related_name=nom,
+            kind=kind,
+            sources={"musicbrainz"},
+            status="confirmed" if deja else None,
+        )
 
     def test_un_lien_coche_est_ecrit_avec_sa_nature(self):
         a_ecrire, a_oublier = trier_confirmations([(self._c("IAM"), True, "groupe")])

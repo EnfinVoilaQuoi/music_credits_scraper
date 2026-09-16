@@ -28,6 +28,7 @@ Module pur, GUI-indépendant et **déterministe** (tri total, aucun aléa) : deu
 générations produisent un SVG byte-identique. Pilotable via `scripts/timeline.py`.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -47,6 +48,7 @@ from src.dataviz.timeline_svg import (
     slot_x,
     write_timeline_svg,
 )
+from src.enrichment.album_types import libelle_record_type
 from src.utils.cert_normalize import ORGANISMES, RANG_PALIERS, decouper_multiplicateur
 from src.utils.dates import parse_flexible
 from src.utils.logger import get_logger
@@ -68,6 +70,7 @@ __all__ = [
     "default_selection",
     "generate_timeline",
     "generate_timeline_preview",
+    "record_types_par_titre",
     "sort_candidates",
 ]
 
@@ -360,8 +363,22 @@ def _display_title(title: str) -> str:
     return base or clean_display_title(title or "")
 
 
+def record_types_par_titre(albums) -> dict[str, str]:
+    """`{titre normalisé: record_type}` depuis les lignes de la table `albums`
+    (`get_albums_for_artist`) — la clé est celle de `_album_key`, donc les
+    graphies Genius/Kworb/Deezer d'un même album se rejoignent."""
+    return {
+        normalize_title(a["title"]): a["record_type"]
+        for a in albums or ()
+        if a.get("title") and a.get("record_type")
+    }
+
+
 def build_candidates(
-    tracks, artist_name: str = "", disabled: frozenset[int] | set[int] = frozenset()
+    tracks,
+    artist_name: str = "",
+    disabled: frozenset[int] | set[int] = frozenset(),
+    record_types: Mapping[str, str] | None = None,
 ) -> list[Candidate]:
     """TOUS les candidats, dans l'ordre « proposés » : projets (albums puis
     rééditions, par date), puis les morceaux par streams décroissants, puis les
@@ -386,7 +403,10 @@ def build_candidates(
             continue
         title = clean_display_title(album)  # la parenthèse d'un album (« (vol.1) ») RESTE
         common = _common_primary(album_tracks)
-        line1 = f"Album avec **{common}**" if common else "Album"
+        # « EP » / « Album » / … = ce que le distributeur déclare (`albums.record_type`,
+        # Deezer ou saisie) ; sans donnée, « Album ». Un `line1` mémorisé prime.
+        nature = libelle_record_type((record_types or {}).get(normalize_title(album)))
+        line1 = f"{nature} avec **{common}**" if common else nature
         ids = tuple(sorted(t.id for t in album_tracks if t.id is not None))
         projects.append(
             Candidate(
@@ -801,6 +821,7 @@ def generate_timeline(
     style: TimelineStyle | None = None,
     output_path=None,
     disabled: frozenset[int] | set[int] = frozenset(),
+    record_types: Mapping[str, str] | None = None,
 ) -> TimelineResult:
     """Génère `timeline.svg` + `timeline.json` pour un artiste.
 
@@ -811,7 +832,7 @@ def generate_timeline(
     """
     style = style or TimelineStyle()
     disabled = frozenset(disabled)
-    candidates = build_candidates(tracks, artist_name, disabled)
+    candidates = build_candidates(tracks, artist_name, disabled, record_types)
     if entries is None:
         count = (pages or default_page_count(candidates)) * PAGE_SIZE
         entries = _entries_from_defaults(candidates, default_selection(candidates, count))
@@ -892,13 +913,14 @@ def generate_timeline_preview(
     style: TimelineStyle | None = None,
     output_path=None,
     disabled: frozenset[int] | set[int] = frozenset(),
+    record_types: Mapping[str, str] | None = None,
 ) -> Path:
     """Même rendu que `generate_timeline`, mais en page HTML d'APERÇU seulement :
     rien n'est écrit dans `timeline.svg` / `timeline.json` (l'export attendu par
     Illustrator reste celui qu'on a validé). Renvoie le chemin du HTML."""
     style = style or TimelineStyle()
     disabled = frozenset(disabled)
-    candidates = build_candidates(tracks, artist_name, disabled)
+    candidates = build_candidates(tracks, artist_name, disabled, record_types)
     if entries is None:
         count = (pages or default_page_count(candidates)) * PAGE_SIZE
         entries = _entries_from_defaults(candidates, default_selection(candidates, count))

@@ -17,13 +17,23 @@ import pytest
 from src.api.discogs_api import DiscogsClient, nom_sans_suffixe
 
 
-def _artiste(nom, groupes=(), membres=(), alias=()):
+def _artiste(nom, groupes=(), membres=(), alias=(), variantes=()):
     return SimpleNamespace(
         name=nom,
         groups=[SimpleNamespace(name=n) for n in groupes],
         members=[SimpleNamespace(name=n) for n in membres],
         aliases=[SimpleNamespace(name=n) for n in alias],
+        name_variations=list(variantes),
     )
+
+
+def test_name_variations_are_info_aliases():
+    """Les variantes de graphie Discogs sont des alias « pour info » (detail
+    `name_variation`), distincts des alias-identités (pages d'artiste)."""
+    liens = DiscogsClient._liens_de(_artiste("Isha", alias=("Psmaker",), variantes=("ISHA",)))
+    par_nom = {r.related_name: r for r in liens}
+    assert par_nom["Psmaker"].detail is None
+    assert par_nom["ISHA"].detail == "name_variation" and par_nom["ISHA"].kind == "alias"
 
 
 class _FauxClient:

@@ -649,3 +649,21 @@ def test_candidate_is_frozen_dataclass():
     )
     with pytest.raises(AttributeError):
         c.key = "x"
+
+
+def test_record_types_drive_the_default_label():
+    """« EP » / « Album » / « Compilation » viennent de `albums.record_type`
+    (Deezer ou saisie) ; sans donnée, « Album ». Clé = titre normalisé."""
+    types = tl.record_types_par_titre(
+        [
+            {"title": "ALBUM A", "record_type": "ep"},
+            {"title": "Album B", "record_type": "compile"},
+            {"title": "Sans type", "record_type": None},
+        ]
+    )
+    assert types == {"album a": "ep", "album b": "compile"}
+    cands = {c.key: c for c in build_candidates(_corpus(), record_types=types)}
+    assert cands["album:album a"].line1_default == "EP"
+    assert cands["reedition:album a"].line1_default == "Réédition de"
+    assert cands["album:album b"].line1_default == "Compilation avec **Limsa**"
+    assert {c.key: c for c in build_candidates(_corpus())}["album:album a"].line1_default == "Album"

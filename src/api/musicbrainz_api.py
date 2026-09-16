@@ -56,6 +56,22 @@ _USER_AGENT = "MusicCreditsScraper/1.0 ( https://github.com/g78rem/music_credits
 #: sert donc à rien d'aller plus vite, on se ferait juste jeter.
 _INTERVALLE_MIN_S = 1.1
 
+#: Le 503 n'est PAS que de cadence (mesuré le 2026-09-15) : à 1,1 s d'intervalle,
+#: **3 lookups sur 6** rendaient « The MusicBrainz web server is currently busy »
+#: avec `Retry-After: 0` — le serveur est SATURÉ et demande de réessayer tout de
+#: suite. Sans réessai, un lookup sur deux échouait et `resoudre_artiste` rendait
+#: `None` : la GUI annonçait « ambiguïté » là où c'était un aléa de transport.
+_TENTATIVES = 4
+
+
+class MusicBrainzSature(RuntimeError):
+    """503 persistant après `_TENTATIVES` essais : la source parle, mais pas à nous.
+
+    Levée (jamais avalée en `[]`/`None`) pour qu'un appelant ne confonde pas
+    « pas de réponse » avec « pas de résultat ».
+    """
+
+
 #: UUID du type de relation « member of band ». On s'appuie sur l'identifiant et
 #: non sur le libellé `type` : le libellé est du texte d'interface, l'UUID est le
 #: contrat.
@@ -75,6 +91,32 @@ class RelationGroupe:
     ended: bool = False
 
 
+@dataclass(frozen=True)
+class AliasArtiste:
+    """Un alias vu par MusicBrainz, avec son TYPE — c'est lui qui décide de l'usage.
+
+    « Artist name » = un vrai nom de scène (Psmaker pour Isha) → proposable.
+    « Legal name » (état civil), « Search hint » (faute de frappe courante) et
+    les autres → gardés pour information, jamais utilisés en recherche : c'est
+    là que naissent les faux positifs (décision utilisateur 2026-09-16).
+    """
+
+    nom: str
+    type: str | None = None
+    locale: str | None = None
+    primary: bool = False
+    begin: str | None = None
+    end: str | None = None
+
+    @property
+    def proposable(self) -> bool:
+        return self.type == ALIAS_NOM_DE_SCENE
+
+
+#: Le seul type d'alias MusicBrainz qui vaut proposition.
+ALIAS_NOM_DE_SCENE = "Artist name"
+
+
 @dataclass
 class CandidatArtiste:
     """Un artiste MusicBrainz au nom exactement égal au nôtre, et son oracle."""
@@ -86,6 +128,7 @@ class CandidatArtiste:
     desambiguation: str | None = None
     albums_communs: int = 0
     relations: list[RelationGroupe] = field(default_factory=list)
+    aliases: list[AliasArtiste] = field(default_factory=list)
 
 
 # ── Logique PURE (testable sans réseau) ──────────────────────────────────────
@@ -138,6 +181,31 @@ def relations_membre(detail: dict) -> list[RelationGroupe]:
     return liens
 
 
+def aliases_de(detail: dict) -> list[AliasArtiste]:
+    """Alias d'une réponse de lookup (`inc=aliases`), TOUS types, dédoublonnés
+    sur le nom normalisé (le premier vu gagne — un « Artist name » et un
+    « Search hint » de même graphie ne font qu'une ligne). Fonction pure."""
+    vus: set[str] = set()
+    out: list[AliasArtiste] = []
+    for brut in detail.get("aliases") or []:
+        nom = str(brut.get("name") or "").strip()
+        cle = normalize_name(nom)
+        if not cle or cle in vus:
+            continue
+        vus.add(cle)
+        out.append(
+            AliasArtiste(
+                nom=nom,
+                type=brut.get("type") or None,
+                locale=brut.get("locale") or None,
+                primary=bool(brut.get("primary")),
+                begin=brut.get("begin-date") or brut.get("begin") or None,
+                end=brut.get("end-date") or brut.get("end") or None,
+            )
+        )
+    return out
+
+
 def compter_albums_communs(detail: dict, nos_albums: set[str]) -> int:
     """Nb de release-groups du candidat dont le titre normalisé est dans notre base."""
     if not nos_albums:
@@ -174,6 +242,15 @@ def departager(candidats: list[CandidatArtiste]) -> CandidatArtiste | None:
     return classes[0]
 
 
+def _retry_after(valeur: str | None) -> float:
+    """Délai avant réessai : `Retry-After` s'il est plus long que la cadence."""
+    try:
+        demande = float(valeur) if valeur is not None else 0.0
+    except ValueError:
+        demande = 0.0
+    return max(demande, _INTERVALLE_MIN_S)
+
+
 # ── Client ───────────────────────────────────────────────────────────────────
 
 
@@ -193,43 +270,62 @@ class MusicBrainzAPI:
             time.sleep(reste)
         self._dernier_appel = time.monotonic()
 
-    def _get(self, chemin: str, params: dict[str, Any]) -> dict | None:
-        self._attendre_son_tour()
-        try:
-            reponse = self.session.get(
-                f"{_BASE_URL}{chemin}", params={**params, "fmt": "json"}, timeout=self.timeout
-            )
-        except requests.RequestException as e:
-            logger.warning(f"MusicBrainz injoignable ({chemin}): {e}")
-            raise
-        if reponse.status_code == 503:
-            # Throttling, PAS une panne : la source parle et demande de ralentir.
-            logger.warning("MusicBrainz : 503 (cadence dépassée ou serveur saturé)")
-            return None
-        reponse.raise_for_status()
-        return reponse.json()
+    def _get(self, chemin: str, params: dict[str, Any]) -> dict:
+        """GET JSON, réessayé sur 503 (serveur saturé — cf. `_TENTATIVES`).
+
+        `Retry-After` est honoré mais jamais en dessous de la cadence : le site
+        rend `0`, et repartir aussitôt ne ferait que redemander au même serveur
+        saturé. Lève `MusicBrainzSature` quand les essais sont épuisés.
+        """
+        for essai in range(1, _TENTATIVES + 1):
+            self._attendre_son_tour()
+            try:
+                reponse = self.session.get(
+                    f"{_BASE_URL}{chemin}", params={**params, "fmt": "json"}, timeout=self.timeout
+                )
+            except requests.RequestException as e:
+                logger.warning(f"MusicBrainz injoignable ({chemin}): {e}")
+                raise
+            if reponse.status_code != 503:
+                reponse.raise_for_status()
+                return reponse.json()
+            # Throttling ou saturation, PAS une panne : la source parle et
+            # demande de réessayer.
+            logger.info(f"MusicBrainz : 503 sur {chemin} (essai {essai}/{_TENTATIVES})")
+            if essai < _TENTATIVES:
+                time.sleep(_retry_after(reponse.headers.get("Retry-After")))
+        raise MusicBrainzSature(
+            f"503 persistant sur {chemin} après {_TENTATIVES} essais (serveur saturé)"
+        )
 
     def rechercher_artiste(self, nom: str, limite: int = 25) -> list[dict]:
         """Candidats bruts pour un nom. Le filtrage est l'affaire de l'appelant."""
         with source_usage.observe(_SOURCE, label=f"recherche {nom}") as obs:
-            data = self._get("/artist/", {"query": f'artist:"{nom}"', "limit": limite})
-            if data is None:
-                # 503 : la source parle et demande de ralentir. C'est NOTRE
-                # cadence, pas sa panne — `throttled`, jamais `broken`.
-                obs.fail(IssueKind.THROTTLED, "503 (cadence 1 req/s)")
-                return []
+            try:
+                data = self._get("/artist/", {"query": f'artist:"{nom}"', "limit": limite})
+            except MusicBrainzSature as e:
+                # La source parle et demande de réessayer : `throttled`, jamais
+                # `broken` — et l'exception REMONTE, un `[]` la ferait passer
+                # pour « aucun artiste de ce nom ».
+                obs.fail(IssueKind.THROTTLED, str(e))
+                raise
             artistes = data.get("artists") or []
             if not artistes:
                 obs.absent()
             return artistes
 
-    def details_artiste(self, mbid: str, inc: str = "artist-rels") -> dict | None:
-        """Lookup d'un artiste. `inc` cumulable : `artist-rels+release-groups`."""
+    def details_artiste(self, mbid: str, inc: str = "artist-rels") -> dict:
+        """Lookup d'un artiste. `inc` cumulable : `artist-rels+release-groups`.
+
+        Lève `MusicBrainzSature` sur 503 persistant (jamais `None` : un lookup
+        muet ferait disparaître un homonyme du départage, en silence).
+        """
         with source_usage.observe(_SOURCE, label=f"lookup {mbid}") as obs:
-            data = self._get(f"/artist/{mbid}", {"inc": inc})
-            if data is None:
-                obs.fail(IssueKind.THROTTLED, "503 (cadence 1 req/s)")
-            return data
+            try:
+                return self._get(f"/artist/{mbid}", {"inc": inc})
+            except MusicBrainzSature as e:
+                obs.fail(IssueKind.THROTTLED, str(e))
+                raise
 
     def resoudre_artiste(self, nom: str, nos_albums: set[str]) -> CandidatArtiste | None:
         """Nom → l'artiste MusicBrainz correspondant, relations comprises.
@@ -242,6 +338,12 @@ class MusicBrainzAPI:
         Une requête pour la recherche, puis UNE par homonyme exact — les
         relations ET les albums sont demandés ensemble, donc le gagnant n'a pas
         besoin d'un appel de plus.
+
+        `None` ne signifie QUE « nom inconnu » ou « homonymes indépartageables » :
+        une panne de transport lève `MusicBrainzSature`. Avant le 2026-09-15 un
+        lookup en 503 était sauté (`continue`), et un artiste unique dont le
+        seul lookup échouait ressortait comme « ambigu » — Kid Cudi, un seul
+        homonyme exact, l'était une fois sur deux.
         """
         exacts = candidats_exacts(nom, self.rechercher_artiste(nom))
         if not exacts:
@@ -250,9 +352,8 @@ class MusicBrainzAPI:
 
         candidats = []
         for brut in exacts:
-            detail = self.details_artiste(brut["id"], inc="artist-rels+release-groups")
-            if detail is None:
-                continue
+            # Les alias voyagent dans la MÊME requête : aucun appel de plus.
+            detail = self.details_artiste(brut["id"], inc="artist-rels+release-groups+aliases")
             candidats.append(
                 CandidatArtiste(
                     mbid=brut["id"],
@@ -262,6 +363,7 @@ class MusicBrainzAPI:
                     desambiguation=brut.get("disambiguation"),
                     albums_communs=compter_albums_communs(detail, nos_albums),
                     relations=relations_membre(detail),
+                    aliases=aliases_de(detail),
                 )
             )
 

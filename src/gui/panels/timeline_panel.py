@@ -35,6 +35,7 @@ from src.dataviz.timeline import (
     default_selection,
     generate_timeline,
     generate_timeline_preview,
+    record_types_par_titre,
     sort_candidates,
 )
 from src.dataviz.timeline_overrides_io import (
@@ -78,6 +79,7 @@ class TimelinePanel:
         self._media_command = media_command
         self.rows: dict[str, _Row] = {}
         self._candidates: list[Candidate] = []
+        self._record_types: dict[str, str] = {}
         self._artist_name: str | None = None
         self._build(parent)
 
@@ -191,7 +193,10 @@ class TimelinePanel:
             return
 
         self._artist_name = artist.name
-        self._candidates = build_candidates(tracks, artist.name, disabled)
+        self._record_types = record_types_par_titre(
+            self.app.data_manager.get_albums_for_artist(artist.id)
+        )
+        self._candidates = build_candidates(tracks, artist.name, disabled, self._record_types)
         by_key = {c.key: c for c in self._candidates}
         override = get_override(load_overrides(), artist.name)
         saved = entries_from_override(override)
@@ -415,6 +420,7 @@ class TimelinePanel:
                     pages=pages,
                     style=load_style(),
                     disabled=disabled,
+                    record_types=self._record_types,
                 )
             except ValueError as exc:  # clé disparue, mauvais compte, aucun stream
                 self._safe_after(lambda msg=str(exc): self._on_error(msg))

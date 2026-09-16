@@ -519,6 +519,17 @@ class DiscogsClient:
             )
         for alias in artiste.aliases or []:
             liens.append(ArtistRelation(related_name=alias.name, kind="alias", source="discogs"))
+        # Variantes de graphie (« ISHA », « Isha (2) ») : pas des identités, de
+        # simples orthographes — gardées POUR INFO, jamais proposées.
+        for variante in artiste.name_variations or []:
+            liens.append(
+                ArtistRelation(
+                    related_name=str(variante),
+                    kind="alias",
+                    source="discogs",
+                    detail="name_variation",
+                )
+            )
         return liens
 
     def enrich_track_data(self, track: Track, force_update: bool = False) -> bool | str:

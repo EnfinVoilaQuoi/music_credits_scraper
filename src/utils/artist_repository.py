@@ -422,8 +422,13 @@ class ArtistRepository:
     # Appartenance à une formation (table `artist_relations`, e22)
     # ──────────────────────────────────────────────────────────────────────────
 
+    STATUTS_RELATION = ("proposed", "confirmed", "refused", "info")
+
     def record_artist_relations(self, artist_id: int, relations) -> int:
-        """Enregistre des liens CONFIRMÉS. Écrivain dédié, jamais `save_artist`.
+        """Enregistre des liens CONFIRMÉS (= les confirme). Écrivain dédié, jamais `save_artist`.
+
+        Une ligne déjà là en `proposed` ou `refused` PASSE en `confirmed` : c'est
+        le geste d'arbitrage de la fenêtre « Groupes ».
 
         La règle du 2026-09-06 s'applique telle quelle : une façade générique ne
         peut pas écrire une donnée que la plupart de ses appelants ignorent, sous
@@ -466,6 +471,7 @@ class ArtistRepository:
                         "formation": rel.formation,
                         "debut": rel.begin_date,
                         "fin": rel.end_date,
+                        "detail": rel.detail,
                         "quand": maintenant,
                     }
                     if deja:
@@ -473,9 +479,9 @@ class ArtistRepository:
                             text(
                                 "UPDATE artist_relations SET related_artist_id = :lie, "
                                 "source = :source, formation = :formation, "
-                                "begin_date = :debut, end_date = :fin, "
-                                "confirmed_at = :quand WHERE artist_id = :aid "
-                                "AND related_name = :nom AND kind = :kind"
+                                "begin_date = :debut, end_date = :fin, detail = :detail, "
+                                "status = 'confirmed', confirmed_at = :quand "
+                                "WHERE artist_id = :aid AND related_name = :nom AND kind = :kind"
                             ),
                             params,
                         )
@@ -484,8 +490,9 @@ class ArtistRepository:
                             text(
                                 "INSERT INTO artist_relations (artist_id, related_artist_id, "
                                 "related_name, kind, source, formation, begin_date, "
-                                "end_date, confirmed_at, created_at) VALUES (:aid, :lie, "
-                                ":nom, :kind, :source, :formation, :debut, :fin, :quand, :quand)"
+                                "end_date, detail, status, confirmed_at, created_at) "
+                                "VALUES (:aid, :lie, :nom, :kind, :source, :formation, :debut, "
+                                ":fin, :detail, 'confirmed', :quand, :quand)"
                             ),
                             params,
                         )
@@ -494,6 +501,108 @@ class ArtistRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_artist_relations({artist_id}): {e}")
             return 0
+
+    def propose_artist_relations(self, artist_id: int, relations, status: str = "proposed") -> int:
+        """Dépose des liens PROPOSÉS (ou `info`) par l'enrichissement, sans jamais
+        toucher une ligne existante — quel que soit son statut.
+
+        C'est ce qui rend un refus DURABLE : un run qui repasse retrouve la ligne
+        `refused` et n'insère rien. L'absence se juge par nom NORMALISÉ et kind
+        (« L'Or du Commun » / « L'Or Du Commun » sont une seule ligne), pas par
+        la clé d'unicité brute.
+
+        Returns:
+            Nombre de liens insérés.
+        """
+        if status not in ("proposed", "info"):
+            raise ValueError(f"Statut de proposition inconnu : {status!r}")
+        relations = [r for r in (relations or []) if r and r.related_name and r.kind]
+        if not relations:
+            return 0
+        maintenant = datetime.now()
+        inseres = 0
+        try:
+            with self.engine.begin() as conn:
+                existants = {
+                    (normalize_name(r["related_name"]), r["kind"])
+                    for r in conn.execute(
+                        text(
+                            "SELECT related_name, kind FROM artist_relations WHERE artist_id = :aid"
+                        ),
+                        {"aid": artist_id},
+                    ).mappings()
+                }
+                for rel in relations:
+                    cle = (normalize_name(rel.related_name), rel.kind)
+                    if cle in existants:
+                        continue
+                    existants.add(cle)
+                    conn.execute(
+                        text(
+                            "INSERT INTO artist_relations (artist_id, related_artist_id, "
+                            "related_name, kind, source, formation, begin_date, end_date, "
+                            "detail, status, confirmed_at, created_at) VALUES (:aid, :lie, "
+                            ":nom, :kind, :source, :formation, :debut, :fin, :detail, "
+                            ":status, NULL, :quand)"
+                        ),
+                        {
+                            "aid": artist_id,
+                            "lie": rel.related_artist_id
+                            or self._id_par_nom(conn, rel.related_name),
+                            "nom": rel.related_name,
+                            "kind": rel.kind,
+                            "source": rel.source,
+                            "formation": rel.formation,
+                            "debut": rel.begin_date,
+                            "fin": rel.end_date,
+                            "detail": rel.detail,
+                            "status": status,
+                            "quand": maintenant,
+                        },
+                    )
+                    inseres += 1
+            return inseres
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur propose_artist_relations({artist_id}): {e}")
+            return 0
+
+    def set_relation_status(
+        self,
+        artist_id: int,
+        related_name: str,
+        kind: str,
+        status: str,
+        formation: str | None = None,
+    ) -> bool:
+        """Arbitre UN lien existant : `proposed` → `confirmed` / `refused`, ou l'inverse.
+
+        `confirmed_at` est posé quand on confirme, effacé sinon. `formation` n'est
+        écrite que si fournie (la nature d'un alias reste NULL).
+        """
+        if status not in self.STATUTS_RELATION:
+            raise ValueError(f"Statut de lien inconnu : {status!r}")
+        try:
+            with self.engine.begin() as conn:
+                n = conn.execute(
+                    text(
+                        "UPDATE artist_relations SET status = :status, "
+                        "confirmed_at = :quand, "
+                        "formation = COALESCE(:formation, formation) "
+                        "WHERE artist_id = :aid AND related_name = :nom AND kind = :kind"
+                    ),
+                    {
+                        "status": status,
+                        "quand": datetime.now() if status == "confirmed" else None,
+                        "formation": formation,
+                        "aid": artist_id,
+                        "nom": related_name,
+                        "kind": kind,
+                    },
+                ).rowcount
+            return n > 0
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur set_relation_status({artist_id}, {related_name!r}): {e}")
+            return False
 
     @staticmethod
     def _id_par_nom(conn, nom: str) -> int | None:
@@ -527,8 +636,15 @@ class ArtistRepository:
             logger.error(f"Erreur forget_artist_relation({artist_id}, {related_name!r}): {e}")
             return False
 
-    def get_artist_relations(self, artist_id: int) -> list[ArtistRelation]:
-        """Liens confirmés d'un artiste, ordre stable (nature puis nom).
+    def get_artist_relations(
+        self, artist_id: int, status: str | None = "confirmed"
+    ) -> list[ArtistRelation]:
+        """Liens d'un artiste, ordre stable (nature puis nom).
+
+        **Par défaut, les CONFIRMÉS seuls** : tous les lecteurs métier (noms de
+        recherche des certifs, discographie réunie, panneau Formations) passent
+        par ici, et un alias seulement proposé ne doit pas faire rattacher une
+        certification. `status=None` rend tout (fenêtre d'arbitrage).
 
         **L'identifiant de l'autre bout est résolu À LA LECTURE** quand il
         manque. C'est le cas NORMAL, et pas un accident : on confirme presque
@@ -543,13 +659,15 @@ class ArtistRepository:
         """
         try:
             with self.engine.connect() as conn:
+                filtre = "" if status is None else " AND status = :status"
                 lignes = conn.execute(
                     text(
                         "SELECT related_artist_id, related_name, kind, source, "
-                        "formation, begin_date, end_date FROM artist_relations "
-                        "WHERE artist_id = :aid ORDER BY kind, related_name"
+                        "formation, begin_date, end_date, status, detail "
+                        f"FROM artist_relations WHERE artist_id = :aid{filtre} "
+                        "ORDER BY kind, related_name"
                     ),
-                    {"aid": artist_id},
+                    {"aid": artist_id, "status": status},
                 ).mappings()
                 relations = [
                     ArtistRelation(
@@ -560,6 +678,8 @@ class ArtistRepository:
                         formation=r["formation"],
                         begin_date=r["begin_date"],
                         end_date=r["end_date"],
+                        status=r["status"],
+                        detail=r["detail"],
                     )
                     for r in lignes
                 ]
@@ -591,7 +711,7 @@ class ArtistRepository:
                 lignes = conn.execute(
                     text(
                         "SELECT related_name, formation FROM artist_relations "
-                        "WHERE formation IS NOT NULL"
+                        "WHERE formation IS NOT NULL AND status = 'confirmed'"
                     )
                 ).mappings()
                 for ligne in lignes:

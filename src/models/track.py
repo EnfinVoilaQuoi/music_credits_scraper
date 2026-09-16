@@ -510,6 +510,9 @@ class Track:
 
     # Champs internes de marquage
     _album_from_api: bool = field(default=False, repr=False)
+    # TRANSITOIRE (jamais en base) : l'album du hit Deezer de CE run, lu par le
+    # pas de fin de run qui interroge la fiche album (`record_type`, e26).
+    _deezer_album_id: int | None = field(default=None, repr=False)
     _release_date_from_api: bool = field(default=False, repr=False)
     # « Relations posées ce run, pas encore enregistrées » — pendant de
     # `Certs.needs_write` : `save_track` n'écrit plus la colonne `relationships`,

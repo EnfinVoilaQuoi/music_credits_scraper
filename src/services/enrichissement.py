@@ -30,6 +30,10 @@ class OptionsEnrich:
     sources: tuple[str, ...] | None = None
     force_update: bool = False
     clear_on_failure: bool = True
+    #: Identité en fin de run (MusicBrainz + Discogs) : alias PROPOSÉS, à
+    #: arbitrer dans « Groupes ». Champ dédié, pas un nom dans `sources` :
+    #: celles-ci sont des PROVIDERS par morceau, gardés par `apis_available`.
+    musicbrainz: bool = True
 
 
 @dataclass
@@ -38,6 +42,12 @@ class BilanEnrich(Bilan):
     nettoyes: int = 0
     #: [{"title": str, "results": dict}] — le détail par morceau du résumé.
     resultats: list[dict] = field(default_factory=list)
+    # Pas de fin de run (2026-09-16) : nature des disques (Deezer) et identité.
+    types_albums: int = 0
+    albums_ignores: list[str] = field(default_factory=list)
+    alias_proposes: int = 0
+    alias_infos: int = 0
+    identite: str = ""
 
 
 def sources_effectives(runtime: Runtime, options: OptionsEnrich) -> list[str]:
@@ -127,9 +137,82 @@ async def run_async(
             # save, qui attribue l'id des morceaux neufs.
             await asyncio.to_thread(dm.record_pending, track)
             bilan.traites += 1
+        else:
+            # Pas de FIN DE RUN — une fois par artiste, quand la boucle est
+            # allée au bout : la nature des disques (une fiche Deezer par
+            # album, à partir des hits vus ce run) et l'identité (alias
+            # proposés, oracle d'identité sur les albums en base).
+            if "deezer" in sources and enricher.deezer_client is not None:
+                await _types_albums_deezer(runtime, artist, options, bilan, hooks)
+            if options.musicbrainz:
+                await _propositions_identite(runtime, artist, bilan, hooks)
     finally:
         await _teardown(runtime)
     return bilan
+
+
+async def _types_albums_deezer(
+    runtime: Runtime, artist: Artist, options: OptionsEnrich, bilan: BilanEnrich, hooks: Hooks
+) -> None:
+    """`albums.record_type` depuis Deezer. Une exception ici n'annule pas les
+    morceaux déjà sauvés, mais elle rend le run INCOMPLET (règle du bilan)."""
+    from src.enrichment.album_types import types_albums_deezer
+
+    enricher, dm = runtime.data_enricher, runtime.data_manager
+    hooks.progress(0, 1, "Nature des disques", "Deezer")
+    try:
+        deja = {a["title"]: a for a in await asyncio.to_thread(dm.get_albums_for_artist, artist.id)}
+        resultat = await types_albums_deezer(
+            enricher.deezer_client,
+            enricher.http,
+            artist.tracks,
+            deja,
+            lambda title, rt, did: dm.set_album_record_type(
+                artist.id, title, rt, deezer_album_id=did
+            ),
+            force=options.force_update,
+            artist_name=artist.name,
+        )
+    except Exception as exc:  # dernier ressort : le run doit se DIRE incomplet
+        logger.exception("Nature des disques (Deezer) : échec")
+        bilan.erreurs.append(f"Deezer (nature des disques) : {exc}")
+        bilan.complete = False
+        return
+    bilan.types_albums = resultat.renseignes
+    bilan.albums_ignores = list(resultat.motifs)
+
+
+async def _propositions_identite(
+    runtime: Runtime, artist: Artist, bilan: BilanEnrich, hooks: Hooks
+) -> None:
+    """Alias PROPOSÉS (jamais confirmés) par MusicBrainz + Discogs, sur le fil
+    sync du run (les deux clients sont bloquants). Une saturation MusicBrainz
+    est une PANNE, pas « pas d'alias »."""
+    from src.utils.formations import aliases_a_proposer, chercher_formations
+
+    enricher, dm = runtime.data_enricher, runtime.data_manager
+    hooks.progress(0, 1, "Identité", "MusicBrainz")
+    try:
+        rapport = await enricher.sync_runner.run(chercher_formations, artist, dm)
+        if rapport.panne_mb:
+            raise RuntimeError(rapport.panne_mb)
+        proposes, infos = aliases_a_proposer(rapport, artist.name)
+        bilan.alias_proposes = await asyncio.to_thread(
+            dm.propose_artist_relations, artist.id, proposes
+        )
+        bilan.alias_infos = await asyncio.to_thread(
+            dm.propose_artist_relations, artist.id, infos, "info"
+        )
+    except Exception as exc:  # dernier ressort : le run doit se DIRE incomplet
+        logger.exception("Identité (MusicBrainz) : échec")
+        bilan.erreurs.append(f"MusicBrainz (identité) : {exc}")
+        bilan.complete = False
+        bilan.identite = f"MusicBrainz en panne : {exc}"
+        return
+    if rapport.mbid:
+        bilan.identite = f"MusicBrainz : {rapport.identite_mb or rapport.mbid}"
+    else:
+        bilan.identite = "MusicBrainz : artiste non résolu (aucun alias proposé)"
 
 
 def run(
@@ -184,6 +267,17 @@ def resume(bilan: BilanEnrich, options: OptionsEnrich, desactives: int = 0) -> s
         summary += "✅ Mode force update activé\n"
     if options.clear_on_failure and bilan.nettoyes > 0:
         summary += f"🗑️ {bilan.nettoyes} morceau(x) nettoyé(s) (données erronées effacées)\n"
+    if bilan.types_albums or bilan.albums_ignores:
+        summary += (
+            f"💿 Nature des disques (Deezer) : {bilan.types_albums} renseigné(s), "
+            f"{len(bilan.albums_ignores)} ignoré(s)\n"
+        )
+    if bilan.identite:
+        summary += (
+            f"🪪 Identité — {bilan.identite} : {bilan.alias_proposes} alias proposé(s)"
+            f"{f', {bilan.alias_infos} pour info' if bilan.alias_infos else ''}"
+            " — à arbitrer dans « Groupes »\n"
+        )
 
     summary += "\nDÉTAIL PAR MORCEAU:\n"
     summary += "Légende: ✓=succès | ✗=échec/absent | ?=crash/timeout | -=déjà présent\n\n"

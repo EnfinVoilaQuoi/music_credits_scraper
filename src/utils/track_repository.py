@@ -1353,6 +1353,91 @@ class TrackRepository:
             valeurs["spotify_editions_json"] = editions_json
         return valeurs
 
+    RECORD_TYPES = ("album", "ep", "single", "compile")
+
+    def set_album_record_type(
+        self,
+        artist_id: int,
+        title: str,
+        record_type: str | None,
+        *,
+        source: str = "deezer",
+        deezer_album_id: int | None = None,
+    ) -> bool:
+        """Pose la nature du disque (e26), SOURCÉE : `deezer` ou `manual`.
+
+        La ligne d'album est créée si elle manque — avec la nature SEULEMENT,
+        jamais une colonne de streams (l'arbitrage Kworb/Spotify d'`upsert_album`
+        reste seul maître). Clé = `(title, artist_id)` BRUT, comme le reste de
+        la table : la ligne créée depuis `track.album` (Genius) peut donc
+        cohabiter avec celle de Kworb si les graphies diffèrent — les lecteurs
+        rapprochent par titre normalisé, on ne fusionne pas ici.
+
+        **Une valeur `manual` n'est jamais écrasée par `deezer`** (même règle
+        que Kworb face à Spotify) ; `record_type=None` avec `source="manual"`
+        efface la saisie.
+
+        Returns:
+            True si quelque chose a été écrit.
+        """
+        if record_type is not None and record_type not in self.RECORD_TYPES:
+            raise ValueError(f"record_type inconnu : {record_type!r}")
+        if source not in ("deezer", "manual"):
+            raise ValueError(f"source inconnue : {source!r}")
+        title = (title or "").strip()
+        if not title:
+            return False
+        params = {
+            "aid": artist_id,
+            "title": title,
+            "rt": record_type,
+            "src": source if record_type is not None else None,
+            "quand": date_bind(datetime.now()),
+            "did": deezer_album_id,
+        }
+        try:
+            with self.engine.begin() as conn:
+                deja = conn.execute(
+                    text(
+                        "SELECT record_type_source FROM albums "
+                        "WHERE artist_id = :aid AND title = :title"
+                    ),
+                    params,
+                ).first()
+                if deja is None:
+                    conn.execute(
+                        text(
+                            "INSERT INTO albums (title, artist_id, record_type, "
+                            "record_type_source, record_type_updated, deezer_album_id) "
+                            "VALUES (:title, :aid, :rt, :src, :quand, :did)"
+                        ),
+                        params,
+                    )
+                    return True
+                if deja[0] == "manual" and source == "deezer":
+                    # La main a tranché : Deezer ne retient que sa fiche.
+                    conn.execute(
+                        text(
+                            "UPDATE albums SET deezer_album_id = COALESCE(:did, deezer_album_id) "
+                            "WHERE artist_id = :aid AND title = :title"
+                        ),
+                        params,
+                    )
+                    return False
+                conn.execute(
+                    text(
+                        "UPDATE albums SET record_type = :rt, record_type_source = :src, "
+                        "record_type_updated = :quand, "
+                        "deezer_album_id = COALESCE(:did, deezer_album_id) "
+                        "WHERE artist_id = :aid AND title = :title"
+                    ),
+                    params,
+                )
+                return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur set_album_record_type({artist_id}, {title!r}): {e}")
+            return False
+
     def get_albums_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
         """Retourne les albums d'un artiste triés par streams décroissants."""
         try:
@@ -1365,8 +1450,9 @@ class TrackRepository:
                         text(
                             "SELECT title, spotify_streams, spotify_daily_streams, "
                             "spotify_streams_updated, spotify_streams_source, spotify_editions_json, "
-                            "spotify_album_ids, "
-                            "ytm_streams FROM albums "
+                            "spotify_album_ids, ytm_streams, "
+                            "record_type, record_type_source, record_type_updated, "
+                            "deezer_album_id FROM albums "
                             "WHERE artist_id = :aid ORDER BY spotify_streams DESC"
                         ),
                         {"aid": artist_id},
@@ -1395,6 +1481,11 @@ class TrackRepository:
                         # artiste ne liste pas.
                         "spotify_album_ids": row["spotify_album_ids"],
                         "ytm_streams": row["ytm_streams"],
+                        # e26 : nature du disque (Deezer ou saisie), sourcée.
+                        "record_type": row["record_type"],
+                        "record_type_source": row["record_type_source"],
+                        "record_type_updated": row["record_type_updated"],
+                        "deezer_album_id": row["deezer_album_id"],
                     }
                     for row in rows
                 ]

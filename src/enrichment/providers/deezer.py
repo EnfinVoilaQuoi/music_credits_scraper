@@ -208,6 +208,11 @@ class DeezerProvider:
             logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
             updated = True
 
+        # Album du hit : PAS une donnée du morceau (pas de `updated`), juste la
+        # piste que suivra `album_types` en fin de run pour la nature du disque.
+        if data.get("deezer_album_id"):
+            track._deezer_album_id = data["deezer_album_id"]
+
         # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
         if data.get("deezer_isrc"):
             ctx.observations.append(Observation("isrc", data["deezer_isrc"], self.name))

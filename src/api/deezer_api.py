@@ -233,6 +233,39 @@ class DeezerAPI:
         """
         return self._make_request(f"album/{album_id}")
 
+    async def search_album_async(
+        self, http: "AsyncHttpSession", artist: str, title: str
+    ) -> list[dict]:
+        """`GET /search/album?q=artist:"…" album:"…"` — les fiches candidates
+        (chacune porte déjà `record_type` et `nb_tracks`). Repli quand aucun
+        morceau de l'album n'a de hit : mesuré, la recherche AVANCÉE par
+        morceau rend 0 résultat pour « Isha » alors que celle par album marche."""
+        with source_usage.observe(_SOURCE, label=f"album {artist} — {title}") as obs:
+            data = await self._make_request_async(
+                http, "search/album", {"q": f'artist:"{artist}" album:"{title}"', "limit": 10}
+            )
+            hits = list((data or {}).get("data") or [])
+            if not hits:
+                # La recherche avancée est chatouilleuse sur la ponctuation
+                # (« Vol.1 » vs « Vol. 1 » : 0 résultat) ; la requête LIBRE
+                # rend la fiche, et l'appelant exige l'égalité stricte du titre.
+                data = await self._make_request_async(
+                    http, "search/album", {"q": f"{artist} {title}", "limit": 10}
+                )
+                hits = list((data or {}).get("data") or [])
+            if not hits:
+                obs.absent("aucune fiche album")
+            return hits
+
+    async def get_album_async(self, http: "AsyncHttpSession", album_id: int) -> dict | None:
+        """Jumeau async de `get_album`, sous observation : c'est la fiche qui porte
+        `record_type` (nature du disque), absente du hit de recherche."""
+        with source_usage.observe(_SOURCE, label=f"album {album_id}") as obs:
+            data = await self._make_request_async(http, f"album/{album_id}")
+            if not data:
+                obs.absent("fiche album absente")
+            return data
+
     def extract_enrichment_data(self, track_data: dict) -> dict[str, Any]:
         """
         Extrait les données d'enrichissement depuis les données Deezer

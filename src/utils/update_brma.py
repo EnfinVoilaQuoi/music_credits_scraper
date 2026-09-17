@@ -92,6 +92,15 @@ _COLONNES_IDENTITE = [
 #: Clé de la source dans le registre d'observabilité.
 _SOURCE = "brma"
 
+_C1 = re.compile(r"[\x80-\x9f]")
+
+
+def _visible(texte: str) -> str:
+    """Les contrôles C1 (œ mal décodé) rendus par « � », sinon ils ne se voient
+    ni dans la GUI ni dans la console — seulement à la copie du texte."""
+    return _C1.sub("�", texte)
+
+
 #: Marqueur de ligne dans le style EN LIGNE des pages Ultratop.
 _STYLE_LIGNE = "display:table-row"
 
@@ -742,8 +751,10 @@ class UltratopUpdater:
         )
         if report is not None:
             report["fantomes_retires"] = len(fantomes)
+            # Le caractère de contrôle est INVISIBLE à l'écran (« Sans cur ») : on
+            # le rend par « � » pour que l'exemple montre ce qui est cassé.
             report["fantome_examples"] = [
-                f"{df.iloc[i].artist} — {df.iloc[i].title}" for i in fantomes[:15]
+                _visible(f"{df.iloc[i].artist} — {df.iloc[i].title}") for i in fantomes[:15]
             ]
         if fantomes:
             df = df.drop(df.index[fantomes])

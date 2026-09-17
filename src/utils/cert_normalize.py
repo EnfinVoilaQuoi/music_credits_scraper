@@ -342,6 +342,13 @@ def libelle_tronque(valeur: str) -> bool:
     D'où le choix : SIGNALER pour saisie manuelle, jamais deviner le texte
     manquant.
 
+    Un oracle EXTERNE existe depuis le 2026-09-17 : le slug WordPress de la
+    certification (`snep_slugs`), généré depuis le titre complet avant la
+    corruption — 21 titres coupés sur 21 retrouvés, 7 d'entre eux innocentés
+    (le slug s'arrête au même mot : « Tu le C » est un vrai titre). Ce crible
+    reste le détecteur ; l'oracle confirme, innocente et SUGGÈRE, sans jamais
+    écrire lui-même.
+
     Deux marques, mesurées sur le corpus réel — les signaux évidents ayant
     d'abord été essayés et écartés : « finit par un mot de 1-2 lettres » sortait
     759 titres presque tous légitimes (« BEST OF », « AS I AM », « BAD GUY »),

@@ -37,6 +37,7 @@ sur le libellé CORROMPU — c'est lui qui revient à chaque import.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from src.utils.cert_normalize import (
@@ -139,7 +140,10 @@ def ecrire_fixes(source: str, fixes: dict, acceptes: set[str] | None = None) -> 
 
 
 def candidats_a_corriger(
-    rows: list[list[str]], fixes: dict, acceptes: set[str] | None = None
+    rows: list[list[str]],
+    fixes: dict,
+    acceptes: set[str] | None = None,
+    oracle: Callable[[str, str], bool | None] | None = None,
 ) -> list[tuple]:
     """Libellés qu'aucune réparation automatique ne sait remettre d'aplomb.
 
@@ -154,6 +158,12 @@ def candidats_a_corriger(
         rien ne dit lequel : cherché le 2026-09-06, aucun titre tronqué n'a sa
         version complète ailleurs dans le corpus. Il n'y a donc rien à deviner,
         seulement quelqu'un à qui demander.
+
+    `oracle(artiste, titre)` (2026-09-17) : le verdict des slugs du site
+    (`snep_slugs.verdict_troncature`) — False innocente un libellé que le crible
+    croyait coupé (« Le Tour de M » est complet), None laisse le crible parler.
+    L'oracle n'ACCUSE jamais seul : un slug plus long qu'un titre non signalé est
+    le cas normal des titres à apostrophe, où le slug perd des lettres.
 
     `rows` = lignes déjà découpées (champ 0 = artiste, champ 1 = titre).
     Retourne `[(suspect, artiste, titre, correction_existante), …]`, les cas
@@ -171,6 +181,8 @@ def candidats_a_corriger(
             continue
         artiste, titre = champs[0].strip(), champs[1].strip()
         tronque = libelle_tronque(artiste) or libelle_tronque(titre)
+        if tronque and oracle is not None and oracle(artiste, titre) is False:
+            tronque = False
         if "?" not in artiste + titre and not tronque:
             continue
         cle = cle_correction(artiste, titre)

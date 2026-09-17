@@ -162,7 +162,11 @@ def validate_bpi_csv(
         if not lvl or not u:
             continue
         attendu = bpi_units(lvl, format_type=cat)
-        if attendu is not None and str(attendu) != str(u).strip():
+        try:
+            lu = float(str(u).strip())
+        except ValueError:
+            lu = None
+        if attendu is not None and lu != attendu:
             ecarts[f"{lvl} / {cat} : {u} au lieu de {attendu}"] = (
                 ecarts.get(f"{lvl} / {cat} : {u} au lieu de {attendu}", 0) + 1
             )

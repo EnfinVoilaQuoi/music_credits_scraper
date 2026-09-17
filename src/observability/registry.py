@@ -36,6 +36,9 @@ class Family(StrEnum):
     # audio — c'est de l'IDENTITÉ d'artiste, et la confondre avec les crédits
     # rendrait la section « crédits » du panneau illisible (lot 3).
     IDENTITE = "identite"
+    # Photos et pochettes : ni crédit, ni donnée audio — du VISUEL, qui sert les
+    # exports (Bubble, Timeline) et l'illustration de posts.
+    MEDIA = "media"
 
 
 FAMILY_LABELS: dict[Family, str] = {
@@ -44,6 +47,7 @@ FAMILY_LABELS: dict[Family, str] = {
     Family.CERTS: "Certifications",
     Family.STREAMS: "Streams",
     Family.IDENTITE: "Identité · Groupes & formations",
+    Family.MEDIA: "Photos & pochettes",
 }
 
 #: Ordre d'affichage des sections du panneau.
@@ -53,6 +57,7 @@ FAMILY_ORDER: tuple[Family, ...] = (
     Family.CERTS,
     Family.STREAMS,
     Family.IDENTITE,
+    Family.MEDIA,
 )
 
 
@@ -110,6 +115,10 @@ DOMAIN_TO_KEY: dict[str, str] = {
     "apic-desktop.musixmatch.com": "musixmatch",
     "snepmusique.com": "snep",
     "musicbrainz.org": "musicbrainz",
+    # The BACKPACKERZ : API REST WordPress ouverte (photos, usage autorisé avec
+    # citation). Le site ET son CDN d'uploads sont le même hôte.
+    "www.thebackpackerz.com": "backpackerz",
+    "thebackpackerz.com": "backpackerz",
 }
 
 
@@ -183,6 +192,10 @@ FIXTURE_TO_KEY: dict[str, str] = {
     "bpi_artists": "bpi",
     "lrclib_get": "lrclib",
     "getsongbpm_search": "getsongbpm",
+    "backpackerz_tags": "backpackerz",
+    "backpackerz_posts": "backpackerz",
+    "backpackerz_media_parent": "backpackerz",
+    "backpackerz_media_search": "backpackerz",
 }
 
 

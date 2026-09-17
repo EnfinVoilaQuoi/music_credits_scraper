@@ -69,6 +69,7 @@ _LRCLIB_PARAMS = {  # /get exact : Josman — Dans le vide (album Matrix, 243 s 
     "album_name": "Matrix",
     "duration": 243,
 }
+_BPZ_BASE = "https://www.thebackpackerz.com/wp-json/wp/v2"
 _GETSONGBPM_LOOKUP = "song:Harder, Better, Faster, Stronger artist:Daft Punk"
 
 # BPI : fenêtre d'UN MOIS figée dans le passé. Le mois (et non le jour) parce
@@ -188,6 +189,32 @@ CAPTURES: list[dict] = [
         "path": "getsongbpm/search.json",
         "url": None,  # construite à la volée avec GETSONGBPM_API_KEY (jamais stockée)
         "method": "getsongbpm",
+    },
+    # The BACKPACKERZ : API REST WordPress ouverte, sentinelle Isha (tag 350,
+    # article 65350 = interview de 2020 aux quatre photos © JuPi).
+    {
+        "name": "backpackerz_tags",
+        "path": "backpackerz/tags_isha.json",
+        "url": f"{_BPZ_BASE}/tags?search=isha&per_page=20",
+        "method": "requests",
+    },
+    {
+        "name": "backpackerz_posts",
+        "path": "backpackerz/posts_tag350.json",
+        "url": f"{_BPZ_BASE}/posts?tags=350&per_page=100&_fields=id,title,link,date,featured_media",
+        "method": "requests",
+    },
+    {
+        "name": "backpackerz_media_parent",
+        "path": "backpackerz/media_parent65350.json",
+        "url": f"{_BPZ_BASE}/media?parent=65350&per_page=100&media_type=image",
+        "method": "requests",
+    },
+    {
+        "name": "backpackerz_media_search",
+        "path": "backpackerz/media_search_isha.json",
+        "url": f"{_BPZ_BASE}/media?search=isha&per_page=20&media_type=image",
+        "method": "requests",
     },
 ]
 

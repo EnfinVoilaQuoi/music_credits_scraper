@@ -30,6 +30,9 @@ IMAGES_DIR = DATA_DIR / "images"
 ARTIST_IMAGES_DIR = IMAGES_DIR / "artistes"
 COVER_IMAGES_DIR = IMAGES_DIR / "covers"
 VIGNETTE_IMAGES_DIR = IMAGES_DIR / "vignettes"
+# Photos The BACKPACKERZ (usage autorisé avec citation) : un dossier par artiste,
+# avec son sidecar `credits.json` — cf. `src/utils/backpackerz_photos.py`.
+BACKPACKERZ_IMAGES_DIR = IMAGES_DIR / "backpackerz"
 ENV_FILE = BASE_DIR / ".env"
 
 # Charger .env comme FALLBACK sans écraser les variables Windows (override=False) :
@@ -42,7 +45,7 @@ load_dotenv(ENV_FILE, override=False)
 # Créer les dossiers s'ils n'existent pas
 ARTISTS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
-for _img_dir in (ARTIST_IMAGES_DIR, COVER_IMAGES_DIR, VIGNETTE_IMAGES_DIR):
+for _img_dir in (ARTIST_IMAGES_DIR, COVER_IMAGES_DIR, VIGNETTE_IMAGES_DIR, BACKPACKERZ_IMAGES_DIR):
     _img_dir.mkdir(parents=True, exist_ok=True)
 
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}

@@ -66,7 +66,7 @@ _ISSUE_LABEL = {
     "parse": "structure changée",
     "crash": "scrape cassé",
 }
-_FAMILY_ICON = {"credits": "🎤", "audio": "🎚", "certs": "🏆", "streams": "📈"}
+_FAMILY_ICON = {"credits": "🎤", "audio": "🎚", "certs": "🏆", "streams": "📈", "media": "🖼"}
 _WINDOWS = {"7 jours": 7, "30 jours": 30, "Tout": None}
 _TOUS = "Tous les artistes"
 _MAINTENANCE_DOC = BASE_DIR / "docs" / "maintenance-sources.md"

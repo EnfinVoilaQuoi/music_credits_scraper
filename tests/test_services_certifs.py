@@ -46,18 +46,18 @@ class TestExecuterMaj:
         certifs.executer_maj("RIAA", lancer=lanceur)
         assert len(lanceur.appels) == 1
 
-    def test_brma_sans_chrome_avertit_et_tente_quand_meme(self, monkeypatch):
-        monkeypatch.setattr(certifs, "preparer_cdp", lambda: None)
-        avertis = []
-        lanceur = _Lanceur()
-        certifs.executer_maj("BRMA", lancer=lanceur, sur_cdp_absent=avertis.append)
-        assert avertis == ["BRMA"] and len(lanceur.appels) == 1
+    def test_brma_ne_prepare_plus_chrome_ici(self, monkeypatch):
+        """Le script pose sa route lui-même (`ultratop_fetch.preparer_route_cdp`)
+        et refuse de partir sans Chrome : la fenêtre ne le prépare plus, ne
+        l'injecte plus, ne l'avertit plus — une seule autorité."""
 
-    def test_brma_avec_chrome_passe_l_url_en_env(self, monkeypatch):
-        monkeypatch.setattr(certifs, "preparer_cdp", lambda: "http://cdp")
+        def jamais():
+            raise AssertionError("preparer_cdp ne doit pas être appelé pour BRMA")
+
+        monkeypatch.setattr(certifs, "preparer_cdp", jamais)
         lanceur = _Lanceur()
         certifs.executer_maj("BRMA", lancer=lanceur)
-        assert lanceur.appels[0][2]["GENIUS_CDP_URL"] == "http://cdp"
+        assert len(lanceur.appels) == 1 and lanceur.appels[0][2] is None
 
 
 class TestMettreAJour:

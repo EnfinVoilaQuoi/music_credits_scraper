@@ -68,14 +68,6 @@ class TestExecuterMajErreurs:
         with pytest.raises(FileNotFoundError):
             certifs.executer_maj("SNEP", lancer=_Lanceur())
 
-    def test_brma_sans_chrome_ni_callback_avertit_au_log(self, monkeypatch, caplog):
-        monkeypatch.setattr(certifs, "preparer_cdp", lambda: None)
-        lanceur = _Lanceur()
-        with caplog.at_level("WARNING"):
-            certifs.executer_maj("BRMA", lancer=lanceur)
-        assert len(lanceur.appels) == 1 and lanceur.appels[0][2] is None
-        assert any("Chrome de debug introuvable" in r.message for r in caplog.records)
-
     def test_riaa_repli_sans_chrome_garde_l_echec_headless(self, monkeypatch, caplog):
         monkeypatch.setattr(certifs, "preparer_cdp", lambda: None)
         lanceur = _Lanceur(codes={"RIAA": 1})

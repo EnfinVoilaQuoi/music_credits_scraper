@@ -20,6 +20,7 @@ import schedule
 from src.config import DATA_PATH
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.scrapers.ultratop_fetch import preparer_route_cdp
 from src.utils import cert_clean_report, cert_store
 from src.utils.llm_extractor import secours_apres_panne
 from src.utils.logger import get_logger
@@ -1163,6 +1164,20 @@ def main():
         # Un rapport porteur d'`error` sortait en 0 : la GUI concluait au succès
         # et proposait « Appliquer » pour une opération qui ne pouvait rien faire.
         sys.exit(1 if rapport.get("error") else 0)
+
+    # Tout ce qui suit SCRAPE : la route CDP se pose ICI, avant la première page.
+    # Le script ne le faisait pas — le savoir vivait chez ses appelants (GUI,
+    # `run_brma.ps1`), et lancé à la main il partait en headless boucler sur le
+    # Cloudflare d'ultratop, à 3 tentatives et 30 s d'attente par page. Sans
+    # Chrome, on refuse de partir : un run qui ne peut rien lire doit le DIRE
+    # tout de suite, pas après 64 pages muettes.
+    safe_print("🌐 BRMA : préparation de Chrome (route CDP, Cloudflare)…")
+    if not preparer_route_cdp():
+        safe_print(
+            "❌ BRMA : Chrome de debug introuvable — Ultratop n'est lisible que par la "
+            "route CDP (installe Google Chrome, ou définis CHROME_PATH / GENIUS_CDP_URL)"
+        )
+        sys.exit(1)
 
     if args.mode == "manual":
         # Mode interactif

@@ -1277,7 +1277,6 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             bilan = certifs.mettre_a_jour(
                 should_stop=stop_requested,
                 progres=self._set_progress,
-                sur_cdp_absent=self._avertir_cdp_absent,
             )
             echecs = bilan.echecs
             self._set_progress(
@@ -1297,29 +1296,13 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
         self._demarrer("maj-toutes", update_all)
 
-    def _avertir_cdp_absent(self, nom: str) -> None:
-        """BRMA sans Chrome de debug : on prévient, la MàJ tente quand même."""
-        self.after(
-            0,
-            lambda: messagebox.showwarning(
-                "Chrome requis (Cloudflare)",
-                "Impossible de préparer Chrome en mode debug pour contourner le "
-                "Cloudflare d'ultratop.\nVérifie que Google Chrome est installé "
-                "(ou définis la variable CHROME_PATH).\n\nLa mise à jour va tenter "
-                "quand même, mais risque de boucler sur le challenge.",
-                parent=self,
-            ),
-        )
-
-    def _preparer_cdp(self) -> str | None:
-        """Lance (ou retrouve) un Chrome de debug et rend son URL CDP."""
-        return certifs.preparer_cdp()
-
     def _executer_maj(self, nom: str) -> tuple[int, str]:
-        """Met à jour UNE source, de façon SYNCHRONE (service `certifs.executer_maj`)."""
-        return certifs.executer_maj(
-            nom, progres=self._set_progress, sur_cdp_absent=self._avertir_cdp_absent
-        )
+        """Met à jour UNE source, de façon SYNCHRONE (service `certifs.executer_maj`).
+
+        BRMA sans Chrome de debug : le SCRIPT refuse de partir (code 1) et le
+        dit dans sa sortie, que le dialogue d'erreur relaie — la fenêtre n'a plus
+        à préparer Chrome ni à avertir de son côté."""
+        return certifs.executer_maj(nom, progres=self._set_progress)
 
     def _lancer_maj(self, nom: str):
         """Un bouton de mise à jour : le corps ci-dessus, dans un fil, avec dialogue."""

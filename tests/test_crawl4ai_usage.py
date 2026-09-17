@@ -17,7 +17,7 @@ from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 def _propre(monkeypatch):
     su.reset()
     su.set_sink(None)
-    monkeypatch.setattr(base, "_CDP_URL", None)  # échelle headless → visible
+    monkeypatch.delenv("GENIUS_CDP_URL", raising=False)  # échelle headless → visible
     yield
     su.reset()
     su.set_sink(None)

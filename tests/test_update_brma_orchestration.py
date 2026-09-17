@@ -121,6 +121,37 @@ class TestDedupDatabase:
         assert report["levels"] == {"Or": 1}
         assert len(pd.read_csv(updater.database_path)) == 1
 
+    def test_fantome_d_encodage_purge_quand_la_version_saine_existe(self, updater):
+        """Un œ mal décodé (octet cp1252 0x9C lu en latin-1 → U+009C) doublait
+        20 certifications du clean ; le crible du 2026-09-06 ne cherchait que
+        le « ? ». La ligne cassée part, la saine reste — et une cassée SANS
+        version saine reste, seule trace de la certification."""
+
+        def ligne(artist, title):
+            return {
+                "artist": artist,
+                "title": title,
+                "category": "singles",
+                "certification_level": "Or",
+                "certification_date": "2021-01-01",
+                "year_page": 2021,
+                "detail_url": "",
+            }
+
+        casse, sain = "C" + chr(0x9C) + "ur de Pirate", "Cœur de Pirate"
+        raw = pd.DataFrame(
+            [
+                ligne(casse, "Comme des enfants"),
+                ligne(sain, "Comme des enfants"),
+                ligne(casse, "Seule trace"),
+            ]
+        )
+        raw.to_csv(updater.raw_path, index=False, encoding="utf-8-sig")
+        report = updater.dedup_database(apply=True)
+        assert report["fantomes_retires"] == 1
+        clean = pd.read_csv(updater.database_path, encoding="utf-8-sig")
+        assert sorted(clean["artist"]) == sorted([sain, casse])
+
 
 class TestEcritureAtomique:
     def test_echec_d_ecriture_nettoie_le_temporaire_et_releve(self, updater, monkeypatch):

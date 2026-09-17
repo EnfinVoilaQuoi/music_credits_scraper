@@ -12,14 +12,25 @@ Deux règles y sont vérifiées, toutes deux issues de bugs réels :
    récupération ciblée écrivait `GLOBAL`, la base paraîtrait à jour alors que
    seul un artiste a été rafraîchi.
 
-Le réseau est remplacé par un faux `requests_get` ; tout le reste (filtrage,
-fusion, régénération du clean, méta) tourne pour de vrai sur `tmp_path`.
+3. **Les PAGES, pas l'export** (2026-09-17). L'export CSV que le site génère
+   pour `?interprete=` est plafonné aux blocs de la page qui l'a produit (30
+   lignes pour NINHO, 147 en base) et son fichier est partagé entre
+   chargements : la récupération par artiste était TRONQUÉE à 30 depuis
+   toujours pour un artiste prolifique, et la confirmation des retraits
+   « confirmait » tout ce qui vivait au-delà de la page 1.
+
+Le réseau est remplacé par un faux `_fetch` servant des pages HTML ; tout le
+reste (filtrage, fusion, régénération du clean, méta) tourne pour de vrai sur
+`tmp_path`.
 """
 
 import json
+import re as _re
 
 import pytest
+import requests
 
+import tests.test_update_snep_scrape as _tus  # `_page` réexposée par attribut (F811)
 from src.utils import update_snep as us
 
 RAW_HEADER = (
@@ -32,17 +43,9 @@ def _ligne(artiste, titre="TITRE", lvl="Or", constat="02/10/2025"):
     return f"{artiste};{titre};LABEL;Singles;{lvl};01/01/2019;{constat}"
 
 
-class _Reponse:
-    def __init__(self, text="", status=200):
-        self.text = text
-        self.content = text.encode("utf-8")
-        self._status = status
-
-    def raise_for_status(self):
-        if self._status >= 400:
-            import requests
-
-            raise requests.RequestException(f"HTTP {self._status}")
+def _html(lignes, last_page=1):
+    """La page HTML du site rendant ces lignes CSV (blocs `div.certification`)."""
+    return _tus._page([tuple(ligne.split(";")) for ligne in lignes], last_page=last_page)
 
 
 @pytest.fixture
@@ -56,24 +59,25 @@ def snep_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def reseau(monkeypatch):
-    """Faux réseau : `pages` associe une URL (par sous-chaîne) à une réponse."""
-    pages: dict[str, _Reponse] = {}
+def site(monkeypatch):
+    """Faux site : `pages[N]` = HTML (ou exception) servi pour /page/N ; les
+    URL demandées sont mémorisées. Une page non déclarée = coupure réseau."""
+    pages: dict[int, object] = {}
     appels = []
 
-    def _get(source, url, **kwargs):
+    def fake_fetch(session, url, timeout=None):
         appels.append(url)
-        for motif, reponse in pages.items():
-            if motif in url:
-                return reponse
-        return _Reponse("", 404)
+        m = _re.search(r"/page/(\d+)", url)
+        page = pages.get(int(m.group(1)) if m else 1)
+        if page is None:
+            raise requests.ConnectionError(f"page absente : {url}")
+        if isinstance(page, Exception):
+            raise page
+        return page
 
-    monkeypatch.setattr(us.source_usage, "requests_get", _get)
+    monkeypatch.setattr(us, "_fetch", fake_fetch)
+    monkeypatch.setattr(us.time, "sleep", lambda *_: None)
     return pages, appels
-
-
-def _page_avec_lien(nom="certif-abc.csv"):
-    return _Reponse(f'<html><a href="/wp-content/uploads/{nom}">Télécharger en CSV</a></html>')
 
 
 class TestFiltreMotEntier:
@@ -95,22 +99,21 @@ class TestFiltreMotEntier:
 
 
 class TestRecuperationParArtiste:
-    def _lancer(self, reseau, snep_dir, lignes, nom_artiste="IAM"):
-        pages, _ = reseau
-        pages["?interprete="] = _page_avec_lien()
-        pages["certif-abc.csv"] = _Reponse("\n".join([RAW_HEADER, *lignes]))
+    def _lancer(self, site, snep_dir, lignes, nom_artiste="IAM"):
+        pages, _ = site
+        pages[1] = _html(lignes)
         return us.fetch_artist_certifications(nom_artiste)
 
-    def test_nominal(self, reseau, snep_dir):
-        ok = self._lancer(reseau, snep_dir, [_ligne("IAM", "DEMAIN C'EST LOIN")])
+    def test_nominal(self, site, snep_dir):
+        ok = self._lancer(site, snep_dir, [_ligne("IAM", "DEMAIN C'EST LOIN")])
         assert ok is True
         brut = (snep_dir / "certif-.csv").read_text(encoding="utf-8-sig")
         assert "DEMAIN C'EST LOIN" in brut
 
-    def test_bruit_ecarte_du_csv_maitre(self, reseau, snep_dir):
+    def test_bruit_ecarte_du_csv_maitre(self, site, snep_dir):
         """Le cœur du garde-fou : WILLIAMS ne doit pas entrer dans la base."""
         ok = self._lancer(
-            reseau,
+            site,
             snep_dir,
             [_ligne("IAM", "VRAI TITRE"), _ligne("WILLIAMS", "FAUX TITRE")],
         )
@@ -119,79 +122,105 @@ class TestRecuperationParArtiste:
         assert "VRAI TITRE" in brut
         assert "FAUX TITRE" not in brut
 
-    def test_que_du_bruit_abandonne(self, reseau, snep_dir):
+    def test_que_du_bruit_abandonne(self, site, snep_dir):
         """Aucune ligne ne correspond : on n'écrit RIEN plutôt que d'écrire du
         bruit (artiste mal orthographié ou inconnu)."""
-        ok = self._lancer(reseau, snep_dir, [_ligne("WILLIAMS"), _ligne("LIAM")])
+        ok = self._lancer(site, snep_dir, [_ligne("WILLIAMS"), _ligne("LIAM")])
         assert ok is False
         assert not (snep_dir / "certif-.csv").exists()
 
-    def test_fusion_avec_l_existant(self, reseau, snep_dir):
+    def test_fusion_avec_l_existant(self, site, snep_dir):
         """Le CSV maître ACCUMULE : une récup par artiste ne l'écrase pas."""
         (snep_dir / "certif-.csv").write_text(
             "﻿" + RAW_HEADER + "\n" + _ligne("JUL", "ANCIEN") + "\n", encoding="utf-8"
         )
-        self._lancer(reseau, snep_dir, [_ligne("IAM", "NOUVEAU")])
+        self._lancer(site, snep_dir, [_ligne("IAM", "NOUVEAU")])
         brut = (snep_dir / "certif-.csv").read_text(encoding="utf-8-sig")
         assert "ANCIEN" in brut
         assert "NOUVEAU" in brut
 
-    def test_source_artist_dans_la_meta(self, reseau, snep_dir):
+    def test_source_artist_dans_la_meta(self, site, snep_dir):
         """Règle JOURNAL 2026-06-25 : une récup ciblée est tracée ARTIST, pas
         GLOBAL — sinon la base paraît globalement à jour."""
-        self._lancer(reseau, snep_dir, [_ligne("IAM", "TITRE")])
+        self._lancer(site, snep_dir, [_ligne("IAM", "TITRE")])
         meta = json.loads((snep_dir / "certif_snep.meta.json").read_text(encoding="utf-8"))
         assert meta["last_source"] == "ARTIST"
         assert "ARTIST" in meta["updates"]
         assert "GLOBAL" not in meta["updates"]
 
-    def test_fraicheur_globale_preservee(self, reseau, snep_dir):
+    def test_fraicheur_globale_preservee(self, site, snep_dir):
         """Une MàJ globale antérieure garde SA date : la récup artiste ajoute une
         entrée à côté, elle ne repeint pas l'historique global."""
         (snep_dir / "certif_snep.meta.json").write_text(
             json.dumps({"updates": {"GLOBAL": "2020-01-01T00:00:00"}}), encoding="utf-8"
         )
-        self._lancer(reseau, snep_dir, [_ligne("IAM", "TITRE")])
+        self._lancer(site, snep_dir, [_ligne("IAM", "TITRE")])
         meta = json.loads((snep_dir / "certif_snep.meta.json").read_text(encoding="utf-8"))
         assert meta["updates"]["GLOBAL"] == "2020-01-01T00:00:00"
         assert meta["updates"]["ARTIST"] != "2020-01-01T00:00:00"
 
-    def test_clean_regenere(self, reseau, snep_dir):
-        self._lancer(reseau, snep_dir, [_ligne("IAM", "TITRE")])
+    def test_clean_regenere(self, site, snep_dir):
+        self._lancer(site, snep_dir, [_ligne("IAM", "TITRE")])
         clean = (snep_dir / "certif_snep.csv").read_text(encoding="utf-8-sig")
         assert "TITRE" in clean
 
 
 class TestEchecsReseau:
-    def test_page_artiste_inaccessible(self, reseau, snep_dir):
-        pages, _ = reseau
-        pages["?interprete="] = _Reponse("", 503)
+    def test_page_artiste_inaccessible(self, site, snep_dir):
+        pages, _ = site
+        pages[1] = requests.ConnectionError("HTTP 503")
         assert us.fetch_artist_certifications("IAM") is False
 
-    def test_lien_csv_introuvable(self, reseau, snep_dir):
-        """Page servie mais sans lien d'export : artiste inconnu du SNEP."""
-        pages, _ = reseau
-        pages["?interprete="] = _Reponse("<html>aucun export ici</html>")
+    def test_aucun_bloc_abandonne(self, site, snep_dir):
+        """Page servie mais vide : artiste inconnu du SNEP, on n'écrit rien."""
+        pages, _ = site
+        pages[1] = "<html>rien ici</html>"
         assert us.fetch_artist_certifications("Inconnu") is False
+        assert not (snep_dir / "certif-.csv").exists()
 
-    def test_telechargement_csv_impossible(self, reseau, snep_dir):
-        pages, _ = reseau
-        pages["?interprete="] = _page_avec_lien()
-        pages["certif-abc.csv"] = _Reponse("", 500)
+    def test_page_suivante_inaccessible_abandonne(self, site, snep_dir):
+        """Un listing partiel n'est pas un listing : la 2ᵉ page tombe, rien
+        n'est écrit (une récupération tronquée passerait pour complète)."""
+        pages, _ = site
+        pages[1] = _html([_ligne("IAM", f"T{i}") for i in range(30)], last_page=3)
         assert us.fetch_artist_certifications("IAM") is False
+        assert not (snep_dir / "certif-.csv").exists()
 
-    def test_contenu_inattendu(self, reseau, snep_dir):
-        """Le SNEP sert parfois une page d'erreur avec un code 200."""
-        pages, _ = reseau
-        pages["?interprete="] = _page_avec_lien()
-        pages["certif-abc.csv"] = _Reponse("<html>maintenance</html>")
-        assert us.fetch_artist_certifications("IAM") is False
 
-    def test_csv_vide(self, reseau, snep_dir):
-        pages, _ = reseau
-        pages["?interprete="] = _page_avec_lien()
-        pages["certif-abc.csv"] = _Reponse("")
-        assert us.fetch_artist_certifications("IAM") is False
+class TestListingComplet:
+    """La page N rend les tranches N..2N−1 (`_lignes_du_filtre`, mécanique du
+    SITE) : 65 certifications = 3 tranches, lues en 2 requêtes (pages 1 et 2),
+    là où l'export — et la lecture de la seule page 1 — s'arrêtaient à 30."""
+
+    def _site_de_65(self, site):
+        pages, appels = site
+        lignes = [_ligne("CELINE DION", f"TITRE {i:02d}") for i in range(65)]
+        pages[1] = _html(lignes[:30], last_page=3)
+        pages[2] = _html(lignes[30:65])  # tranches 2 et 3
+        pages[3] = _html(lignes[60:65])
+        return lignes, appels
+
+    def test_recuperation_par_artiste_n_est_plus_tronquee_a_30(self, site, snep_dir):
+        lignes, appels = self._site_de_65(site)
+        assert us.fetch_artist_certifications("CELINE DION") is True
+        brut = (snep_dir / "certif-.csv").read_text(encoding="utf-8-sig")
+        assert sum(1 for ligne in lignes if ligne in brut) == 65
+        assert _tus.TestScrapeYear._pages_vues(appels) == [1, 2]
+
+    def test_confirmation_des_retraits_voit_toute_la_page_artiste(self, site):
+        lignes, _ = self._site_de_65(site)
+        assert us._page_artiste("CELINE DION") == lignes
+
+    def test_page_inaccessible_laisse_indecise(self, site):
+        pages, _ = site
+        pages[1] = requests.ConnectionError("HTTP 503")
+        assert us._page_artiste("CELINE DION") is None
+
+    def test_listing_partiel_laisse_indecise(self, site):
+        """Une absence qu'on n'a pas pu vérifier n'est pas un retrait."""
+        pages, _ = site
+        pages[1] = _html([_ligne("CELINE DION", f"T{i}") for i in range(30)], last_page=3)
+        assert us._page_artiste("CELINE DION") is None
 
 
 class TestCsvMaitre:
@@ -260,3 +289,10 @@ def test_affichage_resiste_a_un_stdout_ferme(monkeypatch, caplog):
     monkeypatch.setattr("builtins.print", _ferme)
     us.safe_print("message important")
     assert "message important" in caplog.text
+
+    def test_page_vide_laisse_indecise(self, site):
+        """Le nom vient du crédit LOCAL et le SNEP réécrit ses crédits
+        (« MAITRE GIMS » → « GIMS ») : une page vide ne prouve pas un retrait."""
+        pages, _ = site
+        pages[1] = "<html>rien</html>"
+        assert us._page_artiste("MAITRE GIMS") is None

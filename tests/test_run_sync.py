@@ -47,7 +47,8 @@ def test_run_sync_refuse_depuis_la_boucle():
 
 
 def test_crawl_page_route_par_la_boucle():
-    """Le pont sync des scrapers crawl4ai exécute `acrawl_page` sur la boucle app."""
+    """Le pont sync des scrapers crawl4ai exécute le rendu sur la boucle app
+    (l'observation, elle, reste sur le thread appelant — cf. `_Passes`)."""
     from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 
     class _Stub(CrawlAIScraperBase):
@@ -55,10 +56,10 @@ def test_crawl_page_route_par_la_boucle():
             super().__init__(headless=True)
             self.seen_thread = None
 
-        async def acrawl_page(self, url, **kwargs):
+        async def _acrawl_page_body(self, url, *args):
             self.seen_thread = threading.current_thread().name
-            return ("md", "<html>")
+            return "<html>"
 
     stub = _Stub()
-    assert stub._crawl_page("https://exemple.test") == ("md", "<html>")
+    assert stub._crawl_page("https://exemple.test") == (None, "<html>")
     assert stub.seen_thread == "asyncio-loop"

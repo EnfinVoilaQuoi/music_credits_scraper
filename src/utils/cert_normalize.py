@@ -379,6 +379,18 @@ def libelle_tronque(valeur: str) -> bool:
 #: leurs accents — c'est exactement le périmètre d'une corruption d'encodage.
 _NON_ALPHANUM_RE = re.compile(r"[^a-z0-9]+")
 
+#: Les deux traces d'un encodage cassé : le « ? » de substitution (exports SNEP)
+#: et les caractères de contrôle C1 U+0080-U+009F, qui n'existent dans aucun
+#: libellé — c'est un octet cp1252 (0x9C = œ, 0x95 = •) lu comme du latin-1.
+#: Mesuré le 2026-09-17 : 21 lignes du brut BRMA, toutes d'un scrape de 2025
+#: (l'ancien scraper `requests`), doublant 20 certifications à œ dans le clean.
+_ENCODAGE_CASSE_RE = re.compile(r"[?\x80-\x9f]")
+
+
+def ecriture_cassee(*libelles: str) -> bool:
+    """Vrai si l'un des libellés porte la trace d'un encodage cassé."""
+    return any(_ENCODAGE_CASSE_RE.search(v or "") for v in libelles)
+
 
 def squelette_libelle(valeur: str) -> str:
     """Le libellé réduit à ses lettres et chiffres, en minuscules.
@@ -388,8 +400,18 @@ def squelette_libelle(valeur: str) -> str:
     que `cle_plate`, qui conserve justement le « ? » — les deux coexistent parce
     qu'ils répondent à des questions opposées : `cle_plate` pour retrouver un
     libellé « tel qu'écrit », celui-ci pour l'apparier malgré son écriture.
+
+    Les accents sont RETIRÉS avant (2026-09-17) : le site SNEP sert « BEYAH »
+    là où le brut porte « BEYĀH », et un « Ā » supprimé comme non-alphanumérique
+    faisait deux squelettes (« beyh » / « beyah ») — un Platine « retiré » alors
+    que son Double Platine est sur le site. Mesuré sur le brut entier : les 133
+    groupes de jumelles sont les mêmes avec et sans cette étape (l'œ, non
+    décomposable, reste supprimé comme le « ? » qui le remplace).
     """
-    return _NON_ALPHANUM_RE.sub("", (valeur or "").lower())
+    sans_accents = "".join(
+        c for c in unicodedata.normalize("NFD", valeur or "") if unicodedata.category(c) != "Mn"
+    )
+    return _NON_ALPHANUM_RE.sub("", sans_accents.lower())
 
 
 def reperer_fantomes(
@@ -441,7 +463,7 @@ def reperer_fantomes(
             squelette_libelle(titre),
             *(ligne[j] for j in autres),
         )
-        cassee = "?" in artiste or "?" in titre
+        cassee = ecriture_cassee(artiste, titre)
         groupes.setdefault(cle, []).append((i, cassee))
 
     fantomes = []

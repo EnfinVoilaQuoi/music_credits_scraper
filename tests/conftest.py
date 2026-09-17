@@ -52,6 +52,24 @@ def _oracle_spotify_hors_ligne(monkeypatch):
     monkeypatch.setattr("src.utils.spotify_identity.lire_identite_http", lambda spotify_id: None)
 
 
+@pytest.fixture(autouse=True)
+def _aucun_chrome_de_debug(monkeypatch):
+    """AUCUN test ne lance Chrome.
+
+    `ultratop_fetch.preparer_route_cdp` (2026-09-17) lance un Chrome de debug
+    quand `GENIUS_CDP_URL` manque — c'est son rôle, et tout ce qui scrape
+    Ultratop y passe (`update_brma.main`, la sonde complète, la capture de
+    fixtures). Sans ce cran, un test qui traverse `main()` ouvrirait un vrai
+    navigateur sur la machine du développeur et échouerait sur le CI, qui n'en a
+    pas. Le neutraliser rend « Chrome introuvable », le cas le plus proche du
+    CI ; un test qui veut EXERCER la route pose la variable ou remplace
+    `ensure_cdp_chrome` lui-même. `GENIUS_CDP_URL` est retirée pour que le `.env`
+    du développeur ne fasse pas passer un test qui échoue ailleurs.
+    """
+    monkeypatch.delenv("GENIUS_CDP_URL", raising=False)
+    monkeypatch.setattr("src.scrapers.cdp_chrome.ensure_cdp_chrome", lambda *a, **k: None)
+
+
 @pytest.fixture
 def data_manager(tmp_path, monkeypatch):
     # DataManager n'importe plus les certifications au démarrage (elles vivent

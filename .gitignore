@@ -102,7 +102,6 @@ scripts/*
 !scripts/bpmfinder_login.py
 !scripts/bpmfinder_diagnose.py
 !scripts/sonoteller_worklist.py
-!scripts/run_brma.ps1
 # Crédits Discogs : table d'alias et oracle Genius (2026-09-03)
 !scripts/reclass_discogs_roles.py
 !scripts/discogs_genius_oracle.py

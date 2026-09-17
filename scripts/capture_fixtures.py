@@ -289,20 +289,13 @@ def _fetch_riaa(url: str) -> str | None:
 def _fetch_ultratop(params: dict) -> str | None:
     """Ultratop = Cloudflare strict : tout navigateur d'automation BOUCLE sur le
     challenge, même en fenêtre visible (piège documenté, JOURNAL 2026-06-29).
-    Seule la route CDP passe : vrai Chrome lancé hors automation, auquel
-    patchright s'attache."""
-    from src.scrapers.cdp_chrome import ensure_cdp_chrome
+    Seule la route CDP passe, et c'est `ultratop_fetch` qui la pose — le script
+    la préparait lui-même, en bricolant la constante de la base par-dessus."""
+    from src.scrapers.ultratop_fetch import fetch_ultratop_html, preparer_route_cdp
 
-    cdp_url = ensure_cdp_chrome()
-    if not cdp_url:
+    if not preparer_route_cdp():
         print("   Chrome introuvable — route CDP obligatoire pour Ultratop (cf. JOURNAL)")
         return None
-    os.environ["GENIUS_CDP_URL"] = cdp_url  # lu à l'import de crawl4ai_scraper_base
-    import src.scrapers.crawl4ai_scraper_base as cf_base
-
-    cf_base._CDP_URL = cdp_url  # au cas où le module serait déjà importé
-    from src.scrapers.ultratop_fetch import fetch_ultratop_html
-
     return fetch_ultratop_html(params["year"], params["category"])
 
 

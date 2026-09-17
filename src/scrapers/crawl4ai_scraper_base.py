@@ -56,10 +56,19 @@ _USER_AGENT = (
 # qu'UNE fois (manuellement), ensuite tout passe (même en headless).
 _PROFILE_DIR = str(Path.home() / ".music_credits_scraper" / "cf_profile")
 
-# Optionnel : se connecter à un navigateur Chromium DÉJÀ OUVERT (ex. Brave sur IP
-# résidentielle) via CDP, au lieu de lancer Chrome for Testing. Lance ton Brave avec
-# `--remote-debugging-port=9222` puis `set GENIUS_CDP_URL=http://localhost:9222`.
-_CDP_URL = os.getenv("GENIUS_CDP_URL")
+
+def _cdp_url() -> str | None:
+    """Optionnel : se connecter à un navigateur Chromium DÉJÀ OUVERT (ex. Brave sur
+    IP résidentielle) via CDP, au lieu de lancer Chrome for Testing. Lance ton Brave
+    avec `--remote-debugging-port=9222` puis `set GENIUS_CDP_URL=http://localhost:9222`.
+
+    Lue À L'APPEL, pas à l'import : cette base est importée au chargement de
+    `update_brma`, si bien qu'une constante de module figeait la route AVANT que
+    le script ait pu préparer son Chrome (`ultratop_fetch.preparer_route_cdp`) —
+    il fallait poser la variable dans le shell, d'où l'ex-`run_brma.ps1`.
+    """
+    return os.getenv("GENIUS_CDP_URL")
+
 
 # Optionnel : forcer patchright à lancer le VRAI navigateur installé
 # (channel="chrome", "msedge", "brave"…) au lieu du Chromium bundlé. Certains
@@ -214,7 +223,7 @@ class CrawlAIScraperBase:
         bloqué en headless puis servi en fenêtre visible vaut UN succès, pas deux
         échecs."""
         # 0) Mode CDP : on lit via un navigateur déjà ouvert (Brave, IP résidentielle)
-        if _CDP_URL:
+        if _cdp_url():
             try:
                 _, html, blocked = await self._patchright_fetch(
                     url,
@@ -383,13 +392,14 @@ class CrawlAIScraperBase:
 
         try:
             async with async_playwright() as pw:
-                cdp_mode = bool(_CDP_URL)
+                cdp_url = _cdp_url()
+                cdp_mode = bool(cdp_url)
                 if cdp_mode:
                     # Attache à un Chromium déjà ouvert (Brave, IP résidentielle, vraie session)
-                    browser = await pw.chromium.connect_over_cdp(_CDP_URL)
+                    browser = await pw.chromium.connect_over_cdp(cdp_url)
                     ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
                     page = await ctx.new_page()
-                    logger.info(f"{self.__class__.__name__}: connecté via CDP à {_CDP_URL}")
+                    logger.info(f"{self.__class__.__name__}: connecté via CDP à {cdp_url}")
                 else:
                     ctx = await pw.chromium.launch_persistent_context(
                         profile_dir, **self._launch_kwargs(headless)

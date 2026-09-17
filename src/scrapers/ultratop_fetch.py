@@ -7,15 +7,21 @@ requêtes `requests` non-navigateur (403). On réutilise donc `CrawlAIScraperBas
 l'apparition de `.chart_title` (les entrées de certif) au lieu du conteneur
 paroles Genius, puis on récupère le HTML rendu.
 
-⚠️ PREMIÈRE UTILISATION : le profil persistant a un cookie `cf_clearance` pour
-genius.com mais PAS pour ultratop.be. La 1ʳᵉ page ouvrira donc une fenêtre
-VISIBLE pour résoudre le challenge Cloudflare d'ultratop.be UNE fois ; le cookie
-est ensuite mémorisé et tout repasse en headless (même mécanisme que Genius).
+⚠️ ROUTE CDP OBLIGATOIRE — ce Cloudflare-là est STRICT (≠ Genius, ≠ RIAA) : il
+fait boucler tout navigateur LANCÉ par de l'automation, headless comme fenêtre
+visible, même le vrai Chrome via `channel="chrome"` (JOURNAL 2026-06-29). La
+seule voie qui passe : un Chrome démarré NORMALEMENT avec son port de debug,
+auquel patchright s'ATTACHE (`connect_over_cdp`). `preparer_route_cdp` est le
+point UNIQUE qui pose cette route ; il était écrit à trois endroits au-dessus
+de ce module (GUI, `run_brma.ps1`, `capture_fixtures`) et nulle part dedans, si
+bien que `python -m src.utils.update_brma` partait boucler en headless.
 
 URLs (inchangées par la refonte) : /fr/or-platine/{année}/{singles|albums}.
 Le DOM aussi est inchangé : .chart_title = <B>Artiste</B><BR>Titre,
 .company = "JJ/MM/AAAA: Niveau [JJ/MM/AAAA: Niveau ...]".
 """
+
+import os
 
 from bs4 import BeautifulSoup
 
@@ -38,12 +44,43 @@ def _get_scraper() -> CrawlAIScraperBase:
     return _scraper
 
 
+def preparer_route_cdp() -> str | None:
+    """Garantit la route CDP et rend son URL ; None si Chrome est introuvable.
+
+    `GENIUS_CDP_URL` déjà posée (GUI, `.env`, Brave lancé à la main) → respectée
+    telle quelle. Sinon on lance — ou on retrouve — le Chrome de debug et on POSE
+    la variable, que la base lit à l'appel (`crawl4ai_scraper_base._cdp_url`).
+
+    Sans route, l'appelant doit REFUSER de partir : l'échelle headless → fenêtre
+    visible ne rend jamais une page d'Ultratop, elle boucle sur le challenge
+    (et `fetch_page_with_retry` y ajouterait 10 + 20 s d'attente PAR page).
+    """
+    url = os.getenv("GENIUS_CDP_URL")
+    if url:
+        return url
+    from src.scrapers.cdp_chrome import ensure_cdp_chrome
+
+    url = ensure_cdp_chrome()
+    if url:
+        os.environ["GENIUS_CDP_URL"] = url
+        logger.info(f"Ultratop : route CDP posée ({url})")
+    else:
+        logger.error(
+            "Ultratop : Chrome de debug introuvable — route CDP obligatoire "
+            "(installe Google Chrome ou définis CHROME_PATH)"
+        )
+    return url
+
+
 def fetch_ultratop_html(year, category: str) -> str | None:
     """Récupère le HTML d'une page certif Ultratop via le navigateur anti-CF.
 
     `category` = 'singles' ou 'albums'. Retourne le HTML ou None si la page est
-    vide / bloquée par Cloudflare (le challenge non résolu).
+    vide / bloquée par Cloudflare (le challenge non résolu), ou si aucune route
+    CDP n'a pu être posée — on ne tente PAS le headless, il boucle.
     """
+    if not preparer_route_cdp():
+        return None
     url = f"{ULTRATOP_BASE}/{year}/{category}"
     scraper = _get_scraper()
     try:

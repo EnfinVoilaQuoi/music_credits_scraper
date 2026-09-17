@@ -315,10 +315,16 @@ class TestCodeDeSortie:
     """Ce que la GUI lit pour juger d'un run — et qui valait 0 en toutes
     circonstances, y compris scrape entièrement bloqué."""
 
-    def _lancer(self, monkeypatch, tmp_path, reussi):
+    def _lancer(self, monkeypatch, tmp_path, reussi, *, cdp="http://cdp", run=None):
         monkeypatch.setattr(
-            m.UltratopUpdater, "run_manual_update", lambda self, years_back=2: reussi
+            m.UltratopUpdater,
+            "run_manual_update",
+            run or (lambda self, years_back=2: reussi),
         )
+        # La route CDP se pose dans `main()` (2026-09-17) : ces deux cas jugent
+        # le code de sortie du RUN, pas celui de la route — on la donne.
+        if cdp:
+            monkeypatch.setenv("GENIUS_CDP_URL", cdp)
         monkeypatch.setattr(
             "sys.argv",
             [
@@ -341,6 +347,18 @@ class TestCodeDeSortie:
     def test_un_run_echoue_sort_en_1(self, monkeypatch, tmp_path):
         """Sans ça, la GUI annonce « ✅ Mise à jour BRMA réussie » sur une panne."""
         assert self._lancer(monkeypatch, tmp_path, False) == 1
+
+    def test_sans_chrome_le_script_refuse_de_partir(self, monkeypatch, tmp_path, capsys):
+        """Ultratop n'est lisible que par la route CDP, et le script ne le
+        savait pas : lancé à la main sans `GENIUS_CDP_URL`, il partait boucler en
+        headless sur le challenge — 3 tentatives et 30 s d'attente par page, sur
+        64 pages. Chrome introuvable ⇒ code 1 AVANT la première page, et le
+        motif est DIT (la GUI relaie la sortie du sous-processus)."""
+        lances = []
+        run = lambda self, years_back=2: lances.append(years_back) or True  # noqa: E731
+        assert self._lancer(monkeypatch, tmp_path, True, cdp=None, run=run) == 1
+        assert lances == []
+        assert "route CDP" in capsys.readouterr().out
 
 
 # ── Le repli LLM (famille A : les sélecteurs sont cassés) ─────────────────────

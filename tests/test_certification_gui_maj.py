@@ -44,21 +44,21 @@ class TestLesQuatreMisesAJourOntLeursArguments:
     def test_brma_lance_bien_un_run_unique_et_pas_le_menu(self):
         assert MISES_A_JOUR["BRMA"].args[:2] == ("--mode", "once")
 
-    def test_brma_prepare_chrome_EN_AMONT(self):
+    def test_brma_n_a_pas_de_repli_cdp_car_le_script_pose_sa_route(self):
         """Le Cloudflare d'ultratop fait boucler tout navigateur d'automation :
-        le CDP n'y est pas un repli, c'est la seule route qui passe."""
-        assert MISES_A_JOUR["BRMA"].cdp_amont
+        le CDP n'y est pas un repli, c'est la seule route — et c'est le script
+        qui la pose (`ultratop_fetch.preparer_route_cdp`), pas la fenêtre. Un
+        drapeau ici redirait la même chose à un second endroit."""
         assert not MISES_A_JOUR["BRMA"].repli_cdp
+        assert not hasattr(MISES_A_JOUR["BRMA"], "cdp_amont")
 
     def test_riaa_est_en_headless_avec_le_CDP_en_REPLI(self):
-        """L'inverse de BRMA, et c'est mesuré : patchright headless passe sur
-        riaa.com. Le repli sert aussi de diagnostic."""
+        """Mesuré : patchright headless passe sur riaa.com. Le repli sert aussi
+        de diagnostic."""
         assert MISES_A_JOUR["RIAA"].repli_cdp
-        assert not MISES_A_JOUR["RIAA"].cdp_amont
 
     def test_bpi_n_a_aucun_navigateur(self):
-        """HTTP nu, htmx rendu côté serveur : ni amont, ni repli."""
-        assert not MISES_A_JOUR["BPI"].cdp_amont
+        """HTTP nu, htmx rendu côté serveur : aucun repli."""
         assert not MISES_A_JOUR["BPI"].repli_cdp
 
     @pytest.mark.parametrize("nom", ["SNEP", "BRMA", "RIAA", "BPI"])

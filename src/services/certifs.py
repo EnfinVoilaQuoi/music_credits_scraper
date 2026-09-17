@@ -44,17 +44,18 @@ class MiseAJour(NamedTuple):
 
     script: str
     args: tuple[str, ...] = ()
-    #: Chrome de debug préparé EN AMONT (BRMA : le Cloudflare d'ultratop fait
-    #: boucler tout navigateur d'automation, le CDP n'y est pas un repli).
-    cdp_amont: bool = False
     #: Chrome de debug en REPLI d'un échec (RIAA : le headless passe, et un
     #: repli qui réussit dit que c'était un problème d'accès, pas un parseur).
+    #: BRMA n'a PAS de drapeau : le Cloudflare d'ultratop fait boucler tout
+    #: navigateur d'automation, le CDP y est la SEULE route — et c'est le script
+    #: qui la pose (`ultratop_fetch.preparer_route_cdp`, 2026-09-17), plus la
+    #: fenêtre. Un `cdp_amont` ici disait la même chose à un second endroit.
     repli_cdp: bool = False
 
 
 MISES_A_JOUR: dict[str, MiseAJour] = {
     "SNEP": MiseAJour("update_snep.py"),
-    "BRMA": MiseAJour("update_brma.py", ("--mode", "once", "--years-back", "1"), cdp_amont=True),
+    "BRMA": MiseAJour("update_brma.py", ("--mode", "once", "--years-back", "1")),
     "RIAA": MiseAJour("update_riaa.py", ("--auto",), repli_cdp=True),
     "BPI": MiseAJour("update_bpi.py", ("--auto",)),
 }
@@ -169,42 +170,24 @@ def executer_maj(
     nom: str,
     *,
     progres: Callable[[str], None] = _rien,
-    sur_cdp_absent: Callable[[str], None] | None = None,
     lancer: Callable[..., tuple[int, str]] = run_streaming,
 ) -> tuple[int, str]:
     """Met à jour UNE source, de façon SYNCHRONE. Rend (code, sortie).
 
     Séparé du worker pour que « Tout mettre à jour » et la CLI enchaînent les
     sources DANS UN SEUL fil (quatre sous-processus écrivant leurs CSV en même
-    temps ne se surveillent pas l'un l'autre). `sur_cdp_absent(nom)` est appelé
-    quand la source exige Chrome et qu'il est introuvable (la GUI avertit ; par
-    défaut, un log).
+    temps ne se surveillent pas l'un l'autre). Chaque script prépare sa propre
+    route (BRMA lance son Chrome de debug et refuse de partir sans lui, code 1
+    et motif en sortie) ; ici on ne fait que lancer et relayer.
     """
     maj = MISES_A_JOUR[nom]
     script = SCRIPTS / maj.script
     if not script.exists():
         raise FileNotFoundError(f"Script non trouvé: {script}")
     commande = [sys.executable, str(script), *maj.args]
-    env = None
-
-    if maj.cdp_amont:
-        # Le Cloudflare d'ultratop fait boucler tout navigateur lancé par de
-        # l'automation, même le vrai Chrome (JOURNAL 2026-06-29) : ici le CDP
-        # n'est pas un repli, c'est la seule route qui passe.
-        progres(f"🌐 {nom} : préparation de Chrome (Cloudflare)…")
-        url = preparer_cdp()
-        if url:
-            env = _env_cdp(url)
-        elif sur_cdp_absent is not None:
-            sur_cdp_absent(nom)
-        else:
-            logger.warning(
-                f"[{nom}] Chrome de debug introuvable (CHROME_PATH ?) — la MàJ tente "
-                "quand même, mais risque de boucler sur le challenge Cloudflare"
-            )
 
     progres(f"Mise à jour {nom} en cours...")
-    code, sortie = lancer(commande, nom, env=env, progres=progres)
+    code, sortie = lancer(commande, nom, env=None, progres=progres)
 
     if code != 0 and maj.repli_cdp:
         code, sortie = _relancer_via_cdp(
@@ -232,7 +215,6 @@ def mettre_a_jour(
     *,
     should_stop: Callable[[], bool] = lambda: False,
     progres: Callable[[str], None] = _rien,
-    sur_cdp_absent: Callable[[str], None] | None = None,
 ) -> BilanCertifs:
     """MàJ GLOBALE des magasins, EN SÉRIE. Un run coupé ou une source en échec
     rendent `complete=False`."""
@@ -243,7 +225,7 @@ def mettre_a_jour(
             bilan.interrompu(f"arrêt demandé avant {nom}")
             break
         try:
-            code, sortie = executer_maj(nom, progres=progres, sur_cdp_absent=sur_cdp_absent)
+            code, sortie = executer_maj(nom, progres=progres)
             bilan.lignes.append(ligne_bilan(nom, code, sortie))
         except Exception as e:
             logger.exception(f"Mise à jour globale — {nom}")

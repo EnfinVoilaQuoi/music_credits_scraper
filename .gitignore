@@ -6,6 +6,8 @@ __pycache__/
 *.so
 .Python
 venv/
+# venv d'analyse audio (torch + librosa + DeepRhythm), séparé du venv projet (2026-09-17)
+venv-audio/
 env/
 ENV/
 
@@ -105,6 +107,8 @@ scripts/*
 !scripts/bpmfinder_login.py
 !scripts/bpmfinder_diagnose.py
 !scripts/sonoteller_worklist.py
+# Pilote analyse audio locale : tempo/tonalité mesurés contre le consensus en base (2026-09-17)
+!scripts/pilote_audio.py
 # Crédits Discogs : table d'alias et oracle Genius (2026-09-03)
 !scripts/reclass_discogs_roles.py
 !scripts/discogs_genius_oracle.py

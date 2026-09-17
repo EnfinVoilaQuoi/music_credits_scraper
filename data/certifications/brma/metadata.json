@@ -1,11 +1,11 @@
 {
-  "last_update": "2026-09-17T03:03:19.930183",
-  "total_records": 5847,
+  "last_update": "2026-09-17T07:32:07.088349",
+  "total_records": 5840,
   "new_records_added": 0,
-  "unique_artists": 2078,
+  "unique_artists": 2076,
   "updates": {
-    "GLOBAL": "2026-09-17T03:03:19.930183"
+    "GLOBAL": "2026-09-17T07:32:07.088349"
   },
   "last_source": "GLOBAL",
-  "count": 5847
+  "count": 5840
 }

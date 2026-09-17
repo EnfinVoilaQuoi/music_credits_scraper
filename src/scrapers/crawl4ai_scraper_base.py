@@ -12,13 +12,14 @@ boucle applicative ; `_crawl_page` n'est plus qu'un pont bloquant
 import inspect
 import os
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from crawl4ai import BrowserConfig
 
 from src.concurrency import async_loop
 from src.observability import source_usage
-from src.observability.issues import IssueKind
+from src.observability.issues import IssueKind, classify
 from src.utils.logger import get_logger
 
 # patchright (undetected Chromium) est importé en lazy dans _patchright_fetch : on
@@ -33,6 +34,30 @@ except ImportError:  # pragma: no cover
 
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _Passes:
+    """Les passes d'un crawl (CDP, headless, fenêtre visible), relevées pendant le
+    rendu et REJOUÉES dans l'observation de l'appelant.
+
+    Une tentative se rattache à l'observation ouverte sur le carrier COURANT (la
+    Task asyncio, sinon le thread). Le rendu tourne sur la boucle applicative ;
+    le pont sync `_crawl_page` et son appelant, sur un thread. Notée côté
+    boucle, une passe partirait en verdict isolé et l'observation de
+    l'appelant resterait `indeterminate` — même mécanique que
+    `riaa_scraper_v2._Tentatives`.
+    """
+
+    relevees: list[tuple[IssueKind, str, bool]] = field(default_factory=list)
+
+    def note(self, kind: IssueKind, detail: str = "", *, expected: bool = False) -> None:
+        self.relevees.append((kind, detail, expected))
+
+    def rejouer(self, source_key: str) -> None:
+        for kind, detail, expected in self.relevees:
+            source_usage.record_attempt(source_key, kind, detail=detail, expected=expected)
+        self.relevees.clear()
 
 
 def _supported_kwargs(cls, **kwargs) -> dict:
@@ -161,20 +186,38 @@ class CrawlAIScraperBase:
         Crawl synchrone d'une page. Retourne (markdown, html_brut).
         Retourne (None, None) si le crawl échoue.
 
-        Pont F4 : exécute `acrawl_page` sur LA boucle applicative (bloquant).
+        Pont F4 : exécute le crawl sur LA boucle applicative (bloquant).
         À appeler depuis un thread sync uniquement — une coroutine await
         directement `acrawl_page`.
+
+        L'observation est ouverte ICI, sur le thread de l'appelant, et les
+        passes relevées sur la boucle y sont REJOUÉES (`_Passes`) : un capteur
+        posé de l'autre côté du pont ne trouve pas son observation (règle apprise
+        sur RIAA le 2026-09-08). Quand ce pont ouvrait sa propre observation
+        côté boucle, un appelant qui en tenait une sur son thread —
+        `update_brma._lire_page`, pour y poser le verdict de PARSE — la voyait
+        rester sans tentative : le run BRMA du 2026-09-17 comptait 78 pages `ok`
+        ET 78 `indeterminate`. `observe()` étant réentrant par source, l'appelant
+        qui en tient une la réutilise ; sinon on en ouvre une, comme avant.
         """
-        return async_loop.run_sync(
-            self.acrawl_page(
-                url,
-                js_before_wait=js_before_wait,
-                wait_for=wait_for,
-                wait_timeout=wait_timeout,
-                page_timeout=page_timeout,
-                delay_before_return=delay_before_return,
-            )
-        )
+        passes = _Passes()
+        with source_usage.observe(self.health_key, label=url) as obs:
+            try:
+                html = async_loop.run_sync(
+                    self._acrawl_page_body(
+                        url,
+                        js_before_wait,
+                        wait_for,
+                        wait_timeout,
+                        page_timeout,
+                        delay_before_return,
+                        passes,
+                    )
+                )
+            finally:
+                passes.rejouer(self.health_key)
+            self._conclure(obs, html)
+            return None, html
 
     async def acrawl_page(
         self,
@@ -198,16 +241,30 @@ class CrawlAIScraperBase:
             page_timeout     : ms avant abandon du chargement de page
             delay_before_return : secondes d'attente supplémentaires après le wait_for
         """
+        passes = _Passes()
         with source_usage.observe(self.health_key, label=url) as obs:
-            html = await self._acrawl_page_body(
-                url, js_before_wait, wait_for, wait_timeout, page_timeout, delay_before_return
-            )
-            if html is None:
-                # Les trois passes ont échoué sans exception : la page n'est pas
-                # venue. Si une tentative a déjà dit pourquoi (bloquée, timeout),
-                # c'est elle qui parle — sinon on nomme l'inaccessibilité.
-                obs.fail(IssueKind.UNREACHABLE, "aucune passe n'a rendu de HTML")
+            try:
+                html = await self._acrawl_page_body(
+                    url,
+                    js_before_wait,
+                    wait_for,
+                    wait_timeout,
+                    page_timeout,
+                    delay_before_return,
+                    passes,
+                )
+            finally:
+                passes.rejouer(self.health_key)
+            self._conclure(obs, html)
             return None, html
+
+    @staticmethod
+    def _conclure(obs, html: str | None) -> None:
+        if html is None:
+            # Les passes ont échoué sans exception : la page n'est pas venue. Si
+            # une tentative a déjà dit pourquoi (bloquée, timeout), c'est elle qui
+            # parle — sinon on nomme l'inaccessibilité.
+            obs.fail(IssueKind.UNREACHABLE, "aucune passe n'a rendu de HTML")
 
     async def _acrawl_page_body(
         self,
@@ -217,11 +274,12 @@ class CrawlAIScraperBase:
         wait_timeout: int,
         page_timeout: int,
         delay_before_return: float,
+        passes: "_Passes",
     ) -> str | None:
-        """L'échelle CDP → headless → fenêtre visible, sous l'observation ouverte
-        par `acrawl_page`. Chaque passe est une TENTATIVE, l'appel reste unique :
-        bloqué en headless puis servi en fenêtre visible vaut UN succès, pas deux
-        échecs."""
+        """L'échelle CDP → headless → fenêtre visible. Chaque passe est une
+        TENTATIVE relevée dans `passes` — rejouée par l'appelant dans SON
+        observation —, l'appel reste unique : bloqué en headless puis servi en
+        fenêtre visible vaut UN succès, pas deux échecs."""
         # 0) Mode CDP : on lit via un navigateur déjà ouvert (Brave, IP résidentielle)
         if _cdp_url():
             try:
@@ -234,7 +292,7 @@ class CrawlAIScraperBase:
                     delay_before_return,
                     headless=True,
                 )
-                self._note_passe(blocked, html, "CDP")
+                self._note_passe(passes, blocked, html, "CDP")
                 if blocked:
                     logger.warning(
                         f"{self.__class__.__name__}: via CDP, page bloquée — ouvre d'abord "
@@ -242,7 +300,7 @@ class CrawlAIScraperBase:
                     )
                 return html
             except PatchrightError as e:
-                source_usage.note_failure(self.health_key, e, detail=f"CDP : {e}")
+                passes.note(classify(exc=e), f"CDP : {e}")
                 logger.error(f"{self.__class__.__name__}: CDP {url}: {e}")
                 return None
 
@@ -259,9 +317,9 @@ class CrawlAIScraperBase:
                     delay_before_return,
                     headless=True,
                 )
-                self._note_passe(blocked, html, "headless")
+                self._note_passe(passes, blocked, html, "headless")
             except PatchrightError as e:
-                source_usage.note_failure(self.health_key, e, detail=f"headless : {e}")
+                passes.note(classify(exc=e), f"headless : {e}")
                 logger.error(f"{self.__class__.__name__}: patchright headless {url}: {e}")
                 html, blocked = None, True
             if not blocked:
@@ -284,14 +342,15 @@ class CrawlAIScraperBase:
                 max(delay_before_return, 2.0),
                 headless=False,
             )
-            self._note_passe(False, html, "fenêtre visible")
+            self._note_passe(passes, False, html, "fenêtre visible")
             return html
         except PatchrightError as e:
-            source_usage.note_failure(self.health_key, e, detail=f"fenêtre visible : {e}")
+            passes.note(classify(exc=e), f"fenêtre visible : {e}")
             logger.error(f"{self.__class__.__name__}: patchright visible {url}: {e}")
             return None
 
-    def _note_passe(self, blocked: bool, html: str | None, passe: str) -> None:
+    @staticmethod
+    def _note_passe(passes: "_Passes", blocked: bool, html: str | None, passe: str) -> None:
         """Une passe de l'échelle = une tentative.
 
         Un blocage anti-bot est ATTENDU sur ces sources (`tolerate_403`) : il est
@@ -300,15 +359,11 @@ class CrawlAIScraperBase:
         succès s'effondrent, c'est le signe que Cloudflare a durci.
         """
         if blocked:
-            source_usage.record_attempt(
-                self.health_key, IssueKind.BLOCKED, detail=f"{passe} : anti-bot", expected=True
-            )
+            passes.note(IssueKind.BLOCKED, f"{passe} : anti-bot", expected=True)
         elif html:
-            source_usage.record_attempt(self.health_key, IssueKind.OK, detail=passe)
+            passes.note(IssueKind.OK, passe)
         else:
-            source_usage.record_attempt(
-                self.health_key, IssueKind.UNREACHABLE, detail=f"{passe} : page vide"
-            )
+            passes.note(IssueKind.UNREACHABLE, f"{passe} : page vide")
 
     def _launch_kwargs(self, headless: bool) -> dict:
         """Arguments de lancement du contexte persistant, partagés par

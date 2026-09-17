@@ -15,7 +15,7 @@ accumulations qui ne se corrigent jamais toutes seules.
 
 import pytest
 
-from src.utils.cert_normalize import reperer_fantomes, squelette_libelle
+from src.utils.cert_normalize import ecriture_cassee, reperer_fantomes, squelette_libelle
 from src.utils.snep_build import purger_fantomes
 
 # (artiste, titre, catégorie, niveau, date) — mêmes rangs que le CSV SNEP réduit
@@ -52,6 +52,27 @@ class TestSqueletteLibelle:
     @pytest.mark.parametrize("vide", ["", "   ", None])
     def test_un_libelle_vide_donne_un_squelette_vide(self, vide):
         assert squelette_libelle(vide) == ""
+
+    def test_accents_retires(self):
+        """« BEYĀH » en base, « BEYAH » sur le site SNEP (2026-09-17)."""
+        assert squelette_libelle("BEYĀH") == squelette_libelle("BEYAH") == "beyah"
+
+    @pytest.mark.parametrize(
+        "libelle, casse",
+        [
+            ("C?UR", True),
+            ("C" + chr(0x9C) + "ur", True),
+            ("Bient" + chr(0x95) + "t", True),
+            ("Cœur", False),
+            ("WHY?", True),
+            ("COEUR", False),
+        ],
+    )
+    def test_ecriture_cassee(self, libelle, casse):
+        """Le « ? » de substitution ET les contrôles C1 (octet cp1252 lu en
+        latin-1) trahissent un encodage cassé. Un vrai point d'interrogation
+        compte aussi, sans conséquence : un fantôme exige une jumelle saine."""
+        assert ecriture_cassee(libelle) is casse
 
 
 class TestReperage:

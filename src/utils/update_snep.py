@@ -222,19 +222,31 @@ def _fetch(session, url: str, timeout: int = None) -> str:
 
     Respecte MAX_RETRIES / DELAY_BETWEEN_REQUESTS de config.py. Lève la
     dernière exception si tous les essais échouent.
+
+    Point de passage UNIQUE des lectures de pages (`?annee=`, `?interprete=`),
+    donc le seul endroit où les OBSERVER (2026-09-17) : une page = un appel
+    logique = un verdict, les relances étant des tentatives de ce même appel.
+    Jusque-là seule la recherche par artiste comptait, via l'export.
     """
     timeout = timeout or SELENIUM_TIMEOUT
     last_exc = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = session.get(url, timeout=timeout)
-            resp.raise_for_status()
-            return resp.text
-        except requests.RequestException as e:
-            last_exc = e
-            if attempt < MAX_RETRIES:
-                time.sleep(DELAY_BETWEEN_REQUESTS * attempt)
-    raise last_exc
+    with source_usage.observe(_SOURCE, label=url) as obs:
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                resp = session.get(url, timeout=timeout)
+                code = getattr(resp, "status_code", None)
+                if code is not None:
+                    obs.note_status(code, headers=getattr(resp, "headers", None))
+                resp.raise_for_status()
+                return resp.text
+            except requests.RequestException as e:
+                last_exc = e
+                if getattr(e, "response", None) is None:
+                    # Pas de réponse (connexion, timeout) : rien n'a été noté.
+                    source_usage.note_failure(_SOURCE, e, detail=f"essai {attempt}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(DELAY_BETWEEN_REQUESTS * attempt)
+        raise last_exc
 
 
 def _parse_certifications_page(html: str) -> list:
@@ -380,8 +392,18 @@ def _pages_couvrantes(nb_pages: int) -> list[int]:
 
 
 def _lignes_de_lannee(session, year: int, html_p1: str, nb_pages: int) -> list | None:
-    """Toutes les certifications de l'année en ~log₂(P) requêtes, ou None si le
-    site ne se comporte pas comme mesuré (→ repli sur le parcours page à page).
+    """Toutes les certifications de l'année : `_lignes_du_filtre` sur `?annee=`."""
+    return _lignes_du_filtre(session, f"annee={year}", html_p1, nb_pages, libelle=f"Année {year}")
+
+
+def _lignes_du_filtre(
+    session, filtre: str, html_p1: str, nb_pages: int, *, libelle: str
+) -> list | None:
+    """Toutes les certifications d'un FILTRE du site (`annee=2001`, `interprete=NINHO`)
+    en ~log₂(P) requêtes, ou None si le site ne se comporte pas comme mesuré
+    (→ repli sur le parcours page à page). La mécanique est celle du SITE, pas de
+    l'année : vérifié sur `?interprete=NINHO` le 2026-09-17 (p1=30, p2=60, p3=90,
+    p4=120, p5=118 pour 238 blocs, même modèle à l'unité près).
 
     **Le site applique `LIMIT 30×N OFFSET 30×(N−1)`** — un `posts_per_page` qui
     suit le numéro de page. La page N ne rend donc pas la Nᵉ tranche de 30 mais
@@ -419,16 +441,16 @@ def _lignes_de_lannee(session, year: int, html_p1: str, nb_pages: int) -> list |
         else:
             try:
                 rows = _parse_certifications_page(
-                    _fetch(session, f"{_SNEP_BASE}page/{page}?annee={year}")
+                    _fetch(session, f"{_SNEP_BASE}page/{page}?{filtre}")
                 )
             except requests.RequestException as e:
-                safe_print(f"⚠️ Année {year} : page {page} inaccessible ({e}) — parcours complet")
+                safe_print(f"⚠️ {libelle} : page {page} inaccessible ({e}) — parcours complet")
                 return None
             if not rows:
                 # Sous le modèle mesuré, une page ≤ P rend au moins une tranche.
                 # Vide = le site ne se comporte pas comme prévu : on abandonne
                 # tout de suite plutôt que de dépenser les requêtes suivantes.
-                safe_print(f"⚠️ Année {year} : page {page} sans bloc — parcours complet")
+                safe_print(f"⚠️ {libelle} : page {page} sans bloc — parcours complet")
                 return None
             time.sleep(random.uniform(DELAY_BETWEEN_REQUESTS, DELAY_BETWEEN_REQUESTS * 1.8))
         for row in rows:
@@ -439,7 +461,7 @@ def _lignes_de_lannee(session, year: int, html_p1: str, nb_pages: int) -> list |
     if par_page * (nb_pages - 1) < len(lignes) <= par_page * nb_pages:
         return lignes
     safe_print(
-        f"⚠️ Année {year} : {len(lignes)} certifs collectées, hors de "
+        f"⚠️ {libelle} : {len(lignes)} certifs collectées, hors de "
         f"]{par_page * (nb_pages - 1)}, {par_page * nb_pages}] — parcours complet"
     )
     return None
@@ -643,17 +665,25 @@ def _reconcilier(dest_path: Path, annees: list[int], site: list) -> int:
 
 
 def _page_artiste(nom: str) -> list | None:
-    """Les blocs de `?interprete=<nom>` ; None si la page est inaccessible."""
-    from urllib.parse import quote
+    """Tout ce que le site montre pour `?interprete=<nom>` ; None si inaccessible
+    ou incomplet — une absence qu'on n'a pas pu vérifier n'est pas un retrait.
 
+    Une page VIDE vaut None aussi : le nom vient du crédit LOCAL, et le SNEP
+    réécrit ses crédits (« MAITRE GIMS » → « GIMS », « DISIZ LA PESTE » →
+    « DISIZ », mesuré le 2026-09-17) — la page vide dit alors « ce crédit
+    n'existe plus », pas « ces certifications ont disparu ». Le Diamant qui
+    remplace l'Or de *Malheur, malheur* est en ligne sous le nouveau crédit ;
+    seule une lecture des années ENSEMBLE le rapproche (même titre, même
+    sortie), pas une recherche sous l'ancien nom.
+    """
     time.sleep(random.uniform(DELAY_BETWEEN_REQUESTS, DELAY_BETWEEN_REQUESTS * 1.8))
-    try:
-        return _parse_certifications_page(
-            _fetch(_get_session(), f"{_SNEP_BASE}?interprete={quote(nom)}")
-        )
-    except requests.RequestException as e:
-        safe_print(f"⚠️ Confirmation impossible pour « {nom} » ({e}) — candidate laissée indécise")
+    lignes = _lignes_artiste(nom, dire=lambda m: None)
+    if lignes is None:
+        safe_print(f"⚠️ Confirmation impossible pour « {nom} » — candidate laissée indécise")
+    elif not lignes:
+        safe_print(f"⚠️ Aucun bloc pour « {nom} » (crédit réécrit ?) — candidate laissée indécise")
         return None
+    return lignes
 
 
 # `scrape_recent_certifications` a été RETIRÉE le 2026-09-04. Elle s'arrêtait
@@ -810,57 +840,70 @@ def schedule_monthly_update() -> bool:
     return success
 
 
+def _lignes_artiste(nom: str, *, dire=safe_print) -> list[str] | None:
+    """TOUT ce que le site montre pour `?interprete=<nom>`, en lignes CSV (sans
+    en-tête), ou None si la lecture n'a pas pu aller au bout.
+
+    UNE route pour la recherche par artiste et la confirmation des retraits,
+    et c'est la mécanique des pages, pas l'export : mesuré le 2026-09-17,
+    **l'export CSV du filtre est plafonné aux blocs de la page qui l'a généré**
+    (30 lignes pour NINHO, 147 en base) et son nom de fichier est partagé
+    (`certif-ninho_.csv`), donc rendu périmé par le chargement suivant. La
+    recherche par artiste était TRONQUÉE à 30 depuis toujours pour un artiste
+    prolifique, et la confirmation des retraits « confirmait » tout ce qui
+    vivait au-delà de la page 1 (35 des 153 marques d'un backfill 1987-2026).
+    Les pages, elles, suivent le modèle `LIMIT 30N` de `_lignes_du_filtre` :
+    ~log₂(P) requêtes, et un parcours page à page en repli.
+    """
+    from urllib.parse import quote
+
+    session = _get_session()
+    filtre = f"interprete={quote(nom)}"
+    libelle = f"« {nom} »"
+    dire(f"🌐 {_SNEP_BASE}?{filtre}")
+    try:
+        html = _fetch(session, f"{_SNEP_BASE}?{filtre}")
+    except requests.RequestException as e:
+        dire(f"❌ Page artiste inaccessible : {e}")
+        return None
+    nb_pages = _discover_last_page(html)
+    lignes = _lignes_du_filtre(session, filtre, html, nb_pages, libelle=libelle)
+    if lignes is not None:
+        return lignes
+
+    # Repli : page à page, correct en toutes circonstances — mais une page
+    # manquante rend le tout None : un listing partiel ferait des retraits.
+    vues, lignes = set(), []
+    for page in range(1, nb_pages + 1):
+        if page > 1:
+            time.sleep(random.uniform(DELAY_BETWEEN_REQUESTS, DELAY_BETWEEN_REQUESTS * 1.8))
+            try:
+                html = _fetch(session, f"{_SNEP_BASE}page/{page}?{filtre}")
+            except requests.RequestException as e:
+                dire(f"❌ {libelle} page {page}/{nb_pages} : {e} — abandon")
+                return None
+        for row in _parse_certifications_page(html):
+            if row not in vues:
+                vues.add(row)
+                lignes.append(row)
+    return lignes
+
+
 def fetch_artist_certifications(artist_name: str) -> bool:
     """
-    Récupère le CSV COMPLET des certifications d'un artiste via le filtre
-    ?interprete= du site SNEP (seul export encore fiable), le fusionne dans
-    le CSV maître et réimporte en base.
+    Récupère TOUTES les certifications d'un artiste via le filtre ?interprete=
+    du site SNEP (les pages, pas l'export — cf. `_lignes_artiste`), les
+    fusionne dans le CSV maître et réimporte en base.
     """
-    from urllib.parse import quote, urljoin
-
     safe_print("=" * 60)
     safe_print(f"CERTIFICATIONS SNEP — ARTISTE : {artist_name}")
     safe_print("=" * 60)
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://snepmusique.com/les-certifications/",
-    }
-
-    # 1. Charger la page filtrée (génère l'export côté serveur)
-    page_url = f"https://snepmusique.com/les-certifications/?interprete={quote(artist_name)}"
-    safe_print(f"🌐 {page_url}")
-    try:
-        resp = source_usage.requests_get(_SOURCE, page_url, headers=headers, timeout=30)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        safe_print(f"❌ Page artiste inaccessible : {e}")
+    export = _lignes_artiste(artist_name)
+    if export is None:
         return False
-
-    # 2. Trouver le lien "Télécharger en CSV" généré pour ce filtre
-    import re as _re
-
-    m = _re.search(r'href="([^"]*certif-[^"]*\.csv)"', resp.text)
-    if not m:
-        safe_print("❌ Lien CSV introuvable sur la page (artiste inconnu du SNEP ?)")
-        return False
-    csv_url = urljoin("https://snepmusique.com/", m.group(1))
-    safe_print(f"📥 Export : {csv_url}")
-
-    # 3. Télécharger et valider le CSV
-    try:
-        csv_resp = source_usage.requests_get(_SOURCE, csv_url, headers=headers, timeout=30)
-        csv_resp.raise_for_status()
-    except requests.RequestException as e:
-        safe_print(f"❌ Téléchargement CSV impossible : {e}")
-        return False
-
-    content = csv_resp.content.decode("utf-8-sig", errors="replace")
-    lines = content.splitlines()
-    if not lines or "Interprete" not in lines[0]:
-        safe_print("❌ Contenu CSV inattendu, abandon")
-        return False
-    safe_print(f"✅ {len(lines) - 1} certification(s) renvoyée(s) par le SNEP")
+    safe_print(f"✅ {len(export)} certification(s) renvoyée(s) par le SNEP")
+    lines = [_CSV_HEADER, *export]
 
     # Filtre mot-entier : le SNEP fait un `contains` sur ?interprete=, donc
     # 'IAM' ramène aussi WILLIAMS, LIAM, DIAM'S… On ne garde que les lignes où

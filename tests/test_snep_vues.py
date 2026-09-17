@@ -192,3 +192,46 @@ class TestConfirmationParArtiste:
         assert snep_vues.artiste_principal("GAZO, LETO, KERCHAK & FAVE") == "GAZO"
         assert snep_vues.artiste_principal("MOJI X SBOY") == "MOJI"
         assert snep_vues.artiste_principal("KIDS UNITED") == "KIDS UNITED"
+
+
+class TestEcrituresCorrompues:
+    """Le site sert encore les titres anciens avec un « ? » à la place de
+    l'apostrophe et de l'œ, pages ET export, là où le brut porte la forme
+    restaurée. `normalize_text` garde l'apostrophe et supprime le « ? » :
+    « THAT'S » ≠ « THATS », et un backfill 1987-2026 a « confirmé » 153
+    retraits, dont 119 sur un tel libellé (2026-09-17). Le rapprochement se
+    fait par squelette — la règle des fantômes —, la clé du sidecar ne
+    change pas."""
+
+    def test_apostrophe_restauree_reconnue_dans_l_ecriture_corrompue(self):
+        local = _l("CELINE DION", "LET'S TALK ABOUT LOVE", "Diamant")
+        site = _l("CELINE DION", "LET?S TALK ABOUT LOVE", "Diamant")
+        r = reconcilier([local], [site])
+        assert r.vues == {cle_ligne(champs(local))} and not r.retirees
+
+    def test_ligature_restauree_reconnue(self):
+        local = _l("CELINE DION", "AU CŒUR DU STADE", "Diamant", cat="Vidéos")
+        site = _l("CELINE DION", "AU C?UR DU STADE", "Diamant", cat="Vidéos")
+        assert reconcilier([local], [site]).vues
+
+    def test_oeuvre_reconnue_malgre_la_corruption_pour_le_remplacement(self):
+        """L'Or local « THAT'S » est de l'histoire si le site montre un Platine
+        « THAT?S » : remplacé, pas retiré."""
+        local = _l("CELINE DION", "THAT'S THE WAY IT IS", "Or")
+        site = _l("CELINE DION", "THAT?S THE WAY IT IS", "Platine")
+        r = reconcilier([local], [site])
+        assert r.remplacees and not r.retirees
+
+    def test_la_cle_du_sidecar_garde_l_ecriture_locale(self):
+        """Seule la COMPARAISON change : les marques déjà posées restent
+        adressables, aucune migration du sidecar."""
+        f = champs(_l("CELINE DION", "LET'S TALK ABOUT LOVE", "Diamant"))
+        assert cle_ligne(f)[1] == "LET'S TALK ABOUT LOVE"
+
+    def test_accent_local_absent_du_site_reconnu(self):
+        """« BEYĀH » en base, « BEYAH » sur le site : un Platine dont le Double
+        Platine est en ligne est REMPLACÉ, pas retiré (mesuré le 2026-09-17)."""
+        local = _l("DAMSO", "BEYĀH", "Platine", sortie="30/05/2025", cat="Albums")
+        site = _l("DAMSO", "BEYAH", "Double Platine", sortie="30/05/2025", cat="Albums")
+        r = reconcilier([local], [site])
+        assert r.remplacees and not r.retirees

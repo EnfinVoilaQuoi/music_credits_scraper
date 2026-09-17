@@ -22,6 +22,7 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.ultratop_fetch import preparer_route_cdp
 from src.utils import cert_clean_report, cert_store
+from src.utils.cert_normalize import reperer_fantomes
 from src.utils.llm_extractor import secours_apres_panne
 from src.utils.logger import get_logger
 
@@ -729,6 +730,24 @@ class UltratopUpdater:
                 for r in absorbees.head(15).itertuples()
             ]
 
+        # 3) Fantômes d'encodage : la même certif écrite deux fois, une fois
+        #    avec un œ mal décodé (octet cp1252 lu en latin-1 : « Sans cur »,
+        #    21 lignes d'un scrape de 2025) et une fois proprement. Le crible
+        #    du 2026-09-06 ne cherchait que le « ? » et concluait à 0 pour BRMA.
+        #    Même règle que SNEP (`reperer_fantomes`) : la version saine doit
+        #    exister, sinon la ligne cassée est la seule trace et reste.
+        lignes = df[["artist", "title", "category", "certification_level", "certification_date"]]
+        fantomes = reperer_fantomes(
+            lignes.values.tolist(), i_artiste=0, i_titre=1, autres=[2, 3, 4]
+        )
+        if report is not None:
+            report["fantomes_retires"] = len(fantomes)
+            report["fantome_examples"] = [
+                f"{df.iloc[i].artist} — {df.iloc[i].title}" for i in fantomes[:15]
+            ]
+        if fantomes:
+            df = df.drop(df.index[fantomes])
+
         df = df.drop(columns=["_ka", "_kt"])
         removed = before - len(df)
         if removed:
@@ -788,13 +807,18 @@ class UltratopUpdater:
             counters=[
                 ("Doublons exacts retirés", report.get("duplicates_removed", 0)),
                 ("Niveaux vides absorbés", report.get("empty_levels_absorbed", 0)),
+                ("Fantômes d'encodage retirés", report.get("fantomes_retires", 0)),
             ],
             sections=[("Répartition des niveaux (après)", report.get("levels") or {})],
             examples=[
                 (
                     "Niveaux vides absorbés (exemples)",
                     [ex[:90] for ex in report.get("empty_level_examples") or []],
-                )
+                ),
+                (
+                    "Fantômes d'encodage (exemples)",
+                    [ex[:90] for ex in report.get("fantome_examples") or []],
+                ),
             ],
             note_dry_run=(
                 "ℹ️  DRY-RUN : rien n'a été écrit. Relance avec --dedup pour "

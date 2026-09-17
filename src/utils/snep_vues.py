@@ -16,6 +16,17 @@ les deux populations que par l'ŒUVRE : une ligne locale est RETIRÉE si le site
 n'en montre plus aucun palier au moins égal pour la même œuvre — clé (titre,
 date de sortie), jamais le crédit d'artiste, que le SNEP réécrit.
 
+Le RAPPROCHEMENT se fait par SQUELETTE alphanumérique (`squelette_libelle`, la
+règle des fantômes), jamais par `normalize_text` (2026-09-17) : le site sert
+encore les titres anciens avec un « ? » à la place de l'apostrophe et de l'œ
+(« THAT?S THE WAY IT IS », « AU C?UR DU STADE »), pages ET export, là où le
+brut porte la forme restaurée. `normalize_text` garde l'apostrophe et supprime
+le « ? » — « THAT'S » ≠ « THATS » —, si bien qu'un backfill de 1987-2026 avait
+« confirmé » 153 retraits, dont 119 sur un libellé à apostrophe ou ligature, et
+ajouté 108 doublons « ? » comme nouveautés. La clé du SIDECAR, elle, reste
+`cle_ligne` (identité de la ligne telle qu'écrite) : seule la comparaison
+change, aucune marque à migrer.
+
 Le résultat vit dans un SIDECAR (`certif-.vues.json`) et non dans une colonne
 du brut : le brut garde le format natif du SNEP et `_row_key` l'indexe par la
 fin. Une marque est POSÉE OU EFFACÉE à chaque année relue entièrement (même
@@ -35,7 +46,7 @@ from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
-from src.utils.cert_normalize import RANG_PALIERS, normalize_text
+from src.utils.cert_normalize import RANG_PALIERS, normalize_text, squelette_libelle
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -75,6 +86,21 @@ def cle_texte(cle: tuple) -> str:
     return _SEPARATEUR_CLE.join(cle)
 
 
+def _cle_comparable(f: list[str]) -> tuple:
+    """La même ligne, vue par le site : artiste et titre réduits à leur
+    SQUELETTE, pour qu'une écriture corrompue (« LET?S TALK ») et sa forme
+    restaurée (« LET'S TALK ») se reconnaissent. C'est la clé de COMPARAISON ;
+    `cle_ligne` reste celle du sidecar."""
+    return (
+        squelette_libelle(f[0]),
+        squelette_libelle(f[1]),
+        f[-4].strip(),
+        f[-3].strip(),
+        f[-2].strip(),
+        f[-1].strip(),
+    )
+
+
 def cles_oeuvre(f: list[str]) -> tuple[tuple, tuple]:
     """L'ŒUVRE certifiée, par deux clés dont UNE suffit : (titre, sortie) et
     (titre, artiste).
@@ -88,8 +114,8 @@ def cles_oeuvre(f: list[str]) -> tuple[tuple, tuple]:
     PLK. Le résidu (titre réécrit, « Argent sale - A COLORS SHOW » → « Argent
     sale ») tombe du côté RETRAIT : rare, et réversible.
     """
-    titre = normalize_text(f[1])
-    return (titre, f[-2].strip()), (titre, normalize_text(f[0]))
+    titre = squelette_libelle(f[1])
+    return (titre, f[-2].strip()), (titre, squelette_libelle(f[0]))
 
 
 def _rang(palier: str) -> int:
@@ -103,8 +129,7 @@ class Reconciliation(NamedTuple):
 
 
 def _classer(f: list[str], site_cles: set, paliers_par_oeuvre: dict) -> str:
-    cle = cle_ligne(f)
-    if cle in site_cles:
+    if _cle_comparable(f) in site_cles:
         return "vue"
     # Rang bas = palier haut : un palier ≥ sur le site = rang ≤ au nôtre.
     rangs = [r for c in cles_oeuvre(f) for r in paliers_par_oeuvre.get(c, [])]
@@ -113,7 +138,7 @@ def _classer(f: list[str], site_cles: set, paliers_par_oeuvre: dict) -> str:
 
 def _indexer(lignes_site: Iterable[str]) -> tuple[set, dict]:
     site = [f for f in map(champs, lignes_site) if len(f) >= 7]
-    site_cles = {cle_ligne(f) for f in site}
+    site_cles = {_cle_comparable(f) for f in site}
     paliers_par_oeuvre: dict[tuple, list[int]] = {}
     for f in site:
         for cle in cles_oeuvre(f):
@@ -224,6 +249,9 @@ def enregistrer(brut: Path, r: Reconciliation, *, le: date | None = None) -> int
         entree = vues.setdefault(cle_texte(cle), {})
         # La PREMIÈRE date d'absence est l'information ; on ne la rajeunit pas.
         entree.setdefault("retiree_le", jour)
+        # Un `remplacee` d'un passage antérieur survivait au retrait : l'entrée
+        # disait à la fois « histoire conservée » et « retirée ».
+        entree.pop("remplacee", None)
     _ecrire(brut, vues)
     return len(r.retirees)
 

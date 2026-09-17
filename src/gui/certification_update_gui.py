@@ -1,11 +1,13 @@
 """Interface graphique pour la mise à jour des certifications musicales"""
 
 import sys
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import TclError, messagebox
 
 import customtkinter as ctk
+import requests
 
 from src.concurrency.lifecycle import start_worker, stop_requested
 from src.config import DATA_PATH
@@ -838,20 +840,55 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
             messagebox.showerror("Titres à corriger", f"Lecture impossible : {e}", parent=self)
             return
 
-        candidats = candidats_a_corriger(rows, charger_fixes("snep"), charger_acceptes("snep"))
-        if not candidats:
-            messagebox.showinfo(
-                "Titres à corriger",
-                "Aucun libellé cassé ou tronqué à arbitrer : ce que la restauration "
-                "automatique sait réparer l'est déjà.",
-                parent=self,
+        # L'oracle des slugs (2026-09-17) : l'index REST du site, rafraîchi par
+        # `modified_after` (une requête ; ~120 la première fois) — dans un fil,
+        # la fenêtre s'ouvre ensuite. Sans réseau, on ouvre sans oracle : les
+        # libellés restent à arbitrer, simplement sans suggestion.
+        from src.utils import snep_slugs
+
+        def preparer():
+            index = None
+            try:
+                index = snep_slugs.rafraichir(progres=self._set_progress)
+            except (requests.RequestException, OSError, ValueError) as e:
+                logger.warning(f"[SNEP] index des slugs indisponible : {e}")
+                index = snep_slugs.charger()
+                self._set_progress("⚠️ slugs SNEP indisponibles — sans suggestion")
+            oracle = (lambda a, t: snep_slugs.verdict_troncature(a, t, index)) if index else None
+            candidats = candidats_a_corriger(
+                rows, charger_fixes("snep"), charger_acceptes("snep"), oracle=oracle
             )
-            return
+            suggestions = {}
+            if index is not None:
+                for _suspect, artiste, titre, _fix in candidats:
+                    if libelle_tronque(titre):
+                        sugg = snep_slugs.suggestion(artiste, titre, index)
+                        if sugg:
+                            suggestions[(artiste, titre)] = sugg
+            self._set_progress("")
 
-        self._fenetre_correction(candidats, enregistrer_fix, accepter)
+            def ouvrir():
+                if not candidats:
+                    messagebox.showinfo(
+                        "Titres à corriger",
+                        "Aucun libellé cassé ou tronqué à arbitrer : ce que la restauration "
+                        "automatique sait réparer l'est déjà.",
+                        parent=self,
+                    )
+                    return
+                self._fenetre_correction(candidats, enregistrer_fix, accepter, suggestions)
 
-    def _fenetre_correction(self, candidats: list, enregistrer_fix, accepter):
+            self.after(0, ouvrir)
+
+        self._demarrer("slugs", preparer, "Index des slugs SNEP")
+
+    def _fenetre_correction(self, candidats: list, enregistrer_fix, accepter, suggestions=None):
         """Fenêtre de saisie des corrections (une ligne par libellé).
+
+        `suggestions[(artiste, titre)] = (titre reconstruit, lien)` : ce que le
+        slug du site sait d'un titre COUPÉ (`snep_slugs`). Pré-rempli dans le
+        champ, accents et apostrophes à remettre à la main — le slug les a
+        perdus — et le lien de la page pour vérifier.
 
         Deux décisions y sont possibles, et la seconde compte autant que la
         première : CORRIGER un libellé cassé, ou le VALIDER tel quel. Sans cette
@@ -950,9 +987,16 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                     border_color=couleur,
                     border_width=2 if couleur else 1,
                 )
-                champ.insert(0, (correction or {}).get(cle) or valeur)
+                sugg = (suggestions or {}).get((artiste, titre)) if cle == "title" else None
+                champ.insert(0, (correction or {}).get(cle) or (sugg[0] if sugg else valeur))
                 champ.pack(side="left", padx=6, pady=4)
                 champs[cle] = champ
+                if sugg:
+                    lien = ctk.CTkLabel(
+                        ligne, text="↗ slug", text_color="#3B8ED0", cursor="hand2", width=50
+                    )
+                    lien.pack(side="left", padx=(0, 4))
+                    lien.bind("<Button-1>", lambda _e, url=sugg[1]: webbrowser.open(url))
 
             correct = ctk.BooleanVar(value=False)
             ctk.CTkCheckBox(ligne, text="✓ correct", variable=correct, width=90).pack(

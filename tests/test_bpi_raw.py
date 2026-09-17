@@ -91,6 +91,27 @@ class TestAccumulation:
         assert (total, ajoutees) == (2, 0)
         assert len(pd.read_csv(bpi_tmp / "bpi_raw.csv")) == 2
 
+    def test_un_entier_passe_en_float_ne_fabrique_pas_de_doublon(self, bpi_tmp):
+        """Le cas qui a mordu le 2026-09-17 : `units` vaut `int | None` à la
+        sortie du scraper (un Silver de Music DVD n'a pas d'unités), la colonne
+        devient float64 au premier `DataFrame`, et « 400000.0 » part dans le
+        brut — où la dédup EXACTE ne le reconnaît pas comme « 400000 » : 12
+        doublons et 62 « unités incohérentes » au validateur, sur un brut de
+        86 723 lignes. Un brut déjà pollué se répare à la relecture."""
+        (bpi_tmp / "bpi_raw.csv").write_text(
+            "\ufeff" + ",".join(u.CERTIF_COLUMNS) + "\n"
+            "A,T,Single,Gold,2020-01-01,,,400000.0,2,10,1,,2026-09-07 03:40:49\n",
+            encoding="utf-8",
+        )
+        lot = [
+            {**_ligne(level="Gold"), "units": 400000},
+            {**_ligne(level="Silver", cat="Music DVDs", tid=2), "units": None},
+        ]
+        total, ajoutees = u._merge_certif_csv(u._horodater(lot))
+        brut = pd.read_csv(bpi_tmp / "bpi_raw.csv", dtype=str).fillna("")
+        assert (total, ajoutees) == (2, 1)
+        assert list(brut["units"]) == ["400000", ""]  # ni « .0 », ni « nan »
+
     def test_la_date_de_collecte_conservee_est_la_PREMIERE(self, bpi_tmp):
         """La provenance qu'on garde est celle de la première observation."""
         u._merge_certif_csv([{**_ligne(), "scraped_at": "2026-01-01 00:00:00"}])

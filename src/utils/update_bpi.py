@@ -79,6 +79,9 @@ CERTIF_COLUMNS = [
 
 
 # ── Brut / clean ──────────────────────────────────────────────────────────────
+_ENTIER_FLOTTE = re.compile(r"-?\d+\.0")
+
+
 def _texte(valeur) -> str:
     """Valeur → texte, l'absence donnant «  » et jamais « None » ni « nan ».
 
@@ -88,7 +91,18 @@ def _texte(valeur) -> str:
     """
     if valeur is None or (isinstance(valeur, float) and pd.isna(valeur)):
         return ""
-    return str(valeur).strip()
+    # Un entier passé par une colonne pandas à trous ressort en float
+    # (`400000.0`) : c'était la fuite mesurée le 2026-09-17 — `units` vaut
+    # `int | None` à la sortie du scraper, la colonne devient float64, et
+    # « 400000.0 » ne reconnaît plus « 400000 » dans la dédup EXACTE du brut
+    # (12 doublons, 62 « unités incohérentes » au validateur). On ramène aussi
+    # les chaînes déjà écrites ainsi, pour que le brut existant se répare.
+    if isinstance(valeur, float) and valeur.is_integer():
+        return str(int(valeur))
+    texte = str(valeur).strip()
+    if _ENTIER_FLOTTE.fullmatch(texte):
+        return texte[:-2]
+    return texte
 
 
 def _align_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -352,9 +366,13 @@ def _horodater(lignes: list[dict]) -> list[dict]:
     marque = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for ligne in lignes:
         ligne.setdefault("scraped_at", marque)
-        ligne["units"] = bpi_units(
+        # En TEXTE dès ici, comme `_clean_from_raw` : un `int | None` fait
+        # une colonne float64 au premier `DataFrame`, et « 400000.0 » part
+        # dans le brut (jumeau de la ligne 194, corrigé aux deux endroits).
+        unites = bpi_units(
             ligne.get("certification_level", ""), format_type=ligne.get("category", "")
         )
+        ligne["units"] = "" if unites is None else str(unites)
     return lignes
 
 
@@ -488,15 +506,25 @@ def clean_certif_csv(apply: bool = True) -> dict:
     report = cert_clean_report.rapport_vierge(CERTIF_CSV)
     raw = _load_bpi_raw()
     report["rows_in"] = len(raw)
+    # Le brut aussi se purge de ses doublons d'identité (comme à chaque fusion) :
+    # relu avec `units` ramené au texte entier, les 37 847 jumelles « 400000 » /
+    # « 400000.0 » du 2026-09-17 redeviennent des doublons exacts. Sans cette
+    # étape, « Nettoyer » laissait le brut gonflé jusqu'à la mise à jour suivante.
+    brut_purge = raw.drop_duplicates(subset=_COLONNES_IDENTITE, keep="first", ignore_index=True)
+    report["brut_purge"] = len(raw) - len(brut_purge)
     clean = _clean_from_raw(raw, report)
     report["rows_out"] = len(clean)
     report["deja_propre"], report["lignes_modifiees"] = cert_clean_report.comparer_au_fichier(
         clean, CERTIF_CSV
     )
+    # Un brut gonflé est une raison d'appliquer, même si le clean ne bouge pas.
+    report["deja_propre"] = report["deja_propre"] and not report["brut_purge"]
     if apply and not clean.empty:
         if (sauvegarde := cert_store.sauvegarder(CERTIF_CSV)) is not None:
             report["backup"] = str(sauvegarde)
         clean.to_csv(CERTIF_CSV, index=False, encoding="utf-8-sig")
+        if report["brut_purge"]:
+            _write_bpi_raw(brut_purge)
         _write_bpi_meta(source="CLEAN", count=len(clean))
         report["applied"] = True
     return report
@@ -509,6 +537,7 @@ def format_clean_report(report: dict) -> str:
         titre="NETTOYAGE BPI",
         counters=[
             ("Lignes en entrée (brut)", report.get("rows_in", 0)),
+            ("Doublons d'identité purgés du brut", report.get("brut_purge", 0)),
             ("Lignes en sortie (clean)", report.get("rows_out", 0)),
             ("Lignes creuses retirées", report.get("empty_removed", 0)),
             ("Doublons retirés", report.get("duplicates_removed", 0)),

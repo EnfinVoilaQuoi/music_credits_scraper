@@ -11,6 +11,7 @@ from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
 from src.gui.panels import albums_view, formations_panel, tracks_table
 from src.gui.windows import artist_loader
+from src.gui.windows.backpackerz_photos import show_backpackerz_photos
 from src.gui.windows.export_studio import show_export_studio
 from src.gui.windows.formations import show_formations
 from src.gui.windows.source_health import show_source_health
@@ -227,6 +228,17 @@ class MainWindow:
             width=110,
         )
         self.export_button.pack(side="right", padx=5)
+
+        # 9. Photos The BACKPACKERZ (à droite, à côté d'Export studio) — outil
+        # autonome : n'exige qu'un artiste chargé, pas sa discographie.
+        self.photos_button = ctk.CTkButton(
+            control_frame,
+            text="Photos BPZ",
+            command=lambda: show_backpackerz_photos(self),
+            state="disabled",
+            width=100,
+        )
+        self.photos_button.pack(side="right", padx=5)
 
         # Progress bar
         self.progress_var = ctk.DoubleVar()
@@ -860,6 +872,9 @@ class MainWindow:
         # Si pas de scraping en cours, appliquer la logique normale
         if hasattr(self, "stop_button"):
             self.stop_button.configure(state="disabled")
+
+        # Photos BPZ : un artiste suffit (la recherche se fait par son NOM).
+        self.photos_button.configure(state="normal" if self.current_artist else "disabled")
 
         if not self.current_artist:
             # Aucun artiste chargé

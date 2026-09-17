@@ -95,6 +95,9 @@ class SourceSpec:
     usage_note: str = ""  # précision affichée dans la colonne d'usage réel
 
 
+#: Sentinelle The BACKPACKERZ : l'artiste de référence du projet, tagué sur ~30 articles.
+_BPZ_SENTINELLE = "Isha"
+
 #: Sentinelle MusicBrainz : un groupe ancien, stable et richement documenté.
 _MB_SENTINELLE = "IAM"
 #: Son MBID, pour la sonde rapide (un lookup direct, sans recherche).
@@ -288,6 +291,41 @@ def _probe_ytmusic() -> list[str]:
         return ["recherche sentinelle sans résultat"]
     if not any(isinstance(h, dict) and h.get("browseId") for h in hits):
         return ["aucun résultat avec browseId (structure changée ?)"]
+    return []
+
+
+def _probe_backpackerz() -> list[str]:
+    """Rejoue le VRAI transport : l'API REST WordPress, sentinelle « Isha ».
+
+    Un GET nu sur la page d'accueil rendrait 200 même API fermée (un réglage
+    WordPress suffit à couper `/wp-json/`). On demande donc le tag de
+    l'artiste de référence et on vérifie que le JSON a la forme attendue —
+    c'est `tags_exacts` du client, joué en sonde.
+    """
+    import httpx
+
+    from src.api import backpackerz_api as bpz
+
+    try:
+        reponse = httpx.get(
+            f"{bpz.BASE_URL}/tags",
+            params={"search": _BPZ_SENTINELLE, "per_page": 20},
+            headers=bpz._UA,
+            timeout=20,
+            follow_redirects=True,
+        )
+    except httpx.HTTPError as e:
+        return [f"requête impossible : {type(e).__name__}"]
+    if reponse.status_code != 200:
+        return [f"HTTP {reponse.status_code}"]
+    try:
+        corps = reponse.json()
+    except ValueError:
+        return ["réponse non JSON (API REST fermée ou page HTML)"]
+    if not isinstance(corps, list):
+        return [f"réponse non-liste : {type(corps).__name__}"]
+    if not bpz.tags_exacts(_BPZ_SENTINELLE, corps):
+        return [f"tag « {_BPZ_SENTINELLE} » introuvable ({len(corps)} proposé(s))"]
     return []
 
 
@@ -566,6 +604,14 @@ SOURCES: list[SourceSpec] = [
         tolerate_403=True,
         notes="le lien du CSV change régulièrement côté SNEP",
         families=(Family.CERTS,),
+    ),
+    SourceSpec(
+        key="backpackerz",
+        label="The BACKPACKERZ (photos d'artistes)",
+        fast_probe=_probe_backpackerz,
+        full_probe=_probe_backpackerz,
+        notes="API REST WordPress ouverte, sans clé ; usage autorisé AVEC citation",
+        families=(Family.MEDIA,),
     ),
 ]
 

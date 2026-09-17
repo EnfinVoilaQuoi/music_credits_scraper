@@ -123,6 +123,9 @@ CAPTURES: list[dict] = [
         "url": _GENIUS_SONG_URL,
         "method": "requests",
         "fallback": "playwright",
+        # Dépôt public : les paroles sont retirées de la fixture (structure
+        # conservée, texte remplacé) — voir `expurger_paroles`.
+        "expurger": "paroles",
     },
     {
         "name": "riaa_search",
@@ -348,6 +351,28 @@ def _fetch_getsongbpm() -> str | None:
 
 
 # ── Capture ────────────────────────────────────────────────────────────────────
+def expurger_paroles(html: str) -> str:
+    """Remplace le TEXTE des conteneurs de paroles Genius par un placeholder.
+
+    La structure reste intacte (conteneurs, <br>, entêtes de section « [Couplet 1] »)
+    pour que le parseur soit testé sur la vraie page ; seul le contenu protégé
+    part. Les tests vérifient la forme (sections, sauts de ligne), pas les mots.
+    """
+    from bs4 import BeautifulSoup, NavigableString
+
+    soup = BeautifulSoup(html, "html.parser")
+    n = 0
+    for conteneur in soup.select('[data-lyrics-container="true"]'):
+        for chaine in list(conteneur.find_all(string=True)):
+            texte = chaine.strip()
+            if not texte or texte.startswith("["):
+                continue
+            n += 1
+            chaine.replace_with(NavigableString(f"Paroles retirées de la fixture, ligne {n}"))
+    print(f"   paroles expurgées : {n} lignes")
+    return str(soup)
+
+
 def capture_one(entry: dict) -> bool:
     print(f"→ {entry['name']} ({entry['path']})")
     method = entry["method"]
@@ -377,6 +402,9 @@ def capture_one(entry: dict) -> bool:
     if not content:
         print("   ❌ capture échouée")
         return False
+
+    if entry.get("expurger") == "paroles":
+        content = expurger_paroles(content)
 
     target = FIXTURES_DIR / entry["path"]
     target.parent.mkdir(parents=True, exist_ok=True)

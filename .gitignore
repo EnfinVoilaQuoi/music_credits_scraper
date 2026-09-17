@@ -20,9 +20,7 @@ ENV/
 drivers/*
 data/disabled_tracks/*
 data/artists/*
-!data/artists/.gitkeep
 data/logs/*
-!data/logs/.gitkeep
 data/ultratop/*
 data/certifications/brma/backups/*
 data/certifications/brma/logs/*
@@ -54,16 +52,20 @@ lib/*
 # malgré les règles *.json / *.html ci-dessus (offline, rejouées par les tests).
 !tests/fixtures/**
 
-# Sidecars de fraîcheur des certifs (meta) : à VERSIONNER malgré *.json
-# (convention brut+clean : le clean et sa meta accompagnent la source).
+# Certifications (dépôt PUBLIC, décision 2026-09-17) : seuls le CLEAN
+# (`certif_<source>.csv`), sa fraîcheur (meta) et nos corrections manuelles
+# sont versionnés. Le BRUT (`*_raw.csv`, `certif-.csv`) et le sidecar
+# `certif-.vues.json` (ce que le site SNEP montre encore, ligne à ligne du
+# brut) restent locaux : les updaters amorcent le brut depuis le clean quand
+# il manque. Sauvegardes du brut : `cert_store` → `backups/`.
+data/certifications/**/*_raw.csv
+data/certifications/snep/certif-.csv
 !data/certifications/**/*.meta.json
 !data/certifications/**/metadata.json
-# Ce que le site SNEP montre encore, ligne par ligne du brut (snep_vues) : le
-# clean en dépend, il se versionne avec lui.
-!data/certifications/snep/*.vues.json
 !data/certifications/**/manual_fixes.json
 
-# Claude
+# Outillage IA (suivi de travail, skills, mémoire) : privé
+.agents/
 .claude/
 CLAUDE.md
 JOURNAL.md

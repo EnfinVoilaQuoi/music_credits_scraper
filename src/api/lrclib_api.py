@@ -53,7 +53,7 @@ logger = get_logger(__name__)
 _SOURCE = "lrclib"
 
 # User-Agent identifiable, recommandé par LRCLIB (nom + version + lien projet).
-_USER_AGENT = "MusicCreditsScraper/1.0 (+https://github.com/g78rem/music_credits_scraper)"
+_USER_AGENT = "MusicCreditsScraper/1.0 (+https://github.com/EnfinVoilaQuoi/music_credits_scraper)"
 
 # En-têtes par requête pour la voie async : l'AsyncHttpSession est PARTAGÉE (UA
 # httpx par défaut) — on repasse l'UA identifiable par requête (comme la session

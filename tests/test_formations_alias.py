@@ -15,9 +15,9 @@ from src.models import Artist, ArtistRelation
 from src.utils.formations import (
     Candidat,
     RapportFormations,
-    aliases_a_proposer,
     chercher_formations,
     fusionner,
+    liens_a_proposer,
     trier_decisions,
 )
 
@@ -87,7 +87,7 @@ def test_fusionner_crosses_discogs_alias_and_variations():
     assert cands[0].proposable and cands[0].croise
 
 
-# ── aliases_a_proposer ───────────────────────────────────────────────────────
+# ── liens_a_proposer ───────────────────────────────────────────────────────
 
 
 def _rapport(mbid="mb-1", **kw):
@@ -96,7 +96,7 @@ def _rapport(mbid="mb-1", **kw):
 
 def test_nothing_without_oracle():
     c = Candidat(related_name="Psmaker", kind="alias", sources={"discogs"})
-    assert aliases_a_proposer(_rapport(mbid=None, candidats=[c]), "Isha") == ([], [])
+    assert liens_a_proposer(_rapport(mbid=None, candidats=[c]), "Isha") == ([], [])
 
 
 def test_split_proposed_and_info_and_skip_known():
@@ -115,9 +115,15 @@ def test_split_proposed_and_info_and_skip_known():
         Candidat(related_name="IAM", kind="member_of", sources={"musicbrainz"}),
         Candidat(related_name="isha", kind="alias", sources={"discogs"}),
     ]
-    proposes, infos = aliases_a_proposer(_rapport(candidats=cands), "Isha")
-    assert [r.related_name for r in proposes] == ["Psmaker"]
+    proposes, infos = liens_a_proposer(_rapport(candidats=cands), "Isha")
+    # Les FORMATIONS sont proposées aussi (2026-09-17 : PLK sans Panama Bende
+    # après un run), sans nature — c'est l'utilisateur qui la choisit.
+    assert [(r.related_name, r.kind) for r in proposes] == [
+        ("Psmaker", "alias"),
+        ("IAM", "member_of"),
+    ]
     assert proposes[0].detail == "Artist name" and proposes[0].source == "musicbrainz"
+    assert proposes[1].formation is None
     assert [(r.related_name, r.detail) for r in infos] == [
         ("Malcolm", "Legal name"),
         ("Isha (2)", "name_variation"),
@@ -195,7 +201,7 @@ def test_chercher_reads_all_statuses_and_reports_mbid():
     assert rapport.mbid == "mb-1" and rapport.panne_mb is None
     statuts = {c.related_name: c.status for c in rapport.candidats}
     assert statuts == {"Psmaker": "refused", "PS": None}
-    proposes, _ = aliases_a_proposer(rapport, "Isha")
+    proposes, _ = liens_a_proposer(rapport, "Isha")
     assert [r.related_name for r in proposes] == ["PS"]
 
 
@@ -204,7 +210,7 @@ def test_chercher_reports_mb_outage_as_a_failure():
         Artist(id=1, name="Isha"), _DM(), mb=_MB(boum=True), discogs=_Discogs()
     )
     assert rapport.panne_mb == "503 saturé" and rapport.mbid is None
-    assert aliases_a_proposer(rapport, "Isha") == ([], [])
+    assert liens_a_proposer(rapport, "Isha") == ([], [])
 
 
 # ── candidats_de_base / reunir ───────────────────────────────────────────────

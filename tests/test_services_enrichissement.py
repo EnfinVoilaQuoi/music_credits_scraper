@@ -288,13 +288,13 @@ class TestFinDeRun:
         assert not bilan.complete and "Deezer HS" in bilan.erreurs[0]
 
     def test_identite_propose_sans_confirmer(self, monkeypatch):
-        from src.api.musicbrainz_api import AliasArtiste
+        from src.api.musicbrainz_api import AliasArtiste, RelationGroupe
 
         class _MB:
             def resoudre_artiste(self, nom, nos_albums):
                 return SimpleNamespace(
                     mbid="mb-1",
-                    relations=[],
+                    relations=[RelationGroupe("member_of", "Panama Bende", "mb-pb", "Group")],
                     aliases=[
                         AliasArtiste("Psmaker", "Artist name"),
                         AliasArtiste("M.", "Legal name"),
@@ -305,11 +305,16 @@ class TestFinDeRun:
 
         rt, _, _ = _setup_fin(monkeypatch, mb=_MB())
         bilan = _run(rt, _tracks_album("a"), enr.OptionsEnrich(sources=("reccobeats",)))
-        assert rt.data_manager.proposes == [("proposed", ["Psmaker"]), ("info", ["M."])]
+        assert rt.data_manager.proposes == [
+            ("proposed", ["Panama Bende"]),
+            ("proposed", ["Psmaker"]),
+            ("info", ["M."]),
+        ]
+        assert bilan.formations_proposees == 1
         assert bilan.alias_proposes == 1 and bilan.alias_infos == 1
         assert bilan.identite == "MusicBrainz : Belgian rapper" and bilan.complete
         texte = enr.resume(bilan, enr.OptionsEnrich())
-        assert "1 alias proposé(s), 1 pour info" in texte and "Groupes" in texte
+        assert "1 formation(s), 1 alias proposé(s), 1 pour info" in texte and "Groupes" in texte
 
     def test_panne_musicbrainz_est_une_panne(self, monkeypatch):
         class _MB:

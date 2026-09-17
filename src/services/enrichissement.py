@@ -45,6 +45,7 @@ class BilanEnrich(Bilan):
     # Pas de fin de run (2026-09-16) : nature des disques (Deezer) et identité.
     types_albums: int = 0
     albums_ignores: list[str] = field(default_factory=list)
+    formations_proposees: int = 0
     alias_proposes: int = 0
     alias_infos: int = 0
     identite: str = ""
@@ -185,10 +186,10 @@ async def _types_albums_deezer(
 async def _propositions_identite(
     runtime: Runtime, artist: Artist, bilan: BilanEnrich, hooks: Hooks
 ) -> None:
-    """Alias PROPOSÉS (jamais confirmés) par MusicBrainz + Discogs, sur le fil
-    sync du run (les deux clients sont bloquants). Une saturation MusicBrainz
-    est une PANNE, pas « pas d'alias »."""
-    from src.utils.formations import aliases_a_proposer, chercher_formations
+    """Formations ET alias PROPOSÉS (jamais confirmés) par MusicBrainz + Discogs,
+    sur le fil sync du run (les deux clients sont bloquants). Une saturation
+    MusicBrainz est une PANNE, pas « pas d'alias »."""
+    from src.utils.formations import chercher_formations, liens_a_proposer
 
     enricher, dm = runtime.data_enricher, runtime.data_manager
     hooks.progress(0, 1, "Identité", "MusicBrainz")
@@ -196,9 +197,14 @@ async def _propositions_identite(
         rapport = await enricher.sync_runner.run(chercher_formations, artist, dm)
         if rapport.panne_mb:
             raise RuntimeError(rapport.panne_mb)
-        proposes, infos = aliases_a_proposer(rapport, artist.name)
+        proposes, infos = liens_a_proposer(rapport, artist.name)
+        formations = [r for r in proposes if r.kind != "alias"]
+        alias = [r for r in proposes if r.kind == "alias"]
+        bilan.formations_proposees = await asyncio.to_thread(
+            dm.propose_artist_relations, artist.id, formations
+        )
         bilan.alias_proposes = await asyncio.to_thread(
-            dm.propose_artist_relations, artist.id, proposes
+            dm.propose_artist_relations, artist.id, alias
         )
         bilan.alias_infos = await asyncio.to_thread(
             dm.propose_artist_relations, artist.id, infos, "info"
@@ -212,7 +218,7 @@ async def _propositions_identite(
     if rapport.mbid:
         bilan.identite = f"MusicBrainz : {rapport.identite_mb or rapport.mbid}"
     else:
-        bilan.identite = "MusicBrainz : artiste non résolu (aucun alias proposé)"
+        bilan.identite = "MusicBrainz : artiste non résolu (rien proposé)"
 
 
 def run(
@@ -274,7 +280,8 @@ def resume(bilan: BilanEnrich, options: OptionsEnrich, desactives: int = 0) -> s
         )
     if bilan.identite:
         summary += (
-            f"🪪 Identité — {bilan.identite} : {bilan.alias_proposes} alias proposé(s)"
+            f"🪪 Identité — {bilan.identite} : {bilan.formations_proposees} formation(s), "
+            f"{bilan.alias_proposes} alias proposé(s)"
             f"{f', {bilan.alias_infos} pour info' if bilan.alias_infos else ''}"
             " — à arbitrer dans « Groupes »\n"
         )

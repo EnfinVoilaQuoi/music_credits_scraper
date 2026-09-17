@@ -19,7 +19,7 @@ Ce que l'assemblage apporte, et qu'aucune source ne donne seule :
     d'un membre à l'autre.
 
 Depuis le 2026-09-16, l'enrichissement appelle `chercher_formations` en fin de
-run et DÉPOSE des propositions (`aliases_a_proposer` → `propose_artist_relations`)
+run et DÉPOSE des propositions (`liens_a_proposer` → `propose_artist_relations`)
 — toujours sans confirmer : la fenêtre « Groupes » arbitre. Garde-fous : oracle
 d'identité obligatoire (pas de MBID retenu ⇒ rien n'est proposé, même si Discogs
 avait un candidat unique), seuls les alias MusicBrainz « Artist name » et les
@@ -208,14 +208,21 @@ def trier_confirmations(decisions) -> tuple[list[ArtistRelation], list[tuple[str
     return a_ecrire, a_oublier
 
 
-def aliases_a_proposer(
+def liens_a_proposer(
     rapport: RapportFormations, nom_artiste: str
 ) -> tuple[list[ArtistRelation], list[ArtistRelation]]:
-    """(alias à PROPOSER, alias à garder POUR INFO) — fonction PURE.
+    """(liens à PROPOSER, alias à garder POUR INFO) — fonction PURE.
+
+    Formations (`member_of` / `has_member`) ET alias : jusqu'au 2026-09-17 seule
+    la seconde famille sortait d'ici, si bien qu'un run d'enrichissement sur PLK
+    ne déposait pas Panama Bende et qu'il fallait relancer « Rechercher » à la
+    main pour voir ce que le run avait déjà trouvé.
 
     Rien sans oracle (`rapport.mbid` absent) : un Discogs seul, même à candidat
     unique, ne suffit pas à mettre un nom en face de l'artiste. Ce qui a déjà
-    un statut en base n'est jamais reproposé (le refus est une mémoire).
+    un statut en base n'est jamais reproposé (le refus est une mémoire). La
+    nature (groupe / collectif) reste à l'utilisateur : une formation proposée
+    n'en porte que si elle était déjà connue ailleurs.
     """
     if not rapport.mbid:
         return [], []
@@ -223,7 +230,7 @@ def aliases_a_proposer(
     proposes: list[ArtistRelation] = []
     infos: list[ArtistRelation] = []
     for c in rapport.candidats:
-        if c.kind != "alias" or c.status is not None:
+        if c.status is not None:
             continue
         if moi and normalize_name(c.related_name) == moi:
             continue

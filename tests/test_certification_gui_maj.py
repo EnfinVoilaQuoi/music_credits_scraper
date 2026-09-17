@@ -236,12 +236,24 @@ class TestColonneDeDate:
 
 
 class TestLaTableDesBrutsEstPARTAGEE:
-    def test_les_quatre_bruts_existent(self):
+    def test_la_table_pointe_sur_les_bruts_des_updaters(self):
+        """Les bruts ne sont PAS versionnés (dépôt public, 2026-09-17) : ne pas
+        tester leur existence sur disque — vert ici, rouge sur un clone frais.
+        Ce qui compte est que la table désigne les fichiers que les updaters
+        écrivent réellement."""
         from src.config import DATA_PATH
+        from src.utils import update_bpi, update_brma, update_riaa
 
+        base = Path(DATA_PATH) / "certifications"
+        attendus = {
+            "RIAA": Path(update_riaa.RIAA_RAW),
+            "BPI": Path(update_bpi.BPI_RAW),
+            "BRMA": Path(update_brma._BRMA_DIR) / "brma_raw.csv",
+            # `update_snep.download_latest_snep_csv` écrit `dest_dir / "certif-.csv"`.
+            "SNEP": base / "snep" / "certif-.csv",
+        }
         for nom, (dossier, fichier) in BRUTS_PAR_SOURCE.items():
-            chemin = Path(DATA_PATH) / "certifications" / dossier / fichier
-            assert chemin.exists(), f"brut {nom} introuvable : {chemin}"
+            assert (base / dossier / fichier).resolve() == attendus[nom].resolve(), nom
 
     def test_la_fenetre_ne_recode_plus_la_liste(self):
         source = (

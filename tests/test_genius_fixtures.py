@@ -39,7 +39,7 @@ def test_lyrics(scraper, soup):
     lyrics = scraper._extract_lyrics_bs4(soup)
     assert len(lyrics) > 200, "paroles vides/tronquées — conteneurs data-lyrics-container changés ?"
     assert "\n" in lyrics
-    assert "vide" in lyrics.lower()  # « Dans le vide »
+    assert "[Couplet 1]" in lyrics  # entêtes de section conservées à l'expurgation
     assert "You might also like" not in lyrics
     assert not lyrics.endswith("Embed")
 

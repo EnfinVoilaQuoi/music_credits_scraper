@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 #: Taille d'affichage des vignettes (bord le plus long).
 _VIGNETTE = 200
 _COLONNES = 4
-_UA = {"User-Agent": "MusicCreditsScraper/1.0 ( https://github.com/g78rem/music_credits_scraper )"}
+_UA = {"User-Agent": "MusicCreditsScraper/1.0 ( https://github.com/EnfinVoilaQuoi/music_credits_scraper )"}
 
 
 class BackpackerzPhotosWindow:

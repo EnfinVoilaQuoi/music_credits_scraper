@@ -50,7 +50,7 @@ _SOURCE = "musicbrainz"
 _BASE_URL = "https://musicbrainz.org/ws/2"
 
 #: Format imposé : `Nom/version ( contact )`. Sans lui, 503 (mesuré).
-_USER_AGENT = "MusicCreditsScraper/1.0 ( https://github.com/g78rem/music_credits_scraper )"
+_USER_AGENT = "MusicCreditsScraper/1.0 ( https://github.com/EnfinVoilaQuoi/music_credits_scraper )"
 
 #: 1 requête/seconde et par IP. Au-delà, MusicBrainz refuse SEC (503) — il ne
 #: sert donc à rien d'aller plus vite, on se ferait juste jeter.

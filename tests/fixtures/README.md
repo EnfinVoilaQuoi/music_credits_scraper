@@ -15,6 +15,11 @@ documente la casse (procédure complète : `docs/maintenance-sources.md`).
   données dans des `<script>`, git compresse bien le HTML).
 - Jamais de secret dans une fixture : la capture GetSongBPM ne stocke pas la
   clé API.
+- **Exception à « brutes » : les paroles.** Le dépôt est public et les paroles
+  sont protégées ; la page Genius est **expurgée à la capture**
+  (`capture_fixtures.expurger_paroles`) : conteneurs, `<br>` et entêtes de
+  section « [Couplet 1] » conservés, chaque ligne de texte remplacée par un
+  placeholder. Les tests vérifient la FORME des paroles extraites, pas les mots.
 
 ## (Re)capturer
 

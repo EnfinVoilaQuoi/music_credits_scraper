@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "fixes": {
+    "SHURIK?N|OU JE VIS": {
+      "artist": "SHURIK'N",
+      "title": "OU JE VIS",
+      "avant": "SHURIK?N — OU JE VIS"
+    },
+    "2 BE 3|DONT?SAY GOODBYE": {
+      "artist": "2 BE 3",
+      "title": "DON'T SAY GOODBYE",
+      "avant": "2 BE 3 — DONT?SAY GOODBYE"
+    },
+    "COMPILATION|HISTOIRE DES TOUT P?TITS": {
+      "artist": "COMPILATION",
+      "title": "Histoire des tout p'tits",
+      "avant": "COMPILATION — Histoire des tout p?tits"
+    },
+    "COMPILATION|LE TOP DES TOUT P?TITS": {
+      "artist": "COMPILATION",
+      "title": "LE TOP DES TOUT P'TITS",
+      "avant": "COMPILATION — LE TOP DES TOUT P?TITS"
+    },
+    "DES?REE|LIFE": {
+      "artist": "DES'REE",
+      "title": "LIFE",
+      "avant": "DES?REE — LIFE"
+    },
+    "DES?REE|SUPERNATURAL": {
+      "artist": "DES'REE",
+      "title": "SUPERNATURAL",
+      "avant": "DES?REE — SUPERNATURAL"
+    },
+    "MODERN TALKING|BROTHER LOUI?E 98": {
+      "artist": "MODERN TALKING",
+      "title": "BROTHER LOUIE '98",
+      "avant": "MODERN TALKING — BROTHER LOUI?E 98"
+    },
+    "MYTHOS?N & DJ COSMO|THE HEART OF THE OCEAN": {
+      "artist": "MYTHOS 'N DJ COSMO",
+      "title": "THE HEART OF THE OCEAN",
+      "avant": "MYTHOS?N & DJ COSMO — THE HEART OF THE OCEAN"
+    },
+    "MYTHOS?N DJ COSMOS|UNCHAINED MELODY": {
+      "artist": "MYTHOS 'N DJ COSMOS",
+      "title": "UNCHAINED MELODY",
+      "avant": "MYTHOS?N DJ COSMOS — UNCHAINED MELODY"
+    },
+    "SANDI THOM|SMILE?IT CONFUSES PEOPLE": {
+      "artist": "SANDI THOM",
+      "title": "SMILE... IT CONFUSES PEOPLE",
+      "avant": "SANDI THOM — SMILE?IT CONFUSES PEOPLE"
+    },
+    "SERGENT GARCIA|UN POQUITO QUEMA?O": {
+      "artist": "SERGENT GARCIA",
+      "title": "UN POQUITO QUEMA'O",
+      "avant": "SERGENT GARCIA — UN POQUITO QUEMA?O"
+    },
+    "VERONIQUE & DAVINA|Y?A D'LA GYM Y?A D'LA JOIE": {
+      "artist": "VERONIQUE & DAVINA",
+      "title": "Y'A D'LA GYM Y'A D'LA JOIE",
+      "avant": "VERONIQUE & DAVINA — Y?A D'LA GYM Y?A D'LA JOIE"
+    },
+    "WILL SMITH|GETTIN?JIGGY WIT IT": {
+      "artist": "WILL SMITH",
+      "title": "GETTIN' JIGGY WIT IT",
+      "avant": "WILL SMITH — GETTIN?JIGGY WIT IT"
+    },
+    "LES NEGRESSES VERTES|M'LAH": {
+      "artist": "LES NEGRESSES VERTES",
+      "title": "MLAH",
+      "avant": "LES NEGRESSES VERTES — M'LAH"
+    },
+    "DIVERS|CUT KILLER & D.J. ABDEL PR": {
+      "artist": "DIVERS",
+      "title": "CUT KILLER & D.J. ABDEL presentent hip hop soul pa",
+      "avant": "DIVERS — CUT KILLER & D.J. ABDEL pr"
+    }
+  },
+  "acceptes": [
+    "COMPILATION|1998 UNE G",
+    "COMPILATION|H1TS - TOUS LES N",
+    "COMPILATION|LES PLUS GRANDES CHANSONS DU SI",
+    "DIVERS|CUT KILLER & D.J. ABDEL PR",
+    "HAYCE LEMSI & VOLTS FACE|LES PIEDS DEVANT LE D",
+    "IAM|L'EMPIRE DU C",
+    "JEAN MATTEI|TERRA LES VOIX DE L'",
+    "K. COSTA & D. LEVY|ALADDIN CE R",
+    "KOBA LAD|LA C",
+    "LES ENFOIRES|LE Z",
+    "LES ENFOIRES|TOUS DANS LE M",
+    "LES T|QU'EST-CE QU'ON S'FAIT CHIER",
+    "LORENZO|TU LE C",
+    "LORIE|RESTER LA M",
+    "LYNDA LEMAY|NOS R",
+    "M|EN T",
+    "M|LA TOUR DE M",
+    "M|LE TOUR DE M",
+    "M|LES LECONS DE MUSIQUE DE M",
+    "NAPS FEAT. GAZO & NINHO|C'EST CARRÉ LE S",
+    "RENAUD|MON FIL SUR MOI ET MES CHANSONS PR",
+    "SINIK|LA MAIN SUR LE C"
+  ]
+}

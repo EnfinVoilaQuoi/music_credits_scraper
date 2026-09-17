@@ -61,6 +61,7 @@ lib/*
 # Ce que le site SNEP montre encore, ligne par ligne du brut (snep_vues) : le
 # clean en dépend, il se versionne avec lui.
 !data/certifications/snep/*.vues.json
+!data/certifications/**/manual_fixes.json
 
 # Claude
 .claude/

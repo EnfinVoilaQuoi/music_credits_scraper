@@ -346,6 +346,15 @@ def _track_key(track) -> str:
     return f"{KIND_TRACK}:{track.id}"
 
 
+def compte_pour_la_timeline(track) -> bool:
+    """Seuls les morceaux PRINCIPAUX et les FEATS comptent : une apparition
+    secondaire (chœurs, voix additionnelle — `secondary_role`) n'est pas un
+    point de carrière et ses streams ne sont pas ceux de l'artiste (décision
+    utilisateur 2026-09-17 : un Green Montana proposé à Isha pour une voix
+    additionnelle). Exclue des candidats, des albums ET du cumul."""
+    return not (track.secondary_role or "").strip()
+
+
 def _track_line1(track) -> str:
     freestyle, emission = is_freestyle(track)
     if freestyle:
@@ -353,8 +362,6 @@ def _track_line1(track) -> str:
     primary = (track.primary_artist_name or "").strip()
     if track.is_featuring and primary:
         return f"Feat avec **{primary}**"
-    if (track.secondary_role or "").strip() and primary:
-        return f"Apparition sur **{primary}**"
     return "Single"
 
 
@@ -393,6 +400,7 @@ def build_candidates(
     """
     projects: list[Candidate] = []
     consumed: set[int] = set()
+    tracks = [t for t in tracks if compte_pour_la_timeline(t)]
 
     for album in list_albums(tracks):
         album_tracks = [t for t in select_album_tracks(tracks, album) if track_date(t)]
@@ -526,7 +534,10 @@ def cumulative_streams(tracks, at: date, disabled: frozenset[int] | set[int] = f
     return sum(
         track_streams(t)
         for t in tracks
-        if t.id not in disabled and (d := track_date(t)) is not None and d <= at
+        if compte_pour_la_timeline(t)
+        and t.id not in disabled
+        and (d := track_date(t)) is not None
+        and d <= at
     )
 
 

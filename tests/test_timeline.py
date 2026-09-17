@@ -235,6 +235,9 @@ def _corpus():
             primary="X",
             secondary="Additional Vocals",
         ),
+        # Un feat de plus, pour que la miniature garde 12 candidats une fois
+        # l'apparition secondaire (22) écartée.
+        _track(23, "Feat Y", "Album de Y", "2022-08-08", 500_000, None, feat=True, primary="Y"),
     ]
     return tracks
 
@@ -311,8 +314,27 @@ def test_freestyle_line1_default():
     assert cands["track:15"].line1_default == "Freestyle **Grünt**"
     assert cands["track:17"].line1_default == "Freestyle **Booska**"
     assert cands["track:16"].line1_default == "Feat avec **Georgio**"
-    assert cands["track:22"].line1_default == "Apparition sur **X**"
     assert cands["track:18"].line1_default == "Single"
+
+
+def test_secondary_roles_are_out_of_the_timeline():
+    """Une apparition secondaire (voix additionnelle) n'est ni candidate ni
+    comptée dans le cumul : seuls les principaux et les feats comptent."""
+    tracks = _corpus()
+    keys = {c.key for c in build_candidates(tracks)}
+    assert "track:22" not in keys
+    at = date(2099, 1, 1)
+    sans = [t for t in tracks if t.id != 22]
+    assert cumulative_streams(tracks, at) == cumulative_streams(sans, at)
+    assert tl.track_streams(tracks[21]) > 0  # il aurait compté sans la règle
+    # Un album dont les titres sont des apparitions secondaires ne devient pas un projet.
+    secondaires = [
+        _track(
+            300 + i, f"S{i}", "Album de X", "2021-01-01", 1_000, 1, primary="X", secondary="Vocals"
+        )
+        for i in range(5)
+    ]
+    assert "album:album de x" not in {c.key for c in build_candidates(tracks + secondaires)}
 
 
 # ── 5. Candidats : ordre, exclusions, plafond ────────────────────────────────
@@ -444,7 +466,8 @@ def test_cumulative_streams_inclusive_and_none_as_zero():
     )
     # Sans date : jamais compté, même « à la fin des temps ».
     total = cumulative_streams(tracks, date(2099, 1, 1))
-    assert total == sum(tl.track_streams(t) for t in tracks if t.id != 21)
+    # Sans date (21) et apparition secondaire (22) : jamais comptés.
+    assert total == sum(tl.track_streams(t) for t in tracks if t.id not in (21, 22))
     assert tl.track_streams(_track(1, "x", None, "2020-01-01", None, None)) == 0
 
 

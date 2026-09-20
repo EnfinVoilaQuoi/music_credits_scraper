@@ -1,7 +1,7 @@
 """Normalisation des noms de crédits (producteurs, feats…) pour le regroupement.
 
 Fonctions **pures** (aucun état, aucune DB), pensées pour le graphe de
-collaboration de `src/dataviz/` (Bubble Prod / Bubble Feat). Deux niveaux :
+graphe de collaborations (consommateur externe). Deux niveaux :
 
 - `display_name(name)` : nettoyage **léger** pour l'affichage — retire les
   caractères invisibles et le suffixe Genius « (Producer) », normalise les

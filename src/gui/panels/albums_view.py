@@ -331,7 +331,7 @@ def import_genius_album(app):
             skipped_known += 1
             # Le morceau existe déjà, mais Genius nous donne son RANG dans
             # l'album — la seule source du `track_number`. Sans ce backfill il
-            # était jeté, et tout ce qui trie une tracklist (dataviz Structure)
+            # était jeté, et tout ce qui trie une tracklist
             # retombait sur l'ordre alphabétique.
             number = tr.get("track_number")
             existing = by_genius_id[gid]

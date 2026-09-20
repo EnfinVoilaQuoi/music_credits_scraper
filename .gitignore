@@ -120,10 +120,6 @@ scripts/*
 !scripts/mark_latin_awards.py
 !scripts/repair_riaa_digital_singles.py
 # Dataviz / export studio
-!scripts/bubble_prod.py
-!scripts/bubble_compare.py
-!scripts/structure.py
-!scripts/timeline.py
 !scripts/backpackerz_photos.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
@@ -146,4 +142,6 @@ data/kworb_links/*
 
 # Docs de mise en page Illustrator : même raison que les .jsx ci-dessus — elles
 # détaillent la maquette et le tour de main, elles restent locales.
-docs/*-illustrator.md
+
+# Depot prive (ne pas inclure par accident)
+therapie_studio/

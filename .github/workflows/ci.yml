@@ -76,8 +76,6 @@ jobs:
       #      Le report tenait à ce que les décisions allaient changer ; le lot
       #      les a laissées intactes, elles sont donc gelées. Mesuré 81 %).
       # → 81 (2026-09-14 : mesuré 82 % après les services GUI-indépendants et
-      #      la CLI ; `dataviz/debug_preview.py` — aperçu matplotlib des CLIs,
-      #      0 % et sans logique — sort du périmètre plutôt que d'être couvert).
       # → 84 (2026-09-15, chantier « couverture = prétexte, audit = but » : les
       #      chemins d'erreur des services (74 → 97 %), des scripts de certifs
       #      (BRMA 86, SNEP 95, RIAA 95) et du reliquat utils/observability, lus
@@ -88,4 +86,4 @@ jobs:
       # couvert, jamais pour « faire un chiffre » — les fabriques paresseuses qui
       # instancient un vrai client réseau restent délibérément non couvertes.
       - name: Cliquet de couverture (hors GUI)
-        run: coverage report --omit="src/gui/*,src/main.py,src/dataviz/debug_preview.py" --fail-under=84
+        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=84

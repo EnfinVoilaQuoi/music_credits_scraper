@@ -57,6 +57,12 @@ class TestPropagation:
         assert _colonne(data_manager, pauvre.id, "lyrics") == "Premier couplet…"
         assert _colonne(data_manager, pauvre.id, "lyrics_source") == "genius"
 
+    def test_le_constat_d_instrumental_arrive_chez_la_soeur(self, data_manager, famille):
+        riche, pauvre = famille
+        riche.lyrics.instrumental = True
+        data_manager.save_track(riche)
+        assert _colonne(data_manager, pauvre.id, "instrumental") == 1
+
     def test_les_credits_sont_UNIS(self, data_manager, famille):
         """UNION, jamais remplacement : `save_track` fait `DELETE FROM credits`
         puis réinsertion, donc un save venu d'un flux qui ne porte pas les

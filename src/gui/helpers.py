@@ -103,6 +103,23 @@ def _streams_complets(track) -> bool:
     return bool(track.spotify_id_checked_at)
 
 
+def format_lyrics_cell(track) -> str:
+    """Cellule « Paroles » du tableau : ✓ = texte, ⏱ = timestamps (en plus ou
+    seuls), 🎹 = instrumental CONSTATÉ sur Genius (scrape réussi, pas de paroles
+    par nature — e27), vide = rien ou jamais cherché."""
+    has_text = bool(track.lyrics.present)
+    has_sync = bool(track.lyrics.synced)
+    if has_text and has_sync:
+        return "✓⏱"
+    if has_sync:
+        return "⏱"
+    if has_text:
+        return "✓"
+    if track.lyrics.instrumental:
+        return "🎹"
+    return ""
+
+
 def get_track_status_icon(track, disabled_ids) -> str:
     """Retourne l'icône de statut selon le niveau de complétude des données
 
@@ -145,8 +162,9 @@ def get_track_status_icon(track, disabled_ids) -> str:
         except (AttributeError, TypeError, KeyError):
             missing.append("Crédits")
 
-        # 4. Paroles obtenues
-        if not track.lyrics.text or not track.lyrics.text.strip():
+        # 4. Paroles obtenues — ou instrumental constaté sur Genius (e27) :
+        # pas de paroles PAR NATURE, il n'y a rien à réclamer.
+        if track.lyrics.a_chercher():
             missing.append("Paroles")
 
         # 5. BPM

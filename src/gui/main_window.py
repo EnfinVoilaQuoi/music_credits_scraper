@@ -12,7 +12,7 @@ from src.gui.dialogs import artist_selection, scraping_menu
 from src.gui.panels import albums_view, formations_panel, tracks_table
 from src.gui.windows import artist_loader
 from src.gui.windows.backpackerz_photos import show_backpackerz_photos
-from src.gui.windows.export_studio import show_export_studio
+from src.gui.windows.export_window import show_export_window
 from src.gui.windows.formations import show_formations
 from src.gui.windows.source_health import show_source_health
 from src.gui.windows.track_details import TrackDetailsWindow
@@ -64,7 +64,7 @@ class MainWindow:
         self.deleted_tracks_manager = self.runtime.deleted
         self.open_detail_windows = {}  # Dict: {track_id: (window, track_object)}
         self.source_health_window = None  # Fenêtre « État des sources » (singleton)
-        self.export_studio_window = None  # Fenêtre « Export studio » (singleton)
+        self.export_window = None  # Fenêtre « Export » (singleton)
 
         self._create_widgets()
         self._update_statistics()
@@ -222,8 +222,8 @@ class MainWindow:
         # (Bubble Prod…) ; l'export JSON historique vit dedans.
         self.export_button = ctk.CTkButton(
             control_frame,
-            text="Export studio",
-            command=lambda: show_export_studio(self),
+            text="Export",
+            command=lambda: show_export_window(self),
             state="disabled",
             width=110,
         )
@@ -322,6 +322,7 @@ class MainWindow:
         tree_scroll_frame.pack(fill="both", expand=True)
 
         # COLONNES AVEC COLONNE PAROLES ENTRE CRÉDITS ET BPM + DURÉE ENTRE BPM ET CERTIF
+        # (Paroles : ✓ texte, ⏱ timestamps, 🎹 instrumental — `helpers.format_lyrics_cell`)
         self.TRACK_COLUMNS = (
             "Titre",
             "Artiste principal",
@@ -628,6 +629,7 @@ class MainWindow:
                 tracks_with_lyrics = sum(
                     1 for t in active_tracks if t.lyrics.text and t.lyrics.text.strip()
                 )
+                tracks_instrumental = sum(1 for t in active_tracks if t.lyrics.instrumental)
 
                 # Morceaux avec données additionnelles = BPM + Key/Mode + Durée (actifs uniquement)
                 tracks_with_additional = sum(
@@ -687,7 +689,10 @@ class MainWindow:
                 line1_parts.append(f"{tracks_with_music_credits} avec Crédits")
 
                 # Avec paroles
-                line1_parts.append(f"{tracks_with_lyrics} avec Paroles")
+                _paroles = f"{tracks_with_lyrics} avec Paroles"
+                if tracks_instrumental:
+                    _paroles += f" (+{tracks_instrumental} instrumentaux 🎹)"
+                line1_parts.append(_paroles)
 
                 # Avec données additionnelles
                 line1_parts.append(f"{tracks_with_additional} avec Données Add.")

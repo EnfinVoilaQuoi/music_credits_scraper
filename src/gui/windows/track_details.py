@@ -824,16 +824,30 @@ class TrackDetailsWindow:
             empty_lyrics_container = ctk.CTkFrame(lyrics_frame)
             empty_lyrics_container.pack(fill="both", expand=True, padx=50, pady=50)
 
+            if track.lyrics.instrumental:
+                # Constat, pas un trou : pas d'invite à re-scraper (e27).
+                _quand = helpers.format_datetime(track.lyrics.scraped_at)
+                titre_vide = "🎹 Morceau instrumental"
+                detail_vide = "Genius indique « This song is an instrumental »" + (
+                    f"\n(constaté le {_quand})" if _quand else ""
+                )
+            else:
+                titre_vide = "📝 Aucunes paroles disponibles"
+                detail_vide = (
+                    "Utilisez le bouton 'Scraper paroles' dans l'interface principale\n"
+                    "pour récupérer les paroles de ce morceau"
+                )
+
             ctk.CTkLabel(
                 empty_lyrics_container,
-                text="📝 Aucunes paroles disponibles",
+                text=titre_vide,
                 font=("Arial", 18, "bold"),
                 text_color="gray",
             ).pack(expand=True, pady=(0, 10))
 
             ctk.CTkLabel(
                 empty_lyrics_container,
-                text="Utilisez le bouton 'Scraper paroles' dans l'interface principale\npour récupérer les paroles de ce morceau",
+                text=detail_vide,
                 font=("Arial", 12),
                 text_color="gray",
                 justify="center",
@@ -930,6 +944,10 @@ class TrackDetailsWindow:
         _ly_src = track.lyrics.source or "—"
         tech_textbox.insert("end", "\n📝 PAROLES\n")
         tech_textbox.insert("end", f"• Texte présent : {_yn(_ly)}  (source : {_ly_src})\n")
+        _instru = {True: "oui 🎹", False: "non"}.get(
+            track.lyrics.instrumental, "— (jamais constaté)"
+        )
+        tech_textbox.insert("end", f"• Instrumental (Genius) : {_instru}\n")
         tech_textbox.insert("end", f"• Structure Genius [Couplet/Refrain] : {_yn(_has_struct)}\n")
         _sy_src = track.lyrics.synced_source or ("?" if _has_ts else "—")
         _sy_conf = track.lyrics.synced_confidence
@@ -1003,7 +1021,7 @@ class TrackDetailsWindow:
             _missing.append("Key/Mode")
         if not track.isrc:
             _missing.append("ISRC")
-        if not (track.lyrics.text or ""):
+        if track.lyrics.a_chercher():
             _missing.append("paroles")
         if not track.spotify_id:
             _missing.append("Spotify ID")

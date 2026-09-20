@@ -131,6 +131,7 @@ def _reset_forces(runtime: Runtime, tracks: list[Track], options: OptionsCredits
             t.lyrics.present = False
             t.lyrics.scraped_at = None
             t.lyrics.source = None
+            t.lyrics.instrumental = None  # repartir de zéro = re-constater
     if options.force_sync:
         for t in tracks:
             t.lyrics.synced = None
@@ -207,7 +208,7 @@ def run(
                 return _sauver(runtime, artist, tracks, bilan)
             _reset_forces(runtime, tracks, options)
             if options.paroles_genius:
-                besoin = [t for t in tracks if not (t.lyrics.present and t.lyrics.text)]
+                besoin = [t for t in tracks if t.lyrics.a_chercher()]
                 if besoin:
                     scraper = scraper or clients.genius()
                     bilan.paroles = scraper.scrape_lyrics_batch(
@@ -232,8 +233,16 @@ def run(
                             bilan.interrompu("arrêt demandé pendant la synchro")
                             break
                         has_sync = bool(t.lyrics.synced)
-                        need_sync = options.sync and not (has_sync and not options.force_sync)
-                        need_text = options.paroles_ytm and not (t.lyrics.present and t.lyrics.text)
+                        # Un instrumental constaté n'a ni texte ni timestamps à
+                        # chercher — le retenter à chaque run serait l'échec
+                        # perpétuel que le constat sert à éviter.
+                        instrumental = bool(t.lyrics.instrumental)
+                        need_sync = (
+                            options.sync
+                            and not instrumental
+                            and not (has_sync and not options.force_sync)
+                        )
+                        need_text = options.paroles_ytm and t.lyrics.a_chercher()
                         if not need_sync and not need_text:
                             continue
                         outcome = provider.enrich(
@@ -264,11 +273,13 @@ def run(
 
             if bilan.paroles is None:
                 n_ok = sum(1 for t in tracks if t.lyrics.present and t.lyrics.text)
+                n_instru = sum(1 for t in tracks if t.lyrics.instrumental)
                 bilan.paroles = {
-                    "success": n_ok,
-                    "failed": n - n_ok,
+                    "success": n_ok + n_instru,
+                    "failed": n - n_ok - n_instru,
                     "errors": [],
                     "lyrics_scraped": n_ok,
+                    "instrumental": n_instru,
                 }
 
         return _sauver(runtime, artist, tracks, bilan)
@@ -314,6 +325,8 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
     if bilan.paroles:
         msg += "📝 Paroles:\n"
         msg += f"  - Réussis: {bilan.paroles['success']}\n  - Échoués: {bilan.paroles['failed']}\n"
+        if bilan.paroles.get("instrumental"):
+            msg += f"  - dont instrumentaux 🎹 : {bilan.paroles['instrumental']}\n"
         if bilan.paroles.get("errors"):
             msg += f"  - Erreurs: {len(bilan.paroles['errors'])}\n"
     if bilan.sync and options.sync:

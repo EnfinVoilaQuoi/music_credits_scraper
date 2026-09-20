@@ -194,7 +194,13 @@ class TestPhaseSynchro:
         bilan = credits.run(_rt(), Artist(name="S"), [_track("A")], _SANS_CREDITS, Hooks(), cl)
         assert bilan.sync["text"] == 1 and bilan.sync["lrclib"] == 0
         # Sans passe Genius, le bilan paroles est DÉDUIT de l'état des morceaux.
-        assert bilan.paroles == {"success": 1, "failed": 0, "errors": [], "lyrics_scraped": 1}
+        assert bilan.paroles == {
+            "success": 1,
+            "failed": 0,
+            "errors": [],
+            "lyrics_scraped": 1,
+            "instrumental": 0,
+        }
 
     def test_provider_qui_leve_est_consigne_sans_perdre_la_sauvegarde(self):
         dm = _DM()

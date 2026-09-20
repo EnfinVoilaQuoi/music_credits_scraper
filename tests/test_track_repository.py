@@ -316,3 +316,32 @@ class TestPersistanceDeezer:
         relu = next(x for x in data_manager.get_artist_tracks(artiste.id) if x.title == t.title)
         assert (relu.deezer_id, relu.lyrics.explicit) == (42, True)
         assert relu.deezer_url == "https://www.deezer.com/track/42"
+
+
+class TestPersistanceInstrumental:
+    """e27 : le constat « Genius dit instrumental » est un tri-état comme
+    `explicit_lyrics` — `False` (paroles vues) ne se relit pas en `None`
+    (jamais constaté), et un run qui ne scrape pas les paroles le laisse."""
+
+    def test_aller_retour_tri_etat(self, data_manager, artiste):
+        for titre, valeur in (("Instru", True), ("Chanté", False), ("Inconnu", None)):
+            t = Track(title=titre, artist=artiste)
+            t.lyrics.instrumental = valeur
+            data_manager.save_track(t)
+
+        relus = {x.title: x for x in data_manager.get_artist_tracks(artiste.id)}
+        assert relus["Instru"].lyrics.instrumental is True
+        assert relus["Chanté"].lyrics.instrumental is False
+        assert relus["Inconnu"].lyrics.instrumental is None
+
+    def test_un_run_muet_n_efface_pas_le_constat(self, data_manager, artiste):
+        t = Track(title="Persistant", artist=artiste)
+        t.lyrics.instrumental = True
+        t.id = data_manager.save_track(t)
+
+        muet = Track(title="Persistant", artist=artiste)
+        muet.id = t.id
+        data_manager.save_track(muet)
+
+        relu = next(x for x in data_manager.get_artist_tracks(artiste.id) if x.title == t.title)
+        assert relu.lyrics.instrumental is True

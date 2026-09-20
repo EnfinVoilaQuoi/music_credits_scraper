@@ -404,6 +404,21 @@ class Lyrics:
     # TRI-ÉTAT : None = jamais mesuré, False = Deezer dit que non. Ce n'est PAS
     # un texte — il n'y a rien à croiser avec les paroles de Genius.
     explicit: bool | None = None
+    # « Genius dit que c'est un instrumental » (colonne `instrumental`, e27).
+    # TRI-ÉTAT : None = jamais constaté, True = la page Genius l'affiche
+    # (placeholder « This song is an instrumental »), False = des paroles ont
+    # été trouvées. Distingue « pas de paroles PAR NATURE » d'un scrape raté —
+    # sans lui, un interlude était compté en échec et re-scrapé à chaque run.
+    instrumental: bool | None = None
+
+    def a_chercher(self) -> bool:
+        """Vrai s'il reste des paroles à aller chercher : ni texte en base, ni
+        constat d'instrumental. SEUL prédicat « paroles manquantes » du projet
+        (flux, sélection `--manquants`, GUI) — le dupliquer, c'est oublier le
+        tri-état quelque part."""
+        # Le TEXTE fait foi : `present` n'est que la colonne `has_lyrics`, qui
+        # en dérive à l'écriture.
+        return not self.instrumental and not (self.text or "").strip()
 
 
 @dataclass
@@ -930,6 +945,7 @@ class Track:
                 "has_synced_lyrics": bool(self.lyrics.synced),
                 "lyrics_synced_source": self.lyrics.synced_source,
                 "lyrics_synced_confidence": self.lyrics.synced_confidence,
+                "instrumental": self.lyrics.instrumental,
             }
         else:
             lyrics_info = {
@@ -937,6 +953,7 @@ class Track:
                 "lyrics_word_count": 0,
                 "lyrics_char_count": 0,
                 "lyrics_scraped_at": None,
+                "instrumental": self.lyrics.instrumental,
             }
 
         return {

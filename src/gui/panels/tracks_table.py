@@ -126,17 +126,7 @@ def populate_tracks_table(app):
                 credits_count = len(track.credits)
             credits_display = str(credits_count)
 
-            # Paroles : ✓ = texte, ⏱ = timestamps (paroles synchronisées) en plus
-            has_lyrics_flag = track.lyrics.present
-            has_sync_flag = bool(track.lyrics.synced)
-            if has_lyrics_flag and has_sync_flag:
-                lyrics_display = "✓⏱"
-            elif has_sync_flag:
-                lyrics_display = "⏱"
-            elif has_lyrics_flag:
-                lyrics_display = "✓"
-            else:
-                lyrics_display = ""
+            lyrics_display = helpers.format_lyrics_cell(track)
 
             # BPM avec tonalité - VERSION AMÉLIORÉE
             bpm = ""  # ⭐ IMPORTANT : Initialiser la variable
@@ -657,9 +647,9 @@ def sort_column(app, col):
             # CORRECTION: Trier par nombre de crédits
             sort_key = lambda t: len(t.credits)
         elif col == "Paroles":
-            # rien < texte seul < texte + timestamps
+            # rien < instrumental 🎹 < texte seul < texte + timestamps
             sort_key = lambda t: (
-                bool(t.lyrics.present),
+                2 if t.lyrics.present else (1 if t.lyrics.instrumental else 0),
                 bool(t.lyrics.synced),
             )
         elif col == "BPM":

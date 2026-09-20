@@ -56,6 +56,7 @@ COLONNES_PARTAGEES = (
     "lyrics_scraped_at",
     "lyrics_source",
     "has_lyrics",
+    "instrumental",
     "lyrics_synced",
     "lyrics_synced_source",
     "lyrics_synced_confidence",

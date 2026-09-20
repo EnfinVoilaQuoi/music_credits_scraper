@@ -53,6 +53,7 @@ _FILL_ONLY = [
     "youtube_url_source",
     "anecdotes",
     "lyrics.present",
+    "lyrics.instrumental",
     "genius_url",
     # Les vues YouTube Music, recopiées si la fiche gardée n'en a pas.
     #

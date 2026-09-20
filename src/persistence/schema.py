@@ -149,6 +149,11 @@ tracks = Table(
     Column("deezer_id", Integer),
     Column("deezer_url", Text),
     Column("explicit_lyrics", _BOOL),
+    # Migration e27 : « Genius dit que c'est un instrumental ». NULLABLE à
+    # dessein — NULL = jamais constaté, 1 = placeholder vu sur la page,
+    # 0 = des paroles ont été trouvées. Sans ce constat, un interlude sans
+    # paroles était un échec de scrape re-tenté à chaque run.
+    Column("instrumental", _BOOL),
     UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )

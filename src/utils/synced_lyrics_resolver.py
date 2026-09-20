@@ -140,7 +140,7 @@ def resolve_track_synced_lyrics(
                 )
 
     # Fallback TEXTE (YTM) — seulement si Genius n'a rien donné.
-    if need_text and not (track.lyrics.present and track.lyrics.text):
+    if need_text and track.lyrics.a_chercher():
         txt = ytm_res.get("lyrics") if ytm_res else None
         if txt:
             out.text = txt

@@ -141,6 +141,8 @@ def fusionner(
         if not track.lyrics.text and existant.lyrics.text:
             track.lyrics.text = existant.lyrics.text
             track.lyrics.present = existant.lyrics.present
+        if track.lyrics.instrumental is None:
+            track.lyrics.instrumental = existant.lyrics.instrumental
         if not track.credits and existant.credits:
             track.credits = existant.credits
         if not track.certs.entries and existant.certs.entries:

@@ -67,6 +67,7 @@ _COLUMNS = [
     "anecdotes",
     "has_lyrics",
     "lyrics_scraped_at",
+    "instrumental",
     "certifications",
     "album_certifications",
 ]

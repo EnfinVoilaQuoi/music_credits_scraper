@@ -18,6 +18,14 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Instrumental : Genius remplace les conteneurs de paroles par un placeholder
+# `LyricsPlaceholder__Container` / `__Message` (« This song is an instrumental »)
+# et pose `"instrumental":true` dans `__PRELOADED_STATE__` (JSON ÉCHAPPÉ dans
+# une chaîne JS, d'où la barre oblique optionnelle avant le guillemet).
+_LYRICS_PLACEHOLDER_SEL = "[class*='LyricsPlaceholder']"
+_INSTRUMENTAL_TEXT = "this song is an instrumental"
+_INSTRUMENTAL_STATE = re.compile(r'instrumental\\?":\s*true')
+
 # ---------------------------------------------------------------------------
 # JS injecté dans la page Genius pour révéler la section crédits complète
 # ---------------------------------------------------------------------------
@@ -184,9 +192,12 @@ class GeniusScraperV3(CrawlAIScraperBase):
             logger.warning(f"GeniusScraperV3: pas d'URL Genius pour '{track.title}'")
             return ""
 
+        # Attend le conteneur de paroles OU le placeholder d'un instrumental :
+        # sans le second, chaque interlude payait les 12 s de timeout à
+        # chaque run (« This song is an instrumental » n'a pas de conteneur).
         _, html = self._crawl_page(
             url=track.genius_url,
-            wait_for="css:[data-lyrics-container='true']",
+            wait_for=f"css:[data-lyrics-container='true'], {_LYRICS_PLACEHOLDER_SEL}",
             wait_timeout=12_000,
             page_timeout=30_000,
             delay_before_return=1.0,
@@ -204,20 +215,34 @@ class GeniusScraperV3(CrawlAIScraperBase):
         Optimisation v3 : les morceaux dont les paroles ont déjà été récupérées
         lors du scrape crédits (même crawl) ne sont pas re-crawlés.
         """
-        results = {"success": 0, "failed": 0, "errors": [], "lyrics_scraped": 0}
+        results = {
+            "success": 0,
+            "failed": 0,
+            "errors": [],
+            "lyrics_scraped": 0,
+            "instrumental": 0,
+        }
         total = len(tracks)
         for i, track in enumerate(tracks):
             try:
-                if track.lyrics.present and track.lyrics.text:
-                    # Déjà récupérées pendant le scrape crédits — pas de re-crawl
+                if not track.lyrics.a_chercher():
+                    # Déjà récupérées pendant le scrape crédits, ou instrumental
+                    # constaté — pas de re-crawl
                     results["success"] += 1
-                    results["lyrics_scraped"] += 1
+                    if track.lyrics.instrumental:
+                        results["instrumental"] += 1
+                    else:
+                        results["lyrics_scraped"] += 1
                     logger.debug(f"V3: paroles déjà présentes pour '{track.title}' — skip")
                 else:
                     lyrics = self.scrape_track_lyrics(track)
                     if lyrics:
                         results["success"] += 1
                         results["lyrics_scraped"] += 1
+                    elif track.lyrics.instrumental:
+                        # Pas de paroles PAR NATURE : un constat, pas un échec.
+                        results["success"] += 1
+                        results["instrumental"] += 1
                     else:
                         track.lyrics.present = False
                         results["failed"] += 1
@@ -231,7 +256,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 progress_callback(i + 1, total, track.title)
         logger.info(
             f"V3: paroles terminées — {results['lyrics_scraped']} récupérées, "
-            f"{results['failed']} échecs"
+            f"{results['instrumental']} instrumentaux, {results['failed']} échecs"
         )
         return results
 
@@ -264,8 +289,19 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
             track.lyrics.text = lyrics
             track.lyrics.present = True
+            track.lyrics.instrumental = False
             track.lyrics.scraped_at = datetime.now()
             logger.info(f"✅ Paroles récupérées pour '{track.title}' ({len(lyrics.split())} mots)")
+        elif self._is_instrumental_bs4(soup):
+            # Pas de paroles PAR NATURE : le scrape a ABOUTI, il se date et se
+            # source comme un succès — c'est ce constat qui évite de re-crawler
+            # le morceau à chaque run et de le compter en échec.
+            track.lyrics.text = None
+            track.lyrics.present = False
+            track.lyrics.instrumental = True
+            track.lyrics.scraped_at = datetime.now()
+            track.lyrics.source = "genius"
+            logger.info(f"🎹 Instrumental constaté sur Genius pour '{track.title}'")
         return lyrics
 
     @staticmethod
@@ -295,8 +331,15 @@ class GeniusScraperV3(CrawlAIScraperBase):
         """
         containers = soup.find_all("div", {"data-lyrics-container": "true"})
         if not containers:
-            # Fallback si les attributs data-* ont été retirés (HTML nettoyé)
-            containers = soup.select("div[class*='Lyrics__Container']")
+            # Fallback si les attributs data-* ont été retirés (HTML nettoyé).
+            # Sur un instrumental, le wrapper `Lyrics__Container` existe mais
+            # n'abrite que le placeholder : on l'écarte, sinon « This song is
+            # an instrumental » serait enregistré comme paroles.
+            containers = [
+                c
+                for c in soup.select("div[class*='Lyrics__Container']")
+                if not c.select_one(_LYRICS_PLACEHOLDER_SEL)
+            ]
         if not containers:
             return ""
 
@@ -325,6 +368,28 @@ class GeniusScraperV3(CrawlAIScraperBase):
         lyrics = re.sub(r"\n?\d*Embed\s*$", "", lyrics)
         lyrics = re.sub(r"\n{3,}", "\n\n", lyrics)
         return lyrics.strip()
+
+    @staticmethod
+    def _is_instrumental_bs4(soup) -> bool:
+        """« This song is an instrumental » : Genius le dit DEUX fois sur la page
+        (fixture `tests/fixtures/genius/instrumental_page.html`, 2026-09-20) —
+        le placeholder affiché à la place des paroles, et `"instrumental":true`
+        dans `window.__PRELOADED_STATE__`. L'un OU l'autre suffit : les classes
+        hachées du placeholder changent, le JSON d'état est plus stable, et le
+        texte est ce que l'utilisateur voit. Jamais vrai si un conteneur de
+        paroles existe. L'API publique n'expose PAS ce champ.
+        """
+        if soup.find("div", {"data-lyrics-container": "true"}):
+            return False
+        for el in soup.select(_LYRICS_PLACEHOLDER_SEL):
+            if _INSTRUMENTAL_TEXT in el.get_text(" ", strip=True).lower():
+                return True
+        for script in soup.find_all("script"):
+            if "__PRELOADED_STATE__" in (script.string or "") and _INSTRUMENTAL_STATE.search(
+                script.string
+            ):
+                return True
+        return False
 
     def _extract_album_bs4(self, html: str) -> str | None:
         """

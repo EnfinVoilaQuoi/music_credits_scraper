@@ -186,6 +186,9 @@ class TrackRepository:
                 "lyrics_synced_source": track.lyrics.synced_source,
                 "lyrics_synced_confidence": track.lyrics.synced_confidence,
                 "has_lyrics": bool(track.lyrics.text),  # INSERT uniquement
+                # e27 : tri-état, COALESCE — un flux qui ne scrape pas les
+                # paroles envoie None et ne doit pas effacer le constat.
+                "instrumental": track.lyrics.instrumental,
                 "anecdotes": track.anecdotes,
                 "spotify_page_title": getattr(track, "spotify_page_title", None),
                 # Chantier « Media » : chemins d'images (kind/vues vidéo passent par
@@ -267,6 +270,7 @@ class TrackRepository:
                         lyrics_synced_source = COALESCE(:lyrics_synced_source, lyrics_synced_source),
                         lyrics_synced_confidence = COALESCE(:lyrics_synced_confidence, lyrics_synced_confidence),
                         has_lyrics = CASE WHEN :lyrics IS NOT NULL THEN 1 ELSE has_lyrics END,
+                        instrumental = COALESCE(:instrumental, instrumental),
                         anecdotes = COALESCE(:anecdotes, anecdotes),
                         -- Absente de cet UPDATE jusqu'au 2026-09-08, alors
                         -- qu'à l'enrichissement la ligne existe DÉJÀ : le
@@ -297,6 +301,7 @@ class TrackRepository:
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, lyrics_synced_source, lyrics_synced_confidence, has_lyrics, anecdotes,
+                        instrumental,
                         spotify_page_title,
                         cover_path, yt_thumbnail_path,
                         created_at, updated_at, last_scraped
@@ -308,6 +313,7 @@ class TrackRepository:
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,
                         :lyrics, :lyrics_scraped_at, :lyrics_source, :lyrics_synced, :lyrics_synced_source, :lyrics_synced_confidence, :has_lyrics, :anecdotes,
+                        :instrumental,
                         :spotify_page_title,
                         :cover_path, :yt_thumbnail_path,
                         :now, :now, :last_scraped

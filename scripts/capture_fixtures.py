@@ -41,6 +41,9 @@ _UA = (
 _KWORB_ARTIST_ID = "6dbdXbyAWk2qx8Qttw0knR"  # Josman
 _SPOTIFY_TRACK_ID = "4WYhQviUDsXVzLp6oncwJS"  # Josman — Dans le vide
 _GENIUS_SONG_URL = "https://genius.com/Josman-dans-le-vide-lyrics"
+# Page SANS paroles par nature (« This song is an instrumental ») : le parseur
+# doit la distinguer d'un scrape raté (2026-09-20).
+_GENIUS_INSTRUMENTAL_URL = "https://genius.com/Lucio-bukowski-nuage-doort-interlude-lyrics"
 # Spotify web : sentinelle ISHA, choisie EXPRÈS. C'est l'artiste sur lequel le
 # projet s'est déjà trompé d'identité (streams de Limsa d'Aulnay écrits sur Isha,
 # JOURNAL 2026-07-02), et ses « Recommandés » sont truffés de Limsa d'Aulnay :
@@ -126,6 +129,14 @@ CAPTURES: list[dict] = [
         # Dépôt public : les paroles sont retirées de la fixture (structure
         # conservée, texte remplacé) — voir `expurger_paroles`.
         "expurger": "paroles",
+    },
+    {
+        "name": "genius_instrumental_page",
+        "path": "genius/instrumental_page.html",
+        "url": _GENIUS_INSTRUMENTAL_URL,
+        "method": "requests",
+        "fallback": "playwright",
+        # Aucune parole sur la page : rien à expurger.
     },
     {
         "name": "riaa_search",

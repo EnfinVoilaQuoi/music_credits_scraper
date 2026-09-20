@@ -97,9 +97,10 @@ def est_manquant(track: Track, kind: Manque) -> bool:
     if kind is Manque.CREDITS_DISCOGS:
         return not any(c.source == "discogs" for c in track.credits)
     if kind is Manque.PAROLES:
-        return not (track.lyrics.present and track.lyrics.text)
+        return track.lyrics.a_chercher()
     if kind is Manque.TIMESTAMPS:
-        return not track.lyrics.synced
+        # Un instrumental constaté n'a pas de timestamps à chercher non plus.
+        return not track.lyrics.instrumental and not track.lyrics.synced
     if kind is Manque.AUDIO:
         return track.audio.bpm is None or track.audio.key is None
     if kind is Manque.STREAMS:

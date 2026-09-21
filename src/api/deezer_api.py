@@ -266,6 +266,92 @@ class DeezerAPI:
                 obs.absent("fiche album absente")
             return data
 
+    # ── Discographie (2026-09-21, détecteur d'écarts) ───────────────────────
+
+    async def search_artists_async(
+        self, http: "AsyncHttpSession", name: str, limit: int = 50
+    ) -> list[dict]:
+        """`GET /search/artist` — TOUS les hits, jamais le premier.
+
+        Mesuré : pour « Isha », le premier hit est un homonyme à 5 fans (id
+        259696952) ; le bon (1236609, 44 albums) vient après. L'identité se
+        décide par l'oracle (`services/deezer_identite`), pas par le rang.
+        """
+        with source_usage.observe(_SOURCE, label=f"artistes « {name} »") as obs:
+            data = await self._make_request_async(
+                http, "search/artist", {"q": name, "limit": limit}
+            )
+            hits = list((data or {}).get("data") or [])
+            if not hits:
+                obs.absent("aucun artiste")
+            return hits
+
+    async def get_artist_async(self, http: "AsyncHttpSession", artist_id: int) -> dict | None:
+        """`GET /artist/{id}` — la fiche (nom, nb_album, nb_fan, picture)."""
+        with source_usage.observe(_SOURCE, label=f"artiste {artist_id}") as obs:
+            data = await self._make_request_async(http, f"artist/{artist_id}")
+            if not data:
+                obs.absent("fiche artiste absente")
+            return data
+
+    async def _paginate_async(
+        self, http: "AsyncHttpSession", endpoint: str, params: dict | None = None
+    ) -> list[dict]:
+        """Suit `next` jusqu'au bout. Garde anti-boucle : une page vide ou une
+        page qui ne rend que des ids déjà vus arrête la lecture."""
+        params = dict(params or {})
+        params.setdefault("limit", 100)
+        items: list[dict] = []
+        vus: set = set()
+        page = await self._make_request_async(http, endpoint, params)
+        for _ in range(200):
+            data = list((page or {}).get("data") or [])
+            neufs = [d for d in data if d.get("id") not in vus]
+            if not neufs:
+                break
+            for d in neufs:
+                vus.add(d.get("id"))
+            items.extend(neufs)
+            suivant = (page or {}).get("next")
+            if not suivant:
+                break
+            try:
+                response = await http.get(suivant, timeout=10)
+                response.raise_for_status()
+                page = self._payload_or_none(response.json())
+            except (httpx.HTTPError, ValueError) as e:
+                logger.error(f"Pagination Deezer interrompue ({endpoint}): {e}")
+                break
+        return items
+
+    async def get_artist_albums_async(self, http: "AsyncHttpSession", artist_id: int) -> list[dict]:
+        """`GET /artist/{id}/albums` — les disques où l'artiste APPARAÎT, y
+        compris ceux des autres (AD$ d'Ocho chez Freeze) : à qualifier par
+        `album.artist` de la fiche."""
+        with source_usage.observe(_SOURCE, label=f"albums de {artist_id}") as obs:
+            albums = await self._paginate_async(http, f"artist/{artist_id}/albums")
+            if not albums:
+                obs.absent("aucun disque")
+            return albums
+
+    async def get_album_tracks_async(self, http: "AsyncHttpSession", album_id: int) -> list[dict]:
+        """`GET /album/{id}/tracks` — `title`, `title_short`, `title_version`,
+        `isrc`, `duration`, `track_position`, `disk_number`, `explicit_lyrics`,
+        `artist` (principal seulement : les contributeurs sont sur `/track/{id}`)."""
+        with source_usage.observe(_SOURCE, label=f"pistes de {album_id}") as obs:
+            pistes = await self._paginate_async(http, f"album/{album_id}/tracks")
+            if not pistes:
+                obs.absent("aucune piste")
+            return pistes
+
+    async def get_track_async(self, http: "AsyncHttpSession", track_id: int) -> dict | None:
+        """`GET /track/{id}` — la fiche piste, avec `contributors` et `bpm`."""
+        with source_usage.observe(_SOURCE, label=f"piste {track_id}") as obs:
+            data = await self._make_request_async(http, f"track/{track_id}")
+            if not data:
+                obs.absent("fiche piste absente")
+            return data
+
     def extract_enrichment_data(self, track_data: dict) -> dict[str, Any]:
         """
         Extrait les données d'enrichissement depuis les données Deezer

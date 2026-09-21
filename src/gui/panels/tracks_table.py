@@ -180,9 +180,13 @@ def populate_tracks_table(app):
             certif_display = ""
             try:
                 # Vérifier si le track a des certifications stockées
-                if track.certs.entries:
-                    # Prendre la plus haute certification (première dans la liste déjà triée)
-                    cert_level = track.certs.entries[0].get("certification", "")
+                if track.certs.reelles or track.certs.echos:
+                    # Plus haute certification RÉELLE (liste déjà triée) ; sans
+                    # réelle, l'écho d'une version se voit, marqué ↩.
+                    reelle = bool(track.certs.reelles)
+                    cert_level = (track.certs.reelles or track.certs.echos)[0].get(
+                        "certification", ""
+                    )
                     emoji_map = {
                         "Or": "🥇",
                         "Double Or": "🥇🥇",
@@ -196,6 +200,8 @@ def populate_tracks_table(app):
                         "Quadruple Diamant": "💎💎💎💎",
                     }
                     certif_display = emoji_map.get(cert_level, "✓")
+                    if not reelle:
+                        certif_display = "↩" + certif_display
             except Exception:
                 pass
 
@@ -692,8 +698,8 @@ def sort_column(app, col):
 
             def get_cert_value(t):
                 try:
-                    if t.certs.entries:
-                        cert_level = t.certs.entries[0].get("certification", "")
+                    if t.certs.reelles:
+                        cert_level = t.certs.reelles[0].get("certification", "")
                         emoji_map = {
                             "Quadruple Diamant": "💎💎💎💎",
                             "Triple Diamant": "💎💎💎",

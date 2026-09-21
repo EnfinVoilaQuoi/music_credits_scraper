@@ -185,3 +185,69 @@ class TestUneExceptionNEfaceRien:
 
         assert track.certs.entries == []
         assert track.certs.needs_write is True
+
+
+class TestEchoDesVersions:
+    """Une certification d'une VERSION reste la sienne ; le socle en porte l'écho
+    (décision 2026-09-21) — visible, jamais compté."""
+
+    def _disco(self):
+        artist = Artist(name="Diam’s")
+        socle = Track(title="Suzy", artist=artist)
+        socle.id = 1
+        live = Track(title="Suzy (Live 2006)", artist=artist)
+        live.id = 2
+        live.relationships = [{"type": "version_of", "title": "Suzy", "track_id": 1}]
+        return artist, socle, live
+
+    def test_le_socle_porte_l_echo_sans_le_compter(self):
+        artist, socle, live = self._disco()
+        matcher = _FakeMatcher(
+            tracks={
+                "Suzy": [_match(title="Suzy", certification="Or")],
+                "Suzy (Live 2006)": [_match(title="Suzy (Live 2006)", certification="Platine")],
+            }
+        )
+        n = apply_certifications(artist, [socle, live], matcher)
+        assert n == 2
+        assert socle.certs.level == "Or"  # jamais le Platine du live
+        assert [e["certification"] for e in socle.certs.reelles] == ["Or"]
+        (echo,) = socle.certs.echos
+        assert (echo["certification"], echo["echo_de"], echo["echo_titre"]) == (
+            "Platine",
+            2,
+            "Suzy (Live 2006)",
+        )
+        assert live.certs.level == "Platine" and live.certs.echos == []
+
+    def test_le_matcher_par_mots_ne_double_plus_la_version_sur_le_socle(self):
+        """Le rapprochement par mots entiers posait aussi « Suzy (Live 2006) »
+        sur « Suzy » : avec une fiche de version, le socle ne la garde qu'en écho."""
+        artist, socle, live = self._disco()
+        cert_live = _match(title="Suzy (Live 2006)", certification="Platine")
+        matcher = _FakeMatcher(tracks={"Suzy": [cert_live], "Suzy (Live 2006)": [cert_live]})
+        apply_certifications(artist, [socle, live], matcher)
+        assert socle.certs.reelles == [] and socle.certs.has is False
+        assert len(socle.certs.echos) == 1
+        assert live.certs.reelles == [cert_live]
+
+    def test_sans_fiche_de_version_le_socle_garde_la_certif(self):
+        artist, socle, _ = self._disco()
+        cert_live = _match(title="Suzy (Live 2006)", certification="Platine")
+        matcher = _FakeMatcher(tracks={"Suzy": [cert_live]})
+        apply_certifications(artist, [socle], matcher)
+        assert socle.certs.reelles == [cert_live] and socle.certs.echos == []
+
+    def test_l_echo_est_recalcule_a_chaque_application(self):
+        artist, socle, live = self._disco()
+        matcher = _FakeMatcher(tracks={"Suzy (Live 2006)": [_match(title="Suzy (Live 2006)")]})
+        apply_certifications(artist, [socle, live], matcher)
+        apply_certifications(artist, [socle, live], matcher)
+        assert len(socle.certs.echos) == 1
+
+    def test_socle_par_le_titre_quand_la_relation_manque(self):
+        artist, socle, live = self._disco()
+        live.relationships = []
+        matcher = _FakeMatcher(tracks={"Suzy (Live 2006)": [_match(title="Suzy (Live 2006)")]})
+        apply_certifications(artist, [socle, live], matcher)
+        assert len(socle.certs.echos) == 1

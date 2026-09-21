@@ -209,8 +209,8 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
             # Champs DÉRIVÉS de la plus haute certification (aucune colonne DB) :
             # recalculés ici comme dans certification_enricher — un seul verdict,
             # `duration_days` inclus (via calculate_certification_duration).
-            if track.certs.entries:
-                highest = track.certs.entries[0]
+            if track.certs.reelles:
+                highest = track.certs.reelles[0]
                 track.certs.has = True
                 track.certs.level = highest.get("certification")
                 track.certs.date = highest.get("certification_date")

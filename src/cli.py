@@ -76,6 +76,16 @@ def _disco_args(p: argparse.ArgumentParser) -> None:
     _bool_flags(p, "respecter-supprimes", True, "ne pas réajouter les morceaux supprimés")
     _bool_flags(p, "images", True, "télécharger photos, pochettes, vignettes")
     p.add_argument("--maj", action="store_true", help="mode MàJ : prefill des seuls nouveaux")
+    _bool_flags(p, "deezer", True, "compléter par Deezer (écarts listés, jamais créés)")
+    p.add_argument("--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu")
+
+
+def _deezer_args(p: argparse.ArgumentParser) -> None:
+    _artiste_args(p)
+    p.add_argument("--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu")
+    p.add_argument("--creer", action="store_true", help="créer les écarts cochés d'office")
+    p.add_argument("--versions", action="store_true", help="avec --creer : toutes les versions")
+    p.add_argument("--apparitions", action="store_true", help="avec --creer : les apparitions")
 
 
 def _credits_args(p: argparse.ArgumentParser) -> None:
@@ -131,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
     d = sub.add_parser("disco", help="discographie Genius (illimitée par défaut)")
     _artiste_args(d)
     _disco_args(d)
+
+    _deezer_args(
+        sub.add_parser(
+            "deezer", help="écarts de discographie Deezer (rapport ; --creer pour écrire)"
+        )
+    )
 
     c = sub.add_parser("credits", help="crédits, paroles, timestamps sur tous les morceaux")
     _artiste_args(c)
@@ -188,6 +204,8 @@ def options_disco(a: argparse.Namespace) -> discographie.OptionsDisco:
         include_secondary=a.secondaires,
         respect_deleted=a.respecter_supprimes,
         download_images=a.images,
+        deezer=a.deezer,
+        deezer_id=a.deezer_id,
     )
 
 
@@ -303,6 +321,12 @@ def _fermer(runtime: Runtime) -> None:
         logger.warning("Arrêt Playwright", exc_info=True)
 
 
+def deezer_ambigu():
+    from src.services.deezer_identite import ArtisteDeezerAmbigu
+
+    return ArtisteDeezerAmbigu
+
+
 def _charger(runtime: Runtime, a: argparse.Namespace, *, creer: bool):
     if creer:
         return artiste.charger_ou_ajouter(runtime, a.nom, genius_id=a.genius_id)
@@ -336,6 +360,9 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
         _imprimer_bilan("Certifs — application", bilan.rapport)
         return code_de(bilan)
 
+    if a.commande == "deezer":
+        return _executer_deezer(a, runtime, hooks)
+
     if a.commande == "cycle":
         options = options_cycle(a)
         bilan = cycle.run(runtime, a.nom, options, hooks)
@@ -354,6 +381,53 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
     return code_de(b)
 
 
+def _executer_deezer(a: argparse.Namespace, runtime: Runtime, hooks) -> int:
+    """Rapport des écarts Deezer ; `--creer` écrit ce qui est coché d'office
+    (élargi par `--versions` / `--apparitions`). L'artiste doit être en base."""
+    from src.concurrency import async_loop
+    from src.observability import source_usage
+    from src.observability.registry import Flow
+    from src.services import deezer_identite, ecarts_deezer
+
+    art = _charger(runtime, a, creer=False)
+    enricher = runtime.data_enricher
+    with source_usage.run_scope(Flow.DISCO, artist_id=art.id):
+        deezer_id = async_loop.run_sync(
+            deezer_identite.resoudre_async(
+                enricher.deezer_client,
+                enricher.http,
+                runtime.data_manager,
+                art,
+                force_id=a.deezer_id,
+            )
+        )
+        bilan = ecarts_deezer.detecter(
+            runtime,
+            art,
+            deezer_id=deezer_id,
+            should_stop=hooks.should_stop,
+            genius_api=runtime.genius_api,
+        )
+        _imprimer_bilan("Deezer — écarts de discographie", ecarts_deezer.resume(bilan, art.name))
+        if a.creer:
+            choisis = [
+                e
+                for e in bilan.ecarts
+                if e.coche
+                or (a.versions and e.nature == "version")
+                or (a.apparitions and e.nature == "apparition")
+            ]
+            client, http = enricher.deezer_client, enricher.http
+            comptes = ecarts_deezer.creer_lignes(
+                runtime.data_manager,
+                art,
+                choisis,
+                lire_piste=lambda tid: async_loop.run_sync(client.get_track_async(http, tid)),
+            )
+            _imprimer_bilan("Deezer — création", "\n".join(comptes) or "rien à créer")
+    return code_de(bilan)
+
+
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
     _installer_ctrl_c()
@@ -362,6 +436,13 @@ def main(argv: list[str] | None = None) -> int:
     usage_repository.attach(runtime.data_manager.engine)
     try:
         return executer(a, runtime)
+    except deezer_ambigu() as amb:
+        print(f"❓ Artiste Deezer {amb.nom!r} ambigu. Candidats :")
+        for c in amb.candidats:
+            print(f"   • {c.id}  {c.name}  ({c.nb_album} disques, {c.nb_fan} fans, {c.detail})")
+        if not amb.candidats:
+            print("   (aucun homonyme exact) — donne --deezer-id")
+        return AMBIGU
     except artiste.ArtisteAmbigu as amb:
         print(f"❓ Artiste {amb.nom!r} introuvable par slug Genius. Candidats :")
         for c in amb.candidats:

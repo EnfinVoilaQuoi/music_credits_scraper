@@ -30,6 +30,11 @@ class OptionsDisco:
     include_secondary: bool = False
     respect_deleted: bool = True
     download_images: bool = True
+    #: Compléter par Deezer en fin de run : les disques et pistes que Genius
+    #: n'a pas, LISTÉS pour validation (jamais créés par le run).
+    deezer: bool = True
+    #: Identifiant Deezer forcé (CLI `--deezer-id`) quand l'oracle est ambigu.
+    deezer_id: int | None = None
 
 
 @dataclass
@@ -47,6 +52,10 @@ class BilanDisco(Bilan):
     total_en_base: int = 0
     #: Certifs/relations recalculées mais NON enregistrées (contrôle de fin de flux).
     oublies: list[str] = field(default_factory=list)
+    #: Écarts Deezer (BilanEcarts) — None si non demandé ou impossible.
+    ecarts_deezer: object = None
+    #: Pourquoi Deezer n'a rien donné (« artiste ambigu », « injoignable »…).
+    deezer_motif: str = ""
 
 
 @dataclass
@@ -296,7 +305,58 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
         f"✅ Merge terminé : {bilan.nouveaux} nouveaux, {bilan.mis_a_jour} mis à jour, "
         f"{bilan.sauves} sauvegardés, {bilan.doublons_evites} doublons évités"
     )
+    if options.deezer and bilan.complete and not hooks.should_stop():
+        _completer_par_deezer(runtime, artist, options, hooks, bilan)
     return bilan
+
+
+def _completer_par_deezer(runtime, artist, options, hooks, bilan) -> None:
+    """Ce que Deezer a et que Genius n'a pas — APRÈS la sauvegarde (l'oracle
+    d'identité a besoin des albums en base). Le run reste complet pour Genius
+    quoi qu'il arrive ici : un homonyme n'est jamais pris d'office, une source
+    secondaire ne bloque pas le flux."""
+    from src.services import deezer_identite, ecarts_deezer
+
+    enricher = runtime.data_enricher
+    if enricher is None or getattr(enricher, "deezer_client", None) is None:
+        bilan.deezer_motif = "client Deezer indisponible"
+        return
+    try:
+        from src.concurrency import async_loop
+
+        deezer_id = async_loop.run_sync(
+            deezer_identite.resoudre_async(
+                enricher.deezer_client,
+                enricher.http,
+                runtime.data_manager,
+                artist,
+                force_id=options.deezer_id,
+            )
+        )
+    except deezer_identite.ArtisteDeezerAmbigu as e:
+        bilan.deezer_motif = "artiste Deezer ambigu — à choisir dans la fenêtre « Écarts Deezer »"
+        bilan.ecarts_deezer = ecarts_deezer.BilanEcarts(complete=False, motif=bilan.deezer_motif)
+        bilan.ecarts_deezer.ambigu = e.candidats
+        hooks.confirmer_ecarts(bilan.ecarts_deezer)
+        return
+    except Exception as e:  # noqa: BLE001 — source secondaire : dit, jamais bloquant
+        logger.exception("Identité Deezer impossible")
+        bilan.deezer_motif = f"Deezer injoignable ({e})"
+        return
+    try:
+        bilan.ecarts_deezer = ecarts_deezer.detecter(
+            runtime,
+            artist,
+            deezer_id=deezer_id,
+            should_stop=hooks.should_stop,
+            genius_api=runtime.genius_api,
+        )
+    except Exception as e:  # noqa: BLE001 — idem
+        logger.exception("Détection des écarts Deezer échouée")
+        bilan.deezer_motif = f"Deezer : {e}"
+        return
+    if bilan.ecarts_deezer.ecarts:
+        hooks.confirmer_ecarts(bilan.ecarts_deezer)
 
 
 def resume(bilan: BilanDisco, artist: Artist) -> str:
@@ -319,6 +379,16 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
     msg += f"\n📅 {bilan.dates_api} dates de sortie récupérées via l'API"
     msg += f"\n💾 {bilan.sauves} morceaux sauvegardés en base"
     msg += f"\n📊 Total en base : {bilan.total_en_base} morceaux"
+    if bilan.ecarts_deezer is not None and bilan.ecarts_deezer.ecarts:
+        e = bilan.ecarts_deezer
+        msg += (
+            f"\n🎧 Deezer : {len(e.ecarts)} écart(s) de discographie "
+            f"(dont {len(e.coches())} coché(s) d'office) — à valider"
+        )
+    elif bilan.deezer_motif:
+        msg += f"\n🎧 Deezer : {bilan.deezer_motif}"
+    elif bilan.ecarts_deezer is not None:
+        msg += "\n🎧 Deezer : aucun écart, la base a tout ce que Deezer publie"
     if not bilan.complete:
         msg += f"\n\n⚠️ Run INCOMPLET : {bilan.motif}"
     if bilan.erreurs:

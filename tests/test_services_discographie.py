@@ -189,3 +189,79 @@ class TestRun:
         )
         assert not bilan.complete and "arrêt" in bilan.motif
         assert bilan.sauves < 2
+
+
+class TestCompleterParDeezer:
+    """Le run discographie se prolonge par Deezer (2026-09-21) : les écarts sont
+    LISTÉS via le hook `confirmer_ecarts`, jamais créés ; une source secondaire
+    ne rend jamais le run incomplet."""
+
+    def _run(self, monkeypatch, *, deezer=True, identite=None, detection=None):
+        from src.services import discographie as d
+
+        artist = Artist(name="A")
+        artist.id = 1
+        dm = _DM([])
+        runtime = _runtime(dm, [_t("Durag", gid=1, album="LVA")])
+        runtime.data_enricher = SimpleNamespace(deezer_client=object(), http=None)
+        recus = []
+        hooks = Hooks(confirmer_ecarts=recus.append)
+        appels = []
+
+        async def _resoudre(*a, **k):
+            appels.append("identite")
+            if isinstance(identite, Exception):
+                raise identite
+            return identite or 1236609
+
+        monkeypatch.setattr("src.services.deezer_identite.resoudre_async", _resoudre)
+        monkeypatch.setattr("src.concurrency.async_loop.run_sync", lambda coro: _sync(coro))
+
+        def _detecter(runtime, artist, **kw):
+            appels.append("detection")
+            if isinstance(detection, Exception):
+                raise detection
+            return detection
+
+        monkeypatch.setattr("src.services.ecarts_deezer.detecter", _detecter)
+        bilan = d.run(runtime, artist, d.OptionsDisco(deezer=deezer, download_images=False), hooks)
+        return bilan, recus, appels
+
+    def test_les_ecarts_passent_par_le_hook(self, monkeypatch):
+        from src.services import ecarts_deezer as ed
+
+        b = ed.BilanEcarts(deezer_id=1236609)
+        b.ecarts = [SimpleNamespace(coche=True, nature="absent")]
+        bilan, recus, appels = self._run(monkeypatch, detection=b)
+        assert appels == ["identite", "detection"]
+        assert recus == [b] and bilan.complete
+        assert "1 écart(s)" in d_resume(bilan)
+
+    def test_no_deezer_n_appelle_rien(self, monkeypatch):
+        bilan, recus, appels = self._run(monkeypatch, deezer=False)
+        assert appels == [] and recus == [] and bilan.ecarts_deezer is None
+
+    def test_artiste_ambigu_remonte_les_candidats_sans_bloquer(self, monkeypatch):
+        from src.services.deezer_identite import ArtisteDeezerAmbigu, CandidatDeezer
+
+        exc = ArtisteDeezerAmbigu("A", [CandidatDeezer(1, "A"), CandidatDeezer(2, "A")])
+        bilan, recus, appels = self._run(monkeypatch, identite=exc)
+        assert bilan.complete and "ambigu" in bilan.deezer_motif
+        assert len(recus) == 1 and [c.id for c in recus[0].ambigu] == [1, 2]
+
+    def test_deezer_en_panne_ne_rend_pas_le_run_incomplet(self, monkeypatch):
+        bilan, recus, _ = self._run(monkeypatch, detection=RuntimeError("timeout"))
+        assert bilan.complete and "timeout" in bilan.deezer_motif and recus == []
+
+
+def _sync(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+def d_resume(bilan):
+    from src.services import discographie as d
+
+    artist = Artist(name="A")
+    return d.resume(bilan, artist)

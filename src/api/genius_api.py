@@ -60,6 +60,41 @@ class GeniusAPI:
             return None
         return candidates[0]
 
+    def search_songs(self, query: str, limit: int = 10) -> list[dict]:
+        """`GET /search` (Bearer) — les MORCEAUX trouvés, bruts : `{id, title, url,
+        primary_artist: {id, name}}`. Sert à accrocher une page Genius à une ligne
+        créée depuis Deezer (2026-09-21) : c'est l'appelant qui juge (artiste
+        principal + titre normalisé identiques, hit unique), jamais le rang."""
+        hits: list[dict] = []
+        with source_usage.observe(_SOURCE, label=f"search {query}", absent_statuses=_ABSENT) as obs:
+            try:
+                resp = source_usage.requests_get(
+                    _SOURCE,
+                    "https://api.genius.com/search",
+                    params={"q": query},
+                    headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                for hit in (resp.json().get("response") or {}).get("hits") or []:
+                    r = hit.get("result") or {}
+                    if r.get("id") and r.get("title"):
+                        hits.append(
+                            {
+                                "id": r["id"],
+                                "title": r["title"],
+                                "url": r.get("url"),
+                                "primary_artist": r.get("primary_artist") or {},
+                            }
+                        )
+                if not hits:
+                    obs.absent(f"aucun hit pour {query!r}")
+            except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+                if not isinstance(e, requests.RequestException):
+                    obs.parse_error(f"réponse inexploitable : {e}")
+                logger.warning(f"Recherche Genius échouée: {e}")
+        return hits[:limit]
+
     def search_artist_candidates(self, artist_name: str, max_candidates: int = 6) -> list[Artist]:
         """
         Retourne les artistes candidats pour une recherche par nom.

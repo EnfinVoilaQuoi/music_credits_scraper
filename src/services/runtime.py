@@ -63,7 +63,29 @@ def _kworb_headless(suggestions: list, kworb_date) -> None:
     (Intro) ») sont LISTÉS, jamais appliqués — un choix automatique écrirait
     des streams sur le mauvais morceau. La GUI ouvre `kworb_confirm` à la place."""
     for s in suggestions:
-        logger.warning(f"Kworb — rapprochement incertain NON appliqué (à confirmer en GUI) : {s}")
+        if s.get("kind"):
+            logger.warning(
+                f"Kworb — variante NON appliquée (à trancher en GUI) : « {s['kworb_title']} » "
+                f"({s['kind']}, proposition : {s.get('proposition')}, "
+                f"{s['streams']:,} streams)"
+            )
+        else:
+            logger.warning(
+                f"Kworb — rapprochement incertain NON appliqué (à confirmer en GUI) : {s}"
+            )
+
+
+def _ecarts_headless(bilan) -> None:
+    """Headless : les écarts de discographie Deezer sont LISTÉS, jamais créés
+    (création sur validation) — `python -m src.cli deezer <nom> --creer` est la
+    voie headless ; la GUI ouvre la fenêtre « Écarts Deezer »."""
+    from src.services import ecarts_deezer
+
+    if bilan.ecarts:
+        logger.warning(
+            "Deezer — écarts de discographie NON créés (à valider en GUI ou "
+            "`cli deezer --creer`) :\n" + ecarts_deezer.resume(bilan)
+        )
 
 
 @dataclass
@@ -77,6 +99,9 @@ class Hooks:
     #: (suggestions, date de la page Kworb) — appelé s'il y a des rapprochements
     #: incertains à faire confirmer par un humain.
     confirmer_kworb: Callable[[list, object], None] = _kworb_headless
+    #: (BilanEcarts) — appelé en fin de run discographie quand Deezer a des
+    #: écarts à faire valider ; la GUI ouvre la fenêtre, la CLI liste.
+    confirmer_ecarts: Callable[[object], None] = _ecarts_headless
 
 
 class Manque(StrEnum):

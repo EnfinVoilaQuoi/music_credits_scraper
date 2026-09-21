@@ -11,6 +11,7 @@ mapper/GUI inchangé). Ne PERSISTE pas : l'appelant (worker retrieval, E7h) save
 from src.models import Artist, Track
 from src.models.certification import Certification
 from src.utils.logger import get_logger
+from src.utils.version_descriptors import Kind, meme_prise, parse_variant, socle_normalise
 
 logger = get_logger(__name__)
 
@@ -42,6 +43,87 @@ def _extra_artists(track: Track, artist_name: str) -> list[str]:
     return extra
 
 
+def _poser_plus_haute(track: Track) -> None:
+    """Champs dérivés de la plus haute certification RÉELLE (jamais un écho)."""
+    reelles = track.certs.reelles
+    if reelles:
+        highest = reelles[0]  # déjà trié par priorité
+        track.certs.has = True
+        track.certs.level = highest.get("certification", "")
+        track.certs.date = highest.get("certification_date", "")
+        # Durée d'obtention (écart sortie→certif) de la plus haute certif.
+        track.calculate_certification_duration()
+    else:
+        track.certs.has = False
+        track.certs.level = None
+        track.certs.date = None
+        track.certs.duration_days = None
+
+
+def _socle_de(version: Track, socles: dict[str, Track], par_id: dict[int, Track]) -> Track | None:
+    """Le morceau SOUCHE d'une fiche de version : relation `version_of`/`remix_of`
+    (posée à la création), sinon le titre nu de même socle, s'il est unique."""
+    for rel in version.relationships or []:
+        if rel.get("type") in ("version_of", "remix_of") and rel.get("track_id"):
+            socle = par_id.get(rel["track_id"])
+            if socle is not None:
+                return socle
+    return socles.get(socle_normalise(version.title))
+
+
+def echos_de_versions(tracks: list[Track]) -> int:
+    """Une certification d'une VERSION reste la sienne ; le socle en porte l'ÉCHO.
+
+    Décision utilisateur (2026-09-21) : un live ou un Colors certifié se voit
+    sur la fiche de l'original, dans l'Analyse d'album et en pictogramme
+    Timeline — sans être compté deux fois. Deux gestes, sur la discographie
+    d'un artiste après le rapprochement :
+
+      · le socle NE GARDE PAS une certification dont le titre porte le
+        descripteur d'une version qui a SA fiche (le matcher, par mots entiers,
+        la lui rattachait aussi — c'est le double compte) ;
+      · pour chaque certification RÉELLE d'une fiche de version, le socle reçoit
+        une entrée `echo` (`echo_de`, `echo_titre`), écartée de tout compte
+        (`Certs.reelles`) et rendue distinctement par les écrans.
+
+    Rend le nombre d'échos posés. Fonction pure sur les objets.
+    """
+    par_id = {t.id: t for t in tracks if t.id is not None}
+    socles: dict[str, Track] = {}
+    for t in tracks:
+        if parse_variant(t.title).kind == Kind.NONE:
+            socles.setdefault(socle_normalise(t.title), t)
+    versions = [t for t in tracks if parse_variant(t.title).kind != Kind.NONE]
+    # Repartir de zéro : les échos se recalculent à chaque application.
+    for t in tracks:
+        if t.certs.echos:
+            t.certs.entries = t.certs.reelles
+    n = 0
+    for version in versions:
+        socle = _socle_de(version, socles, par_id)
+        if socle is None or socle is version:
+            continue
+        v = parse_variant(version.title)
+        # Ce que le matcher a posé sur le socle et qui est de CETTE version.
+        propres = []
+        for e in socle.certs.reelles:
+            ev = parse_variant(e.get("title") or "")
+            if ev.kind != Kind.NONE and (ev.kind == v.kind and (v.est_remix or meme_prise(ev, v))):
+                continue
+            propres.append(e)
+        socle.certs.entries = propres + socle.certs.echos
+        for e in version.certs.reelles:
+            echo = dict(e)
+            echo["echo"] = True
+            echo["echo_de"] = version.id
+            echo["echo_titre"] = version.title
+            socle.certs.entries.append(echo)
+            n += 1
+        socle.certs.needs_write = True
+        _poser_plus_haute(socle)
+    return n
+
+
 def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
     """Pose `track.certs.entries`/`album_certifications` depuis le matcher unifié.
 
@@ -67,19 +149,9 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
             # `DataManager.record_pending` qui le fera après le save.
             track.certs.needs_write = True
 
-            if track.certs.entries:
-                highest = track.certs.entries[0]  # déjà trié par priorité
-                track.certs.has = True
-                track.certs.level = highest.get("certification", "")
-                track.certs.date = highest.get("certification_date", "")
-                # Durée d'obtention (écart sortie→certif) de la plus haute certif.
-                track.calculate_certification_duration()
+            _poser_plus_haute(track)
+            if track.certs.reelles:
                 enriched += 1
-            else:
-                track.certs.has = False
-                track.certs.level = None
-                track.certs.date = None
-                track.certs.duration_days = None
 
             if track.album:
                 if track.album not in album_cache:
@@ -123,4 +195,7 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
             f"⚠️ {echecs}/{len(tracks)} morceau(x) NON recalculé(s) (forme inattendue "
             "côté matcher) — leurs certifications en base sont conservées telles quelles"
         )
+    echos = echos_de_versions(tracks)
+    if echos:
+        logger.info(f"↩ {echos} écho(s) de certification de version posé(s) sur les socles")
     return enriched

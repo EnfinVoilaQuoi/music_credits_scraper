@@ -654,9 +654,7 @@ class MainWindow:
                 )
 
                 # Morceaux avec certifications (actifs uniquement)
-                tracks_with_certifications = sum(
-                    1 for t in active_tracks if t.certs.entries and len(t.certs.entries) > 0
-                )
+                tracks_with_certifications = sum(1 for t in active_tracks if t.certs.reelles)
 
                 # Albums avec certifications (compter les albums uniques, pas les morceaux)
                 albums_with_certifications = len(
@@ -716,6 +714,7 @@ class MainWindow:
                         calculate_total_monthly_listeners,
                         calculate_total_streams,
                         format_streams,
+                        streams_variantes,
                     )
 
                     total_cumul = 0
@@ -727,6 +726,9 @@ class MainWindow:
                         if est:
                             total_cumul += est
                             tracks_with_streams += 1
+                        # Les versions alternatives (e28) comptent dans le cumul
+                        # de la discographie, pas dans celui du morceau.
+                        total_cumul += calculate_total_streams(streams_variantes(t), None) or 0
                     sp_ml = self.current_artist.spotify_monthly_listeners
                     yt_ml = self.current_artist.ytm_monthly_listeners
                     total_ml = calculate_total_monthly_listeners(sp_ml, yt_ml)

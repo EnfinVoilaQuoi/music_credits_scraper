@@ -336,3 +336,78 @@ class TestRateLimit:
         client._check_rate_limit()
 
         assert len(dormi) == 1 and dormi[0] > 0
+
+
+# ── Discographie (2026-09-21) : les lectures async du détecteur d'écarts ─────
+
+
+def _http_async(handler):
+    import httpx
+
+    from src.api.async_http import AsyncHttpSession
+    from src.concurrency.rate_limiter import DomainRateLimiter
+
+    return AsyncHttpSession(transport=httpx.MockTransport(handler), limiter=DomainRateLimiter(0.0))
+
+
+class TestLecturesDiscographie:
+    def test_search_artists_rend_tous_les_hits(self):
+        import asyncio
+
+        import httpx
+
+        def handler(request):
+            assert request.url.params["limit"] == "50"
+            return httpx.Response(
+                200,
+                json={"data": [{"id": 259696952, "name": "Isha"}, {"id": 1236609, "name": "ISHA"}]},
+            )
+
+        hits = asyncio.run(DeezerAPI().search_artists_async(_http_async(handler), "Isha"))
+        assert [h["id"] for h in hits] == [259696952, 1236609]
+
+    def test_pagination_suit_next_et_s_arrete(self):
+        import asyncio
+
+        import httpx
+
+        def handler(request):
+            if "index=2" in str(request.url):
+                return httpx.Response(200, json={"data": [{"id": 3}], "total": 3})
+            return httpx.Response(
+                200,
+                json={
+                    "data": [{"id": 1}, {"id": 2}],
+                    "next": "https://api.deezer.com/artist/9/albums?index=2&limit=2",
+                },
+            )
+
+        albums = asyncio.run(DeezerAPI().get_artist_albums_async(_http_async(handler), 9))
+        assert [a["id"] for a in albums] == [1, 2, 3]
+
+    def test_pagination_ne_boucle_pas_sur_une_page_repetee(self):
+        import asyncio
+
+        import httpx
+
+        def handler(request):
+            return httpx.Response(
+                200,
+                json={"data": [{"id": 1}], "next": "https://api.deezer.com/album/1/tracks?index=1"},
+            )
+
+        pistes = asyncio.run(DeezerAPI().get_album_tracks_async(_http_async(handler), 1))
+        assert [p["id"] for p in pistes] == [1]
+
+    def test_erreur_applicative_rend_none(self):
+        import asyncio
+
+        import httpx
+
+        def handler(request):
+            return httpx.Response(
+                200, json={"error": {"type": "DataException", "message": "no data"}}
+            )
+
+        assert asyncio.run(DeezerAPI().get_track_async(_http_async(handler), 42)) is None
+        assert asyncio.run(DeezerAPI().get_artist_async(_http_async(handler), 42)) is None

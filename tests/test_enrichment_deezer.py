@@ -21,15 +21,19 @@ class _FakeDeezerClient:
         self._result = result
         self.calls = []
 
-    def enrich_track(self, artist, title, previous_duration, scraped_release_date):
+    def enrich_track(
+        self, artist, title, previous_duration, scraped_release_date, artist_deezer_id=None
+    ):
         self.calls.append((artist, title, previous_duration, scraped_release_date))
+        self.ids = getattr(self, "ids", []) + [artist_deezer_id]
         return self._result
 
     async def enrich_track_async(
-        self, http, artist, title, previous_duration, scraped_release_date
+        self, http, artist, title, previous_duration, scraped_release_date, artist_deezer_id=None
     ):
         """Jumeau async : même signature au `http` près (session partagée)."""
         self.calls.append((artist, title, previous_duration, scraped_release_date))
+        self.ids = getattr(self, "ids", []) + [artist_deezer_id]
         return self._result
 
 
@@ -360,3 +364,31 @@ class TestFiletDException:
     def test_result_malforme_en_async_aussi(self):
         p = DeezerProvider(_FakeDeezerClient({"success": True}))
         assert asyncio.run(p.enrich_async(_track(), EnrichmentContext())) is False
+
+
+class TestIdDeezerDeLArtiste:
+    """e30 : quand l'artiste a un id Deezer, le provider le passe au client (la
+    recherche libre filtrée par id passe avant l'avancée par nom, qui rend 0
+    hit pour « Isha ») — sauf pour un featuring, dont l'artiste principal est
+    quelqu'un d'autre."""
+
+    def test_id_transmis_pour_un_morceau_principal(self):
+        from src.models import Artist
+
+        client = _FakeDeezerClient({"success": False, "verifications": {}, "data": {}})
+        artist = Artist(name="Isha")
+        artist.deezer_id = 1236609
+        track = Track(title="Durag", artist=artist)
+        DeezerProvider(client).enrich(track, EnrichmentContext())
+        assert client.ids == [1236609]
+
+    def test_pas_d_id_pour_un_featuring(self):
+        from src.models import Artist
+
+        client = _FakeDeezerClient({"success": False, "verifications": {}, "data": {}})
+        artist = Artist(name="Isha")
+        artist.deezer_id = 1236609
+        track = Track(title="Grünt #33", artist=artist)
+        track.is_featuring, track.primary_artist_name = True, "Swing"
+        DeezerProvider(client).enrich(track, EnrichmentContext())
+        assert client.ids == [None]

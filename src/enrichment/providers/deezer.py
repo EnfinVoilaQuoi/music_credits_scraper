@@ -39,6 +39,14 @@ class DeezerProvider:
         return None
 
     @staticmethod
+    def _artist_deezer_id(track: Track) -> int | None:
+        """L'id Deezer de l'artiste (e30) — seulement quand c'est LUI qu'on cherche
+        (pas un featuring, dont l'artiste principal est quelqu'un d'autre)."""
+        if track.is_featuring and track.primary_artist_name:
+            return None
+        return getattr(track.artist, "deezer_id", None)
+
+    @staticmethod
     def _artist_name(track: Track) -> str:
         """Artiste de recherche : artiste principal si featuring (commun sync/async)."""
         if track.is_featuring and track.primary_artist_name:
@@ -69,6 +77,7 @@ class DeezerProvider:
                 title=track.title,
                 previous_duration=previous_duration,
                 scraped_release_date=scraped_release_date,
+                artist_deezer_id=self._artist_deezer_id(track),
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
@@ -98,6 +107,7 @@ class DeezerProvider:
                 title=track.title,
                 previous_duration=previous_duration,
                 scraped_release_date=scraped_release_date,
+                artist_deezer_id=self._artist_deezer_id(track),
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 

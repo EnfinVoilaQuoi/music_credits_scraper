@@ -118,6 +118,8 @@ scripts/*
 !scripts/repair_spotify_ids.py
 # Streams : rejeu à blanc du rapprochement Kworb (2026-09-21)
 !scripts/kworb_replay.py
+# Crédits : purge des références à un autre morceau prises pour des personnes (2026-09-21)
+!scripts/purge_credits_relations.py
 # Certifications : rend son programme au corpus latin RIAA (2026-09-06)
 !scripts/mark_latin_awards.py
 !scripts/repair_riaa_digital_singles.py

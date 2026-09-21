@@ -1097,6 +1097,43 @@ class TrackRepository:
             logger.error(f"Erreur record_certifications({track_id}): {e}")
             return False
 
+    def compter_credits_relations_deguisees(self) -> tuple[int, int]:
+        """(lignes, morceaux) des « crédits » qui sont des références à un autre
+        morceau — `genius_scraper_v3.est_relation_deguisee` (2026-09-21)."""
+        from src.scrapers.genius_scraper_v3 import _RELATION_BY
+
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT COUNT(*), COUNT(DISTINCT track_id) FROM credits "
+                        "WHERE instr(name, :motif) > 0"
+                    ),
+                    {"motif": _RELATION_BY},
+                ).one()
+            return int(row[0]), int(row[1])
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur compter_credits_relations_deguisees: {e}")
+            return 0, 0
+
+    def purger_credits_relations_deguisees(self) -> int:
+        """Retire ces lignes (écrivain dédié — les scripts n'écrivent pas en
+        direct dans `credits`). Le scraper ne les produit plus ; ce qui reste en
+        base vient des scrapes antérieurs. Rend le nombre de lignes retirées."""
+        from src.scrapers.genius_scraper_v3 import _RELATION_BY
+
+        try:
+            with self.engine.begin() as conn:
+                res = conn.execute(
+                    text("DELETE FROM credits WHERE instr(name, :motif) > 0"),
+                    {"motif": _RELATION_BY},
+                )
+            logger.info(f"🧹 {res.rowcount} « crédits » relationnels retirés")
+            return int(res.rowcount)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur purger_credits_relations_deguisees: {e}")
+            return 0
+
     def record_relationships(self, track_id: int, relationships: list) -> bool:
         """Écrit la colonne `relationships` VERBATIM, `[]` compris.
 

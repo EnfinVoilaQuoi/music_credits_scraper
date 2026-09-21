@@ -152,7 +152,13 @@ class _MediaRun:
         url = None
         if self.deezer:
             try:
-                found = self.deezer.search_artist(artist.name)
+                # e30 : l'id tranché par l'oracle d'identité, jamais le premier
+                # hit d'une recherche par nom (la photo d'Isha venait de
+                # l'homonyme 259696952, 5 fans).
+                if getattr(artist, "deezer_id", None):
+                    found = self.deezer.get_artist(artist.deezer_id)
+                else:
+                    found = self.deezer.search_artist(artist.name)
             except (AttributeError, KeyError, TypeError) as e:
                 self.report.errors.append(f"Deezer search_artist '{artist.name}': {e}")
                 found = None

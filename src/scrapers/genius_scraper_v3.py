@@ -74,6 +74,21 @@ _JS_WAIT_CREDITS = (
 )
 
 
+#: Genius écrit une RELATION entre morceaux comme « Titre by Artiste (Ft. X) »,
+#: avec une espace INSÉCABLE avant l'artiste — les sections « Remixes »,
+#: « Samples », « Songs That Interpolate », « Translations », « Is A Remix Of »…
+#: voisines des crédits, que le LLM avalait comme des personnes. Mesuré le
+#: 2026-09-21 : 7 867 « crédits » sur 3 763 morceaux (Kanye 3 251). Une vraie
+#: personne ne s'appelle pas « X by Y » ; un éditeur « Built by Music »
+#: porte une espace ordinaire et reste.
+_RELATION_BY = " by\u00a0"
+
+
+def est_relation_deguisee(nom: str | None) -> bool:
+    """Ce « crédit » est en fait une référence à un autre morceau (cf. `_RELATION_BY`)."""
+    return bool(nom) and _RELATION_BY in nom
+
+
 class GeniusScraperV3(CrawlAIScraperBase):
     """
     Scraper Genius v3 — Crawl4AI pour le rendu + Llama 3.2 pour le parsing.
@@ -520,7 +535,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
             for name in names:
                 name = str(name).strip()
-                if len(name) < 2:
+                if len(name) < 2 or est_relation_deguisee(name):
                     continue
                 credits.append(
                     Credit(

@@ -411,3 +411,30 @@ class TestLecturesDiscographie:
 
         assert asyncio.run(DeezerAPI().get_track_async(_http_async(handler), 42)) is None
         assert asyncio.run(DeezerAPI().get_artist_async(_http_async(handler), 42)) is None
+
+
+class TestRechercheParIdArtiste:
+    def test_le_hit_se_choisit_par_l_id_pas_par_le_rang(self, client, monkeypatch):
+        reponse = {
+            "data": [
+                {"id": 1, "title": "Durag", "artist": {"id": 259696952, "name": "Isha"}},
+                {"id": 2, "title": "Durag", "artist": {"id": 1236609, "name": "ISHA"}},
+            ]
+        }
+        monkeypatch.setattr(client, "_make_request", lambda *a, **k: reponse)
+        assert client.search_track_by_artist_id("Isha", "Durag", 1236609)["id"] == 2
+        assert client.search_track_by_artist_id("Isha", "Durag", 42) is None
+
+    def test_enrich_track_prefere_l_id_puis_se_replie(self, client, monkeypatch):
+        appels = []
+
+        def _req(endpoint, params=None):
+            appels.append(params["q"])
+            if "artist:" in params["q"]:
+                return {"data": [{"id": 9, "title": "Durag", "artist": {"id": 1, "name": "X"}}]}
+            return {"data": []}
+
+        monkeypatch.setattr(client, "_make_request", _req)
+        r = client.enrich_track("Isha", "Durag", artist_deezer_id=1236609)
+        assert r["data"]["deezer_track_id"] == 9  # repli sur la recherche avancée
+        assert appels[0] == "Isha Durag" and "artist:" in appels[1]

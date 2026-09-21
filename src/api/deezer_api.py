@@ -160,6 +160,37 @@ class DeezerAPI:
         return params
 
     @staticmethod
+    def _hit_de_l_artiste(data: dict | None, artist_deezer_id: int) -> dict | None:
+        """Premier hit dont l'artiste PRINCIPAL est le nôtre (par id, jamais par nom).
+
+        Mesuré (2026-09-16/21) : la recherche avancée `artist:"Isha" track:"…"`
+        rend 0 hit pour Isha, et la recherche libre rend d'abord des homonymes.
+        Avec `artists.deezer_id` tranché par l'oracle, le hit se choisit par l'id."""
+        for hit in (data or {}).get("data") or []:
+            if ((hit.get("artist") or {}).get("id")) == artist_deezer_id:
+                return hit
+        return None
+
+    def search_track_by_artist_id(
+        self, artist: str, title: str, artist_deezer_id: int
+    ) -> dict | None:
+        """Recherche LIBRE `artist title`, filtrée sur l'id de l'artiste."""
+        data = self._make_request("search", {"q": f"{artist} {title}", "limit": 10})
+        return self._hit_de_l_artiste(data, artist_deezer_id)
+
+    async def search_track_by_artist_id_async(
+        self, http: "AsyncHttpSession", artist: str, title: str, artist_deezer_id: int
+    ) -> dict | None:
+        data = await self._make_request_async(
+            http, "search", {"q": f"{artist} {title}", "limit": 10}
+        )
+        return self._hit_de_l_artiste(data, artist_deezer_id)
+
+    def get_artist(self, artist_id: int) -> dict | None:
+        """`GET /artist/{id}` (sync) — la fiche : nom, `picture_xl`, nb_album, nb_fan."""
+        return self._make_request(f"artist/{artist_id}")
+
+    @staticmethod
     def _first_search_hit(data: dict | None, artist: str, title: str) -> dict | None:
         """Premier résultat (meilleur match) ou None (commun sync/async)."""
         if not data or "data" not in data or not data["data"]:
@@ -523,6 +554,7 @@ class DeezerAPI:
         title: str,
         previous_duration: int | None = None,
         scraped_release_date: str | None = None,
+        artist_deezer_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Enrichit les données d'un track avec vérifications
@@ -532,12 +564,18 @@ class DeezerAPI:
             title: Titre de la chanson
             previous_duration: Durée depuis les enrichissements précédents
             scraped_release_date: Date de sortie depuis le scraping
+            artist_deezer_id: id Deezer de l'artiste (e30) — quand il est connu,
+                la recherche libre filtrée par id passe AVANT l'avancée par nom.
 
         Returns:
             Données enrichies avec vérifications
         """
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = self.search_track(artist, title)
+            track_data = None
+            if artist_deezer_id:
+                track_data = self.search_track_by_artist_id(artist, title, artist_deezer_id)
+            if track_data is None:
+                track_data = self.search_track(artist, title)
             if track_data is None:
                 obs.absent("aucun hit de recherche")
             return self._build_enrichment_result(
@@ -551,10 +589,17 @@ class DeezerAPI:
         title: str,
         previous_duration: int | None = None,
         scraped_release_date: str | None = None,
+        artist_deezer_id: int | None = None,
     ) -> dict[str, Any]:
         """Jumeau async d'`enrich_track` (mêmes vérifications, même forme de retour)."""
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = await self.search_track_async(http, artist, title)
+            track_data = None
+            if artist_deezer_id:
+                track_data = await self.search_track_by_artist_id_async(
+                    http, artist, title, artist_deezer_id
+                )
+            if track_data is None:
+                track_data = await self.search_track_async(http, artist, title)
             if track_data is None:
                 obs.absent("aucun hit de recherche")
             return self._build_enrichment_result(

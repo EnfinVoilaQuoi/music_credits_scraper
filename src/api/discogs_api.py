@@ -411,6 +411,10 @@ class DiscogsClient:
             "direct metal mastering by": CreditRole.MASTERING_ENGINEER,
             "lacquer cut by": CreditRole.MASTERING_ENGINEER,
             "editor": CreditRole.VIDEO_EDITOR,
+            # 2026-09-21 : « Remix » (20 crédits en base) — la personne qui a
+            # retravaillé le morceau, lexicalement non ambigu.
+            "remix": CreditRole.REMIXER,
+            "remixed by": CreditRole.REMIXER,
         }
 
         # NON mappés DÉLIBÉRÉMENT (décision 2026-09-03) — ne pas « compléter »

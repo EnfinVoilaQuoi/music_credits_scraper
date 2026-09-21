@@ -57,3 +57,41 @@ class TestFormatStreams:
 
     def test_none_chaine_vide(self):
         assert format_streams(None) == ""
+
+
+class TestVariantes:
+    """e28/e29 : les versions alternatives comptent dans la DISCOGRAPHIE, pas
+    dans le morceau ni l'album ; une variante qui a sa fiche est comptée par elle."""
+
+    def _track(self, sp, entries):
+        from src.models.track import Track, TrackSpotifyId
+
+        t = Track(title="X")
+        t.streams.spotify_streams = sp
+        t.spotify_id_entries = [TrackSpotifyId(**e) for e in entries]
+        return t
+
+    def test_streams_variantes_exclut_les_editions_et_les_fiches(self):
+        from src.utils.streams_calculator import streams_variantes
+
+        t = self._track(
+            1000,
+            [
+                {"spotify_id": "A", "kind": "edition"},
+                {"spotify_id": "B", "kind": "rendition", "streams": 100},
+                {"spotify_id": "C", "kind": "rendition", "streams": 50, "variant_track_id": 9},
+            ],
+        )
+        assert streams_variantes(t) == 100
+
+    def test_total_discographie(self):
+        from src.utils.streams_calculator import (
+            SPOTIFY_SHARE,
+            calculate_total_streams,
+            total_discographie,
+        )
+
+        t = self._track(1000, [{"spotify_id": "B", "kind": "rendition", "streams": 100}])
+        assert total_discographie([t]) == calculate_total_streams(1000, None) + int(
+            100 / SPOTIFY_SHARE
+        )

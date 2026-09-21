@@ -199,6 +199,43 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                     lines.append(f"   • Kworb « {kw} » → base « {db} » ({score:.0%})")
                 if len(fuzzy) > 8:
                     lines.append(f"   … et {len(fuzzy) - 8} autre(s) (voir logs)")
+            # Renditions (Live, Bonus Track, Unplugged…) rattachées à leur
+            # morceau souche — hors total, visibles dans l'onglet Streams.
+            renditions = r.get("renditions_rattachees") or []
+            if renditions:
+                total = sum(st for _, _, st in renditions)
+                lines.append(
+                    f"\n🎚️ {len(renditions)} version(s) alternative(s) rattachée(s) "
+                    f"({total:,} streams, hors totaux) :".replace(",", " ")
+                )
+                for kw, parent, streams in renditions[:8]:
+                    lines.append(f"   • « {kw} » → {parent} — {streams:,}".replace(",", " "))
+                if len(renditions) > 8:
+                    lines.append(f"   … et {len(renditions) - 8} autre(s) (voir logs)")
+            # Un ID Spotify sur DEUX lignes de l'artiste : rien n'est écrit pour
+            # lui, c'est à fusionner (ou à départager) à la main.
+            partages = r.get("ids_partages") or []
+            if partages:
+                lines.append(
+                    "\n⚠️ ID Spotify porté par plusieurs morceaux (rien écrit, à départager) :"
+                )
+                for sid, titres in partages[:8]:
+                    lines.append(f"   • {sid} : {' | '.join(titres)}")
+            # L'ID en base désigne une AUTRE version que le titre de la ligne :
+            # signature d'un ID mal attribué, à passer par « Vérifier les
+            # identifiants Spotify ».
+            suspectes = r.get("variantes_suspectes") or []
+            if suspectes:
+                lines.append("\n🔀 ID dont le titre Spotify est une autre version (à vérifier) :")
+                for base, spotify, _sid in suspectes[:8]:
+                    lines.append(f"   • base « {base} » ↔ Spotify « {spotify} »")
+                if len(suspectes) > 8:
+                    lines.append(f"   … et {len(suspectes) - 8} autre(s) (voir logs)")
+            ecartees = r.get("lignes_ecartees") or []
+            if ecartees:
+                lines.append("\n⤫ Lignes écartées (autre enregistrement, même titre) :")
+                for kw, streams, base in ecartees[:8]:
+                    lines.append(f"   • « {kw} » — {streams:,} ≠ « {base} »".replace(",", " "))
             # Morceaux présents sur Kworb mais introuvables en base : soit un
             # raté de matching, soit un titre absent de la discographie.
             details = r.get("unmatched_details") or []

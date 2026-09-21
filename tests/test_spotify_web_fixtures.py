@@ -166,3 +166,51 @@ def test_href_relatif_accepte():
     est ce qui a rendu la source muette le 2026-07-18 : zéro résultat, aucune
     erreur."""
     assert "4g3aNSz1rMRTrHMYXzvAz6" in parse.parse_track_ids(_LIGNE_ARTISTE)
+
+
+# ── Identité d'une page titre (2026-09-21) ────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def page_remix() -> str:
+    return _fixture("track_remix.html")
+
+
+def test_identite_d_un_remix_a_trois_artistes(page_remix):
+    """« Dolce Camara - Snight B Remix » : TOUS les crédités, le single, la date
+    complète, le label — ce qui fait qu'une ligne créée depuis Kworb n'est pas vide."""
+    ident = parse.parse_track_identity(page_remix)
+    assert ident["name"] == "Dolce Camara - Snight B Remix"
+    assert ident["artists"] == ["Booba", "Snight B", "SDM"]
+    assert ident["album"] == "Dolce Camara (Snight B Remix)"
+    assert ident["album_id"] == "1SjL9H0lVR2gmsqADe3FMC"
+    assert ident["release_date"] == "2024-04-25"
+    assert ident["year"] == 2024
+    assert ident["duration"] == 144
+    assert ident["labels"] == {"©": "Tallac Records", "℗": "Tallac Records"}
+
+
+def test_identite_d_un_morceau_d_album(page_titre):
+    ident = parse.parse_track_identity(page_titre)
+    assert ident["name"] == "CR600 - Bonus Track"
+    assert ident["artists"] == ["ISHA"]
+    assert ident["album"] == "Bitume Caviar (vol.1)"
+    assert ident["release_date"] == "2024-12-01"
+    assert ident["duration"] == 180
+
+
+def test_une_page_non_rendue_ne_donne_pas_d_identite():
+    assert parse.parse_track_identity("<html><title>Spotify – Web Player</title></html>") is None
+
+
+@pytest.mark.parametrize(
+    ("texte", "attendu"),
+    [
+        ("25 avril 2024", "2024-04-25"),
+        ("1 décembre 2024", "2024-12-01"),
+        ("25 April 2024", None),  # locale non épinglée : on ne devine pas
+        ("2024", None),
+    ],
+)
+def test_date_en_toutes_lettres(texte, attendu):
+    assert parse.parse_date_fr(texte) == attendu

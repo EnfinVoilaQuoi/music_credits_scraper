@@ -43,6 +43,8 @@ _BOOL = Boolean(create_constraint=False)
 _FALSE = text("0")
 # Statut par défaut d'un lien d'artiste (e26).
 _CONFIRMED = text("'confirmed'")
+# Migration e28 : nature d'un ID Spotify (`track_spotify_ids.kind`).
+_EDITION = text("'edition'")
 
 
 artists = Table(
@@ -70,6 +72,8 @@ artists = Table(
     Column("ytm_channel_source", Text),
     # Chantier « Media » (e9) : chemin relatif (à IMAGES_DIR) de la photo de profil.
     Column("image_path", Text),
+    # e30 : identifiant Deezer tranché par l'oracle d'identité (jamais le 1ᵉʳ hit).
+    Column("deezer_id", Integer),
     sqlite_autoincrement=True,
 )
 
@@ -296,6 +300,14 @@ artist_relations = Table(
 # les MÊMES compteurs. On visite UNE page (l'ID principal) mais on RECONNAÎT
 # toutes les IDs, et on ne SOMME JAMAIS deux éditions (JOURNAL 2026-09-05 :
 # 99 M au lieu de 50 M sur « Bitume Caviar »).
+#
+# Migration e28 : `kind` distingue l'ÉDITION (défaut) de la RENDITION — une
+# autre prise du même morceau par l'artiste (« DKR - Bonus Track », « … -
+# Unplugged »), rattachée au morceau souche avec son compteur PROPRE
+# (`streams`/`daily_streams`/`streams_at`, mono-source Kworb, jamais arbitré,
+# jamais en colonne) et son titre Spotify (`label`). Les lecteurs qui font d'un
+# ID une clé du morceau (`get_track_ids_by_spotify_id`, l'audit d'identité) ne
+# lisent que les éditions.
 track_spotify_ids = Table(
     "track_spotify_ids",
     metadata,
@@ -305,6 +317,14 @@ track_spotify_ids = Table(
     Column("source", Text),
     Column("is_primary", _BOOL, server_default=_FALSE),
     Column("seen_at", TIMESTAMP),
+    Column("kind", Text, nullable=False, server_default=_EDITION),
+    Column("label", Text),
+    Column("streams", Integer),
+    Column("daily_streams", Integer),
+    Column("streams_at", TIMESTAMP),
+    # Migration e29 : sur une rendition du souche, l'id du morceau qui EST cette
+    # version quand elle a sa propre fiche (l'indication reste sur le souche).
+    Column("variant_track_id", Integer),
     UniqueConstraint("track_id", "spotify_id"),
     sqlite_autoincrement=True,
 )

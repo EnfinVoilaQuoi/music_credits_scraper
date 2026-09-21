@@ -37,7 +37,9 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
     """Rapport de vérification, une case à cocher par écart."""
 
     def __init__(self, app, artiste: str):
-        super().__init__(app)
+        # `app` est la MainWindow, pas un widget : le maître Tk est `app.root`
+        # (cliqué le 2026-09-21 : « 'MainWindow' object has no attribute 'tk' »).
+        super().__init__(app.root)
         self.app = app
         self.artiste = artiste
         self.ecarts: list[dict] = []
@@ -45,7 +47,7 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
 
         self.title(f"Vérifier les identifiants Spotify — {artiste}")
         self.geometry("900x640")
-        self.transient(app)
+        self.transient(app.root)
 
         self.statut = ctk.CTkLabel(self, text="Lecture des identifiants…", font=("Arial", 13))
         self.statut.pack(pady=(15, 5))
@@ -117,10 +119,12 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
         self.barre.set(1)
         self.ecarts = rapport["ecarts"]
         etrangers = sum(1 for e in self.ecarts if e["artiste_etranger"])
+        variantes = sum(1 for e in self.ecarts if e.get("variante_etrangere"))
         self.statut.configure(
             text=(
                 f"{rapport['verifies']} vérifié(s) · {rapport['illisibles']} illisible(s) · "
-                f"{len(self.ecarts)} écart(s), dont {etrangers} 🚨 artiste étranger"
+                f"{len(self.ecarts)} écart(s), dont {etrangers} 🚨 artiste étranger "
+                f"et {variantes} 🔀 variante"
             )
         )
 
@@ -140,8 +144,10 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
             self.liste,
             text=(
                 "🚨 = aucun artiste attendu chez Spotify : l'identifiant désigne un AUTRE\n"
-                "morceau. Les autres écarts demandent un œil — un titre écrit autrement,\n"
-                "une version live, un featuring noté d'un seul côté n'est pas une erreur.\n"
+                "morceau. 🔀 = une autre VERSION (la base attend « X (Remix) », Spotify\n"
+                "sert « X » nu, ou l'inverse) : ses streams partent sur la mauvaise ligne.\n"
+                "Les autres écarts demandent un œil — un titre écrit autrement, un\n"
+                "featuring noté d'un seul côté n'est pas une erreur.\n"
                 "Seules les lignes COCHÉES seront retirées."
             ),
             font=("Arial", 10),
@@ -153,12 +159,15 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
         cadre = ctk.CTkFrame(self.liste)
         cadre.pack(fill="x", pady=4)
 
-        # Pré-cochés : les artistes étrangers seuls, ceux que `repair_spotify_ids`
-        # retire sans hésiter. Le reste demande un humain, donc part décoché.
-        var = ctk.BooleanVar(value=bool(ecart["artiste_etranger"]))
+        # Pré-cochés : les deux motifs que `repair_spotify_ids` retire sans
+        # hésiter — artiste étranger, variante étrangère. Le reste demande un
+        # humain, donc part décoché.
+        etranger = bool(ecart["artiste_etranger"])
+        variante = bool(ecart.get("variante_etrangere"))
+        var = ctk.BooleanVar(value=etranger or variante)
         self.cases.append((ecart, var))
 
-        marque = "🚨" if ecart["artiste_etranger"] else "  "
+        marque = "🚨" if etranger else ("🔀" if variante else "  ")
         edition = "" if ecart["principal"] else "  (édition)"
         ctk.CTkCheckBox(
             cadre,

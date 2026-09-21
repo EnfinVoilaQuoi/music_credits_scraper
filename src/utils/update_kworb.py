@@ -22,19 +22,32 @@ import difflib
 import logging
 import sys
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 from playwright.sync_api import Error as PlaywrightError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.scrapers.kworb_scraper import KworbScraper
 from src.utils.logger import get_logger
-from src.utils.spotify_identity import valider_identite
+from src.utils.spotify_identity import (
+    artiste_etranger,
+    identite_concorde,
+    lire_identite_http,
+    valider_identite,
+)
+from src.utils.version_descriptors import (
+    MOTS_DE_MEME_MORCEAU,
+    Kind,
+    meme_famille,
+    meme_prise,
+    parse_variant,
+)
 
 logger = get_logger(__name__)
 
 
 # Normaliseur PARTAGÉ (même matching que update_ytmusic — cf. title_matching.py)
-from src.utils.title_matching import base_album_key, contains_as_words
+from src.utils.title_matching import base_album_key, contains_as_words, names_match_as_words
 from src.utils.title_matching import normalize_title as _normalize_title
 
 
@@ -183,6 +196,379 @@ def _best_candidate(entry_title, tracks):
     return best_t, best_r
 
 
+@dataclass
+class Index:
+    """Ce que la base sait des morceaux de l'artiste, indexé pour le rapprochement.
+
+    Construit UNE fois par run (`construire_index`) — les IDs de TOUS les
+    magasins (colonne + table e23), par nature ; les titres normalisés ; les
+    socles (titre sans descripteur de version) des morceaux qui n'en portent
+    pas, pour rattacher une rendition.
+    """
+
+    by_id: dict[int, object] = field(default_factory=dict)
+    by_edition_id: dict[str, object] = field(default_factory=dict)
+    by_rendition_id: dict[str, object] = field(default_factory=dict)
+    #: ID porté par ≥ 2 lignes de l'artiste (défaut C) : rien ne lui sera attribué.
+    ids_partages: dict[str, list] = field(default_factory=dict)
+    by_title: dict[str, list] = field(default_factory=dict)
+    by_socle: dict[str, list] = field(default_factory=dict)
+    tracks: list = field(default_factory=list)
+
+
+def construire_index(tracks) -> Index:
+    index = Index(tracks=list(tracks))
+    porteurs: dict[str, list] = defaultdict(list)
+    for t in tracks:
+        index.by_id[t.id] = t
+        index.by_title.setdefault(_normalize_title(t.title), []).append(t)
+        if parse_variant(t.title).kind == Kind.NONE:
+            index.by_socle.setdefault(_normalize_title(t.title), []).append(t)
+        editions = set()
+        if getattr(t, "spotify_id", None):
+            editions.add(t.spotify_id)
+        for e in getattr(t, "spotify_id_entries", None) or []:
+            if e.est_rendition:
+                index.by_rendition_id[e.spotify_id] = t
+            else:
+                editions.add(e.spotify_id)
+        for sid in editions:
+            porteurs[sid].append(t)
+    for sid, ts in porteurs.items():
+        if len(ts) > 1:
+            index.ids_partages[sid] = ts
+        else:
+            index.by_edition_id[sid] = ts[0]
+    return index
+
+
+@dataclass
+class Rapprochement:
+    """Verdict de `rapprocher` pour UNE ligne Kworb."""
+
+    track: object = None
+    via: str | None = None
+    score: float = 0.0
+    #: Le morceau SOUCHE quand la ligne est une rendition à rattacher (auto ou
+    #: mémorisée) ; `track` reste None.
+    rendition_de: object = None
+    #: Proposition pour le dialogue (remix, ou suggestion floue) — rien n'est écrit.
+    suggestion: dict | None = None
+    #: Pourquoi rien : id_partage | ambigu | rejete | ignore | aucun.
+    motif: str | None = None
+
+
+def sommer_editions(lignes: list[dict], tolerance: float = 0.02) -> dict:
+    """Total d'un morceau qui a PLUSIEURS lignes Kworb — sommées, sauf doublons purs.
+
+    Décision utilisateur (2026-09-21) après mesure : sur 67 paires de lignes au
+    même titre, 64 ont des compteurs DISTINCTS (uploads séparés — Runaway
+    1,26 Md + 35 M ; tout le catalogue MC Solaar re-sorti en 2021) : toutes les
+    écoutes de l'enregistrement, on ADDITIONNE. 3 sont des doublons purs
+    (« La zone » 19 422 364 / 19 411 834 — le même compteur relevé deux jours
+    différents), et les additionner double le morceau : une ligne dont le
+    compteur est à moins de `tolerance` d'une ligne déjà retenue compte UNE fois.
+    """
+    tri = sorted(lignes, key=lambda x: -(x.get("streams") or 0))
+    retenues: list[dict] = []
+    ecartees: list[dict] = []
+    for ligne in tri:
+        v = ligne.get("streams") or 0
+        if any(
+            r["streams"] and abs(r["streams"] - v) <= tolerance * max(r["streams"], 1)
+            for r in retenues
+        ):
+            ecartees.append(ligne)
+        else:
+            retenues.append(ligne)
+    return {
+        "streams": sum(r["streams"] or 0 for r in retenues),
+        "daily": sum(r.get("daily") or 0 for r in retenues),
+        "retenues": retenues,
+        "ecartees": ecartees,
+    }
+
+
+def _departager_homonymes(lignes: list[dict], track, lire_identite) -> tuple[list, list]:
+    """Plusieurs lignes Kworb sur un morceau : sont-elles bien SON enregistrement ?
+
+    Deux uploads d'un même morceau (à sommer — décision utilisateur, 2026-09-21)
+    et deux morceaux DIFFÉRENTS au même titre nu (« Forever » de Drake, 809 M,
+    et « FOREVER » de Vultures 2) se présentent pareil : deux IDs, un titre.
+    Ce qui les sépare est l'ARTISTE crédité par l'embed : une ligne dont aucun
+    artiste attendu n'est crédité est un autre morceau, écartée (rendue, pour
+    le rapport).
+
+    La DURÉE ne départage PAS, et c'est mesuré : un catalogue re-sorti (MC
+    Solaar 2021, Vultures 1 réédité) donne deux uploads du même morceau à
+    durées différentes — les écarter perdait 21 morceaux chez Solaar et ~150 M
+    de streams chez Kanye. Elle ne tranche que pour les titres GÉNÉRIQUES
+    (« Intro », « Interlude », « Outro », « Skit »), où deux morceaux distincts
+    du même artiste portent couramment le même mot : là, seules les lignes dont
+    la durée concorde avec la ligne de base restent.
+
+    Ne coûte une lecture que lorsqu'il y a litige : ≥ 2 lignes à IDs distincts
+    et compteurs distincts (les compteurs ≈ identiques sont des doublons purs,
+    `sommer_editions` s'en charge). Sans ID, on ne peut rien lire : on garde.
+    """
+    avec_id = [x for x in lignes if x.get("spotify_id")]
+    if len({x["spotify_id"] for x in avec_id}) < 2:
+        return lignes, []
+    valeurs = sorted(x["streams"] or 0 for x in avec_id)
+    if valeurs[-1] and (valeurs[-1] - valeurs[0]) <= 0.02 * valeurs[-1]:
+        return lignes, []
+    identites = {x["spotify_id"]: lire_identite(x["spotify_id"]) for x in avec_id}
+    generique = bool(set(_normalize_title(track.title).split()) & MOTS_DE_MEME_MORCEAU)
+    retenues, ecartees = [], []
+    for x in lignes:
+        identite = identites.get(x.get("spotify_id"))
+        etranger = identite is not None and (
+            artiste_etranger(track, identite)
+            or (generique and not identite_concorde(track, identite)[0])
+        )
+        (ecartees if etranger else retenues).append(x)
+    if not retenues:
+        # Aucune ne concorde : on ne sait pas laquelle est la bonne, on garde
+        # tout plutôt que d'écrire zéro (l'abstention vaut pour l'ÉCART, pas
+        # pour le morceau entier).
+        return lignes, []
+    return retenues, ecartees
+
+
+def _fiche_de_la_version(v, index: Index):
+    """Une FICHE de cette version existe-t-elle déjà (« Nudes (Live at AK
+    Studios) » chez Genius pour « Nudes - Acoustic » chez Spotify) ? Alors la
+    ligne est À ELLE — un morceau, pas une variante du souche. Unique, sinon rien."""
+    if v.kind != Kind.RENDITION:
+        return None
+    socle = _normalize_title(v.socle)
+    fiches = [
+        t
+        for t in index.tracks
+        if (tv := parse_variant(t.title)).kind == Kind.RENDITION
+        and _normalize_title(tv.socle) == socle
+        and meme_prise(tv, v)
+    ]
+    return fiches[0] if len(fiches) == 1 else None
+
+
+def _candidats_remix_existants(v, index: Index) -> list:
+    """Lignes de base qui SONT déjà ce remix : par relation `remix_of` vers le
+    socle (Genius : « DCR (Dolce Camara Remix) » → Dolce Camara), ou par leur
+    propre titre (« X (Remix) »)."""
+    socle = _normalize_title(v.socle)
+    out = []
+    for t in index.tracks:
+        tv = parse_variant(t.title)
+        if tv.est_remix and _normalize_title(tv.socle) == socle:
+            out.append(t)
+            continue
+        for rel in getattr(t, "relationships", None) or []:
+            if rel.get("type") == "remix_of" and _normalize_title(rel.get("title") or "") == socle:
+                out.append(t)
+                break
+    return out
+
+
+def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) -> dict:
+    """Le dict que le dialogue affiche pour un remix — jamais écrit d'office."""
+    socle = _normalize_title(v.socle)
+    parents = index.by_socle.get(socle) or index.by_title.get(socle) or []
+    parent = parents[0] if len(parents) == 1 else None
+    identite = lire_identite(entry["spotify_id"]) if entry.get("spotify_id") else None
+    credited = [a for a in (identite or {}).get("artists") or [] if a]
+    proposition = "tiers" if v.kind == Kind.REMIX_NAMED else "collab"
+    if v.remixer and credited:
+        remixeur_credite = any(names_match_as_words(v.remixer, a) for a in credited)
+        deja_collaborateur = parent is not None and any(
+            names_match_as_words(v.remixer, c.name) for c in parent.get_music_credits()
+        )
+        if remixeur_credite and not deja_collaborateur:
+            motifs.append(f"« {v.remixer} » est crédité par Spotify et absent des crédits du socle")
+    if entry.get("is_feature"):
+        motifs.append("Kworb : l'artiste n'est pas premier crédité (*)")
+        proposition = "tiers"
+    existants = _candidats_remix_existants(v, index)
+    if existants:
+        motifs.append(
+            "un morceau en base est déjà ce remix : " + " | ".join(t.title for t in existants)
+        )
+    return {
+        "kworb_title": entry["title"],
+        "streams": entry["streams"],
+        "daily": entry["daily_streams"],
+        "spotify_id": entry.get("spotify_id"),
+        "is_feature": bool(entry.get("is_feature")),
+        "kind": v.kind.value,
+        "socle": v.socle,
+        "remixer": v.remixer,
+        "parent_track_id": parent.id if parent else None,
+        "parent_title": parent.title if parent else None,
+        "credited": credited,
+        "identite": identite,
+        "existants": [(t.id, t.title) for t in existants],
+        "proposition": "existant" if len(existants) == 1 else proposition,
+        "motifs": motifs,
+        # Champs de la suggestion historique, pour un dialogue qui ne saurait
+        # pas encore les nouveaux.
+        "track_id": existants[0].id if len(existants) == 1 else (parent.id if parent else None),
+        "db_title": (
+            existants[0].title if len(existants) == 1 else (parent.title if parent else None)
+        ),
+        "score": 0.0,
+    }
+
+
+def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> Rapprochement:
+    """À quel morceau de la base appartient cette ligne Kworb ?
+
+    Niveaux, du plus sûr au moins sûr :
+      ① ID partagé par deux lignes de l'artiste ⇒ rien (défaut C) ;
+      ② ID connu comme ÉDITION ⇒ le morceau ; comme RENDITION ⇒ la variante
+         (sauf si le titre Kworb désigne désormais une ligne de base à part
+         entière : la variante est devenue morceau, l'ID est à elle) ;
+      ③ titre exact unique / homonymes départagés par les artistes crédités /
+         flou à candidat unique / confirmation mémorisée — inchangé ;
+      ④ sinon le DESCRIPTEUR de version tranche : rien ⇒ suggestion floue ;
+         RENDITION dont une FICHE de même famille existe ⇒ ce morceau ; sinon à
+         socle unique ⇒ rattachement automatique au souche ; REMIX ⇒ jamais
+         automatique, proposition pour le dialogue (décision mémorisée ensuite).
+    """
+    sid = entry.get("spotify_id")
+    norm = _normalize_title(entry["title"])
+    if sid and sid in index.ids_partages:
+        return Rapprochement(motif="id_partage")
+    if sid and sid in index.by_edition_id:
+        return Rapprochement(track=index.by_edition_id[sid], via="id")
+    if sid and sid in index.by_rendition_id:
+        devenue = index.by_title.get(norm) or []
+        if len(devenue) == 1:
+            return Rapprochement(track=devenue[0], via="id")
+        fiche = _fiche_de_la_version(parse_variant(entry["title"]), index)
+        if fiche is not None:
+            return Rapprochement(track=fiche, via="fiche")
+        return Rapprochement(track=index.by_rendition_id[sid], via="rendition_id")
+
+    candidates = index.by_title.get(norm, [])
+    if len(candidates) == 1:
+        return Rapprochement(track=candidates[0], via="title")
+    if len(candidates) > 1:
+        # Homonymes (« MEILLEUR » Souffrance / « Meilleur » Goldee Money) :
+        # les artistes crédités du track Spotify départagent.
+        identite = lire_identite(sid) if sid else None
+        credited_norm = {_normalize_title(a) for a in (identite or {}).get("artists") or [] if a}
+        track = _resolve_homonym(candidates, artist.name, credited_norm)
+        if track:
+            return Rapprochement(track=track, via="title+artistes")
+        return Rapprochement(motif="ambigu")
+
+    ftrack, fscore = _fuzzy_unique(entry["title"], index.tracks)
+    if ftrack:
+        return Rapprochement(track=ftrack, via="fuzzy", score=fscore)
+
+    confirmed = decisions.get("confirmed", {})
+    if norm in confirmed:
+        track = index.by_id.get(confirmed[norm])
+        if track:
+            return Rapprochement(track=track, via="confirmed")
+
+    decision = (decisions.get("decisions") or {}).get(norm)
+    if decision:
+        kind, tid = decision.get("kind"), decision.get("track_id")
+        cible = index.by_id.get(tid) if tid else None
+        if kind == "ignore":
+            return Rapprochement(motif="ignore")
+        if kind == "rendition" and cible is not None:
+            return Rapprochement(rendition_de=cible, via="decision")
+        if cible is not None:
+            return Rapprochement(track=cible, via="decision")
+        # Décision orpheline (morceau supprimé) : on retombe sur la proposition.
+
+    v = parse_variant(entry["title"])
+    rejete = norm in decisions.get("rejected", [])
+    if v.kind == Kind.NONE:
+        if rejete:
+            return Rapprochement(motif="rejete")
+        cand, score = _best_candidate(entry["title"], index.tracks)
+        if cand:
+            return Rapprochement(
+                suggestion={
+                    "kworb_title": entry["title"],
+                    "streams": entry["streams"],
+                    "daily": entry["daily_streams"],
+                    "track_id": cand.id,
+                    "db_title": cand.title,
+                    "score": score,
+                }
+            )
+        return Rapprochement(motif="aucun")
+
+    motifs = []
+    if rejete:
+        # L'ancien dialogue posait une AUTRE question (« même morceau ? ») :
+        # un rejet n'a pas répondu à celle-ci. Reproposé UNE fois — la décision
+        # prise ferme la porte.
+        motifs.append("précédemment rejeté (ancienne question « même morceau ? »)")
+    if v.kind == Kind.RENDITION:
+        socle = _normalize_title(v.socle)
+        fiche = _fiche_de_la_version(v, index)
+        if fiche is not None:
+            return Rapprochement(track=fiche, via="fiche")
+        parents = index.by_socle.get(socle, [])
+        if len(parents) == 1 and sid and not rejete:
+            return Rapprochement(rendition_de=parents[0], via="rendition_auto")
+        parent = parents[0] if len(parents) == 1 else None
+        if parent is None and not parents:
+            return Rapprochement(motif="aucun")
+        return Rapprochement(
+            suggestion={
+                "kworb_title": entry["title"],
+                "streams": entry["streams"],
+                "daily": entry["daily_streams"],
+                "spotify_id": sid,
+                "is_feature": bool(entry.get("is_feature")),
+                "kind": v.kind.value,
+                "socle": v.socle,
+                "remixer": None,
+                "parent_track_id": parent.id if parent else None,
+                "parent_title": parent.title if parent else None,
+                "credited": [],
+                "identite": None,
+                "existants": [],
+                "proposition": "rendition" if parent else "ignore",
+                "motifs": motifs
+                + ([] if parent else [f"{len(parents)} morceaux portent ce socle"]),
+                "track_id": parent.id if parent else None,
+                "db_title": parent.title if parent else None,
+                "score": 0.0,
+            }
+        )
+    return Rapprochement(
+        suggestion=_proposition_remix(entry, v, index, artist, lire_identite, motifs)
+    )
+
+
+def _ecrire_rendition(data_manager, parent, entry, kworb_date, result, via) -> None:
+    ok = data_manager.record_variant_streams(
+        parent.id,
+        entry.get("spotify_id"),
+        entry["streams"],
+        entry["daily_streams"],
+        kworb_date,
+        label=entry["title"],
+    )
+    if ok:
+        result["renditions_rattachees"].append((entry["title"], parent.title, entry["streams"]))
+        logger.info(
+            f"🎚️ Rendition ({via}) : Kworb '{entry['title']}' → « {parent.title} » "
+            f"({entry['streams']:,} streams, hors total)"
+        )
+    else:
+        result["unmatched"] += 1
+        result["unmatched_titles"].append(entry["title"])
+        result["unmatched_details"].append((entry["title"], entry["streams"]))
+
+
 def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     """Scrape la page songs et valide l'identité. Re-vote une fois si mismatch.
 
@@ -220,13 +606,15 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     return None, spotify_artist_id
 
 
-def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
+def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None) -> dict:
     """Scrape kworb.net et met à jour les streams des morceaux et albums de l'artiste.
 
     Args:
         artist: objet Artist avec au moins `id`, `name`, `spotify_id`
         data_manager: instance de DataManager
         scraper: KworbScraper injecté (StreamsProvider) ; créé en interne si None
+        lire_identite: lecteur d'identité Spotify (embed) injectable ; par défaut
+            `lire_identite_http` — sert aux homonymes, aux remix, au backfill.
 
     Returns:
         dict résumé {matched, unmatched, albums_updated, unmatched_titles,
@@ -250,6 +638,12 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
         "albums_excluded": [],
         "artist_name": None,
         "kworb_updated": None,
+        # 2026-09-21 — ce que le rapprochement SIGNALE (cf. `rapprocher`) :
+        "ids_partages": [],  # [(spotify_id, [titres])] : un ID sur 2 lignes, rien écrit
+        "renditions_rattachees": [],  # [(titre kworb, titre parent, streams)]
+        "variantes_suspectes": [],  # [(titre base, titre spotify, id)] : ID mal attribué ?
+        "multi_lignes": [],  # [(titre, n lignes, n comptées, total)]
+        "lignes_ecartees": [],  # [(titre kworb, streams, titre base)] : autre enregistrement
     }
 
     # ── 1. S'assurer que l'ID Spotify artiste est disponible ──────────────────
@@ -302,177 +696,175 @@ def update_kworb_streams(artist, data_manager, scraper=None) -> dict:
             f"({daily_sum.get('total') or 0:,}/jour)"
         )
 
-    # ── 4. Streams des morceaux : ID → titre unique → homonymes désambiguïsés ─
+    # ── 4. Streams des morceaux ───────────────────────────────────────────────
     tracks = data_manager.get_artist_tracks(artist.id)
-    by_spotify_id = {t.spotify_id: t for t in tracks if getattr(t, "spotify_id", None)}
-    by_title: dict[str, list] = defaultdict(list)
-    for t in tracks:
-        by_title[_normalize_title(t.title)].append(t)
+    index = construire_index(tracks)
+    lire_identite = lire_identite or lire_identite_http
+    result["ids_partages"] = [
+        (sid, sorted(t.title for t in ts)) for sid, ts in sorted(index.ids_partages.items())
+    ]
+    for sid, titres in result["ids_partages"]:
+        logger.warning(
+            f"⚠️ ID Spotify {sid} porté par {len(titres)} morceaux de l'artiste "
+            f"({' | '.join(titres)}) — aucune ligne Kworb ne lui sera attribuée"
+        )
 
-    # Désambiguïsation des HOMONYMES (deux morceaux distincts au même titre,
-    # ex. "MEILLEUR" Souffrance vs "Meilleur" Goldee Money — cf. JOURNAL) :
-    # les artistes crédités du track Kworb (page embed Spotify) sont comparés
-    # à l'artiste principal de chaque candidat en base.
-    _embed_scraper = None
-
-    def _match_ambiguous(entry, candidates):
-        nonlocal _embed_scraper
-        if not entry.get("spotify_id"):
-            return None
-        if _embed_scraper is None:
-            try:
-                from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
-
-                _embed_scraper = SpotifyIDScraper(headless=True)
-            except ImportError as e:
-                logger.warning(f"Désambiguïsation embed indisponible: {e}")
-                return None
-        try:
-            credited = _embed_scraper.get_track_artists(entry["spotify_id"])
-        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError):
-            credited = []
-        credited_norm = {_normalize_title(a["name"]) for a in credited if a.get("name")}
-        # La DÉCISION vit au niveau module (`_resolve_homonym`) : seule
-        # l'ouverture du scraper embed reste ici.
-        return _resolve_homonym(candidates, artist.name, credited_norm)
-
-    # Décisions mémorisées (confirmé/rejeté) pour ne pas redemander
+    # Décisions mémorisées (confirmé/rejeté/décidé) pour ne pas redemander
     try:
         from src.utils.kworb_links_manager import KworbLinksManager
 
         _links = KworbLinksManager()
         _decisions = _links.load(artist.name)
     except (OSError, ValueError):
-        _decisions = {"confirmed": {}, "rejected": []}
-    _by_id = {t.id: t for t in tracks}
+        _decisions = {"confirmed": {}, "rejected": [], "decisions": {}}
 
     # Accumulation par track : un morceau peut avoir PLUSIEURS lignes Kworb
-    # (éditions/single) → SOMME des streams (comme les albums).
-    agg: dict[int, dict] = {}
+    # (éditions, uploads séparés) — sommées SAUF doublons purs, cf. `sommer_editions`.
+    agg: dict[int, list[dict]] = {}
 
     for entry in page_songs["entries"]:
-        track = None
-        via = None
-        _suggested = False  # True → suggestion en attente, ne pas compter "non matché"
-        if entry.get("spotify_id") and entry["spotify_id"] in by_spotify_id:
-            track, via = by_spotify_id[entry["spotify_id"]], "id"
-        else:
-            candidates = by_title.get(_normalize_title(entry["title"]), [])
-            if len(candidates) == 1:
-                track, via = candidates[0], "title"
-            elif len(candidates) > 1:
-                track = _match_ambiguous(entry, candidates)
-                if track:
-                    via = "title+artistes"
-                    logger.info(
-                        f"🔎 Homonyme résolu par artistes crédités: '{entry['title']}' "
-                        f"→ track #{track.id} ({getattr(track, 'primary_artist_name', None) or artist.name})"
-                    )
-                else:
-                    logger.warning(
-                        f"⚠️ Titre ambigu NON résolu ({len(candidates)} morceaux "
-                        f"en base), passé: '{entry['title']}'"
-                    )
+        r = rapprocher(entry, index, artist, _decisions, lire_identite)
 
-            # 3ᵉ niveau : rapprochement flou (candidat unique) pour les coquilles
-            # / ponctuation. Seulement si ni ID ni titre exact n'ont abouti.
-            if track is None:
-                ftrack, fscore = _fuzzy_unique(entry["title"], tracks)
-                if ftrack:
-                    track, via = ftrack, "fuzzy"
-                    result["fuzzy_matched"].append((entry["title"], ftrack.title, fscore))
-                    logger.info(
-                        f"≈ Match flou ({fscore:.0%}): Kworb '{entry['title']}' "
-                        f"→ base '{ftrack.title}'"
-                    )
-
-            # 4ᵉ niveau : décision mémorisée, sinon SUGGESTION à confirmer
-            if track is None:
-                _nk = _normalize_title(entry["title"])
-                if _nk in _decisions.get("confirmed", {}):
-                    track = _by_id.get(_decisions["confirmed"][_nk])
-                    if track:
-                        via = "confirmed"
-                        logger.info(
-                            f"🔗 Kworb (confirmé mémorisé): '{entry['title']}' → '{track.title}'"
-                        )
-                elif _nk not in _decisions.get("rejected", []):
-                    cand, score = _best_candidate(entry["title"], tracks)
-                    if cand:
-                        _suggested = True
-                        result["suggestions"].append(
-                            {
-                                "kworb_title": entry["title"],
-                                "streams": entry["streams"],
-                                "daily": entry["daily_streams"],
-                                "track_id": cand.id,
-                                "db_title": cand.title,
-                                "score": score,
-                            }
-                        )
-                        logger.info(
-                            f"❓ Suggestion ({score:.0%}): Kworb '{entry['title']}' "
-                            f"≈ base '{cand.title}' — à confirmer"
-                        )
-                # rejeté mémorisé → on laisse en non-matché silencieusement
-
-            # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement).
-            # L'if interne est volontairement séparé : c'est une écriture DB dont
-            # le résultat conditionne la suite, pas une simple condition.
-            if (  # noqa: SIM102
-                track
-                and entry.get("spotify_id")
-                and not getattr(track, "spotify_id", None)
-                # Kworb rapproche par titre avant de livrer son lien : l'ID qu'il
-                # propose peut désigner un autre morceau (1 cas sur les 130 qu'il
-                # a posés). Une requête n'est dépensée que lorsqu'un ID est sur le
-                # point d'être écrit.
-                and valider_identite(track, entry["spotify_id"])
-            ):
-                if data_manager.update_track_spotify_id(track.id, entry["spotify_id"]):
-                    track.spotify_id = entry["spotify_id"]
-                    result["spotify_ids_backfilled"] += 1
-
-        if track:
-            a = agg.setdefault(
-                track.id, {"streams": 0, "daily": 0, "n": 0, "title": entry["title"]}
+        if r.track is not None and r.via == "rendition_id":
+            # L'ID est connu comme RENDITION du morceau : son compteur va sur la
+            # ligne de la variante, jamais sur le parent.
+            _ecrire_rendition(data_manager, r.track, entry, kworb_date, result, r.via)
+            continue
+        if r.rendition_de is not None:
+            _ecrire_rendition(data_manager, r.rendition_de, entry, kworb_date, result, r.via)
+            continue
+        if r.suggestion is not None:
+            result["suggestions"].append(r.suggestion)
+            logger.info(
+                f"❓ Proposition ({r.suggestion.get('proposition') or 'même morceau ?'}) : "
+                f"Kworb '{entry['title']}' — à confirmer"
             )
-            a["streams"] += entry["streams"]
-            a["daily"] += entry["daily_streams"]
-            a["n"] += 1
-            result["matched"] += 1
-            _key = {"id": "matched_by_id", "fuzzy": "matched_by_fuzzy"}.get(via, "matched_by_title")
-            result[_key] += 1
-            logger.debug(f"✅ Match ({via}): '{entry['title']}' → {entry['streams']:,} streams")
-        elif _suggested:
-            pass  # en attente de confirmation utilisateur — pas "non matché"
-        else:
+            continue
+        if r.track is None:
+            if r.motif == "id_partage":
+                pass  # signalé une fois pour toutes ci-dessus
+            elif r.motif == "ambigu":
+                logger.warning(f"⚠️ Titre ambigu NON résolu, passé: '{entry['title']}'")
+            elif r.motif != "rejete":
+                logger.debug(f"⚠️ Pas de match en DB: '{entry['title']}'")
+            if r.motif != "id_partage":
+                result["unmatched"] += 1
+                result["unmatched_titles"].append(entry["title"])
+                result["unmatched_details"].append((entry["title"], entry["streams"]))
+            continue
+
+        track, via = r.track, r.via
+        if via == "fiche" and entry.get("spotify_id"):
+            # La version a sa propre fiche : ses streams sont à elle. Le SOUCHE
+            # garde quand même l'indication (décision utilisateur), avec le
+            # pointeur vers la fiche — affichée sans compter.
+            socle = _normalize_title(parse_variant(entry["title"]).socle)
+            parents = index.by_socle.get(socle) or []
+            parent = index.by_rendition_id.get(entry["spotify_id"]) or (
+                parents[0] if len(parents) == 1 else None
+            )
+            if parent is not None and parent.id != track.id:
+                data_manager.record_variant_streams(
+                    parent.id,
+                    entry["spotify_id"],
+                    entry["streams"],
+                    entry["daily_streams"],
+                    kworb_date,
+                    label=entry["title"],
+                    variant_track_id=track.id,
+                )
+        if via == "fuzzy":
+            result["fuzzy_matched"].append((entry["title"], track.title, r.score))
+            logger.info(
+                f"≈ Match flou ({r.score:.0%}): Kworb '{entry['title']}' → base '{track.title}'"
+            )
+        elif via == "title+artistes":
+            logger.info(
+                f"🔎 Homonyme résolu par artistes crédités: '{entry['title']}' "
+                f"→ track #{track.id} ({getattr(track, 'primary_artist_name', None) or artist.name})"
+            )
+        elif via in ("confirmed", "decision"):
+            logger.info(f"🔗 Kworb (décision mémorisée): '{entry['title']}' → '{track.title}'")
+        if via == "id" and not meme_famille(
+            parse_variant(entry["title"]), parse_variant(track.title)
+        ):
+            # L'ID en base dit « ce morceau », son titre Spotify dit une AUTRE
+            # version : c'est la signature d'un ID mal attribué (« Heartless
+            # (Remix) » qui porte l'ID de « Heartless »). On écrit ce que l'ID
+            # affirme — c'est la clé — mais on le DIT, et la vérification des
+            # identifiants Spotify (motif « variante ») le répare.
+            result["variantes_suspectes"].append((track.title, entry["title"], entry["spotify_id"]))
+            logger.warning(
+                f"🔀 ID {entry['spotify_id']} : la base attend « {track.title} », Spotify "
+                f"sert « {entry['title']} » — à vérifier (identifiants Spotify)"
+            )
+
+        # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement).
+        # L'if interne est volontairement séparé : c'est une écriture DB dont
+        # le résultat conditionne la suite, pas une simple condition.
+        if (  # noqa: SIM102
+            via != "id"
+            and entry.get("spotify_id")
+            and not getattr(track, "spotify_id", None)
+            # Kworb rapproche par titre avant de livrer son lien : l'ID qu'il
+            # propose peut désigner un autre morceau (1 cas sur les 130 qu'il
+            # a posés). Une requête n'est dépensée que lorsqu'un ID est sur le
+            # point d'être écrit.
+            and valider_identite(track, entry["spotify_id"], lire_identite=lire_identite)
+        ):
+            if data_manager.update_track_spotify_id(track.id, entry["spotify_id"]):
+                track.spotify_id = entry["spotify_id"]
+                result["spotify_ids_backfilled"] += 1
+
+        agg.setdefault(track.id, []).append(
+            {
+                "title": entry["title"],
+                "spotify_id": entry.get("spotify_id"),
+                "streams": entry["streams"],
+                "daily": entry["daily_streams"] or 0,
+                "via": via,
+            }
+        )
+        result["matched"] += 1
+        _key = {"id": "matched_by_id", "fuzzy": "matched_by_fuzzy"}.get(via, "matched_by_title")
+        result[_key] += 1
+        logger.debug(f"✅ Match ({via}): '{entry['title']}' → {entry['streams']:,} streams")
+
+    agg_by_track: dict[int, dict] = {}
+    for track_id, lignes in agg.items():
+        track = index.by_id[track_id]
+        retenues, ecartees = _departager_homonymes(lignes, track, lire_identite)
+        for ligne in ecartees:
+            result["lignes_ecartees"].append((ligne["title"], ligne["streams"], track.title))
             result["unmatched"] += 1
-            result["unmatched_titles"].append(entry["title"])
-            result["unmatched_details"].append((entry["title"], entry["streams"]))
-            logger.debug(f"⚠️ Pas de match en DB: '{entry['title']}'")
-
-    if _embed_scraper is not None:
-        try:
-            _embed_scraper.close()
-        except Exception:  # noqa: BLE001 — fermeture best-effort du scraper embed
-            pass
-
-    agg_by_track = agg  # réutilisé plus bas pour le total des albums
-    for track_id, a in agg.items():
+            result["unmatched_titles"].append(ligne["title"])
+            result["unmatched_details"].append((ligne["title"], ligne["streams"]))
+            result["matched"] -= 1
+            logger.warning(
+                f"⚠️ Ligne Kworb '{ligne['title']}' ({ligne['streams']:,}) écartée : autre "
+                f"enregistrement que « {track.title} » (durée)"
+            )
+        somme = sommer_editions(retenues)
+        agg_by_track[track_id] = {"streams": somme["streams"], "daily": somme["daily"]}
         # Kworb déclare ce qu'il a vu ; c'est le repository qui ARBITRE la valeur
         # de la colonne à partir de toutes les observations du morceau. Cet
         # updater n'a donc pas à savoir s'il est maître — et l'ordre des sources
         # n'a aucun effet sur le résultat.
         data_manager.record_spotify_streams(
             track_id,
-            a["streams"],
+            somme["streams"],
             "kworb",
             updated_at=kworb_date,
-            daily_streams=a["daily"],
+            daily_streams=somme["daily"],
         )
-        if a["n"] > 1:
-            logger.info(f"🎛️ '{a['title']}': {a['n']} lignes Kworb sommées → {a['streams']:,}")
+        if len(retenues) > 1 or somme["ecartees"]:
+            result["multi_lignes"].append(
+                (track.title, len(retenues), len(somme["retenues"]), somme["streams"])
+            )
+            logger.info(
+                f"🎛️ '{track.title}': {len(retenues)} lignes Kworb, "
+                f"{len(somme['retenues'])} comptées → {somme['streams']:,}"
+            )
 
     result["unmatched_details"].sort(key=lambda x: x[1], reverse=True)
     logger.info(

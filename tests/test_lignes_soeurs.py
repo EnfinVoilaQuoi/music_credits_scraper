@@ -120,6 +120,23 @@ class TestPropagation:
             "3VXzVGAWFSrH47dBtTOPws"
         ]
 
+    def test_une_rendition_arrive_chez_la_soeur_avec_ses_colonnes(self, data_manager, famille):
+        """e28 : la copie additive suit `PRAGMA table_info`, donc `kind`, `label`
+        et le compteur voyagent sans code dédié — c'est ce que ce test garde."""
+        chez_swing, chez_isha = famille
+        data_manager.record_variant_streams(
+            chez_swing.id, "5go793BaOjzfop2JwctQ0r", 108, 7, None, label="Grünt #33 - Live"
+        )
+        data_manager.save_track(chez_isha)
+
+        (rendition,) = data_manager.get_track_spotify_ids(chez_isha.id)
+        assert (rendition.kind, rendition.label, rendition.streams, rendition.daily_streams) == (
+            "rendition",
+            "Grünt #33 - Live",
+            108,
+            7,
+        )
+
 
 class TestPartition:
     """Ce qui décrit la LIGNE d'un artiste ne bouge pas."""

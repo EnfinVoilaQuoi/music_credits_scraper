@@ -41,7 +41,8 @@ def _provenance_spotify(track) -> str:
     """
     if not track.spotify_id:
         return "—"
-    entrees = track.spotify_id_entries
+    # Les éditions seules : une rendition (e28) est une autre prise, pas une édition.
+    entrees = [e for e in track.spotify_id_entries if not e.est_rendition]
     principale = next((e for e in entrees if e.spotify_id == track.spotify_id), None)
     if principale is None:
         # Un ID en colonne sans ligne dans la table : un producteur a posé la
@@ -573,8 +574,12 @@ class TrackDetailsWindow:
                     source_emoji = {
                         "genius": "🎤",
                         "spotify": "🎧",
+                        "spotify_web": "🎧",
+                        "deezer": "🎵",
                         "discogs": "💿",
                         "lastfm": "📻",
+                        "kworb": "📈",
+                        "heritage": "↩",  # hérité du morceau original (version)
                     }.get(credit.source, "🔗")
                     detail = f" ({credit.role_detail})" if credit.role_detail else ""
                     music_textbox.insert("end", f"{source_emoji} {credit.name}{detail}\n")
@@ -746,7 +751,13 @@ class TrackDetailsWindow:
 
             info_text = f"📊 {words_count} mots • {chars_count} caractères"
             if track.lyrics.source:
-                info_text += f" • {track.lyrics.source}"
+                from src.utils.version_heritage import est_herite
+
+                info_text += (
+                    " • ↩ héritées du morceau original"
+                    if est_herite(track.lyrics.source)
+                    else f" • {track.lyrics.source}"
+                )
             if track.lyrics.synced:
                 info_text += " • ⏱ synchronisé"
                 _sy_src = track.lyrics.synced_source
@@ -1077,6 +1088,24 @@ class TrackDetailsWindow:
                 else []
             )
 
+            echos = track.certs.echos
+            if echos:
+                # Écho (2026-09-21) : une version de ce morceau (live, Colors…)
+                # est certifiée — la certification est la sienne, on la MONTRE ici
+                # sans la compter.
+                ctk.CTkLabel(
+                    cert_frame,
+                    text="↩ Certifiée sur une version : "
+                    + " · ".join(
+                        f"« {e.get('echo_titre')} » {e.get('certification', '')} "
+                        f"({e.get('body', '')}, {e.get('certification_date', '')})"
+                        for e in echos
+                    ),
+                    text_color=("#1f6aa5", "#4aa3df"),
+                    font=("Arial", 12),
+                    wraplength=820,
+                    justify="left",
+                ).pack(anchor="w", padx=12, pady=(8, 2))
             if track_certs or album_certs:
                 # Afficher les infos de certification
                 cert_info = ctk.CTkTextbox(cert_frame, width=850, height=450)
@@ -1320,6 +1349,50 @@ class TrackDetailsWindow:
                 text_color="gray",
                 font=ctk.CTkFont(size=10),
             ).pack(anchor="w", pady=(10, 0))
+
+            # Versions alternatives (e28) : les RENDITIONS rattachées au morceau
+            # — Live, Radio Edit, Bonus Track… — avec leur compteur PROPRE, hors
+            # total. Rien n'est créé quand il n'y en a pas (un cadre vide garde
+            # 200 × 200 px).
+            renditions = [e for e in track.spotify_id_entries if e.est_rendition]
+            if renditions:
+                import webbrowser
+
+                from src.gui.helpers import format_datetime
+
+                ctk.CTkFrame(streams_content, height=1, fg_color="gray40").pack(
+                    fill="x", pady=(12, 6)
+                )
+                ctk.CTkLabel(
+                    streams_content,
+                    text="Versions alternatives (non comptées dans le total) :",
+                    font=ctk.CTkFont(size=13, weight="bold"),
+                ).pack(anchor="w", pady=(0, 4))
+                titres = {t.id: t.title for t in getattr(self.app, "tracks", []) or []}
+                for e in renditions:
+                    ligne = ctk.CTkFrame(streams_content, fg_color="transparent")
+                    ligne.pack(fill="x", pady=1)
+                    quotidien = (
+                        f" (+{e.daily_streams:,}/j)".replace(",", " ") if e.daily_streams else ""
+                    )
+                    quand = f" — {format_datetime(e.streams_at)}" if e.streams_at else ""
+                    fiche = ""
+                    if e.variant_track_id:
+                        nom = titres.get(e.variant_track_id)
+                        fiche = "  → a sa propre fiche" + (f" : « {nom} »" if nom else "")
+                    ctk.CTkLabel(
+                        ligne,
+                        text=f"   • {e.label or e.spotify_id} : {format_streams(e.streams)}{quotidien}{quand}{fiche}",
+                        anchor="w",
+                    ).pack(side="left")
+                    lien = ctk.CTkLabel(ligne, text="▶️", text_color="#1DB954", cursor="hand2")
+                    lien.pack(side="left", padx=6)
+                    lien.bind(
+                        "<Button-1>",
+                        lambda ev, sid=e.spotify_id: webbrowser.open(
+                            f"https://open.spotify.com/intl-fr/track/{sid}"
+                        ),
+                    )
 
         except Exception as e:
             ctk.CTkLabel(streams_frame, text=f"Erreur : {e}", text_color="red").pack(expand=True)

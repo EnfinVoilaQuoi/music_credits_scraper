@@ -120,6 +120,7 @@ class ArtistRepository:
                             artists.c.spotify_id,
                             artists.c.discogs_id,
                             artists.c.image_path,
+                            artists.c.deezer_id,
                         ).where(artists.c.name == name)
                     )
                     .mappings()
@@ -137,6 +138,7 @@ class ArtistRepository:
                 spotify_id=row["spotify_id"],
                 discogs_id=row["discogs_id"],
                 image_path=row["image_path"],
+                deezer_id=row["deezer_id"],
             )
 
             logger.debug(f"🎤 Objet Artist créé: {artist.name} (ID: {artist.id})")
@@ -259,7 +261,7 @@ class ArtistRepository:
                 artist_row = (
                     conn.execute(
                         text(
-                            "SELECT id, name, genius_id, spotify_id, discogs_id, "
+                            "SELECT id, name, genius_id, spotify_id, discogs_id, deezer_id, "
                             "created_at, updated_at FROM artists WHERE name = :name"
                         ),
                         {"name": artist_name},
@@ -326,6 +328,7 @@ class ArtistRepository:
                     "genius_id": artist_row["genius_id"],
                     "spotify_id": artist_row["spotify_id"],
                     "discogs_id": artist_row["discogs_id"],
+                    "deezer_id": artist_row["deezer_id"],
                     "created_at": artist_row["created_at"],
                     "updated_at": artist_row["updated_at"],
                     "tracks_count": counts["tracks_count"] if counts else 0,
@@ -926,6 +929,23 @@ class ArtistRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur get_monthly_listeners_history (id={artist_id}): {e}")
             return []
+
+    def update_artist_deezer_id(self, artist_id: int, deezer_id: int | None) -> bool:
+        """Identifiant Deezer de l'artiste (e30) — écrivain dédié, tranché par
+        l'oracle `services/deezer_identite` ou choisi à la main ; `None` efface."""
+        try:
+            stmt = (
+                update(artists)
+                .where(artists.c.id == artist_id)
+                .values(deezer_id=deezer_id, updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            logger.info(f"deezer_id artiste #{artist_id} mis à jour: {deezer_id}")
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur update_artist_deezer_id (artist_id={artist_id}): {e}")
+            return False
 
     def update_artist_spotify_id(self, artist_id: int, spotify_id: str) -> bool:
         """Met à jour le spotify_id d'un artiste."""

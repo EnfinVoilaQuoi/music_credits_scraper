@@ -312,3 +312,92 @@ class TestPageTitleSurvitAuSave:
                 text("SELECT spotify_page_title FROM tracks WHERE id = :tid"), {"tid": track.id}
             ).scalar()
         assert stocke == "Magot - song by Artiste | Spotify"
+
+
+def _dkr(data_manager, artist) -> Track:
+    """« DKR » avec son édition principale INDEXÉE (l'écrivain dédié, pas `save_track`)."""
+    track = _morceau(data_manager, artist, titre="DKR", spotify_id=_ID_ALBUM)
+    data_manager.record_track_spotify_ids(
+        track.id, [TrackSpotifyId(spotify_id=_ID_ALBUM, source="genius_media")]
+    )
+    return track
+
+
+class TestRenditions:
+    """e28 : une RENDITION (« DKR - Bonus Track ») se rattache au morceau avec son
+    compteur PROPRE, hors de la colonne, hors de la carte des éditions."""
+
+    def test_le_compteur_dune_rendition_ne_touche_pas_la_colonne(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _dkr(data_manager, artist)
+        data_manager.record_spotify_streams(track.id, 500, "kworb")
+
+        assert data_manager.record_variant_streams(
+            track.id, _ID_SINGLE, 108, 7, None, label="DKR - Bonus Track"
+        )
+
+        (relu,) = data_manager.get_artist_tracks(artist.id)
+        assert relu.streams.spotify_streams == 500
+        rendition = next(e for e in relu.spotify_id_entries if e.est_rendition)
+        assert (
+            rendition.spotify_id,
+            rendition.label,
+            rendition.streams,
+            rendition.daily_streams,
+        ) == (
+            _ID_SINGLE,
+            "DKR - Bonus Track",
+            108,
+            7,
+        )
+        # Les éditions seules dans la liste nue (sélecteur de version, unicité).
+        assert relu.spotify_ids == [_ID_ALBUM]
+
+    def test_une_rendition_nest_pas_une_edition_pour_la_carte(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _dkr(data_manager, artist)
+        data_manager.record_variant_streams(track.id, _ID_SINGLE, 108, None, None)
+
+        assert _ID_SINGLE not in data_manager.get_track_ids_by_spotify_id()
+        assert data_manager.lignes_du_spotify_id(_ID_SINGLE) == []
+
+    def test_une_edition_ne_se_requalifie_pas_en_rendition(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _dkr(data_manager, artist)
+
+        assert not data_manager.record_variant_streams(track.id, _ID_ALBUM, 108, None, None)
+
+        (relu,) = data_manager.get_artist_tracks(artist.id)
+        assert [e.kind for e in relu.spotify_id_entries] == ["edition"]
+
+    def test_une_seconde_passe_remplace_le_compteur(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _dkr(data_manager, artist)
+        data_manager.record_variant_streams(
+            track.id, _ID_SINGLE, 108, None, None, label="DKR - Bonus"
+        )
+        data_manager.record_variant_streams(track.id, _ID_SINGLE, 120, 3, None)
+
+        (relu,) = data_manager.get_artist_tracks(artist.id)
+        rendition = next(e for e in relu.spotify_id_entries if e.est_rendition)
+        assert (rendition.streams, rendition.daily_streams, rendition.label) == (
+            120,
+            3,
+            "DKR - Bonus",
+        )
+
+    def test_record_track_spotify_ids_ne_retrograde_pas_une_rendition(self, data_manager):
+        """Une passe qui revoit l'ID (Kworb backfill, scraper) ne sait pas sa nature."""
+        artist = _artiste(data_manager)
+        track = _dkr(data_manager, artist)
+        data_manager.record_variant_streams(track.id, _ID_SINGLE, 108, None, None)
+
+        data_manager.record_track_spotify_ids(
+            track.id, [TrackSpotifyId(spotify_id=_ID_SINGLE, source="scraper")]
+        )
+
+        (relu,) = data_manager.get_artist_tracks(artist.id)
+        assert {e.spotify_id: e.kind for e in relu.spotify_id_entries} == {
+            _ID_ALBUM: "edition",
+            _ID_SINGLE: "rendition",
+        }

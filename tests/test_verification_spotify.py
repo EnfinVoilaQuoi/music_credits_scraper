@@ -66,6 +66,19 @@ class TestLeBalayagePartage:
         assert ecart["spotify_id"] == "idSpotify22caracte"
         assert ecart["motif"]
 
+    def test_une_variante_etrangere_est_marquee_comme_telle(self):
+        """« Heartless (Remix) » qui porte l'ID de « Heartless » : bon artiste,
+        même durée — seul le descripteur de version le trahit."""
+        rapport = verifier_lignes(
+            [_ligne(titre="Heartless (Remix)", artiste="Kanye West", duree=211)],
+            lambda sid: _embed("Heartless", ("Kanye West",), 211),
+            pause=0,
+        )
+        (ecart,) = rapport["ecarts"]
+        assert ecart["variante_etrangere"] is True
+        assert ecart["artiste_etranger"] is False
+        assert ecart["motif"].startswith("variante")
+
     def test_une_page_illisible_n_accuse_personne(self):
         """Même règle qu'`absent` côté observabilité : ne pas savoir lire n'est
         pas un verdict de faute. Elle est comptée à part, jamais en écart."""

@@ -167,6 +167,26 @@ class SpotifyWebScraper(CrawlAIScraperBase):
             obs.ok()
             return {"playcounts": playcounts}
 
+    async def afetch_track_identity(self, sess, track_id: str) -> dict | None:
+        """Ce que la page titre dit du morceau, sans connexion (2026-09-21).
+
+        Sert à ce qu'une ligne créée depuis Kworb (un remix, une version) ne
+        soit pas VIDE : artistes crédités, disque, date de sortie, durée, label.
+        Cf. `parse.parse_track_identity`. Une page par appel, un verdict.
+        """
+        url = self.track_url(track_id)
+        with source_usage.observe(_SOURCE, label=url) as obs:
+            html = await sess.fetch(url, wait_for='css:[data-testid="entityTitle"]')
+            if not html:
+                obs.fail(IssueKind.UNREACHABLE, "page titre non rendue")
+                return None
+            identite = parse.parse_track_identity(html)
+            if identite is None:
+                obs.parse_error("page titre sans en-tête (structure changée ?)")
+                return None
+            obs.ok()
+            return identite
+
     async def afetch_album(self, sess, album_id: str) -> dict | None:
         """Composition d'un album : son titre et l'ordre de ses pistes.
 
@@ -218,3 +238,25 @@ class SpotifyWebScraper(CrawlAIScraperBase):
                 "track_ids": [tid for tid, _ in tracks],
                 "announced": annonce,
             }
+
+
+def lire_identite_page(track_id: str, scraper: "SpotifyWebScraper | None" = None) -> dict | None:
+    """Pont SYNC : l'identité d'une page titre depuis un thread ordinaire.
+
+    Ouvre une session le temps d'une page (le dialogue Kworb en demande une à
+    la fois). Jamais depuis la boucle asyncio (`run_sync` s'en garde).
+    """
+    from src.concurrency import async_loop
+
+    own = scraper is None
+    scraper = scraper or SpotifyWebScraper(headless=True)
+
+    async def _une_page():
+        async with scraper.session() as sess:
+            return await scraper.afetch_track_identity(sess, track_id)
+
+    try:
+        return async_loop.run_sync(_une_page())
+    finally:
+        if own:
+            scraper.close()

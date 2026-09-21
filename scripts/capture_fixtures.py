@@ -115,6 +115,14 @@ CAPTURES: list[dict] = [
         "method": "spotify_web",
     },
     {
+        # Un REMIX à trois artistes crédités (Booba, Snight B, SDM) et un single
+        # comme disque : la fixture de `parse_track_identity` (2026-09-21).
+        "name": "spotify_web_track_remix",
+        "path": "spotify_web/track_remix.html",
+        "url": "https://open.spotify.com/intl-fr/track/1W4mPC2NDpoKeolyEckBnm",
+        "method": "spotify_web",
+    },
+    {
         "name": "spotify_web_artist",
         "path": "spotify_web/artist.html",
         "url": f"https://open.spotify.com/intl-fr/artist/{_SPOTIFY_WEB_ARTIST_ID}",

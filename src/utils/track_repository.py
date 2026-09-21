@@ -456,6 +456,7 @@ class TrackRepository:
                             artists.c.genius_id,
                             artists.c.spotify_id,
                             artists.c.discogs_id,
+                            artists.c.deezer_id,
                         ).where(artists.c.id == artist_id)
                     )
                     .mappings()
@@ -475,6 +476,7 @@ class TrackRepository:
                     genius_id=artist_row["genius_id"],
                     spotify_id=artist_row["spotify_id"],
                     discogs_id=artist_row["discogs_id"],
+                    deezer_id=artist_row["deezer_id"],
                 )
 
                 # Vérifier le nombre total
@@ -552,7 +554,11 @@ class TrackRepository:
                         # passer par `add_spotify_id`, qui marquerait à tort ces
                         # IDs comme « vus ce run ».
                         track.spotify_id_entries = spotify_ids_by_track.get(row["id"], [])
-                        track.spotify_ids = [e.spotify_id for e in track.spotify_id_entries]
+                        # Les éditions seules : une rendition (e28) n'est pas une
+                        # « Version N » du morceau, ni un ID que l'unicité doit compter.
+                        track.spotify_ids = [
+                            e.spotify_id for e in track.spotify_id_entries if not e.est_rendition
+                        ]
 
                         # Chargement crédits (a besoin de la connexion → hors mapper)
                         try:
@@ -957,6 +963,10 @@ class TrackRepository:
         (e23, les éditions alternatives, qui ne passent que par l'écrivain dédié).
         Ignorer le premier rendrait la carte aveugle à tout ID posé par un
         enrichissement ; ignorer le second ferait retomber le pluriel d'éditions.
+
+        Les RENDITIONS (e28) n'y sont PAS : leur compteur est le leur, pas celui
+        du morceau — mappées ici, elles feraient écrire sur le parent le compteur
+        de la variante, et « revendiqueraient » l'ID contre une vraie ligne remix.
         """
         try:
             with self.engine.connect() as conn:
@@ -968,7 +978,8 @@ class TrackRepository:
                             "UNION "
                             "SELECT t.id, t.artist_id, s.spotify_id "
                             "FROM track_spotify_ids s JOIN tracks t ON t.id = s.track_id "
-                            "WHERE s.spotify_id IS NOT NULL AND s.spotify_id != ''"
+                            "WHERE s.spotify_id IS NOT NULL AND s.spotify_id != '' "
+                            "AND s.kind = 'edition'"
                         )
                     )
                     .mappings()
@@ -1012,7 +1023,7 @@ class TrackRepository:
                             "UNION "
                             "SELECT t.id, t.artist_id, t.title "
                             "FROM track_spotify_ids s JOIN tracks t ON t.id = s.track_id "
-                            "WHERE s.spotify_id = :sid"
+                            "WHERE s.spotify_id = :sid AND s.kind = 'edition'"
                         ),
                         {"sid": spotify_id},
                     )
@@ -1832,7 +1843,7 @@ class TrackRepository:
                     r["spotify_id"]: r
                     for r in conn.execute(
                         text(
-                            "SELECT spotify_id, source FROM track_spotify_ids "
+                            "SELECT spotify_id, source, label FROM track_spotify_ids "
                             "WHERE track_id = :tid"
                         ),
                         {"tid": track_id},
@@ -1847,8 +1858,8 @@ class TrackRepository:
                         conn.execute(
                             text(
                                 "INSERT INTO track_spotify_ids "
-                                "(track_id, spotify_id, source, is_primary, seen_at) "
-                                "VALUES (:tid, :sid, :source, :prim, :now)"
+                                "(track_id, spotify_id, source, is_primary, seen_at, kind, label) "
+                                "VALUES (:tid, :sid, :source, :prim, :now, :kind, :label)"
                             ),
                             {
                                 "tid": track_id,
@@ -1856,16 +1867,20 @@ class TrackRepository:
                                 "source": entry.source,
                                 "prim": est_principal,
                                 "now": now,
+                                "kind": entry.kind or "edition",
+                                "label": entry.label,
                             },
                         )
                     else:
                         # Une provenance connue ne se laisse pas écraser par un
                         # None : la passe qui redécouvre un ID ne sait pas
-                        # toujours d'où il venait.
+                        # toujours d'où il venait. Même règle pour `label`, et
+                        # `kind` n'est JAMAIS touché ici : une passe qui revoit
+                        # un ID ne sait pas sa nature (e28).
                         conn.execute(
                             text(
                                 "UPDATE track_spotify_ids SET source = :source, "
-                                "is_primary = :prim, seen_at = :now "
+                                "is_primary = :prim, seen_at = :now, label = :label "
                                 "WHERE track_id = :tid AND spotify_id = :sid"
                             ),
                             {
@@ -1874,6 +1889,7 @@ class TrackRepository:
                                 "source": entry.source or ancienne["source"],
                                 "prim": est_principal,
                                 "now": now,
+                                "label": entry.label or ancienne["label"],
                             },
                         )
                     ecrites += 1
@@ -2097,7 +2113,8 @@ class TrackRepository:
                 rows = (
                     conn.execute(
                         text(
-                            "SELECT track_id, spotify_id, source, is_primary, seen_at "
+                            "SELECT track_id, spotify_id, source, is_primary, seen_at, "
+                            "kind, label, streams, daily_streams, streams_at, variant_track_id "
                             "FROM track_spotify_ids WHERE track_id = :tid"
                         ),
                         {"tid": track_id},
@@ -2115,7 +2132,9 @@ class TrackRepository:
         rows = (
             conn.execute(
                 text(
-                    "SELECT s.track_id, s.spotify_id, s.source, s.is_primary, s.seen_at "
+                    "SELECT s.track_id, s.spotify_id, s.source, s.is_primary, s.seen_at, "
+                    "s.kind, s.label, s.streams, s.daily_streams, s.streams_at, "
+                    "s.variant_track_id "
                     "FROM track_spotify_ids s JOIN tracks t ON t.id = s.track_id "
                     "WHERE t.artist_id = :aid"
                 ),
@@ -2142,11 +2161,95 @@ class TrackRepository:
                     source=r["source"],
                     is_primary=bool(r["is_primary"]),
                     seen_at=r["seen_at"],
+                    kind=r["kind"] or "edition",
+                    label=r["label"],
+                    streams=r["streams"],
+                    daily_streams=r["daily_streams"],
+                    streams_at=r["streams_at"],
+                    variant_track_id=r["variant_track_id"],
                 )
             )
         for ids in par_track.values():
-            ids.sort(key=lambda s: (not s.is_primary, s.spotify_id))
+            # Le principal, puis les autres éditions, puis les renditions (e28).
+            ids.sort(key=lambda s: (not s.is_primary, s.est_rendition, s.spotify_id))
         return par_track
+
+    def record_variant_streams(
+        self,
+        track_id: int,
+        spotify_id: str,
+        streams: int,
+        daily_streams: int | None,
+        seen_at,
+        label: str | None = None,
+        variant_track_id: int | None = None,
+    ) -> bool:
+        """Compteur d'une RENDITION du morceau (e28) — écrivain dédié.
+
+        `variant_track_id` (e29) : la version a sa propre fiche — l'indication
+        reste sur le souche, les streams vivent sur la fiche.
+
+        Une rendition (« DKR - Bonus Track ») se rattache au morceau souche avec
+        son compteur PROPRE : ni observation, ni arbitrage, ni colonne
+        `spotify_streams` — elle s'affiche après le total et n'y entre jamais.
+        Source unique (Kworb) à ce jour ; la valeur est remplacée à chaque passe.
+
+        Une ligne déjà connue comme ÉDITION n'est pas requalifiée ici (rien
+        n'est écrit, `False`) : la nature d'un ID ne change pas au détour d'un
+        compteur.
+        """
+        if not spotify_id:
+            return False
+        try:
+            with self.engine.begin() as conn:
+                nature = conn.execute(
+                    text(
+                        "SELECT kind FROM track_spotify_ids "
+                        "WHERE track_id = :tid AND spotify_id = :sid"
+                    ),
+                    {"tid": track_id, "sid": spotify_id},
+                ).scalar()
+                if nature is not None and nature != "rendition":
+                    logger.warning(
+                        f"record_variant_streams : {spotify_id} est une {nature} du "
+                        f"morceau #{track_id}, compteur de rendition ignoré"
+                    )
+                    return False
+                params = {
+                    "tid": track_id,
+                    "sid": spotify_id,
+                    "streams": int(streams),
+                    "daily": daily_streams,
+                    "at": seen_at,
+                    "label": label,
+                    "fiche": variant_track_id,
+                }
+                if nature is None:
+                    conn.execute(
+                        text(
+                            "INSERT INTO track_spotify_ids "
+                            "(track_id, spotify_id, source, is_primary, seen_at, kind, label, "
+                            "streams, daily_streams, streams_at, variant_track_id) "
+                            "VALUES (:tid, :sid, 'kworb', 0, :at, 'rendition', :label, "
+                            ":streams, :daily, :at, :fiche)"
+                        ),
+                        params,
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "UPDATE track_spotify_ids SET streams = :streams, "
+                            "daily_streams = :daily, streams_at = :at, "
+                            "label = COALESCE(:label, label), seen_at = :at, "
+                            "variant_track_id = COALESCE(:fiche, variant_track_id) "
+                            "WHERE track_id = :tid AND spotify_id = :sid"
+                        ),
+                        params,
+                    )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_variant_streams (track_id={track_id}): {e}")
+            return False
 
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:
         """Met à jour les streams YouTube Music d'un album."""

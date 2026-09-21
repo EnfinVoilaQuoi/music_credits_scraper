@@ -16,13 +16,14 @@ from datetime import datetime
 
 import pytest
 
-from src.models.track import Track
+from src.models.track import Track, TrackSpotifyId
 from src.utils import update_kworb as uk
 from src.utils.update_kworb import (
     _best_candidate,
     _fuzzy_unique,
     _names_match,
     _resolve_homonym,
+    sommer_editions,
     update_kworb_streams,
 )
 
@@ -64,6 +65,8 @@ class _DataManager:
         self.totals = None
         self.artist_spotify_id = None
         self.track_spotify_ids = []
+        self.variant_writes = []
+        self.variant_fiches = []
 
     def get_artist_tracks(self, artist_id):
         return self._tracks
@@ -89,6 +92,13 @@ class _DataManager:
 
     def upsert_album(self, artist_id, titre, streams, daily, **kwargs):
         self.album_writes.append((titre, streams, daily, kwargs))
+        return True
+
+    def record_variant_streams(
+        self, track_id, spotify_id, streams, daily, seen_at, label=None, variant_track_id=None
+    ):
+        self.variant_writes.append((track_id, spotify_id, streams, daily, label))
+        self.variant_fiches.append((track_id, spotify_id, variant_track_id))
         return True
 
 
@@ -772,50 +782,41 @@ class TestVoteIdArtiste:
 
 
 class TestDesambiguisationParEmbed:
-    """Deux morceaux au même titre, départagés par la page embed du track."""
+    """Deux morceaux au même titre, départagés par les artistes crédités de
+    l'embed — lus par le lecteur d'identité INJECTÉ (`lire_identite`), le même
+    que le gate et l'audit : plus de navigateur ouvert dans ce module."""
 
-    def _run(self, embed, tracks, entries):
+    def _run(self, identites, tracks, entries):
         dm = _DataManager(tracks)
-        res = update_kworb_streams(_Artist(), dm, scraper=_Scraper(songs=_page(entries)))
+        res = update_kworb_streams(
+            _Artist(),
+            dm,
+            scraper=_Scraper(songs=_page(entries)),
+            lire_identite=lambda sid: identites.get(sid),
+        )
         return res, dm
 
-    def test_homonyme_resolu(self, embed):
-        embed["track_artists"] = {"SPX": [{"name": "Souffrance"}]}
+    def test_homonyme_resolu(self):
+        identites = {"SPX": {"name": "Meilleur", "artists": ["Souffrance"], "duration": 200}}
         tracks = [
             _track(1, "Meilleur", feat=True, primary="Souffrance"),
             _track(2, "Meilleur", feat=True, primary="Goldee Money"),
         ]
-        res, dm = self._run(embed, tracks, [_entry("Meilleur", 4000, 40, "SPX")])
+        res, dm = self._run(identites, tracks, [_entry("Meilleur", 4000, 40, "SPX")])
         assert res["matched_by_title"] == 1
         assert dm.streams_writes == [(1, 4000, 40, datetime(2026, 9, 1))]
 
-    def test_embed_muet_abstention(self, embed):
-        embed["track_artists"] = {"SPX": []}
+    def test_embed_muet_abstention(self):
+        identites = {"SPX": {"name": "Meilleur", "artists": [], "duration": None}}
         tracks = [_track(1, "Meilleur"), _track(2, "MEILLEUR")]
-        res, dm = self._run(embed, tracks, [_entry("Meilleur", spotify_id="SPX")])
+        res, dm = self._run(identites, tracks, [_entry("Meilleur", spotify_id="SPX")])
         assert res["unmatched"] == 1
         assert dm.streams_writes == []
 
-    def test_scraper_embed_ferme(self, embed):
-        """Un navigateur laissé ouvert bloque la fermeture de l'application."""
-        embed["track_artists"] = {"SPX": [{"name": "Jul"}]}
-        tracks = [_track(1, "Meilleur"), _track(2, "MEILLEUR", feat=True, primary="Autre")]
-        self._run(embed, tracks, [_entry("Meilleur", spotify_id="SPX")])
-        assert _EmbedScraper.instances[0].closed is True
-
-    def test_erreur_embed_traitee_comme_muette(self, embed, monkeypatch):
-        from playwright.sync_api import Error as PlaywrightError
-
-        class _Casse(_EmbedScraper):
-            def get_track_artists(self, spotify_id):
-                raise PlaywrightError("page morte")
-
-        monkeypatch.setattr(
-            "src.scrapers.spotify_id_scraper_v2.SpotifyIDScraper",
-            lambda headless=True: _Casse(headless),
-        )
+    def test_embed_illisible_abstention(self):
+        """Un lecteur qui rend None (page illisible) ne tranche pas."""
         tracks = [_track(1, "Meilleur"), _track(2, "MEILLEUR")]
-        res, dm = self._run(embed, tracks, [_entry("Meilleur", spotify_id="SPX")])
+        res, dm = self._run({}, tracks, [_entry("Meilleur", spotify_id="SPX")])
         assert res["unmatched"] == 1
         assert dm.streams_writes == []
 
@@ -841,3 +842,300 @@ class TestKworbDeclareSansArbitrer:
             _Artist(), dm, scraper=_Scraper(songs=_page([_entry("Titre", daily=42)]))
         )
         assert dm.streams_kwargs[0]["daily_streams"] == 42
+
+
+# ─────────────────────────────────────── 2026-09-21 : variantes, remix, sommation
+
+
+def _memoire(monkeypatch, **data):
+    data.setdefault("confirmed", {})
+    data.setdefault("rejected", [])
+    data.setdefault("decisions", {})
+
+    class _Memoire:
+        def load(self, artist_name):
+            return data
+
+    monkeypatch.setattr("src.utils.kworb_links_manager.KworbLinksManager", _Memoire)
+
+
+def _run(tracks, entries, identites=None, **kw):
+    dm = _DataManager(tracks)
+    res = update_kworb_streams(
+        _Artist(),
+        dm,
+        scraper=_Scraper(songs=_page(entries)),
+        lire_identite=lambda sid: (identites or {}).get(sid),
+        **kw,
+    )
+    return res, dm
+
+
+def _identite(nom, artistes, duree):
+    return {"name": nom, "artists": artistes, "duration": duree}
+
+
+class TestSommerEditions:
+    def test_uploads_distincts_sommes(self):
+        """Runaway : 1,26 Md + 35 M sont deux uploads, toutes leurs écoutes comptent."""
+        r = sommer_editions(
+            [{"streams": 1_262_752_224, "daily": 100}, {"streams": 35_465_477, "daily": 5}]
+        )
+        assert (r["streams"], r["daily"]) == (1_298_217_701, 105)
+        assert r["ecartees"] == []
+
+    def test_doublon_pur_compte_une_fois(self):
+        """« La zone » : 19 422 364 / 19 411 834, le même compteur relevé deux
+        jours différents — additionner doublait le morceau (38,8 M chez Booba)."""
+        r = sommer_editions(
+            [{"streams": 19_422_364, "daily": 10}, {"streams": 19_411_834, "daily": 10}]
+        )
+        assert (r["streams"], r["daily"]) == (19_422_364, 10)
+        assert len(r["ecartees"]) == 1
+
+    def test_vide(self):
+        assert sommer_editions([])["streams"] == 0
+
+
+class TestIdsPartages:
+    def test_un_id_sur_deux_lignes_ne_recoit_rien(self):
+        """« OUTSIDE » (Jackboys 2) et « outside » (Birds in the Trap) portent le
+        même ID : le dict d'avant en désignait UNE au hasard."""
+        tracks = [_track(1, "OUTSIDE", spotify_id="SPX"), _track(2, "outside", spotify_id="SPX")]
+        res, dm = _run(tracks, [_entry("outside", 108_000_000, 9, "SPX")])
+        assert dm.streams_writes == []
+        assert res["ids_partages"] == [("SPX", ["OUTSIDE", "outside"])]
+        assert res["unmatched"] == 0  # signalé à part, pas « non matché »
+
+    def test_les_ids_de_la_table_comptent_aussi(self):
+        t1 = _track(1, "A", spotify_id="SP1")
+        t1.spotify_id_entries = [TrackSpotifyId(spotify_id="SP2", source="kworb")]
+        t2 = _track(2, "B", spotify_id="SP2")
+        res, dm = _run([t1, t2], [_entry("B", 500, 5, "SP2")])
+        assert dm.streams_writes == []
+        assert [sid for sid, _ in res["ids_partages"]] == ["SP2"]
+
+
+class TestRenditions:
+    def test_bonus_track_rattache_au_socle(self):
+        """« DKR - Bonus Track » (108 M) : rendition de « DKR », rattachée
+        automatiquement — hors colonne, hors total."""
+        res, dm = _run(
+            [_track(1, "DKR", spotify_id="SP1")], [_entry("DKR - Bonus Track", 108, 1, "SPB")]
+        )
+        assert dm.streams_writes == []
+        assert dm.variant_writes == [(1, "SPB", 108, 1, "DKR - Bonus Track")]
+        assert res["renditions_rattachees"] == [("DKR - Bonus Track", "DKR", 108)]
+        assert res["unmatched"] == 0
+
+    def test_un_id_connu_comme_rendition_va_sur_la_variante(self):
+        t = _track(1, "DKR", spotify_id="SP1")
+        t.spotify_id_entries = [
+            TrackSpotifyId(spotify_id="SP1", source="genius_media"),
+            TrackSpotifyId(spotify_id="SPB", source="kworb", kind="rendition"),
+        ]
+        res, dm = _run(
+            [t], [_entry("DKR", 1000, 10, "SP1"), _entry("DKR - Bonus Track", 108, 1, "SPB")]
+        )
+        assert dm.streams_writes == [(1, 1000, 10, datetime(2026, 9, 1))]
+        assert dm.variant_writes == [(1, "SPB", 108, 1, "DKR - Bonus Track")]
+
+    def test_une_variante_devenue_morceau_reprend_son_id(self):
+        """La rendition a depuis sa propre ligne en base : l'ID est à elle."""
+        parent = _track(1, "DKR", spotify_id="SP1")
+        parent.spotify_id_entries = [
+            TrackSpotifyId(spotify_id="SPB", source="kworb", kind="rendition")
+        ]
+        propre = _track(2, "DKR (Bonus Track)")
+        res, dm = _run([parent, propre], [_entry("DKR - Bonus Track", 108, 1, "SPB")])
+        assert dm.variant_writes == []
+        assert dm.streams_writes == [(2, 108, 1, datetime(2026, 9, 1))]
+
+    def test_une_fiche_de_la_version_prend_la_ligne(self):
+        """« Nudes (Live at AK Studios) » a sa page Genius : « Nudes - Acoustic »
+        (même famille « performance ») est CE morceau, pas une variante de « Nudes »."""
+        tracks = [_track(1, "Nudes", spotify_id="SP1"), _track(2, "Nudes (Live at AK Studios)")]
+        res, dm = _run(tracks, [_entry("Nudes - Acoustic", 14_000_000, 100, "SPA")])
+        assert dm.streams_writes == [(2, 14_000_000, 100, datetime(2026, 9, 1))]
+        # Le souche garde l'indication, avec le pointeur vers la fiche.
+        assert dm.variant_fiches == [(1, "SPA", 2)]
+        assert dm.track_spotify_ids == [(2, "SPA")]  # la fiche reçoit l'ID de Kworb
+
+    def test_une_variante_deja_rattachee_rejoint_sa_fiche(self):
+        parent = _track(1, "Blues", spotify_id="SP1")
+        parent.spotify_id_entries = [
+            TrackSpotifyId(spotify_id="SPA", source="kworb", kind="rendition")
+        ]
+        fiche = _track(2, "Blues (Live at AK Studios)")
+        res, dm = _run([parent, fiche], [_entry("Blues - Acoustic", 342, 3, "SPA")])
+        assert dm.streams_writes == [(2, 342, 3, datetime(2026, 9, 1))]
+        # L'indication reste sur « Blues », désormais pointée vers sa fiche.
+        assert dm.variant_fiches == [(1, "SPA", 2)]
+
+    def test_socle_ambigu_devient_proposition(self):
+        tracks = [_track(1, "Meilleur"), _track(2, "MEILLEUR")]
+        res, dm = _run(tracks, [_entry("Meilleur - Live", 100, 1, "SPL")])
+        assert dm.variant_writes == []
+        (s,) = res["suggestions"]
+        assert s["kind"] == "rendition" and s["proposition"] == "ignore"
+
+    def test_sans_socle_en_base_rien(self):
+        res, dm = _run([_track(1, "Autre")], [_entry("Inconnu - Live", 100, 1, "SPL")])
+        assert res["unmatched"] == 1 and dm.variant_writes == []
+
+
+class TestRemix:
+    def test_remix_nomme_propose_tiers_sans_ecrire(self):
+        identites = {
+            "SPR": _identite("Dolce Camara - Snight B Remix", ["Booba", "Snight B", "SDM"], 144)
+        }
+        res, dm = _run(
+            [_track(1, "Dolce Camara", spotify_id="SP1")],
+            [_entry("Dolce Camara - Snight B Remix", 25_000_000, 100, "SPR")],
+            identites,
+        )
+        assert dm.streams_writes == [] and dm.variant_writes == []
+        (s,) = res["suggestions"]
+        assert (s["kind"], s["remixer"], s["proposition"], s["parent_track_id"]) == (
+            "remix_named",
+            "Snight B",
+            "tiers",
+            1,
+        )
+        assert s["credited"] == ["Booba", "Snight B", "SDM"]
+        assert any("Snight B" in m for m in s["motifs"])
+        assert res["unmatched"] == 0
+
+    def test_remix_nu_propose_collab(self):
+        res, _ = _run([_track(1, "5G", spotify_id="SP1")], [_entry("5G Remix", 500, 5, "SPR")])
+        (s,) = res["suggestions"]
+        assert (s["kind"], s["proposition"]) == ("remix_bare", "collab")
+
+    def test_etoile_kworb_penche_vers_tiers(self):
+        e = _entry("5G Remix", 500, 5, "SPR")
+        e["is_feature"] = True
+        res, _ = _run([_track(1, "5G", spotify_id="SP1")], [e])
+        assert res["suggestions"][0]["proposition"] == "tiers"
+
+    def test_remix_deja_en_base_par_relation(self):
+        """« DCR (Dolce Camara Remix) » existe (Genius, `remix_of → Dolce Camara`) :
+        la ligne Kworb lui est proposée, pas de création."""
+        dcr = _track(2, "DCR (Dolce Camara Remix)")
+        dcr.relationships = [{"type": "remix_of", "title": "Dolce Camara", "artist": "Booba"}]
+        res, dm = _run(
+            [_track(1, "Dolce Camara", spotify_id="SP1"), dcr],
+            [_entry("Dolce Camara - Snight B Remix", 25_000_000, 100, "SPR")],
+        )
+        (s,) = res["suggestions"]
+        assert s["proposition"] == "existant"
+        assert s["existants"] == [(2, "DCR (Dolce Camara Remix)")]
+        assert s["track_id"] == 2
+
+    def test_rejet_ancien_repropose_une_fois(self, monkeypatch):
+        _memoire(monkeypatch, rejected=["dolce camara snight b remix"])
+        res, _ = _run(
+            [_track(1, "Dolce Camara", spotify_id="SP1")],
+            [_entry("Dolce Camara - Snight B Remix", 25, 1, "SPR")],
+        )
+        (s,) = res["suggestions"]
+        assert any("précédemment rejeté" in m for m in s["motifs"])
+
+    def test_decision_ignore_reste_silencieuse(self, monkeypatch):
+        _memoire(
+            monkeypatch,
+            rejected=["dolce camara snight b remix"],
+            decisions={"dolce camara snight b remix": {"kind": "ignore", "track_id": None}},
+        )
+        res, dm = _run(
+            [_track(1, "Dolce Camara", spotify_id="SP1")],
+            [_entry("Dolce Camara - Snight B Remix", 25, 1, "SPR")],
+        )
+        assert res["suggestions"] == [] and dm.streams_writes == []
+
+    def test_decision_rendition_memorisee(self, monkeypatch):
+        _memoire(monkeypatch, decisions={"x club remix": {"kind": "rendition", "track_id": 1}})
+        res, dm = _run([_track(1, "X", spotify_id="SP1")], [_entry("X - Club Remix", 25, 1, "SPR")])
+        assert dm.variant_writes == [(1, "SPR", 25, 1, "X - Club Remix")]
+
+    def test_decision_morceau_memorisee(self, monkeypatch):
+        _memoire(monkeypatch, decisions={"x club remix": {"kind": "existant", "track_id": 2}})
+        res, dm = _run(
+            [_track(1, "X", spotify_id="SP1"), _track(2, "X (Remix)")],
+            [_entry("X - Club Remix", 25, 1, "SPR")],
+        )
+        assert dm.streams_writes == [(2, 25, 1, datetime(2026, 9, 1))]
+
+
+class TestHomonymesATitreNu:
+    def test_deux_morceaux_differents_au_meme_titre(self):
+        """« Forever » (Drake, 809 M) et « FOREVER » (Vultures 2, 7 M, crédité ¥$)
+        sur une base qui n'a qu'une ligne « Forever » : l'ARTISTE sépare."""
+        identites = {
+            "SPD": _identite("Forever", ["Drake", "Kanye West"], 357),
+            "SPV": _identite("FOREVER", ["¥$"], 180),
+        }
+        t = _track(1, "Forever", feat=True, primary="Drake")
+        t.artist, t.duration = _Artist(), 357
+        res, dm = _run(
+            [t], [_entry("Forever", 809, 8, "SPD"), _entry("Forever", 7, 1, "SPV")], identites
+        )
+        assert dm.streams_writes == [(1, 809, 8, datetime(2026, 9, 1))]
+        assert res["lignes_ecartees"] == [("Forever", 7, "Forever")]
+        assert res["unmatched"] == 1
+
+    def test_deux_uploads_a_durees_differentes_sommes(self):
+        """Le catalogue MC Solaar re-sorti en 2021 : deux uploads de « Caroline »,
+        même artiste, durées différentes — toutes les écoutes comptent."""
+        identites = {
+            "SP1": _identite("Caroline", ["Jul"], 258),
+            "SP2": _identite("Caroline", ["Jul"], 245),
+        }
+        t = _track(1, "Caroline")
+        t.artist, t.duration = _Artist(), 258
+        res, dm = _run(
+            [t], [_entry("Caroline", 14, 1, "SP1"), _entry("Caroline", 13, 1, "SP2")], identites
+        )
+        assert dm.streams_writes == [(1, 27, 2, datetime(2026, 9, 1))]
+        assert res["lignes_ecartees"] == []
+
+    def test_un_titre_generique_se_departage_par_la_duree(self):
+        """Trois « Interlude » de Jazzy Bazz sont trois morceaux : seule la ligne
+        dont la durée concorde avec la base est la sienne."""
+        identites = {
+            "SP1": _identite("Interlude", ["Jul"], 61),
+            "SP2": _identite("Interlude", ["Jul"], 95),
+        }
+        t = _track(1, "Interlude")
+        t.artist, t.duration = _Artist(), 61
+        res, dm = _run(
+            [t],
+            [_entry("Interlude", 1342, 1, "SP1"), _entry("Interlude", 343, 1, "SP2")],
+            identites,
+        )
+        assert dm.streams_writes == [(1, 1342, 1, datetime(2026, 9, 1))]
+        assert res["lignes_ecartees"] == [("Interlude", 343, "Interlude")]
+
+    def test_deux_uploads_du_meme_enregistrement_sommes(self):
+        identites = {
+            "SP1": _identite("Runaway", ["Kanye West"], 548),
+            "SP2": _identite("Runaway", ["Kanye West"], 549),
+        }
+        res, dm = _run(
+            [_track(1, "Runaway")],
+            [_entry("Runaway", 1_262, 10, "SP1"), _entry("Runaway", 35, 1, "SP2")],
+            identites,
+        )
+        assert dm.streams_writes == [(1, 1_297, 11, datetime(2026, 9, 1))]
+        assert res["multi_lignes"] == [("Runaway", 2, 2, 1_297)]
+
+
+class TestVariantesSuspectes:
+    def test_id_en_base_dont_le_titre_spotify_est_une_autre_version(self):
+        """« Heartless (Remix) » porte l'ID de « Heartless » : on écrit ce que
+        l'ID affirme, mais on le DIT — la vérification des identifiants répare."""
+        res, dm = _run(
+            [_track(1, "Heartless (Remix)", spotify_id="SPH")],
+            [_entry("Heartless", 2_109, 9, "SPH")],
+        )
+        assert dm.streams_writes == [(1, 2_109, 9, datetime(2026, 9, 1))]
+        assert res["variantes_suspectes"] == [("Heartless (Remix)", "Heartless", "SPH")]

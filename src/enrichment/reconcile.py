@@ -109,8 +109,12 @@ def _confidence_key(confidence: float | None) -> float:
 #: d'une page (« 2:30 »), donc à la seconde affichée, ce qui la place derrière
 #: les deux sources qui donnent la valeur du fichier.
 DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
-    "duration": ("deezer", "ytmusic", "songbpm", "reccobeats"),
-    "release_date": ("genius", "deezer"),
+    # `spotify_web` (2026-09-21) : la page titre Spotify ne renseigne que les
+    # lignes créées depuis Kworb (remix, versions sans page Genius) — pour elles
+    # c'est la seule source ; partout ailleurs elle ne pèse rien. Elle lit PAR
+    # l'ID, comme ReccoBeats, qui reste bon dernier (c'est lui qui a contaminé).
+    "duration": ("deezer", "ytmusic", "songbpm", "spotify_web", "reccobeats"),
+    "release_date": ("genius", "deezer", "spotify_web"),
     "isrc": ("deezer",),
 }
 

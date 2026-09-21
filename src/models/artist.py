@@ -21,6 +21,8 @@ class Artist:
     ytm_monthly_listeners: int | None = None
     # Chantier « Media » : chemin relatif (à IMAGES_DIR) de la photo de profil.
     image_path: str | None = None
+    # e30 : identifiant Deezer de l'artiste, tranché par l'oracle (`deezer_identite`).
+    deezer_id: int | None = None
     tracks: list["Track"] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -44,6 +46,7 @@ class Artist:
             "spotify_id": self.spotify_id,
             "discogs_id": self.discogs_id,
             "image_path": self.image_path,
+            "deezer_id": self.deezer_id,
             "tracks_count": self.get_tracks_count(),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),

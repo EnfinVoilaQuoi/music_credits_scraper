@@ -116,6 +116,8 @@ scripts/*
 !scripts/repair_certifications.py
 !scripts/audit_spotify_ids.py
 !scripts/repair_spotify_ids.py
+# Streams : rejeu à blanc du rapprochement Kworb (2026-09-21)
+!scripts/kworb_replay.py
 # Certifications : rend son programme au corpus latin RIAA (2026-09-06)
 !scripts/mark_latin_awards.py
 !scripts/repair_riaa_digital_singles.py

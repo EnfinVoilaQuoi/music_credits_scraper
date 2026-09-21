@@ -214,15 +214,31 @@ def split_title_paren(title: str) -> tuple[str, str | None]:
     return (head, match.group(1)) if head else (stripped, None)
 
 
-def normalize_title(s: str) -> str:
-    """Normalise un titre : feat (avec/sans parenthèses), apostrophes, accents,
-    points (acronymes), ponctuation, espaces avant chiffres, casse."""
+def strip_featuring(s: str) -> str:
+    """Retire les mentions de featuring d'un titre, graphie conservée par ailleurs.
+
+        « Titre (feat. X) » / « Titre [ft. X] » → « Titre »
+        « Ronaldinho qui jongle ft. ISHA »      → « Ronaldinho qui jongle »
+
+    Première étape de `normalize_title`, exposée seule parce que la lecture des
+    descripteurs de version (`version_descriptors`) doit voir « Evasion (feat.
+    China) - Version Radio » comme « Evasion - Version Radio » AVANT de chercher
+    le descripteur — sans écraser la ponctuation qui porte ce descripteur.
+    """
     if not s:
         return ""
     # Retirer les suffixes featuring : "Titre (feat. X)" / "[feat. X]" → "Titre"
     s = re.sub(r"\s*[\(\[]\s*(?:feat|ft|avec|with)\.?[^\)\]]*[\)\]]", "", s, flags=re.IGNORECASE)
     # "Titre ft. X" sans parenthèses (vu sur kworb : "Ronaldinho qui jongle ft. ISHA")
-    s = re.sub(r"\s+(?:feat|ft)\.?\s+.*$", "", s, flags=re.IGNORECASE)
+    return re.sub(r"\s+(?:feat|ft)\.?\s+.*$", "", s, flags=re.IGNORECASE)
+
+
+def normalize_title(s: str) -> str:
+    """Normalise un titre : feat (avec/sans parenthèses), apostrophes, accents,
+    points (acronymes), ponctuation, espaces avant chiffres, casse."""
+    if not s:
+        return ""
+    s = strip_featuring(s)
     # Unifier/supprimer les apostrophes (typographiques ou droites)
     s = re.sub(r"['’‘`´]", "", s)
     # AVANT le passage en ASCII : après, la ligature a disparu (cf. la table).

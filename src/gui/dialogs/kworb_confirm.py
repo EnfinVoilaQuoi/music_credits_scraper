@@ -1,34 +1,45 @@
-"""Confirmation des rapprochements Kworb incertains"""
+"""Confirmation des rapprochements Kworb incertains — et des variantes (2026-09-21).
 
-import re
+Deux familles de lignes dans le même dialogue :
+  · les suggestions FLOUES historiques (« Matrix » ≈ « Matrix (Intro) ») : une
+    case « même morceau ? », mémorisée par `confirm`/`reject` ;
+  · les VARIANTES (dicts porteurs d'un `kind`) : un remix ou une rendition que
+    `update_kworb.rapprocher` n'a pas voulu trancher seul — quatre voies
+    (`services/kworb_decisions.DECISIONS`), pré-positionnées sur sa proposition,
+    appliquées par `kworb_decisions.appliquer` dans un worker (une ligne créée
+    ouvre une page Spotify) et mémorisées par `decide`.
+"""
+
 from tkinter import messagebox
 
 import customtkinter as ctk
 
-# Descripteurs entre parenthèses : indice « même morceau » vs « version différente »
-_SAME_HINTS = ("intro", "outro", "interlude", "skit", "prelude", "prélude")
-_DIFF_HINTS = (
-    "acoustic",
-    "acoustique",
-    "remix",
-    "live",
-    "freestyle",
-    "instrumental",
-    "edit",
-    "version",
-    "demo",
-    "rmx",
-    "club",
-    "radio",
-    "sped",
-    "slowed",
-)
+from src.concurrency.lifecycle import run_worker
+from src.services import kworb_decisions
+from src.utils.version_descriptors import indice_meme_morceau
+
+#: Ordre des boutons ; « existant » n'apparaît que si un morceau en base est
+#: déjà ce remix (sinon la voie n'a pas de cible).
+_VOIES = ("edition", "rendition", "existant", "collab", "tiers", "ignore")
+
+
+def _texte_variante(s: dict) -> str:
+    streams = f"{s['streams']:,}".replace(",", " ")
+    lignes = [
+        f"Kworb « {s['kworb_title']} » — {streams} streams"
+        + ("  (*)" if s.get("is_feature") else "")
+    ]
+    if s.get("parent_title"):
+        lignes.append(f"   socle en base : « {s['parent_title']} »")
+    if s.get("credited"):
+        lignes.append("   Spotify crédite : " + ", ".join(s["credited"]))
+    for m in s.get("motifs") or []:
+        lignes.append(f"   • {m}")
+    return "\n".join(lignes)
 
 
 def confirm_kworb_suggestions(app, suggestions, kworb_date_str):
-    """Confirme/rejette les rapprochements Kworb incertains (mémorisés).
-    Indice : « (Intro/Outro/Interlude) » = souvent le même morceau ;
-    « (Acoustic/Remix/Live/Freestyle) » = version différente → ne pas lier."""
+    """Confirme/rejette les rapprochements Kworb incertains (mémorisés)."""
     from datetime import datetime as _dt
 
     try:
@@ -46,48 +57,63 @@ def confirm_kworb_suggestions(app, suggestions, kworb_date_str):
 
     dlg = ctk.CTkToplevel(app.root)
     dlg.title("Rapprochements Kworb à confirmer")
-    dlg.geometry("640x560")
+    dlg.geometry("760x600")
     dlg.transient(app.root)
     dlg.grab_set()
 
     ctk.CTkLabel(
         dlg,
-        text="Ces titres Kworb ressemblent à un morceau en base.\n"
-        "Coche ceux qui sont bien LE MÊME morceau (ta réponse est mémorisée).",
+        text=(
+            "Ces lignes Kworb n'ont pas de morceau en base. Une VARIANTE (Live, Radio Edit, "
+            "Bonus…) se rattache au morceau souche, hors total ; un REMIX devient un morceau "
+            "à part — principal (collaboration) ou rôle secondaire (remixé par un tiers).\n"
+            "Ta réponse est mémorisée : elle ne sera plus redemandée."
+        ),
         justify="left",
+        wraplength=720,
     ).pack(padx=15, pady=(12, 6), anchor="w")
 
-    scroll = ctk.CTkScrollableFrame(dlg, height=380)
+    scroll = ctk.CTkScrollableFrame(dlg, height=420)
     scroll.pack(fill="both", expand=True, padx=12, pady=6)
 
-    vars_by_sugg = []
+    cases = []  # (suggestion floue, BooleanVar)
+    choix = []  # (variante, StringVar)
     for s in suggestions:
-        desc = (re.search(r"[\(\[]([^)\]]+)[)\]]", s["kworb_title"]) or [None, ""])[1].lower()
-        db_desc = (re.search(r"[\(\[]([^)\]]+)[)\]]", s["db_title"]) or [None, ""])[1].lower()
-        blob = f"{desc} {db_desc}"
-        if any(h in blob for h in _DIFF_HINTS):
-            hint, default = "⚠️ version différente probable", False
-        elif any(h in blob for h in _SAME_HINTS):
-            hint, default = "✓ même morceau probable", True
-        else:
-            hint, default = "à vérifier", False
-
         row = ctk.CTkFrame(scroll)
         row.pack(fill="x", pady=4)
-        var = ctk.BooleanVar(value=default)
-        ctk.CTkCheckBox(row, text="", variable=var, width=28).pack(side="left", padx=(6, 0))
-        txt = (
-            f"Kworb « {s['kworb_title']} »\n→ base « {s['db_title']} »   "
-            f"({s['score']:.0%})   {s['streams']:,} streams".replace(",", " ") + f"\n   {hint}"
-        )
-        ctk.CTkLabel(row, text=txt, justify="left", anchor="w").pack(
-            side="left", fill="x", expand=True, padx=6, pady=4
-        )
-        vars_by_sugg.append((s, var))
+        if s.get("kind"):
+            ctk.CTkLabel(row, text=_texte_variante(s), justify="left", anchor="w").pack(
+                anchor="w", fill="x", padx=8, pady=(6, 2)
+            )
+            voies = [v for v in _VOIES if v != "existant" or s.get("existants")]
+            if not s.get("parent_track_id"):
+                voies = [v for v in voies if v not in ("rendition", "edition")]
+            var = ctk.StringVar(
+                value=s.get("proposition") if s.get("proposition") in voies else "ignore"
+            )
+            ctk.CTkSegmentedButton(
+                row,
+                values=[kworb_decisions.LIBELLES[v] for v in voies],
+                variable=ctk.StringVar(value=kworb_decisions.LIBELLES[var.get()]),
+                command=lambda lib, v=var: v.set(_voie_du_libelle(lib)),
+            ).pack(anchor="w", padx=8, pady=(0, 6))
+            choix.append((s, var))
+        else:
+            hint, default = indice_meme_morceau(s["kworb_title"], s["db_title"])
+            var = ctk.BooleanVar(value=default)
+            ctk.CTkCheckBox(row, text="", variable=var, width=28).pack(side="left", padx=(6, 0))
+            txt = (
+                f"Kworb « {s['kworb_title']} »\n→ base « {s['db_title']} »   "
+                f"({s['score']:.0%})   {s['streams']:,} streams".replace(",", " ") + f"\n   {hint}"
+            )
+            ctk.CTkLabel(row, text=txt, justify="left", anchor="w").pack(
+                side="left", fill="x", expand=True, padx=6, pady=4
+            )
+            cases.append((s, var))
 
     def _apply():
         n_ok = 0
-        for s, var in vars_by_sugg:
+        for s, var in cases:
             if var.get():
                 if app.data_manager.record_spotify_streams(
                     s["track_id"],
@@ -100,17 +126,53 @@ def confirm_kworb_suggestions(app, suggestions, kworb_date_str):
                     n_ok += 1
             else:
                 links.reject(app.current_artist.name, s["kworb_title"])
+        decisions = [(s, var.get()) for s, var in choix]
         dlg.destroy()
-        app._reload_tracks_and_refresh()
-        messagebox.showinfo(
-            "Rapprochements Kworb",
-            f"{n_ok} lié(s), {len(vars_by_sugg) - n_ok} rejeté(s).\n"
-            "Décisions mémorisées pour les prochains runs.",
-        )
+
+        def _appliquer_variantes():
+            # Une ligne créée lit sa page titre Spotify : hors du fil Tk.
+            from src.scrapers.spotify_web_scraper import lire_identite_page
+
+            comptes = []
+            for s, decision in decisions:
+                try:
+                    comptes.append(
+                        kworb_decisions.appliquer(
+                            app.data_manager,
+                            app.current_artist,
+                            s,
+                            decision,
+                            updated_at,
+                            lire_page=lire_identite_page,
+                            links=links,
+                        )
+                    )
+                except Exception as e:  # noqa: BLE001 — une ligne ne bloque pas les autres
+                    comptes.append(f"« {s['kworb_title']} » : ❌ {e}")
+            texte = f"{n_ok} lié(s), {len(cases) - n_ok} rejeté(s)."
+            if comptes:
+                texte += "\n\n" + "\n".join(comptes)
+            texte += "\n\nDécisions mémorisées pour les prochains runs."
+            app.root.after(0, app._reload_tracks_and_refresh)
+            app.root.after(0, lambda: messagebox.showinfo("Rapprochements Kworb", texte))
+
+        if decisions:
+            run_worker(_appliquer_variantes, name="kworb-decisions")
+        else:
+            app._reload_tracks_and_refresh()
+            messagebox.showinfo(
+                "Rapprochements Kworb",
+                f"{n_ok} lié(s), {len(cases) - n_ok} rejeté(s).\n"
+                "Décisions mémorisées pour les prochains runs.",
+            )
 
     btns = ctk.CTkFrame(dlg, fg_color="transparent")
-    btns.pack(pady=12)
-    ctk.CTkButton(btns, text="Appliquer", command=_apply).pack(side="left", padx=5)
+    btns.pack(fill="x", padx=12, pady=(4, 12))
+    ctk.CTkButton(btns, text="Appliquer", command=_apply).pack(side="right", padx=6)
     ctk.CTkButton(btns, text="Plus tard", fg_color="gray", command=dlg.destroy).pack(
-        side="left", padx=5
+        side="right", padx=6
     )
+
+
+def _voie_du_libelle(libelle: str) -> str:
+    return next(v for v, lib in kworb_decisions.LIBELLES.items() if lib == libelle)

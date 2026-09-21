@@ -120,6 +120,9 @@ class CreditRole(Enum):
 
     # Autres
     FEATURED = "Featured Artist"
+    # 2026-09-21 : qui a retravaillé le morceau. Genius l'écrit « Remixer »
+    # (66 crédits en base, jusqu'ici rangés en Other), Discogs « Remix ».
+    REMIXER = "Remixer"
     SAMPLE = "Sample"
     INTERPOLATION = "Interpolation"
     OTHER = "Other"
@@ -448,6 +451,18 @@ class Certs:
     # resterait marqué en fin de flux signale un enregistrement oublié.
     needs_write: bool = field(default=False, repr=False)
 
+    # Écho (2026-09-21) : une certification obtenue par une VERSION du morceau
+    # (un live, un Colors) reste la sienne ; le morceau souche en porte l'écho
+    # — entrée `{"echo": True, "echo_de": <id>, "echo_titre": …}` — pour la fiche,
+    # l'Analyse d'album et le pictogramme Timeline, jamais comptée.
+    @property
+    def reelles(self) -> list[dict[str, Any]]:
+        return [e for e in self.entries if not e.get("echo")]
+
+    @property
+    def echos(self) -> list[dict[str, Any]]:
+        return [e for e in self.entries if e.get("echo")]
+
 
 @dataclass
 class Media:
@@ -480,12 +495,32 @@ class TrackSpotifyId:
 
     ⚠️ Plusieurs IDs = plusieurs ÉDITIONS DU MÊME enregistrement, qui portent
     les MÊMES compteurs : on les RECONNAÎT toutes, on n'en SOMME jamais deux.
+
+    Depuis e28 le pluriel a DEUX natures (`kind`) : l'ÉDITION ci-dessus, et la
+    RENDITION — une autre prise du même morceau par l'artiste (« DKR - Bonus
+    Track », « … - Unplugged »), reconnue par son titre Spotify (`label`) et
+    portant son compteur PROPRE (`streams`, `daily_streams`, `streams_at`,
+    mono-source Kworb), affiché après le total du morceau sans jamais y entrer.
+    `Track.spotify_ids` ne liste que les éditions ; `spotify_id_entries` porte
+    tout.
     """
 
     spotify_id: str = ""
     source: str | None = None
     is_primary: bool = False
     seen_at: datetime | None = None
+    kind: str = "edition"
+    label: str | None = None
+    streams: int | None = None
+    daily_streams: int | None = None
+    streams_at: datetime | None = None
+    #: e29 : la version a SA PROPRE fiche (id du morceau) — le souche garde
+    #: l'indication, les streams vivent sur la fiche.
+    variant_track_id: int | None = None
+
+    @property
+    def est_rendition(self) -> bool:
+        return self.kind == "rendition"
 
 
 @dataclass
@@ -804,7 +839,7 @@ class Track:
         for level in ("Or", "Platine", "Diamant"):
             dates = [
                 d
-                for c in self.certs.entries
+                for c in self.certs.reelles
                 if c.get("certification") == level
                 and (d := parse_flexible(c.get("certification_date"))) is not None
             ]

@@ -40,6 +40,35 @@ def calculate_total_streams(
     return None
 
 
+def streams_variantes(track) -> int:
+    """Streams Spotify des VERSIONS ALTERNATIVES rattachées au morceau (e28) —
+    Live, Radio Edit, Bonus Track… — hors de sa colonne et de son total.
+
+    Décision utilisateur (2026-09-21) : elles ne comptent PAS dans le total du
+    morceau ni dans celui d'un album (une variante n'est pas une piste du disque),
+    mais elles comptent dans le cumul de la DISCOGRAPHIE de l'artiste (Timeline,
+    bandeau de la fenêtre principale) : ce sont ses écoutes. Une variante qui a
+    SA PROPRE FICHE (`variant_track_id`, e29) est déjà comptée par cette fiche —
+    exclue ici, sinon elle compterait deux fois.
+    """
+    return sum(
+        e.streams or 0
+        for e in getattr(track, "spotify_id_entries", None) or []
+        if e.est_rendition and not e.variant_track_id
+    )
+
+
+def total_discographie(tracks) -> int:
+    """Cumul estimé d'une discographie : chaque morceau (Spotify + YTM, cf.
+    `calculate_total_streams`) plus ses variantes rattachées (Spotify seul)."""
+    total = 0
+    for t in tracks:
+        est = calculate_total_streams(t.streams.spotify_streams, t.streams.ytm_streams)
+        total += est or 0
+        total += calculate_total_streams(streams_variantes(t), None) or 0
+    return total
+
+
 def calculate_total_monthly_listeners(
     spotify_listeners: int | None,
     ytm_listeners: int | None,

@@ -257,3 +257,112 @@ def parse_page_artist_name(html: str) -> str | None:
         return None
     name = raw.split("|")[0].strip()
     return name or None
+
+
+# ── Identité d'une page TITRE (2026-09-21) ────────────────────────────────────
+
+_MOIS_FR = {
+    "janvier": 1,
+    "février": 2,
+    "fevrier": 2,
+    "mars": 3,
+    "avril": 4,
+    "mai": 5,
+    "juin": 6,
+    "juillet": 7,
+    "août": 8,
+    "aout": 8,
+    "septembre": 9,
+    "octobre": 10,
+    "novembre": 11,
+    "décembre": 12,
+    "decembre": 12,
+}
+_DATE_FR_RE = re.compile(r"^\s*(\d{1,2})\s+(\S+)\s+(\d{4})\s*$")
+_LABEL_RE = re.compile(r"^\s*([©℗])\s*(?:\d{4}\s+)?(.+?)\s*$")
+
+
+def parse_date_fr(text: str | None) -> str | None:
+    """« 25 avril 2024 » → « 2024-04-25 ». Locale FRANÇAISE épinglée, comme les
+    auditeurs mensuels : un autre libellé de mois rend None, jamais une date fausse."""
+    m = _DATE_FR_RE.match(text or "")
+    if not m:
+        return None
+    mois = _MOIS_FR.get(m.group(2).lower())
+    if not mois:
+        return None
+    return f"{int(m.group(3)):04d}-{mois:02d}-{int(m.group(1)):02d}"
+
+
+def parse_track_identity(html: str) -> dict | None:
+    """Ce qu'une page titre dit du morceau, SANS connexion — l'identité d'une
+    ligne que Kworb a révélée et que Genius ignore (un remix, une version).
+
+    Établi en session live le 2026-09-21 sur « Dolce Camara - Snight B Remix » :
+      · `[data-testid="entityTitle"]` = le titre Spotify ;
+      · en-tête : lien `/album/{id}` = le disque (single ou album), `release-date`
+        = l'ANNÉE seule, une durée « m:ss » ;
+      · `[data-testid="track-artist-link-card"]` × N = TOUS les artistes
+        crédités, dans l'ordre (le `creator-link` de l'en-tête n'en donne qu'un) ;
+      · plus bas, la date complète en toutes lettres (« 25 avril 2024 ») et les
+        mentions « © 2024 Tallac Records » / « ℗ 2024 Tallac Records ».
+    Le bloc « Crédits » (écrit par / produit par) n'existe QUE connecté : il
+    n'est pas lu ici.
+
+    Returns:
+        {"name", "artists", "album", "album_id", "release_date" (ISO ou None),
+         "year", "duration" (s), "labels": {"©": …, "℗": …}} — ou None si la
+        page n'est pas une page titre rendue.
+    """
+    soup = _soup(html)
+    node = soup.select_one('[data-testid="entityTitle"]')
+    if node is None:
+        return None
+    name = node.get_text(" ", strip=True)
+    if not name:
+        return None
+    header = node.parent.parent if node.parent is not None else node
+    album = album_id = None
+    for a in header.find_all("a"):
+        m = _ALBUM_ID_RE.search(a.get("href") or "")
+        if m:
+            album, album_id = a.get_text(strip=True) or None, m.group(1)
+            break
+    duration = None
+    for span in header.find_all("span"):
+        t = span.get_text(strip=True)
+        if _DURATION_RE.match(t):
+            mn, sec = t.split(":")
+            duration = int(mn) * 60 + int(sec)
+            break
+    year_node = soup.select_one('[data-testid="release-date"]')
+    year = None
+    if year_node is not None and _DIGITS_RE.match(year_node.get_text(strip=True) or ""):
+        year = int(year_node.get_text(strip=True))
+    artists = []
+    for card in soup.select('[data-testid="track-artist-link-card"]'):
+        img = card.find("img")
+        nom = (img.get("alt") if img else None) or card.get_text(" ", strip=True)
+        nom = re.sub(r"^Artiste\s*", "", nom or "").strip()
+        if nom and nom not in artists:
+            artists.append(nom)
+    release_date = None
+    for texte in soup.find_all(string=_DATE_FR_RE):
+        release_date = parse_date_fr(str(texte))
+        if release_date:
+            break
+    labels: dict[str, str] = {}
+    for texte in soup.find_all(string=_LABEL_RE):
+        m = _LABEL_RE.match(str(texte))
+        if m and "Spotify AB" not in m.group(2) and m.group(1) not in labels:
+            labels[m.group(1)] = m.group(2)
+    return {
+        "name": name,
+        "artists": artists,
+        "album": album,
+        "album_id": album_id,
+        "release_date": release_date,
+        "year": year,
+        "duration": duration,
+        "labels": labels,
+    }

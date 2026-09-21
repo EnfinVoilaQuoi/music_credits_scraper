@@ -46,11 +46,22 @@ from src.utils.spotify_identity import (
     artiste_etranger,
     identite_concorde,
     lire_identite_http,
+    variante_etrangere,
 )
 
 
-def a_retirer(dm: DataManager, artiste: str | None, pause: float) -> list[dict]:
-    """Les lignes dont l'ID désigne le morceau d'un autre artiste."""
+def _fautif(track, identite, *, variantes: bool) -> bool:
+    """Les deux motifs que la réparation retire sans hésiter : un artiste
+    étranger, et — depuis 2026-09-21 — une VARIANTE étrangère (la base attend
+    « Heartless (Remix) », Spotify sert « Heartless » : 73 lignes, 22,7 Md de
+    streams sur la mauvaise ligne). `--sans-variantes` revient au seul premier."""
+    return artiste_etranger(track, identite) or (variantes and variante_etrangere(track, identite))
+
+
+def a_retirer(
+    dm: DataManager, artiste: str | None, pause: float, *, variantes: bool = True
+) -> list[dict]:
+    """Les lignes dont l'ID désigne un autre morceau (artiste ou version)."""
     lignes = lignes_a_verifier(dm.engine, artiste, None)
     print(f"🔎 {len(lignes)} identifiant(s) à vérifier sur l'embed Spotify\n")
     fautifs = []
@@ -59,7 +70,7 @@ def a_retirer(dm: DataManager, artiste: str | None, pause: float) -> list[dict]:
         if identite is not None:
             track = track_de_la_ligne(ligne)
             ok, motif = identite_concorde(track, identite)
-            if not ok and artiste_etranger(track, identite):
+            if not ok and _fautif(track, identite, variantes=variantes):
                 fautifs.append(
                     {
                         "track_id": ligne["id"],
@@ -76,10 +87,14 @@ def a_retirer(dm: DataManager, artiste: str | None, pause: float) -> list[dict]:
     return fautifs
 
 
-def depuis_json(chemin: str) -> list[dict]:
+def depuis_json(chemin: str, *, variantes: bool = True) -> list[dict]:
     """Reprend les écarts d'un audit précédent — sans redemander une page."""
     with open(chemin, encoding="utf-8") as f:
-        return [e for e in json.load(f) if e.get("artiste_etranger")]
+        return [
+            e
+            for e in json.load(f)
+            if e.get("artiste_etranger") or (variantes and e.get("variante_etrangere"))
+        ]
 
 
 def rapport(fautifs: list[dict]) -> None:
@@ -120,10 +135,20 @@ def main() -> int:
     parser.add_argument("--depuis", help="Reprendre le JSON d'un audit précédent")
     parser.add_argument("--exclure", nargs="*", type=int, default=[], help="track_id à épargner")
     parser.add_argument("--pause", type=float, default=0.2, help="Pause entre deux requêtes")
+    parser.add_argument(
+        "--sans-variantes",
+        action="store_true",
+        help="Ne retirer que sur « artiste étranger » (critère d'avant 2026-09-21)",
+    )
     args = parser.parse_args()
 
     dm = DataManager()
-    fautifs = depuis_json(args.depuis) if args.depuis else a_retirer(dm, args.artiste, args.pause)
+    variantes = not args.sans_variantes
+    fautifs = (
+        depuis_json(args.depuis, variantes=variantes)
+        if args.depuis
+        else a_retirer(dm, args.artiste, args.pause, variantes=variantes)
+    )
     if args.exclure:
         avant = len(fautifs)
         fautifs = [f for f in fautifs if f["track_id"] not in set(args.exclure)]

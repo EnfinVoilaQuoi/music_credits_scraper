@@ -48,14 +48,14 @@ class TestFichierParArtiste:
 class TestLecture:
     def test_fichier_absent_rend_la_structure_vide(self, manager):
         data = manager.load("Inconnu")
-        assert data == {"confirmed": {}, "rejected": []}
+        assert data == {"confirmed": {}, "rejected": [], "decisions": {}}
 
     def test_fichier_corrompu_ne_fait_pas_crasher(self, manager):
         """Un JSON tronqué ne doit pas bloquer le run : on repart d'une mémoire
         vide, quitte à redemander une fois."""
         manager.base_dir.mkdir(parents=True, exist_ok=True)
         (manager.base_dir / "Jul.json").write_text("{ceci n'est pas du JSON", encoding="utf-8")
-        assert manager.load("Jul") == {"confirmed": {}, "rejected": []}
+        assert manager.load("Jul") == {"confirmed": {}, "rejected": [], "decisions": {}}
 
     def test_structure_partielle_completee(self, manager):
         """Un vieux fichier sans la clé `rejected` reste exploitable."""
@@ -66,6 +66,7 @@ class TestLecture:
         data = manager.load("Jul")
         assert data["confirmed"] == {"titre": 7}
         assert data["rejected"] == []
+        assert data["decisions"] == {}
 
 
 class TestDecisions:
@@ -137,3 +138,28 @@ def test_ecriture_impossible_journalisee(manager, monkeypatch, caplog):
     monkeypatch.setattr("pathlib.Path.write_text", _boom)
     manager.confirm("Jul", "Matrix", 7)  # ne lève pas
     assert "Sauvegarde décisions Kworb échouée" in caplog.text
+
+
+class TestTaxonomie:
+    """`decide` (2026-09-21) : la décision de variante remplace un rejet ou une
+    confirmation antérieurs, qui répondaient à une autre question."""
+
+    def test_decision_memorisee(self, manager):
+        manager.decide("Booba", "Dolce Camara - Snight B Remix", "tiers", 99)
+        assert manager.load("Booba")["decisions"] == {
+            normalize_title("Dolce Camara - Snight B Remix"): {"kind": "tiers", "track_id": 99}
+        }
+
+    def test_un_rejet_ancien_est_efface(self, manager):
+        manager.reject("Booba", "DKR - Bonus Track")
+        manager.decide("Booba", "DKR - Bonus Track", "rendition", 7)
+        data = manager.load("Booba")
+        assert data["rejected"] == []
+        assert data["decisions"][normalize_title("DKR - Bonus Track")]["kind"] == "rendition"
+
+    def test_ignore_sans_morceau(self, manager):
+        manager.decide("Booba", "X - Live", "ignore")
+        assert manager.load("Booba")["decisions"][normalize_title("X - Live")] == {
+            "kind": "ignore",
+            "track_id": None,
+        }

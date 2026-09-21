@@ -20,6 +20,7 @@ from src.utils.spotify_identity import (
     noms_attendus,
     valider_identite,
     valider_identite_async,
+    variante_etrangere,
 )
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -120,6 +121,47 @@ class TestTitre:
         assert "titre" in motif
 
 
+class TestVariante:
+    """Règle INCONDITIONNELLE (2026-09-21) : un descripteur de version asymétrique
+    est un autre enregistrement, même avec le bon artiste et la bonne durée —
+    mesuré, 73 variantes portaient l'ID de l'original (22,7 Md de streams sur
+    la mauvaise ligne), toutes corroborées par une durée qui avait SUIVI l'ID."""
+
+    def test_la_variante_qui_porte_l_id_de_l_original(self):
+        track = _track(titre="Heartless (Remix)", artiste="Kanye West", duree=211)
+        ok, motif = identite_concorde(track, _identite("Heartless", ["Kanye West"], 211))
+        assert ok is False
+        assert motif.startswith("variante")
+        assert variante_etrangere(track, _identite("Heartless", ["Kanye West"], 211))
+
+    def test_l_original_qui_porte_l_id_d_une_version(self):
+        track = _track(titre="FACTS", artiste="Kanye West", duree=200)
+        ok, motif = identite_concorde(
+            track, _identite("Facts (Charlie Heat Version)", ["Kanye West"], 200)
+        )
+        assert ok is False
+        assert motif.startswith("variante")
+
+    def test_deux_remixeurs_differents(self):
+        track = _track(titre="Dolce Camara (Snight B Remix)", artiste="Booba", duree=144)
+        identite = _identite("Dolce Camara - Dee Mad x Akalex Remix", ["Booba"], 144)
+        assert identite_concorde(track, identite)[0] is False
+
+    def test_genius_et_spotify_ecrivent_le_meme_remix(self):
+        track = _track(titre="Dolce Camara (Snight B Remix)", artiste="Booba", duree=144)
+        identite = _identite("Dolce Camara - Snight B Remix", ["Booba", "Snight B"], 144)
+        assert identite_concorde(track, identite) == (True, "")
+
+    def test_une_rendition_ecrite_des_deux_cotes(self):
+        track = _track(titre="Evasion (feat. China) - Version Radio", artiste="Diam’s", duree=200)
+        identite = _identite("Evasion - Version Radio", ["Diam’s"], 200)
+        assert identite_concorde(track, identite) == (True, "")
+
+    def test_un_titre_ecrit_autrement_n_est_pas_son_affaire(self):
+        track = _track(titre="Un pour la plume", artiste="Flynt", duree=249)
+        assert not variante_etrangere(track, _identite("1 pour la plume", ["Flynt"], 249))
+
+
 class TestOnNeConcluitPas:
     """Un ID non vérifiable n'est PAS un ID fautif — même règle qu'`absent` en
     observabilité : ce qu'on n'a pas pu lire n'accuse personne."""
@@ -208,3 +250,24 @@ class TestToutProducteurPasseParLeGate:
         """Un crible qui ne trouve aucun site passerait au vert pour de mauvaises
         raisons — le défaut classique du garde-fou muet."""
         assert len(list(self._sites())) >= 4
+
+
+class TestTitresTranches:
+    """Une décision HUMAINE (dialogue Kworb) désarme les règles de titre, jamais
+    celles d'artiste et de durée."""
+
+    def test_le_titre_ne_refuse_plus(self):
+        track = _track(titre="DCR (Dolce Camara Remix)", artiste="Booba")
+        identite = _identite("Dolce Camara - Snight B Remix", ["Booba", "Snight B"], 144)
+        assert identite_concorde(track, identite)[0] is False
+        assert identite_concorde(track, identite, titres_tranches=True) == (True, "")
+
+    def test_l_artiste_garde_toujours(self):
+        track = _track(titre="DCR (Dolce Camara Remix)", artiste="Booba")
+        identite = _identite("Dolce Camara - Snight B Remix", ["Mylène Farmer"], 144)
+        assert identite_concorde(track, identite, titres_tranches=True)[0] is False
+
+    def test_la_duree_garde_toujours(self):
+        track = _track(titre="DCR (Dolce Camara Remix)", artiste="Booba", duree=300)
+        identite = _identite("Dolce Camara - Snight B Remix", ["Booba"], 144)
+        assert identite_concorde(track, identite, titres_tranches=True)[0] is False

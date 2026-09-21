@@ -30,6 +30,10 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
     Les deux magasins sont interrogés pour la même raison que
     `get_track_ids_by_spotify_id` : la colonne porte l'ID PRINCIPAL (seul écrit
     par `save_track`), la table les éditions alternatives.
+
+    Les RENDITIONS (e28) sont exclues : leur titre Spotify diffère du titre du
+    morceau PAR CONSTRUCTION (« DKR - Bonus Track » sur « DKR ») — la règle
+    d'asymétrie de version les signalerait toutes, et la réparation les retirerait.
     """
     filtre = "AND a.name = :artiste" if artiste else ""
     params = {"artiste": artiste} if artiste else {}
@@ -44,7 +48,7 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
           FROM track_spotify_ids s
           JOIN tracks t ON t.id = s.track_id
           JOIN artists a ON a.id = t.artist_id
-         WHERE 1=1 {filtre}
+         WHERE s.kind = 'edition' {filtre}
          ORDER BY 6, 2
     """
     with engine.connect() as conn:
@@ -157,6 +161,7 @@ def verifier_lignes(
         artiste_etranger,
         identite_concorde,
         lire_identite_http,
+        variante_etrangere,
     )
 
     lire_identite = lire_identite or lire_identite_http
@@ -185,6 +190,7 @@ def verifier_lignes(
                         "principal": bool(ligne["principal"]),
                         "motif": motif,
                         "artiste_etranger": artiste_etranger(track, identite),
+                        "variante_etrangere": variante_etrangere(track, identite),
                         "spotify": identite,
                     }
                 )

@@ -28,6 +28,7 @@ from src.utils.title_matching import (
     normalize_title,
 )
 from src.utils.track_mapper import _clean_duration
+from src.utils.version_descriptors import meme_famille, parse_variant
 
 logger = get_logger(__name__)
 
@@ -53,7 +54,13 @@ def noms_attendus(track) -> list[str]:
     return [n for n in noms if n]
 
 
-def identite_concorde(track, identite: dict | None, *, tolerance: int = TOLERANCE_DUREE):
+def identite_concorde(
+    track,
+    identite: dict | None,
+    *,
+    tolerance: int = TOLERANCE_DUREE,
+    titres_tranches: bool = False,
+):
     """Le morceau servi par Spotify est-il celui-ci ? → `(verdict, motif)`.
 
     Trois règles, de la plus forte à la plus faible :
@@ -64,14 +71,28 @@ def identite_concorde(track, identite: dict | None, *, tolerance: int = TOLERANC
     2. **Durée** — au-delà de la tolérance, c'est un autre enregistrement. C'est
        le signal OBJECTIF, et le seul qui attrape certains cas : Flynt « Rap
        théorie » avait le bon titre, le bon artiste, et 64 secondes d'écart.
-    3. **Titre** — le plus faible des trois, et le seul CONDITIONNEL : il ne
-       refuse que si l'artiste ou la durée manque à l'appel. Quand les deux
-       concordent, un titre différent est une variante d'écriture (« 1 pour la
-       plume » chez Spotify, « Un pour la plume » chez Genius).
+    3. **Version** (2026-09-21) — la base attend « Heartless (Remix) » et Spotify
+       sert « Heartless » nu, ou l'inverse (« FACTS » ↔ « Facts (Charlie Heat
+       Version) »), ou un autre remixeur : un DESCRIPTEUR DE VERSION asymétrique
+       est un autre enregistrement, quoi qu'en disent l'artiste et la durée.
+       Règle INCONDITIONNELLE, et c'est le point : c'est le cas où la durée
+       s'est corroborée elle-même — mesuré, **73 variantes portaient l'ID de
+       l'original et 22,7 Md de streams étaient écrits sur la mauvaise ligne**,
+       toutes avec le bon artiste et une durée qui avait SUIVI l'ID fautif.
+       Le vocabulaire est celui de `version_descriptors` (fermé).
+    4. **Titre** — le plus faible, et le seul CONDITIONNEL : il ne refuse que
+       si l'artiste ou la durée manque à l'appel. Quand les deux concordent, un
+       titre différent est une variante d'écriture (« 1 pour la plume » chez
+       Spotify, « Un pour la plume » chez Genius).
 
     **Un ID non vérifiable n'est pas un ID fautif** : `identite=None` (embed
     illisible, réseau coupé) rend `(True, "")` — on ne conclut pas, même règle
     qu'`absent` en observabilité, où ce qu'on n'a pas pu lire n'accuse personne.
+
+    `titres_tranches=True` désarme les deux règles de TITRE (3 et 4) : réservé
+    aux décisions HUMAINES (dialogue Kworb, où l'utilisateur a lu les deux
+    titres et dit que la ligne « Dolce Camara - Snight B Remix » EST « DCR
+    (Dolce Camara Remix) »). L'artiste et la durée continuent de garder.
     """
     if not identite:
         return True, ""
@@ -87,16 +108,28 @@ def identite_concorde(track, identite: dict | None, *, tolerance: int = TOLERANC
             f"artiste : Spotify crédite {', '.join(artistes)}, attendu {' ou '.join(attendus)}"
         )
 
+    titre_spotify = identite.get("name") or ""
+    if not titres_tranches and variante_etrangere(track, identite):
+        return False, (
+            f"variante : Spotify sert « {titre_spotify} », la base attend « {track.title} »"
+        )
+
     duree_base = _clean_duration(track.duration)
     duree_spotify = identite.get("duration")
     if duree_base and duree_spotify and abs(duree_base - duree_spotify) > tolerance:
         return False, f"durée : {duree_base} s attendus, {duree_spotify} s sur Spotify"
 
-    titre_spotify = identite.get("name") or ""
     a, b = normalize_title(track.title or ""), normalize_title(titre_spotify)
     # Deux signaux indépendants qui s'accordent valent mieux qu'un titre.
     corrobore = bool(artistes and attendus and duree_base and duree_spotify)
-    if a and b and a != b and not corrobore and not either_contains_as_words(a, b):
+    if (
+        a
+        and b
+        and a != b
+        and not corrobore
+        and not titres_tranches
+        and not either_contains_as_words(a, b)
+    ):
         # Le titre ne refuse QUE s'il est seul à parler. Quand l'artiste ET la
         # durée concordent, deux signaux indépendants s'accordent, et un titre
         # écrit autrement n'est qu'une variante éditoriale : Spotify sert « 1
@@ -131,6 +164,26 @@ def artiste_etranger(track, identite: dict | None) -> bool:
     return not any(names_match_as_words(n, a) for n in attendus for a in artistes)
 
 
+def variante_etrangere(track, identite: dict | None) -> bool:
+    """Le titre Spotify et le titre en base ne désignent pas la même VERSION.
+
+    « Heartless (Remix) » en base contre « Heartless » chez Spotify, « FACTS »
+    contre « Facts (Charlie Heat Version) », « Dolce Camara - Snight B Remix »
+    contre « … - Dee Mad x Akalex Remix ». Second motif de RÉPARATION, à côté
+    d'`artiste_etranger` : lui aussi se montre (le titre servi est dans le
+    rapport), et il ne dépend pas d'une durée qui a pu suivre l'ID fautif.
+
+    Prédicat pur, sur le SEUL descripteur : deux titres qui diffèrent par autre
+    chose (« 1 pour la plume » / « Un pour la plume ») ne sont pas son affaire.
+    """
+    if not identite:
+        return False
+    titre_spotify = identite.get("name") or ""
+    if not titre_spotify or not track.title:
+        return False
+    return not meme_famille(parse_variant(track.title), parse_variant(titre_spotify))
+
+
 def lire_identite_http(spotify_id: str) -> dict | None:
     """Lecteur par DÉFAUT : la page `/embed/` en `requests` nu, sans navigateur.
 
@@ -159,7 +212,9 @@ def lire_identite_http(spotify_id: str) -> dict | None:
     return SpotifyIDScraper._identite_depuis_embed(resp.text)
 
 
-def _juger(track, spotify_id: str, identite: dict | None, tolerance: int) -> bool:
+def _juger(
+    track, spotify_id: str, identite: dict | None, tolerance: int, titres_tranches: bool = False
+) -> bool:
     """Décision COMMUNE aux voies sync et async : seul le transport diffère.
 
     Factorisée dès l'écriture, et pas après : c'est le défaut du jumeau
@@ -167,23 +222,32 @@ def _juger(track, spotify_id: str, identite: dict | None, tolerance: int) -> boo
     GARDE-FOU, lui, n'avait atterri que sur une voie — celle qu'aucun appelant
     n'empruntait.
     """
-    accepte, motif = identite_concorde(track, identite, tolerance=tolerance)
+    accepte, motif = identite_concorde(
+        track, identite, tolerance=tolerance, titres_tranches=titres_tranches
+    )
     if not accepte:
         logger.warning(f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — {motif}")
     return accepte
 
 
-def valider_identite(track, spotify_id: str, lire_identite=None, *, tolerance=TOLERANCE_DUREE):
+def valider_identite(
+    track,
+    spotify_id: str,
+    lire_identite=None,
+    *,
+    tolerance=TOLERANCE_DUREE,
+    titres_tranches: bool = False,
+):
     """Vérifie qu'un ID désigne bien ce morceau avant de l'accepter (voie sync).
 
     `lire_identite` est INJECTÉ (le scraper qui vient de trouver l'ID, ou un
     double en test) : ce module ne dépend d'aucun réseau. Sans lui, le lecteur
-    HTTP par défaut fait l'affaire.
+    HTTP par défaut fait l'affaire. `titres_tranches` : cf. `identite_concorde`.
     """
     if not spotify_id:
         return False
     lecteur = lire_identite or lire_identite_http
-    return _juger(track, spotify_id, lecteur(spotify_id), tolerance)
+    return _juger(track, spotify_id, lecteur(spotify_id), tolerance, titres_tranches)
 
 
 async def valider_identite_async(

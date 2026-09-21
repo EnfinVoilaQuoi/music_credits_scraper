@@ -686,6 +686,9 @@ class GeniusScraperV3(CrawlAIScraperBase):
             "Video Editor": CreditRole.VIDEO_EDITOR,
             "Video Colorist": CreditRole.VIDEO_COLORIST,
             "Featuring": CreditRole.FEATURED,
+            "Remixer": CreditRole.REMIXER,
+            "Remixed By": CreditRole.REMIXER,
+            "Remix": CreditRole.REMIXER,
             "Sample": CreditRole.SAMPLE,
             "A&R": CreditRole.A_AND_R,
         }

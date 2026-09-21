@@ -7,8 +7,11 @@ UNE FOIS ; la décision est mémorisée pour ne plus redemander aux runs suivant
 Stockage : data/kworb_links/<artiste>.json
     {
       "confirmed": { "<titre kworb normalisé>": <track_id> },
-      "rejected":  [ "<titre kworb normalisé>", ... ]
+      "rejected":  [ "<titre kworb normalisé>", ... ],
+      "decisions": { "<titre kworb normalisé>": {"kind": "...", "track_id": <id|null>} }
     }
+`decisions` (2026-09-21) porte la taxonomie des variantes — rendition / existant
+/ collab / tiers / ignore — et l'emporte sur les deux autres.
 Clé = titre Kworb normalisé (via title_matching.normalize_title) pour être
 stable entre les runs malgré ponctuation/casse.
 """
@@ -39,6 +42,7 @@ class KworbLinksManager:
             data = {}
         data.setdefault("confirmed", {})
         data.setdefault("rejected", [])
+        data.setdefault("decisions", {})
         return data
 
     def _save(self, artist_name: str, data: dict):
@@ -66,3 +70,20 @@ class KworbLinksManager:
         data["confirmed"].pop(norm, None)
         self._save(artist_name, data)
         logger.info(f"🚫 Kworb décision mémorisée : '{kworb_title}' rejeté")
+
+    def decide(self, artist_name: str, kworb_title: str, kind: str, track_id: int | None = None):
+        """Décision de la taxonomie des variantes (2026-09-21), mémorisée par titre.
+
+        `kind` ∈ rendition (rattachée au morceau `track_id`) · existant / collab /
+        tiers (la ligne Kworb appartient au morceau `track_id`, existant ou créé)
+        · ignore. Elle REMPLACE un rejet ou une confirmation antérieurs : ces
+        deux-là répondaient à une autre question (« même morceau ? »).
+        """
+        data = self.load(artist_name)
+        norm = normalize_title(kworb_title)
+        data["decisions"][norm] = {"kind": kind, "track_id": track_id}
+        if norm in data["rejected"]:
+            data["rejected"].remove(norm)
+        data["confirmed"].pop(norm, None)
+        self._save(artist_name, data)
+        logger.info(f"🔗 Kworb décision mémorisée : '{kworb_title}' → {kind} (#{track_id})")

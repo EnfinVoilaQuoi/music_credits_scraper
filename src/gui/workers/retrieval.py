@@ -23,13 +23,15 @@ def get_tracks(app):
     # Inclure les features
     dialog = ctk.CTkToplevel(app.root)
     dialog.title("Options de récupération")
-    dialog.geometry("480x940")
 
-    # Centrer la fenêtre
+    # Hauteur adaptée à l'écran : 940 px idéal, plafonné à 85 % de l'écran.
     dialog.update_idletasks()
-    x = (dialog.winfo_screenwidth() // 2) - (240)
-    y = (dialog.winfo_screenheight() // 2) - (470)
-    dialog.geometry(f"480x940+{x}+{y}")
+    screen_h = dialog.winfo_screenheight()
+    dialog_w = 480
+    dialog_h = min(940, int(screen_h * 0.85))
+    x = (dialog.winfo_screenwidth() // 2) - (dialog_w // 2)
+    y = (screen_h // 2) - (dialog_h // 2)
+    dialog.geometry(f"{dialog_w}x{dialog_h}+{x}+{y}")
 
     dialog.lift()
     dialog.focus_force()
@@ -43,14 +45,17 @@ def get_tracks(app):
     download_images_var = ctk.BooleanVar(value=True)  # Télécharger photos/covers/vignettes (Media)
     deezer_var = ctk.BooleanVar(value=True)  # Compléter par Deezer (écarts listés, jamais créés)
 
-    # Interface
+    # Interface — le contenu scrolle, les boutons d'action restent en bas.
     ctk.CTkLabel(
         dialog, text="Options de récupération des morceaux", font=("Arial", 16, "bold")
-    ).pack(pady=15)
+    ).pack(pady=(15, 5))
+
+    scroll = ctk.CTkScrollableFrame(dialog, fg_color="transparent")
+    scroll.pack(fill="both", expand=True, padx=5, pady=5)
 
     # Checkbox pour les features
-    features_frame = ctk.CTkFrame(dialog)
-    features_frame.pack(fill="x", padx=20, pady=15)
+    features_frame = ctk.CTkFrame(scroll)
+    features_frame.pack(fill="x", padx=15, pady=(10, 5))
 
     ctk.CTkCheckBox(
         features_frame,
@@ -67,8 +72,8 @@ def get_tracks(app):
     ).pack(anchor="w", padx=15, pady=(0, 8))
 
     # Checkbox pour l'appel API album + media (Spotify/YouTube/relations)
-    prefill_frame = ctk.CTkFrame(dialog)
-    prefill_frame.pack(fill="x", padx=20, pady=(0, 5))
+    prefill_frame = ctk.CTkFrame(scroll)
+    prefill_frame.pack(fill="x", padx=15, pady=(0, 5))
 
     ctk.CTkCheckBox(
         prefill_frame,
@@ -87,8 +92,8 @@ def get_tracks(app):
     ).pack(anchor="w", padx=15, pady=(0, 8))
 
     # Checkbox pour les rôles secondaires (Additional Voices, chœurs…)
-    secondary_frame = ctk.CTkFrame(dialog)
-    secondary_frame.pack(fill="x", padx=20, pady=(0, 5))
+    secondary_frame = ctk.CTkFrame(scroll)
+    secondary_frame.pack(fill="x", padx=15, pady=(0, 5))
 
     ctk.CTkCheckBox(
         secondary_frame,
@@ -107,8 +112,8 @@ def get_tracks(app):
     ).pack(anchor="w", padx=15, pady=(0, 8))
 
     # Checkbox : ne pas réajouter les morceaux supprimés
-    deleted_frame = ctk.CTkFrame(dialog)
-    deleted_frame.pack(fill="x", padx=20, pady=(0, 5))
+    deleted_frame = ctk.CTkFrame(scroll)
+    deleted_frame.pack(fill="x", padx=15, pady=(0, 5))
 
     ctk.CTkCheckBox(
         deleted_frame,
@@ -135,8 +140,8 @@ def get_tracks(app):
     ).pack(anchor="w", padx=15, pady=(0, 8))
 
     # Checkbox : télécharger les images (chantier « Media »)
-    images_frame = ctk.CTkFrame(dialog)
-    images_frame.pack(fill="x", padx=20, pady=(0, 5))
+    images_frame = ctk.CTkFrame(scroll)
+    images_frame.pack(fill="x", padx=15, pady=(0, 5))
 
     ctk.CTkCheckBox(
         images_frame,
@@ -155,8 +160,8 @@ def get_tracks(app):
     ).pack(anchor="w", padx=15, pady=(0, 8))
 
     # Checkbox : compléter par Deezer (2026-09-21) + bouton « Écarts Deezer » seul
-    deezer_frame = ctk.CTkFrame(dialog)
-    deezer_frame.pack(fill="x", padx=20, pady=(0, 5))
+    deezer_frame = ctk.CTkFrame(scroll)
+    deezer_frame.pack(fill="x", padx=15, pady=(0, 5))
     ctk.CTkCheckBox(
         deezer_frame,
         text="Compléter par Deezer en fin de run",
@@ -184,12 +189,12 @@ def get_tracks(app):
         command=_ecarts_seuls,
         fg_color="gray30",
         hover_color="gray20",
-        state="normal" if getattr(app, "tracks", None) else "disabled",
+        state="normal" if discographie_chargee(app) else "disabled",
     ).pack(anchor="w", padx=15, pady=(0, 12))
 
     # Nombre maximum de morceaux
-    max_songs_frame = ctk.CTkFrame(dialog)
-    max_songs_frame.pack(fill="x", padx=20, pady=15)
+    max_songs_frame = ctk.CTkFrame(scroll)
+    max_songs_frame.pack(fill="x", padx=15, pady=(10, 5))
 
     ctk.CTkLabel(
         max_songs_frame, text="Nombre maximum de morceaux (debug):", font=("Arial", 12)
@@ -208,8 +213,8 @@ def get_tracks(app):
     max_songs_entry.pack(anchor="w", padx=15, pady=(0, 12))
 
     # Info supplémentaire
-    info_frame = ctk.CTkFrame(dialog)
-    info_frame.pack(fill="x", padx=20, pady=15)
+    info_frame = ctk.CTkFrame(scroll)
+    info_frame.pack(fill="x", padx=15, pady=(10, 5))
 
     info_text = """ℹ️ Les morceaux en featuring seront marqués avec 🎤
 ⚡ L'album et la date seront récupérés automatiquement via l'API
@@ -219,9 +224,9 @@ def get_tracks(app):
         info_frame, text=info_text, font=("Arial", 9), text_color="gray", justify="left"
     ).pack(anchor="w", padx=15, pady=10)
 
-    # Boutons
+    # Boutons — HORS du scroll, toujours visibles en bas de la fenêtre.
     button_frame = ctk.CTkFrame(dialog)
-    button_frame.pack(fill="x", padx=20, pady=20)
+    button_frame.pack(fill="x", padx=20, pady=(10, 15))
 
     def start_retrieval(update_only: bool = False):
         # Vide / invalide / ≤ 0 = illimité (None) : le plafond ne sert qu'au debug.
@@ -275,6 +280,14 @@ def get_tracks(app):
     ctk.CTkButton(button_frame, text="❌ Annuler", command=cancel, width=90, height=35).pack(
         side="right", padx=6
     )
+
+
+def discographie_chargee(app) -> list:
+    """Les morceaux de l'artiste courant tels que la GUI les tient : sur
+    `app.current_artist.tracks` — `app.tracks` n'est rempli que par le worker
+    de récupération (bouton « Écarts Deezer » grisé à tort, 2026-09-21)."""
+    artist = getattr(app, "current_artist", None)
+    return list(getattr(artist, "tracks", None) or []) if artist is not None else []
 
 
 def start_track_retrieval(

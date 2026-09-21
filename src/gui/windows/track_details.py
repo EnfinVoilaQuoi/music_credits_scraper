@@ -1368,7 +1368,9 @@ class TrackDetailsWindow:
                     text="Versions alternatives (non comptées dans le total) :",
                     font=ctk.CTkFont(size=13, weight="bold"),
                 ).pack(anchor="w", pady=(0, 4))
-                titres = {t.id: t.title for t in getattr(self.app, "tracks", []) or []}
+                from src.gui.workers.retrieval import discographie_chargee
+
+                titres = {t.id: t.title for t in discographie_chargee(self.app)}
                 for e in renditions:
                     ligne = ctk.CTkFrame(streams_content, fg_color="transparent")
                     ligne.pack(fill="x", pady=1)

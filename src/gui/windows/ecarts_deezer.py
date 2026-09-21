@@ -265,7 +265,9 @@ def show_ecarts_deezer(app, bilan=None) -> None:
     if app.current_artist is None:
         messagebox.showwarning("Écarts Deezer", "Charge un artiste d'abord.")
         return
-    if not getattr(app, "tracks", None):
+    from src.gui.workers.retrieval import discographie_chargee
+
+    if not discographie_chargee(app):
         messagebox.showwarning(
             "Écarts Deezer",
             "Récupère la discographie d'abord : l'identité Deezer se juge sur les albums.",

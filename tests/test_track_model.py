@@ -56,43 +56,6 @@ class TestGetProducers:
         assert "C" not in producers
 
 
-class TestUpdateReleaseDate:
-    def test_pas_de_date_existante(self):
-        track = Track(title="Test")
-        assert track.update_release_date("2020-05-01") is True
-        assert track.release_date == datetime(2020, 5, 1)
-
-    def test_garde_la_plus_ancienne(self):
-        # Un single sort AVANT l'album : la date la plus ancienne gagne
-        track = Track(title="Test", release_date=datetime(2020, 5, 1))
-        assert track.update_release_date("2019-03-01") is True
-        assert track.release_date == datetime(2019, 3, 1)
-
-    def test_date_plus_recente_ignoree(self):
-        track = Track(title="Test", release_date=datetime(2020, 5, 1))
-        assert track.update_release_date("2021-01-01") is False
-        assert track.release_date == datetime(2020, 5, 1)
-
-    def test_force_ecrase(self):
-        track = Track(title="Test", release_date=datetime(2020, 5, 1))
-        assert track.update_release_date("2021-01-01", force=True) is True
-        assert track.release_date == datetime(2021, 1, 1)
-
-    def test_format_iso_avec_heure(self):
-        track = Track(title="Test")
-        assert track.update_release_date("2020-05-01T12:30:00Z") is True
-        assert track.release_date.year == 2020
-
-    def test_chaine_invalide_refusee(self):
-        track = Track(title="Test")
-        assert track.update_release_date("pas une date") is False
-        assert track.release_date is None
-
-    def test_type_invalide_refuse(self):
-        track = Track(title="Test")
-        assert track.update_release_date(12345) is False
-
-
 class TestSpotifyIds:
     def test_add_puis_legacy_rempli(self):
         track = Track(title="Test")

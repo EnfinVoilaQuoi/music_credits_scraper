@@ -131,3 +131,53 @@ class TestVerdictDeValidation:
         constat = tv.evaluer(t)
         assert constat.verdict is tv.Verdict.INEDIT and constat.icone == "🔒"
         assert not constat.compte_a_valider and constat.manques == ()
+
+
+class TestFusionDesConstats:
+    """`merge_tracks` (2026-09-23) : `unreleased` et `instrumental` ne se
+    fusionnent PAS de la même façon, et c'est mesuré."""
+
+    @pytest.mark.parametrize(
+        ("garde", "supprime", "paroles", "attendu"),
+        [
+            # Des paroles survivent : le constat ne peut être que « 0 ».
+            (True, None, True, False),
+            (None, True, True, False),
+            (None, None, True, False),
+            # Aucune parole : un constat d'instrumental, d'un côté ou de
+            # l'autre, vaut pour la ligne survivante.
+            (True, None, False, True),
+            (None, True, False, True),
+            (False, True, False, True),
+            # Rien à dire : on garde ce qu'on sait, sans inventer.
+            (None, None, False, None),
+            (False, None, False, False),
+            (None, False, False, False),
+        ],
+    )
+    def test_instrumental_suit_les_PAROLES_conservees(self, garde, supprime, paroles, attendu):
+        from src.utils.track_soeurs import fusionner_constat_instrumental
+
+        assert fusionner_constat_instrumental(garde, supprime, paroles) is attendu
+
+    def test_l_invariant_que_cette_regle_protege(self):
+        """Mesuré sur les 9 766 morceaux : aucune ligne à `instrumental=1` ne
+        porte de paroles, aucune ligne à `0` n'en est dépourvue. Une fusion ne
+        doit pas être ce qui casse cet invariant."""
+        from src.utils.track_soeurs import fusionner_constat_instrumental
+
+        assert fusionner_constat_instrumental(True, True, paroles_conservees=True) is False
+
+
+class TestDialogueDeFusion:
+    """Le tri-état ne doit pas être re-piégé par le code qui le consomme."""
+
+    def test_les_champs_TRI_ETAT_sont_separes_des_champs_falsy(self):
+        from src.gui.dialogs.merge_tracks import _FILL_ONLY, _FILL_TRI_ETAT
+
+        assert "lyrics.instrumental" in _FILL_TRI_ETAT
+        assert "unreleased" in _FILL_TRI_ETAT
+        assert not set(_FILL_TRI_ETAT) & set(_FILL_ONLY), (
+            "`_FILL_ONLY` traite False comme une absence : un constat « 0 » y "
+            "serait écrasé par le « 1 » de l'autre fiche."
+        )

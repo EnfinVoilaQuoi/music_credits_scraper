@@ -732,72 +732,13 @@ class Track:
                 return
         self.credits.append(credit)
 
-    def update_release_date(self, new_date, source: str = "unknown", force: bool = False) -> bool:
-        """
-        Met à jour la date de sortie de manière intelligente
-
-        Args:
-            new_date: Nouvelle date (datetime, str, ou None)
-            source: Source de la date ("api", "scraper", "manual")
-            force: Si True, écrase la date existante même si elle est plus ancienne
-
-        Returns:
-            bool: True si la date a été mise à jour, False sinon
-
-        Logique:
-        - Garde toujours la date la PLUS ANCIENNE (singles sortis avant l'album)
-        - Si force=True, écrase sans vérifier
-        - Si pas de date existante, met à jour
-        """
-        from src.utils.dates import parse_flexible
-
-        # Convertir en datetime (ISO, "YYYY-MM-DD", objet datetime tel quel)
-        parsed = parse_flexible(new_date)
-        if parsed is None:
-            if new_date is not None:
-                logger.debug(f"Impossible de parser la date '{new_date}'")
-            return False
-        new_date = parsed
-
-        # Si pas de date existante, mettre à jour
-        if not self.release_date:
-            self.release_date = new_date
-            logger.debug(
-                f"Date de sortie définie pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})"
-            )
-            return True
-
-        # Convertir la date existante ; si illisible, la remplacer
-        existing_date = parse_flexible(self.release_date)
-        if existing_date is None:
-            self.release_date = new_date
-            logger.debug(
-                f"Date existante invalide remplacée pour '{self.title}': {new_date.strftime('%d/%m/%Y')}"
-            )
-            return True
-
-        # Si force=True, écraser sans vérifier
-        if force:
-            self.release_date = new_date
-            logger.debug(
-                f"Date de sortie écrasée (force) pour '{self.title}': {new_date.strftime('%d/%m/%Y')} (source: {source})"
-            )
-            return True
-
-        # Comparer les dates et garder la plus ancienne
-        if new_date < existing_date:
-            old_date_str = existing_date.strftime("%d/%m/%Y")
-            new_date_str = new_date.strftime("%d/%m/%Y")
-            self.release_date = new_date
-            logger.info(
-                f"✨ Date plus ancienne trouvée pour '{self.title}': {new_date_str} (remplace {old_date_str}) - Source: {source}"
-            )
-            return True
-        else:
-            logger.debug(
-                f"Date existante conservée pour '{self.title}': {existing_date.strftime('%d/%m/%Y')} (nouvelle date {new_date.strftime('%d/%m/%Y')} ignorée)"
-            )
-            return False
+    # `update_release_date` a été RETIRÉE le 2026-09-23. Elle gardait « la date
+    # la plus ancienne, toutes sources confondues » — une règle que le lot 3 a
+    # SUPPLANTÉE et, surtout, CONTREDITE : la date retenue est désormais la plus
+    # PRÉCISE (`reconcile.resoudre_date_de_sortie`), l'antériorité ne tranchant
+    # qu'entre éditions d'une même source (`_DATES_PAR_EDITION`). Elle n'avait
+    # plus aucun appelant, ici ni dans `therapie_studio` — la laisser invitait à
+    # l'appeler et à défaire le verdict du moteur.
 
     def get_credits_by_role(self, role: CreditRole) -> list[Credit]:
         """Retourne tous les crédits d'un rôle spécifique."""

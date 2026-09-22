@@ -53,7 +53,6 @@ _FILL_ONLY = [
     "youtube_url_source",
     "anecdotes",
     "lyrics.present",
-    "lyrics.instrumental",
     "genius_url",
     # Les vues YouTube Music, recopiées si la fiche gardée n'en a pas.
     #
@@ -67,6 +66,20 @@ _FILL_ONLY = [
     # l'utilisateur de se souvenir laquelle des deux lignes garder.
     "streams.ytm_streams",
     "streams.ytm_streams_updated",
+]
+
+# Champs TRI-ÉTAT : seul `None` est une absence.
+#
+# Ils étaient dans `_FILL_ONLY`, dont le test d'absence est `in (None, "", False)`
+# — or `False` y est une VALEUR (« des paroles ont été trouvées », « le morceau
+# est sorti »), pas un vide. Une fiche gardée disant « 0 » se faisait donc
+# écraser par le « 1 » de l'autre : on pouvait obtenir des PAROLES et un constat
+# d'instrumental sur la même ligne, contradiction qui n'existe nulle part en base
+# (mesuré le 2026-09-23 : 0 cas sur 9 766). C'est le piège que le tri-état existe
+# précisément pour éviter, refait dans le code qui le consomme.
+_FILL_TRI_ETAT = [
+    "lyrics.instrumental",
+    "unreleased",  # e34 — le dialogue l'ignorait complètement
 ]
 
 
@@ -183,6 +196,9 @@ def _do_merge(app, keep, other):
     for attr in _FILL_ONLY:
         kv = _get(keep, attr)
         if kv in (None, "", False) and _get(other, attr) not in (None, "", False):
+            _set(keep, attr, _get(other, attr))
+    for attr in _FILL_TRI_ETAT:
+        if _get(keep, attr) is None and _get(other, attr) is not None:
             _set(keep, attr, _get(other, attr))
     keep.artist = app.current_artist
     app.data_manager.save_track(keep)

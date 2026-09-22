@@ -24,7 +24,7 @@ from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_title
 from src.utils.track_mapper import _clean_duration, track_from_row
-from src.utils.track_soeurs import synchroniser_soeurs
+from src.utils.track_soeurs import fusionner_constat_instrumental, synchroniser_soeurs
 
 logger = get_logger(__name__)
 
@@ -1098,6 +1098,34 @@ class TrackRepository:
                 valeurs = self._arbitrer_streams(conn, keep_id)
                 if valeurs:
                     conn.execute(update(tracks).where(tracks.c.id == keep_id).values(**valeurs))
+                # `instrumental` (e27) n'est PAS symétrique comme `unreleased` :
+                # il doit rester cohérent avec les paroles que la ligne
+                # conserve. La règle vit dans `track_soeurs`, avec sa mesure.
+                lignes = (
+                    conn.execute(
+                        text(
+                            "SELECT id, instrumental, lyrics FROM tracks "
+                            "WHERE id IN (:keep_id, :delete_id)"
+                        ),
+                        {"keep_id": keep_id, "delete_id": delete_id},
+                    )
+                    .mappings()
+                    .all()
+                )
+                par_id = {int(ligne["id"]): ligne for ligne in lignes}
+                garde, supprime = par_id.get(keep_id), par_id.get(delete_id)
+                if garde is not None:
+                    conn.execute(
+                        text("UPDATE tracks SET instrumental = :v WHERE id = :id"),
+                        {
+                            "v": fusionner_constat_instrumental(
+                                garde["instrumental"],
+                                supprime["instrumental"] if supprime else None,
+                                bool((garde["lyrics"] or "").strip()),
+                            ),
+                            "id": keep_id,
+                        },
+                    )
                 # e34 : le constat d'inédit se fusionne par le PLUS INFORMÉ.
                 # `MIN` ignore les NULL, donc 0 (sorti, prouvé par une trace de
                 # plateforme) l'emporte sur 1, qui l'emporte sur « jamais

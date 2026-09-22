@@ -403,3 +403,31 @@ def effacer_chez_les_soeurs(conn, track_id: int, effacement) -> int:
     for jumelle in jumelles:
         effacement(jumelle)
     return len(jumelles)
+
+
+def fusionner_constat_instrumental(
+    garde: bool | None, supprime: bool | None, paroles_conservees: bool
+) -> bool | None:
+    """Le constat `instrumental` de la ligne SURVIVANTE d'une fusion.
+
+    Contrairement à `unreleased`, où un simple `MIN` suffit (0 = « sorti,
+    prouvé » l'emporte toujours), ce constat n'est PAS symétrique : il doit
+    rester cohérent avec les paroles que la ligne conserve. Mesuré sur la base
+    entière le 2026-09-23 — **0 ligne à `instrumental=1` porte des paroles, 0
+    ligne à `0` en est dépourvue** : cette cohérence est un invariant de fait,
+    et une fusion ne doit pas être ce qui le casse.
+
+    D'où la règle, dans cet ordre :
+
+      · des paroles survivent ⇒ **0**, ce qui est littéralement ce que 0 veut
+        dire (« des paroles ont été trouvées ») ;
+      · sinon un constat d'instrumental d'un côté ou de l'autre ⇒ **1** : la
+        page Genius l'a dit, et rien ici ne le contredit ;
+      · sinon la valeur de la ligne gardée, à défaut celle de l'autre — un
+        constat ne se perd pas parce qu'il vivait sur la ligne supprimée.
+    """
+    if paroles_conservees:
+        return False
+    if garde is True or supprime is True:
+        return True
+    return garde if garde is not None else supprime

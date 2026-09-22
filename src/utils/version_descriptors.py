@@ -325,6 +325,83 @@ def meme_famille(a: Variant, b: Variant) -> bool:
     return True
 
 
+def titres_equivalents(a: str | None, b: str | None) -> bool:
+    """Deux titres désignent-ils le MÊME morceau dans la MÊME version ?
+
+    Égalité des titres normalisés, ou même socle avec des descripteurs de la
+    même famille (« Nudes (Live at AK Studios) » ≈ « Nudes - Acoustic »). Une
+    asymétrie de descripteur refuse : « MW2 » n'est pas « MW2 (Chopped &
+    $crewed) ». UN prédicat pour DEUX producteurs de durée (gate Deezer,
+    déclaration YTM) — vit ici et non dans `title_matching`, que ce module
+    importe déjà (cycle sinon).
+    """
+    if not a or not b:
+        return False
+    na, nb = normalize_title(a), normalize_title(b)
+    if na and na == nb:
+        return True
+    va, vb = parse_variant(a), parse_variant(b)
+    if normalize_title(va.socle) != normalize_title(vb.socle):
+        return False
+    return meme_famille(va, vb)
+
+
+def doublons_evidents(fiches) -> bool:
+    """Ces fiches d'un même artiste sont-elles À L'ÉVIDENCE le même enregistrement ?
+
+    `fiches` = `[(titre, album)]`. Même titre normalisé SUR LE MÊME DISQUE
+    (ou sans disque connu) — « Pour de Vrai » / « Pour de vrai » chez A2H,
+    `UNIQUE(title, artist_id)` étant sensible à la casse ; mais PAS « OUTSIDE »
+    (Jackboys 2) / « outside » (Birds in the Trap) chez Travis Scott, deux
+    morceaux distincts au même titre — c'est l'album qui les sépare. Ou même
+    PRISE (« Le cœur des filles (Acoustic) » / « (Unplugged) », « (Acoustic) » /
+    « (Live at AK Studios) » — mesuré sur A2H, le live EST unplugged).
+    Décision utilisateur 2026-09-22 : un ID Spotify ou une vidéo portés par de
+    telles fiches ne sont pas « à départager », ce sont des doublons à
+    FUSIONNER — les compteurs s'écrivent sur chacune, le rapport le dit en une
+    ligne. Au-delà de deux fiches, toutes les paires doivent l'être.
+    """
+    from src.utils.title_matching import cle_album
+
+    fiches = [(t, a) for t, a in (fiches or []) if t]
+    if len(fiches) < 2:
+        return False
+    for i, (a, alb_a) in enumerate(fiches):
+        for b, alb_b in fiches[i + 1 :]:
+            if normalize_title(a) == normalize_title(b):
+                if not alb_a or not alb_b or cle_album(alb_a) == cle_album(alb_b):
+                    continue
+                return False
+            va, vb = parse_variant(a), parse_variant(b)
+            if normalize_title(va.socle) == normalize_title(vb.socle) and meme_prise(va, vb):
+                continue
+            return False
+    return True
+
+
+def medley_evident(titre_video: str | None, titres) -> bool:
+    """Un clip DOUBLE : chaque morceau rattaché est nommé dans le titre de la
+    vidéo (« Avec une rose / Masterclass (Clip Officiel) », « Prélude avant
+    l'amour / A4 / Seulement L'Amour »). Comparaison par MOTS ENTIERS sur les
+    socles normalisés, jamais par sous-chaîne."""
+    from src.utils.title_matching import contains_as_words, developper_ligatures
+
+    titres = [t for t in (titres or []) if t]
+    if not titre_video or len(titres) < 2:
+        return False
+
+    # Pas `normalize_title` : elle colle l'espace devant un chiffre (« Donjon &
+    # 2h22 » → « donjon2h22 ») et « 2h22 » cesserait d'être un mot.
+    def _mots(texte: str) -> str:
+        texte = developper_ligatures(texte)
+        texte = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode("ascii")
+        texte = re.sub(r"['’]", "", texte)
+        return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", texte)).strip().lower()
+
+    video = _mots(titre_video)
+    return all(contains_as_words(_mots(parse_variant(t).socle), video) for t in titres)
+
+
 def indice_meme_morceau(titre_kworb: str, titre_base: str) -> tuple[str, bool]:
     """Indice du dialogue Kworb pour une suggestion FLOUE : (libellé, coché ?).
 

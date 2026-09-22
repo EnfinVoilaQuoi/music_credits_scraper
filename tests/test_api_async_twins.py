@@ -26,8 +26,11 @@ def _http(handler) -> AsyncHttpSession:
 # Deezer
 # ──────────────────────────────────────────────────────────────────────
 
+# Titre et artiste nommés : depuis le gate d'identité (2026-09-22), un hit
+# sans eux n'est pas retenu — c'est ce que Deezer sert réellement.
 _DEEZER_HIT = {
     "id": 3135556,
+    "title": "Solo",
     "isrc": "FRXXX2000001",
     "bpm": 0,  # Deezer renvoie souvent 0 → doit devenir None
     "duration": 240,
@@ -37,14 +40,14 @@ _DEEZER_HIT = {
     "rank": 100,
     "link": "https://www.deezer.com/track/3135556",
     "album": {"id": 42, "cover_medium": "https://img/album.jpg", "cover_xl": "https://img/xl.jpg"},
-    "artist": {"id": 7, "picture_xl": "https://img/artist.jpg"},
+    "artist": {"id": 7, "name": "X", "picture_xl": "https://img/artist.jpg"},
 }
 
 
 def test_deezer_enrich_track_async_success():
     def handler(request):
         assert request.url.host == "api.deezer.com"
-        assert 'artist:"X"' in request.url.params["q"]
+        assert request.url.params["q"] == "X Solo"  # recherche LIBRE, l'avancée est morte
         return httpx.Response(200, json={"data": [_DEEZER_HIT]})
 
     result = asyncio.run(

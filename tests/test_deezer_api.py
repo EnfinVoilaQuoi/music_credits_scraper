@@ -50,24 +50,49 @@ class TestFiltrageDesErreursApi:
         assert client._payload_or_none({"error": {}}) is None
 
 
-class TestParametresDeRecherche:
-    def test_requete_avancee(self, client):
-        params = client._search_params("ISHA", "Titre", strict=False)
-        assert params["q"] == 'artist:"ISHA" track:"Titre"'
-        assert "strict" not in params
+class TestRechercheLibreGardee:
+    """Mesuré le 2026-09-22 : la recherche avancée `artist:"X" track:"Y"` rend
+    0 hit pour tout le monde — la requête est LIBRE, et c'est le gate qui
+    choisit, jamais `data[0]`."""
 
-    def test_mode_strict(self, client):
-        assert client._search_params("ISHA", "Titre", strict=True)["strict"] == "on"
+    def test_requete_libre_sans_syntaxe_avancee(self, client):
+        params = client._search_params("ISHA", "Titre")
+        assert params == {"q": "ISHA Titre", "limit": 10}
+        assert "artist:" not in params["q"] and "strict" not in params
 
-
-class TestPremierResultat:
-    def test_premier_hit_retourne(self, client):
-        data = {"data": [{"id": 1}, {"id": 2}]}
-        assert client._first_search_hit(data, "A", "T") == {"id": 1}
+    def test_le_gate_choisit_pas_le_rang(self, client):
+        data = {
+            "data": [
+                {"id": 1, "title": "Tueur de dragon (Vent)", "artist": {"name": "ISHA"}},
+                {"id": 2, "title": "Durag", "artist": {"name": "ISHA"}},
+            ]
+        }
+        assert client._choisir_hit(data, "Isha", "Durag", None, None)["id"] == 2
 
     @pytest.mark.parametrize("data", [None, {}, {"data": []}])
     def test_absence_de_resultat(self, client, data):
-        assert client._first_search_hit(data, "A", "T") is None
+        assert client._choisir_hit(data, "A", "T", None, None) is None
+
+    def test_le_jumeau_async_rend_le_meme_hit(self, client, monkeypatch):
+        import asyncio
+
+        reponse = {
+            "data": [
+                {"id": 1, "title": "Durag", "artist": {"id": 259696952, "name": "Isha"}},
+                {"id": 2, "title": "Durag", "artist": {"id": 1236609, "name": "ISHA"}},
+            ]
+        }
+        monkeypatch.setattr(client, "_make_request", lambda *a, **k: reponse)
+
+        async def _req_async(http, endpoint, params=None):
+            return reponse
+
+        monkeypatch.setattr(client, "_make_request_async", _req_async)
+        sync = client.search_track("Isha", "Durag", artist_deezer_id=1236609)
+        asy = asyncio.run(
+            client.search_track_async(None, "Isha", "Durag", artist_deezer_id=1236609)
+        )
+        assert sync == asy and sync["id"] == 2
 
 
 class TestExtraction:
@@ -422,19 +447,45 @@ class TestRechercheParIdArtiste:
             ]
         }
         monkeypatch.setattr(client, "_make_request", lambda *a, **k: reponse)
-        assert client.search_track_by_artist_id("Isha", "Durag", 1236609)["id"] == 2
-        assert client.search_track_by_artist_id("Isha", "Durag", 42) is None
+        assert client.search_track("Isha", "Durag", artist_deezer_id=1236609)["id"] == 2
+        # Sans id, le nom par mots entiers accepte les deux : le premier gagne.
+        assert client.search_track("Isha", "Durag")["id"] == 1
 
-    def test_enrich_track_prefere_l_id_puis_se_replie(self, client, monkeypatch):
+    def test_enrich_track_un_seul_appel_garde(self, client, monkeypatch):
+        """Plus de chaîne « id puis avancée » : l'avancée est morte et le repli
+        « premier hit de l'artiste » prenait « Tueur de dragon » pour « Durag »."""
         appels = []
 
         def _req(endpoint, params=None):
             appels.append(params["q"])
-            if "artist:" in params["q"]:
-                return {"data": [{"id": 9, "title": "Durag", "artist": {"id": 1, "name": "X"}}]}
-            return {"data": []}
+            return {
+                "data": [
+                    {
+                        "id": 9,
+                        "title": "Tueur de dragon (Vent)",
+                        "artist": {"id": 1236609, "name": "ISHA"},
+                    }
+                ]
+            }
 
         monkeypatch.setattr(client, "_make_request", _req)
         r = client.enrich_track("Isha", "Durag", artist_deezer_id=1236609)
-        assert r["data"]["deezer_track_id"] == 9  # repli sur la recherche avancée
-        assert appels[0] == "Isha Durag" and "artist:" in appels[1]
+        assert not r["success"] and r["data"] is None
+        assert appels == ["Isha Durag"]
+
+    def test_get_isrc_refuse_un_hit_etranger(self, client, monkeypatch):
+        monkeypatch.setattr(
+            client,
+            "_make_request",
+            lambda *a, **k: {
+                "data": [
+                    {
+                        "id": 1,
+                        "title": "Heartless",
+                        "isrc": "X",
+                        "artist": {"name": "Vitamin String Quartet"},
+                    }
+                ]
+            },
+        )
+        assert client.get_isrc("Kanye West", "Heartless") is None

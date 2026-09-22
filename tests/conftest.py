@@ -50,6 +50,8 @@ def _oracle_spotify_hors_ligne(monkeypatch):
     lecteur (ou appelle `identite_concorde`, qui est pur).
     """
     monkeypatch.setattr("src.utils.spotify_identity.lire_identite_http", lambda spotify_id: None)
+    # Même règle pour l'oracle Deezer de l'audit des ids (2026-09-22).
+    monkeypatch.setattr("src.utils.deezer_identity.lire_piste_http", lambda deezer_id: None)
 
 
 @pytest.fixture(autouse=True)

@@ -15,6 +15,7 @@ import httpx
 import requests
 
 from src.observability import source_usage
+from src.utils.deezer_identity import choisir_hit
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -127,64 +128,64 @@ class DeezerAPI:
             logger.error(f"Erreur de parsing JSON: {e}")
             return None
 
-    def search_track(self, artist: str, title: str, strict: bool = False) -> dict | None:
-        """
-        Recherche un track par artiste et titre
+    def search_track(
+        self,
+        artist: str,
+        title: str,
+        *,
+        previous_duration=None,
+        artist_deezer_id: int | None = None,
+    ) -> dict | None:
+        """Le hit de recherche qui EST ce morceau, ou None.
 
-        Args:
-            artist: Nom de l'artiste
-            title: Titre de la chanson
-            strict: Active le mode strict (désactive le fuzzy matching)
-
-        Returns:
-            Données du premier résultat ou None
+        Recherche LIBRE `"{artist} {title}"` puis gate d'identité
+        (`deezer_identity.choisir_hit` : artiste par id ou par mots, titre
+        OBLIGATOIRE, durée ± 2 s quand la fiche en a une). Mesuré le
+        2026-09-22 : la recherche avancée `artist:"X" track:"Y"` rend 0 hit
+        pour TOUT LE MONDE (Kanye West « Heartless », Travis Scott « SICKO
+        MODE ») — `track:"Y"` seul marche encore, `artist:"X"` seul rend 0 ;
+        et le repli « premier hit de l'artiste » prenait « Tueur de dragon »
+        pour « Durag » (5 % d'ids faux en base). Refuser est un bon résultat.
         """
-        data = self._make_request("search", self._search_params(artist, title, strict))
-        return self._first_search_hit(data, artist, title)
+        data = self._make_request("search", self._search_params(artist, title))
+        return self._choisir_hit(data, artist, title, previous_duration, artist_deezer_id)
 
     async def search_track_async(
-        self, http: "AsyncHttpSession", artist: str, title: str, strict: bool = False
+        self,
+        http: "AsyncHttpSession",
+        artist: str,
+        title: str,
+        *,
+        previous_duration=None,
+        artist_deezer_id: int | None = None,
     ) -> dict | None:
-        """Jumeau async de `search_track` (mêmes params, même sélection)."""
-        data = await self._make_request_async(
-            http, "search", self._search_params(artist, title, strict)
-        )
-        return self._first_search_hit(data, artist, title)
+        """Jumeau async de `search_track` (mêmes params, même gate)."""
+        data = await self._make_request_async(http, "search", self._search_params(artist, title))
+        return self._choisir_hit(data, artist, title, previous_duration, artist_deezer_id)
 
     @staticmethod
-    def _search_params(artist: str, title: str, strict: bool) -> dict:
-        """Requête de recherche avancée (commun sync/async)."""
-        params = {"q": f'artist:"{artist}" track:"{title}"', "limit": 5}
-        if strict:
-            params["strict"] = "on"
-        return params
+    def _search_params(artist: str, title: str) -> dict:
+        """Requête LIBRE (commun sync/async). `limit` 10 : le bon hit n'est pas
+        toujours premier (homonymes, reprises « as made famous by »)."""
+        return {"q": f"{artist} {title}", "limit": 10}
 
     @staticmethod
-    def _hit_de_l_artiste(data: dict | None, artist_deezer_id: int) -> dict | None:
-        """Premier hit dont l'artiste PRINCIPAL est le nôtre (par id, jamais par nom).
-
-        Mesuré (2026-09-16/21) : la recherche avancée `artist:"Isha" track:"…"`
-        rend 0 hit pour Isha, et la recherche libre rend d'abord des homonymes.
-        Avec `artists.deezer_id` tranché par l'oracle, le hit se choisit par l'id."""
-        for hit in (data or {}).get("data") or []:
-            if ((hit.get("artist") or {}).get("id")) == artist_deezer_id:
-                return hit
-        return None
-
-    def search_track_by_artist_id(
-        self, artist: str, title: str, artist_deezer_id: int
+    def _choisir_hit(
+        data: dict | None, artist: str, title: str, previous_duration, artist_deezer_id
     ) -> dict | None:
-        """Recherche LIBRE `artist title`, filtrée sur l'id de l'artiste."""
-        data = self._make_request("search", {"q": f"{artist} {title}", "limit": 10})
-        return self._hit_de_l_artiste(data, artist_deezer_id)
-
-    async def search_track_by_artist_id_async(
-        self, http: "AsyncHttpSession", artist: str, title: str, artist_deezer_id: int
-    ) -> dict | None:
-        data = await self._make_request_async(
-            http, "search", {"q": f"{artist} {title}", "limit": 10}
+        """Le gate, UNE fois pour les deux voies (« corriger un jumeau, c'est
+        corriger les deux »). Jamais `data[0]`."""
+        hits = (data or {}).get("data") or []
+        hit = choisir_hit(
+            hits,
+            artist_name=artist,
+            title=title,
+            previous_duration=previous_duration,
+            artist_deezer_id=artist_deezer_id,
         )
-        return self._hit_de_l_artiste(data, artist_deezer_id)
+        if hit is None:
+            logger.info(f"Deezer : aucun hit concordant pour {artist} - {title} ({len(hits)} lus)")
+        return hit
 
     def get_artist(self, artist_id: int) -> dict | None:
         """`GET /artist/{id}` (sync) — la fiche : nom, `picture_xl`, nb_album, nb_fan."""
@@ -428,6 +429,7 @@ class DeezerAPI:
         # Album : image medium (historique, compat provider) + id/cover_xl (Media)
         album = track_data.get("album")
         if isinstance(album, dict) and album:
+            enriched_data["deezer_album"] = album
             enriched_data["deezer_picture"] = album.get("cover_medium") or album.get("cover")
             enriched_data["deezer_album_id"] = album.get("id")
             enriched_data["deezer_cover_xl"] = album.get("cover_xl") or album.get("cover_big")
@@ -565,19 +567,20 @@ class DeezerAPI:
             previous_duration: Durée depuis les enrichissements précédents
             scraped_release_date: Date de sortie depuis le scraping
             artist_deezer_id: id Deezer de l'artiste (e30) — quand il est connu,
-                la recherche libre filtrée par id passe AVANT l'avancée par nom.
+                le gate d'identité juge l'artiste par id plutôt que par nom.
 
         Returns:
             Données enrichies avec vérifications
         """
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = None
-            if artist_deezer_id:
-                track_data = self.search_track_by_artist_id(artist, title, artist_deezer_id)
+            track_data = self.search_track(
+                artist,
+                title,
+                previous_duration=previous_duration,
+                artist_deezer_id=artist_deezer_id,
+            )
             if track_data is None:
-                track_data = self.search_track(artist, title)
-            if track_data is None:
-                obs.absent("aucun hit de recherche")
+                obs.absent("aucun hit concordant")
             return self._build_enrichment_result(
                 track_data, previous_duration, scraped_release_date
             )
@@ -593,15 +596,15 @@ class DeezerAPI:
     ) -> dict[str, Any]:
         """Jumeau async d'`enrich_track` (mêmes vérifications, même forme de retour)."""
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = None
-            if artist_deezer_id:
-                track_data = await self.search_track_by_artist_id_async(
-                    http, artist, title, artist_deezer_id
-                )
+            track_data = await self.search_track_async(
+                http,
+                artist,
+                title,
+                previous_duration=previous_duration,
+                artist_deezer_id=artist_deezer_id,
+            )
             if track_data is None:
-                track_data = await self.search_track_async(http, artist, title)
-            if track_data is None:
-                obs.absent("aucun hit de recherche")
+                obs.absent("aucun hit concordant")
             return self._build_enrichment_result(
                 track_data, previous_duration, scraped_release_date
             )

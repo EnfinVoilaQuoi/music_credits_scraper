@@ -583,21 +583,10 @@ class TrackDetailsWindow:
 
             for role, credits in sorted(music_credits_by_role.items()):
                 music_textbox.insert("end", f"\n━━━ {role} ━━━\n", "bold")
-                for credit in credits:
-                    source_emoji = {
-                        "genius": "🎤",
-                        "spotify": "🎧",
-                        "spotify_web": "🎧",
-                        "deezer": "🎵",
-                        "discogs": "💿",
-                        "lastfm": "📻",
-                        "kworb": "📈",
-                        "heritage": "↩",
-                        "youtube_topic": "▶️",
-                        "youtube_clip": "🎬",
-                    }.get(credit.source, "🔗")
-                    detail = f" ({credit.role_detail})" if credit.role_detail else ""
-                    music_textbox.insert("end", f"{source_emoji} {credit.name}{detail}\n")
+                # Une ligne par PERSONNE : deux sources d'accord sur un rôle
+                # s'affichent « 🎤💿 Skread », pas sur deux lignes.
+                for ligne in helpers.lignes_de_credits(credits):
+                    music_textbox.insert("end", f"{ligne}\n")
         else:
             music_textbox.insert("end", "❌ Aucun crédit musical trouvé.\n\n")
             music_textbox.insert(
@@ -638,17 +627,8 @@ class TrackDetailsWindow:
 
             for role, credits in sorted(video_credits_by_role.items()):
                 video_textbox.insert("end", f"\n━━━ {role} ━━━\n", "bold")
-                for credit in credits:
-                    source_emoji = {
-                        "genius": "🎤",
-                        "spotify": "🎧",
-                        "discogs": "💿",
-                        "lastfm": "📻",
-                        "youtube_topic": "▶️",
-                        "youtube_clip": "🎬",
-                    }.get(credit.source, "🔗")
-                    detail = f" ({credit.role_detail})" if credit.role_detail else ""
-                    video_textbox.insert("end", f"{source_emoji} {credit.name}{detail}\n")
+                for ligne in helpers.lignes_de_credits(credits):
+                    video_textbox.insert("end", f"{ligne}\n")
 
             video_textbox.configure(state="disabled")
 

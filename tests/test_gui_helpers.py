@@ -272,3 +272,50 @@ class TestStatutStreams:
 
     def test_aucun_compteur_du_tout(self):
         assert helpers.get_track_status_icon(self._morceau(None), set()) == "⚠️"
+
+
+class TestLignesDeCredits:
+    """Une ligne par PERSONNE, pas par ligne de base (2026-09-22).
+
+    136 paires (morceau, personne, rôle) étaient déjà créditées par Genius ET
+    Discogs et s'affichaient en double dans la fiche morceau.
+    """
+
+    class _C:
+        def __init__(self, name, source, role_detail=None):
+            self.name, self.source, self.role_detail = name, source, role_detail
+
+    def test_deux_sources_d_accord_font_UNE_ligne(self):
+        lignes = helpers.lignes_de_credits(
+            [self._C("Skread", "genius"), self._C("Skread", "discogs")]
+        )
+        assert lignes == ["🎤💿 Skread"]
+
+    def test_deux_personnes_restent_deux_lignes(self):
+        lignes = helpers.lignes_de_credits([self._C("Skread", "genius"), self._C("TM88", "genius")])
+        assert lignes == ["🎤 Skread", "🎤 TM88"]
+
+    def test_deux_graphies_du_meme_nom_sont_la_meme_personne(self):
+        """`identity_key` : c'est déjà la règle du reclassement des rôles."""
+        lignes = helpers.lignes_de_credits(
+            [self._C("Jimmy Jay", "genius"), self._C("JIMMY JAY", "discogs")]
+        )
+        assert len(lignes) == 1
+
+    def test_les_details_des_deux_sources_sont_REUNIS(self):
+        lignes = helpers.lignes_de_credits(
+            [
+                self._C("Jimmy Jay", "genius", "Scratches"),
+                self._C("Jimmy Jay", "discogs", "Turntables"),
+            ]
+        )
+        assert lignes == ["🎤💿 Jimmy Jay (Scratches, Turntables)"]
+
+    def test_une_source_inconnue_garde_son_lien(self):
+        assert helpers.lignes_de_credits([self._C("X", "sacem")]) == ["🔗 X"]
+
+    def test_la_table_des_emojis_couvre_les_sources_du_projet(self):
+        """La copie « vidéo » de cette table avait perdu deezer, spotify_web,
+        kworb et heritage : leurs crédits s'affichaient tous en 🔗."""
+        for source in ("genius", "discogs", "deezer", "spotify_web", "kworb", "heritage"):
+            assert helpers.EMOJI_SOURCE.get(source), source

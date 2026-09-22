@@ -221,3 +221,57 @@ def normalize_text(text: str) -> str:
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
     # Convertir en minuscules
     return text.lower()
+
+
+#: Émoji par source de crédit. Table UNIQUE : la fiche morceau en avait deux
+#: copies (musique et vidéo), et celle des vidéos avait perdu `deezer`,
+#: `spotify_web`, `kworb` et `heritage` — les crédits venus de là s'affichaient
+#: tous avec le même 🔗 « source inconnue ».
+EMOJI_SOURCE = {
+    "genius": "🎤",
+    "spotify": "🎧",
+    "spotify_web": "🎧",
+    "deezer": "🎵",
+    "discogs": "💿",
+    "lastfm": "📻",
+    "kworb": "📈",
+    "heritage": "↩",
+    "youtube_topic": "▶️",
+    "youtube_clip": "🎬",
+}
+
+
+def lignes_de_credits(credits) -> list[str]:
+    """Une ligne d'affichage PAR PERSONNE, et non par ligne de base.
+
+    Deux sources qui créditent la même personne au même rôle sont un ACCORD,
+    pas deux crédits : « 🎤💿 Skread » dit la même chose que deux lignes
+    empilées, en le disant mieux. Mesuré le 2026-09-22 : **136 accords** de ce
+    genre dormaient déjà en base et s'affichaient en double.
+
+    Ni la base ni les sources ne perdent quoi que ce soit — c'est de
+    l'affichage : `credits` garde une ligne par source, chacune avec sa
+    provenance, et le reclassement des `Other` (`scripts/reclass_credit_roles`)
+    peut donc en ajouter sans « fabriquer un doublon ».
+
+    Les personnes gardent l'ordre d'arrivée ; leurs émojis sont triés pour que
+    deux morceaux affichent la même paire dans le même ordre.
+    """
+    from src.utils.credit_normalize import identity_key
+
+    par_personne: dict[str, dict] = {}
+    for credit in credits:
+        cle = identity_key(credit.name) or (credit.name or "").lower()
+        entree = par_personne.setdefault(cle, {"nom": credit.name, "emojis": [], "details": []})
+        emoji = EMOJI_SOURCE.get(credit.source, "🔗")
+        if emoji not in entree["emojis"]:
+            entree["emojis"].append(emoji)
+        detail = (credit.role_detail or "").strip()
+        if detail and detail not in entree["details"]:
+            entree["details"].append(detail)
+
+    lignes = []
+    for entree in par_personne.values():
+        detail = f" ({', '.join(entree['details'])})" if entree["details"] else ""
+        lignes.append(f"{''.join(sorted(entree['emojis']))} {entree['nom']}{detail}")
+    return lignes

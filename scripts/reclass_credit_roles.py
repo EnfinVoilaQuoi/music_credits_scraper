@@ -88,9 +88,11 @@ def analyser(conn, source: str | None = None) -> tuple[list, list, list]:
       une fois sous « Writer » et une fois sous le libellé « Writers » resté en
       `Other`. Reclasser la seconde afficherait la personne deux fois au même
       rôle — la ligne est SUPPRIMÉE, elle n'apporte rien ;
-    · source différente ⇒ **collision** assumée (8 mesurées) : les deux sources
-      nomment la personne, les deux lignes se distinguent par leur émoji de
-      provenance, c'est déjà le comportement actuel de la fiche morceau.
+    · source différente ⇒ **accord** entre sources (8 mesurés) : Genius ET
+      Discogs nomment Skread comme programmeur. Les deux lignes restent en base
+      — chacune porte SA provenance — et la fiche morceau les affiche sur une
+      seule ligne, « 🎤💿 Skread » (`helpers.lignes_de_credits`). Rien à
+      arbitrer : 136 accords du même genre dormaient déjà en base.
     """
     cur = conn.cursor()
 
@@ -147,9 +149,9 @@ def rapport(reclassements, doublons, collisions, conn):
             print(f"   [{src}] {name!r} déjà {cible} (arrive via {libelle!r})")
 
     if collisions:
-        print(f"\n⚠️  {len(collisions)} doublon(s) VISIBLE(S) créé(s) — la personne est déjà")
-        print("    créditée à ce rôle sur ce morceau (l'autre source la nomme aussi).")
-        print("    Assumé : les deux lignes se distinguent par leur émoji de source.\n")
+        print(f"\n🤝 {len(collisions)} accord(s) entre sources — l'AUTRE source crédite déjà")
+        print("    la personne à ce rôle. Les deux lignes restent (chacune sa provenance) ;")
+        print("    la fiche morceau les affiche sur une seule, « 🎤💿 Nom ».\n")
         for name, libelle, cible in collisions:
             print(f"   {name!r} déjà crédité {cible} (arrive via {libelle!r})")
 

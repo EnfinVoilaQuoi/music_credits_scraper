@@ -457,7 +457,12 @@ class GeniusAPI:
                         track.observations.append(
                             Observation(
                                 "release_date",
-                                track.release_date.strftime("%Y-%m-%d"),
+                                # À SA précision : « 2018 » quand Genius n'a que
+                                # l'année, sans quoi son 1ᵉʳ janvier fabriqué
+                                # battrait la vraie date de Deezer (il est en
+                                # tête de l'ordre des sources).
+                                self.precision_de_la_date(song)
+                                or track.release_date.strftime("%Y-%m-%d"),
                                 "genius",
                             )
                         )
@@ -980,8 +985,45 @@ class GeniusAPI:
             logger.warning(f"Erreur lors de l'extraction de l'album: {e}")
         return None
 
+    @staticmethod
+    def precision_de_la_date(song: dict) -> str | None:
+        """La date de sortie Genius À SA PRÉCISION : « 2018 », « 2018-05 » ou
+        « 2018-05-14 ».
+
+        `release_date_components` peut n'avoir que l'année, et
+        `_extract_release_date_from_song` rend alors `datetime(année, 1, 1)` —
+        un 1ᵉʳ janvier fabriqué que rien ne distingue d'un vrai (719 dates en
+        base sont dans ce cas). Comme Genius est EN TÊTE de l'ordre des
+        sources, déclarer ce faux jour ferait perdre le « 2018-05-02 » que
+        Deezer connaît.
+
+        **Un `datetime` ne porte pas sa précision** : seule la SOURCE sait ce
+        qu'elle a vu, et c'est ici qu'elle le dit. La colonne, elle, reste une
+        date complète — c'est `dates.completer` qui la fabrique à l'arbitrage.
+        """
+        composants = song.get("release_date_components")
+        if not isinstance(composants, dict):
+            return None
+        annee = composants.get("year")
+        if not annee:
+            return None
+        mois, jour = composants.get("month"), composants.get("day")
+        try:
+            if mois and jour:
+                return f"{int(annee):04d}-{int(mois):02d}-{int(jour):02d}"
+            if mois:
+                return f"{int(annee):04d}-{int(mois):02d}"
+            return f"{int(annee):04d}"
+        except (TypeError, ValueError):
+            return None
+
     def _extract_release_date_from_song(self, song: dict) -> datetime | None:
-        """Extrait la date de sortie depuis les données de l'API"""
+        """Extrait la date de sortie depuis les données de l'API.
+
+        Rend TOUJOURS un `datetime` (les appelants posent la colonne, qui est
+        une date complète) ; la précision réellement connue vit dans
+        `precision_de_la_date`, et c'est elle qu'on déclare en observation.
+        """
         try:
             release_components = song.get("release_date_components")
             if release_components:

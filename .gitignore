@@ -117,6 +117,7 @@ scripts/*
 !scripts/audit_spotify_ids.py
 !scripts/repair_spotify_ids.py
 !scripts/repair_deezer_ids.py
+!scripts/repair_release_dates.py
 # Streams : rejeu à blanc du rapprochement Kworb (2026-09-21)
 !scripts/kworb_replay.py
 # Crédits : purge des références à un autre morceau prises pour des personnes (2026-09-21)

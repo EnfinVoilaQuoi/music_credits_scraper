@@ -19,6 +19,7 @@ from src.enrichment.observation import Observation
 from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackVideo
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
+from src.utils.dates import completer, la_plus_ancienne, meme_jour
 from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_title
 from src.utils.track_mapper import _clean_duration, track_from_row
@@ -794,6 +795,100 @@ class TrackRepository:
             {"tid": track_id, "field": field},
         )
 
+    #: Sources dont chaque observation de date décrit une ÉDITION, pas
+    #: l'enregistrement : la plus ancienne fait foi. Deezer sert un catalogue de
+    #: distributeurs, où « Loto » sort en single le 02/05/2018 puis sur l'album
+    #: J.O.$ le 14/09 — mesuré, **164 morceaux** ont des dates d'édition
+    #: divergentes. Une seule observation par (morceau, champ, source) : sans
+    #: fusion, la dernière édition rencontrée écraserait la première.
+    _DATES_PAR_EDITION = {"deezer"}
+
+    def _valeur_de_date_fusionnee(self, conn, track_id: int, obs):
+        """La valeur à écrire pour une observation de date d'ÉDITION.
+
+        Rien n'est perdu de l'autre côté : `releases.release_date` garde la date
+        de CHAQUE parution (e31), et la fiche morceau les affiche toutes. Ici on
+        ne décide que de la date de l'ENREGISTREMENT, celle de la colonne.
+        """
+        ancienne = conn.execute(
+            text(
+                "SELECT value FROM observations "
+                "WHERE track_id = :tid AND field = 'release_date' AND source = :source"
+            ),
+            {"tid": track_id, "source": obs.source},
+        ).scalar()
+        return la_plus_ancienne(obs.value, ancienne) if ancienne else obs.value
+
+    def colonnes_sans_provenance(self, field: str) -> list[tuple[int, str]]:
+        """`(track_id, valeur)` des colonnes renseignées qu'AUCUNE observation
+        n'explique — le champ doit être arbitrable (`COLONNES_DISCOGRAPHIE`).
+
+        Ces colonnes sont une bombe à retardement depuis que les champs de
+        discographie sont arbitrés À L'ÉCRITURE : une source déclare, la colonne
+        prend son verdict, puis un retrait (`clear_track_deezer_id`) ré-arbitre
+        sur ce qui reste — et s'il ne reste RIEN, la colonne se vide. La valeur
+        d'origine, qui n'avait jamais été déclarée, disparaît sans que personne
+        l'ait décidé.
+        """
+        colonne = self.COLONNES_DISCOGRAPHIE.get(field)
+        if colonne is None:
+            raise ValueError(f"champ non arbitrable : {field!r}")
+        try:
+            with self.engine.connect() as conn:
+                return [
+                    (int(r[0]), r[1])
+                    for r in conn.execute(
+                        text(
+                            f"SELECT t.id, t.{colonne} FROM tracks t "  # noqa: S608 - colonne interne
+                            f"WHERE t.{colonne} IS NOT NULL AND t.{colonne} != '' "
+                            "AND NOT EXISTS (SELECT 1 FROM observations o "
+                            "WHERE o.track_id = t.id AND o.field = :field)"
+                        ),
+                        {"field": field},
+                    )
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur colonnes_sans_provenance({field}): {e}")
+            return []
+
+    def declarer_provenance_legacy(self, field: str, lignes) -> int:
+        """Pose une observation `legacy` sur ces colonnes — MÊME règle que le
+        backfill de la migration e24, rejouable parce que la base grossit après
+        une migration (6 201 morceaux datés créés après e24).
+
+        `legacy` et non la source réelle : on ne SAIT pas qui a écrit la
+        colonne, et inventer une source serait pire que d'avouer qu'on l'ignore.
+        Le moteur l'écarte dès qu'une source réelle existe, exactement comme il
+        faut. N'écrase jamais une observation existante.
+        """
+        if field not in self.COLONNES_DISCOGRAPHIE:
+            raise ValueError(f"champ non arbitrable : {field!r}")
+        lignes = [(tid, v) for tid, v in lignes if v is not None and str(v) != ""]
+        if not lignes:
+            return 0
+        maintenant = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with self.engine.begin() as conn:
+                for track_id, valeur in lignes:
+                    conn.execute(
+                        text(
+                            "INSERT OR IGNORE INTO observations "
+                            "(track_id, field, value, source, confidence, seen_at) "
+                            "VALUES (:tid, :field, :value, 'legacy', NULL, :now)"
+                        ),
+                        {
+                            "tid": int(track_id),
+                            "field": field,
+                            "value": str(valeur),
+                            "now": maintenant,
+                        },
+                    )
+            logger.info(f"🧾 {len(lignes)} colonne(s) {field} déclarée(s) `legacy`")
+            return len(lignes)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur declarer_provenance_legacy({field}): {e}")
+            return 0
+
     def _upsert_observations(self, conn, track_id: int, observations) -> None:
         for obs in observations:
             # `seen_at` verbatim (string) comme le backfill E4 et le stockage
@@ -801,6 +896,13 @@ class TrackRepository:
             seen_at = obs.seen_at or datetime.now()
             if isinstance(seen_at, datetime):
                 seen_at = seen_at.strftime("%Y-%m-%d %H:%M:%S")
+            valeur = obs.value
+            if (
+                obs.field == "release_date"
+                and obs.source in self._DATES_PAR_EDITION
+                and valeur is not None
+            ):
+                valeur = self._valeur_de_date_fusionnee(conn, track_id, obs)
             conn.execute(
                 text(
                     "INSERT INTO observations "
@@ -813,7 +915,7 @@ class TrackRepository:
                 {
                     "tid": track_id,
                     "field": obs.field,
-                    "value": None if obs.value is None else str(obs.value),
+                    "value": None if valeur is None else str(valeur),
                     "source": obs.source,
                     "confidence": None if obs.confidence is None else float(obs.confidence),
                     "seen_at": seen_at,
@@ -1367,7 +1469,12 @@ class TrackRepository:
         qui est le cas voulu après une purge (un ID retiré emporte ses
         conséquences, il ne les laisse pas en place sans preuve).
         """
-        from src.enrichment.reconcile import DISCOGRAPHY_PRIORITIES, resolve_by_priority
+        from src.enrichment.reconcile import (
+            DISCOGRAPHY_PRIORITIES,
+            resolve_by_priority,
+            resoudre_date_de_sortie,
+        )
+        from src.utils.dates import completer as _completer
 
         observations = self._get_observations(conn, track_id)
         valeurs: dict = {}
@@ -1376,13 +1483,26 @@ class TrackRepository:
             ordre = DISCOGRAPHY_PRIORITIES.get(field)
             if colonne is None or ordre is None:
                 continue
-            verdict = resolve_by_priority(
-                [o for o in observations if o.field == field], field, ordre
-            )
+            obs_du_champ = [o for o in observations if o.field == field]
+            # `release_date` a sa propre stratégie (la précision avant l'ordre),
+            # et c'est la MÊME fonction que celle de `reconcile()` : en brancher
+            # une seule des deux ferait dépendre le verdict du flux qui écrit.
+            if field == "release_date":
+                verdict = resoudre_date_de_sortie(obs_du_champ, ordre)
+            else:
+                verdict = resolve_by_priority(obs_du_champ, field, ordre)
             if verdict is None:
                 valeurs[colonne] = None
             elif field == "duration":
                 valeurs[colonne] = _clean_duration(verdict.value)
+            elif field == "release_date":
+                # La COLONNE reste une date COMPLÈTE : la GUI, le tri,
+                # `albums_grouping`, `artist_loader` (`[:4]`) et la Timeline du
+                # dépôt privé la lisent ainsi. La précision ne vit que dans
+                # l'observation.
+                valeurs[colonne] = _completer(verdict.value) or (
+                    str(verdict.value) if verdict.value is not None else None
+                )
             else:
                 valeurs[colonne] = str(verdict.value) if verdict.value is not None else None
         return valeurs
@@ -1585,10 +1705,15 @@ class TrackRepository:
                 ):
                     effacements["isrc"] = None
                     rapport["isrc_efface"] = True
+                # `meme_jour` et non `str(...)[:10]` : depuis que la PRÉCISION
+                # est portée par la forme de l'observation (« 2018 »,
+                # « 2018-05 »), une troncature à 10 caractères ne reconnaît plus
+                # la colonne complétée « 2018-01-01 » — et la colonne ne se
+                # viderait plus JAMAIS, en silence.
                 if (
                     ligne["release_date"]
                     and valeurs_deezer.get("release_date")
-                    and str(ligne["release_date"])[:10] == str(valeurs_deezer["release_date"])[:10]
+                    and meme_jour(ligne["release_date"], valeurs_deezer["release_date"])
                 ):
                     effacements["release_date"] = None
                     rapport["release_date_effacee"] = True
@@ -1700,10 +1825,15 @@ class TrackRepository:
 
     @staticmethod
     def _release_dates_match(left, right) -> bool:
-        """Date stricte sans imposer un type datetime aux données historiques."""
+        """Date stricte sans imposer un type datetime aux données historiques.
+
+        Tolérante aux PRÉCISIONS depuis le 2026-09-22 (« 2018 » désigne le même
+        jour que « 2018-01-01 ») : une troncature à 10 caractères ne les
+        rapprochait pas.
+        """
         if left is None or right is None:
             return False
-        return str(left)[:10] == str(right)[:10]
+        return meme_jour(left, right)
 
     def _persist_release_observations(
         self, conn, track_id: int, artist_id: int, observations: list[ReleaseObservation]
@@ -1923,6 +2053,18 @@ class TrackRepository:
     def _complete_release(
         self, conn, release_id: int, title: str, observation: ReleaseObservation
     ) -> None:
+        # Une PARUTION a une date, et c'est la plus ancienne vue qui fait foi.
+        # Le `COALESCE` gardait la PREMIÈRE arrivée, ce qui dépendait de l'ordre
+        # des observations : un repressage rencontré avant l'édition d'origine
+        # figeait sa date. (Ne pas confondre avec la date du MORCEAU : celle-ci
+        # décrit l'édition, celle-là l'enregistrement.)
+        date = observation.release_date
+        if date is not None:
+            connue = conn.execute(
+                text("SELECT release_date FROM releases WHERE id = :id"), {"id": release_id}
+            ).scalar()
+            if connue is not None:
+                date = completer(la_plus_ancienne(date, connue)) or date
         conn.execute(
             text(
                 "UPDATE releases SET credited_artist_name = COALESCE(:credited_artist_name, credited_artist_name), "
@@ -1932,7 +2074,7 @@ class TrackRepository:
             {
                 "id": release_id,
                 "credited_artist_name": observation.credited_artist_name,
-                "release_date": observation.release_date,
+                "release_date": date,
                 "record_type": observation.record_type,
                 "now": datetime.now(),
             },

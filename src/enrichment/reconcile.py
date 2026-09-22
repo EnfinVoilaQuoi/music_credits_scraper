@@ -172,6 +172,47 @@ def resolve_by_priority(observations: list, field: str, ordre) -> Resolution | N
     return None
 
 
+def resoudre_date_de_sortie(observations: list, ordre=None) -> Resolution | None:
+    """Verdict de `release_date` : la PRÉCISION d'abord, l'ordre ensuite.
+
+    Genius est en tête de l'ordre des sources, mais il fabrique
+    `datetime(année, 1, 1)` dès que `release_date_components` n'a que l'année
+    (719 dates en base tombent au 1ᵉʳ janvier). Le suivre aveuglément ferait
+    perdre le « 2018-05-02 » de Deezer, qui est la vraie date. On groupe donc
+    par précision, la maximale gagne, et l'ordre des sources ne départage que
+    DANS ce groupe.
+
+    ⚠️ La précision est la FORME de la valeur (`"2018"` / `"2018-05"` /
+    `"2018-05-14"`) : c'est le producteur qui la déclare. Une source qui écrit
+    un `datetime` dit « au jour près », et personne ne pourra la contredire.
+
+    Mêmes règles héritées qu'ailleurs : `manual` court-circuite, `legacy` ne
+    sert que s'il est seul.
+    """
+    from src.utils import dates as _dates
+
+    ordre = ordre or DISCOGRAPHY_PRIORITIES["release_date"]
+    manual = _manual_obs(observations)
+    if manual is not None:
+        return Resolution("release_date", manual.value, MANUAL_SOURCE)
+
+    reelles = [o for o in observations if o.source != LEGACY_SOURCE and _dates.precision(o.value)]
+    if not reelles:
+        legacy = [o for o in observations if o.value is not None]
+        if not legacy:
+            return None
+        return Resolution("release_date", legacy[0].value, legacy[0].source, legacy[0].confidence)
+
+    plus_precise = max(_dates.precision(o.value) for o in reelles)
+    candidates = {o.source: o for o in reelles if _dates.precision(o.value) == plus_precise}
+    for source in ordre:
+        obs = candidates.get(source)
+        if obs is not None:
+            return Resolution("release_date", obs.value, source, obs.confidence)
+    obs = next(iter(candidates.values()))
+    return Resolution("release_date", obs.value, obs.source, obs.confidence)
+
+
 def reconcile_spotify_streams(observations: list, master: str) -> Any:
     """Valeur à inscrire en colonne pour les streams Spotify.
 
@@ -387,7 +428,12 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
 
     release_date = resolutions.get("release_date")
     if release_date is not None:
-        track.release_date = release_date.value
+        # La COLONNE reste une date complète (contrat avec la GUI, le tri et
+        # la Timeline du dépôt privé) : la précision ne vit que dans
+        # l'observation.
+        from src.utils.dates import completer as _completer
+
+        track.release_date = _completer(release_date.value) or release_date.value
 
     isrc = resolutions.get("isrc")
     if isrc is not None:
@@ -452,7 +498,13 @@ def reconcile(
         obs_list = by_field.get(field, [])
         if not obs_list:
             continue
-        res = resolve_by_priority(obs_list, field, ordre)
+        # `release_date` a sa propre stratégie (la précision avant l'ordre) —
+        # la MÊME fonction que celle du repository, sinon le verdict
+        # dépendrait du flux qui a écrit.
+        if field == "release_date":
+            res = resoudre_date_de_sortie(obs_list, ordre)
+        else:
+            res = resolve_by_priority(obs_list, field, ordre)
         if res is not None:
             resolutions[field] = res
 

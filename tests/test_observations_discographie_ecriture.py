@@ -198,3 +198,62 @@ def test_apply_resolutions_pose_duration_source():
     t = Track(title="X")
     apply_resolutions(t, {"duration": Resolution("duration", "203", "songbpm")})
     assert t.duration == 203 and t.duration_source == "songbpm"
+
+
+class TestDatesDeSortie:
+    """Lot 3 (2026-09-22) : la PRÉCISION est portée par la forme de
+    l'observation, la COLONNE reste une date complète."""
+
+    def _observer(self, dm, track_id, valeur, source):
+        dm.record_discography_observations(track_id, [Observation("release_date", valeur, source)])
+
+    def test_la_precision_passe_devant_l_ordre_des_sources(self, data_manager):
+        """Genius est premier, mais « 2018 » est tout ce qu'il sait : sa date
+        complétée au 1ᵉʳ janvier ne doit pas battre celle de Deezer."""
+        t = _track(data_manager, _artist(data_manager))
+        self._observer(data_manager, t.id, "2018", "genius")
+        self._observer(data_manager, t.id, "2018-05-02", "deezer")
+        assert str(_colonnes(data_manager, t.id)["release_date"])[:10] == "2018-05-02"
+
+    def test_la_colonne_est_TOUJOURS_une_date_complete(self, data_manager):
+        """Contrat avec la GUI, le tri et la Timeline du dépôt privé : même
+        quand la seule observation ne connaît que l'année."""
+        t = _track(data_manager, _artist(data_manager))
+        self._observer(data_manager, t.id, "2018", "genius")
+        assert str(_colonnes(data_manager, t.id)["release_date"])[:10] == "2018-01-01"
+
+    def test_l_ordre_d_ecriture_ne_change_rien(self, data_manager):
+        artist = _artist(data_manager)
+        a = _track(data_manager, artist)
+        self._observer(data_manager, a.id, "2018-05-02", "deezer")
+        self._observer(data_manager, a.id, "2018", "genius")
+        b = Track(title="Karma", artist=artist)
+        b.id = data_manager.save_track(b)
+        self._observer(data_manager, b.id, "2018", "genius")
+        self._observer(data_manager, b.id, "2018-05-02", "deezer")
+        for tid in (a.id, b.id):
+            assert str(_colonnes(data_manager, tid)["release_date"])[:10] == "2018-05-02"
+
+    def test_deezer_garde_la_date_de_la_PREMIERE_edition(self, data_manager):
+        """Chaque observation Deezer décrit une ÉDITION (« Loto » : single le
+        02/05, album le 14/09) et il n'y a qu'une ligne par (morceau, champ,
+        source) : sans fusion, la dernière rencontrée écraserait la première.
+        Les dates de CHAQUE parution vivent dans `releases` (e31)."""
+        t = _track(data_manager, _artist(data_manager))
+        self._observer(data_manager, t.id, "2018-09-14", "deezer")
+        self._observer(data_manager, t.id, "2018-05-02", "deezer")
+        assert str(_colonnes(data_manager, t.id)["release_date"])[:10] == "2018-05-02"
+
+    def test_la_fusion_ne_vaut_QUE_pour_les_sources_par_edition(self, data_manager):
+        """Genius décrit l'enregistrement : sa dernière valeur remplace la
+        précédente, comme n'importe quelle observation."""
+        t = _track(data_manager, _artist(data_manager))
+        self._observer(data_manager, t.id, "2018-09-14", "genius")
+        self._observer(data_manager, t.id, "2019-01-20", "genius")
+        assert str(_colonnes(data_manager, t.id)["release_date"])[:10] == "2019-01-20"
+
+    def test_une_edition_moins_precise_ne_rajeunit_pas_le_morceau(self, data_manager):
+        t = _track(data_manager, _artist(data_manager))
+        self._observer(data_manager, t.id, "2018-05-02", "deezer")
+        self._observer(data_manager, t.id, "2018", "deezer")
+        assert str(_colonnes(data_manager, t.id)["release_date"])[:10] == "2018-05-02"

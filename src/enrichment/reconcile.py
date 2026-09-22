@@ -109,10 +109,15 @@ def _confidence_key(confidence: float | None) -> float:
 #: d'une page (« 2:30 »), donc à la seconde affichée, ce qui la place derrière
 #: les deux sources qui donnent la valeur du fichier.
 DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
-    # `spotify_web` (2026-09-21) : la page titre Spotify ne renseigne que les
-    # lignes créées depuis Kworb (remix, versions sans page Genius) — pour elles
-    # c'est la seule source ; partout ailleurs elle ne pèse rien. Elle lit PAR
-    # l'ID, comme ReccoBeats, qui reste bon dernier (c'est lui qui a contaminé).
+    # Mesuré le 2026-09-22 : cet ordre était en partie DÉCLARATIF — `ytmusic`
+    # et `spotify_web` n'avaient jamais écrit UNE observation (0 en base contre
+    # 3 284 reccobeats), et Deezer 368 seulement, sa recherche par morceau
+    # étant morte. Depuis : Deezer par le CATALOGUE de l'artiste (écarts, lien
+    # → fiche) et par la recherche libre gardée ; YTM déclare `duration_seconds`
+    # du hit dont le titre concorde (flux paroles) ; `spotify_web` déclare les
+    # durées des pages titre et album du run streams. Ces deux-là lisent PAR
+    # l'ID, comme ReccoBeats, qui reste bon dernier (c'est lui qui a contaminé)
+    # — un ID rejeté emporte leurs durées (`clear_track_spotify_id`).
     "duration": ("deezer", "ytmusic", "songbpm", "spotify_web", "reccobeats"),
     "release_date": ("genius", "deezer", "spotify_web"),
     "isrc": ("deezer",),
@@ -378,6 +383,7 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
     duration = resolutions.get("duration")
     if duration is not None:
         track.duration = _clean_duration(duration.value)
+        track.duration_source = duration.source
 
     release_date = resolutions.get("release_date")
     if release_date is not None:

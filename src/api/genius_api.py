@@ -15,7 +15,7 @@ from src.config import (
     GENIUS_SLEEP_TIME,
     GENIUS_TIMEOUT,
 )
-from src.models import Artist, Track
+from src.models import Artist, ReleaseObservation, Track
 from src.observability import source_usage
 from src.utils.logger import get_logger, log_api
 from src.utils.spotify_identity import valider_identite
@@ -445,6 +445,19 @@ class GeniusAPI:
                         is_featuring=is_feat,
                     )
                     track.secondary_role = secondary_role
+                    album_data = song.get("album")
+                    if isinstance(album_data, dict) and album_data.get("name"):
+                        track.release_observations.append(
+                            ReleaseObservation(
+                                title=str(album_data["name"]),
+                                source="genius",
+                                external_release_id=album_data.get("id"),
+                                external_track_id=track.genius_id,
+                                release_date=track.release_date,
+                                scope="appearance" if is_feat else "own",
+                                confidence="identified" if album_data.get("id") else "suggested",
+                            )
+                        )
                     # Chantier « Media » : pochettes (morceau + album) sur le
                     # chemin réel. `album_cover_url` = transitoire (non persisté),
                     # consommé par media_enricher en fallback de Deezer.
@@ -641,9 +654,21 @@ class GeniusAPI:
 
         album = song.get("album")
         name = album.get("name") if isinstance(album, dict) else None
+        album_id = album.get("id") if isinstance(album, dict) else None
         if name and not track.album and not track.album_override:  # édition manuelle respectée
             track.album = str(name)
             track._album_from_api = True
+            track.release_observations.append(
+                ReleaseObservation(
+                    title=str(name),
+                    source="genius",
+                    external_release_id=album_id,
+                    external_track_id=track.genius_id,
+                    release_date=track.release_date,
+                    scope="appearance" if track.is_featuring else "own",
+                    confidence="identified" if album_id else "suggested",
+                )
+            )
             changed = True
 
         sid, yt = self._extract_media(song)

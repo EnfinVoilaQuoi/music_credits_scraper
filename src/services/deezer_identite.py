@@ -24,11 +24,10 @@ rien et remonte `ArtisteDeezerAmbigu` avec les candidats, pour que la CLI
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass, field
 
 from src.utils.logger import get_logger
-from src.utils.title_matching import normalize_name, normalize_title
+from src.utils.title_matching import cle_album, normalize_name
 
 logger = get_logger(__name__)
 
@@ -58,13 +57,6 @@ class ArtisteDeezerAmbigu(Exception):
         super().__init__(f"Artiste Deezer ambigu : {nom!r}")
         self.nom = nom
         self.candidats = candidats
-
-
-def cle_album(titre: str | None) -> str:
-    """Clé de comparaison d'un titre d'album — jamais vide : « … » et « ... »
-    normalisent à la chaîne vide (points supprimés), le titre brut sert alors."""
-    brut = (titre or "").strip()
-    return normalize_title(brut) or unicodedata.normalize("NFKD", brut).lower()
 
 
 def candidats_exacts(nom: str, hits: list[dict]) -> list[CandidatDeezer]:

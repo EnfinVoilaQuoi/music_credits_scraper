@@ -150,6 +150,118 @@ def test_base_neuve_est_au_head_pour_alembic(tmp_path):
     assert avant == apres
 
 
+def test_e31_reprend_les_albums_de_reference_sans_dupliquer_les_tracks(tmp_path):
+    """La migration e31 transforme le pointeur historique en lien N↔N."""
+    path = str(tmp_path / "release-backfill.db")
+    _upgrade_to(path, "e30_artist_deezer_id")
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Diams')")
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, album, track_number) "
+            "VALUES (1, 'Car tu portes mon nom', 1, 'Dans ma bulle', 4)"
+        )
+        # Deux graphies historiques ne doivent pas casser la clé `legacy`, ni
+        # créer deux parutions pour le même disque.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist_id, album, track_number) "
+            "VALUES (2, 'Jeune demoiselle', 1, 'Dans Ma Bulle', 5)"
+        )
+        conn.commit()
+    _upgrade_to(path, "e31_release_catalog")
+    with sqlite3.connect(path) as conn:
+        releases = conn.execute("SELECT title, scope FROM releases").fetchall()
+        links = conn.execute(
+            "SELECT track_id, track_number, source, matched_by FROM release_tracks"
+        ).fetchall()
+        tracks_count = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+    assert releases == [("Dans Ma Bulle", "own")]
+    assert links == [(1, 4, "legacy", "legacy"), (2, 5, "legacy", "legacy")]
+    assert tracks_count == 2
+
+
+def test_e32_reprend_les_identifiants_deezer_et_resiste_a_une_relance(tmp_path):
+    path = str(tmp_path / "release-identifiers.db")
+    _upgrade_to(path, "e31_release_catalog")
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
+        conn.execute("INSERT INTO tracks (id, title, artist_id) VALUES (1, 'T', 1)")
+        conn.execute(
+            "INSERT INTO releases (id, artist_id, title, deezer_album_id, scope, identity_key) "
+            "VALUES (1, 1, 'Album', 55, 'own', 'deezer:55')"
+        )
+        conn.execute(
+            "INSERT INTO release_tracks (id, release_id, track_id, source_track_id, source, matched_by) "
+            "VALUES (1, 1, 1, 77, 'deezer', 'deezer_id')"
+        )
+        conn.commit()
+    _upgrade_to(path, "e32_release_identity_pipeline")
+    _upgrade_to(path, "e32_release_identity_pipeline")
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT source, external_id FROM release_identifiers").fetchall() == [
+            ("deezer", "55")
+        ]
+        assert conn.execute(
+            "SELECT source, external_track_id, matched_by FROM release_track_sources"
+        ).fetchall() == [("deezer", "77", "deezer_id")]
+
+
+def test_e33_la_parution_heritee_rejoint_sa_jumelle_deezer(tmp_path):
+    """Un disque connu de `tracks.album` (legacy) ET rattaché par Deezer avait
+    deux parutions ; e33 les fusionne (« … » = « ... »), sans toucher à deux
+    parutions Deezer d'un même titre (deux éditions)."""
+    path = str(tmp_path / "release-adoption.db")
+    _upgrade_to(path, "e32_release_identity_pipeline")
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
+        conn.executemany(
+            "INSERT INTO tracks (id, title, artist_id, album) VALUES (?, ?, 1, '…')",
+            [(1, "Boulevard"), (2, "Cercueil"), (3, "Inédit")],
+        )
+        conn.executemany(
+            "INSERT INTO releases (id, artist_id, title, scope, identity_key) VALUES (?, 1, ?, 'own', ?)",
+            [
+                (1, "…", "legacy:1:…"),
+                (2, "...", "deezer:6"),
+                (3, "...", "deezer:7"),
+                (4, "Autre", "legacy:1:autre"),
+            ],
+        )
+        conn.execute(
+            "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
+            "VALUES (2, 1, 'deezer', '6'), (3, 1, 'deezer', '7')"
+        )
+        conn.executemany(
+            "INSERT INTO release_tracks (id, release_id, track_id, source, matched_by) VALUES (?, ?, ?, ?, ?)",
+            [
+                (1, 1, 1, "legacy", "legacy"),
+                (2, 1, 3, "legacy", "legacy"),
+                (3, 2, 1, "deezer", "title"),  # déjà porté par la cible
+                (4, 2, 2, "deezer", "title"),
+            ],
+        )
+        conn.execute(
+            "INSERT INTO release_track_sources (release_track_id, source, matched_by) "
+            "VALUES (1, 'legacy', 'legacy'), (3, 'deezer', 'title')"
+        )
+        conn.commit()
+    _upgrade_to(path, "e33_release_legacy_adoption")
+    _upgrade_to(path, "e33_release_legacy_adoption")
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT id, identity_key FROM releases ORDER BY id").fetchall() == [
+            (2, "deezer:6"),
+            (3, "deezer:7"),
+            (4, "legacy:1:autre"),
+        ]
+        assert conn.execute(
+            "SELECT release_id, track_id FROM release_tracks ORDER BY track_id"
+        ).fetchall() == [(2, 1), (2, 2), (2, 3)]
+        # La preuve du lien héritée écarté est partie avec lui ; celle du lien
+        # conservé reste.
+        assert conn.execute(
+            "SELECT release_track_id FROM release_track_sources ORDER BY 1"
+        ).fetchall() == [(3,)]
+
+
 def test_e4_backfill_bpm_key_mode(tmp_path):
     """La révision e4 crée `observations` et backfill le trio audio depuis les
     colonnes `*_source` : 1 obs par `bpm_source` non nul, key/mode = 2 obs (même

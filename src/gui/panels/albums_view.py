@@ -11,7 +11,7 @@ from src.enrichment.album_types import LIBELLES, RECORD_TYPES
 from src.enrichment.observation import Observation
 from src.gui import albums_grouping, helpers
 from src.gui.panels import tracks_table
-from src.models import Track
+from src.models import ReleaseObservation, Track
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -159,10 +159,34 @@ def populate_albums_table(app):
     FEAT_LABEL = "🎤 Featurings (albums invités)"
     SINGLES_LABEL = "— Singles / sans album —"
 
-    # Grouper les morceaux par album (clé normalisée : "d'" == "d’", "Vol.3" == "Vol. 3")
-    # Sans album : les feats vont dans la ligne Featurings, les solos dans Singles.
+    # Le catalogue e31 est la source de la vue principale : une fiche peut
+    # apparaître dans plusieurs éditions sans être dupliquée. Les fiches sans
+    # lien (base ancienne ouverte avant migration, ou single) retombent sur le
+    # champ historique `track.album`.
     groups = {}
+    by_id = {track.id: track for track in app.current_artist.tracks if track.id}
+    linked_ids = set()
+    try:
+        memberships = app.data_manager.get_release_tracks_for_artist(
+            app.current_artist.id, scope="own"
+        )
+    except (SQLAlchemyError, KeyError, TypeError) as e:
+        logger.debug(f"Catalogue de parutions indisponible: {e}")
+        memberships = []
+    for link in memberships:
+        track = by_id.get(link["track_id"])
+        if track is None:
+            continue
+        linked_ids.add(track.id)
+        # L'ID évite de confondre deux éditions homonymes; le libellé visible
+        # reste le titre naturel dans le cas courant.
+        key = f"release:{link['release_id']}"
+        if key not in groups:
+            groups[key] = [link["title"], []]
+        groups[key][1].append(track)
     for track in app.current_artist.tracks:
+        if track.id in linked_ids:
+            continue
         album = (track.album or "").strip()
         if not album:
             album = FEAT_LABEL if track.is_featuring else SINGLES_LABEL
@@ -199,7 +223,16 @@ def populate_albums_table(app):
             feat_tracks.append(group_tracks[0])
             del groups[key]
 
-    groups = {display: tracks for display, tracks in groups.values()}
+    # Deux parutions distinctes peuvent partager un titre (réédition, compile
+    # homonyme). Treeview exige une clé visible : on garde le titre lisible et
+    # ne suffixe qu'en cas de collision réelle.
+    rendered_groups = {}
+    for display, grouped_tracks in groups.values():
+        rendered = display
+        if rendered in rendered_groups:
+            rendered = f"{display} (édition {len(rendered_groups) + 1})"
+        rendered_groups[rendered] = grouped_tracks
+    groups = rendered_groups
     if feat_tracks or visual_feats:
         groups.setdefault(FEAT_LABEL, []).extend(feat_tracks + visual_feats)
     if visual_singles:
@@ -335,13 +368,24 @@ def import_genius_album(app):
             # retombait sur l'ordre alphabétique.
             number = tr.get("track_number")
             existing = by_genius_id[gid]
+            existing.release_observations.append(
+                ReleaseObservation(
+                    title=album_name,
+                    source="genius",
+                    external_release_id=data["album"].get("id"),
+                    external_track_id=gid,
+                    release_date=release_date,
+                    scope="own",
+                    confidence="identified" if data["album"].get("id") else "suggested",
+                )
+            )
             if number and existing.track_number != number:
                 existing.track_number = number
-                try:
-                    app.data_manager.save_track(existing)
-                    renumbered += 1
-                except Exception as e:
-                    logger.error(f"N° de piste '{existing.title}' échoué: {e}")
+                renumbered += 1
+            try:
+                app.data_manager.save_track(existing)
+            except Exception as e:
+                logger.error(f"N° de piste/parution '{existing.title}' échoué: {e}")
             continue
         if gid in deleted_ids:
             skipped_deleted += 1
@@ -353,6 +397,17 @@ def import_genius_album(app):
         track.album = album_name
         track.track_number = tr.get("track_number")
         track.release_date = release_date
+        track.release_observations.append(
+            ReleaseObservation(
+                title=album_name,
+                source="genius",
+                external_release_id=data["album"].get("id"),
+                external_track_id=gid,
+                release_date=release_date,
+                scope="own",
+                confidence="identified" if data["album"].get("id") else "suggested",
+            )
+        )
         if release_date:
             # La date est un champ ARBITRÉ depuis le lot B : une écriture qui
             # n'émet pas d'observation ne vit que dans la colonne, et la

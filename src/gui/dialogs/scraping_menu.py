@@ -33,6 +33,7 @@ def show_scraping_menu(app):
     # Variables pour les checkboxes
     scrape_genius_var = ctk.BooleanVar(value=True)  # Genius coché par défaut
     scrape_discogs_var = ctk.BooleanVar(value=True)  # Discogs coché par défaut
+    scrape_youtube_var = ctk.BooleanVar(value=True)  # YouTube Topic/clip par défaut
     force_credits_var = ctk.BooleanVar(value=False)
     # Sources paroles (TEXTE) — uniformisé comme les crédits
     lyrics_ytm_var = ctk.BooleanVar(value=True)  # YouTube Music (texte fallback) par défaut
@@ -72,6 +73,15 @@ def show_scraping_menu(app):
         font=("Arial", 11),
     )
     discogs_checkbox.pack(anchor="w", padx=30, pady=2)
+
+    # Checkbox YouTube Topic/clip
+    youtube_checkbox = ctk.CTkCheckBox(
+        credits_frame,
+        text="   YouTube (Topic / clip — morceaux sans producteur)",
+        variable=scrape_youtube_var,
+        font=("Arial", 11),
+    )
+    youtube_checkbox.pack(anchor="w", padx=30, pady=2)
 
     # Checkbox Mise à jour forcée
     force_credits_checkbox = ctk.CTkCheckBox(
@@ -181,6 +191,7 @@ def show_scraping_menu(app):
     def start_scraping():
         scrape_genius = scrape_genius_var.get()
         scrape_discogs = scrape_discogs_var.get()
+        scrape_youtube = scrape_youtube_var.get()
         force_credits = force_credits_var.get()
         lyrics_ytm = lyrics_ytm_var.get()
         lyrics_genius = lyrics_genius_var.get()
@@ -194,7 +205,13 @@ def show_scraping_menu(app):
         force_sync = force_sync_var.get()
 
         # Au moins une source (crédits, paroles ou timestamps) doit être sélectionnée
-        if not scrape_genius and not scrape_discogs and not scrape_lyrics and not scrape_sync:
+        if (
+            not scrape_genius
+            and not scrape_discogs
+            and not scrape_youtube
+            and not scrape_lyrics
+            and not scrape_sync
+        ):
             messagebox.showwarning("Attention", "Sélectionnez au moins une option de scraping")
             return
 
@@ -205,6 +222,7 @@ def show_scraping_menu(app):
             app,
             scrape_genius=scrape_genius,
             scrape_discogs=scrape_discogs,
+            scrape_youtube=scrape_youtube,
             force_credits=force_credits,
             scrape_lyrics=scrape_lyrics,
             lyrics_ytm=lyrics_ytm,

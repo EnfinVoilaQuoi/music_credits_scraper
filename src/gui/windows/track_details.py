@@ -59,6 +59,17 @@ class TrackDetailsWindow:
     """Fenêtre de détails d'un morceau. S'enregistre dans app.open_detail_windows
     (même sémantique que l'ancienne méthode MainWindow._show_track_details_for_track)."""
 
+    @staticmethod
+    def _create_urls_frame(parent):
+        """Conteneur commun des liens externes, indépendant de Genius.
+
+        Une fiche introduite par Deezer n'a pas forcément de page Genius ;
+        Spotify et YouTube doivent néanmoins pouvoir y ajouter leurs contrôles.
+        """
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(anchor="w", padx=10, pady=5)
+        return frame
+
     def __init__(self, app, track: Track):
         """Construit et affiche la fenêtre de détails - VERSION AVEC DEBUG FEATURING"""
         self.app = app
@@ -265,11 +276,13 @@ class TrackDetailsWindow:
         except Exception:
             pass
 
+        # Les trois sources de liens sont indépendantes : surtout ne pas créer
+        # ce conteneur dans le `if track.genius_url`, une piste Deezer pouvant
+        # ne jamais avoir d'URL Genius.
+        urls_frame = self._create_urls_frame(info_frame)
+
         # URL Genius (cliquable)
         if track.genius_url:
-            urls_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
-            urls_frame.pack(anchor="w", padx=10, pady=5)
-
             # URL Genius - JAUNE avec bouton "Voir"
             genius_frame = ctk.CTkFrame(urls_frame, fg_color="transparent")
             genius_frame.pack(side="left", padx=(0, 20))
@@ -579,7 +592,9 @@ class TrackDetailsWindow:
                         "discogs": "💿",
                         "lastfm": "📻",
                         "kworb": "📈",
-                        "heritage": "↩",  # hérité du morceau original (version)
+                        "heritage": "↩",
+                        "youtube_topic": "▶️",
+                        "youtube_clip": "🎬",
                     }.get(credit.source, "🔗")
                     detail = f" ({credit.role_detail})" if credit.role_detail else ""
                     music_textbox.insert("end", f"{source_emoji} {credit.name}{detail}\n")
@@ -629,6 +644,8 @@ class TrackDetailsWindow:
                         "spotify": "🎧",
                         "discogs": "💿",
                         "lastfm": "📻",
+                        "youtube_topic": "▶️",
+                        "youtube_clip": "🎬",
                     }.get(credit.source, "🔗")
                     detail = f" ({credit.role_detail})" if credit.role_detail else ""
                     video_textbox.insert("end", f"{source_emoji} {credit.name}{detail}\n")
@@ -917,6 +934,26 @@ class TrackDetailsWindow:
         _album_api = track._album_from_api
         _album_src = "API Genius" if _album_api else ("scrape" if track.album else "—")
         tech_textbox.insert("end", f"• Album : {track.album or 'N/A'}  ({_album_src})\n")
+        # e31 : l'album de référence ci-dessus reste compatible avec les flux
+        # historiques; les autres parutions vivent dans le catalogue séparé.
+        if track.id:
+            parutions = app.data_manager.get_track_releases(track.id)
+            autres = [
+                r
+                for r in parutions
+                if r["scope"] == "appearance" and r.get("status", "confirmed") == "confirmed"
+            ]
+            if autres:
+                tech_textbox.insert("end", "• Aussi présent sur :\n")
+                for r in autres:
+                    credit = f" — {r['credited_artist_name']}" if r["credited_artist_name"] else ""
+                    pos = f" (piste {r['track_number']})" if r["track_number"] else ""
+                    tech_textbox.insert("end", f"   · {r['title']}{credit}{pos}\n")
+            suggestions = [r for r in parutions if r.get("status") == "suggested"]
+            if suggestions:
+                tech_textbox.insert("end", "• Parutions à confirmer :\n")
+                for r in suggestions:
+                    tech_textbox.insert("end", f"   · {r['title']} — proposée par {r['source']}\n")
         _rd_api = track._release_date_from_api
         _rd_src = "API Genius" if _rd_api else ("scrape" if track.release_date else "—")
         tech_textbox.insert(

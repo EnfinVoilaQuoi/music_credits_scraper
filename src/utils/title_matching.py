@@ -264,6 +264,15 @@ _MARQUEURS_EDITION = re.compile(
 )
 
 
+def cle_album(titre: str | None) -> str:
+    """Clé de comparaison d'un titre d'album — jamais vide : « … » et « ... »
+    normalisent à la chaîne vide (points supprimés), le titre brut sert alors.
+    Partagée par les écarts Deezer et le catalogue des parutions (une parution
+    Deezer ADOPTE la parution héritée de `tracks.album` qui porte la même clé)."""
+    brut = (titre or "").strip()
+    return normalize_title(brut) or unicodedata.normalize("NFKD", brut).lower()
+
+
 def base_album_key(titre_normalise: str, cles_connues) -> str | None:
     """Album de la base auquel rattacher une entrée d'album, ou None.
 

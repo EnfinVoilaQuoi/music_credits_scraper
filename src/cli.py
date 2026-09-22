@@ -91,7 +91,9 @@ def _deezer_args(p: argparse.ArgumentParser) -> None:
 def _credits_args(p: argparse.ArgumentParser) -> None:
     _bool_flags(p, "genius", True, "crédits Genius")
     _bool_flags(p, "discogs", True, "crédits Discogs")
+    _bool_flags(p, "youtube", True, "crédits YouTube (Topic/clip)")
     p.add_argument("--force-credits", action="store_true")
+    p.add_argument("--tout-youtube", action="store_true", help="YouTube sur TOUS les morceaux")
     _bool_flags(p, "paroles-genius", True, "paroles structurées Genius")
     _bool_flags(p, "paroles-ytm", True, "paroles YTM (repli texte)")
     p.add_argument("--force-paroles", action="store_true")
@@ -213,7 +215,9 @@ def options_credits(a: argparse.Namespace) -> credits.OptionsCredits:
     return credits.OptionsCredits(
         genius=a.genius,
         discogs=a.discogs,
+        youtube=a.youtube,
         force_credits=a.force_credits,
+        tout_youtube=getattr(a, "tout_youtube", False),
         paroles_genius=a.paroles_genius,
         paroles_ytm=a.paroles_ytm,
         force_paroles=a.force_paroles,
@@ -407,6 +411,9 @@ def _executer_deezer(a: argparse.Namespace, runtime: Runtime, hooks) -> int:
             deezer_id=deezer_id,
             should_stop=hooks.should_stop,
             genius_api=runtime.genius_api,
+        )
+        ecarts_deezer.rattacher_liens_confirmes(
+            runtime.data_manager, art, bilan, should_stop=hooks.should_stop
         )
         _imprimer_bilan("Deezer — écarts de discographie", ecarts_deezer.resume(bilan, art.name))
         if a.creer:

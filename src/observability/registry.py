@@ -156,6 +156,7 @@ PROVIDER_TO_KEYS: dict[str, tuple[str, ...]] = {
     "songbpm": ("songbpm",),
     "spotify_id": ("spotify_embed",),
     "streams": ("kworb", "spotify_web", "ytmusic"),
+    "youtube_credits": ("youtube_topic", "youtube_clip"),
 }
 
 #: Sources qui n'ont AUCUN domaine à elles : elles partagent leur hôte avec une
@@ -164,7 +165,9 @@ PROVIDER_TO_KEYS: dict[str, tuple[str, ...]] = {
 #: exception qui doit rester DÉCLARÉE : sans cette liste, la prochaine personne
 #: qui verra la source « manquer » dans `DOMAIN_TO_KEY` l'y ajoutera et volera
 #: silencieusement l'attribution de sa jumelle.
-KEYS_WITHOUT_OWN_DOMAIN: frozenset[str] = frozenset({"spotify_web"})
+KEYS_WITHOUT_OWN_DOMAIN: frozenset[str] = frozenset(
+    {"spotify_web", "youtube_topic", "youtube_clip"}
+)
 
 # ── Sources de certification (protocole `CertificationSource`, en MAJUSCULES) ──
 CERT_SOURCE_TO_KEY: dict[str, str] = {

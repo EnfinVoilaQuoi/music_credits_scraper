@@ -24,6 +24,7 @@ def start_combined_scraping(
     app,
     scrape_genius=False,
     scrape_discogs=False,
+    scrape_youtube=True,
     force_credits=False,
     scrape_lyrics=False,
     force_lyrics=False,
@@ -46,6 +47,7 @@ def start_combined_scraping(
     options = credits.OptionsCredits(
         genius=scrape_genius,
         discogs=scrape_discogs,
+        youtube=scrape_youtube,
         force_credits=force_credits,
         paroles_genius=scrape_lyrics and lyrics_genius,
         paroles_ytm=scrape_lyrics and lyrics_ytm,

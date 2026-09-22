@@ -11,8 +11,9 @@ from typing import Any
 from bs4 import BeautifulSoup
 
 from src.config import DELAY_BETWEEN_REQUESTS
-from src.models import Credit, CreditRole, Track
+from src.models import Credit, CreditRole, ReleaseObservation, Track
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
+from src.utils.credit_roles import map_role
 from src.utils.llm_extractor import LLMExtractor, build_credits_prompt
 from src.utils.logger import get_logger
 
@@ -141,6 +142,14 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 album = self._extract_album_bs4(html)
                 if album:
                     track.album = album
+                    # Une page Genius ne donne ici ni ID d'album ni date fiable :
+                    # elle devient une proposition, jamais un rapprochement par
+                    # titre seul avec une édition/compilation existante.
+                    track.release_observations.append(
+                        ReleaseObservation(
+                            title=album, source="genius_scrape", confidence="suggested"
+                        )
+                    )
                     logger.info(f"💿 Album détecté pour '{track.title}': {album}")
             except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
                 logger.debug(f"GeniusScraperV3: album introuvable pour '{track.title}': {e}")
@@ -646,136 +655,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             return []
 
     def _map_genius_role_to_enum(self, genius_role: str) -> CreditRole:
-        role_mapping = {
-            "Producer": CreditRole.PRODUCER,
-            "Co-Producer": CreditRole.CO_PRODUCER,
-            "Executive Producer": CreditRole.EXECUTIVE_PRODUCER,
-            "Vocal Producer": CreditRole.VOCAL_PRODUCER,
-            "Additional Production": CreditRole.ADDITIONAL_PRODUCTION,
-            "Writer": CreditRole.WRITER,
-            "Writers": CreditRole.WRITER,
-            "Songwriter": CreditRole.WRITER,
-            "Songwriters": CreditRole.WRITER,
-            "Composer": CreditRole.COMPOSER,
-            "Composers": CreditRole.COMPOSER,
-            "Lyricist": CreditRole.LYRICIST,
-            "Lyricists": CreditRole.LYRICIST,
-            "Arranger": CreditRole.ARRANGER,
-            "Arrangers": CreditRole.ARRANGER,
-            "Producers": CreditRole.PRODUCER,
-            "Mixing Engineer": CreditRole.MIXING_ENGINEER,
-            "Mix Engineer": CreditRole.MIXING_ENGINEER,
-            "Mastering Engineer": CreditRole.MASTERING_ENGINEER,
-            "Recording Engineer": CreditRole.RECORDING_ENGINEER,
-            "Engineer": CreditRole.ENGINEER,
-            "Vocals": CreditRole.VOCALS,
-            "Lead Vocals": CreditRole.LEAD_VOCALS,
-            "Background Vocals": CreditRole.BACKGROUND_VOCALS,
-            "Additional Vocals": CreditRole.ADDITIONAL_VOCALS,
-            "Choir": CreditRole.CHOIR,
-            "Label": CreditRole.LABEL,
-            "Publisher": CreditRole.PUBLISHER,
-            "Distributor": CreditRole.DISTRIBUTOR,
-            "Guitar": CreditRole.GUITAR,
-            "Bass Guitar": CreditRole.BASS_GUITAR,
-            "Acoustic Guitar": CreditRole.ACOUSTIC_GUITAR,
-            "Electric Guitar": CreditRole.ELECTRIC_GUITAR,
-            "Drums": CreditRole.DRUMS,
-            "Piano": CreditRole.PIANO,
-            "Keyboard": CreditRole.KEYBOARD,
-            "Synthesizer": CreditRole.SYNTHESIZER,
-            "Bass": CreditRole.BASS,
-            "Art Direction": CreditRole.ART_DIRECTION,
-            "Artwork": CreditRole.ARTWORK,
-            "Graphic Design": CreditRole.GRAPHIC_DESIGN,
-            "Photography": CreditRole.PHOTOGRAPHY,
-            "Illustration": CreditRole.ILLUSTRATION,
-            "Video Director": CreditRole.VIDEO_DIRECTOR,
-            "Video Producer": CreditRole.VIDEO_PRODUCER,
-            "Video Director of Photography": CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY,
-            "Video Cinematographer": CreditRole.VIDEO_CINEMATOGRAPHER,
-            "Video Digital Imaging Technician": CreditRole.VIDEO_DIGITAL_IMAGING_TECHNICIAN,
-            "Video Camera Operator": CreditRole.VIDEO_CAMERA_OPERATOR,
-            "Video Drone Operator": CreditRole.VIDEO_DRONE_OPERATOR,
-            "Video Set Decorator": CreditRole.VIDEO_SET_DECORATOR,
-            "Video Editor": CreditRole.VIDEO_EDITOR,
-            "Video Colorist": CreditRole.VIDEO_COLORIST,
-            "Featuring": CreditRole.FEATURED,
-            "Remixer": CreditRole.REMIXER,
-            "Remixed By": CreditRole.REMIXER,
-            "Remix": CreditRole.REMIXER,
-            "Sample": CreditRole.SAMPLE,
-            "A&R": CreditRole.A_AND_R,
-        }
-
-        if genius_role in role_mapping:
-            return role_mapping[genius_role]
-
-        lower = genius_role.lower()
-        for key, value in role_mapping.items():
-            if key.lower() == lower:
-                return value
-
-        # Rôles vidéo : traités AVANT les règles floues pour que
-        # "Video Line Producer" ne devienne pas un Producer musical
-        if "video" in lower:
-            if "director" in lower and "photography" in lower:
-                return CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY
-            if "director" in lower:
-                return CreditRole.VIDEO_DIRECTOR
-            if "producer" in lower:
-                return CreditRole.VIDEO_PRODUCER
-            if "cinematographer" in lower:
-                return CreditRole.VIDEO_CINEMATOGRAPHER
-            if "camera" in lower:
-                return CreditRole.VIDEO_CAMERA_OPERATOR
-            if "drone" in lower:
-                return CreditRole.VIDEO_DRONE_OPERATOR
-            if "editor" in lower:
-                return CreditRole.VIDEO_EDITOR
-            if "colorist" in lower:
-                return CreditRole.VIDEO_COLORIST
-            if "set decorator" in lower:
-                return CreditRole.VIDEO_SET_DECORATOR
-            return CreditRole.OTHER
-
-        if "producer" in lower:
-            if "co" in lower:
-                return CreditRole.CO_PRODUCER
-            if "executive" in lower:
-                return CreditRole.EXECUTIVE_PRODUCER
-            if "vocal" in lower:
-                return CreditRole.VOCAL_PRODUCER
-            return CreditRole.PRODUCER
-
-        if "engineer" in lower:
-            if "mix" in lower:
-                return CreditRole.MIXING_ENGINEER
-            if "master" in lower:
-                return CreditRole.MASTERING_ENGINEER
-            if "record" in lower:
-                return CreditRole.RECORDING_ENGINEER
-            return CreditRole.ENGINEER
-
-        if "vocal" in lower:
-            if "lead" in lower:
-                return CreditRole.LEAD_VOCALS
-            if "background" in lower or "backing" in lower:
-                return CreditRole.BACKGROUND_VOCALS
-            if "additional" in lower:
-                return CreditRole.ADDITIONAL_VOCALS
-            return CreditRole.VOCALS
-
-        if "guitar" in lower:
-            if "bass" in lower:
-                return CreditRole.BASS_GUITAR
-            if "acoustic" in lower:
-                return CreditRole.ACOUSTIC_GUITAR
-            if "electric" in lower:
-                return CreditRole.ELECTRIC_GUITAR
-            return CreditRole.GUITAR
-
-        return CreditRole.OTHER
+        return map_role(genius_role)
 
     def _deduplicate_credits(self, credits: list[Credit]) -> list[Credit]:
         """Supprime les doublons de crédits"""

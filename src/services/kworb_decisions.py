@@ -40,6 +40,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from src.enrichment.observation import Observation
+from src.models import ReleaseObservation
 from src.models.track import Credit, CreditRole, Track
 from src.utils import version_heritage
 from src.utils.logger import get_logger
@@ -117,6 +118,18 @@ def _creer_ligne(dm, artist, proposition: dict, decision: str, identite: dict | 
             track.release_date = datetime.fromisoformat(identite["release_date"])
         if identite.get("duration"):
             track.duration = identite["duration"]
+        if identite.get("album"):
+            track.release_observations.append(
+                ReleaseObservation(
+                    title=identite["album"],
+                    source="spotify_web",
+                    external_release_id=identite.get("album_id"),
+                    external_track_id=proposition.get("spotify_id"),
+                    release_date=identite.get("release_date"),
+                    scope="appearance" if tiers else "own",
+                    confidence="identified" if identite.get("album_id") else "suggested",
+                )
+            )
     parent_title = proposition.get("parent_title") or proposition.get("socle")
     if parent_title:
         parent = _track_par_id(dm, artist, proposition.get("parent_track_id"))

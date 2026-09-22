@@ -53,7 +53,11 @@ class TestClasser:
         base = [_track("Chardons", "Chardons Bleus")]
         albums = [_album(1, "Chardons Bleus", [_piste(10, "Chardons"), _piste(11, "Coal lla")])]
         ecarts, jumelles = ed.classer(albums, base, [], NOUS)
-        assert [(e.nature, e.titre, e.coche) for e in ecarts] == [("absent", "Coal lla", True)]
+        # « Chardons » est CONNU : rattaché à la parution sans confirmation.
+        assert [(e.nature, e.titre, e.coche) for e in ecarts] == [
+            ("link", "Chardons", True),
+            ("absent", "Coal lla", True),
+        ]
         assert jumelles == []
 
     def test_disque_absent_de_l_artiste_principal(self):
@@ -121,15 +125,69 @@ class TestClasser:
         base = [_track("Boulevard", "…"), _track("Cercueil", "…")]
         albums = [_album(6, "...", [_piste(60, "Boulevard"), _piste(61, "Cercueil")])]
         ecarts, jumelles = ed.classer(albums, base, [], NOUS)
-        # « … » et « ... » sont le MÊME disque (clé NFKD) : ni écart, ni jumelle.
-        assert ecarts == [] and jumelles == []
+        # « … » et « ... » sont le MÊME disque (clé NFKD) : ni écart, ni jumelle —
+        # ses pistes connues sont des liens automatiques (titre, sans durée en base).
+        assert [(e.nature, e.matched_by, e.coche) for e in ecarts] == [("link", "title", True)] * 2
+        assert jumelles == []
         albums = [_album(6, "EP sans nom", [_piste(60, "Boulevard"), _piste(61, "Cercueil")])]
-        assert ed.classer(albums, base, [], NOUS) == ([], ["EP sans nom"])
+        ecarts, jumelles = ed.classer(albums, base, [], NOUS)
+        # Un disque INCONNU dont on connaît toutes les pistes : jumelle ET liens.
+        assert [e.nature for e in ecarts] == ["link", "link"] and jumelles == ["EP sans nom"]
+        # Déjà rattachées : plus rien à dire, le disque reste une jumelle.
+        assert ed.classer(
+            albums, base, [], NOUS, liens_connus={(6, base[0].id), (6, base[1].id)}
+        ) == (
+            [],
+            ["EP sans nom"],
+        )
 
-    def test_isrc_connu_vaut_titre_connu(self):
+    def test_titre_generique_sans_duree_reste_a_confirmer(self):
+        base = [_track("Intro", "Album A"), _track("Outro", "Album A")]
+        base[1].duration = 60
+        albums = [_album(9, "Album B", [_piste(90, "Intro"), _piste(91, "Outro")])]
+        albums[0].pistes[0].duration = None
+        albums[0].pistes[1].duration = 61
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        # Deux « Intro » sans durée comparable : rien ne dit que c'est la même ;
+        # « Outro » à 1 s près : lien.
+        assert [(e.nature, e.matched_by, e.coche) for e in ecarts] == [
+            ("link_candidate", "title_generique", False),
+            ("link", "title_duration", True),
+        ]
+
+    def test_edition_generique_rejoint_le_socle_par_isrc(self):
         base = [_track("Pas de côté", "Chansons", isrc="FR123")]
         albums = [_album(7, "Chansons", [_piste(70, "Pas de coté (Version)", isrc="FR123")])]
-        assert ed.classer(albums, base, [], NOUS)[0] == []
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        assert [(e.nature, e.matched_by) for e in ecarts] == [("link", "isrc")]
+
+    def test_album_version_generique_n_est_pas_une_nouvelle_version(self):
+        base = [_track("Argent, drogue et sexe", "Album")]
+        base[0].duration = 200
+        albums = [
+            _album(
+                71,
+                "Album bis",
+                [_piste(71, "Argent, Drogue et Sexe", "Argent, Drogue et Sexe", "Album Version")],
+            )
+        ]
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        assert [(e.nature, e.matched_by) for e in ecarts] == [("link", "title_duration")]
+
+    def test_meme_titre_duree_differente_est_un_doute_explicite(self):
+        base = [_track("Fucked Up", "Matrix")]
+        base[0].duration = 201
+        albums = [_album(72, "Autre album", [_piste(72, "Fucked Up")])]
+        albums[0].pistes[0].duration = 198
+
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+
+        assert [(e.nature, e.matched_by) for e in ecarts] == [
+            ("link_candidate", "title_duration_conflict")
+        ]
+        assert ecarts[0].motifs == [
+            "même titre, durée différente (Deezer 198 s / base 201 s) — à confirmer"
+        ]
 
     def test_album_connu_par_son_id_deezer(self):
         albums = [_album(8, "Titre Deezer différent", [_piste(80, "Inédit")])]
@@ -272,6 +330,9 @@ class TestDetecterAsync:
         def get_albums_for_artist(self, aid):
             return []
 
+        def get_deezer_release_links(self, aid):
+            return set()
+
     def test_lecture_classement_et_contributeurs(self):
         client = self._Client()
         artist = Artist(name="Nous")
@@ -279,6 +340,7 @@ class TestDetecterAsync:
         bilan = asyncio.run(ed.detecter_async(client, None, self._DM(), artist, deezer_id=NOUS))
         assert bilan.complete and bilan.albums_lus == 2
         assert [(e.nature, e.titre) for e in bilan.ecarts] == [
+            ("link", "MW2"),
             ("absent", "Inédit"),
             ("apparition", "MW2 (Chopped & $crewed)"),
         ]
@@ -341,6 +403,16 @@ class TestCreerLignes:
         ed.creer_lignes(data_manager, artist, [e])
         comptes = ed.creer_lignes(data_manager, artist, [e])
         assert len(data_manager.get_artist_tracks(artist.id)) == 1 and "existe déjà" in comptes[0]
+
+    def test_stop_ne_demarre_pas_la_prochaine_ecriture(self, data_manager):
+        artist = self._artiste(data_manager)
+        piste = _piste(71, "Premier")
+        e = ed.Ecart("absent", _album(7, "Chardons Bleus", [piste]), piste)
+
+        comptes = ed.creer_lignes(data_manager, artist, [e], should_stop=lambda: True)
+
+        assert comptes == []
+        assert data_manager.get_artist_tracks(artist.id) == []
 
     def test_apparition_en_featuring_sans_album(self, data_manager):
         artist = self._artiste(data_manager)

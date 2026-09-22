@@ -10,7 +10,7 @@ Ouverte à la demande (bouton du dialogue « Discographie ») ou en fin de run
 discographie par le hook `confirmer_ecarts`, avec un bilan déjà calculé.
 """
 
-from tkinter import messagebox
+from tkinter import TclError, messagebox
 
 import customtkinter as ctk
 
@@ -55,9 +55,33 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
         ctk.CTkButton(pied, text="Fermer", command=self.destroy, width=100).pack(side="right")
 
         if bilan is not None:
-            self._afficher(bilan)
+            # Le bilan issu du run discographie a été calculé en amont : les
+            # liens prouvés restent toutefois des écritures et passent donc par
+            # le worker, jamais par le thread Tk.
+            run_worker(lambda: self._rattacher_et_afficher(bilan), name="ecarts-deezer-liens")
         else:
             run_worker(self._detecter, name="ecarts-deezer")
+
+    def _dialog_exists(self) -> bool:
+        """Une fermeture utilisateur rend les retours worker silencieux."""
+        try:
+            return bool(self.winfo_exists())
+        except TclError:
+            return False
+
+    def _post_ui(self, callback, *args) -> None:
+        """Programme un retour sur la fenêtre principale, jamais le dialogue.
+
+        Le dialogue est facultatif une fois le travail validé : il peut être
+        fermé avant que le worker ait fini. La root, elle, reste vivante jusqu'à
+        ce que `_on_closing` ait joint les workers.
+        """
+        try:
+            self.app.root.after(0, callback, *args)
+        except TclError:
+            # L'application est déjà détruite : les données ont été écrites ou
+            # le worker aura vu stop_requested entre deux unités.
+            logger.debug("Retour GUI Deezer abandonné : application fermée")
 
     # ── Détection ─────────────────────────────────────────────────────────────
 
@@ -88,12 +112,22 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
             except Exception as e:  # noqa: BLE001 - fond GUI : l'erreur s'affiche
                 logger.exception("Écarts Deezer : lecture interrompue")
                 message = str(e)
-                self.after(0, lambda: self._annoncer(f"❌ {message}"))
+                self._post_ui(self._annoncer, f"❌ {message}")
                 return
-        self.after(0, self._afficher, bilan)
+        self._rattacher_et_afficher(bilan)
+
+    def _rattacher_et_afficher(self, bilan) -> None:
+        if not bilan.ambigu and not stop_requested():
+            ecarts_deezer.rattacher_liens_confirmes(
+                self.app.runtime.data_manager,
+                self.artist,
+                bilan,
+                should_stop=stop_requested,
+            )
+        self._post_ui(self._afficher, bilan)
 
     def _annoncer(self, texte: str) -> None:
-        if self.winfo_exists():
+        if self._dialog_exists():
             self.statut.configure(text=texte)
 
     # ── Affichage ─────────────────────────────────────────────────────────────
@@ -104,7 +138,7 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
         self.cases = []
 
     def _afficher(self, bilan) -> None:
-        if not self.winfo_exists():
+        if not self._dialog_exists():
             return
         self.bilan = bilan
         self._vider()
@@ -112,6 +146,7 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
             self._afficher_candidats(bilan.ambigu)
             return
         c = bilan.compteurs()
+        auto = bilan.rattachements_auto
         self.statut.configure(
             text=(
                 f"{bilan.albums_lus} disques · {bilan.pistes_lues} pistes · "
@@ -119,13 +154,17 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
                 + " · ".join(
                     f"{ecarts_deezer.GLYPHES[n]} {c[n]}" for n in ecarts_deezer.NATURES if c.get(n)
                 )
+                + (f" · 🔗 {auto} rattachement(s) automatique(s)" if auto else "")
                 + ("" if bilan.complete else f" · ⚠️ incomplet ({bilan.motif})")
             )
         )
         if not bilan.ecarts:
             ctk.CTkLabel(
                 self.liste,
-                text="✅ Aucun écart — la base a tout ce que Deezer publie.",
+                text=(
+                    "✅ Aucun écart à traiter — la base couvre ce que Deezer publie."
+                    + (f"\n🔗 {auto} rattachement(s) de parution effectué(s)." if auto else "")
+                ),
                 font=("Arial", 13),
             ).pack(anchor="w", pady=10)
             if bilan.editions_jumelles:
@@ -146,6 +185,9 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
                 "✚ absent d'un disque connu et 💿 disque absent : cochés d'office. "
                 "🎚️ version : cochée si Genius ou Kworb la connaît (BPM/tonalité suivront), "
                 "sinon listée. 👥 apparition : disque d'un autre (rôle secondaire), à toi de voir.\n"
+                "🔗 Un morceau CONNU (ID Deezer, ISRC ou même titre sans descripteur) est rattaché "
+                "à la parution automatiquement ; ❓ durée divergente ou titre générique : à confirmer ; "
+                "🔓 lien déjà écrit contredit par une durée d'une autre source : cocher pour DÉLIER.\n"
                 "Une ligne créée reçoit de Deezer date, durée, ISRC, feats, label ; d'une version, "
                 "son socle lui transmet paroles et auteurs selon sa famille (héritage)."
             ),
@@ -184,6 +226,8 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
             self.cases.append((e, var))
             cases_du_disque.append(var)
             texte = f"{ecarts_deezer.GLYPHES[e.nature]} {e.titre}"
+            if e.nature == "version" and e.piste.title_version:
+                texte += f"   · Deezer : « {e.piste.title_version} »"
             if e.motifs:
                 texte += "   · " + " · ".join(e.motifs)
             ctk.CTkCheckBox(cadre, text=texte, variable=var, font=("Arial", 11)).pack(
@@ -248,15 +292,25 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
                     artist,
                     choisis,
                     lire_piste=lambda tid: async_loop.run_sync(client.get_track_async(http, tid)),
+                    should_stop=stop_requested,
                 )
-            self.after(0, self._fin_creation, comptes)
+            self._post_ui(self._fin_creation, comptes)
 
         run_worker(_travail, name="ecarts-deezer-creation")
 
     def _fin_creation(self, comptes: list[str]) -> None:
+        # À la fermeture complète, la root va disparaître dès que les workers
+        # ont fini : aucun widget ni popup ne doit se réveiller entre-temps.
+        if stop_requested():
+            return
         self.app._reload_tracks_and_refresh()
+        # Fermer CE dialogue ne défait pas les écritures ; la liste principale
+        # vient d'être rechargée, mais il n'y a plus de parent pour le résumé.
+        if not self._dialog_exists():
+            return
         messagebox.showinfo("Écarts Deezer", "\n".join(comptes) or "Rien à créer.", parent=self)
-        self.destroy()
+        if self._dialog_exists():
+            self.destroy()
 
 
 def show_ecarts_deezer(app, bilan=None) -> None:

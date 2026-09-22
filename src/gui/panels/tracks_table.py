@@ -3,11 +3,12 @@ Le Treeview lui-même appartient à MainWindow (widget partagé avec la vue albu
 
 import tkinter
 from datetime import datetime
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 
 from src.gui import helpers
 from src.gui.dialogs import manual_entry, merge_tracks, report
 from src.gui.panels import albums_view
+from src.models import ReleaseObservation
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -467,6 +468,22 @@ def on_right_click(app, event):
                 label="🏷️ Renommer le morceau…",
                 command=lambda: manual_entry.rename_track(app, index),
             )
+            context_menu.add_command(
+                label="💿 Rattacher à une parution…",
+                command=lambda: attach_track_to_release(app, index),
+            )
+            context_menu.add_command(
+                label="💿 Retirer d'une parution…",
+                command=lambda: detach_track_from_release(app, index),
+            )
+            context_menu.add_command(
+                label="★ Définir comme album repère…",
+                command=lambda: set_track_reference_release(app, index),
+            )
+            context_menu.add_command(
+                label="✓ Confirmer une parution proposée…",
+                command=lambda: confirm_release_suggestion(app, index),
+            )
             if len(app.selected_tracks) == 2:
                 context_menu.add_separator()
                 context_menu.add_command(
@@ -484,6 +501,187 @@ def on_right_click(app, event):
                 context_menu.tk_popup(event.x_root, event.y_root)
             finally:
                 context_menu.grab_release()
+
+
+def attach_track_to_release(app, index: int) -> None:
+    """Rattachement manuel explicite, sans jamais toucher `track.album`."""
+    if not app.current_artist or index >= len(app.current_artist.tracks):
+        return
+    track = app.current_artist.tracks[index]
+    title = simpledialog.askstring(
+        "Rattacher à une parution",
+        "Titre de l'album ou de la compilation :",
+        parent=app.root,
+    )
+    if not title or not title.strip():
+        return
+    third_party = messagebox.askyesno(
+        "Nature de la parution",
+        "Est-ce un disque d'un autre artiste (compilation / apparition) ?\n\n"
+        "Oui : visible sous « Aussi présent sur ».\nNon : discographie principale.",
+        parent=app.root,
+    )
+    credited = None
+    if third_party:
+        credited = simpledialog.askstring(
+            "Artiste crédité",
+            "Artiste ou organisme crédité du disque (facultatif) :",
+            parent=app.root,
+        )
+    scope = "appearance" if third_party else "own"
+    if not messagebox.askyesno(
+        "Confirmer le rattachement",
+        f"Rattacher « {track.title} » à « {title.strip()} »"
+        + (f" — {credited}" if credited else "")
+        + " ?\n\nLa fiche morceau et son album de référence ne seront pas modifiés.",
+        parent=app.root,
+    ):
+        return
+    try:
+        app.data_manager.record_release_observations(
+            track.id,
+            [
+                ReleaseObservation(
+                    title=title.strip(),
+                    source="manual",
+                    credited_artist_name=(
+                        credited.strip() if credited and credited.strip() else None
+                    ),
+                    scope=scope,
+                    confidence="confirmed",
+                )
+            ],
+        )
+        ok = True
+    except (ValueError, TypeError) as e:
+        messagebox.showerror("Parution", f"Rattachement impossible : {e}", parent=app.root)
+        return
+    if ok:
+        messagebox.showinfo("Parution", "Rattachement enregistré.", parent=app.root)
+    else:
+        messagebox.showerror(
+            "Parution", "Rattachement impossible — voir les logs.", parent=app.root
+        )
+
+
+def set_track_reference_release(app, index: int) -> None:
+    """Choix explicite du pointeur de compatibilité ``tracks.album``."""
+    from tkinter import simpledialog
+
+    track = app.current_artist.tracks[index]
+    if not track.id:
+        return
+    entries = app.data_manager.get_track_releases(track.id)
+    confirmed = [entry for entry in entries if entry.get("status", "confirmed") == "confirmed"]
+    if not confirmed:
+        messagebox.showinfo(
+            "Album repère", "Aucune parution confirmée pour ce morceau.", parent=app.root
+        )
+        return
+    choices = "\n".join(f"{entry['id']} — {entry['title']}" for entry in confirmed)
+    release_id = simpledialog.askinteger(
+        "Définir comme album repère",
+        f"Choisir la parution qui devient l'album repère :\n{choices}",
+        parent=app.root,
+    )
+    if release_id is None:
+        return
+    if release_id not in {entry["id"] for entry in confirmed}:
+        messagebox.showwarning("Album repère", "Identifiant de parution invalide.", parent=app.root)
+        return
+    if app.data_manager.set_track_reference_release(track.id, release_id):
+        track.album = next(entry["title"] for entry in confirmed if entry["id"] == release_id)
+        app._reload_tracks_and_refresh()
+    else:
+        messagebox.showerror(
+            "Album repère", "Changement impossible — voir les logs.", parent=app.root
+        )
+
+
+def confirm_release_suggestion(app, index: int) -> None:
+    track = app.current_artist.tracks[index]
+    if not track.id:
+        return
+    entries = [
+        entry
+        for entry in app.data_manager.get_track_releases(track.id)
+        if entry.get("status") == "suggested"
+    ]
+    if not entries:
+        messagebox.showinfo("Parution", "Aucune proposition à confirmer.", parent=app.root)
+        return
+    choices = "\n".join(f"{entry['id']} — {entry['title']}" for entry in entries)
+    release_id = simpledialog.askinteger(
+        "Confirmer une parution",
+        f"Confirmer la proposition :\n{choices}",
+        parent=app.root,
+    )
+    if release_id is None:
+        return
+    if app.data_manager.confirm_release_suggestion(track.id, release_id):
+        messagebox.showinfo("Parution", "Parution confirmée.", parent=app.root)
+        app._reload_tracks_and_refresh()
+    else:
+        messagebox.showwarning(
+            "Parution", "Proposition introuvable ou déjà traitée.", parent=app.root
+        )
+
+
+def detach_track_from_release(app, index: int) -> None:
+    """Retrait manuel avec choix explicite si l'album de référence est visé."""
+    if not app.current_artist or index >= len(app.current_artist.tracks):
+        return
+    track = app.current_artist.tracks[index]
+    entries = app.data_manager.get_track_releases(track.id)
+    if not entries:
+        messagebox.showinfo(
+            "Parution", "Ce morceau n'est rattaché à aucune parution.", parent=app.root
+        )
+        return
+    choices = "\n".join(f"{r['id']} — {r['title']}" for r in entries)
+    release_id = simpledialog.askinteger(
+        "Retirer d'une parution",
+        f"Parutions de « {track.title} » :\n{choices}\n\nSaisis l'identifiant à retirer :",
+        parent=app.root,
+    )
+    if release_id is None or not any(r["id"] == release_id for r in entries):
+        return
+    if not messagebox.askyesno(
+        "Confirmer le retrait",
+        "Retirer ce rattachement ? La fiche et ses données ne seront pas supprimées.",
+        parent=app.root,
+    ):
+        return
+    outcome = app.data_manager.unlink_track_from_release(release_id, track.id)
+    if outcome == "needs_replacement":
+        alternatives = [r for r in entries if r["id"] != release_id and r["scope"] == "own"]
+        if alternatives:
+            options = "\n".join(f"{r['id']} — {r['title']}" for r in alternatives)
+            replacement = simpledialog.askinteger(
+                "Album de référence",
+                "Cette parution est l'album de référence. Choisis son remplacement :\n" + options,
+                parent=app.root,
+            )
+            if replacement is not None:
+                outcome = app.data_manager.unlink_track_from_release(
+                    release_id, track.id, replacement_release_id=replacement
+                )
+        elif messagebox.askyesno(
+            "Détacher le morceau",
+            "Aucune autre parution principale ne peut devenir la référence. "
+            "Détacher complètement l'album de référence ?",
+            parent=app.root,
+        ):
+            outcome = app.data_manager.unlink_track_from_release(
+                release_id, track.id, clear_reference=True
+            )
+    if outcome == "removed":
+        app._reload_tracks_and_refresh()
+        messagebox.showinfo("Parution", "Rattachement retiré.", parent=app.root)
+    elif outcome == "needs_replacement":
+        messagebox.showinfo("Parution", "Aucun retrait effectué.", parent=app.root)
+    else:
+        messagebox.showerror("Parution", "Retrait impossible — voir les logs.", parent=app.root)
 
 
 def disable_track_with_refresh(app, index: int, item):

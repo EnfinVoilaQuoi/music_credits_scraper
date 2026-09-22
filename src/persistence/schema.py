@@ -231,6 +231,98 @@ albums = Table(
 )
 
 
+# Catalogue des parutions (e31). `albums` reste le magasin des agrégats de
+# streams : sa clé `(artist_id, title)` ne peut pas représenter proprement une
+# compilation extérieure ni deux éditions homonymes. Une parution est donc une
+# entité de catalogue séparée, reliée aux fiches `tracks` ci-dessous.
+#
+# `artist_id` est l'artiste dont on consulte le catalogue, pas nécessairement
+# l'auteur crédité du disque : une compilation Booska-P dans la base de Diam's
+# est une `appearance`, son `credited_artist_name` est « Booska-P ».
+releases = Table(
+    "releases",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("title", Text, nullable=False),
+    Column("credited_artist_name", Text),
+    Column("release_date", TIMESTAMP),
+    Column("record_type", Text),
+    Column("deezer_album_id", Integer),
+    # own = discographie principale ; appearance = compilation/disque tiers.
+    Column("scope", Text, nullable=False, server_default=text("'own'")),
+    # Clé déterministe : `deezer:<id>` quand la source le connaît, sinon une
+    # clé manuelle normalisée. Elle évite un doublon de parution sans imposer
+    # une fausse unicité sur un simple titre.
+    Column("identity_key", Text, nullable=False),
+    Column("created_at", TIMESTAMP),
+    Column("updated_at", TIMESTAMP),
+    # (e32 : ajoutée APRÈS updated_at, l'ordre des colonnes suit la migration.)
+    # confirmed = utilisable dans la discographie ; suggested = donnée source
+    # trop incomplète pour rapprocher silencieusement une autre parution.
+    Column("status", Text, nullable=False, server_default=text("'confirmed'")),
+    UniqueConstraint("artist_id", "identity_key"),
+    sqlite_autoincrement=True,
+)
+
+
+# Apparition d'UN enregistrement sur UNE parution. L'unicité protège contre
+# les réimports : le même morceau peut avoir N parutions, pas N fois la même.
+release_tracks = Table(
+    "release_tracks",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("release_id", Integer, ForeignKey("releases.id"), nullable=False),
+    Column("track_id", Integer, ForeignKey("tracks.id"), nullable=False),
+    Column("disc_number", Integer),
+    Column("track_number", Integer),
+    Column("source_track_id", Integer),
+    Column("source", Text),
+    # deezer_id | isrc | manual | legacy : pourquoi le rapprochement est sûr.
+    Column("matched_by", Text),
+    Column("created_at", TIMESTAMP),
+    Column("updated_at", TIMESTAMP),
+    # (e32 : ajoutée après updated_at.)
+    Column("external_track_id", Text),
+    UniqueConstraint("release_id", "track_id"),
+    sqlite_autoincrement=True,
+)
+
+
+# Les IDs sont par catalogue d'artiste : la même compilation Deezer peut être
+# une apparition chez plusieurs artistes sans partager leur objet ``releases``.
+release_identifiers = Table(
+    "release_identifiers",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("release_id", Integer, ForeignKey("releases.id"), nullable=False),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("source", Text, nullable=False),
+    Column("external_id", Text, nullable=False),
+    Column("created_at", TIMESTAMP),
+    UniqueConstraint("artist_id", "source", "external_id"),
+    sqlite_autoincrement=True,
+)
+
+
+# Une même appartenance peut être observée par Genius, Deezer et Spotify. La
+# ligne historique de ``release_tracks`` reste un résumé de compatibilité ;
+# cette table garde toutes les preuves sans que la dernière écriture efface les
+# précédentes.
+release_track_sources = Table(
+    "release_track_sources",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("release_track_id", Integer, ForeignKey("release_tracks.id"), nullable=False),
+    Column("source", Text, nullable=False),
+    Column("external_track_id", Text),
+    Column("matched_by", Text, nullable=False),
+    Column("created_at", TIMESTAMP),
+    UniqueConstraint("release_track_id", "source", "external_track_id", "matched_by"),
+    sqlite_autoincrement=True,
+)
+
+
 # Appartenance à une formation (e22). Table de LIENS : la discographie d'un
 # membre est réunie par UNION d'`artist_id` à la lecture, jamais en dupliquant
 # des morceaux (`UNIQUE(title, artist_id)` l'interdit, et cela doublerait

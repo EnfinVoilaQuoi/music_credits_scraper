@@ -245,5 +245,8 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
         # track.duration posé plus haut (l.135) : alimente la stratégie
         # lyrics_synced (départage par durée réelle dans compare_synced).
         apply_resolutions(track, reconcile(observations, track_duration=track.duration))
+        track.durations_observees = {
+            o.source: _clean_duration(o.value) for o in observations if o.field == "duration"
+        }
 
     return track

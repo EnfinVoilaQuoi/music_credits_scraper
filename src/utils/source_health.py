@@ -613,6 +613,22 @@ SOURCES: list[SourceSpec] = [
         notes="API REST WordPress ouverte, sans clé ; usage autorisé AVEC citation",
         families=(Family.MEDIA,),
     ),
+    SourceSpec(
+        key="youtube_topic",
+        label="YouTube Topic (crédits distributeur)",
+        fast_probe=lambda: [],
+        notes="Description auto-générée des vidéos « - Topic » ; Data API v3",
+        families=(Family.CREDITS,),
+        usage_note="Via YouTube Data API v3 (fetch_video_meta_batch), pas de sonde propre",
+    ),
+    SourceSpec(
+        key="youtube_clip",
+        label="YouTube clip (crédits description)",
+        fast_probe=lambda: [],
+        notes="Description libre des clips officiels ; regex + repli LLM",
+        families=(Family.CREDITS,),
+        usage_note="Via YouTube Data API v3 (fetch_video_meta_batch), pas de sonde propre",
+    ),
 ]
 
 SOURCES_BY_KEY = {s.key: s for s in SOURCES}

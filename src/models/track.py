@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from src.enrichment.observation import Observation
     from src.models.artist import Artist
+    from src.models.release import ReleaseObservation
 
 # NB : les utilitaires de src.utils sont importés LOCALEMENT dans les méthodes
 # (et non au niveau module) : src/utils/__init__.py charge DataManager/DataEnricher,
@@ -568,6 +569,8 @@ class Track:
     # `Certs.needs_write` : `save_track` n'écrit plus la colonne `relationships`,
     # c'est `TrackRepository.record_relationships` qui le fait.
     _relationships_pending: bool = field(default=False, repr=False)
+    # Parutions vues pendant le run. Consommées et vidées par ``save_track``.
+    release_observations: list["ReleaseObservation"] = field(default_factory=list, repr=False)
 
     # IDs externes
     genius_id: int | None = None
@@ -599,6 +602,13 @@ class Track:
     # accès via track.audio.<champ> (bpm, key, mode, musical_key…).
     audio: Audio = field(default_factory=Audio)
     duration: int | None = None  # En secondes
+    # Source de la durée arbitrée (transitoire, posée par `apply_resolutions`) :
+    # les écarts Deezer ne reconfrontent un lien qu'à une durée venue d'AILLEURS.
+    duration_source: str | None = field(default=None, repr=False)
+    #: Toutes les durées OBSERVÉES `{source: secondes}` (transitoire, mapper) :
+    #: après un lien Deezer, `deezer` gagne l'arbitrage — c'est ici que survit
+    #: la durée d'une autre source, seule à pouvoir contredire le lien.
+    durations_observees: dict = field(default_factory=dict, repr=False)
     genre: str | None = None
     track_number: int | None = None
     audio_features: dict[str, Any] | None = field(default_factory=dict)

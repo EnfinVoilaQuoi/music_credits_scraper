@@ -10,7 +10,7 @@ from src.api.deezer_api import DeezerAPI
 from src.enrichment.base import Capability
 from src.enrichment.context import EnrichmentContext
 from src.enrichment.observation import Observation
-from src.models import Track
+from src.models import ReleaseObservation, Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 
@@ -222,6 +222,19 @@ class DeezerProvider:
         # piste que suivra `album_types` en fin de run pour la nature du disque.
         if data.get("deezer_album_id"):
             track._deezer_album_id = data["deezer_album_id"]
+            album = data.get("deezer_album")
+            if isinstance(album, dict) and album.get("title"):
+                track.release_observations.append(
+                    ReleaseObservation(
+                        title=album["title"],
+                        source="deezer",
+                        external_release_id=data["deezer_album_id"],
+                        external_track_id=data.get("deezer_track_id"),
+                        release_date=data.get("deezer_release_date"),
+                        scope="appearance" if track.is_featuring else "own",
+                        confidence="identified",
+                    )
+                )
 
         # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
         if data.get("deezer_isrc"):

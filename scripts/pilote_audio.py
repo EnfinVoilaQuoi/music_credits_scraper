@@ -350,6 +350,34 @@ def _analyser_fichier(chemin: Path, deeprhythm: _DeepRhythm) -> dict:
     }
 
 
+def telecharger(args) -> int:
+    """Ne fait QUE ramener les WAV (gardés) — pour une étape d'analyse tierce
+    (Essentia dans un conteneur Linux, qui n'a pas yt-dlp)."""
+    selection = json.loads(args.selection.read_text(encoding="utf-8"))
+    DOSSIER_AUDIO.mkdir(parents=True, exist_ok=True)
+    vus: set[str] = set()
+    ok = echecs = 0
+    for m in selection:
+        if m["video_id"] in vus:
+            continue
+        vus.add(m["video_id"])
+        deja = (DOSSIER_AUDIO / f"{m['video_id']}.wav").exists()
+        chemin, erreur = _telecharger(m["video_id"], m["url"], args)
+        if not chemin and "403" in (erreur or ""):
+            time.sleep(args.pause)
+            chemin, erreur = _telecharger(m["video_id"], m["url"], args)
+        if chemin:
+            ok += 1
+            print(f"✅ {m['artiste']} — {m['titre']}{' (déjà là)' if deja else ''}")
+        else:
+            echecs += 1
+            print(f"❌ {m['artiste']} — {m['titre']} : {erreur}")
+        if not deja:
+            time.sleep(args.pause)
+    print(f"\n{ok} WAV disponibles, {echecs} échec(s) → {DOSSIER_AUDIO}")
+    return 0 if not echecs else 2
+
+
 def analyser(args) -> int:
     selection = json.loads(args.selection.read_text(encoding="utf-8"))
     estimations: dict[str, dict] = {}
@@ -436,6 +464,24 @@ def _libelle_cle(pc, mode) -> str:
     return key_mode_to_french(int(pc), int(mode))
 
 
+def _cle_librosa(e: dict) -> tuple[int, int, float] | None:
+    t = e.get("tonalite")
+    return (t["pitch_class"], t["mode"], t["marge"]) if t else None
+
+
+def _cle_essentia(profil: str):
+    def lire(e: dict) -> tuple[int, int, float] | None:
+        from src.utils.music_theory import note_to_pitch_class, parse_mode
+
+        c = e.get("essentia", {}).get("cles", {}).get(profil)
+        if not c:
+            return None
+        pc, mode = note_to_pitch_class(c["key"]), parse_mode(c["scale"])
+        return None if pc is None or mode is None else (pc, mode, float(c["strength"]))
+
+    return lire
+
+
 def comparer(args) -> int:
     from src.audio.metriques import CATEGORIES, categorie_tonalite, score_mirex
     from src.utils.bpm_vote import bpm_agree
@@ -447,6 +493,15 @@ def comparer(args) -> int:
         "librosa_beat": lambda e: e.get("librosa", {}).get("tempo_beat_track"),
         "deeprhythm": lambda e: e.get("deeprhythm", {}).get("tempo"),
     }
+    methodes_cle = {"librosa_ks": _cle_librosa}
+    if args.essentia and args.essentia.exists():
+        essentia = json.loads(args.essentia.read_text(encoding="utf-8"))
+        for cle, e in essentia.items():
+            estimations.setdefault(cle, {})["essentia"] = e
+        methodes["ess_rhythm2013"] = lambda e: e.get("essentia", {}).get("bpm_rhythm2013")
+        methodes["ess_percival"] = lambda e: e.get("essentia", {}).get("bpm_percival")
+        for profil in ("edma", "bgate", "temperley", "krumhansl"):
+            methodes_cle[f"ess_{profil}"] = _cle_essentia(profil)
     lignes: list[str] = ["# Pilote analyse audio locale — rapport", ""]
     lignes.append(f"Sélection : {args.selection} · estimations : {args.estimations}")
     lignes.append("")
@@ -493,34 +548,46 @@ def comparer(args) -> int:
         )
 
     # --- lot B : tonalité ---------------------------------------------------
-    cats: list[str] = []
+    cats: dict[str, list[str]] = {m: [] for m in methodes_cle}
     lignes += ["", "## Lot B — tonalité (oracle = même paire key/mode chez ≥ 2 sources)", ""]
-    lignes.append("| id | artiste — titre | réf | estimée | marge | catégorie |")
-    lignes.append("|---|---|---|---|---|---|")
+    lignes.append("| id | artiste — titre | réf | " + " | ".join(methodes_cle) + " |")
+    lignes.append("|---|---|---|" + "---|" * len(methodes_cle))
     for m in (x for x in selection if x["lot"] == LOT_CLE):
-        e = estimations.get(str(m["id"]), {}).get("tonalite")
+        e = estimations.get(str(m["id"]), {})
         ref = (m["ref"]["key"], m["ref"]["mode"])
-        if not e:
-            lignes.append(
-                f"| {m['id']} | {m['artiste']} — {m['titre']} | {_libelle_cle(*ref)} | — | — | — |"
-            )
-            continue
-        cat = categorie_tonalite((e["pitch_class"], e["mode"]), ref)
-        cats.append(cat)
+        cellules = []
+        for nom, lire in methodes_cle.items():
+            est = lire(e)
+            if est is None:
+                cellules.append("—")
+                continue
+            pc, mode, conf = est
+            cat = categorie_tonalite((pc, mode), ref)
+            cats[nom].append(cat)
+            cellules.append(f"{_libelle_cle(pc, mode)} ({conf:.2f}) {cat}")
         lignes.append(
             f"| {m['id']} | {m['artiste']} — {m['titre']} | {_libelle_cle(*ref)} | "
-            f"{_libelle_cle(e['pitch_class'], e['mode'])} | {e['marge']:.3f} | {cat} |"
+            + " | ".join(cellules)
+            + " |"
         )
-    lignes += ["", "**Résumé tonalité**", ""]
-    if cats:
-        n = len(cats)
-        mirex = sum(score_mirex(c) for c in cats) / n
+    lignes += [
+        "",
+        "**Résumé tonalité**",
+        "",
+        "| méthode | n | exactes | MIREX | " + " | ".join(CATEGORIES) + " |",
+    ]
+    lignes.append("|---|---|---|---|" + "---|" * len(CATEGORIES))
+    for nom, cs in cats.items():
+        n = len(cs)
+        if not n:
+            lignes.append(f"| {nom} | 0 | — | — |" + " — |" * len(CATEGORIES))
+            continue
+        mirex = sum(score_mirex(c) for c in cs) / n
         lignes.append(
-            f"- n = {n} · score MIREX moyen = **{mirex:.2f}** · exactes = {cats.count('exacte')} ({100 * cats.count('exacte') / n:.0f} %)"
+            f"| {nom} | {n} | {cs.count('exacte')} ({100 * cs.count('exacte') / n:.0f} %) | **{mirex:.2f}** | "
+            + " | ".join(str(cs.count(c)) for c in CATEGORIES)
+            + " |"
         )
-        lignes.append("- " + " · ".join(f"{c} {cats.count(c)}" for c in CATEGORIES))
-    else:
-        lignes.append("- aucune estimation")
 
     # --- lot C : le trou ------------------------------------------------------
     lignes += ["", "## Lot C — le trou réel (sans oracle : accord librosa ↔ DeepRhythm)", ""]
@@ -608,6 +675,12 @@ def main() -> int:
     p.add_argument("--out", type=Path, default=SELECTION)
     p.set_defaults(fonction=selectionner)
 
+    p = sub.add_parser("telecharger", help="ne ramener que les WAV, gardés (venv-audio)")
+    p.add_argument("--selection", type=Path, default=SELECTION)
+    p.add_argument("--pause", type=float, default=8.0)
+    p.add_argument("--cookies-from-browser")
+    p.set_defaults(fonction=telecharger)
+
     p = sub.add_parser("analyser", help="télécharger et analyser (venv-audio)")
     p.add_argument("--selection", type=Path, default=SELECTION)
     p.add_argument("--out", type=Path, default=ESTIMATIONS)
@@ -628,6 +701,12 @@ def main() -> int:
     )
     p.add_argument("--selection", type=Path, default=SELECTION)
     p.add_argument("--estimations", type=Path, default=ESTIMATIONS)
+    p.add_argument(
+        "--essentia",
+        type=Path,
+        default=ESTIMATIONS.with_name("estimations_essentia.json"),
+        help="sortie de scripts/pilote_audio_essentia.py (ignorée si absente)",
+    )
     p.add_argument("--out", type=Path, default=RAPPORT)
     p.set_defaults(fonction=comparer)
 

@@ -38,7 +38,11 @@ if sys.platform == "win32":
 
 from src.utils.data_manager import DataManager
 from src.utils.database_backup import get_backup_manager
-from src.utils.deezer_audit import lignes_a_verifier, verifier_lignes
+from src.utils.deezer_audit import (
+    lignes_a_verifier,
+    noms_acceptes_par_artiste,
+    verifier_lignes,
+)
 
 
 def _fautif(ecart: dict) -> bool:
@@ -53,7 +57,12 @@ def auditer(dm: DataManager, artiste: str | None, pause: float) -> dict:
         if faits % 50 == 0:
             print(f"   … {faits}/{total}")
 
-    rapport = verifier_lignes(lignes, pause=pause, progression=_progression)
+    rapport = verifier_lignes(
+        lignes,
+        noms_par_artiste=noms_acceptes_par_artiste(dm, lignes),
+        pause=pause,
+        progression=_progression,
+    )
     print(
         f"   {rapport['verifies']} vérifié(s), {rapport['illisibles']} illisible(s), "
         f"{len(rapport['ecarts'])} écart(s)"

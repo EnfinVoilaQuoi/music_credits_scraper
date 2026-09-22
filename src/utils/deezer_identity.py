@@ -60,7 +60,11 @@ def _artistes_du_hit(hit: dict) -> list[tuple[int | None, str]]:
 
 
 def artiste_etranger(
-    hit: dict | None, *, artist_name: str, artist_deezer_id: int | None = None
+    hit: dict | None,
+    *,
+    artist_name: str,
+    artist_deezer_id: int | None = None,
+    noms_acceptes=(),
 ) -> bool:
     """L'artiste attendu n'est pas parmi ceux du hit (principal + contributeurs).
 
@@ -69,17 +73,33 @@ def artiste_etranger(
     nom ne rattrape pas un id étranger, c'est justement le cas de l'homonyme
     (« Isha » 259696952, 5 fans, contre 1236609) ; sinon par
     `names_match_as_words` (jamais par sous-chaîne : « Isha » ⊂ « Misha »).
+
+    `noms_acceptes` = les FORMATIONS et ALIAS confirmés (`artist_relations`,
+    lot 3) : Deezer crédite « KIDS SEE GHOSTS » là où la fiche est chez Kanye
+    West ou Kid Cudi, « THE SCOTTS » chez Travis Scott. Un groupe a son PROPRE
+    id Deezer — l'accepter par le NOM ne rouvre pas la porte aux homonymes,
+    qui portent celui de l'artiste et ne sont pas dans cette liste. Un album
+    d'un TIERS où l'artiste est invité (Médine chez BRAV) n'y est pas non
+    plus : il reste signalé.
     """
     if not hit:
         return False
     artistes = _artistes_du_hit(hit)
     if not artistes:
         return False
-    if artist_deezer_id is not None:
-        return not any(aid is not None and int(aid) == int(artist_deezer_id) for aid, _ in artistes)
-    return not (
-        bool(artist_name)
-        and any(names_match_as_words(artist_name, nom) for _, nom in artistes if nom)
+    if artist_deezer_id is not None and any(
+        aid is not None and int(aid) == int(artist_deezer_id) for aid, _ in artistes
+    ):
+        return False
+    attendus = (
+        list(noms_acceptes) if artist_deezer_id is not None else [artist_name, *noms_acceptes]
+    )
+    return not any(
+        names_match_as_words(attendu, nom)
+        for attendu in attendus
+        if attendu
+        for _, nom in artistes
+        if nom
     )
 
 
@@ -102,11 +122,13 @@ def hit_concorde(
     title: str,
     previous_duration=None,
     artist_deezer_id: int | None = None,
+    noms_acceptes=(),
     tolerance: int = TOLERANCE_DUREE,
 ) -> tuple[bool, str]:
     """Le hit est-il le morceau cherché ? → `(verdict, motif)`.
 
-    1. **Artiste** — par id si connu, sinon par mots entiers (`artiste_etranger`).
+    1. **Artiste** — par id si connu, sinon par mots entiers, plus les
+       FORMATIONS et alias confirmés (`noms_acceptes`) — cf. `artiste_etranger`.
     2. **Titre** — OBLIGATOIRE : `titres_equivalents` (mêmes titres normalisés,
        ou même socle avec descripteurs de version de la même famille).
     3. **Durée** — seulement quand la fiche en a une (`previous_duration`) :
@@ -117,7 +139,12 @@ def hit_concorde(
     """
     if not hit:
         return False, "aucun hit"
-    if artiste_etranger(hit, artist_name=artist_name, artist_deezer_id=artist_deezer_id):
+    if artiste_etranger(
+        hit,
+        artist_name=artist_name,
+        artist_deezer_id=artist_deezer_id,
+        noms_acceptes=noms_acceptes,
+    ):
         credites = ", ".join(nom for _, nom in _artistes_du_hit(hit) if nom)
         return False, f"artiste : Deezer crédite {credites}, attendu {artist_name}"
     if variante_etrangere(hit, title=title):

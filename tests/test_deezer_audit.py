@@ -1,8 +1,13 @@
 """Audit des `deezer_id` en base : balayage + verdict de `hit_concorde`, oracle
 INJECTÉ (jamais HTTP)."""
 
-from src.models import Artist, Track
-from src.utils.deezer_audit import criteres_de_la_ligne, lignes_a_verifier, verifier_lignes
+from src.models import Artist, ArtistRelation, Track
+from src.utils.deezer_audit import (
+    criteres_de_la_ligne,
+    lignes_a_verifier,
+    noms_acceptes_par_artiste,
+    verifier_lignes,
+)
 
 
 def _base(dm):
@@ -65,7 +70,37 @@ def test_un_featuring_se_juge_sur_l_artiste_principal(data_manager):
         "title": "Forever",
         "previous_duration": None,
         "artist_deezer_id": None,
+        "noms_acceptes": (),
     }
+
+
+def test_les_formations_confirmees_comptent_comme_l_artiste(data_manager):
+    """« 4th Dimension » est chez Kanye West, Deezer le crédite à KIDS SEE
+    GHOSTS — le groupe de Kanye et Kid Cudi. Un groupe confirmé n'est pas un
+    artiste étranger (mesuré 2026-09-22 : 12 des 19 signalements)."""
+    _, _, _ = _base(data_manager)
+    ksg = {
+        "id": 444,
+        "title": "4th Dimension",
+        "artist": {"id": 888, "name": "KIDS SEE GHOSTS"},
+        "duration": 168,
+    }
+    kanye = data_manager.get_artist_by_name("Kanye West")
+    ligne = next(lg for lg in lignes_a_verifier(data_manager.engine) if lg["title"] == "The Joy")
+    ligne = {**ligne, "title": "4th Dimension", "deezer_id": 444}
+
+    # Sans relation : signalé (c'est l'état de Kanye en base, jamais cherché).
+    rapport = verifier_lignes([ligne], lambda did: ksg, pause=0)
+    assert [e["artiste_etranger"] for e in rapport["ecarts"]] == [True]
+
+    data_manager.record_artist_relations(
+        kanye.id,
+        [ArtistRelation(related_name="KIDS SEE GHOSTS", kind="member_of", formation="groupe")],
+    )
+    noms = noms_acceptes_par_artiste(data_manager, [ligne])
+    assert "KIDS SEE GHOSTS" in noms[ligne["artist_id"]]
+    rapport = verifier_lignes([ligne], lambda did: ksg, noms_par_artiste=noms, pause=0)
+    assert rapport["ecarts"] == []
 
 
 def test_verifier_lignes_signale_l_etranger_et_epargne_le_juste(data_manager):

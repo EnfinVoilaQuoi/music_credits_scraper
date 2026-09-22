@@ -32,7 +32,7 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
     params = {"artiste": artiste} if artiste else {}
     requete = f"""
         SELECT t.id, t.title, t.deezer_id, t.is_featuring, t.primary_artist_name,
-               a.name AS artiste, a.deezer_id AS artist_deezer_id,
+               t.artist_id, a.name AS artiste, a.deezer_id AS artist_deezer_id,
                (SELECT o.value FROM observations o
                  WHERE o.track_id = t.id AND o.field = 'duration'
                    AND o.source NOT IN ('deezer', 'legacy')
@@ -46,7 +46,20 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
     return lignes[:limite] if limite else lignes
 
 
-def criteres_de_la_ligne(ligne: dict) -> dict:
+def noms_acceptes_par_artiste(dm, lignes: list[dict]) -> dict[int, set[str]]:
+    """`{artist_id: noms}` — formations et alias CONFIRMÉS, lus par le
+    repository (`noms_des_formations` / `noms_de_lartiste`, les mêmes que la
+    discographie réunie et les certifs) : pas de seconde requête maison."""
+    out: dict[int, set[str]] = {}
+    for ligne in lignes:
+        aid = ligne.get("artist_id")
+        if aid is None or aid in out:
+            continue
+        out[aid] = dm.noms_des_formations(aid) | dm.noms_de_lartiste(aid, ligne["artiste"])
+    return out
+
+
+def criteres_de_la_ligne(ligne: dict, noms_acceptes=()) -> dict:
     """Les arguments de `hit_concorde` pour cette fiche.
 
     Un FEATURING se juge sur l'artiste PRINCIPAL (c'est lui que Deezer crédite
@@ -60,6 +73,7 @@ def criteres_de_la_ligne(ligne: dict) -> dict:
         "title": ligne["title"],
         "previous_duration": ligne["duree_independante"],
         "artist_deezer_id": None if featuring else ligne["artist_deezer_id"],
+        "noms_acceptes": tuple(sorted(noms_acceptes)),
     }
 
 
@@ -67,6 +81,7 @@ def verifier_lignes(
     lignes: list[dict],
     lire_piste=None,
     *,
+    noms_par_artiste: dict | None = None,
     pause: float = 0.2,
     progression=None,
     interrompu=None,
@@ -95,7 +110,9 @@ def verifier_lignes(
         if fiche is None:
             illisibles += 1
         else:
-            criteres = criteres_de_la_ligne(ligne)
+            criteres = criteres_de_la_ligne(
+                ligne, (noms_par_artiste or {}).get(ligne.get("artist_id"), ())
+            )
             ok, motif = hit_concorde(fiche, **criteres)
             if not ok:
                 ecarts.append(
@@ -109,6 +126,7 @@ def verifier_lignes(
                             fiche,
                             artist_name=criteres["artist_name"],
                             artist_deezer_id=criteres["artist_deezer_id"],
+                            noms_acceptes=criteres["noms_acceptes"],
                         ),
                         "variante_etrangere": variante_etrangere(fiche, title=ligne["title"]),
                         "deezer": {

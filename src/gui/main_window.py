@@ -6,7 +6,7 @@ import customtkinter as ctk
 
 from src.concurrency.lifecycle import start_worker
 from src.config import THEME, WINDOW_HEIGHT, WINDOW_WIDTH
-from src.gui import helpers
+from src.gui import helpers, nouveautes_gui
 from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
 from src.gui.panels import albums_view, formations_panel, tracks_table
@@ -52,7 +52,13 @@ class MainWindow:
 
         # Variables
         self.is_scraping = False
-        self.selected_tracks = set()  # Stocker les morceaux sélectionnés
+        # Cases cochées de la vue morceaux : des IDENTIFIANTS de morceaux
+        # (2026-09-22). Des index de ligne désignaient d'autres morceaux
+        # après un tri — d'où un `clear()` à chaque tri, et des coches à
+        # refaire.
+        self.selected_tracks: set[int] = set()
+        # Dernière vérification « nouveaux titres » de l'artiste courant.
+        self.nouveautes = None
         self.disabled_tracks = set()  # Stocker les morceaux désactivés
         self.sort_column = None
         self.sort_reverse = False
@@ -105,6 +111,35 @@ class MainWindow:
         )
         self.load_button.pack(side="left", padx=5)
 
+        # Deux boutons de CONSULTATION, hors de la barre des flux : ils ne
+        # lancent aucun traitement long (2026-09-22, demande utilisateur).
+        # « Groupes » n'est actif qu'avec une discographie chargée — l'oracle
+        # d'identité départage les homonymes par recouvrement d'albums.
+        self.formations_button = ctk.CTkButton(
+            search_frame,
+            text="Groupes",
+            command=lambda: show_formations(self),
+            state="disabled",
+            width=110,
+            fg_color="#5e35b1",
+            hover_color="#4527a0",
+        )
+        self.formations_button.pack(side="left", padx=5)
+
+        # « Nouveautés » FORCE la vérification des titres Genius absents de la
+        # base ; sans clic, elle se fait seule au plus une fois par jour au
+        # chargement d'un artiste (cf. `services.nouveautes`).
+        self.nouveautes_button = ctk.CTkButton(
+            search_frame,
+            text="Nouveautés",
+            command=lambda: nouveautes_gui.verifier_maintenant(self),
+            state="disabled",
+            width=110,
+            fg_color="#5e35b1",
+            hover_color="#4527a0",
+        )
+        self.nouveautes_button.pack(side="left", padx=5)
+
         # État des sources (santé des scrapers/APIs) — aligné à droite, toujours accessible
         self.health_button = ctk.CTkButton(
             search_frame,
@@ -144,19 +179,6 @@ class MainWindow:
         # === Section contrôles ===
         control_frame = ctk.CTkFrame(main_frame)
         control_frame.pack(fill="x", padx=5, pady=5)
-
-        # 0. Groupes / formations — après la Discographie dans l'usage : l'oracle
-        # d'identité a besoin des albums pour départager les homonymes.
-        self.formations_button = ctk.CTkButton(
-            control_frame,
-            text="Groupes",
-            command=lambda: show_formations(self),
-            state="disabled",
-            width=110,
-            fg_color="#5e35b1",
-            hover_color="#4527a0",
-        )
-        self.formations_button.pack(side="left", padx=5)
 
         # 1. Récupérer les morceaux
         self.get_tracks_button = ctk.CTkButton(
@@ -518,6 +540,9 @@ class MainWindow:
                 if artist:
                     self.current_artist = artist
                     self.root.after(0, self._update_artist_info)
+                    # Vérification « nouveaux titres » : au plus une fois par
+                    # jour et hors du thread Tk (cf. `nouveautes_gui`).
+                    self.root.after(0, lambda: nouveautes_gui.verifier_en_fond(self))
                     self.root.after(0, lambda: tracks_table.apply_default_sort(self))
                     self.root.after(
                         0,
@@ -556,6 +581,7 @@ class MainWindow:
                 self.data_manager.save_artist(genius_artist)
                 self.current_artist = genius_artist
                 self.root.after(0, self._update_artist_info)
+                self.root.after(0, lambda: nouveautes_gui.verifier_en_fond(self))
                 self.root.after(0, lambda: tracks_table.apply_default_sort(self))
                 self.root.after(
                     0,
@@ -898,6 +924,8 @@ class MainWindow:
                 self.streams_button.configure(state="disabled")
             if hasattr(self, "formations_button"):
                 self.formations_button.configure(state="disabled")
+            if hasattr(self, "nouveautes_button"):
+                self.nouveautes_button.configure(state="disabled")
         elif not self.current_artist.tracks:
             # Artiste chargé mais pas de morceaux
             self.get_tracks_button.configure(state="normal")
@@ -913,6 +941,10 @@ class MainWindow:
                 self.streams_button.configure(state="disabled")
             if hasattr(self, "formations_button"):
                 self.formations_button.configure(state="disabled")
+            if hasattr(self, "nouveautes_button"):
+                # Un artiste sans morceau est justement celui pour qui la
+                # vérification a le plus à dire.
+                self.nouveautes_button.configure(state="normal")
         else:
             # Artiste avec morceaux
             self.get_tracks_button.configure(state="normal")
@@ -931,6 +963,8 @@ class MainWindow:
                 # homonymes par recouvrement d'albums, il lui faut la
                 # discographie. Sans elle, « Swing » reste indécidable.
                 self.formations_button.configure(state="normal")
+            if hasattr(self, "nouveautes_button"):
+                self.nouveautes_button.configure(state="normal")
 
     def _show_progress_bar(self):
         """Affiche la barre de progression"""

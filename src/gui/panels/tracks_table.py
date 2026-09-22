@@ -28,6 +28,45 @@ def _index_colonne(app, nom: str) -> int | None:
         return None
 
 
+def _cocher(app, index: int, item=None) -> bool:
+    """Coche la ligne d'index donné. Rend False si elle n'est pas cochable
+    (morceau désactivé, ou pas encore enregistré donc sans identifiant)."""
+    tid = app._get_track_id_from_index(index)
+    if tid is None or tid in app.disabled_tracks:
+        return False
+    app.selected_tracks.add(tid)
+    if item is not None:
+        app.tree.item(item, text="☑")
+    return True
+
+
+def _decocher(app, index: int, item=None) -> None:
+    tid = app._get_track_id_from_index(index)
+    if tid is not None:
+        app.selected_tracks.discard(tid)
+    if item is not None:
+        app.tree.item(item, text="☐")
+
+
+def _est_cochee(app, index: int) -> bool:
+    tid = app._get_track_id_from_index(index)
+    return tid is not None and tid in app.selected_tracks
+
+
+def _case_a_cocher(app, track) -> str:
+    """☑ cochée · ☐ cochable · ◌ pas encore enregistrée.
+
+    La sélection porte des IDENTIFIANTS depuis le 2026-09-22 (elle portait des
+    index, qui désignaient d'autres morceaux après un tri). Un morceau sans id
+    — créé en mémoire, dont le `save_track` a échoué — devient donc incochable,
+    et ça SE VOIT : avant, il se cochait et disparaissait en silence du filtre
+    des workers, qui écartent les `id is None`.
+    """
+    if getattr(track, "id", None) is None:
+        return "◌"
+    return "☑" if track.id in app.selected_tracks else "☐"
+
+
 def _poser_statut(app, index: int, valeurs: list) -> None:
     """Réécrit la cellule « Statut » d'une ligne — à son RANG, pas au 7ᵉ."""
     rang = _index_colonne(app, "Statut")
@@ -35,6 +74,22 @@ def _poser_statut(app, index: int, valeurs: list) -> None:
     if rang is None or len(valeurs) <= rang or not 0 <= index < len(tracks):
         return
     valeurs[rang] = helpers.get_track_status_icon(tracks[index], app.disabled_tracks)
+
+
+def _tuple_de_valeurs(app, valeurs: dict[str, str]) -> tuple:
+    """Les valeurs d'une ligne, posées PAR NOM de colonne.
+
+    Un tuple construit à la main fige l'ordre de `TRACK_COLUMNS` à l'endroit
+    où il est écrit : la ligne de repli en portait 8 pour 11 colonnes, si bien
+    que « Aucun » atterrissait dans la DURÉE et que la cellule Statut restait
+    vide (vu à l'écran le 2026-09-22, même famille que le rang 7 en dur). Une
+    colonne absente rend `""` ; un nom inconnu LÈVE, plutôt que de décaler tout
+    silencieusement.
+    """
+    inconnues = set(valeurs) - set(app.TRACK_COLUMNS)
+    if inconnues:
+        raise KeyError(f"Colonnes inconnues : {sorted(inconnues)}")
+    return tuple(valeurs.get(nom, "") for nom in app.TRACK_COLUMNS)
 
 
 def configure_tree_for_tracks(app):
@@ -247,26 +302,26 @@ def populate_tracks_table(app):
             except Exception:
                 streams_display = ""
 
-            # Case à cocher selon la sélection
-            checkbox = "☑" if i in app.selected_tracks else "☐"
-
             # Ajouter la ligne
             item_id = app.tree.insert(
                 "",
                 "end",
-                text=checkbox,
-                values=(
-                    title,
-                    artist_display,
-                    album,
-                    release_date,
-                    credits_display,
-                    lyrics_display,
-                    bpm,
-                    duration_display,
-                    certif_display,
-                    streams_display,
-                    status,
+                text=_case_a_cocher(app, track),
+                values=_tuple_de_valeurs(
+                    app,
+                    {
+                        "Titre": title,
+                        "Artiste principal": artist_display,
+                        "Album": album,
+                        "Date sortie": release_date,
+                        "Crédits": credits_display,
+                        "Paroles": lyrics_display,
+                        "BPM": bpm,
+                        "Durée": duration_display,
+                        "Certif.": certif_display,
+                        "Streams": streams_display,
+                        "Statut": status,
+                    },
                 ),
                 tags=(str(i),),
             )
@@ -277,26 +332,19 @@ def populate_tracks_table(app):
 
         except Exception as e:
             logger.error(f"Erreur ajout track idx={i}: {e}")
-            # En cas d'erreur, ajouter une ligne minimale
+            # En cas d'erreur, ajouter une ligne minimale — alignée elle aussi.
             try:
                 app.tree.insert(
                     "",
                     "end",
                     text="☐",
-                    values=(
-                        track.title,
-                        "",
-                        "",
-                        "",
-                        "0",
-                        "",
-                        "",
-                        "Aucun",  # CORRECTION: "0" pour les crédits
+                    values=_tuple_de_valeurs(
+                        app, {"Titre": track.title or f"Track {i+1}", "Statut": "⚠️"}
                     ),
                     tags=(str(i),),
                 )
             except Exception:
-                pass
+                logger.exception("Ligne de repli impossible pour idx=%s", i)
 
     # Style pour morceaux désactivés
     app.tree.tag_configure("disabled", foreground="gray", background="#2a2a2a")
@@ -329,41 +377,31 @@ def on_tree_click(app, event):
                 shift_pressed = event.state & 0x1  # Shift key
 
                 if shift_pressed and app.last_selected_index is not None:
-                    # Sélection en plage avec Maj
+                    # La PLAGE est visuelle : elle se dit en index de ligne, et
+                    # chaque ligne est traduite en identifiant au moment d'être
+                    # cochée. `refresh_selection_display` repeint d'un coup,
+                    # plutôt qu'une recherche O(n) par ligne de la plage.
                     start = min(app.last_selected_index, index)
                     end = max(app.last_selected_index, index)
-
-                    # Sélectionner tous les morceaux dans la plage (sauf désactivés)
                     for i in range(start, end + 1):
-                        if not app._is_track_disabled_by_index(i):
-                            app.selected_tracks.add(i)
-                            # Trouver l'item correspondant et cocher
-                            for child in app.tree.get_children():
-                                child_tags = app.tree.item(child)["tags"]
-                                if child_tags and int(child_tags[0]) == i:
-                                    app.tree.item(child, text="☑")
-                                    break
+                        _cocher(app, i)
+                    refresh_selection_display(app)
 
                 elif ctrl_pressed:
                     # Sélection multiple avec Ctrl (toggle)
-                    if index in app.selected_tracks:
-                        app.selected_tracks.remove(index)
-                        app.tree.item(item, text="☐")
+                    if _est_cochee(app, index):
+                        _decocher(app, index, item)
                     else:
-                        app.selected_tracks.add(index)
-                        app.tree.item(item, text="☑")
+                        _cocher(app, index, item)
                     app.last_selected_index = index
 
                 else:
                     # Clic simple - toggle
-                    if index in app.selected_tracks:
-                        app.selected_tracks.remove(index)
-                        app.tree.item(item, text="☐")
+                    if _est_cochee(app, index):
+                        _decocher(app, index, item)
                         new_state = False
                     else:
-                        app.selected_tracks.add(index)
-                        app.tree.item(item, text="☑")
-                        new_state = True
+                        new_state = _cocher(app, index, item)
                     app.last_selected_index = index
 
                     # Armer le cocher-glisser : maintenir le clic et glisser
@@ -392,13 +430,11 @@ def on_tree_drag(app, event):
     if app._is_track_disabled_by_index(index):
         return
 
-    if app._drag_check_state and index not in app.selected_tracks:
-        app.selected_tracks.add(index)
-        app.tree.item(item, text="☑")
-        update_selection_count(app)
-    elif not app._drag_check_state and index in app.selected_tracks:
-        app.selected_tracks.remove(index)
-        app.tree.item(item, text="☐")
+    if app._drag_check_state and not _est_cochee(app, index):
+        if _cocher(app, index, item):
+            update_selection_count(app)
+    elif not app._drag_check_state and _est_cochee(app, index):
+        _decocher(app, index, item)
         update_selection_count(app)
 
 
@@ -713,8 +749,7 @@ def disable_track_with_refresh(app, index: int, item):
     track_id = app._get_track_id_from_index(index)
     if track_id is not None:
         app.disabled_tracks.add(track_id)
-    if index in app.selected_tracks:
-        app.selected_tracks.remove(index)
+        app.selected_tracks.discard(track_id)
 
     # Récupérer les valeurs actuelles de l'item
     current_values = list(app.tree.item(item)["values"])
@@ -771,12 +806,8 @@ def disable_selected_tracks(app):
         return
 
     try:
-        # Convertir les indices sélectionnés en IDs de tracks
-        track_ids_to_disable = set()
-        for index in app.selected_tracks:
-            track_id = app._get_track_id_from_index(index)
-            if track_id is not None:
-                track_ids_to_disable.add(track_id)
+        # La sélection EST déjà une liste d'identifiants (2026-09-22).
+        track_ids_to_disable = set(app.selected_tracks)
 
         # Ajouter aux morceaux désactivés (utiliser IDs)
         app.disabled_tracks.update(track_ids_to_disable)
@@ -981,25 +1012,9 @@ def sort_column(app, col):
             sort_key = get_status_value
 
         if sort_key:
-            # Les cases cochées portent des INDEX de ligne : après le tri, les
-            # mêmes numéros désignent d'autres morceaux. On les traduit en IDs
-            # avant, on les retraduit après — plutôt que de tout décocher, ce
-            # qui obligeait à refaire la sélection à chaque changement de tri.
-            # (Les `disabled_tracks`, eux, sont déjà des IDs : rien à faire.)
-            coches = {
-                app.current_artist.tracks[i].id
-                for i in app.selected_tracks
-                if 0 <= i < len(app.current_artist.tracks)
-                and app.current_artist.tracks[i].id is not None
-            }
-
+            # Rien à traduire : `selected_tracks` et `disabled_tracks` portent
+            # des IDENTIFIANTS, les coches survivent au tri par construction.
             app.current_artist.tracks.sort(key=sort_key, reverse=reverse)
-
-            app.selected_tracks.clear()
-            if coches:
-                app.selected_tracks.update(
-                    i for i, t in enumerate(app.current_artist.tracks) if t.id in coches
-                )
 
         # Mettre à jour les variables de tri
         app.sort_column = col
@@ -1057,10 +1072,8 @@ def refresh_selection_display(app):
 
             if "disabled" in tags or app._is_track_disabled_by_index(index):
                 app.tree.item(item, text="⊘")
-            elif index in app.selected_tracks:
-                app.tree.item(item, text="☑")
-            else:
-                app.tree.item(item, text="☐")
+            elif 0 <= index < len(app.current_artist.tracks if app.current_artist else []):
+                app.tree.item(item, text=_case_a_cocher(app, app.current_artist.tracks[index]))
 
 
 def select_all_tracks(app):
@@ -1069,11 +1082,8 @@ def select_all_tracks(app):
         return
 
     app.selected_tracks.clear()
-
     for i in range(len(app.current_artist.tracks)):
-        # Ne sélectionner que les morceaux actifs
-        if not app._is_track_disabled_by_index(i):
-            app.selected_tracks.add(i)
+        _cocher(app, i)  # écarte les désactivés ET les morceaux sans identifiant
 
     refresh_selection_display(app)
     update_selection_count(app)
@@ -1101,11 +1111,7 @@ def check_selected_tracks(app):
         if tags:
             index = int(tags[0])
 
-            # Vérifier que le morceau n'est pas désactivé
-            if not app._is_track_disabled_by_index(index):
-                # Ajouter à la sélection et cocher
-                app.selected_tracks.add(index)
-                app.tree.item(item, text="☑")
+            if _cocher(app, index, item):
                 logger.debug(f"Morceau {index} coché")
 
     update_selection_count(app)
@@ -1126,6 +1132,15 @@ def update_selection_count(app):
         text = f"Sélectionnés: {selected}/{active} actifs"
         if disabled > 0:
             text += f" ({disabled} désactivés)"
+        # Un morceau sans identifiant n'est pas cochable : le dire plutôt que
+        # de laisser croire qu'il partira dans un run.
+        sans_id = sum(
+            1
+            for t in (app.current_artist.tracks if app.current_artist else [])
+            if getattr(t, "id", None) is None
+        )
+        if sans_id:
+            text += f" · {sans_id} non enregistré(s)"
 
         app.selected_count_label.configure(text=text)
 

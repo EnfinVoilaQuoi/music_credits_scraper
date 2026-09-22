@@ -5,6 +5,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from src.concurrency.lifecycle import run_worker, stop_requested
+from src.gui import nouveautes_gui
 from src.gui.dialogs import report
 from src.observability import source_usage
 from src.observability.registry import Flow
@@ -49,6 +50,22 @@ def get_tracks(app):
     ctk.CTkLabel(
         dialog, text="Options de récupération des morceaux", font=("Arial", 16, "bold")
     ).pack(pady=(15, 5))
+
+    # Bandeau des nouveautés : ce que la vérification quotidienne a trouvé.
+    # Il vit ICI et pas dans une fenêtre à part — le geste qui suit est
+    # justement celui de ce dialogue (décision utilisateur 2026-09-22).
+    texte_bandeau = nouveautes_gui.bandeau(app)
+    if texte_bandeau:
+        bandeau = ctk.CTkFrame(dialog, fg_color="#1b5e20")
+        bandeau.pack(fill="x", padx=15, pady=(0, 5))
+        ctk.CTkLabel(
+            bandeau,
+            text=texte_bandeau,
+            font=("Arial", 12),
+            text_color="white",
+            wraplength=430,
+            justify="left",
+        ).pack(anchor="w", padx=12, pady=8)
 
     scroll = ctk.CTkScrollableFrame(dialog, fg_color="transparent")
     scroll.pack(fill="both", expand=True, padx=5, pady=5)
@@ -371,9 +388,11 @@ def start_track_retrieval(
                 ),
             )
         finally:
-            app.root.after(
-                0, lambda: app.get_tracks_button.configure(state="normal", text="Discographie")
-            )
+            # Le badge repart de la BASE, qui vient de changer : re-vérifier
+            # (force) plutôt que de le remettre à zéro d'autorité — un titre
+            # peut être resté absent, et le dire est plus utile que se taire.
+            app.root.after(0, lambda: app.get_tracks_button.configure(state="normal"))
+            app.root.after(0, lambda: nouveautes_gui.verifier_en_fond(app, force=True))
             app.root.after(0, lambda: app.progress_label.configure(text=""))
 
     def get_tracks_observe():

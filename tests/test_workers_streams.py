@@ -401,34 +401,35 @@ class TestCanalYtm:
 
 
 class TestIdsDesMorceauxCoches:
-    """`app.selected_tracks` porte des INDEX de la vue, pas des identifiants.
+    """`app.selected_tracks` porte des IDENTIFIANTS depuis le 2026-09-22.
 
-    Les passer tels quels aux updaters filtrerait sur des numéros de ligne,
-    c'est-à-dire sur les mauvais morceaux — une confusion silencieuse : le run
-    se déroulerait normalement et écrirait ailleurs.
+    Il portait des INDEX de ligne : après un tri, les mêmes numéros
+    désignaient d'autres morceaux — une confusion silencieuse, le run se
+    déroulait normalement et écrivait ailleurs. Reste à confronter les cases à
+    la discographie AFFICHÉE.
     """
 
     class _Artiste:
         def __init__(self, ids):
             self.tracks = [SimpleNamespace(id=i) for i in ids]
 
-    def test_les_index_sont_traduits_en_identifiants(self):
+    def test_les_identifiants_coches_sont_rendus(self):
         artiste = self._Artiste([101, 202, 303])
-        assert ws.ids_des_morceaux_coches(artiste, {0, 2}) == {101, 303}
+        assert ws.ids_des_morceaux_coches(artiste, {101, 303}) == {101, 303}
 
     def test_aucune_selection(self):
         assert ws.ids_des_morceaux_coches(self._Artiste([101]), set()) == set()
         assert ws.ids_des_morceaux_coches(self._Artiste([101]), None) == set()
 
     def test_sans_artiste(self):
-        assert ws.ids_des_morceaux_coches(None, {0}) == set()
+        assert ws.ids_des_morceaux_coches(None, {101}) == set()
 
-    def test_un_index_hors_limites_est_ecarte(self):
-        """La vue a pu être rechargée depuis que la case a été cochée."""
-        assert ws.ids_des_morceaux_coches(self._Artiste([101]), {0, 5}) == {101}
+    def test_un_id_etranger_a_la_vue_est_ecarte(self):
+        """Morceau supprimé, ou case restée d'un autre artiste."""
+        assert ws.ids_des_morceaux_coches(self._Artiste([101]), {101, 999}) == {101}
 
-    def test_un_morceau_jamais_enregistre_est_ecarte(self):
-        assert ws.ids_des_morceaux_coches(self._Artiste([None, 202]), {0, 1}) == {202}
+    def test_un_morceau_jamais_enregistre_ne_gene_pas(self):
+        assert ws.ids_des_morceaux_coches(self._Artiste([None, 202]), {202}) == {202}
 
 
 class TestResumeVideosPartagees:

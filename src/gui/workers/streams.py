@@ -22,23 +22,19 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def ids_des_morceaux_coches(artist, indices) -> set[int]:
+def ids_des_morceaux_coches(artist, coches) -> set[int]:
     """Identifiants des morceaux cochés dans la vue.
 
-    `app.selected_tracks` porte des INDEX de la liste affichée, pas des
-    identifiants : les passer tels quels aux updaters filtrerait sur des
-    numéros de ligne, c'est-à-dire sur les mauvais morceaux. Un index hors
-    limites (vue rechargée entre-temps) ou un morceau jamais enregistré (pas
-    d'`id`) est écarté plutôt que de faire échouer le lancement.
+    `app.selected_tracks` porte des IDENTIFIANTS depuis le 2026-09-22 (il
+    portait des INDEX de ligne, qui désignaient d'autres morceaux après un
+    tri). Il reste à les confronter à la discographie AFFICHÉE : un id d'un
+    autre artiste, ou d'un morceau supprimé entre-temps, est écarté plutôt que
+    de faire échouer le lancement.
     """
-    if not artist or not indices:
+    if not artist or not coches:
         return set()
-    tracks = artist.tracks or []
-    retenus = set()
-    for i in indices:
-        if 0 <= i < len(tracks) and tracks[i].id is not None:
-            retenus.add(tracks[i].id)
-    return retenus
+    connus = {t.id for t in (artist.tracks or []) if t.id is not None}
+    return {i for i in coches if i in connus}
 
 
 def start_streams_update(app):

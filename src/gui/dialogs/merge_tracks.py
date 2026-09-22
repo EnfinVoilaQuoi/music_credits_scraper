@@ -134,12 +134,15 @@ def _score(t):
 
 def merge_selected_tracks(app):
     """Point d'entrée du clic droit : fusionne les 2 morceaux cochés."""
-    idxs = sorted(app.selected_tracks)
-    if len(idxs) != 2:
+    # La sélection porte des IDENTIFIANTS (2026-09-22) : un morceau non
+    # enregistré n'est plus cochable, la garde `not t.id` devient impossible à
+    # déclencher — elle reste, elle ne coûte rien et documente l'exigence.
+    par_id = {t.id: t for t in (app.current_artist.tracks or []) if t.id is not None}
+    coches = [par_id[i] for i in sorted(app.selected_tracks) if i in par_id]
+    if len(coches) != 2:
         messagebox.showwarning("Fusion", "Cochez exactement 2 morceaux à fusionner (colonne ☑).")
         return
-    t1 = app.current_artist.tracks[idxs[0]]
-    t2 = app.current_artist.tracks[idxs[1]]
+    t1, t2 = coches
     if not t1.id or not t2.id:
         messagebox.showwarning("Fusion", "Les deux morceaux doivent être sauvegardés en base.")
         return

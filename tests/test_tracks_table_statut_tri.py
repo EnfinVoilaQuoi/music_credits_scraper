@@ -107,18 +107,75 @@ class TestCelluleStatut:
         assert app.disabled_tracks == set()
 
 
+class TestValeursParNom:
+    """Le tuple de repli portait 8 valeurs pour 11 colonnes : « Aucun »
+    atterrissait dans la DURÉE et la cellule Statut restait vide."""
+
+    def test_le_tuple_a_toujours_la_longueur_des_colonnes(self):
+        app = _app([], [])
+        valeurs = tracks_table._tuple_de_valeurs(app, {"Titre": "Loto", "Statut": "⚠️"})
+        assert len(valeurs) == len(COLONNES)
+        assert valeurs[0] == "Loto" and valeurs[10] == "⚠️"
+        assert valeurs[7] == ""  # la durée reste VIDE, elle ne reçoit pas un statut
+
+    def test_une_colonne_ajoutee_ne_decale_rien(self):
+        app = _app([], [])
+        app.TRACK_COLUMNS = ("Titre", "Nouvelle", *COLONNES[1:])
+        valeurs = tracks_table._tuple_de_valeurs(app, {"Titre": "Loto", "Statut": "✅"})
+        assert len(valeurs) == len(COLONNES) + 1
+        assert valeurs[0] == "Loto" and valeurs[-1] == "✅"
+
+    def test_un_nom_de_colonne_inconnu_leve(self):
+        import pytest as _pytest
+
+        with _pytest.raises(KeyError):
+            tracks_table._tuple_de_valeurs(_app([], []), {"Tritre": "faute de frappe"})
+
+
+class TestCasesACocher:
+    def test_un_morceau_sans_identifiant_est_incochable_et_le_dit(self):
+        sans_id = _track(None, "Jamais sauvé")
+        app = _app([sans_id], [])
+        assert tracks_table._case_a_cocher(app, sans_id) == "◌"
+        assert tracks_table._cocher(app, 0) is False
+        assert app.selected_tracks == set()
+
+    def test_un_morceau_desactive_ne_se_coche_pas(self):
+        t = _track(10, "Loto")
+        app = _app([t], [], disabled={10})
+        assert tracks_table._cocher(app, 0) is False
+
+    def test_cocher_decocher_par_identifiant(self):
+        t = _track(10, "Loto")
+        app = _app([t], [])
+        assert tracks_table._cocher(app, 0) is True
+        assert app.selected_tracks == {10} and tracks_table._est_cochee(app, 0)
+        tracks_table._decocher(app, 0)
+        assert app.selected_tracks == set()
+
+
 class TestTriGardeLesCases:
     def test_les_cases_suivent_leur_morceau(self, monkeypatch):
         tracks = [_track(1, "Zèbre"), _track(2, "Alpha"), _track(3, "Mambo")]
         app = _app(tracks, [])
-        app.selected_tracks = {0, 2}  # Zèbre et Mambo
+        app.selected_tracks = {1, 3}  # Zèbre et Mambo, par IDENTIFIANT
         monkeypatch.setattr(tracks_table, "populate_tracks_table", lambda app: None)
 
         tracks_table.sort_column(app, "Titre")
 
         assert [t.title for t in app.current_artist.tracks] == ["Alpha", "Mambo", "Zèbre"]
-        assert app.selected_tracks == {1, 2}  # Mambo et Zèbre, toujours cochés
+        # Rien à retraduire : la sélection ne bouge pas d'un tri à l'autre.
+        assert app.selected_tracks == {1, 3}
         assert app.tree.entetes["Titre"] == "Titre ▲"  # le tri est allé au bout
+
+    def test_trois_tris_de_suite_ne_perdent_rien(self, monkeypatch):
+        tracks = [_track(1, "Zèbre"), _track(2, "Alpha"), _track(3, "Mambo")]
+        app = _app(tracks, [])
+        app.selected_tracks = {1, 3}
+        monkeypatch.setattr(tracks_table, "populate_tracks_table", lambda app: None)
+        for colonne in ("Titre", "Titre", "Durée"):
+            tracks_table.sort_column(app, colonne)
+        assert app.selected_tracks == {1, 3}
 
     def test_sans_case_cochee_rien_ne_se_coche(self, monkeypatch):
         app = _app([_track(1, "B"), _track(2, "A")], [])

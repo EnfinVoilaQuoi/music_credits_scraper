@@ -255,10 +255,12 @@ def run_enrichment(
         messagebox.showwarning("Attention", "Aucun morceau sélectionné")
         return
 
+    # Les cases portent des IDENTIFIANTS : plus d'index à borner, et
+    # `_is_track_disabled` juge l'OBJET.
     selected_tracks_list = [
-        app.current_artist.tracks[i]
-        for i in sorted(app.selected_tracks)
-        if not app._is_track_disabled_by_index(i) and i < len(app.current_artist.tracks)
+        t
+        for t in (app.current_artist.tracks or [])
+        if t.id in app.selected_tracks and not app._is_track_disabled(t)
     ]
     if not selected_tracks_list:
         messagebox.showwarning("Attention", "Tous les morceaux sélectionnés sont désactivés")

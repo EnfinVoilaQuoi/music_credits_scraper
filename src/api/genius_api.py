@@ -15,6 +15,7 @@ from src.config import (
     GENIUS_SLEEP_TIME,
     GENIUS_TIMEOUT,
 )
+from src.enrichment.observation import Observation
 from src.models import Artist, ReleaseObservation, Track
 from src.observability import source_usage
 from src.utils.logger import get_logger, log_api
@@ -445,6 +446,21 @@ class GeniusAPI:
                         is_featuring=is_feat,
                     )
                     track.secondary_role = secondary_role
+                    if track.release_date is not None:
+                        # Genius est EN TÊTE de l'ordre `release_date`, et
+                        # n'avait jamais écrit une observation : 2 016 `legacy`
+                        # et 342 `deezer` en base, zéro `genius` (mesuré
+                        # 2026-09-22). Il POSAIT la colonne sans se déclarer —
+                        # troisième occurrence du corollaire du lot B : rendre
+                        # un champ arbitrable oblige à reprendre CHACUNE de ses
+                        # voies d'écriture.
+                        track.observations.append(
+                            Observation(
+                                "release_date",
+                                track.release_date.strftime("%Y-%m-%d"),
+                                "genius",
+                            )
+                        )
                     album_data = song.get("album")
                     if isinstance(album_data, dict) and album_data.get("name"):
                         track.release_observations.append(

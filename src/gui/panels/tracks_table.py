@@ -14,6 +14,29 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _index_colonne(app, nom: str) -> int | None:
+    """Rang d'une colonne dans `TRACK_COLUMNS`, ou None.
+
+    Les valeurs d'un item sont un TUPLE positionnel : écrire au rang 7 était
+    juste quand la table avait 8 colonnes, et écrivait « Actif » dans la DURÉE
+    depuis qu'elle en a 11 (vu à l'écran le 2026-09-22). Un rang en dur est une
+    bombe à retardement dès qu'une colonne s'ajoute.
+    """
+    try:
+        return list(app.TRACK_COLUMNS).index(nom)
+    except ValueError:
+        return None
+
+
+def _poser_statut(app, index: int, valeurs: list) -> None:
+    """Réécrit la cellule « Statut » d'une ligne — à son RANG, pas au 7ᵉ."""
+    rang = _index_colonne(app, "Statut")
+    tracks = app.current_artist.tracks if app.current_artist else []
+    if rang is None or len(valeurs) <= rang or not 0 <= index < len(tracks):
+        return
+    valeurs[rang] = helpers.get_track_status_icon(tracks[index], app.disabled_tracks)
+
+
 def configure_tree_for_tracks(app):
     """Colonnes de la vue Morceaux (vue par défaut)"""
     app.tree.configure(columns=app.TRACK_COLUMNS)
@@ -697,8 +720,7 @@ def disable_track_with_refresh(app, index: int, item):
     current_values = list(app.tree.item(item)["values"])
 
     # Mettre à jour le statut (dernière colonne)
-    if len(current_values) >= 8:
-        current_values[7] = "Désactivé"
+    _poser_statut(app, index, current_values)
 
     # Actualiser immédiatement l'affichage de cet item
     app.tree.item(item, text="⊘", values=current_values, tags=(str(index), "disabled"))
@@ -725,8 +747,7 @@ def enable_track_with_refresh(app, index: int, item):
     current_values = list(app.tree.item(item)["values"])
 
     # Mettre à jour le statut (dernière colonne)
-    if len(current_values) >= 8:
-        current_values[7] = "Actif"
+    _poser_statut(app, index, current_values)
 
     # Actualiser immédiatement l'affichage de cet item
     app.tree.item(item, text="☐", values=current_values, tags=(str(index),))
@@ -779,15 +800,29 @@ def disable_selected_tracks(app):
         report.show_error(app, "Erreur", f"Impossible de désactiver les morceaux: {e}")
 
 
-def enable_selected_tracks(app):
-    """Réactive TOUS les morceaux désactivés"""
+def enable_all_tracks(app):
+    """Réactive TOUS les morceaux désactivés — sur confirmation.
+
+    Le geste est IRRÉVERSIBLE : la liste des désactivés d'un artiste est un
+    travail éditorial (Grünt, freestyles, lives…) qui ne se reconstitue pas
+    (mesuré le 2026-09-22 : les désactivés de Josman effacés d'un clic, sans
+    un mot). Un bouton qui détruit une liste demande confirmation, et la
+    confirmation NOMME ce qu'elle détruit.
+    """
     if not app.disabled_tracks:
         messagebox.showinfo("Info", "Aucun morceau désactivé")
         return
 
-    try:
-        count = len(app.disabled_tracks)
+    count = len(app.disabled_tracks)
+    artiste = app.current_artist.name if app.current_artist else "cet artiste"
+    if not messagebox.askyesno(
+        "Réactiver tous",
+        f"Réactiver les {count} morceau(x) désactivé(s) de {artiste} ?\n\n"
+        "Cette liste ne se reconstitue pas : il faudra les redésactiver un à un.",
+    ):
+        return
 
+    try:
         # Vider complètement les morceaux désactivés
         app.disabled_tracks.clear()
 
@@ -946,18 +981,25 @@ def sort_column(app, col):
             sort_key = get_status_value
 
         if sort_key:
-            # Les morceaux désactivés sont maintenant stockés par ID, pas par index
-            # donc ils restent valides même après le tri
+            # Les cases cochées portent des INDEX de ligne : après le tri, les
+            # mêmes numéros désignent d'autres morceaux. On les traduit en IDs
+            # avant, on les retraduit après — plutôt que de tout décocher, ce
+            # qui obligeait à refaire la sélection à chaque changement de tri.
+            # (Les `disabled_tracks`, eux, sont déjà des IDs : rien à faire.)
+            coches = {
+                app.current_artist.tracks[i].id
+                for i in app.selected_tracks
+                if 0 <= i < len(app.current_artist.tracks)
+                and app.current_artist.tracks[i].id is not None
+            }
 
-            # Trier les morceaux
             app.current_artist.tracks.sort(key=sort_key, reverse=reverse)
 
-            # Vider les sélections (les indices ne sont plus valides après le tri)
             app.selected_tracks.clear()
-
-            # Les disabled_tracks utilisent maintenant des IDs de tracks
-            # donc pas besoin de les restaurer - ils restent valides après le tri
-            # Aucun besoin de sauvegarder car les IDs n'ont pas changé
+            if coches:
+                app.selected_tracks.update(
+                    i for i, t in enumerate(app.current_artist.tracks) if t.id in coches
+                )
 
         # Mettre à jour les variables de tri
         app.sort_column = col

@@ -294,7 +294,7 @@ class MainWindow:
         ctk.CTkButton(
             selection_frame,
             text="Réactiver tous",
-            command=lambda: tracks_table.enable_selected_tracks(self),
+            command=lambda: tracks_table.enable_all_tracks(self),
             width=120,
             fg_color="gray",
             hover_color="darkgray",

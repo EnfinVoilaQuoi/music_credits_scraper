@@ -55,6 +55,31 @@ def _oracle_spotify_hors_ligne(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _aucune_boite_de_dialogue(monkeypatch):
+    """AUCUN test n'ouvre de boîte de dialogue Tk.
+
+    Même famille que les oracles hors ligne : un `messagebox` réel ATTEND un
+    clic — un test de la vue morceaux a laissé une popup « Erreur de tri » à
+    l'écran bien après la fin du run, et mis 82 s à rendre la main
+    (2026-09-22). Les réponses par défaut sont neutres : « non » à une
+    question, rien à afficher. Un test qui veut EXERCER un dialogue
+    monkeypatche sa propre réponse par-dessus.
+    """
+    from tkinter import messagebox
+
+    for nom, reponse in (
+        ("showinfo", None),
+        ("showwarning", None),
+        ("showerror", None),
+        ("askyesno", False),
+        ("askokcancel", False),
+        ("askretrycancel", False),
+        ("askquestion", "no"),
+    ):
+        monkeypatch.setattr(messagebox, nom, lambda *a, _r=reponse, **k: _r, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _aucun_chrome_de_debug(monkeypatch):
     """AUCUN test ne lance Chrome.
 

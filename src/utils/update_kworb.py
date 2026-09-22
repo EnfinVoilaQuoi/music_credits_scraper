@@ -38,6 +38,7 @@ from src.utils.spotify_identity import (
 from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
     Kind,
+    doublons_evidents,
     meme_famille,
     meme_prise,
     parse_variant,
@@ -211,6 +212,10 @@ class Index:
     by_rendition_id: dict[str, object] = field(default_factory=dict)
     #: ID porté par ≥ 2 lignes de l'artiste (défaut C) : rien ne lui sera attribué.
     ids_partages: dict[str, list] = field(default_factory=dict)
+    #: ID porté par des DOUBLONS évidents (même titre / même prise) : attribué
+    #: à la première fiche (id le plus bas) — écrire sur chacune gonflerait le
+    #: total d'album d'un morceau ; les autres restent à fusionner.
+    doublons: dict[str, list] = field(default_factory=dict)
     by_title: dict[str, list] = field(default_factory=dict)
     by_socle: dict[str, list] = field(default_factory=dict)
     tracks: list = field(default_factory=list)
@@ -235,7 +240,11 @@ def construire_index(tracks) -> Index:
         for sid in editions:
             porteurs[sid].append(t)
     for sid, ts in porteurs.items():
-        if len(ts) > 1:
+        if len(ts) > 1 and doublons_evidents([(t.title, t.album) for t in ts]):
+            premiere, *autres = sorted(ts, key=lambda t: t.id)
+            index.by_edition_id[sid] = premiere
+            index.doublons[sid] = autres
+        elif len(ts) > 1:
             index.ids_partages[sid] = ts
         else:
             index.by_edition_id[sid] = ts[0]
@@ -640,6 +649,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         "kworb_updated": None,
         # 2026-09-21 — ce que le rapprochement SIGNALE (cf. `rapprocher`) :
         "ids_partages": [],  # [(spotify_id, [titres])] : un ID sur 2 lignes, rien écrit
+        "doublons_evidents": [],  # [(spotify_id, [titres])] : écrit sur la 1ʳᵉ fiche, à fusionner
         "renditions_rattachees": [],  # [(titre kworb, titre parent, streams)]
         "variantes_suspectes": [],  # [(titre base, titre spotify, id)] : ID mal attribué ?
         "multi_lignes": [],  # [(titre, n lignes, n comptées, total)]
@@ -708,6 +718,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             f"⚠️ ID Spotify {sid} porté par {len(titres)} morceaux de l'artiste "
             f"({' | '.join(titres)}) — aucune ligne Kworb ne lui sera attribuée"
         )
+    result["doublons_evidents"] = [
+        (sid, sorted([index.by_edition_id[sid].title] + [t.title for t in ts]))
+        for sid, ts in sorted(index.doublons.items())
+    ]
 
     # Décisions mémorisées (confirmé/rejeté/décidé) pour ne pas redemander
     try:

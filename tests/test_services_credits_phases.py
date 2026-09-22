@@ -20,6 +20,7 @@ class TestOptions:
         o = credits.OptionsCredits(force_credits=True, sync_musixmatch=True, force_sync=True)
         assert o.taches() == [
             "Crédits Genius/Discogs(forcé)",
+            "Crédits YouTube (Topic/clip)",
             "Paroles",
             "Timestamps LRCLIB/YTM/Musixmatch(forcé)",
         ]
@@ -28,6 +29,7 @@ class TestOptions:
         o = credits.OptionsCredits(
             genius=False,
             discogs=False,
+            youtube=False,
             paroles_genius=False,
             paroles_ytm=False,
             sync_lrclib=False,
@@ -36,8 +38,8 @@ class TestOptions:
         assert o.taches() == [] and o.secondes_par_morceau() == 0
 
     def test_secondes_par_morceau_somme_les_phases(self):
-        assert credits.OptionsCredits().secondes_par_morceau() == 3 + 2 + 2 + 2
-        assert credits.OptionsCredits(discogs=False).secondes_par_morceau() == 7
+        assert credits.OptionsCredits().secondes_par_morceau() == 3 + 2 + 1 + 2 + 2
+        assert credits.OptionsCredits(discogs=False).secondes_par_morceau() == 8
 
 
 class TestNomArtiste:
@@ -140,7 +142,9 @@ class TestPhaseDiscogs:
 
 
 # ── Phase paroles / synchro ────────────────────────────────────────────────
-_SANS_CREDITS = credits.OptionsCredits(genius=False, discogs=False, paroles_genius=False)
+_SANS_CREDITS = credits.OptionsCredits(
+    genius=False, discogs=False, youtube=False, paroles_genius=False
+)
 
 
 class TestPhaseSynchro:
@@ -157,7 +161,7 @@ class TestPhaseSynchro:
             _rt(dm),
             Artist(name="S"),
             [_track("A")],
-            credits.OptionsCredits(discogs=False),
+            credits.OptionsCredits(discogs=False, youtube=False),
             Hooks(should_stop=stop),
             cl,
         )
@@ -264,6 +268,7 @@ class TestResume:
             morceaux=3,
             genius={"success": 2, "failed": 1, "errors": ["x"]},
             discogs={"success": 1, "failed": 2},
+            youtube={"topic": 2, "clip": 1, "llm": 0, "selection": 4},
             paroles={"success": 3, "failed": 0, "errors": ["e"]},
             sync=_SYNC,
             sauves=3,
@@ -275,6 +280,8 @@ class TestResume:
             "🎵 Crédits Genius:",
             "  - Erreurs: 1",
             "💿 Crédits Discogs:",
+            "▶️ Crédits YouTube:",
+            "Topic: 2 • Clip: 1",
             "📝 Paroles:",
             "⏱ Timestamps (synchro):",
             "LRCLIB: 2 • YTM: 1 • Musixmatch: 0",

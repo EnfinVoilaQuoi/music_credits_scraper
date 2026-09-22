@@ -44,6 +44,7 @@ class _DataManager:
         self.streams_calls = []
         self.listeners_calls = []
         self.album_calls = []
+        self.duration_calls = []
 
     def get_track_ids_by_spotify_id(self):
         # Une LISTE par ID (2026-09-08) : un même enregistrement existe une fois
@@ -76,6 +77,10 @@ class _DataManager:
         self.streams_calls.append(
             {"track_id": track_id, "streams": streams, "source": source, **kw}
         )
+        return True
+
+    def record_duration_observation(self, track_id, seconds, source, seen_at=None):
+        self.duration_calls.append((track_id, seconds, source))
         return True
 
 
@@ -118,6 +123,7 @@ def _run(dm, scraper, artist=None, stop=None):
         "harvested_foreign": 0,
         "unknown_ids": 0,
         "albums_totalises": 0,
+        "durees": 0,
         "pages": 0,
         "monthly_listeners": None,
         "artist_name": None,
@@ -274,8 +280,53 @@ _ID_A_REEDITION = "hhhhhhhhhhhhhhhhhhhhhh"
 _ID_PISTE_TIERS = "ffffffffffffffffffffff"
 
 
-def _page_album(tracks, titre="Mon Album"):
-    return {"title": titre, "tracks": tracks, "track_ids": [t for t, _ in tracks]}
+def _page_album(tracks, titre="Mon Album", durations=None):
+    page = {"title": titre, "tracks": tracks, "track_ids": [t for t, _ in tracks]}
+    if durations is not None:
+        page["durations"] = durations
+    return page
+
+
+# ── Lot 4 (2026-09-22) : les durées lues suivent l'ID, sous `spotify_web` ────
+
+
+def test_la_page_titre_declare_sa_duree_sous_spotify_web():
+    dm = _DataManager()
+    scraper = _Scraper(
+        _page_artiste(),
+        track_pages={_ID_A: {"playcounts": {_ID_A: 100}, "durations": {_ID_A: 203}}},
+    )
+    result = _run(dm, scraper)
+    assert dm.duration_calls == [(10, 203, "spotify_web")] and result["durees"] == 1
+
+
+def test_les_lignes_d_album_declarent_leurs_durees_par_id():
+    dm = _DataManager(albums=[{"title": "Mon Album"}])
+    scraper = _Scraper(
+        _page_artiste(playcounts={_ID_A: 100, _ID_B: 200}, albums={_ID_ALBUM: "Mon Album"}),
+        album_pages={
+            _ID_ALBUM: _page_album(
+                [(_ID_A, "A"), (_ID_B, "B"), (_ID_ETRANGER, "E"), (_ID_INCONNU, "I")],
+                durations={_ID_A: 180, _ID_B: 190, _ID_ETRANGER: 200, _ID_INCONNU: 210},
+            )
+        },
+    )
+    _run(dm, scraper)
+    # Les lignes connues de la base, y compris celle d'un AUTRE artiste ; jamais
+    # l'inconnue (on n'attribue que par ID).
+    assert sorted(dm.duration_calls) == [
+        (10, 180, "spotify_web"),
+        (11, 190, "spotify_web"),
+        (99, 200, "spotify_web"),
+    ]
+
+
+def test_une_page_sans_duree_ne_declare_rien():
+    """Les anciens fakes (sans clé `durations`) restent valides."""
+    dm = _DataManager()
+    scraper = _Scraper(_page_artiste(), track_pages={_ID_A: {"playcounts": {_ID_A: 100}}})
+    result = _run(dm, scraper)
+    assert dm.duration_calls == [] and result["durees"] == 0
 
 
 def test_le_total_somme_TOUTES_les_pistes():

@@ -901,11 +901,34 @@ class TestIdsPartages:
     def test_un_id_sur_deux_lignes_ne_recoit_rien(self):
         """« OUTSIDE » (Jackboys 2) et « outside » (Birds in the Trap) portent le
         même ID : le dict d'avant en désignait UNE au hasard."""
-        tracks = [_track(1, "OUTSIDE", spotify_id="SPX"), _track(2, "outside", spotify_id="SPX")]
+        tracks = [
+            _track(1, "OUTSIDE", spotify_id="SPX", album="Jackboys 2"),
+            _track(2, "outside", spotify_id="SPX", album="Birds in the Trap"),
+        ]
         res, dm = _run(tracks, [_entry("outside", 108_000_000, 9, "SPX")])
         assert dm.streams_writes == []
         assert res["ids_partages"] == [("SPX", ["OUTSIDE", "outside"])]
         assert res["unmatched"] == 0  # signalé à part, pas « non matché »
+
+    def test_des_doublons_evidents_recoivent_tous_deux_la_ligne(self):
+        """A2H « Pour de Vrai » / « Pour de vrai » (même disque), « Le cœur des
+        filles (Acoustic) » / « (Unplugged) » : deux pages, UN enregistrement —
+        signalé « à fusionner », pas « à départager »."""
+        tracks = [
+            _track(1, "Pour de Vrai", spotify_id="SPX", album="Art"),
+            _track(2, "Pour de vrai", spotify_id="SPX", album="Art"),
+            _track(3, "Le coeur des filles (Acoustic)", spotify_id="SPY"),
+            _track(4, "Le cœur des filles (Unplugged)", spotify_id="SPY"),
+        ]
+        res, dm = _run(
+            tracks,
+            [_entry("Pour de vrai", 1000, 9, "SPX"), _entry("Le cœur des filles", 500, 2, "SPY")],
+        )
+        # Sur la PREMIÈRE fiche seulement : écrire sur chacune gonflerait le
+        # total d'album ; l'autre attend la fusion.
+        assert sorted((tid, st) for tid, st, *_ in dm.streams_writes) == [(1, 1000), (3, 500)]
+        assert res["ids_partages"] == []
+        assert [sid for sid, _ in res["doublons_evidents"]] == ["SPX", "SPY"]
 
     def test_les_ids_de_la_table_comptent_aussi(self):
         t1 = _track(1, "A", spotify_id="SP1")

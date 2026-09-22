@@ -30,6 +30,7 @@ except ImportError:  # pragma: no cover
 from src.observability import source_usage
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
+from src.utils.version_descriptors import titres_equivalents
 
 logger = get_logger(__name__)
 
@@ -380,13 +381,31 @@ class YTMusicAPI:
         Récupère aussi la version SYNCHRONISÉE (LRC) quand la source la fournit.
 
         Returns:
-            {'lyrics': str, 'lyrics_synced': str|None, 'source': str} ou None.
+            {'lyrics': str, 'lyrics_synced': str|None, 'source': str,
+             'duration': int|None, 'title': str|None} ou None.
+            `duration` (lot 3, 2026-09-22) = `duration_seconds` du hit retenu,
+            SEULEMENT si son titre concorde (`titres_equivalents`) — l'artiste
+            seul ne prouve pas que c'est ce morceau. Un morceau SANS paroles
+            rend un dict à `lyrics=None` quand il a une durée à déclarer.
         """
         # `attempt` autour de chaque appel à ytmusicapi : la lib fait ses
         # requêtes elle-même, ni le shim `requests_get` ni l'AsyncHttpSession ne
         # les voient. Sans ça, l'observation conclurait `indeterminate`.
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
             return self._get_lyrics_body(obs, artist, title)
+
+    @staticmethod
+    def _duree_du_hit(hit: dict, title: str) -> int | None:
+        """`duration_seconds` du hit, si son TITRE est bien celui cherché.
+
+        Le hit n'est confirmé que par l'artiste (mots entiers) — assez pour
+        des paroles qu'on relit, pas pour une durée qui entre en arbitrage
+        (`ytmusic` est 2ᵉ de l'ordre, devant SongBPM et ReccoBeats).
+        """
+        secondes = hit.get("duration_seconds")
+        if not isinstance(secondes, int) or secondes <= 0:
+            return None
+        return secondes if titres_equivalents(title, hit.get("title")) else None
 
     def _get_lyrics_body(self, obs, artist: str, title: str) -> dict | None:
         """Corps de `get_lyrics`, sous l'observation ouverte par elle."""
@@ -413,13 +432,25 @@ class YTMusicAPI:
                 logger.debug(f"YTM lyrics: artiste non confirmé pour '{artist} - {title}'")
                 obs.absent("artiste non confirmé sur les résultats")
                 return None
+            duree = self._duree_du_hit(chosen, title)
+            sans_paroles = (
+                {
+                    "lyrics": None,
+                    "lyrics_synced": None,
+                    "source": None,
+                    "duration": duree,
+                    "title": chosen.get("title"),
+                }
+                if duree
+                else None
+            )
 
             with source_usage.attempt(_SOURCE, detail="watch_playlist"):
                 watch = self.yt.get_watch_playlist(videoId=chosen["videoId"])
             lyrics_id = watch.get("lyrics") if isinstance(watch, dict) else None
             if not lyrics_id:
                 obs.absent("pas de paroles pour cette vidéo")
-                return None
+                return sans_paroles
 
             # Demander la version synchronisée ; fallback texte brut si indispo
             try:
@@ -441,14 +472,20 @@ class YTMusicAPI:
 
             if not text or not str(text).strip():
                 obs.absent("paroles vides")
-                return None
+                return sans_paroles
 
             source = (data.get("source") if isinstance(data, dict) else None) or "YouTube Music"
             logger.info(
                 f"📝 YTM paroles: '{artist} - {title}' (source: {source}"
                 f"{', synchro' if synced else ''})"
             )
-            return {"lyrics": str(text).strip(), "lyrics_synced": synced, "source": source}
+            return {
+                "lyrics": str(text).strip(),
+                "lyrics_synced": synced,
+                "source": source,
+                "duration": duree,
+                "title": chosen.get("title"),
+            }
         except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
             # Le transport a déjà été qualifié par `attempt` ; ici on ne nomme que
             # les ruptures de FORME de la réponse.
@@ -516,7 +553,7 @@ class YTMusicAPI:
         + chaîne) est la base de la différenciation clip/show/audio.
 
         Returns:
-            ``{videoId: {"views": int|None, "title": str|None, "channel": str|None}}``
+            ``{videoId: {"views": int|None, "title": str|None, "channel": str|None, "description": str|None}}``
         """
         if not video_ids:
             return {}
@@ -557,6 +594,7 @@ class YTMusicAPI:
                         "views": int(view_str) if view_str is not None else None,
                         "title": snippet.get("title"),
                         "channel": snippet.get("channelTitle"),
+                        "description": snippet.get("description"),
                     }
             except (GoogleApiError, OSError, KeyError, ValueError) as e:
                 logger.error(

@@ -126,6 +126,38 @@ def parse_row_playcounts(html: str) -> dict[str, int]:
     return found
 
 
+def _row_duration(row) -> int | None:
+    """Durée d'une ligne de `tracklist-row` (cellule `m:ss`, jamais la première
+    — c'est le rang). En secondes, ou None."""
+    for cell in row.find_all(recursive=False)[1:]:
+        t = cell.get_text(strip=True)
+        if _DURATION_RE.match(t):
+            mn, sec = t.split(":")
+            return int(mn) * 60 + int(sec)
+    return None
+
+
+def parse_row_durations(html: str) -> dict[str, int]:
+    """`{spotify_track_id: secondes}` des lignes qui affichent une durée.
+
+    Lot 4 (2026-09-22) : les pages d'ALBUM (`[rang, titre, durée]`) et les
+    listes d'une page titre portent la durée de chaque ligne — lue pour rien
+    jusqu'ici, alors que `spotify_web` est déclarée 4ᵉ source de durée et
+    n'en avait jamais écrit une. Même règle que la récolte : ce parseur ne
+    filtre pas par artiste, l'appelant n'attribue que par ID.
+    """
+    found: dict[str, int] = {}
+    for row in _soup(html).select('[data-testid="tracklist-row"]'):
+        link = row.find("a", href=_TRACK_ID_RE)
+        if not link:
+            continue
+        match = _TRACK_ID_RE.search(link.get("href", ""))
+        secondes = _row_duration(row)
+        if match and secondes and match.group(1) not in found:
+            found[match.group(1)] = secondes
+    return found
+
+
 def parse_album_tracks(html: str) -> list[tuple[str, str]]:
     """`[(track_id, titre)]` des pistes listées, dans l'ordre, sans doublon.
 

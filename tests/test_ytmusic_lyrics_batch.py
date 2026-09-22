@@ -115,6 +115,59 @@ class TestParoles:
         api.yt = _YTLyrics(search=[])
         assert api.get_lyrics("ISHA", "Titre") is None
 
+
+class TestDureeDeclaree:
+    """Lot 3 (2026-09-22) : YTM rend `duration_seconds` du hit — SEULEMENT si
+    son titre est bien celui cherché (l'artiste seul ne suffit pas pour une
+    durée qui entre en arbitrage)."""
+
+    def _hit(self, titre, secondes=203):
+        return {**_resultat(), "title": titre, "duration_seconds": secondes}
+
+    def test_duree_rendue_quand_le_titre_concorde(self, api):
+        api.yt = _YTLyrics(
+            search=[self._hit("Titre")],
+            watch={"lyrics": "browse1"},
+            lyrics_sync=requests.RequestException("pas de synchro"),
+            lyrics={"lyrics": "Des paroles", "source": "Musixmatch"},
+        )
+        res = api.get_lyrics("ISHA", "Titre")
+        assert res["duration"] == 203 and res["title"] == "Titre"
+
+    def test_pas_de_duree_sur_un_titre_etranger(self, api):
+        api.yt = _YTLyrics(
+            search=[self._hit("Tueur de dragon (Vent)")],
+            watch={"lyrics": "browse1"},
+            lyrics_sync=requests.RequestException("pas de synchro"),
+            lyrics={"lyrics": "Des paroles", "source": "Musixmatch"},
+        )
+        res = api.get_lyrics("ISHA", "Durag")
+        assert res["lyrics"] == "Des paroles" and res["duration"] is None
+
+    def test_descripteur_asymetrique_ne_donne_pas_de_duree(self, api):
+        api.yt = _YTLyrics(
+            search=[self._hit("Titre (Live)")],
+            watch={"lyrics": "browse1"},
+            lyrics_sync=requests.RequestException("pas de synchro"),
+            lyrics={"lyrics": "Des paroles", "source": "Musixmatch"},
+        )
+        res = api.get_lyrics("ISHA", "Titre")
+        assert res["lyrics"] == "Des paroles" and res["duration"] is None
+
+    def test_un_morceau_sans_paroles_declare_quand_meme_sa_duree(self, api):
+        api.yt = _YTLyrics(search=[self._hit("Titre")], watch={})
+        res = api.get_lyrics("ISHA", "Titre")
+        assert res == {
+            "lyrics": None,
+            "lyrics_synced": None,
+            "source": None,
+            "duration": 203,
+            "title": "Titre",
+        }
+        # Sans durée ni paroles : None, comme avant.
+        api.yt = _YTLyrics(search=[_resultat()], watch={})
+        assert api.get_lyrics("ISHA", "Titre") is None
+
     def test_artiste_non_confirme(self, api):
         api.yt = _YTLyrics(search=[_resultat(artiste="Un Autre Rappeur")])
         assert api.get_lyrics("ISHA", "Titre") is None

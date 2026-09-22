@@ -140,10 +140,13 @@ class SpotifyWebScraper(CrawlAIScraperBase):
         """Page titre : le compteur du morceau + la récolte des listes.
 
         Returns:
-            {'playcounts': {track_id: int}} — inclut le morceau lui-même quand
-            son compteur est lisible. Les autres entrées sont des recommandations
-            et des titres populaires : elles peuvent appartenir à n'importe quel
-            artiste, c'est à l'appelant de trancher.
+            {'playcounts': {track_id: int}, 'durations': {track_id: int}} —
+            inclut le morceau lui-même quand son compteur est lisible. Les
+            autres entrées sont des recommandations et des titres populaires :
+            elles peuvent appartenir à n'importe quel artiste, c'est à
+            l'appelant de trancher. `durations` (lot 4) = la durée de l'en-tête
+            pour le morceau de la page (`parse_track_identity`, même HTML, zéro
+            page de plus) et celles des lignes listées.
         """
         url = self.track_url(track_id)
         with source_usage.observe(_SOURCE, label=url) as obs:
@@ -165,7 +168,11 @@ class SpotifyWebScraper(CrawlAIScraperBase):
                 # qu'on a plutôt que rien, en le disant.
                 logger.warning(f"Spotify {track_id} : compteur principal illisible")
             obs.ok()
-            return {"playcounts": playcounts}
+            durations = parse.parse_row_durations(html)
+            identite = parse.parse_track_identity(html)
+            if identite and identite.get("duration"):
+                durations[track_id] = identite["duration"]
+            return {"playcounts": playcounts, "durations": durations}
 
     async def afetch_track_identity(self, sess, track_id: str) -> dict | None:
         """Ce que la page titre dit du morceau, sans connexion (2026-09-21).
@@ -202,8 +209,9 @@ class SpotifyWebScraper(CrawlAIScraperBase):
         l'appelant de savoir qu'il n'a pas tout vu.
 
         Returns:
-            {'title', 'tracks': [(track_id, titre)], 'track_ids', 'announced'},
-            ou None si rien n'est venu. Les TITRES sont indispensables : deux
+            {'title', 'tracks': [(track_id, titre)], 'track_ids', 'announced',
+            'durations': {track_id: secondes}}, ou None si rien n'est venu.
+            Les TITRES sont indispensables : deux
             éditions d'un même album portent des `track_id` différents pour le
             même enregistrement (cf. `parse_album_tracks`).
         """
@@ -237,6 +245,7 @@ class SpotifyWebScraper(CrawlAIScraperBase):
                 "tracks": tracks,
                 "track_ids": [tid for tid, _ in tracks],
                 "announced": annonce,
+                "durations": parse.parse_row_durations(html),
             }
 
 

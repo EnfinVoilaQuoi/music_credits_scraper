@@ -232,16 +232,49 @@ def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
 # projet quand il n'y a pas d'oracle (cf. les titres tronqués du SNEP). Elle
 # n'ampute rien définitivement — dès que le mauvais lien est rejeté (bouton ✖️),
 # la vidéo cesse d'être partagée et recompte pour le morceau qui la garde.
-def videos_partagees(vid_counts: dict) -> set:
+def videos_partagees(vid_counts: dict, tracks_par_id: dict | None = None) -> set:
     """videoId rattachés à PLUSIEURS morceaux, donc non attribuables à un seul.
 
-    Fonction pure. `vid_counts` : `{track_id: {video_id: vues}}`.
+    Fonction pure. `vid_counts` : `{track_id: {video_id: vues}}`. Avec
+    `tracks_par_id`, les partages ÉVIDENTS en sont exclus (décision utilisateur
+    2026-09-22, mesuré sur A2H) : un clip DOUBLE dont le titre nomme chaque
+    morceau (« Avec une rose / Masterclass »), ou des DOUBLONS de fiche (même
+    titre, même prise — « (Acoustic) » / « (Live at AK Studios) »). Ils ne
+    figurent plus dans la liste « à vérifier » — mais restent NON comptés :
+    attribuer la vidéo à chacun gonflerait le total d'album (3 × 531 930 pour
+    « Honeymoon », le défaut d'origine).
     """
     vus_par = {}
     for track_id, vids in vid_counts.items():
         for video_id in vids:
             vus_par.setdefault(video_id, set()).add(track_id)
-    return {video_id for video_id, tracks in vus_par.items() if len(tracks) > 1}
+    partagees = {video_id for video_id, tracks in vus_par.items() if len(tracks) > 1}
+    if tracks_par_id is None:
+        return partagees
+    return {v for v in partagees if not partage_evident(v, vus_par[v], tracks_par_id)}
+
+
+def partage_evident(video_id: str, track_ids, tracks_par_id: dict) -> str | None:
+    """« medley » (clip double), « doublon » (mêmes fiches) ou None."""
+    from src.utils.version_descriptors import doublons_evidents, medley_evident
+
+    fiches = [tracks_par_id[t] for t in track_ids if t in tracks_par_id]
+    titres = [f.title for f in fiches]
+    if doublons_evidents([(f.title, f.album) for f in fiches]):
+        return "doublon"
+    titre_video = next(
+        (
+            v.title
+            for t in track_ids
+            if t in tracks_par_id
+            for v in tracks_par_id[t].videos
+            if v.video_id == video_id and v.title
+        ),
+        None,
+    )
+    if medley_evident(titre_video, titres):
+        return "medley"
+    return None
 
 
 def _rapport_partagees(partagees: set, vid_counts: dict, tracks_par_id: dict) -> list:
@@ -318,6 +351,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         # décrites pour que l'utilisateur puisse trancher (clip double légitime
         # ou lien fautif). `vues_non_attribuees` chiffre ce que ça laisse de côté.
         "videos_partagees": [],
+        "partages_evidents": 0,  # clips doubles et doublons de fiche : non comptés, non listés
         "vues_non_attribuees": 0,
     }
 
@@ -661,8 +695,10 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     # (cf. `videos_partagees`) et signalées : on refuse de conclure plutôt que
     # de multiplier un même compteur.
     partagees = videos_partagees(vid_counts)
+    a_verifier = videos_partagees(vid_counts, tracks_par_id)
+    result["partages_evidents"] = len(partagees - a_verifier)
     vues_par_video = {vid: n for vids in vid_counts.values() for vid, n in vids.items()}
-    result["videos_partagees"] = _rapport_partagees(partagees, vid_counts, tracks_par_id)
+    result["videos_partagees"] = _rapport_partagees(a_verifier, vid_counts, tracks_par_id)
     # Montant que la règle laisse de côté : une perte assumée doit être VISIBLE,
     # sans quoi elle se lit comme une baisse inexpliquée des compteurs.
     result["vues_non_attribuees"] = sum(vues_par_video.get(vid, 0) for vid in partagees)

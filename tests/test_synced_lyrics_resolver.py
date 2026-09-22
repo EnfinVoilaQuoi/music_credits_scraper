@@ -214,6 +214,38 @@ def test_duration_de_secours_ytm_transmise_a_lrclib():
     assert lrclib.last_duration == 183
 
 
+def test_ytm_declare_sa_duree_meme_si_la_fiche_en_a_une():
+    """Lot 3 : l'observation `(duration, ytmusic)` est émise — `deezer` reste
+    au-dessus dans l'ordre, déclarer ne déplace pas une meilleure source."""
+    out = resolve_track_synced_lyrics(
+        _track(duration=200),
+        "X",
+        lrclib=_FakeLRCLIB(None),
+        ytm=_FakeYTM(lrc=None, duration=203),
+        mxm=None,
+        need_sync=True,
+        need_text=False,
+        sync_ytm=True,
+    )
+    assert [(o.field, o.value, o.source) for o in out.observations] == [
+        ("duration", 203, "ytmusic")
+    ]
+
+
+def test_sans_duree_ytm_aucune_observation_de_duree():
+    out = resolve_track_synced_lyrics(
+        _track(duration=200),
+        "X",
+        lrclib=_FakeLRCLIB(None),
+        ytm=_FakeYTM(lrc=None, duration=None),
+        mxm=None,
+        need_sync=True,
+        need_text=False,
+        sync_ytm=True,
+    )
+    assert not [o for o in out.observations if o.field == "duration"]
+
+
 def test_need_sync_false_pas_de_synchro():
     out = resolve_track_synced_lyrics(
         _track(),

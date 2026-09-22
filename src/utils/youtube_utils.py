@@ -84,3 +84,28 @@ def classify_video_kind(video_title: str | None, channel_title: str | None) -> s
     if any(h in title for h in _CLIP_HINTS):
         return "clip"
     return "unknown"
+
+
+def video_pour_credits(track) -> tuple[str | None, str]:
+    """Choisit la vidéo la plus utile pour extraire des crédits.
+
+    Priorité : ``audio`` (Topic, description structurée) → clip
+    (``youtube_url``) → première vidéo disponible.
+
+    Returns:
+        ``(video_id, kind)`` où *kind* ∈ ``{"audio", "clip", "unknown"}``,
+        ou ``(None, "")`` si aucune vidéo.
+    """
+    for video in getattr(track, "videos", ()):
+        if video.kind == "audio" and video.video_id:
+            return video.video_id, "audio"
+
+    vid = extract_video_id(getattr(track, "youtube_url", None))
+    if vid:
+        return vid, "clip"
+
+    for video in getattr(track, "videos", ()):
+        if video.video_id:
+            return video.video_id, video.kind or "unknown"
+
+    return None, ""

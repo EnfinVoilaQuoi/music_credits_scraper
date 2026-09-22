@@ -161,6 +161,17 @@ def test_le_compteur_est_lu_malgre_la_colonne_de_rang():
     assert parse.parse_row_playcounts(_LIGNE_ARTISTE) == {"4g3aNSz1rMRTrHMYXzvAz6": 8186033}
 
 
+def test_les_durees_des_lignes_sont_lues_par_id():
+    """Lot 4 : la cellule `m:ss` d'une ligne d'album ou de liste, jamais le rang."""
+    assert parse.parse_row_durations(_LIGNE_ALBUM) == {"3EDDunSmj8RbiVGU0Qr0M8": 234}
+    assert parse.parse_row_durations(_LIGNE_ARTISTE) == {"4g3aNSz1rMRTrHMYXzvAz6": 151}
+
+
+def test_la_page_titre_enregistree_porte_des_durees(page_titre):
+    durees = parse.parse_row_durations(page_titre)
+    assert durees and all(0 < d < 3600 for d in durees.values())
+
+
 def test_href_relatif_accepte():
     """Les hrefs sont RELATIFS (`/intl-fr/track/…`). Exiger « spotify » dans l'URL
     est ce qui a rendu la source muette le 2026-07-18 : zéro résultat, aucune

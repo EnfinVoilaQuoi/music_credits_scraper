@@ -1,7 +1,7 @@
-"""Crédits (Genius v3 / Discogs), paroles (texte) et timestamps (LRCLIB / YTM /
-Musixmatch) — sans widget.
+"""Crédits (Genius v3 / Discogs / YouTube Topic+clip), paroles (texte) et
+timestamps (LRCLIB / YTM / Musixmatch) — sans widget.
 
-Extrait du worker `src/gui/workers/scraping.py` (2026-09-14). Trois phases dans
+Extrait du worker `src/gui/workers/scraping.py` (2026-09-14). Quatre phases dans
 l'ordre historique, `should_stop` testé ENTRE deux morceaux, save en fin de run.
 Les fabriques de clients sont injectables (`Clients`) pour tester sans réseau.
 """
@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from src.models import Artist, Track
+from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
 from src.services.runtime import Bilan, Hooks, Runtime
 from src.utils.logger import get_logger
 
@@ -24,6 +25,7 @@ class OptionsCredits:
 
     genius: bool = True
     discogs: bool = True
+    youtube: bool = True
     force_credits: bool = False
     paroles_genius: bool = True
     paroles_ytm: bool = True
@@ -32,6 +34,7 @@ class OptionsCredits:
     sync_ytm: bool = True
     sync_musixmatch: bool = False
     force_sync: bool = False
+    tout_youtube: bool = False
 
     @property
     def paroles(self) -> bool:
@@ -47,6 +50,8 @@ class OptionsCredits:
         if self.genius or self.discogs:
             srcs = [n for n, on in (("Genius", self.genius), ("Discogs", self.discogs)) if on]
             out.append(f"Crédits {'/'.join(srcs)}{'(forcé)' if self.force_credits else ''}")
+        if self.youtube:
+            out.append(f"Crédits YouTube (Topic/clip){'(tout)' if self.tout_youtube else ''}")
         if self.paroles:
             out.append(f"Paroles{'(forcé)' if self.force_paroles else ''}")
         if self.sync:
@@ -66,6 +71,7 @@ class OptionsCredits:
         return (
             (3 if self.genius else 0)
             + (2 if self.discogs else 0)
+            + (1 if self.youtube else 0)
             + (2 if self.paroles else 0)
             + (2 if self.sync else 0)
         )
@@ -76,6 +82,7 @@ class BilanCredits(Bilan):
     morceaux: int = 0
     genius: dict | None = None
     discogs: dict | None = None
+    youtube: dict | None = None
     paroles: dict | None = None
     sync: dict | None = None
     sauves: int = 0
@@ -104,6 +111,12 @@ def _lyrics_provider(options: OptionsCredits):
     )
 
 
+def _ytmusic_api():
+    from src.api.ytmusic_api import YTMusicAPI
+
+    return YTMusicAPI()
+
+
 @dataclass
 class Clients:
     """Fabriques paresseuses — remplacées par des factices dans les tests."""
@@ -111,6 +124,122 @@ class Clients:
     genius: Callable[[], object] = _genius_scraper
     discogs: Callable[[], object] = _discogs_client
     lyrics: Callable[[OptionsCredits], object] = _lyrics_provider
+    ytmusic_meta: Callable[[], object] = _ytmusic_api
+
+
+def _manque_credits(track: Track) -> bool:
+    """True si le morceau n'a aucun Producer ni Writer/Composer."""
+    roles = {c.role for c in track.credits}
+    return not (roles & _PRODUCER_ROLES) and not (roles & _WRITER_ROLES)
+
+
+def _phase_youtube(
+    tracks: list[Track],
+    options: OptionsCredits,
+    hooks: Hooks,
+    clients: Clients,
+    bilan: BilanCredits,
+) -> None:
+    """Phase 4 : crédits depuis les descriptions YouTube (Topic puis clip)."""
+    from src.utils.credits_description import (
+        est_description_topic,
+        parse_description_clip,
+        parse_description_clip_llm,
+        parse_description_topic,
+    )
+    from src.utils.youtube_utils import video_pour_credits
+
+    selection = tracks if options.tout_youtube else [t for t in tracks if _manque_credits(t)]
+    if not selection:
+        bilan.youtube = {"topic": 0, "clip": 0, "llm": 0, "skipped": len(tracks)}
+        return
+
+    video_ids = []
+    track_by_vid: dict[str, tuple[Track, str]] = {}
+    for t in selection:
+        vid, kind = video_pour_credits(t)
+        if vid:
+            video_ids.append(vid)
+            track_by_vid[vid] = (t, kind)
+
+    descriptions: dict[str, str | None] = {}
+    canaux: dict[str, str | None] = {}
+    if video_ids:
+        api = clients.ytmusic_meta()
+        meta = api.fetch_video_meta_batch(video_ids)
+        for vid in video_ids:
+            info = meta.get(vid, {})
+            descriptions[vid] = info.get("description")
+            canaux[vid] = info.get("channel")
+
+    topic_count = clip_count = llm_count = 0
+    existing_credits: dict[int, set[tuple[str, str]]] = {}
+
+    for vid, (track, kind) in track_by_vid.items():
+        if hooks.should_stop():
+            bilan.interrompu("arrêt demandé pendant YouTube")
+            break
+
+        desc = descriptions.get(vid)
+        if not desc:
+            continue
+
+        tid = track.id or id(track)
+        if tid not in existing_credits:
+            existing_credits[tid] = {(c.name.lower().strip(), c.role.value) for c in track.credits}
+        seen = existing_credits[tid]
+
+        new_credits = []
+        # Une Topic se reconnaît à son canal ou à « Provided to YouTube », pas
+        # au genre « audio » : un audio posté par le label (Waxx) porte une
+        # description libre, et le parseur Topic y écrivait des URL en crédits.
+        est_topic = est_description_topic(desc, canaux.get(vid))
+        if est_topic:
+            parsed = parse_description_topic(desc)
+            if parsed:
+                for c in parsed:
+                    key = (c.name.lower().strip(), c.role.value)
+                    if key not in seen:
+                        seen.add(key)
+                        new_credits.append(c)
+                if new_credits:
+                    topic_count += 1
+
+        if not new_credits and kind in ("clip", "unknown", "audio"):
+            parsed_clip = parse_description_clip(desc) if not est_topic else []
+            if not parsed_clip:
+                extractor = None
+                try:
+                    from src.utils.llm_extractor import get_shared_extractor
+
+                    extractor = get_shared_extractor()
+                except Exception:  # noqa: BLE001
+                    pass
+                if extractor:
+                    parsed_clip = parse_description_clip_llm(desc, extractor)
+                    if parsed_clip:
+                        llm_count += 1
+
+            if parsed_clip:
+                for c in parsed_clip:
+                    key = (c.name.lower().strip(), c.role.value)
+                    if key not in seen:
+                        seen.add(key)
+                        new_credits.append(c)
+                if new_credits and not any(nc.source == "youtube_topic" for nc in new_credits):
+                    clip_count += 1
+
+        if new_credits:
+            track.credits.extend(new_credits)
+
+    bilan.youtube = {
+        "topic": topic_count,
+        "clip": clip_count,
+        "avec_video": len(track_by_vid),
+        "descriptions": sum(1 for d in descriptions.values() if d),
+        "llm": llm_count,
+        "selection": len(selection),
+    }
 
 
 def nom_artiste_pour(track: Track, artist: Artist) -> str:
@@ -201,7 +330,16 @@ def run(
             if not bilan.complete:
                 return _sauver(runtime, artist, tracks, bilan)
 
-        # 3) Paroles (texte) et/ou timestamps
+        # 3) Crédits YouTube (Topic / clip)
+        if options.youtube:
+            if hooks.should_stop():
+                bilan.interrompu("arrêt demandé avant la phase YouTube")
+                return _sauver(runtime, artist, tracks, bilan)
+            _phase_youtube(tracks, options, hooks, clients, bilan)
+            if not bilan.complete:
+                return _sauver(runtime, artist, tracks, bilan)
+
+        # 4) Paroles (texte) et/ou timestamps
         if options.paroles or options.sync:
             if hooks.should_stop():
                 bilan.interrompu("arrêt demandé avant la phase paroles/synchro")
@@ -321,6 +459,17 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
         msg += "💿 Crédits Discogs:\n"
         msg += (
             f"  - Réussis: {bilan.discogs['success']}\n  - Échoués: {bilan.discogs['failed']}\n\n"
+        )
+    if bilan.youtube:
+        yt = bilan.youtube
+        msg += "▶️ Crédits YouTube:\n"
+        msg += f"  - Topic: {yt['topic']} • Clip: {yt['clip']}"
+        if yt.get("llm"):
+            msg += f" • LLM: {yt['llm']}"
+        msg += (
+            f"\n  - Sélection: {yt.get('selection', '?')} morceaux, "
+            f"{yt.get('avec_video', 0)} avec une vidéo, "
+            f"{yt.get('descriptions', 0)} description(s) lue(s)\n\n"
         )
     if bilan.paroles:
         msg += "📝 Paroles:\n"

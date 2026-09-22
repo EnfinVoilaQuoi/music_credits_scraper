@@ -221,6 +221,13 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                 )
                 for sid, titres in partages[:8]:
                     lines.append(f"   • {sid} : {' | '.join(titres)}")
+            doublons = r.get("doublons_evidents") or []
+            if doublons:
+                lines.append(
+                    f"🔁 {len(doublons)} doublon(s) évident(s) de fiche (même titre ou même "
+                    "prise) : streams écrits sur la première, à fusionner — "
+                    + " ; ".join(" | ".join(titres) for _, titres in doublons[:6])
+                )
             # L'ID en base désigne une AUTRE version que le titre de la ligne :
             # signature d'un ID mal attribué, à passer par « Vérifier les
             # identifiants Spotify ».
@@ -300,6 +307,12 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                 )
             # Vidéos rattachées à plusieurs morceaux : écartées de la somme,
             # parce qu'attribuer les mêmes vues à chacun les multiplierait.
+            evidents = r.get("partages_evidents") or 0
+            if evidents:
+                lines.append(
+                    f"\n🎬 {evidents} vidéo(s) partagée(s) à l'évidence (clip double nommant "
+                    "chaque morceau, ou doublon de fiche) : non comptées, rien à vérifier."
+                )
             partagees = r.get("videos_partagees") or []
             if partagees:
                 non_attribuees = r.get("vues_non_attribuees") or 0

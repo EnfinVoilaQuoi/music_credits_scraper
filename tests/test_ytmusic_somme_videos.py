@@ -300,15 +300,14 @@ class TestVideoPartagee:
 
     def test_le_rapport_nomme_la_video_et_ses_morceaux(self, sans_recherche):
         api, tracks = self._clip_double()
-        # Titre connu d'une passe « vues des vidéos » précédente (e21).
-        tracks[0].videos = [
-            TrackVideo(video_id="clipdouble0", title="B.B. Jacques - Donjon & 2h22")
-        ]
+        # Titre connu d'une passe « vues des vidéos » précédente (e21). Il ne
+        # nomme qu'UN des deux morceaux : rien d'évident, à vérifier.
+        tracks[0].videos = [TrackVideo(video_id="clipdouble0", title="B.B. Jacques - Donjon")]
         dm, result = _lancer(api, tracks)
 
         (partagee,) = result["videos_partagees"]
         assert partagee["video_id"] == "clipdouble0"
-        assert partagee["titre_video"] == "B.B. Jacques - Donjon & 2h22"
+        assert partagee["titre_video"] == "B.B. Jacques - Donjon"
         assert partagee["morceaux"] == ["2h22", "Donjon"]
         assert partagee["url"].endswith("clipdouble0")
         assert partagee["vues"] == 5252528
@@ -318,6 +317,33 @@ class TestVideoPartagee:
         (partagee,) = result["videos_partagees"]
         assert partagee["titre_video"] is None
         assert partagee["url"] == "https://www.youtube.com/watch?v=clipdouble0"
+
+    def test_un_clip_double_evident_nest_pas_liste(self, sans_recherche):
+        """Le titre de la vidéo nomme les deux morceaux : rien à vérifier — et
+        toujours rien de compté (décision utilisateur 2026-09-22, A2H)."""
+        api, tracks = self._clip_double()
+        tracks[0].videos = [
+            TrackVideo(video_id="clipdouble0", title="B.B. Jacques - Donjon & 2h22 (Clip)")
+        ]
+        dm, result = _lancer(api, tracks)
+        assert result["videos_partagees"] == [] and result["partages_evidents"] == 1
+        assert sorted(dm.stream_writes) == [(1, 100), (2, 200)]
+        assert result["vues_non_attribuees"] == 5252528
+
+    def test_des_doublons_de_fiche_ne_sont_pas_listes(self, sans_recherche):
+        api = FakeAPI(raw_tracks=[], vues={"acoustique0": 900})
+        tracks = [
+            _track(
+                1, "Les yeux dans les yeux (Acoustic)", youtube_url="https://youtu.be/acoustique0"
+            ),
+            _track(
+                2,
+                "Les yeux dans les yeux (Live at AK Studios)",
+                youtube_url="https://youtu.be/acoustique0",
+            ),
+        ]
+        _, result = _lancer(api, tracks)
+        assert result["videos_partagees"] == [] and result["partages_evidents"] == 1
 
     def test_un_morceau_sans_video_propre_nest_pas_ecrit_a_zero(self, sans_recherche):
         """0 se lirait comme « jamais écouté » : on préfère ne rien écrire."""

@@ -111,6 +111,7 @@ def update_spotify_streams(
         "harvested_foreign": 0,  # récoltés au passage, autres artistes
         "unknown_ids": 0,  # vus sur les pages, inconnus de la base
         "albums_totalises": 0,  # totaux RÉELS écrits (toutes pistes)
+        "durees": 0,  # durées déclarées `spotify_web` (lot 4), par ID
         "pages": 0,
         "monthly_listeners": None,
         "artist_name": None,
@@ -244,6 +245,7 @@ async def _crawl(
             if not data:
                 continue
             _record(data["playcounts"], artist, data_manager, id_map, releves, result)
+            _declarer_durees(data.get("durations"), data_manager, id_map, result)
 
         # ── Passe C : les totaux d'album ────────────────────────────────
         budget = await _totaliser_albums(
@@ -256,6 +258,7 @@ async def _crawl(
             budget,
             stop_requested,
             result,
+            id_map=id_map,
         )
 
     return result
@@ -284,6 +287,26 @@ def _build_queue(artist, data_manager, seen_dates: dict, now: datetime, releves:
         candidates.append((_parse_seen_at(raw) or datetime.min, track.spotify_id))
     candidates.sort(key=lambda c: c[0])
     return [spotify_id for _, spotify_id in candidates]
+
+
+def _declarer_durees(durees: dict | None, data_manager, id_map: dict, result: dict) -> None:
+    """Déclare les durées lues sur une page, par ID, sous `spotify_web`.
+
+    Lot 4 (2026-09-22) : la durée suit l'ID comme les streams — attribuée aux
+    mêmes lignes (`id_map`, toute la base), jamais par le titre affiché. Elle
+    est DÉCLARÉE (`record_duration_observation`), pas arbitrée ici :
+    `spotify_web` est 4ᵉ de l'ordre, derrière Deezer, YTM et SongBPM, et un
+    ID rejeté emporte sa durée (`clear_track_spotify_id` purge la source).
+    Pas de gate de fraîcheur : une durée ne vieillit pas, l'upsert est
+    idempotent.
+    """
+    if not durees:
+        return
+    seen_at = datetime.now()
+    for spotify_id, secondes in durees.items():
+        for track_id, _owner in id_map.get(spotify_id) or []:
+            if data_manager.record_duration_observation(track_id, secondes, _SOURCE, seen_at):
+                result["durees"] += 1
 
 
 def _record(
@@ -338,6 +361,7 @@ async def _totaliser_albums(
     budget: int,
     stop_requested,
     result: dict,
+    id_map: dict | None = None,
 ) -> int:
     """Totaux d'album — la somme des ENREGISTREMENTS DISTINCTS du disque.
 
@@ -412,6 +436,8 @@ async def _totaliser_albums(
             result["pages"] += 1
             if album:
                 compositions[album_id] = album
+                if id_map is not None:
+                    _declarer_durees(album.get("durations"), data_manager, id_map, result)
                 # Tracklist VIRTUALISÉE : si la page annonce plus de pistes
                 # qu'elle n'en a rendues, on ne sait pas ce qui manque. Sommer
                 # ce qu'on voit donnerait un total plausible et FAUX — le pire
@@ -445,6 +471,8 @@ async def _totaliser_albums(
             result["pages"] += 1
             if data:
                 releves.update(data["playcounts"])
+                if id_map is not None:
+                    _declarer_durees(data.get("durations"), data_manager, id_map, result)
 
         if any(tid not in releves for tid in par_enregistrement.values()):
             logger.warning(f"Album '{connus[cle]}' : piste illisible — total NON écrit")

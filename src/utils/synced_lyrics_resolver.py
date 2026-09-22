@@ -80,8 +80,16 @@ def resolve_track_synced_lyrics(
             # Le client YTM gère déjà son réseau (YTMusicError/requests) → ici on ne
             # couvre plus qu'un retour inattendu ; les autres sources continuent.
             logger.debug(f"YTM get_lyrics échec '{artist_name} - {track.title}': {e}")
-    if ytm_res and not duration and ytm_res.get("duration"):
-        duration = ytm_res["duration"]
+    if ytm_res and ytm_res.get("duration"):
+        # Lot 3 (2026-09-22) : YTM DÉCLARE sa durée — jamais écrite avant
+        # (l'ordre la classait 2ᵉ, la base en comptait 0). Déclarée même si la
+        # fiche en a une : `deezer` reste au-dessus, déclarer ne déplace pas
+        # une meilleure source ; la colonne suit par `save_track` (lot 0).
+        out.observations.append(
+            Observation("duration", int(ytm_res["duration"]), "ytmusic", seen_at=now)
+        )
+        if not duration:
+            duration = ytm_res["duration"]  # secours du match LRCLIB ± 2 s
     ytm_lrc = (ytm_res.get("lyrics_synced") if ytm_res else None) if sync_ytm else None
 
     # SOURCE 1 (LRCLIB) : match sur la durée ±2 s.

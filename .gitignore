@@ -110,7 +110,7 @@ scripts/*
 # Pilote analyse audio locale : tempo/tonalité mesurés contre le consensus en base (2026-09-17)
 !scripts/pilote_audio.py
 # Crédits Discogs : table d'alias et oracle Genius (2026-09-03)
-!scripts/reclass_discogs_roles.py
+!scripts/reclass_credit_roles.py
 !scripts/discogs_genius_oracle.py
 # Certifications : réécriture des rattachements par sous-chaîne (2026-09-06)
 !scripts/repair_certifications.py

@@ -73,7 +73,8 @@ def _poser_statut(app, index: int, valeurs: list) -> None:
     tracks = app.current_artist.tracks if app.current_artist else []
     if rang is None or len(valeurs) <= rang or not 0 <= index < len(tracks):
         return
-    valeurs[rang] = helpers.get_track_status_icon(tracks[index], app.disabled_tracks)
+    ctx = app.contexte_validation() if hasattr(app, "contexte_validation") else None
+    valeurs[rang] = helpers.get_track_status_icon(tracks[index], app.disabled_tracks, ctx)
 
 
 def _tuple_de_valeurs(app, valeurs: dict[str, str]) -> tuple:
@@ -147,6 +148,8 @@ def populate_tracks_table(app):
     except (OSError, ValueError) as e:
         logger.debug(f"Pas de morceaux désactivés sauvegardés: {e}")
         app.disabled_tracks = set()
+
+    ctx = app.contexte_validation() if hasattr(app, "contexte_validation") else None
 
     # Ajouter les morceaux au tableau
     for i, track in enumerate(app.current_artist.tracks):
@@ -284,8 +287,9 @@ def populate_tracks_table(app):
             except Exception:
                 pass
 
-            # Statut - Utiliser votre fonction existante _get_track_status_icon
-            status = helpers.get_track_status_icon(track, app.disabled_tracks)
+            # Statut — le contexte (nature des disques) est mémoïsé par
+            # artiste : sans lui, les timestamps ne seraient jamais exigés.
+            status = helpers.get_track_status_icon(track, app.disabled_tracks, ctx)
 
             # Streams estimés
             try:
@@ -750,6 +754,8 @@ def disable_track_with_refresh(app, index: int, item):
     if track_id is not None:
         app.disabled_tracks.add(track_id)
         app.selected_tracks.discard(track_id)
+    if hasattr(app, "invalider_contexte_validation"):
+        app.invalider_contexte_validation()
 
     # Récupérer les valeurs actuelles de l'item
     current_values = list(app.tree.item(item)["values"])
@@ -777,6 +783,8 @@ def enable_track_with_refresh(app, index: int, item):
     track_id = app._get_track_id_from_index(index)
     if track_id is not None and track_id in app.disabled_tracks:
         app.disabled_tracks.remove(track_id)
+    if hasattr(app, "invalider_contexte_validation"):
+        app.invalider_contexte_validation()
 
     # Récupérer les valeurs actuelles de l'item
     current_values = list(app.tree.item(item)["values"])
@@ -998,16 +1006,13 @@ def sort_column(app, col):
 
             sort_key = get_streams_total
         elif col == "Statut":
-            # CORRECTION: Trier par ordre de priorité (Complet > Incomplet > Désactivé)
-            status_order = {
-                "✅": 1,  # Complet en premier
-                "⚠️": 2,  # Incomplet au milieu
-                "❌": 3,  # Désactivé en dernier
-            }
+            # Complet > incomplet > inédit (rien à exiger) > désactivé.
+            status_order = {"✅": 1, "⚠️": 2, "🔒": 3, "❌": 4}
+            ctx_tri = app.contexte_validation() if hasattr(app, "contexte_validation") else None
 
             def get_status_value(t):
-                icon = helpers.get_track_status_icon(t, app.disabled_tracks)
-                return status_order.get(icon, 4)  # 4 pour les icônes inconnues
+                icon = helpers.get_track_status_icon(t, app.disabled_tracks, ctx_tri)
+                return status_order.get(icon, 5)  # 5 pour les icônes inconnues
 
             sort_key = get_status_value
 

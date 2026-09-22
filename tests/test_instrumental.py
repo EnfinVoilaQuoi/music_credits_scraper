@@ -228,6 +228,7 @@ class TestGui:
         t.audio.bpm = 142
         t.audio.key, t.audio.mode = "C", "Major"
         t.add_credit(Credit(name="P", role=CreditRole.PRODUCER))
+        t.add_credit(Credit(name="A", role=CreditRole.WRITER))
         t.spotify_id = "ID"
         t.streams.spotify_streams, t.streams.ytm_streams = 10, 5
         return t

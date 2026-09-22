@@ -6,7 +6,7 @@ import customtkinter as ctk
 
 from src.concurrency.lifecycle import start_worker
 from src.config import THEME, WINDOW_HEIGHT, WINDOW_WIDTH
-from src.gui import helpers, nouveautes_gui
+from src.gui import nouveautes_gui
 from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
 from src.gui.panels import albums_view, formations_panel, tracks_table
@@ -21,7 +21,9 @@ from src.models import Artist, Track
 from src.observability import repository as usage_repository
 from src.services import artiste as artiste_service
 from src.services.runtime import Runtime
+from src.services.validation import construire_contexte
 from src.utils.logger import get_logger
+from src.utils.track_validation import Verdict, evaluer
 
 logger = get_logger(__name__)
 
@@ -432,6 +434,9 @@ class MainWindow:
                 )
         except Exception as e:
             logger.error(f"Rechargement des morceaux échoué: {e}")
+        # Une écriture a pu changer la nature d'un disque (type d'album, lien
+        # de parution) : le contexte de validation repart de la base.
+        self.invalider_contexte_validation()
         self._populate_tracks_table()
 
     def _show_track_details_for_track(self, track: Track):
@@ -615,6 +620,25 @@ class MainWindow:
         # Lancer dans un thread
         start_worker(search)
 
+    def contexte_validation(self):
+        """Le contexte de validation de l'artiste courant, MÉMOÏSÉ.
+
+        La table l'évalue pour chaque ligne et se redessine à chaque tri :
+        deux requêtes par artiste, pas deux par morceau. Invalidé par
+        `_reload_tracks_and_refresh` et au changement d'artiste.
+        """
+        artist = self.current_artist
+        cle = (artist.id if artist else None, len(self.disabled_tracks))
+        if getattr(self, "_contexte_validation_cle", None) != cle:
+            self._contexte_validation = construire_contexte(
+                self.data_manager, artist, self.disabled_tracks
+            )
+            self._contexte_validation_cle = cle
+        return self._contexte_validation
+
+    def invalider_contexte_validation(self):
+        self._contexte_validation_cle = None
+
     def _close_all_detail_windows(self):
         """Ferme toutes les fenêtres de détail ouvertes (appelé lors du changement d'artiste)"""
         for window, _ in list(self.open_detail_windows.values()):
@@ -691,11 +715,19 @@ class MainWindow:
                     }
                 )
 
-                # Morceaux avec données manquantes (SANS compter les désactivés)
+                # Morceaux à valider — le CONTEXTE est construit UNE fois
+                # par artiste (nature des disques), pas une requête par ligne.
+                constats = [evaluer(t, self.contexte_validation()) for t in active_tracks]
                 tracks_with_missing_data = sum(
-                    1
-                    for t in active_tracks
-                    if helpers.get_track_status_icon(t, self.disabled_tracks) == "⚠️"
+                    1 for c in constats if c.verdict is Verdict.INCOMPLET
+                )
+                tracks_inedits = sum(1 for c in constats if c.verdict is Verdict.INEDIT)
+                disques_sans_type = len(
+                    {
+                        t.album
+                        for t, c in zip(active_tracks, constats, strict=True)
+                        if t.album and any("nature du disque" in d for d in c.details)
+                    }
                 )
 
                 # ✅ LIGNE 1: Statistiques principales
@@ -733,6 +765,14 @@ class MainWindow:
 
                 # ✅ LIGNE 2: Données manquantes
                 line2 = f"{tracks_with_missing_data} Morceaux avec Données manquantes"
+                if tracks_inedits:
+                    # Rien ne leur est exigé : ils ne sont pas « à valider »,
+                    # mais les taire ferait croire à un total incohérent.
+                    line2 += f" (+{tracks_inedits} inédits 🔒)"
+                if disques_sans_type:
+                    # Le trou qui empêche d'exiger les timestamps, DIT pour
+                    # qu'il soit réparable (clic droit → Type, vue Albums).
+                    line2 += f" · {disques_sans_type} disque(s) sans type"
 
                 # ✅ LIGNE 3: Streams et auditeurs mensuels
                 try:

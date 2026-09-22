@@ -150,6 +150,7 @@ class TestIconeDeStatut:
         t.audio.key = "C"
         t.audio.mode = "Major"
         t.add_credit(Credit(name="Producteur X", role=CreditRole.PRODUCER))
+        t.add_credit(Credit(name="Auteur Y", role=CreditRole.WRITER))
         # Les streams comptent depuis le 2026-09-05 : un morceau « complet » doit
         # donc porter les siens (cf. TestStatutStreams pour la règle par
         # plateforme).
@@ -221,6 +222,7 @@ class TestStatutStreams:
         t.audio.key = "C"
         t.audio.mode = "Major"
         t.add_credit(Credit(name="Producteur X", role=CreditRole.PRODUCER))
+        t.add_credit(Credit(name="Auteur Y", role=CreditRole.WRITER))
         t.spotify_id = spotify_id
         t.isrc = isrc
         t.spotify_id_checked_at = cherche_le

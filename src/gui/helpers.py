@@ -4,6 +4,7 @@ import unicodedata
 from datetime import datetime
 
 from src.utils.logger import get_logger
+from src.utils.track_validation import Contexte, evaluer
 
 logger = get_logger(__name__)
 
@@ -65,44 +66,6 @@ def format_lyrics_for_display(lyrics: str) -> str:
     return "\n".join(formatted_lines)
 
 
-def _streams_complets(track) -> bool:
-    """Le morceau a-t-il les streams qu'on peut légitimement lui réclamer ?
-
-    La règle est ASYMÉTRIQUE, parce que les deux absences ne se valent pas.
-
-    **YouTube : toujours exigé.** Un lien manquant ne prouve rien — le catalogue
-    de YouTube est plus large que celui des plateformes de streaming (rips de
-    titres supprimés, versions physiques, inédits, lyrics vidéos de projets
-    jamais sortis). L'absence n'y est pas observable, elle ne peut donc jamais
-    servir d'excuse.
-
-    **Spotify : exigé seulement si l'absence est CONSTATÉE.** Un `spotify_id`
-    vide ne suffit pas — il dit aussi bien « pas sur Spotify » que « jamais
-    cherché ». Deux signaux tranchent :
-
-      · `spotify_id_checked_at` (e17) : une résolution a été menée à terme. Sans
-        cette date, on ne valide pas — affirmer une absence qu'on n'a pas
-        constatée serait pire que de laisser un triangle.
-      · l'ISRC : un enregistrement distribué en a forcément un, donc un ISRC
-        sans identifiant Spotify trahit une résolution ratée, pas une absence.
-        L'inverse ne vaut PAS — 292 morceaux ont un ID Spotify sans ISRC en base
-        (le nôtre vient de Deezer), donc son absence ne prouve rien.
-    """
-    if not track.streams.ytm_streams:
-        return False
-    if track.spotify_id:
-        return bool(track.streams.spotify_streams)
-    if track.isrc:
-        # Un ISRC signe un enregistrement DISTRIBUÉ : il est donc presque
-        # sûrement sur Spotify, et ne pas avoir son identifiant est un échec de
-        # RÉSOLUTION, pas une absence. Mesuré le 2026-09-05 : 67 morceaux dans
-        # ce cas. (L'inverse ne vaut pas : 292 morceaux ont un ID Spotify SANS
-        # ISRC en base — le nôtre vient de Deezer, son absence ne prouve rien.)
-        return False
-    # Ni identifiant ni ISRC : le morceau est-il absent, ou jamais cherché ?
-    return bool(track.spotify_id_checked_at)
-
-
 def format_lyrics_cell(track) -> str:
     """Cellule « Paroles » du tableau : ✓ = texte, ⏱ = timestamps (en plus ou
     seuls), 🎹 = instrumental CONSTATÉ sur Genius (scrape réussi, pas de paroles
@@ -120,93 +83,18 @@ def format_lyrics_cell(track) -> str:
     return ""
 
 
-def get_track_status_icon(track, disabled_ids) -> str:
-    """Retourne l'icône de statut selon le niveau de complétude des données
+def get_track_status_icon(track, disabled_ids, ctx=None) -> str:
+    """Icône de statut — ADAPTATEUR MINCE sur `src/utils/track_validation.py`.
 
-    Infos nécessaires pour validation complète:
-    - Date de sortie ✓
-    - Crédits obtenus ✓
-    - Paroles obtenues ✓
-    - BPM ✓
-    - Key et Mode ✓
-    - Durée ✓
-    - Streams ✓ : YouTube toujours, Spotify seulement si le morceau y est
-      (cf. `_streams_complets`) — un titre publié seulement sur YouTube est donc
-      complet avec ses seuls streams YTM
-    - Certifications ✓ (ou validation si base à jour)
+    Les règles ont quitté le GUI le 2026-09-22 : elles sont pures, testées, et
+    comptent dans le cliquet de couverture (`src/gui/*` en est exclu). La
+    signature ne bouge pas, les appelants non plus ; `ctx` (facultatif) porte
+    la nature des disques, sans quoi les timestamps ne sont jamais exigés.
 
-    Note: Album n'est PAS obligatoire (singles, featurings hors projet)
-
-    Retourne:
-    - ❌ : Morceau désactivé
-    - ⚠️ : Données incomplètes
-    - ✅ : Toutes les infos présentes
+    ✅ complet · ⚠️ incomplet · 🔒 inédit (rien n'est exigé) · ❌ désactivé.
     """
-    try:
-        # Si le morceau est désactivé, retourner ❌
-        if track.id is not None and track.id in disabled_ids:
-            return "❌"
-
-        # Liste des champs requis avec leur validation
-        missing = []
-
-        # 1. Date de sortie
-        if not track.release_date:
-            missing.append("Date")
-
-        # 3. Crédits obtenus
-        try:
-            music_credits = track.get_music_credits()
-            if not music_credits or len(music_credits) == 0:
-                missing.append("Crédits")
-        except (AttributeError, TypeError, KeyError):
-            missing.append("Crédits")
-
-        # 4. Paroles obtenues — ou instrumental constaté sur Genius (e27) :
-        # pas de paroles PAR NATURE, il n'y a rien à réclamer.
-        if track.lyrics.a_chercher():
-            missing.append("Paroles")
-
-        # 5. BPM
-        if not track.audio.bpm or track.audio.bpm == 0:
-            missing.append("BPM")
-
-        # 6. Key et Mode. Le commentaire d'origine parlait d'« attributs
-        # dynamiques du mapper → hasattr requis » : ce n'est plus vrai depuis la
-        # Phase 5 (`key`/`mode` sont de VRAIS champs de `TrackAudio`), et le code
-        # ne fait déjà plus de hasattr.
-        has_key = track.audio.key
-        has_mode = track.audio.mode
-        has_musical_key = track.audio.musical_key
-
-        if not (has_musical_key or (has_key and has_mode)):
-            missing.append("Key/Mode")
-
-        # 7. Durée
-        if not track.duration:
-            missing.append("Durée")
-
-        # 9. Streams — depuis que le scrape Spotify est en place (2026-09-05),
-        # l'absence de compteur est un vrai trou et non plus une fatalité.
-        # Exigés PLATEFORME PAR PLATEFORME : un morceau qui n'existe pas sur
-        # Spotify n'y aura jamais de streams, et le réclamer le marquerait
-        # incomplet à perpétuité. Un morceau publié seulement sur YouTube est
-        # donc COMPLET avec ses seuls streams YTM.
-        if not _streams_complets(track):
-            missing.append("Streams")
-
-        # 8. Certifications : le champ existe toujours (dataclass), donc jamais
-        # « manquant » — la recherche est réputée faite. (Ancien hasattr mort.)
-
-        # Retourner le statut selon les données manquantes
-        if len(missing) == 0:
-            return "✅"  # Toutes les infos présentes
-        else:
-            return "⚠️"  # Données incomplètes
-
-    except (AttributeError, TypeError, KeyError, ValueError) as e:
-        logger.error(f"Erreur dans get_track_status_icon pour {track.title}: {e}")
-        return "⚠️"  # Erreur = incomplet
+    contexte = ctx or Contexte(desactives=frozenset(disabled_ids or ()))
+    return evaluer(track, contexte).icone
 
 
 def get_release_year_safely(track):

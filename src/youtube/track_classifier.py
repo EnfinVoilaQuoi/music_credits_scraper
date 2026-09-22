@@ -18,6 +18,41 @@ class TrackType(Enum):
     ACOUSTIC = "acoustic"  # Version acoustique
 
 
+#: Émissions / freestyles / cyphers. Vocabulaire au niveau MODULE depuis le
+#: 2026-09-22 : la validation d'un morceau (`src/utils/track_validation.py`)
+#: doit savoir qu'un Planète Rap n'est pas un titre d'album, et un module PUR
+#: ne peut pas instancier un classifieur — le recopier ferait un second
+#: vocabulaire à tenir en phase.
+SHOW_INDICATORS = (
+    "grünt",
+    "grunt",
+    "colors show",
+    "a colors show",
+    "planète rap",
+    "planete rap",
+    "oklm",
+    "rentre dans le cercle",
+    "red bull 64 bars",
+    "on the radar",
+    "from the block",
+    "cypher",
+    "freestyle",
+    "radio session",
+)
+
+
+def is_show_performance(title: str, album: str | None = None) -> bool:
+    """True si le morceau est une prestation d'émission/freestyle/cypher.
+
+    Cherche un indicateur dans le titre OU l'album (chantier « Media »).
+    Réutilisé par la vignette YouTube, `youtube_utils.classify_video_kind` et
+    la validation (un freestyle n'exige pas de timestamps, même regroupé dans
+    une compilation).
+    """
+    haystack = f"{title or ''} {album or ''}".lower()
+    return any(indicator in haystack for indicator in SHOW_INDICATORS)
+
+
 class TrackClassifier:
     """Classifie les morceaux pour déterminer la stratégie de recherche"""
 
@@ -65,35 +100,13 @@ class TrackClassifier:
         ]
 
         # Chantier « Media » : émissions / freestyles / cyphers (Grünt, COLORS,
-        # Planète Rap, OKLM…). Détectés sur le TITRE OU l'ALBUM. Classés EXOTIC
-        # (pas de nouvelle valeur d'enum → zéro ripple sur les seuils / auto-select).
-        # Liste extensible.
-        self.show_indicators = [
-            "grünt",
-            "grunt",
-            "colors show",
-            "a colors show",
-            "planète rap",
-            "planete rap",
-            "oklm",
-            "rentre dans le cercle",
-            "red bull 64 bars",
-            "on the radar",
-            "from the block",
-            "cypher",
-            "freestyle",
-            "radio session",
-        ]
+        # Planète Rap, OKLM…). Classés EXOTIC (pas de nouvelle valeur d'enum →
+        # zéro ripple sur les seuils / auto-select).
+        self.show_indicators = list(SHOW_INDICATORS)
 
     def is_show_performance(self, title: str, album: str | None = None) -> bool:
-        """True si le morceau est une prestation d'émission/freestyle/cypher.
-
-        Cherche un `show_indicator` dans le titre OU l'album (chantier « Media »).
-        Helper public réutilisé par la vignette YouTube ET la classification de
-        la vidéo (`youtube_utils.classify_video_kind`).
-        """
-        haystack = f"{title or ''} {album or ''}".lower()
-        return any(indicator in haystack for indicator in self.show_indicators)
+        """Délègue à la fonction module-niveau (UN seul vocabulaire)."""
+        return is_show_performance(title, album)
 
     def classify_track(
         self, track_title: str, album: str = None, release_year: int = None, **context

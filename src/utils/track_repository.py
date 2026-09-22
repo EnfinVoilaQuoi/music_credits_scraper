@@ -1211,6 +1211,44 @@ class TrackRepository:
             logger.error(f"Erreur purger_credits_relations_deguisees: {e}")
             return 0
 
+    def reclasser_credits(self, roles: dict, suppressions=()) -> tuple[int, int]:
+        """Change le rôle de crédits existants et en retire d'autres.
+
+        Écrivain dédié, comme `purger_credits_relations_deguisees` : un script
+        n'écrit pas en direct dans `credits` (`tests/test_scripts_deleguent`).
+        C'est `scripts/reclass_credit_roles.py` qui DÉCIDE — en rejouant le
+        mapper de la source de chaque ligne — et lui seul ; ici on ne fait
+        qu'écrire, en UNE transaction : un reclassement à demi appliqué
+        laisserait la base dans un état que personne ne sait décrire.
+
+        `suppressions` sert les doublons intra-source (Genius nomme la même
+        personne sous « Writer » ET sous « Writers » resté en `Other`).
+
+        Rend (rôles changés, lignes retirées).
+        """
+        if not roles and not suppressions:
+            return 0, 0
+        try:
+            with self.engine.begin() as conn:
+                changes = 0
+                for credit_id, role in roles.items():
+                    res = conn.execute(
+                        text("UPDATE credits SET role = :role WHERE id = :id"),
+                        {"role": role, "id": int(credit_id)},
+                    )
+                    changes += int(res.rowcount or 0)
+                retires = 0
+                for credit_id in suppressions:
+                    res = conn.execute(
+                        text("DELETE FROM credits WHERE id = :id"), {"id": int(credit_id)}
+                    )
+                    retires += int(res.rowcount or 0)
+            logger.info(f"🔁 {changes} crédit(s) reclassé(s), {retires} doublon(s) retiré(s)")
+            return changes, retires
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur reclasser_credits: {e}")
+            return 0, 0
+
     def record_relationships(self, track_id: int, relationships: list) -> bool:
         """Écrit la colonne `relationships` VERBATIM, `[]` compris.
 

@@ -182,6 +182,37 @@ class TestCorrespondanceDesRoles:
         libellés ont été écartés SCIEMMENT."""
         assert client._map_discogs_role_to_enum(libelle) == CreditRole.OTHER
 
+    @pytest.mark.parametrize(
+        ("libelle", "attendu"),
+        [
+            ("Written-By", CreditRole.WRITER),
+            ("Written-By, Performer", CreditRole.WRITER),
+            ("Written-By [Gimme The Loot]", CreditRole.WRITER),
+            ("Co-Producer", CreditRole.CO_PRODUCER),
+        ],
+    )
+    def test_le_TIRET_de_Discogs_ne_fait_plus_perdre_un_role(self, client, libelle, attendu):
+        """Discogs panache « Written-By » et « Mixed By » dans le même
+        formulaire ; la table ne portait que la graphie à espace et le
+        rapprochement se fait par sous-chaîne. Mesuré le 2026-09-22 : **504
+        crédits d'écriture** rangés en `Other` pour un caractère — et autant de
+        morceaux déclarés sans auteur alors qu'ils en avaient un."""
+        assert client._map_discogs_role_to_enum(libelle) is attendu
+
+    @pytest.mark.parametrize(
+        ("libelle", "attendu"),
+        [
+            ("Art Direction", CreditRole.ART_DIRECTION),
+            ("Featuring", CreditRole.FEATURED),
+            ("Illustration", CreditRole.ILLUSTRATION),
+            ("A&R", CreditRole.A_AND_R),
+        ],
+    )
+    def test_les_libelles_que_seule_la_table_GENIUS_connaissait(self, client, libelle, attendu):
+        """Un crédit ne doit pas dépendre de la source qui l'a lu : ces quatre
+        libellés étaient traduits par `credit_roles.map_role` et ignorés ici."""
+        assert client._map_discogs_role_to_enum(libelle) is attendu
+
     def test_role_inconnu(self, client):
         """Rangé en OTHER — la donnée n'est pas perdue, mais elle disparaît des
         regroupements par rôle : c'est là qu'un rôle manquant se voit."""

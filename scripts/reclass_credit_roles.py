@@ -76,8 +76,8 @@ def _est_un_libelle(role_detail: str | None) -> bool:
     return bool(role_detail) and not _PISTES_RE.match(role_detail)
 
 
-def analyser(conn, source: str | None = None) -> tuple[list, list, list]:
-    """(reclassements, doublons, collisions) — sans rien écrire.
+def analyser(conn, source: str | None = None) -> tuple[list, list, list, list]:
+    """(reclassements, doublons, collisions, en_attente) — sans rien écrire.
 
     Un « reclassement » = (id, nom, libellé, rôle cible, source).
 
@@ -102,18 +102,30 @@ def analyser(conn, source: str | None = None) -> tuple[list, list, list]:
     for tid, name, role, src in cur.execute("SELECT track_id, name, role, source FROM credits"):
         deja[(tid, role)].add((identity_key(name), (src or "").lower()))
 
-    reclassements, doublons, collisions = [], [], []
-    requete = "SELECT id, track_id, name, role_detail, source FROM credits WHERE role = 'Other'"
+    reclassements, doublons, collisions, en_attente = [], [], [], []
+    requete = (
+        "SELECT id, track_id, name, role_detail, source, tracks FROM credits WHERE role = 'Other'"
+    )
     params: tuple = ()
     if source is not None:
         requete += " AND source = ?"
         params = (source,)
-    for cid, tid, name, role_detail, src in cur.execute(requete, params):
+    for cid, tid, name, role_detail, src, pistes in cur.execute(requete, params):
         if not _est_un_libelle(role_detail):
             continue
         cible = cible_de(src, role_detail)
         if cible == CreditRole.OTHER:
             continue  # libellé volontairement non mappé, ou inconnu
+        if (pistes or "").strip():
+            # Discogs a nommé des PISTES, et rien ne dit que celle-ci en fait
+            # partie : le crédit a été recopié sur tout le disque (défaut du
+            # 2026-09-22, 1 460 attributions en trop). Promouvoir la ligne d'un
+            # `Other` discret vers un rôle visible — un AUTEUR, qui plus est,
+            # compté par la validation — amplifierait l'erreur. La position
+            # Discogs du morceau n'étant stockée nulle part, seul un re-run
+            # Discogs peut trancher : on attend.
+            en_attente.append((cid, name, role_detail, cible.value, src))
+            continue
         sources_deja = {s for (n, s) in deja[(tid, cible.value)] if n == identity_key(name)}
         if (src or "").lower() in sources_deja:
             doublons.append((cid, name, role_detail, cible.value, src))
@@ -121,10 +133,10 @@ def analyser(conn, source: str | None = None) -> tuple[list, list, list]:
         reclassements.append((cid, name, role_detail, cible.value, src))
         if sources_deja:
             collisions.append((name, role_detail, cible.value))
-    return reclassements, doublons, collisions
+    return reclassements, doublons, collisions, en_attente
 
 
-def rapport(reclassements, doublons, collisions, conn):
+def rapport(reclassements, doublons, collisions, en_attente, conn):
     par_libelle = collections.Counter(
         (src, libelle, cible) for _, _, libelle, cible, src in reclassements
     )
@@ -141,6 +153,15 @@ def rapport(reclassements, doublons, collisions, conn):
         print(f"\nLaissés en Other ({sum(restants.values())} crédits) :\n")
         for (src, libelle), n in restants.most_common(40):
             print(f"   {n:4}  [{src}] {libelle!r}")
+
+    if en_attente:
+        par_libelle = collections.Counter(lib for _, _, lib, _, _ in en_attente)
+        print(f"\n⏸️  {len(en_attente)} crédit(s) EN ATTENTE — Discogs les rattache à des PISTES")
+        print("    précises et rien ne dit que ce morceau en fait partie : le crédit a été")
+        print("    recopié sur tout le disque. Les promouvoir amplifierait l'erreur.")
+        print("    Remède : re-run Discogs sur ces morceaux, puis relancer ce script.\n")
+        for libelle, n in par_libelle.most_common(10):
+            print(f"   {n:4}  {libelle!r}")
 
     if doublons:
         print(f"\n🗑️  {len(doublons)} ligne(s) SUPPRIMÉE(S) — la même source crédite déjà")
@@ -165,14 +186,17 @@ def rapport(reclassements, doublons, collisions, conn):
         )
 
 
-def appliquer(conn, reclassements, doublons=()) -> tuple[int, int]:
-    cur = conn.cursor()
-    for cid, _, _, cible, _ in reclassements:
-        cur.execute("UPDATE credits SET role = ? WHERE id = ?", (cible, cid))
-    for cid, _, _, _, _ in doublons:
-        cur.execute("DELETE FROM credits WHERE id = ?", (cid,))
-    conn.commit()
-    return len(reclassements), len(doublons)
+def appliquer(reclassements, doublons=()) -> tuple[int, int]:
+    """DÉLÈGUE l'écriture au repository (`tests/test_scripts_deleguent`).
+
+    Le script décide — c'est lui qui rejoue les mappers —, le repository écrit,
+    en une seule transaction.
+    """
+    from src.utils.data_manager import DataManager
+
+    roles = {cid: cible for cid, _, _, cible, _ in reclassements}
+    a_retirer = [cid for cid, _, _, _, _ in doublons]
+    return DataManager().reclasser_credits(roles, a_retirer)
 
 
 def revert(conn, source: str | None = None) -> int:
@@ -189,10 +213,10 @@ def revert(conn, source: str | None = None) -> int:
         for cid, rd, src in cur.execute(requete, params)
         if _est_un_libelle(rd) and cible_de(src, rd) != CreditRole.OTHER
     ]
-    for cid in ids:
-        cur.execute("UPDATE credits SET role = 'Other' WHERE id = ?", (cid,))
-    conn.commit()
-    return len(ids)
+    from src.utils.data_manager import DataManager
+
+    changes, _ = DataManager().reclasser_credits(dict.fromkeys(ids, "Other"))
+    return changes
 
 
 def main() -> int:
@@ -210,8 +234,8 @@ def main() -> int:
             print(f"↩️  {revert(conn, args.source)} crédit(s) repassés en Other.")
             return 0
 
-        reclassements, doublons, collisions = analyser(conn, args.source)
-        rapport(reclassements, doublons, collisions, conn)
+        reclassements, doublons, collisions, en_attente = analyser(conn, args.source)
+        rapport(reclassements, doublons, collisions, en_attente, conn)
 
         if not args.apply:
             print("\nℹ️  DRY-RUN : rien n'a été écrit. Relance avec --apply.")
@@ -225,7 +249,7 @@ def main() -> int:
             print("❌ Backup impossible — abandon (règle projet : jamais d'écriture sans backup).")
             return 1
         print(f"\n💾 Backup : {backup}")
-        n_recl, n_doub = appliquer(conn, reclassements, doublons)
+        n_recl, n_doub = appliquer(reclassements, doublons)
         print(f"✅ {n_recl} crédit(s) reclassés, {n_doub} doublon(s) supprimé(s).")
         return 0
     finally:

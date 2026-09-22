@@ -11,10 +11,21 @@ from discogs_client.exceptions import DiscogsAPIError, HTTPError
 from src.models import ArtistRelation, Credit, CreditRole, Track
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.discogs_positions import concerne_la_piste
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import normalize_name
 
 logger = get_logger(__name__)
+
+
+def _sans_tiret(libelle: str) -> str:
+    """Graphie commune aux libellés Discogs : minuscules, tirets en espaces.
+
+    Discogs panache « Written-By » et « Mixed By » dans le même formulaire ;
+    la table, elle, ne peut en porter qu'une graphie.
+    """
+    return (libelle or "").lower().strip().replace("-", " ").replace("_", " ")
+
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "discogs"
@@ -356,7 +367,15 @@ class DiscogsClient:
         Returns:
             CreditRole correspondant
         """
-        role_lower = role.lower().strip()
+        # Discogs écrit ses libellés au TIRET (« Written-By », « Co-Producer »)
+        # et la table en mélangeait les deux graphies. Le rapprochement se
+        # faisant par SOUS-CHAÎNE, « written by » ne reconnaissait pas
+        # « Written-By » : **504 crédits d'écriture** rangés en `Other` pour un
+        # caractère (mesuré 2026-09-22), et autant de morceaux déclarés sans
+        # auteur. Les deux côtés sont donc ramenés à la même graphie — la
+        # longueur ne change pas, le tri du plus spécifique au plus général
+        # reste intact.
+        role_lower = _sans_tiret(role)
 
         # Mapping des rôles Discogs vers CreditRole
         role_mapping = {
@@ -415,6 +434,13 @@ class DiscogsClient:
             # retravaillé le morceau, lexicalement non ambigu.
             "remix": CreditRole.REMIXER,
             "remixed by": CreditRole.REMIXER,
+            # 2026-09-22 : libellés que la table GENIUS connaissait déjà et que
+            # celle-ci ignorait — un crédit ne doit pas dépendre de la source
+            # qui l'a lu. Lexicalement non ambigus, chacun a sa valeur d'enum.
+            "art direction": CreditRole.ART_DIRECTION,
+            "featuring": CreditRole.FEATURED,
+            "illustration": CreditRole.ILLUSTRATION,
+            "a&r": CreditRole.A_AND_R,
         }
 
         # NON mappés DÉLIBÉRÉMENT (décision 2026-09-03) — ne pas « compléter »
@@ -437,7 +463,7 @@ class DiscogsClient:
         # Le tri par longueur décroissante est stable : à longueur égale l'ordre
         # d'insertion (donc le comportement historique) est conservé.
         for discogs_role in sorted(role_mapping, key=len, reverse=True):
-            if discogs_role in role_lower:
+            if _sans_tiret(discogs_role) in role_lower:
                 return role_mapping[discogs_role]
 
         # Pas de correspondance → OTHER
@@ -600,8 +626,20 @@ class DiscogsClient:
                 # concordantes).
                 track.credits = [c for c in track.credits if c.source != "discogs"]
 
+                # Discogs crédite au niveau du DISQUE et dit à quelles PISTES
+                # chaque crédit se rapporte (`tracks`). Ce champ était stocké et
+                # jamais lu : « Mr Hudson — tracks: C2 » atterrissait sur les 14
+                # morceaux de *808s & Heartbreak*, et les 16 auteurs de *Man on
+                # the Moon II* sur ses 15 titres — 1 460 attributions en trop
+                # mesurées le 2026-09-22. Un champ vide vaut toujours pour tout
+                # le disque (producteur exécutif, label, graphiste).
+                position = track_data.get("position")
                 credits_added = 0
+                ignores = 0
                 for credit_dict in track_data["credits"]:
+                    if not concerne_la_piste(credit_dict.get("tracks"), position):
+                        ignores += 1
+                        continue
                     try:
                         role_enum = self._map_discogs_role_to_enum(credit_dict["role"])
 
@@ -634,6 +672,11 @@ class DiscogsClient:
                         logger.debug(f"Erreur ajout crédit: {e}")
                         continue
 
+                if ignores:
+                    logger.debug(
+                        f"Discogs : {ignores} crédit(s) de disque écarté(s) pour "
+                        f"'{track.title}' (position {position!r} hors de leurs pistes)"
+                    )
                 if credits_added > 0:
                     logger.info(f"✅ {credits_added} crédit(s) Discogs ajouté(s) à '{track.title}'")
                     updated = True

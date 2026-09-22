@@ -611,6 +611,11 @@ class Track:
     durations_observees: dict = field(default_factory=dict, repr=False)
     genre: str | None = None
     track_number: int | None = None
+    #: « Genius référence un morceau pas encore sorti » (colonne `unreleased`,
+    #: e34). TRI-ÉTAT : None = jamais constaté, True = inédit, False = sorti
+    #: (une trace de plateforme le prouve). L'absence de marqueur ne vaut PAS
+    #: « sorti » — Genius ne marque pas tout. Règles dans `src/utils/inedits`.
+    unreleased: bool | None = None
     audio_features: dict[str, Any] | None = field(default_factory=dict)
 
     # Support des features

@@ -57,6 +57,9 @@ COLONNES_PARTAGEES = (
     "lyrics_source",
     "has_lyrics",
     "instrumental",
+    # e34 : « pas encore sorti » décrit l'ENREGISTREMENT, pas le contexte d'un
+    # artiste — les deux lignes d'un même inédit le sont toutes les deux.
+    "unreleased",
     "lyrics_synced",
     "lyrics_synced_source",
     "lyrics_synced_confidence",

@@ -134,6 +134,10 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.lyrics.explicit = None if _explicite is None else bool(_explicite)
     _instru = _clean_int(row["instrumental"])
     track.lyrics.instrumental = None if _instru is None else bool(_instru)
+    # e34 : même tri-état, même coercition — `None` est une VALEUR (jamais
+    # constaté), pas une absence à remplacer par False.
+    _inedit = _clean_int(row["unreleased"])
+    track.unreleased = None if _inedit is None else bool(_inedit)
     # E7-D2 : colonnes AUDIO droppées (bpm, bpm_alt, bpm_source, bpm_confidence,
     # key, mode, key_mode_source, musical_key, time_signature, reccobeats_resolution).
     # Attributs posés à None ici (garantit leur existence) PUIS pilotés par la

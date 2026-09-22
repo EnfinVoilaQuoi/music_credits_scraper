@@ -18,6 +18,7 @@ from src.config import (
 from src.enrichment.observation import Observation
 from src.models import Artist, ReleaseObservation, Track
 from src.observability import source_usage
+from src.utils.inedits import porte_le_marqueur, titre_sans_marqueur
 from src.utils.logger import get_logger, log_api
 from src.utils.spotify_identity import valider_identite
 
@@ -436,8 +437,18 @@ class GeniusAPI:
                                     f"— {artist.name} = {role}"
                                 )
 
+                    # e34 : l'astérisque finale du titre Genius marque un
+                    # INÉDIT. Le constat est posé ICI, et le titre stocké en est
+                    # débarrassé — au POINT D'ENTRÉE, donc les runs suivants
+                    # rapprochent « Voldemort* » de notre « Voldemort » au lieu
+                    # d'en créer un doublon (`save_track` apparie par
+                    # (titre, artiste)). Un marqueur qu'on retire sans rien
+                    # constater serait une information perdue ; un marqueur
+                    # qu'on garde dans le titre en fabrique un doublon à chaque
+                    # run. Il faut les deux gestes, au même endroit.
+                    titre_brut = song.get("title", "")
                     track = Track(
-                        title=song.get("title", ""),
+                        title=titre_sans_marqueur(titre_brut),
                         artist=artist,
                         genius_id=song.get("id"),
                         genius_url=song.get("url"),
@@ -446,6 +457,8 @@ class GeniusAPI:
                         is_featuring=is_feat,
                     )
                     track.secondary_role = secondary_role
+                    if porte_le_marqueur(titre_brut):
+                        track.unreleased = True
                     if track.release_date is not None:
                         # Genius est EN TÊTE de l'ordre `release_date`, et
                         # n'avait jamais écrit une observation : 2 016 `legacy`

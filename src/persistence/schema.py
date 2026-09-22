@@ -158,6 +158,12 @@ tracks = Table(
     # 0 = des paroles ont été trouvées. Sans ce constat, un interlude sans
     # paroles était un échec de scrape re-tenté à chaque run.
     Column("instrumental", _BOOL),
+    # Migration e34 : « Genius référence un morceau pas encore sorti » (leak,
+    # snippet, titre annoncé — la communauté le marque d'une astérisque finale).
+    # NULLABLE au même titre que `instrumental` : NULL = jamais constaté,
+    # 1 = inédit, 0 = sorti (une trace de plateforme le prouve). Sans lui, un
+    # inédit porte un ⚠️ qu'aucun run ne pourra jamais lever.
+    Column("unreleased", _BOOL),
     UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )

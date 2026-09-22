@@ -20,6 +20,7 @@ from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackV
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.dates import completer, la_plus_ancienne, meme_jour
+from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_title
 from src.utils.track_mapper import _clean_duration, track_from_row
@@ -210,6 +211,12 @@ class TrackRepository:
                 # e27 : tri-état, COALESCE — un flux qui ne scrape pas les
                 # paroles envoie None et ne doit pas effacer le constat.
                 "instrumental": track.lyrics.instrumental,
+                # e34 : même tri-état, même COALESCE — un flux qui ignore la
+                # question envoie None et n'efface pas le constat. `0` n'est
+                # écrit que pour LEVER un inédit dont une trace de plateforme
+                # prouve la sortie (`constat_a_ecrire`) : Genius retire son
+                # astérisque sans nous prévenir.
+                "unreleased": constat_a_ecrire(track),
                 "anecdotes": track.anecdotes,
                 "spotify_page_title": getattr(track, "spotify_page_title", None),
                 # Chantier « Media » : chemins d'images (kind/vues vidéo passent par
@@ -292,6 +299,7 @@ class TrackRepository:
                         lyrics_synced_confidence = COALESCE(:lyrics_synced_confidence, lyrics_synced_confidence),
                         has_lyrics = CASE WHEN :lyrics IS NOT NULL THEN 1 ELSE has_lyrics END,
                         instrumental = COALESCE(:instrumental, instrumental),
+                        unreleased = COALESCE(:unreleased, unreleased),
                         anecdotes = COALESCE(:anecdotes, anecdotes),
                         -- Absente de cet UPDATE jusqu'au 2026-09-08, alors
                         -- qu'à l'enrichissement la ligne existe DÉJÀ : le
@@ -322,7 +330,7 @@ class TrackRepository:
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
                         lyrics, lyrics_scraped_at, lyrics_source, lyrics_synced, lyrics_synced_source, lyrics_synced_confidence, has_lyrics, anecdotes,
-                        instrumental,
+                        instrumental, unreleased,
                         spotify_page_title,
                         cover_path, yt_thumbnail_path,
                         created_at, updated_at, last_scraped
@@ -334,7 +342,7 @@ class TrackRepository:
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,
                         :lyrics, :lyrics_scraped_at, :lyrics_source, :lyrics_synced, :lyrics_synced_source, :lyrics_synced_confidence, :has_lyrics, :anecdotes,
-                        :instrumental,
+                        :instrumental, :unreleased,
                         :spotify_page_title,
                         :cover_path, :yt_thumbnail_path,
                         :now, :now, :last_scraped
@@ -1090,6 +1098,18 @@ class TrackRepository:
                 valeurs = self._arbitrer_streams(conn, keep_id)
                 if valeurs:
                     conn.execute(update(tracks).where(tracks.c.id == keep_id).values(**valeurs))
+                # e34 : le constat d'inédit se fusionne par le PLUS INFORMÉ.
+                # `MIN` ignore les NULL, donc 0 (sorti, prouvé par une trace de
+                # plateforme) l'emporte sur 1, qui l'emporte sur « jamais
+                # constaté ». Une sortie constatée d'un côté vaut pour les deux
+                # lignes : c'est le même enregistrement.
+                conn.execute(
+                    text(
+                        "UPDATE tracks SET unreleased = (SELECT MIN(unreleased) FROM tracks "
+                        "WHERE id IN (:keep_id, :delete_id)) WHERE id = :keep_id"
+                    ),
+                    {"keep_id": keep_id, "delete_id": delete_id},
+                )
                 conn.execute(
                     text("DELETE FROM tracks WHERE id = :delete_id"), {"delete_id": delete_id}
                 )
@@ -2820,6 +2840,47 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")
             return False
+
+    def record_unreleased(self, track_id: int, valeur: bool | None) -> bool:
+        """Écrivain DÉDIÉ du constat d'inédit (e34).
+
+        `save_track` l'écrit aussi, mais en `COALESCE` : il ne peut donc ni
+        poser `0` sur une ligne à `1`, ni revenir à « jamais constaté ». Ce
+        writer-là écrit VERBATIM, `None` compris — c'est ce qui rend le constat
+        rétractable (`force_paroles` a le même besoin pour `instrumental`).
+        """
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE tracks SET unreleased = :v, updated_at = :now WHERE id = :id"),
+                    {"v": valeur, "now": datetime.now(), "id": track_id},
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_unreleased (track_id={track_id}): {e}")
+            return False
+
+    def titre_deja_pris(self, artist_id: int, titre: str, sauf_id: int | None = None) -> int | None:
+        """L'id du morceau de CET artiste qui porte déjà ce titre, ou None.
+
+        `UNIQUE(title, artist_id)` le refuserait de toute façon — mais un
+        renommage qui échoue en silence laisse un marqueur dans le titre ET un
+        constat posé, c'est-à-dire un état que personne n'a voulu. On regarde
+        AVANT, et on le DIT.
+        """
+        try:
+            with self.engine.connect() as conn:
+                ligne = conn.execute(
+                    text(
+                        "SELECT id FROM tracks WHERE artist_id = :aid AND title = :t "
+                        "AND (:sauf IS NULL OR id != :sauf) LIMIT 1"
+                    ),
+                    {"aid": artist_id, "t": clean_stored_title(titre), "sauf": sauf_id},
+                ).scalar()
+            return int(ligne) if ligne is not None else None
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur titre_deja_pris({titre!r}): {e}")
+            return None
 
     def rename_track(self, track_id: int, new_title: str) -> bool:
         """Renomme un morceau en base (ex. « Matrix (Intro) » → « Matrix » pour

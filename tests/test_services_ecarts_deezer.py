@@ -133,13 +133,13 @@ class TestClasser:
         ecarts, jumelles = ed.classer(albums, base, [], NOUS)
         # Un disque INCONNU dont on connaît toutes les pistes : jumelle ET liens.
         assert [e.nature for e in ecarts] == ["link", "link"] and jumelles == ["EP sans nom"]
-        # Déjà rattachées : plus rien à dire, le disque reste une jumelle.
-        assert ed.classer(
-            albums, base, [], NOUS, liens_connus={(6, base[0].id), (6, base[1].id)}
-        ) == (
-            [],
-            ["EP sans nom"],
-        )
+        # Deja rattachees ET renseignees : plus rien a dire, le disque reste
+        # une jumelle. (Un lien connu dont la fiche est VIDE est REPROPOSE.)
+        for t, pid in zip(base, (60, 61), strict=True):
+            t.deezer_id = pid
+            t.durations_observees = {"deezer": 200}
+        liens = {(6, base[0].id), (6, base[1].id)}
+        assert ed.classer(albums, base, [], NOUS, liens_connus=liens) == ([], ["EP sans nom"])
 
     def test_titre_generique_sans_duree_reste_a_confirmer(self):
         base = [_track("Intro", "Album A"), _track("Outro", "Album A")]

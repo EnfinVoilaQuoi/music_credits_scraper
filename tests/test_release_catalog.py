@@ -371,7 +371,14 @@ class TestLienARevoir:
         artist = Artist(name="Isha", deezer_id=1)
         track = Track(title="Durag", artist=artist)
         track.id, track.duration, track.duration_source = 7, duree_fiche, source
-        track.durations_observees = observees or {}
+        # Lien déjà COMPLET (la fiche a reçu ce que la piste portait) : sans ça
+        # il serait reproposé pour être complété, pas pour être revu.
+        track.deezer_id = 10
+        if observees is None:
+            observees = {"deezer": duree_piste}
+            if source and source != "deezer" and duree_fiche:
+                observees[source] = duree_fiche
+        track.durations_observees = observees
         album = _album(1, "A", [_piste(10, "Durag", duration=duree_piste)], artist)
         return ed.classer([album], [track], [], 1, liens_connus={(1, 7)})[0]
 
@@ -452,3 +459,39 @@ def test_delier_laisse_l_album_repere(data_manager):
     assert "album repère" in comptes[0]
     assert [r["title"] for r in data_manager.get_track_releases(track.id)] == ["Album"]
     assert _colonnes(data_manager, track.id)["deezer_id"] == 78
+
+
+def test_un_lien_connu_qui_n_a_rien_donne_est_repropose(data_manager):
+    """Les 314 liens écrits AVANT que le lien renseigne la fiche (2026-09-22) :
+    `liens_connus` les aurait sautés pour toujours. Reproposé tant qu'il reste
+    quelque chose à donner, muet ensuite."""
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist, album="Album")
+    album = _album(
+        86, "Album", [_piste(91, track.title, duration=203, isrc="FRDDD0000004")], artist
+    )
+    # Lien écrit « à l'ancienne » : la parution seule, la fiche intacte.
+    from src.models import ReleaseObservation
+
+    data_manager.record_release_observations(
+        track.id,
+        [
+            ReleaseObservation(
+                title="Album",
+                source="deezer",
+                external_release_id=86,
+                external_track_id=91,
+                confidence="title",
+            )
+        ],
+    )
+    liens = data_manager.get_deezer_release_links(artist.id)
+    ecarts, _ = ed.classer([album], [track], [], artist.deezer_id, liens_connus=liens)
+    assert [(e.nature, e.coche) for e in ecarts] == [("link", True)]
+    assert "fiche à compléter (id Deezer, ISRC, durée)" in ecarts[0].motifs[0]
+
+    ed.rattacher_liens_confirmes(data_manager, artist, ed.BilanEcarts(ecarts=ecarts))
+    relue = next(t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id)
+    assert (relue.deezer_id, relue.isrc, relue.duration) == (91, "FRDDD0000004", 203)
+    # Plus rien à donner : le run suivant est muet.
+    assert ed.classer([album], [relue], [], artist.deezer_id, liens_connus=liens)[0] == []

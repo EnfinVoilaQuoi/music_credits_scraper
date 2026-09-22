@@ -397,6 +397,26 @@ def classer(
                                 motifs=[revue],
                             )
                         )
+                        continue
+                    reste = _reste_a_renseigner(p, existing)
+                    if not reste:
+                        continue
+                    # Le lien existe déjà, mais la fiche n'a pas reçu ce que la
+                    # piste porte — les 314 liens écrits AVANT que le lien
+                    # renseigne la fiche (2026-09-22). Repassé en 🔗 tant qu'il
+                    # reste quelque chose à donner, muet ensuite : sans cette
+                    # règle, `liens_connus` les aurait sautés pour toujours.
+                    ecarts.append(
+                        Ecart(
+                            nature="link",
+                            album=album,
+                            piste=p,
+                            existing_track=existing,
+                            matched_by=match_by,
+                            coche=True,
+                            motifs=[f"parution déjà connue — fiche à compléter ({reste})"],
+                        )
+                    )
                     continue
                 nature = "link" if match_by in PREUVES_SURES else "link_candidate"
                 ecarts.append(
@@ -472,6 +492,20 @@ def _lien_a_revoir(piste: PisteDeezer, track: Track) -> str | None:
                 f"({source}) — cocher pour délier"
             )
     return None
+
+
+def _reste_a_renseigner(piste: PisteDeezer, track: Track) -> str:
+    """Ce que cette piste peut encore apporter à la fiche (« id Deezer, durée »),
+    ou "" si elle n'a plus rien à donner. Prédicat PUR, lu sur l'objet : la
+    durée `deezer` vit dans `durations_observees` (posé par le mapper)."""
+    manques = []
+    if piste.id and track.deezer_id is None:
+        manques.append("id Deezer")
+    if piste.isrc and not track.isrc:
+        manques.append("ISRC")
+    if piste.duration and not (track.durations_observees or {}).get("deezer"):
+        manques.append("durée")
+    return ", ".join(manques)
 
 
 def _degrader_liens_divergents(ecarts: list[Ecart]) -> None:

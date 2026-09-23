@@ -16,6 +16,8 @@ import pytest
 
 import src.api.musixmatch_api as mod
 from src.api.musixmatch_api import MusixmatchAPI
+from src.observability import source_usage
+from src.observability.issues import IssueKind
 
 
 @pytest.fixture
@@ -309,7 +311,10 @@ class TestTokenFactice:
         monkeypatch.setattr(client, "_api_get_async", faux_get)
 
         assert asyncio.run(client._fetch_new_token_async(None)) is None
-        assert not client.token_file.exists()
+        # Le fichier existe (il porte les horloges : plancher, repos) mais sans jeton.
+        assert not client._lire_etat().get("token")
+        client._token = None
+        assert client._load_cached_token() is None
 
     def test_un_leurre_deja_en_cache_est_ignore(self, client):
         """Cache écrit par une version antérieure du garde-fou : il doit être
@@ -395,10 +400,12 @@ class TestFenetreDeRepos:
         assert asyncio.run(client._fetch_new_token_async(None)) is None
         assert client._au_repos() is True
 
-    def test_la_fenetre_expire_toute_seule(self, client):
+    def test_la_fenetre_expire_toute_seule(self, client, monkeypatch):
         """La source doit pouvoir revenir DANS le même run."""
         client._mettre_au_repos("test")
-        client._repos_jusqua = time.time() - 1
+        assert client._au_repos() is True
+        plus_tard = time.time() + mod.MUSIXMATCH_TOKEN_COOLDOWN_S + 1
+        monkeypatch.setattr(mod.time, "time", lambda: plus_tard)
         assert client._au_repos() is False
         assert client._repos_jusqua == 0.0
 
@@ -428,3 +435,298 @@ class TestFenetreDeRepos:
 
         assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
         assert appels == []
+
+
+# ── 2026-09-23 : client iOS, horloges persistées, leurre, absences ────────────
+#
+# Mesuré ce jour-là : le client desktop ne rend plus que le jeton leurre sur
+# notre IP, le client iOS rend de vraies paroles ; un second `token.get` dans la
+# minute vaut un 401 `captcha` ; et l'endpoint, interrogé avec le jeton d'un
+# autre client, sert un faux morceau (« NOKIA » de Drake, id 226291677) à
+# CHAQUE requête — rejeté par le contrôle de titre, il ressortait en `absent`.
+
+
+@pytest.fixture
+def capteur():
+    source_usage.reset()
+    yield lambda: [(v.issue, v.detail) for v in source_usage.flush()]
+    source_usage.reset()
+
+
+def _enveloppe_macro(track, lrc="[00:10.00] alpha", statut=200):
+    return {
+        "message": {
+            "header": {"status_code": statut},
+            "body": {
+                "macro_calls": {
+                    "matcher.track.get": _appel({"track": track}),
+                    "track.subtitles.get": _appel(
+                        {"subtitle_list": [{"subtitle": {"subtitle_body": lrc}}]}
+                    ),
+                }
+            },
+        }
+    }
+
+
+_LEURRE = {"track_id": 226291677, "track_name": "NOKIA", "artist_name": "Drake"}
+
+
+def _avec_jeton(client, age_s=0.0, app_id=None):
+    """Jeton valide en cache (obtenu il y a `age_s` s)."""
+    t = time.time() - age_s
+    client._ecrire_etat(
+        token="vrai-jeton",
+        obtained_at=t,
+        app_id=app_id or mod._APP_ID,
+        last_token_get=t,
+    )
+
+
+def _faux_get(reponses, appels):
+    async def faux_get(http, action, params):
+        appels.append(action)
+        return reponses[action]() if callable(reponses[action]) else reponses[action]
+
+    return faux_get
+
+
+class TestClientIOS:
+    def test_le_client_emis_est_celui_des_reglages(self):
+        assert mod._APP_ID == "mac-ios-v2.0"
+        assert mod._API_BASE == "https://apic.musixmatch.com/ws/1.1"
+
+    def test_un_jeton_d_un_autre_client_est_ignore(self, client):
+        """C'est le croisement jeton/client qui fait servir le leurre."""
+        _avec_jeton(client, app_id="web-desktop-app-v1.0")
+        assert client._load_cached_token() is None
+
+    def test_un_vieux_cache_sans_client_est_ignore(self, client):
+        client.token_file.write_text(
+            json.dumps({"token": "vrai-jeton", "obtained_at": time.time()}), encoding="utf-8"
+        )
+        assert client._load_cached_token() is None
+
+    def test_le_jeton_obtenu_porte_son_client(self, client, monkeypatch):
+        monkeypatch.setattr(
+            client,
+            "_api_get_async",
+            _faux_get({"token.get": (200, {"message": {"body": {"user_token": "abc123"}}})}, []),
+        )
+        assert asyncio.run(client._fetch_new_token_async(None)) == "abc123"
+        assert client._lire_etat()["app_id"] == mod._APP_ID
+
+
+class TestPlancherTokenGet:
+    def test_un_second_token_get_est_differe(self, client, monkeypatch):
+        appels = []
+        monkeypatch.setattr(
+            client,
+            "_api_get_async",
+            _faux_get(
+                {"token.get": (200, {"message": {"body": {"user_token": "abc123"}}})}, appels
+            ),
+        )
+        assert asyncio.run(client._fetch_new_token_async(None)) == "abc123"
+        client._invalidate_token()
+        assert asyncio.run(client._fetch_new_token_async(None)) is None
+        assert appels == ["token.get"]  # le second n'a pas touché le réseau
+
+    def test_le_plancher_vaut_pour_une_nouvelle_instance(self, client, tmp_path, monkeypatch):
+        """L'horloge est dans le fichier : une relance de la CLI la respecte."""
+        client._ecrire_etat(last_token_get=time.time())
+        autre = MusixmatchAPI(token_file=client.token_file)
+        assert autre._token_get_autorise() is False
+
+    def test_l_horloge_est_posee_avant_l_appel(self, client, monkeypatch):
+        """La TENTATIVE consomme le budget, même si elle échoue côté transport."""
+        monkeypatch.setattr(client, "_api_get_async", _faux_get({"token.get": (None, None)}, []))
+        assert asyncio.run(client._fetch_new_token_async(None)) is None
+        assert client._token_get_autorise() is False
+
+    def test_sans_jeton_sous_le_plancher_l_appel_est_saute(self, client, monkeypatch, capteur):
+        appels = []
+        monkeypatch.setattr(client, "_api_get_async", _faux_get({}, appels))
+        client._ecrire_etat(last_token_get=time.time())
+
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        assert appels == []
+        assert capteur()[0][0] == IssueKind.SKIPPED
+
+    def test_invalider_le_jeton_garde_les_horloges(self, client):
+        _avec_jeton(client)
+        client._invalidate_token()
+        etat = client._lire_etat()
+        assert not etat.get("token") and etat["last_token_get"]
+
+
+class TestReposPersiste:
+    def test_une_nouvelle_instance_voit_la_fenetre(self, client):
+        client._mettre_au_repos("test")
+        assert MusixmatchAPI(token_file=client.token_file)._au_repos() is True
+
+
+class TestContenuLeurre:
+    def test_le_leurre_connu_est_un_blocage_et_non_une_absence(self, client, monkeypatch, capteur):
+        _avec_jeton(client)
+        monkeypatch.setattr(
+            client,
+            "_api_get_async",
+            _faux_get({"macro.subtitles.get": (200, _enveloppe_macro(_LEURRE))}, []),
+        )
+
+        assert asyncio.run(client.get_synced_async(None, "DKR", "Booba")) is None
+        assert capteur()[0][0] == IssueKind.BLOCKED
+        assert client._au_repos() is True
+        assert client._token is None  # jeton invalidé
+
+    def test_meme_quand_la_requete_ressemble_au_leurre(self, client, monkeypatch, capteur):
+        """« Drake – NOKIA » passerait le contrôle de titre : c'est l'identité
+        qui reconnaît le leurre, pas le match."""
+        _avec_jeton(client)
+        monkeypatch.setattr(
+            client,
+            "_api_get_async",
+            _faux_get({"macro.subtitles.get": (200, _enveloppe_macro(_LEURRE))}, []),
+        )
+        assert asyncio.run(client.get_synced_async(None, "NOKIA", "Drake")) is None
+        assert capteur()[0][0] == IssueKind.BLOCKED
+
+    def test_un_meme_morceau_pour_deux_titres_sans_rapport(self, client):
+        """Si Musixmatch changeait de leurre : même id pour deux requêtes étrangères."""
+        faux = {"track_id": 7, "track_name": "Zorglub", "artist_name": "Inconnu"}
+        assert client._est_leurre(faux, "Coupe pleine", "Josman") is False
+        assert client._est_leurre(faux, "Petit frère", "IAM") is True
+
+    def test_deux_graphies_d_un_meme_titre_ne_sont_pas_un_leurre(self, client):
+        vrai = {"track_id": 8, "track_name": "Heartless", "artist_name": "Kanye West"}
+        assert client._est_leurre(vrai, "Heartless", "Kanye West") is False
+        assert client._est_leurre(vrai, "Heartless (Radio Edit)", "Kanye West") is False
+
+    def test_un_faux_match_ordinaire_reste_une_absence(self, client, monkeypatch, capteur):
+        """La règle du leurre n'avale pas le match approximatif normal."""
+        _avec_jeton(client)
+        autre = {"track_id": 9, "track_name": "Autre chose", "artist_name": "Quelqu'un"}
+        monkeypatch.setattr(
+            client,
+            "_api_get_async",
+            _faux_get({"macro.subtitles.get": (200, _enveloppe_macro(autre))}, []),
+        )
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        assert capteur()[0][0] == IssueKind.ABSENT
+        assert client._au_repos() is False
+
+
+class TestNatureDesRefus:
+    def test_un_captcha_sur_token_get_est_un_blocage(self, client, monkeypatch, capteur):
+        captcha = {"message": {"header": {"status_code": 401, "hint": "captcha"}}}
+        monkeypatch.setattr(client, "_api_get_async", _faux_get({"token.get": (200, captcha)}, []))
+
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        assert capteur()[0][0] == IssueKind.BLOCKED
+        assert client._au_repos() is True
+
+    def test_un_401_sans_captcha_reste_de_l_auth(self, client, monkeypatch, capteur):
+        refus = {"message": {"header": {"status_code": 401}}}
+        monkeypatch.setattr(client, "_api_get_async", _faux_get({"token.get": (200, refus)}, []))
+        asyncio.run(client.get_synced_async(None, "Titre", "Artiste"))
+        assert capteur()[0][0] == IssueKind.AUTH
+
+    def test_token_get_injoignable_n_accuse_pas_l_auth(self, client, monkeypatch, capteur):
+        """Un transport en échec n'est ni un refus ni une absence : on ne conclut pas."""
+        monkeypatch.setattr(client, "_api_get_async", _faux_get({"token.get": (None, None)}, []))
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        assert capteur()[0][0] == IssueKind.INDETERMINATE
+
+    def test_macro_injoignable_n_est_pas_une_absence(self, client, monkeypatch, capteur):
+        _avec_jeton(client)
+        monkeypatch.setattr(
+            client, "_api_get_async", _faux_get({"macro.subtitles.get": (None, None)}, [])
+        )
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        assert capteur()[0][0] == IssueKind.INDETERMINATE
+        assert client._absence_recente("Titre", "Artiste") is False
+
+    def test_macro_sans_sous_appels_est_un_parse(self, client, monkeypatch, capteur):
+        _avec_jeton(client)
+        vide = {"message": {"header": {"status_code": 200}, "body": {}}}
+        monkeypatch.setattr(
+            client, "_api_get_async", _faux_get({"macro.subtitles.get": (200, vide)}, [])
+        )
+        asyncio.run(client.get_synced_async(None, "Titre", "Artiste"))
+        assert capteur()[0][0] == IssueKind.PARSE
+
+
+class TestMemoireDesAbsences:
+    def _absent(self, client, monkeypatch, appels):
+        _avec_jeton(client)
+        rien = {
+            "message": {
+                "header": {"status_code": 200},
+                "body": {"macro_calls": {"matcher.track.get": _appel({}, statut=404)}},
+            }
+        }
+        monkeypatch.setattr(
+            client, "_api_get_async", _faux_get({"macro.subtitles.get": (200, rien)}, appels)
+        )
+
+    def test_une_absence_n_est_pas_redemandee(self, client, monkeypatch, capteur):
+        appels = []
+        self._absent(client, monkeypatch, appels)
+        asyncio.run(client.get_synced_async(None, "Titre", "Artiste"))
+        asyncio.run(client.get_synced_async(None, "Titre", "Artiste"))
+
+        assert appels == ["macro.subtitles.get"]
+        assert [v[0] for v in capteur()] == [IssueKind.ABSENT, IssueKind.SKIPPED]
+
+    def test_la_memoire_survit_a_l_instance(self, client, monkeypatch):
+        self._absent(client, monkeypatch, [])
+        asyncio.run(client.get_synced_async(None, "Titre", "Artiste"))
+        assert MusixmatchAPI(token_file=client.token_file)._absence_recente("Titre", "Artiste")
+
+    def test_texte_sans_synchro_est_aussi_memorise(self, client, monkeypatch):
+        _avec_jeton(client)
+        env = {
+            "message": {
+                "header": {"status_code": 200},
+                "body": {
+                    "macro_calls": {
+                        "matcher.track.get": _appel(
+                            {"track": {"track_name": "Titre", "artist_name": "Artiste"}}
+                        ),
+                        "track.lyrics.get": _appel({"lyrics": {"lyrics_body": "du texte"}}),
+                    }
+                },
+            }
+        }
+        monkeypatch.setattr(
+            client, "_api_get_async", _faux_get({"macro.subtitles.get": (200, env)}, [])
+        )
+        assert asyncio.run(client.get_synced_as_source3_async(None, "Titre", "Artiste")) is None
+        assert client._absence_recente("Titre", "Artiste") is True
+
+    def test_l_absence_perime(self, client, monkeypatch):
+        client._noter_absence("Titre", "Artiste")
+        plus_tard = time.time() + mod.MUSIXMATCH_ABSENT_RETRY_DAYS * 86_400 + 1
+        monkeypatch.setattr(mod.time, "time", lambda: plus_tard)
+        assert client._absence_recente("Titre", "Artiste") is False
+
+    def test_un_horodatage_illisible_vaut_perime(self, client):
+        client.absents_file.write_text(
+            json.dumps({mod._cle_absence("Titre", "Artiste"): "hier"}), encoding="utf-8"
+        )
+        assert client._absence_recente("Titre", "Artiste") is False
+
+    def test_un_refus_n_est_pas_memorise_comme_absence(self, client, monkeypatch):
+        _avec_jeton(client)
+        monkeypatch.setattr(
+            client,
+            "_api_get_async",
+            _faux_get({"macro.subtitles.get": (200, _enveloppe_macro(_LEURRE))}, []),
+        )
+        asyncio.run(client.get_synced_async(None, "DKR", "Booba"))
+        assert client._absence_recente("DKR", "Booba") is False
+
+    def test_la_memoire_vit_a_cote_du_jeton(self, client):
+        """Aucun test ne doit écrire dans le vrai `data/`."""
+        assert client.absents_file.parent == client.token_file.parent

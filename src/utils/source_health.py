@@ -423,6 +423,45 @@ def _probe_discogs() -> list[str]:
     return []
 
 
+def _probe_musixmatch() -> list[str]:
+    """Le client configuré obtient-il un VRAI jeton ?
+
+    L'ancienne sonde tapait `token.get` du client desktop et voyait un 200 —
+    alors que ce 200 portait le jeton leurre (56 zéros) : verte sur une source
+    qui ne rendait rien. Celle-ci passe par le client du pipeline, et ne
+    brûle pas le budget de `token.get` (bridé à la FRÉQUENCE) : un jeton en
+    cache encore valide suffit à conclure, un plancher ou une fenêtre de repos
+    en cours la font renoncer plutôt qu'insister.
+    """
+    from src.api import musixmatch_api as mxm
+
+    client = mxm.MusixmatchAPI()
+    if client._load_cached_token():
+        return []
+    if client._au_repos():
+        raise ProbeSkipped("au repos après un jeton refusé — voir l'usage réel")
+    if not client._token_get_autorise():
+        raise ProbeSkipped("token.get différé (plancher entre deux demandes)")
+    client._ecrire_etat(last_token_get=time.time())
+    resp = requests.get(
+        f"{mxm._API_BASE}/token.get",
+        params={"app_id": mxm._APP_ID, "user_language": "en", "format": "json"},
+        headers=mxm._ASYNC_HEADERS,
+        timeout=_FAST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    message = (resp.json() or {}).get("message") or {}
+    header = message.get("header") or {}
+    if header.get("status_code") == 401:
+        # IP bridée : la source n'est pas cassée, on ne peut juste pas la sonder.
+        raise ProbeSkipped(f"token.get refusé ({header.get('hint') or 401}) — IP bridée")
+    token = (message.get("body") or {}).get("user_token") or ""
+    if mxm._is_degenerate_token(token):
+        return [f"jeton leurre servi au client {mxm._APP_ID} ({token[:8]!r}…)"]
+    client._save_token(token)  # le run suivant n'aura pas à en redemander
+    return []
+
+
 # ── Déclaration des sources ────────────────────────────────────────────────────
 SOURCES: list[SourceSpec] = [
     SourceSpec(
@@ -583,9 +622,8 @@ SOURCES: list[SourceSpec] = [
     SourceSpec(
         key="musixmatch",
         label="Musixmatch (paroles synchro, repli)",
-        fast_url="https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0",
-        tolerate_403=True,
-        notes="endpoint non officiel : peut bouger sans préavis",
+        fast_probe=_probe_musixmatch,
+        notes="endpoint non officiel, client iOS : peut bouger sans préavis",
         families=(Family.CREDITS,),
     ),
     SourceSpec(

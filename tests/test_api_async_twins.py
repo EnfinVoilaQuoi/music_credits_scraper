@@ -6,6 +6,8 @@ produit les mêmes structures de retour depuis les mêmes payloads.
 """
 
 import asyncio
+import json
+import time
 
 import httpx
 
@@ -338,7 +340,9 @@ def _mxm_macro_env(synced: str = _MXM_LRC, status: int = 200) -> dict:
 
 def test_mxm_get_synced_as_source3_async_success(monkeypatch, tmp_path):
     def handler(request):
-        assert request.url.host == "apic-desktop.musixmatch.com"
+        # Client iOS (mesuré 2026-09-23 : le desktop ne rend plus que le jeton leurre).
+        assert request.url.host == "apic.musixmatch.com"
+        assert request.url.params["app_id"] == "mac-ios-v2.0"
         assert request.headers["user-agent"].startswith("Mozilla/5.0")
         assert request.headers["cookie"] == "AWSELB=0; AWSELBCORS=0"
         if request.url.path.endswith("token.get"):
@@ -371,9 +375,24 @@ def test_mxm_async_upgrade_only_token_rejected(monkeypatch, tmp_path):
     assert res is None
 
 
+def _mxm_jeton_ancien(client: MusixmatchAPI, age_s: float = 400) -> None:
+    """Jeton en cache obtenu il y a `age_s` s : encore valide (TTL 9 min) et
+    plancher de `token.get` (5 min) déjà franchi — le cas NORMAL d'un jeton
+    qui expire côté serveur au milieu d'un run."""
+    t = time.time() - age_s
+    client.token_file.write_text(
+        json.dumps(
+            {"token": "tok0", "obtained_at": t, "app_id": "mac-ios-v2.0", "last_token_get": t}
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_mxm_async_retry_after_envelope_401(monkeypatch, tmp_path):
     """401 dans l'enveloppe macro → invalidation token + retry unique qui réussit."""
     calls = {"macro": 0, "token": 0}
+    client = _mxm(monkeypatch, tmp_path)
+    _mxm_jeton_ancien(client)
 
     def handler(request):
         if request.url.path.endswith("token.get"):
@@ -386,9 +405,24 @@ def test_mxm_async_retry_after_envelope_401(monkeypatch, tmp_path):
             return httpx.Response(200, json=_mxm_macro_env())
         raise AssertionError(f"URL inattendue: {request.url}")
 
-    res = asyncio.run(
-        _mxm(monkeypatch, tmp_path).get_synced_async(_http(handler), "Solo", "X", duration=200)
-    )
+    res = asyncio.run(client.get_synced_async(_http(handler), "Solo", "X", duration=200))
     assert res["lyrics_synced"] == _MXM_LRC
     assert calls["macro"] == 2  # 1 échec auth + 1 retry OK
-    assert calls["token"] == 2  # token initial + refresh forcé
+    assert calls["token"] == 1  # jeton en cache, puis UN refresh forcé
+
+
+def test_mxm_async_pas_de_second_token_get_sous_le_plancher(monkeypatch, tmp_path):
+    """Un jeton TOUT JUSTE obtenu et refusé : redemander dans la minute vaut un
+    401 `captcha` (mesuré 2026-09-23). Le retry respecte donc le plancher."""
+    calls = {"macro": 0, "token": 0}
+
+    def handler(request):
+        if request.url.path.endswith("token.get"):
+            calls["token"] += 1
+            return httpx.Response(200, json=_mxm_token_env())
+        calls["macro"] += 1
+        return httpx.Response(200, json=_mxm_macro_env(status=401))
+
+    res = asyncio.run(_mxm(monkeypatch, tmp_path).get_synced_async(_http(handler), "Solo", "X"))
+    assert res is None
+    assert calls == {"macro": 1, "token": 1}

@@ -4,6 +4,8 @@
 La sonde Spotify web (patchright) reste hors périmètre : pilotage navigateur.
 """
 
+import time
+
 import requests
 
 from src.utils import source_health as sh
@@ -95,3 +97,70 @@ class TestLoadHealth:
         assert sh.load_health() == {}
         monkeypatch.setattr(sh, "HEALTH_FILE", tmp_path / "absent.json")
         assert sh.load_health() == {}
+
+
+class TestSondeMusixmatch:
+    """L'ancienne sonde voyait un 200 sur `token.get`… qui portait le jeton
+    leurre : verte sur une source qui ne rendait rien (mesuré 2026-09-23)."""
+
+    class _Resp:
+        def __init__(self, env):
+            self.env, self.status_code = env, 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.env
+
+    def _repondre(self, monkeypatch, env, appels):
+        def get(*a, **k):
+            appels.append(k.get("params", {}).get("app_id"))
+            return self._Resp(env)
+
+        monkeypatch.setattr(requests, "get", get)
+
+    def _brancher(self, monkeypatch, tmp_path):
+        import src.api.musixmatch_api as mxm
+
+        monkeypatch.delenv("MUSIXMATCH_USER_TOKEN", raising=False)
+        vrai = mxm.MusixmatchAPI
+        client = vrai(token_file=tmp_path / "jeton.json")
+        monkeypatch.setattr(mxm, "MusixmatchAPI", lambda: client)
+        return client
+
+    def test_vrai_jeton_ok_et_mis_en_cache(self, monkeypatch, tmp_path):
+        client = self._brancher(monkeypatch, tmp_path)
+        appels = []
+        self._repondre(monkeypatch, {"message": {"body": {"user_token": "abc123"}}}, appels)
+        assert sh._probe_musixmatch() == []
+        assert appels == ["mac-ios-v2.0"]
+        assert client._lire_etat()["token"] == "abc123"
+
+    def test_jeton_leurre_est_un_constat(self, monkeypatch, tmp_path):
+        self._brancher(monkeypatch, tmp_path)
+        self._repondre(monkeypatch, {"message": {"body": {"user_token": "0" * 56}}}, [])
+        (constat,) = sh._probe_musixmatch()
+        assert "leurre" in constat
+
+    def test_captcha_ne_conclut_pas(self, monkeypatch, tmp_path):
+        self._brancher(monkeypatch, tmp_path)
+        captcha = {"message": {"header": {"status_code": 401, "hint": "captcha"}}}
+        self._repondre(monkeypatch, captcha, [])
+        assert sh.check_fast(sh.SOURCES_BY_KEY["musixmatch"]).status == "unknown"
+
+    def test_jeton_en_cache_aucun_appel(self, monkeypatch, tmp_path):
+        """Le budget de token.get n'est pas brûlé par la sonde."""
+        client = self._brancher(monkeypatch, tmp_path)
+        client._save_token("abc123")
+        appels = []
+        self._repondre(monkeypatch, {}, appels)
+        assert sh._probe_musixmatch() == [] and appels == []
+
+    def test_sous_le_plancher_aucun_appel(self, monkeypatch, tmp_path):
+        client = self._brancher(monkeypatch, tmp_path)
+        client._ecrire_etat(last_token_get=time.time())
+        appels = []
+        self._repondre(monkeypatch, {}, appels)
+        assert sh.check_fast(sh.SOURCES_BY_KEY["musixmatch"]).status == "unknown"
+        assert appels == []

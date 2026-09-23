@@ -124,6 +124,21 @@ class Settings(BaseSettings):
     # puis on reprend seul — jamais de disjoncteur définitif, la source doit
     # pouvoir revenir dans le même run. 0 désactive la mise au repos.
     musixmatch_token_cooldown_s: int = 600
+    # Transport. Mesuré le 2026-09-23 : le client `web-desktop-app-v1.0` (celui
+    # de syncedlyrics, YTubic, lyrics-api…) ne rend plus que le jeton LEURRE sur
+    # notre IP (56 zéros), le client iOS rend un vrai jeton et de vraies paroles.
+    # Réglable pour pouvoir basculer sans toucher au code le jour où il tombe.
+    musixmatch_app_id: str = "mac-ios-v2.0"
+    musixmatch_api_base: str = "https://apic.musixmatch.com/ws/1.1"
+    # Plancher entre deux `token.get`, tous process confondus (horloge stockée
+    # dans le fichier du jeton) : un second appel dans la minute est refusé en
+    # 401 `captcha` — c'est la FRÉQUENCE de cet appel que Musixmatch bride.
+    musixmatch_token_get_min_interval_s: int = 300
+    # Absence constatée (Musixmatch répond, sans synchro pour ce morceau) : pas
+    # de nouvelle demande avant ce délai. Mesuré : 2 synchros sur 30 morceaux
+    # candidats, les deux tiers ne sont pas du tout chez Musixmatch — les
+    # redemander à chaque run ne rapporte rien.
+    musixmatch_absent_retry_days: int = 30
 
     # --- Désambiguïsation canal YTM (gate d'identité, update_ytmusic) ---
     # Un canal inféré/recherché est jugé suspect (→ abort sans écriture) si trop
@@ -231,6 +246,10 @@ SPOTIFY_ID_MIN_RELEVANCE = settings.spotify_id_min_relevance
 
 # Musixmatch (fenêtre de repos après un jeton refusé)
 MUSIXMATCH_TOKEN_COOLDOWN_S = settings.musixmatch_token_cooldown_s
+MUSIXMATCH_APP_ID = settings.musixmatch_app_id
+MUSIXMATCH_API_BASE = settings.musixmatch_api_base
+MUSIXMATCH_TOKEN_GET_MIN_INTERVAL_S = settings.musixmatch_token_get_min_interval_s
+MUSIXMATCH_ABSENT_RETRY_DAYS = settings.musixmatch_absent_retry_days
 
 # ReccoBeats (péremption du cache négatif)
 RECCOBEATS_NOT_FOUND_TTL_DAYS = settings.reccobeats_not_found_ttl_days

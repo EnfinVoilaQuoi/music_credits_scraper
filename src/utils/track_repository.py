@@ -1665,6 +1665,45 @@ class TrackRepository:
             )
             return None
 
+    def _retirer_mesures_par_isrc(self, conn, track_id: int) -> list[tuple[str, str]]:
+        """Troisième geste, une fois l'ISRC retiré : ce que ReccoBeats en a
+        tiré part avec lui.
+
+        ReccoBeats s'interroge PAR ISRC ou par Spotify Track ID
+        (`reccobeats_resolution`). Seule la voie ISRC dépend de la colonne
+        qu'on vient d'effacer — par `spotify_id`, les mesures sont
+        INDÉPENDANTES et restent en place. Sans ce geste, un ISRC fautif
+        laisse derrière lui un BPM, une tonalité et une durée mesurés sur le
+        morceau que cet ISRC désignait (mesuré 2026-09-22 : 27 lignes à
+        `reccobeats_resolution='isrc'` sans plus aucun ISRC en base).
+        """
+        resolution = conn.execute(
+            text(
+                "SELECT value FROM observations WHERE track_id = :tid "
+                "AND source = 'reccobeats' AND field = 'reccobeats_resolution'"
+            ),
+            {"tid": track_id},
+        ).scalar()
+        if resolution != "isrc":
+            return []
+        retirees = (
+            conn.execute(
+                text(
+                    "SELECT field, source FROM observations WHERE track_id = :tid "
+                    "AND source = 'reccobeats'"
+                ),
+                {"tid": track_id},
+            )
+            .mappings()
+            .all()
+        )
+        if retirees:
+            conn.execute(
+                text("DELETE FROM observations WHERE track_id = :tid AND source = 'reccobeats'"),
+                {"tid": track_id},
+            )
+        return [(r["field"], r["source"]) for r in retirees]
+
     def clear_track_deezer_id(self, track_id: int, deezer_id: int | None = None) -> dict:
         """Rejette l'ID Deezer d'un morceau — les trois gestes, pendant de
         `clear_track_spotify_id` (un hit Deezer faux écrit `deezer_id`, l'ISRC,
@@ -1680,7 +1719,11 @@ class TrackRepository:
         3. **délier la parution** que cette piste prouvait : la preuve
            `release_track_sources` part, et le lien avec elle s'il n'a plus
            aucune preuve — SAUF s'il porte l'album repère (`needs_replacement`,
-           laissé et SIGNALÉ : réécrire `tracks.album` est un geste humain).
+           laissé et SIGNALÉ : réécrire `tracks.album` est un geste humain) ;
+        4. **troisième geste** : si l'ISRC effacé avait résolu ReccoBeats
+           (`reccobeats_resolution='isrc'`), retirer ses observations aussi —
+           sans quoi le BPM et la tonalité d'un autre morceau restent en place
+           sans que rien ne les rattache plus à une preuve.
         """
         rapport = {
             "id_retire": None,
@@ -1690,6 +1733,7 @@ class TrackRepository:
             "release_date_effacee": False,
             "liens_parution_retires": 0,
             "parution_reperee": None,
+            "reccobeats_retirees": [],
         }
         try:
             with self.engine.begin() as conn:
@@ -1766,10 +1810,19 @@ class TrackRepository:
                     effacements["release_date"] = None
                     rapport["release_date_effacee"] = True
                 self._ecrire_colonnes_discographie(conn, track_id, effacements)
+
+                # Troisième geste : ce que ReccoBeats a tiré de l'ISRC part
+                # avec lui — seulement si l'ISRC EFFACÉ est celui qui l'a
+                # résolu (par `spotify_id`, les mesures sont indépendantes).
+                if rapport["isrc_efface"]:
+                    rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
+
                 # Puis ré-arbitrage sur ce qui reste (une durée legacy ou
                 # songbpm reprend la colonne ; rien ⇒ NULL).
                 touches = {f for f in valeurs_deezer if f in self.COLONNES_DISCOGRAPHIE}
                 touches |= set(effacements)
+                touches |= {f for f, _ in rapport["reccobeats_retirees"]}
+                touches &= set(self.COLONNES_DISCOGRAPHIE)
                 if touches:
                     self._ecrire_colonnes_discographie(
                         conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
@@ -1816,11 +1869,103 @@ class TrackRepository:
 
             logger.info(
                 f"🧹 ID Deezer {vise} retiré du morceau {track_id} "
-                f"({len(rapport['observations_retirees'])} observation(s) liée(s))"
+                f"({len(rapport['observations_retirees'])} observation(s) liée(s), "
+                f"{len(rapport['reccobeats_retirees'])} mesure(s) ReccoBeats)"
             )
             return rapport
         except SQLAlchemyError as e:
             logger.error(f"Erreur clear_track_deezer_id (track_id={track_id}): {e}")
+            return rapport
+
+    def clear_orphan_reccobeats_measures(self, track_id: int) -> dict:
+        """Rattrapage du troisième geste pour un morceau réparé AVANT qu'il
+        n'existe (2026-09-22 → 2026-09-23) : `deezer_id`/`isrc` ont déjà été
+        effacés par `clear_track_deezer_id`, mais les observations
+        `reccobeats` résolues par cet ISRC sont restées. Même geste que
+        `_retirer_mesures_par_isrc`, hors du contexte d'un retrait d'ID —
+        garde-fou : n'agit que si `isrc` est bien VIDE en base (sinon la
+        résolution ISRC est peut-être encore valide, ce n'est pas un orphelin)."""
+        rapport = {"reccobeats_retirees": []}
+        try:
+            with self.engine.begin() as conn:
+                ligne = (
+                    conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
+                    .mappings()
+                    .first()
+                )
+                if ligne is None or ligne["isrc"]:
+                    return rapport
+                rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
+                if "duration" in {f for f, _ in rapport["reccobeats_retirees"]}:
+                    self._ecrire_colonnes_discographie(
+                        conn, track_id, self._arbitrer_discographie(conn, track_id, {"duration"})
+                    )
+            return rapport
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur clear_orphan_reccobeats_measures (track_id={track_id}): {e}")
+            return rapport
+
+    def clear_track_isrc(self, track_id: int) -> dict:
+        """Retire un ISRC HÉRITÉ de l'ancien `get_isrc` (avant le gate du
+        2026-09-08) : 719 fiches mesurées le 2026-09-22, jamais passées par
+        aucune observation. Même forme que `clear_track_deezer_id` — colonne,
+        observations, troisième geste — mais sans parution ni `deezer_id` à
+        toucher (ce n'est pas de là que vient cet ISRC)."""
+        rapport = {
+            "isrc_efface": False,
+            "observations_retirees": [],
+            "reccobeats_retirees": [],
+        }
+        try:
+            with self.engine.begin() as conn:
+                ligne = (
+                    conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
+                    .mappings()
+                    .first()
+                )
+                if ligne is None or not ligne["isrc"]:
+                    return rapport
+
+                conn.execute(
+                    text("UPDATE tracks SET isrc = NULL, updated_at = :now WHERE id = :tid"),
+                    {"tid": track_id, "now": datetime.now()},
+                )
+                rapport["isrc_efface"] = True
+
+                retirees = (
+                    conn.execute(
+                        text(
+                            "SELECT field, source FROM observations WHERE track_id = :tid "
+                            "AND field = 'isrc'"
+                        ),
+                        {"tid": track_id},
+                    )
+                    .mappings()
+                    .all()
+                )
+                if retirees:
+                    conn.execute(
+                        text("DELETE FROM observations WHERE track_id = :tid AND field = 'isrc'"),
+                        {"tid": track_id},
+                    )
+                rapport["observations_retirees"] = [(r["field"], r["source"]) for r in retirees]
+
+                rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
+
+                touches = {"isrc"} | {f for f, _ in rapport["reccobeats_retirees"]}
+                touches &= set(self.COLONNES_DISCOGRAPHIE)
+                if touches:
+                    self._ecrire_colonnes_discographie(
+                        conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
+                    )
+
+            logger.info(
+                f"🧹 ISRC retiré du morceau {track_id} "
+                f"({len(rapport['reccobeats_retirees'])} mesure(s) ReccoBeats)"
+            )
+            return rapport
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur clear_track_isrc (track_id={track_id}): {e}")
             return rapport
 
     def update_track_spotify_id(

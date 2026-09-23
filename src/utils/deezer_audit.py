@@ -46,6 +46,77 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
     return lignes[:limite] if limite else lignes
 
 
+def orphelins_reccobeats(engine) -> list[dict]:
+    """Morceaux dont ReccoBeats a été résolu par un ISRC qui n'existe plus en
+    base — reliquat du troisième geste ajouté APRÈS coup à
+    `clear_track_deezer_id` (2026-09-23). Sélection SQL pure, aucun appel
+    réseau : l'ISRC ayant été retiré comme fautif, rien ne rattache plus ces
+    mesures au morceau, il n'y a rien à interroger pour le confirmer."""
+    requete = """
+        SELECT t.id, t.title, a.name AS artiste,
+               (SELECT o.value FROM observations o WHERE o.track_id = t.id
+                 AND o.source = 'reccobeats' AND o.field = 'bpm') AS bpm,
+               (SELECT o.value FROM observations o WHERE o.track_id = t.id
+                 AND o.source = 'reccobeats' AND o.field = 'duration') AS duration
+          FROM tracks t
+          JOIN artists a ON a.id = t.artist_id
+         WHERE (t.isrc IS NULL OR t.isrc = '')
+           AND EXISTS (
+                SELECT 1 FROM observations o WHERE o.track_id = t.id
+                 AND o.source = 'reccobeats' AND o.field = 'reccobeats_resolution'
+                 AND o.value = 'isrc'
+           )
+         ORDER BY a.name, t.title
+    """
+    with engine.connect() as conn:
+        return [dict(r) for r in conn.execute(text(requete)).mappings().all()]
+
+
+def lignes_isrc_a_verifier(
+    engine, artiste: str | None = None, limite: int | None = None
+) -> list[dict]:
+    """Les fiches à ISRC HÉRITÉ de l'ancien `get_isrc` (avant le gate posé le
+    2026-09-08) : ISRC en colonne sans AUCUNE observation qui l'ait vraiment
+    DÉCLARÉ — 719 mesurées le 2026-09-22. Une observation `legacy` NE COMPTE
+    PAS : c'est le backfill de e24 (verbatim de la colonne au moment de la
+    migration), pas une vérification. Même colonnes que `lignes_a_verifier`,
+    `isrc` à la place de `deezer_id`."""
+    filtre = "AND a.name = :artiste" if artiste else ""
+    params = {"artiste": artiste} if artiste else {}
+    requete = f"""
+        SELECT t.id, t.title, t.isrc, t.is_featuring, t.primary_artist_name,
+               t.artist_id, a.name AS artiste, a.deezer_id AS artist_deezer_id,
+               (SELECT o.value FROM observations o
+                 WHERE o.track_id = t.id AND o.field = 'duration'
+                   AND o.source NOT IN ('deezer', 'legacy')
+                 ORDER BY o.source LIMIT 1) AS duree_independante
+          FROM tracks t JOIN artists a ON a.id = t.artist_id
+         WHERE t.isrc IS NOT NULL AND t.isrc != ''
+           AND NOT EXISTS (
+                SELECT 1 FROM observations o WHERE o.track_id = t.id AND o.field = 'isrc'
+                  AND o.source != 'legacy'
+           ) {filtre}
+         ORDER BY a.name, t.title
+    """
+    with engine.connect() as conn:
+        lignes = [dict(r) for r in conn.execute(text(requete), params).mappings().all()]
+    return lignes[:limite] if limite else lignes
+
+
+def isrc_partages(lignes: list[dict]) -> dict[str, list[dict]]:
+    """ISRC porté par ≥ 2 morceaux d'un même artiste à des TITRES différents —
+    un signal indépendant de l'oracle (aucune requête réseau) : six mesurés
+    sur les 719 le 2026-09-22. À sortir en tête du rapport."""
+    par_cle: dict[tuple, list[dict]] = {}
+    for ligne in lignes:
+        par_cle.setdefault((ligne["artist_id"], ligne["isrc"]), []).append(ligne)
+    return {
+        isrc: groupe
+        for (_, isrc), groupe in par_cle.items()
+        if len({g["title"] for g in groupe}) > 1
+    }
+
+
 def noms_acceptes_par_artiste(dm, lignes: list[dict]) -> dict[int, set[str]]:
     """`{artist_id: noms}` — formations et alias CONFIRMÉS, lus par le
     repository (`noms_des_formations` / `noms_de_lartiste`, les mêmes que la
@@ -121,6 +192,71 @@ def verifier_lignes(
                         "artiste": ligne["artiste"],
                         "titre": ligne["title"],
                         "deezer_id": int(ligne["deezer_id"]),
+                        "motif": motif,
+                        "artiste_etranger": artiste_etranger(
+                            fiche,
+                            artist_name=criteres["artist_name"],
+                            artist_deezer_id=criteres["artist_deezer_id"],
+                            noms_acceptes=criteres["noms_acceptes"],
+                        ),
+                        "variante_etrangere": variante_etrangere(fiche, title=ligne["title"]),
+                        "deezer": {
+                            "title": fiche.get("title"),
+                            "artist": (fiche.get("artist") or {}).get("name"),
+                            "duration": fiche.get("duration"),
+                        },
+                    }
+                )
+        if progression is not None:
+            progression(faits, len(lignes))
+        if pause:
+            time.sleep(pause)
+    return {"verifies": faits - illisibles, "illisibles": illisibles, "ecarts": ecarts}
+
+
+def verifier_lignes_isrc(
+    lignes: list[dict],
+    lire_piste=None,
+    *,
+    noms_par_artiste: dict | None = None,
+    pause: float = 0.2,
+    progression=None,
+    interrompu=None,
+) -> dict:
+    """Pendant `verifier_lignes` pour les ISRC hérités (lot 2, 2026-09-23) :
+    l'oracle est `GET /track/isrc:{isrc}`, jugé par le MÊME `hit_concorde` —
+    même critère de retrait (le TITRE, `variante_etrangere`), un artiste
+    étranger reste SIGNALÉ seulement (Deezer crédite parfois le projet plutôt
+    que l'invité, comme pour les ids)."""
+    from src.utils.deezer_identity import (
+        artiste_etranger,
+        hit_concorde,
+        lire_piste_isrc_http,
+        variante_etrangere,
+    )
+
+    lire_piste = lire_piste or lire_piste_isrc_http
+    ecarts: list[dict] = []
+    illisibles = faits = 0
+    for ligne in lignes:
+        if interrompu is not None and interrompu():
+            break
+        fiche = lire_piste(ligne["isrc"])
+        faits += 1
+        if fiche is None:
+            illisibles += 1
+        else:
+            criteres = criteres_de_la_ligne(
+                ligne, (noms_par_artiste or {}).get(ligne.get("artist_id"), ())
+            )
+            ok, motif = hit_concorde(fiche, **criteres)
+            if not ok:
+                ecarts.append(
+                    {
+                        "track_id": ligne["id"],
+                        "artiste": ligne["artiste"],
+                        "titre": ligne["title"],
+                        "isrc": ligne["isrc"],
                         "motif": motif,
                         "artiste_etranger": artiste_etranger(
                             fiche,

@@ -187,3 +187,25 @@ def lire_piste_http(deezer_id: int) -> dict | None:
     if not isinstance(data, dict) or data.get("error") or not data.get("id"):
         return None
     return data
+
+
+def lire_piste_isrc_http(isrc: str) -> dict | None:
+    """Pendant de `lire_piste_http` pour l'audit des ISRC hérités (lot 2,
+    2026-09-23) : `GET /track/isrc:{isrc}`. Même forme (`requests` nu, verdict
+    par le même `hit_concorde`), neutralisé en test."""
+    import requests
+
+    try:
+        resp = requests.get(f"https://api.deezer.com/track/isrc:{isrc}", timeout=15)
+    except requests.RequestException as e:
+        logger.debug(f"Fiche Deezer illisible (ISRC {isrc}) : {e}")
+        return None
+    if not resp.ok:
+        return None
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or data.get("error") or not data.get("id"):
+        return None
+    return data

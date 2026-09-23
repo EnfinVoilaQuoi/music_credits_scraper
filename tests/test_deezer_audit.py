@@ -1,12 +1,19 @@
 """Audit des `deezer_id` en base : balayage + verdict de `hit_concorde`, oracle
 INJECTÉ (jamais HTTP)."""
 
+from sqlalchemy import text
+
+from src.enrichment.observation import Observation
 from src.models import Artist, ArtistRelation, Track
 from src.utils.deezer_audit import (
     criteres_de_la_ligne,
+    isrc_partages,
     lignes_a_verifier,
+    lignes_isrc_a_verifier,
     noms_acceptes_par_artiste,
+    orphelins_reccobeats,
     verifier_lignes,
+    verifier_lignes_isrc,
 )
 
 
@@ -140,3 +147,226 @@ def test_interruption_entre_deux_requetes(data_manager):
         interrompu=lambda: len(appels) >= 1,
     )
     assert len(appels) == 1 and rapport["verifies"] == 1
+
+
+# ── Lot 1 : troisième geste ReccoBeats (2026-09-23) ─────────────────────────
+
+
+def _morceau_contamine(dm):
+    """Kanye « I Got a Love » : deezer_id fautif, ISRC + durée + BPM tirés de
+    lui par ReccoBeats (voie ISRC), et songbpm qui, lui, a le bon morceau."""
+    kanye = Artist(name="Kanye West")
+    kanye.id = dm.save_artist(kanye)
+    t = Track(title="I Got a Love", artist=kanye)
+    t.id = dm.save_track(t)
+    dm.fill_track_identities(t.id, deezer_id=111, isrc="USXXX0000001")
+    dm.upsert_observations(
+        t.id,
+        [
+            Observation("isrc", "USXXX0000001", "deezer"),
+            Observation("duration", 3753, "reccobeats"),
+            Observation("bpm", 93, "reccobeats"),
+            Observation("reccobeats_resolution", "isrc", "reccobeats"),
+            Observation("duration", 316, "songbpm"),
+        ],
+    )
+    dm.record_discography_observations(t.id, [Observation("duration", 3753, "reccobeats")])
+    return t
+
+
+def test_clear_track_deezer_id_retire_les_mesures_reccobeats_resolues_par_isrc(data_manager):
+    t = _morceau_contamine(data_manager)
+    rapport = data_manager.clear_track_deezer_id(t.id, 111)
+    assert rapport["isrc_efface"] is True
+    champs = {f for f, _ in rapport["reccobeats_retirees"]}
+    assert {"duration", "bpm", "reccobeats_resolution"} <= champs
+
+    with data_manager.engine.connect() as conn:
+        reste = conn.execute(
+            text("SELECT COUNT(*) FROM observations WHERE track_id = :tid AND source='reccobeats'"),
+            {"tid": t.id},
+        ).scalar()
+        duree = conn.execute(
+            text("SELECT duration FROM tracks WHERE id = :tid"), {"tid": t.id}
+        ).scalar()
+    assert reste == 0
+    assert str(duree) == "316"  # songbpm reprend la colonne, plus de reccobeats
+
+
+def test_clear_track_deezer_id_conserve_reccobeats_resolu_par_spotify_id(data_manager):
+    """Résolution `spotify_id` : indépendante de l'ISRC, les mesures restent."""
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    t = Track(title="No Face", artist=kanye)
+    t.id = data_manager.save_track(t)
+    data_manager.fill_track_identities(t.id, deezer_id=222, isrc="USXXX0000002")
+    data_manager.upsert_observations(
+        t.id,
+        [
+            Observation("isrc", "USXXX0000002", "deezer"),
+            Observation("bpm", 140, "reccobeats"),
+            Observation("reccobeats_resolution", "spotify_id", "reccobeats"),
+        ],
+    )
+    rapport = data_manager.clear_track_deezer_id(t.id, 222)
+    assert rapport["isrc_efface"] is True
+    assert rapport["reccobeats_retirees"] == []
+
+    with data_manager.engine.connect() as conn:
+        reste = conn.execute(
+            text("SELECT COUNT(*) FROM observations WHERE track_id = :tid AND source='reccobeats'"),
+            {"tid": t.id},
+        ).scalar()
+    assert reste == 2  # bpm + reccobeats_resolution intacts
+
+
+def test_orphelins_reccobeats_et_rattrapage(data_manager):
+    """Un morceau où l'ISRC a été effacé AVANT que le troisième geste existe
+    (simule le reliquat du 2026-09-22) : `clear_orphan_reccobeats_measures`
+    nettoie sans appel réseau."""
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    t = Track(title="The Joy", artist=kanye)
+    t.id = data_manager.save_track(t)
+    data_manager.upsert_observations(
+        t.id,
+        [
+            Observation("duration", 3753, "reccobeats"),
+            Observation("bpm", 93, "reccobeats"),
+            Observation("reccobeats_resolution", "isrc", "reccobeats"),
+            Observation("duration", 316, "songbpm"),
+        ],
+    )
+    data_manager.record_discography_observations(
+        t.id, [Observation("duration", 3753, "reccobeats")]
+    )
+
+    orphelins = orphelins_reccobeats(data_manager.engine)
+    assert [o["id"] for o in orphelins] == [t.id]
+
+    rapport = data_manager.clear_orphan_reccobeats_measures(t.id)
+    assert len(rapport["reccobeats_retirees"]) == 3
+
+    with data_manager.engine.connect() as conn:
+        duree = conn.execute(
+            text("SELECT duration FROM tracks WHERE id = :tid"), {"tid": t.id}
+        ).scalar()
+    assert str(duree) == "316"
+    assert orphelins_reccobeats(data_manager.engine) == []
+
+
+# ── Lot 2 : ISRC hérités de l'ancien get_isrc (2026-09-23) ──────────────────
+
+
+def test_lignes_isrc_a_verifier_ne_voit_que_les_isrc_sans_observation(data_manager):
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    herite = Track(title="Hérité", artist=kanye)
+    herite.id = data_manager.save_track(herite)
+    data_manager.fill_track_identities(herite.id, isrc="USXXX0000003")
+
+    observe = Track(title="Observé", artist=kanye)
+    observe.id = data_manager.save_track(observe)
+    data_manager.fill_track_identities(observe.id, isrc="USXXX0000004")
+    data_manager.upsert_observations(observe.id, [Observation("isrc", "USXXX0000004", "deezer")])
+
+    lignes = lignes_isrc_a_verifier(data_manager.engine)
+    assert [lg["id"] for lg in lignes] == [herite.id]
+
+
+def test_isrc_partages_par_des_titres_differents(data_manager):
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    a = Track(title="Titre A", artist=kanye)
+    a.id = data_manager.save_track(a)
+    data_manager.fill_track_identities(a.id, isrc="USXXX0000005")
+    b = Track(title="Titre B", artist=kanye)
+    b.id = data_manager.save_track(b)
+    data_manager.fill_track_identities(b.id, isrc="USXXX0000005")
+
+    lignes = lignes_isrc_a_verifier(data_manager.engine)
+    partages = isrc_partages(lignes)
+    assert "USXXX0000005" in partages
+    assert {g["title"] for g in partages["USXXX0000005"]} == {"Titre A", "Titre B"}
+
+
+def test_verifier_lignes_isrc_retient_le_titre_signale_l_artiste(data_manager):
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    t = Track(title="I Got a Love", artist=kanye)
+    t.id = data_manager.save_track(t)
+    data_manager.fill_track_identities(t.id, isrc="USXXX0000006")
+
+    fiche_etrangere = {
+        "id": 111,
+        "title": "Rolling 200 Deep",
+        "artist": {"id": 999, "name": "DJ Kay Slay"},
+        "duration": 660,
+    }
+    rapport = verifier_lignes_isrc(
+        lignes_isrc_a_verifier(data_manager.engine),
+        lambda isrc: fiche_etrangere,
+        pause=0,
+    )
+    assert len(rapport["ecarts"]) == 1
+    ecart = rapport["ecarts"][0]
+    assert ecart["variante_etrangere"] is True
+    assert ecart["artiste_etranger"] is True
+    assert ecart["isrc"] == "USXXX0000006"
+
+
+def test_isrc_illisible_n_est_pas_conclu(data_manager):
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    t = Track(title="Introuvable", artist=kanye)
+    t.id = data_manager.save_track(t)
+    data_manager.fill_track_identities(t.id, isrc="USXXX0000007")
+
+    rapport = verifier_lignes_isrc(
+        lignes_isrc_a_verifier(data_manager.engine), lambda isrc: None, pause=0
+    )
+    assert rapport == {"verifies": 0, "illisibles": 1, "ecarts": []}
+
+
+def test_l_oracle_isrc_par_defaut_est_neutralise_en_test(data_manager):
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    t = Track(title="Neutralisé", artist=kanye)
+    t.id = data_manager.save_track(t)
+    data_manager.fill_track_identities(t.id, isrc="USXXX0000008")
+    # conftest : `lire_piste_isrc_http` rend None — aucun test ne parle à Deezer.
+    assert (
+        verifier_lignes_isrc(lignes_isrc_a_verifier(data_manager.engine), pause=0)["illisibles"]
+        == 1
+    )
+
+
+def test_clear_track_isrc_retire_colonne_et_mesures_reccobeats(data_manager):
+    kanye = Artist(name="Kanye West")
+    kanye.id = data_manager.save_artist(kanye)
+    t = Track(title="I Got a Love", artist=kanye)
+    t.id = data_manager.save_track(t)
+    data_manager.fill_track_identities(t.id, isrc="USXXX0000009")
+    data_manager.upsert_observations(
+        t.id,
+        [
+            Observation("duration", 3753, "reccobeats"),
+            Observation("reccobeats_resolution", "isrc", "reccobeats"),
+        ],
+    )
+    data_manager.record_discography_observations(
+        t.id, [Observation("duration", 3753, "reccobeats")]
+    )
+
+    rapport = data_manager.clear_track_isrc(t.id)
+    assert rapport["isrc_efface"] is True
+    assert len(rapport["reccobeats_retirees"]) == 2
+
+    with data_manager.engine.connect() as conn:
+        ligne = (
+            conn.execute(text("SELECT isrc, duration FROM tracks WHERE id = :tid"), {"tid": t.id})
+            .mappings()
+            .first()
+        )
+    assert ligne["isrc"] is None
+    assert ligne["duration"] is None

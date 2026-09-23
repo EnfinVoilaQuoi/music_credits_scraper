@@ -11,6 +11,15 @@ témoins sans astérisque sont `unreleased`, dont « Mouvement » d'A2H, qui a
 26 312 streams Spotify et une date de sortie. Ce champ décrit l'état des
 PAROLES sur Genius, pas celui du morceau.
 
+Le marqueur vaut aussi pour des **titres de DISQUE** (« D9* », « H1* »,
+« ESCAPISM* ») et `titre_sans_marqueur` les nettoie au même point d'entrée.
+⚠️ **Mais il ne se propage PAS aux morceaux du disque** : ce sont des projets
+annoncés sous lesquels Genius range aussi les singles déjà sortis qu'on leur
+prête — sur leurs 14 morceaux, **6 ont une trace de plateforme**, dont
+« Goosebumps » de Travis Scott rangé sous « H1* ». « Disque inédit ⇒ morceaux
+inédits » serait faux pour 43 % d'entre eux. Le constat d'un morceau se prend
+sur SON titre et se lève sur SA trace.
+
 Module PUR : ni base, ni réseau, ni `src.models` (canard-typage — `src/utils/
 __init__` tire `DataEnricher`).
 """

@@ -483,7 +483,7 @@ class GeniusAPI:
                     if isinstance(album_data, dict) and album_data.get("name"):
                         track.release_observations.append(
                             ReleaseObservation(
-                                title=str(album_data["name"]),
+                                title=titre_sans_marqueur(str(album_data["name"])),
                                 source="genius",
                                 external_release_id=album_data.get("id"),
                                 external_track_id=track.genius_id,
@@ -694,7 +694,7 @@ class GeniusAPI:
             track._album_from_api = True
             track.release_observations.append(
                 ReleaseObservation(
-                    title=str(name),
+                    title=titre_sans_marqueur(str(name)),
                     source="genius",
                     external_release_id=album_id,
                     external_track_id=track.genius_id,
@@ -987,13 +987,24 @@ class GeniusAPI:
         return sid, yt
 
     def _extract_album_from_song(self, song: dict) -> str | None:
-        """Extrait l'album depuis les données de l'API"""
+        """Extrait l'album depuis les données de l'API.
+
+        L'astérisque d'inédit marque aussi des DISQUES (« D9* », « ESCAPISM* »)
+        et elle est retirée ici, au même point d'entrée que pour les titres de
+        morceaux. Elle ne fabrique PAS de doublon — `cle_album` la normalise
+        déjà — mais un titre qui la garde empêche toute recherche de disque
+        chez un distributeur le jour où le projet sort, et laisse une
+        convention étrangère non traitée dans nos données.
+
+        ⚠️ Le constat d'inédit ne se propage PAS aux morceaux de ce disque :
+        mesuré, 6 des 14 sont déjà sortis (cf. `inedits`).
+        """
         try:
             album_data = song.get("album")
             if album_data and isinstance(album_data, dict):
                 album_name = album_data.get("name")
                 if album_name:
-                    return album_name
+                    return titre_sans_marqueur(album_name)
         except (KeyError, TypeError, AttributeError) as e:
             logger.warning(f"Erreur lors de l'extraction de l'album: {e}")
         return None

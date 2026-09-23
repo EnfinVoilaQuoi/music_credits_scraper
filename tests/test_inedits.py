@@ -181,3 +181,40 @@ class TestDialogueDeFusion:
             "`_FILL_ONLY` traite False comme une absence : un constat « 0 » y "
             "serait écrasé par le « 1 » de l'autre fiche."
         )
+
+
+class TestMarqueurSurUnDISQUE:
+    """Le marqueur vaut aussi pour un titre de PROJET — mais il ne se propage
+    PAS à ses morceaux (mesuré 2026-09-23 : 6 des 14 sont déjà sortis)."""
+
+    @pytest.mark.parametrize(
+        ("avant", "apres"),
+        [
+            ("D9*", "D9"),
+            ("H1*", "H1"),
+            ("ESCAPISM*", "ESCAPISM"),
+            ("Banlieusards 2*", "Banlieusards 2"),
+            ("Dream In Color*", "Dream In Color"),
+        ],
+    )
+    def test_un_titre_de_disque_se_nettoie_comme_un_titre_de_morceau(self, avant, apres):
+        assert porte_le_marqueur(avant)
+        assert titre_sans_marqueur(avant) == apres
+
+    def test_genius_retire_le_marqueur_du_nom_d_album_a_l_entree(self):
+        """Au POINT D'ENTRÉE, comme pour les titres de morceaux : un titre qui
+        garde l'astérisque interdit toute recherche de disque chez un
+        distributeur le jour où le projet sort."""
+        from src.api.genius_api import GeniusAPI
+
+        api = GeniusAPI.__new__(GeniusAPI)
+        assert api._extract_album_from_song({"album": {"name": "D9*"}}) == "D9"
+        assert api._extract_album_from_song({"album": {"name": "Utopia"}}) == "Utopia"
+        assert api._extract_album_from_song({"album": None}) is None
+
+    def test_le_constat_ne_se_propage_PAS_aux_morceaux_du_disque(self):
+        """« Goosebumps » de Travis Scott est rangé sous « H1* » et compte des
+        centaines de millions de streams : un morceau se constate sur SON
+        titre, jamais sur celui de son disque."""
+        assert not porte_le_marqueur("Goosebumps")
+        assert constat_a_ecrire(_Track(unreleased=None, sp=900_000_000)) is None

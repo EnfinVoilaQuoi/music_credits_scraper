@@ -25,6 +25,17 @@ pose à l'import et retire le marqueur au POINT D'ENTRÉE, si bien que les
 prochains passages rapprochent « Voldemort* » de notre « Voldemort » au lieu
 d'en créer un doublon.
 
+**Seconde phase — les titres de DISQUE** (2026-09-23) : l'astérisque marque
+aussi des projets (« D9* », « H1* », « ESCAPISM* »). Elle n'ouvre PAS de
+doublon de ce côté (`cle_album` la normalise déjà), mais un titre qui la garde
+interdit toute recherche de disque chez un distributeur le jour où le projet
+sort. Elle est donc retirée des trois magasins qui portent ce titre en clair.
+
+⚠️ **Le constat ne se propage PAS aux morceaux de ces disques** : mesuré, **6
+des 14** ont une trace de plateforme — « Goosebumps » de Travis Scott est rangé
+sous « H1* ». « Disque inédit ⇒ morceaux inédits » serait faux pour 43 % d'entre
+eux.
+
 Usage :
     python scripts/backfill_inedits.py            # dry-run (défaut)
     python scripts/backfill_inedits.py --apply    # backup + écriture
@@ -46,6 +57,11 @@ from src.utils.inedits import porte_le_marqueur, titre_sans_marqueur
 #: Ce que la mesure du 2026-09-22 a trouvé. Un écart FRANC signale que le
 #: marqueur a changé de nature chez Genius — auquel cas il faut re-mesurer
 #: avant d'écrire quoi que ce soit, pas faire confiance au script.
+#: ⚠️ Le compte à surveiller est la POPULATION CONNUE — morceaux encore
+#: marqués PLUS morceaux déjà constatés — et non les seuls marqués. Comparer
+#: les marqués à 168 faisait échouer le script sur son PROPRE succès : après
+#: un premier passage il n'en reste que 9 (les collisions), soit
+#: « 95 % d'écart ». Un garde-fou qui interdit de se relancer n'en est pas un.
 ATTENDU = 168
 TOLERANCE = 0.4
 
@@ -82,10 +98,23 @@ def classer(dm, marques: list[dict]) -> tuple[list, list, list]:
     return a_traiter, collisions, deja_sortis
 
 
-def rapport(marques, a_traiter, collisions, deja_sortis) -> bool:
+def population_connue(dm, marques) -> int:
+    """Marqués ENCORE + déjà constatés, sans doublon — l'invariant STABLE.
+
+    C'est lui qui doit valoir ~168, pas le nombre de marqués : celui-là fond
+    dès que le script réussit.
+    """
+    ids = {ligne["id"] for ligne in marques}
+    with dm.engine.connect() as conn:
+        ids |= {int(r[0]) for r in conn.execute(text("SELECT id FROM tracks WHERE unreleased = 1"))}
+    return len(ids)
+
+
+def rapport(marques, a_traiter, collisions, deja_sortis, connus) -> bool:
     """Rend False si le corpus s'écarte trop de la mesure d'origine."""
-    print(f"\n{len(marques)} morceau(x) portent le marqueur d'inédit (mesuré : {ATTENDU}).")
-    ecart = abs(len(marques) - ATTENDU) / ATTENDU
+    print(f"\n{len(marques)} morceau(x) portent ENCORE le marqueur d'inédit.")
+    print(f"{connus} morceau(x) inédits CONNUS au total (mesuré : {ATTENDU}).")
+    ecart = abs(connus - ATTENDU) / ATTENDU
     if ecart > TOLERANCE:
         print(
             f"\n❌ Écart de {100 * ecart:.0f} % à la mesure d'origine : le marqueur a"
@@ -133,6 +162,46 @@ def appliquer(dm, a_traiter, collisions) -> tuple[int, int]:
     return constats, renommages
 
 
+def disques_marques(dm) -> list[tuple[int, str, str, str, int]]:
+    """(artist_id, artiste, titre marqué, titre propre, nb morceaux)."""
+    with dm.engine.connect() as conn:
+        lignes = (
+            conn.execute(
+                text(
+                    "SELECT t.artist_id, a.name AS artiste, t.album, COUNT(*) AS n "
+                    "FROM tracks t JOIN artists a ON a.id = t.artist_id "
+                    "WHERE t.album IS NOT NULL AND t.album != '' "
+                    "GROUP BY t.artist_id, a.name, t.album"
+                )
+            )
+            .mappings()
+            .all()
+        )
+    return [
+        (
+            ligne["artist_id"],
+            ligne["artiste"],
+            ligne["album"],
+            titre_sans_marqueur(ligne["album"]),
+            ligne["n"],
+        )
+        for ligne in lignes
+        if porte_le_marqueur(ligne["album"])
+    ]
+
+
+def rapport_disques(disques) -> None:
+    print(f"\n{len(disques)} disque(s) portent le marqueur d'inédit dans leur TITRE :\n")
+    for _aid, artiste, marque, propre, n in sorted(disques, key=lambda d: -d[4]):
+        print(f"   {n:3} morceau(x)  {artiste} — {marque!r} → {propre!r}")
+    if disques:
+        print(
+            "\nℹ️  Seuls les TITRES changent. Le constat d'inédit ne se propage pas aux"
+            "\n   morceaux : 6 des 14 ont une trace de plateforme (« Goosebumps » est"
+            "\n   rangé sous « H1* »)."
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--apply", action="store_true", help="écrit réellement (backup avant)")
@@ -141,13 +210,16 @@ def main() -> int:
     dm = DataManager()
     marques = relever(dm)
     a_traiter, collisions, deja_sortis = classer(dm, marques)
-    if not rapport(marques, a_traiter, collisions, deja_sortis):
+    connus = population_connue(dm, marques)
+    if not rapport(marques, a_traiter, collisions, deja_sortis, connus):
         return 1
+    disques = disques_marques(dm)
+    rapport_disques(disques)
 
     if not args.apply:
         print("\nℹ️  DRY-RUN : rien n'a été écrit. Relance avec --apply.")
         return 0
-    if not marques:
+    if not marques and not disques:
         print("\nRien à faire.")
         return 0
 
@@ -158,6 +230,16 @@ def main() -> int:
     print(f"\n💾 Backup : {backup}")
     constats, renommages = appliquer(dm, a_traiter, collisions)
     print(f"✅ {constats} constat(s) posé(s), {renommages} titre(s) nettoyé(s).")
+
+    morceaux = parutions = 0
+    for aid, _artiste, marque, propre, _n in disques:
+        m, p = dm.renommer_album(aid, marque, propre)
+        morceaux += m
+        parutions += p
+    if disques:
+        print(
+            f"✅ {len(disques)} disque(s) renommé(s) — {morceaux} morceau(x), {parutions} parution(s)."
+        )
     return 0
 
 

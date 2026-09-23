@@ -2869,6 +2869,49 @@ class TrackRepository:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")
             return False
 
+    def renommer_album(self, artist_id: int, ancien: str, nouveau: str) -> tuple[int, int]:
+        """Renomme un disque partout où son TITRE est stocké, pour un artiste.
+
+        Trois magasins portent ce titre en clair — `tracks.album` (l'album
+        REPÈRE), `releases.title` (le catalogue des parutions) et `albums.title`
+        (le magasin des streams d'album) — et les laisser diverger ferait deux
+        disques là où il y en a un. Rend (morceaux, parutions) touchés.
+
+        `album_override` n'est PAS posé : ce n'est pas une saisie humaine mais
+        le nettoyage d'une convention de Genius, et le marquer en manuel
+        empêcherait toute correction ultérieure par la source.
+        """
+        if not ancien or not nouveau or ancien == nouveau:
+            return 0, 0
+        try:
+            with self.engine.begin() as conn:
+                morceaux = conn.execute(
+                    text(
+                        "UPDATE tracks SET album = :nouveau, updated_at = :now "
+                        "WHERE artist_id = :aid AND album = :ancien"
+                    ),
+                    {"nouveau": nouveau, "ancien": ancien, "aid": artist_id, "now": datetime.now()},
+                ).rowcount
+                parutions = conn.execute(
+                    text(
+                        "UPDATE releases SET title = :nouveau, updated_at = :now "
+                        "WHERE artist_id = :aid AND title = :ancien"
+                    ),
+                    {"nouveau": nouveau, "ancien": ancien, "aid": artist_id, "now": datetime.now()},
+                ).rowcount
+                conn.execute(
+                    text(
+                        "UPDATE albums SET title = :nouveau "
+                        "WHERE artist_id = :aid AND title = :ancien"
+                    ),
+                    {"nouveau": nouveau, "ancien": ancien, "aid": artist_id},
+                )
+            logger.info(f"💿 Album renommé : {ancien!r} → {nouveau!r} ({morceaux} morceau(x))")
+            return int(morceaux or 0), int(parutions or 0)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur renommer_album({ancien!r} → {nouveau!r}): {e}")
+            return 0, 0
+
     def record_unreleased(self, track_id: int, valeur: bool | None) -> bool:
         """Écrivain DÉDIÉ du constat d'inédit (e34).
 

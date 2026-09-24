@@ -164,7 +164,6 @@ tracks = Table(
     # 1 = inédit, 0 = sorti (une trace de plateforme le prouve). Sans lui, un
     # inédit porte un ⚠️ qu'aucun run ne pourra jamais lever.
     Column("unreleased", _BOOL),
-    UniqueConstraint("title", "artist_id"),
     sqlite_autoincrement=True,
 )
 
@@ -434,6 +433,29 @@ track_spotify_ids = Table(
 # ligne « feat » chez l'invité). La colonne était nue, ce parcours est désormais
 # fait à chaque écriture de donnée d'enregistrement.
 Index("ix_tracks_genius_id", tracks.c.genius_id)
+
+# Identité d'une fiche (e36, 2026-09-24). `UNIQUE(title, artist_id)` faisait
+# FUSIONNER en une ligne des morceaux Genius différents au même titre : l'API
+# `/artists/{id}/songs` rend aussi les covers de tiers où l'artiste est auteur,
+# et le premier `genius_id` gagnait pendant que les champs des autres se
+# mélangeaient (« goosebumps » portait la page de la cover de Skylar Grey et les
+# streams de Travis ; 117 fiches, 132 collisions loggées). Une fiche Genius est
+# désormais unique par (artiste, genius_id) ; le titre ne reste unique que
+# parmi les fiches SANS genius_id (Deezer, remix Kworb), qui n'ont que lui.
+Index(
+    "ux_tracks_artist_genius",
+    tracks.c.artist_id,
+    tracks.c.genius_id,
+    unique=True,
+    sqlite_where=tracks.c.genius_id.isnot(None),
+)
+Index(
+    "ux_tracks_titre_sans_genius",
+    tracks.c.artist_id,
+    tracks.c.title,
+    unique=True,
+    sqlite_where=tracks.c.genius_id.is_(None),
+)
 
 
 # Vidéos YouTube d'un morceau (e20). Un morceau en a souvent DEUX — le clip

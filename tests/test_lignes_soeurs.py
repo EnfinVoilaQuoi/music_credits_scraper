@@ -183,10 +183,11 @@ class TestGardeFous:
 
         assert _colonne(data_manager, t2.id, "lyrics") is None
 
-    def test_un_doublon_intra_artiste_est_SIGNALE_et_non_synchronise(self, data_manager, caplog):
-        """Après partage, deux lignes d'un doublon paraîtraient identiques — et
-        c'est leur DIVERGENCE qui le trahit aujourd'hui. Le rendre invisible
-        serait le pire service à rendre."""
+    def test_un_doublon_intra_artiste_ne_peut_plus_naitre(self, data_manager):
+        """Avant e36, « BOSS » et « Boss » (même page Genius) devenaient deux
+        fiches, signalées « Doublon INTRA-ARTISTE ». Depuis, l'identité d'une
+        fiche est son genius_id : la seconde écriture RETOMBE sur la première.
+        Le signalement reste pour les doublons nés avant e36."""
         josman = Artist(name="Josman")
         josman.id = data_manager.save_artist(josman)
         boss = Track(title="BOSS", artist=josman)
@@ -196,11 +197,10 @@ class TestGardeFous:
 
         bis = Track(title="Boss", artist=josman)  # même artiste, même genius_id
         bis.genius_id = 638651
-        with caplog.at_level("WARNING"):
-            data_manager.save_track(bis)
+        data_manager.save_track(bis)
 
-        assert any("Doublon INTRA-ARTISTE" in m for m in caplog.messages)
-        assert _colonne(data_manager, bis.id, "lyrics") is None  # non synchronisé
+        assert bis.id == boss.id
+        assert len(data_manager.get_artist_tracks(josman.id)) == 1
 
     def test_la_synchronisation_est_idempotente(self, data_manager, famille):
         """Elle ne fait que des unions et des comblements : l'appeler deux fois,

@@ -32,6 +32,11 @@ from src.utils.track_soeurs import (
 
 logger = get_logger(__name__)
 
+
+class FicheAmbigue(ValueError):
+    """Un morceau SANS genius_id désigne plusieurs fiches homonymes (e36)."""
+
+
 # Champs d'observation AUDIO pilotant les colonnes réconciliées (E6). Supprimés
 # ensemble quand un morceau est « nettoyé » (E7-D1) : sinon la réconciliation les
 # ressusciterait à la lecture. bpm_alt suit bpm (octave dérivée).
@@ -88,6 +93,59 @@ def source_lien_retenue(ancienne: str | None, nouvelle: str | None) -> str | Non
 class TrackRepository:
     """Persistance des morceaux, crédits et albums. Requiert `self.engine`."""
 
+    _COLONNES_FICHE_EXISTANTE = (
+        "SELECT id, is_featuring, primary_artist_name, featured_artists, "
+        "lyrics, has_lyrics, lyrics_scraped_at, "
+        # Les colonnes d'IDENTITÉ, pour comparer avant d'écrire.
+        "genius_id, spotify_id, isrc, discogs_id, deezer_id FROM tracks "
+    )
+
+    def _fiche_existante(self, conn, track: Track):
+        """La fiche que `track` met à jour, ou `None` pour une création (e36).
+
+        Le titre ne suffit plus : deux morceaux Genius DIFFÉRENTS peuvent porter
+        le même titre chez un artiste (sa version et la cover d'un tiers dont il
+        est l'auteur), et les retrouver par titre les fusionnait.
+
+          1. `track.id` connu ⇒ cette fiche (l'objet vient de la base) ;
+          2. `genius_id` connu ⇒ la fiche de même genius_id ; sinon une fiche
+             SANS genius_id au même titre, ADOPTÉE (créée par Deezer / Kworb,
+             Genius la publie ensuite) ; sinon création — même si une fiche au
+             même titre porte un AUTRE genius_id ;
+          3. sans genius_id (Deezer, remix Kworb) ⇒ par titre : une fiche la
+             complète ; plusieurs (homonymes) ⇒ refus, jamais de choix au hasard.
+        """
+        artiste = track.artist.id
+
+        def _une(where: str, params: dict):
+            return (
+                conn.execute(text(self._COLONNES_FICHE_EXISTANTE + where), params).mappings().all()
+            )
+
+        if track.id:
+            lignes = _une("WHERE id = :id AND artist_id = :a", {"id": track.id, "a": artiste})
+            if lignes:
+                return lignes[0]
+        if track.genius_id:
+            lignes = _une(
+                "WHERE artist_id = :a AND genius_id = :g", {"a": artiste, "g": track.genius_id}
+            )
+            if lignes:
+                return lignes[0]
+            lignes = _une(
+                "WHERE artist_id = :a AND title = :t AND genius_id IS NULL",
+                {"a": artiste, "t": track.title},
+            )
+            return lignes[0] if lignes else None
+        lignes = _une("WHERE artist_id = :a AND title = :t", {"a": artiste, "t": track.title})
+        if len(lignes) > 1:
+            raise FicheAmbigue(
+                f"« {track.title} » désigne {len(lignes)} fiches de l'artiste {artiste} "
+                f"(ids {[r['id'] for r in lignes]}) et le morceau n'a pas de genius_id : "
+                "rattachement refusé plutôt que deviné"
+            )
+        return lignes[0] if lignes else None
+
     def save_track(self, track: Track) -> int:
         """Sauvegarde ou met à jour un morceau.
 
@@ -135,20 +193,7 @@ class TrackRepository:
                     f"{brute!r} → {track.duration!r} (normalisée à l'entrée)"
                 )
 
-            existing_track = (
-                conn.execute(
-                    text(
-                        "SELECT id, is_featuring, primary_artist_name, featured_artists, "
-                        "lyrics, has_lyrics, lyrics_scraped_at, "
-                        # Les colonnes d'IDENTITÉ, pour comparer avant d'écrire.
-                        "genius_id, spotify_id, isrc, discogs_id, deezer_id FROM tracks "
-                        "WHERE title = :title AND artist_id = :artist_id"
-                    ),
-                    {"title": track.title, "artist_id": track.artist.id},
-                )
-                .mappings()
-                .first()
-            )
+            existing_track = self._fiche_existante(conn, track)
 
             if existing_track:
                 track.id = existing_track["id"]
@@ -3213,14 +3258,27 @@ class TrackRepository:
         Même nettoyage qu'à l'enregistrement : un titre collé depuis Genius
         emporte volontiers un caractère invisible avec lui.
         """
+        titre = clean_stored_title(new_title)
         try:
-            stmt = (
-                update(tracks)
-                .where(tracks.c.id == track_id)
-                .values(title=clean_stored_title(new_title), updated_at=datetime.now())
-            )
             with self.engine.begin() as conn:
-                conn.execute(stmt)
+                # Depuis e36 le titre n'est plus UNIQUE en base (homonymes de
+                # genius_id différents) : le refus qu'assurait la contrainte est
+                # explicite ici, sinon un renommage fabriquerait un homonyme.
+                deja = conn.execute(
+                    text(
+                        "SELECT 1 FROM tracks WHERE title = :t AND id != :id AND artist_id = "
+                        "(SELECT artist_id FROM tracks WHERE id = :id)"
+                    ),
+                    {"t": titre, "id": track_id},
+                ).first()
+                if deja:
+                    logger.error(f"rename_track({track_id}) : « {titre} » est déjà pris")
+                    return False
+                conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == track_id)
+                    .values(title=titre, updated_at=datetime.now())
+                )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur rename_track (track_id={track_id}): {e}")

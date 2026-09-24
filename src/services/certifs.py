@@ -242,8 +242,16 @@ def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
     certifications de l'artiste sous le nom de SES groupes, pas sous celui de
     ses membres. Une formation devinée par un rapprochement de noms n'a rien à
     faire dans une URL de recherche.
+
+    Parmi les alias, seuls les noms de scène et les GRAPHIES servent
+    (`formations.NATURES_DE_RECHERCHE`, 2026-09-23) : un état civil confirmé
+    (« Malcolm McCormick ») n'est pas un nom de crédit discographique, et un
+    indice de recherche est une faute de frappe — les deux fabriquent des faux
+    positifs. Ils restent lus ailleurs (présence dans un collectif : les
+    crédits d'écriture portent l'état civil).
     """
     from src.utils.cert_artist import noms_de_recherche
+    from src.utils.formations import NATURES_DE_RECHERCHE, nature_alias
 
     formations: list[str] = []
     if artist.id:
@@ -251,7 +259,11 @@ def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
             formations = [
                 rel.related_name
                 for rel in runtime.data_manager.get_artist_relations(artist.id)
-                if rel.kind in ("member_of", "alias")
+                if rel.kind == "member_of"
+                or (
+                    rel.kind == "alias"
+                    and nature_alias(rel.detail, rel.source) in NATURES_DE_RECHERCHE
+                )
             ]
         except Exception:
             logger.exception("Formations indisponibles pour la recherche de certifs")

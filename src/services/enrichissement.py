@@ -49,6 +49,7 @@ class BilanEnrich(Bilan):
     alias_proposes: int = 0
     alias_infos: int = 0
     identite: str = ""
+    identite_discogs: str = ""
 
 
 def sources_effectives(runtime: Runtime, options: OptionsEnrich) -> list[str]:
@@ -219,6 +220,18 @@ async def _propositions_identite(
         bilan.identite = f"MusicBrainz : {rapport.identite_mb or rapport.mbid}"
     else:
         bilan.identite = "MusicBrainz : artiste non résolu (rien proposé)"
+    identite_discogs = rapport.identite_discogs
+    if identite_discogs is not None and identite_discogs.origine != "inconnu":
+        libelles = {
+            "forcee": "forcée",
+            "memorisee": "mémorisée",
+            "disques": f"par les disques ({identite_discogs.detail})",
+            "annuaire": f"provisoire, annuaire ({identite_discogs.detail})",
+            "ambigu": f"ambiguë ({identite_discogs.detail})",
+        }
+        bilan.identite_discogs = (
+            f"Discogs : {libelles.get(identite_discogs.origine, identite_discogs.origine)}"
+        )
 
 
 def run(
@@ -280,7 +293,9 @@ def resume(bilan: BilanEnrich, options: OptionsEnrich, desactives: int = 0) -> s
         )
     if bilan.identite:
         summary += (
-            f"🪪 Identité — {bilan.identite} : {bilan.formations_proposees} formation(s), "
+            f"🪪 Identité — {bilan.identite}"
+            f"{f' · {bilan.identite_discogs}' if bilan.identite_discogs else ''}"
+            f" : {bilan.formations_proposees} formation(s), "
             f"{bilan.alias_proposes} alias proposé(s)"
             f"{f', {bilan.alias_infos} pour info' if bilan.alias_infos else ''}"
             " — à arbitrer dans « Groupes »\n"

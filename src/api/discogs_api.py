@@ -1,19 +1,22 @@
 """Client pour l'API Discogs - Enrichissement des crédits et métadonnées"""
 
 import os
-import re
 import time
 from typing import Any
 
 import discogs_client
+import requests
 from discogs_client.exceptions import DiscogsAPIError, HTTPError
 
-from src.models import ArtistRelation, Credit, CreditRole, Track
+from src.models import Artist, ArtistRelation, Credit, CreditRole, Track
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.discogs_identity import nom_sans_suffixe, release_concorde, titre_de_piste
 from src.utils.discogs_positions import concerne_la_piste
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import normalize_name
+
+__all__ = ["DiscogsClient", "nom_sans_suffixe", "release_concorde", "token_discogs"]
 
 logger = get_logger(__name__)
 
@@ -44,19 +47,14 @@ def token_discogs() -> str | None:
 
 # ── Formations : groupes, membres, alias (lot 3) ──────────────────────────────
 
-#: Discogs désambiguïse les homonymes par un SUFFIXE NUMÉRIQUE : notre rappeur
-#: belge s'appelle « Swing (20) », pas « Swing ». Mesuré le 2026-09-08, et le
-#: piège est vicieux : sans retirer ce suffixe, la recherche « Swing » ne rend
-#: qu'UN homonyme exact — « Swing » tout court, qui n'est PAS le nôtre. On
-#: obtiendrait donc une confirmation confiante et fausse, ce qui est pire que
-#: pas de confirmation du tout. Le motif est volontairement étroit (un entier
-#: nu, en fin de nom) pour ne pas amputer un titre légitimement parenthésé.
-_SUFFIXE_HOMONYME = re.compile(r"\s*\(\d+\)$")
-
-
-def nom_sans_suffixe(nom: str) -> str:
-    """« Swing (20) » → « Swing ». Fonction pure."""
-    return _SUFFIXE_HOMONYME.sub("", nom or "").strip()
+# Discogs désambiguïse les homonymes par un SUFFIXE NUMÉRIQUE : notre rappeur
+# belge s'appelle « Swing (20) », pas « Swing ». Mesuré le 2026-09-08, et le
+# piège est vicieux : sans retirer ce suffixe, la recherche « Swing » ne rend
+# qu'UN homonyme exact — « Swing » tout court, qui n'est PAS le nôtre. On
+# obtiendrait donc une confirmation confiante et fausse, ce qui est pire que
+# pas de confirmation du tout. `nom_sans_suffixe` vit dans
+# `src.utils.discogs_identity` (partagé avec l'oracle et l'audit) et reste
+# importable d'ici.
 
 
 class DiscogsClient:
@@ -112,7 +110,13 @@ class DiscogsClient:
             logger.debug(f"Impossible de vérifier le rate limit: {e}")
 
     def search_track(
-        self, track_title: str, artist_name: str, album_name: str | None = None
+        self,
+        track_title: str,
+        artist_name: str,
+        album_name: str | None = None,
+        *,
+        noms_attendus: set[str] | None = None,
+        artist_discogs_id: int | None = None,
     ) -> dict[str, Any] | None:
         """
         Recherche un morceau sur Discogs
@@ -121,6 +125,10 @@ class DiscogsClient:
             track_title: Titre du morceau
             artist_name: Nom de l'artiste
             album_name: Nom de l'album (optionnel mais améliore la précision)
+            noms_attendus: noms sous lesquels le disque (ou la piste) doit être
+                crédité — défaut : `artist_name` seul. Pour un feat, y ajouter
+                l'artiste principal.
+            artist_discogs_id: identité Discogs de l'artiste, si connue.
 
         Returns:
             Dictionnaire avec les infos du morceau ou None
@@ -129,13 +137,24 @@ class DiscogsClient:
             logger.error("❌ Client Discogs non initialisé")
             return None
 
+        attendus = set(noms_attendus or ()) | {artist_name}
         with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_title}") as obs:
-            return self._search_track_body(obs, track_title, artist_name, album_name)
+            return self._search_track_body(
+                obs, track_title, artist_name, album_name, attendus, artist_discogs_id
+            )
 
     def _search_track_body(
-        self, obs, track_title: str, artist_name: str, album_name: str | None
+        self,
+        obs,
+        track_title: str,
+        artist_name: str,
+        album_name: str | None,
+        noms_attendus: set[str] | None = None,
+        artist_discogs_id: int | None = None,
     ) -> dict[str, Any] | None:
         """Corps de `search_track`, sous l'observation ouverte par elle."""
+        noms_attendus = noms_attendus or {artist_name}
+        etrangers = 0
         try:
             self._check_rate_limit()
 
@@ -178,6 +197,23 @@ class DiscogsClient:
                     # Vérifier si le release contient le track recherché
                     track_data = self._extract_track_from_release(release, track_title, artist_name)
 
+                    # Le disque est-il celui de NOTRE artiste ? (2026-09-23) La
+                    # recherche est libre : Django « Nuages » rapprochait le disque
+                    # de Django Reinhardt, et en importait les crédits. Un disque
+                    # étranger est sauté — le candidat suivant peut être le bon.
+                    if track_data and not release_concorde(
+                        track_data.pop("artistes_release", []),
+                        track_data.pop("artistes_piste", []),
+                        noms_attendus,
+                        artist_discogs_id,
+                    ):
+                        etrangers += 1
+                        logger.info(
+                            f"↪️ Discogs: disque « {release.title} » crédité à un autre "
+                            f"artiste — écarté pour '{track_title}'"
+                        )
+                        continue
+
                     if track_data:
                         logger.info(f"✅ Discogs: Correspondance trouvée (résultat #{i})")
                         log_api("Discogs", f"search/{track_title}", True)
@@ -194,7 +230,10 @@ class DiscogsClient:
                 f"❌ Aucune correspondance exacte trouvée sur Discogs pour '{track_title}'"
             )
             log_api("Discogs", f"search/{track_title}", False)
-            obs.absent("aucune correspondance exacte")
+            obs.absent(
+                "aucune correspondance exacte"
+                + (f" ({etrangers} disque(s) d'un autre artiste écarté(s))" if etrangers else "")
+            )
             return None
 
         except HTTPError as e:
@@ -256,6 +295,11 @@ class DiscogsClient:
                         "discogs_url": release.url if hasattr(release, "url") else None,
                         "position": track.position if hasattr(track, "position") else None,
                         "duration": track.duration if hasattr(track, "duration") else None,
+                        # Retirés par `_search_track_body` après le contrôle
+                        # d'identité (`release_concorde`) : ils ne sont pas des
+                        # données du morceau.
+                        "artistes_release": self._artistes_de(release),
+                        "artistes_piste": self._artistes_de(track),
                     }
 
                     # Extraire les métadonnées du release
@@ -284,6 +328,14 @@ class DiscogsClient:
         except (DiscogsAPIError, AttributeError, TypeError, KeyError, ValueError) as e:
             logger.warning(f"Erreur extraction track depuis release: {e}")
             return None
+
+    @staticmethod
+    def _artistes_de(objet) -> list[tuple[int | None, str]]:
+        """`(id, nom)` des artistes crédités d'un disque ou d'une piste de sa
+        tracklist (`artists`, lazy-loadé — frontière externe). Une piste d'album
+        n'en a souvent aucun : c'est le disque qui la crédite."""
+        artistes = getattr(objet, "artists", None) or []
+        return [(getattr(a, "id", None), a.name) for a in artistes if getattr(a, "name", None)]
 
     def _extract_credits_from_release(self, release) -> list[dict[str, str]]:
         """
@@ -341,21 +393,11 @@ class DiscogsClient:
             logger.warning(f"⚠️ Erreur extraction crédits Discogs: {e}")
             return []
 
-    def _normalize_string(self, s: str) -> str:
-        """Normalise une chaîne pour la comparaison"""
-        import re
-
-        # Unifier les apostrophes typographiques (' ' ` ´) → apostrophe droite
-        for apo in ("’", "‘", "`", "´"):
-            s = s.replace(apo, "'")
-        # Minuscules, sans accents, sans caractères spéciaux
-        s = s.lower().strip()
-        # Retirer les parenthèses/crochets
-        s = re.sub(r"\s*[\(\)\[\]].*?[\(\)\[\]]", "", s)
-        s = re.sub(r"\s*[\(\)\[\]]", "", s)
-        # Retirer feat/ft
-        s = re.sub(r"\s*\(?f(ea)?t\.?\s+.*", "", s)
-        return " ".join(s.split())
+    @staticmethod
+    def _normalize_string(s: str) -> str:
+        """Normalise une chaîne pour la comparaison (`discogs_identity.titre_de_piste`,
+        partagée avec l'audit des disques)."""
+        return titre_de_piste(s)
 
     def _map_discogs_role_to_enum(self, role: str) -> CreditRole:
         """
@@ -483,83 +525,188 @@ class DiscogsClient:
                 obs.absent()
             return exacts
 
-    def get_artist_groups(self, nom: str, attendues: set[str] | None = None) -> dict:
-        """Ce que Discogs sait des formations de cet artiste.
+    def candidats_artiste(self, nom: str) -> list[tuple[int, str]]:
+        """`(id, nom)` des homonymes EXACTS (suffixe retiré) — le repli annuaire
+        de l'oracle `services/discogs_identite`."""
+        return [(int(a.id), a.name) for a in self._candidats_formation(nom)]
 
-        Discogs est la source de **confirmation** du lot 3, pas la source
-        primaire — et sa façon de désambiguïser lui interdit de trancher seul :
-        « Swing » rend SEPT homonymes exacts une fois le suffixe retiré. Choisir
-        parmi eux sans oracle reviendrait à jouer à pile ou face sur l'identité
-        de quelqu'un.
+    def artistes_du_disque(self, release_id: int) -> list[tuple[int, str]] | None:
+        """`(id, nom)` des artistes crédités d'un disque (pas les `extraartists`),
+        ou `None` s'il est illisible."""
+        disque = self.lire_disque(release_id)
+        return None if disque is None else disque["artistes"]
 
-        D'où deux régimes, et c'est tout l'intérêt :
+    def lire_disque(self, release_id: int) -> dict | None:
+        """Ce qu'il faut pour juger l'identité d'un disque : ses artistes et,
+        piste par piste, le titre et les artistes crédités (compilations).
 
-          · **un seul candidat** (« Shurik'n ») → on lit ses groupes, ses membres
-            et ses alias, qui deviennent des PROPOSITIONS ;
-          · **plusieurs candidats** → on ne propose rien, mais on peut encore
-            CONFIRMER : si l'un d'eux déclare une des formations `attendues`
-            (celles que MusicBrainz vient de nommer), l'ambiguïté est levée par
-            la chose même qu'on cherchait à vérifier.
+        `release.*` est lazy-loadé par discogs_client : le premier accès EST la
+        requête (une seule par disque). Un disque illisible rend `None` (on ne
+        conclut pas), jamais une liste vide — qui voudrait dire « personne
+        n'est crédité ».
 
         Returns:
-            ``{"proposees": [ArtistRelation], "confirmees": {noms}, "candidats": n}``
+            ``{"titre", "artistes": [(id, nom)], "pistes": [(titre, [(id, nom)])]}``
         """
-        candidats = self._candidats_formation(nom)
+        with source_usage.observe(_SOURCE, label=f"disque {release_id}") as obs:
+            try:
+                with source_usage.attempt(_SOURCE, detail="release"):
+                    release = self.client.release(int(release_id))
+                    out = {
+                        "titre": release.title,
+                        "artistes": self._artistes_de(release),
+                        "pistes": [
+                            (piste.title, self._artistes_de(piste))
+                            for piste in (release.tracklist or [])
+                        ],
+                    }
+            except HTTPError as e:
+                obs.note_status(e.status_code or 0)
+                logger.warning(f"Discogs : disque {release_id} illisible ({e})")
+                return None
+            except (DiscogsAPIError, requests.RequestException) as e:
+                obs.fail(IssueKind.UNREACHABLE, f"disque {release_id} : {e}")
+                logger.warning(f"Discogs : disque {release_id} illisible ({e})")
+                return None
+            except (AttributeError, TypeError, ValueError) as e:
+                obs.parse_error(f"disque {release_id} : {e}")
+                logger.warning(f"Discogs : disque {release_id} inexploitable ({e})")
+                return None
+            obs.ok()
+            return out
+
+    def get_artist_groups(
+        self,
+        nom: str,
+        attendues: set[str] | None = None,
+        artist_id: int | None = None,
+    ) -> dict:
+        """Ce que Discogs sait des formations de cet artiste.
+
+        **Identité connue** (`artist_id`, tranché par l'oracle
+        `services/discogs_identite` — disques déjà rattachés, ou mémorisé) :
+        la fiche est lue DIRECTEMENT (une requête, aucune recherche), ses liens
+        sont des propositions et `confirmees` = liens ∩ `attendues`. C'est ce
+        qui débloque les 14 artistes sur 25 qui ont des homonymes Discogs
+        (mesuré 2026-09-23) : sans identité, ils ne recevaient rien.
+
+        **Sans identité**, Discogs ne peut pas trancher seul — « Swing » rend
+        SEPT homonymes exacts une fois le suffixe retiré :
+
+          · **un seul candidat** (« Shurik'n ») → ses groupes, membres et alias
+            deviennent des PROPOSITIONS — sauf **contradiction** : si
+            MusicBrainz a nommé des formations (`attendues` non vides) et
+            qu'AUCUN de ses liens ne les recoupe, ce candidat unique n'est
+            probablement pas le nôtre, et rien n'est proposé ;
+          · **plusieurs candidats** → on ne propose rien, mais on peut encore
+            CONFIRMER : si UN d'eux déclare une des formations `attendues`,
+            l'ambiguïté est levée par la chose même qu'on cherchait à vérifier.
+            Si DEUX homonymes confirment, elle ne l'est pas : rien (l'ancienne
+            boucle gardait silencieusement les liens du dernier).
+
+        Returns:
+            ``{"proposees": [ArtistRelation], "confirmees": {noms},
+            "candidats": n, "diagnostic": str | None}``
+        """
         attendues_norm = {normalize_name(f) for f in (attendues or set())}
+
+        if artist_id is not None:
+            with (
+                source_usage.observe(_SOURCE, label=f"formations #{artist_id}"),
+                source_usage.attempt(_SOURCE, detail="artist"),
+            ):
+                liens = self._liens_de(self.client.artist(int(artist_id)))
+            noms_lies = {normalize_name(rel.related_name) for rel in liens}
+            return {
+                "proposees": liens,
+                "confirmees": noms_lies & attendues_norm,
+                "candidats": 1,
+                "diagnostic": None,
+            }
+
+        candidats = self._candidats_formation(nom)
         proposees: list[ArtistRelation] = []
         confirmees: set[str] = set()
+        diagnostic = None
+        confirmants = 0
 
         for artiste in candidats:
             with source_usage.observe(_SOURCE, label=f"formations {artiste.name}"):
                 liens = self._liens_de(artiste)
-            noms_lies = {normalize_name(nom_sans_suffixe(rel.related_name)) for rel in liens}
+            noms_lies = {normalize_name(rel.related_name) for rel in liens}
             communs = noms_lies & attendues_norm
             if communs:
+                confirmants += 1
                 confirmees |= communs
                 if len(candidats) > 1:
                     # L'ambiguïté est levée : ce candidat-là est le bon, ses
                     # autres liens valent donc aussi comme propositions.
                     proposees = liens
             elif len(candidats) == 1:
-                proposees = liens
+                if attendues_norm:
+                    diagnostic = (
+                        f"Discogs : l'unique « {artiste.name} » ne déclare aucune des "
+                        "formations nommées par MusicBrainz — probablement un autre "
+                        "artiste, rien n'en est tiré."
+                    )
+                else:
+                    proposees = liens
 
-        if len(candidats) > 1 and not confirmees:
+        if confirmants > 1:
+            diagnostic = (
+                f"Discogs : {confirmants} homonymes de « {nom} » déclarent les formations "
+                "attendues — ambigu, rien n'en est tiré."
+            )
+            proposees, confirmees = [], set()
+        elif len(candidats) > 1 and not confirmees:
             logger.info(
                 f"Discogs : {len(candidats)} homonymes exacts pour « {nom} » et aucun ne "
                 "déclare les formations attendues — aucune confirmation, et rien d'inventé."
             )
-        return {"proposees": proposees, "confirmees": confirmees, "candidats": len(candidats)}
+        if diagnostic:
+            logger.info(diagnostic)
+        return {
+            "proposees": proposees,
+            "confirmees": confirmees,
+            "candidats": len(candidats),
+            "diagnostic": diagnostic,
+        }
 
     @staticmethod
     def _liens_de(artiste) -> list:
         """Groupes, membres et alias d'un artiste Discogs, en `ArtistRelation`.
 
-        Le nom est conservé VERBATIM (suffixe compris) : c'est ce que Discogs
-        affiche, et le retirer ici ferait perdre l'information qui distingue
-        « Swing (20) » de « Swing (6) ». Le retrait n'a lieu qu'à la COMPARAISON.
+        **Le numéro d'homonyme est retiré ICI, à l'entrée** (2026-09-23). La
+        version précédente gardait le nom verbatim en promettant de retirer le
+        suffixe « à la comparaison » — ce qui n'arrivait jamais : `normalize_name`
+        garde « (4) ». Mesuré en base : `667 (4)` en double de `667`, `CFR (2)`
+        et `Moon Man (9)`, liens jamais résolus vers un artiste de la base et
+        envoyés tels quels à la recherche de certifs. Deux liens qui ne
+        diffèrent que par le suffixe n'en font qu'un.
         """
-        liens = []
+        liens: list[ArtistRelation] = []
+        vus: set[tuple[str, str]] = set()
+
+        def ajouter(nom: str, kind: str, detail: str | None = None) -> None:
+            propre = nom_sans_suffixe(nom)
+            cle = (normalize_name(propre), kind)
+            if not cle[0] or cle in vus:
+                return
+            vus.add(cle)
+            liens.append(
+                ArtistRelation(related_name=propre, kind=kind, source="discogs", detail=detail)
+            )
+
         for groupe in artiste.groups or []:
-            liens.append(
-                ArtistRelation(related_name=groupe.name, kind="member_of", source="discogs")
-            )
+            ajouter(groupe.name, "member_of")
         for membre in artiste.members or []:
-            liens.append(
-                ArtistRelation(related_name=membre.name, kind="has_member", source="discogs")
-            )
+            ajouter(membre.name, "has_member")
         for alias in artiste.aliases or []:
-            liens.append(ArtistRelation(related_name=alias.name, kind="alias", source="discogs"))
-        # Variantes de graphie (« ISHA », « Isha (2) ») : pas des identités, de
-        # simples orthographes — gardées POUR INFO, jamais proposées.
+            ajouter(alias.name, "alias")
+        # Variantes de graphie (« ISHA ») : pas des identités, de simples
+        # orthographes — gardées POUR INFO, jamais proposées.
         for variante in artiste.name_variations or []:
-            liens.append(
-                ArtistRelation(
-                    related_name=str(variante),
-                    kind="alias",
-                    source="discogs",
-                    detail="name_variation",
-                )
-            )
+            ajouter(str(variante), "alias", "name_variation")
         return liens
 
     def enrich_track_data(self, track: Track, force_update: bool = False) -> bool | str:
@@ -582,8 +729,24 @@ class DiscogsClient:
             artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
             album_name = track.album
 
-            # Rechercher le track sur Discogs
-            track_data = self.search_track(track.title, artist_name, album_name)
+            # Rechercher le track sur Discogs. Pour un feat, le disque est celui
+            # de l'artiste PRINCIPAL : il est accepté aussi. L'identité Discogs
+            # de l'artiste (oracle `discogs_identite`) ne vaut que hors feat.
+            attendus = {artist_name}
+            if track.primary_artist_name:
+                attendus.add(track.primary_artist_name)
+            artist_discogs_id = (
+                track.artist.discogs_id
+                if isinstance(track.artist, Artist) and not track.is_featuring
+                else None
+            )
+            track_data = self.search_track(
+                track.title,
+                artist_name,
+                album_name,
+                noms_attendus=attendus,
+                artist_discogs_id=artist_discogs_id,
+            )
 
             if not track_data:
                 logger.warning(f"⚠️ Aucune donnée Discogs pour '{track.title}'")

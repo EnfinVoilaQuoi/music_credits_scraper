@@ -210,7 +210,7 @@ class _DMFin(_DM):
         return True
 
     def get_artist_tracks(self, artist_id):
-        return [SimpleNamespace(album="Album A")]
+        return [Track(title="x", album="Album A")]
 
     def get_artist_relations(self, artist_id, status="confirmed"):
         return [r for r in self._relations if status is None or r.status == status]
@@ -240,7 +240,13 @@ def _setup_fin(monkeypatch, fiches=None, mb=None):
         import src.api.discogs_api as dg_mod
 
         class _Dg:
-            def get_artist_groups(self, nom, attendues=None):
+            def candidats_artiste(self, nom):
+                return []
+
+            def artistes_du_disque(self, release_id):
+                return None
+
+            def get_artist_groups(self, nom, attendues=None, artist_id=None):
                 return {"proposees": [], "confirmees": set(), "candidats": 0}
 
         monkeypatch.setattr(dg_mod, "DiscogsClient", lambda token: _Dg())

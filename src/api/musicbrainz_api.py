@@ -110,7 +110,12 @@ class AliasArtiste:
 
     @property
     def proposable(self) -> bool:
-        return self.type == ALIAS_NOM_DE_SCENE
+        """Délègue à `formations.nature_alias` — UNE règle, plus de verdict
+        double (import local : `src.utils` tire le pipeline d'enrichissement,
+        qui importe ce module)."""
+        from src.utils.formations import nature_alias
+
+        return nature_alias(self.type, "musicbrainz") == "scene"
 
 
 #: Le seul type d'alias MusicBrainz qui vaut proposition.

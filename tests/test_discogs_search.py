@@ -6,6 +6,8 @@ n'arrête pas les suivants, et chaque issue porte le bon verdict
 d'observabilité (`absent` ≠ `throttled` ≠ `parse` ≠ `unreachable`).
 """
 
+from types import SimpleNamespace
+
 import pytest
 from discogs_client.exceptions import DiscogsAPIError, HTTPError
 
@@ -15,6 +17,10 @@ from tests import test_discogs_api as _tda
 
 _Piste, _Release = _tda._Piste, _tda._Release
 client = _tda.client  # fixture du module voisin, réexposée sous son nom
+
+
+def _Artiste(id_, name):
+    return SimpleNamespace(id=id_, name=name)
 
 
 class _Client:
@@ -57,9 +63,12 @@ class TestRecherche:
         assert client.search_track("T", "A") is None
 
     def test_requete_avec_album_et_premier_candidat_qui_correspond(self, client):
-        client.client = _Client([_Release(tracklist=[_Piste("Bande organisée")])])
+        client.client = _Client(
+            [_Release(tracklist=[_Piste("Bande organisée")], artists=[_Artiste(1, "13 Organisé")])]
+        )
         data = client.search_track("Bande Organisée", "13 Organisé", "13 Organisé")
         assert data and data["discogs_id"] == 12345
+        assert "artistes_release" not in data and "artistes_piste" not in data
         assert client.client.requetes[0][0] == "13 Organisé 13 Organisé Bande Organisée"
         assert _verdicts() == [(IssueKind.OK, "")]
 
@@ -109,3 +118,45 @@ class TestRecherche:
         client.search_track("T", "A")
         kinds = [k for k, _ in _verdicts()]
         assert kinds == [IssueKind.PARSE, IssueKind.UNREACHABLE]
+
+
+class TestIdentiteDuDisque:
+    """2026-09-23 : la recherche est libre, et l'artiste du disque trouvé n'était
+    jamais vérifié — Django « Nuages » portait le disque de Django Reinhardt."""
+
+    def test_disque_etranger_saute_puis_le_bon(self, client):
+        reinhardt = _Release(
+            id=1, tracklist=[_Piste("Nuages")], artists=[_Artiste(9, "Django Reinhardt")]
+        )
+        le_notre = _Release(id=2, tracklist=[_Piste("Nuages")], artists=[_Artiste(5, "Django (3)")])
+        client.client = _Client([reinhardt, le_notre])
+        data = client.search_track("Nuages", "Django")
+        assert data["discogs_id"] == 2
+        assert _verdicts() == [(IssueKind.OK, "")]
+
+    def test_disque_etranger_seul_est_absent_et_compte(self, client):
+        client.client = _Client(
+            [_Release(tracklist=[_Piste("Nuages")], artists=[_Artiste(9, "Django Reinhardt")])]
+        )
+        assert client.search_track("Nuages", "Django") is None
+        issue, detail = _verdicts()[0]
+        assert issue is IssueKind.ABSENT and "1 disque(s) d'un autre artiste" in detail
+
+    def test_feat_disque_de_lartiste_principal(self, client):
+        client.client = _Client(
+            [_Release(tracklist=[_Piste("Bande organisée")], artists=[_Artiste(3, "Jul")])]
+        )
+        data = client.search_track("Bande organisée", "SCH", noms_attendus={"Jul"})
+        assert data is not None
+
+    def test_lidentite_discogs_suffit(self, client):
+        client.client = _Client(
+            [_Release(tracklist=[_Piste("Durag")], artists=[_Artiste(6244752, "ISHA (7)")])]
+        )
+        assert client.search_track("Durag", "Isha", artist_discogs_id=6244752) is not None
+
+    def test_compilation_cest_la_piste_qui_decide(self, client):
+        piste = _Piste("Nuages")
+        piste.artists = [_Artiste(5, "Django")]
+        client.client = _Client([_Release(tracklist=[piste], artists=[_Artiste(194, "Various")])])
+        assert client.search_track("Nuages", "Django") is not None

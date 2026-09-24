@@ -24,7 +24,11 @@ from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_title
 from src.utils.track_mapper import _clean_duration, track_from_row
-from src.utils.track_soeurs import fusionner_constat_instrumental, synchroniser_soeurs
+from src.utils.track_soeurs import (
+    effacer_chez_les_soeurs,
+    fusionner_constat_instrumental,
+    synchroniser_soeurs,
+)
 
 logger = get_logger(__name__)
 
@@ -1470,6 +1474,43 @@ class TrackRepository:
             logger.error(f"Erreur record_spotify_streams (track_id={track_id}): {e}")
             return False
 
+    def forget_spotify_streams_observation(self, track_id: int, source: str) -> bool:
+        """Retire l'observation de streams d'UNE source, puis ré-arbitre la colonne.
+
+        Pendant de `record_spotify_streams`, pour une observation que sa source ne
+        confirme plus (2026-09-23) : l'arbitrage est une priorité PURE, sans
+        fraîcheur, donc une valeur Kworb qu'aucun run ne réécrit plus garde la
+        colonne indéfiniment — Kanye « Runaway » affichait 35 M (une ligne Kworb
+        d'avant la règle des IDs partagés) contre 1,26 Md lus sur Spotify.
+
+        S'il ne reste AUCUNE observation, la colonne est VIDÉE (comme
+        `clear_track_spotify_id`) : laisser le chiffre en place en ferait une
+        valeur sans source. Le quotidien ne vient que de Kworb et n'est pas
+        arbitré : il part avec l'observation Kworb.
+        """
+        try:
+            with self.engine.begin() as conn:
+                supprimees = conn.execute(
+                    text(
+                        "DELETE FROM observations WHERE track_id = :tid "
+                        "AND field = 'spotify_streams' AND source = :src"
+                    ),
+                    {"tid": track_id, "src": source},
+                ).rowcount
+                if not supprimees:
+                    return False
+                valeurs = self._arbitrer_streams(conn, track_id) or {
+                    "spotify_streams": None,
+                    "spotify_streams_updated": None,
+                }
+                if source == "kworb":
+                    valeurs["spotify_daily_streams"] = None
+                conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur forget_spotify_streams_observation({track_id}, {source}): {e}")
+            return False
+
     def _arbitrer_streams(self, conn, track_id: int) -> dict:
         """Colonnes de streams à écrire, d'après TOUTES les observations du morceau.
 
@@ -1966,6 +2007,72 @@ class TrackRepository:
             return rapport
         except SQLAlchemyError as e:
             logger.error(f"Erreur clear_track_isrc (track_id={track_id}): {e}")
+            return rapport
+
+    def clear_track_discogs_release(self, track_id: int, discogs_id: int | None = None) -> dict:
+        """Rejette le DISQUE Discogs d'un morceau (2026-09-23) — pendant de
+        `clear_track_deezer_id` pour ce que `DiscogsClient.enrich_track_data`
+        écrit à partir d'un disque :
+
+          1. `discogs_id` (l'id du DISQUE où la recherche a trouvé la piste) ;
+          2. `genre` — Discogs en est le SEUL écrivain, et il ne l'écrit que
+             quand il est vide, depuis le même disque que `discogs_id` : il en
+             découle, il part avec lui ;
+          3. les crédits `source='discogs'` — importés du disque étranger
+             (Django « Nuages » : un crédit photo du disque de Django Reinhardt).
+
+        Appliqué aux lignes SŒURS (même `genius_id`) qui portent ce disque ou
+        aucun : `discogs_id`, `genre` et les crédits y sont propagés
+        (`track_soeurs`), et les y laisser les ferait revenir à la première
+        synchronisation. Une sœur qui porte un AUTRE disque garde le sien.
+        """
+        rapport = {"id_retire": None, "lignes": [], "credits_retires": 0}
+        try:
+            with self.engine.begin() as conn:
+                ligne = (
+                    conn.execute(
+                        text("SELECT discogs_id FROM tracks WHERE id = :tid"), {"tid": track_id}
+                    )
+                    .mappings()
+                    .first()
+                )
+                if ligne is None:
+                    logger.warning(f"clear_track_discogs_release : morceau {track_id} introuvable")
+                    return rapport
+                vise = discogs_id if discogs_id is not None else ligne["discogs_id"]
+                if vise is None:
+                    return rapport
+                vise = int(vise)
+                rapport["id_retire"] = vise
+
+                def effacer(tid: int) -> None:
+                    actuel = conn.execute(
+                        text("SELECT discogs_id FROM tracks WHERE id = :tid"), {"tid": tid}
+                    ).scalar()
+                    if actuel is not None and int(actuel) != vise:
+                        return
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET discogs_id = NULL, genre = NULL, "
+                            "updated_at = :now WHERE id = :tid"
+                        ),
+                        {"tid": tid, "now": datetime.now()},
+                    )
+                    rapport["credits_retires"] += conn.execute(
+                        text("DELETE FROM credits WHERE track_id = :tid AND source = 'discogs'"),
+                        {"tid": tid},
+                    ).rowcount
+                    rapport["lignes"].append(tid)
+
+                effacer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, effacer)
+            logger.info(
+                f"🧹 Disque Discogs {vise} retiré de {len(rapport['lignes'])} ligne(s) "
+                f"({rapport['credits_retires']} crédit(s) Discogs)"
+            )
+            return rapport
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur clear_track_discogs_release (track_id={track_id}): {e}")
             return rapport
 
     def update_track_spotify_id(

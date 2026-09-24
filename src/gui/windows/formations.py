@@ -14,11 +14,15 @@ un run ne repropose jamais un lien refusé.
 
 Deux choix par ligne, distincts :
 
-  · **le statut** — proposé / confirmé / refusé ;
+  · **le statut** — proposé / confirmé / refusé / pour info (2026-09-23 : un
+    état civil ou une graphie se CONFIRME aussi — la nature de l'alias,
+    affichée en clair, décide ensuite de l'usage : les certifs ne cherchent
+    que sous les noms de scène et les graphies) ;
   · **groupe ou collectif**, qui décide de la LECTURE. Un groupe apporte tous
     ses morceaux au membre ; un collectif seulement ceux où il est présent
     (écriture, production, performance). La nature déjà choisie pour une
-    formation est pré-remplie — elle appartient à la formation, pas au lien.
+    formation est pré-remplie — elle appartient à la formation, pas au lien ;
+    sans elle, aucune par défaut, et une confirmation sans nature est signalée.
 
 La page d'un groupe n'absorbe pas le solo de ses membres : le panneau
 « Membres » sert à naviguer vers eux (décision utilisateur du 2026-09-08).
@@ -31,6 +35,7 @@ import customtkinter as ctk
 
 from src.concurrency.lifecycle import start_worker
 from src.utils.formations import (
+    NATURES_ALIAS,
     candidats_de_base,
     chercher_formations,
     reunir,
@@ -49,8 +54,15 @@ _LIBELLE_KIND = {
 
 _NATURES = ("groupe", "collectif")
 
-#: Statuts arbitrables, dans l'ordre du sélecteur, et leurs libellés.
-_STATUTS = (("proposed", "Proposé"), ("confirmed", "Confirmé"), ("refused", "Refusé"))
+#: Statuts arbitrables, dans l'ordre du sélecteur, et leurs libellés. « Pour
+#: info » est arbitrable depuis le 2026-09-23 : un état civil ou une graphie
+#: (« Travis $cott ») se confirme, et un alias confirmé se ramène en info.
+_STATUTS = (
+    ("proposed", "Proposé"),
+    ("confirmed", "Confirmé"),
+    ("refused", "Refusé"),
+    ("info", "Pour info"),
+)
 _LIBELLE_STATUT = dict(_STATUTS)
 _STATUT_PAR_LIBELLE = {lib: st for st, lib in _STATUTS}
 
@@ -59,8 +71,22 @@ _SECTIONS = (
     ("proposed", "⏳ Proposés — à arbitrer", "#e6a700"),
     ("confirmed", "✅ Confirmés", "#1DB954"),
     ("refused", "⛔ Refusés (mémoire : jamais reproposés)", "gray"),
-    ("info", "ℹ️ Pour info — jamais utilisés (état civil, indices, graphies)", "gray"),
+    (
+        "info",
+        "ℹ️ Pour info — non proposés (état civil, indices, graphies), confirmables",
+        "gray",
+    ),
 )
+
+
+def section_de(candidat) -> str:
+    """La section d'un candidat. Un candidat NEUF non proposable (variante de
+    graphie, état civil…) va « pour info » — il était rangé avec les proposés et
+    enregistré en `proposed` s'il était laissé tel quel (20 variantes en base,
+    2026-09-23). Fonction pure."""
+    if candidat.status is None:
+        return "proposed" if candidat.proposable else "info"
+    return candidat.status
 
 
 class FormationsWindow:
@@ -208,10 +234,6 @@ class FormationsWindow:
             self.bouton_enregistrer.configure(state="normal")
             return
 
-        # Un candidat neuf (jamais en base) s'arbitre avec les proposés.
-        def section_de(c):
-            return "info" if c.status == "info" else (c.status or "proposed")
-
         for statut, titre, couleur in _SECTIONS:
             groupe = [c for c in self._candidats if section_de(c) == statut]
             if not groupe:
@@ -220,17 +242,18 @@ class FormationsWindow:
                 self.corps, text=titre, text_color=couleur, font=ctk.CTkFont(weight="bold")
             ).pack(anchor="w", padx=6, pady=(10, 2))
             for candidat in groupe:
-                self._ligne(candidat, lecture_seule=statut == "info")
+                self._ligne(candidat, section=statut)
 
         self.bouton_enregistrer.configure(state="normal")
 
-    def _ligne(self, candidat, *, lecture_seule: bool):
+    def _ligne(self, candidat, *, section: str):
         cadre = ctk.CTkFrame(self.corps)
         cadre.pack(fill="x", padx=6, pady=3)
 
         libelle = f"{_LIBELLE_KIND.get(candidat.kind, candidat.kind)}  «{candidat.related_name}»"
-        if candidat.detail:
-            libelle += f"  ({candidat.detail})"
+        if candidat.nature:
+            # La nature EN CLAIR (« état civil »), pas le type brut de la source.
+            libelle += f"  ({NATURES_ALIAS[candidat.nature]})"
         ctk.CTkLabel(cadre, text=libelle, anchor="w", width=340).pack(side="left", padx=(10, 4))
 
         # Le croisement des deux sources est l'information la plus utile : elle
@@ -246,18 +269,18 @@ class FormationsWindow:
         periode = " → ".join(x for x in (candidat.begin_date, candidat.end_date) if x)
         ctk.CTkLabel(cadre, text=periode, width=100, text_color="gray").pack(side="left", padx=4)
 
-        if lecture_seule:
-            ctk.CTkLabel(cadre, text="pour info", width=200, text_color="gray").pack(
-                side="left", padx=4
-            )
-            return
-
-        statut = ctk.StringVar(value=_LIBELLE_STATUT[candidat.status or "proposed"])
+        # Un candidat neuf part avec le statut de SA section : laissé tel quel,
+        # un non-proposable est enregistré en `info`, jamais en `proposed`.
+        statut = ctk.StringVar(value=_LIBELLE_STATUT[candidat.status or section])
         ctk.CTkSegmentedButton(
-            cadre, values=[lib for _st, lib in _STATUTS], variable=statut, width=250
+            cadre, values=[lib for _st, lib in _STATUTS], variable=statut, width=320
         ).pack(side="left", padx=4)
 
-        nature = ctk.StringVar(value=candidat.formation or "groupe")
+        # Pas de nature par défaut (2026-09-23) : pré-remplie seulement si la
+        # formation en a déjà une ailleurs (`nature_connue_pour`). Un « groupe »
+        # par défaut faisait absorber toute la discographie d'une formation
+        # que personne n'avait qualifiée.
+        nature = ctk.StringVar(value=candidat.formation or "")
         if candidat.kind == "alias":
             # La question groupe/collectif ne se pose pas pour un autre nom de scène.
             ctk.CTkLabel(cadre, text="—", width=120, text_color="gray").pack(side="left", padx=4)
@@ -282,21 +305,31 @@ class FormationsWindow:
             (
                 ligne["candidat"],
                 _STATUT_PAR_LIBELLE[ligne["statut"].get()],
-                ligne["nature"].get(),
+                ligne["nature"].get() or None,
             )
             for ligne in self._lignes
         )
-        confirmes = refuses = proposes = 0
+        confirmes = refuses = proposes = infos = 0
+        sans_nature = []
         for candidat, statut, nature in decisions:
             rel = candidat.vers_relation(nature)
             if statut == "confirmed":
                 confirmes += dm.record_artist_relations(self.artist.id, [rel])
+                if rel.kind == "member_of" and not rel.formation:
+                    sans_nature.append(rel.related_name)
             elif statut == "refused":
                 if candidat.status is None:
                     dm.propose_artist_relations(self.artist.id, [rel])
                 refuses += int(
                     dm.set_relation_status(self.artist.id, rel.related_name, rel.kind, "refused")
                 )
+            elif statut == "info":
+                if candidat.status is None:
+                    infos += dm.propose_artist_relations(self.artist.id, [rel], status="info")
+                else:
+                    infos += int(
+                        dm.set_relation_status(self.artist.id, rel.related_name, rel.kind, "info")
+                    )
             else:  # proposed : un candidat neuf, gardé en mémoire sans le trancher
                 if candidat.status is None:
                     proposes += dm.propose_artist_relations(self.artist.id, [rel])
@@ -304,13 +337,23 @@ class FormationsWindow:
                     dm.set_relation_status(self.artist.id, rel.related_name, rel.kind, "proposed")
         logger.info(
             f"Formations « {self.artist.name} » : {confirmes} confirmé(s), "
-            f"{refuses} refusé(s), {proposes} proposé(s) gardé(s)"
+            f"{refuses} refusé(s), {proposes} proposé(s) gardé(s), {infos} pour info"
         )
-        self.statut.configure(
-            text=f"✅ {confirmes} confirmé(s), {refuses} refusé(s), {proposes} proposé(s) gardé(s).",
-            text_color="#1DB954",
+        message = (
+            f"✅ {confirmes} confirmé(s), {refuses} refusé(s), "
+            f"{proposes} proposé(s) gardé(s), {infos} pour info."
         )
+        if sans_nature:
+            # Sans nature, une formation ne s'intègre à RIEN (ni groupe ni
+            # collectif) : le lien est confirmé mais sans effet sur la lecture.
+            message += (
+                "\n⚠️ Confirmé(s) SANS nature (groupe/collectif) — sans effet sur la "
+                "discographie tant qu'elle n'est pas choisie : " + ", ".join(sans_nature)
+            )
+        # Relire la base PUIS poser le bilan : `afficher_base` réécrit l'en-tête,
+        # et le bilan (avec son avertissement) était effacé aussitôt affiché.
         self.afficher_base()
+        self.statut.configure(text=message, text_color="#e6a700" if sans_nature else "#1DB954")
         # La discographie réunie change : la vue doit repartir de la base.
         self.app._reload_tracks_and_refresh()
 

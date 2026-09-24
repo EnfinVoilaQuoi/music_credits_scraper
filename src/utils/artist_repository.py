@@ -47,11 +47,15 @@ class ArtistRepository:
         """Sauvegarde ou met à jour un artiste"""
         with self.engine.begin() as conn:
             if artist.id:
-                # Mise à jour
+                # Mise à jour. `discogs_id` en COALESCE (2026-09-23) : il est
+                # désormais posé par l'oracle `services/discogs_identite` via
+                # son écrivain dédié, et un `Artist` construit sans lui (la
+                # plupart des appelants) l'EFFACERAIT sinon.
                 conn.execute(
                     text(
                         "UPDATE artists SET name = :name, genius_id = :genius_id, "
-                        "spotify_id = :spotify_id, discogs_id = :discogs_id, updated_at = :now "
+                        "spotify_id = :spotify_id, "
+                        "discogs_id = COALESCE(:discogs_id, discogs_id), updated_at = :now "
                         "WHERE id = :id"
                     ),
                     {
@@ -458,15 +462,10 @@ class ArtistRepository:
             with self.engine.begin() as conn:
                 for rel in relations:
                     lie = rel.related_artist_id or self._id_par_nom(conn, rel.related_name)
-                    deja = conn.execute(
-                        text(
-                            "SELECT id FROM artist_relations WHERE artist_id = :aid "
-                            "AND related_name = :nom AND kind = :kind"
-                        ),
-                        {"aid": artist_id, "nom": rel.related_name, "kind": rel.kind},
-                    ).first()
+                    deja = self._id_relation(conn, artist_id, rel.related_name, rel.kind)
                     params = {
                         "aid": artist_id,
+                        "rid": deja,
                         "lie": lie,
                         "nom": rel.related_name,
                         "kind": rel.kind,
@@ -478,13 +477,15 @@ class ArtistRepository:
                         "quand": maintenant,
                     }
                     if deja:
+                        # La ligne GARDE sa graphie (celle que la base connaît) :
+                        # c'est l'id qui la désigne, trouvé par nom normalisé.
                         conn.execute(
                             text(
                                 "UPDATE artist_relations SET related_artist_id = :lie, "
                                 "source = :source, formation = :formation, "
                                 "begin_date = :debut, end_date = :fin, detail = :detail, "
                                 "status = 'confirmed', confirmed_at = :quand "
-                                "WHERE artist_id = :aid AND related_name = :nom AND kind = :kind"
+                                "WHERE id = :rid"
                             ),
                             params,
                         )
@@ -586,26 +587,51 @@ class ArtistRepository:
             raise ValueError(f"Statut de lien inconnu : {status!r}")
         try:
             with self.engine.begin() as conn:
-                n = conn.execute(
+                rid = self._id_relation(conn, artist_id, related_name, kind)
+                if rid is None:
+                    return False
+                conn.execute(
                     text(
                         "UPDATE artist_relations SET status = :status, "
                         "confirmed_at = :quand, "
                         "formation = COALESCE(:formation, formation) "
-                        "WHERE artist_id = :aid AND related_name = :nom AND kind = :kind"
+                        "WHERE id = :rid"
                     ),
                     {
                         "status": status,
                         "quand": datetime.now() if status == "confirmed" else None,
                         "formation": formation,
-                        "aid": artist_id,
-                        "nom": related_name,
-                        "kind": kind,
+                        "rid": rid,
                     },
-                ).rowcount
-            return n > 0
+                )
+            return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur set_relation_status({artist_id}, {related_name!r}): {e}")
             return False
+
+    @staticmethod
+    def _id_relation(conn, artist_id: int, nom: str, kind: str) -> int | None:
+        """id de la ligne (artiste, kind) dont le nom NORMALISÉ est `nom`.
+
+        Même règle que `propose_artist_relations` (2026-09-23) : les trois
+        autres écrivains comparaient le nom BRUT, si bien qu'arbitrer « L'Or Du
+        Commun » (graphie Discogs) ne trouvait pas « L'Or du Commun » en base —
+        la confirmation insérait un DOUBLON, le refus ne touchait rien.
+        """
+        cible = normalize_name(nom)
+        if not cible:
+            return None
+        lignes = conn.execute(
+            text(
+                "SELECT id, related_name FROM artist_relations "
+                "WHERE artist_id = :aid AND kind = :kind ORDER BY id"
+            ),
+            {"aid": artist_id, "kind": kind},
+        ).mappings()
+        for ligne in lignes:
+            if normalize_name(ligne["related_name"]) == cible:
+                return ligne["id"]
+        return None
 
     @staticmethod
     def _id_par_nom(conn, nom: str) -> int | None:
@@ -627,14 +653,11 @@ class ArtistRepository:
         """Retire UN lien (l'utilisateur le décoche). Pendant de l'additivité."""
         try:
             with self.engine.begin() as conn:
-                n = conn.execute(
-                    text(
-                        "DELETE FROM artist_relations WHERE artist_id = :aid "
-                        "AND related_name = :nom AND kind = :kind"
-                    ),
-                    {"aid": artist_id, "nom": related_name, "kind": kind},
-                ).rowcount
-            return n > 0
+                rid = self._id_relation(conn, artist_id, related_name, kind)
+                if rid is None:
+                    return False
+                conn.execute(text("DELETE FROM artist_relations WHERE id = :rid"), {"rid": rid})
+            return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur forget_artist_relation({artist_id}, {related_name!r}): {e}")
             return False
@@ -740,6 +763,11 @@ class ArtistRepository:
         Seuls les liens `member_of` élargissent : un groupe ne récupère pas les
         albums solo de ses membres. IAM n'est pas l'auteur de « Où je vis ».
 
+        Et seulement ceux qualifiés `groupe` (2026-09-23) : une formation
+        confirmée SANS nature n'absorbe plus rien — `NULL != 'collectif'` la
+        faisait lire comme un groupe, soit toute sa discographie apportée au
+        membre sur la foi d'un choix que personne n'avait fait.
+
         Un seul niveau, volontairement : pas de transitivité. Un membre d'un
         groupe dont un membre est dans un autre groupe n'hérite pas du troisième.
         L'ordre est stable, l'artiste lui-même toujours en tête.
@@ -748,7 +776,7 @@ class ArtistRepository:
         for rel in self.get_artist_relations(artist_id):
             if (
                 rel.kind == "member_of"
-                and rel.formation != "collectif"
+                and rel.formation == "groupe"
                 and rel.related_artist_id not in (None, *ids)
             ):
                 ids.append(rel.related_artist_id)
@@ -945,6 +973,24 @@ class ArtistRepository:
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur update_artist_deezer_id (artist_id={artist_id}): {e}")
+            return False
+
+    def update_artist_discogs_id(self, artist_id: int, discogs_id: int | None) -> bool:
+        """Identifiant Discogs de l'artiste — écrivain dédié, tranché par
+        l'oracle `services/discogs_identite` (vote par disques) ou choisi à la
+        main ; `None` efface. Pendant de `update_artist_deezer_id`."""
+        try:
+            stmt = (
+                update(artists)
+                .where(artists.c.id == artist_id)
+                .values(discogs_id=discogs_id, updated_at=datetime.now())
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+            logger.info(f"discogs_id artiste #{artist_id} mis à jour: {discogs_id}")
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur update_artist_discogs_id (artist_id={artist_id}): {e}")
             return False
 
     def update_artist_spotify_id(self, artist_id: int, spotify_id: str) -> bool:

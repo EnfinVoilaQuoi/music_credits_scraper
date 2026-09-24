@@ -171,3 +171,87 @@ class TestRecordType:
         with pytest.raises(ValueError):
             data_manager.set_album_record_type(a.id, "X", "ep", source="genius")
         assert not data_manager.set_album_record_type(a.id, "  ", "ep")
+
+
+# ── e35 : suffixe d'homonyme retiré, alias reclassés (2026-09-23) ────────────
+
+
+def test_e35_suffixes_et_reclassement(tmp_path):
+    db = tmp_path / "m.db"
+    engine = create_engine(f"sqlite:///{db}")
+    with engine.begin() as conn:
+        command.upgrade(make_alembic_config(conn), "e34_inedit")
+    lignes = [
+        # (related_name, kind, status, detail, source, formation)
+        ("667", "member_of", "proposed", None, "musicbrainz", None),
+        ("667 (4)", "member_of", "confirmed", None, "discogs", "groupe"),
+        ("CFR (2)", "member_of", "proposed", None, "discogs", None),
+        ("Moon Man (9)", "alias", "refused", None, "discogs", None),
+        ("Moon Man (3)", "alias", "info", "name_variation", "discogs", None),
+        ("Sch (2)", "alias", "proposed", "name_variation", "discogs", None),
+        ("T. Scott", "alias", "proposed", None, "musicbrainz", None),
+        ("Psmaker", "alias", "proposed", "Artist name", "musicbrainz", None),
+        ("Page Discogs", "alias", "proposed", None, "discogs", None),
+        ("Jacques Webster", "alias", "confirmed", "Legal name", "musicbrainz", None),
+        ("Refusé", "alias", "refused", "Search hint", "musicbrainz", None),
+    ]
+    with closing(sqlite3.connect(db)) as c, c:
+        c.execute("INSERT INTO artists (name) VALUES ('SCH')")
+        c.executemany(
+            "INSERT INTO artist_relations (artist_id, related_name, kind, status, detail, "
+            "source, formation) VALUES (1, ?, ?, ?, ?, ?, ?)",
+            lignes,
+        )
+    for _ in range(2):  # idempotent
+        with engine.begin() as conn:
+            command.upgrade(make_alembic_config(conn), "e35_relations_suffixe_nature")
+    with closing(sqlite3.connect(db)) as c:
+        etat = {
+            r[0]: r[1:]
+            for r in c.execute(
+                "SELECT related_name, kind, status, formation FROM artist_relations"
+            ).fetchall()
+        }
+    assert etat == {
+        # doublon suffixé supprimé, le meilleur statut et la nature survivent
+        "667": ("member_of", "confirmed", "groupe"),
+        "CFR": ("member_of", "proposed", None),  # renommé
+        # deux suffixés d'un même nom : un seul reste, au meilleur statut (info > refused)
+        "Moon Man": ("alias", "info", None),
+        "Sch": ("alias", "info", None),  # renommé ET reclassé (graphie)
+        "T. Scott": ("alias", "info", None),  # MB sans type = graphie
+        "Psmaker": ("alias", "proposed", None),  # nom de scène : reste proposé
+        "Page Discogs": ("alias", "proposed", None),  # page Discogs = identité
+        "Jacques Webster": ("alias", "confirmed", None),  # confirmé : intouché
+        "Refusé": ("alias", "refused", None),
+    }
+    engine.dispose()
+
+
+class TestEcrivainsParNomNormalise:
+    """2026-09-23 : seul `propose_artist_relations` comparait le nom normalisé ;
+    confirmer « L'Or Du Commun » (graphie Discogs) quand la base a « L'Or du
+    Commun » insérait un DOUBLON, refuser ou oublier ne touchait rien."""
+
+    def test_confirmer_retrouve_la_ligne(self, data_manager):
+        a = _artiste(data_manager, "Swing")
+        data_manager.propose_artist_relations(a.id, [_rel("L'Or du Commun", kind="member_of")])
+        data_manager.record_artist_relations(
+            a.id, [_rel("L'Or Du Commun", kind="member_of", formation="groupe")]
+        )
+        tous = data_manager.get_artist_relations(a.id, status=None)
+        assert [(r.related_name, r.status, r.formation) for r in tous] == [
+            ("L'Or du Commun", "confirmed", "groupe")
+        ]
+
+    def test_statut_et_oubli(self, data_manager):
+        a = _artiste(data_manager, "Swing")
+        data_manager.propose_artist_relations(a.id, [_rel("L'Or du Commun", kind="member_of")])
+        assert data_manager.set_relation_status(a.id, "L'OR DU COMMUN", "member_of", "refused")
+        assert data_manager.get_artist_relations(a.id, "refused")[0].related_name == (
+            "L'Or du Commun"
+        )
+        assert not data_manager.set_relation_status(a.id, "L'Or du Commun", "alias", "refused")
+        assert data_manager.forget_artist_relation(a.id, "l'or du commun", "member_of")
+        assert data_manager.get_artist_relations(a.id, status=None) == []
+        assert not data_manager.forget_artist_relation(a.id, "L'Or du Commun", "member_of")

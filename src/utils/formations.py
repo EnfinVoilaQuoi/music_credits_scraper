@@ -32,12 +32,57 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.api.musicbrainz_api import ALIAS_NOM_DE_SCENE
 from src.models import ArtistRelation
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
 
 logger = get_logger(__name__)
+
+
+# ── Nature d'un alias : UNE règle (2026-09-23) ────────────────────────────────
+
+#: Natures d'alias, et leur libellé à l'écran.
+NATURES_ALIAS = {
+    "scene": "nom de scène",
+    "graphie": "graphie",
+    "etat_civil": "état civil",
+    "indice": "indice",
+}
+
+#: Natures sous lesquelles on CHERCHE des certifications (alias confirmés
+#: seulement). Un état civil n'est pas un nom de crédit discographique, et un
+#: indice de recherche est une faute de frappe courante : les deux fabriquent
+#: des faux positifs.
+NATURES_DE_RECHERCHE = ("scene", "graphie")
+
+_TYPES_MB = {
+    "Artist name": "scene",
+    "Legal name": "etat_civil",
+    "Search hint": "indice",
+    "name_variation": "graphie",  # variante de graphie Discogs
+}
+
+
+def nature_alias(detail: str | None, source: str | None) -> str:
+    """« scene » | « graphie » | « etat_civil » | « indice » — fonction PURE.
+
+    Deux règles se contredisaient jusqu'au 2026-09-23 (`AliasArtiste.proposable`
+    ne voulait que « Artist name », `Candidat.proposable` acceptait aussi un
+    type absent, quelle qu'en soit la source), et la fenêtre enregistrait en
+    `proposed` 20 variantes de graphie. Toutes passent désormais par ici.
+
+    Un type ABSENT dépend de qui parle : chez Discogs, un alias sans type est
+    une PAGE d'artiste (une identité) ; chez MusicBrainz, un alias sans type est
+    une simple écriture (« T. Scott », « Travi$ Scot »). Un type inconnu est
+    traité en indice — le plus prudent, il n'entre dans aucune recherche.
+
+    Décision utilisateur : état civil et graphies restent CONFIRMABLES (« Travis
+    $cott » est bien lui) ; la nature ne dit pas si l'alias est vrai, elle dit à
+    quoi il SERT.
+    """
+    if detail is None:
+        return "scene" if "discogs" in (source or "") else "graphie"
+    return _TYPES_MB.get(detail, "indice")
 
 
 @dataclass
@@ -59,13 +104,18 @@ class Candidat:
         return self.status == "confirmed"
 
     @property
-    def proposable(self) -> bool:
-        """Un alias ne vaut PROPOSITION que s'il est une identité : « Artist name »
-        chez MusicBrainz, page d'artiste chez Discogs (detail None). Les états
-        civils, indices de recherche et variantes de graphie partent « pour info »."""
+    def nature(self) -> str | None:
+        """Nature de l'alias (`nature_alias`) ; None pour une formation."""
         if self.kind != "alias":
-            return True
-        return self.detail in (None, ALIAS_NOM_DE_SCENE)
+            return None
+        return nature_alias(self.detail, "+".join(sorted(self.sources)))
+
+    @property
+    def proposable(self) -> bool:
+        """Un alias ne vaut PROPOSITION que s'il est un nom de scène : « Artist
+        name » chez MusicBrainz, page d'artiste chez Discogs. États civils,
+        indices et graphies partent « pour info » — confirmables quand même."""
+        return self.kind != "alias" or self.nature == "scene"
 
     @property
     def croise(self) -> bool:
@@ -94,6 +144,8 @@ class RapportFormations:
     mbid: str | None = None  # l'oracle a désigné quelqu'un (sinon rien n'est proposé)
     panne_mb: str | None = None  # MusicBrainz en PANNE ≠ « pas d'alias »
     diagnostics: list[str] = field(default_factory=list)
+    #: `services.discogs_identite.IdentiteDiscogs` — ce que l'oracle a conclu.
+    identite_discogs: object | None = None
 
 
 def _cle(nom: str, kind: str) -> tuple[str, str]:
@@ -157,11 +209,11 @@ def fusionner(
         cle = _cle(rel.related_name, rel.kind)
         existant = par_cle.get(cle)
         if existant:
+            # Le type MusicBrainz est GARDÉ quand Discogs croise (2026-09-23) :
+            # un « Legal name » que Discogs a aussi en page d'alias reste un
+            # état civil. L'effacer le rendait proposable, puis cherchable en
+            # certifs sous le nom civil de l'artiste.
             existant.sources.add("discogs")
-            # Une identité Discogs (page d'artiste) prime sur un simple type
-            # MusicBrainz non proposable : le croisement DIT que c'est un pseudo.
-            if rel.kind == "alias" and rel.detail is None:
-                existant.detail = existant.detail if existant.proposable else None
         else:
             par_cle[cle] = Candidat(
                 related_name=rel.related_name,
@@ -342,11 +394,34 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
             from src.api.discogs_api import DiscogsClient, token_discogs
 
             discogs = DiscogsClient(token_discogs())
+        from src.services import discogs_identite
+
+        # L'identité d'abord (2026-09-23) : les disques déjà rattachés désignent
+        # le bon homonyme, et une identité VÉRIFIÉE fait lire la fiche par id.
+        # Une identité provisoire (annuaire, candidat unique) ne l'autorise pas :
+        # la recherche par nom garde alors sa garde de contradiction.
+        identite = discogs_identite.resoudre(discogs, data_manager, artist, tracks=tracks)
+        rapport.identite_discogs = identite
+        if identite.origine == "disques":
+            rapport.diagnostics.append(f"Discogs : identité par les disques ({identite.detail}).")
+        elif identite.origine == "annuaire":
+            rapport.diagnostics.append(
+                f"Discogs : identité provisoire (annuaire, {identite.detail}) — non mémorisée."
+            )
+        elif identite.origine == "ambigu":
+            rapport.diagnostics.append(f"Discogs : identité ambiguë ({identite.detail}).")
+
         attendues = {rel.nom for rel in relations_mb}
-        resultat = discogs.get_artist_groups(artist.name, attendues=attendues)
+        resultat = discogs.get_artist_groups(
+            artist.name,
+            attendues=attendues,
+            artist_id=identite.id if identite.verifiee else None,
+        )
         proposees = resultat["proposees"]
         confirmees = resultat["confirmees"]
-        if resultat["candidats"] > 1 and not confirmees:
+        if resultat.get("diagnostic"):
+            rapport.diagnostics.append(resultat["diagnostic"])
+        elif resultat["candidats"] > 1 and not confirmees:
             rapport.diagnostics.append(
                 f"Discogs : {resultat['candidats']} homonymes exacts, aucun ne confirme — "
                 "rien n'en est tiré."

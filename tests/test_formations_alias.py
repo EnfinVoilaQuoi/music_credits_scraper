@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.api.musicbrainz_api import AliasArtiste, aliases_de
-from src.models import Artist, ArtistRelation
+from src.models import Artist, ArtistRelation, Track
 from src.utils.formations import (
     Candidat,
     RapportFormations,
@@ -82,9 +82,16 @@ def test_fusionner_crosses_discogs_alias_and_variations():
     assert par_nom["Psmaker"].croise and par_nom["Psmaker"].proposable
     assert not par_nom["Isha (2)"].proposable and par_nom["Isha (2)"].detail == "name_variation"
     assert "isha" not in par_nom
-    # Un « Search hint » MB confirmé comme PAGE Discogs devient proposable.
+    # 2026-09-23 : le type MB est GARDÉ quand Discogs croise — un « Search hint »
+    # ou un « Legal name » vu aussi comme page Discogs reste ce qu'il est.
     cands = fusionner([], [_dg_alias("Larry")], set(), [_alias("Larry", "Search hint")], "X")
-    assert cands[0].proposable and cands[0].croise
+    assert cands[0].croise and cands[0].detail == "Search hint" and not cands[0].proposable
+    cands = fusionner([], [_dg_alias("Malcolm")], set(), [_alias("Malcolm", "Legal name")], "X")
+    assert cands[0].nature == "etat_civil" and not cands[0].proposable
+    # Un alias MB SANS type croisé avec une page Discogs : c'est Discogs qui
+    # dit que c'est une identité.
+    cands = fusionner([], [_dg_alias("Psmaker")], set(), [_alias("Psmaker", None)], "Isha")
+    assert cands[0].nature == "scene" and cands[0].proposable
 
 
 # ── liens_a_proposer ───────────────────────────────────────────────────────
@@ -172,7 +179,13 @@ class _MB:
 
 
 class _Discogs:
-    def get_artist_groups(self, nom, attendues=None):
+    def candidats_artiste(self, nom):
+        return []
+
+    def artistes_du_disque(self, release_id):
+        return None
+
+    def get_artist_groups(self, nom, attendues=None, artist_id=None):
         return {"proposees": [], "confirmees": set(), "candidats": 0}
 
 
@@ -181,7 +194,7 @@ class _DM:
         self._relations = list(relations)
 
     def get_artist_tracks(self, artist_id):
-        return [SimpleNamespace(album="La vie augmente")]
+        return [Track(title="Durag", album="La vie augmente")]
 
     def get_artist_relations(self, artist_id, status="confirmed"):
         return [r for r in self._relations if status is None or r.status == status]
@@ -295,9 +308,9 @@ def test_window_opens_from_base_and_applies_decisions(racine, data_manager, monk
     app = App()
     w = fen.FormationsWindow(app)
     try:
-        assert [ligne["candidat"].related_name for ligne in w._lignes] == [
-            "Psmaker"
-        ]  # info : lecture seule
+        # « Pour info » est ARBITRABLE depuis le 2026-09-23 (un état civil se
+        # confirme) : ses lignes ont aussi leur sélecteur.
+        assert [ligne["candidat"].related_name for ligne in w._lignes] == ["Psmaker", "Malcolm"]
         assert "1 à arbitrer" in w.statut.cget("text")
         w._lignes[0]["statut"].set("Confirmé")
         w.enregistrer()
@@ -310,3 +323,90 @@ def test_window_opens_from_base_and_applies_decisions(racine, data_manager, monk
         assert data_manager.get_artist_relations(artist.id, "refused")[0].related_name == "Psmaker"
     finally:
         w.window.destroy()
+
+
+# ── nature_alias : UNE règle, des usages distincts (2026-09-23) ──────────────
+
+
+@pytest.mark.parametrize(
+    ("detail", "source", "nature"),
+    [
+        ("Artist name", "musicbrainz", "scene"),
+        ("Legal name", "musicbrainz", "etat_civil"),
+        ("Search hint", "musicbrainz", "indice"),
+        ("name_variation", "discogs", "graphie"),
+        (None, "discogs", "scene"),  # page d'alias Discogs = une identité
+        (None, "musicbrainz+discogs", "scene"),
+        (None, "musicbrainz", "graphie"),  # alias MB sans type : une écriture
+        (None, None, "graphie"),
+        (None, "manual", "graphie"),
+        ("Type inconnu", "musicbrainz", "indice"),  # le plus prudent
+    ],
+)
+def test_nature_alias(detail, source, nature):
+    from src.utils.formations import nature_alias
+
+    assert nature_alias(detail, source) == nature
+
+
+@pytest.mark.parametrize("type_mb", ["Artist name", "Legal name", "Search hint", None])
+def test_les_deux_proposable_disent_la_meme_chose(type_mb):
+    """Il y avait deux règles : `AliasArtiste.proposable` (MB) refusait un type
+    absent, `Candidat.proposable` l'acceptait quelle qu'en soit la source."""
+    alias = _alias("X", type_mb)
+    candidat = fusionner([], [], set(), [alias], "Artiste")[0]
+    assert alias.proposable == candidat.proposable
+
+
+def test_un_candidat_neuf_non_proposable_va_pour_info():
+    """La fenêtre rangeait tout candidat neuf avec les proposés, et
+    l'enregistrait `proposed` s'il était laissé tel quel (20 variantes)."""
+    from src.gui.windows.formations import section_de
+
+    graphie = Candidat(
+        related_name="ISHA", kind="alias", sources={"discogs"}, detail="name_variation"
+    )
+    scene = Candidat(related_name="Psmaker", kind="alias", sources={"discogs"})
+    groupe = Candidat(related_name="IAM", kind="member_of", sources={"musicbrainz"})
+    confirme = Candidat(
+        related_name="Travis $cott", kind="alias", detail="name_variation", status="confirmed"
+    )
+    assert section_de(graphie) == "info"
+    assert section_de(scene) == "proposed"
+    assert section_de(groupe) == "proposed"
+    assert section_de(confirme) == "confirmed"
+
+
+def test_recherche_de_certifs_sans_etat_civil_ni_indice(data_manager):
+    """Confirmés tous les quatre ; seuls le nom de scène, la graphie et la
+    formation servent à chercher des certifications."""
+    from src.services.certifs import noms_de_recherche_pour
+
+    artist = Artist(name="Travis Scott")
+    artist.id = data_manager.save_artist(artist)
+    data_manager.record_artist_relations(
+        artist.id,
+        [
+            ArtistRelation(related_name="La Flame", kind="alias", source="discogs"),
+            ArtistRelation(
+                related_name="Travis $cott", kind="alias", source="discogs", detail="name_variation"
+            ),
+            ArtistRelation(
+                related_name="Jacques Webster",
+                kind="alias",
+                source="musicbrainz",
+                detail="Legal name",
+            ),
+            ArtistRelation(
+                related_name="Travis Scot", kind="alias", source="musicbrainz", detail="Search hint"
+            ),
+            ArtistRelation(related_name="JackBoys", kind="member_of", formation="groupe"),
+        ],
+    )
+    runtime = SimpleNamespace(data_manager=data_manager)
+    noms = noms_de_recherche_pour(runtime, artist)
+    assert "Jacques Webster" not in noms and "Travis Scot" not in noms
+    assert {"La Flame", "Travis $cott", "JackBoys"} <= set(noms)
+    # La présence dans un collectif lit TOUS les alias confirmés : les crédits
+    # d'écriture portent l'état civil.
+    assert "Jacques Webster" in data_manager.noms_de_lartiste(artist.id, artist.name)

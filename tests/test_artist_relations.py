@@ -92,14 +92,14 @@ class TestUnionALaLecture:
     def test_les_ids_du_membre_incluent_ses_groupes(self, data_manager):
         iam = _artiste(data_manager, "IAM")
         shurikn = _artiste(data_manager, "Shurik'N")
-        data_manager.record_artist_relations(shurikn.id, [_rel("IAM")])
+        data_manager.record_artist_relations(shurikn.id, [_rel("IAM", formation="groupe")])
 
         assert data_manager.ids_discographie_reunie(shurikn.id) == [shurikn.id, iam.id]
 
     def test_lartiste_est_toujours_en_tete(self, data_manager):
         iam = _artiste(data_manager, "IAM")
         shurikn = _artiste(data_manager, "Shurik'N")
-        data_manager.record_artist_relations(shurikn.id, [_rel("IAM")])
+        data_manager.record_artist_relations(shurikn.id, [_rel("IAM", formation="groupe")])
         assert data_manager.ids_discographie_reunie(shurikn.id)[0] == shurikn.id
         assert iam.id in data_manager.ids_discographie_reunie(shurikn.id)
 
@@ -114,7 +114,7 @@ class TestUnionALaLecture:
 
     def test_un_groupe_absent_de_la_base_nelargit_rien(self, data_manager):
         shurikn = _artiste(data_manager, "Shurik'N")
-        data_manager.record_artist_relations(shurikn.id, [_rel("IAM")])
+        data_manager.record_artist_relations(shurikn.id, [_rel("IAM", formation="groupe")])
         assert data_manager.ids_discographie_reunie(shurikn.id) == [shurikn.id]
 
     def test_pas_de_transitivite(self, data_manager):
@@ -123,8 +123,8 @@ class TestUnionALaLecture:
         _artiste(data_manager, "Groupe C")
         b = _artiste(data_manager, "Groupe B")
         a = _artiste(data_manager, "Artiste A")
-        data_manager.record_artist_relations(a.id, [_rel("Groupe B")])
-        data_manager.record_artist_relations(b.id, [_rel("Groupe C")])
+        data_manager.record_artist_relations(a.id, [_rel("Groupe B", formation="groupe")])
+        data_manager.record_artist_relations(b.id, [_rel("Groupe C", formation="groupe")])
 
         assert data_manager.ids_discographie_reunie(a.id) == [a.id, b.id]
 
@@ -135,7 +135,7 @@ class TestUnionALaLecture:
         iam = _artiste(data_manager, "IAM")
         shurikn = _artiste(data_manager, "Shurik'N")
         data_manager.save_track(Track(title="Petit frère", artist=iam))
-        data_manager.record_artist_relations(shurikn.id, [_rel("IAM")])
+        data_manager.record_artist_relations(shurikn.id, [_rel("IAM", formation="groupe")])
 
         ids = data_manager.ids_discographie_reunie(shurikn.id)
         morceaux = [t for i in ids for t in data_manager.get_artist_tracks(i)]
@@ -144,6 +144,15 @@ class TestUnionALaLecture:
             total = conn.exec_driver_sql("SELECT COUNT(*) FROM tracks").scalar()
         assert total == 1  # une seule LIGNE en base…
         assert [t.title for t in morceaux] == ["Petit frère"]  # …vue par le membre
+
+    def test_une_formation_SANS_nature_nabsorbe_rien(self, data_manager):
+        """2026-09-23 : `NULL != 'collectif'` faisait lire une formation jamais
+        qualifiée comme un GROUPE — toute sa discographie apportée au membre sur
+        la foi d'un choix que personne n'avait fait."""
+        _artiste(data_manager, "IAM")
+        shurikn = _artiste(data_manager, "Shurik'N")
+        data_manager.record_artist_relations(shurikn.id, [_rel("IAM")])
+        assert data_manager.ids_discographie_reunie(shurikn.id) == [shurikn.id]
 
 
 class TestEcrivainsDediesArtiste:

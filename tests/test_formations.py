@@ -11,7 +11,7 @@ Aucun réseau : les deux clients sont des faux.
 from types import SimpleNamespace
 
 from src.api.musicbrainz_api import RelationGroupe
-from src.models import Artist, ArtistRelation
+from src.models import Artist, ArtistRelation, Track
 from src.utils.formations import (
     Candidat,
     chercher_formations,
@@ -122,10 +122,17 @@ class _FauxDiscogs:
         self._boum = boum
         self.attendues_recues = None
 
-    def get_artist_groups(self, nom, attendues=None):
+    def candidats_artiste(self, nom):
+        return []
+
+    def artistes_du_disque(self, release_id):
+        return None
+
+    def get_artist_groups(self, nom, attendues=None, artist_id=None):
         if self._boum:
             raise RuntimeError("réseau")
         self.attendues_recues = attendues
+        self.artist_id_recu = artist_id
         return self._r
 
 
@@ -150,7 +157,7 @@ def _artiste():
 
 
 def _track(album):
-    return SimpleNamespace(album=album)
+    return Track(title="x", album=album)
 
 
 class TestRecherche:

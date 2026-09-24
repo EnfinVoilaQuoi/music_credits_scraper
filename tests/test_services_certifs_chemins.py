@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.models import Artist
+from src.models import Artist, ArtistRelation
 from src.services import certifs
 from src.services.runtime import Runtime
 from tests.test_services_certifs import _Lanceur
@@ -106,9 +106,13 @@ class TestMettreAJourErreurs:
 class TestNomsDeRecherche:
     def test_formations_confirmees_member_of_et_alias_seulement(self):
         rels = [
-            SimpleNamespace(kind="member_of", related_name="IAM"),
-            SimpleNamespace(kind="has_member", related_name="Membre"),
-            SimpleNamespace(kind="alias", related_name="Shurik'n"),
+            ArtistRelation(kind="member_of", related_name="IAM"),
+            ArtistRelation(kind="has_member", related_name="Membre"),
+            ArtistRelation(kind="alias", related_name="Shurik'n"),
+            # 2026-09-23 : un état civil ou un indice confirmés ne servent PAS
+            # à chercher des certifications (faux positifs).
+            ArtistRelation(kind="alias", related_name="Geoffroy Mussard", detail="Legal name"),
+            ArtistRelation(kind="alias", related_name="Shurikn", detail="Search hint"),
         ]
         dm = SimpleNamespace(get_artist_relations=lambda aid: rels)
         art = Artist(name="Shurik'N")

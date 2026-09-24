@@ -55,7 +55,7 @@ class _Release:
         self.id = kw.get("id", 12345)
         self.url = kw.get("url", "https://discogs.com/release/12345")
         self.tracklist = kw.get("tracklist", [_Piste("Bande organisée")])
-        for champ in ("genres", "styles", "year", "labels", "credits", "extraartists"):
+        for champ in ("genres", "styles", "year", "labels", "credits", "extraartists", "artists"):
             if champ in kw:
                 setattr(self, champ, kw[champ])
 

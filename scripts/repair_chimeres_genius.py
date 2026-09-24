@@ -36,6 +36,7 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
 import requests
 
 from src.config import DATA_DIR, GENIUS_API_KEY
+from src.services.chimeres_genius import reposer_page
 from src.utils.spotify_identity import lire_identite_http
 from src.utils.title_matching import normalize_name, normalize_title
 
@@ -123,28 +124,8 @@ _AUTOMATIQUES = {"artistes de l'ID Spotify", "artiste principal"}
 
 
 def _appliquer(dm, genius, fiche: dict, choisi: dict) -> str:
-    """Pose la bonne page. Rend un statut lisible."""
     artiste = dm.get_artist_by_name(fiche["artiste"])
-    relation = genius._verify_artist_credit(choisi["id"], artiste.genius_id)
-    if relation is None:
-        return "SAUTÉ : l'artiste n'est pas crédité au détail de la page"
-    kind, role = relation
-    principal = (choisi.get("primary_artist") or {}).get("name")
-    date = genius.precision_de_la_date(choisi)
-    if date is None:
-        brute = genius._extract_release_date_from_song(choisi)
-        date = brute.strftime("%Y-%m-%d") if brute else None
-    ok = dm.rattacher_page_genius(
-        fiche["id"],
-        genius_id=choisi["id"],
-        genius_url=choisi.get("url"),
-        album=genius._extract_album_from_song(choisi),
-        date_observee=date,
-        is_featuring=kind != "primary",
-        primary_artist_name=None if kind == "primary" else principal,
-        secondary_role=role if kind == "secondary" else None,
-    )
-    return f"corrigé ({kind}{' ' + role if role else ''})" if ok else "REFUSÉ (voir log)"
+    return reposer_page(dm, genius, fiche["id"], artiste.genius_id, choisi)
 
 
 def main() -> int:

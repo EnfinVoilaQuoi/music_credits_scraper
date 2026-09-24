@@ -232,6 +232,42 @@ def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
 # projet quand il n'y a pas d'oracle (cf. les titres tronqués du SNEP). Elle
 # n'ampute rien définitivement — dès que le mauvais lien est rejeté (bouton ✖️),
 # la vidéo cesse d'être partagée et recompte pour le morceau qui la garde.
+#: Provenances d'un rattachement vidéo ↔ fiche qui l'AFFIRMENT (album du canal
+#: YouTube Music, lien saisi à la main, lien donné par Genius) — contre la
+#: recherche automatique, qui le SUPPOSE.
+_RATTACHEMENTS_AFFIRMES = frozenset({"ytm_album", "manual", "genius_media"})
+
+
+def rattachements_de_recherche_a_retirer(vid_counts: dict, sources: dict) -> list:
+    """PUR. `[(track_id, video_id)]` : une vidéo partagée par plusieurs fiches,
+    que l'une tient par un rattachement AFFIRMÉ et les autres par la seule
+    RECHERCHE, appartient à la première (2026-09-24).
+
+    Mesuré sur A2H : les fiches « (Live at AK Studios) » (session 2020) avaient
+    reçu par recherche les vidéos de l'album REWORKS (2025, « (Acoustic) ») que
+    le canal range sous d'autres fiches. Partagées, ces vidéos étaient écartées
+    de TOUS les totaux — « De juillet à septembre (Acoustic) » restait à zéro.
+    `sources` : `{(track_id, video_id): provenance}`.
+    """
+    par_video: dict = {}
+    for track_id, vids in vid_counts.items():
+        for video_id in vids:
+            par_video.setdefault(video_id, []).append(track_id)
+    retraits = []
+    for video_id, track_ids in par_video.items():
+        if len(track_ids) < 2:
+            continue
+        affirmes = [t for t in track_ids if sources.get((t, video_id)) in _RATTACHEMENTS_AFFIRMES]
+        if not affirmes:
+            continue
+        retraits += [
+            (t, video_id)
+            for t in track_ids
+            if sources.get((t, video_id)) == "search_auto" and t not in affirmes
+        ]
+    return sorted(retraits)
+
+
 def videos_partagees(vid_counts: dict, tracks_par_id: dict | None = None) -> set:
     """videoId rattachés à PLUSIEURS morceaux, donc non attribuables à un seul.
 
@@ -353,6 +389,9 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         "videos_partagees": [],
         "partages_evidents": 0,  # clips doubles et doublons de fiche : non comptés, non listés
         "vues_non_attribuees": 0,
+        #: Vidéos trouvées par RECHERCHE retirées d'une fiche, le canal ou un lien
+        #: manuel les rattachant à une autre (2026-09-24).
+        "recherches_ecartees": 0,
     }
 
     if api is None:
@@ -725,6 +764,29 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     # Les vidéos PARTAGÉES entre plusieurs morceaux sont écartées de la somme
     # (cf. `videos_partagees`) et signalées : on refuse de conclure plutôt que
     # de multiplier un même compteur.
+    # Une vidéo que le canal (ou un lien manuel / Genius) donne à une fiche
+    # n'appartient pas à la fiche qui ne l'a trouvée que par recherche.
+    sources = {(t.id, v.video_id): v.source for t in db_tracks for v in (t.videos or []) if t.id}
+    for track_id, vids in videos_vues.items():
+        for video_id, video in vids.items():
+            sources[(track_id, video_id)] = video.source or sources.get((track_id, video_id))
+    for track_id, video_id in rattachements_de_recherche_a_retirer(vid_counts, sources):
+        vid_counts[track_id].pop(video_id, None)
+        videos_vues.get(track_id, {}).pop(video_id, None)
+        data_manager.forget_track_video(track_id, video_id)
+        fiche = tracks_par_id.get(track_id)
+        if (
+            fiche is not None
+            and fiche.youtube_url_source == "search_auto"
+            and video_id in (fiche.youtube_url or "")
+        ):
+            data_manager.clear_track_youtube_link(track_id)
+        result["recherches_ecartees"] += 1
+        logger.info(
+            f"🧹 Vidéo {video_id} retirée de « {fiche.title if fiche else track_id} » "
+            "(trouvée par recherche, rattachée ailleurs par le canal ou à la main)"
+        )
+
     partagees = videos_partagees(vid_counts)
     a_verifier = videos_partagees(vid_counts, tracks_par_id)
     result["partages_evidents"] = len(partagees - a_verifier)

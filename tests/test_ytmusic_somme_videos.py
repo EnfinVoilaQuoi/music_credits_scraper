@@ -382,3 +382,19 @@ class TestTotalDalbum:
         dm, _ = _lancer(api, tracks)
 
         assert dm.album_writes == [("Alb", 1007)]  # et non 2007
+
+
+def test_un_rattachement_affirme_l_emporte_sur_une_recherche():
+    """A2H (2026-09-24) : la vidéo « De juillet à septembre (Acoustic) » de
+    l'album REWORKS avait été trouvée par RECHERCHE pour la fiche « (Live at AK
+    Studios) » (session 2020) ; partagée, elle n'était comptée nulle part."""
+    from src.utils.update_ytmusic import rattachements_de_recherche_a_retirer
+
+    vid_counts = {1592: {"3Xm": 6158}, 9630: {"3Xm": 6158}, 7: {"clip": 10}, 8: {"clip": 10}}
+    sources = {
+        (1592, "3Xm"): "search_auto",
+        (9630, "3Xm"): "ytm_album",
+        (7, "clip"): "genius_media",  # clip double : deux rattachements affirmés
+        (8, "clip"): "genius_media",
+    }
+    assert rattachements_de_recherche_a_retirer(vid_counts, sources) == [(1592, "3Xm")]

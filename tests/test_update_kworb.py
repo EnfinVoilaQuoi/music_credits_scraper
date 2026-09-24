@@ -362,18 +362,20 @@ class TestNiveauxDeRapprochement:
 
     def test_niveau_4_suggestion_non_ecrite(self):
         """Une suggestion attend l'utilisateur : ni écrite, ni comptée
-        « non matchée » (elle n'est pas un échec, juste en attente)."""
-        t = _track(1, "Matrix (Intro)")
-        res, dm = self._run([t], [_entry("Matrix", 900, 9)])
+        « non matchée » (elle n'est pas un échec, juste en attente).
+        (« Matrix » / « Matrix (Intro) » se rapproche désormais par sous-titre :
+        l'exemple est un rapprochement flou.)"""
+        t = _track(1, "Le Temps Passe")
+        res, dm = self._run([t], [_entry("Le Temps", 900, 9)])
         assert res["unmatched"] == 0
         assert dm.streams_writes == []
         assert res["suggestions"] == [
             {
-                "kworb_title": "Matrix",
+                "kworb_title": "Le Temps",
                 "streams": 900,
                 "daily": 9,
                 "track_id": 1,
-                "db_title": "Matrix (Intro)",
+                "db_title": "Le Temps Passe",
                 "score": pytest.approx(res["suggestions"][0]["score"]),
             }
         ]
@@ -1338,3 +1340,38 @@ class TestAutreUploadAuMemeTitre:
         """L'ID propre est une petite édition : la ligne reste le compteur."""
         res, dm = self._lancer({1: 50_000})
         assert [w[0] for w in dm.streams_writes] == [1]
+
+
+def test_les_fiches_en_role_secondaire_ne_disputent_pas_le_titre():
+    """Kanye « Heartless » : l'original et huit reprises (The Fray, KIDZ BOP…)
+    depuis e36. Aucune reprise n'est une ligne de SA page Kworb."""
+    original = _track(1, "Heartless")
+    reprise = _track(2, "Heartless", feat=True, primary="The Fray")
+    reprise.secondary_role = "Cover"
+    res, dm = _run([original, reprise], [_entry("Heartless", 2_116_371_399, 9, "EDITION")])
+    assert [w[0] for w in dm.streams_writes] == [1]
+
+
+class TestSousTitre:
+    """6D (2026-09-24) — la même chanson, un sous-titre d'un côté ou de l'autre."""
+
+    def test_kworb_sans_le_sous_titre_genius(self):
+        """Kworb « Make Her Say » / Genius « Make Her Say (I Poke Her Face) »."""
+        t = _track(1, "Make Her Say (I Poke Her Face)", feat=True, primary="Kid Cudi")
+        res, dm = _run([t], [_entry("Make Her Say", 117_874_444, 9, "X")])
+        assert [w[0] for w in dm.streams_writes] == [1]
+
+    def test_un_skit_n_est_rapproche_que_par_son_album(self):
+        """Kworb « Skit #1 (Kanye West/Late Registration) » : le sous-titre nomme
+        l'album — une intro ou un skit par projet."""
+        bon = _track(1, "Skit #1", album="Late Registration")
+        res, dm = _run([bon], [_entry("Skit #1 (Kanye West/Late Registration)", 5, 1, "X")])
+        assert [w[0] for w in dm.streams_writes] == [1]
+        autre = _track(2, "Skit #1", album="The College Dropout")
+        res, dm = _run([autre], [_entry("Skit #1 (Kanye West/Late Registration)", 5, 1, "X")])
+        assert dm.streams_writes == []
+
+    def test_une_version_n_est_pas_un_sous_titre(self):
+        t = _track(1, "Ego")
+        res, dm = _run([t], [_entry("Ego (Remix)", 5, 1, "X")])
+        assert dm.streams_writes == []

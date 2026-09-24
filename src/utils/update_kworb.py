@@ -263,7 +263,53 @@ class Index:
     doublons: dict[str, list] = field(default_factory=dict)
     by_title: dict[str, list] = field(default_factory=dict)
     by_socle: dict[str, list] = field(default_factory=dict)
+    #: Titre sans sous-titre final → [(fiche, sous-titre)] (6D, `sous_titre`).
+    by_titre_court: dict[str, list] = field(default_factory=dict)
     tracks: list = field(default_factory=list)
+
+
+_GROUPE_FINAL = re.compile(r"^(.*\S)\s*[\(\[]([^()\[\]]+)[\)\]]\s*$")
+
+
+def sous_titre(titre: str | None) -> tuple[str, str] | None:
+    """PUR (6D, 2026-09-24). `(titre court normalisé, sous-titre)` quand le titre
+    finit par un groupe entre parenthèses qui n'est PAS un descripteur de version
+    — un sous-titre (« Make Her Say (I Poke Her Face) »), un contexte (« Skit #1
+    (Kanye West/Late Registration) ») ou une mention d'édition (« … (Album
+    Version Edited) »). « (Remix) », « (Live) » restent des versions : None."""
+    from src.utils.title_matching import strip_featuring
+    from src.utils.version_descriptors import est_edition_de_diffusion
+
+    m = _GROUPE_FINAL.match(strip_featuring(titre or "").strip())
+    if not m:
+        return None
+    court, groupe = m.group(1), m.group(2).strip()
+    if parse_variant(f"x ({groupe})").kind != Kind.NONE and not est_edition_de_diffusion(groupe):
+        return None
+    return _normalize_title(court), groupe
+
+
+def _par_sous_titre(titre: str, norm: str, index: "Index"):
+    """La fiche UNIQUE dont le titre ne diffère de la ligne que par un sous-titre,
+    d'un côté ou de l'autre (Kworb « Make Her Say » / Genius « Make Her Say (I
+    Poke Her Face) » ; Kworb « Skit #1 (Kanye West/Late Registration) » / Genius
+    « Skit #1 »). Un titre GÉNÉRIQUE (une intro par projet) n'est rapproché que
+    si le sous-titre nomme l'album de la fiche."""
+    paires = [(f, g) for f, g in index.by_titre_court.get(norm, [])]
+    st = sous_titre(titre)
+    if st:
+        paires += [(f, st[1]) for f in index.by_title.get(st[0], [])]
+    if any(not f.secondary_role for f, _ in paires):
+        paires = [(f, g) for f, g in paires if not f.secondary_role]
+    fiches = {f.id: (f, g) for f, g in paires}
+    if len(fiches) != 1:
+        return None
+    fiche, groupe = next(iter(fiches.values()))
+    if titre_generique(fiche.title) and not (
+        fiche.album and contains_as_words(_normalize_title(fiche.album), _normalize_title(groupe))
+    ):
+        return None
+    return fiche
 
 
 def construire_index(tracks) -> Index:
@@ -272,6 +318,9 @@ def construire_index(tracks) -> Index:
     for t in tracks:
         index.by_id[t.id] = t
         index.by_title.setdefault(_normalize_title(t.title), []).append(t)
+        st = sous_titre(t.title)
+        if st:
+            index.by_titre_court.setdefault(st[0], []).append((t, st[1]))
         if parse_variant(t.title).kind == Kind.NONE:
             index.by_socle.setdefault(_normalize_title(t.title), []).append(t)
         editions = set()
@@ -528,6 +577,14 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
         return Rapprochement(track=index.by_rendition_id[sid], via="rendition_id")
 
     candidates = index.by_title.get(norm, [])
+    # Une fiche en RÔLE SECONDAIRE (reprise, page d'un autre où l'artiste n'est
+    # qu'auteur) n'est jamais une ligne de SA page Kworb : Spotify ne crédite pas
+    # Kanye sur la reprise de The Fray. Depuis e36, « Heartless » a neuf fiches
+    # chez Kanye — sans ce filtre, chaque titre à succès coûtait une lecture de
+    # l'embed, et restait sans streams si elle échouait (2026-09-24).
+    principales = [c for c in candidates if not c.secondary_role]
+    if principales and len(principales) < len(candidates):
+        candidates = principales
     if len(candidates) == 1:
         return Rapprochement(track=candidates[0], via="title")
     if len(candidates) > 1:
@@ -541,6 +598,12 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
         if track:
             return Rapprochement(track=track, via="title+artistes")
         return Rapprochement(motif="ambigu")
+
+    # Un rapprochement REJETÉ par l'utilisateur ne revient jamais par une règle.
+    rejete = norm in (decisions.get("rejected") or [])
+    fiche = None if rejete else _par_sous_titre(entry["title"], norm, index)
+    if fiche is not None:
+        return Rapprochement(track=fiche, via="sous_titre")
 
     ftrack, fscore = _fuzzy_unique(entry["title"], index.tracks)
     if ftrack:
@@ -902,7 +965,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         track, via = r.track, r.via
         sid = entry.get("spotify_id")
         if (
-            via in ("title", "title+artistes", "fuzzy")
+            via in ("title", "title+artistes", "fuzzy", "sous_titre")
             and sid
             and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web)
         ):

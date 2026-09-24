@@ -116,6 +116,8 @@ def charger(runtime: Runtime, nom: str) -> Artist | None:
         return None
     artist.tracks = runtime.data_manager.discographie_reunie(artist)
     logger.info(f"✅ Artiste trouvé en base: {artist.name} avec {len(artist.tracks)} morceaux")
+    for groupe, exclus in artist.hors_periode.items():
+        logger.info(f"   {groupe} : {exclus} morceau(x) hors période d'appartenance, écartés")
     return artist
 
 

@@ -297,3 +297,105 @@ class TestJointureTardive:
         data_manager.record_artist_relations(swing.id, [_rel("Inconnu", formation="groupe")])
         (lu,) = data_manager.get_artist_relations(swing.id)
         assert lu.related_artist_id is None
+
+
+def _date(data_manager, track, valeur, source="genius"):
+    """Pose une date AVEC SA PRÉCISION, comme le fait un producteur."""
+    from src.enrichment.observation import Observation
+
+    data_manager.record_discography_observations(
+        track.id, [Observation(field="release_date", value=valeur, source=source)]
+    )
+
+
+class TestGroupeDate:
+    """2026-09-24 : un groupe daté n'apporte que ce qui est sorti pendant
+    l'appartenance. Les années charnière exigent une PREUVE de présence : un
+    crédit, ou le disque (crédité sur au moins la moitié de ses titres)."""
+
+    def _booba_lunatic(self, data_manager, fin="2003", debut="1994"):
+        lunatic = _artiste(data_manager, "Lunatic")
+        booba = _artiste(data_manager, "Booba")
+        data_manager.record_artist_relations(
+            booba.id,
+            [_rel("Lunatic", formation="groupe", begin_date=debut, end_date=fin)],
+        )
+        return booba, lunatic
+
+    def test_un_groupe_sans_date_apporte_tout(self, data_manager):
+        lunatic = _artiste(data_manager, "Lunatic")
+        booba = _artiste(data_manager, "Booba")
+        data_manager.record_artist_relations(booba.id, [_rel("Lunatic", formation="groupe")])
+        _date(data_manager, _morceau(data_manager, lunatic, "Bien après"), "2015-01-01")
+
+        assert {t.title for t in data_manager.discographie_reunie(booba)} == {"Bien après"}
+        assert booba.hors_periode == {}
+
+    def test_dedans_garde_dehors_ecarte_et_se_compte(self, data_manager):
+        booba, lunatic = self._booba_lunatic(data_manager)
+        _date(data_manager, _morceau(data_manager, lunatic, "Pendant"), "1999-06-01")
+        _date(data_manager, _morceau(data_manager, lunatic, "Après"), "2006-06-01")
+        _morceau(data_manager, lunatic, "Sans date")
+
+        titres = {t.title for t in data_manager.discographie_reunie(booba)}
+        assert titres == {"Pendant", "Sans date"}
+        assert booba.hors_periode == {"Lunatic": 1}
+
+    def test_charniere_gardee_seulement_avec_un_credit(self, data_manager):
+        booba, lunatic = self._booba_lunatic(data_manager)
+        avec = _morceau(data_manager, lunatic, "Avec", [("Booba", CreditRole.WRITER)])
+        sans = _morceau(data_manager, lunatic, "Sans", [("Ali", CreditRole.WRITER)])
+        _date(data_manager, avec, "2003-09-01")
+        _date(data_manager, sans, "2003-09-01")
+
+        assert {t.title for t in data_manager.discographie_reunie(booba)} == {"Avec"}
+
+    def test_une_annee_seule_au_1er_janvier_n_est_pas_un_jour(self, data_manager):
+        """La colonne vaut 2003-01-01, mais l'observation dit « 2003 » : face à
+        un départ au 27 mars, c'est une charnière, pas un morceau « dedans »."""
+        booba, lunatic = self._booba_lunatic(data_manager, fin="2003-03-27")
+        _date(data_manager, _morceau(data_manager, lunatic, "Année seule"), "2003")
+
+        assert data_manager.discographie_reunie(booba) == []
+
+    def _album(self, data_manager, lunatic, credites, total, date="2003-10-01"):
+        for i in range(total):
+            credits = (
+                [("Booba", CreditRole.WRITER)] if i < credites else [("Ali", CreditRole.WRITER)]
+            )
+            t = Track(title=f"Titre {i}", artist=lunatic, album="Mauvais Œil")
+            t.credits = [Credit(name=n, role=r) for n, r in credits]
+            data_manager.save_track(t)
+            _date(data_manager, t, date)
+
+    def test_le_disque_prouve_la_presence_au_dela_de_la_moitie(self, data_manager):
+        booba, lunatic = self._booba_lunatic(data_manager)
+        self._album(data_manager, lunatic, credites=6, total=10)
+
+        assert len(data_manager.discographie_reunie(booba)) == 10
+        assert booba.hors_periode == {}
+
+    def test_sous_la_moitie_seuls_les_titres_credites(self, data_manager):
+        booba, lunatic = self._booba_lunatic(data_manager)
+        self._album(data_manager, lunatic, credites=3, total=10)
+
+        assert len(data_manager.discographie_reunie(booba)) == 3
+        assert booba.hors_periode == {"Lunatic": 7}
+
+    def test_un_single_de_deux_titres_ne_prouve_rien(self, data_manager):
+        booba, lunatic = self._booba_lunatic(data_manager)
+        self._album(data_manager, lunatic, credites=1, total=2)
+
+        assert len(data_manager.discographie_reunie(booba)) == 1
+
+    def test_un_collectif_n_est_jamais_filtre_par_date(self, data_manager):
+        collectif = _artiste(data_manager, "501 Posse")
+        solaar = _artiste(data_manager, "MC Solaar")
+        data_manager.record_artist_relations(
+            solaar.id,
+            [_rel("501 Posse", formation="collectif", begin_date="1988", end_date="1995")],
+        )
+        t = _morceau(data_manager, collectif, "Tard", [("MC Solaar", CreditRole.WRITER)])
+        _date(data_manager, t, "2010-01-01")
+
+        assert {t.title for t in data_manager.discographie_reunie(solaar)} == {"Tard"}

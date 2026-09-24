@@ -192,3 +192,39 @@ class TestGeniusDeclareSaPrecision:
         from src.api.genius_api import GeniusAPI
 
         assert GeniusAPI.precision_de_la_date({}) is None
+
+
+class TestPositionDansLaPeriode:
+    """Appartenance à un groupe (2026-09-24) : n'exclure que ce qui est PROUVÉ
+    hors période ; ce que la précision ne tranche pas est une CHARNIÈRE."""
+
+    @pytest.mark.parametrize(
+        ("sortie", "debut", "fin", "attendu"),
+        [
+            # Sans borne, ou sans date de sortie : rien ne prouve l'exclusion.
+            ("2010-05-01", None, None, dates.DEDANS),
+            (None, "1994", "2003", dates.DEDANS),
+            ("pas une date", "1994", "2003", dates.DEDANS),
+            # Franchement dedans / dehors.
+            ("1998-04-01", "1994", "2003", dates.DEDANS),
+            ("2005-06-01", "1994", "2003", dates.DEHORS),
+            ("1990", "1994", "2003", dates.DEHORS),
+            # L'année de la borne, à la précision de l'année : indécidable.
+            ("2003-06-12", "1994", "2003", dates.CHARNIERE),
+            ("1994", "1994", "2003", dates.CHARNIERE),
+            # Un « 2003 » stocké au 1ᵉʳ janvier n'est PAS avant le 27 mars.
+            ("2003", None, "2003-03-27", dates.CHARNIERE),
+            # Au jour près des deux côtés : la comparaison exacte tranche.
+            ("2003-02-01", None, "2003-03-27", dates.DEDANS),
+            ("2003-03-27", None, "2003-03-27", dates.DEDANS),
+            ("2003-04-01", None, "2003-03-27", dates.DEHORS),
+            # Mois contre mois.
+            ("2003-03", None, "2003-03", dates.CHARNIERE),
+            ("2003-04", None, "2003-03", dates.DEHORS),
+            # Borne ouverte (WZRD 2010– : aucune fin).
+            ("2024-01-01", "2010", None, dates.DEDANS),
+            (datetime(2009, 5, 1), "2010", None, dates.DEHORS),
+        ],
+    )
+    def test_verdict(self, sortie, debut, fin, attendu):
+        assert dates.position_dans_la_periode(sortie, debut, fin) == attendu

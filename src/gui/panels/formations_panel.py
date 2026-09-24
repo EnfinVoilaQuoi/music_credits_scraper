@@ -83,6 +83,16 @@ def build(parent, app) -> None:
         for relation in du_type:
             if relation.related_artist_id:
                 _lien_cliquable(ligne, relation.related_name, ouvrir)
+                exclus = artiste.hors_periode.get(relation.related_name)
+                if kind == "member_of" and exclus:
+                    # Sans ce mot, un morceau du groupe écarté par les dates
+                    # d'appartenance ressemble à une donnée perdue.
+                    ctk.CTkLabel(
+                        ligne,
+                        text=f"({exclus} morceau(x) hors période d'appartenance)",
+                        text_color="gray",
+                        font=ctk.CTkFont(size=11),
+                    ).pack(side="left", padx=(0, 10))
             else:
                 # Formation connue mais absente de la base : le lien vaut quand
                 # même, il n'y a simplement nulle part où aller.

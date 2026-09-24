@@ -24,6 +24,9 @@ class Artist:
     # e30 : identifiant Deezer de l'artiste, tranché par l'oracle (`deezer_identite`).
     deezer_id: int | None = None
     tracks: list["Track"] = field(default_factory=list)
+    #: Posé par `discographie_reunie`, jamais en base : {groupe: nb de ses
+    #: morceaux écartés car sortis hors de la période d'appartenance}.
+    hors_periode: dict[str, int] = field(default_factory=dict, repr=False)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 

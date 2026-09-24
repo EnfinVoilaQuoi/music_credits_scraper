@@ -137,3 +137,42 @@ def la_plus_ancienne(a, b) -> str | None:
     if na.startswith(nb) or nb.startswith(na):
         return na if len(na) >= len(nb) else nb
     return na if completer(na) <= completer(nb) else nb
+
+
+DEDANS, DEHORS, CHARNIERE = "dedans", "dehors", "charniere"
+
+
+def _face_a_la_borne(sortie: str, borne: str) -> int | None:
+    """-1 avant, +1 après, 0 le même jour, None indécidable — comparés à la
+    précision la PLUS GROSSIÈRE des deux (formes canoniques de même longueur
+    se comparent lexicographiquement)."""
+    n = min(len(sortie), len(borne))
+    a, b = sortie[:n], borne[:n]
+    if a != b:
+        return -1 if a < b else 1
+    return 0 if len(sortie) == len(borne) == 10 else None
+
+
+def position_dans_la_periode(sortie, debut, fin) -> str:
+    """`DEDANS` / `DEHORS` / `CHARNIERE` d'une sortie face à une période
+    d'appartenance, bornes INCLUSES et facultatives.
+
+    N'exclut que ce qui est PROUVÉ hors période : une sortie ou une borne
+    illisible ne prouve rien (`DEDANS`). `CHARNIERE` = la précision ne permet
+    pas de trancher — « 2003 » face à une fin en « 2003 » —, c'est à l'appelant
+    de chercher une autre preuve (un crédit)."""
+    s = normaliser_observation(sortie)
+    if s is None:
+        return DEDANS
+    verdicts = []
+    d = normaliser_observation(debut)
+    if d is not None:
+        v = _face_a_la_borne(s, d)
+        verdicts.append(DEHORS if v == -1 else CHARNIERE if v is None else DEDANS)
+    f = normaliser_observation(fin)
+    if f is not None:
+        v = _face_a_la_borne(s, f)
+        verdicts.append(DEHORS if v == 1 else CHARNIERE if v is None else DEDANS)
+    if DEHORS in verdicts:
+        return DEHORS
+    return CHARNIERE if CHARNIERE in verdicts else DEDANS

@@ -22,6 +22,14 @@ from src.utils.title_matching import names_match_as_words, normalize_name
 
 logger = get_logger(__name__)
 
+#: Preuve de présence par le DISQUE, sur une année charnière d'appartenance à
+#: un groupe (2026-09-24). 50 % plutôt que 70 % : le défaut visé, ce sont des
+#: crédits incomplets (le groupe crédité à la place de ses membres). À MESURER
+#: sur un vrai groupe daté (Lunatic chez Booba) avant de figer.
+SEUIL_PRESENCE_ALBUM = 0.5
+#: En dessous, un seul crédit ferait basculer le disque (un single 2 titres).
+MIN_TITRES_ALBUM = 3
+
 
 def _signe_par_une_formation(track, formations: set[str]) -> bool:
     """Ce morceau est-il signé par une formation dont l'artiste est membre ?
@@ -834,11 +842,27 @@ class ArtistRepository:
         Aucune ligne n'est dupliquée : on lit plus large, on n'écrit rien. Les
         doublons de morceaux (un même titre lu deux fois par deux chemins) sont
         écartés sur l'identité métier de `Track`.
+
+        Un groupe DATÉ (`begin_date`/`end_date`) n'apporte que ce qui est sorti
+        pendant l'appartenance (2026-09-24) — voir `_filtrer_par_periode`. Ce
+        qui est écarté est compté dans `artist.hors_periode`, pour que la GUI le
+        dise : un morceau qui disparaît sans un mot ressemble à une perte.
+        Un collectif n'est jamais filtré par date : le crédit prouve déjà la
+        présence, mieux qu'une date.
         """
         vus, resultat = set(), []
         formations = self.noms_des_formations(artist.id)
+        noms = self.noms_de_lartiste(artist.id, artist.name)
+        periodes = self._periodes_des_groupes(artist.id)
+        artist.hors_periode = {}
         for aid in self.ids_discographie_reunie(artist.id):
-            for track in self.get_artist_tracks(aid):
+            morceaux = self.get_artist_tracks(aid)
+            if aid in periodes:
+                nom_groupe, debut, fin = periodes[aid]
+                morceaux, exclus = self._filtrer_par_periode(aid, morceaux, debut, fin, noms)
+                if exclus:
+                    artist.hors_periode[nom_groupe] = exclus
+            for track in morceaux:
                 if track not in vus:
                     track.membre_de_la_formation = _signe_par_une_formation(track, formations)
                     # Marqué dès qu'il vient d'ailleurs : sans ça, on ne
@@ -848,7 +872,6 @@ class ArtistRepository:
                     vus.add(track)
                     resultat.append(track)
 
-        noms = self.noms_de_lartiste(artist.id, artist.name)
         for collectif_id in self.ids_collectifs(artist.id):
             for track in self.get_artist_tracks(collectif_id):
                 if track not in vus and track.personne_presente(noms):
@@ -856,6 +879,111 @@ class ArtistRepository:
                     vus.add(track)
                     resultat.append(track)
         return resultat
+
+    def _periodes_des_groupes(
+        self, artist_id: int
+    ) -> dict[int, tuple[str, str | None, str | None]]:
+        """{id du groupe: (nom, début, fin)} pour les GROUPES en base qui portent
+        au moins une borne. Un groupe sans date n'y figure pas : rien à filtrer."""
+        return {
+            rel.related_artist_id: (rel.related_name, rel.begin_date, rel.end_date)
+            for rel in self.get_artist_relations(artist_id)
+            if rel.kind == "member_of"
+            and rel.formation == "groupe"
+            and rel.related_artist_id is not None
+            and (rel.begin_date or rel.end_date)
+        }
+
+    def _dates_de_sortie(self, groupe_id: int) -> dict[int, str]:
+        """{track_id: date AVEC SA PRÉCISION} des morceaux d'un artiste, en UNE
+        requête. La colonne `release_date` est toujours complète — un « 2003 »
+        de Genius y vaut `2003-01-01` et passerait pour un jour précis ; seule
+        l'observation porte la précision. Même verdict que la colonne
+        (`resoudre_date_de_sortie`), sans son `completer`."""
+        from src.enrichment.observation import Observation
+        from src.enrichment.reconcile import resoudre_date_de_sortie
+
+        par_morceau: dict[int, list[Observation]] = {}
+        try:
+            with self.engine.connect() as conn:
+                lignes = conn.execute(
+                    text(
+                        "SELECT o.track_id, o.value, o.source, o.confidence "
+                        "FROM observations o JOIN tracks t ON t.id = o.track_id "
+                        "WHERE o.field = 'release_date' AND t.artist_id = :aid"
+                    ),
+                    {"aid": groupe_id},
+                ).mappings()
+                for r in lignes:
+                    par_morceau.setdefault(r["track_id"], []).append(
+                        Observation(
+                            field="release_date",
+                            value=r["value"],
+                            source=r["source"],
+                            confidence=r["confidence"],
+                        )
+                    )
+        except SQLAlchemyError as e:
+            # Repli : la colonne (précision au jour). Filtrer sur une date un
+            # peu trop précise vaut mieux que ne rien réunir.
+            logger.warning(f"Précision des dates du groupe #{groupe_id} illisible : {e}")
+            return {}
+        dates = {}
+        for track_id, observations in par_morceau.items():
+            verdict = resoudre_date_de_sortie(observations)
+            if verdict is not None and verdict.value:
+                dates[track_id] = verdict.value
+        return dates
+
+    def _filtrer_par_periode(self, groupe_id, morceaux, debut, fin, noms) -> tuple[list, int]:
+        """(morceaux gardés, nombre écarté) d'un groupe daté.
+
+        Trois verdicts (`dates.position_dans_la_periode`) :
+          · DEDANS — gardé (sans date de sortie aussi : rien ne prouve le contraire) ;
+          · DEHORS — écarté ;
+          · CHARNIÈRE — l'année de début ou de fin, que la précision ne tranche
+            pas : gardé seulement s'il y a une PREUVE de présence. Un crédit
+            nominatif (`personne_presente`, la règle des collectifs), ou le
+            DISQUE : un membre crédité sur au moins `SEUIL_PRESENCE_ALBUM` d'un
+            disque d'au moins `MIN_TITRES_ALBUM` titres faisait partie du groupe
+            quand il est sorti — ses titres charnière sont gardés même sans
+            crédit (le groupe est souvent crédité à la place de ses membres).
+            Le ratio porte sur TOUT le disque : un album s'étale sur plusieurs
+            dates (singles extraits avant).
+        """
+        from src.utils import dates as _dates
+        from src.utils.title_matching import cle_album
+
+        precises = self._dates_de_sortie(groupe_id)
+        positions = {}
+        for t in morceaux:
+            sortie = precises.get(t.id) or t.release_date
+            positions[id(t)] = _dates.position_dans_la_periode(sortie, debut, fin)
+
+        par_disque: dict[str, list] = {}
+        for t in morceaux:
+            if t.album:
+                par_disque.setdefault(cle_album(t.album), []).append(t)
+        disques_prouves = {
+            cle
+            for cle, titres in par_disque.items()
+            if len(titres) >= MIN_TITRES_ALBUM
+            and sum(t.personne_presente(noms) for t in titres) / len(titres) >= SEUIL_PRESENCE_ALBUM
+        }
+
+        def prouve(t) -> bool:
+            return t.personne_presente(noms) or bool(
+                t.album and cle_album(t.album) in disques_prouves
+            )
+
+        gardes, exclus = [], 0
+        for t in morceaux:
+            position = positions[id(t)]
+            if position == _dates.DEDANS or (position == _dates.CHARNIERE and prouve(t)):
+                gardes.append(t)
+            else:
+                exclus += 1
+        return gardes, exclus
 
     def update_artist_kworb_totals(
         self,

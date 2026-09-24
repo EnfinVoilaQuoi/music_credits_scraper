@@ -117,6 +117,7 @@ scripts/*
 !scripts/audit_spotify_ids.py
 !scripts/repair_spotify_ids.py
 !scripts/repair_deezer_ids.py
+!scripts/repair_chimeres_genius.py
 !scripts/repair_release_dates.py
 !scripts/mesurer_lyrics_state.py
 !scripts/backfill_inedits.py

@@ -130,3 +130,87 @@ def test_migration_leve_les_doublons_puis_autorise_les_homonymes(tmp_path):
             conn.execute("INSERT INTO tracks (title, artist_id) VALUES ('Durag', 1)")
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO tracks (title, artist_id, genius_id) VALUES ('X', 1, 10)")
+
+
+# ── Réparation des chimères (scripts/repair_chimeres_genius.py) ──────────────
+
+
+def _chanson(gid, principal, album=None):
+    return {"id": gid, "primary_artist": {"name": principal}, "album": {"name": album}}
+
+
+class TestVerdictChimere:
+    def _verdict(self, *a):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "repair_chimeres_genius", "scripts/repair_chimeres_genius.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.verdict(*a)
+
+    def test_les_artistes_de_l_id_spotify_tranchent(self):
+        """« goosebumps » garde la cover de Skylar Grey, son ID Spotify est Travis."""
+        fiche = {"genius_id": 1, "artiste": "Travis Scott", "album": "Dark Thoughts"}
+        cands = [_chanson(1, "Skylar Grey", "Dark Thoughts"), _chanson(2, "Travis Scott")]
+        v, choisi, raison = self._verdict(fiche, cands, {"travis scott"})
+        assert (v, choisi["id"], raison) == ("a_corriger", 2, "artistes de l'ID Spotify")
+
+    def test_l_album_ne_passe_qu_en_dernier(self):
+        """La colonne album d'une chimère est CONTAMINÉE (dernier écrivain)."""
+        fiche = {"genius_id": 1, "artiste": "Kid Cudi", "album": "Cover Album"}
+        cands = [_chanson(1, "Kid Cudi"), _chanson(2, "Lissie", "Cover Album")]
+        v, choisi, raison = self._verdict(fiche, cands, None)
+        assert (v, choisi["id"], raison) == ("ok", 1, "artiste principal")
+
+    def test_rien_ne_tranche(self):
+        fiche = {"genius_id": 1, "artiste": "X", "album": None}
+        v, choisi, _ = self._verdict(fiche, [_chanson(1, "A"), _chanson(2, "B")], None)
+        assert (v, choisi) == ("indecis", None)
+
+
+def test_rattacher_page_genius_repose_la_page_et_efface_le_melange(data_manager, artiste):
+    from src.models import Credit, CreditRole
+
+    t = _t(artiste, "goosebumps", 5616211, album="Dark Thoughts")
+    t.primary_artist_name = "Skylar Grey"
+    t.secondary_role = "Writer"
+    t.anecdotes = "bio de la cover"
+    t.lyrics.text = "paroles de la cover"
+    t.lyrics.source = "genius"
+    t.credits = [Credit(name="Skylar Grey", role=CreditRole.PRODUCER, source="genius")]
+    tid = data_manager.save_track(t)
+
+    assert data_manager.rattacher_page_genius(
+        tid,
+        genius_id=2849767,
+        genius_url="https://genius.com/Travis-scott-goosebumps-lyrics",
+        album="Birds in the Trap Sing McKnight",
+        date_observee="2016-09-02",
+        is_featuring=False,
+        primary_artist_name=None,
+        secondary_role=None,
+    )
+    (relu,) = data_manager.get_artist_tracks(artiste.id)
+    assert relu.genius_id == 2849767
+    assert relu.album == "Birds in the Trap Sing McKnight"
+    assert relu.primary_artist_name is None and relu.secondary_role is None
+    assert relu.anecdotes is None and relu.lyrics.text is None
+    assert [c for c in relu.credits if c.source == "genius"] == []
+    assert str(relu.release_date)[:10] == "2016-09-02"
+
+
+def test_rattacher_refuse_un_genius_id_deja_pris(data_manager, artiste):
+    data_manager.save_track(_t(artiste, "goosebumps", 2849767))
+    b = data_manager.save_track(_t(artiste, "goosebumps", 5616211))
+    assert not data_manager.rattacher_page_genius(
+        b,
+        genius_id=2849767,
+        genius_url=None,
+        album=None,
+        date_observee=None,
+        is_featuring=False,
+        primary_artist_name=None,
+        secondary_role=None,
+    )

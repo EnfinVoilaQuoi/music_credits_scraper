@@ -1448,6 +1448,94 @@ class TrackRepository:
             logger.error(f"Erreur reclasser_credits: {e}")
             return 0, 0
 
+    def rattacher_page_genius(
+        self,
+        track_id: int,
+        *,
+        genius_id: int,
+        genius_url: str | None,
+        album: str | None,
+        date_observee: str | None,
+        is_featuring: bool,
+        primary_artist_name: str | None,
+        secondary_role: str | None,
+    ) -> bool:
+        """Rend à une fiche CHIMÈRE la page Genius qu'elle décrit vraiment (e36).
+
+        Avant e36, des morceaux Genius différents au même titre fusionnaient :
+        la fiche a gardé le genius_id d'un morceau, les champs d'un autre. Ce
+        geste pose la bonne page ET retire ce qui venait des pages Genius
+        mélangées — rien ne dit de laquelle elles ont été lues :
+
+          · identité (genius_id, URL), relation à l'artiste (feat, principal,
+            rôle secondaire) et album : repris de la bonne page ;
+          · date : observation `genius` remplacée, colonne ré-arbitrée ;
+          · crédits `genius`, paroles venues de Genius, anecdote et relations :
+            EFFACÉS, à re-scraper (`credits --manquants`).
+
+        Refuse si une autre fiche de l'artiste porte déjà ce genius_id.
+        """
+        try:
+            with self.engine.begin() as conn:
+                deja = conn.execute(
+                    text(
+                        "SELECT id FROM tracks WHERE genius_id = :g AND id != :id AND artist_id = "
+                        "(SELECT artist_id FROM tracks WHERE id = :id)"
+                    ),
+                    {"g": genius_id, "id": track_id},
+                ).first()
+                if deja:
+                    logger.error(
+                        f"rattacher_page_genius({track_id}) : genius_id {genius_id} déjà porté "
+                        f"par la fiche {deja[0]}"
+                    )
+                    return False
+                conn.execute(
+                    text(
+                        "UPDATE tracks SET genius_id = :g, genius_url = :u, album = :album, "
+                        "is_featuring = :feat, primary_artist_name = :pan, "
+                        "secondary_role = :role, anecdotes = NULL, relationships = NULL, "
+                        "updated_at = :now WHERE id = :id"
+                    ),
+                    {
+                        "g": genius_id,
+                        "u": genius_url,
+                        "album": album,
+                        "feat": bool(is_featuring),
+                        "pan": primary_artist_name,
+                        "role": secondary_role,
+                        "now": datetime.now(),
+                        "id": track_id,
+                    },
+                )
+                conn.execute(
+                    text(
+                        "UPDATE tracks SET lyrics = NULL, has_lyrics = 0, lyrics_scraped_at = NULL, "
+                        "lyrics_source = NULL, instrumental = NULL "
+                        "WHERE id = :id AND lyrics_source LIKE 'genius%'"
+                    ),
+                    {"id": track_id},
+                )
+                conn.execute(
+                    text("DELETE FROM credits WHERE track_id = :id AND source = 'genius'"),
+                    {"id": track_id},
+                )
+                conn.execute(
+                    text("DELETE FROM observations WHERE track_id = :id AND source = 'genius'"),
+                    {"id": track_id},
+                )
+                if date_observee:
+                    self._upsert_observations(
+                        conn, track_id, [Observation("release_date", date_observee, "genius")]
+                    )
+                self._ecrire_colonnes_discographie(
+                    conn, track_id, self._arbitrer_discographie(conn, track_id, ["release_date"])
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur rattacher_page_genius({track_id}): {e}")
+            return False
+
     def record_relationships(self, track_id: int, relationships: list) -> bool:
         """Écrit la colonne `relationships` VERBATIM, `[]` compris.
 

@@ -178,6 +178,30 @@ class TestResolutionDeCanal:
         monkeypatch.setattr(requests, "get", lambda *a, **k: _Reponse())
         assert _api().resolve_channel("@ISHAOfficiel") == "UCbbbbbbbbbbbbbbbbbbbbbb"
 
+    @pytest.mark.parametrize(
+        "valeur",
+        [
+            "@Népal75e",
+            "https://www.youtube.com/@Népal75e",
+            "https://www.youtube.com/@N%C3%A9pal75e/videos",
+        ],
+    )
+    def test_handle_non_ascii(self, monkeypatch, valeur):
+        """YouTube accepte les accents dans un handle : le motif ASCII coupait
+        « @Népal75e » en « @N ». L'URL copiée du navigateur arrive encodée."""
+        vus = []
+
+        class _Reponse:
+            text = '{"channelId":"UCdddddddddddddddddddddd"}'
+
+        def _get(url, **k):
+            vus.append(url)
+            return _Reponse()
+
+        monkeypatch.setattr(requests, "get", _get)
+        assert _api().resolve_channel(valeur) == "UCdddddddddddddddddddddd"
+        assert vus == ["https://music.youtube.com/@N%C3%A9pal75e"]
+
     def test_api_en_echec_puis_page(self, monkeypatch):
         def _build_casse(*a, **k):
             raise OSError("quota dépassé")

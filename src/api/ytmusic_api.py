@@ -10,6 +10,7 @@ Stratégie quota-optimisée :
 
 import re
 import unicodedata
+from urllib.parse import quote, unquote
 
 import requests
 from ytmusicapi import YTMusic
@@ -166,8 +167,11 @@ class YTMusicAPI:
         if m:
             return m.group(1)
 
-        # Extraire le handle (@xxx)
-        h = re.search(r"@([A-Za-z0-9._-]+)", value)
+        # Extraire le handle (@xxx). YouTube accepte les lettres NON-ASCII
+        # (« @Népal75e ») : un motif [A-Za-z0-9] coupait au « é » et cherchait
+        # « @N ». Une URL copiée depuis le navigateur arrive souvent encodée
+        # (« @N%C3%A9pal75e ») — décodée d'abord.
+        h = re.search(r"@([^\s/?#&@]+)", unquote(value))
         if not h:
             logger.warning(f"resolve_channel: format non reconnu: {value!r}")
             return None
@@ -192,7 +196,7 @@ class YTMusicAPI:
         # 2. Fallback : page music.youtube.com/@handle
         try:
             r = requests.get(
-                f"https://music.youtube.com/@{handle}",
+                f"https://music.youtube.com/@{quote(handle)}",
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
                 timeout=15,
             )

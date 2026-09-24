@@ -290,3 +290,76 @@ def test_base_vide_abort_propre(monkeypatch):
     assert dm.stream_writes == []
     assert dm.monthly_writes == []
     assert dm.set_calls == []
+
+
+# ── Canal élu sans album lisible : repli sur la recherche (2026-09-23) ──────
+
+
+def test_canal_infere_sans_album_repli_sur_la_recherche(monkeypatch):
+    """Lucio Bukowski / Népal : le vote élit une chaîne YOUTUBE que ytmusicapi
+    ne lit pas comme page artiste. Le run s'arrêtait à « Aucun album » et
+    l'artiste restait à zéro ; la recherche par nom trouve la page artiste."""
+    titles = ["A", "B", "C", "D"]
+    base = [_track(i, t) for i, t in enumerate(titles)]
+    api = FakeAPI(
+        channel_albums={"UCartiste": [{"title": "Alb", "browseId": "B_Alb"}]},
+        raw={"B_Alb": _raw(titles)},
+        candidates=[("UCchaine_yt", "Lucio"), ("UCartiste", "Lucio")],
+    )
+    dm = FakeDM(base, channel_info=(None, None))
+    _patch(monkeypatch, api, inferred="UCchaine_yt")
+
+    result = mod.update_ytmusic_streams(_ARTIST, dm)
+
+    assert "canal_introuvable" not in result
+    assert result["identity"]["status"] == "ok"
+    assert result["identity"]["channel_source"] == "search"
+    assert len(dm.stream_writes) == 4
+    assert dm.set_calls == [("UCartiste", "inferred")]  # épinglé APRÈS le gate
+
+
+def test_pin_infere_sans_album_depingle_et_repli(monkeypatch):
+    titles = ["A", "B", "C"]
+    base = [_track(i, t) for i, t in enumerate(titles)]
+    api = FakeAPI(
+        channel_albums={"UCartiste": [{"title": "Alb", "browseId": "B_Alb"}]},
+        raw={"B_Alb": _raw(titles)},
+        candidates=[("UCartiste", "X")],
+    )
+    dm = FakeDM(base, channel_info=("UCvide", "inferred"))
+    _patch(monkeypatch, api)
+
+    result = mod.update_ytmusic_streams(_ARTIST, dm)
+
+    assert dm.cleared is True
+    assert result["identity"]["channel_id"] == "UCartiste"
+    assert len(dm.stream_writes) == 3
+
+
+def test_canal_manuel_sans_album_jamais_remplace(monkeypatch):
+    """Une saisie manuelle n'est pas contournée : c'est signalé, pas remplacé."""
+    base = [_track(0, "A")]
+    api = FakeAPI(
+        channel_albums={"UCautre": [{"title": "Alb", "browseId": "B_Alb"}]},
+        raw={"B_Alb": _raw(["A"])},
+        candidates=[("UCautre", "X")],
+    )
+    dm = FakeDM(base, channel_info=("UCman", "manual"))
+    _patch(monkeypatch, api)
+
+    result = mod.update_ytmusic_streams(_ARTIST, dm)
+
+    assert result["canal_introuvable"] == {"channel_id": "UCman", "channel_source": "manual"}
+    assert dm.stream_writes == [] and dm.set_calls == [] and dm.cleared is False
+
+
+def test_aucun_canal_lisible_signale(monkeypatch):
+    base = [_track(0, "A")]
+    api = FakeAPI(channel_albums={}, raw={}, candidates=[("UCrien", "X")])
+    dm = FakeDM(base, channel_info=(None, None))
+    _patch(monkeypatch, api, inferred="UCvide")
+
+    result = mod.update_ytmusic_streams(_ARTIST, dm)
+
+    assert result["canal_introuvable"]["channel_id"] == "UCvide"
+    assert dm.stream_writes == [] and dm.monthly_writes == []

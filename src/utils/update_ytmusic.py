@@ -399,11 +399,42 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         logger.error(f"Artiste '{artist.name}' introuvable sur YouTube Music.")
         return result
 
+    if not artist_info["albums"] and channel_source != "manual":
+        # Le vote sur les vidéos élit une chaîne YOUTUBE (celle qui a publié les
+        # liens Genius), qui n'est pas toujours une page artiste YTM : chez
+        # Lucio Bukowski ytmusicapi ne sait pas la lire, chez Népal elle n'avait
+        # aucun album. Sans repli, le run s'arrêtait ici — passes par lien
+        # comprises — et l'artiste restait à ZÉRO stream YTM, run après run
+        # (mesuré 2026-09-23 : 561 morceaux). La recherche par nom, elle, trouve
+        # la page artiste ; le gate d'identité (1b) la valide comme les autres.
+        # Un canal MANUEL n'est jamais remplacé : il est signalé plus bas.
+        repli = [
+            (cid, nom)
+            for cid, nom in api.get_artist_channel_candidates(artist.name)
+            if cid != channel_id
+        ]
+        cid2, info2 = _pick_best_candidate(api, repli, db_norm_albums)
+        if info2 is not None and info2["albums"]:
+            logger.warning(
+                f"Canal YTM {channel_source} {channel_id} sans album lisible pour "
+                f"'{artist.name}' — repli sur la recherche par nom : {cid2}"
+            )
+            if pinned_source == "inferred":
+                # Le pin inféré ne sert plus : le gate épinglera le nouveau s'il passe.
+                data_manager.clear_artist_ytm_channel(artist.id)
+            channel_id, artist_info, channel_source = cid2, info2, "search"
+
     albums = artist_info["albums"]
     ytm_monthly_listeners = artist_info["monthly_listeners"]
 
     if not albums:
-        logger.warning(f"Aucun album YTMusic pour '{artist.name}'")
+        # Rien de lisible, recherche comprise : ce n'est PAS « aucun stream »,
+        # c'est un canal introuvable — le dire au bilan, pas seulement au log.
+        logger.error(
+            f"Aucun album YTMusic lisible pour '{artist.name}' (canal {channel_id}, "
+            f"{channel_source}) — renseigne le champ « Canal YTM » (@handle)"
+        )
+        result["canal_introuvable"] = {"channel_id": channel_id, "channel_source": channel_source}
         return result
 
     if not db_tracks:

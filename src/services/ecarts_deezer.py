@@ -234,6 +234,16 @@ def _variante_de(piste: PisteDeezer):
     return normalize_title(v.socle), v.kind != Kind.NONE and not _edition_generique(v)
 
 
+def nom_de_contributeur_plausible(nom: str | None) -> bool:
+    """PUR. Deezer crée parfois une entité d'artiste à partir d'un titre mal
+    découpé : « Soprano) / Ils Disent / Personne n'est Innocent » est
+    contributeur de « La Colombe » de Médine (2026-09-24). Une parenthèse
+    orpheline trahit la coupure — jamais un nom d'artiste."""
+    if not nom or not nom.strip():
+        return False
+    return nom.count("(") == nom.count(")") and nom.count("[") == nom.count("]")
+
+
 def _edition_generique(variant) -> bool:
     """Une mention éditoriale ne désigne pas une nouvelle prise musicale — ni une
     édition de DIFFUSION (radio edit, clean, explicit, remaster : même
@@ -722,7 +732,10 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
         track.primary_artist_name = a.artist_name or None
     credits: list[Credit] = []
     for _cid, nom in contributeurs or a.contributors:
-        if nom and not names_match_as_words(nom, artist.name):
+        if not nom_de_contributeur_plausible(nom):
+            logger.info(f"Contributeur Deezer écarté (nom malformé) : « {nom} »")
+            continue
+        if not names_match_as_words(nom, artist.name):
             if est_apparition and names_match_as_words(nom, a.artist_name):
                 continue
             credits.append(Credit(name=nom, role=CreditRole.FEATURED, source="deezer"))

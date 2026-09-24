@@ -1067,9 +1067,9 @@ class TestRenditions:
         assert dm.streams_writes == [(2, 108, 1, datetime(2026, 9, 1))]
 
     def test_une_fiche_de_la_version_prend_la_ligne(self):
-        """« Nudes (Live at AK Studios) » a sa page Genius : « Nudes - Acoustic »
-        (même famille « performance ») est CE morceau, pas une variante de « Nudes »."""
-        tracks = [_track(1, "Nudes", spotify_id="SP1"), _track(2, "Nudes (Live at AK Studios)")]
+        """« Nudes (Acoustic) » a sa page Genius : « Nudes - Acoustic » est CE
+        morceau, pas une variante de « Nudes »."""
+        tracks = [_track(1, "Nudes", spotify_id="SP1"), _track(2, "Nudes (Unplugged)")]
         res, dm = _run(tracks, [_entry("Nudes - Acoustic", 14_000_000, 100, "SPA")])
         assert dm.streams_writes == [(2, 14_000_000, 100, datetime(2026, 9, 1))]
         # Le souche garde l'indication, avec le pointeur vers la fiche.
@@ -1081,11 +1081,19 @@ class TestRenditions:
         parent.spotify_id_entries = [
             TrackSpotifyId(spotify_id="SPA", source="kworb", kind="rendition")
         ]
-        fiche = _track(2, "Blues (Live at AK Studios)")
+        fiche = _track(2, "Blues (Unplugged)")
         res, dm = _run([parent, fiche], [_entry("Blues - Acoustic", 342, 3, "SPA")])
         assert dm.streams_writes == [(2, 342, 3, datetime(2026, 9, 1))]
         # L'indication reste sur « Blues », désormais pointée vers sa fiche.
         assert dm.variant_fiches == [(1, "SPA", 2)]
+
+    def test_une_fiche_live_ne_prend_pas_la_ligne_acoustique(self):
+        """A2H : la session « Live at AK Studios » (2020) n'est pas l'album
+        acoustique REWORKS (2025) que Spotify sert en « - Acoustic »."""
+        tracks = [_track(1, "Nudes", spotify_id="SP1"), _track(2, "Nudes (Live at AK Studios)")]
+        res, dm = _run(tracks, [_entry("Nudes - Acoustic", 14_000_000, 100, "SPA")])
+        assert all(w[0] != 2 for w in dm.streams_writes)
+        assert (2, "SPA") not in dm.track_spotify_ids
 
     def test_socle_ambigu_devient_proposition(self):
         tracks = [_track(1, "Meilleur"), _track(2, "MEILLEUR")]
@@ -1263,3 +1271,13 @@ def test_un_id_pose_sur_une_autre_fiche_va_a_la_fiche_du_titre():
     res, dm = _run(tracks, [_entry("Only One", 1000, 10, "SPX")])
     assert [tid for tid, *_ in dm.streams_writes] == [2]
     assert res["ids_mal_places"] == [("SPX", "Only", "Only One")]
+
+
+def test_un_titre_generique_ne_deplace_pas_l_id():
+    """PLK : Kworb sert « Interlude * » avec l'ID d'« Interlude ****** (Pt. 3) »,
+    et une fiche Deezer s'appelle « Interlude * ». Chaque projet a son intro, ses
+    interludes : un titre générique ne désigne pas une fiche, l'ID fait foi."""
+    tracks = [_track(1, "Interlude ****** (Pt. 3)", spotify_id="SPX"), _track(2, "Interlude *")]
+    res, dm = _run(tracks, [_entry("Interlude *", 1000, 10, "SPX")])
+    assert [tid for tid, *_ in dm.streams_writes] == [1]
+    assert res["ids_mal_places"] == []

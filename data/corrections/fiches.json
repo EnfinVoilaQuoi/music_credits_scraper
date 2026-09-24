@@ -83,6 +83,31 @@
       "retirer_id_spotify": [
         "1YtbL9W2WDaT4Z8vZoRJWs"
       ]
+    },
+    {
+      "fiche": {
+        "titre": "Yatch Music",
+        "album": "Summer Stories Kushtape, Vol. 2"
+      },
+      "fusionner_dans": {
+        "genius_id": 2844519
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 5339146
+      },
+      "retirer_id_spotify": [
+        "1KNKBk1H5z51eRgOTqaQI7"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5339145
+      },
+      "retirer_id_spotify": [
+        "4GiwmGe9Bbk23RXmJG7Fud"
+      ]
     }
   ],
   "Booba": [
@@ -131,6 +156,41 @@
       },
       "retirer_id_spotify": [
         "5Y5dlBMUM5rTrpNo445yUC"
+      ]
+    },
+    {
+      "fiche": {
+        "titre": "Mr.Kopp",
+        "album": "D.U.C."
+      },
+      "fusionner_dans": {
+        "genius_id": 722498
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Strass & paillettes",
+        "album": "Temps mort"
+      },
+      "fusionner_dans": {
+        "genius_id": 54499
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Intro",
+        "album": "0.9"
+      },
+      "fusionner_dans": {
+        "genius_id": 210155
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 313348
+      },
+      "retirer_id_spotify": [
+        "2hYlj68sSPc8h8BfgXua7x"
       ]
     }
   ],
@@ -196,6 +256,42 @@
       "retirer_id_spotify": [
         "43AtKOibxb0pYV2CUlqBfB"
       ]
+    },
+    {
+      "fiche": {
+        "titre": "Le jugement",
+        "album": null
+      },
+      "fusionner_dans": {
+        "genius_id": 73983
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Ecorchée",
+        "album": "Au Tour De Ma Bulle"
+      },
+      "fusionner_dans": {
+        "genius_id": 2393504
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 3031918
+      },
+      "retirer_id_spotify": [
+        "60954gLQvRLJeqKc54og1k"
+      ],
+      "lien_youtube": "https://www.youtube.com/watch?v=3EogUpxPvVs"
+    },
+    {
+      "fiche": {
+        "titre": "Suzy 2003",
+        "album": "Brut de femme"
+      },
+      "version_de": {
+        "genius_id": 3031918
+      }
     }
   ],
   "Freeze Corleone": [
@@ -209,6 +305,23 @@
       "retirer_id_spotify": [
         "1Pit975hbTxrwgf2BRixEb"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5805280
+      },
+      "retirer_id_spotify": [
+        "6e54OVT22djtYkALxbp8ld"
+      ]
+    },
+    {
+      "fiche": {
+        "titre": "Desiigner - A COLORS SHOW",
+        "album": "Desiigner - A COLORS SHOW"
+      },
+      "version_de": {
+        "genius_id": 5805280
+      }
     }
   ],
   "Josman": [
@@ -219,6 +332,24 @@
       },
       "fusionner_dans": {
         "genius_id": 638651
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Matrix",
+        "album": "Matrix"
+      },
+      "fusionner_dans": {
+        "genius_id": 2490047
+      }
+    },
+    {
+      "fiche": {
+        "titre": "R.A.P. (Rhythm and Poetry)",
+        "album": "Echecs positifs"
+      },
+      "fusionner_dans": {
+        "genius_id": 704799
       }
     }
   ],
@@ -313,6 +444,24 @@
       "retirer_id_spotify": [
         "7sZCAHP2duHwr5M5K7lHsb"
       ]
+    },
+    {
+      "fiche": {
+        "titre": "Ni**as In Paris",
+        "album": "Watch The Throne (Deluxe)"
+      },
+      "fusionner_dans": {
+        "genius_id": 51899
+      }
+    },
+    {
+      "fiche": {
+        "titre": "New God Flow",
+        "album": null
+      },
+      "fusionner_dans": {
+        "genius_id": 79864
+      }
     }
   ],
   "Kid Cudi": [
@@ -438,6 +587,189 @@
       "retirer_id_spotify": [
         "177WEvlLsCc0FzCTWslawr"
       ]
+    }
+  ],
+  "MC Solaar": [
+    {
+      "fiche": {
+        "titre": "Le cinquième as",
+        "album": "Cinquième as"
+      },
+      "fusionner_dans": {
+        "genius_id": 118346
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Un Coup D'Œil Dans Le MÉtro",
+        "album": "Chapitre 7"
+      },
+      "fusionner_dans": {
+        "genius_id": 87676
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Samedi soir",
+        "album": "Magnum 567 (Pack contenant 3 albums de MC Solaar : Cinquième As, Mach 6 et Chapitre 7)"
+      },
+      "fusionner_dans": {
+        "genius_id": 64878
+      }
+    },
+    {
+      "fiche": {
+        "titre": "TOUT SE TRANSFORME. (Bande originale du film « Transformers : Rise of the Beasts »)",
+        "album": "TOUT SE TRANSFORME. (Bande originale du film « Transformers : Rise of the Beasts »)"
+      },
+      "fusionner_dans": {
+        "genius_id": 9205452
+      }
+    },
+    {
+      "fiche": {
+        "titre": "L'homme qui voulait trois milliards",
+        "album": "Cinquième as"
+      },
+      "fusionner_dans": {
+        "genius_id": 379298
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Intro",
+        "album": "Paradisiaque / Mc Solaar"
+      },
+      "fusionner_dans": {
+        "genius_id": 379192
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 358888
+      },
+      "retirer_id_spotify": [
+        "6JPcuEtxEVfdt8iY3fVKfv"
+      ]
+    },
+    {
+      "fiche": {
+        "titre": "Dix de mes disciples",
+        "album": "Le tour de la question"
+      },
+      "version_de": {
+        "genius_id": 358888
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 379192
+      },
+      "retirer_id_spotify": [
+        "65V9vKVtEOQo3uDlIEbH1J"
+      ]
+    }
+  ],
+  "Médine": [
+    {
+      "fiche": {
+        "titre": "Blockkk identitaire (feat. Youssoupha)",
+        "album": "Protest Song"
+      },
+      "fusionner_dans": {
+        "genius_id": 132392
+      }
+    },
+    {
+      "fiche": {
+        "titre": "La Colombe",
+        "album": "Don't Panik Tape"
+      },
+      "fusionner_dans": {
+        "genius_id": 3120542
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Arabian panthers",
+        "album": "Table d'écoute"
+      },
+      "fusionner_dans": {
+        "genius_id": 101100
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 3120542
+      },
+      "retirer_credits": [
+        {
+          "nom": "Soprano) / Ils Disent / Personne n'est Innocent",
+          "role": "Featured Artist"
+        }
+      ]
+    }
+  ],
+  "Népal": [
+    {
+      "fiche": {
+        "titre": "Love64 (Interlude)",
+        "album": "445e Nuit"
+      },
+      "fusionner_dans": {
+        "genius_id": 3239128
+      }
+    }
+  ],
+  "OrelSan": [
+    {
+      "fiche": {
+        "titre": "La petite marchande de porte-clefs",
+        "album": "Le Chant des sirènes"
+      },
+      "fusionner_dans": {
+        "genius_id": 56282
+      }
+    }
+  ],
+  "PLK": [
+    {
+      "fiche": {
+        "titre": "Pas bien (Extrait de la BO de « En Passant Pécho »)",
+        "album": null
+      },
+      "fusionner_dans": {
+        "genius_id": 6453552
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Interlude *",
+        "album": "Chambre 140 (Part.1)"
+      },
+      "fusionner_dans": {
+        "genius_id": 9946258
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Règlement Freestyle #17",
+        "album": "Règlement Freestyle #17"
+      },
+      "fusionner_dans": {
+        "genius_id": 3600553
+      }
+    }
+  ],
+  "SCH": [
+    {
+      "fiche": {
+        "titre": "Genny & Ciiro",
+        "album": "A7"
+      },
+      "fusionner_dans": {
+        "genius_id": 2336436
+      }
     }
   ]
 }

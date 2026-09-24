@@ -172,6 +172,24 @@ _CITATION_RE = re.compile(r"[\"“”]([^\"“”]*)[\"“”]|(?<!\w)'([^']*)'(
 _ANNEE_RE = re.compile(r"\b(19|20)\d{2}\b")
 
 
+#: Ce qui peut accompagner un mot de même morceau sans lui donner d'identité.
+_NUMEROTATION = frozenset({"part", "pt", "partie", "vol", "chapitre"})
+
+
+def titre_generique(titre: str | None) -> bool:
+    """PUR. Le titre ne désigne-t-il qu'une PLACE dans un projet (« Intro »,
+    « Interlude * », « Intro (0.9) », « Interlude ****** (Pt. 3) ») ?
+
+    Chaque projet a son intro, parfois plusieurs interludes : un tel titre ne
+    désigne jamais une fiche à lui seul — l'album ou l'identifiant tranche.
+    « Matrix (Intro) » n'est PAS générique (le morceau s'appelle Matrix).
+    """
+    mots = _tokens(strip_featuring(titre or ""))
+    if not set(mots) & MOTS_DE_MEME_MORCEAU:
+        return False
+    return all(m in MOTS_DE_MEME_MORCEAU or m in _NUMEROTATION or m.isdigit() for m in mots)
+
+
 def _tokens(texte: str) -> list[str]:
     """Mots normalisés d'un descripteur (ascii, minuscules, ponctuation écrasée).
 
@@ -312,26 +330,17 @@ def socle_normalise(title: str | None) -> str:
 
 
 #: Familles de renditions : deux mots d'une même famille désignent la même prise.
-#: Mesuré à l'audit du 2026-09-21 : Genius écrit « (Live at AK Studios) » là où
-#: Spotify sert « - Acoustic » pour la même session unplugged d'A2H — exiger un
-#: mot commun aurait retiré deux IDs JUSTES (et laissé les deux faux, qui
-#: pointaient sur la version studio). Une prise en public / acoustique, une
-#: version sans voix, une édition (démo, radio, bonus, remaster…).
+#: LIVE et ACOUSTIQUE sont deux familles (2026-09-24). Elles n'en faisaient
+#: qu'une (« performance ») sur la foi de l'audit du 2026-09-21, qui croyait que
+#: Genius « (Live at AK Studios) » et Spotify « - Acoustic » désignaient la même
+#: session d'A2H. Faux : la session AK Studios (2020) n'est pas sur Spotify, les
+#: « - Acoustic » sont l'album REWORKS (2025) — les fiches AK Studios portaient
+#: donc les IDs et les streams d'un autre enregistrement. Unplugged est rangé
+#: avec l'acoustique (Spotify sert « Le cœur des filles - Unplugged »).
 _FAMILLES_RENDITION = {
-    "performance": frozenset(
-        {
-            "live",
-            "unplugged",
-            "acoustic",
-            "acoustique",
-            "session",
-            "symphonic",
-            "symphonique",
-            "piano",
-            "stripped",
-            "solo",
-        }
-    ),
+    "live": frozenset({"live", "session", "symphonic", "symphonique"}),
+    "acoustique": frozenset({"acoustic", "acoustique", "unplugged", "stripped", "piano"}),
+    "solo": frozenset({"solo"}),
     "sans_voix": frozenset({"instrumental", "cappella", "acapella"}),
     "demo": frozenset({"demo"}),
     # « Version », « Edit », « Radio Edit », « Bonus Track », « Original » :
@@ -361,8 +370,8 @@ def meme_prise(a: Variant, b: Variant) -> bool:
 
     C'est le critère pour ATTRIBUER une ligne Kworb à la fiche d'une version,
     là où le gate (`meme_famille`) se contente de ne pas REFUSER un ID juste.
-    Une famille commune AUTRE que « edition » : performance (« Live at AK
-    Studios » = « Acoustic »), sans voix, démo, remaster, vitesse, chopped.
+    Une famille commune AUTRE que « edition » : live, acoustique, solo, sans
+    voix, démo, remaster, vitesse, chopped (« Live » ≠ « Acoustic »).
     « Version », « Edit », « Bonus » ne nomment pas une prise — mesuré :
     « Put On - Album Version (Edited) » (336 M) serait allé sur « Put On (Video
     Version) », « Jesus Walks - Live Version » sur « Jesus Walks (Demo) ».
@@ -377,8 +386,8 @@ def meme_famille(a: Variant, b: Variant) -> bool:
     """Deux titres désignent-ils la même VERSION d'un morceau ?
 
     Même nature, et pour un remix nommé le même remixeur ; pour deux renditions,
-    une FAMILLE de version en commun (« Radio Edit » ≈ « Edit », « Live at AK
-    Studios » ≈ « Acoustic », mais « Live » ≠ « Instrumental »). C'est ce prédicat qui laisse passer « Heartless
+    une FAMILLE de version en commun (« Radio Edit » ≈ « Edit », « Live 2006 »
+    ≈ « Live au Zénith », mais « Live » ≠ « Acoustic » ≠ « Instrumental »). C'est ce prédicat qui laisse passer « Heartless
     (Remix) » face à « Heartless - Remix » et refuse « Heartless » nu.
     """
     if a.est_remix and b.est_remix:

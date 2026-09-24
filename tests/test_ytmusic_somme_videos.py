@@ -338,7 +338,7 @@ class TestVideoPartagee:
             ),
             _track(
                 2,
-                "Les yeux dans les yeux (Live at AK Studios)",
+                "Les yeux dans les yeux (Unplugged)",
                 youtube_url="https://youtu.be/acoustique0",
             ),
         ]

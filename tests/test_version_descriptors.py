@@ -128,9 +128,13 @@ class TestMemeFamille:
         assert meme_famille(
             parse_variant("Suzy - Live 2006"), parse_variant("Suzy (Live au Zénith)")
         )
-        # Même famille « performance » : la session unplugged d'A2H est « (Live
-        # at AK Studios) » chez Genius, « - Acoustic » chez Spotify.
-        assert meme_famille(parse_variant("X (Live at AK Studios)"), parse_variant("X - Acoustic"))
+        assert meme_famille(parse_variant("X (Unplugged)"), parse_variant("X - Acoustic"))
+        # Live et acoustique sont deux familles (2026-09-24) : la session
+        # « Live at AK Studios » d'A2H (2020) n'est pas l'album acoustique
+        # REWORKS (2025) que Spotify sert en « - Acoustic ».
+        assert not meme_famille(
+            parse_variant("X (Live at AK Studios)"), parse_variant("X - Acoustic")
+        )
         assert not meme_famille(parse_variant("X - Live"), parse_variant("X - Instrumental"))
         assert not meme_famille(parse_variant("X (Demo)"), parse_variant("X - Live"))
 
@@ -159,7 +163,8 @@ class TestMemePrise:
         assert meme_prise(
             parse_variant("Jesus Walks - Live Version"), parse_variant("Jesus Walks (Live)")
         )
-        assert meme_prise(
+        assert meme_prise(parse_variant("Nudes - Acoustic"), parse_variant("Nudes (Acoustic)"))
+        assert not meme_prise(
             parse_variant("Nudes - Acoustic"), parse_variant("Nudes (Live at AK Studios)")
         )
         assert not meme_prise(

@@ -517,3 +517,15 @@ def test_une_edition_de_diffusion_ne_touche_pas_la_fiche():
         )
     ]
     assert dm.identites == [] and fiche.duration == 245
+
+
+def test_contributeur_au_nom_malforme_ecarte():
+    """Deezer liste « Soprano) / Ils Disent / Personne n'est Innocent » comme
+    contributeur de « La Colombe » (Médine) : un titre mal découpé, pas un
+    artiste."""
+    from src.services.ecarts_deezer import nom_de_contributeur_plausible
+
+    assert not nom_de_contributeur_plausible("Soprano) / Ils Disent / Personne n'est Innocent")
+    assert not nom_de_contributeur_plausible("")
+    assert nom_de_contributeur_plausible("Soprano")
+    assert nom_de_contributeur_plausible("Swing (BE)")

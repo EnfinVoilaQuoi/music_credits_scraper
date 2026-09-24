@@ -65,6 +65,9 @@ class TestTitreObligatoire:
 
     def test_meme_famille_de_version_acceptee(self):
         assert hit_concorde(
+            _hit("Nudes - Acoustic", "A2H"), artist_name="A2H", title="Nudes (Unplugged)"
+        )[0]
+        assert not hit_concorde(
             _hit("Nudes - Acoustic", "A2H"), artist_name="A2H", title="Nudes (Live at AK Studios)"
         )[0]
 

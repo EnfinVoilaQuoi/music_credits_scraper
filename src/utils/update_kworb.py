@@ -43,6 +43,7 @@ from src.utils.version_descriptors import (
     meme_famille,
     meme_prise,
     parse_variant,
+    titre_generique,
     titres_equivalents,
 )
 
@@ -499,8 +500,12 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
             # L'ID est posé sur une AUTRE fiche que celle du titre (« Only » porte
             # l'ID d'« Only One », 2026-09-24) : si UNE fiche porte exactement le
             # titre de la ligne, les streams vont à elle et l'ID est SIGNALÉ.
+            # Jamais sur un titre GÉNÉRIQUE : chaque projet a son intro, parfois
+            # plusieurs interludes — « Interlude * » ne désigne pas une fiche,
+            # l'ID (« Interlude ****** (Pt. 3) ») est la seule identité fiable.
+            generique = titre_generique(entry["title"])
             bonnes = [t for t in index.by_title.get(norm, []) if t.id != porteur.id]
-            if len(bonnes) == 1:
+            if len(bonnes) == 1 and not generique:
                 return Rapprochement(track=bonnes[0], via="id_mal_place", motif=porteur.title)
         return Rapprochement(track=porteur, via="id")
     # Édition de DIFFUSION (« Impossible - Radio Edit », « Put On - Album

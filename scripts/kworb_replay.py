@@ -33,6 +33,7 @@ class _Enregistreur:
         self.streams = []
         self.variantes = []
         self.ids = []
+        self.oublis = []
 
     def get_artist_tracks(self, artist_id):
         return self._dm.get_artist_tracks(artist_id)
@@ -45,6 +46,10 @@ class _Enregistreur:
         self, track_id, spotify_id, streams, daily, seen_at, label=None, variant_track_id=None
     ):
         self.variantes.append((track_id, spotify_id, streams, label))
+        return True
+
+    def forget_spotify_streams_observation(self, track_id, source):
+        self.oublis.append(track_id)
         return True
 
     def update_track_spotify_id(self, track_id, spotify_id, source="kworb"):

@@ -578,6 +578,33 @@ def _ecrire_rendition(data_manager, parent, entry, kworb_date, result, via) -> N
         result["unmatched_details"].append((entry["title"], entry["streams"]))
 
 
+def _oublier_observations_perimees(data_manager, index: Index, ecrits: set, result: dict) -> None:
+    """Retire l'observation Kworb des fiches à qui ce run a REFUSÉ d'attribuer.
+
+    L'arbitrage des streams est une priorité pure : une observation Kworb que
+    plus aucun run n'écrit garde la colonne indéfiniment. Mesuré le 2026-09-23 :
+    Kanye « Runaway » à 35 M (une ligne d'avant la règle des IDs partagés)
+    contre 1,26 Md lus sur Spotify, Freeze « INTRO » à 3,5 M contre 23 M.
+
+    Seul le REFUS explicite est retenu — ID porté par deux fiches de l'artiste,
+    ou doublon évident non choisi : ce run SAIT que ce chiffre ne peut pas être
+    attribué à cette fiche. « Non réécrit » ne suffit PAS : mesuré, la plupart
+    des 102 observations non réécrites sont justes et à leur place, c'est l'ID
+    qui a été posé sur une AUTRE fiche (« Wolves » → « Wolves (BOOTS
+    Reference) ») — purger là viderait la bonne fiche pour garder la mauvaise.
+    """
+    refusees = {t.id for ts in index.ids_partages.values() for t in ts}
+    refusees |= {t.id for ts in index.doublons.values() for t in ts}
+    for track_id in sorted(refusees - ecrits):
+        if data_manager.forget_spotify_streams_observation(track_id, "kworb"):
+            titre = index.by_id[track_id].title
+            result["observations_retirees"].append(titre)
+            logger.info(
+                f"🧹 Observation Kworb retirée de « {titre} » : ID non attribuable "
+                "(partagé ou doublon) — la colonne est ré-arbitrée"
+            )
+
+
 def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     """Scrape la page songs et valide l'identité. Re-vote une fois si mismatch.
 
@@ -654,6 +681,8 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         "variantes_suspectes": [],  # [(titre base, titre spotify, id)] : ID mal attribué ?
         "multi_lignes": [],  # [(titre, n lignes, n comptées, total)]
         "lignes_ecartees": [],  # [(titre kworb, streams, titre base)] : autre enregistrement
+        #: Fiches dont l'observation Kworb a été retirée (ID non attribuable).
+        "observations_retirees": [],
     }
 
     # ── 1. S'assurer que l'ID Spotify artiste est disponible ──────────────────
@@ -879,6 +908,8 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 f"🎛️ '{track.title}': {len(retenues)} lignes Kworb, "
                 f"{len(somme['retenues'])} comptées → {somme['streams']:,}"
             )
+
+    _oublier_observations_perimees(data_manager, index, set(agg_by_track), result)
 
     result["unmatched_details"].sort(key=lambda x: x[1], reverse=True)
     logger.info(

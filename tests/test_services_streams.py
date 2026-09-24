@@ -88,3 +88,21 @@ class TestHookKworb:
             provider=p,
         )
         assert vus == [(["s"], "2026-09-14")]
+
+
+class TestCanalYtmIntrouvable:
+    def test_signale_au_bilan(self):
+        """« Aucun canal lisible » n'est pas « zéro stream » : un bilan propre
+        cachait Lucio Bukowski et Népal, restés à 0 run après run."""
+        p = _Provider({"matched": 0})
+        p.fetch_ytm = lambda *a, **k: {"canal_introuvable": {"channel_id": "UCx"}}
+        dm = SimpleNamespace(get_artist_tracks=lambda aid: [])
+        rt = Runtime(
+            data_manager=dm, genius_api=None, data_enricher=None, deleted=None, disabled=None
+        )
+        a = _artist()
+        a.id = 1
+        bilan = streams.run(
+            rt, a, streams.OptionsStreams(kworb=False, spotify_web=False), Hooks(), provider=p
+        )
+        assert bilan.erreurs == ["YouTube Music : aucun canal lisible"]

@@ -69,6 +69,13 @@ class TestResumeKworb:
         assert "1 234 567" in texte  # espace insécable de milliers, pas de virgule
 
 
+class TestResumeObservationsRetirees:
+    def test_liste_les_fiches(self):
+        r = {"spotify": {"matched": 1, "observations_retirees": ["Runaway"]}}
+        texte = _resume(r)
+        assert "🧹 1 ancienne(s) valeur(s) Kworb" in texte and "Runaway" in texte
+
+
 class TestResumeSpotifyWeb:
     def test_comptes(self):
         r = {"spotify_web": {"recorded": 40, "albums_totalises": 3, "pages": 41}}
@@ -126,6 +133,11 @@ class TestResumeYtm:
         r = {"ytm": {"identity": {"status": "warning", "matched": 3, "ytm_titles": 30}}}
         texte = _resume(r)
         assert "⚠️" in texte and "écriture maintenue" in texte
+
+    def test_canal_introuvable_dit_quoi_faire(self):
+        r = {"ytm": {"canal_introuvable": {"channel_id": "UCx", "channel_source": "search"}}}
+        texte = _resume(r)
+        assert "🚨" in texte and "UCx" in texte and "Canal YTM" in texte
 
     def test_gate_silencieux_quand_tout_va_bien(self):
         r = {"ytm": {"matched": 20, "identity": {"status": "ok"}}}

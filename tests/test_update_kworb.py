@@ -67,6 +67,7 @@ class _DataManager:
         self.track_spotify_ids = []
         self.variant_writes = []
         self.variant_fiches = []
+        self.oublis = []
 
     def get_artist_tracks(self, artist_id):
         return self._tracks
@@ -76,6 +77,10 @@ class _DataManager:
         # est arbitrée côté repository (`reconcile_spotify_streams`).
         self.streams_writes.append((track_id, streams, kw.get("daily_streams"), updated_at))
         self.streams_kwargs.append({"source": source, **kw})
+        return True
+
+    def forget_spotify_streams_observation(self, track_id, source):
+        self.oublis.append((track_id, source))
         return True
 
     def update_track_spotify_id(self, track_id, spotify_id):
@@ -929,6 +934,34 @@ class TestIdsPartages:
         assert sorted((tid, st) for tid, st, *_ in dm.streams_writes) == [(1, 1000), (3, 500)]
         assert res["ids_partages"] == []
         assert [sid for sid, _ in res["doublons_evidents"]] == ["SPX", "SPY"]
+
+    def test_id_partage_retire_l_observation_kworb_perimee(self):
+        """Kanye « Runaway » : l'ID est aussi sur « Runaway (Film) », le run
+        n'écrit plus rien — mais la vieille observation (35 M) restait MAÎTRE
+        contre 1,26 Md lus sur Spotify. Le refus explicite la retire."""
+        tracks = [
+            _track(1, "OUTSIDE", spotify_id="SPX", album="Jackboys 2"),
+            _track(2, "outside", spotify_id="SPX", album="Birds in the Trap"),
+            _track(3, "Autre", spotify_id="SPZ"),
+        ]
+        res, dm = _run(tracks, [_entry("Autre", 5, 1, "SPZ")])
+        assert dm.oublis == [(1, "kworb"), (2, "kworb")]
+        assert res["observations_retirees"] == ["OUTSIDE", "outside"]
+
+    def test_doublon_non_retenu_retire_la_premiere_garde(self):
+        tracks = [
+            _track(1, "Pour de Vrai", spotify_id="SPX", album="Art"),
+            _track(2, "Pour de vrai", spotify_id="SPX", album="Art"),
+        ]
+        _, dm = _run(tracks, [_entry("Pour de vrai", 1000, 9, "SPX")])
+        assert dm.oublis == [(2, "kworb")]
+
+    def test_une_fiche_simplement_non_reecrite_garde_son_observation(self):
+        """« Non réécrit » n'est PAS « périmé » : mesuré, « Wolves » gardait
+        la bonne valeur pendant que son ID désignait une autre fiche."""
+        tracks = [_track(1, "Wolves", spotify_id="SP1"), _track(2, "B", spotify_id="SP2")]
+        _, dm = _run(tracks, [_entry("B", 5, 1, "SP2")])
+        assert dm.oublis == []
 
     def test_les_ids_de_la_table_comptent_aussi(self):
         t1 = _track(1, "A", spotify_id="SP1")

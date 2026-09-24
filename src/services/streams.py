@@ -121,6 +121,10 @@ def run(
                         _epingler_canal_ytm(runtime, artist, options.ytm_channel)
                     ids = set(options.track_ids) if options.track_ids is not None else None
                     results["ytm"] = provider.fetch_ytm(artist, dm, track_ids=ids)
+                    if results["ytm"].get("canal_introuvable"):
+                        # Pas « zéro stream » : aucun canal lisible. Un bilan
+                        # propre cachait un artiste resté à 0 run après run.
+                        bilan.erreurs.append("YouTube Music : aucun canal lisible")
                     # Media 5 : vues + nature (clip/show/audio) des vidéos — batch
                     # YT mutualisé avec les streams. SÉPARÉ de ytm_streams.
                     # Défensif : n'interrompt pas la récupération des streams.
@@ -221,6 +225,12 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                 )
                 for sid, titres in partages[:8]:
                     lines.append(f"   • {sid} : {' | '.join(titres)}")
+            retirees = r.get("observations_retirees") or []
+            if retirees:
+                lines.append(
+                    f"🧹 {len(retirees)} ancienne(s) valeur(s) Kworb retirée(s) (ID non "
+                    "attribuable) — la page Spotify reprend la main : " + " ; ".join(retirees[:8])
+                )
             doublons = r.get("doublons_evidents") or []
             if doublons:
                 lines.append(
@@ -289,6 +299,13 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                 f"{r.get('unmatched', 0)} non matchés, "
                 f"{r.get('albums_processed', 0)} albums"
             )
+            introuvable = r.get("canal_introuvable")
+            if introuvable:
+                lines.append(
+                    f"🚨 Aucun album lisible sur le canal YTM {introuvable['channel_id']} "
+                    f"({introuvable['channel_source']}), recherche par nom comprise — "
+                    "rien n'a été écrit. Renseigne le champ « Canal YTM » (@handle)."
+                )
             # Verdict du gate d'identité (canal homonyme / divergent).
             identity = r.get("identity") or {}
             status = identity.get("status")

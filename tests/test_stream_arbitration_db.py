@@ -254,3 +254,31 @@ def test_la_fusion_n_invente_rien_sans_observation(data_manager):
     doublon = _track(data_manager, artist, "Doublon")
     assert data_manager.merge_tracks(garde, doublon) is True
     assert _colonnes(data_manager, garde)["spotify_streams"] is None
+
+
+# ── Retrait d'une observation que sa source ne confirme plus (2026-09-23) ──
+
+
+def test_retirer_kworb_rend_la_main_a_spotify_web(data_manager, morceau):
+    """Kanye « Runaway » : 35 M Kworb périmés, 1,26 Md lus sur Spotify."""
+    data_manager.record_spotify_streams(morceau, 35, "kworb", _KWORB_DATE, daily_streams=3)
+    data_manager.record_spotify_streams(morceau, 1260, "spotify_web", datetime.now())
+    assert _colonnes(data_manager, morceau)["spotify_streams"] == 35
+    assert data_manager.forget_spotify_streams_observation(morceau, "kworb") is True
+    col = _colonnes(data_manager, morceau)
+    assert col["spotify_streams"] == 1260
+    assert col["spotify_daily_streams"] is None  # le quotidien ne vient que de Kworb
+
+
+def test_sans_autre_source_la_colonne_se_vide(data_manager, morceau):
+    """Laisser le chiffre en place en ferait une valeur sans source."""
+    data_manager.record_spotify_streams(morceau, 35, "kworb", _KWORB_DATE)
+    data_manager.forget_spotify_streams_observation(morceau, "kworb")
+    col = _colonnes(data_manager, morceau)
+    assert col["spotify_streams"] is None and col["spotify_streams_updated"] is None
+
+
+def test_rien_a_retirer_ne_touche_a_rien(data_manager, morceau):
+    data_manager.record_spotify_streams(morceau, 1260, "spotify_web", datetime.now())
+    assert data_manager.forget_spotify_streams_observation(morceau, "kworb") is False
+    assert _colonnes(data_manager, morceau)["spotify_streams"] == 1260

@@ -162,6 +162,17 @@ def _split_names(raw: str) -> list[str]:
     return result
 
 
+#: Postes de l'ÉQUIPE DE TOURNAGE dont l'intitulé contient « production »,
+#: « réalisation » ou « direction » : « Directeur de Production : Nicholas Kanel »
+#: sortait en PRODUCER sur A2H « Le cœur des filles » (2026-09-24). Une ligne qui
+#: les nomme n'est jamais lue par les motifs musicaux.
+_POSTES_DE_TOURNAGE = re.compile(
+    r"\b(?:directeur|directrice|chef|chargée?|assistante?|régisseu(?:r|se)|coordinat(?:eur|rice)|"
+    r"line|unit|executive)\b[^:]*\b(?:de\s+)?(?:production|prod)\b",
+    re.IGNORECASE,
+)
+
+
 def parse_description_clip(text: str) -> list[Credit]:
     """Parse une description de clip officiel avec des motifs fermés FR/EN."""
     if not text:
@@ -170,7 +181,7 @@ def parse_description_clip(text: str) -> list[Credit]:
     credits: list[Credit] = []
     for line in text.splitlines():
         line = line.strip()
-        if not line:
+        if not line or _POSTES_DE_TOURNAGE.search(line):
             continue
         for pattern, role in _CLIP_PATTERNS:
             m = pattern.search(line)

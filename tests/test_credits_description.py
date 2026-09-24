@@ -236,3 +236,22 @@ class TestClipFormesCourtes:
 
     def test_les_liens_ne_font_pas_de_credit(self):
         assert parse_description_clip("Facebook : https://www.facebook.com/a2h") == []
+
+
+def test_un_poste_de_tournage_n_est_pas_un_producteur():
+    """A2H « Le cœur des filles » (2026-09-24) : « Directeur de Production » du
+    clip sortait en PRODUCER du morceau."""
+    from src.utils.credits_description import parse_description_clip
+
+    texte = (
+        "Réal : Julien Gauthier\n"
+        "Directeur de Production : Nicholas Kanel\n"
+        "Chargée de production : Léa X\n"
+        "Prod by Dtweezer\n"
+        "Production : Kore"
+    )
+    assert [(c.name, c.role.value) for c in parse_description_clip(texte)] == [
+        ("Julien Gauthier", "Video Director"),
+        ("Dtweezer", "Producer"),
+        ("Kore", "Producer"),
+    ]

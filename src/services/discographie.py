@@ -112,6 +112,7 @@ def fusionner(
         par_titre.setdefault(t.title.lower().strip(), []).append(t)
 
     fusion = Fusion()
+    adoptees: set = set()
     for track in nouveaux:
         if should_stop():
             logger.info("⏹️ Arrêt demandé — dédup interrompue")
@@ -122,7 +123,15 @@ def fusionner(
         # au même titre qui porte un AUTRE genius_id est un AUTRE morceau (la
         # cover d'un tiers, un homonyme) : reprendre son `track.id` faisait de
         # `save_track` un UPDATE qui réécrivait sa fiche avec l'autre morceau.
-        adoptable = (lambda t: not t.genius_id) if track.genius_id else (lambda t: True)
+        # Une fiche sans genius_id ne s'adopte qu'UNE fois par run : `existants`
+        # est l'instantané du début, où elle reste « sans genius_id » après sa
+        # première adoption — Kanye « Reborn » (KIDS SEE GHOSTS) puis la cover de
+        # Dirty Nice s'étaient rattachés à la même fiche (2026-09-24).
+        adoptable = (
+            (lambda t: not t.genius_id and t.id not in adoptees)
+            if track.genius_id
+            else (lambda t: True)
+        )
         if track.genius_id and track.genius_id in par_gid:
             existant = par_gid[track.genius_id]
         else:
@@ -166,6 +175,8 @@ def fusionner(
             track.credits = existant.credits
         if not track.certs.entries and existant.certs.entries:
             track.certs.entries = existant.certs.entries
+        if track.genius_id and not existant.genius_id:
+            adoptees.add(existant.id)
         track.id = existant.id
     return fusion
 

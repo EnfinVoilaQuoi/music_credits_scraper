@@ -60,6 +60,16 @@ class TestFusionner:
         disco.fusionner([genius], [deezer])
         assert genius.id == 7
 
+    def test_une_fiche_sans_genius_id_n_est_adoptee_qu_une_fois(self):
+        """Kanye « Reborn » : KIDS SEE GHOSTS puis la cover de Dirty Nice se
+        rattachaient tous deux à la même fiche Deezer."""
+        deezer = _t("Reborn", tid=9918)
+        ksg = _t("Reborn", gid=3720970)
+        cover = _t("Reborn", gid=4286164)
+        f = disco.fusionner([ksg, cover], [deezer])
+        assert ksg.id == 9918 and cover.id is None
+        assert (f.nouveaux, f.mis_a_jour) == (1, 1)
+
     def test_nouveau_compte_comme_nouveau(self):
         f = disco.fusionner([_t("Inédit", gid=1)], [_t("Autre", gid=2, tid=9)])
         assert (f.nouveaux, f.mis_a_jour) == (1, 0)

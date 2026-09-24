@@ -45,6 +45,21 @@ class TestFusionner:
         f = disco.fusionner([nouveau], [pauvre, riche])
         assert nouveau.id == 4 and f.doublons_evites == 1
 
+    def test_un_homonyme_d_un_autre_genius_id_n_est_pas_repris(self):
+        """Lucio « Freestyle n°3 » et celui de Mani Deïz (feat. Lucio) : deux
+        pages Genius. Reprendre l'id de la fiche Lucio faisait réécrire sa fiche
+        avec l'autre morceau (e36)."""
+        lucio = _t("Freestyle n°3", gid=138641, album="Autistic Machine", tid=1)
+        mani = _t("Freestyle n°3", gid=243762, album="Autistic Machine")
+        f = disco.fusionner([mani], [lucio])
+        assert (f.nouveaux, f.mis_a_jour) == (1, 0) and mani.id is None
+
+    def test_une_fiche_sans_genius_id_est_adoptee(self):
+        deezer = _t("Durag", tid=7)
+        genius = _t("Durag", gid=111)
+        disco.fusionner([genius], [deezer])
+        assert genius.id == 7
+
     def test_nouveau_compte_comme_nouveau(self):
         f = disco.fusionner([_t("Inédit", gid=1)], [_t("Autre", gid=2, tid=9)])
         assert (f.nouveaux, f.mis_a_jour) == (1, 0)

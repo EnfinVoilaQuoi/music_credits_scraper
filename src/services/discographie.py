@@ -96,6 +96,8 @@ def fusionner(
 
     Trois niveaux, du plus sûr au plus lâche : `genius_id` → (titre, album) →
     titre seul (doublons de casse : on prend le candidat le plus COMPLET).
+    Les deux derniers ne rattachent un morceau Genius qu'à une fiche SANS
+    genius_id (même règle que `save_track`, e36).
     Quand un existant est trouvé : bpm / tonalité / paroles / crédits / certifs
     sont PRÉSERVÉS si le nouveau ne les porte pas, et `track.id` est repris —
     c'est lui qui fait de `save_track` un UPDATE. Mute `nouveaux`, pure sinon.
@@ -115,13 +117,21 @@ def fusionner(
             logger.info("⏹️ Arrêt demandé — dédup interrompue")
             break
         existant = None
+        # e36 : un morceau qui a un genius_id ne se rattache PAR TITRE qu'à une
+        # fiche SANS genius_id (adoption d'une fiche Deezer / Kworb). Une fiche
+        # au même titre qui porte un AUTRE genius_id est un AUTRE morceau (la
+        # cover d'un tiers, un homonyme) : reprendre son `track.id` faisait de
+        # `save_track` un UPDATE qui réécrivait sa fiche avec l'autre morceau.
+        adoptable = (lambda t: not t.genius_id) if track.genius_id else (lambda t: True)
         if track.genius_id and track.genius_id in par_gid:
             existant = par_gid[track.genius_id]
         else:
             key = (track.title.lower().strip(), (track.album or "").lower().strip())
             existant = par_titre_album.get(key)
+            if existant is not None and not adoptable(existant):
+                existant = None
         if existant is None:
-            candidats = par_titre.get(track.title.lower().strip())
+            candidats = [t for t in par_titre.get(track.title.lower().strip(), []) if adoptable(t)]
             if candidats:
                 if len(candidats) > 1:
                     logger.warning(

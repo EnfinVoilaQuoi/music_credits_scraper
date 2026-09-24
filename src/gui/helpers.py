@@ -275,3 +275,12 @@ def lignes_de_credits(credits) -> list[str]:
         detail = f" ({', '.join(entree['details'])})" if entree["details"] else ""
         lignes.append(f"{''.join(sorted(entree['emojis']))} {entree['nom']}{detail}")
     return lignes
+
+
+def hauteur_texte(texte: str | None, *, mini: int = 60, maxi: int = 240) -> int:
+    """Hauteur (px) d'une zone de texte proportionnelle à son contenu : une ligne
+    par paragraphe et par ~130 caractères, plafonnée — au-delà, la zone défile.
+    L'anecdote de l'API Genius garde ses paragraphes (2026-09-24)."""
+    texte = texte or ""
+    lignes = texte.count(chr(10)) + 1 + len(texte) // 130
+    return min(maxi, max(mini, 18 * lignes))

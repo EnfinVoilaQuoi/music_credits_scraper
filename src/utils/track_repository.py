@@ -1536,6 +1536,21 @@ class TrackRepository:
             logger.error(f"Erreur rattacher_page_genius({track_id}): {e}")
             return False
 
+    def record_secondary_role(self, track_id: int, role: str | None) -> bool:
+        """Écrit VERBATIM le rôle secondaire (`save_track` le passe en COALESCE :
+        il ne sait pas le remplacer par un rôle plus juste, « Writer » → « Cover »)."""
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == track_id)
+                    .values(secondary_role=role, updated_at=datetime.now())
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_secondary_role({track_id}): {e}")
+            return False
+
     def record_relationships(self, track_id: int, relationships: list) -> bool:
         """Écrit la colonne `relationships` VERBATIM, `[]` compris.
 

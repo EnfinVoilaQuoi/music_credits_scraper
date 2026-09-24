@@ -20,6 +20,7 @@ from src.models import Artist, ReleaseObservation, Track
 from src.observability import source_usage
 from src.utils.inedits import porte_le_marqueur, titre_sans_marqueur
 from src.utils.logger import get_logger, log_api
+from src.utils.pages_genius import page_non_morceau, role_de_version
 from src.utils.spotify_identity import valider_identite
 
 logger = get_logger(__name__)
@@ -378,6 +379,12 @@ class GeniusAPI:
                     break
 
                 for song in songs:
+                    # Traductions et livrets ne sont pas des morceaux (« A7
+                    # [Livret] » portait l'ID Spotify et les streams d'« A7 »).
+                    nature = page_non_morceau(song.get("title"))
+                    if nature:
+                        logger.info(f"⏭️ Page Genius écartée ({nature}) : {song.get('title')}")
+                        continue
                     primary = song.get("primary_artist") or {}
                     is_feat = primary.get("id") != artist.genius_id
                     if is_feat and not include_features:
@@ -730,6 +737,23 @@ class GeniusAPI:
             # `save_track` n'écrit plus la colonne : c'est
             # `DataManager.record_pending` qui l'enregistre après le save.
             track._relationships_pending = True
+            changed = True
+
+        # Version d'un TIERS d'un morceau de l'artiste (cover / remix) : Genius
+        # le dit par la relation, la fiche restait en « Writer ».
+        role = role_de_version(
+            track.relationships, track.artist.name if track.artist else "", track.secondary_role
+        )
+        if role and role != track.secondary_role:
+            track.secondary_role = role
+            changed = True
+
+        # Anecdote : la description de l'API garde ses PARAGRAPHES, la page les
+        # aplatissait (`_extract_anecdotes_bs4`). Posée quand la fiche n'en a
+        # pas, ou quand elle est plus complète.
+        bio = ((song.get("description") or {}).get("plain") or "").strip()
+        if bio and bio != "?" and bio != track.anecdotes and len(bio) >= len(track.anecdotes or ""):
+            track.anecdotes = bio
             changed = True
 
         # Chantier « Media » : pochettes (morceau + album). Transitoires, non

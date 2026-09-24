@@ -12,6 +12,7 @@ from src.config import YOUTUBE_PERSIST_CONFIDENCE
 from src.gui import helpers
 from src.models import Track
 from src.utils.logger import get_logger
+from src.utils.pages_genius import titre_affiche
 from src.utils.youtube_integration import (
     reject_youtube_link,
     set_youtube_link,
@@ -89,7 +90,7 @@ class TrackDetailsWindow:
 
         # Créer une fenêtre de détails
         details_window = ctk.CTkToplevel(self.app.root)
-        details_window.title(f"Détails - {track.title}")
+        details_window.title(f"Détails - {titre_affiche(track.title, track.secondary_role)}")
         details_window.transient(self.app.root)
 
         # Stocker la référence de la fenêtre
@@ -113,9 +114,11 @@ class TrackDetailsWindow:
         info_frame.pack(fill="x", padx=10, pady=10)
 
         # Titre principal
-        ctk.CTkLabel(info_frame, text=f"🎵 {track.title}", font=("Arial", 16, "bold")).pack(
-            anchor="w", padx=10, pady=(10, 5)
-        )
+        ctk.CTkLabel(
+            info_frame,
+            text=f"🎵 {titre_affiche(track.title, track.secondary_role)}",
+            font=("Arial", 16, "bold"),
+        ).pack(anchor="w", padx=10, pady=(10, 5))
 
         # Informations de base sur deux colonnes
         basic_info_frame = ctk.CTkFrame(info_frame)
@@ -718,7 +721,9 @@ class TrackDetailsWindow:
                 anecdotes_textbox = ctk.CTkTextbox(
                     lyrics_scrollable,
                     width=820,
-                    height=60,  # Hauteur divisée par 2
+                    # Proportionnelle au texte (l'anecdote de l'API garde ses
+                    # paragraphes), plafonnée : au-delà, la zone défile.
+                    height=helpers.hauteur_texte(track.anecdotes),
                     font=("Arial", 11),
                     wrap="word",
                 )

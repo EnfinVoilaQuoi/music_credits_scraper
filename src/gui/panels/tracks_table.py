@@ -2,6 +2,7 @@
 Le Treeview lui-même appartient à MainWindow (widget partagé avec la vue albums)."""
 
 import tkinter
+from collections import Counter
 from datetime import datetime
 from tkinter import messagebox, simpledialog
 
@@ -10,6 +11,7 @@ from src.gui.dialogs import manual_entry, merge_tracks, report
 from src.gui.panels import albums_view
 from src.models import ReleaseObservation
 from src.utils.logger import get_logger
+from src.utils.pages_genius import titre_affiche
 
 logger = get_logger(__name__)
 
@@ -151,6 +153,10 @@ def populate_tracks_table(app):
 
     ctx = app.contexte_validation() if hasattr(app, "contexte_validation") else None
 
+    # Homonymes VISIBLES (deux fiches de l'artiste au même titre depuis e36 :
+    # « OUTSIDE » 2025 / « outside » 2016) : l'année les distingue à l'affichage.
+    _par_titre = Counter((t.title or "").casefold() for t in app.current_artist.tracks)
+
     # Ajouter les morceaux au tableau
     for i, track in enumerate(app.current_artist.tracks):
         try:
@@ -158,7 +164,12 @@ def populate_tracks_table(app):
             is_disabled = app._is_track_disabled(track)
 
             # Formatage des valeurs
-            title = track.title or f"Track {i+1}"
+            _annee = (
+                str(track.release_date)[:4]
+                if track.release_date and _par_titre[(track.title or "").casefold()] > 1
+                else None
+            )
+            title = titre_affiche(track.title or f"Track {i+1}", track.secondary_role, _annee)
 
             # Artiste principal - gestion du featuring
             if track.is_featuring and track.primary_artist_name:

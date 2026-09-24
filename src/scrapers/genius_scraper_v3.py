@@ -293,7 +293,9 @@ class GeniusScraperV3(CrawlAIScraperBase):
         soup = BeautifulSoup(html, "html.parser")
 
         anecdotes = self._extract_anecdotes_bs4(soup)
-        if anecdotes:
+        # Repli seulement : l'API (`apply_song_metadata`) donne la même bio AVEC
+        # ses paragraphes ; la page les aplatit et n'écrase donc pas.
+        if anecdotes and not track.anecdotes:
             track.anecdotes = anecdotes
             logger.info(f"📝 Anecdote extraite ({len(anecdotes)} caractères)")
 

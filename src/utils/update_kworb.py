@@ -20,6 +20,7 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
 
 import difflib
 import logging
+import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -129,7 +130,9 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | N
         return None
 
 
-def _resolve_homonym(candidates, artist_name: str, credited_norm: set[str]):
+def _resolve_homonym(
+    candidates, artist_name: str, credited_norm: set[str], premier: str | None = None
+):
     """Départage des HOMONYMES par les artistes crédités du track Spotify.
 
     Deux morceaux distincts peuvent porter le même titre (« MEILLEUR » de
@@ -155,8 +158,31 @@ def _resolve_homonym(candidates, artist_name: str, credited_norm: set[str]):
         # sous-chaîne nue, qui faisait passer « IAM » pour « WILLIAMS ». Le
         # relâchement voulu reste entier — « Jul » matche toujours « Jul & SCH ».
         if any(p == c or contains_as_words(p, c) or contains_as_words(c, p) for c in credited_norm):
-            matches.append(cand)
-    return matches[0] if len(matches) == 1 else None
+            matches.append((cand, p))
+    if len(matches) > 1:
+        # Depuis e36, un titre peut désigner plusieurs fiches compatibles (Kanye
+        # « Forever » : Drake, Lil Wayne, ¥$ et son leak — Spotify crédite Drake,
+        # Kanye, Wayne, Eminem). Départage filtre par filtre, sans jamais vider
+        # la liste : l'artiste principal est le PREMIER crédité par Spotify ;
+        # puis une fiche sortie, connue de Spotify, rangée sur un album.
+        filtres = (
+            lambda c, p: premier is not None and p == premier,
+            lambda c, p: not getattr(c, "unreleased", False),
+            lambda c, p: bool(getattr(c, "spotify_id", None)),
+            lambda c, p: bool(getattr(c, "album", None)),
+        )
+        for filtre in filtres:
+            restants = [m for m in matches if filtre(*m)]
+            if restants:
+                matches = restants
+            if len(matches) == 1:
+                break
+    return matches[0][0] if len(matches) == 1 else None
+
+
+#: « Mercy.1 » : suffixe d'homonymie de Spotify, collé à une LETTRE — « Tokyo
+#: 2.0 » n'est pas concerné.
+_SUFFIXE_UPLOAD = re.compile(r"(?<=[^\d\s.])\.\d{1,2}$")
 
 
 def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
@@ -444,7 +470,9 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
          automatique, proposition pour le dialogue (décision mémorisée ensuite).
     """
     sid = entry.get("spotify_id")
-    norm = _normalize_title(entry["title"])
+    # Spotify nomme parfois un second upload « Mercy.1 », « Cold.1 » (131 M chez
+    # Kanye) : même titre, suffixe d'homonymie de la plateforme.
+    norm = _normalize_title(_SUFFIXE_UPLOAD.sub("", entry["title"]))
     if sid and sid in index.ids_partages:
         return Rapprochement(motif="id_partage")
     if sid and sid in index.by_edition_id:
@@ -475,8 +503,10 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
         # Homonymes (« MEILLEUR » Souffrance / « Meilleur » Goldee Money) :
         # les artistes crédités du track Spotify départagent.
         identite = lire_identite(sid) if sid else None
-        credited_norm = {_normalize_title(a) for a in (identite or {}).get("artists") or [] if a}
-        track = _resolve_homonym(candidates, artist.name, credited_norm)
+        credites = [a for a in (identite or {}).get("artists") or [] if a]
+        credited_norm = {_normalize_title(a) for a in credites}
+        premier = _normalize_title(credites[0]) if credites else None
+        track = _resolve_homonym(candidates, artist.name, credited_norm, premier)
         if track:
             return Rapprochement(track=track, via="title+artistes")
         return Rapprochement(motif="ambigu")

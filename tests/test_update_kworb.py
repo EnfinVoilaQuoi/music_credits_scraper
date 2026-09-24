@@ -222,6 +222,21 @@ class TestHomonymes:
         ]
         assert _resolve_homonym(cands, "Jul", {"dinos"}) is None
 
+    def test_le_premier_credite_est_l_artiste_principal(self):
+        """Kanye « Forever » (e36) : Drake, Lil Wayne et ¥$ sont tous crédités par
+        Spotify — le PREMIER crédité (Drake) désigne le morceau."""
+        drake = _track(1, "Forever", feat=True, primary="Drake")
+        wayne = _track(2, "Forever", feat=True, primary="Lil Wayne")
+        credites = {"drake", "kanye west", "lil wayne", "eminem"}
+        assert _resolve_homonym([drake, wayne], "Kanye West", credites, "drake") is drake
+
+    def test_une_fiche_sortie_l_emporte_sur_un_leak(self):
+        """Kanye « Famous » : TLOP contre une page sans album, inédite."""
+        tlop = _track(1, "Famous", spotify_id="SP", album="The Life of Pablo")
+        leak = _track(2, "Famous")
+        leak.unreleased = True
+        assert _resolve_homonym([tlop, leak], "Kanye West", {"kanye west"}, "kanye west") is tlop
+
     def test_deux_candidats_compatibles_abstention(self):
         """Ambiguïté non levée : ne rien écrire plutôt qu'écrire au hasard."""
         cands = [_track(1, "T"), _track(2, "T")]
@@ -928,6 +943,13 @@ class TestEditionsDeDiffusion:
         tracks = [_track(1, "Impossible", spotify_id="SP1"), _track(2, "Impossible - Radio Edit")]
         _, dm = _run(tracks, [_entry("Impossible - Radio Edit", 400, 4, "SPR")])
         assert [tid for tid, *_ in dm.streams_writes] == [2] and dm.editions == []
+
+
+def test_suffixe_d_homonymie_spotify():
+    """Spotify nomme un second upload « Mercy.1 » (131 M chez Kanye)."""
+    tracks = [_track(1, "Mercy", spotify_id="SP1")]
+    _, dm = _run(tracks, [_entry("Mercy", 1000, 1, "SP1"), _entry("Mercy.1", 300, 1, "SP2")])
+    assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 1300)]
 
 
 class TestIdsPartages:

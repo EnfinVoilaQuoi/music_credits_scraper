@@ -166,6 +166,7 @@ class GeniusAPI:
         prefill: bool = True,
         known_genius_ids: set | None = None,
         include_secondary: bool = False,
+        roles_connus: dict | None = None,
     ) -> list[Track]:
         """
         Récupère la liste des morceaux d'un artiste
@@ -181,6 +182,9 @@ class GeniusAPI:
             known_genius_ids: genius_id à exclure du prefill (mode MàJ). L'appelant
                 y met les titres dont les données media (album/Spotify/YouTube) sont
                 déjà complètes en base — les connus mais incomplets sont re-tentés.
+            roles_connus: {genius_id: (kind, rôle)} déjà constatés en base (mode
+                MàJ) : la vérification au détail des rôles secondaires n'est
+                payée que pour les morceaux NOUVEAUX.
         """
         tracks = []
 
@@ -200,6 +204,7 @@ class GeniusAPI:
                 max_songs,
                 include_features=include_features,
                 include_secondary=include_secondary,
+                roles_connus=roles_connus,
             )
             log_api("Genius", f"artist/{artist.genius_id}/songs", True)
 
@@ -352,6 +357,7 @@ class GeniusAPI:
         max_songs: int | None,
         include_features: bool = False,
         include_secondary: bool = False,
+        roles_connus: dict | None = None,
     ) -> list[Track]:
         """Méthode manuelle de récupération (fallback) — gère aussi les featurings.
 
@@ -423,8 +429,15 @@ class GeniusAPI:
                                 continue
                             # Mode rôles secondaires : on VÉRIFIE au détail que c'est
                             # bien NOTRE artiste (id exact) et on récupère son rôle.
-                            verdict = self._verify_artist_credit(song.get("id"), artist.genius_id)
-                            time.sleep(DELAY_BETWEEN_REQUESTS)
+                            # Rôle déjà constaté en base (MàJ) : un appel détail
+                            # par morceau connu, à chaque run, faisait durer une
+                            # MàJ de Travis Scott 20 à 40 min (2026-09-24).
+                            verdict = (roles_connus or {}).get(song.get("id"))
+                            if verdict is None:
+                                verdict = self._verify_artist_credit(
+                                    song.get("id"), artist.genius_id
+                                )
+                                time.sleep(DELAY_BETWEEN_REQUESTS)
                             if verdict is None:
                                 logger.debug(
                                     f"Ignoré (non crédité au détail / id ≠): {song.get('title')} "

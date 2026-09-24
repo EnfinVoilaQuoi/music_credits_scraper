@@ -82,6 +82,19 @@ def _aucune_boite_de_dialogue(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _cache_des_nouveautes_isole(tmp_path, monkeypatch):
+    """AUCUN test n'écrit le cache du badge « nouveautés » réel.
+
+    Un run discographie l'OUBLIE pour l'artiste traité (2026-09-24) : sans ce
+    cran, un test de `discographie.run` retirait l'entrée de l'artiste d'id 1
+    dans `data/nouveautes_cache.json`.
+    """
+    from src.utils import nouveautes_cache
+
+    monkeypatch.setattr(nouveautes_cache, "FICHIER", tmp_path / "nouveautes_cache.json")
+
+
+@pytest.fixture(autouse=True)
 def _aucun_chrome_de_debug(monkeypatch):
     """AUCUN test ne lance Chrome.
 

@@ -70,6 +70,16 @@ class TestFusionner:
         assert ksg.id == 9918 and cover.id is None
         assert (f.nouveaux, f.mis_a_jour) == (1, 1)
 
+    def test_roles_connus_pour_maj(self):
+        """MàJ : la vérification au détail des rôles secondaires n'est payée que
+        pour les morceaux nouveaux (2026-09-24)."""
+        cover = _t("Heartless", gid=1)
+        cover.is_featuring, cover.secondary_role = True, "Cover"
+        feat = _t("Company", gid=2)
+        feat.is_featuring = True
+        roles = disco.roles_connus_pour_maj([cover, feat, _t("Solo", gid=3), _t("Deezer")])
+        assert roles == {1: ("secondary", "Cover"), 2: ("feat", None), 3: ("primary", None)}
+
     def test_nouveau_compte_comme_nouveau(self):
         f = disco.fusionner([_t("Inédit", gid=1)], [_t("Autre", gid=2, tid=9)])
         assert (f.nouveaux, f.mis_a_jour) == (1, 0)

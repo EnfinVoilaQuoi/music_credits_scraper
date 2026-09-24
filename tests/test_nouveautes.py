@@ -123,3 +123,14 @@ def test_resume_cite_cinq_titres_et_compte_le_reste():
     v = nouveautes.verifier(_runtime(genius), _artist())
     texte = nouveautes.resume(v, "Isha")
     assert texte.startswith("8 titre(s)") and "et 3 autre(s)" in texte
+
+
+def test_oublier_retire_l_entree_d_un_artiste():
+    """Après un run discographie, le badge ne montre plus ce que le run a
+    peut-être récupéré (Travis Scott, 2026-09-24)."""
+    nouveautes_cache.ecrire(7, {"verifie_le": "2026-09-24T04:12:12", "nouveautes": []})
+    nouveautes_cache.ecrire(8, {"verifie_le": "2026-09-24T04:12:12", "nouveautes": []})
+    nouveautes_cache.oublier(7)
+    assert nouveautes_cache.lire(7) is None
+    assert nouveautes_cache.lire(8) is not None
+    nouveautes_cache.oublier(99)  # absent : rien ne casse

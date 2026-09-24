@@ -63,6 +63,20 @@ def ecrire(artist_id: int, entree: dict) -> None:
         logger.debug(f"Cache des nouveautés non écrit ({e})")
 
 
+def oublier(artist_id: int) -> None:
+    """Retire l'entrée d'un artiste : après un run discographie, les titres
+    qu'elle listait sont peut-être en base — le badge les montrait encore
+    (Travis Scott, 2026-09-24). Le prochain chargement revérifie."""
+    data = _charger()
+    if data.pop(str(artist_id), None) is None:
+        return
+    try:
+        with open(FICHIER, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+    except OSError as e:
+        logger.debug(f"Cache des nouveautés non écrit ({e})")
+
+
 def est_frais(entree: dict | None, maintenant: datetime | None = None) -> bool:
     if not entree or not entree.get("verifie_le"):
         return False

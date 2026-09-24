@@ -72,6 +72,21 @@ def _gid_int(t: Track) -> int | None:
         return None
 
 
+def roles_connus_pour_maj(tracks: list[Track]) -> dict:
+    """Mode MàJ : relation de l'artiste déjà constatée par morceau, au format du
+    verdict de `GeniusAPI._verify_artist_credit` — la vérification au détail
+    n'est alors payée que pour les morceaux nouveaux."""
+    roles = {}
+    for t in tracks:
+        if not t.genius_id:
+            continue
+        if t.secondary_role:
+            roles[t.genius_id] = ("secondary", t.secondary_role)
+        else:
+            roles[t.genius_id] = ("feat" if t.is_featuring else "primary", None)
+    return roles
+
+
 def known_genius_ids_pour_maj(tracks: list[Track]) -> set:
     """Mode MàJ : titres dont les données media sont DÉJÀ complètes, exclus du
     prefill API. Un lien YouTube 'search_auto' (recherche persistée) ne compte
@@ -221,7 +236,9 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     logger.info(f"📦 {len(existants)} morceaux déjà en base avant récupération")
 
     known_genius_ids = None
+    roles_connus = None
     if options.update_only and existants:
+        roles_connus = roles_connus_pour_maj(existants)
         known_genius_ids = known_genius_ids_pour_maj(existants)
         n_retry = sum(1 for t in existants if t.genius_id) - len(known_genius_ids)
         logger.info(
@@ -236,6 +253,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
         prefill=options.prefill,
         known_genius_ids=known_genius_ids,
         include_secondary=options.include_secondary,
+        roles_connus=roles_connus,
     )
     if not nouveaux:
         bilan.interrompu("aucun morceau trouvé")
@@ -317,6 +335,11 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
             f"({len(bilan.oublies)}): {', '.join(bilan.oublies[:8])}"
         )
 
+    # Le badge « nouveautés » listait des titres que ce run vient peut-être de
+    # récupérer : son cache du jour ne vaut plus rien.
+    from src.utils import nouveautes_cache
+
+    nouveautes_cache.oublier(artist.id)
     artist.tracks = dm.get_artist_tracks(artist.id)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)

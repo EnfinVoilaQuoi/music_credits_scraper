@@ -100,6 +100,15 @@ class TestRolesSecondaires:
         ]
         assert api.genius.detail_calls == [6, 7, 8, 9, 10]
 
+    def test_role_connu_n_est_pas_reverifie(self, api):
+        """MàJ : un morceau dont la base connaît déjà le rôle ne coûte plus un
+        appel détail (20 à 40 min par MàJ de Travis Scott, 2026-09-24)."""
+        details = {9: {"producer_artists": [{"id": MOI}]}}
+        api.genius = _Client([_song(8, AUTRE), _song(9, AUTRE)], details)
+        tracks = _run(api, None, include_secondary=True, roles_connus={8: ("secondary", "Cover")})
+        assert [(t.genius_id, t.secondary_role) for t in tracks] == [(8, "Cover"), (9, "Producer")]
+        assert api.genius.detail_calls == [9]
+
     def test_detail_en_echec_jette_le_morceau(self, api):
         api.genius = _Client([_song(6, AUTRE)], {6: AssertionError("HTTP 500")})
         assert _run(api, None, include_secondary=True) == []

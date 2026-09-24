@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from src.models import Artist, Track
 from src.services.runtime import Bilan, Hooks, Runtime
 from src.utils.logger import get_logger
+from src.utils.title_matching import cle_album
+from src.utils.version_descriptors import titre_generique
 
 logger = get_logger(__name__)
 
@@ -35,6 +37,10 @@ class OptionsDisco:
     deezer: bool = True
     #: Identifiant Deezer forcé (CLI `--deezer-id`) quand l'oracle est ambigu.
     deezer_id: int | None = None
+    #: Compléter les albums de l'artiste par leur tracklist Genius : les titres
+    #: signés par un autre (intro d'un DJ, interlude d'un beatmaker) et ceux que
+    #: la liste des morceaux omet (décision utilisateur 2026-09-24).
+    tracklists: bool = True
 
 
 @dataclass
@@ -47,6 +53,8 @@ class BilanDisco(Bilan):
     supprimes_ignores: int = 0
     #: Pages d'édition de diffusion notées sur leur original au lieu d'une fiche.
     editions: int = 0
+    #: Titres ajoutés par la tracklist d'un album de l'artiste.
+    titres_album: int = 0
     albums_api: int = 0
     dates_api: int = 0
     images: int = 0
@@ -125,7 +133,7 @@ def fusionner(
     for t in existants:
         if t.genius_id:
             par_gid[t.genius_id] = t
-        par_titre_album[(t.title.lower().strip(), (t.album or "").lower().strip())] = t
+        par_titre_album[(t.title.lower().strip(), cle_album(t.album or ""))] = t
         par_titre.setdefault(t.title.lower().strip(), []).append(t)
 
     fusion = Fusion()
@@ -152,11 +160,13 @@ def fusionner(
         if track.genius_id and track.genius_id in par_gid:
             existant = par_gid[track.genius_id]
         else:
-            key = (track.title.lower().strip(), (track.album or "").lower().strip())
+            key = (track.title.lower().strip(), cle_album(track.album or ""))
             existant = par_titre_album.get(key)
             if existant is not None and not adoptable(existant):
                 existant = None
-        if existant is None:
+        if existant is None and not titre_generique(track.title):
+            # Un titre générique (« Intro », « Interlude ») n'est rapproché que
+            # par (titre, album) ci-dessus : un par projet, jamais par titre seul.
             candidats = [t for t in par_titre.get(track.title.lower().strip(), []) if adoptable(t)]
             if candidats:
                 if len(candidats) > 1:
@@ -294,6 +304,13 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     absorbes = genius_ids_absorbes(artist.name) | dm.get_artist_edition_genius_ids(artist.id)
     if absorbes:
         nouveaux = [t for t in nouveaux if t.genius_id not in absorbes]
+    if options.tracklists and not hooks.should_stop():
+        exclus = absorbes | (
+            runtime.deleted.load_deleted_ids(artist.name) if options.respect_deleted else set()
+        )
+        nouveaux += _completer_par_tracklists(
+            runtime, artist, existants + nouveaux, exclus, options, hooks, bilan
+        )
     nouveaux, bilan.editions = _rattacher_editions(dm, nouveaux, existants)
     bilan.recuperes = len(nouveaux)
 
@@ -384,6 +401,44 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     return bilan
 
 
+def _completer_par_tracklists(runtime, artist, tracks, exclus, options, hooks, bilan) -> list:
+    """Les titres des albums de l'artiste absents de la liste Genius. Source
+    secondaire du run : une panne est DITE (bilan.erreurs), jamais bloquante.
+    """
+    import time
+
+    from src.config import DELAY_BETWEEN_REQUESTS
+    from src.services import tracklists_genius
+
+    try:
+        completion = tracklists_genius.completer(
+            runtime.genius_api, artist, tracks, exclus=exclus, should_stop=hooks.should_stop
+        )
+    except Exception:
+        logger.exception("Complétion par les tracklists Genius échouée")
+        bilan.erreurs.append("tracklists Genius")
+        return []
+    if completion.quota:
+        bilan.erreurs.append(
+            "tracklists Genius : quota journalier atteint, reprise au prochain run"
+        )
+    if completion.echecs:
+        bilan.erreurs.append(f"tracklists Genius : {completion.echecs} album(s) illisible(s)")
+    logger.info(
+        f"🎼 Tracklists Genius : {completion.albums_lus} album(s) lu(s), "
+        f"{completion.albums_etrangers} d'un autre artiste écarté(s), "
+        f"{len(completion.pistes)} titre(s) ajouté(s)"
+    )
+    # Leur album, leur media (Spotify, YouTube) et leurs relations : le même
+    # appel détail que le prefill des morceaux de la liste.
+    if options.prefill:
+        for t in completion.pistes:
+            runtime.genius_api.apply_song_metadata(t)
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+    bilan.titres_album = len(completion.pistes)
+    return completion.pistes
+
+
 def _completer_par_deezer(runtime, artist, options, hooks, bilan) -> None:
     """Ce que Deezer a et que Genius n'a pas — APRÈS la sauvegarde (l'oracle
     d'identité a besoin des albums en base). Le run reste complet pour Genius
@@ -443,6 +498,8 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
     msg = f"✅ {bilan.recuperes} morceaux récupérés pour {artist.name}"
     msg += f"\n🆕 {bilan.nouveaux} nouveaux morceaux"
     msg += f"\n🔄 {bilan.mis_a_jour} morceaux mis à jour"
+    if bilan.titres_album:
+        msg += f"\n🎼 {bilan.titres_album} titre(s) d'album ajouté(s) par la tracklist Genius"
     if bilan.doublons_evites:
         msg += f"\n🚫 {bilan.doublons_evites} doublons évités"
     if bilan.supprimes_ignores:

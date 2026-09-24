@@ -30,6 +30,7 @@ from src.utils.track_soeurs import (
     fusionner_constat_instrumental,
     synchroniser_soeurs,
 )
+from src.utils.version_descriptors import titre_generique
 from src.utils.version_heritage import sans_heritage_couvert
 
 logger = get_logger(__name__)
@@ -99,7 +100,7 @@ class TrackRepository:
         "SELECT id, is_featuring, primary_artist_name, featured_artists, "
         "lyrics, has_lyrics, lyrics_scraped_at, "
         # Les colonnes d'IDENTITÉ, pour comparer avant d'écrire.
-        "genius_id, spotify_id, isrc, discogs_id, deezer_id FROM tracks "
+        "genius_id, spotify_id, isrc, discogs_id, deezer_id, album FROM tracks "
     )
 
     def _fiche_existante(self, conn, track: Track):
@@ -138,6 +139,12 @@ class TrackRepository:
                 "WHERE artist_id = :a AND title = :t AND genius_id IS NULL",
                 {"a": artiste, "t": track.title},
             )
+            if lignes and titre_generique(track.title):
+                # « Interlude », « Intro » : un par projet, parfois plusieurs.
+                # Le titre seul ne désigne pas la fiche — l'ALBUM doit concorder,
+                # sinon l'interlude d'un disque adopterait celui d'un autre.
+                cle = cle_album(track.album) if track.album else None
+                lignes = [r for r in lignes if cle and cle_album(r["album"]) == cle]
             return lignes[0] if lignes else None
         lignes = _une("WHERE artist_id = :a AND title = :t", {"a": artiste, "t": track.title})
         if len(lignes) > 1:

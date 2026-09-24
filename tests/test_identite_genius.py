@@ -60,6 +60,15 @@ class TestRattachement:
         assert deezer == genius
         assert _fiches(data_manager, artiste)[0][2] == 111
 
+    def test_un_titre_generique_n_adopte_que_dans_son_album(self, data_manager, artiste):
+        """« Interlude » : un par projet. La fiche Deezer d'un disque n'est pas
+        adoptée par la page Genius de l'interlude d'un autre (2026-09-24)."""
+        deezer = data_manager.save_track(_t(artiste, "Interlude", album="Rodeo"))
+        autre = data_manager.save_track(_t(artiste, "Interlude", 7, album="Birds in the Trap"))
+        assert autre != deezer
+        meme = data_manager.save_track(_t(artiste, "Interlude", 8, album="RODEO"))
+        assert meme == deezer
+
     def test_la_fiche_deezer_complete_l_unique_homonyme(self, data_manager, artiste):
         a = data_manager.save_track(_t(artiste, "Durag", 111))
         assert data_manager.save_track(_t(artiste, "Durag")) == a

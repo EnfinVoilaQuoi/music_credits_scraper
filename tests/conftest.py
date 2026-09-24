@@ -100,6 +100,14 @@ def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _cache_des_tracklists_isole(tmp_path, monkeypatch):
+    """AUCUN test n'écrit `data/tracklists_genius.json` réel (run discographie)."""
+    from src.services import tracklists_genius
+
+    monkeypatch.setattr(tracklists_genius, "FICHIER", tmp_path / "tracklists_genius.json")
+
+
+@pytest.fixture(autouse=True)
 def _cache_des_nouveautes_isole(tmp_path, monkeypatch):
     """AUCUN test n'écrit le cache du badge « nouveautés » réel.
 

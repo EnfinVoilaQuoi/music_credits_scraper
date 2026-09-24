@@ -70,6 +70,14 @@ class TestFusionner:
         assert ksg.id == 9918 and cover.id is None
         assert (f.nouveaux, f.mis_a_jour) == (1, 1)
 
+    def test_un_titre_generique_ne_s_adopte_que_dans_son_album(self):
+        """« Interlude » : un par projet — jamais rapproché par le titre seul."""
+        deezer = _t("Interlude", album="Qui sème le vent récolte le tempo", tid=9)
+        autre = _t("Interlude", gid=5, album="Paradisiaque")
+        assert disco.fusionner([autre], [deezer]).nouveaux == 1 and autre.id is None
+        sien = _t("Interlude", gid=6, album="Qui Sème Le Vent Récolte Le Tempo")
+        assert disco.fusionner([sien], [deezer]).mis_a_jour == 1 and sien.id == 9
+
     def test_roles_connus_pour_maj(self):
         """MàJ : la vérification au détail des rôles secondaires n'est payée que
         pour les morceaux nouveaux (2026-09-24)."""
@@ -227,6 +235,64 @@ class TestRun:
         )
         assert not bilan.complete and "arrêt" in bilan.motif
         assert bilan.sauves < 2
+
+
+class TestTracklists:
+    """Les titres de l'album de l'artiste signés par un autre (2026-09-24)."""
+
+    def _run(self, options):
+        artist = Artist(name="MC Solaar", genius_id=1310)
+        artist.id = 1
+        artist.tracks = []
+        dm = _DM([])
+        prefill = []
+        genius = SimpleNamespace(
+            get_artist_songs=lambda *a, **k: [_t("Caroline", gid=31147, album="Qui sème")],
+            album_du_morceau=lambda sid: {
+                "id": 12001,
+                "name": "Qui sème",
+                "primary_artist_ids": {1310},
+            },
+            tracklist_album=lambda aid: [
+                {
+                    "number": 1,
+                    "song": {
+                        "id": 378624,
+                        "title": "Intro",
+                        "primary_artist": {"id": 9, "name": "Jimmy Jay"},
+                    },
+                },
+                {
+                    "number": 10,
+                    "song": {
+                        "id": 31147,
+                        "title": "Caroline",
+                        "primary_artist": {"id": 1310, "name": "MC Solaar"},
+                    },
+                },
+            ],
+            apply_song_metadata=lambda t: prefill.append(t.title),
+        )
+        runtime = Runtime(
+            data_manager=dm,
+            genius_api=genius,
+            data_enricher=None,
+            deleted=SimpleNamespace(load_deleted_ids=lambda nom: set()),
+            disabled=None,
+        )
+        return disco.run(runtime, artist, options, Hooks()), dm, prefill
+
+    def test_le_titre_manquant_est_sauve_et_compte(self, monkeypatch):
+        monkeypatch.setattr("src.config.DELAY_BETWEEN_REQUESTS", 0)
+        bilan, dm, prefill = self._run(disco.OptionsDisco(download_images=False, deezer=False))
+        assert ("save", "Intro") in dm.journal and bilan.titres_album == 1
+        assert prefill == ["Intro"]
+        assert "1 titre(s) d'album" in disco.resume(bilan, Artist(name="MC Solaar"))
+
+    def test_no_tracklists_n_appelle_rien(self):
+        options = disco.OptionsDisco(download_images=False, deezer=False, tracklists=False)
+        bilan, dm, _ = self._run(options)
+        assert ("save", "Intro") not in dm.journal and bilan.titres_album == 0
 
 
 class TestCompleterParDeezer:

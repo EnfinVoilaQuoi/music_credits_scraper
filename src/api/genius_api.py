@@ -33,6 +33,12 @@ _SOURCE = "genius_api"
 _ABSENT: tuple[int, ...] = ()
 
 
+class QuotaGeniusAtteint(Exception):
+    """HTTP 429 : le quota JOURNALIER de l'API (10 000 requêtes / 24 h, mesuré
+    le 2026-09-24) est épuisé. Continuer ne ferait qu'empiler des échecs :
+    l'appelant s'arrête et le DIT."""
+
+
 class GeniusAPI:
     """Gère les interactions avec l'API Genius"""
 
@@ -682,6 +688,70 @@ class GeniusAPI:
             f"{len(numbers)} numéro(s) de piste"
         )
         return numbers
+
+    def album_du_morceau(self, song_id: int) -> dict | None:
+        """L'album Genius d'un morceau : `{id, name, primary_artist_ids,
+        release_date_for_display}` ; `{}` si Genius ne le range dans aucun
+        album (cas normal : un single) ; None si la réponse est illisible.
+
+        `primary_artist_ids` décide à QUI est l'album : une tracklist ne se
+        complète que pour les projets de l'artiste, jamais pour la compilation
+        ou l'album d'un autre où il n'est qu'invité."""
+        headers = {"Authorization": f"Bearer {GENIUS_API_KEY}"}
+        try:
+            resp = source_usage.requests_get(
+                _SOURCE, f"https://api.genius.com/songs/{song_id}", headers=headers, timeout=20
+            )
+            if resp.status_code == 429:
+                raise QuotaGeniusAtteint(resp.text[:200])
+            resp.raise_for_status()
+            song = (resp.json().get("response") or {}).get("song") or {}
+        except (requests.RequestException, ValueError) as e:
+            logger.warning(f"Album du morceau Genius #{song_id} illisible : {e}")
+            return None
+        album = song.get("album")
+        if not isinstance(album, dict) or not album.get("id"):
+            return {}
+        ids = self._collect_artist_ids(album.get("primary_artists"))
+        artiste = album.get("artist") or {}
+        if artiste.get("id"):
+            ids.add(artiste["id"])
+        return {
+            "id": album["id"],
+            "name": album.get("name"),
+            "primary_artist_ids": ids,
+            "release_date_for_display": album.get("release_date_for_display"),
+        }
+
+    def tracklist_album(self, album_id: int) -> list[dict] | None:
+        """Tracklist COMPLÈTE d'un album Genius : `[{number, disc_number, song}]`
+        (song = payload morceau abrégé, crédités compris). Paginée par
+        `next_page` (jamais par la taille d'une page — cf. `/artists/songs`).
+        None si l'API échoue : une tracklist partielle passerait pour complète."""
+        headers = {"Authorization": f"Bearer {GENIUS_API_KEY}"}
+        pistes, page = [], 1
+        try:
+            while page:
+                resp = source_usage.requests_get(
+                    _SOURCE,
+                    f"https://api.genius.com/albums/{album_id}/tracks",
+                    headers=headers,
+                    params={"per_page": 50, "page": page},
+                    timeout=20,
+                )
+                if resp.status_code == 429:
+                    raise QuotaGeniusAtteint(resp.text[:200])
+                resp.raise_for_status()
+                corps = resp.json().get("response") or {}
+                lot = corps.get("tracks") or []
+                if not lot:
+                    break
+                pistes += lot
+                page = corps.get("next_page")
+        except (requests.RequestException, ValueError) as e:
+            logger.warning(f"Tracklist de l'album Genius #{album_id} illisible : {e}")
+            return None
+        return pistes
 
     def apply_song_metadata(self, track: "Track") -> bool:
         """

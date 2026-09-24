@@ -173,6 +173,12 @@ class TrackDetailsWindow:
                 text_color="green",
             ).pack(anchor="w", pady=2)
             ctk.CTkLabel(left_column, text=f"Artiste: {artist_name}").pack(anchor="w", pady=1)
+            if primary_artist:
+                # Titre de SON album que Genius signe d'un autre (l'intro d'un
+                # DJ, l'interlude d'un beatmaker) — tracklist, 2026-09-24.
+                ctk.CTkLabel(
+                    left_column, text=f"🎼 Titre de l'album — page Genius de {primary_artist}"
+                ).pack(anchor="w", pady=1)
 
         # Album et numéro de piste
         if track.album:

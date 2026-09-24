@@ -76,6 +76,9 @@ def _disco_args(p: argparse.ArgumentParser) -> None:
     _bool_flags(p, "respecter-supprimes", True, "ne pas réajouter les morceaux supprimés")
     _bool_flags(p, "images", True, "télécharger photos, pochettes, vignettes")
     p.add_argument("--maj", action="store_true", help="mode MàJ : prefill des seuls nouveaux")
+    _bool_flags(
+        p, "tracklists", True, "compléter les albums de l'artiste par leur tracklist Genius"
+    )
     _bool_flags(p, "deezer", True, "compléter par Deezer (écarts listés, jamais créés)")
     p.add_argument("--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu")
 
@@ -208,6 +211,7 @@ def options_disco(a: argparse.Namespace) -> discographie.OptionsDisco:
         download_images=a.images,
         deezer=a.deezer,
         deezer_id=a.deezer_id,
+        tracklists=a.tracklists,
     )
 
 

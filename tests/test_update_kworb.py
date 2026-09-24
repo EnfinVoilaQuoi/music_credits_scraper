@@ -952,6 +952,15 @@ def test_suffixe_d_homonymie_spotify():
     assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 1300)]
 
 
+def test_le_flou_ne_rapproche_pas_deux_versions_differentes():
+    """Kanye (2026-09-24) : « The New Workout Plan - Live Version » était
+    rattaché à 91 % à « The New Workout Plan (Long Version) »."""
+    tracks = [_track(1, "The New Workout Plan (Long Version)")]
+    track, _ = _fuzzy_unique("The New Workout Plan - Live Version", tracks)
+    assert track is None
+    assert _fuzzy_unique("Rhythm is love", [_track(2, "Rythm is love")])[0].id == 2
+
+
 class TestIdsPartages:
     def test_un_id_sur_deux_lignes_ne_recoit_rien(self):
         """« OUTSIDE » (Jackboys 2) et « outside » (Birds in the Trap) portent le

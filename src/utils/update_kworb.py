@@ -185,6 +185,18 @@ def _resolve_homonym(
 _SUFFIXE_UPLOAD = re.compile(r"(?<=[^\d\s.])\.\d{1,2}$")
 
 
+def _meme_version_stricte(a, b) -> bool:
+    """Deux titres qu'un rapprochement FLOU peut confondre : même absence de
+    descripteur (une coquille), même remix, ou même PRISE (`meme_prise` : « Live »
+    ≈ « Acoustic », mais « Live Version » ≠ « Long Version », que la famille
+    « édition » réunissait par le seul mot « Version »)."""
+    if a.kind == Kind.NONE and b.kind == Kind.NONE:
+        return True
+    if a.est_remix and b.est_remix:
+        return meme_famille(a, b)
+    return meme_prise(a, b)
+
+
 def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     """Rapproche un titre Kworb d'UN SEUL morceau en base par similarité
     (difflib sur titre normalisé) — attrape les coquilles (« Rhythm » vs
@@ -194,8 +206,13 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     version (Acoustic/Intro/Remix) → studio et acoustique restent distincts.
     """
     nk = _normalize_title(entry_title)
+    ventree = parse_variant(entry_title)
     hits = []
     for t in tracks:
+        # Une coquille, pas une AUTRE VERSION : « The New Workout Plan - Live
+        # Version » ressemblait à 91 % à « (Long Version) » (2026-09-24).
+        if not _meme_version_stricte(ventree, parse_variant(t.title)):
+            continue
         r = difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio()
         if r >= threshold:
             hits.append((r, t))

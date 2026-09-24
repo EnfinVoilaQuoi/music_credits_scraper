@@ -161,3 +161,13 @@ def test_la_designation_par_titre_est_exacte():
     d = {"titre": "Boss", "album": "Échecs positifs"}
     assert cf.designe(d, genius_id=None, titre="Boss", album="Échecs positifs")
     assert not cf.designe(d, genius_id=638651, titre="BOSS", album="Échecs positifs")
+
+
+def test_le_premier_credite_departage():
+    """« Selfish » : Spotify crédite Slum Village, John Legend, Kanye West — la
+    fiche de Slum Village garde l'ID, pas celle de DONDA 2."""
+    mod = _script()
+    slum = _t("Selfish", "Kanye West", is_featuring=True, primary_artist_name="Slum Village")
+    donda = _t("Selfish", "Kanye West")
+    identite = {"name": "Selfish", "artists": ["Slum Village", "John Legend", "Kanye West"]}
+    assert mod.score_identite(slum, identite) > mod.score_identite(donda, identite)

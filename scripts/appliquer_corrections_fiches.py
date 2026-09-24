@@ -80,18 +80,20 @@ def score_identite(track, identite: dict) -> tuple:
       1. le contrôle d'identité ne la rejette pas (veto) ;
       2. son artiste PRINCIPAL est crédité par Spotify (« Pour de Vrai » d'Eech
          contre « Pour de vrai » d'A2H, Spotify ne crédite qu'A2H) ;
-      3. titre IDENTIQUE, casse comprise (Spotify sert « outside » : la fiche
+      3. il est le PREMIER crédité (« Selfish » : Spotify crédite Slum Village,
+         John Legend, Kanye West — les deux fiches y ont leur principal) ;
+      4. titre IDENTIQUE, casse comprise (Spotify sert « outside » : la fiche
          de 2016, pas « OUTSIDE » de 2025).
     """
     from src.utils.spotify_identity import identite_concorde
     from src.utils.title_matching import names_match_as_words
 
     concorde = identite_concorde(track, identite)[0]
-    principal = any(
-        names_match_as_words(a, _principal(track)) for a in identite.get("artists") or []
-    )
+    artistes = identite.get("artists") or []
+    principal = any(names_match_as_words(a, _principal(track)) for a in artistes)
+    premier = bool(artistes) and names_match_as_words(artistes[0], _principal(track))
     titre = (track.title or "").strip() == (identite.get("name") or "").strip()
-    return (concorde, principal, titre)
+    return (concorde, principal, premier, titre)
 
 
 def departager(track, autre, lire_identite) -> list:

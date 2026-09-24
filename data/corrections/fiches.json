@@ -286,6 +286,33 @@
       "retirer_id_spotify": [
         "7a0tTD7xdvKsNcJfMIDWp4"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 81
+      },
+      "fusionner_dans": {
+        "genius_id": 25733
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 5375711
+      },
+      "retirer_id_spotify": [
+        "6EnfW37wjj3qcwQDv602CA"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7667926
+      },
+      "departager_id_avec": {
+        "genius_id": 1375
+      },
+      "retirer_id_spotify": [
+        "7sZCAHP2duHwr5M5K7lHsb"
+      ]
     }
   ],
   "Kid Cudi": [

@@ -183,3 +183,16 @@ class TestFermetureEtSauvegarde:
     def test_aucun_morceau(self):
         bilan = credits.run(_rt(), Artist(name="S"), [], credits.OptionsCredits(), Hooks())
         assert not bilan.complete
+
+
+def test_un_credit_herite_ne_dispense_pas_de_la_description_youtube():
+    """Une version acoustique hérite ses auteurs : sa production n'est connue que
+    par SA description Topic, qui doit donc être lue (2026-09-24)."""
+    from src.models.track import Credit, CreditRole, Track
+    from src.services.credits import _manque_credits
+
+    t = Track(title="Grenadine (Acoustic)")
+    t.credits = [Credit(name="A2H", role=CreditRole.WRITER, source="heritage")]
+    assert _manque_credits(t)
+    t.credits.append(Credit(name="Tefa", role=CreditRole.PRODUCER, source="youtube_topic"))
+    assert not _manque_credits(t)

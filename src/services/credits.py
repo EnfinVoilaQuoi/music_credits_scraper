@@ -128,8 +128,14 @@ class Clients:
 
 
 def _manque_credits(track: Track) -> bool:
-    """True si le morceau n'a aucun Producer ni Writer/Composer."""
-    roles = {c.role for c in track.credits}
+    """True si le morceau n'a aucun Producer ni Writer/Composer DIRECT.
+
+    Un crédit HÉRITÉ de l'original (`source="heritage"`) ne compte pas : une
+    version live ou acoustique hérite ses auteurs, et sans cette règle sa
+    description YouTube Topic — seule source de SA production — n'était jamais
+    lue (2026-09-24). L'héritage s'efface ensuite devant la source directe
+    (`version_heritage.sans_heritage_couvert`)."""
+    roles = {c.role for c in track.credits if c.source != "heritage"}
     return not (roles & _PRODUCER_ROLES) and not (roles & _WRITER_ROLES)
 
 

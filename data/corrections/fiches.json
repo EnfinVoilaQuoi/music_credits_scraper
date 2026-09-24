@@ -708,6 +708,15 @@
           "role": "Featured Artist"
         }
       ]
+    },
+    {
+      "fiche": {
+        "titre": "Joe Le Taxi (Inedit)",
+        "album": "Don't Panik Tape"
+      },
+      "fusionner_dans": {
+        "genius_id": 96927
+      }
     }
   ],
   "Népal": [
@@ -769,6 +778,14 @@
       },
       "fusionner_dans": {
         "genius_id": 2336436
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 10207486
+      },
+      "fusionner_dans": {
+        "genius_id": 5363682
       }
     }
   ]

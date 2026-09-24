@@ -99,3 +99,46 @@ def constat_a_ecrire(track) -> bool | None:
     if connu and trace_de_plateforme(track):
         return False
     return connu
+
+
+#: Mention d'inédit ÉCRITE dans le titre (« Gagarine (Unreleased) », « Joe Le
+#: Taxi (Inedit) »), à ne pas confondre avec « [Snippet] » ou « (Leak) » : un
+#: extrait ou une fuite est une VERSION (fiche propre, décision utilisateur).
+MENTION_INEDIT = re.compile(r"\s*[\(\[](?:unreleased|inédit|inedit)[\)\]]\s*$", re.IGNORECASE)
+
+
+def doublons_inedits(tracks) -> list[tuple]:
+    """PUR (2026-09-24). `[(absorbée, gardée)]` : une fiche dont le titre est celui
+    d'une autre fiche de l'artiste + « (Unreleased) » / « (Inédit) » est le MÊME
+    morceau, décrit par deux pages Genius (SCH « Gagarine (Unreleased) » et
+    « Gagarine* », toutes deux sans date) ou par Deezer (Médine « Joe Le Taxi
+    (Inedit) » sur le même disque).
+
+    Il faut une preuve de plus que le titre : l'autre fiche est CONSTATÉE inédite,
+    ou les deux sont rangées sur le même disque ; et leurs années ne se
+    contredisent pas (BEN plg « Les deux pieds dans la ville (unreleased) » 2024
+    face à la version sortie en 2022 : écarté). Une seule candidate, jamais deux.
+    """
+    from src.utils.title_matching import cle_album, normalize_title
+
+    par_titre: dict[str, list] = {}
+    for t in tracks:
+        if not MENTION_INEDIT.search(t.title or ""):
+            par_titre.setdefault(normalize_title(t.title or ""), []).append(t)
+    paires = []
+    for t in tracks:
+        titre = t.title or ""
+        if not MENTION_INEDIT.search(titre):
+            continue
+        autres = par_titre.get(normalize_title(MENTION_INEDIT.sub("", titre)), [])
+        if len(autres) != 1:
+            continue
+        autre = autres[0]
+        meme_disque = bool(t.album and autre.album) and cle_album(t.album) == cle_album(autre.album)
+        if not (autre.unreleased or meme_disque):
+            continue
+        annees = {str(d)[:4] for d in (t.release_date, autre.release_date) if d}
+        if len(annees) > 1:
+            continue
+        paires.append((t, autre))
+    return paires

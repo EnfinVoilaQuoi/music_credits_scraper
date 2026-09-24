@@ -171,3 +171,12 @@ def test_le_premier_credite_departage():
     donda = _t("Selfish", "Kanye West")
     identite = {"name": "Selfish", "artists": ["Slum Village", "John Legend", "Kanye West"]}
     assert mod.score_identite(slum, identite) > mod.score_identite(donda, identite)
+
+
+def test_une_fusion_par_regle_est_memorisee_une_fois():
+    from src.utils import corrections_fiches as cf
+
+    cf.memoriser_fusion("SCH", {"genius_id": 10207486}, {"genius_id": 5363682})
+    cf.memoriser_fusion("SCH", {"genius_id": 10207486}, {"genius_id": 5363682})
+    assert cf.genius_ids_absorbes("SCH") == {10207486}
+    assert len(cf.charger()["SCH"]) == 1

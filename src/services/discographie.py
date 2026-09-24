@@ -55,6 +55,8 @@ class BilanDisco(Bilan):
     editions: int = 0
     #: Titres ajoutés par la tracklist d'un album de l'artiste.
     titres_album: int = 0
+    #: Doublons « X (Unreleased) » / « X » fusionnés (même morceau inédit).
+    fusions_inedits: list = field(default_factory=list)
     albums_api: int = 0
     dates_api: int = 0
     images: int = 0
@@ -388,6 +390,9 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
 
     nouveautes_cache.oublier(artist.id)
     artist.tracks = dm.get_artist_tracks(artist.id)
+    bilan.fusions_inedits = fusionner_doublons_inedits(dm, artist, artist.tracks)
+    if bilan.fusions_inedits:
+        artist.tracks = dm.get_artist_tracks(artist.id)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)
     bilan.albums_api = sum(1 for t in nouveaux if t.album)
@@ -399,6 +404,27 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     if options.deezer and bilan.complete and not hooks.should_stop():
         _completer_par_deezer(runtime, artist, options, hooks, bilan)
     return bilan
+
+
+def fusionner_doublons_inedits(dm, artist, tracks) -> list[str]:
+    """Fusionne les doublons « X (Unreleased) » / « X » (`inedits.doublons_inedits`)
+    et consigne chaque fusion dans `data/corrections/fiches.json` — sans quoi
+    l'import suivant recréerait la page absorbée. La fiche SANS mention est gardée
+    (le titre Genius canonique). Le backup est celui du run.
+    """
+    from src.utils.corrections_fiches import designation_de, memoriser_fusion
+    from src.utils.inedits import doublons_inedits
+
+    faites = []
+    for absorbee, gardee in doublons_inedits(tracks):
+        if not dm.merge_tracks(gardee.id, absorbee.id):
+            continue
+        memoriser_fusion(artist.name, designation_de(absorbee), designation_de(gardee))
+        if gardee.unreleased is None and "unreleased" in absorbee.title.lower():
+            dm.record_unreleased(gardee.id, True)
+        faites.append(f"{absorbee.title} → {gardee.title}")
+        logger.info(f"🔁 Doublon inédit fusionné : « {absorbee.title} » → « {gardee.title} »")
+    return faites
 
 
 def _completer_par_tracklists(runtime, artist, tracks, exclus, options, hooks, bilan) -> list:
@@ -498,6 +524,9 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
     msg = f"✅ {bilan.recuperes} morceaux récupérés pour {artist.name}"
     msg += f"\n🆕 {bilan.nouveaux} nouveaux morceaux"
     msg += f"\n🔄 {bilan.mis_a_jour} morceaux mis à jour"
+    if bilan.fusions_inedits:
+        msg += f"\n🔁 {len(bilan.fusions_inedits)} doublon(s) inédit(s) fusionné(s) : "
+        msg += ", ".join(bilan.fusions_inedits[:5])
     if bilan.titres_album:
         msg += f"\n🎼 {bilan.titres_album} titre(s) d'album ajouté(s) par la tracklist Genius"
     if bilan.doublons_evites:

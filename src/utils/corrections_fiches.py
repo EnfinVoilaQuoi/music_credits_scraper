@@ -99,3 +99,26 @@ def genius_ids_absorbes(artiste: str) -> set[int]:
         for e in charger().get(artiste, [])
         if e.get("fusionner_dans") and (e.get("fiche") or {}).get("genius_id") is not None
     }
+
+
+def designation_de(track) -> dict:
+    """La désignation d'une fiche dans le fichier : sa page Genius, sinon titre
+    + album (fiche Deezer)."""
+    if track.genius_id:
+        return {"genius_id": int(track.genius_id)}
+    return {"titre": track.title, "album": track.album}
+
+
+def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
+    """Consigne une fusion décidée par une RÈGLE (pas à la main) : sans elle, le
+    prochain import recréerait la page absorbée (`genius_ids_absorbes`)."""
+    try:
+        donnees = json.loads(FICHIER.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        donnees = {}
+    entrees = donnees.setdefault(artiste, [])
+    if any(e.get("fiche") == absorbee and e.get("fusionner_dans") for e in entrees):
+        return
+    entrees.append({"fiche": absorbee, "fusionner_dans": gardee})
+    FICHIER.parent.mkdir(parents=True, exist_ok=True)
+    FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")

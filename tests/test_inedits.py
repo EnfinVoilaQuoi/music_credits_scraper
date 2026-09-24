@@ -218,3 +218,46 @@ class TestMarqueurSurUnDISQUE:
         titre, jamais sur celui de son disque."""
         assert not porte_le_marqueur("Goosebumps")
         assert constat_a_ecrire(_Track(unreleased=None, sp=900_000_000)) is None
+
+
+class TestDoublonsInedits:
+    """« X (Unreleased) » / « X » : le même morceau inédit, deux pages (2026-09-24)."""
+
+    @staticmethod
+    def _t(titre, unreleased=None, album=None, date=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(title=titre, unreleased=unreleased, album=album, release_date=date)
+
+    def test_sch_gagarine(self):
+        from src.utils.inedits import doublons_inedits
+
+        marque, etoile = self._t("Gagarine (Unreleased)"), self._t("Gagarine", unreleased=1)
+        assert doublons_inedits([marque, etoile]) == [(marque, etoile)]
+
+    def test_medine_joe_le_taxi_meme_disque(self):
+        from src.utils.inedits import doublons_inedits
+
+        deezer = self._t("Joe Le Taxi (Inedit)", album="Don't Panik Tape", date="2008-04-14")
+        genius = self._t("Joe Le Taxi", album="Don’t Panik Tape", date="2008-01-01")
+        assert doublons_inedits([deezer, genius]) == [(deezer, genius)]
+
+    def test_annees_contradictoires_ecartees(self):
+        """BEN plg : l'inédit 2024 face à la version sortie en 2022."""
+        from src.utils.inedits import doublons_inedits
+
+        paire = [
+            self._t("Les deux pieds dans la ville (unreleased)", date="2024-01-01"),
+            self._t("Les deux pieds dans la ville", unreleased=1, date="2022-12-24"),
+        ]
+        assert doublons_inedits(paire) == []
+
+    def test_sans_preuve_de_plus_que_le_titre_rien(self):
+        from src.utils.inedits import doublons_inedits
+
+        assert doublons_inedits([self._t("X (Unreleased)"), self._t("X")]) == []
+
+    def test_un_snippet_est_une_version_pas_un_doublon(self):
+        from src.utils.inedits import doublons_inedits
+
+        assert doublons_inedits([self._t("Stronger (Snippet)"), self._t("Stronger", 1)]) == []

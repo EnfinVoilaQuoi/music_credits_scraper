@@ -176,8 +176,11 @@ class DiscogsClient:
                 results = self.client.search(query, type="release", artist=artist_name)
 
             if not results:
-                logger.warning(f"❌ Aucun résultat Discogs pour '{track_title}'")
-                log_api("Discogs", f"search/{track_title}", False)
+                # Une ABSENCE, pas un échec : l'appel a abouti (déjà compté
+                # `absent` par l'observabilité). En ERROR, elle noyait les
+                # vraies pannes — 324 lignes pour un run A2H (2026-09-24).
+                logger.info(f"∅ Aucun résultat Discogs pour '{track_title}'")
+                log_api("Discogs", f"search/{track_title} (aucun résultat)", True)
                 obs.absent("aucun résultat de recherche")
                 return None
 
@@ -226,10 +229,8 @@ class DiscogsClient:
                     logger.debug(f"Erreur analyse résultat #{i}: {e}")
                     continue
 
-            logger.warning(
-                f"❌ Aucune correspondance exacte trouvée sur Discogs pour '{track_title}'"
-            )
-            log_api("Discogs", f"search/{track_title}", False)
+            logger.info(f"∅ Aucune correspondance exacte trouvée sur Discogs pour '{track_title}'")
+            log_api("Discogs", f"search/{track_title} (aucune correspondance)", True)
             obs.absent(
                 "aucune correspondance exacte"
                 + (f" ({etrangers} disque(s) d'un autre artiste écarté(s))" if etrangers else "")

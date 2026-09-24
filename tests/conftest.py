@@ -82,6 +82,15 @@ def _aucune_boite_de_dialogue(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _gate_spotify_sans_fournisseur(monkeypatch):
+    """Le fournisseur de titres du gate Spotify est posé par `DataManager` : sans
+    ce cran, il survivrait d'un test à l'autre en pointant une base détruite."""
+    from src.utils import spotify_identity
+
+    monkeypatch.setattr(spotify_identity, "fournisseur_titres", None)
+
+
+@pytest.fixture(autouse=True)
 def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
     """AUCUN test ne lit `data/corrections/fiches.json` réel : il est relu par le
     gate Spotify, `save_track` et l'import discographie (2026-09-24)."""

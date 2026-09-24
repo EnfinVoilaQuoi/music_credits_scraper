@@ -495,3 +495,9 @@ class TestResumeVideosPartagees:
     def test_rien_a_signaler_reste_silencieux(self):
         texte = _resume({"ytm": {"matched": 3, "videos_partagees": []}})
         assert "rattachée" not in texte
+
+
+def test_resume_ids_mal_places():
+    r = {"spotify": {"matched": 1, "ids_mal_places": [("SPX", "Only", "Only One")]}}
+    texte = _resume(r)
+    assert "🔀 1 ID Spotify posé(s)" in texte and "« Only » porte l'ID de « Only One »" in texte

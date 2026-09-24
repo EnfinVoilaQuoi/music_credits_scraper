@@ -43,6 +43,7 @@ from src.utils.version_descriptors import (
     meme_famille,
     meme_prise,
     parse_variant,
+    titres_equivalents,
 )
 
 logger = get_logger(__name__)
@@ -493,7 +494,15 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
     if sid and sid in index.ids_partages:
         return Rapprochement(motif="id_partage")
     if sid and sid in index.by_edition_id:
-        return Rapprochement(track=index.by_edition_id[sid], via="id")
+        porteur = index.by_edition_id[sid]
+        if not titres_equivalents(_SUFFIXE_UPLOAD.sub("", entry["title"]), porteur.title):
+            # L'ID est posé sur une AUTRE fiche que celle du titre (« Only » porte
+            # l'ID d'« Only One », 2026-09-24) : si UNE fiche porte exactement le
+            # titre de la ligne, les streams vont à elle et l'ID est SIGNALÉ.
+            bonnes = [t for t in index.by_title.get(norm, []) if t.id != porteur.id]
+            if len(bonnes) == 1:
+                return Rapprochement(track=bonnes[0], via="id_mal_place", motif=porteur.title)
+        return Rapprochement(track=porteur, via="id")
     # Édition de DIFFUSION (« Impossible - Radio Edit », « Put On - Album
     # Version (Edited) ») : même enregistrement, même fiche — la ligne rejoint
     # l'original et ses streams S'ADDITIONNENT (décision utilisateur 2026-09-24).
@@ -736,6 +745,9 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         "doublons_evidents": [],  # [(spotify_id, [titres])] : écrit sur la 1ʳᵉ fiche, à fusionner
         "renditions_rattachees": [],  # [(titre kworb, titre parent, streams)]
         "variantes_suspectes": [],  # [(titre base, titre spotify, id)] : ID mal attribué ?
+        #: ID porté par une autre fiche que celle du titre : streams à la bonne
+        #: fiche, ID à déplacer (`scripts/deplacer_ids_spotify.py`).
+        "ids_mal_places": [],  # [(id, fiche porteuse, fiche au bon titre)]
         "multi_lignes": [],  # [(titre, n lignes, n comptées, total)]
         "lignes_ecartees": [],  # [(titre kworb, streams, titre base)] : autre enregistrement
         #: Fiches dont l'observation Kworb a été retirée (ID non attribuable).
@@ -885,6 +897,12 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             )
         elif via in ("confirmed", "decision"):
             logger.info(f"🔗 Kworb (décision mémorisée): '{entry['title']}' → '{track.title}'")
+        if via == "id_mal_place":
+            result["ids_mal_places"].append((entry.get("spotify_id"), r.motif, track.title))
+            logger.warning(
+                f"🔀 ID {entry.get('spotify_id')} posé sur « {r.motif} » : la ligne Kworb "
+                f"« {entry['title']} » va à la fiche « {track.title} »"
+            )
         if via == "id" and not meme_famille(
             parse_variant(entry["title"]), parse_variant(track.title)
         ):

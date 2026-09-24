@@ -28,7 +28,7 @@ from src.utils.title_matching import (
     normalize_title,
 )
 from src.utils.track_mapper import _clean_duration
-from src.utils.version_descriptors import meme_famille, parse_variant
+from src.utils.version_descriptors import meme_famille, parse_variant, titres_equivalents
 
 logger = get_logger(__name__)
 
@@ -36,6 +36,39 @@ logger = get_logger(__name__)
 #: de fin au même endroit, et Genius arrondit : quelques secondes ne prouvent
 #: rien. Au-delà, c'est un autre enregistrement.
 TOLERANCE_DUREE = 5
+
+#: Fournisseur des fiches de l'artiste : `artist_id -> [(track_id, titre)]`.
+#: Posé par `DataManager` — ce module ne touche jamais la base. `None` (tests
+#: purs, scripts sans base) ⇒ la règle « ID d'une autre fiche » est inactive.
+fournisseur_titres = None
+
+
+def fiche_du_titre_spotify(track, identite: dict | None) -> str | None:
+    """Le titre d'une AUTRE fiche de l'artiste que l'ID désigne, ou None.
+
+    Mesuré le 2026-09-24 : 64 lignes Kworb (6,3 Md de streams) partaient par
+    l'ID vers une fiche au titre différent alors qu'une fiche au titre EXACT
+    existait — « Wolves » → « Wolves (BOOTS Reference) », « Only One » →
+    « Only », Jazzy Bazz « Éternité » → « Feu Grégeois ». Toutes les sources
+    en posaient (scraper, Kworb, SongBPM, Genius, historique). Le titre seul
+    ne refuse pas un ID (« 1 pour la plume » / « Un pour la plume ») ; il le
+    refuse quand ce titre est celui d'une fiche SŒUR.
+    """
+    nom = (identite or {}).get("name")
+    if fournisseur_titres is None or not nom or titres_equivalents(track.title, nom):
+        return None
+    artist_id = getattr(track.artist, "id", None)
+    if not artist_id:
+        return None
+    try:
+        fiches = fournisseur_titres(artist_id)
+    except Exception:  # noqa: BLE001 — garde-fou : un fournisseur en panne ne refuse rien
+        logger.exception("Fournisseur de titres en échec")
+        return None
+    for tid, titre in fiches:
+        if tid != track.id and titres_equivalents(titre, nom):
+            return titre
+    return None
 
 
 def noms_attendus(track) -> list[str]:
@@ -229,6 +262,13 @@ def _juger(
     if spotify_id in ids_refuses(track):
         logger.warning(
             f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — retiré à la main"
+        )
+        return False
+    autre = None if titres_tranches else fiche_du_titre_spotify(track, identite)
+    if autre is not None:
+        logger.warning(
+            f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — c'est celui "
+            f"de la fiche « {autre} »"
         )
         return False
     accepte, motif = identite_concorde(

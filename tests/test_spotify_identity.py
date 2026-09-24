@@ -271,3 +271,22 @@ class TestTitresTranches:
         track = _track(titre="DCR (Dolce Camara Remix)", artiste="Booba", duree=300)
         identite = _identite("Dolce Camara - Snight B Remix", ["Booba"], 144)
         assert identite_concorde(track, identite, titres_tranches=True)[0] is False
+
+
+def test_l_id_d_une_autre_fiche_est_refuse(monkeypatch):
+    """Kanye « Only » portait l'ID d'« Only One » (120 M) alors que la fiche
+    « Only One » existait (2026-09-24)."""
+    from src.models import Artist, Track
+    from src.utils import spotify_identity as si
+
+    kanye = Artist(name="Kanye West")
+    kanye.id = 7
+    only = Track(title="Only", artist=kanye)
+    only.id = 1
+    identite = {"name": "Only One", "artists": ["Kanye West"], "duration": None}
+
+    monkeypatch.setattr(si, "fournisseur_titres", lambda aid: [(1, "Only"), (2, "Only One")])
+    assert si.valider_identite(only, "SP", lambda s: identite) is False
+
+    monkeypatch.setattr(si, "fournisseur_titres", lambda aid: [(1, "Only")])
+    assert si.valider_identite(only, "SP", lambda s: identite) is True

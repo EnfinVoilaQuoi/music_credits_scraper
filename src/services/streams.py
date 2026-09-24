@@ -248,6 +248,16 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                     lines.append(f"   • base « {base} » ↔ Spotify « {spotify} »")
                 if len(suspectes) > 8:
                     lines.append(f"   … et {len(suspectes) - 8} autre(s) (voir logs)")
+            mal_places = r.get("ids_mal_places") or []
+            if mal_places:
+                lines.append(
+                    f"\n🔀 {len(mal_places)} ID Spotify posé(s) sur une autre fiche que celle "
+                    "du titre — streams donnés à la bonne fiche, ID à déplacer :"
+                )
+                for _sid, porteur, bonne in mal_places[:8]:
+                    lines.append(f"   • « {porteur} » porte l'ID de « {bonne} »")
+                if len(mal_places) > 8:
+                    lines.append(f"   … et {len(mal_places) - 8} autre(s) (voir logs)")
             ecartees = r.get("lignes_ecartees") or []
             if ecartees:
                 lines.append("\n⤫ Lignes écartées (autre enregistrement, même titre) :")

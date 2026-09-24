@@ -123,6 +123,7 @@ scripts/*
 !scripts/backfill_pages_genius.py
 !scripts/appliquer_corrections_fiches.py
 !scripts/fusionner_editions.py
+!scripts/deplacer_ids_spotify.py
 !scripts/repair_release_dates.py
 !scripts/mesurer_lyrics_state.py
 !scripts/backfill_inedits.py

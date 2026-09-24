@@ -33,6 +33,11 @@ class DataManager(ArtistRepository, TrackRepository):
         # importées ici (elles vivent dans certif_snep.csv, lu paresseusement par
         # le matcher unifié) — le constructeur ne déclenche aucun import CSV.
         self._db = Database(DATABASE_URL.replace("sqlite:///", ""))
+        # Le gate d'identité Spotify refuse un ID qui est celui d'une AUTRE fiche
+        # de l'artiste ; il ne touche pas la base, on lui fournit les titres.
+        from src.utils import spotify_identity
+
+        spotify_identity.fournisseur_titres = self.titres_des_fiches
 
     @property
     def db_path(self) -> str:

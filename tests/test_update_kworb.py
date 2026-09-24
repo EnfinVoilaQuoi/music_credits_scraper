@@ -1254,3 +1254,12 @@ class TestVariantesSuspectes:
         )
         assert dm.streams_writes == [(1, 2_109, 9, datetime(2026, 9, 1))]
         assert res["variantes_suspectes"] == [("Heartless (Remix)", "Heartless", "SPH")]
+
+
+def test_un_id_pose_sur_une_autre_fiche_va_a_la_fiche_du_titre():
+    """Kanye « Only » portait l'ID d'« Only One » (120 M) : les streams vont à
+    « Only One », l'ID est signalé pour déplacement (2026-09-24)."""
+    tracks = [_track(1, "Only", spotify_id="SPX"), _track(2, "Only One")]
+    res, dm = _run(tracks, [_entry("Only One", 1000, 10, "SPX")])
+    assert [tid for tid, *_ in dm.streams_writes] == [2]
+    assert res["ids_mal_places"] == [("SPX", "Only", "Only One")]

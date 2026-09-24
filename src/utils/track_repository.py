@@ -3603,6 +3603,16 @@ class TrackRepository:
         "genius_id",
     )
 
+    def titres_des_fiches(self, artist_id: int) -> list[tuple[int, str]]:
+        """`[(id, titre)]` des fiches de l'artiste (gate d'identité Spotify)."""
+        with self.engine.connect() as conn:
+            return [
+                (i, t)
+                for i, t in conn.execute(
+                    text("SELECT id, title FROM tracks WHERE artist_id = :a"), {"a": artist_id}
+                )
+            ]
+
     def record_track_edition(self, track_id: int, label: str, **champs) -> bool:
         """Enregistre une édition de diffusion (« Radio Edit ») du morceau.
 

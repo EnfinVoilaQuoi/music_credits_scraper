@@ -1,0 +1,412 @@
+{
+  "A2H": [
+    {
+      "fiche": {
+        "titre": "Le coeur des filles (Acoustic)",
+        "album": "REWORKS"
+      },
+      "version_de": {
+        "genius_id": 5963354
+      },
+      "retirer_id_spotify": [
+        "07mOGvE74Z3m2AesaRUneq"
+      ],
+      "retirer_credits": [
+        {
+          "nom": "Matthieu Cabaret",
+          "role": "Composer"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "titre": "Le cœur des filles (Unplugged)",
+        "album": "Le cœur des filles (Unplugged)"
+      },
+      "version_de": {
+        "genius_id": 5963354
+      },
+      "retirer_credits": [
+        {
+          "nom": "Matthieu Cabaret",
+          "role": "Composer"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5963354
+      },
+      "retirer_credits": [
+        {
+          "nom": "Matthieu Cabaret",
+          "role": "Composer"
+        },
+        {
+          "nom": "Alice Bouet",
+          "role": "Video Director"
+        },
+        {
+          "nom": "Johanna Gabriella Boyer",
+          "role": "Video Director"
+        },
+        {
+          "nom": "Julie Sanchez",
+          "role": "Video Director"
+        },
+        {
+          "nom": "Kelly Perry",
+          "role": "Video Director"
+        },
+        {
+          "nom": "Hakim Chérif Zaoui",
+          "role": "Video Director"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4645104
+      },
+      "departager_id_avec": {
+        "genius_id": 2471253
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 2471253
+      },
+      "retirer_id_spotify": [
+        "1YtbL9W2WDaT4Z8vZoRJWs"
+      ]
+    }
+  ],
+  "Booba": [
+    {
+      "fiche": {
+        "genius_id": 9067199
+      },
+      "version_de": {
+        "genius_id": 5331939
+      },
+      "inedit": true,
+      "lien_youtube": "https://www.youtube.com/watch?v=Ki_U4JBRsHw",
+      "retirer_id_spotify": [
+        "6hluRlFf8XucT5KaELb7SF"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6425422
+      },
+      "cover_de": {
+        "genius_id": 5420055
+      },
+      "tiers": {
+        "role": "Cover",
+        "principal": "Jedn"
+      },
+      "departager_id_avec": {
+        "genius_id": 5420055
+      },
+      "retirer_id_spotify": [
+        "4fW3EMRzAfj8aNMsF3zMwt"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2824
+      },
+      "departager_id_avec": {
+        "genius_id": 359040
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 359040
+      },
+      "retirer_id_spotify": [
+        "5Y5dlBMUM5rTrpNo445yUC"
+      ]
+    }
+  ],
+  "Diam’s": [
+    {
+      "fiche": {
+        "genius_id": 732420
+      },
+      "fusionner_dans": {
+        "genius_id": 4337658
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 12788831
+      },
+      "version_de": {
+        "genius_id": 3699244
+      },
+      "departager_id_avec": {
+        "genius_id": 3699244
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Ma France à Moi (Live 2006)",
+        "album": "Au Tour De Ma Bulle"
+      },
+      "lien_youtube": "https://www.youtube.com/watch?v=GYP_V8QKRE4",
+      "departager_id_avec": {
+        "titre": "Ma France à moi (Version Yann Tiersen; Live 2006)",
+        "album": "ma france a moi"
+      }
+    },
+    {
+      "fiche": {
+        "titre": "Ma France à moi (Version Yann Tiersen; Live 2006)",
+        "album": "ma france a moi"
+      },
+      "lien_youtube": "https://www.youtube.com/watch?v=fPfEhcIuQJg",
+      "retirer_id_spotify": [
+        "0Nm30S1pmr2GltRYmxzRYM"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8443399
+      },
+      "sample_de": {
+        "genius_id": 166708
+      },
+      "departager_id_avec": {
+        "genius_id": 166708
+      },
+      "retirer_id_spotify": [
+        "7bneLZnKB9b3j8uHYUnH8Q"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3699244
+      },
+      "retirer_id_spotify": [
+        "43AtKOibxb0pYV2CUlqBfB"
+      ]
+    }
+  ],
+  "Freeze Corleone": [
+    {
+      "fiche": {
+        "genius_id": 7637197
+      },
+      "departager_id_avec": {
+        "genius_id": 4087042
+      },
+      "retirer_id_spotify": [
+        "1Pit975hbTxrwgf2BRixEb"
+      ]
+    }
+  ],
+  "Josman": [
+    {
+      "fiche": {
+        "titre": "Boss",
+        "album": "Échecs positifs"
+      },
+      "fusionner_dans": {
+        "genius_id": 638651
+      }
+    }
+  ],
+  "Kanye West": [
+    {
+      "fiche": {
+        "genius_id": 3780052
+      },
+      "retirer_id_spotify": [
+        "0NrtwAmRAdLxua31SzHvXr"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7143890
+      },
+      "inedit": true,
+      "lien_youtube": "https://www.youtube.com/watch?v=dY5uZqDz8AU",
+      "retirer_id_spotify": [
+        "0NrtwAmRAdLxua31SzHvXr"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10723419
+      },
+      "retirer_id_spotify": [
+        "5UsLjwBaTHBX4ektWIr4XX"
+      ]
+    },
+    {
+      "fiche": {
+        "titre": "Forever (Explicit Version)"
+      },
+      "fusionner_dans": {
+        "genius_id": 147
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 6592544
+      },
+      "inedit": true,
+      "retirer_lien_youtube": "https://www.youtube.com/watch?v=V7HzDJiT9K4",
+      "lien_youtube": "https://www.youtube.com/watch?v=-qZxQJLXxlg"
+    },
+    {
+      "fiche": {
+        "genius_id": 7110702
+      },
+      "retirer_id_spotify": [
+        "3DK6m7It6Pw857FcQftMds"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4911632
+      },
+      "version_de": {
+        "genius_id": 9728770
+      },
+      "inedit": true,
+      "retirer_lien_youtube": "https://www.youtube.com/watch?v=BzcuDb8WYUU",
+      "lien_youtube": "https://www.youtube.com/watch?v=g44Y0L-TNpk",
+      "retirer_id_spotify": [
+        "7a0tTD7xdvKsNcJfMIDWp4"
+      ]
+    }
+  ],
+  "Kid Cudi": [
+    {
+      "fiche": {
+        "genius_id": 7227664
+      },
+      "fusionner_dans": {
+        "genius_id": 10089437
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 9072588
+      },
+      "retirer_id_spotify": [
+        "393MDhe62s8hbH8ETrlxe5"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9000383
+      },
+      "retirer_id_spotify": [
+        "0WFOl7P9gowO92fuI0eJIZ"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7110702
+      },
+      "retirer_id_spotify": [
+        "3DK6m7It6Pw857FcQftMds"
+      ]
+    }
+  ],
+  "SDM": [
+    {
+      "fiche": {
+        "genius_id": 12719502
+      },
+      "departager_id_avec": {
+        "genius_id": 6638525
+      },
+      "retirer_id_spotify": [
+        "6aKNeabjZyZdAeSFxcLIkR"
+      ]
+    }
+  ],
+  "Shurik’n": [
+    {
+      "fiche": {
+        "genius_id": 7485491
+      },
+      "departager_id_avec": {
+        "genius_id": 4818799
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 4818799
+      },
+      "retirer_id_spotify": [
+        "4eXkEQ5Kw1WBIKVgsoKZCQ"
+      ]
+    }
+  ],
+  "Travis Scott": [
+    {
+      "fiche": {
+        "genius_id": 5034468
+      },
+      "retirer_id_spotify": [
+        "4MXhiYIRDMGAuvZc5IFTwC"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11416397
+      },
+      "fusionner_dans": {
+        "genius_id": 2851126
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 7252208
+      },
+      "tiers": {
+        "role": "Cover",
+        "principal": "KIDZ BOP Kids"
+      },
+      "cover_de": {
+        "genius_id": 2849767
+      },
+      "retirer_id_spotify": [
+        "6gBFPUFcJLzWGx4lenP6h2"
+      ],
+      "retirer_lien_youtube": "https://www.youtube.com/watch?v=W5b-a8Nzmag"
+    },
+    {
+      "fiche": {
+        "genius_id": 8066632
+      },
+      "tiers": {
+        "role": "Cover",
+        "principal": "Moistrus"
+      },
+      "cover_de": {
+        "genius_id": 4497172
+      },
+      "retirer_id_spotify": [
+        "3eekarcy7kvN4yt5ZFzltW"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12135744
+      },
+      "departager_id_avec": {
+        "genius_id": 2849776
+      },
+      "retirer_id_spotify": [
+        "177WEvlLsCc0FzCTWslawr"
+      ]
+    }
+  ]
+}

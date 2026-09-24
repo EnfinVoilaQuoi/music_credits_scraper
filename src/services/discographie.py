@@ -265,6 +265,12 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     )
     if bilan.supprimes_ignores:
         logger.info(f"🗂️ {bilan.supprimes_ignores} morceau(x) supprimé(s) ignoré(s) (historique)")
+    # Pages Genius FUSIONNÉES à la main dans une autre fiche : ne pas les recréer.
+    from src.utils.corrections_fiches import genius_ids_absorbes
+
+    absorbes = genius_ids_absorbes(artist.name)
+    if absorbes:
+        nouveaux = [t for t in nouveaux if t.genius_id not in absorbes]
     bilan.recuperes = len(nouveaux)
 
     fusion = fusionner(nouveaux, existants, should_stop=hooks.should_stop)

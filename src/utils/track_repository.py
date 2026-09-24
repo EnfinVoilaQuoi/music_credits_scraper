@@ -19,10 +19,11 @@ from src.enrichment.observation import Observation
 from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackVideo
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
+from src.utils.corrections_fiches import credits_refuses
 from src.utils.dates import completer, la_plus_ancienne, meme_jour
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
-from src.utils.title_matching import cle_album, clean_stored_title, normalize_title
+from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import _clean_duration, track_from_row
 from src.utils.track_soeurs import (
     effacer_chez_les_soeurs,
@@ -408,8 +409,13 @@ class TrackRepository:
                     {"track_id": track.id},
                 )
 
-                # Sauvegarder les nouveaux crédits
+                # Sauvegarder les nouveaux crédits — sauf ceux retirés À LA MAIN
+                # (data/corrections/fiches.json) : la source les ressert à chaque
+                # run (« Matthieu Cabaret — Composer », compositing du clip).
+                refuses = credits_refuses(track)
                 for credit in track.credits:
+                    if (normalize_name(credit.name), credit.role.value) in refuses:
+                        continue
                     self._save_credit(conn, track.id, credit)
 
             # Sauvegarder les erreurs
@@ -1535,6 +1541,52 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur rattacher_page_genius({track_id}): {e}")
             return False
+
+    def record_relation_artiste(
+        self,
+        track_id: int,
+        *,
+        is_featuring: bool,
+        primary_artist_name: str | None,
+        secondary_role: str | None,
+    ) -> bool:
+        """Réécrit VERBATIM la relation de la fiche à son artiste (principal / feat
+        / rôle secondaire), `None` compris — `save_track` passe ces champs en
+        COALESCE et ne sait pas les remplacer (corrections à la main, étape 3)."""
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == track_id)
+                    .values(
+                        is_featuring=bool(is_featuring),
+                        primary_artist_name=primary_artist_name,
+                        secondary_role=secondary_role,
+                        updated_at=datetime.now(),
+                    )
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_relation_artiste({track_id}): {e}")
+            return False
+
+    def forget_credit(self, track_id: int, name: str, role: str) -> int:
+        """Retire un crédit (nom normalisé + rôle), toutes sources. Rend le nombre
+        de lignes retirées. Sa MÉMOIRE est `corrections_fiches.credits_refuses` :
+        sans elle, la source le reposerait au prochain run."""
+        try:
+            with self.engine.begin() as conn:
+                lignes = conn.execute(
+                    text("SELECT id, name FROM credits WHERE track_id = :t AND role = :r"),
+                    {"t": track_id, "r": role},
+                ).fetchall()
+                ids = [i for i, n in lignes if normalize_name(n) == normalize_name(name)]
+                for i in ids:
+                    conn.execute(text("DELETE FROM credits WHERE id = :i"), {"i": i})
+            return len(ids)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur forget_credit({track_id}, {name}, {role}): {e}")
+            return 0
 
     def record_secondary_role(self, track_id: int, role: str | None) -> bool:
         """Écrit VERBATIM le rôle secondaire (`save_track` le passe en COALESCE :

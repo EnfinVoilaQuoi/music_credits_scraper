@@ -222,6 +222,15 @@ def _juger(
     GARDE-FOU, lui, n'avait atterri que sur une voie — celle qu'aucun appelant
     n'empruntait.
     """
+    # Un ID retiré À LA MAIN (data/corrections/fiches.json) ne revient pas,
+    # quelle que soit la source qui le repropose.
+    from src.utils.corrections_fiches import ids_refuses
+
+    if spotify_id in ids_refuses(track):
+        logger.warning(
+            f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — retiré à la main"
+        )
+        return False
     accepte, motif = identite_concorde(
         track, identite, tolerance=tolerance, titres_tranches=titres_tranches
     )

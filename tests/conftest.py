@@ -82,6 +82,15 @@ def _aucune_boite_de_dialogue(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
+    """AUCUN test ne lit `data/corrections/fiches.json` réel : il est relu par le
+    gate Spotify, `save_track` et l'import discographie (2026-09-24)."""
+    from src.utils import corrections_fiches
+
+    monkeypatch.setattr(corrections_fiches, "FICHIER", tmp_path / "corrections_fiches.json")
+
+
+@pytest.fixture(autouse=True)
 def _cache_des_nouveautes_isole(tmp_path, monkeypatch):
     """AUCUN test n'écrit le cache du badge « nouveautés » réel.
 

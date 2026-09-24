@@ -65,6 +65,7 @@ data/certifications/snep/certif-.csv
 !data/certifications/**/*.meta.json
 !data/certifications/**/metadata.json
 !data/certifications/**/manual_fixes.json
+!data/corrections/fiches.json
 
 # Outillage IA (suivi de travail, skills, mémoire) : privé
 .agents/
@@ -120,6 +121,7 @@ scripts/*
 !scripts/repair_chimeres_genius.py
 !scripts/repair_relation_artiste.py
 !scripts/backfill_pages_genius.py
+!scripts/appliquer_corrections_fiches.py
 !scripts/repair_release_dates.py
 !scripts/mesurer_lyrics_state.py
 !scripts/backfill_inedits.py

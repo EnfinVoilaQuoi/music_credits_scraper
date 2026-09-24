@@ -45,6 +45,8 @@ class BilanDisco(Bilan):
     doublons_evites: int = 0
     sauves: int = 0
     supprimes_ignores: int = 0
+    #: Pages d'édition de diffusion notées sur leur original au lieu d'une fiche.
+    editions: int = 0
     albums_api: int = 0
     dates_api: int = 0
     images: int = 0
@@ -196,6 +198,27 @@ def fusionner(
     return fusion
 
 
+def _rattacher_editions(dm, nouveaux: list[Track], existants: list[Track]) -> tuple[list, int]:
+    """Une page Genius d'ÉDITION de diffusion (« Impossible (Radio Edit) ») dont
+    l'original a sa fiche n'en crée pas une seconde : elle est notée sur
+    l'original (`track_editions`), sa page Genius comprise — le run suivant
+    la reconnaît et ne la recrée pas (décision utilisateur 2026-09-24)."""
+    from src.services import editions
+
+    gardes, rattachees = [], 0
+    connus = {t.genius_id for t in existants if t.genius_id}
+    for t in nouveaux:
+        socle = None if t.genius_id in connus else editions.socle_de(t.title, existants)
+        if socle is None or not socle.id:
+            gardes.append(t)
+            continue
+        editions.rattacher(dm, socle, t.title, "genius", genius_id=t.genius_id)
+        rattachees += 1
+    if rattachees:
+        logger.info(f"🎚️ {rattachees} édition(s) de diffusion notée(s) sur leur original")
+    return gardes, rattachees
+
+
 def _filtrer_supprimes(
     runtime: Runtime, artist: Artist, nouveaux: list[Track], respect_deleted: bool
 ) -> tuple[list[Track], int]:
@@ -268,9 +291,10 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     # Pages Genius FUSIONNÉES à la main dans une autre fiche : ne pas les recréer.
     from src.utils.corrections_fiches import genius_ids_absorbes
 
-    absorbes = genius_ids_absorbes(artist.name)
+    absorbes = genius_ids_absorbes(artist.name) | dm.get_artist_edition_genius_ids(artist.id)
     if absorbes:
         nouveaux = [t for t in nouveaux if t.genius_id not in absorbes]
+    nouveaux, bilan.editions = _rattacher_editions(dm, nouveaux, existants)
     bilan.recuperes = len(nouveaux)
 
     fusion = fusionner(nouveaux, existants, should_stop=hooks.should_stop)

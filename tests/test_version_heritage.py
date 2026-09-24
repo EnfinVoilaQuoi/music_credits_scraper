@@ -27,7 +27,10 @@ def _version(titre):
 class TestFamille:
     def test_familles(self):
         assert vh.famille_de("Suzy - Live 2006") == "performance"
-        assert vh.famille_de("Suzy (Version Radio)") == "edition"
+        assert vh.famille_de("Suzy (Bonus Track)") == "edition"
+        # Édition de DIFFUSION (2026-09-24) : pas une version, une édition de
+        # la même fiche — rien à hériter.
+        assert vh.famille_de("Suzy (Version Radio)") is None
         assert vh.famille_de("Suzy - Live Version") == "performance"  # la prise l'emporte
         assert vh.famille_de("Suzy (Instrumental)") == "sans_voix"
         assert vh.famille_de("MW2 - Chopped & $crewed") == "chopped"
@@ -47,7 +50,7 @@ class TestHeriter:
         assert v.lyrics.synced is None  # jamais la synchro
 
     def test_radio_edit_herite_tout_sauf_la_video(self):
-        v = _version("Suzy (Version Radio)")
+        v = _version("Suzy (Bonus Track)")
         vh.heriter(v, _socle())
         assert {c.role for c in v.credits} == {
             CreditRole.WRITER,
@@ -91,3 +94,31 @@ class TestHeriter:
     def test_est_herite(self):
         assert vh.est_herite("heritage:7") and vh.est_herite("heritage")
         assert not vh.est_herite("genius") and not vh.est_herite(None)
+
+
+class TestHeritageCouvert:
+    """Un crédit hérité s'efface dès qu'une source DIRECTE crédite sa famille
+    (A2H « Le cœur des filles (Acoustic) », 2026-09-24)."""
+
+    def _c(self, nom, role, source):
+        return Credit(name=nom, role=role, source=source)
+
+    def test_l_ecriture_directe_chasse_l_ecriture_heritee(self):
+        credits = [
+            self._c("Matthieu Cabaret", CreditRole.COMPOSER, "heritage"),
+            self._c("A2H", CreditRole.WRITER, "heritage"),
+            self._c("Clyde Bessi", CreditRole.COMPOSER, "youtube_topic"),
+        ]
+        assert [c.name for c in vh.sans_heritage_couvert(credits)] == ["Clyde Bessi"]
+
+    def test_famille_par_famille(self):
+        """Une production directe ne chasse pas l'écriture héritée."""
+        credits = [
+            self._c("A2H", CreditRole.WRITER, "heritage"),
+            self._c("Clyde Bessi", CreditRole.PRODUCER, "youtube_topic"),
+        ]
+        assert len(vh.sans_heritage_couvert(credits)) == 2
+
+    def test_sans_source_directe_l_heritage_reste(self):
+        credits = [self._c("A2H", CreditRole.WRITER, "heritage")]
+        assert vh.sans_heritage_couvert(credits) == credits

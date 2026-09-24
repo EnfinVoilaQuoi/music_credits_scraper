@@ -142,3 +142,31 @@ def heriter(version, socle, *, famille: str | None = None) -> Heritage:
 
 def est_herite(source: str | None) -> bool:
     return bool(source) and source.split(":")[0] == SOURCE
+
+
+def sans_heritage_couvert(credits: list) -> list:
+    """Les crédits sans l'héritage qu'une source DIRECTE couvre (2026-09-24).
+
+    L'héritage comble ce qu'on ne sait pas d'une version ; dès que Genius,
+    Discogs, Deezer ou la description YouTube créditent l'ÉCRITURE (resp. la
+    PRODUCTION) de la version elle-même, les crédits hérités de cette famille
+    s'effacent. Mesuré sur A2H « Le cœur des filles (Acoustic) » : l'héritage
+    y avait recopié un faux compositeur de l'original, et une UNION l'aurait
+    gardé à côté des vrais (Clyde Bessi, Noé Berne). Famille par famille : une
+    production directe ne chasse pas l'écriture héritée.
+    """
+    familles = (_WRITER_ROLES, _PRODUCTION)
+    couvertes = [
+        any(c.role in fam and not est_herite(c.source) for c in credits) for fam in familles
+    ]
+    return [
+        c
+        for c in credits
+        if not (
+            est_herite(c.source)
+            and any(
+                couverte and c.role in fam
+                for fam, couverte in zip(familles, couvertes, strict=True)
+            )
+        )
+    ]

@@ -235,7 +235,11 @@ def _variante_de(piste: PisteDeezer):
 
 
 def _edition_generique(variant) -> bool:
-    """Une mention éditoriale ne désigne pas une nouvelle prise musicale."""
+    """Une mention éditoriale ne désigne pas une nouvelle prise musicale — ni une
+    édition de DIFFUSION (radio edit, clean, explicit, remaster : même
+    enregistrement, même fiche, décision utilisateur 2026-09-24)."""
+    if variant.kind == Kind.NONE and variant.edition:
+        return True
     if variant.kind != Kind.RENDITION:
         return False
     return normalize_title(variant.descriptor or "") in {
@@ -245,6 +249,15 @@ def _edition_generique(variant) -> bool:
         "album version",
         "version album",
     }
+
+
+def _edition_de_diffusion(piste: PisteDeezer) -> str | None:
+    """Le libellé d'édition de diffusion de la piste (« Radio Edit »), ou None."""
+    if piste.title_version:
+        v = parse_variant(f"{piste.title_short} - {piste.title_version.strip('()[]')}")
+    else:
+        v = parse_variant(piste.title)
+    return v.edition if v.kind == Kind.NONE else None
 
 
 def _edition_generique_de(piste: PisteDeezer) -> bool:
@@ -758,6 +771,23 @@ def _renseigner_fiche(dm, e: Ecart, track: Track) -> list[str]:
     """
     p = e.piste
     apports: list[str] = []
+    edition = _edition_de_diffusion(p)
+    if edition:
+        # Une édition de diffusion (radio edit…) apporte SES données, pas celles
+        # de l'original : durée coupée, ISRC propre. Notées sur l'édition,
+        # jamais versées sur la fiche (elles y gagneraient l'arbitrage).
+        from src.services.editions import rattacher
+
+        rattacher(
+            dm,
+            track,
+            p.title,
+            "deezer",
+            deezer_id=p.id,
+            isrc=p.isrc or None,
+            duration=p.duration or None,
+        )
+        return [f"édition « {edition} »"]
     isrc_compatible = bool(p.isrc) and (
         not track.isrc or str(track.isrc).strip().upper() == p.isrc.strip().upper()
     )

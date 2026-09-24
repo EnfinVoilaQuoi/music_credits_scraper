@@ -137,6 +137,9 @@ class _DM:
     def certifications_non_enregistrees(self, tracks):
         return []
 
+    def get_artist_edition_genius_ids(self, artist_id):
+        return set()
+
     def get_artist_tracks(self, aid):
         return self.existants + [t for t in self.saved_new()]
 
@@ -300,3 +303,24 @@ def d_resume(bilan):
 
     artist = Artist(name="A")
     return d.resume(bilan, artist)
+
+
+def test_une_page_d_edition_est_notee_sur_l_original():
+    """Décision 2026-09-24 : « Impossible (Radio Edit) » n'ouvre pas de fiche,
+    il devient une édition d'« Impossible » (page Genius comprise)."""
+
+    class _DM:
+        def __init__(self):
+            self.editions = []
+
+        def record_track_edition(self, track_id, label, **champs):
+            self.editions.append((track_id, label, champs.get("genius_id")))
+            return True
+
+    dm = _DM()
+    original = _t("Impossible", gid=1, tid=10)
+    radio = _t("Impossible (Radio Edit)", gid=2)
+    autre = _t("Nouveau", gid=3)
+    gardes, n = disco._rattacher_editions(dm, [radio, autre], [original])
+    assert gardes == [autre] and n == 1
+    assert dm.editions == [(10, "Radio Edit", 2)]

@@ -89,7 +89,9 @@ class TestClasser:
             _album(4, "Brut de femme", [_piste(40, "Evasion - Radio Edit", "Evasion - Radio Edit")])
         ]
         ecarts, _ = ed.classer(albums, base, [], NOUS)
-        assert ecarts[0].nature == "version" and ecarts[0].socle.title == "Evasion"
+        # Décision 2026-09-24 : un radio edit est le MÊME morceau — rattaché à la
+        # fiche connue (parution), pas proposé comme version.
+        assert ecarts[0].nature == "link" and ecarts[0].existing_track.title == "Evasion"
 
     def test_disque_d_un_autre_ne_garde_que_nos_contributions(self):
         base = [_track("MW2", "LMF")]
@@ -477,3 +479,41 @@ def test_resume_lisible():
     b.ecarts = [ed.Ecart("absent", _album(1, "Chardons Bleus", [piste]), piste, coche=True)]
     texte = ed.resume(b, "Lucio Bukowski")
     assert "1 écart(s) dont 1 coché(s)" in texte and "[x] ✚ Coal lla" in texte
+
+
+def test_une_edition_de_diffusion_ne_touche_pas_la_fiche():
+    """Un radio edit rattaché apporte SES données (durée coupée, ISRC propre) à
+    son ÉDITION, jamais à la fiche de l'original (décision 2026-09-24)."""
+
+    class _DM:
+        def __init__(self):
+            self.editions, self.identites = [], []
+
+        def record_track_edition(self, track_id, label, **champs):
+            self.editions.append((track_id, label, champs))
+            return True
+
+        def fill_track_identities(self, *a, **k):
+            self.identites.append(k)
+            return {}
+
+    dm = _DM()
+    fiche = _track("Evasion")
+    fiche.id, fiche.duration = 5, 245
+    piste = _piste(40, "Evasion - Radio Edit", "Evasion", isrc="FRX1")
+    e = ed.Ecart(nature="link", album=_album(4, "Single", [piste]), piste=piste)
+    assert ed._renseigner_fiche(dm, e, fiche) == ["édition « Radio Edit »"]
+    assert dm.editions == [
+        (
+            5,
+            "Radio Edit",
+            {
+                "title": "Evasion - Radio Edit",
+                "source": "deezer",
+                "deezer_id": 40,
+                "isrc": "FRX1",
+                "duration": 200,
+            },
+        )
+    ]
+    assert dm.identites == [] and fiche.duration == 245

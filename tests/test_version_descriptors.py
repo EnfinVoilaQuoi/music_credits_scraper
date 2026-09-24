@@ -14,6 +14,8 @@ from src.utils.version_descriptors import (
     meme_prise,
     parse_variant,
     socle_normalise,
+    titre_sans_edition,
+    titres_equivalents,
 )
 
 CAS = [
@@ -30,7 +32,8 @@ CAS = [
         "Petite fille",
         None,
     ),
-    ("Evasion (feat. China) - Version Radio", Kind.RENDITION, "Evasion", None),
+    # Éditions de DIFFUSION (décision 2026-09-24) : le titre EST le morceau.
+    ("Evasion (feat. China) - Version Radio", Kind.NONE, "Evasion", None),
     ("Freeze Raël - Chopped & $crewed", Kind.RENDITION, "Freeze Raël", None),
     ("Day 'N' Nite - Crooker's 'At Night' Dub", Kind.REMIX_NAMED, "Day 'N' Nite", "Crooker's"),
     ("Day 'N' Nite - Club Mix", Kind.REMIX_BARE, "Day 'N' Nite", None),
@@ -55,9 +58,9 @@ CAS = [
     ("I Wonder (Terry Urban Mix)", Kind.REMIX_NAMED, "I Wonder", "Terry Urban"),
     ("Praise God (DANNE Remix) [Mixed]", Kind.REMIX_NAMED, "Praise God", "DANNE"),
     ("Facts (Charlie Heat Version)", Kind.RENDITION, "Facts", None),
-    ("Put On - Album Version (Edited)", Kind.RENDITION, "Put On", None),
+    ("Put On - Album Version (Edited)", Kind.NONE, "Put On", None),
     ("Marine - Version 2006", Kind.RENDITION, "Marine", None),
-    ("Pursuit Of Happiness - Radio Edit", Kind.RENDITION, "Pursuit Of Happiness", None),
+    ("Pursuit Of Happiness - Radio Edit", Kind.NONE, "Pursuit Of Happiness", None),
     ("Garcimore (Instrumental)", Kind.RENDITION, "Garcimore", None),
     ("Décadent instrumental", Kind.RENDITION, "Décadent", None),
     ("Long Live", Kind.NONE, "Long Live", None),
@@ -121,7 +124,7 @@ class TestMemeFamille:
         )
 
     def test_renditions_par_mot_commun(self):
-        assert meme_famille(parse_variant("X - Radio Edit"), parse_variant("X (Edit)"))
+        assert meme_famille(parse_variant("X - Bonus Track"), parse_variant("X (Edit)"))
         assert meme_famille(
             parse_variant("Suzy - Live 2006"), parse_variant("Suzy (Live au Zénith)")
         )
@@ -173,4 +176,45 @@ class TestMemePrise:
         assert not meme_famille(
             parse_variant("X - Chopped & $crewed"), parse_variant("X (Video Edit)")
         )
-        assert meme_famille(parse_variant("X - Radio Edit"), parse_variant("X (Version)"))
+        assert meme_famille(parse_variant("X - Bonus Track"), parse_variant("X (Version)"))
+
+
+class TestEditionsDeDiffusion:
+    """Décision utilisateur 2026-09-24 : original, radio edit, clean, explicit,
+    album/single version, remaster = UNE fiche."""
+
+    @pytest.mark.parametrize(
+        "titre, socle, edition",
+        [
+            ("Forever (Explicit Version)", "Forever", "Explicit Version"),
+            ("CARNIVAL (Clean)", "CARNIVAL", "Clean"),
+            ("Heartless - 2011 Remaster", "Heartless", "2011 Remaster"),
+            ("Gotta Have It (Album Version Edited)", "Gotta Have It", "Album Version Edited"),
+        ],
+    )
+    def test_le_titre_est_le_morceau(self, titre, socle, edition):
+        v = parse_variant(titre)
+        assert (v.kind, v.socle, v.edition) == (Kind.NONE, socle, edition)
+
+    @pytest.mark.parametrize(
+        "titre", ["Marine - Version 2006", "X (Edit)", "Day N Nite (Martin Jensen Edit)"]
+    )
+    def test_un_mot_fort_est_exige(self, titre):
+        """« Version 2006 » est une autre prise ; « Edit » seul, souvent un remix léger."""
+        assert parse_variant(titre).edition is None
+
+    def test_l_edition_d_une_version_appartient_a_la_version(self):
+        v = parse_variant("Boulbi (Jaykill & SubLife Remix) (Radio Edit)")
+        assert (v.kind, v.remixer, v.edition) == (
+            Kind.REMIX_NAMED,
+            "Jaykill & SubLife",
+            "Radio Edit",
+        )
+        assert titre_sans_edition("Boulbi (Jaykill & SubLife Remix) (Radio Edit)") == (
+            "Boulbi (Jaykill & SubLife Remix)"
+        )
+
+    def test_equivalence_avec_l_original(self):
+        """Le gate Spotify ne doit plus refuser l'ID explicit pour la fiche nue."""
+        assert titres_equivalents("Forever", "Forever (Explicit Version)")
+        assert not titres_equivalents("X", "X (Remix)")

@@ -30,6 +30,7 @@ from src.utils.track_soeurs import (
     fusionner_constat_instrumental,
     synchroniser_soeurs,
 )
+from src.utils.version_heritage import sans_heritage_couvert
 
 logger = get_logger(__name__)
 
@@ -413,6 +414,9 @@ class TrackRepository:
                 # (data/corrections/fiches.json) : la source les ressert à chaque
                 # run (« Matthieu Cabaret — Composer », compositing du clip).
                 refuses = credits_refuses(track)
+                # Héritage couvert par une source directe : effacé (famille par
+                # famille, cf. `version_heritage.sans_heritage_couvert`).
+                track.credits = sans_heritage_couvert(track.credits)
                 for credit in track.credits:
                     if (normalize_name(credit.name), credit.role.value) in refuses:
                         continue
@@ -1002,6 +1006,9 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM track_videos WHERE track_id = :tid"), {"tid": track_id}
                 )
+                conn.execute(
+                    text("DELETE FROM track_editions WHERE track_id = :tid"), {"tid": track_id}
+                )
                 # IDs Spotify (e23) : idem.
                 conn.execute(
                     text("DELETE FROM track_spotify_ids WHERE track_id = :tid"), {"tid": track_id}
@@ -1087,6 +1094,21 @@ class TrackRepository:
                 )
                 conn.execute(
                     text("UPDATE track_videos SET track_id = :keep_id WHERE track_id = :delete_id"),
+                    {"keep_id": keep_id, "delete_id": delete_id},
+                )
+                # Éditions (e37) : même libellé des deux côtés = même édition.
+                conn.execute(
+                    text("""
+                    DELETE FROM track_editions WHERE track_id = :delete_id AND EXISTS (
+                        SELECT 1 FROM track_editions k WHERE k.track_id = :keep_id
+                          AND k.label = track_editions.label
+                    )"""),
+                    {"keep_id": keep_id, "delete_id": delete_id},
+                )
+                conn.execute(
+                    text(
+                        "UPDATE track_editions SET track_id = :keep_id WHERE track_id = :delete_id"
+                    ),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
                 # IDs Spotify (e23) : la fusion les RÉUNIT elle aussi. Deux
@@ -3566,6 +3588,94 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur forget_track_video({track_id}, {video_id!r}): {e}")
             return False
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Éditions de diffusion d'un morceau (table `track_editions`, e37)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    _COLONNES_EDITION = (
+        "title",
+        "source",
+        "duration",
+        "spotify_id",
+        "deezer_id",
+        "isrc",
+        "genius_id",
+    )
+
+    def record_track_edition(self, track_id: int, label: str, **champs) -> bool:
+        """Enregistre une édition de diffusion (« Radio Edit ») du morceau.
+
+        ADDITIF, comme `record_track_videos` : une ligne par (morceau, libellé) ;
+        une seconde source COMPLÈTE ce que la première n'avait pas (Kworb donne
+        l'ID Spotify, Deezer la durée et l'ISRC), jamais ne remplace."""
+        valeurs = {k: v for k, v in champs.items() if k in self._COLONNES_EDITION and v is not None}
+        try:
+            with self.engine.begin() as conn:
+                ligne = (
+                    conn.execute(
+                        text("SELECT * FROM track_editions WHERE track_id = :t AND label = :l"),
+                        {"t": track_id, "l": label},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if ligne is None:
+                    cols = ", ".join(["track_id", "label", "created_at", *valeurs])
+                    params = ", ".join([":track_id", ":label", ":now", *(f":{k}" for k in valeurs)])
+                    conn.execute(
+                        text(f"INSERT INTO track_editions ({cols}) VALUES ({params})"),
+                        {"track_id": track_id, "label": label, "now": datetime.now(), **valeurs},
+                    )
+                    return True
+                manquants = {k: v for k, v in valeurs.items() if ligne[k] in (None, "")}
+                if manquants:
+                    sets = ", ".join(f"{k} = :{k}" for k in manquants)
+                    conn.execute(
+                        text(f"UPDATE track_editions SET {sets} WHERE id = :id"),
+                        {"id": ligne["id"], **manquants},
+                    )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur record_track_edition({track_id}, {label}): {e}")
+            return False
+
+    def get_track_editions(self, track_id: int) -> list[dict]:
+        try:
+            with self.engine.connect() as conn:
+                return [
+                    dict(r)
+                    for r in conn.execute(
+                        text(
+                            "SELECT label, title, source, duration, spotify_id, deezer_id, isrc, "
+                            "genius_id FROM track_editions WHERE track_id = :t ORDER BY label"
+                        ),
+                        {"t": track_id},
+                    ).mappings()
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_track_editions({track_id}): {e}")
+            return []
+
+    def get_artist_edition_genius_ids(self, artist_id: int) -> set[int]:
+        """Pages Genius absorbées comme ÉDITIONS par les fiches de l'artiste :
+        l'import discographie ne les recrée pas."""
+        try:
+            with self.engine.connect() as conn:
+                return {
+                    int(g)
+                    for (g,) in conn.execute(
+                        text(
+                            "SELECT e.genius_id FROM track_editions e JOIN tracks t "
+                            "ON t.id = e.track_id WHERE t.artist_id = :a "
+                            "AND e.genius_id IS NOT NULL"
+                        ),
+                        {"a": artist_id},
+                    )
+                }
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_artist_edition_genius_ids({artist_id}): {e}")
+            return set()
 
     def get_track_videos(self, track_id: int) -> list[TrackVideo]:
         """Vidéos connues d'un morceau, les plus vues d'abord."""

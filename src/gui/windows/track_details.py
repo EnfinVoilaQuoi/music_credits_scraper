@@ -691,6 +691,9 @@ class TrackDetailsWindow:
                     if _url:
                         _lbl.bind("<Button-1>", lambda e, u=_url: webbrowser.open(u))
 
+        # === ONGLET : VERSIONS (étape 4, 2026-09-24) ===
+        self._onglet_versions(notebook, track)
+
         # === ONGLET 4: PAROLES ===
         lyrics_frame = ctk.CTkFrame(notebook)
         if has_lyrics:
@@ -1372,52 +1375,6 @@ class TrackDetailsWindow:
                 font=ctk.CTkFont(size=10),
             ).pack(anchor="w", pady=(10, 0))
 
-            # Versions alternatives (e28) : les RENDITIONS rattachées au morceau
-            # — Live, Radio Edit, Bonus Track… — avec leur compteur PROPRE, hors
-            # total. Rien n'est créé quand il n'y en a pas (un cadre vide garde
-            # 200 × 200 px).
-            renditions = [e for e in track.spotify_id_entries if e.est_rendition]
-            if renditions:
-                import webbrowser
-
-                from src.gui.helpers import format_datetime
-
-                ctk.CTkFrame(streams_content, height=1, fg_color="gray40").pack(
-                    fill="x", pady=(12, 6)
-                )
-                ctk.CTkLabel(
-                    streams_content,
-                    text="Versions alternatives (non comptées dans le total) :",
-                    font=ctk.CTkFont(size=13, weight="bold"),
-                ).pack(anchor="w", pady=(0, 4))
-                from src.gui.workers.retrieval import discographie_chargee
-
-                titres = {t.id: t.title for t in discographie_chargee(self.app)}
-                for e in renditions:
-                    ligne = ctk.CTkFrame(streams_content, fg_color="transparent")
-                    ligne.pack(fill="x", pady=1)
-                    quotidien = (
-                        f" (+{e.daily_streams:,}/j)".replace(",", " ") if e.daily_streams else ""
-                    )
-                    quand = f" — {format_datetime(e.streams_at)}" if e.streams_at else ""
-                    fiche = ""
-                    if e.variant_track_id:
-                        nom = titres.get(e.variant_track_id)
-                        fiche = "  → a sa propre fiche" + (f" : « {nom} »" if nom else "")
-                    ctk.CTkLabel(
-                        ligne,
-                        text=f"   • {e.label or e.spotify_id} : {format_streams(e.streams)}{quotidien}{quand}{fiche}",
-                        anchor="w",
-                    ).pack(side="left")
-                    lien = ctk.CTkLabel(ligne, text="▶️", text_color="#1DB954", cursor="hand2")
-                    lien.pack(side="left", padx=6)
-                    lien.bind(
-                        "<Button-1>",
-                        lambda ev, sid=e.spotify_id: webbrowser.open(
-                            f"https://open.spotify.com/intl-fr/track/{sid}"
-                        ),
-                    )
-
         except Exception as e:
             ctk.CTkLabel(streams_frame, text=f"Erreur : {e}", text_color="red").pack(expand=True)
 
@@ -1426,6 +1383,104 @@ class TrackDetailsWindow:
             details_window, text="Fermer", command=details_window.destroy, width=100
         )
         close_button.pack(pady=10)
+
+    def _onglet_versions(self, notebook, track) -> None:
+        """Onglet « Versions » : tout ce qui est une version de ce morceau.
+
+        Décision utilisateur (2026-09-24) : radio edit, clean, explicit,
+        album/single version et remaster sont des ÉDITIONS de la même fiche
+        (table `track_editions`) ; remix, cover, live, acoustique, leak et
+        version courte ont leur propre fiche. Les renditions Kworb sans fiche
+        (compteur propre) quittent l'onglet Streams pour venir ici.
+        """
+        import webbrowser
+
+        from src.gui.workers.retrieval import discographie_chargee
+        from src.services.editions import versions_liees
+        from src.utils.streams_calculator import format_streams
+
+        editions = self.app.data_manager.get_track_editions(track.id) if track.id else []
+        fiches = discographie_chargee(self.app)
+        liees = versions_liees(track, fiches)
+        origine = [
+            r
+            for r in track.relationships or []
+            if r.get("type") in ("version_of", "remix_of", "cover_of")
+        ]
+        renditions = [e for e in track.spotify_id_entries if e.est_rendition]
+
+        frame = ctk.CTkFrame(notebook)
+        total = len(editions) + len(liees) + len(renditions) + len(origine)
+        notebook.add(frame, text=f"🎛️ Versions ({total})" if total else "🎛️ Versions")
+        zone = ctk.CTkScrollableFrame(frame, width=850, height=600)
+        zone.pack(fill="both", expand=True, padx=5, pady=5)
+
+        def titre(texte):
+            ctk.CTkLabel(zone, text=texte, font=("Arial", 13, "bold")).pack(
+                anchor="w", padx=10, pady=(10, 3)
+            )
+
+        def ligne(texte, url=None, gris=False):
+            lbl = ctk.CTkLabel(
+                zone,
+                text=texte,
+                anchor="w",
+                justify="left",
+                text_color=(
+                    ("#1f6aa5", "#4aa3df") if url else (("gray40", "gray60") if gris else None)
+                ),
+                cursor="hand2" if url else "arrow",
+            )
+            lbl.pack(anchor="w", padx=14, pady=1)
+            if url:
+                lbl.bind("<Button-1>", lambda ev, u=url: webbrowser.open(u))
+
+        if not total:
+            ctk.CTkLabel(zone, text="Aucune version ni édition connue.", text_color="gray").pack(
+                anchor="w", padx=14, pady=12
+            )
+            return
+
+        if origine:
+            titre("↩ Est une version de")
+            for r in origine:
+                nature = {"version_of": "version", "remix_of": "remix", "cover_of": "cover"}[
+                    r["type"]
+                ]
+                ligne(
+                    f"   • {r.get('title') or '?'} — {r.get('artist') or '?'}  ({nature})",
+                    r.get("url"),
+                )
+
+        if editions:
+            titre("📀 Éditions (même enregistrement, streams comptés dans le total)")
+            for e in editions:
+                duree = (
+                    f"{e['duration'] // 60}:{e['duration'] % 60:02d}" if e.get("duration") else "—"
+                )
+                source = f"  [{e['source']}]" if e.get("source") else ""
+                url = (
+                    f"https://open.spotify.com/intl-fr/track/{e['spotify_id']}"
+                    if e.get("spotify_id")
+                    else None
+                )
+                ligne(f"   • {e['label']} — {duree}{source}", url)
+
+        if liees:
+            titre("🎚️ Versions qui ont leur propre fiche")
+            for f, nature in sorted(liees, key=lambda x: (x[1], x[0].title.lower())):
+                qui = f" — {f.primary_artist_name}" if f.primary_artist_name else ""
+                annee = f" ({str(f.release_date)[:4]})" if f.release_date else ""
+                ligne(f"   • [{nature}] {f.title}{qui}{annee}")
+
+        if renditions:
+            titre("🔀 Versions alternatives sans fiche (compteur propre, hors total)")
+            for e in renditions:
+                fiche = "  → a sa propre fiche" if e.variant_track_id else ""
+                ligne(
+                    f"   • {e.label or e.spotify_id} : {format_streams(e.streams)}{fiche}",
+                    f"https://open.spotify.com/intl-fr/track/{e.spotify_id}",
+                )
 
     def _boutons_verifier_rejeter_spotify(self, parent, track, ids: list[str]) -> None:
         """🔎 Vérifier / ✖️ Rejeter l'ID Spotify — le pendant des boutons YouTube.

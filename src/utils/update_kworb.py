@@ -449,6 +449,16 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
         return Rapprochement(motif="id_partage")
     if sid and sid in index.by_edition_id:
         return Rapprochement(track=index.by_edition_id[sid], via="id")
+    # Édition de DIFFUSION (« Impossible - Radio Edit », « Put On - Album
+    # Version (Edited) ») : même enregistrement, même fiche — la ligne rejoint
+    # l'original et ses streams S'ADDITIONNENT (décision utilisateur 2026-09-24).
+    # Une fiche qui porte EXACTEMENT ce titre (pas encore fusionnée) garde la main.
+    if not index.by_title.get(norm):
+        from src.services.editions import socle_de
+
+        socle_ed = socle_de(entry["title"], index.tracks)
+        if socle_ed is not None:
+            return Rapprochement(track=socle_ed, via="edition")
     if sid and sid in index.by_rendition_id:
         devenue = index.by_title.get(norm) or []
         if len(devenue) == 1:
@@ -845,8 +855,18 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement).
         # L'if interne est volontairement séparé : c'est une écriture DB dont
         # le résultat conditionne la suite, pas une simple condition.
+        if via == "edition":
+            # L'ID de l'édition est noté SUR l'édition, jamais comme ID principal
+            # de l'original (la récolte Spotify lui attribuerait le compteur de
+            # l'édition).
+            from src.services.editions import rattacher
+
+            rattacher(
+                data_manager, track, entry["title"], "kworb", spotify_id=entry.get("spotify_id")
+            )
+            result.setdefault("editions", []).append((entry["title"], track.title))
         if (  # noqa: SIM102
-            via != "id"
+            via not in ("id", "edition")
             and entry.get("spotify_id")
             and not getattr(track, "spotify_id", None)
             # Kworb rapproche par titre avant de livrer son lien : l'ID qu'il

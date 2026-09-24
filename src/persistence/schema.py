@@ -496,6 +496,30 @@ track_videos = Table(
 )
 
 
+# Éditions de DIFFUSION d'un morceau (e37, 2026-09-24) : radio edit, clean,
+# explicit, album/single version, remaster. Décision utilisateur : même
+# enregistrement coupé ou censuré ⇒ UNE fiche, dont la ligne garde les données
+# de l'original ; l'édition vit ici (« radio edit de 3:12 »), avec ses propres
+# identifiants. `label` = le libellé d'édition (`parse_variant(...).edition`).
+track_editions = Table(
+    "track_editions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("track_id", Integer, ForeignKey("tracks.id"), nullable=False),
+    Column("label", Text, nullable=False),
+    Column("title", Text),
+    Column("source", Text),
+    Column("duration", Integer),
+    Column("spotify_id", Text),
+    Column("deezer_id", Integer),
+    Column("isrc", Text),
+    Column("genius_id", Integer),
+    Column("created_at", TIMESTAMP),
+    UniqueConstraint("track_id", "label"),
+    sqlite_autoincrement=True,
+)
+
+
 # Observations (phase E4) : provenance scalaire par (morceau, champ, source).
 # Modèle UPSERT — au plus une valeur par (track_id, field, source), la dernière
 # vue (`seen_at`). Alimentée par backfill E4 (bpm/key/mode depuis les colonnes

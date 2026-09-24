@@ -68,6 +68,7 @@ class _DataManager:
         self.variant_writes = []
         self.variant_fiches = []
         self.oublis = []
+        self.editions = []
 
     def get_artist_tracks(self, artist_id):
         return self._tracks
@@ -77,6 +78,10 @@ class _DataManager:
         # est arbitrée côté repository (`reconcile_spotify_streams`).
         self.streams_writes.append((track_id, streams, kw.get("daily_streams"), updated_at))
         self.streams_kwargs.append({"source": source, **kw})
+        return True
+
+    def record_track_edition(self, track_id, label, **champs):
+        self.editions.append((track_id, label, champs.get("spotify_id")))
         return True
 
     def forget_spotify_streams_observation(self, track_id, source):
@@ -900,6 +905,29 @@ class TestSommerEditions:
 
     def test_vide(self):
         assert sommer_editions([])["streams"] == 0
+
+
+class TestEditionsDeDiffusion:
+    def test_la_ligne_radio_edit_rejoint_l_original_et_s_additionne(self):
+        """Décision utilisateur 2026-09-24 : un radio edit est le MÊME morceau,
+        ses streams comptent dans son total (« Put On - Album Version (Edited) »,
+        336 M, restait hors total)."""
+        tracks = [_track(1, "Impossible", spotify_id="SP1")]
+        res, dm = _run(
+            tracks,
+            [
+                _entry("Impossible", 1000, 10, "SP1"),
+                _entry("Impossible - Radio Edit", 400, 4, "SPR"),
+            ],
+        )
+        assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 1400)]
+        assert dm.editions == [(1, "Radio Edit", "SPR")]
+        assert dm.track_spotify_ids == []  # jamais l'ID principal
+
+    def test_une_fiche_au_titre_exact_garde_la_main(self):
+        tracks = [_track(1, "Impossible", spotify_id="SP1"), _track(2, "Impossible - Radio Edit")]
+        _, dm = _run(tracks, [_entry("Impossible - Radio Edit", 400, 4, "SPR")])
+        assert [tid for tid, *_ in dm.streams_writes] == [2] and dm.editions == []
 
 
 class TestIdsPartages:

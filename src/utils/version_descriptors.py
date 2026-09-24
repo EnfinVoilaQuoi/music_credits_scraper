@@ -55,6 +55,11 @@ class Variant:
     kind: Kind
     #: Remixeur en graphie d'origine (REMIX_NAMED seulement).
     remixer: str | None = None
+    #: Édition de DIFFUSION (« Radio Edit », « Explicit Version », « 2011
+    #: Remaster ») : même enregistrement, même fiche (décision utilisateur
+    #: 2026-09-24). Le titre vaut alors `NONE` — c'est le morceau — et le libellé
+    #: de l'édition est gardé ici.
+    edition: str | None = None
 
     @property
     def est_remix(self) -> bool:
@@ -134,7 +139,31 @@ _MOTS_NEUTRES = frozenset(
     }
 )
 
-_VOCABULAIRE = RENDITION_WORDS | frozenset(REMIX_WORDS)
+#: Édition de DIFFUSION : le MÊME enregistrement coupé, censuré ou remasterisé
+#: (décision utilisateur 2026-09-24 : « aucun intérêt à avoir deux fiches »).
+#: Un mot FORT est exigé — « Version 2006 » (Diam's « Marine ») est une autre
+#: prise, « Album Version » une simple édition ; « Edit » seul désigne souvent
+#: un remix léger (« Martin Jensen Edit »).
+DIFFUSION_FORTS = frozenset(
+    {
+        "radio",
+        "clean",
+        "explicit",
+        "dirty",
+        "album",
+        "single",
+        "edited",
+        "remaster",
+        "remastered",
+        "mono",
+        "stereo",
+        "censored",
+        "uncensored",
+    }
+)
+_DIFFUSION_COMPAGNONS = frozenset({"version", "edit", "mix", "the"})
+
+_VOCABULAIRE = RENDITION_WORDS | frozenset(REMIX_WORDS) | DIFFUSION_FORTS
 
 _REMIX_RE = re.compile(r"\b(" + "|".join(REMIX_WORDS) + r")\b", re.IGNORECASE)
 _GROUPE_FINAL_RE = re.compile(r"\s*[\(\[]([^()\[\]]*)[\)\]]\s*$")
@@ -217,6 +246,16 @@ def _remixeur(descripteur: str) -> str | None:
     return nom or None
 
 
+def est_edition_de_diffusion(descripteur: str) -> bool:
+    """PUR. Un descripteur fait UNIQUEMENT de mots de diffusion (au moins un mot
+    fort), d'années et de compagnons : « Radio Edit », « Explicit Version »,
+    « Album Version (Edited) », « 2011 Remaster »."""
+    mots = [t for t in _tokens(descripteur) if not t.isdigit()]
+    if not mots or not any(t in DIFFUSION_FORTS for t in mots):
+        return False
+    return all(t in DIFFUSION_FORTS or t in _DIFFUSION_COMPAGNONS for t in mots)
+
+
 def parse_variant(title: str | None) -> Variant:
     """Lit le descripteur de version d'un titre — cf. le module."""
     if not title or not title.strip():
@@ -225,6 +264,17 @@ def parse_variant(title: str | None) -> Variant:
     socle, groupes = _detacher_descripteur(brut)
     if not groupes:
         return Variant(brut, None, Kind.NONE)
+    # Éditions de diffusion EN QUEUE (« Boulbi (Remix) (Radio Edit) » : le radio
+    # edit appartient au REMIX) — retirées, puis le reste est lu normalement.
+    edition = []
+    while groupes and est_edition_de_diffusion(groupes[-1]):
+        edition.insert(0, groupes.pop())
+    if edition:
+        libelle = " ".join(edition)
+        if not groupes:
+            return Variant(socle, None, Kind.NONE, edition=libelle)
+        v = parse_variant(_recomposer(socle, groupes))
+        return Variant(v.socle, v.descriptor, v.kind, v.remixer, edition=libelle)
     descripteur = " ".join(groupes)
     if _REMIX_RE.search(descripteur):
         # Le remixeur se lit dans le groupe qui porte le mot de remix.
@@ -234,6 +284,26 @@ def parse_variant(title: str | None) -> Variant:
             return Variant(socle, descripteur, Kind.REMIX_NAMED, nom)
         return Variant(socle, descripteur, Kind.REMIX_BARE)
     return Variant(socle, descripteur, Kind.RENDITION)
+
+
+def _recomposer(socle: str, groupes: list[str]) -> str:
+    """Le titre sans ses éditions de diffusion, groupes restants en parenthèses."""
+    return socle + "".join(f" ({g})" for g in groupes)
+
+
+def titre_sans_edition(title: str | None) -> str | None:
+    """Le titre du morceau dont `title` est une édition de diffusion, ou None :
+    « Boulbi (Jaykill & SubLife Remix) (Radio Edit) » → « Boulbi (Jaykill &
+    SubLife Remix) », « Forever (Explicit Version) » → « Forever »."""
+    if not title:
+        return None
+    brut = strip_featuring(title).strip()
+    socle, groupes = _detacher_descripteur(brut)
+    if not groupes or not est_edition_de_diffusion(groupes[-1]):
+        return None
+    while groupes and est_edition_de_diffusion(groupes[-1]):
+        groupes.pop()
+    return _recomposer(socle, groupes)
 
 
 def socle_normalise(title: str | None) -> str:

@@ -73,6 +73,9 @@ class _DataManager:
     def get_artist_tracks(self, artist_id):
         return self._tracks
 
+    def get_stream_observation_values(self, source):
+        return getattr(self, "lus", {}).get(source, {})
+
     def record_spotify_streams(self, track_id, streams, source, updated_at=None, **kw):
         # L'appelant ne DÉCLARE que ce qu'il a vu : la valeur retenue en colonne
         # est arbitrée côté repository (`reconcile_spotify_streams`).
@@ -1281,3 +1284,57 @@ def test_un_titre_generique_ne_deplace_pas_l_id():
     res, dm = _run(tracks, [_entry("Interlude *", 1000, 10, "SPX")])
     assert [tid for tid, *_ in dm.streams_writes] == [1]
     assert res["ids_mal_places"] == []
+
+
+class TestAutreUploadAuMemeTitre:
+    """6F — Kid Cudi « Day 'N' Nite » : Kworb rapproche par titre un autre
+    upload (9 M) d'une fiche dont l'ID propre, absent de Kworb, lit 66 M chez
+    Spotify. La ligne n'est pas son compteur."""
+
+    def _lancer(self, lus_web, lignes=()):
+        fiche = _track(1, "Day 'N' Nite", spotify_id="PROPRE")
+        dm = _DataManager([fiche])
+        dm.lus = {"spotify_web": lus_web}
+        entrees = [_entry("Day 'N' Nite", 9_110_682, 5, "AUTRE"), *lignes]
+        res = update_kworb_streams(
+            _Artist(),
+            dm,
+            scraper=_Scraper(songs=_page(entrees)),
+            lire_identite=lambda sid: None,
+        )
+        return res, dm
+
+    def test_ligne_ecartee_et_observation_perimee_retiree(self):
+        res, dm = self._lancer({1: 66_193_696})
+        assert dm.streams_writes == [] and (1, "kworb") in dm.oublis
+        assert res["lignes_ecartees"] == [("Day 'N' Nite", 9_110_682, "Day 'N' Nite")]
+
+    def test_sans_lecture_spotify_la_ligne_reste_ecrite(self):
+        res, dm = self._lancer({})
+        assert [w[0] for w in dm.streams_writes] == [1]
+
+    def test_second_upload_du_meme_enregistrement_reste_somme(self):
+        """« Boulbi » : l'ID propre est AUSSI sur la page — la seconde ligne est
+        un autre upload du même morceau, les deux se somment."""
+        propre = _entry("Day 'N' Nite", 60_000_000, 9, "PROPRE")
+        res, dm = self._lancer({1: 66_193_696}, [propre])
+        assert [w[0] for w in dm.streams_writes] == [1] and res["lignes_ecartees"] == []
+
+    def test_observation_kworb_d_un_ancien_run_retiree(self):
+        """La ligne ne rapproche plus (titre ambigu), mais l'observation Kworb
+        d'un run antérieur restait maîtresse à 9 M contre 66 M lus."""
+        fiche = _track(1, "Day 'N' Nite", spotify_id="PROPRE")
+        dm = _DataManager([fiche])
+        dm.lus = {"spotify_web": {1: 66_193_696}, "kworb": {1: 9_110_682}}
+        update_kworb_streams(
+            _Artist(),
+            dm,
+            scraper=_Scraper(songs=_page([_entry("Autre", 5, 1, "X")])),
+            lire_identite=lambda sid: None,
+        )
+        assert (1, "kworb") in dm.oublis
+
+    def test_id_propre_lu_plus_bas_que_la_ligne(self):
+        """L'ID propre est une petite édition : la ligne reste le compteur."""
+        res, dm = self._lancer({1: 50_000})
+        assert [w[0] for w in dm.streams_writes] == [1]

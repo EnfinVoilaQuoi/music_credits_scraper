@@ -363,3 +363,19 @@ def test_aucun_canal_lisible_signale(monkeypatch):
 
     assert result["canal_introuvable"]["channel_id"] == "UCvide"
     assert dm.stream_writes == [] and dm.monthly_writes == []
+
+
+def test_sans_canal_lisible_les_liens_connus_sont_mesures(monkeypatch):
+    """6E : l'identité d'un lien YouTube est le lien, pas le canal. Sans canal
+    lisible, un morceau à clip Genius garde ses vues (Lucio Bukowski, Népal :
+    561 morceaux restés à zéro run après run)."""
+    base = [_track(0, "A", youtube_url="https://www.youtube.com/watch?v=clip0000000")]
+    api = FakeAPI(channel_albums={}, raw={}, candidates=[("UCrien", "X")])
+    dm = FakeDM(base, channel_info=(None, None))
+    _patch(monkeypatch, api, inferred="UCvide")
+
+    result = mod.update_ytmusic_streams(_ARTIST, dm)
+
+    assert result["canal_introuvable"]["channel_id"] == "UCvide"
+    assert dm.monthly_writes == []  # rien de ce canal
+    assert [w[0] for w in dm.stream_writes] == [0]

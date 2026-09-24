@@ -422,23 +422,27 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             # Dernier recours : recherche par nom (candidats avec albums d'abord).
             channel_source = "search"
             candidates = api.get_artist_channel_candidates(artist.name)
-    if not candidates:
-        logger.error(f"Artiste '{artist.name}' introuvable sur YouTube Music.")
-        return result
-
     # db_tracks lu UNE fois : sert au départage des homonymes par albums (0b) ET
     # au gate d'identité (1b).
     db_tracks = data_manager.get_artist_tracks(artist.id)
     db_norm_albums = {_normalize_title(t.album) for t in db_tracks if t.album}
 
-    # ── Étape 0b : départage des homonymes par recouvrement d'albums ──────────
-    # (plusieurs artistes peuvent porter le même nom, ex: 'Isha')
-    channel_id, artist_info = _pick_best_candidate(api, candidates, db_norm_albums)
+    # 6E (2026-09-24) : sans canal lisible (ou validé), les passes par LIEN
+    # YouTube tournent quand même — leur identité est le lien, pas le canal. Elles
+    # relisent toutes les vidéos DÉJÀ connues de chaque fiche (audio du canal vues
+    # aux runs précédents comprises) : les totaux restent complets.
+    canal_ok = True
+    channel_id, artist_info = None, None
+    if candidates:
+        # ── Étape 0b : départage des homonymes par recouvrement d'albums ──────
+        # (plusieurs artistes peuvent porter le même nom, ex: 'Isha')
+        channel_id, artist_info = _pick_best_candidate(api, candidates, db_norm_albums)
     if artist_info is None:
         logger.error(f"Artiste '{artist.name}' introuvable sur YouTube Music.")
-        return result
+        canal_ok = False
+        artist_info = {"albums": [], "monthly_listeners": None}
 
-    if not artist_info["albums"] and channel_source != "manual":
+    if canal_ok and not artist_info["albums"] and channel_source != "manual":
         # Le vote sur les vidéos élit une chaîne YOUTUBE (celle qui a publié les
         # liens Genius), qui n'est pas toujours une page artiste YTM : chez
         # Lucio Bukowski ytmusicapi ne sait pas la lire, chez Népal elle n'avait
@@ -474,7 +478,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             f"{channel_source}) — renseigne le champ « Canal YTM » (@handle)"
         )
         result["canal_introuvable"] = {"channel_id": channel_id, "channel_source": channel_source}
-        return result
+        canal_ok = False
 
     if not db_tracks:
         logger.warning(
@@ -496,7 +500,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     tracks_by_album: dict[str, list[dict]] = {}
     all_video_ids: list[str] = []
 
-    for album_info in albums:
+    for album_info in albums if canal_ok else []:
         raw_tracks = api.get_album_tracks_raw(album_info["browseId"])
         tracks_by_album[album_info["title"]] = raw_tracks
         all_video_ids.extend(t["video_id"] for t in raw_tracks if t.get("video_id"))
@@ -516,7 +520,9 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     )
     result["identity"] = {"channel_id": channel_id, "channel_source": channel_source, **report}
 
-    if _identity_suspect(report):
+    if not canal_ok:
+        result["identity"]["status"] = "aborted"
+    elif _identity_suspect(report):
         if channel_source == "manual":
             logger.warning(
                 f"⚠️ Canal YTM manuel à l'identité divergente "
@@ -529,13 +535,16 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                 f"🚨 Identité du canal YTM suspecte pour '{artist.name}' "
                 f"({report['matched']}/{report['ytm_titles']} titres retrouvés, "
                 f"ratio {report['ratio']:.0%}, {report['album_overlap']} album(s) commun(s)) "
-                "— AUCUNE écriture. Épingle le bon canal (@handle) dans la fenêtre Nb Streams."
+                "— rien n'est écrit depuis ce canal (les liens YouTube connus restent "
+                "mesurés). Épingle le bon canal (@handle) dans la fenêtre Nb Streams."
             )
             if pinned_source == "inferred":
                 data_manager.clear_artist_ytm_channel(artist.id)
                 logger.info("Canal inféré erroné dé-épinglé (ré-inférence au prochain run).")
             result["identity"]["status"] = "aborted"
-            return result
+            # 6E : on OUBLIE ce que ce canal a donné, on garde les passes par lien.
+            canal_ok = False
+            tracks_by_album, all_video_ids, ytm_monthly_listeners = {}, [], None
     else:
         result["identity"]["status"] = "ok"
         # Canal validé : persister le pin inféré/recherché MAINTENANT (jamais
@@ -547,7 +556,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                 pass
 
     # Auditeurs mensuels : écrits APRÈS validation (jamais sur un homonyme).
-    if ytm_monthly_listeners:
+    if canal_ok and ytm_monthly_listeners:
         data_manager.update_artist_monthly_listeners(artist.id, ytm_listeners=ytm_monthly_listeners)
         logger.info(f"Auditeurs mensuels YTMusic : {ytm_monthly_listeners:,}")
 

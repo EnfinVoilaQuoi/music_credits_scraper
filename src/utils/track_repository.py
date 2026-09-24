@@ -1375,6 +1375,30 @@ class TrackRepository:
             logger.error(f"Erreur get_stream_observation_dates({source}): {e}")
             return {}
 
+    def get_stream_observation_values(self, source: str) -> dict[int, int]:
+        """`{track_id: streams}` observés par une source (valeur de l'observation,
+        pas de la colonne arbitrée). `spotify_web` n'attribue que PAR ID : sa
+        valeur est donc celle de l'ID propre de la fiche."""
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT track_id, value FROM observations "
+                        "WHERE field = 'spotify_streams' AND source = :src"
+                    ),
+                    {"src": source},
+                ).all()
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_stream_observation_values({source}): {e}")
+            return {}
+        valeurs = {}
+        for track_id, value in rows:
+            try:
+                valeurs[track_id] = int(float(value))
+            except (TypeError, ValueError):
+                continue
+        return valeurs
+
     def record_certifications(self, track_id: int, entries: list, album_entries: list) -> bool:
         """Écrit les deux colonnes de certifications VERBATIM, `[]` compris.
 

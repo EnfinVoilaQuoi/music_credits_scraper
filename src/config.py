@@ -170,6 +170,10 @@ class Settings(BaseSettings):
     # toute observation `spotify_web`, quel que soit le run qui l'a écrite — une
     # valeur récoltée sur la page d'un autre artiste compte comme fraîche.
     spotify_web_freshness_days: int = 14
+    # Mode léger (page artiste seule) : les morceaux qui ont un ID Spotify et
+    # AUCUN stream (sous le plancher Kworb de 100 000) sont visités quand même,
+    # sous ce plafond — 881 mesurés le 2026-09-23, le rattrapage s'étale.
+    spotify_web_pages_sans_stream: int = 40
 
     # --- BPI (certifications UK) : plafond de pagination ---
     # Le corpus fait ~26 500 lignes à 24 par page, soit ~1 105 pages (mesuré le

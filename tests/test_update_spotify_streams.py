@@ -8,6 +8,7 @@ nous appartient pas ne touche jamais une colonne.
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 from src.utils.update_spotify_streams import _build_queue, _crawl
 
@@ -29,10 +30,13 @@ class _Artist:
 
 
 class _Track:
-    def __init__(self, track_id, spotify_id, title="T"):
+    def __init__(self, track_id, spotify_id, title="T", album=None, streams=1000):
         self.id = track_id
         self.spotify_id = spotify_id
         self.title = title
+        self.album = album
+        self.secondary_role = None
+        self.streams = SimpleNamespace(spotify_streams=streams)
 
 
 class _DataManager:
@@ -83,6 +87,10 @@ class _DataManager:
         self.duration_calls.append((track_id, seconds, source))
         return True
 
+    def update_track_spotify_id(self, track_id, spotify_id, source="kworb"):
+        self.id_calls = getattr(self, "id_calls", []) + [(track_id, spotify_id, source)]
+        return True
+
 
 class _Scraper:
     """Rend des pages préparées ; compte les visites."""
@@ -124,6 +132,7 @@ def _run(dm, scraper, artist=None, stop=None):
         "unknown_ids": 0,
         "albums_totalises": 0,
         "durees": 0,
+        "ids_resolus": 0,
         "pages": 0,
         "monthly_listeners": None,
         "artist_name": None,
@@ -593,3 +602,83 @@ class TestEntreePublique:
         monkeypatch.setattr(uss.async_loop, "run_sync", lambda coro: asyncio.run(coro))
         uss.update_spotify_streams(_Artist(), _DataManager(), scraper=_Fourni())
         assert ferme == []
+
+
+# ── 6B (2026-09-24) : la page album nomme les fiches sans ID ────────────────
+from src.utils.update_spotify_streams import resoudre_ids_par_album  # noqa: E402
+
+_ID_X = "xxxxxxxxxxxxxxxxxxxxxx"
+
+
+def _fiche(tid, titre, album="Mon Album", duration=None):
+    from src.models import Artist, Track
+
+    t = Track(title=titre, artist=Artist(name="ISHA"), album=album, duration=duration)
+    t.id = tid
+    return t
+
+
+def test_une_fiche_sans_id_est_retrouvee_dans_son_album():
+    album = _page_album([(_ID_X, "Grenadine - Acoustic")], durations={_ID_X: 200})
+    fiche = _fiche(20, "Grenadine (Acoustic)", duration=201)
+    assert resoudre_ids_par_album(album, "ISHA", [fiche], lambda s: False) == [(fiche, _ID_X)]
+
+
+def test_homonymes_duree_et_id_deja_pris_ne_resolvent_rien():
+    album = _page_album([(_ID_X, "Intro")], durations={_ID_X: 60})
+    # Deux fiches « Intro » rangées sur ce disque : jamais deviné.
+    assert (
+        resoudre_ids_par_album(
+            album, "ISHA", [_fiche(1, "Intro"), _fiche(2, "Intro")], lambda s: False
+        )
+        == []
+    )
+    # L'ID appartient déjà à une fiche.
+    assert resoudre_ids_par_album(album, "ISHA", [_fiche(1, "Intro")], lambda s: True) == []
+    # Durée contredite (32 s contre 60) : autre enregistrement.
+    assert (
+        resoudre_ids_par_album(album, "ISHA", [_fiche(1, "Intro", duration=32)], lambda s: False)
+        == []
+    )
+
+
+def test_la_passe_album_pose_l_id_et_ses_streams():
+    fiche = _Track(20, None, title="Grenadine (Acoustic)", album="Mon Album")
+    fiche.duration, fiche.is_featuring, fiche.primary_artist_name = None, False, None
+    fiche.artist = _Artist()
+    dm = _DataManager(tracks=[_Track(10, _ID_A), fiche], albums=[{"title": "Mon Album"}])
+    page = _page_album([(_ID_A, "A"), (_ID_X, "Grenadine - Acoustic")])
+    scraper = _Scraper(
+        _page_artiste(playcounts={_ID_A: 100}, albums={_ID_ALBUM: "Mon Album"}),
+        track_pages={_ID_X: {"playcounts": {_ID_X: 7}}},
+        album_pages={_ID_ALBUM: page},
+    )
+    result = _run(dm, scraper)
+    assert dm.id_calls == [(20, _ID_X, "spotify_web")] and result["ids_resolus"] == 1
+    assert {c["track_id"]: c["streams"] for c in dm.streams_calls}[20] == 7
+
+
+def test_mode_leger_visite_les_morceaux_a_id_sans_stream():
+    """6C : sous le plancher Kworb, seule la page titre donne un compteur."""
+    dm = _DataManager(tracks=[_Track(10, _ID_A), _Track(11, _ID_B, streams=None)])
+    scraper = _Scraper(
+        _page_artiste(playcounts={_ID_A: 100}),
+        track_pages={_ID_B: {"playcounts": {_ID_B: 42}}},
+    )
+    result = {
+        k: 0
+        for k in (
+            "recorded",
+            "harvested_foreign",
+            "unknown_ids",
+            "albums_totalises",
+            "durees",
+            "ids_resolus",
+            "sans_stream",
+            "pages",
+        )
+    }
+    result.update(monthly_listeners=None, artist_name=None, spotify_artist_id=None, aborted=None)
+    asyncio.run(_crawl(_Artist(), dm, scraper, "artistid", None, result, False))
+    assert scraper.visited == [_ID_B] and result["sans_stream"] == 1
+    assert {c["track_id"]: c["streams"] for c in dm.streams_calls}[11] == 42

@@ -649,7 +649,31 @@ def _ecrire_rendition(data_manager, parent, entry, kworb_date, result, via) -> N
         result["unmatched_details"].append((entry["title"], entry["streams"]))
 
 
-def _oublier_observations_perimees(data_manager, index: Index, ecrits: set, result: dict) -> None:
+def autre_upload_que_la_fiche(
+    track, sid: str, streams: int, ids_page: set, lus_web: dict[int, int]
+) -> bool:
+    """PUR (6F, 2026-09-24). Une ligne Kworb rapprochée par le TITRE, portant
+    l'ID `sid`, est-elle un AUTRE upload que celui de la fiche ?
+
+    Oui seulement si l'ID PROPRE de la fiche n'est sur AUCUNE ligne de la page
+    ET que Spotify (pages web, qui n'attribuent que par ID) le lit à plus du
+    DOUBLE de la ligne : Kid Cudi « Day 'N' Nite », un autre upload à 9 M contre
+    66 M lus sur l'ID de la fiche. Mesuré au rejeu (2026-09-24), les deux
+    conditions sont nécessaires : « ID différent » seul écartait 396 lignes
+    justes (seconds uploads qui se SOMMENT, « Boulbi » 38 M) ; « lu plus haut »
+    en écartait encore 139 — l'ID propre est souvent une autre ÉDITION du même
+    enregistrement, et Spotify compte par enregistrement : même nombre, un peu
+    plus frais (11 M contre 10,8 M). Un autre upload diffère d'un ordre.
+    """
+    propres = {track.spotify_id, *(e.spotify_id for e in track.spotify_id_entries or [])} - {None}
+    if not propres or sid in propres or propres & ids_page:
+        return False
+    return lus_web.get(track.id, 0) > 2 * (streams or 0)
+
+
+def _oublier_observations_perimees(
+    data_manager, index: Index, ecrits: set, result: dict, refusees_titre: set = frozenset()
+) -> None:
     """Retire l'observation Kworb des fiches à qui ce run a REFUSÉ d'attribuer.
 
     L'arbitrage des streams est une priorité pure : une observation Kworb que
@@ -666,6 +690,7 @@ def _oublier_observations_perimees(data_manager, index: Index, ecrits: set, resu
     """
     refusees = {t.id for ts in index.ids_partages.values() for t in ts}
     refusees |= {t.id for ts in index.doublons.values() for t in ts}
+    refusees |= set(refusees_titre)
     for track_id in sorted(refusees - ecrits):
         if data_manager.forget_spotify_streams_observation(track_id, "kworb"):
             titre = index.by_id[track_id].title
@@ -838,6 +863,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     # Accumulation par track : un morceau peut avoir PLUSIEURS lignes Kworb
     # (éditions, uploads séparés) — sommées SAUF doublons purs, cf. `sommer_editions`.
     agg: dict[int, list[dict]] = {}
+    # 6F : cf. `autre_upload_que_la_fiche`.
+    lus_web = data_manager.get_stream_observation_values("spotify_web")
+    ids_page = {e["spotify_id"] for e in page_songs["entries"] if e.get("spotify_id")}
+    refusees_titre: set[int] = set()
 
     for entry in page_songs["entries"]:
         r = rapprocher(entry, index, artist, _decisions, lire_identite)
@@ -871,6 +900,22 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             continue
 
         track, via = r.track, r.via
+        sid = entry.get("spotify_id")
+        if (
+            via in ("title", "title+artistes", "fuzzy")
+            and sid
+            and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web)
+        ):
+            refusees_titre.add(track.id)
+            result["lignes_ecartees"].append((entry["title"], entry["streams"], track.title))
+            result["unmatched"] += 1
+            result["unmatched_titles"].append(entry["title"])
+            result["unmatched_details"].append((entry["title"], entry["streams"]))
+            logger.warning(
+                f"⚠️ Ligne Kworb '{entry['title']}' ({entry['streams']:,}, ID {sid}) écartée : "
+                f"« {track.title} » a son propre ID ({track.spotify_id}), lu sur Spotify"
+            )
+            continue
         if via == "fiche" and entry.get("spotify_id"):
             # La version a sa propre fiche : ses streams sont à elle. Le SOUCHE
             # garde quand même l'indication (décision utilisateur), avec le
@@ -999,7 +1044,19 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 f"{len(somme['retenues'])} comptées → {somme['streams']:,}"
             )
 
-    _oublier_observations_perimees(data_manager, index, set(agg_by_track), result)
+    # Même règle pour une observation Kworb d'un run ANTÉRIEUR qu'aucune ligne
+    # n'a réécrite : si l'ID propre de la fiche n'est pas sur la page et que
+    # Spotify le lit à plus du double, ce chiffre était celui d'un autre upload
+    # (« Day 'N' Nite », 9 M restés maîtres contre 66 M lus).
+    lus_kworb = data_manager.get_stream_observation_values("kworb")
+    for t in index.by_id.values():
+        if (
+            t.id not in agg_by_track
+            and t.id in lus_kworb
+            and autre_upload_que_la_fiche(t, "", lus_kworb[t.id], ids_page, lus_web)
+        ):
+            refusees_titre.add(t.id)
+    _oublier_observations_perimees(data_manager, index, set(agg_by_track), result, refusees_titre)
 
     result["unmatched_details"].sort(key=lambda x: x[1], reverse=True)
     logger.info(

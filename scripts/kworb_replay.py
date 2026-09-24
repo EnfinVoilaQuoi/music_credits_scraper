@@ -38,6 +38,12 @@ class _Enregistreur:
     def get_artist_tracks(self, artist_id):
         return self._dm.get_artist_tracks(artist_id)
 
+    def get_stream_observation_values(self, source):
+        return self._dm.get_stream_observation_values(source)
+
+    def record_track_edition(self, track_id, label, **champs):
+        return True
+
     def record_spotify_streams(self, track_id, streams, source, updated_at=None, **kw):
         self.streams.append((track_id, streams, kw.get("daily_streams")))
         return True

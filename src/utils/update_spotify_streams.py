@@ -112,6 +112,8 @@ def update_spotify_streams(
         "unknown_ids": 0,  # vus sur les pages, inconnus de la base
         "albums_totalises": 0,  # totaux RÉELS écrits (toutes pistes)
         "durees": 0,  # durées déclarées `spotify_web` (lot 4), par ID
+        "ids_resolus": 0,  # fiches sans ID retrouvées sur une page album (6B)
+        "sans_stream": 0,  # pages titre des morceaux à ID sans stream (6C)
         "pages": 0,
         "monthly_listeners": None,
         "artist_name": None,
@@ -214,6 +216,22 @@ async def _crawl(
         _record(page["playcounts"], artist, data_manager, id_map, releves, result)
 
         if not full_crawl:
+            # 6C : sauf les morceaux à ID Spotify SANS AUCUN stream — sous le
+            # plancher Kworb (100 000), seule leur page titre en donne un. Sans
+            # cette passe ils restaient à zéro tant qu'on ne cochait pas le crawl
+            # complet (881 mesurés le 2026-09-23).
+            await _visiter_sans_stream(
+                sess,
+                scraper,
+                artist,
+                data_manager,
+                id_map,
+                seen_dates,
+                now,
+                releves,
+                stop_requested,
+                result,
+            )
             # Mode léger : la page artiste seule. Elle rend déjà les auditeurs
             # mensuels — que Kworb ne donne pas du tout — et le top 10, soit
             # justement les morceaux que Kworb couvre le mieux, donc la
@@ -262,6 +280,43 @@ async def _crawl(
         )
 
     return result
+
+
+def file_sans_stream(tracks, seen_dates: dict, now: datetime, releves: dict) -> list[str]:
+    """PUR. IDs Spotify des morceaux SANS AUCUN stream (colonne vide), non
+    observés récemment par `spotify_web` : un morceau déjà vu à zéro ou
+    illisible n'est pas revisité à chaque run."""
+    max_age = settings.spotify_web_freshness_days
+    return [
+        t.spotify_id
+        for t in tracks
+        if t.spotify_id
+        and not t.streams.spotify_streams
+        and t.spotify_id not in releves
+        and not _is_fresh(seen_dates.get(t.id), now, max_age)
+    ]
+
+
+async def _visiter_sans_stream(
+    sess, scraper, artist, data_manager, id_map, seen_dates, now, releves, stop_requested, result
+) -> None:
+    file = file_sans_stream(data_manager.get_artist_tracks(artist.id), seen_dates, now, releves)[
+        : settings.spotify_web_pages_sans_stream
+    ]
+    if file:
+        logger.info(f"Spotify web '{artist.name}' : {len(file)} morceau(x) à ID sans stream")
+    for spotify_id in file:
+        if stop_requested and stop_requested():
+            break
+        if spotify_id in releves:
+            continue
+        data = await scraper.afetch_track(sess, spotify_id)
+        result["pages"] += 1
+        result["sans_stream"] += 1
+        if not data:
+            continue
+        _record(data["playcounts"], artist, data_manager, id_map, releves, result)
+        _declarer_durees(data.get("durations"), data_manager, id_map, result)
 
 
 def _build_queue(artist, data_manager, seen_dates: dict, now: datetime, releves: dict) -> list[str]:
@@ -351,6 +406,44 @@ def _record(
                 result["harvested_foreign"] += 1
 
 
+def resoudre_ids_par_album(album: dict, artiste_nom: str, fiches: list, deja_pris) -> list:
+    """PUR. `[(fiche, spotify_id)]` : les fiches SANS ID d'un album de l'artiste
+    retrouvées dans la tracklist de sa page album Spotify (étape 6B, 2026-09-24).
+
+    La page album était lue pour les totaux et les IDs inconnus JETÉS — 941
+    fiches jamais cherchées (créations Deezer, tracklists Genius, réparations).
+    Le rapprochement se fait par TITRE, mais DANS l'album : un titre unique
+    sur le disque, une fiche unique. L'identité passe ensuite par le gate
+    commun, jugée sur ce que la page montre (titre, durée de la ligne ; l'album
+    est celui de l'artiste — la passe ne lit que des albums connus de la base
+    et listés par sa page artiste) : aucune requête de plus.
+    `deja_pris(spotify_id)` : l'ID appartient déjà à une fiche (jamais repris).
+    """
+    from src.utils.spotify_identity import valider_identite
+    from src.utils.title_matching import strip_featuring
+
+    cle = lambda t: normalize_title(strip_featuring(t or ""))  # noqa: E731
+    pistes: dict[str, list[tuple[str, str]]] = {}
+    for spotify_id, titre in album.get("tracks") or []:
+        pistes.setdefault(cle(titre), []).append((spotify_id, titre))
+    par_titre: dict[str, list] = {}
+    for f in fiches:
+        par_titre.setdefault(cle(f.title), []).append(f)
+    durees = album.get("durations") or {}
+    trouves = []
+    for titre_cle, candidats in par_titre.items():
+        lignes = {sid: t for sid, t in pistes.get(titre_cle, [])}
+        if len(candidats) != 1 or len(lignes) != 1:
+            continue  # homonymes sur le disque ou en base : jamais deviné
+        (spotify_id, titre), fiche = next(iter(lignes.items())), candidats[0]
+        if deja_pris(spotify_id):
+            continue
+        identite = {"name": titre, "artists": [artiste_nom], "duration": durees.get(spotify_id)}
+        if valider_identite(fiche, spotify_id, lambda _sid, i=identite: i):
+            trouves.append((fiche, spotify_id))
+    return trouves
+
+
 async def _totaliser_albums(
     sess,
     scraper,
@@ -422,6 +515,14 @@ async def _totaliser_albums(
         if cle and album_id not in groupes.setdefault(cle, []):
             groupes[cle].append(album_id)
 
+    # Fiches SANS ID de chaque album connu : la page album les nomme (6B).
+    sans_id: dict[str, list] = {}
+    if id_map is not None:
+        for t in data_manager.get_artist_tracks(artist.id):
+            if t.album and not t.spotify_id and not t.secondary_role:
+                sans_id.setdefault(normalize_title(t.album), []).append(t)
+    resolus: list[str] = []
+
     for cle, editions in groupes.items():
         if budget <= 0 or (stop_requested and stop_requested()):
             break
@@ -437,6 +538,18 @@ async def _totaliser_albums(
             if album:
                 compositions[album_id] = album
                 if id_map is not None:
+                    for fiche, sid in resoudre_ids_par_album(
+                        album, artist.name, sans_id.get(cle, []), id_map.__contains__
+                    ):
+                        if data_manager.update_track_spotify_id(fiche.id, sid, source=_SOURCE):
+                            id_map[sid] = [(fiche.id, artist.id)]
+                            sans_id[cle].remove(fiche)
+                            resolus.append(sid)
+                            result["ids_resolus"] += 1
+                            logger.info(
+                                f"🆔 « {fiche.title} » : ID Spotify {sid} trouvé sur la page "
+                                f"de l'album « {connus[cle]} »"
+                            )
                     _declarer_durees(album.get("durations"), data_manager, id_map, result)
                 # Tracklist VIRTUALISÉE : si la page annonce plus de pistes
                 # qu'elle n'en a rendues, on ne sait pas ce qui manque. Sommer
@@ -506,4 +619,9 @@ async def _totaliser_albums(
             f"Album '{connus[cle]}' : {total:,} streams sur "
             f"{len(par_enregistrement)} enregistrements{detail_txt}".replace(",", " ")
         )
+    # Les streams des IDs résolus, quand la passe les a lus (pistes visitées
+    # pour un total) ; sinon le prochain run les visite (file par péremption).
+    lus = {sid: releves[sid] for sid in resolus if sid in releves}
+    if lus and id_map is not None:
+        _record(lus, artist, data_manager, id_map, {}, result)
     return budget

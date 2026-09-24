@@ -285,6 +285,16 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                 f"{r.get('albums_totalises', 0)} album(s) totalisé(s), "
                 f"{r.get('pages', 0)} page(s) ouverte(s)"
             )
+            if r.get("sans_stream"):
+                lines.append(
+                    f"   • {r['sans_stream']} morceau(x) à ID sans stream visité(s) "
+                    "(sous le plancher Kworb)"
+                )
+            if r.get("ids_resolus"):
+                lines.append(
+                    f"   • 🆔 {r['ids_resolus']} ID(s) Spotify trouvé(s) sur les pages album "
+                    "(fiches qui n'en avaient pas)"
+                )
             if not spotify_full_crawl:
                 lines.append(
                     "   • page artiste seule — coche « tous les morceaux » "

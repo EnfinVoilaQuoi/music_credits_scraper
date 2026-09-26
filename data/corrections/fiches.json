@@ -462,6 +462,38 @@
       "fusionner_dans": {
         "genius_id": 79864
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 13763301
+      },
+      "version_de": {
+        "genius_id": 2327379
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 10456124
+      },
+      "version_de": {
+        "genius_id": 2327379
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 10780985
+      },
+      "version_de": {
+        "genius_id": 2327379
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 5848803
+      },
+      "version_de": {
+        "genius_id": 2327379
+      }
     }
   ],
   "Kid Cudi": [
@@ -596,6 +628,28 @@
       "retirer_id_spotify": [
         "177WEvlLsCc0FzCTWslawr"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13763301
+      },
+      "version_de": {
+        "genius_id": 2327379
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 5848803
+      },
+      "version_de": {
+        "genius_id": 2327379
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 11314281
+      },
+      "supprimer": true
     }
   ],
   "MC Solaar": [
@@ -795,6 +849,16 @@
       },
       "fusionner_dans": {
         "genius_id": 5363682
+      }
+    }
+  ],
+  "Sadek": [
+    {
+      "fiche": {
+        "genius_id": 12484643
+      },
+      "fusionner_dans": {
+        "genius_id": 9818235
       }
     }
   ]

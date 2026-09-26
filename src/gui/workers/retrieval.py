@@ -41,7 +41,8 @@ def get_tracks(app):
     # Variables pour les options
     include_features_var = ctk.BooleanVar(value=True)  # Par défaut, inclure les features
     prefill_var = ctk.BooleanVar(value=True)  # Appel API album + Spotify/YouTube (media)
-    include_secondary_var = ctk.BooleanVar(value=False)  # Rôles secondaires (Additional Voices…)
+    include_prods_var = ctk.BooleanVar(value=True)  # Prods pour d'autres (statut à part)
+    include_secondary_var = ctk.BooleanVar(value=False)  # Autres rôles (Additional Voices…)
     respect_deleted_var = ctk.BooleanVar(value=True)  # Ne pas réajouter les morceaux supprimés
     download_images_var = ctk.BooleanVar(value=True)  # Télécharger photos/covers/vignettes (Media)
     deezer_var = ctk.BooleanVar(value=True)  # Compléter par Deezer (écarts listés, jamais créés)
@@ -114,10 +115,16 @@ def get_tracks(app):
 
     ctk.CTkCheckBox(
         secondary_frame,
-        text="Inclure les rôles secondaires (chœurs, Additional Voices…)",
+        text="Inclure les prods (morceaux produits pour d'autres)",
+        variable=include_prods_var,
+        font=("Arial", 12),
+    ).pack(anchor="w", padx=15, pady=(12, 4))
+    ctk.CTkCheckBox(
+        secondary_frame,
+        text="Inclure les autres rôles secondaires (chœurs, écriture, Additional Voices…)",
         variable=include_secondary_var,
         font=("Arial", 12),
-    ).pack(anchor="w", padx=15, pady=12)
+    ).pack(anchor="w", padx=15, pady=(4, 12))
 
     ctk.CTkLabel(
         secondary_frame,
@@ -259,6 +266,7 @@ def get_tracks(app):
         include_features = include_features_var.get()
         prefill = prefill_var.get()
         include_secondary = include_secondary_var.get()
+        include_prods = include_prods_var.get()
         respect_deleted = respect_deleted_var.get()
         download_images = download_images_var.get()
         deezer = deezer_var.get()
@@ -270,6 +278,7 @@ def get_tracks(app):
             prefill=prefill,
             update_only=update_only,
             include_secondary=include_secondary,
+            include_prods=include_prods,
             respect_deleted=respect_deleted,
             download_images=download_images,
             deezer=deezer,
@@ -317,6 +326,7 @@ def start_track_retrieval(
     respect_deleted: bool = True,
     download_images: bool = True,
     deezer: bool = True,
+    include_prods: bool = True,
 ):
     """Lance la récupération des morceaux avec les options choisies.
 
@@ -330,6 +340,7 @@ def start_track_retrieval(
         prefill=prefill,
         update_only=update_only,
         include_secondary=include_secondary,
+        include_prods=include_prods,
         respect_deleted=respect_deleted,
         download_images=download_images,
         deezer=deezer,

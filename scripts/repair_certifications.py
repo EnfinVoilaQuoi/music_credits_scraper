@@ -42,13 +42,20 @@ DB_PATH = "data/music_credits.db"
 
 
 def _cle(entree: dict) -> tuple:
-    """Identité d'une entrée de certification, pour comparer deux listes."""
+    """Identité d'une entrée de certification, pour comparer deux listes.
+
+    L'ÉCHO en fait partie (2026-09-26) : sans lui, une vraie certification et
+    l'écho de la même, renvoyé par une version, avaient la même clé — la vraie,
+    fautive, passait pour déjà juste et n'était jamais retirée (« Feels Like
+    Summer » chez Travis Scott, seulement auteur)."""
     return (
         entree.get("body", ""),
         entree.get("artist_name", ""),
         entree.get("title", ""),
         entree.get("certification", ""),
         entree.get("certification_date", ""),
+        bool(entree.get("echo")),
+        entree.get("echo_de"),
     )
 
 
@@ -89,7 +96,14 @@ def analyser(dm: DataManager, filtre_artiste: str | None):
             t.id: (list(t.certs.entries or []), list(t.certs.album_entries or [])) for t in morceaux
         }
 
-        apply_certifications(Artist(name=nom, id=artiste_id), morceaux, matcher)
+        alias = dm.noms_de_lartiste(artiste_id, nom) - {nom}
+        apply_certifications(
+            Artist(name=nom, id=artiste_id),
+            morceaux,
+            matcher,
+            alias=tuple(sorted(alias)),
+            formations=tuple(sorted(dm.noms_des_formations(artiste_id))),
+        )
 
         for t in morceaux:
             ancien_m, ancien_a = avant[t.id]

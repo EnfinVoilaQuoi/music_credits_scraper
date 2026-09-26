@@ -238,6 +238,42 @@ class TestEchoDesVersions:
         apply_certifications(artist, [socle], matcher)
         assert socle.certs.reelles == [cert_live] and socle.certs.echos == []
 
+    def test_l_echo_va_au_vrai_morceau_pas_a_la_reprise_homonyme(self):
+        """Depuis e36, la reprise de Coone « All Of The Lights » (Kanye auteur)
+        cohabite avec le morceau de Kanye ; listée en premier, elle recevait
+        les échos du Remix (2026-09-26)."""
+        kanye = Artist(name="Kanye West")
+        reprise = Track(title="All Of The Lights", artist=kanye, is_featuring=True)
+        reprise.id, reprise.primary_artist_name, reprise.secondary_role = 10, "Coone", "Cover"
+        original = Track(title="All of the Lights", artist=kanye)
+        original.id = 11
+        remix = Track(title="All of the Lights (Remix)", artist=kanye)
+        remix.id = 12
+        remix.relationships = [{"type": "remix_of", "title": "All of the Lights"}]
+        matcher = _FakeMatcher(
+            tracks={"All of the Lights (Remix)": [_match(title="ALL OF THE LIGHTS (REMIX)")]}
+        )
+        apply_certifications(kanye, [reprise, original, remix], matcher)
+        assert len(original.certs.echos) == 1
+        assert reprise.certs.echos == []
+
+    def test_une_version_ne_prend_pas_les_certifs_de_l_original(self):
+        """Le titre tronqué rapprochait « DOUBLE PONEY » de « Double Poney
+        (Instrumental) » (2026-09-26)."""
+        booba = Artist(name="Booba")
+        instru = Track(title="Double Poney (Instrumental)", artist=booba)
+        instru.id = 1
+        matcher = _FakeMatcher(
+            tracks={
+                "Double Poney (Instrumental)": [
+                    _match(title="DOUBLE PONEY", certification="Diamant"),
+                    _match(title="DOUBLE PONEY (INSTRUMENTAL)", certification="Or"),
+                ]
+            }
+        )
+        apply_certifications(booba, [instru], matcher)
+        assert [e["certification"] for e in instru.certs.reelles] == ["Or"]
+
     def test_l_echo_est_recalcule_a_chaque_application(self):
         artist, socle, live = self._disco()
         matcher = _FakeMatcher(tracks={"Suzy (Live 2006)": [_match(title="Suzy (Live 2006)")]})
@@ -251,3 +287,111 @@ class TestEchoDesVersions:
         matcher = _FakeMatcher(tracks={"Suzy (Live 2006)": [_match(title="Suzy (Live 2006)")]})
         apply_certifications(artist, [socle, live], matcher)
         assert len(socle.certs.echos) == 1
+
+
+class _MatcherParArtiste:
+    """Répond selon l'ARTISTE cherché : c'est ce que les règles d'homonymie
+    décident (2026-09-25)."""
+
+    def __init__(self, par_artiste):
+        self.par_artiste = par_artiste
+        self.cherches = []
+
+    def get_track_certifications(self, artist, title, extra_artists=None):
+        self.cherches.append(artist)
+        out = []
+        for a in [artist, *(extra_artists or [])]:
+            out += self.par_artiste.get(a, [])
+        return out
+
+    def get_album_certifications(self, artist, album):
+        return []
+
+
+class TestHomonymesDepuisE36:
+    """Les fiches homonymes d'un artiste ne reçoivent plus les certifs de
+    l'enregistrement certifié (2026-09-25)."""
+
+    def test_reprise_ou_l_artiste_n_est_qu_auteur_sans_certif(self):
+        from src.models.track import Credit, CreditRole  # noqa: F401
+
+        kanye = Artist(name="Kanye West")
+        glee = Track(title="American Boy", artist=kanye, is_featuring=True)
+        glee.primary_artist_name, glee.secondary_role = "Glee Cast", "Writer"
+        m = _MatcherParArtiste({"Kanye West": [_match(artist_name="ESTELLE FT KANYE WEST")]})
+        apply_certifications(kanye, [glee], m)
+        assert glee.certs.entries == []
+        assert m.cherches == []  # rien n'est même cherché
+
+    def test_production_compte_par_l_interprete(self):
+        """« Si t'as fait la prod, t'as participé activement au morceau. »"""
+        kanye = Artist(name="Kanye West")
+        t = Track(title="Heaven", artist=kanye, is_featuring=True)
+        t.primary_artist_name, t.secondary_role = "John Legend", "Producer"
+        m = _MatcherParArtiste(
+            {
+                "John Legend": [_match(artist_name="JOHN LEGEND")],
+                "Kanye West": [_match(artist_name="KANYE WEST", title="HEAVEN")],
+            }
+        )
+        apply_certifications(kanye, [t], m)
+        assert [e["artist_name"] for e in t.certs.entries] == ["JOHN LEGEND"]
+
+    def test_production_lue_dans_les_credits(self):
+        """Genius range « Additional Vocals » AVANT « Producer » : le rôle seul
+        aurait privé un vrai producteur de ses certifs."""
+        from src.models.track import Credit, CreditRole
+
+        kanye = Artist(name="Kanye West")
+        t = Track(title="X", artist=kanye, is_featuring=True)
+        t.primary_artist_name, t.secondary_role = "Autre", "Additional Vocals"
+        t.credits = [Credit(name="Kanye West", role=CreditRole.PRODUCER)]
+        m = _MatcherParArtiste({"Autre": [_match(artist_name="AUTRE")]})
+        apply_certifications(kanye, [t], m)
+        assert len(t.certs.entries) == 1
+
+    def test_feat_homonyme_ne_prend_pas_la_certif_de_l_artiste(self):
+        """« Diamonds » de Teairra Marí ft. Kanye ≠ « DIAMONDS » de Kanye."""
+        kanye = Artist(name="Kanye West")
+        t = Track(title="Diamonds", artist=kanye, is_featuring=True)
+        t.primary_artist_name = "Teairra Marí"
+        m = _MatcherParArtiste({"Kanye West": [_match(artist_name="KANYE WEST")]})
+        apply_certifications(kanye, [t], m)
+        assert t.certs.entries == []
+
+    def test_feat_garde_la_certif_qui_credite_un_autre_invite(self):
+        """« Bande organisée » : principal Genius « 13 Organisé » (projet), le
+        SNEP crédite « JUL FEAT. SCH, NAPS… » — Jul est un invité du morceau."""
+        from src.models.track import Credit, CreditRole
+
+        sch = Artist(name="SCH")
+        t = Track(title="Bande organisée", artist=sch, is_featuring=True)
+        t.primary_artist_name = "13 Organisé"
+        t.credits = [
+            Credit(name="JuL", role=CreditRole.FEATURED),
+            Credit(name="SCH", role=CreditRole.FEATURED),
+        ]
+        m = _MatcherParArtiste({"SCH": [_match(artist_name="JUL FEAT. SCH, NAPS, KOFS")]})
+        apply_certifications(sch, [t], m)
+        assert len(t.certs.entries) == 1
+
+    def test_suffixe_genius_retire(self):
+        orelsan = Artist(name="OrelSan")
+        t = Track(title="Millions", artist=orelsan, is_featuring=True)
+        t.primary_artist_name = "No Limit (FRA)"
+        m = _MatcherParArtiste({"OrelSan": [_match(artist_name="NO LIMIT, ORELSAN, NINHO")]})
+        apply_certifications(orelsan, [t], m)
+        assert len(t.certs.entries) == 1
+
+
+def test_alias_confirme_vaut_fiche_propre():
+    """« PABLO » : interprète « Ye » = Kanye West sous alias confirmé. Genius lit
+    un rôle de production, c'est pourtant SA fiche (2026-09-25)."""
+    kanye = Artist(name="Kanye West")
+    t = Track(title="PABLO", artist=kanye, is_featuring=True)
+    t.primary_artist_name, t.secondary_role = "Ye", "Producer"
+    m = _MatcherParArtiste({"Kanye West": [_match(artist_name="KANYE WEST")]})
+    apply_certifications(kanye, [t], m, alias=("Ye",))
+    assert len(t.certs.entries) == 1
+    apply_certifications(kanye, [t], m)  # sans l'alias : un autre interprète
+    assert t.certs.entries == []

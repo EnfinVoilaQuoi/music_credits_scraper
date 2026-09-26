@@ -30,6 +30,9 @@ class OptionsDisco:
     prefill: bool = True
     update_only: bool = False
     include_secondary: bool = False
+    #: Les PRODS de l'artiste pour d'autres : un statut à part entière
+    #: (`participation.PROD`), donc gardées par défaut (décision 2026-09-26).
+    include_prods: bool = True
     respect_deleted: bool = True
     download_images: bool = True
     #: Compléter par Deezer en fin de run : les disques et pistes que Genius
@@ -289,6 +292,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
         known_genius_ids=known_genius_ids,
         include_secondary=options.include_secondary,
         roles_connus=roles_connus,
+        include_prods=options.include_prods,
     )
     if not nouveaux:
         bilan.interrompu("aucun morceau trouvé")
@@ -333,7 +337,15 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
         from src.utils.cert_matcher import get_cert_matcher
         from src.utils.certification_enricher import apply_certifications
 
-        apply_certifications(artist, nouveaux, get_cert_matcher())
+        alias = runtime.data_manager.noms_de_lartiste(artist.id, artist.name) - {artist.name}
+        formations = runtime.data_manager.noms_des_formations(artist.id)
+        apply_certifications(
+            artist,
+            nouveaux,
+            get_cert_matcher(),
+            alias=tuple(sorted(alias)),
+            formations=tuple(sorted(formations)),
+        )
     except Exception:
         logger.exception("Rematch certifications échoué")
         bilan.erreurs.append("rematch certifications")

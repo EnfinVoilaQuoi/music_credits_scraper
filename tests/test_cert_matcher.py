@@ -68,6 +68,15 @@ class TestLevelRank:
         assert self._rank("4x Platinum") < self._rank("Platinum")
         assert self._rank("4x Platinum") > self._rank("Diamant")
 
+    def test_au_dela_de_dix_platines_on_depasse_le_diamant(self):
+        """Diamond = 10x Platinum : « 12x Platinum » (Ni**as in Paris) passait
+        SOUS le Diamond et la fiche affichait le mauvais palier (2026-09-24)."""
+        assert self._rank("12x Platinum") < self._rank("Diamond")
+        assert self._rank("11x Platinum") > self._rank("12x Platinum")
+        assert self._rank("12x Platino") < self._rank("Diamante")
+        assert self._rank("2x Diamond") <= self._rank("20x Platinum")
+        assert self._rank("9x Platinum") > self._rank("Diamond")
+
     def test_niveau_inconnu_relegue_en_fin(self):
         assert self._rank("Ruby") == 99.0
 

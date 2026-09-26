@@ -58,11 +58,22 @@ def streams_variantes(track) -> int:
     )
 
 
-def total_discographie(tracks) -> int:
-    """Cumul estimé d'une discographie : chaque morceau (Spotify + YTM, cf.
-    `calculate_total_streams`) plus ses variantes rattachées (Spotify seul)."""
+def morceaux_comptes(tracks, noms=(), formations=(), *, prods: bool = False) -> list:
+    """Les morceaux qui entrent dans les comptes de l'artiste : Principal et
+    Feat (`participation.compte_comme_sien`), les prods sur CHOIX. Une seule
+    règle pour le bandeau et la Timeline (2026-09-25 : le bandeau sommait tout,
+    rôles secondaires et prods compris)."""
+    from src.utils.participation import compte_comme_sien, participation
+
+    return [t for t in tracks if compte_comme_sien(participation(t, noms, formations), prods=prods)]
+
+
+def total_discographie(tracks, noms=(), formations=(), *, prods: bool = False) -> int:
+    """Cumul estimé d'une discographie : chaque morceau COMPTÉ (`morceaux_comptes`
+    — Spotify + YTM, cf. `calculate_total_streams`) plus ses variantes
+    rattachées (Spotify seul)."""
     total = 0
-    for t in tracks:
+    for t in morceaux_comptes(tracks, noms, formations, prods=prods):
         est = calculate_total_streams(t.streams.spotify_streams, t.streams.ytm_streams)
         total += est or 0
         total += calculate_total_streams(streams_variantes(t), None) or 0

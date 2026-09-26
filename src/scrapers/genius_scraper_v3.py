@@ -14,6 +14,7 @@ from src.config import DELAY_BETWEEN_REQUESTS
 from src.models import Credit, CreditRole, ReleaseObservation, Track
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 from src.utils.credit_roles import map_role
+from src.utils.inedits import titre_sans_marqueur
 from src.utils.llm_extractor import LLMExtractor, build_credits_prompt
 from src.utils.logger import get_logger
 
@@ -434,6 +435,9 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 text = link.get_text(separator=" ", strip=True)
                 # Nettoyer les suffixes type "Drôle d'oiseau (2025)"
                 text = re.sub(r"\s*\(\d{4}\)\s*$", "", text).strip()
+                # Même point d'entrée que l'API : le marqueur d'inédit d'un
+                # DISQUE (« H1* ») ne va jamais en base (`inedits`, 2026-09-24).
+                text = titre_sans_marqueur(text)
                 if text and len(text) < 150:
                     return text
         return None

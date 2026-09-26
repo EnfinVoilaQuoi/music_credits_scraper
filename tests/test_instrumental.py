@@ -248,3 +248,13 @@ class TestGui:
 
     def test_statut_incomplet_sans_constat(self):
         assert helpers.get_track_status_icon(self._complet(None), set()) == "⚠️"
+
+
+def test_nom_d_album_de_la_page_sans_marqueur_d_inedit():
+    """Le nom de disque lu sur la page passe par le même retrait que l'API
+    (2026-09-24 : des fiches naissaient avec « 13* », « SSC3* »)."""
+    sc = GeniusScraperV3.__new__(GeniusScraperV3)
+    page = '<div class="HeaderArtistAndTracklist"><a href="/albums/Kanye-west/13">13*</a></div>'
+    assert sc._extract_album_bs4(page) == "13"
+    page = '<a href="/albums/x/y">Hôtel sans *****</a>'
+    assert sc._extract_album_bs4(page) == "Hôtel sans *****"

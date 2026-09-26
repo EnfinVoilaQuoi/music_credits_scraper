@@ -72,7 +72,8 @@ def _disco_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-songs", type=int, help="plafond DUR (debug) ; défaut = illimité")
     _bool_flags(p, "features", True, "inclure les featurings")
     _bool_flags(p, "prefill", True, "appel API détail (album, Spotify ID, YouTube)")
-    _bool_flags(p, "secondaires", False, "rôles secondaires (vérif détail)")
+    _bool_flags(p, "prods", True, "morceaux produits pour d'autres (vérif détail)")
+    _bool_flags(p, "secondaires", False, "autres rôles secondaires (vérif détail)")
     _bool_flags(p, "respecter-supprimes", True, "ne pas réajouter les morceaux supprimés")
     _bool_flags(p, "images", True, "télécharger photos, pochettes, vignettes")
     p.add_argument("--maj", action="store_true", help="mode MàJ : prefill des seuls nouveaux")
@@ -207,6 +208,7 @@ def options_disco(a: argparse.Namespace) -> discographie.OptionsDisco:
         prefill=a.prefill,
         update_only=a.maj,
         include_secondary=a.secondaires,
+        include_prods=a.prods,
         respect_deleted=a.respecter_supprimes,
         download_images=a.images,
         deezer=a.deezer,

@@ -133,6 +133,12 @@ class _DM:
         self.journal = []
         self.next_id = 100
 
+    def noms_de_lartiste(self, artist_id, nom):
+        return {nom}
+
+    def noms_des_formations(self, artist_id):
+        return set()
+
     def save_track(self, t):
         if t.id is None:
             t.id = self.next_id

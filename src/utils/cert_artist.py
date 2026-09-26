@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from src.utils.cert_normalize import RANG_PALIERS, decouper_multiplicateur
+from src.utils.cert_normalize import RANG_PALIERS, palier_effectif
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -228,7 +228,7 @@ def _ordre_palier(niveau: str) -> tuple:
     d'un autre module — et le découpage « Nx » refait ici. Deux référentiels
     pour un seul verdict, dont l'un ne s'annonçait même pas comme partagé.
     """
-    multiplicateur, palier = decouper_multiplicateur(niveau)
+    multiplicateur, palier = palier_effectif(niveau)
     return (-RANG_PALIERS.get(palier, 99), multiplicateur)
 
 

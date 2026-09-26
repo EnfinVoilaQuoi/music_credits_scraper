@@ -91,7 +91,7 @@ class TestRolesSecondaires:
             10: {"writer_artists": [{"id": AUTRE}]},  # pas crédité au détail → jeté
         }
         api.genius = _Client([_song(i, AUTRE) for i in (6, 7, 8, 9, 10)], details)
-        tracks = _run(api, None, include_secondary=True)
+        tracks = _run(api, None, include_secondary=True, include_prods=True)
         assert [(t.genius_id, t.is_featuring, t.secondary_role) for t in tracks] == [
             (6, False, None),
             (7, True, None),
@@ -105,9 +105,40 @@ class TestRolesSecondaires:
         appel détail (20 à 40 min par MàJ de Travis Scott, 2026-09-24)."""
         details = {9: {"producer_artists": [{"id": MOI}]}}
         api.genius = _Client([_song(8, AUTRE), _song(9, AUTRE)], details)
-        tracks = _run(api, None, include_secondary=True, roles_connus={8: ("secondary", "Cover")})
+        tracks = _run(
+            api,
+            None,
+            include_secondary=True,
+            include_prods=True,
+            roles_connus={8: ("secondary", "Cover")},
+        )
         assert [(t.genius_id, t.secondary_role) for t in tracks] == [(8, "Cover"), (9, "Producer")]
         assert api.genius.detail_calls == [9]
+
+    def test_prods_seules(self, api):
+        """Option par défaut du run (2026-09-26) : les prods sans les autres
+        rôles. La même lecture au détail décide des deux."""
+        details = {
+            8: {"custom_performances": [{"label": "Additional Vocals", "artists": [{"id": MOI}]}]},
+            9: {"producer_artists": [{"id": MOI}]},
+            11: {"custom_performances": [{"label": "Co-Producer", "artists": [{"id": MOI}]}]},
+        }
+        api.genius = _Client([_song(i, AUTRE) for i in (8, 9, 11)], details)
+        tracks = _run(api, None, include_prods=True)
+        assert [(t.genius_id, t.secondary_role) for t in tracks] == [
+            (9, "Producer"),
+            (11, "Co-Producer"),
+        ]
+        assert api.genius.detail_calls == [8, 9, 11]
+
+    def test_autres_roles_sans_les_prods(self, api):
+        details = {
+            8: {"custom_performances": [{"label": "Additional Vocals", "artists": [{"id": MOI}]}]},
+            9: {"producer_artists": [{"id": MOI}]},
+        }
+        api.genius = _Client([_song(i, AUTRE) for i in (8, 9)], details)
+        tracks = _run(api, None, include_secondary=True)
+        assert [(t.genius_id, t.secondary_role) for t in tracks] == [(8, "Additional Vocals")]
 
     def test_detail_en_echec_jette_le_morceau(self, api):
         api.genius = _Client([_song(6, AUTRE)], {6: AssertionError("HTTP 500")})

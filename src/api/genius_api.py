@@ -17,7 +17,9 @@ from src.config import (
 )
 from src.enrichment.observation import Observation
 from src.models import Artist, ReleaseObservation, Track
+from src.models.track import _PRODUCER_ROLES
 from src.observability import source_usage
+from src.utils.credit_roles import map_role
 from src.utils.inedits import porte_le_marqueur, titre_sans_marqueur
 from src.utils.logger import get_logger, log_api
 from src.utils.pages_genius import page_non_morceau, role_de_version
@@ -84,6 +86,10 @@ class GeniusAPI:
                     headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
                     timeout=10,
                 )
+                if resp.status_code == 429:
+                    # Comme `album_du_morceau` : rendre [] ferait lire « aucune
+                    # page Genius » à l'appelant, écart après écart (2026-09-24).
+                    raise QuotaGeniusAtteint(resp.text[:200])
                 resp.raise_for_status()
                 for hit in (resp.json().get("response") or {}).get("hits") or []:
                     r = hit.get("result") or {}
@@ -173,6 +179,7 @@ class GeniusAPI:
         known_genius_ids: set | None = None,
         include_secondary: bool = False,
         roles_connus: dict | None = None,
+        include_prods: bool = False,
     ) -> list[Track]:
         """
         Récupère la liste des morceaux d'un artiste
@@ -191,6 +198,11 @@ class GeniusAPI:
             roles_connus: {genius_id: (kind, rôle)} déjà constatés en base (mode
                 MàJ) : la vérification au détail des rôles secondaires n'est
                 payée que pour les morceaux NOUVEAUX.
+            include_prods: garder les morceaux où l'artiste est PRODUCTEUR — un
+                statut à part (`participation.PROD`), séparé des autres rôles
+                secondaires (`include_secondary`) depuis le 2026-09-25. La même
+                lecture au détail décide des deux : l'option ne change que ce
+                qu'on garde, pas ce que ça coûte.
         """
         tracks = []
 
@@ -211,6 +223,7 @@ class GeniusAPI:
                 include_features=include_features,
                 include_secondary=include_secondary,
                 roles_connus=roles_connus,
+                include_prods=include_prods,
             )
             log_api("Genius", f"artist/{artist.genius_id}/songs", True)
 
@@ -347,12 +360,24 @@ class GeniusAPI:
             return ("primary", None)
         if aid in self._collect_artist_ids(song.get("featured_artists")):
             return ("feat", None)
-        # Rôles fins (chant additionnel, chœurs, etc.)
-        for perf in song.get("custom_performances") or []:
-            if isinstance(perf, dict) and aid in self._collect_artist_ids(perf.get("artists")):
-                return ("secondary", perf.get("label") or "Contribution")
+        # La PRODUCTION d'abord (2026-09-25) : c'est un statut à part entière
+        # (`participation.PROD`), et un seul rôle est retenu. Rangée après les
+        # performances, elle se perdait dès que l'artiste avait AUSSI fait des
+        # chœurs (67 fiches « Additional Vocals » dont les crédits disent
+        # producteur, mesuré). Les autres rôles restent dans les crédits.
         if aid in self._collect_artist_ids(song.get("producer_artists")):
             return ("secondary", "Producer")
+        perfs = [
+            p
+            for p in song.get("custom_performances") or []
+            if isinstance(p, dict) and aid in self._collect_artist_ids(p.get("artists"))
+        ]
+        for perf in perfs:
+            if map_role(perf.get("label") or "") in _PRODUCER_ROLES:
+                return ("secondary", perf.get("label"))
+        # Rôles fins (chant additionnel, chœurs, etc.)
+        if perfs:
+            return ("secondary", perfs[0].get("label") or "Contribution")
         if aid in self._collect_artist_ids(song.get("writer_artists")):
             return ("secondary", "Writer")
         return None
@@ -364,6 +389,7 @@ class GeniusAPI:
         include_features: bool = False,
         include_secondary: bool = False,
         roles_connus: dict | None = None,
+        include_prods: bool = False,
     ) -> list[Track]:
         """Méthode manuelle de récupération (fallback) — gère aussi les featurings.
 
@@ -426,7 +452,7 @@ class GeniusAPI:
                             and aid not in primary_ids
                             and not is_collab_page
                         ):
-                            if not include_secondary:
+                            if not (include_secondary or include_prods):
                                 logger.debug(
                                     f"Ignoré (rôle secondaire/tag douteux): "
                                     f"{song.get('title')} — primary='{primary.get('name')}' "
@@ -456,6 +482,12 @@ class GeniusAPI:
                             elif kind == "feat":
                                 is_feat = True  # vrai feat sous-déclaré par la liste
                             else:  # 'secondary'
+                                est_prod = map_role(role or "") in _PRODUCER_ROLES
+                                if not (include_prods if est_prod else include_secondary):
+                                    logger.debug(
+                                        f"Ignoré (rôle {role} non demandé): {song.get('title')}"
+                                    )
+                                    continue
                                 is_feat = True
                                 secondary_role = role
                                 logger.info(
@@ -780,11 +812,14 @@ class GeniusAPI:
         name = album.get("name") if isinstance(album, dict) else None
         album_id = album.get("id") if isinstance(album, dict) else None
         if name and not track.album and not track.album_override:  # édition manuelle respectée
-            track.album = str(name)
+            # Le marqueur d'inédit se retire de la FICHE comme de l'observation :
+            # seule l'observation l'était, et « 13* » vivait dans `tracks.album`
+            # face à « 13 » dans `releases` (2026-09-24).
+            track.album = titre_sans_marqueur(str(name))
             track._album_from_api = True
             track.release_observations.append(
                 ReleaseObservation(
-                    title=titre_sans_marqueur(str(name)),
+                    title=track.album,
                     source="genius",
                     external_release_id=album_id,
                     external_track_id=track.genius_id,

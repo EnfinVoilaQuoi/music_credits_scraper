@@ -363,7 +363,15 @@ def appliquer(runtime: Runtime, artist: Artist) -> BilanCertifs:
         bilan.interrompu("aucun morceau chargé")
         return bilan
     reset_cert_matcher()
-    bilan.certifies = apply_certifications(artist, artist.tracks, get_cert_matcher())
+    alias = runtime.data_manager.noms_de_lartiste(artist.id, artist.name) - {artist.name}
+    formations = runtime.data_manager.noms_des_formations(artist.id)
+    bilan.certifies = apply_certifications(
+        artist,
+        artist.tracks,
+        get_cert_matcher(),
+        alias=tuple(sorted(alias)),
+        formations=tuple(sorted(formations)),
+    )
     for track in artist.tracks:
         runtime.data_manager.record_pending(track)
     oublies = runtime.data_manager.certifications_non_enregistrees(artist.tracks)

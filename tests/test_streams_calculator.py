@@ -95,3 +95,30 @@ class TestVariantes:
         assert total_discographie([t]) == calculate_total_streams(1000, None) + int(
             100 / SPOTIFY_SHARE
         )
+
+
+class TestCumulSelonLaParticipation:
+    """Le bandeau et la Timeline ont la même règle (2026-09-25)."""
+
+    def _t(self, sp, **kw):
+        from src.models.track import Track
+
+        t = Track(title="X", **kw)
+        t.streams.spotify_streams = sp
+        return t
+
+    def test_seuls_principal_feat_et_formations_comptent(self):
+        from src.utils.streams_calculator import total_discographie
+
+        principal = self._t(400)
+        feat = self._t(400, is_featuring=True, primary_artist_name="Autre")
+        prod = self._t(
+            400, is_featuring=True, primary_artist_name="Autre", secondary_role="Producer"
+        )
+        auteur = self._t(
+            400, is_featuring=True, primary_artist_name="Autre", secondary_role="Writer"
+        )
+        groupe = self._t(400, is_featuring=True, primary_artist_name="IAM", secondary_role="Writer")
+        tous = [principal, feat, prod, auteur, groupe]
+        assert total_discographie(tous, ("Shurik’n",), ("IAM",)) == 3 * 1000
+        assert total_discographie(tous, ("Shurik’n",), ("IAM",), prods=True) == 4 * 1000

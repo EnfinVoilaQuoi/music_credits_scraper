@@ -28,7 +28,7 @@ from src.utils.cert_normalize import (
     PROGRAMME_LATIN,
     RANG_PALIERS,
     date_riaa,
-    decouper_multiplicateur,
+    palier_effectif,
     programme_riaa,
     riaa_level,
 )
@@ -382,7 +382,7 @@ class CertMatcher:
         lvl = (level or "").strip().lower()
         if lvl in _RANK:
             return _RANK[lvl]
-        multiplicateur, palier = decouper_multiplicateur(lvl)
+        multiplicateur, palier = palier_effectif(lvl)
         if multiplicateur > 1 and palier in _RANK:
             # Un cran au-dessus du palier simple, sans jamais le dépasser.
             return _RANK[palier] - min(multiplicateur - 1, 9) * 0.1

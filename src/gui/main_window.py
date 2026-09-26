@@ -780,21 +780,23 @@ class MainWindow:
                         calculate_total_monthly_listeners,
                         calculate_total_streams,
                         format_streams,
-                        streams_variantes,
+                        morceaux_comptes,
+                        total_discographie,
                     )
 
-                    total_cumul = 0
-                    tracks_with_streams = 0
-                    for t in active_tracks:
-                        est = calculate_total_streams(
-                            t.streams.spotify_streams, t.streams.ytm_streams
-                        )
-                        if est:
-                            total_cumul += est
-                            tracks_with_streams += 1
-                        # Les versions alternatives (e28) comptent dans le cumul
-                        # de la discographie, pas dans celui du morceau.
-                        total_cumul += calculate_total_streams(streams_variantes(t), None) or 0
+                    # Même règle que la Timeline (`participation`) : principaux
+                    # et feats, formations confirmées comprises ; ni rôles
+                    # secondaires ni prods (2026-09-25 — le bandeau sommait tout).
+                    noms = self.data_manager.noms_de_lartiste(
+                        self.current_artist.id, self.current_artist.name
+                    )
+                    formations = self.data_manager.noms_des_formations(self.current_artist.id)
+                    total_cumul = total_discographie(active_tracks, noms, formations)
+                    tracks_with_streams = sum(
+                        1
+                        for t in morceaux_comptes(active_tracks, noms, formations)
+                        if calculate_total_streams(t.streams.spotify_streams, t.streams.ytm_streams)
+                    )
                     sp_ml = self.current_artist.spotify_monthly_listeners
                     yt_ml = self.current_artist.ytm_monthly_listeners
                     total_ml = calculate_total_monthly_listeners(sp_ml, yt_ml)

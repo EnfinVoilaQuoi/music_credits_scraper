@@ -8,9 +8,14 @@ colonne (`to_column_dict`), byte-compatible avec `cert_matcher._format` (contrat
 mapper/GUI inchangé). Ne PERSISTE pas : l'appelant (worker retrieval, E7h) save.
 """
 
+import re
+
 from src.models import Artist, Track
 from src.models.certification import Certification
+from src.models.track import CreditRole
 from src.utils.logger import get_logger
+from src.utils.participation import Participation, participation
+from src.utils.title_matching import names_match_as_words
 from src.utils.version_descriptors import Kind, meme_prise, parse_variant, socle_normalise
 
 logger = get_logger(__name__)
@@ -43,6 +48,74 @@ def _extra_artists(track: Track, artist_name: str) -> list[str]:
     return extra
 
 
+#: Séparateurs d'un crédit d'artiste multiple (« ¥$, Kanye West & Ty Dolla $ign »).
+_SEPARATEURS_CREDIT = re.compile(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bx\b|\bet\b|\band\b)\s*", re.I)
+
+
+#: Suffixe de désambiguïsation Genius (« No Limit (FRA) », « UZI (FRA 77) ») :
+#: absent des crédits des organismes, il empêchait de reconnaître l'artiste.
+_SUFFIXE_GENIUS = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _noms_du_credit(credit: str | None) -> list[str]:
+    noms = (_SUFFIXE_GENIUS.sub("", n).strip() for n in _SEPARATEURS_CREDIT.split(credit or ""))
+    return [n for n in noms if n]
+
+
+def _qui_chercher(
+    track: Track, artist_name: str, alias=(), formations=()
+) -> tuple[str | None, list[str], list[str]]:
+    """(artiste recherché, artistes supplémentaires, noms EXIGÉS dans le crédit).
+
+    Depuis e36 un artiste a des fiches HOMONYMES (2026-09-25) : les reprises où
+    il n'est qu'AUTEUR (`secondary_role` — Glee Cast « American Boy ») et des
+    feats homonymes (Teairra Marí « Diamonds » ft. Kanye). Chercher par SON nom
+    leur donnait les certifs de l'enregistrement certifié : la BPI 4x Platinum
+    d'Estelle ft. Kanye sur la reprise de Glee Cast (382 fiches secondaires,
+    1 453 entrées mesurées).
+
+    · rôle secondaire → AUCUNE certif, sauf la PRODUCTION (décision
+      utilisateur 2026-09-25 : « si t'as fait la prod, t'as participé
+      activement au morceau ») ; alors par l'INTERPRÈTE seul — la certif est
+      celle de SON enregistrement, jamais celle d'un homonyme ;
+    · feat d'un autre artiste → la certif doit créditer cet artiste principal
+      OU l'un des autres invités du morceau : le principal Genius est parfois un
+      PROJET ou un groupe (« 13 Organisé », « JACKBOYS », « 93 Empire ») que
+      l'organisme ne crédite pas — il nomme Jul, Young Thug, Sofiane. Une certif
+      qui ne crédite que NOTRE artiste va à sa propre fiche homonyme.
+
+    La décision vient de `participation` (une fonction pour toute l'app).
+    """
+    noms = (artist_name, *alias)
+    p = participation(track, noms, formations)
+    principal = track.primary_artist_name
+    if p == Participation.SECONDAIRE:
+        return None, [], []
+    if p == Participation.PROD:
+        return (principal or None), [], []
+    extra = _extra_artists(track, artist_name)
+    extra += [a for a in alias if a != artist_name and a not in extra]
+    if p == Participation.PRINCIPAL:
+        # Y compris l'interprète sous un alias confirmé (« Ye » pour Kanye West).
+        return artist_name, extra, []
+    exiges: list[str] = []
+    if principal:
+        exiges = _noms_du_credit(principal)
+        exiges += [
+            n
+            for c in track.credits
+            if c.role == CreditRole.FEATURED
+            for n in _noms_du_credit(c.name)
+            if not names_match_as_words(artist_name, n)
+        ]
+    return artist_name, extra, exiges
+
+
+def _credite(match: dict, exiges: list[str]) -> bool:
+    credit = match.get("artist_name", "") or ""
+    return not exiges or any(names_match_as_words(n, credit) for n in exiges)
+
+
 def _poser_plus_haute(track: Track) -> None:
     """Champs dérivés de la plus haute certification RÉELLE (jamais un écho)."""
     reelles = track.certs.reelles
@@ -71,6 +144,13 @@ def _socle_de(version: Track, socles: dict[str, Track], par_id: dict[int, Track]
     return socles.get(socle_normalise(version.title))
 
 
+def _rang_de_socle(track: Track) -> int:
+    role = (track.secondary_role or "").strip().lower()
+    if not role:
+        return 0
+    return 2 if role in ("cover", "remix", "remixer") else 1
+
+
 def echos_de_versions(tracks: list[Track]) -> int:
     """Une certification d'une VERSION reste la sienne ; le socle en porte l'ÉCHO.
 
@@ -89,8 +169,13 @@ def echos_de_versions(tracks: list[Track]) -> int:
     Rend le nombre d'échos posés. Fonction pure sur les objets.
     """
     par_id = {t.id: t for t in tracks if t.id is not None}
+    # À titre égal, l'original est la fiche qui porte l'enregistrement de
+    # l'artiste, pas un homonyme (e36) : la reprise de Coone « All Of The
+    # Lights » passait avant le vrai morceau et recevait les échos du Remix
+    # (2026-09-26). Rang : sans rôle secondaire < rôle secondaire < version d'un
+    # tiers (reprise, remix) ; l'ordre de la liste départage le reste.
     socles: dict[str, Track] = {}
-    for t in tracks:
+    for t in sorted(tracks, key=_rang_de_socle):
         if parse_variant(t.title).kind == Kind.NONE:
             socles.setdefault(socle_normalise(t.title), t)
     versions = [t for t in tracks if parse_variant(t.title).kind != Kind.NONE]
@@ -124,7 +209,9 @@ def echos_de_versions(tracks: list[Track]) -> int:
     return n
 
 
-def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
+def apply_certifications(
+    artist: Artist, tracks: list[Track], matcher, *, alias=(), formations=()
+) -> int:
     """Pose `track.certs.entries`/`album_certifications` depuis le matcher unifié.
 
     Matérialise chaque correspondance en `Certification` (frontière typée) puis la
@@ -136,14 +223,27 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
 
     enriched = 0
     echecs = 0
-    album_cache: dict[str, list[dict]] = {}  # évite de re-chercher le même album
+    album_cache: dict[tuple, list[dict]] = {}  # évite de re-chercher le même album
 
     for track in tracks:
         try:
             title = _normalize_title(track.title)
-            extra = _extra_artists(track, artist.name)
+            cherche, extra, exiges = _qui_chercher(track, artist.name, alias, formations)
 
-            matches = matcher.get_track_certifications(artist.name, title, extra_artists=extra)
+            matches = (
+                matcher.get_track_certifications(cherche, title, extra_artists=extra)
+                if cherche
+                else []
+            )
+            matches = [m for m in matches if _credite(m, exiges)]
+            if parse_variant(track.title).kind != Kind.NONE:
+                # Une VERSION ne prend pas les certifs de l'original : le
+                # rapprochement par titre tronqué donnait « DOUBLE PONEY » à
+                # « Double Poney (Instrumental) » (315 fiches, 1 023 entrées,
+                # 2026-09-26) — puis l'écho les renvoyait sur l'original.
+                matches = [
+                    m for m in matches if parse_variant(m.get("title") or "").kind != Kind.NONE
+                ]
             track.certs.entries = [Certification.from_match(m).to_column_dict() for m in matches]
             # Recalculé : `save_track` n'écrit plus ces colonnes, c'est
             # `DataManager.record_pending` qui le fera après le save.
@@ -153,13 +253,12 @@ def apply_certifications(artist: Artist, tracks: list[Track], matcher) -> int:
             if track.certs.reelles:
                 enriched += 1
 
-            if track.album:
-                if track.album not in album_cache:
-                    album_cache[track.album] = matcher.get_album_certifications(
-                        artist.name, track.album
-                    )
+            if track.album and cherche:
+                cle_cache = (cherche, track.album)
+                if cle_cache not in album_cache:
+                    album_cache[cle_cache] = matcher.get_album_certifications(cherche, track.album)
                 track.certs.album_entries = [
-                    Certification.from_match(m).to_column_dict() for m in album_cache[track.album]
+                    Certification.from_match(m).to_column_dict() for m in album_cache[cle_cache]
                 ]
             else:
                 track.certs.album_entries = []

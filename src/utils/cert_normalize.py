@@ -689,6 +689,28 @@ def decouper_multiplicateur(niveau: str) -> tuple[int, str]:
     return 1, lvl
 
 
+#: Le palier DIAMANT de chaque vocabulaire qui écrit ses platines en « Nx ».
+_DIAMANT_DU_PLATINE = {"platinum": "diamond", "platino": "diamante", "platine": "diamant"}
+
+
+def palier_effectif(niveau: str) -> tuple[float, str]:
+    """(multiplicateur, palier) pour ORDONNER : « 12x Platinum » → (1.2, diamond).
+
+    Un Diamant vaut dix Platines — RIAA classique (Diamond = 10 000 000 =
+    10 × Platinum) comme latine (Diamante 600 000 = 10 × Platino 60 000). Or la
+    RIAA continue d'écrire « 11x », « 12x Platinum » APRÈS le Diamond, et un
+    rang tiré du seul palier nu classait ces certifications SOUS le Diamond :
+    « Ni**as in Paris » affichait Diamond au lieu de 12x Platinum (2026-09-24).
+    Ramener « N×Platine » (N ≥ 10) à N/10 Diamant rend l'ordre juste sans
+    toucher aux libellés ; SNEP écrit ses paliers en toutes lettres, et BRMA/BPI
+    n'ont pas de Diamant : l'ordre relatif de leurs « Nx » est inchangé.
+    """
+    multiplicateur, palier = decouper_multiplicateur(niveau)
+    if multiplicateur >= 10 and palier in _DIAMANT_DU_PLATINE:
+        return multiplicateur / 10, _DIAMANT_DU_PLATINE[palier]
+    return multiplicateur, palier
+
+
 FORMAT_JOUR_CLI = "JJ-MM-AAAA"
 _JOUR_CLI = re.compile(r"^\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\s*$")
 _JOUR_ISO = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$")

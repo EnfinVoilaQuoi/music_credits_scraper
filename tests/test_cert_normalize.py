@@ -221,3 +221,15 @@ class TestMultiplicateur:
     def test_un_multiplicateur_de_un_est_absorbe(self):
         assert riaa_level("1x Platinum") == "Platinum"
         assert riaa_level("1x Gold") == "Gold"
+
+
+def test_palier_effectif_ramene_dix_platines_a_un_diamant():
+    from src.utils.cert_artist import _ordre_palier
+    from src.utils.cert_normalize import palier_effectif
+
+    assert palier_effectif("12x Platinum") == (1.2, "diamond")
+    assert palier_effectif("10x Platino") == (1.0, "diamante")
+    assert palier_effectif("9x Platinum") == (9, "platinum")
+    assert palier_effectif("Or") == (1, "or")
+    # L'échelle affichée d'un titre suit le même ordre.
+    assert _ordre_palier("12x Platinum") > _ordre_palier("Diamond") > _ordre_palier("9x Platinum")

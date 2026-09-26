@@ -385,6 +385,15 @@ class TestApplicationDesMetadonnees:
         assert t.youtube_url_source == "genius_media"
         assert len(t.relationships) == 1
 
+    def test_marqueur_d_inedit_retire_de_la_fiche_comme_de_la_parution(self):
+        """« H1* » : l'observation était nettoyée, pas `track.album` — le même
+        disque s'appelait « H1 » dans `releases` et « H1* » dans `tracks`."""
+        api = self._api_avec({"album": {"id": 9, "name": "H1*"}})
+        t = _track()
+        assert api.apply_song_metadata(t) is True
+        assert t.album == "H1"
+        assert [o.title for o in t.release_observations] == ["H1"]
+
     def test_sans_genius_id(self):
         api = self._api_avec({})
         assert api.apply_song_metadata(_track(genius_id=None)) is False
@@ -494,6 +503,28 @@ class TestVerificationDuCredit:
     def test_producteur(self):
         api = self._api_avec({"producer_artists": [{"id": 42}]})
         assert api._verify_artist_credit(9, 42) == ("secondary", "Producer")
+
+    def test_la_production_prime_sur_les_choeurs(self):
+        """Producteur ET choriste : la production est un statut à part, elle
+        l'emporte (elle se perdait sous « Additional Vocals », 2026-09-25)."""
+        api = self._api_avec(
+            {
+                "producer_artists": [{"id": 42}],
+                "custom_performances": [{"label": "Additional Vocals", "artists": [{"id": 42}]}],
+            }
+        )
+        assert api._verify_artist_credit(9, 42) == ("secondary", "Producer")
+
+    def test_une_performance_de_production_prime_sur_les_autres(self):
+        api = self._api_avec(
+            {
+                "custom_performances": [
+                    {"label": "Additional Vocals", "artists": [{"id": 42}]},
+                    {"label": "Co-Producer", "artists": [{"id": 42}]},
+                ]
+            }
+        )
+        assert api._verify_artist_credit(9, 42) == ("secondary", "Co-Producer")
 
     def test_auteur(self):
         api = self._api_avec({"writer_artists": [{"id": 42}]})

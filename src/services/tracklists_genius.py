@@ -103,7 +103,7 @@ def piste_depuis_tracklist(entree: dict, album: dict, artist: Artist) -> Track |
 
     song = entree.get("song") or {}
     titre_brut = song.get("title") or ""
-    if not song.get("id") or not titre_brut or page_non_morceau(titre_brut):
+    if not song.get("id") or not titre_brut or page_non_morceau(titre_brut, album.get("name")):
         return None
     aid = int(artist.genius_id)
     principaux = GeniusAPI._collect_artist_ids(song.get("primary_artists"))

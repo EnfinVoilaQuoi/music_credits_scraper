@@ -722,6 +722,7 @@ class MainWindow:
                     1 for c in constats if c.verdict is Verdict.INCOMPLET
                 )
                 tracks_inedits = sum(1 for c in constats if c.verdict is Verdict.INEDIT)
+                tracks_sans_info = sum(1 for c in constats if c.verdict is Verdict.SANS_INFO)
                 disques_sans_type = len(
                     {
                         t.album
@@ -769,6 +770,9 @@ class MainWindow:
                     # Rien ne leur est exigé : ils ne sont pas « à valider »,
                     # mais les taire ferait croire à un total incohérent.
                     line2 += f" (+{tracks_inedits} inédits 🔒)"
+                if tracks_sans_info:
+                    # Pages lues qui ne disent rien : à vérifier, pas à valider.
+                    line2 += f" (+{tracks_sans_info} sans info 🕳️)"
                 if disques_sans_type:
                     # Le trou qui empêche d'exiger les timestamps, DIT pour
                     # qu'il soit réparable (clic droit → Type, vue Albums).

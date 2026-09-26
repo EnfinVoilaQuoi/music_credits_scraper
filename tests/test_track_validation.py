@@ -211,8 +211,9 @@ class TestHorsDuCompte:
         assert not tv.est_inedit(morceau(unreleased=None))
         assert not tv.est_inedit(morceau(unreleased=False))
 
-    def test_les_quatre_icones_sont_distinctes(self):
-        assert len(set(tv.ICONES.values())) == 4
+    def test_une_icone_distincte_par_verdict(self):
+        assert set(tv.ICONES) == set(tv.Verdict)
+        assert len(set(tv.ICONES.values())) == len(tv.Verdict)
 
 
 def test_une_fiche_mal_formee_ne_casse_pas_la_table():

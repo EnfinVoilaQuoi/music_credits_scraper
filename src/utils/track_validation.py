@@ -30,7 +30,8 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from src.utils.logger import get_logger
-from src.utils.title_matching import cle_album
+from src.utils.paroles_genius import inedit_par_le_texte, texte_utile
+from src.utils.title_matching import cle_album, normalize_name
 from src.youtube.track_classifier import is_show_performance
 
 logger = get_logger(__name__)
@@ -45,6 +46,7 @@ class Verdict(StrEnum):
     VALIDE = "valide"
     INCOMPLET = "incomplet"
     INEDIT = "inedit"
+    SANS_INFO = "sans_info"
     DESACTIVE = "desactive"
 
 
@@ -67,6 +69,7 @@ ICONES = MappingProxyType(
         Verdict.VALIDE: "✅",
         Verdict.INCOMPLET: "⚠️",
         Verdict.INEDIT: "🔒",
+        Verdict.SANS_INFO: "🕳️",
         Verdict.DESACTIVE: "❌",
     }
 )
@@ -135,7 +138,11 @@ def credits_confirmes(track) -> bool:
     ne couvre que 14 % du corpus.
     """
     sources = {(c.source or "").lower() for c in track.credits}
-    return any(s.startswith("genius") for s in sources) and "discogs" in sources
+    # Les crédits PROVISOIRES de l'API Genius (`credits_genius_api.SOURCE_API`,
+    # en dur : module sans import de modèle) ne confirment rien — le scrape
+    # n'est pas encore passé.
+    genius = any(s.startswith("genius") and s != "genius_api" for s in sources)
+    return genius and "discogs" in sources
 
 
 def audio_valide(track) -> tuple[bool, bool]:
@@ -173,6 +180,52 @@ def streams_valides(track) -> bool:
 def est_inedit(track) -> bool:
     """Constat « non sorti » (e34). Tri-état : seul `True` compte."""
     return getattr(track, "unreleased", None) is True
+
+
+#: En dessous, le « texte » n'en est pas un : « (...) », « a », « ,,e, ».
+_PAROLES_SIGNIFICATIVES = 20
+
+
+def page_lue(track) -> bool:
+    """Paroles ET crédits de la page Genius ont été lus. Les paroles seules ne
+    suffisent pas : *Tu voulais du rap (Interlude)* avait ses paroles lues et
+    ses crédits jamais (Népal, Doums, Lomepal) — vide en base, pas sur Genius.
+    `last_scraped` date la lecture des crédits depuis le 2026-09-26 ; avant,
+    un crédit Genius en base en est la seule preuve."""
+    if track.lyrics.scraped_at is None:
+        return False
+    return track.last_scraped is not None or any(
+        (c.source or "") == "genius" for c in track.credits
+    )
+
+
+def sans_info(track) -> bool:
+    """Page Genius LUE qui ne dit rien (2026-09-26) : ni présence sur une
+    plateforme, ni album, ni vidéo, ni bio, ni paroles utiles, ni crédit d'une
+    autre personne que l'artiste. Cas type : *NICE THAT* (texte « (...) »).
+
+    Calculé, jamais stocké, et seulement APRÈS lecture (`page_lue`) : avant,
+    les vrais inédits sont vides aussi (*Real shit*, *BLEED IT*). Tout ce qui
+    porte une info suffit à sortir de la catégorie (décisions utilisateur) :
+    un crédit d'un tiers (« All Night », feat. non sorti avec Roddy Ricch), un
+    ALBUM (l'interlude de Népal sur *La folie des glandeurs*), une VIDÉO — au
+    risque de garder une poubelle à trier plutôt que perdre un vrai morceau (les
+    freestyles de Kid Cudi n'ont que « Kid Cudi: » en texte). Un placeholder
+    d'inédit (« Unreleased ») est un constat : 🔒, pas 🕳️. « Lyrics from
+    snippet » seul n'est pas un texte (`paroles_genius.texte_utile`)."""
+    if not page_lue(track) or track.lyrics.instrumental:
+        return False
+    if inedit_par_le_texte(track.lyrics.text):
+        return False
+    if track.spotify_id or track.deezer_id or track.isrc or track.streams.spotify_streams:
+        return False
+    if track.album or track.youtube_url or (track.anecdotes or "").strip():
+        return False
+    texte = "".join(ch for ch in texte_utile(track.lyrics.text) if ch.isalnum())
+    if len(texte) >= _PAROLES_SIGNIFICATIVES:
+        return False
+    artiste = normalize_name(track.artist.name) if track.artist else ""
+    return all(normalize_name(c.name) == artiste for c in track.credits)
 
 
 def sur_un_album_de_lartiste(track, ctx: Contexte) -> bool | None:
@@ -241,6 +294,15 @@ def evaluer(track, ctx: Contexte | None = None) -> Constat:
     try:
         if getattr(track, "id", None) is not None and track.id in ctx.desactives:
             return Constat(verdict=Verdict.DESACTIVE, compte_a_valider=False)
+        if sans_info(track):
+            return Constat(
+                verdict=Verdict.SANS_INFO,
+                compte_a_valider=False,
+                details=(
+                    "Page Genius sans aucune info (ni plateforme, ni bio, ni paroles, "
+                    "ni autre crédit) — à vérifier",
+                ),
+            )
         if est_inedit(track):
             return Constat(
                 verdict=Verdict.INEDIT,

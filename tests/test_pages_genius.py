@@ -34,6 +34,49 @@ class TestPageNonMorceau:
         """Mesuré sur toute la base : 9 pages retenues, aucun vrai morceau."""
         assert page_non_morceau(titre) is None
 
+    @pytest.mark.parametrize(
+        "titre",
+        [
+            "Slavery Was a Choice Pt. 1 [May 1, 2018]",
+            "Oxford Lecture",
+            "2016 MTV VMAs Speech",
+            "Backstage SNL Rant",
+            "Clique.tv Interview",
+            "Interview Metronews - Futur 2.0",
+            "Yeezus Tour Setlist",
+            "Rodeo Tour Dates",
+            ".WAV RADIO EP 8 Tracklist",
+            "Twitter Note 2 (2015)",
+            "Hi, I’m Scott (TEDx Talk)",
+            "Bloqués - Liste des épisodes",
+            "Tatouages de Booba",
+            "Rodeo Thank You Letter",
+            "Reebok Commercial",
+        ],
+    )
+    def test_non_musique(self, titre):
+        """Décision utilisateur 2026-09-26 : pas d'interviews en base."""
+        assert page_non_morceau(titre) == "non-musique"
+
+    @pytest.mark.parametrize(
+        "titre",
+        [
+            "Interview",  # skit d'album (Shurik'n, Travis Scott) : sur les plateformes
+            "Talk To Me Nice",
+            "Prayer",
+            "Double discours",
+            "Lecture aléatoire",
+            "Lettre",
+            "You Don’t Know My Name (Radio Edit)",
+            "On Sight",
+            "Freestyle Radio 1",
+            "Rentre dans le Cercle - Épisode 3",
+        ],
+    )
+    def test_morceaux_proches_gardes(self, titre):
+        """Les faux amis mesurés sur la base : ce sont des morceaux."""
+        assert page_non_morceau(titre) is None
+
 
 class TestRoleDeVersion:
     _COVER = [{"type": "cover_of", "artist": "Travis Scott", "title": "ASTROTHUNDER"}]

@@ -88,7 +88,9 @@ def classer(dm, marques: list[dict]) -> tuple[list, list, list]:
     a_traiter, collisions, deja_sortis = [], [], []
     for ligne in marques:
         propre = titre_sans_marqueur(ligne["title"])
-        pris_par = dm.titre_deja_pris(ligne["artist_id"], propre, sauf_id=ligne["id"])
+        pris_par = dm.titre_deja_pris(
+            ligne["artist_id"], propre, sauf_id=ligne["id"], homonyme_genius=True
+        )
         if ligne["spotify_id"] or ligne["spotify_streams"]:
             deja_sortis.append(ligne)
         if pris_par is not None:
@@ -155,7 +157,7 @@ def appliquer(dm, a_traiter, collisions) -> tuple[int, int]:
         if dm.record_unreleased(ligne["id"], True):
             constats += 1
     for ligne, propre in a_traiter:
-        if dm.rename_track(ligne["id"], propre):
+        if dm.rename_track(ligne["id"], propre, homonyme_genius=True):
             renommages += 1
         else:
             print(f"   ⚠️ renommage refusé pour #{ligne['id']} {ligne['title']!r}")

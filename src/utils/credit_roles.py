@@ -6,6 +6,8 @@ libellés YouTube (Topic, clip) et Spotify (« Produit par », « Écrit par »�
 
 from __future__ import annotations
 
+import re
+
 from src.models.track import CreditRole
 
 _EXACT: dict[str, CreditRole] = {
@@ -100,11 +102,24 @@ _EXACT: dict[str, CreditRole] = {
 _EXACT_LOWER: dict[str, CreditRole] = {k.lower(): v for k, v in _EXACT.items()}
 
 
+def _mots(lower: str) -> list[str]:
+    """Les MOTS d'un libellé : « Co-Producer » → ["co", "producer"]."""
+    return re.findall(r"[a-z0-9&]+", lower)
+
+
+def _commence(mots: list[str], *prefixes: str) -> bool:
+    """Un mot commence par l'un des préfixes (« mix » couvre mix/mixing/mixed,
+    jamais « remix », qui n'est pas un travail d'ingénieur de mixage)."""
+    return any(m.startswith(p) for m in mots for p in prefixes)
+
+
 def map_role(label: str) -> CreditRole:
     """Convertit un libellé de rôle en ``CreditRole``.
 
     Trois niveaux : correspondance exacte, insensible à la casse, puis
-    heuristiques par sous-chaîne (vidéo → production → ingénierie → voix → guitare).
+    heuristiques par MOTS (vidéo → production → ingénierie → voix → guitare).
+    Jamais par sous-chaîne nue : « co » ⊂ « Record Producer » en faisait un
+    co-producteur (2026-09-24).
     """
     if label in _EXACT:
         return _EXACT[label]
@@ -113,61 +128,80 @@ def map_role(label: str) -> CreditRole:
     if lower in _EXACT_LOWER:
         return _EXACT_LOWER[lower]
 
-    if "video" in lower:
-        if "director" in lower and "photography" in lower:
+    mots = _mots(lower)
+
+    if "video" in mots:
+        if "director" in mots and "photography" in mots:
             return CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY
-        if "director" in lower:
+        if "director" in mots:
             return CreditRole.VIDEO_DIRECTOR
-        if "producer" in lower:
+        if _commence(mots, "producer"):
             return CreditRole.VIDEO_PRODUCER
-        if "cinematographer" in lower:
+        if "cinematographer" in mots:
             return CreditRole.VIDEO_CINEMATOGRAPHER
-        if "camera" in lower:
+        if "camera" in mots:
             return CreditRole.VIDEO_CAMERA_OPERATOR
-        if "drone" in lower:
+        if "drone" in mots:
             return CreditRole.VIDEO_DRONE_OPERATOR
-        if "editor" in lower:
+        if "editor" in mots:
             return CreditRole.VIDEO_EDITOR
-        if "colorist" in lower:
+        if "colorist" in mots:
             return CreditRole.VIDEO_COLORIST
-        if "set decorator" in lower:
+        if "decorator" in mots:
             return CreditRole.VIDEO_SET_DECORATOR
         return CreditRole.OTHER
 
-    if "producer" in lower:
-        if "co" in lower:
+    if _commence(mots, "producer", "coproducer"):
+        if "co" in mots or "coproducer" in mots:
             return CreditRole.CO_PRODUCER
-        if "executive" in lower:
+        if "executive" in mots:
             return CreditRole.EXECUTIVE_PRODUCER
-        if "vocal" in lower:
+        if _commence(mots, "vocal"):
             return CreditRole.VOCAL_PRODUCER
         return CreditRole.PRODUCER
 
-    if "engineer" in lower:
-        if "mix" in lower:
-            return CreditRole.MIXING_ENGINEER
-        if "master" in lower:
-            return CreditRole.MASTERING_ENGINEER
-        if "record" in lower:
-            return CreditRole.RECORDING_ENGINEER
-        return CreditRole.ENGINEER
+    if _commence(mots, "engineer"):
+        assistant = _commence(mots, "assistant", "asst")
+        if _commence(mots, "mix"):
+            return CreditRole.ASSISTANT_MIXING_ENGINEER if assistant else CreditRole.MIXING_ENGINEER
+        if _commence(mots, "master"):
+            return (
+                CreditRole.ASSISTANT_MASTERING_ENGINEER
+                if assistant
+                else CreditRole.MASTERING_ENGINEER
+            )
+        if _commence(mots, "record"):
+            return (
+                CreditRole.ASSISTANT_RECORDING_ENGINEER
+                if assistant
+                else CreditRole.RECORDING_ENGINEER
+            )
+        return CreditRole.ASSISTANT_ENGINEER if assistant else CreditRole.ENGINEER
 
-    if "vocal" in lower:
-        if "lead" in lower:
+    # « Vocal Samples », « Sample Programmer », « Sampling » : un SAMPLE, pas une
+    # voix — sans ce test « Vocal Samples » tombait en VOCALS, et
+    # `participation` en faisait un feat (10 fiches, 2026-09-26).
+    if _commence(mots, "sampl"):
+        return CreditRole.SAMPLE
+
+    if _commence(mots, "vocal"):
+        if "lead" in mots:
             return CreditRole.LEAD_VOCALS
-        if "background" in lower or "backing" in lower:
+        if "background" in mots or "backing" in mots:
             return CreditRole.BACKGROUND_VOCALS
-        if "additional" in lower:
+        if "additional" in mots:
             return CreditRole.ADDITIONAL_VOCALS
         return CreditRole.VOCALS
 
-    if "guitar" in lower:
-        if "bass" in lower:
+    if _commence(mots, "guitar"):
+        if "bass" in mots:
             return CreditRole.BASS_GUITAR
-        if "acoustic" in lower:
+        if "acoustic" in mots:
             return CreditRole.ACOUSTIC_GUITAR
-        if "electric" in lower:
+        if "electric" in mots:
             return CreditRole.ELECTRIC_GUITAR
+        if "rhythm" in mots:
+            return CreditRole.RHYTHM_GUITAR
         return CreditRole.GUITAR
 
     return CreditRole.OTHER

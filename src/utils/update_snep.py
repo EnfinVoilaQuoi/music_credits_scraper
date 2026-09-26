@@ -269,6 +269,7 @@ def _parse_certifications_page(html: str) -> list:
 
     soup = BeautifulSoup(html, "html.parser")
     rows = []
+    incomplets: list[str] = []
 
     for block in soup.select("div.certification"):
         desc = block.select_one(".description")
@@ -302,9 +303,18 @@ def _parse_certifications_page(html: str) -> list:
 
         # Ligne valide seulement si les champs indispensables sont présents
         if not (artiste and titre and certif and constat):
+            incomplets.append(f"{artiste or '?'} — {titre or '?'}")
             continue
         rows.append(";".join([artiste, titre, label, categorie, certif, sortie, constat]))
 
+    if incomplets:
+        # Écartés, mais DITS (2026-09-24) : un libellé de date renommé par le
+        # site viderait chaque bloc de son constat, et l'année paraîtrait
+        # simplement vide.
+        logger.warning(
+            f"SNEP : {len(incomplets)} bloc(s) sans artiste/titre/palier/date de "
+            f"constat écarté(s), ex. {incomplets[0]}"
+        )
     return rows
 
 

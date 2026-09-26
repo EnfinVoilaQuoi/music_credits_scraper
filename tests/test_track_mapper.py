@@ -138,6 +138,17 @@ class TestCleanDuration:
     def test_invalide_defaut(self):
         assert _clean_duration("bloup") is None
 
+    def test_formes_elargies_et_positivite(self):
+        """Audit 2026-09-24 : « 1:02:30 » et « 228.6 » étaient perdus, « -5 »
+        et « 0 » acceptés comme durées."""
+        assert _clean_duration("1:02:30") == 3750
+        assert _clean_duration("228.6") == 229
+        assert _clean_duration(228.6) == 229
+        assert _clean_duration("-5") is None
+        assert _clean_duration(0) is None
+        assert _clean_duration("3:-5") is None
+        assert _clean_duration(True) is None
+
     @pytest.mark.parametrize("empty", [None, "None", "NULL", ""])
     def test_litteraux_vides(self, empty):
         assert _clean_duration(empty) is None
@@ -150,8 +161,14 @@ class TestTrackFromRow:
     def test_ligne_sans_titre_renvoie_none(self, artist):
         assert track_from_row(make_row(id=1, title=None), artist) is None
 
-    def test_titre_litteral_null_renvoie_none(self, artist):
-        assert track_from_row(make_row(id=1, title="NULL"), artist) is None
+    def test_un_titre_null_est_un_vrai_titre(self, artist):
+        """Retourné le 2026-09-25 : un morceau peut s'appeler « NULL » ou
+        « None » ; l'écarter le faisait disparaître des lectures sans trace."""
+        assert track_from_row(make_row(id=1, title="NULL"), artist).title == "NULL"
+        assert track_from_row(make_row(id=2, title="None"), artist).title == "None"
+
+    def test_titre_blanc_renvoie_none(self, artist):
+        assert track_from_row(make_row(id=1, title="   "), artist) is None
 
     def test_champs_de_base(self, artist):
         row = make_row(id=5, title="  Matrix  ", spotify_id="abc", duration="228")

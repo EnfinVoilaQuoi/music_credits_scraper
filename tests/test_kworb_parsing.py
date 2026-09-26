@@ -94,7 +94,9 @@ class TestParseEntries:
         feat = self._entries()[1]
         assert feat["is_feature"] is True
         assert feat["spotify_id"] == "BBB222"
-        assert feat["daily_streams"] == 0  # daily vide → 0
+        # Retourné le 2026-09-25 : une cellule vide est une donnée ABSENTE, pas
+        # « 0 écoute/jour » (« Madre Mia », 61 M, s'affichait à 0/jour).
+        assert feat["daily_streams"] is None
 
     def test_ligne_sans_lien_ignoree(self):
         assert len(self._entries()) == 2
@@ -145,3 +147,12 @@ class TestNamesMatch:
     def test_page_sans_nom(self):
         assert not _names_match(None, "Isha")
         assert not _names_match("", "Isha")
+
+
+def test_somme_connue():
+    from src.utils.update_kworb import somme_connue
+
+    assert somme_connue([None, None]) is None
+    assert somme_connue([]) is None
+    assert somme_connue([3, None, 4]) == 7
+    assert somme_connue([0]) == 0

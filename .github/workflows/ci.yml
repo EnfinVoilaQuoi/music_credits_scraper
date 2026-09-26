@@ -86,4 +86,4 @@ jobs:
       # couvert, jamais pour « faire un chiffre » — les fabriques paresseuses qui
       # instancient un vrai client réseau restent délibérément non couvertes.
       - name: Cliquet de couverture (hors GUI)
-        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=84
+        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=86

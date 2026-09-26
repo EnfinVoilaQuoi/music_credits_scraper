@@ -205,7 +205,9 @@ class KworbScraper:
                     {
                         "title": title,
                         "streams": streams,
-                        "daily_streams": daily or 0,
+                        # Cellule vide = PAS DE DONNÉE, pas « 0 écoute/jour » :
+                        # « Madre Mia » (61 M) s'affichait à 0/jour (2026-09-25).
+                        "daily_streams": daily,
                         "spotify_id": spotify_id,
                         "is_feature": is_feature,
                     }

@@ -37,6 +37,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from src.api.genius_api import QuotaGeniusAtteint
 from src.enrichment.observation import Observation
 from src.models import ReleaseObservation
 from src.models.track import Credit, CreditRole, Track
@@ -588,6 +589,10 @@ def accrocher_genius(ecarts: list[Ecart], artist, genius_api) -> None:
             continue
         try:
             hits = genius_api.search_songs(f"{artist.name} {e.piste.title_short or e.titre}")
+        except QuotaGeniusAtteint:
+            # Chaque écart suivant prendrait le même 429 : on s'arrête et on le DIT.
+            logger.warning("Quota Genius atteint : pages Genius non cherchées pour la suite")
+            return
         except Exception:  # noqa: BLE001 — une recherche ratée n'accroche rien, c'est tout
             logger.exception("Recherche Genius échouée")
             continue
@@ -944,6 +949,13 @@ def delier(dm, artist, e: Ecart) -> str:
             f" — id Deezer {e.piste.id} retiré, "
             f"{len(rapport['observations_retirees'])} observation(s) deezer purgée(s)"
         )
+    elif e.piste.duration and dm.forget_discography_observation(
+        track.id, "duration", "deezer", e.piste.duration
+    ):
+        # La fiche garde SON id Deezer, mais la durée écrite par ce lien (au
+        # titre seul, `_renseigner_fiche`) gagnait l'arbitrage — c'est elle que
+        # la revue contestait. Elle part avec le lien.
+        compte += f" — durée Deezer {e.piste.duration} s retirée"
     return compte
 
 

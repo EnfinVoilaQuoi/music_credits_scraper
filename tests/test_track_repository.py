@@ -235,6 +235,40 @@ class TestRenommageEtSuppression:
         assert data_manager.rename_track(morceau.id, "Déjà pris") is False
         assert _colonne(data_manager, morceau.id, "title") == ("Morceau",)
 
+    def test_homonyme_genius_distinct_accepte(self, data_manager, artiste):
+        """« Candy* » (inédit de Travis) → « Candy » quand « Candy » est un autre
+        morceau Genius (Don Toliver ft. Travis) : e36 autorise l'homonyme,
+        le renommage aussi (validé 2026-09-25)."""
+        inedit = Track(title="Candy*", artist=artiste, genius_id=11343364)
+        data_manager.save_track(inedit)
+        data_manager.save_track(Track(title="Candy", artist=artiste, genius_id=5344755))
+
+        assert (
+            data_manager.titre_deja_pris(
+                artiste.id, "Candy", sauf_id=inedit.id, homonyme_genius=True
+            )
+            is None
+        )
+        assert data_manager.rename_track(inedit.id, "Candy", homonyme_genius=True) is True
+        # Sans le drapeau (renommage manuel), la règle e36 tient.
+        assert data_manager.titre_deja_pris(artiste.id, "Candy") is not None
+
+    def test_homonyme_sans_genius_id_refuse(self, data_manager, artiste):
+        """Une fiche sans genius_id (Deezer) au même titre est vraisemblablement
+        le MÊME morceau : à fusionner, pas à dédoubler."""
+        inedit = Track(title="Candy*", artist=artiste, genius_id=11343364)
+        data_manager.save_track(inedit)
+        deezer = Track(title="Candy", artist=artiste)
+        data_manager.save_track(deezer)
+
+        assert (
+            data_manager.titre_deja_pris(
+                artiste.id, "Candy", sauf_id=inedit.id, homonyme_genius=True
+            )
+            == deezer.id
+        )
+        assert data_manager.rename_track(inedit.id, "Candy", homonyme_genius=True) is False
+
     def test_suppression(self, data_manager, morceau):
         assert data_manager.delete_track(morceau.id) is True
         assert _colonne(data_manager, morceau.id, "title") is None

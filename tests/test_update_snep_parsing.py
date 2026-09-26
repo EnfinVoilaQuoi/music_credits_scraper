@@ -134,6 +134,14 @@ class TestParseCertificationsPage:
         # Champs indispensables : artiste, titre, certif, constat
         assert _parse_certifications_page(BLOC_SANS_CONSTAT) == []
 
+    def test_bloc_ecarte_est_signale(self, caplog):
+        """Écarté, mais pas en silence (2026-09-24)."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            _parse_certifications_page(BLOC_SANS_CONSTAT)
+        assert "1 bloc(s)" in caplog.text
+
     def test_page_vide(self):
         assert _parse_certifications_page("<html><body></body></html>") == []
 

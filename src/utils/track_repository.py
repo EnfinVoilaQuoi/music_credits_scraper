@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.config import settings
 from src.enrichment.observation import Observation
 from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackVideo
+from src.models.track import CreditRole
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.corrections_fiches import credits_refuses
@@ -91,6 +92,32 @@ def source_lien_retenue(ancienne: str | None, nouvelle: str | None) -> str | Non
     if ancienne in _YT_SOURCES_PROTEGEES:
         return ancienne
     return nouvelle
+
+
+#: Condition SQL « cet homonyme est interdit » pour le RETRAIT DU MARQUEUR
+#: D'INÉDIT (`homonyme_genius=True`), la fiche renommée étant `:sauf`. Depuis
+#: e36 deux fiches Genius DIFFÉRENTES peuvent porter le même titre (« Candy* »
+#: inédit de Travis Scott, « Candy » de Don Toliver ft. Travis) — l'import le
+#: fait déjà, le marqueur étant retiré au point d'entrée. Le retrait suit donc la
+#: règle de l'index : refusé seulement si l'une des deux fiches n'a pas de
+#: `genius_id` (vraisemblablement le même morceau, à fusionner) ou s'ils sont
+#: égaux. Validé le 2026-09-25 sur les 9 collisions de `backfill_inedits`,
+#: toutes des homonymes. Un renommage MANUEL, lui, ne fabrique jamais
+#: d'homonyme (e36, « Matrix (Intro) » → « Matrix »).
+_HOMONYME_INTERDIT = (
+    "(genius_id IS NULL OR genius_id = (SELECT genius_id FROM tracks WHERE id = :sauf) "
+    "OR (SELECT genius_id FROM tracks WHERE id = :sauf) IS NULL)"
+)
+
+
+def _est_album_repere(album: str | None, titre_parution: str | None) -> bool:
+    """La parution porte-t-elle l'album REPÈRE de la fiche ? Par `cle_album`,
+    comme le rapprochement des parutions : la parution adoptée garde souvent la
+    graphie du distributeur (« DONDA », « Don't ») face à celle de Genius
+    (« Donda », « Don’t »), voire un espace final. Mesuré le 2026-09-24 : 509
+    liens sur 8 807 où l'égalité exacte ne reconnaissait pas le repère — et le
+    délien le retirait alors sans exiger de remplaçant."""
+    return bool(album and titre_parution and cle_album(album) == cle_album(titre_parution))
 
 
 class TrackRepository:
@@ -182,6 +209,12 @@ class TrackRepository:
             # mémoire est corrigé lui aussi, sans quoi il divergerait de la base
             # jusqu'au prochain rechargement.
             track.title = clean_stored_title(track.title)
+            # Même passage pour le nom de disque (2026-09-24) : Genius sert
+            # « J.O.$ » avec un espace final, `releases` et `albums` le stockent
+            # nettoyé — 130 fiches ne rejoignaient plus leur ligne `albums`
+            # (streams d'album, nature EP/Album) par l'égalité de titre.
+            if track.album is not None:
+                track.album = clean_stored_title(track.album) or None
 
             # Second point de passage unique, même principe (lot B-bis) : toute
             # durée entrant en base est ramenée en SECONDES ici. SQLite accepte
@@ -207,12 +240,15 @@ class TrackRepository:
             if existing_track:
                 track.id = existing_track["id"]
                 self._signaler_identites_concurrentes(track, existing_track)
+                if track.is_featuring is None:
+                    # L'objet reflète ce que la base garde (COALESCE ci-dessous).
+                    track.is_featuring = bool(existing_track["is_featuring"])
                 # NB : plus de « préservation » ici. Les anciens blocs gardés par
                 # `not hasattr(track, "is_featuring"/"lyrics")` étaient morts (champs
                 # de la dataclass → hasattr toujours vrai) et, de toute façon,
                 # redondants : les paroles sont préservées par le COALESCE de
-                # l'UPDATE ci-dessous, et is_featuring suit la décision documentée
-                # « le track en mémoire fait foi » (écrasé SANS COALESCE). La fusion
+                # l'UPDATE ci-dessous, is_featuring aussi quand l'objet ne le
+                # renseigne pas (tri-état, 2026-09-25). La fusion
                 # en mémoire des données enrichies se fait en amont côté worker
                 # (gui/workers/retrieval.py).
 
@@ -292,10 +328,10 @@ class TrackRepository:
                 # re-fetch de discographie (API Genius, champs vides) écrase
                 # les données enrichies (lyrics, BPM, key, spotify_id...).
                 #
-                # DÉCISION is_featuring : seul champ écrasé SANS COALESCE (le
-                # track en mémoire fait foi pour le statut featuring au moment du
-                # save). Comportement historique conservé. Les appelants qui
-                # re-sauvent depuis l'API portent is_featuring sur l'objet.
+                # is_featuring : COALESCE depuis le 2026-09-25 (tri-état). Un
+                # True/False EXPLICITE écrase toujours ; seul « non renseigné »
+                # (None, un `Track` neuf) préserve la base. Une transition
+                # voulue sans reconstruire l'objet : `record_relation_artiste`.
                 conn.execute(
                     text("""
                     UPDATE tracks
@@ -345,7 +381,7 @@ class TrackRepository:
                         spotify_url = COALESCE(:spotify_url, spotify_url),
                         youtube_url = COALESCE(:youtube_url, youtube_url),
                         youtube_url_source = COALESCE(:youtube_url_source, youtube_url_source),
-                        is_featuring = :is_featuring,
+                        is_featuring = COALESCE(:is_featuring, is_featuring),
                         primary_artist_name = COALESCE(:primary_artist_name, primary_artist_name),
                         featured_artists = COALESCE(:featured_artists, featured_artists),
                         secondary_role = COALESCE(:secondary_role, secondary_role),
@@ -374,6 +410,8 @@ class TrackRepository:
                     params,
                 )
             else:
+                if track.is_featuring is None:
+                    track.is_featuring = False  # une création sans affirmation : principal
                 result = conn.execute(
                     text("""
                     -- E7-D1 : colonnes audio (bpm, bpm_alt, bpm_source, bpm_confidence,
@@ -398,7 +436,7 @@ class TrackRepository:
                         :deezer_id, :deezer_url, :explicit_lyrics,
                         :duration, :genre,
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
-                        :is_featuring, :primary_artist_name, :featured_artists, :secondary_role,
+                        COALESCE(:is_featuring, 0), :primary_artist_name, :featured_artists, :secondary_role,
                         :lyrics, :lyrics_scraped_at, :lyrics_source, :lyrics_synced, :lyrics_synced_source, :lyrics_synced_confidence, :has_lyrics, :anecdotes,
                         :instrumental, :unreleased,
                         :spotify_page_title,
@@ -675,10 +713,7 @@ class TrackRepository:
                         ]
 
                         # Chargement crédits (a besoin de la connexion → hors mapper)
-                        try:
-                            track.credits = self._get_track_credits(conn, row["id"])
-                        except SQLAlchemyError:
-                            track.credits = []
+                        track.credits = self._get_track_credits(conn, row["id"])
 
                         result.append(track)
 
@@ -718,10 +753,7 @@ class TrackRepository:
 
     def _get_track_credits(self, conn, track_id: int) -> list[Credit]:
         """Récupère les crédits d'un morceau (connexion Core fournie par l'appelant)."""
-        # Pas d'annotation sur `result` : `Credit` est ré-importé localement dans
-        # la boucle (avec `CreditRole`), donc traité comme variable locale — une
-        # annotation `list[Credit]` ici déclencherait F823 (réf. avant assignation).
-        result = []
+        result: list[Credit] = []
 
         try:
             credit_rows = (
@@ -729,39 +761,33 @@ class TrackRepository:
             )
 
             for row in credit_rows:
-                try:
-                    name = row["name"]
-                    role_str = row["role"]
-                    role_detail = row["role_detail"]
-                    source = row["source"] or "genius"
-
-                    if name and role_str:
-                        from src.models import Credit, CreditRole
-
-                        # Conversion du rôle string vers enum
-                        try:
-                            role = CreditRole(role_str)
-                        except ValueError:
-                            # Une valeur d'enum inconnue en base est le symptôme
-                            # « clé masquée » (2026-09-03) : elle doit se voir.
-                            logger.warning(
-                                f"Rôle de crédit inconnu en base : {role_str!r} "
-                                f"(track_id={track_id}) — classé OTHER"
-                            )
-                            role = CreditRole.OTHER
-
-                        credit = Credit(
-                            name=str(name),
-                            role=role,
-                            role_detail=role_detail,
-                            tracks=row["tracks"],
-                            source=str(source),
-                        )
-                        result.append(credit)
-
-                except (KeyError, ValueError, TypeError) as credit_error:
-                    logger.debug(f"Erreur crédit: {credit_error}")
+                name = row["name"]
+                role_str = row["role"]
+                if not (name and role_str):
                     continue
+                # Conversion du rôle string vers enum
+                try:
+                    role = CreditRole(role_str)
+                except ValueError:
+                    # Une valeur d'enum inconnue en base est le symptôme
+                    # « clé masquée » (2026-09-03) : elle doit se voir.
+                    logger.warning(
+                        f"Rôle de crédit inconnu en base : {role_str!r} "
+                        f"(track_id={track_id}) — classé OTHER"
+                    )
+                    role = CreditRole.OTHER
+                result.append(
+                    Credit(
+                        name=str(name),
+                        role=role,
+                        role_detail=row["role_detail"],
+                        tracks=row["tracks"],
+                        # `legacy` et non « genius » : une source absente ne
+                        # s'invente pas (un rescrape Genius purgerait la ligne
+                        # comme la sienne). 0 ligne concernée au 2026-09-24.
+                        source=str(row["source"] or "legacy"),
+                    )
+                )
 
         except (SQLAlchemyError, KeyError, ValueError, TypeError) as e:
             # `warning`, pas `debug` : une lecture qui casse rendrait des
@@ -942,9 +968,10 @@ class TrackRepository:
             return 0
         maintenant = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
+            posees = 0
             with self.engine.begin() as conn:
                 for track_id, valeur in lignes:
-                    conn.execute(
+                    res = conn.execute(
                         text(
                             "INSERT OR IGNORE INTO observations "
                             "(track_id, field, value, source, confidence, seen_at) "
@@ -957,8 +984,11 @@ class TrackRepository:
                             "now": maintenant,
                         },
                     )
-            logger.info(f"🧾 {len(lignes)} colonne(s) {field} déclarée(s) `legacy`")
-            return len(lignes)
+                    # Compter ce qui est POSÉ, pas ce qui est demandé : rejoué,
+                    # le script annonçait N déclarations sans rien écrire.
+                    posees += int(res.rowcount or 0)
+            logger.info(f"🧾 {posees} colonne(s) {field} déclarée(s) `legacy`")
+            return posees
         except SQLAlchemyError as e:
             logger.error(f"Erreur declarer_provenance_legacy({field}): {e}")
             return 0
@@ -1890,6 +1920,46 @@ class TrackRepository:
             logger.error(f"Erreur record_discography_observations (track_id={track_id}): {e}")
             return {}
 
+    def forget_discography_observation(self, track_id: int, field: str, source: str, value) -> bool:
+        """Retire l'observation `(field, source)` SI elle porte cette valeur, puis
+        ré-arbitre la colonne (rien ne reste ⇒ NULL, comme `clear_track_deezer_id`).
+
+        Pendant de `record_discography_observations` pour une valeur dont on peut
+        MONTRER l'origine : `ecarts_deezer.delier` défait le lien d'une piste
+        Deezer qui n'est pas l'id de la fiche, et sa durée — écrite au lien, et
+        gagnante de l'arbitrage — restait en colonne après le délien (2026-09-24).
+        Une valeur différente vient d'une autre écriture de la même source : on
+        n'y touche pas.
+        """
+        colonne = self.COLONNES_DISCOGRAPHIE.get(field)
+        if colonne is None:
+            raise ValueError(f"champ non arbitrable : {field!r}")
+        try:
+            with self.engine.begin() as conn:
+                actuelle = conn.execute(
+                    text(
+                        "SELECT value FROM observations "
+                        "WHERE track_id = :tid AND field = :field AND source = :src"
+                    ),
+                    {"tid": track_id, "field": field, "src": source},
+                ).scalar()
+                if actuelle is None or str(actuelle) != str(value):
+                    return False
+                conn.execute(
+                    text(
+                        "DELETE FROM observations "
+                        "WHERE track_id = :tid AND field = :field AND source = :src"
+                    ),
+                    {"tid": track_id, "field": field, "src": source},
+                )
+                self._ecrire_colonnes_discographie(
+                    conn, track_id, self._arbitrer_discographie(conn, track_id, {field})
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur forget_discography_observation({track_id}, {field}): {e}")
+            return False
+
     def record_duration_observation(
         self, track_id: int, seconds: int, source: str, seen_at=None
     ) -> bool:
@@ -2153,7 +2223,7 @@ class TrackRepository:
                     ).scalar()
                     if reste:
                         continue
-                    if ligne["album"] and ligne["album"] == lien["title"]:
+                    if _est_album_repere(ligne["album"], lien["title"]):
                         rapport["parution_reperee"] = lien["title"]
                         continue
                     conn.execute(
@@ -2985,7 +3055,7 @@ class TrackRepository:
                 )
                 if current is None:
                     return "missing"
-                is_reference = bool(current["album"] and current["album"] == current["title"])
+                is_reference = _est_album_repere(current["album"], current["title"])
                 if is_reference and replacement_release_id is None and not clear_reference:
                     return "needs_replacement"
                 if replacement_release_id is not None:
@@ -3436,7 +3506,14 @@ class TrackRepository:
             logger.error(f"Erreur record_unreleased (track_id={track_id}): {e}")
             return False
 
-    def titre_deja_pris(self, artist_id: int, titre: str, sauf_id: int | None = None) -> int | None:
+    def titre_deja_pris(
+        self,
+        artist_id: int,
+        titre: str,
+        sauf_id: int | None = None,
+        *,
+        homonyme_genius: bool = False,
+    ) -> int | None:
         """L'id du morceau de CET artiste qui porte déjà ce titre, ou None.
 
         `UNIQUE(title, artist_id)` le refuserait de toute façon — mais un
@@ -3449,7 +3526,9 @@ class TrackRepository:
                 ligne = conn.execute(
                     text(
                         "SELECT id FROM tracks WHERE artist_id = :aid AND title = :t "
-                        "AND (:sauf IS NULL OR id != :sauf) LIMIT 1"
+                        "AND (:sauf IS NULL OR id != :sauf)"
+                        + (" AND " + _HOMONYME_INTERDIT if homonyme_genius else "")
+                        + " LIMIT 1"
                     ),
                     {"aid": artist_id, "t": clean_stored_title(titre), "sauf": sauf_id},
                 ).scalar()
@@ -3458,7 +3537,7 @@ class TrackRepository:
             logger.error(f"Erreur titre_deja_pris({titre!r}): {e}")
             return None
 
-    def rename_track(self, track_id: int, new_title: str) -> bool:
+    def rename_track(self, track_id: int, new_title: str, *, homonyme_genius: bool = False) -> bool:
         """Renomme un morceau en base (ex. « Matrix (Intro) » → « Matrix » pour
         aligner sur Kworb). Échoue si le titre existe déjà pour l'artiste
         (contrainte UNIQUE(title, artist_id)).
@@ -3471,11 +3550,18 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 # Depuis e36 le titre n'est plus UNIQUE en base (homonymes de
                 # genius_id différents) : le refus qu'assurait la contrainte est
-                # explicite ici, sinon un renommage fabriquerait un homonyme.
+                # explicite ici. Seul le retrait du marqueur d'inédit
+                # (`homonyme_genius`) admet un homonyme Genius distinct
+                # (`_HOMONYME_INTERDIT`).
                 deja = conn.execute(
                     text(
                         "SELECT 1 FROM tracks WHERE title = :t AND id != :id AND artist_id = "
                         "(SELECT artist_id FROM tracks WHERE id = :id)"
+                        + (
+                            " AND " + _HOMONYME_INTERDIT.replace(":sauf", ":id")
+                            if homonyme_genius
+                            else ""
+                        )
                     ),
                     {"t": titre, "id": track_id},
                 ).first()

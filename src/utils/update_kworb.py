@@ -271,6 +271,16 @@ class Index:
 _GROUPE_FINAL = re.compile(r"^(.*\S)\s*[\(\[]([^()\[\]]+)[\)\]]\s*$")
 
 
+def somme_connue(valeurs) -> int | None:
+    """PUR. Somme des valeurs CONNUES ; None si aucune ne l'est.
+
+    Kworb laisse la colonne « Daily » vide quand il n'a pas de donnée : sommer
+    avec `or 0` transformait « inconnu » en « 0 écoute par jour » (2026-09-25).
+    """
+    connues = [v for v in valeurs if v is not None]
+    return sum(connues) if connues else None
+
+
 def sous_titre(titre: str | None) -> tuple[str, str] | None:
     """PUR (6D, 2026-09-24). `(titre court normalisé, sous-titre)` quand le titre
     finit par un groupe entre parenthèses qui n'est PAS un descripteur de version
@@ -386,7 +396,7 @@ def sommer_editions(lignes: list[dict], tolerance: float = 0.02) -> dict:
             retenues.append(ligne)
     return {
         "streams": sum(r["streams"] or 0 for r in retenues),
-        "daily": sum(r.get("daily") or 0 for r in retenues),
+        "daily": somme_connue(r.get("daily") for r in retenues),
         "retenues": retenues,
         "ecartees": ecartees,
     }
@@ -1062,7 +1072,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 "title": entry["title"],
                 "spotify_id": entry.get("spotify_id"),
                 "streams": entry["streams"],
-                "daily": entry["daily_streams"] or 0,
+                "daily": entry["daily_streams"],
                 "via": via,
             }
         )
@@ -1143,14 +1153,14 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         # Streams des MORCEAUX de chaque album, tels qu'on vient de les écrire.
         # C'est la seule somme juste (cf. plus bas) : chaque enregistrement y
         # compte UNE fois, quel que soit le nombre d'éditions qui le portent.
-        par_album = defaultdict(lambda: {"streams": 0, "daily": 0})
+        par_album = defaultdict(lambda: {"streams": 0, "daily": None})
         for track in tracks:
             piste = agg_by_track.get(track.id)
             if not piste or not getattr(track, "album", None):
                 continue
             cumul = par_album[_normalize_title(track.album)]
             cumul["streams"] += piste["streams"]
-            cumul["daily"] += piste["daily"] or 0
+            cumul["daily"] = somme_connue((cumul["daily"], piste["daily"]))
 
         # Les lignes d'album de Kworb ne servent plus qu'à nommer le disque et à
         # collecter les IDs de ses éditions.
@@ -1181,7 +1191,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 agg["ids"].append(entry["spotify_id"])
         for key, agg in editions.items():
             agg["streams"] = par_album.get(key, {}).get("streams", 0)
-            agg["daily"] = par_album.get(key, {}).get("daily", 0)
+            agg["daily"] = par_album.get(key, {}).get("daily")
 
         for key, agg in editions.items():
             n_tracks = album_track_counts.get(key, 0)

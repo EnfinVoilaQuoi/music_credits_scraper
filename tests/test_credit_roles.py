@@ -4,6 +4,8 @@ Reprend les cas du scraper Genius pour garantir l'équivalence après
 l'extraction, et ajoute les libellés YouTube/Spotify.
 """
 
+import pytest
+
 from src.models.track import CreditRole
 from src.utils.credit_roles import map_role
 
@@ -86,7 +88,9 @@ class TestFuzzyRules:
         assert map_role("Vocal Producer") is CreditRole.VOCAL_PRODUCER
 
     def test_assistant_mix_engineer(self):
-        assert map_role("Assistant Mix Engineer") is CreditRole.MIXING_ENGINEER
+        # L'enum a ses rôles d'assistant : les rabattre sur l'ingénieur titulaire
+        # les rendait inatteignables (2026-09-24).
+        assert map_role("Assistant Mix Engineer") is CreditRole.ASSISTANT_MIXING_ENGINEER
 
     def test_lead_vocals(self):
         assert map_role("Lead Vocals") is CreditRole.LEAD_VOCALS
@@ -143,3 +147,57 @@ class TestYouTubeSpotifyLabels:
 
     def test_recorded_by(self):
         assert map_role("Recorded By") is CreditRole.RECORDING_ENGINEER
+
+
+class TestReplisParMots:
+    """Le repli raisonne sur des MOTS, jamais sur des sous-chaînes (2026-09-24) :
+    « co » ⊂ « Record Producer » en faisait un co-producteur."""
+
+    @pytest.mark.parametrize(
+        "label, role",
+        [
+            ("Record Producer", CreditRole.PRODUCER),
+            ("Recording Producer", CreditRole.PRODUCER),
+            ("Concert Producer", CreditRole.PRODUCER),
+            ("Additional Producer", CreditRole.PRODUCER),
+            ("Co Producer", CreditRole.CO_PRODUCER),
+            ("Coproducer", CreditRole.CO_PRODUCER),
+            ("Executive Music Producer", CreditRole.EXECUTIVE_PRODUCER),
+            ("Vocals Producer", CreditRole.VOCAL_PRODUCER),
+            ("Assistant Mixing Engineer", CreditRole.ASSISTANT_MIXING_ENGINEER),
+            ("Assistant Mastering Engineer", CreditRole.ASSISTANT_MASTERING_ENGINEER),
+            ("Assistant Recording Engineer", CreditRole.ASSISTANT_RECORDING_ENGINEER),
+            ("Assistant Engineer", CreditRole.ASSISTANT_ENGINEER),
+            ("Additional Mixing Engineer", CreditRole.MIXING_ENGINEER),
+            ("Remix Engineer", CreditRole.ENGINEER),
+            ("Audio Engineer", CreditRole.ENGINEER),
+            ("Additional Recording Engineer", CreditRole.RECORDING_ENGINEER),
+            ("Mastering Engineers", CreditRole.MASTERING_ENGINEER),
+            ("Background Vocalist", CreditRole.BACKGROUND_VOCALS),
+            ("Lead Vocalist", CreditRole.LEAD_VOCALS),
+            ("Additional Vocalist", CreditRole.ADDITIONAL_VOCALS),
+            ("Guest Vocals", CreditRole.VOCALS),
+            ("Rhythm Guitar", CreditRole.RHYTHM_GUITAR),
+            ("Lead Guitar", CreditRole.GUITAR),
+            ("Acoustic Guitars", CreditRole.ACOUSTIC_GUITAR),
+            ("Electric Guitars", CreditRole.ELECTRIC_GUITAR),
+            ("Bass Guitars", CreditRole.BASS_GUITAR),
+            ("Video Director Of Photography (2nd unit)", CreditRole.VIDEO_DIRECTOR_OF_PHOTOGRAPHY),
+            ("Video Co-Director", CreditRole.VIDEO_DIRECTOR),
+            ("Video Executive Producer", CreditRole.VIDEO_PRODUCER),
+            ("Video Lead Cinematographer", CreditRole.VIDEO_CINEMATOGRAPHER),
+            ("Video Camera Assistant", CreditRole.VIDEO_CAMERA_OPERATOR),
+            ("Video Drone Pilot", CreditRole.VIDEO_DRONE_OPERATOR),
+            ("Video Assistant Editor", CreditRole.VIDEO_EDITOR),
+            ("Video Colorist Assistant", CreditRole.VIDEO_COLORIST),
+            ("Video Set Decorator Assistant", CreditRole.VIDEO_SET_DECORATOR),
+            ("Video Stylist", CreditRole.OTHER),
+            # Un sample n'est pas une voix (2026-09-26).
+            ("Vocal Samples", CreditRole.SAMPLE),
+            ("Sample Programmer", CreditRole.SAMPLE),
+            ("Sampling", CreditRole.SAMPLE),
+            ("Decorator", CreditRole.OTHER),
+        ],
+    )
+    def test_repli(self, label, role):
+        assert map_role(label) is role

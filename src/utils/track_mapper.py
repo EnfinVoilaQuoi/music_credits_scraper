@@ -61,35 +61,40 @@ def _clean_int(value, default=None, allow_string=False):
 
 
 def _clean_duration(value, default=None):
-    """Durée en secondes (int). Supporte int, '180', '3:00' (MM:SS)."""
-    if value is None or str(value) in _NULL_LITERALS:
+    """Durée en secondes (int > 0). Supporte int, float, '180', '228.6',
+    '3:00' (MM:SS) et '1:02:30' (H:MM:SS).
+
+    Une durée nulle ou négative n'en est pas une : elle rend `default` (audit du
+    2026-09-24 — « -5 » et « 0 » passaient, « 1:02:30 » et « 228.6 » non)."""
+    if value is None or str(value) in _NULL_LITERALS or isinstance(value, bool):
         return default
 
-    if isinstance(value, int):
-        return value
-
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return default
-
-        if ":" in value:
-            try:
-                parts = value.split(":")
-                if len(parts) == 2:
-                    return int(parts[0]) * 60 + int(parts[1])
-            except (ValueError, IndexError):
-                return default
-
+    secondes = None
+    if isinstance(value, (int, float)):
+        secondes = round(value)
+    elif isinstance(value, str):
+        texte = value.strip()
         try:
-            return int(value)
+            if ":" in texte:
+                parts = [int(p) for p in texte.split(":")]
+                if len(parts) not in (2, 3) or any(p < 0 for p in parts):
+                    return default
+                secondes = 0
+                for p in parts:
+                    secondes = secondes * 60 + p
+            elif texte:
+                secondes = round(float(texte))
         except ValueError:
             return default
+    else:
+        try:
+            secondes = round(float(value))
+        except (ValueError, TypeError):
+            return default
 
-    try:
-        return int(value)
-    except (ValueError, TypeError):
+    if secondes is None or secondes <= 0:
         return default
+    return secondes
 
 
 def track_from_row(row, artist: Artist, observations=None) -> Track | None:
@@ -110,9 +115,11 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track_id = row["id"]
     title = row["title"]
 
-    if not track_id or not title:
-        return None
-    if str(title).strip() in _NULL_LITERALS:
+    # Le TITRE échappe aux littéraux nuls ('None'/'NULL') : c'est une donnée
+    # d'artiste, pas un reliquat de `str(None)` — « NULL » est un titre possible
+    # (« Null » de Travis Scott existe), et la fiche disparaissait des lectures
+    # sans trace (validé 2026-09-25). Seul un titre VIDE est illisible.
+    if not track_id or not title or not str(title).strip():
         return None
 
     track = Track(id=track_id, title=str(title).strip())

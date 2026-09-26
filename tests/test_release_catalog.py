@@ -39,6 +39,44 @@ def test_un_morceau_peut_etre_lie_a_trois_parutions_sans_dupliquer_sa_fiche(data
     ]
 
 
+def test_le_repere_se_reconnait_malgre_la_graphie_du_distributeur(data_manager):
+    """« Donda » (Genius, fiche) face à « DONDA » (Deezer, parution) : 509 liens
+    en base où l'égalité exacte ne voyait pas le repère (2026-09-24)."""
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist, album="Don’t Panik Tape ")
+    original = data_manager.ensure_release(artist.id, "Don't Panik Tape", scope="own")
+    deluxe = data_manager.ensure_release(artist.id, "Deluxe", scope="own")
+    data_manager.link_track_to_release(original, track.id)
+    data_manager.link_track_to_release(deluxe, track.id)
+
+    assert data_manager.unlink_track_from_release(original, track.id) == "needs_replacement"
+    assert (
+        data_manager.unlink_track_from_release(original, track.id, clear_reference=True)
+        == "removed"
+    )
+    assert data_manager.get_artist_tracks(artist.id)[0].album is None
+
+
+def test_delier_un_lien_absent(data_manager):
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist, album="A")
+    release = data_manager.ensure_release(artist.id, "B", scope="own")
+    assert data_manager.unlink_track_from_release(release, track.id) == "missing"
+
+
+def test_remplacant_qui_ne_contient_pas_le_morceau_refuse(data_manager):
+    import pytest
+
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist, album="A")
+    a = data_manager.ensure_release(artist.id, "A", scope="own")
+    ailleurs = data_manager.ensure_release(artist.id, "Ailleurs", scope="own")
+    data_manager.link_track_to_release(a, track.id)
+    with pytest.raises(ValueError):
+        data_manager.unlink_track_from_release(a, track.id, replacement_release_id=ailleurs)
+    assert [r["title"] for r in data_manager.get_track_releases(track.id)] == ["A"]
+
+
 def test_retrait_de_l_album_de_reference_exige_un_choix_explicite(data_manager):
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Original")
@@ -438,6 +476,49 @@ def test_delier_retire_le_lien_et_purge_deezer_si_l_id_vient_de_la_piste(data_ma
     col = _colonnes(data_manager, track.id)
     assert col["deezer_id"] is None and col["duration"] == 200
     assert ("duration", "deezer") not in _observations(data_manager, track.id)
+
+
+def test_delier_retire_la_duree_du_lien_quand_la_fiche_garde_son_id(data_manager):
+    """La fiche porte déjà l'id Deezer 10 ; un lien au titre seul vers la piste
+    77 d'un best-of écrit sa durée (240) en observation `deezer`, qui gagne la
+    colonne. Délier ce lien doit emporter cette durée — sinon la valeur que la
+    revue contestait reste en place, l'id de la fiche n'étant pas celui de la
+    piste (2026-09-24)."""
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist, album="Album")
+    data_manager.fill_track_identities(track.id, deezer_id=10)
+    data_manager.record_duration_observation(track.id, 200, "songbpm")
+    best_of = _album(83, "Best-of", [_piste(77, track.title, duration=240)], artist)
+    track.duration, track.deezer_id = None, 10
+    ecarts, _ = ed.classer([best_of], [track], [], artist.deezer_id)
+    ed.rattacher_liens_confirmes(data_manager, artist, ed.BilanEcarts(ecarts=ecarts))
+    assert _colonnes(data_manager, track.id)["duration"] == 240
+
+    relue = next(t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id)
+    ecarts, _ = ed.classer(
+        [best_of],
+        [relue],
+        [],
+        artist.deezer_id,
+        liens_connus=data_manager.get_deezer_release_links(artist.id),
+    )
+    assert [e.nature for e in ecarts] == ["link_review"]
+
+    comptes = ed.creer_lignes(data_manager, artist, ecarts)
+    assert "durée Deezer 240 s retirée" in comptes[0]
+    col = _colonnes(data_manager, track.id)
+    assert (col["deezer_id"], col["duration"]) == (10, 200)
+    assert ("duration", "deezer") not in _observations(data_manager, track.id)
+
+
+def test_forget_discography_observation_ne_touche_qu_a_la_valeur_montree(data_manager):
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist)
+    data_manager.record_duration_observation(track.id, 240, "deezer")
+    assert not data_manager.forget_discography_observation(track.id, "duration", "deezer", 250)
+    assert _colonnes(data_manager, track.id)["duration"] == 240
+    assert data_manager.forget_discography_observation(track.id, "duration", "deezer", 240)
+    assert _colonnes(data_manager, track.id)["duration"] is None  # plus aucune source
 
 
 def test_delier_laisse_l_album_repere(data_manager):

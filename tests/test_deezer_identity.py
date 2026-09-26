@@ -170,3 +170,20 @@ class TestToutProducteurPasseParLeGate:
 
     def test_le_crible_voit_bien_quelque_chose(self):
         assert len(list(self._sites())) >= 3
+
+
+class TestSansMatiereOnNeConclutPas:
+    """Gardes « rien à juger » : un hit vide ou muet n'accuse personne
+    (audit de couverture 2026-09-24)."""
+
+    def test_titre_d_un_hit_absent(self):
+        assert titre_deezer(None) == ""
+        assert titre_deezer({}) == ""
+
+    def test_artiste_d_un_hit_absent(self):
+        assert not artiste_etranger(None, artist_name="Isha")
+
+    def test_variante_sans_titre_servi(self):
+        assert not variante_etrangere(None, title="Durag")
+        assert not variante_etrangere({"title": "Durag"}, title="")
+        assert not variante_etrangere({"title": "", "title_short": ""}, title="Durag")

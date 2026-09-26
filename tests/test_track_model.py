@@ -77,14 +77,6 @@ class TestSpotifyIds:
         assert track.spotify_id == "abc123"  # le principal ne bouge pas
         assert track.get_all_spotify_ids() == ["abc123", "def456"]
 
-    def test_primary_prefere_la_liste(self):
-        track = Track(title="Test", spotify_id="legacy", spotify_ids=["nouveau"])
-        assert track.primary_spotify_id == "nouveau"
-
-    def test_primary_fallback_legacy(self):
-        track = Track(title="Test", spotify_id="legacy")
-        assert track.primary_spotify_id == "legacy"
-
     def test_id_vide_refuse(self):
         track = Track(title="Test")
         assert track.add_spotify_id("") is False

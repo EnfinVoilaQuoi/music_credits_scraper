@@ -619,7 +619,10 @@ class Track:
     audio_features: dict[str, Any] | None = field(default_factory=dict)
 
     # Support des features
-    is_featuring: bool = False  # True si l'artiste est en featuring
+    # Tri-état (2026-09-25) : None = NON RENSEIGNÉ — `save_track` garde alors la
+    # valeur en base (un `Track` neuf sauvé sur une fiche existante la
+    # repassait en principal). False/True sont des affirmations et s'écrivent.
+    is_featuring: bool | None = None
     featured_artists: str | None = None  # Liste des artistes en featuring
     primary_artist_name: str | None = None  # Nom de l'artiste principal si différent
     secondary_role: str | None = (
@@ -918,7 +921,7 @@ class Track:
 
     def to_dict(self) -> dict:
         """Convertit le morceau en dictionnaire - VERSION AVEC SÉPARATION VIDÉO ET PAROLES"""
-        is_featuring = self.is_featuring
+        is_featuring = bool(self.is_featuring)
 
         music_credits = self.get_music_credits()
         video_credits = self.get_video_credits()
@@ -1004,13 +1007,6 @@ class Track:
     # (Méthode GUI _start_lyrics_scraping supprimée le 2026-07-10 : code d'interface
     # copié par erreur dans le modèle — cf. AUDIT.md §3.3. La fonctionnalité vit
     # dans src/gui/workers/scraping.py.)
-
-    @property
-    def primary_spotify_id(self) -> str | None:
-        """Retourne l'ID Spotify principal"""
-        if self.spotify_ids and len(self.spotify_ids) > 0:
-            return self.spotify_ids[0]
-        return self.spotify_id
 
     def add_spotify_id(self, new_id: str, source: str | None = None) -> bool:
         """Ajoute un Spotify ID à la liste (sans doublons) et le marque à écrire.

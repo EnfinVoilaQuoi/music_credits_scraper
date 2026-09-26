@@ -100,8 +100,26 @@ class TestUpdateNonDestructif:
         assert lu.audio.bpm == 142
         assert lu.lyrics.text == "paroles"
 
-    def test_is_featuring_ecrase_sans_coalesce(self, data_manager):
-        # Décision documentée : is_featuring est le seul champ écrasé sans COALESCE.
+    def test_is_featuring_non_renseigne_preserve_la_base(self, data_manager):
+        """Tri-état (2026-09-25) : un `Track` neuf (is_featuring=None) sauvé sur
+        une fiche existante ne la repasse plus en principal."""
+        artist = _artiste_sauve(data_manager)
+        data_manager.save_track(Track(title="X", artist=artist, is_featuring=True))
+        t = Track(title="X", artist=artist)
+        data_manager.save_track(t)
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.is_featuring is True
+        assert t.is_featuring is True  # l'objet reflète la base
+
+    def test_creation_sans_affirmation_est_principale(self, data_manager):
+        artist = _artiste_sauve(data_manager)
+        t = Track(title="Y", artist=artist)
+        data_manager.save_track(t)
+        (lu,) = data_manager.get_artist_tracks(artist.id)
+        assert lu.is_featuring is False and t.is_featuring is False
+
+    def test_is_featuring_explicite_ecrase(self, data_manager):
+        # Un False EXPLICITE reste une affirmation : il écrase.
         artist = _artiste_sauve(data_manager)
         data_manager.save_track(Track(title="X", artist=artist, is_featuring=True))
         data_manager.save_track(Track(title="X", artist=artist, is_featuring=False))

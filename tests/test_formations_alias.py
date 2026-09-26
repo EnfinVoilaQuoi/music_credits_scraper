@@ -263,16 +263,9 @@ def test_candidats_de_base_and_reunir():
 # ── Fenêtre : ouverture sans réseau, décisions appliquées ────────────────────
 
 
-@pytest.fixture(scope="module")
-def racine():
-    ctk = pytest.importorskip("customtkinter")
-    try:
-        root = ctk.CTk()
-    except Exception as exc:  # noqa: BLE001 — pas d'affichage (CI headless)
-        pytest.skip(f"aucun affichage disponible : {exc!r}")
-    root.withdraw()
-    yield root
-    root.destroy()
+@pytest.fixture
+def racine(racine_tk):
+    return racine_tk
 
 
 def test_window_opens_from_base_and_applies_decisions(racine, data_manager, monkeypatch):

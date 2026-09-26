@@ -27,8 +27,10 @@ class ExportWindow:
         self.tabview = ctk.CTkTabview(self.window)
         self.tabview.pack(fill="both", expand=True, padx=10, pady=(10, 5))
 
-        self._build_export_brut_tab()
+        # Studio D'ABORD : « Export Brut » reste le dernier onglet, isolé
+        # (décision du 2026-09-15, perdue au découpage public/privé).
         self._install_studio_tabs()
+        self._build_export_brut_tab()
 
     def _build_export_brut_tab(self):
         tab_brut = self.tabview.add("Export Brut")

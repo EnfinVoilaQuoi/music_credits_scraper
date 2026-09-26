@@ -179,20 +179,13 @@ class TestFenetreDeCorrection:
     et le CSV sont remplacés, le fil est exécuté en ligne."""
 
     @pytest.fixture
-    def dialogue(self):
-        ctk = pytest.importorskip("customtkinter")
+    def dialogue(self, racine_tk):
         from src.gui.certification_update_gui import CertificationUpdateDialog
 
-        try:
-            racine = ctk.CTk()
-        except Exception:  # noqa: BLE001 — pas d'affichage (CI headless)
-            pytest.skip("aucun affichage disponible")
-        racine.withdraw()
-        d = CertificationUpdateDialog(racine)
+        d = CertificationUpdateDialog(racine_tk)
         d.withdraw()
         yield d
         d.destroy()
-        racine.destroy()
 
     def test_suggestions_et_oracle_atteignent_la_fenetre(self, dialogue, monkeypatch, tmp_path):
         import src.gui.certification_update_gui as gui

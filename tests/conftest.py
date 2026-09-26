@@ -147,3 +147,21 @@ def data_manager(tmp_path, monkeypatch):
     db_file = tmp_path / "test_music_credits.db"
     monkeypatch.setattr(dm_mod, "DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
     return dm_mod.DataManager()
+
+
+@pytest.fixture(scope="session")
+def racine_tk():
+    """UNE racine Tk pour TOUTE la session. Recréer Tk après `destroy()` dans le
+    même process rate sous Windows (« Can't find a usable init.tcl ») : chaque
+    fichier qui créait la sienne faisait tomber les suivants en « aucun
+    affichage disponible » — des tests GUI ignorés en silence dès qu'ils ne
+    tournaient pas seuls (mesuré 2026-09-26 : `test_snep_slugs` 19/19 seul,
+    ignoré en lot)."""
+    ctk = pytest.importorskip("customtkinter")
+    try:
+        root = ctk.CTk()
+    except Exception as exc:  # noqa: BLE001 — pas d'affichage (CI headless)
+        pytest.skip(f"aucun affichage disponible : {exc!r}")
+    root.withdraw()
+    yield root
+    root.destroy()

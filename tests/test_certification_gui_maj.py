@@ -333,18 +333,11 @@ class TestLaFenetreSeConstruitEncore:
     """
 
     @pytest.fixture
-    def fenetre(self):
-        ctk = pytest.importorskip("customtkinter")
-        try:
-            racine = ctk.CTk()
-        except Exception:  # noqa: BLE001 — pas d'affichage (CI headless)
-            pytest.skip("aucun affichage disponible")
-        racine.withdraw()
-        dialogue = CertificationUpdateDialog(racine)
+    def fenetre(self, racine_tk):
+        dialogue = CertificationUpdateDialog(racine_tk)
         dialogue.withdraw()
         yield dialogue
         dialogue.destroy()
-        racine.destroy()
 
     def _widgets(self, w):
         trouves = []
@@ -393,21 +386,14 @@ class TestLesGardeFousDeLaFenetre:
     """
 
     @pytest.fixture
-    def fenetre(self):
-        ctk = pytest.importorskip("customtkinter")
-        try:
-            racine = ctk.CTk()
-        except Exception:  # noqa: BLE001 — pas d'affichage (CI headless)
-            pytest.skip("aucun affichage disponible")
-        racine.withdraw()
-        dialogue = CertificationUpdateDialog(racine)
+    def fenetre(self, racine_tk):
+        dialogue = CertificationUpdateDialog(racine_tk)
         dialogue.withdraw()
         yield dialogue
         try:
             dialogue.destroy()
         except Exception:  # noqa: BLE001 — déjà détruite par un test
             pass
-        racine.destroy()
 
     def test_deux_lancements_sur_la_meme_cle_le_second_est_REFUSE(self, fenetre, monkeypatch):
         """Deux clics = deux sous-processus sur le même CSV, avant."""

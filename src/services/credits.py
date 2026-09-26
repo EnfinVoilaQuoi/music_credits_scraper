@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
 from src.services.runtime import Bilan, Hooks, Runtime
+from src.utils.credits_genius_api import SOURCE_API
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -130,12 +131,15 @@ class Clients:
 def _manque_credits(track: Track) -> bool:
     """True si le morceau n'a aucun Producer ni Writer/Composer DIRECT.
 
+    Un crédit PROVISOIRE de l'API Genius (`genius_api`) ne compte pas non
+    plus : il ne dispense de rien, le scrape le remplacera.
+
     Un crédit HÉRITÉ de l'original (`source="heritage"`) ne compte pas : une
     version live ou acoustique hérite ses auteurs, et sans cette règle sa
     description YouTube Topic — seule source de SA production — n'était jamais
     lue (2026-09-24). L'héritage s'efface ensuite devant la source directe
     (`version_heritage.sans_heritage_couvert`)."""
-    roles = {c.role for c in track.credits if c.source != "heritage"}
+    roles = {c.role for c in track.credits if c.source not in ("heritage", SOURCE_API)}
     return not (roles & _PRODUCER_ROLES) and not (roles & _WRITER_ROLES)
 
 
@@ -460,6 +464,14 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
         msg += f"  - Réussis: {bilan.genius['success']}\n  - Échoués: {bilan.genius['failed']}\n"
         if bilan.genius.get("errors"):
             msg += f"  - Erreurs: {len(bilan.genius['errors'])}\n"
+        if bilan.genius.get("api_remplaces"):
+            msg += f"  - Crédits provisoires (API) remplacés: {bilan.genius['api_remplaces']}\n"
+        if bilan.genius.get("api_ecarts"):
+            titres = ", ".join(sorted(bilan.genius["api_ecarts"]))
+            msg += (
+                f"  - 🎫 Crédits que seule l'API donne, gardés, sur "
+                f"{len(bilan.genius['api_ecarts'])} morceau(x) (détail au log) : {titres}\n"
+            )
         msg += "\n"
     if bilan.discogs:
         msg += "💿 Crédits Discogs:\n"

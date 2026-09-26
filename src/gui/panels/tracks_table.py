@@ -213,11 +213,7 @@ def populate_tracks_table(app):
                         else str(track.release_date)
                     )
 
-            # CORRECTION: Obtenir le nombre de crédits directement
-            credits_count = 0
-            if track.credits:
-                credits_count = len(track.credits)
-            credits_display = str(credits_count)
+            credits_display = helpers.format_credits_cell(track)
 
             lyrics_display = helpers.format_lyrics_cell(track)
 
@@ -1017,13 +1013,13 @@ def sort_column(app, col):
 
             sort_key = get_streams_total
         elif col == "Statut":
-            # Complet > incomplet > inédit (rien à exiger) > désactivé.
-            status_order = {"✅": 1, "⚠️": 2, "🔒": 3, "❌": 4}
+            # Complet > incomplet > inédit (rien à exiger) > sans info > désactivé.
+            status_order = {"✅": 1, "⚠️": 2, "🔒": 3, "🕳️": 4, "❌": 5}
             ctx_tri = app.contexte_validation() if hasattr(app, "contexte_validation") else None
 
             def get_status_value(t):
                 icon = helpers.get_track_status_icon(t, app.disabled_tracks, ctx_tri)
-                return status_order.get(icon, 5)  # 5 pour les icônes inconnues
+                return status_order.get(icon, 6)  # 6 pour les icônes inconnues
 
             sort_key = get_status_value
 

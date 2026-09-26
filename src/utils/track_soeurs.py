@@ -372,6 +372,14 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
         )
         rapport["colonnes"] += len(trous)
 
+    # Un scrape chez une sœur vaut pour tout l'enregistrement : les crédits
+    # PROVISOIRES de l'API partent AVANT l'union. Ce n'est pas un retrait de
+    # donnée (le scrape en est le remplacement) et c'est idempotent ; après
+    # l'union, ils bloqueraient la copie du crédit scrapé identique (la clé
+    # d'union ignore la source) et survivraient à côté du scrape.
+    from src.utils.credits_genius_api import purger_provisoires_couverts
+
+    rapport["provisoires"] = purger_provisoires_couverts(conn, famille)
     for source in famille:
         for cible in famille:
             if source != cible:

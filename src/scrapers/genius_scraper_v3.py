@@ -13,10 +13,12 @@ from bs4 import BeautifulSoup
 from src.config import DELAY_BETWEEN_REQUESTS
 from src.models import Credit, CreditRole, ReleaseObservation, Track
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
-from src.utils.credit_roles import map_role
+from src.utils import credits_genius_api
+from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
 from src.utils.inedits import titre_sans_marqueur
 from src.utils.llm_extractor import LLMExtractor, build_credits_prompt
 from src.utils.logger import get_logger
+from src.utils.paroles_genius import inedit_par_le_texte, instrumental_par_le_texte
 
 logger = get_logger(__name__)
 
@@ -99,6 +101,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
     def __init__(self, headless: bool = True):
         super().__init__(headless)
+        #: Écarts API/page du dernier morceau scrapé (None : rien à comparer).
+        self.derniers_ecarts_api = None
         self._llm = LLMExtractor(model="llama3.2")
         if not self._llm.is_available():
             logger.warning(
@@ -129,6 +133,12 @@ class GeniusScraperV3(CrawlAIScraperBase):
             page_timeout=30_000,
             delay_before_return=1.5,
         )
+        # « La section crédits de la page a été LUE » : sans cette date, une
+        # fiche sans crédit ne dit pas si la page n'en a pas ou si personne ne
+        # l'a regardée (*Tu voulais du rap* : paroles lues, crédits jamais —
+        # « 🕳️ sans info » la prenait pour vide, 2026-09-26).
+        if html:
+            track.last_scraped = datetime.now()
 
         # Paroles + anecdotes depuis le même HTML (gratuit)
         if include_lyrics and html:
@@ -172,15 +182,48 @@ class GeniusScraperV3(CrawlAIScraperBase):
         if not credits:
             logger.warning(f"GeniusScraperV3: aucun crédit trouvé pour '{track.title}'")
 
+        self.derniers_ecarts_api = None
         if credits:
+            # Les crédits PROVISOIRES de l'API sont comparés à la page : ce
+            # qu'elle confirme (même personne, même rôle) est remplacé par le
+            # crédit scrapé, le reste est GARDÉ en 🎫 et signalé — en nombre, il
+            # trahirait un parseur qui perd des lignes.
+            api = [c for c in track.credits if c.source == credits_genius_api.SOURCE_API]
+            if api:
+                ecarts = credits_genius_api.comparer(api, credits)
+                self.derniers_ecarts_api = ecarts
+                if ecarts.signale:
+                    logger.warning(
+                        f"GeniusScraperV3: '{track.title}' — crédits que seule l'API "
+                        f"donne, gardés : absents de la page {ecarts.api_seuls}, "
+                        f"rôles en plus {ecarts.roles_divergents}"
+                    )
             # Purger les anciens crédits Genius (évite que des erreurs d'anciens
-            # runs — ex: titres de tracklist en Writer — persistent en base)
+            # runs — ex: titres de tracklist en Writer — persistent en base).
             before = len(track.credits)
-            track.credits = [c for c in track.credits if c.source != "genius"]
+            track.credits = [
+                c for c in track.credits if c.source != credits_genius_api.SOURCE_SCRAPE
+            ]
             purged = before - len(track.credits)
             if purged:
                 logger.info(f"GeniusScraperV3: {purged} ancien(s) crédit(s) Genius purgé(s)")
+            # La même page vaut pour les lignes sœurs : `save_track` y
+            # remplacera les anciens crédits `genius` (sinon l'union les
+            # réinjecte — fragments « Recorded At » revenus le 2026-09-26).
+            track._credits_genius_frais = True
 
+        # Les `genius_api` que la page confirme partent AVANT l'ajout :
+        # `add_credit` dédoublonne sans regarder la source, un provisoire resté
+        # en place écarterait le crédit scrapé identique.
+        confirmes = {credits_genius_api.cle_credit(c) for c in credits}
+        track.credits = [
+            c
+            for c in track.credits
+            if not (
+                c.source == credits_genius_api.SOURCE_API
+                and credits_genius_api.cle_credit(c) in confirmes
+            )
+        ]
         for credit in credits:
             track.add_credit(credit)
 
@@ -190,13 +233,29 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
     def scrape_multiple_tracks(self, tracks, progress_callback=None) -> dict:
         """Scrape plusieurs morceaux — même interface que GeniusScraper.scrape_multiple_tracks()."""
-        results = {"success": 0, "failed": 0, "errors": [], "albums_scraped": set()}
+        results = {
+            "success": 0,
+            "failed": 0,
+            "errors": [],
+            "albums_scraped": set(),
+            # Crédits API comparés puis remplacés, et morceaux où ils
+            # contredisaient la page (titre → écarts).
+            "api_remplaces": 0,
+            "api_ecarts": {},
+        }
         total = len(tracks)
         for i, track in enumerate(tracks):
             try:
                 logger.info(f"V3: scraping {i+1}/{total}: {track.title}")
+                self.derniers_ecarts_api = None
                 self.scrape_track_credits(track)
-                if track.credits:
+                ecarts = self.derniers_ecarts_api
+                if ecarts is not None:
+                    results["api_remplaces"] += 1
+                    if ecarts.signale:
+                        results["api_ecarts"][track.title] = ecarts
+                # Des crédits API seuls ne font pas un scrape réussi.
+                if credits_genius_api.a_des_credits_scrapes(track.credits):
                     results["success"] += 1
                 else:
                     results["failed"] += 1
@@ -301,6 +360,12 @@ class GeniusScraperV3(CrawlAIScraperBase):
             logger.info(f"📝 Anecdote extraite ({len(anecdotes)} caractères)")
 
         lyrics = self._extract_lyrics_bs4(soup)
+        # « [Morceau instrumental : Lucio Bukowski] » : un en-tête n'est pas des
+        # paroles, c'est le constat d'un instrumental (11 fiches le portaient
+        # comme texte, 2026-09-26).
+        instrumental_ecrit = instrumental_par_le_texte(lyrics)
+        if instrumental_ecrit:
+            lyrics = ""
         if lyrics:
             # Ajoute l'artiste aux en-têtes de section sans attribution (Genius ne
             # le met qu'en cas de feat). Ex. [Couplet 1] → [Couplet 1 : Isha].
@@ -319,7 +384,12 @@ class GeniusScraperV3(CrawlAIScraperBase):
             track.lyrics.instrumental = False
             track.lyrics.scraped_at = datetime.now()
             logger.info(f"✅ Paroles récupérées pour '{track.title}' ({len(lyrics.split())} mots)")
-        elif self._is_instrumental_bs4(soup):
+            # « Unreleased » / « Please check back once the song has been
+            # released » : le placeholder d'un inédit est un CONSTAT (e34).
+            if inedit_par_le_texte(lyrics):
+                track.unreleased = True
+                logger.info(f"🔒 Inédit constaté sur Genius pour '{track.title}'")
+        elif instrumental_ecrit or self._is_instrumental_bs4(soup):
             # Pas de paroles PAR NATURE : le scrape a ABOUTI, il se date et se
             # source comme un succès — c'est ce constat qui évite de re-crawler
             # le morceau à chaque run et de le compter en échec.
@@ -550,7 +620,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
 
             for name in names:
                 name = str(name).strip()
-                if len(name) < 2 or est_relation_deguisee(name):
+                if len(name) < 2 or est_relation_deguisee(name) or valeur_vide(name):
                     continue
                 credits.append(
                     Credit(
@@ -569,8 +639,6 @@ class GeniusScraperV3(CrawlAIScraperBase):
     # -------------------------------------------------------------------------
 
     # Labels Genius qui ne sont pas des crédits de personnes
-    _NON_CREDIT_LABELS = ("album", "released on", "release date", "genre", "tags")
-
     def _extract_fallback_bs4(self, html: str) -> list[Credit]:
         """
         Extraction BeautifulSoup sur le HTML brut.
@@ -589,7 +657,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 if not label_div or not contributor_div:
                     continue
                 role_text = label_div.get_text(strip=True)
-                if role_text.lower() in self._NON_CREDIT_LABELS:
+                if role_text.lower() in LIBELLES_HORS_CREDITS:
                     continue
                 names = self._extract_names_intelligently(contributor_div)
                 self._append_credits(credits, role_text, names)
@@ -601,7 +669,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                     if not label_div:
                         continue
                     role_text = label_div.get_text(strip=True)
-                    if role_text.lower() in self._NON_CREDIT_LABELS:
+                    if role_text.lower() in LIBELLES_HORS_CREDITS:
                         continue
                     container_div = label_div.find_next_sibling("div")
                     if not container_div:
@@ -614,11 +682,17 @@ class GeniusScraperV3(CrawlAIScraperBase):
         return self._deduplicate_credits(credits)
 
     def _append_credits(self, credits: list[Credit], role_text: str, names: list[str]) -> None:
-        """Ajoute un Credit par nom pour un rôle donné."""
+        """Ajoute un Credit par nom pour un rôle donné.
+
+        Les RELATIONS (« Come as You Are by Nirvana » sous « Is A Cover Of »,
+        les traductions « … by Genius Traducciones al Español ») vivent dans les
+        mêmes conteneurs que les crédits : filtrées ICI aussi. Le filtre ne
+        vivait que dans la voie LLM — le re-scrape du 2026-09-26 en a
+        réintroduit 1 575 (66 → 1 641 lignes)."""
         role_enum = self._map_genius_role_to_enum(role_text)
         for name in names:
             name = name.strip()
-            if name:
+            if name and not valeur_vide(name) and not est_relation_deguisee(name):
                 credits.append(
                     Credit(
                         name=name,
@@ -635,7 +709,19 @@ class GeniusScraperV3(CrawlAIScraperBase):
     def _extract_names_intelligently(self, container_div) -> list[str]:
         names = []
         try:
-            for link in container_div.select("a"):
+            links = container_div.select("a")
+            if not links:
+                # Contributeur SANS lien = champ en TEXTE LIBRE (« Recorded At »),
+                # pas une liste d'artistes : Genius y sépare les valeurs par
+                # « ; » (« Cabo, Mexico; Pio Pico, Los Angeles, CA »), et la
+                # virgule appartient au lieu. Découpé à la virgule, il donnait
+                # « Burbank » et « CA. » en crédits (mesuré 2026-09-26 sur trois
+                # pages réelles : seuls ces champs et la date sont sans lien).
+                texte = container_div.get_text(" ", strip=True)
+                return [
+                    p.replace("&amp;", "&").strip() for p in texte.split(";") if len(p.strip()) > 1
+                ]
+            for link in links:
                 name = link.get_text(strip=True)
                 if name and name not in names:
                     names.append(name)

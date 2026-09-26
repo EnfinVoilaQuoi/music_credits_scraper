@@ -19,6 +19,7 @@ from src.enrichment.observation import Observation
 from src.models import Artist, ReleaseObservation, Track
 from src.models.track import _PRODUCER_ROLES
 from src.observability import source_usage
+from src.utils import credits_genius_api
 from src.utils.credit_roles import map_role
 from src.utils.inedits import porte_le_marqueur, titre_sans_marqueur
 from src.utils.logger import get_logger, log_api
@@ -333,7 +334,7 @@ class GeniusAPI:
         target = artist_name.strip().lower()
         return any(p.strip().lower() == target for p in parts)
 
-    def _verify_artist_credit(self, song_id, artist_id):
+    def _verify_artist_credit(self, song_id, artist_id, detail_out: dict | None = None):
         """
         Vérifie au détail (`genius.song`) si `artist_id` (id EXACT) est crédité
         sur le morceau, et renvoie la nature du crédit :
@@ -341,6 +342,8 @@ class GeniusAPI:
         None = id absent des crédits (ex: 'ISHA!' ≠ notre Isha → à jeter).
         Le détail est autoritaire : il rattrape les feats sous-déclarés par la liste,
         et expose les rôles fins via `custom_performances` (Additional Vocals…).
+        `detail_out` reçoit la fiche lue (clé `song`) : ses crédits sont posés
+        sur le morceau sans second appel (`credits_genius_api`).
         """
         if not song_id:
             return None
@@ -352,6 +355,8 @@ class GeniusAPI:
             logger.warning(f"verify credit échec song {song_id}: {e}")
             return None
         song = (data or {}).get("song") or {}
+        if detail_out is not None:
+            detail_out["song"] = song
         try:
             aid = int(artist_id)
         except (TypeError, ValueError):
@@ -429,6 +434,7 @@ class GeniusAPI:
                         continue
 
                     secondary_role = None  # rempli si contribution secondaire (Additional Voices…)
+                    detail: dict = {}  # fiche lue par la vérification, le cas échéant
 
                     if is_feat:
                         # L'API renvoie aussi les morceaux où l'artiste a un rôle
@@ -467,7 +473,7 @@ class GeniusAPI:
                             verdict = (roles_connus or {}).get(song.get("id"))
                             if verdict is None:
                                 verdict = self._verify_artist_credit(
-                                    song.get("id"), artist.genius_id
+                                    song.get("id"), artist.genius_id, detail_out=detail
                                 )
                                 time.sleep(DELAY_BETWEEN_REQUESTS)
                             if verdict is None:
@@ -515,6 +521,10 @@ class GeniusAPI:
                         is_featuring=is_feat,
                     )
                     track.secondary_role = secondary_role
+                    if detail.get("song"):
+                        # Crédits PROVISOIRES de la fiche déjà lue (aucun appel de
+                        # plus) : le scrape les remplacera.
+                        credits_genius_api.poser(track, detail["song"])
                     if porte_le_marqueur(titre_brut):
                         track.unreleased = True
                     if track.release_date is not None:
@@ -877,6 +887,11 @@ class GeniusAPI:
         # Chantier « Media » : pochettes (morceau + album). Transitoires, non
         # persistées (aucune colonne) → ne comptent PAS dans `changed` (pas de
         # save déclenché pour elles), simplement disponibles pour media_enricher.
+        # Crédits PROVISOIRES (source `genius_api`) : gratuits, la fiche est
+        # déjà lue ; jamais sur un morceau scrapé, que le scrape remplacera.
+        if credits_genius_api.poser(track, song):
+            changed = True
+
         art, album_cover = self._extract_song_art(song)
         if art and not track.media.artwork_url:
             track.media.artwork_url = art

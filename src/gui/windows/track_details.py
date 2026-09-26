@@ -578,6 +578,14 @@ class TrackDetailsWindow:
         ctk.CTkLabel(music_header, text=status_text, text_color=status_color).pack(
             anchor="w", padx=5
         )
+        from src.utils.credits_genius_api import sont_provisoires
+
+        if sont_provisoires(track.credits):
+            ctk.CTkLabel(
+                music_header,
+                text="⏳ Crédits provisoires (🎫 API Genius) — en attente du scrape de la page",
+                text_color="orange",
+            ).pack(anchor="w", padx=5)
 
         # Zone de crédits musicaux
         music_textbox = ctk.CTkTextbox(music_credits_frame, width=850, height=400)

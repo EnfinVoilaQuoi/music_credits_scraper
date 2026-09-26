@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 from src.models import Artist, Track
 from src.services.runtime import Bilan, Hooks, Runtime
+from src.utils.credits_genius_api import SOURCE_API
+from src.utils.credits_genius_api import unir as unir_credits
 from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album
 from src.utils.version_descriptors import titre_generique
@@ -54,6 +56,11 @@ class BilanDisco(Bilan):
     doublons_evites: int = 0
     sauves: int = 0
     supprimes_ignores: int = 0
+    #: Fiches de version qui ont hérité de leur original (`services.versions`).
+    heritages: int = 0
+    #: Pages NON MUSICALES écartées (interviews, discours… — par le titre dès la
+    #: liste, par le nom d'« album » Genius une fois la fiche détail lue).
+    non_musique: list = field(default_factory=list)
     #: Pages d'édition de diffusion notées sur leur original au lieu d'une fiche.
     editions: int = 0
     #: Titres ajoutés par la tracklist d'un album de l'artiste.
@@ -203,8 +210,13 @@ def fusionner(
             track.lyrics.present = existant.lyrics.present
         if track.lyrics.instrumental is None:
             track.lyrics.instrumental = existant.lyrics.instrumental
-        if not track.credits and existant.credits:
-            track.credits = existant.credits
+        # Des crédits DÉFINITIFS portés par la fiche neuve l'emportent, comme
+        # le reste ; des crédits PROVISOIRES de l'API (vérification d'un rôle
+        # secondaire, prefill) ne remplacent rien — ils s'UNISSENT à la base,
+        # car `save_track` réécrit la table depuis l'objet : les préférer
+        # effacerait les crédits scrapés.
+        if existant.credits and all(c.source == SOURCE_API for c in track.credits):
+            track.credits = unir_credits(existant.credits, track.credits)
         if not track.certs.entries and existant.certs.entries:
             track.certs.entries = existant.certs.entries
         if track.genius_id and not existant.genius_id:
@@ -250,6 +262,21 @@ def _filtrer_supprimes(
         if gid in deleted_ids:
             runtime.deleted.remove_deleted(artist.name, gid)
     return nouveaux, 0
+
+
+def _filtrer_non_musique(nouveaux: list[Track]) -> tuple[list[Track], list[str]]:
+    """Pages non musicales que seul le NOM D'ALBUM trahit (« On Politics »
+    rangé dans *Visionary Streams of Consciousness*) : le titre est déjà filtré
+    à la liste, l'album n'est connu qu'après la fiche détail (prefill)."""
+    from src.utils.pages_genius import page_non_morceau
+
+    gardes, ecartes = [], []
+    for t in nouveaux:
+        if page_non_morceau(t.title, t.album) == "non-musique":
+            ecartes.append(f"{t.title} ({t.album})" if t.album else t.title)
+        else:
+            gardes.append(t)
+    return gardes, ecartes
 
 
 def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -> BilanDisco:
@@ -304,6 +331,9 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     )
     if bilan.supprimes_ignores:
         logger.info(f"🗂️ {bilan.supprimes_ignores} morceau(x) supprimé(s) ignoré(s) (historique)")
+    nouveaux, bilan.non_musique = _filtrer_non_musique(nouveaux)
+    for titre in bilan.non_musique:
+        logger.info(f"⏭️ Page non musicale écartée (album) : {titre}")
     # Pages Genius FUSIONNÉES à la main dans une autre fiche : ne pas les recréer.
     from src.utils.corrections_fiches import genius_ids_absorbes
 
@@ -404,6 +434,11 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     artist.tracks = dm.get_artist_tracks(artist.id)
     bilan.fusions_inedits = fusionner_doublons_inedits(dm, artist, artist.tracks)
     if bilan.fusions_inedits:
+        artist.tracks = dm.get_artist_tracks(artist.id)
+    from src.services.versions import heriter_versions
+
+    bilan.heritages = heriter_versions(dm, artist.tracks)
+    if bilan.heritages:
         artist.tracks = dm.get_artist_tracks(artist.id)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)
@@ -545,6 +580,10 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
         msg += f"\n🚫 {bilan.doublons_evites} doublons évités"
     if bilan.supprimes_ignores:
         msg += f"\n🗂️ {bilan.supprimes_ignores} morceaux supprimés ignorés (historique)"
+    if bilan.non_musique:
+        msg += f"\n⏭️ {len(bilan.non_musique)} page(s) non musicale(s) écartée(s)"
+    if bilan.heritages:
+        msg += f"\n↩ {bilan.heritages} version(s) ont hérité de leur original"
     if bilan.featurings_total:
         msg += f"\n🎤 {bilan.featurings_total} morceaux en featuring (total)"
     msg += f"\n💿 {bilan.albums_api} albums récupérés via l'API"

@@ -10,6 +10,24 @@ import re
 
 from src.models.track import CreditRole
 
+#: Libellés de la section crédits d'une page Genius qui ne sont PAS des crédits
+#: (métadonnées du morceau). Partagé par le scrape et la voie API : deux
+#: copies finiraient par diverger.
+LIBELLES_HORS_CREDITS = ("album", "released on", "release date", "genre", "tags")
+
+#: Ce que les contributeurs Genius tapent FAUTE DE SAVOIR, dans un champ en
+#: texte libre (« Recorded At » : « N/A » sur deux « references » de Kanye,
+#: « ??? » sur un mashup — mesuré 2026-09-26, seuls cas sur toute la base).
+#: « na » et « none » n'y sont PAS : ils pourraient nommer quelqu'un.
+_VALEURS_VIDES = frozenset({"n/a", "n.a.", "n.a", "unknown", "inconnu", "tbd", "tba"})
+
+
+def valeur_vide(nom: str | None) -> bool:
+    """Ce « nom » ne désigne personne : « N/A », « ??? », « - »…"""
+    n = (nom or "").strip().lower()
+    return n in _VALEURS_VIDES or not any(ch.isalnum() for ch in n)
+
+
 _EXACT: dict[str, CreditRole] = {
     # --- Genius / anglais standard ---
     "Producer": CreditRole.PRODUCER,

@@ -569,6 +569,11 @@ class Track:
     # `Certs.needs_write` : `save_track` n'écrit plus la colonne `relationships`,
     # c'est `TrackRepository.record_relationships` qui le fait.
     _relationships_pending: bool = field(default=False, repr=False)
+    # « Crédits de la page Genius relus ce run » : la page est celle de TOUTES
+    # les lignes sœurs (même genius_id), `save_track` y remplace donc les
+    # crédits `genius` au lieu de laisser l'union réinjecter les anciens.
+    # Consommé et remis à False par ``save_track``.
+    _credits_genius_frais: bool = field(default=False, repr=False)
     # Parutions vues pendant le run. Consommées et vidées par ``save_track``.
     release_observations: list["ReleaseObservation"] = field(default_factory=list, repr=False)
 

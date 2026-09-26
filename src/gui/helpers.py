@@ -66,6 +66,16 @@ def format_lyrics_for_display(lyrics: str) -> str:
     return "\n".join(formatted_lines)
 
 
+def format_credits_cell(track) -> str:
+    """Cellule « Crédits » du tableau : le nombre, suivi de ⏳ quand ce ne
+    sont que des crédits PROVISOIRES de l'API Genius (le scrape n'est pas
+    passé : il manque au moins les contributeurs sans page Genius)."""
+    from src.utils.credits_genius_api import sont_provisoires
+
+    n = len(track.credits)
+    return f"{n} ⏳" if sont_provisoires(track.credits) else str(n)
+
+
 def format_lyrics_cell(track) -> str:
     """Cellule « Paroles » du tableau : ✓ = texte, ⏱ = timestamps (en plus ou
     seuls), 🎹 = instrumental CONSTATÉ sur Genius (scrape réussi, pas de paroles
@@ -91,7 +101,8 @@ def get_track_status_icon(track, disabled_ids, ctx=None) -> str:
     signature ne bouge pas, les appelants non plus ; `ctx` (facultatif) porte
     la nature des disques, sans quoi les timestamps ne sont jamais exigés.
 
-    ✅ complet · ⚠️ incomplet · 🔒 inédit (rien n'est exigé) · ❌ désactivé.
+    ✅ complet · ⚠️ incomplet · 🔒 inédit (rien n'est exigé) · 🕳️ page Genius
+    sans aucune info · ❌ désactivé.
     """
     contexte = ctx or Contexte(desactives=frozenset(disabled_ids or ()))
     return evaluer(track, contexte).icone
@@ -229,6 +240,7 @@ def normalize_text(text: str) -> str:
 #: tous avec le même 🔗 « source inconnue ».
 EMOJI_SOURCE = {
     "genius": "🎤",
+    "genius_api": "🎫",
     "spotify": "🎧",
     "spotify_web": "🎧",
     "deezer": "🎵",

@@ -21,6 +21,10 @@ from src.models.track import CreditRole
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.corrections_fiches import credits_refuses
+from src.utils.credits_genius_api import (
+    purger_provisoires_couverts,
+    sans_provisoires_couverts,
+)
 from src.utils.dates import completer, la_plus_ancienne, meme_jour
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
@@ -462,6 +466,8 @@ class TrackRepository:
                 # Héritage couvert par une source directe : effacé (famille par
                 # famille, cf. `version_heritage.sans_heritage_couvert`).
                 track.credits = sans_heritage_couvert(track.credits)
+                # Crédits PROVISOIRES de l'API Genius remplacés par un scrape.
+                track.credits = sans_provisoires_couverts(track.credits)
                 for credit in track.credits:
                     if (normalize_name(credit.name), credit.role.value) in refuses:
                         continue
@@ -521,6 +527,24 @@ class TrackRepository:
             # donc de ses sœurs au moment même où elle naît, ce qui rend l'ajout
             # d'un artiste déjà couvert par un autre presque gratuit.
             if track.id:
+                if track._credits_genius_frais:
+                    # Crédits de la page relus : la page est celle de TOUTES
+                    # les sœurs. Leurs crédits `genius` partent AVANT l'union,
+                    # qui ne sait qu'ajouter et réinjecterait les anciens
+                    # (mesuré 2026-09-26 : « The Morning », trois lignes chez
+                    # Kanye, Cudi et Travis, gardait les « Recorded At »
+                    # découpés à côté des lieux entiers).
+                    effacer_chez_les_soeurs(
+                        conn,
+                        track.id,
+                        lambda jumelle: conn.execute(
+                            text(
+                                "DELETE FROM credits WHERE track_id = :tid " "AND source = 'genius'"
+                            ),
+                            {"tid": jumelle},
+                        ),
+                    )
+                    track._credits_genius_frais = False
                 synchroniser_soeurs(conn, track.id, track.genius_id)
 
             # commit auto à la sortie du bloc `engine.begin()`
@@ -1079,6 +1103,10 @@ class TrackRepository:
         AVANT (règle projet : backup avant toute opération destructive)."""
         try:
             with self.engine.begin() as conn:
+                # Un scrape de l'une des deux fiches vaut pour la fusion : les
+                # provisoires de l'API partent AVANT la dédup, sinon l'un d'eux
+                # écarterait le crédit scrapé identique de l'autre fiche.
+                purger_provisoires_couverts(conn, (keep_id, delete_id))
                 # Crédits : ne transférer que ceux absents du morceau conservé
                 conn.execute(
                     text("""
@@ -1606,7 +1634,12 @@ class TrackRepository:
                     {"id": track_id},
                 )
                 conn.execute(
-                    text("DELETE FROM credits WHERE track_id = :id AND source = 'genius'"),
+                    # Provisoires de l'API compris : ils viennent de la même
+                    # page mélangée.
+                    text(
+                        "DELETE FROM credits WHERE track_id = :id "
+                        "AND source IN ('genius', 'genius_api')"
+                    ),
                     {"id": track_id},
                 )
                 conn.execute(
@@ -1651,6 +1684,213 @@ class TrackRepository:
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_relation_artiste({track_id}): {e}")
+            return False
+
+    def oublier_paroles_ytm(self, track_id: int) -> bool:
+        """Oublie des paroles TEXTE venues de YouTube Music et le LRC YTM qui
+        les accompagne — ils sortent du même résultat de recherche (2026-09-26 :
+        199 textes YTM sur 284 étaient ceux d'un autre morceau, la recherche ne
+        regardant que l'artiste). La fiche redevient « à chercher » : le
+        prochain run passe par `get_lyrics(exiger_titre=True)`. Ne touche PAS à
+        des paroles d'une autre provenance (Genius, héritage). Sœurs comprises.
+        """
+        from src.enrichment.reconcile import _reconcile_lyrics_synced
+
+        fait = [False]
+        try:
+            with self.engine.begin() as conn:
+
+                def oublier(tid: int) -> None:
+                    ligne = conn.execute(
+                        text("SELECT lyrics_source, duration FROM tracks WHERE id = :id"),
+                        {"id": tid},
+                    ).first()
+                    if ligne is None:
+                        return
+                    source, duree = ligne
+                    s = (source or "").lower()
+                    if not (s.startswith("source:") or s == "youtube music"):
+                        return
+                    conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :id "
+                            "AND field = 'lyrics_synced' AND source = 'ytmusic'"
+                        ),
+                        {"id": tid},
+                    )
+                    restantes = [
+                        Observation("lyrics_synced", v, src)
+                        for src, v in conn.execute(
+                            text(
+                                "SELECT source, value FROM observations "
+                                "WHERE track_id = :id AND field = 'lyrics_synced'"
+                            ),
+                            {"id": tid},
+                        ).all()
+                    ]
+                    res = _reconcile_lyrics_synced(restantes, _clean_duration(duree))
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET lyrics = NULL, has_lyrics = 0, lyrics_source = NULL, "
+                            "lyrics_scraped_at = NULL, lyrics_synced = :v, "
+                            "lyrics_synced_source = :s, lyrics_synced_confidence = :c, "
+                            "updated_at = :now WHERE id = :id"
+                        ),
+                        {
+                            "v": res.value if res else None,
+                            "s": res.source if res else None,
+                            "c": int(res.confidence) if res and res.confidence else None,
+                            "now": datetime.now(),
+                            "id": tid,
+                        },
+                    )
+                    fait[0] = True
+
+                oublier(track_id)
+                effacer_chez_les_soeurs(conn, track_id, oublier)
+            return fait[0]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur oublier_paroles_ytm({track_id}): {e}")
+            return False
+
+    def retirer_mesures_songbpm(self, track_id: int) -> int:
+        """Retire tout ce que SongBPM a dit d'une fiche (BPM, tonalité, durée…)
+        et ré-arbitre la durée — quand la page SongBPM était celle d'une AUTRE
+        version (2026-09-26 : « Intro (A2) » prenait le « Intro » de Booba venu,
+        « Blues (Live at AK Studios) » les valeurs de « Blues »). Les colonnes
+        audio se lisent des observations : les retirer suffit. Appliqué aux
+        lignes SŒURS (observations partagées). Rend le nombre retiré."""
+        total = [0]
+        try:
+            with self.engine.begin() as conn:
+
+                def retirer(tid: int) -> None:
+                    total[0] += conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :id AND source = 'songbpm'"
+                        ),
+                        {"id": tid},
+                    ).rowcount
+                    self._ecrire_colonnes_discographie(
+                        conn, tid, self._arbitrer_discographie(conn, tid, ["duration"])
+                    )
+
+                retirer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, retirer)
+            return total[0]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_mesures_songbpm({track_id}): {e}")
+            return 0
+
+    def reverifier_lrc(self, track_id: int) -> tuple[int, bool]:
+        """Retire les LRC que les paroles Genius DÉMENTENT et ré-arbitre (2026-09-26).
+
+        Observations `lyrics_synced` démenties supprimées (toute source), puis
+        colonnes `lyrics_synced*` réécrites depuis ce qui reste — ou vidées. Un
+        LRC présent en COLONNE seule (ancien, sans observation) est jugé aussi.
+        Même oracle et même arbitrage que la lecture (`reconcile`), appliqués
+        aux lignes SŒURS : les observations y sont partagées, les laisser chez
+        une sœur les ferait revenir à la première synchronisation.
+
+        Rend (observations retirées, colonnes modifiées) cumulés sur la famille."""
+        from src.enrichment.reconcile import _reconcile_lyrics_synced
+        from src.utils.concordance_paroles import lrc_dementi, paroles_de_reference
+
+        bilan = [0, False]
+        try:
+            with self.engine.begin() as conn:
+
+                def reverifier(tid: int) -> None:
+                    ligne = conn.execute(
+                        text(
+                            "SELECT lyrics, lyrics_source, duration, lyrics_synced FROM tracks WHERE id = :id"
+                        ),
+                        {"id": tid},
+                    ).first()
+                    if ligne is None:
+                        return
+                    texte, source_texte, duree, colonne = ligne
+                    paroles = paroles_de_reference(texte, source_texte)
+                    obs = conn.execute(
+                        text(
+                            "SELECT id, source, value FROM observations "
+                            "WHERE track_id = :id AND field = 'lyrics_synced'"
+                        ),
+                        {"id": tid},
+                    ).all()
+                    dementies = [i for i, _s, v in obs if lrc_dementi(paroles, v)]
+                    for i in dementies:
+                        conn.execute(text("DELETE FROM observations WHERE id = :i"), {"i": i})
+                    bilan[0] += len(dementies)
+                    restantes = [
+                        Observation("lyrics_synced", v, s) for i, s, v in obs if i not in dementies
+                    ]
+                    res = _reconcile_lyrics_synced(restantes, _clean_duration(duree), paroles)
+                    if res is not None:
+                        valeur, source, conf = res.value, res.source, res.confidence
+                    elif colonne and (dementies or lrc_dementi(paroles, colonne)):
+                        valeur = source = conf = None
+                    else:
+                        return
+                    if valeur == colonne and not dementies:
+                        return
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET lyrics_synced = :v, lyrics_synced_source = :s, "
+                            "lyrics_synced_confidence = :c, updated_at = :now WHERE id = :id"
+                        ),
+                        {
+                            "v": valeur,
+                            "s": source,
+                            "c": int(conf) if conf is not None else None,
+                            "now": datetime.now(),
+                            "id": tid,
+                        },
+                    )
+                    bilan[1] = bilan[1] or valeur != colonne
+
+                reverifier(track_id)
+                effacer_chez_les_soeurs(conn, track_id, reverifier)
+            return bilan[0], bilan[1]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur reverifier_lrc({track_id}): {e}")
+            return 0, False
+
+    def constater_instrumental(self, track_id: int) -> bool:
+        """Pose le constat « instrumental » et retire le faux texte — un en-tête
+        « [Morceau instrumental : X] » enregistré comme paroles (2026-09-26).
+
+        Écrivain dédié : `save_track` écrit les paroles en COALESCE et ne sait
+        pas les vider. Appliqué aux lignes SŒURS aussi (paroles et constat sont
+        partagés) : sinon la synchronisation regarnirait le texte. Le LRC part
+        aussi, observations comprises : sans paroles, aucun LRC n'est celui du
+        morceau (*Intro (A2)* portait celui de *G5 (Intro)*, la reprise
+        instrumentale de *Ghost Town* par Justice Der celui du titre chanté)."""
+        try:
+            with self.engine.begin() as conn:
+
+                def poser(tid: int) -> None:
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET instrumental = 1, lyrics = NULL, has_lyrics = 0, "
+                            "lyrics_synced = NULL, lyrics_synced_source = NULL, "
+                            "lyrics_synced_confidence = NULL, updated_at = :now WHERE id = :id"
+                        ),
+                        {"id": tid, "now": datetime.now()},
+                    )
+                    conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :id "
+                            "AND field = 'lyrics_synced'"
+                        ),
+                        {"id": tid},
+                    )
+
+                poser(track_id)
+                effacer_chez_les_soeurs(conn, track_id, poser)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur constater_instrumental({track_id}): {e}")
             return False
 
     def forget_credit(self, track_id: int, name: str, role: str) -> int:

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from src.enrichment.observation import Observation
+from src.utils.concordance_paroles import jugeable, lrc_dementi, paroles_de_reference
 from src.utils.logger import get_logger
 from src.utils.lyrics_sync import compare_synced
 
@@ -70,12 +71,22 @@ def resolve_track_synced_lyrics(
     now = now or datetime.now()
 
     duration = getattr(track, "duration", None)
+    # Paroles Genius du morceau : l'oracle qui DÉMENT un LRC d'un autre morceau
+    # (2026-09-26 : 50 % des LRC YTM, 1,8 % des LRCLIB). Sans elles, YTM exige
+    # le même socle de titre — sinon il prend le 1ᵉʳ résultat du bon artiste.
+    paroles = paroles_de_reference(track.lyrics.text, track.lyrics.source)
+
+    def _retenu(lrc, source):
+        if lrc and lrc_dementi(paroles, lrc):
+            logger.info(f"⏭ {track.title}: LRC {source} écarté — démenti par les paroles Genius")
+            return None
+        return lrc
 
     # YTM : LRC (source 2) ET durée de secours ET texte fallback.
     ytm_res = None
     if ytm is not None:
         try:
-            ytm_res = ytm.get_lyrics(artist_name, track.title)
+            ytm_res = ytm.get_lyrics(artist_name, track.title, exiger_titre=not jugeable(paroles))
         except (AttributeError, TypeError) as e:
             # Le client YTM gère déjà son réseau (YTMusicError/requests) → ici on ne
             # couvre plus qu'un retour inattendu ; les autres sources continuent.
@@ -91,6 +102,7 @@ def resolve_track_synced_lyrics(
         if not duration:
             duration = ytm_res["duration"]  # secours du match LRCLIB ± 2 s
     ytm_lrc = (ytm_res.get("lyrics_synced") if ytm_res else None) if sync_ytm else None
+    ytm_lrc = _retenu(ytm_lrc, "YTM")
 
     # SOURCE 1 (LRCLIB) : match sur la durée ±2 s.
     lrclib_lrc = None
@@ -103,7 +115,7 @@ def resolve_track_synced_lyrics(
                 duration=duration,
             )
             if lr:
-                lrclib_lrc = lr.get("lyrics_synced")
+                lrclib_lrc = _retenu(lr.get("lyrics_synced"), "LRCLIB")
         except (AttributeError, TypeError, KeyError) as e:
             # LRCLIBAPI gère déjà son réseau → accès inattendu seul ; on continue.
             logger.debug(f"LRCLIB échec '{artist_name} - {track.title}': {e}")
@@ -135,6 +147,8 @@ def resolve_track_synced_lyrics(
                 # ne couvre plus qu'un retour inattendu ; dernier recours, non bloquant.
                 mres = None
                 logger.debug(f"Musixmatch échec '{artist_name} - {track.title}': {e}")
+            if mres and not _retenu(mres["lrc"], "Musixmatch"):
+                mres = None
             if mres:
                 out.lyrics_synced = mres["lrc"]
                 out.lyrics_synced_source = mres["source"]

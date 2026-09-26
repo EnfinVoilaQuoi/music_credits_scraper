@@ -50,6 +50,10 @@ MANUAL_SOURCE = "manual"
 # purgées par `e5_drop_combined_bpm_observations`). Inerte tant que le backfill
 # n'a pas tourné (aucune observation `legacy` en base).
 LEGACY_SOURCE = "legacy"
+#: Sources de REPLI : reprises telles quelles si SEULES, écartées dès qu'une
+#: source réelle existe. `heritage` = ce qu'une version tient de son original
+#: (BPM et tonalité d'un instrumental, 2026-09-26 — le même beat).
+_SOURCES_DE_REPLI = frozenset({LEGACY_SOURCE, "heritage"})
 
 
 def _manual_obs(observations: list):
@@ -64,7 +68,7 @@ def _drop_legacy(observations: list) -> list:
     """Écarte les observations `legacy` s'il existe AU MOINS une source réelle
     pour ce champ (elles ne servent que seules). Sans source réelle, la liste est
     rendue telle quelle — la donnée backfillée est le seul recours."""
-    real = [o for o in observations if o.source != LEGACY_SOURCE]
+    real = [o for o in observations if o.source not in _SOURCES_DE_REPLI]
     return real if real else observations
 
 
@@ -254,14 +258,15 @@ def _reconcile_bpm(observations: list, alt_observations: list) -> Resolution | N
         if value is not None:
             return Resolution("bpm", value, MANUAL_SOURCE, manual.confidence, alt=None)
 
-    real = [o for o in observations if o.source != LEGACY_SOURCE]
+    real = [o for o in observations if o.source not in _SOURCES_DE_REPLI]
     if not real and observations:
-        legacy = observations[0]
+        # `legacy` d'abord (la colonne backfillée), sinon l'héritage.
+        legacy = min(observations, key=lambda o: o.source != LEGACY_SOURCE)
         value = sanitize_bpm(legacy.value)
         if value is None:
             return None
         alt = sanitize_bpm(alt_observations[0].value) if alt_observations else None
-        return Resolution("bpm", value, LEGACY_SOURCE, legacy.confidence, alt=alt)
+        return Resolution("bpm", value, legacy.source, legacy.confidence, alt=alt)
 
     candidates = []
     for obs in real:
@@ -325,7 +330,9 @@ def _as_resolution(field: str, obs) -> Resolution:
     return Resolution(field, obs.value, obs.source, obs.confidence)
 
 
-def _reconcile_lyrics_synced(observations: list, track_duration) -> Resolution | None:
+def _reconcile_lyrics_synced(
+    observations: list, track_duration, paroles: str | None = None
+) -> Resolution | None:
     """Départage les LRC synchronisés par source (réutilise `compare_synced`).
 
     Les observations portent le LRC BRUT par source (slug `lrclib`/`ytmusic`/
@@ -337,8 +344,16 @@ def _reconcile_lyrics_synced(observations: list, track_duration) -> Resolution |
     `Resolution.source` = LABEL du verdict (`LRCLIB`/`YouTube Music`/`Musixmatch`)
     → la colonne legacy `lyrics_synced_source` garde exactement sa sémantique.
     La `confidence` (1/2) est calculée ICI, pas portée par les observations.
+
+    Un LRC que les `paroles` Genius DÉMENTENT est écarté AVANT le départage,
+    quelle que soit sa source (`concordance_paroles.lrc_dementi`, 2026-09-26 :
+    50 % des LRC YTM et 1,8 % des LRCLIB étaient ceux d'un autre morceau, et le
+    départage par la durée ne le voyait pas). Sans paroles jugeables, rien
+    n'est écarté.
     """
-    by_source = {o.source: o for o in observations}
+    from src.utils.concordance_paroles import lrc_dementi
+
+    by_source = {o.source: o for o in observations if not lrc_dementi(paroles, o.value)}
     lrclib = by_source.get("lrclib")
     ytm = by_source.get("ytmusic")
     if lrclib is not None or ytm is not None:
@@ -355,7 +370,15 @@ def _reconcile_lyrics_synced(observations: list, track_duration) -> Resolution |
     mxm = by_source.get("musixmatch")
     if mxm is not None:
         return Resolution(LYRICS_SYNCED_FIELD, mxm.value, "Musixmatch", 1.0)
+    if any(o.source in _SOURCES_LRC for o in observations):
+        # Des sources ont répondu et les paroles les DÉMENTENT toutes : le
+        # verdict est « pas de LRC » — sans lui la colonne garderait le faux.
+        return Resolution(LYRICS_SYNCED_FIELD, None, None, None)
     return None
+
+
+#: Sources dont une observation `lyrics_synced` est un LRC candidat.
+_SOURCES_LRC = frozenset({"lrclib", "ytmusic", "musixmatch"})
 
 
 def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
@@ -448,7 +471,11 @@ def apply_resolutions(track, resolutions: dict[str, Resolution]) -> None:
 
 
 def reconcile(
-    observations: list, *, track_duration=None, streams_master: str = "kworb"
+    observations: list,
+    *,
+    track_duration=None,
+    streams_master: str = "kworb",
+    paroles: str | None = None,
 ) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.
 
@@ -459,7 +486,7 @@ def reconcile(
     `track_duration` (secondes) alimente la stratégie `lyrics_synced` (départage
     par la durée réelle dans `compare_synced`) ; il entre par PARAMÈTRE pour que
     le moteur reste pur (aucune lecture de `Track`). Les deux appelants passent
-    `track.duration`.
+    `track.duration`. `paroles` (le texte Genius) écarte les LRC qu'il dément.
     """
     by_field: dict[str, list] = {}
     for obs in observations:
@@ -480,7 +507,7 @@ def reconcile(
 
     lyrics_obs = by_field.get(LYRICS_SYNCED_FIELD, [])
     if lyrics_obs:
-        lyrics_res = _reconcile_lyrics_synced(lyrics_obs, track_duration)
+        lyrics_res = _reconcile_lyrics_synced(lyrics_obs, track_duration, paroles)
         if lyrics_res is not None:
             resolutions[LYRICS_SYNCED_FIELD] = lyrics_res
 

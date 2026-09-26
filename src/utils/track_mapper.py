@@ -252,10 +252,18 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     # = colonne legacy conservée (fallback). Import local (anti-cycle utils↔enrich).
     if observations:
         from src.enrichment.reconcile import apply_resolutions, reconcile
+        from src.utils.concordance_paroles import paroles_de_reference
 
         # track.duration posé plus haut (l.135) : alimente la stratégie
         # lyrics_synced (départage par durée réelle dans compare_synced).
-        apply_resolutions(track, reconcile(observations, track_duration=track.duration))
+        apply_resolutions(
+            track,
+            reconcile(
+                observations,
+                track_duration=track.duration,
+                paroles=paroles_de_reference(track.lyrics.text, track.lyrics.source),
+            ),
+        )
         track.durations_observees = {
             o.source: _clean_duration(o.value) for o in observations if o.field == "duration"
         }

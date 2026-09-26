@@ -31,7 +31,7 @@ except ImportError:  # pragma: no cover
 from src.observability import source_usage
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
-from src.utils.version_descriptors import titres_equivalents
+from src.utils.version_descriptors import meme_socle, titres_equivalents
 
 logger = get_logger(__name__)
 
@@ -377,7 +377,7 @@ class YTMusicAPI:
             out.append(f"[{m:02d}:{s:02d}.{cs:02d}]{text}")
         return "\n".join(out) if any_ts else None
 
-    def get_lyrics(self, artist: str, title: str) -> dict | None:
+    def get_lyrics(self, artist: str, title: str, exiger_titre: bool = False) -> dict | None:
         """
         Récupère les paroles via YTMusic : search(songs) → videoId →
         get_watch_playlist → browseId paroles → get_lyrics.
@@ -391,12 +391,17 @@ class YTMusicAPI:
             SEULEMENT si son titre concorde (`titres_equivalents`) — l'artiste
             seul ne prouve pas que c'est ce morceau. Un morceau SANS paroles
             rend un dict à `lyrics=None` quand il a une durée à déclarer.
+
+        `exiger_titre` : le résultat doit AUSSI porter le même socle de titre
+        (`version_descriptors.meme_socle`). L'artiste seul faisait prendre le
+        1ᵉʳ morceau venu du bon artiste — 50 % de LRC faux (2026-09-26). Le
+        résolveur le demande quand il n'a pas de paroles Genius pour démentir.
         """
         # `attempt` autour de chaque appel à ytmusicapi : la lib fait ses
         # requêtes elle-même, ni le shim `requests_get` ni l'AsyncHttpSession ne
         # les voient. Sans ça, l'observation conclurait `indeterminate`.
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            return self._get_lyrics_body(obs, artist, title)
+            return self._get_lyrics_body(obs, artist, title, exiger_titre)
 
     @staticmethod
     def _duree_du_hit(hit: dict, title: str) -> int | None:
@@ -411,7 +416,9 @@ class YTMusicAPI:
             return None
         return secondes if titres_equivalents(title, hit.get("title")) else None
 
-    def _get_lyrics_body(self, obs, artist: str, title: str) -> dict | None:
+    def _get_lyrics_body(
+        self, obs, artist: str, title: str, exiger_titre: bool = False
+    ) -> dict | None:
         """Corps de `get_lyrics`, sous l'observation ouverte par elle."""
         try:
             with source_usage.attempt(_SOURCE, detail="search"):
@@ -429,12 +436,16 @@ class YTMusicAPI:
                 # acceptait « Williams » pour « IAM » et « Misha Van Der Werf »
                 # pour « Isha » — soit les paroles ET les timestamps d'un autre
                 # morceau écrits sur le nôtre. 5ᵉ site du même piège (2026-09-05).
-                if names_match_as_words(artist, arts):
-                    chosen = r
-                    break
+                if not names_match_as_words(artist, arts):
+                    continue
+                if exiger_titre and not meme_socle(title, r.get("title")):
+                    continue
+                chosen = r
+                break
             if not chosen:
-                logger.debug(f"YTM lyrics: artiste non confirmé pour '{artist} - {title}'")
-                obs.absent("artiste non confirmé sur les résultats")
+                motif = "titre" if exiger_titre else "artiste"
+                logger.debug(f"YTM lyrics: {motif} non confirmé pour '{artist} - {title}'")
+                obs.absent(f"{motif} non confirmé sur les résultats")
                 return None
             duree = self._duree_du_hit(chosen, title)
             sans_paroles = (

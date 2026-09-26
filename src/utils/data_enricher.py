@@ -509,9 +509,17 @@ class DataEnricher:
         save_track persiste track.observations dans SA transaction (E5c-1).
         """
         from src.enrichment.reconcile import apply_resolutions, reconcile
+        from src.utils.concordance_paroles import paroles_de_reference
 
         track.observations = self._collect_run_observations(ballot.candidates, ctx.observations)
-        apply_resolutions(track, reconcile(track.observations, track_duration=track.duration))
+        apply_resolutions(
+            track,
+            reconcile(
+                track.observations,
+                track_duration=track.duration,
+                paroles=paroles_de_reference(track.lyrics.text, track.lyrics.source),
+            ),
+        )
         logger.info(
             f"🧮 Réconciliation: BPM={track.audio.bpm} (alt={track.audio.bpm_alt}, "
             f"source={track.audio.bpm_source}, conf={track.audio.bpm_confidence})"

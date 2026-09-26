@@ -27,7 +27,8 @@ from src.utils.llm_extractor import (
     get_shared_extractor,
 )
 from src.utils.logger import get_logger, log_api
-from src.utils.title_matching import either_contains_as_words
+from src.utils.title_matching import either_contains_as_words, normalize_title
+from src.utils.version_descriptors import meme_famille, parse_variant, titre_generique
 
 logger = get_logger(__name__)
 
@@ -159,6 +160,27 @@ class SongBPMScraper:
         t = re.sub(r"[\-_/.,:;!?\"'’]+", " ", t)
         return " ".join(t.split())
 
+    def meme_version(self, search_title: str, result_title: str) -> bool:
+        """Le résultat SongBPM est-il la même VERSION du morceau cherché ?
+
+        `_title_key` retire les parenthèses, si bien que « Intro (A2) »,
+        « Intro (Mix-Tape Evolution) » et « Intro (Patrimoine du ghetto) »
+        devenaient tous « intro » et prenaient le BPM, la tonalité et la durée
+        du premier « Intro » de Booba venu ; « Blues (Live at AK Studios) »
+        et « (Acoustic) » ceux de « Blues » (mesuré 2026-09-26 : 624 fiches en
+        184 groupes aux valeurs dupliquées). Deux règles, les mêmes que pour
+        Spotify et Deezer : des descripteurs de familles DIFFÉRENTES désignent
+        un autre enregistrement (live, acoustique, remix, instrumental…) ; un
+        titre GÉNÉRIQUE n'est reconnu que titre complet égal.
+        """
+        a = self._normalize_title_for_matching(search_title)
+        b = self._normalize_title_for_matching(result_title)
+        if not meme_famille(parse_variant(a), parse_variant(b)):
+            return False
+        if titre_generique(self._title_key(a)) or titre_generique(self._title_key(b)):
+            return normalize_title(a) == normalize_title(b)
+        return True
+
     def _match_track(
         self,
         result_title: str,
@@ -181,7 +203,13 @@ class SongBPMScraper:
             logger.info("❌ REJET: artiste différent")
             return False
 
-        # 2) Titre = comparaison assouplie (égalité / inclusion / similarité)
+        # 2) Même VERSION, et un titre générique garde sa parenthèse — la clé
+        #    ci-dessous retire tout ce qui est entre parenthèses.
+        if not self.meme_version(search_title, result_title):
+            logger.info(f"❌ REJET: autre version ('{search_title}' vs '{result_title}')")
+            return False
+
+        # 3) Titre = comparaison assouplie (égalité / inclusion / similarité)
         rt = self._title_key(result_title)
         st = self._title_key(search_title)
         if not rt or not st:

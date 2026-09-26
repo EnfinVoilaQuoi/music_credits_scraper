@@ -33,7 +33,7 @@ class _FakeYTM:
             "source": source,
         }
 
-    def get_lyrics(self, artist, title):
+    def get_lyrics(self, artist, title, exiger_titre=False):
         return dict(self._res)
 
 

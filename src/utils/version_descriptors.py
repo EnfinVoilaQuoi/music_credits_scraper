@@ -425,6 +425,21 @@ def titres_equivalents(a: str | None, b: str | None) -> bool:
     return meme_famille(va, vb)
 
 
+def meme_socle(a: str | None, b: str | None) -> bool:
+    """Deux titres désignent-ils le même MORCEAU, en une version ou une autre ?
+
+    `titres_equivalents`, ou même socle quel que soit le descripteur (« Famous
+    (Video Version) » ≈ « Famous »). Plus large que `titres_equivalents` à
+    dessein : pour des PAROLES, les versions d'un morceau partagent leur texte.
+    Mesuré sur 200 recherches YTM (2026-09-26) : garde 64 LRC justes sur 69,
+    refuse 96 faux sur 98 — là où l'équivalence stricte n'en gardait que 43.
+    """
+    if titres_equivalents(a, b):
+        return True
+    sa = normalize_title(parse_variant(a or "").socle)
+    return bool(sa) and sa == normalize_title(parse_variant(b or "").socle)
+
+
 def doublons_evidents(fiches) -> bool:
     """Ces fiches d'un même artiste sont-elles À L'ÉVIDENCE le même enregistrement ?
 

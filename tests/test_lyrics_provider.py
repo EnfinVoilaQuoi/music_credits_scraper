@@ -31,7 +31,7 @@ class _FakeYTM:
     def __init__(self, lrc=None, text=None, source=None):
         self._res = {"lyrics_synced": lrc, "lyrics": text, "duration": None, "source": source}
 
-    def get_lyrics(self, artist, title):
+    def get_lyrics(self, artist, title, exiger_titre=False):
         return dict(self._res)
 
 

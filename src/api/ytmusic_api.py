@@ -8,6 +8,7 @@ Stratégie quota-optimisée :
   3. Fallback sur le champ `views` formaté de ytmusicapi si pas de clé ou erreur API
 """
 
+import json
 import re
 import unicodedata
 from urllib.parse import quote, unquote
@@ -29,6 +30,7 @@ except ImportError:  # pragma: no cover
 
 
 from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
 from src.utils.version_descriptors import meme_socle, titres_equivalents
@@ -377,7 +379,9 @@ class YTMusicAPI:
             out.append(f"[{m:02d}:{s:02d}.{cs:02d}]{text}")
         return "\n".join(out) if any_ts else None
 
-    def get_lyrics(self, artist: str, title: str, exiger_titre: bool = False) -> dict | None:
+    def get_lyrics(
+        self, artist: str, title: str, exiger_titre: bool = False, video_ids=()
+    ) -> dict | None:
         """
         Récupère les paroles via YTMusic : search(songs) → videoId →
         get_watch_playlist → browseId paroles → get_lyrics.
@@ -396,12 +400,16 @@ class YTMusicAPI:
         (`version_descriptors.meme_socle`). L'artiste seul faisait prendre le
         1ᵉʳ morceau venu du bon artiste — 50 % de LRC faux (2026-09-26). Le
         résolveur le demande quand il n'a pas de paroles Genius pour démentir.
+
+        `video_ids` : vidéos DÉJÀ rattachées au morceau, essayées AVANT toute
+        recherche (`track_videos`, par ordre de confiance) — l'identité est
+        acquise, la recherche n'est plus qu'un repli.
         """
         # `attempt` autour de chaque appel à ytmusicapi : la lib fait ses
         # requêtes elle-même, ni le shim `requests_get` ni l'AsyncHttpSession ne
         # les voient. Sans ça, l'observation conclurait `indeterminate`.
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            return self._get_lyrics_body(obs, artist, title, exiger_titre)
+            return self._get_lyrics_body(obs, artist, title, exiger_titre, video_ids)
 
     @staticmethod
     def _duree_du_hit(hit: dict, title: str) -> int | None:
@@ -416,11 +424,61 @@ class YTMusicAPI:
             return None
         return secondes if titres_equivalents(title, hit.get("title")) else None
 
+    def _lire_paroles(self, video_id: str) -> tuple[str | None, str | None, str | None]:
+        """(texte, LRC, source) des paroles qu'YTM rattache à CETTE vidéo ;
+        (None, None, None) si elle n'en a pas. Aucune recherche : l'identité
+        est celle de la vidéo."""
+        with source_usage.attempt(_SOURCE, detail="watch_playlist"):
+            watch = self.yt.get_watch_playlist(videoId=video_id)
+        lyrics_id = watch.get("lyrics") if isinstance(watch, dict) else None
+        if not lyrics_id:
+            return None, None, None
+        # Demander la version synchronisée ; fallback texte brut si indispo
+        try:
+            data = self.yt.get_lyrics(lyrics_id, timestamps=True)
+        except (YTMusicError, requests.RequestException):
+            # Certaines pistes n'ont pas de version synchronisée → texte brut.
+            data = self.yt.get_lyrics(lyrics_id)
+        raw = data.get("lyrics") if isinstance(data, dict) else None
+        synced = None
+        if isinstance(raw, list):
+            synced = self._format_lrc(raw)
+            text = "\n".join(
+                (line.get("text", "") if isinstance(line, dict) else getattr(line, "text", ""))
+                for line in raw
+            )
+        else:
+            text = raw
+        if not text or not str(text).strip():
+            return None, None, None
+        source = (data.get("source") if isinstance(data, dict) else None) or "YouTube Music"
+        return str(text).strip(), synced, source
+
     def _get_lyrics_body(
-        self, obs, artist: str, title: str, exiger_titre: bool = False
+        self, obs, artist: str, title: str, exiger_titre: bool = False, video_ids=()
     ) -> dict | None:
         """Corps de `get_lyrics`, sous l'observation ouverte par elle."""
         try:
+            # 1) Les vidéos DÉJÀ rattachées au morceau : aucune recherche, donc
+            #    aucune erreur d'identité. Mesuré 2026-09-26 : 70 paroles lues
+            #    ainsi, 70 justes — la recherche texte en donnait 50 % de fausses.
+            for video_id in video_ids:
+                text, synced, source = self._lire_paroles(video_id)
+                if text:
+                    logger.info(
+                        f"📝 YTM paroles (vidéo connue {video_id}) : '{artist} - {title}'"
+                        f"{' — synchro' if synced else ''}"
+                    )
+                    return {
+                        "lyrics": text,
+                        "lyrics_synced": synced,
+                        "source": source,
+                        "duration": None,
+                        "title": None,
+                        "video_id": video_id,
+                    }
+
+            # 2) Repli : recherche texte, sous les gardes (artiste, titre).
             with source_usage.attempt(_SOURCE, detail="search"):
                 results = self.yt.search(f"{artist} {title}", filter="songs", limit=3)
             if not results:
@@ -460,47 +518,29 @@ class YTMusicAPI:
                 else None
             )
 
-            with source_usage.attempt(_SOURCE, detail="watch_playlist"):
-                watch = self.yt.get_watch_playlist(videoId=chosen["videoId"])
-            lyrics_id = watch.get("lyrics") if isinstance(watch, dict) else None
-            if not lyrics_id:
+            text, synced, source = self._lire_paroles(chosen["videoId"])
+            if not text:
                 obs.absent("pas de paroles pour cette vidéo")
                 return sans_paroles
-
-            # Demander la version synchronisée ; fallback texte brut si indispo
-            try:
-                data = self.yt.get_lyrics(lyrics_id, timestamps=True)
-            except (YTMusicError, requests.RequestException):
-                # Certaines pistes n'ont pas de version synchronisée → texte brut.
-                data = self.yt.get_lyrics(lyrics_id)
-
-            raw = data.get("lyrics") if isinstance(data, dict) else None
-            synced = None
-            if isinstance(raw, list):
-                synced = self._format_lrc(raw)
-                text = "\n".join(
-                    (line.get("text", "") if isinstance(line, dict) else getattr(line, "text", ""))
-                    for line in raw
-                )
-            else:
-                text = raw
-
-            if not text or not str(text).strip():
-                obs.absent("paroles vides")
-                return sans_paroles
-
-            source = (data.get("source") if isinstance(data, dict) else None) or "YouTube Music"
             logger.info(
                 f"📝 YTM paroles: '{artist} - {title}' (source: {source}"
                 f"{', synchro' if synced else ''})"
             )
             return {
-                "lyrics": str(text).strip(),
+                "lyrics": text,
                 "lyrics_synced": synced,
                 "source": source,
                 "duration": duree,
                 "title": chosen.get("title"),
+                "video_id": chosen["videoId"],
             }
+        except json.JSONDecodeError as e:
+            # Réponse VIDE : c'est le bridage de YTM (mesuré 2026-09-26 après
+            # ~1 800 appels), pas une structure changée — sans ce cas l'erreur
+            # sortait en « parse » ou remontait jusqu'au flux.
+            obs.fail(IssueKind.THROTTLED, f"réponse vide (bridage YTM) : {e}")
+            logger.warning(f"YTM bridé pour '{artist} - {title}' : réponse vide")
+            return None
         except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
             # Le transport a déjà été qualifié par `attempt` ; ici on ne nomme que
             # les ruptures de FORME de la réponse.

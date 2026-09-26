@@ -47,6 +47,25 @@ class SyncedLyricsOutcome:
     text_source: str | None = None
 
 
+#: Provenances des vidéos d'une fiche, par ordre de CONFIANCE : un lien choisi
+#: à la main, puis le morceau relevé dans les albums YTM de l'artiste, puis le
+#: lien Genius, puis le lien retenu par une recherche.
+_ORDRE_VIDEOS = ("manual", "ytm_album", "genius_media", "search_auto")
+
+
+def videos_connues(track) -> list[str]:
+    """Les vidéos DÉJÀ rattachées au morceau, les plus sûres d'abord.
+
+    YTM en tire les paroles SANS recherche : mesuré le 2026-09-26, 70 paroles
+    lues ainsi, 70 justes (la recherche texte en donnait 50 % de fausses)."""
+    rang = {s: i for i, s in enumerate(_ORDRE_VIDEOS)}
+    vues = sorted(
+        (v for v in track.videos if v.video_id),
+        key=lambda v: rang.get(v.source, len(rang)),
+    )
+    return list(dict.fromkeys(v.video_id for v in vues))
+
+
 def resolve_track_synced_lyrics(
     track,
     artist_name: str,
@@ -86,7 +105,12 @@ def resolve_track_synced_lyrics(
     ytm_res = None
     if ytm is not None:
         try:
-            ytm_res = ytm.get_lyrics(artist_name, track.title, exiger_titre=not jugeable(paroles))
+            ytm_res = ytm.get_lyrics(
+                artist_name,
+                track.title,
+                exiger_titre=not jugeable(paroles),
+                video_ids=videos_connues(track),
+            )
         except (AttributeError, TypeError) as e:
             # Le client YTM gère déjà son réseau (YTMusicError/requests) → ici on ne
             # couvre plus qu'un retour inattendu ; les autres sources continuent.

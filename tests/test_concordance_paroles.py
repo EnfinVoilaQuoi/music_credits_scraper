@@ -91,7 +91,7 @@ class _YTM:
     def __init__(self, lrc):
         self.lrc, self.appels = lrc, []
 
-    def get_lyrics(self, artist, title, exiger_titre=False):
+    def get_lyrics(self, artist, title, exiger_titre=False, video_ids=()):
         self.appels.append(exiger_titre)
         return {"lyrics": "x", "lyrics_synced": self.lrc, "source": "YouTube Music"}
 
@@ -286,3 +286,77 @@ class TestOublierParolesYTM:
     def test_des_paroles_genius_ne_sont_pas_touchees(self, data_manager):
         tid = self._fiche(data_manager, "genius")
         assert not data_manager.oublier_paroles_ytm(tid)
+
+
+class _YtmVideos:
+    """Client YTM factice : paroles pour certaines vidéos, recherche comptée."""
+
+    def __init__(self, avec_paroles=(), erreur=None):
+        self.avec_paroles, self.erreur, self.recherches = set(avec_paroles), erreur, 0
+
+    def search(self, q, filter=None, limit=None):
+        if self.erreur:
+            raise self.erreur
+        self.recherches += 1
+        return [{"videoId": "s", "title": "Intro (A2)", "artists": [{"name": "Booba"}]}]
+
+    def get_watch_playlist(self, videoId):
+        if self.erreur:
+            raise self.erreur
+        return {"lyrics": f"lyr-{videoId}" if videoId in self.avec_paroles else None}
+
+    def get_lyrics(self, browse_id, timestamps=False):
+        return {"lyrics": f"paroles de {browse_id}", "source": "YouTube Music"}
+
+
+class TestVideosConnues:
+    def _api(self, yt):
+        from src.api.ytmusic_api import YTMusicAPI
+
+        api = YTMusicAPI.__new__(YTMusicAPI)
+        api.yt = yt
+        return api
+
+    def test_la_video_connue_evite_la_recherche(self):
+        yt = _YtmVideos(avec_paroles={"clip"})
+        res = self._api(yt).get_lyrics("Booba", "Intro (A2)", video_ids=["topic", "clip"])
+        assert res["lyrics"] == "paroles de lyr-clip" and res["video_id"] == "clip"
+        assert yt.recherches == 0
+
+    def test_sans_paroles_on_retombe_sur_la_recherche(self):
+        yt = _YtmVideos(avec_paroles={"s"})
+        res = self._api(yt).get_lyrics("Booba", "Intro (A2)", video_ids=["clip"])
+        assert res["video_id"] == "s" and yt.recherches == 1
+
+    def test_reponse_vide_comptee_comme_bridage(self):
+        import json
+
+        from src.observability import source_usage
+
+        yt = _YtmVideos(erreur=json.JSONDecodeError("Expecting value", "", 0))
+        verdicts = []
+        orig = source_usage.Observation.fail
+
+        def espion(self, kind, detail=""):
+            verdicts.append(kind)
+            return orig(self, kind, detail)
+
+        source_usage.Observation.fail = espion
+        try:
+            assert self._api(yt).get_lyrics("Booba", "Intro (A2)") is None
+        finally:
+            source_usage.Observation.fail = orig
+        assert [k.value for k in verdicts] == ["throttled"]
+
+    def test_ordre_de_confiance(self):
+        from src.models import TrackVideo
+        from src.utils.synced_lyrics_resolver import videos_connues
+
+        t = Track(title="X")
+        t.videos = [
+            TrackVideo(video_id="auto", source="search_auto"),
+            TrackVideo(video_id="clip", source="genius_media"),
+            TrackVideo(video_id="topic", source="ytm_album"),
+            TrackVideo(video_id="clip", source="genius_media"),
+        ]
+        assert videos_connues(t) == ["topic", "clip", "auto"]

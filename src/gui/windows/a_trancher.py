@@ -10,7 +10,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from src.services.revue import DETECTEURS, Cas, detecter, par_detecteur
+from src.services.revue import Cas, analyser, par_detecteur, tous_les_detecteurs
 
 #: Au-delà, la fenêtre deviendrait lente à construire ; le tri par impact met
 #: de toute façon en haut ce qui compte.
@@ -32,8 +32,8 @@ class ATrancherWindow(ctk.CTkToplevel):
         self.app = app
         self.artiste = artiste
         self.tracks = {t.id: t for t in artiste.tracks or []}
-        self.cas: list[Cas] = detecter(artiste.tracks or [])
-        self.defs = {d.code: d for d in DETECTEURS}
+        self.cas: list[Cas] = analyser(app.data_manager, artiste)
+        self.defs = {d.code: d for d in tous_les_detecteurs()}
 
         self.title(f"À trancher — {artiste.name}")
         self.geometry("980x680")
@@ -49,7 +49,7 @@ class ATrancherWindow(ctk.CTkToplevel):
         ).pack(side="left")
 
         self.choix = {f"{_TOUT} ({len(self.cas)})": None}
-        for d in DETECTEURS:
+        for d in tous_les_detecteurs():
             if compte.get(d.code):
                 self.choix[f"{d.icone} {d.libelle} ({compte[d.code]})"] = d.code
         self.filtre = ctk.CTkOptionMenu(

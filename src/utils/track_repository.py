@@ -890,6 +890,37 @@ class TrackRepository:
             for r in rows
         ]
 
+    def get_artist_observations(self, artist_id: int) -> dict[int, list[Observation]]:
+        """Observations brutes de TOUTES les fiches d'un artiste, en une requête —
+        `{track_id: [Observation]}`. Sert les détecteurs du panneau « À
+        trancher », qui jugent ce que chaque source a dit, pas seulement le
+        verdict arbitré."""
+        with self.engine.connect() as conn:
+            rows = (
+                conn.execute(
+                    text(
+                        "SELECT o.track_id, o.field, o.value, o.source, o.confidence, o.seen_at "
+                        "FROM observations o JOIN tracks t ON t.id = o.track_id "
+                        "WHERE t.artist_id = :aid"
+                    ),
+                    {"aid": artist_id},
+                )
+                .mappings()
+                .all()
+            )
+        par_fiche: dict[int, list[Observation]] = {}
+        for r in rows:
+            par_fiche.setdefault(r["track_id"], []).append(
+                Observation(
+                    field=r["field"],
+                    value=r["value"],
+                    source=r["source"],
+                    confidence=r["confidence"],
+                    seen_at=r["seen_at"],
+                )
+            )
+        return par_fiche
+
     def upsert_observations(self, track_id: int, observations, *, conn=None) -> None:
         """Upsert les observations d'un morceau (clé (field, source)). No-op si vide."""
         if not observations:

@@ -25,6 +25,7 @@ from ytmusicapi.exceptions import YTMusicError
 from src.api.ytmusic_api import YTMusicAPI
 from src.config import YTM_IDENTITY_MIN_MATCHED, YTM_IDENTITY_MIN_RATIO
 from src.models import TrackVideo
+from src.utils.duree_youtube import duree_a_declarer
 from src.utils.logger import get_logger
 
 # Extraction du video id : helper partagé (factorisé, cf. youtube_utils). Alias
@@ -587,7 +588,9 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         )
 
     # ── Étape 2 : UNE seule passe YouTube Data API v3 pour tous les IDs ──────
-    view_counts = api.fetch_view_counts_batch(all_video_ids)
+    # Le même appel rapporte la durée et la chaîne de chaque vidéo (même quota).
+    details_videos: dict = {}
+    view_counts = api.fetch_view_counts_batch(all_video_ids, details=details_videos)
     # Estimer le nb de requêtes effectuées
     result["yt_api_calls"] = (len(all_video_ids) + 49) // 50 if all_video_ids else 0
 
@@ -751,7 +754,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             f"🎬 Vidéos hors canal : {len(extras)} morceau(x), "
             f"{len(all_extra_vids)} vidéo(s) (clip Genius, lien manuel, audio trouvée)"
         )
-        extra_counts = api.fetch_view_counts_batch(all_extra_vids)
+        extra_counts = api.fetch_view_counts_batch(all_extra_vids, details=details_videos)
         result["yt_api_calls"] += (len(all_extra_vids) + 49) // 50
         for track_id, videos in extras.items():
             for video_id, video in videos.items():
@@ -824,6 +827,22 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
 
     for track_id, videos in videos_vues.items():
         data_manager.record_track_videos(track_id, list(videos.values()))
+
+    # ── Étape 7 : durée d'après les vidéos PROPRES à la fiche (2026-09-27) ────
+    # Audio d'une chaîne Topic = le fichier du distributeur ; vidéo ordinaire
+    # seulement hors plateformes (cf. `duree_youtube`). Une vidéo partagée par
+    # plusieurs fiches (clip double compris) ne dit la durée d'aucune.
+    result["durees_youtube"] = 0
+    for track_id, vids in vid_counts.items():
+        fiche = tracks_par_id.get(track_id)
+        if fiche is None:
+            continue
+        propres = [details_videos[v] for v in vids if v not in partagees and v in details_videos]
+        verdict = duree_a_declarer(propres, not fiche.spotify_id and not fiche.deezer_id)
+        if verdict and data_manager.record_duration_observation(track_id, *verdict):
+            result["durees_youtube"] += 1
+    if result["durees_youtube"]:
+        logger.info(f"⏱️ Durée YouTube déclarée pour {result['durees_youtube']} morceau(x)")
 
     logger.info(
         f"YTMusic terminé : {result['matched']} matchés, "

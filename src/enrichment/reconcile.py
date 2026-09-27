@@ -122,7 +122,20 @@ DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
     # durées des pages titre et album du run streams. Ces deux-là lisent PAR
     # l'ID, comme ReccoBeats, qui reste bon dernier (c'est lui qui a contaminé)
     # — un ID rejeté emporte leurs durées (`clear_track_spotify_id`).
-    "duration": ("deezer", "ytmusic", "songbpm", "spotify_web", "reccobeats"),
+    # `youtube` (audio d'une chaîne Topic, le fichier du distributeur : 97-99 %
+    # à ≤ 2 s de Deezer) passe devant SongBPM ; `youtube_video` (vidéo
+    # ordinaire, fiche hors plateformes) ne sert qu'en l'absence de tout le
+    # reste — ReccoBeats reste en queue (il exige un ID Spotify, que ces fiches
+    # n'ont pas : les deux ne se croisent pas) (2026-09-27).
+    "duration": (
+        "deezer",
+        "ytmusic",
+        "youtube",
+        "songbpm",
+        "spotify_web",
+        "youtube_video",
+        "reccobeats",
+    ),
     "release_date": ("genius", "deezer", "spotify_web"),
     "isrc": ("deezer",),
 }

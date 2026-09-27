@@ -19,9 +19,21 @@ from src.models import TrackVideo
 _ARTIST = SimpleNamespace(id=1, name="Isha")
 
 
-def _track(idx, title, *, album="Alb", youtube_url=None, videos=None, spotify_streams=None):
+def _track(
+    idx,
+    title,
+    *,
+    album="Alb",
+    youtube_url=None,
+    videos=None,
+    spotify_streams=None,
+    spotify_id=None,
+    deezer_id=None,
+):
     return SimpleNamespace(
         id=idx,
+        spotify_id=spotify_id,
+        deezer_id=deezer_id,
         title=title,
         album=album,
         streams=SimpleNamespace(spotify_streams=spotify_streams),
@@ -36,9 +48,10 @@ def _track(idx, title, *, album="Alb", youtube_url=None, videos=None, spotify_st
 class FakeAPI:
     """Canal à UN album, et un compteur de vues par videoId."""
 
-    def __init__(self, raw_tracks, vues):
+    def __init__(self, raw_tracks, vues, details=None):
         self.raw_tracks = raw_tracks
         self.vues = vues
+        self.details = details or {}
         self.batches = []
 
     def get_artist_channel_candidates(self, name):
@@ -50,8 +63,10 @@ class FakeAPI:
     def get_album_tracks_raw(self, browse_id):
         return self.raw_tracks
 
-    def fetch_view_counts_batch(self, ids):
+    def fetch_view_counts_batch(self, ids, details=None):
         self.batches.append(sorted(ids))
+        if details is not None:
+            details.update({v: self.details[v] for v in ids if v in self.details})
         return {v: self.vues[v] for v in ids if v in self.vues}
 
     @staticmethod
@@ -65,6 +80,7 @@ class FakeDM:
         self.stream_writes = []
         self.album_writes = []
         self.video_writes = []
+        self.durees = []
 
     def get_artist_ytm_channel_info(self, artist_id):
         return ("UCok", "manual")
@@ -87,6 +103,10 @@ class FakeDM:
 
     def update_album_ytm_streams(self, artist_id, album_title, total):
         self.album_writes.append((album_title, total))
+        return True
+
+    def record_duration_observation(self, track_id, secondes, source):
+        self.durees.append((track_id, secondes, source))
         return True
 
     def record_track_videos(self, track_id, videos):
@@ -398,3 +418,34 @@ def test_un_rattachement_affirme_l_emporte_sur_une_recherche():
         (8, "clip"): "genius_media",
     }
     assert rattachements_de_recherche_a_retirer(vid_counts, sources) == [(1592, "3Xm")]
+
+
+# ── Durée d'après les vidéos (2026-09-27) ────────────────────────────────────
+
+
+def test_duree_de_l_audio_topic_et_repli_hors_plateformes(sans_recherche):
+    """L'audio d'une chaîne Topic donne la durée (`youtube`) ; une vidéo
+    ordinaire ne la donne que pour une fiche hors plateformes (`youtube_video`),
+    et une vidéo partagée par deux fiches (clip double) ne la donne à aucune."""
+    api = FakeAPI(
+        raw_tracks=[{"title": "Magot", "video_id": "audioaudioa", "views_str": None}],
+        vues={"audioaudioa": 5, "freestylefr": 7, "clipsurspot": 9, "clipdouble1": 3},
+        details={
+            "audioaudioa": {"duration": 193, "channel": "Isha - Topic"},
+            "freestylefr": {"duration": 150, "channel": "Booska-P"},
+            "clipsurspot": {"duration": 240, "channel": "ISHA"},
+            "clipdouble1": {"duration": 400, "channel": "ISHA"},
+        },
+    )
+    tracks = [
+        _track(1, "Magot"),
+        _track(2, "Freestyle", album=None, youtube_url="https://youtu.be/freestylefr"),
+        _track(3, "Clip", spotify_id="SP", youtube_url="https://youtu.be/clipsurspot"),
+        _track(4, "A", youtube_url="https://youtu.be/clipdouble1"),
+        _track(5, "B", youtube_url="https://youtu.be/clipdouble1"),
+    ]
+
+    dm, result = _lancer(api, tracks)
+
+    assert sorted(dm.durees) == [(1, 193, "youtube"), (2, 150, "youtube_video")]
+    assert result["durees_youtube"] == 2

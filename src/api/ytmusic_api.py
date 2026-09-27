@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover
 
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.duree_youtube import iso8601_secondes
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
 from src.utils.version_descriptors import meme_socle, titres_equivalents
@@ -560,8 +561,15 @@ class YTMusicAPI:
 
     # ── Étape 2 : batch YouTube Data API v3 (quota-optimal) ───────────────────
 
-    def fetch_view_counts_batch(self, video_ids: list[str]) -> dict[str, int]:
+    def fetch_view_counts_batch(
+        self, video_ids: list[str], details: dict | None = None
+    ) -> dict[str, int]:
         """Récupère les viewCounts exacts pour une liste de videoId.
+
+        `details`, s'il est fourni, est REMPLI par le même appel —
+        `{videoId: {"duration": s, "channel": nom}}` (parties `contentDetails`
+        et `snippet` : même coût quota, 1 unité par lot de 50). Sert la durée
+        des vidéos (`duree_youtube`, 2026-09-27).
 
         Regroupe automatiquement en batches de 50 pour minimiser les requêtes API.
         Retourne {} si YOUTUBE_API_KEY absent ou erreur.
@@ -598,11 +606,19 @@ class YTMusicAPI:
         for i in range(0, len(unique_ids), _YT_BATCH_SIZE):
             batch = unique_ids[i : i + _YT_BATCH_SIZE]
             try:
-                response = youtube.videos().list(part="statistics", id=",".join(batch)).execute()
+                part = "statistics" if details is None else "statistics,contentDetails,snippet"
+                response = youtube.videos().list(part=part, id=",".join(batch)).execute()
                 for item in response.get("items", []):
                     view_str = item.get("statistics", {}).get("viewCount")
                     if view_str is not None:
                         counts[item["id"]] = int(view_str)
+                    if details is not None:
+                        details[item["id"]] = {
+                            "duration": iso8601_secondes(
+                                item.get("contentDetails", {}).get("duration")
+                            ),
+                            "channel": item.get("snippet", {}).get("channelTitle"),
+                        }
             except (GoogleApiError, OSError, KeyError, ValueError) as e:
                 logger.error(f"Erreur YouTube Data API v3 (batch {i // _YT_BATCH_SIZE + 1}): {e}")
 

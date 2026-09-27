@@ -93,6 +93,8 @@ def test_report_album_overlap_normalise():
 def _track(idx, title, album="Alb", spotify_streams=None, youtube_url=None, videos=None):
     return SimpleNamespace(
         id=idx,
+        spotify_id=None,
+        deezer_id=None,
         title=title,
         album=album,
         streams=SimpleNamespace(spotify_streams=spotify_streams),  # Phase 5 : sous-objet
@@ -124,7 +126,7 @@ class FakeAPI:
     def get_album_tracks_raw(self, browse_id):
         return self.raw.get(browse_id, [])
 
-    def fetch_view_counts_batch(self, ids):
+    def fetch_view_counts_batch(self, ids, details=None):
         return {v: 100 for v in ids}
 
     @staticmethod

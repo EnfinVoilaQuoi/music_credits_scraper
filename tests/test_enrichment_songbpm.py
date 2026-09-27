@@ -338,3 +338,38 @@ class TestVoieAsync:
         )
         asyncio.run(self._provider(scraper).enrich_async(track, ctx))
         assert scraper.calls[0][2] is None
+
+
+class TestPageDUneAutreFiche:
+    """La page SongBPM porte l'ID Spotify d'une AUTRE fiche de l'artiste : elle
+    décrit ce morceau-là, et toutes ses mesures avec (2026-09-27, A2H « Blues
+    (Live at AK Studios) » recevait BPM, tonalité et durée de « Blues »)."""
+
+    def _fiches(self):
+        artiste = Artist(name="A2H")
+        original = Track(title="Blues", artist=artiste, spotify_id="15Fc")
+        original.id = 1
+        live = Track(title="Blues (Live at AK Studios)", artist=artiste)
+        live.id = 2
+        return original, live
+
+    def test_aucune_mesure_prise(self):
+        original, live = self._fiches()
+        data = {"bpm": 130, "key": 2, "mode": 0, "duration": 176, "spotify_id": "15Fc"}
+        ctx = EnrichmentContext(artist_tracks=[original, live])
+        assert SongBpmProvider(_FakeScraper(data)).enrich(live, ctx) is False
+        assert not ctx.bpm_ballot.candidates and not ctx.observations
+        assert live.duration is None and live.spotify_id is None
+
+    def test_un_id_inconnu_ne_bloque_rien(self):
+        original, live = self._fiches()
+        data = {"bpm": 130, "spotify_id": "autre"}
+        ctx = EnrichmentContext(artist_tracks=[original, live])
+        assert SongBpmProvider(_FakeScraper(data)).enrich(live, ctx) is True
+
+    def test_meme_enregistrement_n_est_pas_une_autre_fiche(self):
+        from src.enrichment.providers.songbpm import fiche_du_meme_id
+
+        original, live = self._fiches()
+        original.genius_id = live.genius_id = 42
+        assert fiche_du_meme_id(live, "15Fc", [original, live]) is None

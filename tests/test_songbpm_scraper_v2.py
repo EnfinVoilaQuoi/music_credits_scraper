@@ -393,3 +393,53 @@ class TestParseurDeResultats:
 
         scraper.page = _PageCasse()
         assert scraper._get_search_results() == []
+
+
+# ───────────── repli « sans parenthèses » : chercher court, juger complet (2026-09-27)
+
+
+class _Obs:
+    def absent(self, *_):
+        pass
+
+
+class TestRepliSansParentheses:
+    """« Blues (Live at AK Studios) » était recherché comme « Blues » ET jugé
+    comme « Blues » : la règle « même version » voyait deux titres identiques et
+    posait le BPM, la tonalité et la durée de l'original sur la version live."""
+
+    def _espion(self, appels):
+        def perform(**kw):
+            appels.append(kw)
+            return None
+
+        return perform
+
+    def test_voie_sync_juge_avec_le_titre_complet(self, scraper, monkeypatch):
+        appels = []
+        monkeypatch.setattr(scraper, "_perform_search", self._espion(appels))
+        scraper._search_track_body(_Obs(), "Blues (Live at AK Studios)", "A2H", None, 5, True)
+        assert appels[1]["track_title"] == "Blues"
+        assert appels[1]["titre_juge"] == "Blues (Live at AK Studios)"
+
+    def test_voie_async_juge_avec_le_titre_complet(self, monkeypatch):
+        import asyncio
+
+        from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
+
+        s = SongBPMScraperAsync(headless=True)
+        appels = []
+
+        async def perform(**kw):
+            appels.append(kw)
+            return None
+
+        monkeypatch.setattr(s, "_perform_search_async", perform)
+        asyncio.run(
+            s._search_track_async_body(_Obs(), "Blues (Live at AK Studios)", "A2H", None, 5, True)
+        )
+        assert appels[1]["track_title"] == "Blues"
+        assert appels[1]["titre_juge"] == "Blues (Live at AK Studios)"
+
+    def test_l_original_n_est_pas_la_version_live(self, scraper):
+        assert not scraper._match_track("Blues", "A2H", "Blues (Live at AK Studios)", "A2H")

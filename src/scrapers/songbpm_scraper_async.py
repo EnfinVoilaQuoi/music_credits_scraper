@@ -274,6 +274,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         max_results_to_check: int = 5,
         fetch_details: bool = True,
         reload_homepage: bool = True,
+        titre_juge: str | None = None,
     ) -> dict[str, Any] | None:
         try:
             if reload_homepage:
@@ -305,10 +306,13 @@ class SongBPMScraperAsync(SongBPMScraper):
                 return None
 
             for i, result in enumerate(results[:max_results_to_check], 1):
+                # `titre_juge` : le titre COMPLET quand la requête a été
+                # nettoyée — sinon « Blues (Live at AK Studios) » cherché comme
+                # « Blues » acceptait la page de l'original (2026-09-27).
                 if self._match_track(
                     result["title"],
                     result["artist"],
-                    track_title,
+                    titre_juge or track_title,
                     artist_name,
                     result_spotify_id=result.get("spotify_id"),
                     search_spotify_id=spotify_id,
@@ -396,6 +400,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                     max_results_to_check=max_results_to_check,
                     fetch_details=fetch_details,
                     reload_homepage=False,
+                    titre_juge=track_title,
                 )
                 if result:
                     log_api("SongBPM", f"search/{track_title}", True)

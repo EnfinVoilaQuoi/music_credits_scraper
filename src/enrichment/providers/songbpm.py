@@ -24,6 +24,21 @@ logger = get_logger(__name__)
 # playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
 
 
+def fiche_du_meme_id(track: Track, spotify_id: str | None, artist_tracks) -> Track | None:
+    """PUR. L'autre fiche de l'artiste qui porte déjà cet ID Spotify (hors
+    elle-même et ses doublons d'enregistrement, même `genius_id`), sinon None."""
+    if not spotify_id:
+        return None
+    for t in artist_tracks or ():
+        if t is track or (t.id is not None and t.id == track.id):
+            continue
+        if track.genius_id and t.genius_id == track.genius_id:
+            continue
+        if t.spotify_id == spotify_id or spotify_id in t.spotify_ids:
+            return t
+    return None
+
+
 class SongBpmProvider:
     """Enrichissement via le scraper SongBPM (source `songbpm`)."""
 
@@ -185,6 +200,18 @@ class SongBpmProvider:
         force_update = ctx.force_update
         artist_tracks = ctx.artist_tracks
         updated = False
+
+        autre = fiche_du_meme_id(track, track_data.get("spotify_id"), artist_tracks)
+        if autre is not None:
+            # La page porte l'identifiant Spotify d'une AUTRE fiche de l'artiste :
+            # elle décrit ce morceau-là, ses mesures aussi. Refuser l'ID seul
+            # gardait BPM, tonalité et durée de l'original sur les versions
+            # « Live at AK Studios » d'A2H (2026-09-27).
+            logger.warning(
+                f"⚠️ SongBPM : la page retenue pour '{track.title}' est celle de "
+                f"'{autre.title}' (même ID Spotify) — mesures écartées"
+            )
+            return False
 
         # BPM → candidat pour le vote (§8.3). E7 : plus de pose legacy directe —
         # apply_resolutions pose track.audio.bpm en fin de run. Un candidat valide au

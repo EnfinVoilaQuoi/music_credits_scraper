@@ -20,12 +20,13 @@ from src.models import Artist
 from src.utils.artist_repository import ArtistRepository
 from src.utils.db import Database
 from src.utils.logger import get_logger
+from src.utils.revue_repository import RevueRepository
 from src.utils.track_repository import TrackRepository
 
 logger = get_logger(__name__)
 
 
-class DataManager(ArtistRepository, TrackRepository):
+class DataManager(ArtistRepository, TrackRepository, RevueRepository):
     """Gère la persistance des données (façade sur Database + repositories)."""
 
     def __init__(self):

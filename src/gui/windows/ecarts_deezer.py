@@ -124,6 +124,10 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
                 bilan,
                 should_stop=stop_requested,
             )
+            ecarts_deezer.enregistrer_signalements(
+                self.app.runtime.data_manager, self.artist, bilan
+            )
+        self.bilan = bilan
         self._post_ui(self._afficher, bilan)
 
     def _annoncer(self, texte: str) -> None:
@@ -293,6 +297,10 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
                     choisis,
                     lire_piste=lambda tid: async_loop.run_sync(client.get_track_async(http, tid)),
                     should_stop=stop_requested,
+                )
+                # Ce qui vient d'être traité quitte le panneau « À trancher ».
+                ecarts_deezer.enregistrer_signalements(
+                    runtime.data_manager, artist, self.bilan, traites=choisis
                 )
             self._post_ui(self._fin_creation, comptes)
 

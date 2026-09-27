@@ -1090,3 +1090,38 @@ def resume(bilan: BilanEcarts, artist_name: str = "") -> str:
     if bilan.erreurs:
         lignes.append("\nErreurs : " + " ; ".join(bilan.erreurs))
     return "\n".join(lignes)
+
+
+#: Natures qui attendent une décision (les 🔗 prouvés sont écrits sans elle).
+NATURES_A_TRANCHER = tuple(n for n in NATURES if n != "link")
+
+
+def enregistrer_signalements(data_manager, artist, bilan, *, traites=()) -> int:
+    """Les écarts d'une détection RÉUSSIE deviennent des signalements du panneau
+    « À trancher » (2026-09-27), un détecteur par nature. `traites` : les écarts
+    que l'utilisateur vient d'appliquer, retirés. Rend le nombre écrit."""
+    from src.services import revue
+
+    if bilan is None or bilan.ambigu or not bilan.complete:
+        return 0
+    deja = {id(e) for e in traites}
+    total = 0
+    for nature in NATURES_A_TRANCHER:
+        cas = []
+        for e in bilan.ecarts:
+            if e.nature != nature or id(e) in deja:
+                continue
+            motif = f"{LIBELLES[nature]} — « {e.album.title} »"
+            if e.motifs:
+                motif += " (" + ", ".join(e.motifs) + ")"
+            cas.append(
+                revue.cas_de_run(
+                    f"deezer_{nature}",
+                    e.existing_track,
+                    e.titre,
+                    motif,
+                    {"piste_deezer": e.piste.id, "album_deezer": e.album.id},
+                )
+            )
+        total += data_manager.remplacer_signalements(artist.id, f"deezer_{nature}", cas)
+    return total

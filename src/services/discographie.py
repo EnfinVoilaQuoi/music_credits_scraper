@@ -557,6 +557,7 @@ def _completer_par_deezer(runtime, artist, options, hooks, bilan) -> None:
         logger.exception("Détection des écarts Deezer échouée")
         bilan.deezer_motif = f"Deezer : {e}"
         return
+    ecarts_deezer.enregistrer_signalements(runtime.data_manager, artist, bilan.ecarts_deezer)
     if bilan.ecarts_deezer.ecarts:
         hooks.confirmer_ecarts(bilan.ecarts_deezer)
 

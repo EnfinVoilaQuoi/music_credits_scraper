@@ -529,3 +529,46 @@ def test_contributeur_au_nom_malforme_ecarte():
     assert not nom_de_contributeur_plausible("")
     assert nom_de_contributeur_plausible("Soprano")
     assert nom_de_contributeur_plausible("Swing (BE)")
+
+
+class TestSignalementsDuPanneau:
+    """Les écarts d'une détection deviennent des signalements « À trancher »
+    (2026-09-27) ; ce que l'utilisateur vient d'appliquer en sort."""
+
+    def _bilan(self):
+        alb = _album(10, "Hourvari", [_piste(1, "Inédit"), _piste(2, "Autre")])
+        e1 = ed.Ecart("absent", alb, alb.pistes[0], motifs=["piste 1"])
+        e2 = ed.Ecart("absent", alb, alb.pistes[1])
+        return ed.BilanEcarts(ecarts=[e1, e2]), e1
+
+    def _dm(self):
+        ecrits = {}
+
+        def remplacer(aid, code, cas):
+            ecrits[code] = cas
+            return len(cas)
+
+        return ecrits, type("DM", (), {"remplacer_signalements": staticmethod(remplacer)})()
+
+    def test_un_detecteur_par_nature_et_les_traites_retires(self):
+        from src.models import Artist
+
+        ecrits, dm = self._dm()
+        bilan, e1 = self._bilan()
+        artiste = Artist(name="Lucio Bukowski")
+        artiste.id = 3
+        assert ed.enregistrer_signalements(dm, artiste, bilan) == 2
+        assert set(ecrits) == {f"deezer_{n}" for n in ed.NATURES_A_TRANCHER}
+        assert [c.morceau for c in ecrits["deezer_absent"]] == ["Inédit", "Autre"]
+        assert "Hourvari" in ecrits["deezer_absent"][0].motif
+        ed.enregistrer_signalements(dm, artiste, bilan, traites=[e1])
+        assert [c.morceau for c in ecrits["deezer_absent"]] == ["Autre"]
+
+    def test_detection_incomplete_ou_ambigue_n_efface_rien(self):
+        from src.models import Artist
+
+        ecrits, dm = self._dm()
+        bilan, _ = self._bilan()
+        bilan.interrompu("réseau")
+        assert ed.enregistrer_signalements(dm, Artist(name="X"), bilan) == 0
+        assert ecrits == {}

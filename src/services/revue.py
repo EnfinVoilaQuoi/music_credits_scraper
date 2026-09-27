@@ -25,6 +25,7 @@ Spotify — oracles réseau) n'entre ici qu'une fois enregistré : étape 3 (WIP
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from collections.abc import Callable
@@ -75,6 +76,27 @@ class Cas:
     motif: str
     impact: int = 0
     preuves: dict = field(default_factory=dict, hash=False, compare=False)
+    #: Identité STABLE du cas : la fiche (sa page Genius, sinon son id) + une
+    #: EMPREINTE de ses preuves. Un verdict la mémorise ; de nouvelles preuves
+    #: (un autre BPM, une autre vidéo) font une autre clé, donc le cas revient.
+    cle: str = ""
+
+
+def cle_du_cas(track, preuves: dict) -> str:
+    """Les valeurs VOLATILES (vues, impact) sont hors de l'empreinte — sinon le
+    cas reviendrait à chaque run ; un détecteur peut fixer `preuves["empreinte"]`."""
+    if track is None:
+        ident = "artiste"
+    elif track.genius_id:
+        ident = f"g{track.genius_id}"
+    else:
+        ident = f"t{track.id}"
+    if "empreinte" in preuves:
+        empreinte = str(preuves["empreinte"])
+    else:
+        stables = {k: v for k, v in preuves.items() if k != "impact"}
+        empreinte = json.dumps(stables, sort_keys=True, ensure_ascii=False, default=str)
+    return f"{ident}|{empreinte}"
 
 
 @dataclass(frozen=True)
@@ -423,7 +445,7 @@ def vues_youtube_anormales(track, _ctx=None):
     if sp and yt > VUES_YTM_MIN and yt > RAPPORT_YTM_SPOTIFY * sp:
         return (
             f"{yt:,} vues YouTube pour {sp:,} streams Spotify (×{yt // sp})".replace(",", " "),
-            {"ytm": yt, "spotify": sp},
+            {"ytm": yt, "spotify": sp, "empreinte": ""},
         )
     return None
 
@@ -505,26 +527,130 @@ def detecter(ctx: Contexte, detecteurs=DETECTEURS, detecteurs_artiste=DETECTEURS
             if verdict:
                 motif, preuves = verdict
                 poids = preuves.get("impact", impact(t))
-                cas.append(Cas(d.code, t.id, t.title, motif, poids, preuves))
+                cas.append(
+                    Cas(d.code, t.id, t.title, motif, poids, preuves, cle_du_cas(t, preuves))
+                )
     for d in detecteurs_artiste:
         for libelle, motif, preuves in d.juger(ctx):
-            cas.append(Cas(d.code, None, libelle, motif, 0, preuves))
+            cle = f"artiste|{libelle}|{preuves.get('kind', '')}"
+            cas.append(Cas(d.code, None, libelle, motif, 0, preuves, cle))
     return sorted(cas, key=lambda c: (-c.impact, c.detecteur, c.morceau))
 
 
-def analyser(data_manager, artiste) -> list[Cas]:
-    """Lit le contexte d'UN artiste (deux requêtes) et rend ses cas."""
-    return detecter(
+#: Détecteurs dont les cas viennent des RUNS (oracles réseau), enregistrés dans
+#: `revue_signalements` : ils n'ont pas de fonction ici, seulement un libellé.
+DETECTEURS_DE_RUN: tuple[DetecteurArtiste, ...] = (
+    DetecteurArtiste("kworb_variante", "Kworb : ID d'une autre version", "🔀", None),
+    DetecteurArtiste("kworb_id_mal_place", "Kworb : ID sur une autre fiche", "🔀", None),
+    DetecteurArtiste("kworb_id_partage", "Kworb : ID porté par deux fiches", "⚠️", None),
+    DetecteurArtiste("kworb_doublon", "Kworb : doublon évident", "🔁", None),
+    DetecteurArtiste("kworb_ecartee", "Kworb : ligne écartée", "⤫", None),
+    DetecteurArtiste("kworb_flou", "Kworb : rapprochement flou", "≈", None),
+    DetecteurArtiste("kworb_non_relie", "Kworb : introuvable en base", "❔", None),
+    DetecteurArtiste("deezer_absent", "Deezer : morceau absent", "✚", None),
+    DetecteurArtiste("deezer_album_absent", "Deezer : disque absent", "💿", None),
+    DetecteurArtiste("deezer_version", "Deezer : version absente", "🎚️", None),
+    DetecteurArtiste("deezer_apparition", "Deezer : apparition chez un autre", "👥", None),
+    DetecteurArtiste("deezer_link_candidate", "Deezer : parution à confirmer", "❓", None),
+    DetecteurArtiste("deezer_link_review", "Deezer : lien à revoir", "🔓", None),
+    DetecteurArtiste("spotify_audit", "Spotify : identifiant démenti", "🔍", None),
+)
+CODES_KWORB = tuple(d.code for d in DETECTEURS_DE_RUN if d.code.startswith("kworb_"))
+
+
+def enregistrer_audit_spotify(data_manager, artiste, ecarts, *, retires=()) -> int:
+    """Les écarts d'un audit Spotify COMPLET deviennent des signalements
+    (« 🔍 Vérifier les identifiants »), moins ceux qui viennent d'être retirés."""
+    par_id = {t.id: t for t in artiste.tracks or []}
+    enleves = {(e["track_id"], e["spotify_id"]) for e in retires}
+    cas = []
+    for e in ecarts:
+        if (e["track_id"], e["spotify_id"]) in enleves:
+            continue
+        marque = "🚨 " if e["artiste_etranger"] else ("🔀 " if e.get("variante_etrangere") else "")
+        track = par_id.get(e["track_id"])
+        preuves = {"spotify_id": e["spotify_id"], "spotify_sert": e["spotify"]["name"]}
+        motif = f"{marque}{e['motif']} — Spotify sert « {e['spotify']['name']} »"
+        if track is None:
+            cas.append(
+                Cas(
+                    "spotify_audit",
+                    e["track_id"],
+                    e["titre"],
+                    motif,
+                    0,
+                    preuves,
+                    f"t{e['track_id']}|{e['spotify_id']}",
+                )
+            )
+        else:
+            cas.append(
+                cas_de_run("spotify_audit", track, e["titre"], motif, preuves, impact(track))
+            )
+    return data_manager.remplacer_signalements(artiste.id, "spotify_audit", cas)
+
+
+def cas_de_run(detecteur: str, track, morceau: str, motif: str, preuves, impact=0) -> Cas:
+    """Un cas trouvé par un RUN, avec la même clé stable que les autres."""
+    if track is None:
+        cle = f"artiste|{morceau}|" + json.dumps(preuves, sort_keys=True, default=str)
+    else:
+        cle = cle_du_cas(track, preuves)
+    return Cas(
+        detecteur, track.id if track is not None else None, morceau, motif, impact, preuves, cle
+    )
+
+
+@dataclass
+class Revue:
+    #: Cas à trancher, triés par impact.
+    actifs: list[Cas]
+    #: Cas que l'utilisateur a marqués normaux (consultables, rétablissables).
+    masques: list[Cas]
+
+
+def _cas_des_signalements(signalements, ids_disco: set) -> list[Cas]:
+    """Un signalement dont la fiche a disparu depuis le run (fusion,
+    suppression) n'a plus d'objet."""
+    return [
+        Cas(
+            s["detecteur"],
+            s["track_id"],
+            s["morceau"] or "",
+            s["motif"] or "",
+            s["impact"] or 0,
+            s["preuves"] or {},
+            s["cle"],
+        )
+        for s in signalements
+        if s["track_id"] is None or s["track_id"] in ids_disco
+    ]
+
+
+def analyser(data_manager, artiste) -> Revue:
+    """Détecteurs hors ligne + signalements des runs, moins ce que
+    l'utilisateur a déjà tranché. Quatre lectures, aucune écriture."""
+    tracks = artiste.tracks or []
+    cas = detecter(
         contexte(
-            artiste.tracks or [],
+            tracks,
             data_manager.get_artist_observations(artiste.id),
             data_manager.get_artist_relations(artiste.id, status="proposed"),
         )
     )
+    cas += _cas_des_signalements(
+        data_manager.signalements_revue(artiste.id), {t.id for t in tracks}
+    )
+    cas.sort(key=lambda c: (-c.impact, c.detecteur, c.morceau))
+    tranches = data_manager.verdicts_revue(artiste.id)
+    return Revue(
+        actifs=[c for c in cas if (c.detecteur, c.cle) not in tranches],
+        masques=[c for c in cas if (c.detecteur, c.cle) in tranches],
+    )
 
 
 def tous_les_detecteurs() -> list:
-    return [*DETECTEURS, *DETECTEURS_ARTISTE]
+    return [*DETECTEURS, *DETECTEURS_ARTISTE, *DETECTEURS_DE_RUN]
 
 
 def par_detecteur(cas: list[Cas]) -> dict[str, int]:

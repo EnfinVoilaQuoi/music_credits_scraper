@@ -1375,3 +1375,37 @@ class TestSousTitre:
         t = _track(1, "Ego")
         res, dm = _run([t], [_entry("Ego (Remix)", 5, 1, "X")])
         assert dm.streams_writes == []
+
+
+class TestATrancher:
+    """Ce que Kworb trouve à trancher, par FICHE, pour le panneau (2026-09-27)."""
+
+    def _codes(self, res):
+        return sorted((d["detecteur"], d["morceau"]) for d in res["a_trancher"])
+
+    def test_id_partage_signale_sur_chaque_fiche(self):
+        tracks = [
+            _track(1, "OUTSIDE", spotify_id="SPX", album="Jackboys 2"),
+            _track(2, "outside", spotify_id="SPX", album="Birds in the Trap"),
+        ]
+        res, _ = _run(tracks, [_entry("outside", 108_000_000, 9, "SPX")])
+        assert self._codes(res) == [
+            ("kworb_id_partage", "OUTSIDE"),
+            ("kworb_id_partage", "outside"),
+        ]
+
+    def test_variante_suspecte_avec_sa_fiche_et_ses_streams(self):
+        res, _ = _run(
+            [_track(1, "Heartless (Remix)", spotify_id="SPH")],
+            [_entry("Heartless", 2_109, 9, "SPH")],
+        )
+        (cas,) = res["a_trancher"]
+        assert cas["detecteur"] == "kworb_variante" and cas["track"].id == 1
+        assert cas["impact"] == 2_109 and cas["preuves"]["titre_spotify"] == "Heartless"
+
+    def test_ligne_sans_fiche_signalee_au_niveau_artiste(self):
+        res, _ = _run([_track(1, "Autre")], [_entry("Inconnu", 500, 1, "SPZ")])
+        non_relies = [d for d in res["a_trancher"] if d["detecteur"] == "kworb_non_relie"]
+        assert [(d["track"], d["morceau"], d["impact"]) for d in non_relies] == [
+            (None, "Inconnu", 500)
+        ]

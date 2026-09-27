@@ -322,6 +322,34 @@ def _par_sous_titre(titre: str, norm: str, index: "Index"):
     return fiche
 
 
+def _a_trancher(result, detecteur, track, motif, preuves, impact=0, *, morceau=None) -> None:
+    """Un cas pour le panneau « À trancher » (2026-09-27), rattaché à sa FICHE —
+    `track` None pour une ligne Kworb sans fiche en base."""
+    result["a_trancher"].append(
+        {
+            "detecteur": detecteur,
+            "track": track,
+            "morceau": morceau or (track.title if track is not None else ""),
+            "motif": motif,
+            "preuves": preuves,
+            "impact": impact or 0,
+        }
+    )
+
+
+def _ligne_ecartee(result, track, titre, streams) -> None:
+    _a_trancher(
+        result,
+        "kworb_ecartee",
+        track,
+        f"ligne Kworb « {titre} » ({streams:,} streams) écartée — autre enregistrement ?".replace(
+            ",", " "
+        ),
+        {"titre_kworb": titre},
+        streams,
+    )
+
+
 def construire_index(tracks) -> Index:
     index = Index(tracks=list(tracks))
     porteurs: dict[str, list] = defaultdict(list)
@@ -853,6 +881,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         "ids_mal_places": [],  # [(id, fiche porteuse, fiche au bon titre)]
         "multi_lignes": [],  # [(titre, n lignes, n comptées, total)]
         "lignes_ecartees": [],  # [(titre kworb, streams, titre base)] : autre enregistrement
+        # Le même contenu, par FICHE, pour le panneau « À trancher » (2026-09-27) :
+        # [{detecteur, track, morceau, motif, preuves, impact}] — `services/streams`
+        # en fait des signalements (`revue_signalements`).
+        "a_trancher": [],
         #: Fiches dont l'observation Kworb a été retirée (ID non attribuable).
         "observations_retirees": [],
     }
@@ -923,6 +955,27 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         (sid, sorted([index.by_edition_id[sid].title] + [t.title for t in ts]))
         for sid, ts in sorted(index.doublons.items())
     ]
+    for sid, ts in sorted(index.ids_partages.items()):
+        for t in ts:
+            autres = sorted(x.title for x in ts if x is not t)
+            _a_trancher(
+                result,
+                "kworb_id_partage",
+                t,
+                f"ID Spotify {sid} porté aussi par « {' | '.join(autres)} » — aucun stream écrit",
+                {"spotify_id": sid},
+            )
+    for sid, ts in sorted(index.doublons.items()):
+        fiches = [index.by_edition_id[sid], *ts]
+        for t in fiches:
+            autres = sorted(x.title for x in fiches if x is not t)
+            _a_trancher(
+                result,
+                "kworb_doublon",
+                t,
+                f"même ID Spotify {sid} que « {' | '.join(autres)} » — doublon à fusionner",
+                {"spotify_id": sid},
+            )
 
     # Décisions mémorisées (confirmé/rejeté/décidé) pour ne pas redemander
     try:
@@ -981,6 +1034,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         ):
             refusees_titre.add(track.id)
             result["lignes_ecartees"].append((entry["title"], entry["streams"], track.title))
+            _ligne_ecartee(result, track, entry["title"], entry["streams"])
             result["unmatched"] += 1
             result["unmatched_titles"].append(entry["title"])
             result["unmatched_details"].append((entry["title"], entry["streams"]))
@@ -1010,6 +1064,14 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 )
         if via == "fuzzy":
             result["fuzzy_matched"].append((entry["title"], track.title, r.score))
+            _a_trancher(
+                result,
+                "kworb_flou",
+                track,
+                f"ligne Kworb « {entry['title']} » rapprochée à {r.score:.0%} — même morceau ?",
+                {"titre_kworb": entry["title"]},
+                entry["streams"],
+            )
             logger.info(
                 f"≈ Match flou ({r.score:.0%}): Kworb '{entry['title']}' → base '{track.title}'"
             )
@@ -1022,6 +1084,15 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             logger.info(f"🔗 Kworb (décision mémorisée): '{entry['title']}' → '{track.title}'")
         if via == "id_mal_place":
             result["ids_mal_places"].append((entry.get("spotify_id"), r.motif, track.title))
+            _a_trancher(
+                result,
+                "kworb_id_mal_place",
+                track,
+                f"l'ID {entry.get('spotify_id')} est posé sur « {r.motif} » ; "
+                f"la ligne Kworb « {entry['title']} » revient à cette fiche",
+                {"spotify_id": entry.get("spotify_id"), "porteur": r.motif},
+                entry["streams"],
+            )
             logger.warning(
                 f"🔀 ID {entry.get('spotify_id')} posé sur « {r.motif} » : la ligne Kworb "
                 f"« {entry['title']} » va à la fiche « {track.title} »"
@@ -1035,6 +1106,15 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             # affirme — c'est la clé — mais on le DIT, et la vérification des
             # identifiants Spotify (motif « variante ») le répare.
             result["variantes_suspectes"].append((track.title, entry["title"], entry["spotify_id"]))
+            _a_trancher(
+                result,
+                "kworb_variante",
+                track,
+                f"l'ID {entry['spotify_id']} désigne « {entry['title']} » sur Spotify — "
+                "autre version ?",
+                {"spotify_id": entry["spotify_id"], "titre_spotify": entry["title"]},
+                entry["streams"],
+            )
             logger.warning(
                 f"🔀 ID {entry['spotify_id']} : la base attend « {track.title} », Spotify "
                 f"sert « {entry['title']} » — à vérifier (identifiants Spotify)"
@@ -1087,6 +1167,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         retenues, ecartees = _departager_homonymes(lignes, track, lire_identite)
         for ligne in ecartees:
             result["lignes_ecartees"].append((ligne["title"], ligne["streams"], track.title))
+            _ligne_ecartee(result, track, ligne["title"], ligne["streams"])
             result["unmatched"] += 1
             result["unmatched_titles"].append(ligne["title"])
             result["unmatched_details"].append((ligne["title"], ligne["streams"]))
@@ -1132,6 +1213,18 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     _oublier_observations_perimees(data_manager, index, set(agg_by_track), result, refusees_titre)
 
     result["unmatched_details"].sort(key=lambda x: x[1], reverse=True)
+    ecartees = {titre for titre, _, _ in result["lignes_ecartees"]}
+    for titre, streams in result["unmatched_details"]:
+        if titre not in ecartees:
+            _a_trancher(
+                result,
+                "kworb_non_relie",
+                None,
+                f"sur Kworb ({streams:,} streams), introuvable en base".replace(",", " "),
+                {"titre_kworb": titre},
+                streams,
+                morceau=titre,
+            )
     logger.info(
         f"Songs Kworb: {result['matched']} matchés "
         f"({result['matched_by_id']} par ID, {result['matched_by_title']} par titre, "

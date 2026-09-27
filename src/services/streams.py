@@ -100,6 +100,7 @@ def run(
                 try:
                     if source == "kworb":
                         results[cle] = provider.fetch_spotify(artist, dm)
+                        _signalements_kworb(dm, artist, results[cle])
                     else:
                         results[cle] = provider.fetch_spotify_web(
                             artist,
@@ -150,6 +151,23 @@ def run(
     finally:
         provider.close()
     return bilan
+
+
+def _signalements_kworb(dm, artist: Artist, resultat: dict) -> None:
+    """Ce que Kworb a trouvé à trancher devient des signalements du panneau
+    « À trancher » — seulement sur un passage RÉUSSI : une erreur réseau ne doit
+    pas effacer ce qu'un passage précédent avait trouvé."""
+    from src.services import revue
+
+    if not resultat or "error" in resultat or "a_trancher" not in resultat:
+        return
+    for code in revue.CODES_KWORB:
+        cas = [
+            revue.cas_de_run(code, d["track"], d["morceau"], d["motif"], d["preuves"], d["impact"])
+            for d in resultat["a_trancher"]
+            if d["detecteur"] == code
+        ]
+        dm.remplacer_signalements(artist.id, code, cas)
 
 
 def track_ids_actifs(

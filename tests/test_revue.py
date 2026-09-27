@@ -206,26 +206,92 @@ def test_detecter_trie_par_impact():
     assert revue.par_detecteur(cas) == {"doublon": 2}
 
 
-def test_analyser_lit_le_contexte(data_manager):
+def _booba_lunatic(data_manager):
     a = Artist(name="Booba")
     a.id = data_manager.save_artist(a)
     t = Track(title="Lunatic", artist=a)
     t.observations += [Observation("bpm", 83, "getsongbpm"), Observation("bpm", 130, "songbpm")]
     data_manager.save_track(t)
     a.tracks = data_manager.get_artist_tracks(a.id)
-    assert [c.detecteur for c in revue.analyser(data_manager, a)] == ["bpm"]
+    return a
+
+
+def test_analyser_lit_le_contexte(data_manager):
+    a = _booba_lunatic(data_manager)
+    r = revue.analyser(data_manager, a)
+    assert [c.detecteur for c in r.actifs] == ["bpm"] and r.masques == []
+
+
+class TestMemoireDesVerdicts:
+    """Étape 3 : un cas tranché ne revient plus… tant que ses preuves tiennent."""
+
+    def test_normal_puis_retabli(self, data_manager):
+        a = _booba_lunatic(data_manager)
+        (cas,) = revue.analyser(data_manager, a).actifs
+        data_manager.trancher_cas(a.id, cas.detecteur, cas.cle, morceau=cas.morceau)
+        r = revue.analyser(data_manager, a)
+        assert r.actifs == [] and [c.cle for c in r.masques] == [cas.cle]
+        assert data_manager.annuler_verdict(a.id, cas.detecteur, cas.cle)
+        assert len(revue.analyser(data_manager, a).actifs) == 1
+
+    def test_de_nouvelles_preuves_font_revenir_le_cas(self, data_manager):
+        a = _booba_lunatic(data_manager)
+        (cas,) = revue.analyser(data_manager, a).actifs
+        data_manager.trancher_cas(a.id, cas.detecteur, cas.cle)
+        t = a.tracks[0]
+        data_manager.upsert_observations(t.id, [Observation("bpm", 95, "reccobeats")])
+        a.tracks = data_manager.get_artist_tracks(a.id)
+        assert len(revue.analyser(data_manager, a).actifs) == 1
+
+    def test_cle_stable_hors_valeurs_volatiles(self):
+        t = _t("Cruella", genius_id=42)
+        t.streams.spotify_streams, t.streams.ytm_streams = 316_410, 5_552_707
+        (c1,) = revue.detecter(_ctx(t), detecteurs_artiste=())
+        t.streams.ytm_streams = 6_000_000  # les vues montent : même cas
+        (c2,) = revue.detecter(_ctx(t), detecteurs_artiste=())
+        assert c1.cle == c2.cle and c1.cle.startswith("g42|")
+
+
+class TestSignalementsDesRuns:
+    def test_un_run_remplace_ses_signalements(self, data_manager):
+        a = _booba_lunatic(data_manager)
+        t = a.tracks[0]
+        sig = revue.Cas("kworb_variante", t.id, t.title, "variante suspecte", 5, {"id": "S1"}, "c1")
+        data_manager.remplacer_signalements(a.id, "kworb_variante", [sig])
+        codes = [c.detecteur for c in revue.analyser(data_manager, a).actifs]
+        assert sorted(codes) == ["bpm", "kworb_variante"]
+        data_manager.remplacer_signalements(a.id, "kworb_variante", [])
+        assert [c.detecteur for c in revue.analyser(data_manager, a).actifs] == ["bpm"]
+
+    def test_signalement_d_une_fiche_disparue_ignore(self):
+        s = {
+            "detecteur": "x",
+            "track_id": 99,
+            "morceau": "M",
+            "motif": "",
+            "impact": 0,
+            "preuves": {},
+            "cle": "k",
+        }
+        assert revue._cas_des_signalements([s], {1, 2}) == []
 
 
 def test_fenetre_se_construit(racine_tk):
-    """La fenêtre affiche les cas et filtre par détecteur (lecture seule)."""
+    """La fenêtre affiche les cas, filtre par détecteur, et « ✓ Normal » les masque."""
     from src.gui.windows.a_trancher import ATrancherWindow
 
     a, b = _t("Pour de vrai", 1), _t("Pour de Vrai", 2)
     artiste = Artist(name="A2H")
     artiste.id = 1
     artiste.tracks = [a, b]
+    tranches = []
     dm = SimpleNamespace(
-        get_artist_observations=lambda _id: {}, get_artist_relations=lambda _id, status: []
+        get_artist_observations=lambda _id: {},
+        get_artist_relations=lambda _id, status: [],
+        signalements_revue=lambda _id: [],
+        verdicts_revue=lambda _id: {},
+        trancher_cas=lambda aid, det, cle, **kw: tranches.append((det, cle)),
+        annuler_verdict=lambda aid, det, cle: True,
     )
     app = SimpleNamespace(root=racine_tk, data_manager=dm, _show_track_details_for_track=print)
     w = ATrancherWindow(app, artiste)
@@ -234,5 +300,75 @@ def test_fenetre_se_construit(racine_tk):
         w.filtre.set(next(k for k, v in w.choix.items() if v == "doublon"))
         w._afficher()
         assert len(w.liste.winfo_children()) == 2
+        w._normal(w.cas[0])
+        assert len(w.revue.actifs) == 1 and len(w.revue.masques) == 1 and len(tranches) == 1
+        w.voir_masques.set(True)
+        w._rafraichir()
+        w._retablir(w.cas[0])
+        assert len(w.revue.actifs) == 2
     finally:
         w.destroy()
+
+
+class TestSignalementsKworb:
+    """`services/streams` enregistre ce que Kworb a trouvé, sur passage RÉUSSI."""
+
+    def _dm(self):
+        ecrits = {}
+        return ecrits, SimpleNamespace(
+            remplacer_signalements=lambda aid, code, cas: ecrits.__setitem__(code, cas)
+        )
+
+    def test_passage_reussi_remplace_chaque_detecteur(self):
+        from src.services.streams import _signalements_kworb
+
+        ecrits, dm = self._dm()
+        t = _t("Heartless (Remix)", genius_id=5)
+        _signalements_kworb(
+            dm,
+            _A,
+            {
+                "a_trancher": [
+                    {
+                        "detecteur": "kworb_variante",
+                        "track": t,
+                        "morceau": t.title,
+                        "motif": "autre version ?",
+                        "preuves": {"spotify_id": "SPH"},
+                        "impact": 2109,
+                    }
+                ]
+            },
+        )
+        assert set(ecrits) == set(revue.CODES_KWORB)  # les vides effacent l'ancien
+        (cas,) = ecrits["kworb_variante"]
+        assert cas.track_id == t.id and cas.cle.startswith("g5|")
+
+    def test_echec_n_efface_rien(self):
+        from src.services.streams import _signalements_kworb
+
+        ecrits, dm = self._dm()
+        _signalements_kworb(dm, _A, {"error": "réseau"})
+        assert ecrits == {}
+
+
+def test_audit_spotify_enregistre_puis_retire():
+    ecrits = {}
+    dm = SimpleNamespace(
+        remplacer_signalements=lambda aid, code, cas: ecrits.__setitem__(code, cas) or len(cas)
+    )
+    t = _t("Mouton noir", 1, genius_id=9)
+    artiste = Artist(name="Swing")
+    artiste.id, artiste.tracks = 4, [t]
+    ecart = {
+        "track_id": 1,
+        "titre": "Mouton noir",
+        "spotify_id": "SPM",
+        "artiste_etranger": True,
+        "motif": "artiste étranger",
+        "spotify": {"name": "Dessine-moi un mouton", "artists": ["Mylène Farmer"]},
+    }
+    assert revue.enregistrer_audit_spotify(dm, artiste, [ecart]) == 1
+    (cas,) = ecrits["spotify_audit"]
+    assert cas.motif.startswith("🚨") and "Dessine-moi un mouton" in cas.motif
+    assert revue.enregistrer_audit_spotify(dm, artiste, [ecart], retires=[ecart]) == 0

@@ -334,6 +334,10 @@ class TestCompleterParDeezer:
             return detection
 
         monkeypatch.setattr("src.services.ecarts_deezer.detecter", _detecter)
+        monkeypatch.setattr(
+            "src.services.ecarts_deezer.enregistrer_signalements",
+            lambda *a, **k: appels.append("signalements"),
+        )
         bilan = d.run(runtime, artist, d.OptionsDisco(deezer=deezer, download_images=False), hooks)
         return bilan, recus, appels
 
@@ -343,7 +347,8 @@ class TestCompleterParDeezer:
         b = ed.BilanEcarts(deezer_id=1236609)
         b.ecarts = [SimpleNamespace(coche=True, nature="absent")]
         bilan, recus, appels = self._run(monkeypatch, detection=b)
-        assert appels == ["identite", "detection"]
+        # Les écarts deviennent aussi des signalements du panneau « À trancher ».
+        assert appels == ["identite", "detection", "signalements"]
         assert recus == [b] and bilan.complete
         assert "1 écart(s)" in d_resume(bilan)
 

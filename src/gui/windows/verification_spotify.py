@@ -22,6 +22,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from src.concurrency.lifecycle import start_worker, stop_requested
+from src.services.revue import enregistrer_audit_spotify
 from src.utils.logger import get_logger
 from src.utils.spotify_audit import (
     lignes_a_verifier,
@@ -118,6 +119,10 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
             return
         self.barre.set(1)
         self.ecarts = rapport["ecarts"]
+        # Un audit COMPLET alimente le panneau « À trancher » (2026-09-27).
+        artiste = self.app.current_artist
+        if not stop_requested() and artiste is not None and artiste.name == self.artiste:
+            enregistrer_audit_spotify(self.app.data_manager, artiste, self.ecarts)
         etrangers = sum(1 for e in self.ecarts if e["artiste_etranger"])
         variantes = sum(1 for e in self.ecarts if e.get("variante_etrangere"))
         self.statut.configure(
@@ -236,6 +241,11 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
             var.set(False)
 
         self.bouton_retirer.configure(state="disabled")
+        artiste = self.app.current_artist
+        if artiste is not None and artiste.name == self.artiste:
+            enregistrer_audit_spotify(
+                self.app.data_manager, artiste, self.ecarts, retires=[e for e, _ in choisis]
+            )
         messagebox.showinfo(
             "Identifiants retirés",
             f"{retires} identifiant(s) retiré(s), avec {observations} observation(s) "

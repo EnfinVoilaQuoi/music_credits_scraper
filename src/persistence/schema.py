@@ -593,3 +593,46 @@ source_usage_failures = Table(
     Column("occurred_at", TIMESTAMP),
     sqlite_autoincrement=True,
 )
+
+
+# Panneau « À trancher », étape 3 (e38, 2026-09-27). Deux notions distinctes :
+# - `revue_verdicts` : la mémoire des DÉCISIONS de l'utilisateur sur un cas
+#   (« c'est normal »). Clé = (artiste, détecteur, clé du cas) ; la clé du cas
+#   porte l'EMPREINTE de ses preuves — de nouvelles preuves font revenir le cas.
+# - `revue_signalements` : les cas que seuls les RUNS savent (oracles réseau :
+#   Kworb, Deezer, Spotify). Chaque run REMPLACE ses signalements pour
+#   l'artiste traité ; le panneau les lit à côté de ses détecteurs hors ligne.
+# Les mémoires de DONNÉES (liens Deezer, statut des alias, décisions Kworb,
+# corrections de fiches) restent où elles sont : ce sont les données elles-mêmes.
+revue_verdicts = Table(
+    "revue_verdicts",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("detecteur", Text, nullable=False),
+    Column("cle", Text, nullable=False),
+    Column("verdict", Text, nullable=False),
+    Column("morceau", Text),
+    Column("motif", Text),
+    Column("note", Text),
+    Column("decided_at", TIMESTAMP),
+    UniqueConstraint("artist_id", "detecteur", "cle"),
+    sqlite_autoincrement=True,
+)
+
+revue_signalements = Table(
+    "revue_signalements",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("detecteur", Text, nullable=False),
+    Column("cle", Text, nullable=False),
+    Column("track_id", Integer),
+    Column("morceau", Text),
+    Column("motif", Text),
+    Column("preuves", Text),
+    Column("impact", Integer),
+    Column("seen_at", TIMESTAMP),
+    UniqueConstraint("artist_id", "detecteur", "cle"),
+    sqlite_autoincrement=True,
+)

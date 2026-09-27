@@ -341,7 +341,11 @@ _FAMILLES_RENDITION = {
     "live": frozenset({"live", "session", "symphonic", "symphonique"}),
     "acoustique": frozenset({"acoustic", "acoustique", "unplugged", "stripped", "piano"}),
     "solo": frozenset({"solo"}),
-    "sans_voix": frozenset({"instrumental", "cappella", "acapella"}),
+    # Le beat seul et la voix seule sont deux enregistrements DIFFÉRENTS
+    # (2026-09-27 : ils partageaient une famille « sans voix », si bien qu'une
+    # a cappella héritait du BPM et d'un constat « instrumental »).
+    "instrumental": frozenset({"instrumental"}),
+    "a_cappella": frozenset({"cappella", "acapella"}),
     "demo": frozenset({"demo"}),
     # « Version », « Edit », « Radio Edit », « Bonus Track », « Original » :
     # des éditions d'une même prise studio. Mesuré (2026-09-21) : mettre « demo »

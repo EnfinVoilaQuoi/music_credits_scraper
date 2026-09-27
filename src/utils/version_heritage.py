@@ -12,7 +12,8 @@ de `version_descriptors` :
     edition / remaster           oui      oui       oui    (même enregistrement)
     chopped / vitesse            oui      oui       oui    (effets sur le master)
     performance (live, acoust.)  oui      oui       NON    (autre prise)
-    sans voix (instrumental)     NON      oui       oui    (constat instrumental)
+    instrumental                 NON      oui       oui    (constat instrumental)
+    a cappella                   oui      oui       NON    (la voix seule)
     remix tiers / collab         NON      oui       NON    (le remixeur produit)
 
 Règles d'écriture : UNION, jamais remplacement — un crédit ou des paroles que la
@@ -24,6 +25,7 @@ jamais copiées (le timing diffère). Module PUR.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES, Credit, CreditRole
@@ -66,7 +68,8 @@ REGLES: dict[str, Regle] = {
     "chopped": Regle(paroles=True, ecriture=True, production=True),
     "vitesse": Regle(paroles=True, ecriture=True, production=True),
     "performance": Regle(paroles=True, ecriture=True, production=False),
-    "sans_voix": Regle(paroles=False, ecriture=True, production=True),
+    "instrumental": Regle(paroles=False, ecriture=True, production=True),
+    "a_cappella": Regle(paroles=True, ecriture=True, production=False),
     "remix_named": Regle(paroles=False, ecriture=True, production=False),
     "remix_bare": Regle(paroles=False, ecriture=True, production=False),
 }
@@ -79,6 +82,8 @@ def famille_de(titre: str) -> str | None:
     v = parse_variant(titre)
     if v.kind == Kind.NONE:
         return None
+    if _titre_du_remix(titre):
+        return "instrumental"  # l'instrumental d'un remix est un instrumental
     if v.est_remix:
         return v.kind.value
     familles = _familles_de_rendition(v)
@@ -88,7 +93,15 @@ def famille_de(titre: str) -> str | None:
         familles.add("performance")
     # Une prise (live/acoustique) l'emporte sur une mention d'édition (« Live
     # Version ») : c'est elle qui décide si la production est la même.
-    for nom in ("performance", "sans_voix", "chopped", "vitesse", "remaster", "edition"):
+    for nom in (
+        "performance",
+        "instrumental",
+        "a_cappella",
+        "chopped",
+        "vitesse",
+        "remaster",
+        "edition",
+    ):
         if nom in familles:
             return nom
     return "edition"
@@ -107,6 +120,22 @@ class Heritage:
         return not self.credits and not self.paroles and not self.mesures
 
 
+_INSTRUMENTAL = re.compile(r"\binstrumental\b", re.IGNORECASE)
+
+
+def _titre_du_remix(titre: str) -> str | None:
+    """« Louisville (Remix) [Instrumental] » → « Louisville (Remix) » : le titre
+    du remix dont c'est l'instrumental ; None si ce n'est pas le cas."""
+    if not parse_variant(titre).est_remix or not _INSTRUMENTAL.search(titre):
+        return None
+    t = _INSTRUMENTAL.sub("", titre)
+    t = re.sub(r"\(\s*\)|\[\s*\]", "", t)
+    t = re.sub(r"\s+-\s*$", "", t)
+    t = re.sub(r"\s+([)\]])", r"\1", t)
+    t = re.sub(r"([(\[])\s+", r"\1", t)
+    return " ".join(t.split()) or None
+
+
 def socle_parmi(titre: str | None, fiches) -> object | None:
     """PUR. L'original UNIQUE d'une version parmi `fiches` (même artiste) : même
     socle de titre, sans descripteur de version. None si absent ou ambigu —
@@ -116,6 +145,13 @@ def socle_parmi(titre: str | None, fiches) -> object | None:
 
     if not titre or parse_variant(titre).kind == Kind.NONE:
         return None
+    remix = _titre_du_remix(titre)
+    if remix:
+        # L'instrumental d'un remix a le beat du REMIX : son modèle est la fiche
+        # du remix, jamais l'original (décision utilisateur 2026-09-27).
+        cle = normalize_title(remix)
+        candidats = [t for t in fiches if normalize_title(t.title) == cle]
+        return candidats[0] if len(candidats) == 1 else None
     cle = normalize_title(parse_variant(titre).socle)
     candidats = [
         t
@@ -132,7 +168,7 @@ def heriter(version, socle, *, famille: str | None = None) -> Heritage:
 
     UNION : un crédit déjà porté par la version (même nom, même rôle) n'est pas
     doublé ; des paroles déjà présentes ne sont pas remplacées. Un instrumental
-    (`sans_voix`) reçoit le CONSTAT `lyrics.instrumental = True` (e27), jamais
+    (`instrumental`) reçoit le CONSTAT `lyrics.instrumental = True` (e27), jamais
     les paroles.
     """
     famille = famille or famille_de(version.title)
@@ -153,8 +189,13 @@ def heriter(version, socle, *, famille: str | None = None) -> Heritage:
             version.credits.append(herite)
             bilan.credits.append(herite)
             deja.add((c.name, c.role))
+    # Ce qu'une source DIRECTE de la version couvre déjà ne survivrait pas à
+    # `save_track` (même règle) : l'ajouter faisait réécrire la fiche à chaque
+    # run pour rien — 302 fiches de Kanye West, mesuré le 2026-09-27.
+    version.credits = sans_heritage_couvert(version.credits)
+    bilan.credits = [c for c in bilan.credits if any(c is x for x in version.credits)]
 
-    if famille == "sans_voix":
+    if famille == "instrumental":
         if version.lyrics.instrumental is None and not version.lyrics.text:
             version.lyrics.instrumental = True
         # Le même beat : BPM et tonalité de l'original, en observations de

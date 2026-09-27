@@ -132,3 +132,57 @@ def test_heriter_versions_en_base(data_manager):
             ).scalar()
             == 3
         )
+
+
+class TestACappella:
+    """Une a cappella est la VOIX seule (2026-09-27) : elle était rangée avec les
+    instrumentaux, héritait du BPM et recevait un constat « instrumental »."""
+
+    def test_paroles_et_ecriture_sans_mesures_ni_constat(self):
+        o = _original()
+        o.lyrics.text, o.lyrics.present = "des paroles", True
+        v = _t("Boulbi (Acapella)")
+        b = heriter(v, o)
+        assert b.famille == "a_cappella" and not b.mesures and not v.observations
+        assert v.lyrics.text == "des paroles" and v.lyrics.instrumental is None
+        assert {(c.name, c.role) for c in v.credits} == {("Booba", CreditRole.WRITER)}
+
+
+class TestInstrumentalDUnRemix:
+    """L'instrumental d'un remix a le beat du REMIX (décision utilisateur)."""
+
+    def test_le_modele_est_la_fiche_du_remix(self):
+        remix = _t("Boulbi (Remix)")
+        remix.audio.bpm = 140
+        fiches = [_original(), remix]
+        assert socle_parmi("Boulbi (Remix) [Instrumental]", fiches) is remix
+        v = _t("Boulbi (Remix) [Instrumental]")
+        heriter(v, remix)
+        assert ("bpm", 140, "heritage") in {(o.field, o.value, o.source) for o in v.observations}
+
+    def test_sans_fiche_du_remix_rien_n_est_herite_de_l_original(self):
+        assert socle_parmi("Boulbi (Remix) [Instrumental]", [_original()]) is None
+
+
+def test_ecrivains_de_reparation(data_manager):
+    a = Artist(name="Flynt")
+    a.id = data_manager.save_artist(a)
+    v = Track(title="Haut la main (Acapella)", artist=a)
+    v.observations += [Observation("bpm", 156, "heritage"), Observation("bpm", 90, "songbpm")]
+    vid = data_manager.save_track(v)
+    data_manager.constater_instrumental(vid)
+
+    assert data_manager.retirer_mesures_heritees(vid) == 1
+    assert data_manager.lever_constat_instrumental(vid)
+    relue = {t.id: t for t in data_manager.get_artist_tracks(a.id)}[vid]
+    assert relue.lyrics.instrumental is None and relue.audio.bpm_source == "songbpm"
+
+
+def test_rien_a_heriter_quand_la_version_a_ses_propres_auteurs():
+    # 2026-09-27 : l'héritage ajoutait des crédits que `save_track` retirait
+    # (source directe) — la fiche était réécrite à chaque run, 302 chez Kanye.
+    v = _t("Boulbi (Acoustic)")
+    v.credits = [Credit("Booba", CreditRole.WRITER, source="youtube_topic")]
+    b = heriter(v, _original())
+    assert b.vide
+    assert [(c.name, c.source) for c in v.credits] == [("Booba", "youtube_topic")]

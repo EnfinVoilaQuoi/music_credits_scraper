@@ -32,7 +32,7 @@ class TestFamille:
         # la même fiche — rien à hériter.
         assert vh.famille_de("Suzy (Version Radio)") is None
         assert vh.famille_de("Suzy - Live Version") == "performance"  # la prise l'emporte
-        assert vh.famille_de("Suzy (Instrumental)") == "sans_voix"
+        assert vh.famille_de("Suzy (Instrumental)") == "instrumental"
         assert vh.famille_de("MW2 - Chopped & $crewed") == "chopped"
         assert vh.famille_de("Dolce Camara - Snight B Remix") == "remix_named"
         assert vh.famille_de("Suzy") is None

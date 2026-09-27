@@ -1893,6 +1893,55 @@ class TrackRepository:
             logger.error(f"Erreur constater_instrumental({track_id}): {e}")
             return False
 
+    def lever_constat_instrumental(self, track_id: int) -> bool:
+        """Remet le constat « instrumental » à NULL (jamais constaté), sœurs
+        comprises — quand il a été posé à tort (2026-09-27 : l'héritage rangeait
+        les a cappella avec les instrumentaux). Le morceau redevient « à
+        chercher » pour les paroles ; rien d'autre n'est touché."""
+        try:
+            with self.engine.begin() as conn:
+
+                def lever(tid: int) -> None:
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET instrumental = NULL, updated_at = :now "
+                            "WHERE id = :id AND instrumental = 1"
+                        ),
+                        {"id": tid, "now": datetime.now()},
+                    )
+
+                lever(track_id)
+                effacer_chez_les_soeurs(conn, track_id, lever)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur lever_constat_instrumental({track_id}): {e}")
+            return False
+
+    def retirer_mesures_heritees(self, track_id: int) -> int:
+        """Retire le BPM et la tonalité HÉRITÉS d'une fiche (observations
+        `heritage`), sœurs comprises — quand la famille ne les héritait pas (une
+        a cappella n'a pas de beat, 2026-09-27). Les colonnes audio se lisent des
+        observations : les retirer suffit. Rend le nombre retiré."""
+        total = [0]
+        try:
+            with self.engine.begin() as conn:
+
+                def retirer(tid: int) -> None:
+                    total[0] += conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :id "
+                            "AND source = 'heritage' AND field IN ('bpm', 'key', 'mode')"
+                        ),
+                        {"id": tid},
+                    ).rowcount
+
+                retirer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, retirer)
+            return total[0]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_mesures_heritees({track_id}): {e}")
+            return 0
+
     def forget_credit(self, track_id: int, name: str, role: str) -> int:
         """Retire un crédit (nom normalisé + rôle), toutes sources. Rend le nombre
         de lignes retirées. Sa MÉMOIRE est `corrections_fiches.credits_refuses` :

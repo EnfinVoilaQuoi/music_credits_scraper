@@ -291,8 +291,9 @@ class TestOublierParolesYTM:
 class _YtmVideos:
     """Client YTM factice : paroles pour certaines vidéos, recherche comptée."""
 
-    def __init__(self, avec_paroles=(), erreur=None):
+    def __init__(self, avec_paroles=(), erreur=None, mortes=()):
         self.avec_paroles, self.erreur, self.recherches = set(avec_paroles), erreur, 0
+        self.mortes = set(mortes)
 
     def search(self, q, filter=None, limit=None):
         if self.erreur:
@@ -303,6 +304,10 @@ class _YtmVideos:
     def get_watch_playlist(self, videoId):
         if self.erreur:
             raise self.erreur
+        if videoId in self.mortes:
+            from ytmusicapi.exceptions import YTMusicServerError
+
+            raise YTMusicServerError("No content returned by the server.")
         return {"lyrics": f"lyr-{videoId}" if videoId in self.avec_paroles else None}
 
     def get_lyrics(self, browse_id, timestamps=False):
@@ -325,6 +330,18 @@ class TestVideosConnues:
 
     def test_sans_paroles_on_retombe_sur_la_recherche(self):
         yt = _YtmVideos(avec_paroles={"s"})
+        res = self._api(yt).get_lyrics("Booba", "Intro (A2)", video_ids=["clip"])
+        assert res["video_id"] == "s" and yt.recherches == 1
+
+    def test_une_video_morte_passe_a_la_suivante(self):
+        # 2026-09-27 : un clip Genius inconnu d'YTM abandonnait le morceau
+        # entier, sans essayer la vidéo suivante ni la recherche.
+        yt = _YtmVideos(avec_paroles={"topic"}, mortes={"clip"})
+        res = self._api(yt).get_lyrics("Booba", "Intro (A2)", video_ids=["clip", "topic"])
+        assert res["video_id"] == "topic" and yt.recherches == 0
+
+    def test_toutes_mortes_on_retombe_sur_la_recherche(self):
+        yt = _YtmVideos(avec_paroles={"s"}, mortes={"clip"})
         res = self._api(yt).get_lyrics("Booba", "Intro (A2)", video_ids=["clip"])
         assert res["video_id"] == "s" and yt.recherches == 1
 

@@ -463,7 +463,16 @@ class YTMusicAPI:
             #    aucune erreur d'identité. Mesuré 2026-09-26 : 70 paroles lues
             #    ainsi, 70 justes — la recherche texte en donnait 50 % de fausses.
             for video_id in video_ids:
-                text, synced, source = self._lire_paroles(video_id)
+                try:
+                    text, synced, source = self._lire_paroles(video_id)
+                except YTMusicError as e:
+                    # Vidéo inconnue d'YTM (clip supprimé, privé, hors catalogue :
+                    # « No content returned », mesuré 30 fois sur A2H le
+                    # 2026-09-27). Elle ne dit rien du morceau : on passe à la
+                    # suivante, puis à la recherche — l'abandon du morceau entier
+                    # privait de tout repli.
+                    logger.info(f"YTM vidéo {video_id} illisible pour '{artist} - {title}' : {e}")
+                    continue
                 if text:
                     logger.info(
                         f"📝 YTM paroles (vidéo connue {video_id}) : '{artist} - {title}'"

@@ -155,7 +155,12 @@ def merge_selected_tracks(app):
     if len(coches) != 2:
         messagebox.showwarning("Fusion", "Cochez exactement 2 morceaux à fusionner (colonne ☑).")
         return
-    t1, t2 = coches
+    fusionner_paire(app, *coches)
+
+
+def fusionner_paire(app, t1, t2):
+    """Fusionne DEUX fiches données — point d'entrée partagé par le clic droit
+    et le panneau « À trancher » (doublons)."""
     if not t1.id or not t2.id:
         messagebox.showwarning("Fusion", "Les deux morceaux doivent être sauvegardés en base.")
         return

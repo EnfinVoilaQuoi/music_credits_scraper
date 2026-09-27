@@ -167,7 +167,45 @@ def _signalements_kworb(dm, artist: Artist, resultat: dict) -> None:
             for d in resultat["a_trancher"]
             if d["detecteur"] == code
         ]
-        dm.remplacer_signalements(artist.id, code, cas)
+        if code not in revue.CODES_PROPOSITIONS_KWORB:
+            dm.remplacer_signalements(artist.id, code, cas)
+    _propositions_kworb(dm, artist, resultat)
+
+
+def _propositions_kworb(dm, artist: Artist, resultat: dict) -> None:
+    """Les propositions EN ATTENTE (rapprochement flou, variante ou remix à
+    classer) : jusqu'ici seul le dialogue du run les montrait, et « Plus tard »
+    les perdait jusqu'au run suivant. Elles vivent désormais au panneau, avec
+    leurs décisions ; une proposition décidée n'est plus reproposée
+    (`kworb_links_manager`), donc ne revient pas ici non plus."""
+    from src.services import revue
+
+    suggestions = resultat.get("suggestions") or []
+    par_id = {t.id: t for t in dm.get_artist_tracks(artist.id)} if suggestions else {}
+    date = resultat.get("kworb_updated")
+    variantes, floues = [], []
+    for s in suggestions:
+        preuves = {**s, "kworb_date": str(date) if date else None, "empreinte": s["kworb_title"]}
+        if s.get("kind"):
+            track = par_id.get(s.get("parent_track_id") or s.get("track_id"))
+            motif = f"{s['kind']} Kworb à classer" + (
+                f" — socle « {s['parent_title']} »" if s.get("parent_title") else ""
+            )
+            variantes.append(
+                revue.cas_de_run(
+                    "kworb_proposition", track, s["kworb_title"], motif, preuves, s["streams"]
+                )
+            )
+        else:
+            track = par_id.get(s.get("track_id"))
+            motif = f"Kworb « {s['kworb_title']} » ≈ « {s.get('db_title')} » ({s['score']:.0%})"
+            floues.append(
+                revue.cas_de_run(
+                    "kworb_a_confirmer", track, s["kworb_title"], motif, preuves, s["streams"]
+                )
+            )
+    dm.remplacer_signalements(artist.id, "kworb_proposition", variantes)
+    dm.remplacer_signalements(artist.id, "kworb_a_confirmer", floues)
 
 
 def track_ids_actifs(
@@ -193,6 +231,9 @@ def resume(bilan: BilanStreams, options: OptionsStreams) -> str:
     verdicts du canal YTM) que rien ne vérifiait.
     """
     texte = build_summary(bilan.results, spotify_full_crawl=options.spotify_full)
+    en_attente = len((bilan.results.get("spotify") or {}).get("suggestions") or [])
+    if en_attente:
+        texte += f"\n\n🎚️ {en_attente} proposition(s) Kworb à classer → bouton « À trancher »"
     if not bilan.complete:
         texte += f"\n\n⚠️ Run INCOMPLET : {bilan.motif}"
     if bilan.erreurs:

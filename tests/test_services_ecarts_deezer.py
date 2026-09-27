@@ -572,3 +572,23 @@ class TestSignalementsDuPanneau:
         bilan.interrompu("réseau")
         assert ed.enregistrer_signalements(dm, Artist(name="X"), bilan) == 0
         assert ecrits == {}
+
+
+def test_un_ecart_se_reconstruit_depuis_son_signalement():
+    """Le panneau « À trancher » agit sur un écart ENREGISTRÉ (2026-09-27) :
+    sérialisé à la détection, reconstruit à l'action, fiches par leur id."""
+    import json
+
+    socle = _track("Hourvari")
+    socle.id = 12
+    alb = _album(10, "Hourvari (Live)", [_piste(1, "Hourvari - Live", contributors=[(5, "X")])])
+    e = ed.Ecart("version", alb, alb.pistes[0], socle=socle, motifs=["live"], matched_by="title")
+    d = json.loads(json.dumps(ed.ecart_vers_dict(e)))  # comme en base
+    r = ed.ecart_depuis(d, {12: socle})
+    assert (r.nature, r.album.title, r.piste.title, r.socle) == (
+        "version",
+        "Hourvari (Live)",
+        "Hourvari - Live",
+        socle,
+    )
+    assert r.piste.contributors == [(5, "X")] and r.coche and r.album.pistes == []

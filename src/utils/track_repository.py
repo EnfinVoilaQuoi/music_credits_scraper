@@ -20,7 +20,7 @@ from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackV
 from src.models.track import CreditRole
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
-from src.utils.corrections_fiches import credits_refuses
+from src.utils.corrections_fiches import credits_refuses, videos_refusees
 from src.utils.credits_genius_api import (
     purger_provisoires_couverts,
     sans_provisoires_couverts,
@@ -37,6 +37,7 @@ from src.utils.track_soeurs import (
 )
 from src.utils.version_descriptors import titre_generique
 from src.utils.version_heritage import sans_heritage_couvert
+from src.utils.youtube_utils import extract_video_id
 
 logger = get_logger(__name__)
 
@@ -1948,6 +1949,41 @@ class TrackRepository:
             logger.error(f"Erreur lever_constat_instrumental({track_id}): {e}")
             return False
 
+    def retirer_mesures_source(
+        self, track_id: int, source: str, champs=("bpm", "key", "mode")
+    ) -> int:
+        """Retire ce qu'UNE source a mesuré (BPM, tonalité…), sœurs comprises —
+        pour trancher un désaccord depuis le panneau « À trancher »
+        (2026-09-27). Les colonnes audio se lisent des observations : les
+        retirer suffit ; `duration` est ré-arbitrée si elle est visée."""
+        if source in ("manual",):
+            raise ValueError("une saisie manuelle se corrige à la main, pas par retrait")
+        total = [0]
+        marqueurs = ", ".join(f":c{i}" for i in range(len(champs)))
+        params_champs = {f"c{i}": c for i, c in enumerate(champs)}
+        try:
+            with self.engine.begin() as conn:
+
+                def retirer(tid: int) -> None:
+                    total[0] += conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :id "
+                            f"AND source = :src AND field IN ({marqueurs})"
+                        ),
+                        {"id": tid, "src": source, **params_champs},
+                    ).rowcount
+                    if "duration" in champs:
+                        self._ecrire_colonnes_discographie(
+                            conn, tid, self._arbitrer_discographie(conn, tid, ["duration"])
+                        )
+
+                retirer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, retirer)
+            return total[0]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_mesures_source({track_id}, {source}): {e}")
+            return 0
+
     def retirer_mesures_heritees(self, track_id: int) -> int:
         """Retire le BPM et la tonalité HÉRITÉS d'une fiche (observations
         `heritage`), sœurs comprises — quand la famille ne les héritait pas (une
@@ -3743,6 +3779,9 @@ class TrackRepository:
         un 'search_auto' ne remplace JAMAIS un 'genius_media' ni un 'manual'.
         """
         protected = ("manual", "genius_media")
+        if extract_video_id(url) in self._videos_refusees(track_id):
+            logger.info(f"🚫 Lien YouTube {url} refusé pour le morceau #{track_id} — ignoré")
+            return False
         try:
             stmt = (
                 update(tracks)
@@ -3917,6 +3956,97 @@ class TrackRepository:
     # Vidéos YouTube d'un morceau (table `track_videos`, e20)
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _videos_refusees(self, track_id: int) -> set[str]:
+        """Les vidéos que l'utilisateur a rejetées pour cette fiche (`fiches.json`)."""
+        from types import SimpleNamespace
+
+        try:
+            with self.engine.connect() as conn:
+                r = conn.execute(
+                    text(
+                        "SELECT t.title, t.album, t.genius_id, a.name FROM tracks t "
+                        "LEFT JOIN artists a ON a.id = t.artist_id WHERE t.id = :id"
+                    ),
+                    {"id": track_id},
+                ).first()
+        except SQLAlchemyError as e:
+            # Base indisponible : l'écriture qui suit échouera et rendra son
+            # propre repli — ce filtre ne doit pas lever à sa place.
+            logger.warning(f"Refus de vidéos illisibles (track_id={track_id}): {e}")
+            return set()
+        if r is None or not r[3]:
+            return set()
+        fiche = SimpleNamespace(
+            title=r[0], album=r[1], genius_id=r[2], artist=SimpleNamespace(name=r[3])
+        )
+        return videos_refusees(fiche)
+
+    def retirer_lrc(self, track_id: int, lrc: str) -> int:
+        """Retire UN LRC jugé faux (panneau « À trancher »), sœurs comprises :
+        ses observations `lyrics_synced` (toute source qui l'a servi) puis la
+        colonne, ré-arbitrée depuis ce qui reste — même arbitrage que
+        `reverifier_lrc`. Rend le nombre d'observations retirées."""
+        from src.enrichment.reconcile import _reconcile_lyrics_synced
+        from src.utils.concordance_paroles import paroles_de_reference
+
+        total = [0]
+        try:
+            with self.engine.begin() as conn:
+
+                def retirer(tid: int) -> None:
+                    ligne = conn.execute(
+                        text(
+                            "SELECT lyrics, lyrics_source, duration, lyrics_synced "
+                            "FROM tracks WHERE id = :id"
+                        ),
+                        {"id": tid},
+                    ).first()
+                    if ligne is None:
+                        return
+                    texte, source_texte, duree, colonne = ligne
+                    obs = conn.execute(
+                        text(
+                            "SELECT id, source, value FROM observations "
+                            "WHERE track_id = :id AND field = 'lyrics_synced'"
+                        ),
+                        {"id": tid},
+                    ).all()
+                    visees = [i for i, _s, v in obs if v == lrc]
+                    for i in visees:
+                        conn.execute(text("DELETE FROM observations WHERE id = :i"), {"i": i})
+                    total[0] += len(visees)
+                    if colonne != lrc and not visees:
+                        return
+                    restantes = [
+                        Observation("lyrics_synced", v, s) for i, s, v in obs if i not in visees
+                    ]
+                    res = _reconcile_lyrics_synced(
+                        restantes, _clean_duration(duree), paroles_de_reference(texte, source_texte)
+                    )
+                    valeur, source, conf = (
+                        (res.value, res.source, res.confidence) if res else (None, None, None)
+                    )
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET lyrics_synced = :v, lyrics_synced_source = :s, "
+                            "lyrics_synced_confidence = :c, updated_at = :now WHERE id = :id"
+                        ),
+                        {
+                            "v": valeur,
+                            "s": source,
+                            "c": int(conf) if conf is not None else None,
+                            "now": datetime.now(),
+                            "id": tid,
+                        },
+                    )
+
+                retirer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, retirer)
+            return total[0]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_lrc({track_id}): {e}")
+            return 0
+
     def record_track_videos(self, track_id: int, videos) -> int:
         """Enregistre ce qu'UNE passe a vu des vidéos d'un morceau. Écrivain DÉDIÉ.
 
@@ -3943,6 +4073,10 @@ class TrackRepository:
             Nombre de vidéos écrites (insérées ou mises à jour).
         """
         videos = [v for v in (videos or []) if v and v.video_id]
+        if videos:
+            # Une vidéo rejetée À LA MAIN ne revient par aucun producteur.
+            refusees = self._videos_refusees(track_id)
+            videos = [v for v in videos if v.video_id not in refusees]
         if not videos:
             return 0
         now = datetime.now()

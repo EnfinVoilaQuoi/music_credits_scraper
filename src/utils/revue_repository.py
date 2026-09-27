@@ -121,3 +121,18 @@ class RevueRepository:
                     d["preuves"] = {}
                 sortie.append(d)
             return sortie
+
+    def retirer_signalement(self, artist_id: int, detecteur: str, cle: str) -> bool:
+        """Un signalement TRAITÉ par une action du panneau quitte la liste sans
+        attendre le prochain passage du run."""
+        with self.engine.begin() as conn:
+            return (
+                conn.execute(
+                    delete(revue_signalements).where(
+                        (revue_signalements.c.artist_id == artist_id)
+                        & (revue_signalements.c.detecteur == detecteur)
+                        & (revue_signalements.c.cle == cle)
+                    )
+                ).rowcount
+                > 0
+            )

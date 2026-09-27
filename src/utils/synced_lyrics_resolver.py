@@ -95,9 +95,16 @@ def resolve_track_synced_lyrics(
     # le même socle de titre — sinon il prend le 1ᵉʳ résultat du bon artiste.
     paroles = paroles_de_reference(track.lyrics.text, track.lyrics.source)
 
+    from src.utils.corrections_fiches import empreinte_lrc, lrc_refuses
+
+    refuses = lrc_refuses(track)
+
     def _retenu(lrc, source):
         if lrc and lrc_dementi(paroles, lrc):
             logger.info(f"⏭ {track.title}: LRC {source} écarté — démenti par les paroles Genius")
+            return None
+        if lrc and refuses and empreinte_lrc(lrc) in refuses:
+            logger.info(f"⏭ {track.title}: LRC {source} écarté — refusé à la main")
             return None
         return lrc
 

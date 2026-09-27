@@ -12,7 +12,7 @@ import customtkinter as ctk
 
 from src.concurrency.lifecycle import run_worker, stop_requested
 from src.enrichment.providers.streams import StreamsProvider
-from src.gui.dialogs import kworb_confirm, report
+from src.gui.dialogs import report
 from src.observability import source_usage
 from src.observability.registry import Flow
 from src.services import streams as streams_service
@@ -194,12 +194,10 @@ def run_streams_update(
         app.root.after(0, lambda: app.progress_label.configure(text=f"{tache} en cours..."))
 
     def confirmer_kworb(suggestions, kworb_date):
-        # Rapprochements INCERTAINS (ex. Kworb « Matrix » ≈ base « Matrix
-        # (Intro) ») : dialogue de confirmation + mémoire.
-        app.root.after(
-            0,
-            lambda s=suggestions, d=kworb_date: kworb_confirm.confirm_kworb_suggestions(app, s, d),
-        )
+        # Les propositions Kworb EN ATTENTE ne s'imposent plus en plein run
+        # (2026-09-27) : `services/streams` les a enregistrées pour le panneau
+        # « À trancher », qui porte leurs décisions ; le résumé de fin les compte.
+        logger.info(f"🎚️ {len(suggestions)} proposition(s) Kworb → panneau « À trancher »")
 
     def run():
         try:

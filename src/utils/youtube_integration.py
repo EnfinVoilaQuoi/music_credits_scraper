@@ -88,6 +88,10 @@ def reject_youtube_link(data_manager, track, url: str, artiste_courant: str, sea
     """
     video_id = extract_video_id(url)
     if video_id:
+        # Mémorisé : ni Genius, ni la recherche, ni le canal YTM ne la reposent.
+        from src.utils.corrections_fiches import memoriser_video_refusee
+
+        memoriser_video_refusee(track, video_id)
         data_manager.forget_track_video(track.id, video_id)
         track.videos = [v for v in track.videos if v.video_id != video_id]
     if video_id and extract_video_id(track.youtube_url) == video_id:

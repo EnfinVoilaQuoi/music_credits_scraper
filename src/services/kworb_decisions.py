@@ -62,6 +62,20 @@ LIBELLES = {
 }
 
 
+#: Ordre des voies ; « existant » n'apparaît que si un morceau en base est déjà
+#: ce remix, « edition » / « rendition » que si le morceau souche est connu.
+VOIES = ("edition", "rendition", "existant", "collab", "tiers", "ignore")
+
+
+def voies_possibles(proposition: dict) -> list[str]:
+    """PUR. Les décisions qui ont une CIBLE pour cette proposition — partagé par
+    le dialogue Kworb et le panneau « À trancher »."""
+    voies = [v for v in VOIES if v != "existant" or proposition.get("existants")]
+    if not proposition.get("parent_track_id"):
+        voies = [v for v in voies if v not in ("rendition", "edition")]
+    return voies
+
+
 def _track_par_id(dm, artist, track_id) -> Track | None:
     if not track_id:
         return None

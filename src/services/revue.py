@@ -43,7 +43,7 @@ from src.utils.credits_genius_api import SOURCE_API
 from src.utils.duree_youtube import SOURCE_AUDIO
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import Kind, parse_variant, titre_generique
-from src.utils.version_heritage import famille_de, socle_parmi
+from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
 
 #: Écart de durée au-delà duquel deux sources ne décrivent plus le même fichier
 #: (2 s = même fichier ; 5 s = tolérance inter-plateformes, comme la revue des
@@ -123,6 +123,14 @@ class Contexte:
     disco: list
     obs: dict = field(default_factory=dict)  # track_id -> [Observation]
     relations_proposees: list = field(default_factory=list)
+    #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
+    #: fiche à toute la discographie coûtait des minutes chez Kanye).
+    _memo: dict = field(default_factory=dict, repr=False)
+
+    def memo(self, nom: str, fabrique: Callable):
+        if nom not in self._memo:
+            self._memo[nom] = fabrique()
+        return self._memo[nom]
 
 
 def contexte(tracks, obs=None, relations_proposees=None) -> Contexte:
@@ -266,7 +274,7 @@ def songbpm_copie_de_l_original(track, ctx):
     attendus (décision utilisateur)."""
     if parse_variant(track.title).kind == Kind.NONE or famille_de(track.title) == "instrumental":
         return None
-    socle = socle_parmi(track.title, ctx.disco)
+    socle = socle_parmi(track.title, ctx.disco, ctx.memo("socles", lambda: IndexSocles(ctx.disco)))
     if socle is None:
         return None
     v = {f: _songbpm(ctx, track, f) for f in ("bpm", "duration")}
@@ -357,6 +365,14 @@ def _interprete(track) -> str:
     return cle_doublon(track.primary_artist_name) if track.is_featuring else ""
 
 
+def _index_doublons(disco) -> dict[tuple, list]:
+    index: dict[tuple, list] = {}
+    for t in disco:
+        if not t.secondary_role:
+            index.setdefault((cle_doublon(t.title), _interprete(t)), []).append(t)
+    return index
+
+
 def doublon_de_titre(track, ctx):
     """Deux fiches de l'artiste au même titre, à la casse et à la ponctuation
     près (Booba « 3G » / « 3 G ») : doublon à fusionner, ou deux morceaux
@@ -366,10 +382,8 @@ def doublon_de_titre(track, ctx):
     cle = (cle_doublon(track.title), _interprete(track))
     autres = [
         t
-        for t in ctx.disco
+        for t in ctx.memo("doublons", lambda: _index_doublons(ctx.disco)).get(cle, [])
         if t is not track
-        and not t.secondary_role
-        and (cle_doublon(t.title), _interprete(t)) == cle
         and not (t.genius_id and track.genius_id and t.genius_id == track.genius_id)
     ]
     if cle[0] and autres:
@@ -389,9 +403,10 @@ def doublon_inedit(track, ctx):
     interrompu."""
     from src.utils.inedits import doublons_inedits
 
-    for absorbee, gardee in doublons_inedits(ctx.disco):
-        if absorbee is track:
-            return (f"inédit en double de « {gardee.title} »", {"garde": gardee.id})
+    paires = ctx.memo("inedits", lambda: {id(a): g for a, g in doublons_inedits(ctx.disco)})
+    gardee = paires.get(id(track))
+    if gardee is not None:
+        return (f"inédit en double de « {gardee.title} »", {"garde": gardee.id})
     return None
 
 
@@ -547,6 +562,8 @@ DETECTEURS_DE_RUN: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("kworb_ecartee", "Kworb : ligne écartée", "⤫", None),
     DetecteurArtiste("kworb_flou", "Kworb : rapprochement flou", "≈", None),
     DetecteurArtiste("kworb_non_relie", "Kworb : introuvable en base", "❔", None),
+    DetecteurArtiste("kworb_a_confirmer", "Kworb : même morceau ?", "≟", None),
+    DetecteurArtiste("kworb_proposition", "Kworb : variante / remix à classer", "🎚️", None),
     DetecteurArtiste("deezer_absent", "Deezer : morceau absent", "✚", None),
     DetecteurArtiste("deezer_album_absent", "Deezer : disque absent", "💿", None),
     DetecteurArtiste("deezer_version", "Deezer : version absente", "🎚️", None),
@@ -556,6 +573,8 @@ DETECTEURS_DE_RUN: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("spotify_audit", "Spotify : identifiant démenti", "🔍", None),
 )
 CODES_KWORB = tuple(d.code for d in DETECTEURS_DE_RUN if d.code.startswith("kworb_"))
+#: Les propositions EN ATTENTE, tirées des `suggestions` du run (pas d'`a_trancher`).
+CODES_PROPOSITIONS_KWORB = ("kworb_a_confirmer", "kworb_proposition")
 
 
 def enregistrer_audit_spotify(data_manager, artiste, ecarts, *, retires=()) -> int:

@@ -68,6 +68,9 @@ def _track(url=None, source=None, videos=None, is_featuring=False, primary=None)
         videos=list(videos or []),
         is_featuring=is_featuring,
         primary_artist_name=primary,
+        artist=SimpleNamespace(name="Isha"),
+        genius_id=42,
+        album=None,
     )
 
 
@@ -142,6 +145,15 @@ class TestRejectYoutubeLink:
         assert dm.cleared == [7]  # la colonne portait bien ce lien
         assert chercheur.purges == [("Isha", "Magot")]  # la recherche est purgée
         assert track.videos == []
+
+    def test_le_rejet_est_memorise(self):
+        """2026-09-27 : sans mémoire, le run discographie reposait le lien
+        Genius rejeté ; désormais ni Genius, ni la recherche ne le reposent."""
+        from src.utils.corrections_fiches import videos_refusees
+
+        track = _track(_URL, "genius_media")
+        reject_youtube_link(_FauxDM(), track, _URL, "Isha", searcher=_FauxChercheur())
+        assert videos_refusees(track) == {_VID}
 
     def test_ne_touche_pas_une_colonne_qui_porte_un_AUTRE_lien(self):
         """Rejeter une proposition ne doit pas effacer le lien Genius en place."""

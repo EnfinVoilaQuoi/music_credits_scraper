@@ -395,3 +395,21 @@ def test_alias_confirme_vaut_fiche_propre():
     assert len(t.certs.entries) == 1
     apply_certifications(kanye, [t], m)  # sans l'alias : un autre interprète
     assert t.certs.entries == []
+
+
+def test_une_certif_refusee_a_la_main_n_est_plus_rattachee(monkeypatch, tmp_path):
+    """Panneau « À trancher » (2026-09-27) : sans mémoire, le matcher reposerait
+    la certification retirée au prochain « Appliquer les certifs »."""
+    from src.utils import corrections_fiches
+
+    monkeypatch.setattr(corrections_fiches, "FICHIER", tmp_path / "fiches.json")
+    corrections_fiches._cache.update(chemin=None)
+    artist = Artist(name="Booba")
+    track = Track(title="Temps mort 2.0", artist=artist, genius_id=5)
+    fausse = _match(title="TEMPS MORT", certification="Or", certification_date="2003-01-21")
+    juste = _match(title="TEMPS MORT 2.0", certification="Or", certification_date="2016-02-01")
+    matcher = _FakeMatcher(tracks={"Temps mort 2.0": [fausse, juste]})
+
+    corrections_fiches.memoriser_certif_refusee(track, fausse)
+    apply_certifications(artist, [track], matcher)
+    assert track.certs.entries == [juste]

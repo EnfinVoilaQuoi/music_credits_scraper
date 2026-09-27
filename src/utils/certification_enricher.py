@@ -13,6 +13,7 @@ import re
 from src.models import Artist, Track
 from src.models.certification import Certification
 from src.models.track import CreditRole
+from src.utils.corrections_fiches import certifs_refusees, cle_certif
 from src.utils.logger import get_logger
 from src.utils.participation import Participation, participation
 from src.utils.title_matching import names_match_as_words
@@ -244,7 +245,11 @@ def apply_certifications(
                 matches = [
                     m for m in matches if parse_variant(m.get("title") or "").kind != Kind.NONE
                 ]
-            track.certs.entries = [Certification.from_match(m).to_column_dict() for m in matches]
+            entries = [Certification.from_match(m).to_column_dict() for m in matches]
+            # Une certification retirée À LA MAIN (panneau « À trancher ») n'est
+            # plus rattachée : sans cette mémoire, le matcher la reposerait.
+            refusees = certifs_refusees(track)
+            track.certs.entries = [e for e in entries if cle_certif(e) not in refusees]
             # Recalculé : `save_track` n'écrit plus ces colonnes, c'est
             # `DataManager.record_pending` qui le fera après le save.
             track.certs.needs_write = True

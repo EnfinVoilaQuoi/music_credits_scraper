@@ -136,28 +136,42 @@ def _titre_du_remix(titre: str) -> str | None:
     return " ".join(t.split()) or None
 
 
-def socle_parmi(titre: str | None, fiches) -> object | None:
+class IndexSocles:
+    """Les fiches d'un artiste rangées par titre normalisé, calculé UNE fois :
+    `socle_parmi` sur toute une discographie comparait chaque version à chaque
+    fiche en renormalisant les titres (Kanye, 3 700 fiches : le panneau « À
+    trancher » mettait des minutes à s'ouvrir, 2026-09-27)."""
+
+    def __init__(self, fiches):
+        from src.utils.title_matching import normalize_title
+
+        self.par_cle: dict[str, list] = {}
+        self.nues: set[int] = set()
+        for t in fiches:
+            self.par_cle.setdefault(normalize_title(t.title or ""), []).append(t)
+            if parse_variant(t.title or "").kind == Kind.NONE:
+                self.nues.add(id(t))
+
+
+def socle_parmi(titre: str | None, fiches, index: IndexSocles | None = None) -> object | None:
     """PUR. L'original UNIQUE d'une version parmi `fiches` (même artiste) : même
     socle de titre, sans descripteur de version. None si absent ou ambigu —
     jamais de choix entre homonymes ; une version d'un tiers (rôle secondaire)
-    ne sert d'original que faute d'autre candidat."""
+    ne sert d'original que faute d'autre candidat. `index` : celui des mêmes
+    `fiches`, à passer quand on interroge toute une discographie."""
     from src.utils.title_matching import normalize_title
 
     if not titre or parse_variant(titre).kind == Kind.NONE:
         return None
+    index = index or IndexSocles(fiches)
     remix = _titre_du_remix(titre)
     if remix:
         # L'instrumental d'un remix a le beat du REMIX : son modèle est la fiche
         # du remix, jamais l'original (décision utilisateur 2026-09-27).
-        cle = normalize_title(remix)
-        candidats = [t for t in fiches if normalize_title(t.title) == cle]
+        candidats = index.par_cle.get(normalize_title(remix), [])
         return candidats[0] if len(candidats) == 1 else None
     cle = normalize_title(parse_variant(titre).socle)
-    candidats = [
-        t
-        for t in fiches
-        if normalize_title(t.title) == cle and parse_variant(t.title).kind == Kind.NONE
-    ]
+    candidats = [t for t in index.par_cle.get(cle, []) if id(t) in index.nues]
     if len(candidats) > 1:
         candidats = [t for t in candidats if not t.secondary_role]
     return candidats[0] if len(candidats) == 1 else None

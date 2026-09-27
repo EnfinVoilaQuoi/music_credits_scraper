@@ -61,7 +61,8 @@ def _progres_muet(courant: int, total: int, libelle: str, tache: str = "") -> No
 def _kworb_headless(suggestions: list, kworb_date) -> None:
     """Headless : les rapprochements INCERTAINS Kworb (« Matrix » ≈ « Matrix
     (Intro) ») sont LISTÉS, jamais appliqués — un choix automatique écrirait
-    des streams sur le mauvais morceau. La GUI ouvre `kworb_confirm` à la place."""
+    des streams sur le mauvais morceau. La GUI les laisse au panneau « À
+    trancher » (`services/streams._propositions_kworb`), qui porte les décisions."""
     for s in suggestions:
         if s.get("kind"):
             logger.warning(

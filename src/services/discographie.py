@@ -595,7 +595,7 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
         e = bilan.ecarts_deezer
         msg += (
             f"\n🎧 Deezer : {len(e.ecarts)} écart(s) de discographie "
-            f"(dont {len(e.coches())} coché(s) d'office) — à valider"
+            f"(dont {len(e.coches())} coché(s) d'office) — à valider → bouton « À trancher »"
         )
     elif bilan.deezer_motif:
         msg += f"\n🎧 Deezer : {bilan.deezer_motif}"

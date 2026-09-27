@@ -11,7 +11,7 @@ et à chaque run discographie pour les suivantes.
 from __future__ import annotations
 
 from src.utils.logger import get_logger
-from src.utils.version_heritage import famille_de, heriter, socle_parmi
+from src.utils.version_heritage import IndexSocles, famille_de, heriter, socle_parmi
 
 logger = get_logger(__name__)
 
@@ -22,10 +22,11 @@ def heriter_versions(dm, tracks) -> int:
     enrichies. UNION seulement (`heriter`) : rien n'est remplacé, et une fiche
     qui n'a rien à recevoir n'est pas réécrite."""
     n = 0
+    index = IndexSocles(tracks)  # une fois : sinon chaque version relit tout
     for version in tracks:
         if famille_de(version.title) is None:
             continue
-        socle = socle_parmi(version.title, tracks)
+        socle = socle_parmi(version.title, tracks, index)
         if socle is None or socle is version:
             continue
         if heriter(version, socle).vide:

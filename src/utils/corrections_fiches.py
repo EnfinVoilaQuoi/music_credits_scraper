@@ -122,3 +122,95 @@ def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
     entrees.append({"fiche": absorbee, "fusionner_dans": gardee})
     FICHIER.parent.mkdir(parents=True, exist_ok=True)
     FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")
+
+
+def _ajouter_a_la_fiche(track, cle: str, valeur, meme=None) -> bool:
+    """Ajoute `valeur` à la liste `cle` de l'entrée de la fiche (créée au besoin).
+    Rend False si elle y était déjà (`meme(a, b)` décide de l'égalité)."""
+    artiste = track.artist.name if track.artist else None
+    if not artiste or valeur in (None, ""):
+        return False
+    meme = meme or (lambda a, b: a == b)
+    try:
+        donnees = json.loads(FICHIER.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        donnees = {}
+    entrees = donnees.setdefault(artiste, [])
+    fiche = designation_de(track)
+    ligne = next((e for e in entrees if e.get("fiche") == fiche), None)
+    if ligne is None:
+        ligne = {"fiche": fiche}
+        entrees.append(ligne)
+    liste = ligne.setdefault(cle, [])
+    if any(meme(x, valeur) for x in liste):
+        return False
+    liste.append(valeur)
+    FICHIER.parent.mkdir(parents=True, exist_ok=True)
+    FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    return True
+
+
+def memoriser_id_refuse(track, spotify_id: str) -> None:
+    """Consigne un ID Spotify retiré À LA MAIN (panneau « À trancher ») : relu par
+    le gate d'identité (`ids_refuses`), sans quoi Kworb ou le scraper le
+    reposeraient au prochain run."""
+    _ajouter_a_la_fiche(track, "retirer_id_spotify", spotify_id)
+
+
+def cle_certif(entree: dict) -> tuple:
+    """PUR. L'identité d'une certification rattachée : organisme, titre certifié,
+    palier, date — ce qui la distingue d'une autre certif du même titre."""
+    return (
+        (entree.get("body") or "").strip().upper(),
+        normalize_title(entree.get("title") or ""),
+        (entree.get("certification") or "").strip().casefold(),
+        str(entree.get("certification_date") or "")[:10],
+    )
+
+
+def certifs_refusees(track) -> set[tuple]:
+    """Certifications retirées À LA MAIN de cette fiche (panneau « À trancher ») :
+    `apply_certifications` ne les rattache plus, sans quoi le matcher les
+    reposerait au prochain « Appliquer les certifs »."""
+    return {
+        cle_certif(c) for e in entrees_du_morceau(track) for c in e.get("retirer_certifs") or []
+    }
+
+
+def memoriser_certif_refusee(track, entree: dict) -> None:
+    _ajouter_a_la_fiche(
+        track,
+        "retirer_certifs",
+        {k: entree.get(k) for k in ("body", "title", "certification", "certification_date")},
+        meme=lambda a, b: cle_certif(a) == cle_certif(b),
+    )
+
+
+def videos_refusees(track) -> set[str]:
+    """Vidéos rejetées À LA MAIN (✖️ de la fiche ou du panneau) : ni Genius, ni la
+    recherche, ni le canal YTM ne les rattachent plus à cette fiche (2026-09-27 —
+    avant, le run discographie reposait le lien Genius rejeté)."""
+    return {v for e in entrees_du_morceau(track) for v in e.get("retirer_videos") or []}
+
+
+def memoriser_video_refusee(track, video_id: str) -> None:
+    _ajouter_a_la_fiche(track, "retirer_videos", video_id)
+
+
+def empreinte_lrc(lrc: str | None) -> str:
+    """PUR. L'identité d'un LRC : son TEXTE (espaces normalisés), pas sa source —
+    la même source peut servir plus tard un autre LRC, qui ne doit pas être
+    bloqué par le refus du premier."""
+    import hashlib
+    import re
+
+    return hashlib.sha1(re.sub(r"\s+", " ", (lrc or "").strip()).encode("utf-8")).hexdigest()[:16]
+
+
+def lrc_refuses(track) -> set[str]:
+    """Empreintes des LRC retirés À LA MAIN : le résolveur ne les retient plus."""
+    return {x for e in entrees_du_morceau(track) for x in e.get("retirer_lrc") or []}
+
+
+def memoriser_lrc_refuse(track, lrc: str) -> None:
+    _ajouter_a_la_fiche(track, "retirer_lrc", empreinte_lrc(lrc))

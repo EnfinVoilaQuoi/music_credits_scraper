@@ -150,7 +150,7 @@ class MainWindow:
             text="À trancher",
             command=lambda: show_a_trancher(self),
             state="disabled",
-            width=110,
+            width=140,
             fg_color="#5e35b1",
             hover_color="#4527a0",
         )
@@ -1031,6 +1031,29 @@ class MainWindow:
                 self.nouveautes_button.configure(state="normal")
             if hasattr(self, "a_trancher_button"):
                 self.a_trancher_button.configure(state="normal")
+                self._compter_a_trancher()
+
+    def _compter_a_trancher(self):
+        """« À trancher (N) » : recompté en tâche de fond à chaque rafraîchissement
+        de l'artiste (après un run, un chargement) — ~2 s pour 3 700 fiches."""
+        artiste = self.current_artist
+        if artiste is None or not artiste.tracks:
+            return
+
+        def _compter():
+            from src.services.revue import analyser
+
+            try:
+                n = len(analyser(self.data_manager, artiste).actifs)
+            except Exception:  # noqa: BLE001 - un compteur ne doit rien casser
+                logger.exception("Compteur « À trancher » indisponible")
+                return
+            if self.current_artist is artiste:
+                self.root.after(
+                    0, lambda: self.a_trancher_button.configure(text=f"À trancher ({n})")
+                )
+
+        start_worker(_compter, name="compteur-a-trancher")
 
     def _show_progress_bar(self):
         """Affiche la barre de progression"""

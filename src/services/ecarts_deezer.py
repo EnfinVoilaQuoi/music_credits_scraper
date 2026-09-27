@@ -1092,6 +1092,50 @@ def resume(bilan: BilanEcarts, artist_name: str = "") -> str:
     return "\n".join(lignes)
 
 
+def ecart_vers_dict(e: Ecart) -> dict:
+    """Un écart SÉRIALISABLE (signalement du panneau) — les fiches par leur id,
+    le disque sans sa liste de pistes (inutile pour agir sur UNE piste)."""
+    from dataclasses import asdict
+
+    album = asdict(e.album)
+    album.pop("pistes", None)
+    return {
+        "nature": e.nature,
+        "album": album,
+        "piste": asdict(e.piste),
+        "socle_id": e.socle.id if e.socle is not None else None,
+        "existing_track_id": e.existing_track.id if e.existing_track is not None else None,
+        "motifs": list(e.motifs),
+        "genius": e.genius,
+        "kworb_spotify_id": e.kworb_spotify_id,
+        "matched_by": e.matched_by,
+        "apports": list(e.apports),
+    }
+
+
+def ecart_depuis(d: dict, tracks: dict) -> Ecart:
+    """L'écart reconstruit (`tracks` : `{id: Track}` de la discographie)."""
+
+    def _paires(x):
+        return [tuple(c) for c in x or []]
+
+    album = AlbumDeezer(**{**d["album"], "contributors": _paires(d["album"].get("contributors"))})
+    piste = PisteDeezer(**{**d["piste"], "contributors": _paires(d["piste"].get("contributors"))})
+    return Ecart(
+        nature=d["nature"],
+        album=album,
+        piste=piste,
+        socle=tracks.get(d.get("socle_id")),
+        coche=True,
+        motifs=list(d.get("motifs") or []),
+        genius=d.get("genius"),
+        kworb_spotify_id=d.get("kworb_spotify_id"),
+        existing_track=tracks.get(d.get("existing_track_id")),
+        matched_by=d.get("matched_by"),
+        apports=list(d.get("apports") or []),
+    )
+
+
 #: Natures qui attendent une décision (les 🔗 prouvés sont écrits sans elle).
 NATURES_A_TRANCHER = tuple(n for n in NATURES if n != "link")
 
@@ -1120,7 +1164,14 @@ def enregistrer_signalements(data_manager, artist, bilan, *, traites=()) -> int:
                     e.existing_track,
                     e.titre,
                     motif,
-                    {"piste_deezer": e.piste.id, "album_deezer": e.album.id},
+                    {
+                        "piste_deezer": e.piste.id,
+                        "album_deezer": e.album.id,
+                        # De quoi RECONSTRUIRE l'écart au moment d'agir, depuis
+                        # le panneau (`ecart_depuis`) — clé stable : la piste.
+                        "ecart": ecart_vers_dict(e),
+                        "empreinte": f"{nature}:{e.piste.id}",
+                    },
                 )
             )
         total += data_manager.remplacer_signalements(artist.id, f"deezer_{nature}", cas)

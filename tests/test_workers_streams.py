@@ -268,7 +268,7 @@ def harnais(monkeypatch):
     """Exécute le corps du worker sur place (pas de thread, pas de widget)."""
     import contextlib
 
-    etat = {"resumes": [], "erreurs": [], "confirmations": []}
+    etat = {"resumes": [], "erreurs": []}
 
     def _poser(provider, arret=None):
         monkeypatch.setattr(ws, "StreamsProvider", lambda: provider)
@@ -280,11 +280,6 @@ def harnais(monkeypatch):
         )
         monkeypatch.setattr(
             ws.messagebox, "showerror", lambda titre, msg: etat["erreurs"].append(msg)
-        )
-        monkeypatch.setattr(
-            ws.kworb_confirm,
-            "confirm_kworb_suggestions",
-            lambda app, s, d: etat["confirmations"].append(s),
         )
         return etat
 
@@ -343,14 +338,16 @@ class TestOrchestration:
         self._lancer(harnais, p)
         assert _FauxProvider.ferme is True
 
-    def test_les_rapprochements_incertains_ouvrent_la_confirmation(self, harnais):
+    def test_les_propositions_ne_s_imposent_plus_en_plein_run(self, harnais):
+        """2026-09-27 : plus de dialogue — les propositions vont au panneau
+        « À trancher », et le résumé de fin les compte."""
         p = _FauxProvider(spotify={"matched": 1, "suggestions": [{"kworb_title": "Matrix"}]})
         etat = self._lancer(harnais, p)
-        assert etat["confirmations"] == [[{"kworb_title": "Matrix"}]]
+        assert "1 proposition(s) Kworb à classer" in etat["resumes"][0]
 
-    def test_sans_suggestion_aucune_confirmation(self, harnais):
+    def test_sans_proposition_rien_n_est_annonce(self, harnais):
         etat = self._lancer(harnais, _FauxProvider())
-        assert etat["confirmations"] == []
+        assert "proposition(s) Kworb" not in etat["resumes"][0]
 
     def test_le_resume_est_affiche(self, harnais):
         etat = self._lancer(harnais, _FauxProvider(), fetch_spotify_web=True)

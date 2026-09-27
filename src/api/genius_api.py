@@ -42,6 +42,13 @@ class QuotaGeniusAtteint(Exception):
     l'appelant s'arrête et le DIT."""
 
 
+def _video_refusee(track, url: str) -> bool:
+    from src.utils.corrections_fiches import videos_refusees
+    from src.utils.youtube_utils import extract_video_id
+
+    return extract_video_id(url) in videos_refusees(track)
+
+
 class GeniusAPI:
     """Gère les interactions avec l'API Genius"""
 
@@ -853,6 +860,8 @@ class GeniusAPI:
         # Genius pose le lien si absent, et remplace un 'search_auto'. MAIS
         # respecte un lien 'manual' (choix explicite de l'utilisateur, priorité max).
         _yt_src = track.youtube_url_source
+        if yt and _video_refusee(track, yt):
+            yt = None  # rejetée à la main (✖️) : Genius ne la repose pas
         if yt and _yt_src != "manual" and (not track.youtube_url or _yt_src != "genius_media"):
             track.youtube_url = yt
             track.youtube_url_source = "genius_media"

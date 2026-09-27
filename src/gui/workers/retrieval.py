@@ -364,8 +364,12 @@ def start_track_retrieval(
         )
 
     def confirmer_ecarts(bilan_ecarts):
-        # Écarts Deezer (ou identité ambiguë) : la fenêtre s'ouvre en fin de
-        # run, cases pré-cochées — rien n'est créé sans clic.
+        # Les écarts Deezer ne s'imposent plus en fin de run (2026-09-27) : ils
+        # sont au panneau « À trancher », avec leurs actions (créer, rattacher,
+        # délier). SEULE une identité AMBIGUË ouvre encore la fenêtre : il faut
+        # choisir l'artiste Deezer avant que quoi que ce soit soit détecté.
+        if not bilan_ecarts.ambigu:
+            return
         from src.gui.windows.ecarts_deezer import show_ecarts_deezer
 
         app.root.after(0, lambda b=bilan_ecarts: show_ecarts_deezer(app, b))

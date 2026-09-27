@@ -23,6 +23,14 @@ logger = get_logger(__name__)
 _BREAKER_THRESHOLD = 3
 
 
+def _video_refusee(track, url: str) -> bool:
+    """Une vidéo rejetée à la main (✖️) n'est pas reposée par la recherche."""
+    from src.utils.corrections_fiches import videos_refusees
+    from src.utils.youtube_utils import extract_video_id
+
+    return extract_video_id(url) in videos_refusees(track)
+
+
 class BpmFinderProvider:
     """Enrichissement de dernier recours via BPM Finder (source `bpmfinder`)."""
 
@@ -102,6 +110,7 @@ class BpmFinderProvider:
                 _best
                 and not _best.get("is_search_url")
                 and _best.get("relevance_score", 0) >= YOUTUBE_PERSIST_CONFIDENCE
+                and not _video_refusee(track, _best["url"])
             ):
                 track.youtube_url = _best["url"]
                 track.youtube_url_source = "search_auto"

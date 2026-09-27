@@ -4,7 +4,10 @@ La logique vit dans `src/services/revue.py` (détecteurs PURS, testés) et la
 mémoire dans `revue_repository` ; cette fenêtre affiche : un filtre par
 détecteur, les cas triés par impact, « Ouvrir » la fiche, et « ✓ Normal » qui
 mémorise le verdict — le cas ne revient plus tant que ses preuves ne changent
-pas. Les cas marqués normaux restent consultables et rétablissables.
+pas. Les cas marqués normaux restent consultables et rétablissables. Étape 2 :
+les ACTIONS de chaque type de cas (`services/revue_actions`), qui appellent les
+écrivains existants ; ce qui demande une fenêtre (fusion, groupes, écarts
+Deezer) y est renvoyé.
 Calculée à l'ouverture sur la discographie chargée — zéro réseau.
 """
 
@@ -12,6 +15,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from src.services import revue_actions
 from src.services.revue import Cas, Revue, analyser, par_detecteur, tous_les_detecteurs
 
 #: Au-delà, la fenêtre deviendrait lente à construire ; le tri par impact met
@@ -37,6 +41,9 @@ class ATrancherWindow(ctk.CTkToplevel):
         self.defs = {d.code: d for d in tous_les_detecteurs()}
         self.revue: Revue = analyser(app.data_manager, artiste)
         self.choix: dict[str, str | None] = {}
+        self.ctx_action = revue_actions.ContexteAction(
+            app.data_manager, artiste, self.tracks, renvois=self._renvois()
+        )
 
         self.title(f"À trancher — {artiste.name}")
         self.geometry("1000x700")
@@ -59,10 +66,12 @@ class ATrancherWindow(ctk.CTkToplevel):
         ctk.CTkLabel(
             self,
             text="« ✓ Normal » : le cas ne revient plus tant que ses preuves ne changent pas. "
-            "« Ouvrir » : la fiche du morceau.",
+            "« Ouvrir » : la fiche du morceau. Les autres boutons corrigent directement.",
             font=("Arial", 11),
             text_color="gray",
         ).pack(anchor="w", padx=15)
+        self.compte_rendu = ctk.CTkLabel(self, text="", font=("Arial", 11), anchor="w")
+        self.compte_rendu.pack(anchor="w", padx=15)
 
         self.liste = ctk.CTkScrollableFrame(self)
         self.liste.pack(fill="both", expand=True, padx=15, pady=10)
@@ -126,6 +135,20 @@ class ATrancherWindow(ctk.CTkToplevel):
         ctk.CTkLabel(texte, text=c.motif, font=("Arial", 11), anchor="w", justify="left").pack(
             fill="x"
         )
+        actions = [] if self.voir_masques.get() else revue_actions.actions_pour(c)
+        if actions:
+            barre = ctk.CTkFrame(texte, fg_color="transparent")
+            barre.pack(anchor="w", pady=(2, 0))
+            for a in actions:
+                ctk.CTkButton(
+                    barre,
+                    text=a.libelle,
+                    height=24,
+                    width=0,
+                    fg_color="gray30",
+                    hover_color="gray40",
+                    command=lambda a=a, x=c: self._agir(a, x),
+                ).pack(side="left", padx=(0, 4))
         ctk.CTkLabel(cadre, text=_format_impact(c.impact), width=70).pack(side="left")
         track = self.tracks.get(c.track_id)
         ctk.CTkButton(
@@ -158,6 +181,94 @@ class ATrancherWindow(ctk.CTkToplevel):
         self.revue.actifs.remove(c)
         self.revue.masques.append(c)
         self._rafraichir()
+
+    def _renvois(self) -> dict:
+        """Les fenêtres vers lesquelles une action renvoie (import tardif :
+        elles tirent leur propre pile de dépendances)."""
+
+        def fusion(t1, t2):
+            from src.gui.dialogs.merge_tracks import fusionner_paire
+
+            fusionner_paire(self.app, t1, t2)
+
+        def groupes():
+            from src.gui.windows.formations import show_formations
+
+            show_formations(self.app)
+
+        def ecarts_deezer():
+            from src.gui.windows.ecarts_deezer import show_ecarts_deezer
+
+            show_ecarts_deezer(self.app)
+
+        def lire_piste_deezer(tid):
+            # Appelé depuis le fil de fond de l'action (réseau) : le pont vers
+            # la boucle asyncio de l'application, comme la fenêtre des écarts.
+            from src.concurrency import async_loop
+
+            enricher = self.app.runtime.data_enricher
+            return async_loop.run_sync(enricher.deezer_client.get_track_async(enricher.http, tid))
+
+        return {
+            "fusion": fusion,
+            "groupes": groupes,
+            "ecarts_deezer": ecarts_deezer,
+            "lire_piste_deezer": lire_piste_deezer,
+        }
+
+    def _agir(self, action, c: Cas) -> None:
+        if action.confirmation and not messagebox.askyesno(
+            "À trancher", action.confirmation, parent=self
+        ):
+            return
+        if action.reseau:
+            # La page Spotify d'une ligne créée : hors du fil Tk (règle de
+            # concurrence du projet — `run_worker` pour ce qui touche la boucle).
+            from src.concurrency.lifecycle import run_worker
+
+            self.compte_rendu.configure(text=f"⏳ {action.libelle} — « {c.morceau} »…")
+
+            def _fond():
+                try:
+                    texte = revue_actions.executer(action, self.ctx_action, c)
+                except Exception as e:  # noqa: BLE001 - l'échec s'affiche
+                    message = str(e)
+                    self.after(0, lambda: self._echec(message))
+                    return
+                self.after(0, lambda: self._resolu(action, c, texte))
+
+            run_worker(_fond, name="a-trancher-action")
+            return
+        try:
+            compte_rendu = revue_actions.executer(action, self.ctx_action, c)
+        except Exception as e:  # noqa: BLE001 - l'échec s'affiche, rien n'est retiré
+            self._echec(str(e))
+            return
+        self._resolu(action, c, compte_rendu)
+
+    def _echec(self, message: str) -> None:
+        if self.winfo_exists():
+            self.compte_rendu.configure(text="")
+            messagebox.showerror("À trancher", f"L'action a échoué : {message}", parent=self)
+
+    def _resolu(self, action, c: Cas, compte_rendu: str) -> None:
+        if not action.resout or not self.winfo_exists():
+            return  # un renvoi : la décision se prend dans la fenêtre ouverte
+        if c in self.revue.actifs:
+            self.revue.actifs.remove(c)
+        self.compte_rendu.configure(text=f"✅ {compte_rendu}")
+        self._rafraichir()
+        # Une fiche CRÉÉE (Deezer, remix Kworb) n'existe pas encore dans la
+        # liste en mémoire : on recharge ; sinon un simple réaffichage suffit.
+        cree = action.code == "deezer_appliquer" or action.code in (
+            "kworb_collab",
+            "kworb_tiers",
+        )
+        rafraichir = getattr(
+            self.app, "_reload_tracks_and_refresh" if cree else "_populate_tracks_table", None
+        )
+        if rafraichir:
+            rafraichir()
 
     def _retablir(self, c: Cas) -> None:
         self.app.data_manager.annuler_verdict(self.artiste.id, c.detecteur, c.cle)

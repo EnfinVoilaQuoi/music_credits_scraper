@@ -11,6 +11,7 @@ from src.gui.certification_update_gui import CertificationUpdateDialog
 from src.gui.dialogs import artist_selection, scraping_menu
 from src.gui.panels import albums_view, formations_panel, tracks_table
 from src.gui.windows import artist_loader
+from src.gui.windows.a_trancher import show_a_trancher
 from src.gui.windows.backpackerz_photos import show_backpackerz_photos
 from src.gui.windows.export_window import show_export_window
 from src.gui.windows.formations import show_formations
@@ -141,6 +142,19 @@ class MainWindow:
             hover_color="#4527a0",
         )
         self.nouveautes_button.pack(side="left", padx=5)
+
+        # « À trancher » : ce que les détecteurs trouvent suspect dans la
+        # discographie chargée (lecture seule, calculé à l'ouverture).
+        self.a_trancher_button = ctk.CTkButton(
+            search_frame,
+            text="À trancher",
+            command=lambda: show_a_trancher(self),
+            state="disabled",
+            width=110,
+            fg_color="#5e35b1",
+            hover_color="#4527a0",
+        )
+        self.a_trancher_button.pack(side="left", padx=5)
 
         # État des sources (santé des scrapers/APIs) — aligné à droite, toujours accessible
         self.health_button = ctk.CTkButton(
@@ -972,6 +986,8 @@ class MainWindow:
                 self.formations_button.configure(state="disabled")
             if hasattr(self, "nouveautes_button"):
                 self.nouveautes_button.configure(state="disabled")
+            if hasattr(self, "a_trancher_button"):
+                self.a_trancher_button.configure(state="disabled")
         elif not self.current_artist.tracks:
             # Artiste chargé mais pas de morceaux
             self.get_tracks_button.configure(state="normal")
@@ -987,6 +1003,8 @@ class MainWindow:
                 self.streams_button.configure(state="disabled")
             if hasattr(self, "formations_button"):
                 self.formations_button.configure(state="disabled")
+            if hasattr(self, "a_trancher_button"):
+                self.a_trancher_button.configure(state="disabled")
             if hasattr(self, "nouveautes_button"):
                 # Un artiste sans morceau est justement celui pour qui la
                 # vérification a le plus à dire.
@@ -1011,6 +1029,8 @@ class MainWindow:
                 self.formations_button.configure(state="normal")
             if hasattr(self, "nouveautes_button"):
                 self.nouveautes_button.configure(state="normal")
+            if hasattr(self, "a_trancher_button"):
+                self.a_trancher_button.configure(state="normal")
 
     def _show_progress_bar(self):
         """Affiche la barre de progression"""

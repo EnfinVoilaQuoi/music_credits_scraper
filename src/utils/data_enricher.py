@@ -361,7 +361,6 @@ class DataEnricher:
         sources: list[str] | None = None,
         force_update: bool = False,
         artist_tracks: list[Track] | None = None,
-        clear_on_failure: bool = True,
     ) -> dict[str, bool]:
         """
         Enrichit un morceau : boucle ordonnée de providers (gate → enrich).
@@ -372,9 +371,7 @@ class DataEnricher:
         historique). Le gating et la valeur d'échec de chaque source vivent
         dans son provider (gate() / error_result).
         """
-        sources, ctx, ballot, results, initial_bpm = self._start_run(
-            track, sources, force_update, artist_tracks, clear_on_failure
-        )
+        sources, ctx, ballot, results = self._start_run(track, sources, force_update, artist_tracks)
 
         self._apply_genius_feat_metadata(track)
 
@@ -403,9 +400,6 @@ class DataEnricher:
 
         self._run_step(self._discogs_provider, track, ctx, sources, results)
 
-        if clear_on_failure and force_update:
-            self._clear_after_total_failure(track, results, initial_bpm)
-
         self._log_run_summary(track, results)
         return results
 
@@ -415,7 +409,6 @@ class DataEnricher:
         sources: list[str] | None = None,
         force_update: bool = False,
         artist_tracks: list[Track] | None = None,
-        clear_on_failure: bool = True,
     ) -> dict[str, bool]:
         """Jumeau async d'`enrich_track` (Phase F2) — même orchestration, mêmes
         gates, mêmes valeurs de résultat.
@@ -424,9 +417,7 @@ class DataEnricher:
         httpx partagée ; scrapers sync (spotify_id, songbpm, bpmfinder,
         discogs, Genius) sur le thread sync dédié du run (affinité Playwright).
         """
-        sources, ctx, ballot, results, initial_bpm = self._start_run(
-            track, sources, force_update, artist_tracks, clear_on_failure
-        )
+        sources, ctx, ballot, results = self._start_run(track, sources, force_update, artist_tracks)
         ctx.http = self._http
         ctx.sync_runner = self.sync_runner
 
@@ -451,13 +442,10 @@ class DataEnricher:
 
         await self._run_step_async(self._discogs_provider, track, ctx, sources, results)
 
-        if clear_on_failure and force_update:
-            self._clear_after_total_failure(track, results, initial_bpm)
-
         self._log_run_summary(track, results)
         return results
 
-    def _start_run(self, track, sources, force_update, artist_tracks, clear_on_failure):
+    def _start_run(self, track, sources, force_update, artist_tracks):
         """Sources par défaut + contexte + scrutin d'un run (commun sync/async)."""
         if sources is None:
             sources = [
@@ -477,9 +465,6 @@ class DataEnricher:
         )
         logger.info(f"🔍 État actuel: spotify_id={track.spotify_id}, bpm={track.audio.bpm}")
 
-        # Sauvegarder l'état initial (pour la logique force_update du BPM)
-        initial_bpm = track.audio.bpm
-
         from src.enrichment.context import EnrichmentContext
 
         # Scrutin BPM partagé par toutes les sources du run, arbitré entre
@@ -489,13 +474,12 @@ class DataEnricher:
             force_update=force_update,
             artist_tracks=artist_tracks or [],
             bpm_ballot=ballot,
-            clear_on_failure=clear_on_failure,
             validate_spotify_id_unique=self.validate_spotify_id_unique,
             # ReccoBeats ne re-scrape pas le Spotify ID si l'étape spotify_id le fait déjà
             allow_spotify_scrape=("spotify_id" not in sources),
             results=results,
         )
-        return sources, ctx, ballot, results, initial_bpm
+        return sources, ctx, ballot, results
 
     def _finalize_run(self, track, ballot, ctx) -> None:
         """Réconciliation du run (commun sync/async).
@@ -655,65 +639,6 @@ class DataEnricher:
             # apply_song_metadata gère déjà son réseau (requests/AssertionError) ;
             # ici on ne couvre plus qu'un accès inattendu → warning, pas de silence.
             logger.warning(f"Genius media feat échec: {e}")
-
-    def _clear_after_total_failure(self, track, results: dict, initial_bpm) -> None:
-        """Efface les données musicales si TOUTES les sources ayant tenté ont échoué.
-
-        Sources ayant RÉELLEMENT tenté = ni 'skipped' ni 'not_needed'.
-        ⚠️ all([]) == True en Python : si TOUTES les sources sont
-        'not_needed'/'skipped' (aucune n'a tourné), il ne faut PAS conclure
-        « tout a échoué » et effacer des données valides (bug ayant vidé
-        TOTAL 90 : 100 BPM/Do majeur légitimes). None (crash/timeout) n'est
-        pas non plus un échec de données : il bloque aussi le nettoyage.
-        """
-        attempted = [r for r in results.values() if r not in ("skipped", "not_needed")]
-        all_failed = bool(attempted) and all(r is False for r in attempted)
-        if not (all_failed and initial_bpm is not None):
-            return
-
-        # Vérification de sécurité
-        if not track.title:
-            logger.error("❌ ERREUR: Track sans titre, annulation du nettoyage")
-            return
-
-        logger.warning(f"⚠️ NETTOYAGE: Aucune source n'a trouvé de données pour '{track.title}'")
-        logger.warning("⚠️ Effacement des anciennes valeurs potentiellement erronées...")
-
-        # Effacer UNIQUEMENT les données musicales
-        old_bpm = track.audio.bpm
-        track.audio.bpm = None
-        logger.info(f"   🗑️ BPM effacé: {old_bpm} → None")
-
-        # key/mode : champs du sous-objet audio (Phase 5), toujours présents
-        old_key = track.audio.key
-        track.audio.key = None
-        logger.info(f"   🗑️ Key effacée: {old_key} → None")
-
-        old_mode = track.audio.mode
-        track.audio.mode = None
-        logger.info(f"   🗑️ Mode effacé: {old_mode} → None")
-
-        old_duration = track.duration
-        track.duration = None
-        logger.info(f"   🗑️ Duration effacée: {old_duration} → None")
-
-        old_musical_key = track.audio.musical_key
-        track.audio.musical_key = None
-        logger.info(f"   🗑️ Musical Key effacée: {old_musical_key} → None")
-
-        # Vérification post-nettoyage
-        if not track.title:
-            logger.error("❌ ERREUR CRITIQUE: Le titre a disparu après nettoyage!")
-        elif not track.artist:
-            logger.error("❌ ERREUR CRITIQUE: L'artiste a disparu après nettoyage!")
-        else:
-            logger.info(f"✅ Données erronées nettoyées pour '{track.title}'")
-            results["cleaned"] = True
-            # E7-D1 : ne rien upserter ET demander la SUPPRESSION des observations
-            # audio persistées (sinon la réconciliation ressusciterait les valeurs
-            # effacées à la lecture — la vérité vit dans `observations`).
-            track.observations = []
-            track.clear_audio_observations = True
 
     def _collect_run_observations(self, bpm_candidates, observations_providers):
         """Observations PAR SOURCE de ce run (phase E5c-2b-i).

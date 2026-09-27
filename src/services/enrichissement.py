@@ -29,7 +29,6 @@ class OptionsEnrich:
 
     sources: tuple[str, ...] | None = None
     force_update: bool = False
-    clear_on_failure: bool = True
     #: Identité en fin de run (MusicBrainz + Discogs) : alias PROPOSÉS, à
     #: arbitrer dans « Groupes ». Champ dédié, pas un nom dans `sources` :
     #: celles-ci sont des PROVIDERS par morceau, gardés par `apis_available`.
@@ -39,7 +38,6 @@ class OptionsEnrich:
 @dataclass
 class BilanEnrich(Bilan):
     traites: int = 0
-    nettoyes: int = 0
     #: [{"title": str, "results": dict}] — le détail par morceau du résumé.
     resultats: list[dict] = field(default_factory=list)
     # Pas de fin de run (2026-09-16) : nature des disques (Deezer) et identité.
@@ -126,10 +124,7 @@ async def run_async(
                 sources=sources,
                 force_update=options.force_update,
                 artist_tracks=artist.tracks,
-                clear_on_failure=options.clear_on_failure,
             )
-            if results.get("cleaned", False):
-                bilan.nettoyes += 1
             bilan.resultats.append({"title": track.title, "results": results})
             # Sauvegarder après chaque enrichissement (SQLite hors boucle).
             await asyncio.to_thread(dm.save_track, track)
@@ -255,7 +250,6 @@ _SRC_LABELS = {
     "deezer": "DZ",
     "discogs": "DC",
 }
-_META_KEYS = {"cleaned"}
 
 
 def _status_char(v):
@@ -267,7 +261,7 @@ def _status_char(v):
 
 
 def _overall(results):
-    vals = [v for k, v in results.items() if k not in _META_KEYS]
+    vals = list(results.values())
     chars = [_status_char(v) for v in vals]
     if "✓" in chars:
         return "✓"
@@ -284,8 +278,6 @@ def resume(bilan: BilanEnrich, options: OptionsEnrich, desactives: int = 0) -> s
     summary += f"Morceaux traités: {bilan.traites}\n\n"
     if options.force_update:
         summary += "✅ Mode force update activé\n"
-    if options.clear_on_failure and bilan.nettoyes > 0:
-        summary += f"🗑️ {bilan.nettoyes} morceau(x) nettoyé(s) (données erronées effacées)\n"
     if bilan.types_albums or bilan.albums_ignores:
         summary += (
             f"💿 Nature des disques (Deezer) : {bilan.types_albums} renseigné(s), "
@@ -314,11 +306,7 @@ def resume(bilan: BilanEnrich, options: OptionsEnrich, desactives: int = 0) -> s
             n_ok += 1
         elif overall in ("✗", "?"):
             n_fail += 1
-        parts = [
-            f"{_SRC_LABELS.get(k, k)}:{_status_char(v)}"
-            for k, v in results.items()
-            if k not in _META_KEYS
-        ]
+        parts = [f"{_SRC_LABELS.get(k, k)}:{_status_char(v)}" for k, v in results.items()]
         detail = f"  {' | '.join(parts)}" if parts else ""
         summary += f"{overall} {title}\n{detail}\n" if detail else f"{overall} {title}\n"
 

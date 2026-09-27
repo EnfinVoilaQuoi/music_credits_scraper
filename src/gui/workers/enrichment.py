@@ -186,27 +186,6 @@ def start_enrichment(app):
         text_color="gray",
     ).pack(anchor="w", padx=25, pady=2)
 
-    # Séparateur
-    ctk.CTkLabel(force_frame, text="", height=10).pack()
-
-    # Checkbox pour nettoyer les données erronées
-    clear_on_failure_var = ctk.BooleanVar(value=True)
-    clear_on_failure_checkbox = ctk.CTkCheckBox(
-        force_frame,
-        text="🗑️ Nettoyer les données si enrichissement échoue",
-        variable=clear_on_failure_var,
-        font=("Arial", 12),
-    )
-    clear_on_failure_checkbox.pack(anchor="w", pady=5)
-
-    clear_info_label = ctk.CTkLabel(
-        force_frame,
-        text="Efface les BPM/Key/Mode/Duration erronés quand aucune\nsource ne trouve de nouvelles données (recommandé)",
-        font=("Arial", 9),
-        text_color="gray",
-    )
-    clear_info_label.pack(anchor="w", padx=25, pady=2)
-
     def start_enrichment():
         selected_sources = [s for s, var in sources_vars.items() if var.get()]
         if not selected_sources:
@@ -223,7 +202,6 @@ def start_enrichment(app):
         selected_sources.append("spotify_id")
 
         force_update = force_var.get()
-        clear_on_failure = clear_on_failure_var.get()
 
         musicbrainz = musicbrainz_var.get()
 
@@ -232,7 +210,6 @@ def start_enrichment(app):
             app,
             selected_sources,
             force_update=force_update,
-            clear_on_failure=clear_on_failure,
             musicbrainz=musicbrainz,
         )
 
@@ -243,7 +220,6 @@ def run_enrichment(
     app,
     sources: list[str],
     force_update: bool = False,
-    clear_on_failure: bool = True,
     musicbrainz: bool = True,
 ):
     """Exécute l'enrichissement avec les sources sélectionnées.
@@ -269,7 +245,6 @@ def run_enrichment(
     options = enrichissement.OptionsEnrich(
         sources=tuple(sources),
         force_update=force_update,
-        clear_on_failure=clear_on_failure,
         musicbrainz=musicbrainz,
     )
     disabled_count = len(app.selected_tracks) - len(selected_tracks_list)

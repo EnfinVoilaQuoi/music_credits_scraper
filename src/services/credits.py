@@ -261,25 +261,67 @@ def nom_artiste_pour(track: Track, artist: Artist) -> str:
     return artist.name
 
 
-def _reset_forces(runtime: Runtime, tracks: list[Track], options: OptionsCredits) -> None:
-    """« Forcer » = repartir de zéro, PAR famille et indépendamment."""
-    if options.force_paroles:
-        for t in tracks:
+_CHAMPS_PAROLES = ("text", "present", "scraped_at", "source", "instrumental")
+_CHAMPS_SYNC = ("synced", "synced_source", "synced_confidence")
+
+
+def _reset_forces(tracks: list[Track], options: OptionsCredits) -> dict[int, dict]:
+    """« Forcer » = REDEMANDER aux sources même quand la donnée existe, PAR
+    famille et indépendamment. Rend l'état d'avant, que `_retablir_sans_reponse`
+    remet en place là où aucune source n'a répondu.
+
+    Décision utilisateur (2026-09-27) : une MàJ forcée purge des ERREURS, elle
+    n'enlève pas des données légitimes. Vider d'avance faisait perdre ce qu'un
+    échec, un délai dépassé ou une absence ne remplaçait pas.
+    """
+    avant: dict[int, dict] = {}
+    for t in tracks:
+        if not (options.force_paroles or options.force_sync):
+            break
+        etat = {"anecdotes": t.anecdotes}
+        etat.update({f"lyrics.{c}": getattr(t.lyrics, c) for c in _CHAMPS_PAROLES + _CHAMPS_SYNC})
+        avant[id(t)] = etat
+        if options.force_paroles:
             t.lyrics.text = None
             t.anecdotes = None
             t.lyrics.present = False
             t.lyrics.scraped_at = None
             t.lyrics.source = None
             t.lyrics.instrumental = None  # repartir de zéro = re-constater
-    if options.force_sync:
-        for t in tracks:
+        if options.force_sync:
             t.lyrics.synced = None
             t.lyrics.synced_source = None
             t.lyrics.synced_confidence = None
-            # E7d : purger les obs persistées, sinon une source disparue
-            # laisserait une obs stale qui ressusciterait le verdict à la lecture.
-            if t.id:
-                runtime.data_manager.delete_observations(t.id, "lyrics_synced")
+    return avant
+
+
+def _retablir_sans_reponse(
+    runtime: Runtime,
+    tracks: list[Track],
+    options: OptionsCredits,
+    avant: dict[int, dict],
+    synchro_obtenue: set[int],
+) -> None:
+    """Remet l'état d'avant là où la passe forcée n'a RIEN obtenu, et ne purge les
+    anciennes observations `lyrics_synced` que là où une nouvelle synchro les
+    remplace (E7d : sans cette purge une source disparue ressusciterait son
+    verdict à la lecture — mais la faire d'avance effaçait tout LRC que plus
+    aucune source ne rendait)."""
+    for t in tracks:
+        etat = avant.get(id(t))
+        if etat is None:
+            continue
+        if options.force_paroles and not t.lyrics.text and t.lyrics.instrumental is None:
+            t.anecdotes = t.anecdotes or etat["anecdotes"]
+            for c in _CHAMPS_PAROLES:
+                setattr(t.lyrics, c, etat[f"lyrics.{c}"])
+        if options.force_sync:
+            if id(t) in synchro_obtenue:
+                if t.id:
+                    runtime.data_manager.delete_observations(t.id, "lyrics_synced")
+            elif not t.lyrics.instrumental:
+                for c in _CHAMPS_SYNC:
+                    setattr(t.lyrics, c, etat[f"lyrics.{c}"])
 
 
 def run(
@@ -305,10 +347,9 @@ def run(
         # 1) Crédits Genius
         if options.genius:
             scraper = clients.genius()
-            if options.force_credits:
-                for t in tracks:
-                    t.credits = [c for c in t.credits if c.source != "genius"]
-                    t.credits_scraped_at = None
+            # Pas de purge anticipée en mode forcé (2026-09-27) : le scraper
+            # remplace les crédits `genius` d'un morceau quand SA page est lue,
+            # et seulement alors — un échec de page n'efface rien.
             bilan.genius = scraper.scrape_multiple_tracks(
                 tracks, progress_callback=lambda c, tot, nom: hooks.progress(c, tot, nom, "Genius")
             )
@@ -319,9 +360,11 @@ def run(
         # 2) Crédits Discogs
         if options.discogs:
             client = clients.discogs()
-            if options.force_credits:
-                for t in tracks:
-                    t.credits = [c for c in t.credits if c.source != "discogs"]
+            # Pas de purge anticipée en mode forcé (2026-09-27) : elle vidait les
+            # crédits Discogs AVANT l'appel, si bien qu'un disque introuvable, un
+            # délai dépassé ou une réponse vide les effaçait (16 crédits justes
+            # perdus sur un run A2H). `enrich_track_data` purge les siens quand
+            # un disque est TROUVÉ, et seulement alors.
             ok = ko = 0
             for i, t in enumerate(tracks, 1):
                 if hooks.should_stop():
@@ -354,7 +397,8 @@ def run(
             if hooks.should_stop():
                 bilan.interrompu("arrêt demandé avant la phase paroles/synchro")
                 return _sauver(runtime, artist, tracks, bilan)
-            _reset_forces(runtime, tracks, options)
+            avant = _reset_forces(tracks, options)
+            synchro_obtenue: set[int] = set()
             if options.paroles_genius:
                 besoin = [t for t in tracks if t.lyrics.a_chercher()]
                 if besoin:
@@ -397,6 +441,7 @@ def run(
                             t, nom_artiste_pour(t, artist), need_sync=need_sync, need_text=need_text
                         )
                         if outcome.lyrics_synced is not None:
+                            synchro_obtenue.add(id(t))
                             if outcome.synced_kind in cpt:
                                 cpt[outcome.synced_kind] += 1
                             cpt["cross" if outcome.synced_is_cross else "review"] += 1
@@ -419,6 +464,7 @@ def run(
                         except Exception:  # noqa: BLE001 — fermeture best-effort
                             logger.warning("Fermeture provider paroles échouée", exc_info=True)
 
+            _retablir_sans_reponse(runtime, tracks, options, avant, synchro_obtenue)
             if bilan.paroles is None:
                 n_ok = sum(1 for t in tracks if t.lyrics.present and t.lyrics.text)
                 n_instru = sum(1 for t in tracks if t.lyrics.instrumental)

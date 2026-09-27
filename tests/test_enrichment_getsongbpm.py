@@ -148,8 +148,8 @@ class _RaisingFetcherAsync(_RaisingFetcher):
 
 class TestApplicationDesDonnees:
     """`_apply_song_data` est commun aux deux voies : chaque champ mesuré vaut
-    un SUCCÈS, même sans BPM (sinon faux échec → nettoyage du morceau par
-    `data_enricher._clear_after_total_failure`)."""
+    un SUCCÈS, même sans BPM (sinon faux échec dans le bilan du run —
+    ancien nettoyage retiré le 2026-09-27)."""
 
     @pytest.mark.parametrize(
         "song",

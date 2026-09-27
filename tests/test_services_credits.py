@@ -95,7 +95,10 @@ def _clients(genius=None, lyrics=None):
 
 
 class TestForcer:
-    def test_force_credits_ne_retire_que_la_source_visee(self):
+    def test_force_credits_ne_purge_rien_d_avance(self):
+        # 2026-09-27 : le service vidait les crédits `genius` AVANT le scrape ;
+        # une page illisible les perdait. C'est le scraper qui remplace les
+        # siens, et seulement quand la page est lue.
         t = _track("A")
         t.credits = [
             Credit(name="G", role=CreditRole.PRODUCER, source="genius"),
@@ -112,8 +115,7 @@ class TestForcer:
             sync_ytm=False,
         )
         credits.run(_rt(), Artist(name="Swing"), [t], opts, Hooks(), cl)
-        sources = sorted(c.source for c in t.credits)
-        assert sources == ["discogs", "genius"]  # le Discogs a survécu, le Genius est re-scrapé
+        assert {c.name for c in t.credits} == {"G", "D", "Beat"} and genius.credits_calls == 1
 
     def test_force_sync_purge_les_observations(self):
         dm = _DM()
@@ -131,6 +133,49 @@ class TestForcer:
         credits.run(_rt(dm), Artist(name="Swing"), [t], opts, Hooks(), cl)
         assert dm.obs_deleted == [(t.id, "lyrics_synced")]
         assert lyr.appels and lyr.appels[0][2] is True  # need_sync malgré l'ancien LRC
+
+    def test_force_sync_sans_reponse_garde_l_ancien_lrc(self):
+        # Aucune source ne rend de synchro : rien n'est effacé (2026-09-27).
+        dm = _DM()
+        t = _track("A")
+        t.lyrics.synced, t.lyrics.synced_source = "vieux", "lrclib"
+        lyr = _Lyrics()
+        lyr.enrich = lambda track, artist_name, **kw: SimpleNamespace(
+            lyrics_synced=None, synced_kind=None, synced_is_cross=False, text=None
+        )
+        cl, _, _ = _clients(lyrics=lyr)
+        opts = credits.OptionsCredits(
+            genius=False,
+            discogs=False,
+            paroles_genius=False,
+            paroles_ytm=False,
+            sync_lrclib=True,
+            force_sync=True,
+        )
+        credits.run(_rt(dm), Artist(name="Swing"), [t], opts, Hooks(), cl)
+        assert dm.obs_deleted == []
+        assert (t.lyrics.synced, t.lyrics.synced_source) == ("vieux", "lrclib")
+
+    def test_force_paroles_sans_reponse_garde_le_texte(self):
+        class _GeniusMuet(_Genius):
+            def scrape_lyrics_batch(self, tracks, progress_callback=None):
+                self.lyrics_calls += 1
+                return {"success": 0, "failed": len(tracks), "errors": []}
+
+        t = _track("A")
+        t.lyrics.text, t.lyrics.present, t.lyrics.source = "vieux", True, "heritage:7"
+        cl, genius, _ = _clients(genius=_GeniusMuet())
+        opts = credits.OptionsCredits(
+            genius=False,
+            discogs=False,
+            paroles_ytm=False,
+            sync_lrclib=False,
+            sync_ytm=False,
+            force_paroles=True,
+        )
+        credits.run(_rt(), Artist(name="Swing"), [t], opts, Hooks(), cl)
+        assert genius.lyrics_calls == 1
+        assert (t.lyrics.text, t.lyrics.source, t.lyrics.present) == ("vieux", "heritage:7", True)
 
 
 class TestNeed:

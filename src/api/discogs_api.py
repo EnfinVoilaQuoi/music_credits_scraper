@@ -1,5 +1,6 @@
 """Client pour l'API Discogs - Enrichissement des crédits et métadonnées"""
 
+import json
 import os
 import time
 from typing import Any
@@ -223,6 +224,8 @@ class DiscogsClient:
                         obs.ok()
                         return track_data
 
+                except json.JSONDecodeError:
+                    raise  # réponse VIDE : le transport, pas ce candidat
                 # release.* est lazy-loadé par discogs_client → accès = fetch réseau
                 # possible (DiscogsAPIError). Best-effort par candidat : on continue.
                 except (DiscogsAPIError, AttributeError, TypeError, ValueError, KeyError) as e:
@@ -235,6 +238,17 @@ class DiscogsClient:
                 "aucune correspondance exacte"
                 + (f" ({etrangers} disque(s) d'un autre artiste écarté(s))" if etrangers else "")
             )
+            return None
+
+        except json.JSONDecodeError as e:
+            # Réponse VIDE du chargement paresseux d'un disque (2026-09-27, A2H
+            # « Champagne ») : `JSONDecodeError` hérite de `ValueError` et passait
+            # pour « ce disque ne contient pas le morceau » — la recherche
+            # finissait en `absent` (« Appel réussi »), le seul verdict muet, et
+            # le run forcé effaçait les crédits Discogs pourtant justes.
+            logger.warning(f"⏰ Discogs : réponse vide pour '{track_title}' (bridage ?)")
+            obs.fail(IssueKind.THROTTLED, f"réponse vide : {e}")
+            log_api("Discogs", f"search/{track_title}", False)
             return None
 
         except HTTPError as e:
@@ -326,6 +340,8 @@ class DiscogsClient:
 
             return None
 
+        except json.JSONDecodeError:
+            raise  # réponse vide : c'est au transport de conclure
         except (DiscogsAPIError, AttributeError, TypeError, KeyError, ValueError) as e:
             logger.warning(f"Erreur extraction track depuis release: {e}")
             return None
@@ -754,6 +770,10 @@ class DiscogsClient:
                 return False
 
             updated = False
+            if force_update:
+                # Disque TROUVÉ : en mode forcé il fait foi, même sans crédits
+                # (jamais avant la recherche — un échec effacerait des crédits justes).
+                track.credits = [c for c in track.credits if c.source != "discogs"]
 
             # Discogs ID
             if track_data.get("discogs_id") and (force_update or not track.discogs_id):

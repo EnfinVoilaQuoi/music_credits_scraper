@@ -242,28 +242,8 @@ def test_consensus_bpm_saute_songbpm():
     assert track.audio.bpm == 100
 
 
-def test_crash_songbpm_donne_none_et_bloque_le_nettoyage():
-    calls = []
-    overrides = {
-        "spotify_id": _FakeSpotify(calls, result=False),
-        "reccobeats": _FakeRecco(calls, result=False),
-        "getsongbpm": _FakeGetSongBpm(calls, result=False),
-        "songbpm": _FakeSongBpm(calls, exc=RuntimeError("timeout simulé")),
-        "bpmfinder": _FakeBpmFinder(calls, result=False),
-        "deezer": _FakeDeezer(calls, result=False),
-        "discogs": _FakeDiscogs(calls, result=False),
-    }
-    enricher, _, _ = _enricher(**overrides)
-
-    track = _track(bpm=95, key=5, mode=1, duration=200, musical_key="Sol majeur")
-    results = _run(enricher, track, force_update=True, clear_on_failure=True)
-
-    assert results["songbpm"] is None  # crash ≠ « pas de données »
-    assert "cleaned" not in results
-    assert track.audio.bpm == 95
-
-
-def test_nettoyage_si_toutes_les_tentatives_ont_echoue():
+def test_forcer_sans_reponse_n_efface_rien():
+    # Voie async : même règle (2026-09-27), voir la jumelle sync.
     calls = []
     overrides = {
         name: cls(calls, result=False)
@@ -280,22 +260,11 @@ def test_nettoyage_si_toutes_les_tentatives_ont_echoue():
     enricher, _, _ = _enricher(**overrides)
 
     track = _track(bpm=95, key=5, mode=1, duration=200, musical_key="Sol majeur")
-    results = _run(enricher, track, force_update=True, clear_on_failure=True)
+    results = _run(enricher, track, force_update=True)
 
-    assert results["cleaned"] is True
-    assert track.audio.bpm is None
-    assert track.title == "Solo"  # données essentielles intactes
-
-
-def test_pas_de_nettoyage_si_aucune_source_n_a_tente():
-    bpmfinder = _FakeBpmFinder([], result="skipped")
-    enricher, _, _ = _enricher(bpmfinder=bpmfinder)
-
-    track = _track(bpm=100)
-    results = _run(enricher, track, sources=["bpmfinder"], force_update=True, clear_on_failure=True)
-
-    assert results == {"bpmfinder": "skipped"}
-    assert track.audio.bpm == 100
+    assert "cleaned" not in results
+    assert (track.audio.bpm, track.duration) == (95, 200)
+    assert not track.clear_audio_observations
 
 
 def test_source_absente_ou_indisponible_non_appelee():

@@ -39,9 +39,7 @@ class _Enricher:
     def reset_bpmfinder_breaker(self):
         self.reset = True
 
-    async def enrich_track_async(
-        self, track, *, sources, force_update, artist_tracks, clear_on_failure
-    ):
+    async def enrich_track_async(self, track, *, sources, force_update, artist_tracks):
         self.sources_vues = list(sources)
         self.journal.append(("enrich", track.title))
         return dict(self.results)
@@ -165,11 +163,6 @@ class TestBatch:
         bilan = _run(rt, _tracks("x", "y"), hooks=Hooks(should_stop=stop))
         assert bilan.traites == 1 and not bilan.complete and "1/2" in bilan.motif
         assert "aclose_http" in journal  # teardown même sur arrêt
-
-    def test_nettoyes_comptes(self, monkeypatch):
-        rt, _, _ = _setup(monkeypatch, results={"reccobeats": False, "cleaned": True})
-        bilan = _run(rt, _tracks("x"))
-        assert bilan.nettoyes == 1
 
 
 class TestResume:

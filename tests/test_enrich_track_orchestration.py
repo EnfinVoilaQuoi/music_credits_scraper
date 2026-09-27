@@ -267,61 +267,20 @@ def _enricher_tout_en_echec(songbpm=None):
     return _enricher(**overrides)
 
 
-def test_crash_songbpm_donne_none_et_bloque_le_nettoyage():
-    songbpm = _FakeSongBpm([], exc=RuntimeError("timeout simulé"))
-    enricher, _, _ = _enricher_tout_en_echec(songbpm=songbpm)
-
-    track = _track(bpm=95, key=5, mode=1, duration=200, musical_key="Sol majeur")
-    results = enricher.enrich_track(track, force_update=True, clear_on_failure=True)
-
-    # None (crash) ≠ False (pas de données) : n'alimente PAS « tout a échoué »
-    assert results["songbpm"] is None
-    assert "cleaned" not in results
-    assert track.audio.bpm == 95  # données préservées
-
-
-def test_nettoyage_si_toutes_les_tentatives_ont_echoue():
+def test_forcer_sans_reponse_n_efface_rien():
+    # Décision utilisateur 2026-09-27 : une MàJ forcée purge des ERREURS, elle
+    # n'enlève pas des données légitimes. « Aucune source n'a trouvé » ne prouve
+    # pas que l'ancienne valeur était fausse — l'option qui effaçait alors BPM,
+    # tonalité et durée (et les observations persistées, manuelles comprises) a
+    # été retirée.
     enricher, _, _ = _enricher_tout_en_echec()
 
     track = _track(bpm=95, key=5, mode=1, duration=200, musical_key="Sol majeur")
-    results = enricher.enrich_track(track, force_update=True, clear_on_failure=True)
+    results = enricher.enrich_track(track, force_update=True)
 
-    assert results["cleaned"] is True
-    assert track.audio.bpm is None
-    assert track.audio.key is None
-    assert track.audio.mode is None
-    assert track.duration is None
-    assert track.audio.musical_key is None
-    assert track.title == "Solo"  # les données essentielles restent intactes
-
-
-def test_pas_de_nettoyage_si_aucune_source_n_a_tente():
-    # Bug TOTAL 90 : all([]) == True — toutes les sources en 'not_needed'/'skipped'
-    # ne doit PAS passer pour « tout a échoué »
-    bpmfinder = _FakeBpmFinder([], result="skipped")
-    enricher, _, _ = _enricher(bpmfinder=bpmfinder)
-
-    track = _track(bpm=100)
-    results = enricher.enrich_track(
-        track, sources=["bpmfinder"], force_update=True, clear_on_failure=True
-    )
-
-    assert results == {"bpmfinder": "skipped"}
     assert "cleaned" not in results
-    assert track.audio.bpm == 100
-
-
-def test_pas_de_nettoyage_si_une_source_a_reussi():
-    enricher, _, _ = _enricher_tout_en_echec()
-    deezer_ok = _FakeDeezer([], result=True)
-    enricher._deezer_provider = deezer_ok
-
-    track = _track(bpm=95)
-    results = enricher.enrich_track(track, force_update=True, clear_on_failure=True)
-
-    assert results["deezer"] is True
-    assert "cleaned" not in results
-    assert track.audio.bpm == 95
+    assert (track.audio.bpm, track.audio.key, track.audio.mode) == (95, 5, 1)
+    assert track.duration == 200 and not track.clear_audio_observations
 
 
 # ──────────────────────────────────────────────────────────────────────

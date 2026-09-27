@@ -69,7 +69,7 @@ class TestParsingCredits:
 class TestParsingEnrichStreams:
     def test_enrich(self):
         o = cli.options_enrich(_parse("enrich", "S", "--sources", "reccobeats, deezer", "--force"))
-        assert o.sources == ("reccobeats", "deezer") and o.force_update and o.clear_on_failure
+        assert o.sources == ("reccobeats", "deezer") and o.force_update
         assert o.musicbrainz  # identité en fin de run : cochée par défaut
         assert cli.options_enrich(_parse("enrich", "S")).sources is None
         assert not cli.options_enrich(_parse("enrich", "S", "--no-musicbrainz")).musicbrainz

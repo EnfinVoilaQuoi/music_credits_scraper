@@ -2,7 +2,7 @@
 
 Complète `test_services_enrichissement.py` : liste vide, `run()` soumet à la
 boucle unique et attend, et le texte du résumé (statuts par source, verdict
-global, titre tronqué, compteurs, mode force, nettoyés, run incomplet).
+global, titre tronqué, compteurs, mode force, run incomplet).
 """
 
 from types import SimpleNamespace
@@ -48,7 +48,7 @@ class TestStatuts:
     def test_overall(self):
         assert enr._overall({"a": True, "b": None}) == "✓"
         assert enr._overall({"a": None, "b": False}) == "?"
-        assert enr._overall({"a": "not_needed", "cleaned": True}) == "-"
+        assert enr._overall({"a": "not_needed"}) == "-"
         assert enr._overall({"a": False}) == "✗"
         assert enr._overall({}) == "✗"
 
@@ -57,9 +57,8 @@ class TestResume:
     def test_lignes_et_compteurs(self):
         b = enr.BilanEnrich(
             traites=3,
-            nettoyes=1,
             resultats=[
-                {"title": "Court", "results": {"reccobeats": True, "cleaned": True}},
+                {"title": "Court", "results": {"reccobeats": True}},
                 {
                     "title": "Un titre vraiment beaucoup trop long pour tenir",
                     "results": {"deezer": False},
@@ -71,7 +70,6 @@ class TestResume:
         b.interrompu("arrêt")
         txt = enr.resume(b, enr.OptionsEnrich(force_update=True), desactives=2)
         assert "✅ Mode force update activé" in txt
-        assert "🗑️ 1 morceau(x) nettoyé(s)" in txt
         assert "✅ 1 réussi(s) · ❌ 2 échec(s)" in txt
         assert "✓ Court\n  RC:✓\n" in txt
         assert "✗ Un titre vraiment beaucoup ..." in txt  # 27 chars + "..."
@@ -81,6 +79,6 @@ class TestResume:
         assert txt.endswith("⚠️ Run INCOMPLET : arrêt")
 
     def test_sans_detail_ni_option(self):
-        b = enr.BilanEnrich(traites=1, resultats=[{"title": "X", "results": {"cleaned": False}}])
+        b = enr.BilanEnrich(traites=1, resultats=[{"title": "X", "results": {}}])
         txt = enr.resume(b, enr.OptionsEnrich())
-        assert "✗ X\n" in txt and "force update" not in txt and "nettoyé" not in txt
+        assert "✗ X\n" in txt and "force update" not in txt

@@ -106,10 +106,13 @@ class TestPhaseDiscogs:
         assert bilan.discogs == {"success": 1, "failed": 2} and bilan.complete
         assert bilan.sauves == 3
 
-    def test_force_credits_retire_les_credits_discogs_et_force_le_client(self):
+    def test_force_credits_force_le_client_sans_purge_anticipee(self):
+        # 2026-09-27 : la purge AVANT l'appel effaçait des crédits justes quand
+        # Discogs échouait (A2H, 16 crédits). Le client purge lui-même, et
+        # seulement quand il a trouvé le disque.
         t = _track("A")
         t.credits = [Credit(name="D", role=CreditRole.PRODUCER, source="discogs")]
-        disc = _Discogs([True])
+        disc = _Discogs([False])
         credits.run(
             _rt(),
             Artist(name="S"),
@@ -118,7 +121,7 @@ class TestPhaseDiscogs:
             Hooks(),
             _clients_discogs(disc),
         )
-        assert t.credits == [] and disc.appels == [("A", True)]
+        assert [c.name for c in t.credits] == ["D"] and disc.appels == [("A", True)]
 
     def test_arret_pendant_discogs_sauve_et_rend_incomplet(self):
         dm = _DM()

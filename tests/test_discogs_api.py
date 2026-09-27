@@ -583,3 +583,69 @@ class TestReimportIdempotent:
 
         sources = sorted(c.source for c in track.credits)
         assert sources == ["discogs", "genius"]
+
+
+# ────────────── réponse vide et mode forcé (2026-09-27, A2H « Champagne »)
+
+
+class _ReleaseVide:
+    """Disque dont le chargement paresseux rend une réponse VIDE."""
+
+    title = "Art de vivre"
+
+    @property
+    def tracklist(self):
+        import json
+
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+
+class TestReponseVide:
+    def test_l_extraction_ne_l_avale_pas(self, client):
+        import json
+
+        with pytest.raises(json.JSONDecodeError):
+            client._extract_track_from_release(_ReleaseVide(), "Champagne", "A2H")
+
+    def test_la_recherche_la_compte_en_bridage(self, client, monkeypatch):
+        from src.observability import source_usage
+
+        client.client = type("C", (), {"search": lambda self, *a, **k: [_ReleaseVide()]})()
+        monkeypatch.setattr(client, "_check_rate_limit", lambda: None)
+        verdicts = []
+        orig = source_usage.Observation.fail
+
+        def espion(self, kind, detail=""):
+            verdicts.append(kind.value)
+            return orig(self, kind, detail)
+
+        monkeypatch.setattr(source_usage.Observation, "fail", espion)
+        assert client.search_track("Champagne", "A2H", "Art de vivre") is None
+        assert verdicts == ["throttled"]
+
+
+class TestModeForce:
+    """Une MàJ forcée remplace ce que la source A répondu ; un échec n'efface rien."""
+
+    def _stub(self, client, monkeypatch, donnees):
+        monkeypatch.setattr(client, "search_track", lambda *a, **k: donnees)
+
+    def _avec_credit_discogs(self):
+        t = _track()
+        t.credits = [
+            Credit(name="Ancien", role=CreditRole.MIXING_ENGINEER, source="discogs"),
+            Credit(name="G", role=CreditRole.PRODUCER, source="genius"),
+        ]
+        return t
+
+    def test_sans_disque_rien_n_est_efface(self, client, monkeypatch):
+        self._stub(client, monkeypatch, None)
+        t = self._avec_credit_discogs()
+        assert client.enrich_track_data(t, force_update=True) is False
+        assert {c.name for c in t.credits} == {"Ancien", "G"}
+
+    def test_disque_trouve_sans_credits_purge_les_siens(self, client, monkeypatch):
+        self._stub(client, monkeypatch, _donnees(genres=None))
+        t = self._avec_credit_discogs()
+        client.enrich_track_data(t, force_update=True)
+        assert {c.name for c in t.credits} == {"G"}

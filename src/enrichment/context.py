@@ -24,7 +24,6 @@ class EnrichmentContext:
     # Scrutin BPM commun à toutes les sources du run (arbitré en fin de parcours).
     bpm_ballot: BpmBallot = field(default_factory=BpmBallot)
     # Efface les données audio d'un morceau dont toutes les sources ont échoué.
-    clear_on_failure: bool = True
     # Autorise ReccoBeats à scraper un Spotify ID (False si l'étape spotify_id de
     # l'orchestrateur l'a déjà fait → évite un double scrape Playwright par morceau).
     allow_spotify_scrape: bool = True

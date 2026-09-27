@@ -15,6 +15,13 @@ de `version_descriptors` :
     instrumental                 NON      oui       oui    (constat instrumental)
     a cappella                   oui      oui       NON    (la voix seule)
     remix tiers / collab         NON      oui       NON    (le remixeur produit)
+    démo / alternate / snippet   NON      oui       NON    (autre prise, autre texte)
+    reference                    NON      NON       NON    (chantée par un autre)
+
+Démo, prise alternative et snippet : décision utilisateur du 2026-09-28 — une
+démo n'était dans aucune ligne et retombait sur « edition » (paroles ET
+production de l'original), alors que son texte diffère souvent. Une référence
+est l'œuvre d'un AUTRE artiste pour celui-ci : elle n'hérite de rien.
 
 Règles d'écriture : UNION, jamais remplacement — un crédit ou des paroles que la
 version porte déjà priment ; la provenance est EXPLICITE (`Credit.source =
@@ -72,6 +79,10 @@ REGLES: dict[str, Regle] = {
     "a_cappella": Regle(paroles=True, ecriture=True, production=False),
     "remix_named": Regle(paroles=False, ecriture=True, production=False),
     "remix_bare": Regle(paroles=False, ecriture=True, production=False),
+    "demo": Regle(paroles=False, ecriture=True, production=False),
+    "alternate": Regle(paroles=False, ecriture=True, production=False),
+    "snippet": Regle(paroles=False, ecriture=True, production=False),
+    "reference": Regle(paroles=False, ecriture=False, production=False),
 }
 
 
@@ -94,9 +105,16 @@ def famille_de(titre: str) -> str | None:
     # Une prise (live/acoustique) l'emporte sur une mention d'édition (« Live
     # Version ») : c'est elle qui décide si la production est la même.
     for nom in (
+        # Une référence est chantée par un autre : rien de ce qui suit ne compte.
+        "reference",
         "performance",
         "instrumental",
         "a_cappella",
+        # Autre prise studio, souvent autre texte : avant les effets et éditions
+        # (« Hurricane (Donda Demo) [Mixed] » reste une démo).
+        "demo",
+        "alternate",
+        "snippet",
         "chopped",
         "vitesse",
         "remaster",

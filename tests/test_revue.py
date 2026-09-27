@@ -91,23 +91,95 @@ class TestMesures:
 
 
 class TestLrc:
-    def _avec(self, lrc):
-        t = _t("X")
-        t.lyrics.text = " ".join(f"mot{i}" for i in range(20))
+    def _avec(self, lrc, titre="X", n=50):
+        t = _t(titre)
+        t.lyrics.text = " ".join(f"mot{i}" for i in range(n))
         t.lyrics.source = "genius"
         t.lyrics.synced = lrc
         t.lyrics.synced_source = "YouTube Music"
         return t
 
+    MOITIE = " ".join(f"mot{i}" for i in range(25)) + " " + " ".join(f"autre{i}" for i in range(25))
+
     def test_tranche_ambigue_signalee(self):
-        lrc = (
-            " ".join(f"mot{i}" for i in range(10)) + " " + " ".join(f"autre{i}" for i in range(10))
-        )
-        assert "50%" in revue.lrc_douteux(self._avec(lrc))[0]
+        assert "50%" in revue.lrc_douteux(self._avec(self.MOITIE))[0]
 
     def test_lrc_confirme_ou_dementi_non_signale(self):
-        assert revue.lrc_douteux(self._avec(" ".join(f"mot{i}" for i in range(20)))) is None
-        assert revue.lrc_douteux(self._avec(" ".join(f"autre{i}" for i in range(20)))) is None
+        assert revue.lrc_douteux(self._avec(" ".join(f"mot{i}" for i in range(50)))) is None
+        assert revue.lrc_douteux(self._avec(" ".join(f"autre{i}" for i in range(50)))) is None
+
+    def test_memes_mots_dans_le_desordre_dementi(self):
+        """Les bigrammes : mêmes mots, aucune paire commune — démenti, pas douteux."""
+        lrc = (
+            " ".join(f"mot{i}" for i in range(49, 24, -1))
+            + " "
+            + " ".join(f"autre{i}" for i in range(25))
+        )
+        assert revue.lrc_douteux(self._avec(lrc)) is None
+
+    def test_paroles_genius_trop_courtes_non_jugeables(self):
+        """Un extrait Genius (« Good Ass Job » : 12 mots) ne permet pas de douter."""
+        assert revue.lrc_douteux(self._avec(self.MOITIE, n=20)) is None
+
+    def test_sessions_live_a_part(self):
+        for titre in (
+            "Grünt #33",
+            "Freestyle Skyrock #1",
+            "Freestyle Couvre Feu (OKLM)",
+            "Loup noir - A COLORS SHOW",
+            "Runaway (Live at London Wireless Festival 2014)",
+        ):
+            t = self._avec(self.MOITIE, titre=titre)
+            assert revue.lrc_douteux(t) is None, titre
+            assert "50%" in revue.lrc_session_live(t)[0], titre
+        # « OKLM » et « Girls, Sounds & Colors » sont des titres, pas des sessions.
+        for titre in ("OKLM", "Girls, Sounds & Colors", "Planète rap"):
+            assert not revue.session_live(_t(titre)), titre
+
+
+def _fiche_paroles(titre, tid, paroles, lrc=None, genius_id=None):
+    t = _t(titre, tid, genius_id=genius_id)
+    t.lyrics.text, t.lyrics.source = paroles, "genius"
+    t.lyrics.synced = lrc
+    return t
+
+
+ORIGINAL = " ".join(f"ligne{i} mot{i}" for i in range(30))
+DEMO = (
+    " ".join(f"demo{i} texte{i}" for i in range(20))
+    + " "
+    + " ".join(f"ligne{i} mot{i}" for i in range(4))
+)
+
+
+class TestLrcAutreFiche:
+    def test_le_lrc_de_l_original_sur_la_demo(self):
+        """« Ghost Town (Demo) » portait le LRC de *Ghost Town*."""
+        o = _fiche_paroles("Ghost Town", 1, ORIGINAL)
+        d = _fiche_paroles("Ghost Town (Demo)", 2, DEMO, lrc=ORIGINAL)
+        ctx = _ctx(o, d)
+        motif, preuves = revue.lrc_d_une_autre_fiche(d, ctx)
+        assert "« Ghost Town »" in motif and preuves["autre"] == 1
+        # Formel : il n'est pas AUSSI proposé en douteux.
+        assert revue.lrc_douteux(d, ctx) is None
+
+    def test_son_propre_lrc_n_est_pas_signale(self):
+        o = _fiche_paroles("Ghost Town", 1, ORIGINAL, lrc=ORIGINAL)
+        d = _fiche_paroles("Ghost Town (Demo)", 2, DEMO)
+        assert revue.lrc_d_une_autre_fiche(o, _ctx(o, d)) is None
+
+    def test_memes_paroles_ou_meme_page_ne_comptent_pas(self):
+        """Une version héritée (mêmes paroles) ou une ligne de la même page
+        Genius n'est pas « une autre fiche »."""
+        d = _fiche_paroles("Ghost Town (Demo)", 2, DEMO, lrc=ORIGINAL, genius_id=7)
+        heritee = _fiche_paroles("Ghost Town (Live)", 3, DEMO)
+        soeur = _fiche_paroles("Ghost Town", 4, ORIGINAL, genius_id=7)
+        assert revue.lrc_d_une_autre_fiche(d, _ctx(d, heritee, soeur)) is None
+
+    def test_detecteur_formel(self):
+        assert "lrc_autre_fiche" in revue.CODES_FORMELS
+        assert "certif_autre_titre" in revue.CODES_FORMELS
+        assert "lrc_douteux" not in revue.CODES_FORMELS
 
 
 class TestDoublons:
@@ -170,7 +242,37 @@ class TestPagesEtCredits:
                 "title": "TEMPS MORT",
             }
         ]
+        # Un AUTRE titre : formel, pas « à trancher ».
+        assert revue.certif_avant_sortie(t) is None
+        assert "un autre titre" in revue.certif_d_un_autre_titre(t)[0]
+
+    def test_sous_titre_de_la_certif_ou_descripteur_de_la_fiche(self):
+        """Une parenthèse de PLUS côté certif est un sous-titre (le bon morceau,
+        Kid Cudi « Day 'N' Nite » ← « DAY 'N' NITE (NIGHTMARE) ») ; côté fiche,
+        une version qui a reçu la certif de l'original."""
+        oeuvre = revue.certif_d_une_autre_oeuvre
+        assert not oeuvre(_t("Day ‘N’ Nite"), {"title": "DAY 'N' NITE (NIGHTMARE)"})
+        assert oeuvre(_t("Jesus Walks (Orchestral)"), {"title": "JESUS WALKS"})
+        assert oeuvre(
+            _t("Pursuit Of Happiness (Nightmare) (Prime Day Show)"),
+            {"title": "PURSUIT OF HAPPINESS (NIGHTMARE)"},
+        )
+        assert oeuvre(_t("FATHER"), {"title": "FATHER STRETCH MY HANDS PT. 1"})
+        assert not oeuvre(_t("Alors on danse"), {"title": "ALORS ON DANSE"})
+
+    def test_certif_avant_la_sortie_meme_titre(self):
+        """Même titre : c'est la date de sortie qui est suspecte — à trancher."""
+        t = _t("Day 'N' Nite", release_date="2020-04-17")
+        t.certs.entries = [
+            {
+                "body": "BRMA",
+                "certification": "Or",
+                "certification_date": "2009-04-03",
+                "title": "DAY 'N' NITE",
+            }
+        ]
         assert "avant la sortie" in revue.certif_avant_sortie(t)[0]
+        assert revue.certif_d_un_autre_titre(t) is None
 
     def test_page_annotee_sans_trace(self):
         t = _t("Yam", genius_url="https://genius.com/Kanye-west-yam-annotated")
@@ -292,6 +394,19 @@ def test_fenetre_se_construit(racine_tk):
         verdicts_revue=lambda _id: {},
         trancher_cas=lambda aid, det, cle, **kw: tranches.append((det, cle)),
         annuler_verdict=lambda aid, det, cle: True,
+        corrections_revue=lambda _id: [
+            {
+                "id": 9,
+                "detecteur": "lrc_autre_fiche",
+                "cle": "k",
+                "track_id": 1,
+                "morceau": "Pour de vrai",
+                "motif": "LRC de « X »",
+                "compte_rendu": "LRC retiré de « Pour de vrai »",
+                "applied_at": "2026-09-27 21:00",
+                "annulation": {"type": "lrc"},
+            }
+        ],
     )
     app = SimpleNamespace(root=racine_tk, data_manager=dm, _show_track_details_for_track=print)
     w = ATrancherWindow(app, artiste)
@@ -302,10 +417,13 @@ def test_fenetre_se_construit(racine_tk):
         assert len(w.liste.winfo_children()) == 2
         w._normal(w.cas[0])
         assert len(w.revue.actifs) == 1 and len(w.revue.masques) == 1 and len(tranches) == 1
-        w.voir_masques.set(True)
-        w._rafraichir()
+        w._changer_vue(next(k for k, v in w._libelles_vues().items() if v == "normaux"))
         w._retablir(w.cas[0])
         assert len(w.revue.actifs) == 2
+        # La vue du journal des corrections automatiques, avec « ↩ Rétablir ».
+        w._changer_vue(next(k for k, v in w._libelles_vues().items() if v == "journal"))
+        assert w.vue == "journal" and len(w.liste.winfo_children()) == 1
+        assert w.bouton_surs.cget("state") == "disabled"  # aucun cas formel ici
     finally:
         w.destroy()
 
@@ -372,3 +490,82 @@ def test_audit_spotify_enregistre_puis_retire():
     (cas,) = ecrits["spotify_audit"]
     assert cas.motif.startswith("🚨") and "Dessine-moi un mouton" in cas.motif
     assert revue.enregistrer_audit_spotify(dm, artiste, [ecart], retires=[ecart]) == 0
+
+
+class TestDoublonParLrc:
+    def test_versions_soeurs_envoyees_aux_doublons(self):
+        jeezy = " ".join(f"ligne{i} mot{i}" for i in range(30))
+        roc = (
+            " ".join(f"ligne{i} mot{i}" for i in range(14))
+            + " "
+            + " ".join(f"roc{i} texte{i}" for i in range(16))
+        )
+        j = _fiche_paroles("Can't Tell Me Nothing (Jeezy Remix)", 1, jeezy)
+        r = _fiche_paroles("Can't Tell Me Nothing (R.O.C. Remix)", 2, roc, lrc=jeezy)
+        r.spotify_id = "SP"  # sur une plateforme : pas formel
+        ctx = _ctx(j, r)
+        motif, preuves = revue.doublon_par_lrc(r, ctx)
+        assert "même morceau que « Can't Tell Me Nothing (Jeezy Remix) »" in motif
+        assert preuves["autres"] == [1]
+        assert revue.lrc_douteux(r, ctx) is None
+
+
+class TestAutrePriseHorsPlateformes:
+    """Une démo, une référence, un live inédit n'ont ni page SongBPM (catalogue
+    Spotify) ni LRC à eux (2026-09-28)."""
+
+    def _obs_songbpm(self, tid, duree, bpm):
+        return {
+            tid: [
+                Observation("duration", str(duree), "songbpm"),
+                Observation("bpm", str(bpm), "songbpm"),
+            ]
+        }
+
+    def _original(self):
+        o = _t("All Day", 1, duration=310)
+        o.audio.bpm = 123
+        return o
+
+    def test_mesures_songbpm_de_l_original(self):
+        o = self._original()
+        r = _t("All Day (Kendrick Lamar Reference)", 2)
+        ctx = _ctx(o, r, obs=self._obs_songbpm(2, 311, 123))
+        motif, preuves = revue.songbpm_de_l_original(r, ctx)
+        assert "« All Day »" in motif and preuves["original"] == 1
+        assert revue.songbpm_copie_de_l_original(r, ctx) is None  # pas deux fois
+
+    def test_une_plateforme_une_edition_ou_une_autre_duree_ne_prouvent_rien(self):
+        o = self._original()
+        sur_spotify = _t("All Day (Live)", 2, spotify_id="SP")
+        edition = _t("All Day (Physical Version)", 3)
+        autre_duree = _t("All Day (Demo)", 4)
+        obs = {
+            **self._obs_songbpm(2, 311, 123),
+            **self._obs_songbpm(3, 311, 123),
+            **self._obs_songbpm(4, 250, 123),
+        }
+        ctx = _ctx(o, sur_spotify, edition, autre_duree, obs=obs)
+        for t in (sur_spotify, edition, autre_duree):
+            assert revue.songbpm_de_l_original(t, ctx) is None, t.title
+
+    def test_lrc_de_l_original_sur_une_demo_meme_a_refrain_commun(self):
+        """Au-delà de 40 % de paires propres, la preuve reste formelle quand la
+        fiche est une autre prise hors plateformes et l'autre fiche SON original."""
+        original = " ".join(f"ligne{i} mot{i}" for i in range(30))
+        demo = (
+            " ".join(f"ligne{i} mot{i}" for i in range(14))
+            + " "
+            + " ".join(f"demo{i} texte{i}" for i in range(16))
+        )
+        o = _fiche_paroles("Hurricane", 1, original)
+        d = _fiche_paroles("Hurricane (Donda Demo)", 2, demo, lrc=original)
+        ctx = _ctx(o, d)
+        assert revue._lrc_autre_candidat(d, ctx)[2] >= revue.PROPRE_MAX_FORMEL
+        assert revue.lrc_d_une_autre_fiche(d, ctx)
+        assert revue.lrc_douteux(d, ctx) is None
+        # Sur une plateforme, ce n'est plus formel : à trancher.
+        d.spotify_id = "SP"
+        ctx = _ctx(o, d)
+        assert revue.lrc_d_une_autre_fiche(d, ctx) is None
+        assert "peut-être celui de « Hurricane »" in revue.lrc_douteux(d, ctx)[0]

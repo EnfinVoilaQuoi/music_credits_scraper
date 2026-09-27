@@ -166,6 +166,8 @@ class Bilan:
     complete: bool = True
     motif: str = ""
     erreurs: list[str] = field(default_factory=list)
+    #: Corrections à preuve FORMELLE faites en fin de run (`services/revue_auto`).
+    corrections: list[str] = field(default_factory=list)
 
     def interrompu(self, motif: str) -> None:
         self.complete = False

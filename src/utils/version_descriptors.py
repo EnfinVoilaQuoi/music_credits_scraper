@@ -102,8 +102,38 @@ RENDITION_WORDS = frozenset(
         "solo",
         "mixed",  # tag Genius « [Mixed] » des versions DJ-mix
         "original",
+        # 2026-09-28 — les versions INÉDITES des pages Genius (fuites) : sans ces
+        # mots, « All Day (Kendrick Lamar Reference) » passait pour l'original et
+        # recevait son LRC, sa durée, son BPM et sa tonalité SongBPM.
+        "reference",
+        "ref",
+        "snippet",
+        "alternate",
+        "alt",
+        "og",
+        "sessions",  # « AOL Sessions »
+        "orchestral",
+        # Une version PUBLIÉE puis retouchée (« FE!N (First Edition Version) » —
+        # UTOPIA modifié après sa sortie ; le premier pressage de BULLY) : mots
+        # composés, « first » seul ferait de « (First Time) » un descripteur.
+        "firstedition",
+        "firstpressing",
+        "colors",  # « Loup noir - A COLORS SHOW » : la session live d'un morceau
     }
 )
+
+#: Mots composés lus comme UN mot de vocabulaire (cf. `_tokens`).
+_MOTS_COMPOSES = (
+    (re.compile(r"\bfirst\s+edition\b"), "firstedition"),
+    (re.compile(r"\bfirst\s+pressing\b"), "firstpressing"),
+)
+
+#: Un groupe qui porte l'un de ces mots n'est PAS une version : « Return of the
+#: Moon Man (Original Score) » est une bande originale.
+_HORS_VERSION = frozenset({"score", "soundtrack"})
+
+#: « [V3] », « (V10) » : une prise numérotée (Kanye West en compte des centaines).
+_NUMERO_DE_VERSION = re.compile(r"^v\d{1,2}$")
 
 #: Un retravail par quelqu'un. Le mot se lit en FIN de descripteur, le remixeur
 #: étant ce qui le précède.
@@ -197,11 +227,17 @@ def _tokens(texte: str) -> list[str]:
     (« Version 2006 » → « version2006 »), ce qui cacherait le mot de vocabulaire.
     """
     texte = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^\w\s]", " ", texte).lower().split()
+    texte = re.sub(r"[^\w\s]", " ", texte).lower()
+    for motif, mot in _MOTS_COMPOSES:
+        texte = motif.sub(mot, texte)
+    return texte.split()
 
 
 def _porte_vocabulaire(texte: str) -> bool:
-    return any(t in _VOCABULAIRE for t in _tokens(texte))
+    tokens = _tokens(texte)
+    if _HORS_VERSION & set(tokens):
+        return False
+    return any(t in _VOCABULAIRE or _NUMERO_DE_VERSION.match(t) for t in tokens)
 
 
 def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
@@ -269,6 +305,9 @@ def est_edition_de_diffusion(descripteur: str) -> bool:
     fort), d'années et de compagnons : « Radio Edit », « Explicit Version »,
     « Album Version (Edited) », « 2011 Remaster »."""
     mots = [t for t in _tokens(descripteur) if not t.isdigit()]
+    # « Original Mix » : le mix NON remixé, le même enregistrement que le titre nu.
+    if mots and set(mots) == {"original", "mix"}:
+        return True
     if not mots or not any(t in DIFFUSION_FORTS for t in mots):
         return False
     return all(t in DIFFUSION_FORTS or t in _DIFFUSION_COMPAGNONS for t in mots)
@@ -338,7 +377,9 @@ def socle_normalise(title: str | None) -> str:
 #: donc les IDs et les streams d'un autre enregistrement. Unplugged est rangé
 #: avec l'acoustique (Spotify sert « Le cœur des filles - Unplugged »).
 _FAMILLES_RENDITION = {
-    "live": frozenset({"live", "session", "symphonic", "symphonique"}),
+    "live": frozenset(
+        {"live", "session", "sessions", "symphonic", "symphonique", "orchestral", "colors"}
+    ),
     "acoustique": frozenset({"acoustic", "acoustique", "unplugged", "stripped", "piano"}),
     "solo": frozenset({"solo"}),
     # Le beat seul et la voix seule sont deux enregistrements DIFFÉRENTS
@@ -347,13 +388,24 @@ _FAMILLES_RENDITION = {
     "instrumental": frozenset({"instrumental"}),
     "a_cappella": frozenset({"cappella", "acapella"}),
     "demo": frozenset({"demo"}),
+    # Chantée par un AUTRE pour l'artiste (« Kendrick Lamar Reference ») : autre
+    # voix, souvent autre texte — une famille à elle (décision utilisateur
+    # 2026-09-28 : elle n'hérite de rien).
+    "reference": frozenset({"reference", "ref"}),
+    "snippet": frozenset({"snippet"}),
+    # Une autre prise, nommée ou numérotée (« Alternate », « [V3] » — les
+    # numéros sont rattachés par `_mots_de_rendition`), ou une version
+    # ANTÉRIEURE : « OG », « (Original) » des pages de fuites (« Go2DaMoon
+    # (Original) », « Wolves (Original Version) »), « First Edition », « First
+    # Pressing » (décision utilisateur 2026-09-28 : comme les démos).
+    "alternate": frozenset(
+        {"alternate", "alt", "og", "vN", "original", "firstedition", "firstpressing"}
+    ),
     # « Version », « Edit », « Radio Edit », « Bonus Track », « Original » :
     # des éditions d'une même prise studio. Mesuré (2026-09-21) : mettre « demo »
     # ou « chopped » avec elles faisait de « Jesus Walks - Live Version » la
     # même prise que « Jesus Walks (Demo) ».
-    "edition": frozenset(
-        {"radio", "edit", "edited", "version", "bonus", "extended", "mixed", "original"}
-    ),
+    "edition": frozenset({"radio", "edit", "edited", "version", "bonus", "extended", "mixed"}),
     "remaster": frozenset({"remaster", "remastered"}),
     "vitesse": frozenset({"sped", "slowed"}),
     "chopped": frozenset({"chopped", "screwed", "crewed"}),
@@ -361,7 +413,13 @@ _FAMILLES_RENDITION = {
 
 
 def _mots_de_rendition(v: Variant) -> set[str]:
-    return {t for t in _tokens(v.descriptor or "") if t in RENDITION_WORDS}
+    mots = set()
+    for t in _tokens(v.descriptor or ""):
+        if t in RENDITION_WORDS:
+            mots.add(t)
+        elif _NUMERO_DE_VERSION.match(t):
+            mots.add("vN")
+    return mots
 
 
 def _familles_de_rendition(v: Variant) -> set[str]:

@@ -636,3 +636,28 @@ revue_signalements = Table(
     UniqueConstraint("artist_id", "detecteur", "cle"),
     sqlite_autoincrement=True,
 )
+
+
+# Panneau « À trancher », niveau FORMEL (e39, 2026-09-27) : le JOURNAL des
+# corrections faites sans l'utilisateur. Une ligne par correction, avec de quoi
+# la défaire (`annulation`, JSON : les observations retirées, la certification
+# ôtée…). `retablie_at` posé = l'utilisateur l'a défaite ; le cas est alors
+# marqué « normal » dans `revue_verdicts`, sans quoi la passe suivante le
+# recorrigerait.
+revue_corrections = Table(
+    "revue_corrections",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("detecteur", Text, nullable=False),
+    Column("cle", Text, nullable=False),
+    Column("track_id", Integer),
+    Column("morceau", Text),
+    Column("motif", Text),
+    Column("action", Text, nullable=False),
+    Column("compte_rendu", Text),
+    Column("annulation", Text),
+    Column("applied_at", TIMESTAMP),
+    Column("retablie_at", TIMESTAMP),
+    sqlite_autoincrement=True,
+)

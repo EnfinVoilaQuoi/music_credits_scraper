@@ -380,5 +380,16 @@ def appliquer(runtime: Runtime, artist: Artist) -> BilanCertifs:
             f"Certifs recalculées mais NON enregistrées ({len(oublies)}): {', '.join(oublies[:8])}"
         )
         bilan.erreurs.extend(oublies)
+    # Une certification d'un autre titre, datée avant la sortie, est retirée
+    # seule (preuve formelle, journalisée) ; la mémoire empêche le prochain
+    # rematch de la reposer.
+    from src.services import revue_auto
+
+    bilan.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
     bilan.rapport = f"{bilan.certifies} morceau(x) certifié(s) pour {artist.name}."
+    if bilan.corrections:
+        bilan.rapport += (
+            f"\n⚡ {len(bilan.corrections)} rattachement(s) d'un autre titre retiré(s) "
+            "— détail et « ↩ Rétablir » dans « À trancher »."
+        )
     return bilan

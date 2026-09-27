@@ -5,7 +5,9 @@ Deux magasins, deux notions :
   reproposé tant que ses preuves ne changent pas (la clé du cas porte leur
   empreinte) ;
 - les SIGNALEMENTS des runs (oracles réseau : Kworb, Deezer, Spotify), que
-  chaque run REMPLACE pour l'artiste traité — il connaît la vérité du moment.
+  chaque run REMPLACE pour l'artiste traité — il connaît la vérité du moment ;
+- le JOURNAL des corrections automatiques (e39) : ce que les détecteurs
+  FORMELS ont corrigé seuls, avec de quoi le défaire.
 
 Requiert `self.engine` (moteur SQLAlchemy Core), comme les autres repositories.
 """
@@ -15,9 +17,9 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, update
 
-from src.persistence.schema import revue_signalements, revue_verdicts
+from src.persistence.schema import revue_corrections, revue_signalements, revue_verdicts
 
 VERDICT_NORMAL = "normal"
 
@@ -133,6 +135,61 @@ class RevueRepository:
                         & (revue_signalements.c.detecteur == detecteur)
                         & (revue_signalements.c.cle == cle)
                     )
+                ).rowcount
+                > 0
+            )
+
+    # ── Journal des corrections automatiques (e39) ──────────────────────────
+
+    def journaliser_correction(
+        self,
+        artist_id: int,
+        cas,
+        action: str,
+        compte_rendu: str,
+        annulation: dict,
+    ) -> int:
+        """Consigne une correction faite SANS l'utilisateur. Rend son id."""
+        with self.engine.begin() as conn:
+            return conn.execute(
+                insert(revue_corrections).values(
+                    artist_id=artist_id,
+                    detecteur=cas.detecteur,
+                    cle=cas.cle,
+                    track_id=cas.track_id,
+                    morceau=cas.morceau,
+                    motif=cas.motif,
+                    action=action,
+                    compte_rendu=compte_rendu,
+                    annulation=json.dumps(annulation, ensure_ascii=False, default=str),
+                    applied_at=datetime.now(),
+                )
+            ).inserted_primary_key[0]
+
+    def corrections_revue(self, artist_id: int, *, retablies: bool = False) -> list[dict]:
+        """Le journal de l'artiste, le plus récent d'abord (sans les corrections
+        déjà défaites, sauf `retablies=True`)."""
+        requete = select(revue_corrections).where(revue_corrections.c.artist_id == artist_id)
+        if not retablies:
+            requete = requete.where(revue_corrections.c.retablie_at.is_(None))
+        with self.engine.connect() as conn:
+            sortie = []
+            for r in conn.execute(requete.order_by(revue_corrections.c.id.desc())).mappings():
+                d = dict(r)
+                try:
+                    d["annulation"] = json.loads(d["annulation"] or "{}")
+                except json.JSONDecodeError:
+                    d["annulation"] = {}
+                sortie.append(d)
+            return sortie
+
+    def marquer_correction_retablie(self, correction_id: int) -> bool:
+        with self.engine.begin() as conn:
+            return (
+                conn.execute(
+                    update(revue_corrections)
+                    .where(revue_corrections.c.id == correction_id)
+                    .values(retablie_at=datetime.now())
                 ).rowcount
                 > 0
             )

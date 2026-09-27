@@ -476,7 +476,15 @@ def run(
                     "instrumental": n_instru,
                 }
 
-        return _sauver(runtime, artist, tracks, bilan)
+        bilan = _sauver(runtime, artist, tracks, bilan)
+        if options.sync or options.paroles:
+            # Un LRC fraîchement posé peut être celui d'une autre fiche.
+            from src.services import revue_auto
+
+            bilan.corrections = revue_auto.corriger_apres_run(
+                runtime.data_manager, artist
+            ).appliquees
+        return bilan
     finally:
         if scraper is not None:
             try:
@@ -549,6 +557,11 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
         msg += f"  - Croisés (conf. 2): {s['cross']}\n"
         if s["review"]:
             msg += f"  - À vérifier (conf. 1): {s['review']}\n"
+    if bilan.corrections:
+        msg += (
+            f"\n⚡ {len(bilan.corrections)} correction(s) automatique(s) (LRC d'une autre fiche) "
+            "— détail et « ↩ Rétablir » dans « À trancher »"
+        )
     if desactives:
         msg += f"\n⚠️ {desactives} morceaux désactivés ignorés"
     if not bilan.complete:

@@ -16,6 +16,16 @@ paraîtraient étrangères (*Wolves (BOOTS Reference)*). Seuils calibrés sur la
 base : témoin LRCLIB à 95 % ≥ 0,8 ; sous 0,4 tous les exemples lus sont faux.
 Le script de mesure est `scripts/oracle_lrc.py`.
 
+**BIGRAMMES (2026-09-27)** : les mots isolés confondent deux morceaux d'un même
+artiste dès que la langue est riche en mots-outils — en anglais, « you », « the »,
+« know », « don't » font à eux seuls 40 à 60 % de recouvrement. D'où la tranche
+0,4-0,6, où vivaient 230 cas « à trancher » (142 chez Kanye West). Les paires de
+mots CONSÉCUTIFS ne se partagent pas par hasard : mesuré sur 25 artistes, LRC
+justes (mots ≥ 0,8) à 98 % ≥ 0,6 en bigrammes, LRC faux (paroles d'un autre
+morceau du même artiste) à 99 % < 0,1. Un LRC est donc démenti sous 0,4 de mots
+OU sous 0,1 de bigrammes (sur la base : 109 LRC de la tranche grise et 3 LRC
+« justes » — *Sell Your Soul* portait *Can't Tell Me Nothing* — tombent ainsi).
+
 Jugeable seulement si chaque texte a au moins `MOTS_MIN` mots distincts : en
 dessous (instrumental, snippet, paroles absentes), on ne conclut RIEN — un LRC
 non jugeable n'est pas un LRC faux.
@@ -30,6 +40,11 @@ import unicodedata
 SEUIL_FAUX = 0.4
 #: À partir de ce recouvrement, il est juste ; entre les deux, à trancher.
 SEUIL_JUSTE = 0.6
+#: Sous ce recouvrement de BIGRAMMES, le LRC est celui d'un autre morceau.
+SEUIL_FAUX_BIGRAMMES = 0.1
+#: Recouvrement de bigrammes à partir duquel un LRC colle aux paroles d'une
+#: fiche (témoins justes : 98 % au-dessus).
+SEUIL_JUSTE_BIGRAMMES = 0.6
 #: Mots distincts exigés de CHAQUE côté pour conclure.
 MOTS_MIN = 8
 
@@ -57,6 +72,25 @@ def recouvrement(paroles: str | None, lrc: str | None) -> float | None:
     return round(max(commun / len(mg), commun / len(ml)), 2)
 
 
+def bigrammes(texte: str | None) -> set[tuple[str, str]]:
+    """Les paires de mots CONSÉCUTIFS d'un texte (en-têtes et horodatages retirés,
+    tous les mots gardés : « I'm on » est une paire qui compte)."""
+    t = unicodedata.normalize("NFKD", texte or "").encode("ascii", "ignore").decode().lower()
+    suite = _MOT.findall(_ENTETE.sub(" ", t))
+    return set(zip(suite, suite[1:], strict=False))
+
+
+def recouvrement_bigrammes(paroles: str | None, lrc: str | None) -> float | None:
+    """Part de bigrammes communs (max des deux sens) ; None si non jugeable."""
+    if len(mots(paroles)) < MOTS_MIN or len(mots(lrc)) < MOTS_MIN:
+        return None
+    bg, bl = bigrammes(paroles), bigrammes(lrc)
+    if not bg or not bl:
+        return None
+    commun = len(bg & bl)
+    return round(max(commun / len(bg), commun / len(bl)), 2)
+
+
 def paroles_de_reference(texte: str | None, source: str | None) -> str | None:
     """Les paroles qui peuvent servir d'oracle : GENIUS seulement (ou héritées
     d'une fiche Genius, `heritage:<id>`). Un texte venu de YTM (« Source:
@@ -69,6 +103,12 @@ def paroles_de_reference(texte: str | None, source: str | None) -> str | None:
 def lrc_dementi(paroles: str | None, lrc: str | None) -> bool:
     """Les paroles Genius DÉMENTENT ce LRC : c'est celui d'un autre morceau.
 
-    False quand on ne peut pas juger — seul un démenti écarte une source."""
+    Sous 0,4 de mots communs OU sous 0,1 de bigrammes communs. False quand on ne
+    peut pas juger — seul un démenti écarte une source."""
     score = recouvrement(paroles, lrc)
-    return score is not None and score < SEUIL_FAUX
+    if score is None:
+        return False
+    if score < SEUIL_FAUX:
+        return True
+    paires = recouvrement_bigrammes(paroles, lrc)
+    return paires is not None and paires < SEUIL_FAUX_BIGRAMMES

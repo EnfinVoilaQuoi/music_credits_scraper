@@ -186,3 +186,29 @@ def test_rien_a_heriter_quand_la_version_a_ses_propres_auteurs():
     b = heriter(v, _original())
     assert b.vide
     assert [(c.name, c.source) for c in v.credits] == [("Booba", "youtube_topic")]
+
+
+def test_retirer_heritage_garde_l_ecriture_si_demande(data_manager):
+    """Réparation du 2026-09-28 : une démo avait hérité paroles et production."""
+    a = Artist(name="Kanye West")
+    a.id = data_manager.save_artist(a)
+    d = Track(title="Monster [Demo]", artist=a)
+    d.credits = [
+        Credit("Kanye West", CreditRole.WRITER, source="heritage"),
+        Credit("Mike Dean", CreditRole.PRODUCER, source="heritage"),
+        Credit("Hype Williams", CreditRole.VIDEO_DIRECTOR, source="genius"),
+    ]
+    d.lyrics.text, d.lyrics.present, d.lyrics.source = "Paroles de Monster", True, "heritage:1"
+    tid = data_manager.save_track(d)
+
+    assert data_manager.retirer_heritage(tid, garder_ecriture=True) == (1, True)
+    (relue,) = data_manager.get_artist_tracks(a.id)
+    assert {(c.name, c.source) for c in relue.credits} == {
+        ("Kanye West", "heritage"),
+        ("Hype Williams", "genius"),
+    }
+    assert relue.lyrics.text is None and not relue.lyrics.present
+    # Une référence : rien de l'héritage ne reste, le crédit direct si.
+    assert data_manager.retirer_heritage(tid, garder_ecriture=False) == (1, False)
+    (relue,) = data_manager.get_artist_tracks(a.id)
+    assert [c.name for c in relue.credits] == ["Hype Williams"]

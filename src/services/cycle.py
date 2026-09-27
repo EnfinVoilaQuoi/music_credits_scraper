@@ -153,6 +153,13 @@ def run(runtime: Runtime, nom: str, options: OptionsCycle, hooks: Hooks) -> Bila
         bilan.etapes[etape] = b
         if etape != "certifs":
             _recharger(runtime, artist)
+    if bilan.etapes and not hooks.should_stop():
+        # Dernière passe, sur la discographie rechargée : les corrections à
+        # preuve formelle que les étapes ont rendues visibles.
+        from src.services import revue_auto
+
+        _recharger(runtime, artist)
+        bilan.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
     if any(not b.complete for b in bilan.etapes.values()) and bilan.complete:
         rates = [e for e, b in bilan.etapes.items() if not b.complete]
         bilan.interrompu(f"étape(s) incomplète(s) : {', '.join(rates)}")
@@ -166,6 +173,10 @@ def resume(bilan: BilanCycle, options: OptionsCycle) -> str:
         lignes.append(f"{etape:<8} {etat}")
     for etape in bilan.non_lancees:
         lignes.append(f"{etape:<8} ⏹️ non lancée")
+    if bilan.corrections:
+        lignes.append(
+            f"⚡ {len(bilan.corrections)} correction(s) automatique(s) — voir « À trancher »"
+        )
     lignes.append("")
     lignes.append("COMPLET" if bilan.complete else f"INCOMPLET — {bilan.motif}")
     return "\n".join(lignes)

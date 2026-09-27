@@ -108,6 +108,14 @@
       "retirer_id_spotify": [
         "4GiwmGe9Bbk23RXmJG7Fud"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13296119
+      },
+      "retirer_lrc": [
+        "4b8e76d213424127"
+      ]
     }
   ],
   "Booba": [
@@ -191,6 +199,54 @@
       },
       "retirer_id_spotify": [
         "2hYlj68sSPc8h8BfgXua7x"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 722500
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "TEMPS MORT",
+          "certification": "Or",
+          "certification_date": "2003-01-21"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13581571
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "NERO NEMESIS",
+          "certification": "Triple Platine",
+          "certification_date": "2022-03-10"
+        },
+        {
+          "body": "SNEP",
+          "title": "NERO NEMESIS",
+          "certification": "Platine",
+          "certification_date": "2016-11-30"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12460715
+      },
+      "retirer_lrc": [
+        "c491b49ccdf5972b"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2063666
+      },
+      "retirer_lrc": [
+        "6a7569d5f768864c"
       ]
     }
   ],
@@ -292,6 +348,22 @@
       "version_de": {
         "genius_id": 3031918
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 6669077
+      },
+      "retirer_lrc": [
+        "73859750ac26e1cf"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11387194
+      },
+      "retirer_lrc": [
+        "73859750ac26e1cf"
+      ]
     }
   ],
   "Freeze Corleone": [
@@ -322,6 +394,14 @@
       "version_de": {
         "genius_id": 5805280
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 9762804
+      },
+      "retirer_lrc": [
+        "930aad58de51e827"
+      ]
     }
   ],
   "Josman": [
@@ -494,6 +574,960 @@
       "version_de": {
         "genius_id": 2327379
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 13302052
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "FATHER STRETCH MY HANDS PT. 1",
+          "certification": "Or",
+          "certification_date": "2024-03-07"
+        },
+        {
+          "body": "RIAA",
+          "title": "FATHER STRETCH MY HANDS PT. 1",
+          "certification": "6x Platinum",
+          "certification_date": "2018-03-07"
+        },
+        {
+          "body": "RIAA",
+          "title": "FATHER STRETCH MY HANDS PT. 1",
+          "certification": "6x Platinum",
+          "certification_date": "2024-02-13"
+        },
+        {
+          "body": "BPI",
+          "title": "FATHER STRETCH MY HANDS PT 1",
+          "certification": "Platinum",
+          "certification_date": "2023-03-10"
+        },
+        {
+          "body": "BPI",
+          "title": "FATHER STRETCH MY HANDS PT 1",
+          "certification": "Silver",
+          "certification_date": "2017-10-20"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13302076
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "JESUS IS KING",
+          "certification": "Gold",
+          "certification_date": "2020-06-16"
+        },
+        {
+          "body": "BPI",
+          "title": "JESUS IS KING",
+          "certification": "Silver",
+          "certification_date": "2021-03-26"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8895668
+      },
+      "retirer_lrc": [
+        "ef1ad50d7a0a3660"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 1376622
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "GOLD DIGGER",
+          "certification": "Platinum",
+          "certification_date": "2006-02-16"
+        },
+        {
+          "body": "RIAA",
+          "title": "GOLD DIGGER",
+          "certification": "Gold",
+          "certification_date": "2006-02-16"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5712029
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "CAN'T TELL ME NOTHING",
+          "certification": "4x Platinum",
+          "certification_date": "2018-04-19"
+        },
+        {
+          "body": "BPI",
+          "title": "CAN'T TELL ME NOTHING",
+          "certification": "Silver",
+          "certification_date": "2018-08-31"
+        }
+      ],
+      "retirer_lrc": [
+        "7e4ac42c2973bf6d"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5437
+      },
+      "retirer_lrc": [
+        "0fad439676efcc00"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2327084
+      },
+      "retirer_lrc": [
+        "48e639c281284d89"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8808777
+      },
+      "retirer_lrc": [
+        "324eff6bdadcb9fb"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3550
+      },
+      "retirer_lrc": [
+        "d977576ebeaf9b0e"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3984366
+      },
+      "retirer_lrc": [
+        "7131a8a05a69ffc6"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5780848
+      },
+      "retirer_lrc": [
+        "dce73041bf4791b0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7201254
+      },
+      "retirer_lrc": [
+        "6308a2ce9d44b9c0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5719774
+      },
+      "retirer_lrc": [
+        "460eff0908dd6934",
+        "b85ad9aa4269f510"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 141213
+      },
+      "retirer_lrc": [
+        "7131a8a05a69ffc6"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4950645
+      },
+      "retirer_lrc": [
+        "1dd103b849e8481c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3527047
+      },
+      "retirer_lrc": [
+        "87db969f1fca9110"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10041744
+      },
+      "retirer_lrc": [
+        "4fe718832ba58d90"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8067659
+      },
+      "retirer_lrc": [
+        "42310a8c20038205"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5050441
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "DIAMONDS FROM SIERRA LEONE",
+          "certification": "Gold",
+          "certification_date": "2005-12-12"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 147182
+      },
+      "retirer_lrc": [
+        "a2881bb9d9831c9b"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7604801
+      },
+      "retirer_lrc": [
+        "dce73041bf4791b0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9721247
+      },
+      "retirer_lrc": [
+        "b85ad9aa4269f510"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12808856
+      },
+      "retirer_lrc": [
+        "5059f22a0e2f92a7"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2446124
+      },
+      "retirer_lrc": [
+        "eb224ecb9d1ff651"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13973230
+      },
+      "retirer_lrc": [
+        "634569b0c942d95c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7050427
+      },
+      "retirer_lrc": [
+        "e68efef7de730c67"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8756435
+      },
+      "retirer_lrc": [
+        "dce73041bf4791b0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11178188
+      },
+      "retirer_lrc": [
+        "2437eec4a44d34a3"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12209575
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "DIAMONDS FROM SIERRA LEONE",
+          "certification": "Gold",
+          "certification_date": "2005-12-12"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13338125
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "JESUS WALKS",
+          "certification": "Gold",
+          "certification_date": "2005-03-29"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9893131
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "JESUS IS KING",
+          "certification": "Gold",
+          "certification_date": "2020-06-16"
+        },
+        {
+          "body": "BPI",
+          "title": "JESUS IS KING",
+          "certification": "Silver",
+          "certification_date": "2021-03-26"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5094087
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "THE LIFE OF PABLO",
+          "certification": "Or",
+          "certification_date": "2020-02-28"
+        },
+        {
+          "body": "RIAA",
+          "title": "THE LIFE OF PABLO",
+          "certification": "3x Platinum",
+          "certification_date": "2017-03-27"
+        },
+        {
+          "body": "RIAA",
+          "title": "THE LIFE OF PABLO",
+          "certification": "3x Platinum",
+          "certification_date": "2022-10-26"
+        },
+        {
+          "body": "RIAA",
+          "title": "THE LIFE OF PABLO",
+          "certification": "Platinum",
+          "certification_date": "2017-03-27"
+        },
+        {
+          "body": "RIAA",
+          "title": "THE LIFE OF PABLO",
+          "certification": "Gold",
+          "certification_date": "2017-03-27"
+        },
+        {
+          "body": "RIAA",
+          "title": "SAINT PABLO",
+          "certification": "Gold",
+          "certification_date": "2020-09-23"
+        },
+        {
+          "body": "BPI",
+          "title": "THE LIFE OF PABLO",
+          "certification": "Platinum",
+          "certification_date": "2022-12-09"
+        },
+        {
+          "body": "BPI",
+          "title": "THE LIFE OF PABLO",
+          "certification": "Gold",
+          "certification_date": "2017-09-29"
+        },
+        {
+          "body": "BPI",
+          "title": "THE LIFE OF PABLO",
+          "certification": "Silver",
+          "certification_date": "2017-01-20"
+        },
+        {
+          "body": "BPI",
+          "title": "SAINT PABLO",
+          "certification": "Silver",
+          "certification_date": "2024-04-26"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6608664
+      },
+      "retirer_lrc": [
+        "cd9bb1640a6fda93"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6376768
+      },
+      "retirer_lrc": [
+        "84f622d9341291f4"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9517183
+      },
+      "retirer_lrc": [
+        "830c6cfc47e97012"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12132635
+      },
+      "retirer_lrc": [
+        "4e9f3b71cbbd1c58"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7597320
+      },
+      "retirer_lrc": [
+        "18223fc517e872a2"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 93657
+      },
+      "retirer_lrc": [
+        "bb5c9cf049de40c1"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7682587
+      },
+      "retirer_lrc": [
+        "5098b2a7f39b8676"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9944928
+      },
+      "retirer_lrc": [
+        "04b2091744bc4aa9"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6954565
+      },
+      "retirer_lrc": [
+        "49789ed748e8864e"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3185575
+      },
+      "retirer_lrc": [
+        "f05b627f87ff9c54"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6938926
+      },
+      "retirer_lrc": [
+        "a95f77e6d8976aa9"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11433223
+      },
+      "retirer_lrc": [
+        "87db969f1fca9110"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8453523
+      },
+      "retirer_lrc": [
+        "b9b3c92e3d185733"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10649483
+      },
+      "retirer_lrc": [
+        "0d0c640821eb5e4c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8060713
+      },
+      "retirer_lrc": [
+        "6308a2ce9d44b9c0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4904237
+      },
+      "retirer_lrc": [
+        "a0a6ae67d7f28b1b"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7075395
+      },
+      "retirer_lrc": [
+        "0d608bc138e6f22f"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6096737
+      },
+      "retirer_lrc": [
+        "0e870578b9806eea"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10031781
+      },
+      "retirer_lrc": [
+        "6fc5ff41909bce2c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9681271
+      },
+      "retirer_lrc": [
+        "469d8b9c326e7f95"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7268011
+      },
+      "retirer_lrc": [
+        "469d8b9c326e7f95"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8851042
+      },
+      "retirer_lrc": [
+        "c950459660fc36d7"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7213142
+      },
+      "retirer_lrc": [
+        "d49cbc2a8ace4554"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9624687
+      },
+      "retirer_lrc": [
+        "ef1ad50d7a0a3660"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6938931
+      },
+      "retirer_lrc": [
+        "2fc6a87ae10943b0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8687348
+      },
+      "retirer_lrc": [
+        "519e342799e1c247"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8691883
+      },
+      "retirer_lrc": [
+        "995f78e0ff536c00"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11818700
+      },
+      "retirer_lrc": [
+        "45a9568654dc2e0f"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8341256
+      },
+      "retirer_lrc": [
+        "1569d6227c100ee0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10657884
+      },
+      "retirer_lrc": [
+        "c44458e2e9744af6"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4628754
+      },
+      "retirer_lrc": [
+        "559e764f7ea96c67"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11694037
+      },
+      "retirer_lrc": [
+        "beb0a8682ca79959"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8917039
+      },
+      "retirer_lrc": [
+        "01957d00390114da"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8774535
+      },
+      "retirer_lrc": [
+        "1e69cb6970625e0f"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 699613
+      },
+      "retirer_lrc": [
+        "342055792094caf8"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4939182
+      },
+      "retirer_lrc": [
+        "84f622d9341291f4"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6962062
+      },
+      "retirer_lrc": [
+        "84f622d9341291f4"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7691194
+      },
+      "retirer_lrc": [
+        "4fe718832ba58d90"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8267778
+      },
+      "retirer_lrc": [
+        "ab116ec51d8dc5a8"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8720339
+      },
+      "retirer_lrc": [
+        "6b447dc0b8ae7af4"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5375876
+      },
+      "retirer_lrc": [
+        "a15d00ec25be3412"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13915890
+      },
+      "retirer_lrc": [
+        "cd28d384e47e5093"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5030547
+      },
+      "retirer_lrc": [
+        "51e330b9fad56bca"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6019522
+      },
+      "retirer_lrc": [
+        "51e330b9fad56bca"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6959144
+      },
+      "retirer_lrc": [
+        "b85ad9aa4269f510"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 745685
+      },
+      "retirer_lrc": [
+        "4e9f3b71cbbd1c58"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2425176
+      },
+      "retirer_lrc": [
+        "c0d9125ef7ddaa14"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12959161
+      },
+      "retirer_lrc": [
+        "6fc5ff41909bce2c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12959228
+      },
+      "retirer_lrc": [
+        "6fc5ff41909bce2c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6953122
+      },
+      "retirer_lrc": [
+        "4bf81a1851ba5ce6"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 63760
+      },
+      "retirer_lrc": [
+        "8700cb12e1e5b942"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 133594
+      },
+      "retirer_lrc": [
+        "c2c74f95e5643e28"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9839137
+      },
+      "retirer_lrc": [
+        "4ec738a85b169a03"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7328400
+      },
+      "retirer_lrc": [
+        "20c000a29d74a34e"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8603080
+      },
+      "retirer_lrc": [
+        "42310a8c20038205"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5372991
+      },
+      "retirer_lrc": [
+        "817476d1ae87220d"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9532373
+      },
+      "retirer_lrc": [
+        "8afc1a75dff7a346"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7163006
+      },
+      "retirer_lrc": [
+        "a0a6ae67d7f28b1b"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7462455
+      },
+      "retirer_lrc": [
+        "a0a6ae67d7f28b1b"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7084730
+      },
+      "retirer_lrc": [
+        "0d608bc138e6f22f"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 148436
+      },
+      "retirer_lrc": [
+        "d7708ab19c903914"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9183382
+      },
+      "retirer_lrc": [
+        "5c2d6969e4664b97"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4779269
+      },
+      "retirer_lrc": [
+        "559e764f7ea96c67"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3973746
+      },
+      "retirer_lrc": [
+        "17cf97b277641fe0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12124944
+      },
+      "retirer_id_spotify": [
+        "5e5MKPtJuFb8NaeSEyV5gD"
+      ],
+      "retirer_lrc": [
+        "342055792094caf8"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9793838
+      },
+      "retirer_id_spotify": [
+        "432hUIl3ISDeytYW5XBQ5h"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6309791
+      },
+      "retirer_lrc": [
+        "8afc1a75dff7a346"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9284967
+      },
+      "retirer_lrc": [
+        "1a430df7803b8831"
+      ]
     }
   ],
   "Kid Cudi": [
@@ -537,6 +1571,51 @@
         "36JWGQRW85mJYLXvnryEzL",
         "2K4MFPEhRKdEB6k9jGsaju"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6922872
+      },
+      "retirer_certifs": [
+        {
+          "body": "RIAA",
+          "title": "PURSUIT OF HAPPINESS (NIGHTMARE)",
+          "certification": "Gold",
+          "certification_date": "2011-03-30"
+        },
+        {
+          "body": "RIAA",
+          "title": "PURSUIT OF HAPPINESS (NIGHTMARE)",
+          "certification": "Platinum",
+          "certification_date": "2011-03-30"
+        },
+        {
+          "body": "RIAA",
+          "title": "PURSUIT OF HAPPINESS (NIGHTMARE)",
+          "certification": "2x Platinum",
+          "certification_date": "2015-06-15"
+        },
+        {
+          "body": "RIAA",
+          "title": "PURSUIT OF HAPPINESS (NIGHTMARE)",
+          "certification": "3x Platinum",
+          "certification_date": "2015-06-15"
+        },
+        {
+          "body": "RIAA",
+          "title": "PURSUIT OF HAPPINESS (NIGHTMARE)",
+          "certification": "4x Platinum",
+          "certification_date": "2016-09-16"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12124944
+      },
+      "retirer_id_spotify": [
+        "5e5MKPtJuFb8NaeSEyV5gD"
+      ]
     }
   ],
   "SDM": [
@@ -567,6 +1646,15 @@
       },
       "retirer_id_spotify": [
         "4eXkEQ5Kw1WBIKVgsoKZCQ"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 337209
+      },
+      "retirer_lrc": [
+        "3ea9fbcdc13f2adb",
+        "521678a7d9210cbd"
       ]
     }
   ],
@@ -650,6 +1738,338 @@
         "genius_id": 11314281
       },
       "supprimer": true
+    },
+    {
+      "fiche": {
+        "genius_id": 13302052
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "FATHER STRETCH MY HANDS PT. 1",
+          "certification": "Or",
+          "certification_date": "2024-03-07"
+        },
+        {
+          "body": "RIAA",
+          "title": "FATHER STRETCH MY HANDS PT. 1",
+          "certification": "6x Platinum",
+          "certification_date": "2018-03-07"
+        },
+        {
+          "body": "RIAA",
+          "title": "FATHER STRETCH MY HANDS PT. 1",
+          "certification": "6x Platinum",
+          "certification_date": "2024-02-13"
+        },
+        {
+          "body": "BPI",
+          "title": "FATHER STRETCH MY HANDS PT 1",
+          "certification": "Platinum",
+          "certification_date": "2023-03-10"
+        },
+        {
+          "body": "BPI",
+          "title": "FATHER STRETCH MY HANDS PT 1",
+          "certification": "Silver",
+          "certification_date": "2017-10-20"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3105825
+      },
+      "retirer_lrc": [
+        "a6a717e24a47687c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12125032
+      },
+      "retirer_certifs": [
+        {
+          "body": "BPI",
+          "title": "SICKO MODE",
+          "certification": "Platinum",
+          "certification_date": "2019-03-08"
+        },
+        {
+          "body": "BPI",
+          "title": "SICKO MODE",
+          "certification": "Gold",
+          "certification_date": "2018-12-21"
+        }
+      ],
+      "retirer_lrc": [
+        "a6a717e24a47687c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5016033
+      },
+      "retirer_lrc": [
+        "ff86dc65d584fa41"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3023134
+      },
+      "retirer_lrc": [
+        "8b378603d2920904"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5186910
+      },
+      "retirer_lrc": [
+        "cfba32d858039017"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8303251
+      },
+      "retirer_lrc": [
+        "4bb5d10a3560b657"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10877434
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "GOOSEBUMPS",
+          "certification": "Diamant",
+          "certification_date": "2021-05-27"
+        },
+        {
+          "body": "RIAA",
+          "title": "GOOSEBUMPS",
+          "certification": "3x Platinum",
+          "certification_date": "2017-10-03"
+        },
+        {
+          "body": "RIAA",
+          "title": "GOOSEBUMPS",
+          "certification": "2x Platinum",
+          "certification_date": "2017-06-20"
+        },
+        {
+          "body": "RIAA",
+          "title": "GOOSEBUMPS",
+          "certification": "Platinum",
+          "certification_date": "2017-03-22"
+        },
+        {
+          "body": "RIAA",
+          "title": "GOOSEBUMPS",
+          "certification": "Gold",
+          "certification_date": "2017-01-11"
+        },
+        {
+          "body": "BPI",
+          "title": "GOOSEBUMPS",
+          "certification": "Platinum",
+          "certification_date": "2019-11-29"
+        },
+        {
+          "body": "BPI",
+          "title": "GOOSEBUMPS",
+          "certification": "Gold",
+          "certification_date": "2018-10-19"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12712750
+      },
+      "retirer_lrc": [
+        "cfba32d858039017"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6970583
+      },
+      "retirer_lrc": [
+        "96ce286d0a10971b"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8568157
+      },
+      "retirer_lrc": [
+        "8b378603d2920904"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9720415
+      },
+      "retirer_lrc": [
+        "a752d8d5ea568146"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10327110
+      },
+      "retirer_lrc": [
+        "2808269e2fcd1787"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4628579
+      },
+      "retirer_lrc": [
+        "2808269e2fcd1787"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11131419
+      },
+      "retirer_lrc": [
+        "a6a717e24a47687c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11706791
+      },
+      "retirer_lrc": [
+        "71e07624bb6cd085"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4216719
+      },
+      "retirer_lrc": [
+        "ec7ff73e12be33e7"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 13850270
+      },
+      "retirer_lrc": [
+        "9975a088723a95db"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12712753
+      },
+      "retirer_lrc": [
+        "a6a717e24a47687c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4611863
+      },
+      "retirer_lrc": [
+        "2808269e2fcd1787"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6158215
+      },
+      "retirer_lrc": [
+        "ebfd0ef98c7e2cfa"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10632343
+      },
+      "retirer_lrc": [
+        "a6a717e24a47687c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12712746
+      },
+      "retirer_lrc": [
+        "cbea22008d713e28"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4804726
+      },
+      "retirer_lrc": [
+        "354e894b62ce9986"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 12708698
+      },
+      "retirer_lrc": [
+        "1528192ea35ea399"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4913921
+      },
+      "retirer_lrc": [
+        "620091926fc0a40a"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4929845
+      },
+      "retirer_lrc": [
+        "56fd467430f8f1a8"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 10822234
+      },
+      "retirer_lrc": [
+        "c2102a43b0e5847e"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3784940
+      },
+      "retirer_lrc": [
+        "0ce66be11ccd727f"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5380807
+      },
+      "retirer_lrc": [
+        "535fc40f4e30d5c9"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11598146
+      },
+      "retirer_lrc": [
+        "5e416d51fcdda7e3"
+      ]
     }
   ],
   "MC Solaar": [
@@ -730,6 +2150,25 @@
       },
       "retirer_id_spotify": [
         "65V9vKVtEOQo3uDlIEbH1J"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 289884
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "SOLAAR PLEURE",
+          "certification": "Or",
+          "certification_date": "2001-07-03"
+        },
+        {
+          "body": "BRMA",
+          "title": "Solaar pleure",
+          "certification": "Or",
+          "certification_date": "2001-03-30"
+        }
       ]
     }
   ],
@@ -831,6 +2270,14 @@
       "fusionner_dans": {
         "genius_id": 3600553
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 4007331
+      },
+      "retirer_lrc": [
+        "a9f0063ba3813ab2"
+      ]
     }
   ],
   "SCH": [
@@ -850,6 +2297,32 @@
       "fusionner_dans": {
         "genius_id": 5363682
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 11054000
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "INTERLUDE",
+          "certification": "Platine",
+          "certification_date": "2024-08-15"
+        }
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 11053998
+      },
+      "retirer_certifs": [
+        {
+          "body": "SNEP",
+          "title": "INTERLUDE",
+          "certification": "Platine",
+          "certification_date": "2024-08-15"
+        }
+      ]
     }
   ],
   "Sadek": [

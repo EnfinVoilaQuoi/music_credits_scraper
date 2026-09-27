@@ -150,6 +150,29 @@ def _ajouter_a_la_fiche(track, cle: str, valeur, meme=None) -> bool:
     return True
 
 
+def _retirer_de_la_fiche(track, cle: str, valeur, meme=None) -> bool:
+    """Pendant de `_ajouter_a_la_fiche` : oublie `valeur` de la liste `cle` (une
+    correction automatique qu'on RÉTABLIT). Rend False si elle n'y était pas."""
+    artiste = track.artist.name if track.artist else None
+    if not artiste:
+        return False
+    meme = meme or (lambda a, b: a == b)
+    try:
+        donnees = json.loads(FICHIER.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    ligne = next(
+        (e for e in donnees.get(artiste, []) if e.get("fiche") == designation_de(track)), None
+    )
+    if ligne is None or not any(meme(x, valeur) for x in ligne.get(cle) or []):
+        return False
+    ligne[cle] = [x for x in ligne[cle] if not meme(x, valeur)]
+    if not ligne[cle]:
+        del ligne[cle]
+    FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    return True
+
+
 def memoriser_id_refuse(track, spotify_id: str) -> None:
     """Consigne un ID Spotify retiré À LA MAIN (panneau « À trancher ») : relu par
     le gate d'identité (`ids_refuses`), sans quoi Kworb ou le scraper le
@@ -186,6 +209,15 @@ def memoriser_certif_refusee(track, entree: dict) -> None:
     )
 
 
+def oublier_certif_refusee(track, entree: dict) -> bool:
+    return _retirer_de_la_fiche(
+        track,
+        "retirer_certifs",
+        entree,
+        meme=lambda a, b: cle_certif(a) == cle_certif(b),
+    )
+
+
 def videos_refusees(track) -> set[str]:
     """Vidéos rejetées À LA MAIN (✖️ de la fiche ou du panneau) : ni Genius, ni la
     recherche, ni le canal YTM ne les rattachent plus à cette fiche (2026-09-27 —
@@ -214,3 +246,7 @@ def lrc_refuses(track) -> set[str]:
 
 def memoriser_lrc_refuse(track, lrc: str) -> None:
     _ajouter_a_la_fiche(track, "retirer_lrc", empreinte_lrc(lrc))
+
+
+def oublier_lrc_refuse(track, lrc: str) -> bool:
+    return _retirer_de_la_fiche(track, "retirer_lrc", empreinte_lrc(lrc))

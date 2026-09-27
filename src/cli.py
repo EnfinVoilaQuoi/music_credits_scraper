@@ -177,6 +177,14 @@ def build_parser() -> argparse.ArgumentParser:
     upd = ce_sub.add_parser("update", help="MàJ GLOBALE des magasins (longue)")
     upd.add_argument("sources", nargs="*", help="parmi SNEP BRMA RIAA BPI (défaut : les 4)")
 
+    rv = sub.add_parser("revue", help="panneau « À trancher » : compte des cas par détecteur")
+    _artiste_args(rv)
+    rv.add_argument(
+        "--corriger",
+        action="store_true",
+        help="applique les corrections à preuve FORMELLE (journalisées, rétablissables)",
+    )
+
     cy = sub.add_parser("cycle", help="l'enchaînement complet")
     _artiste_args(cy)
     _manquants_arg(cy)
@@ -371,6 +379,9 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
     if a.commande == "deezer":
         return _executer_deezer(a, runtime, hooks)
 
+    if a.commande == "revue":
+        return _executer_revue(a, runtime)
+
     if a.commande == "cycle":
         options = options_cycle(a)
         bilan = cycle.run(runtime, a.nom, options, hooks)
@@ -387,6 +398,28 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
     b = cycle.executer_etape(runtime, art, etape, options, hooks)
     _imprimer_bilan(etape, cycle.resume_etape(etape, b, options, art))
     return code_de(b)
+
+
+def _executer_revue(a: argparse.Namespace, runtime: Runtime) -> int:
+    """Le compte du panneau « À trancher » (zéro réseau) ; `--corriger` applique
+    les corrections à preuve formelle, comme en fin de run."""
+    from src.services import revue, revue_auto
+
+    art = _charger(runtime, a, creer=False)
+    if a.corriger:
+        bilan = revue_auto.corriger(runtime.data_manager, art)
+        texte = "\n".join(bilan.appliquees + [f"❌ {e}" for e in bilan.echecs])
+        _imprimer_bilan("À trancher — corrections automatiques", texte or "rien à corriger")
+    r = revue.analyser(runtime.data_manager, art)
+    libelles = {d.code: f"{d.icone} {d.libelle}" for d in revue.tous_les_detecteurs()}
+    lignes = [
+        f"{n:5}  {libelles.get(code, code)}"
+        + ("  (formel : corrigé en fin de run)" if code in revue.CODES_FORMELS else "")
+        for code, n in sorted(revue.par_detecteur(r.actifs).items(), key=lambda x: -x[1])
+    ]
+    lignes.append(f"\n{len(r.actifs)} cas à trancher, {len(r.masques)} marqué(s) normal(aux)")
+    _imprimer_bilan(f"À trancher — {art.name}", "\n".join(lignes))
+    return COMPLET
 
 
 def _executer_deezer(a: argparse.Namespace, runtime: Runtime, hooks) -> int:

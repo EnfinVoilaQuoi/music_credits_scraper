@@ -13,6 +13,8 @@ Règles :
   UNE fois à l'ouverture, sans réseau ; le panneau n'écrit rien ;
 - il SIGNALE, il ne corrige rien — décision utilisateur (2026-09-27) : une
   donnée n'est retirée que sur preuve, et c'est l'utilisateur qui tranche ;
+  SAUF les détecteurs FORMELS (`formel=True`, 2026-09-27) : leur preuve suffit,
+  `services/revue_auto` les corrige seul, avec trace et « ↩ Rétablir » ;
 - un cas se recalcule à chaque ouverture : une meilleure donnée arrivée par un
   run (une durée YouTube, une page relue) le fait disparaître d'elle-même ;
 - chaque règle a été MESURÉE sur de vraies discographies avant d'être gardée
@@ -34,15 +36,20 @@ from datetime import date
 from difflib import SequenceMatcher
 
 from src.utils.concordance_paroles import (
+    MOTS_MIN,
     SEUIL_FAUX,
     SEUIL_JUSTE,
+    SEUIL_JUSTE_BIGRAMMES,
+    bigrammes,
+    lrc_dementi,
+    mots,
     paroles_de_reference,
     recouvrement,
 )
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.duree_youtube import SOURCE_AUDIO
 from src.utils.track_validation import sans_info
-from src.utils.version_descriptors import Kind, parse_variant, titre_generique
+from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
 
 #: Écart de durée au-delà duquel deux sources ne décrivent plus le même fichier
@@ -107,6 +114,9 @@ class Detecteur:
     #: `(fiche, contexte) -> (motif, preuves) | None` ; `preuves["impact"]`
     #: remplace l'impact de la fiche (ex. les vues de la vidéo en cause).
     juger: Callable
+    #: La preuve est FORMELLE : le cas se corrige sans attendre l'utilisateur
+    #: (`services/revue_auto`, journalisé et rétablissable).
+    formel: bool = False
 
 
 @dataclass(frozen=True)
@@ -267,6 +277,54 @@ def tonalite_desaccord(track, ctx):
     return None
 
 
+#: Familles dont la fiche est une AUTRE PRISE que son original — ni la même
+#: édition (radio edit, remaster, « Physical Version » : mêmes mesures, même LRC
+#: attendus), ni le même beat ou la même voix (instrumental, a cappella).
+FAMILLES_AUTRE_PRISE = frozenset(
+    {"demo", "reference", "alternate", "snippet", "performance", "remix_named", "remix_bare"}
+)
+
+
+def autre_prise_hors_plateformes(track, ctx):
+    """L'original d'une fiche qui est une AUTRE PRISE et n'a AUCUNE trace de
+    plateforme (ni ID Spotify ni ID Deezer) — None sinon.
+
+    Une telle fiche (démo, référence, live inédit, remix non officiel) n'a ni
+    page SongBPM (SongBPM ne référence que le catalogue Spotify) ni LRC à elle :
+    ce qu'elle porte de SongBPM ou de YouTube Music vient d'une recherche qui a
+    servi l'original (mesuré 2026-09-28 : 106 fiches aux mesures SongBPM de leur
+    original, 34 au LRC de leur original)."""
+    if track.spotify_id or track.deezer_id:
+        return None
+    if famille_de(track.title) not in FAMILLES_AUTRE_PRISE:
+        return None
+    return socle_parmi(track.title, ctx.disco, ctx.memo("socles", lambda: IndexSocles(ctx.disco)))
+
+
+def songbpm_de_l_original(track, ctx):
+    """FORMEL. Une autre prise hors plateformes dont la durée SongBPM (à 2 s) ET
+    le tempo SongBPM sont ceux de son original : la page SongBPM était celle de
+    l'original — BPM, tonalité et durée avec (« All Day (Kendrick Lamar
+    Reference) » 311 s / 123 bpm, comme *All Day*)."""
+    socle = autre_prise_hors_plateformes(track, ctx)
+    if socle is None or not socle.duration or not socle.audio.bpm:
+        return None
+    duree, bpm = _songbpm(ctx, track, "duration"), _songbpm(ctx, track, "bpm")
+    try:
+        if not duree or not bpm or abs(int(float(duree)) - int(socle.duration)) > 2:
+            return None
+        if not _meme_tempo(float(bpm), float(socle.audio.bpm)):
+            return None
+    except ValueError:
+        return None
+    mesures = {o.field: str(o.value) for o in ctx.obs.get(track.id, []) if o.source == "songbpm"}
+    return (
+        f"durée {duree} s et tempo {bpm} SongBPM = ceux de « {socle.title} » — une "
+        "version sans plateforme n'a pas de page SongBPM à elle",
+        {"original": socle.id, "songbpm": mesures},
+    )
+
+
 def songbpm_copie_de_l_original(track, ctx):
     """Une VERSION (live, remix…) dont BPM ET durée SongBPM sont ceux de son
     original : la page était celle de l'original (Freeze « Louisville (Remix) »,
@@ -274,6 +332,8 @@ def songbpm_copie_de_l_original(track, ctx):
     attendus (décision utilisateur)."""
     if parse_variant(track.title).kind == Kind.NONE or famille_de(track.title) == "instrumental":
         return None
+    if songbpm_de_l_original(track, ctx):
+        return None  # formel : `songbpm_de_l_original`
     socle = socle_parmi(track.title, ctx.disco, ctx.memo("socles", lambda: IndexSocles(ctx.disco)))
     if socle is None:
         return None
@@ -298,20 +358,251 @@ def _songbpm(ctx, track, champ):
 # ── Paroles, pages, crédits ─────────────────────────────────────────────────
 
 
-def lrc_douteux(track, _ctx=None):
-    """LRC ni démenti (< 0,4, écarté d'office) ni confirmé (≥ 0,6) par les
-    paroles Genius : la tranche que l'oracle ne sait pas trancher seul."""
+#: Sous ce nombre de mots distincts, les paroles Genius sont un EXTRAIT (snippet,
+#: fragment — « Good Ass Job » : 12 mots pour un LRC de 190) : le recouvrement ne
+#: peut ni confirmer ni douter. Le démenti, lui, reste jugé dès 8 mots.
+MOTS_MIN_DOUTE = 40
+
+#: Sessions et émissions (décision utilisateur 2026-09-28 : une catégorie « live »
+#: qui regroupe versions live, Grünt, COLORS, OKLM, Skyrock). COLORS est lu par le
+#: vocabulaire des versions (famille live) ; « OKLM » ou « Planète rap » seuls
+#: sont aussi des TITRES (Booba), d'où le contexte exigé.
+_SESSION_RE = re.compile(r"gr[uü]nt|#\s*plan[eè]te\s*rap", re.IGNORECASE)
+_EMISSION_RE = re.compile(r"plan[eè]te\s*rap|skyrock|oklm", re.IGNORECASE)
+_CONTEXTE_RE = re.compile(r"freestyle|session|live|radio|couvre[\s-]*feu", re.IGNORECASE)
+
+
+def session_live(track) -> bool:
+    """Version live, session (COLORS) ou freestyle d'émission (Grünt, Planète Rap,
+    Skyrock, OKLM) : leurs LRC se jugent à part — un freestyle collectif de vingt
+    minutes n'a au mieux qu'un couplet synchronisé quelque part."""
+    titre = track.title or ""
+    if famille_de(titre) == "performance" or _SESSION_RE.search(titre):
+        return True
+    return bool(_EMISSION_RE.search(titre) and _CONTEXTE_RE.search(titre))
+
+
+def _versions_soeurs(a, b) -> bool:
+    """Deux VERSIONS d'un même socle dont aucune n'est l'original (« Can't Tell Me
+    Nothing (R.O.C. Remix) » / « (Jeezy Remix) ») : peut-être le même morceau
+    sous deux pages."""
+    if parse_variant(a.title).kind == Kind.NONE or parse_variant(b.title).kind == Kind.NONE:
+        return False
+    return socle_normalise(a.title) == socle_normalise(b.title)
+
+
+def _verdict_lrc(track, ctx):
+    """`(code, motif, preuves)` d'un LRC que l'oracle ne tranche pas seul, ou
+    None — code `lrc` (douteux), `doublon` (le LRC d'une version sœur). Mémorisé :
+    trois détecteurs le consultent."""
+    cache = ctx.memo("verdict_lrc", dict) if ctx is not None else {}
+    if track.id in cache:
+        return cache[track.id]
+    cache[track.id] = verdict = _juger_lrc(track, ctx)
+    return verdict
+
+
+def _juger_lrc(track, ctx):
     if not track.lyrics.synced:
         return None
     ref = paroles_de_reference(track.lyrics.text, track.lyrics.source)
+    if lrc_dementi(ref, track.lyrics.synced) or len(mots(ref)) < MOTS_MIN_DOUTE:
+        return None
+    source = track.lyrics.synced_source
+    trouve = _lrc_autre_candidat(track, ctx) if ctx is not None else None
+    if trouve is not None:
+        autre, meilleur, propre = trouve
+        if _lrc_formel(track, ctx, trouve):
+            return None  # formel : `lrc_d_une_autre_fiche`
+        preuves = {
+            "autre": autre.id,
+            "bigrammes": round(propre, 2),
+            "bigrammes_autre": round(meilleur, 2),
+            "source": source,
+        }
+        if _versions_soeurs(track, autre):
+            return (
+                "doublon",
+                f"même morceau que « {autre.title} » ? Son LRC ({source or '?'}) y colle à "
+                f"{meilleur:.0%}, à {propre:.0%} aux paroles de celle-ci",
+                {**preuves, "autres": [autre.id]},
+            )
+        return (
+            "lrc",
+            f"LRC ({source or '?'}) peut-être celui de « {autre.title} » "
+            f"({meilleur:.0%} de paires communes, {propre:.0%} avec ses propres paroles)",
+            preuves,
+        )
     score = recouvrement(ref, track.lyrics.synced)
     if score is not None and SEUIL_FAUX <= score < SEUIL_JUSTE:
         return (
-            f"LRC ({track.lyrics.synced_source or '?'}) : {score:.0%} de mots communs "
-            "avec les paroles Genius",
-            {"recouvrement": score, "source": track.lyrics.synced_source},
+            "lrc",
+            f"LRC ({source or '?'}) : {score:.0%} de mots communs avec les paroles Genius",
+            {"recouvrement": score, "source": source},
         )
     return None
+
+
+def lrc_douteux(track, ctx=None):
+    """LRC ni démenti (écarté d'office) ni confirmé (≥ 0,6) par les paroles
+    Genius, ni reconnu comme celui d'une autre fiche : ce que l'oracle ne sait
+    pas trancher seul. Les sessions live ont leur propre détecteur."""
+    verdict = _verdict_lrc(track, ctx)
+    if verdict and verdict[0] == "lrc" and not session_live(track):
+        return verdict[1], verdict[2]
+    return None
+
+
+def lrc_session_live(track, ctx=None):
+    """Les LRC douteux des versions live et des freestyles d'émission (Grünt,
+    COLORS, OKLM, Skyrock, Planète Rap), rangés à part."""
+    verdict = _verdict_lrc(track, ctx)
+    if verdict and verdict[0] == "lrc" and session_live(track):
+        return verdict[1], verdict[2]
+    return None
+
+
+def doublon_par_lrc(track, ctx):
+    """Deux versions sœurs dont l'une porte le LRC qui colle aux paroles de
+    l'autre : peut-être le même morceau sous deux pages — envoyé au traitement
+    des doublons (fusion), le LRC pouvant aussi être retiré."""
+    verdict = _verdict_lrc(track, ctx)
+    if verdict and verdict[0] == "doublon":
+        return verdict[1], verdict[2]
+    return None
+
+
+#: Écart minimal de paires communes entre l'autre fiche et la fiche elle-même
+#: pour attribuer un LRC à l'autre (mesuré 2026-09-27 : 91 cas sur 230, démos et
+#: références qui avaient reçu le LRC de l'original).
+ECART_AUTRE_FICHE = 0.3
+#: Au-delà, la fiche partage trop de son propre texte avec ce LRC pour que la
+#: preuve soit formelle — lives, remix, démos qui reprennent le refrain, doublons
+#: de casse (83 cas mesurés entre 0,4 et 0,6) : à trancher.
+PROPRE_MAX_FORMEL = 0.4
+#: Une paire de mots présente dans plus de fiches que cela (« i m », « you
+#: know ») ne sert pas à désigner des candidates : l'index ne garde que les
+#: paires rares, et seules les meilleures candidates sont comparées en entier.
+_DF_MAX = 40
+_CANDIDATES = 10
+
+
+def _part_commune(a: set, b: set) -> float:
+    return max(len(a & b) / len(a), len(a & b) / len(b)) if a and b else 0.0
+
+
+def _references_bigrammes(ctx) -> dict:
+    """`{track_id: (texte, bigrammes)}` des paroles Genius JUGEABLES de la
+    discographie, calculé une fois par ouverture."""
+
+    def fabrique():
+        index = {}
+        for t in ctx.disco:
+            ref = paroles_de_reference(t.lyrics.text, t.lyrics.source)
+            if ref and len(mots(ref)) >= MOTS_MIN:
+                index[t.id] = (ref.strip(), bigrammes(ref))
+        return index
+
+    return ctx.memo("bigrammes", fabrique)
+
+
+def _index_bigrammes(ctx) -> dict:
+    """`{paire rare: [track_id]}` — sans lui, comparer chaque LRC à toutes les
+    paroles de Kanye West coûtait 15 s à l'ouverture."""
+
+    def fabrique():
+        index: dict = {}
+        for tid, (_texte, paires) in _references_bigrammes(ctx).items():
+            for b in paires:
+                index.setdefault(b, []).append(tid)
+        return {b: tids for b, tids in index.items() if len(tids) <= _DF_MAX}
+
+    return ctx.memo("index_bigrammes", fabrique)
+
+
+def _titre_sans_feat(titre: str | None) -> str:
+    """« Cavaliero (Feat. Koba LaD) » et « CAVALIERO » : la même fiche en double,
+    pas une autre fiche."""
+    return cle_doublon(re.sub(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", "", titre or "", flags=re.I))
+
+
+def _lrc_autre_candidat(track, ctx):
+    """`(autre fiche, part commune avec elle, part commune avec la sienne)` quand
+    le LRC colle nettement mieux aux paroles d'une autre fiche ; None sinon.
+    Mémorisé : deux détecteurs le consultent."""
+    cache = ctx.memo("lrc_autre", dict)
+    if track.id not in cache:
+        cache[track.id] = _chercher_lrc_autre(track, ctx)
+    return cache[track.id]
+
+
+def _chercher_lrc_autre(track, ctx):
+    lrc = track.lyrics.synced
+    refs = _references_bigrammes(ctx)
+    if not lrc or track.id not in refs or len(mots(lrc)) < MOTS_MIN:
+        return None
+    texte, siens = refs[track.id]
+    paires = bigrammes(lrc)
+    propre = _part_commune(siens, paires)
+    if propre >= SEUIL_JUSTE_BIGRAMMES:
+        return None
+    par_id = ctx.memo("par_id", lambda: {t.id: t for t in ctx.disco})
+    index = _index_bigrammes(ctx)
+    votes: dict[int, int] = {}
+    for b in paires:
+        for tid in index.get(b, ()):
+            votes[tid] = votes.get(tid, 0) + 1
+    moi = _titre_sans_feat(track.title)
+    meilleur, autre = 0.0, None
+    for tid in sorted(votes, key=votes.get, reverse=True)[: _CANDIDATES + 2]:
+        t = par_id[tid]
+        if t is track or (track.genius_id and t.genius_id == track.genius_id):
+            continue
+        texte_autre, les_siens = refs[tid]
+        if texte_autre == texte or _titre_sans_feat(t.title) == moi:
+            continue
+        part = _part_commune(les_siens, paires)
+        if part > meilleur:
+            meilleur, autre = part, t
+    if autre is None or meilleur < SEUIL_JUSTE_BIGRAMMES or meilleur - propre < ECART_AUTRE_FICHE:
+        return None
+    return autre, meilleur, propre
+
+
+def _lrc_formel(track, ctx, trouve) -> bool:
+    """Le LRC est-il FORMELLEMENT celui de l'autre fiche ? Oui sous 40 % de
+    paires avec ses propres paroles ; oui aussi, au-delà, quand la fiche est une
+    AUTRE PRISE hors plateformes et que l'autre fiche est SON original (une démo,
+    un live inédit n'ont aucun LRC à eux — le refrain commun fait monter le
+    recouvrement sans rien prouver)."""
+    autre, _meilleur, propre = trouve
+    return propre < PROPRE_MAX_FORMEL or autre is autre_prise_hors_plateformes(track, ctx)
+
+
+def lrc_d_une_autre_fiche(track, ctx):
+    """FORMEL. Le LRC colle aux paroles d'une AUTRE fiche de l'artiste (≥ 60 %
+    de paires de mots communes), et à moins de 40 % aux siennes : c'est le LRC
+    de l'autre (Kanye « Ghost Town (Demo) » portait celui de *Ghost Town*,
+    « Get Off Me » celui de *Can't Tell Me Nothing*). Une fiche aux MÊMES
+    paroles (version héritée, page sœur) ou au même titre n'est pas une autre
+    fiche."""
+    trouve = _lrc_autre_candidat(track, ctx)
+    if trouve is None or not _lrc_formel(track, ctx, trouve):
+        return None
+    autre, meilleur, propre = trouve
+    from src.utils.corrections_fiches import empreinte_lrc
+
+    return (
+        f"LRC de « {autre.title} » ({meilleur:.0%} de paires de mots communes, "
+        f"{propre:.0%} avec ses propres paroles)",
+        {
+            "autre": autre.id,
+            "bigrammes": round(propre, 2),
+            "bigrammes_autre": round(meilleur, 2),
+            "source": track.lyrics.synced_source,
+            "empreinte": empreinte_lrc(track.lyrics.synced),
+        },
+    )
 
 
 def page_sans_info(track, _ctx=None):
@@ -472,19 +763,71 @@ def _jour(valeur) -> date | None:
         return None
 
 
-def certif_avant_sortie(track, _ctx=None):
-    """Une certification datée AVANT la sortie du morceau : la date de sortie
-    est fausse, ou la certification appartient à un autre titre (63 sur 1 841
-    mesurées le 2026-09-27)."""
+def _certifs_avant_sortie(track):
     sortie = _jour(track.release_date) if track.release_date else None
     if sortie is None:
-        return None
+        return
     for e in track.certs.reelles:
         certif = _jour(e.get("certification_date") or "")
         if certif and certif < sortie:
+            yield e, certif, sortie
+
+
+_PARENTHESE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
+
+
+def _socle_et_parentheses(titre: str | None) -> tuple[str, frozenset]:
+    """« Pursuit Of Happiness (Nightmare) (Prime Day Show) » → (« pursuitofhappiness »,
+    {« nightmare », « primedayshow »})."""
+    titre = titre or ""
+    entre = frozenset(cle_doublon(m) for m in _PARENTHESE.findall(titre) if cle_doublon(m))
+    return cle_doublon(_PARENTHESE.sub(" ", titre)), entre
+
+
+def certif_d_une_autre_oeuvre(track, entree) -> bool:
+    """PUR. La certification désigne-t-elle PREUVE À L'APPUI une autre œuvre ?
+
+    - titres différents hors parenthèses : oui (« FATHER » ← « FATHER STRETCH MY
+      HANDS PT. 1 », « Nemesis » ← « NERO NEMESIS ») ;
+    - même titre, et la FICHE porte une parenthèse que la certif n'a pas : oui,
+      c'est la certif de l'original sur une version (« Jesus Walks (Orchestral) »
+      ← « JESUS WALKS ») ;
+    - même titre, et la CERTIF porte une parenthèse de plus : NON — un sous-titre
+      (Kid Cudi « Day 'N' Nite » ← « DAY 'N' NITE (NIGHTMARE) », le bon morceau :
+      c'est sa date de sortie qui est fausse). Mesuré 2026-09-27, 4 certifs
+      retirées à tort avant cette règle."""
+    socle_f, entre_f = _socle_et_parentheses(track.title)
+    socle_c, entre_c = _socle_et_parentheses(entree.get("title"))
+    if socle_f != socle_c:
+        return True
+    return entre_c < entre_f
+
+
+def certif_avant_sortie(track, _ctx=None):
+    """Une certification datée AVANT la sortie du morceau, au MÊME titre : la
+    date de sortie est peut-être fausse (Kid Cudi « Day 'N' Nite », sortie
+    lue en 2020 pour un Or de 2009). À trancher. Un AUTRE titre relève de
+    `certif_d_un_autre_titre`, formel."""
+    for e, certif, sortie in _certifs_avant_sortie(track):
+        if not certif_d_une_autre_oeuvre(track, e):
             return (
                 f"{e.get('body', '?')} {e.get('certification', '?')} du {certif:%d/%m/%Y} "
                 f"avant la sortie ({sortie:%d/%m/%Y}) — « {e.get('title', '?')} »",
+                {"certification": e, "sortie": str(sortie)},
+            )
+    return None
+
+
+def certif_d_un_autre_titre(track, _ctx=None):
+    """FORMEL. Une certification datée AVANT la sortie, et d'un AUTRE titre :
+    le rattachement par mots l'a prise pour ce morceau (« FATHER » ← « FATHER
+    STRETCH MY HANDS PT. 1 », « KING » ← l'album « JESUS IS KING », une version
+    ← son original). Mesuré 2026-09-27 : 18 cas sur 21, tous faux."""
+    for e, certif, sortie in _certifs_avant_sortie(track):
+        if certif_d_une_autre_oeuvre(track, e):
+            return (
+                f"{e.get('body', '?')} {e.get('certification', '?')} de « {e.get('title', '?')} » "
+                f"du {certif:%d/%m/%Y}, avant la sortie ({sortie:%d/%m/%Y}) — un autre titre",
                 {"certification": e, "sortie": str(sortie)},
             )
     return None
@@ -514,14 +857,33 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("duree_songbpm", "Durée SongBPM démentie par YouTube", "⏱️", duree_songbpm_dementie),
     Detecteur("duree_spotify", "Durée de l'ID Spotify démentie", "🎧", duree_spotify_dementie),
     Detecteur(
+        "songbpm_original",
+        "Version sans plateforme aux mesures SongBPM de l'original",
+        "🪞",
+        songbpm_de_l_original,
+        formel=True,
+    ),
+    Detecteur(
         "songbpm_copie", "Version aux mesures de l'original", "🪞", songbpm_copie_de_l_original
     ),
     Detecteur("bpm", "BPM en désaccord", "🥁", bpm_desaccord),
     Detecteur("tonalite", "Tonalité en désaccord", "🎹", tonalite_desaccord),
+    Detecteur("lrc_autre_fiche", "LRC d'une autre fiche", "📝", lrc_d_une_autre_fiche, formel=True),
     Detecteur("lrc_douteux", "LRC douteux (40-60 %)", "📝", lrc_douteux),
+    Detecteur(
+        "lrc_live", "LRC douteux — live, Grünt, COLORS, OKLM, Skyrock", "🎤", lrc_session_live
+    ),
     Detecteur("generique_duree", "Titre générique, durée partagée", "🔁", generique_meme_duree),
+    Detecteur(
+        "certif_autre_titre",
+        "Certification d'un autre titre",
+        "🏆",
+        certif_d_un_autre_titre,
+        formel=True,
+    ),
     Detecteur("certif_date", "Certification avant la sortie", "🏆", certif_avant_sortie),
     Detecteur("doublon", "Doublon de titre", "👯", doublon_de_titre),
+    Detecteur("doublon_lrc", "Même morceau ? (LRC d'une version sœur)", "👯", doublon_par_lrc),
     Detecteur("doublon_inedit", "Inédit en double", "👻", doublon_inedit),
     Detecteur("credits_api", "Crédits 🎫 non confirmés", "🎫", credits_api_seuls),
     Detecteur("annotee", "Page « Non-Music » sans trace", "🏷️", page_annotee_sans_trace),
@@ -666,6 +1028,9 @@ def analyser(data_manager, artiste) -> Revue:
         actifs=[c for c in cas if (c.detecteur, c.cle) not in tranches],
         masques=[c for c in cas if (c.detecteur, c.cle) in tranches],
     )
+
+
+CODES_FORMELS = frozenset(d.code for d in DETECTEURS if d.formel)
 
 
 def tous_les_detecteurs() -> list:

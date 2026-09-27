@@ -21,8 +21,8 @@ logger = get_logger(__name__)
 
 #: Détecteurs dont les preuves portent l'ID Spotify à retirer.
 _CODES_ID_SPOTIFY = ("kworb_variante", "spotify_audit", "duree_spotify", "kworb_id_partage")
-_CODES_SONGBPM = ("songbpm_copie", "duree_songbpm")
-_CODES_DOUBLON = ("doublon", "doublon_inedit")
+_CODES_SONGBPM = ("songbpm_copie", "duree_songbpm", "songbpm_original")
+_CODES_DOUBLON = ("doublon", "doublon_inedit", "doublon_lrc")
 
 
 @dataclass
@@ -231,6 +231,15 @@ def _autre_fiche(ctx: ContexteAction, cas: Cas):
 # ── Le catalogue ────────────────────────────────────────────────────────────
 
 
+def _action_retirer_lrc() -> Action:
+    return Action(
+        "retirer_lrc",
+        "✖️ Retirer ce LRC",
+        _retirer_lrc,
+        "Retirer ce LRC ? Il ne sera plus retenu, même si une source le ressert.",
+    )
+
+
 def actions_pour(cas: Cas) -> list[Action]:
     """Les actions proposées pour un cas (hors « ✓ Normal », toujours là)."""
     d = cas.detecteur
@@ -274,30 +283,25 @@ def actions_pour(cas: Cas) -> list[Action]:
             for s in sources
         ]
     if d in _CODES_DOUBLON:
-        return [
-            Action(
-                "fusionner",
-                "🔀 Fusionner…",
-                _renvoi("fusion", _fiche, _autre_fiche),
-                resout=False,
-            )
-        ]
+        fusion = Action(
+            "fusionner",
+            "🔀 Fusionner…",
+            _renvoi("fusion", _fiche, _autre_fiche),
+            resout=False,
+        )
+        if d == "doublon_lrc":
+            # Pas le même morceau après examen : c'est alors le LRC qui est faux.
+            return [fusion, _action_retirer_lrc()]
+        return [fusion]
     if d == "liens_proposes":
         refuser = Action("refuser_lien", "✖️ Refuser", _statut_lien("refused"))
         if cas.preuves.get("kind") == "alias":
             return [Action("confirmer_lien", "✔️ Confirmer", _statut_lien("confirmed")), refuser]
         # Une formation demande sa nature (groupe / collectif) : la fenêtre Groupes.
         return [Action("groupes", "👥 Arbitrer…", _renvoi("groupes"), resout=False), refuser]
-    if d == "lrc_douteux":
-        return [
-            Action(
-                "retirer_lrc",
-                "✖️ Retirer ce LRC",
-                _retirer_lrc,
-                "Retirer ce LRC ? Il ne sera plus retenu, même si une source le ressert.",
-            )
-        ]
-    if d == "certif_date" and cas.preuves.get("certification"):
+    if d in ("lrc_douteux", "lrc_autre_fiche", "lrc_live"):
+        return [_action_retirer_lrc()]
+    if d in ("certif_date", "certif_autre_titre") and cas.preuves.get("certification"):
         return [
             Action(
                 "retirer_certif",

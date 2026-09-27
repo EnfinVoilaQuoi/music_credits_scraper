@@ -9,19 +9,24 @@ les ACTIONS de chaque type de cas (`services/revue_actions`), qui appellent les
 écrivains existants ; ce qui demande une fenêtre (fusion, groupes, écarts
 Deezer) y est renvoyé.
 Calculée à l'ouverture sur la discographie chargée — zéro réseau.
+
+Niveau FORMEL (2026-09-27) : les cas dont la preuve suffit (`revue_auto`) sont
+corrigés en fin de run ; « ⚡ Corriger les N cas sûrs » fait la même chose à la
+demande, et la vue « Corrections auto » liste le journal avec « ↩ Rétablir ».
 """
 
 from tkinter import messagebox
 
 import customtkinter as ctk
 
-from src.services import revue_actions
+from src.services import revue_actions, revue_auto
 from src.services.revue import Cas, Revue, analyser, par_detecteur, tous_les_detecteurs
 
 #: Au-delà, la fenêtre deviendrait lente à construire ; le tri par impact met
 #: de toute façon en haut ce qui compte.
 _MAX_LIGNES = 300
 _TOUT = "Tout"
+_VUE_CAS, _VUE_NORMAUX, _VUE_JOURNAL = "cas", "normaux", "journal"
 
 
 def _format_impact(n: int) -> str:
@@ -40,6 +45,8 @@ class ATrancherWindow(ctk.CTkToplevel):
         self.tracks = {t.id: t for t in artiste.tracks or []}
         self.defs = {d.code: d for d in tous_les_detecteurs()}
         self.revue: Revue = analyser(app.data_manager, artiste)
+        self.journal: list[dict] = app.data_manager.corrections_revue(artiste.id)
+        self.vue = _VUE_CAS
         self.choix: dict[str, str | None] = {}
         self.ctx_action = revue_actions.ContexteAction(
             app.data_manager, artiste, self.tracks, renvois=self._renvois()
@@ -57,11 +64,20 @@ class ATrancherWindow(ctk.CTkToplevel):
             entete, values=[_TOUT], command=lambda _v: self._afficher(), width=330
         )
         self.filtre.pack(side="right")
-        self.voir_masques = ctk.BooleanVar(value=False)
-        self.case_masques = ctk.CTkCheckBox(
-            entete, text="", variable=self.voir_masques, command=self._rafraichir
+
+        bandeau = ctk.CTkFrame(self, fg_color="transparent")
+        bandeau.pack(fill="x", padx=15, pady=(0, 5))
+        self.vues = ctk.CTkSegmentedButton(bandeau, values=[""], command=self._changer_vue)
+        self.vues.pack(side="left")
+        self.bouton_surs = ctk.CTkButton(
+            bandeau,
+            text="",
+            width=0,
+            fg_color="#b26a00",
+            hover_color="#8a5200",
+            command=self._corriger_surs,
         )
-        self.case_masques.pack(side="right", padx=10)
+        self.bouton_surs.pack(side="right")
 
         ctk.CTkLabel(
             self,
@@ -82,10 +98,37 @@ class ATrancherWindow(ctk.CTkToplevel):
 
     @property
     def cas(self) -> list[Cas]:
-        return self.revue.masques if self.voir_masques.get() else self.revue.actifs
+        return self.revue.masques if self.vue == _VUE_NORMAUX else self.revue.actifs
+
+    def _libelles_vues(self) -> dict[str, str]:
+        return {
+            f"À trancher ({len(self.revue.actifs)})": _VUE_CAS,
+            f"Marqués normaux ({len(self.revue.masques)})": _VUE_NORMAUX,
+            f"⚡ Corrections auto ({len(self.journal)})": _VUE_JOURNAL,
+        }
+
+    def _changer_vue(self, libelle: str) -> None:
+        self.vue = self._libelles_vues().get(libelle, _VUE_CAS)
+        self._rafraichir()
 
     def _rafraichir(self) -> None:
         """Recompte, reconstruit le filtre (en gardant le détecteur choisi), réaffiche."""
+        libelles = self._libelles_vues()
+        self.vues.configure(values=list(libelles))
+        self.vues.set(next(k for k, v in libelles.items() if v == self.vue))
+        surs = revue_auto.cas_surs(self.revue)
+        self.bouton_surs.configure(
+            text=f"⚡ Corriger les {len(surs)} cas sûrs",
+            state="normal" if surs else "disabled",
+        )
+        if self.vue == _VUE_JOURNAL:
+            self.filtre.configure(values=[_TOUT])
+            self.filtre.set(_TOUT)
+            self.titre.configure(
+                text=f"{len(self.journal)} correction(s) faite(s) sans vous — preuve formelle"
+            )
+            self._afficher_journal()
+            return
         compte = par_detecteur(self.cas)
         ancien = self.choix.get(self.filtre.get())
         self.choix = {f"{_TOUT} ({len(self.cas)})": None}
@@ -98,14 +141,88 @@ class ATrancherWindow(ctk.CTkToplevel):
         self.titre.configure(
             text=(
                 f"{len(self.revue.masques)} cas marqué(s) normal(aux)"
-                if self.voir_masques.get()
+                if self.vue == _VUE_NORMAUX
                 else f"{len(self.revue.actifs)} cas à trancher — triés par impact"
             )
         )
-        self.case_masques.configure(
-            text=f"Voir les cas marqués normaux ({len(self.revue.masques)})"
-        )
         self._afficher()
+
+    def _afficher_journal(self) -> None:
+        for w in self.liste.winfo_children():
+            w.destroy()
+        if not self.journal:
+            ctk.CTkLabel(self.liste, text="Aucune correction automatique").pack(pady=20)
+            return
+        for c in self.journal[:_MAX_LIGNES]:
+            d = self.defs.get(c["detecteur"])
+            cadre = ctk.CTkFrame(self.liste)
+            cadre.pack(fill="x", pady=2)
+            ctk.CTkLabel(cadre, text=d.icone if d else "⚡", width=30).pack(
+                side="left", padx=(6, 0)
+            )
+            texte = ctk.CTkFrame(cadre, fg_color="transparent")
+            texte.pack(side="left", fill="x", expand=True, padx=6, pady=3)
+            quand = str(c["applied_at"] or "")[:16]
+            ctk.CTkLabel(
+                texte,
+                text=c["compte_rendu"] or c["morceau"],
+                font=("Arial", 12, "bold"),
+                anchor="w",
+            ).pack(fill="x")
+            ctk.CTkLabel(
+                texte,
+                text=f"{quand} — {c['motif']}",
+                font=("Arial", 11),
+                anchor="w",
+                justify="left",
+            ).pack(fill="x")
+            track = self.tracks.get(c["track_id"])
+            ctk.CTkButton(
+                cadre,
+                text="Ouvrir",
+                width=70,
+                state="normal" if track else "disabled",
+                command=lambda t=track: self.app._show_track_details_for_track(t),
+            ).pack(side="left", padx=(6, 3))
+            ctk.CTkButton(
+                cadre,
+                text="↩ Rétablir",
+                width=90,
+                command=lambda x=c: self._retablir_correction(x),
+            ).pack(side="left", padx=(3, 6))
+
+    def _corriger_surs(self) -> None:
+        surs = revue_auto.cas_surs(self.revue)
+        if not surs or not messagebox.askyesno(
+            "À trancher",
+            f"Corriger les {len(surs)} cas à preuve formelle ?\n\n"
+            "Chaque correction est consignée et reste rétablissable (vue « Corrections auto »).",
+            parent=self,
+        ):
+            return
+        bilan = revue_auto.corriger(self.app.data_manager, self.artiste)
+        self._recalculer()
+        self.compte_rendu.configure(text=bilan.resume() or "Rien à corriger")
+        rafraichir = getattr(self.app, "_populate_tracks_table", None)
+        if rafraichir:
+            rafraichir()
+
+    def _retablir_correction(self, correction: dict) -> None:
+        try:
+            texte = revue_auto.retablir(self.app.data_manager, self.artiste, correction)
+        except (LookupError, ValueError) as e:
+            self._echec(str(e))
+            return
+        self._recalculer()
+        self.compte_rendu.configure(text=f"↩ {texte} — le cas est marqué normal")
+        rafraichir = getattr(self.app, "_populate_tracks_table", None)
+        if rafraichir:
+            rafraichir()
+
+    def _recalculer(self) -> None:
+        self.revue = analyser(self.app.data_manager, self.artiste)
+        self.journal = self.app.data_manager.corrections_revue(self.artiste.id)
+        self._rafraichir()
 
     def _afficher(self) -> None:
         for w in self.liste.winfo_children():
@@ -135,7 +252,7 @@ class ATrancherWindow(ctk.CTkToplevel):
         ctk.CTkLabel(texte, text=c.motif, font=("Arial", 11), anchor="w", justify="left").pack(
             fill="x"
         )
-        actions = [] if self.voir_masques.get() else revue_actions.actions_pour(c)
+        actions = [] if self.vue == _VUE_NORMAUX else revue_actions.actions_pour(c)
         if actions:
             barre = ctk.CTkFrame(texte, fg_color="transparent")
             barre.pack(anchor="w", pady=(2, 0))
@@ -158,7 +275,7 @@ class ATrancherWindow(ctk.CTkToplevel):
             state="normal" if track else "disabled",
             command=lambda t=track: self.app._show_track_details_for_track(t),
         ).pack(side="left", padx=(6, 3))
-        if self.voir_masques.get():
+        if self.vue == _VUE_NORMAUX:
             ctk.CTkButton(
                 cadre, text="↩ Rétablir", width=90, command=lambda x=c: self._retablir(x)
             ).pack(side="left", padx=(3, 6))

@@ -37,6 +37,20 @@ class TestFamille:
         assert vh.famille_de("Dolce Camara - Snight B Remix") == "remix_named"
         assert vh.famille_de("Suzy") is None
 
+    def test_versions_inedites(self):
+        assert vh.famille_de("Suzy (Demo)") == "demo"
+        assert vh.famille_de("Suzy [V3]") == "alternate"
+        assert vh.famille_de("Suzy (OG)") == "alternate"
+        assert vh.famille_de("Suzy [Snippet]") == "snippet"
+        assert vh.famille_de("Suzy (Kendrick Lamar Reference)") == "reference"
+        assert vh.famille_de("Suzy (Demo) [Mixed]") == "demo"  # la prise l'emporte
+        # Versions ANTÉRIEURES (décision utilisateur 2026-09-28) : comme les démos.
+        for titre in ("Suzy (Original)", "Suzy (Original Version)", "Suzy (First Edition Version)"):
+            assert vh.famille_de(titre) == "alternate", titre
+        assert vh.famille_de("Suzy (First Pressing Edition)") == "alternate"
+        # « Original Mix » : le même enregistrement, pas une version.
+        assert vh.famille_de("Suzy (Original Mix)") is None
+
 
 class TestHeriter:
     def test_live_herite_paroles_et_ecriture_pas_la_production(self):
@@ -72,6 +86,19 @@ class TestHeriter:
         v = _version("Suzy - DJ X Remix")
         h = vh.heriter(v, _socle())
         assert not h.paroles and [c.role for c in v.credits] == [CreditRole.WRITER]
+
+    def test_demo_alternate_snippet_n_heritent_que_l_ecriture(self):
+        """Décision utilisateur 2026-09-28 : autre prise, souvent autre texte."""
+        for titre in ("Suzy (Demo)", "Suzy [V3]", "Suzy [Snippet]"):
+            v = _version(titre)
+            h = vh.heriter(v, _socle())
+            assert not h.paroles and v.lyrics.text is None, titre
+            assert [c.role for c in v.credits] == [CreditRole.WRITER], titre
+
+    def test_une_reference_n_herite_de_rien(self):
+        v = _version("Suzy (Kendrick Lamar Reference)")
+        h = vh.heriter(v, _socle())
+        assert h.famille == "reference" and not h.paroles and v.credits == []
 
     def test_union_jamais_remplacement(self):
         v = _version("Suzy - Live 2006")

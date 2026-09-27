@@ -55,6 +55,39 @@ class TestOracle:
         assert cp.jugeable(G5)
 
 
+#: Deux morceaux d'un même artiste, même vocabulaire, AUCUNE phrase commune : les
+#: mots isolés les confondent (tranche 0,4-0,6), les bigrammes non.
+PAROLES_A = (
+    "[Verse]\nI know you want it baby, don't you know I got the money\n"
+    "Never let you go tonight, all the love that I got\n"
+    "You want the money, baby, I know you never let it go"
+)
+LRC_B = (
+    "[00:01.00]Tonight sleeps money, baby love is all I want\n"
+    "[00:04.00]Go and burn, know that cold got it\n"
+    "[00:07.00]All tonight, love sleeps never, money don't know\n"
+    "[00:10.00]Baby go, got cold, burn all tonight"
+)
+
+
+class TestBigrammes:
+    def test_memes_mots_autre_morceau_dementi(self):
+        assert cp.recouvrement(PAROLES_A, LRC_B) >= cp.SEUIL_FAUX  # les mots ne voient rien
+        assert cp.recouvrement_bigrammes(PAROLES_A, LRC_B) < cp.SEUIL_FAUX_BIGRAMMES
+        assert cp.lrc_dementi(PAROLES_A, LRC_B)
+
+    def test_meme_morceau_garde(self):
+        assert cp.recouvrement_bigrammes(G5, LRC_G5) >= cp.SEUIL_JUSTE_BIGRAMMES
+        assert not cp.lrc_dementi(G5, LRC_G5)
+
+    def test_horodatages_et_entetes_ignores(self):
+        assert ("00", "28") not in cp.bigrammes(LRC_G5)
+        assert ("couplet", "massif") not in cp.bigrammes(G5)
+
+    def test_non_jugeable(self):
+        assert cp.recouvrement_bigrammes("Lyrics from Snippet", LRC_G5) is None
+
+
 def _obs(source, lrc):
     return Observation("lyrics_synced", lrc, source)
 

@@ -1785,18 +1785,38 @@ class TrackRepository:
             logger.error(f"Erreur oublier_paroles_ytm({track_id}): {e}")
             return False
 
-    def retirer_mesures_songbpm(self, track_id: int) -> int:
+    def retirer_mesures_songbpm(self, track_id: int, retirees: list | None = None) -> int:
         """Retire tout ce que SongBPM a dit d'une fiche (BPM, tonalité, durée…)
         et ré-arbitre la durée — quand la page SongBPM était celle d'une AUTRE
         version (2026-09-26 : « Intro (A2) » prenait le « Intro » de Booba venu,
         « Blues (Live at AK Studios) » les valeurs de « Blues »). Les colonnes
         audio se lisent des observations : les retirer suffit. Appliqué aux
-        lignes SŒURS (observations partagées). Rend le nombre retiré."""
+        lignes SŒURS (observations partagées). Rend le nombre retiré ;
+        `retirees` reçoit les lignes (correction rétablissable, comme
+        `retirer_lrc`)."""
         total = [0]
         try:
             with self.engine.begin() as conn:
 
                 def retirer(tid: int) -> None:
+                    if retirees is not None:
+                        retirees.extend(
+                            {
+                                "track_id": tid,
+                                "field": o.field,
+                                "source": "songbpm",
+                                "value": o.value,
+                                "confidence": o.confidence,
+                                "seen_at": str(o.seen_at) if o.seen_at else None,
+                            }
+                            for o in conn.execute(
+                                text(
+                                    "SELECT field, value, confidence, seen_at FROM observations "
+                                    "WHERE track_id = :id AND source = 'songbpm'"
+                                ),
+                                {"id": tid},
+                            ).all()
+                        )
                     total[0] += conn.execute(
                         text(
                             "DELETE FROM observations WHERE track_id = :id AND source = 'songbpm'"
@@ -2008,6 +2028,51 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur retirer_mesures_heritees({track_id}): {e}")
             return 0
+
+    def retirer_heritage(self, track_id: int, *, garder_ecriture: bool) -> tuple[int, bool]:
+        """Retire ce qu'une fiche a HÉRITÉ à tort de son original, sœurs
+        comprises : les crédits `source='heritage'` (sauf l'écriture si
+        `garder_ecriture`) et des paroles `heritage:<id>`. Décision utilisateur
+        2026-09-28 : une démo, une prise alternative, un snippet n'héritent que
+        de l'écriture ; une référence de rien — jusque-là ils retombaient sur
+        « edition » (paroles ET production). Rend (crédits retirés, paroles
+        retirées)."""
+        from src.models.track import _WRITER_ROLES
+
+        gardes = sorted(r.value for r in _WRITER_ROLES) if garder_ecriture else []
+        marqueurs = ", ".join(f":r{i}" for i in range(len(gardes)))
+        filtre = f"AND role NOT IN ({marqueurs})" if gardes else ""
+        params = {f"r{i}": r for i, r in enumerate(gardes)}
+        bilan = [0, False]
+        try:
+            with self.engine.begin() as conn:
+
+                def retirer(tid: int) -> None:
+                    bilan[0] += conn.execute(
+                        text(
+                            "DELETE FROM credits WHERE track_id = :id "
+                            f"AND source = 'heritage' {filtre}"
+                        ),
+                        {"id": tid, **params},
+                    ).rowcount
+                    bilan[1] |= (
+                        conn.execute(
+                            text(
+                                "UPDATE tracks SET lyrics = NULL, has_lyrics = 0, "
+                                "lyrics_source = NULL, lyrics_scraped_at = NULL, "
+                                "updated_at = :now WHERE id = :id AND lyrics_source LIKE 'heritage%'"
+                            ),
+                            {"id": tid, "now": datetime.now()},
+                        ).rowcount
+                        > 0
+                    )
+
+                retirer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, retirer)
+            return bilan[0], bilan[1]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_heritage({track_id}): {e}")
+            return 0, False
 
     def forget_credit(self, track_id: int, name: str, role: str) -> int:
         """Retire un crédit (nom normalisé + rôle), toutes sources. Rend le nombre
@@ -3981,11 +4046,15 @@ class TrackRepository:
         )
         return videos_refusees(fiche)
 
-    def retirer_lrc(self, track_id: int, lrc: str) -> int:
+    def retirer_lrc(self, track_id: int, lrc: str, retirees: list | None = None) -> int:
         """Retire UN LRC jugé faux (panneau « À trancher »), sœurs comprises :
         ses observations `lyrics_synced` (toute source qui l'a servi) puis la
         colonne, ré-arbitrée depuis ce qui reste — même arbitrage que
-        `reverifier_lrc`. Rend le nombre d'observations retirées."""
+        `reverifier_lrc`. Rend le nombre d'observations retirées.
+
+        `retirees` reçoit les lignes supprimées (`track_id`, `source`, `value`,
+        `confidence`, `seen_at`) : c'est ce qui rend une correction AUTOMATIQUE
+        rétablissable (`restaurer_observations`)."""
         from src.enrichment.reconcile import _reconcile_lyrics_synced
         from src.utils.concordance_paroles import paroles_de_reference
 
@@ -4006,19 +4075,35 @@ class TrackRepository:
                     texte, source_texte, duree, colonne = ligne
                     obs = conn.execute(
                         text(
-                            "SELECT id, source, value FROM observations "
+                            "SELECT id, source, value, confidence, seen_at FROM observations "
                             "WHERE track_id = :id AND field = 'lyrics_synced'"
                         ),
                         {"id": tid},
                     ).all()
-                    visees = [i for i, _s, v in obs if v == lrc]
-                    for i in visees:
-                        conn.execute(text("DELETE FROM observations WHERE id = :i"), {"i": i})
+                    visees = [o.id for o in obs if o.value == lrc]
+                    for o in obs:
+                        if o.id in visees:
+                            conn.execute(
+                                text("DELETE FROM observations WHERE id = :i"), {"i": o.id}
+                            )
+                            if retirees is not None:
+                                retirees.append(
+                                    {
+                                        "track_id": tid,
+                                        "field": "lyrics_synced",
+                                        "source": o.source,
+                                        "value": o.value,
+                                        "confidence": o.confidence,
+                                        "seen_at": str(o.seen_at) if o.seen_at else None,
+                                    }
+                                )
                     total[0] += len(visees)
                     if colonne != lrc and not visees:
                         return
                     restantes = [
-                        Observation("lyrics_synced", v, s) for i, s, v in obs if i not in visees
+                        Observation("lyrics_synced", o.value, o.source)
+                        for o in obs
+                        if o.id not in visees
                     ]
                     res = _reconcile_lyrics_synced(
                         restantes, _clean_duration(duree), paroles_de_reference(texte, source_texte)
@@ -4045,6 +4130,48 @@ class TrackRepository:
             return total[0]
         except SQLAlchemyError as e:
             logger.error(f"Erreur retirer_lrc({track_id}): {e}")
+            return 0
+
+    def restaurer_observations(self, lignes: list[dict]) -> int:
+        """Réinsère des observations retirées par une correction qu'on RÉTABLIT.
+        Une observation plus récente de la même (fiche, champ, source) l'emporte :
+        la source a reparlé depuis, on ne la contredit pas. Rend le nombre
+        réinséré. Les champs de DISCOGRAPHIE (durée…) sont ré-arbitrés ici ; les
+        paroles synchronisées le sont par l'appelant (`reverifier_lrc`)."""
+        from src.enrichment.reconcile import DISCOGRAPHY_PRIORITIES
+
+        n = 0
+        try:
+            with self.engine.begin() as conn:
+                a_arbitrer: dict[int, set] = {}
+                for o in lignes:
+                    if o.get("field") in DISCOGRAPHY_PRIORITIES:
+                        a_arbitrer.setdefault(o["track_id"], set()).add(o["field"])
+                    n += conn.execute(
+                        text(
+                            "INSERT OR IGNORE INTO observations "
+                            "(track_id, field, value, source, confidence, seen_at) "
+                            "VALUES (:track_id, :field, :value, :source, :confidence, :seen_at)"
+                        ),
+                        {
+                            k: o.get(k)
+                            for k in (
+                                "track_id",
+                                "field",
+                                "value",
+                                "source",
+                                "confidence",
+                                "seen_at",
+                            )
+                        },
+                    ).rowcount
+                for tid, champs in a_arbitrer.items():
+                    self._ecrire_colonnes_discographie(
+                        conn, tid, self._arbitrer_discographie(conn, tid, sorted(champs))
+                    )
+            return n
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur restaurer_observations: {e}")
             return 0
 
     def record_track_videos(self, track_id: int, videos) -> int:

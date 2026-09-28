@@ -226,11 +226,16 @@ def test_predicats_manque():
 
 
 class TestArtisteSpotify:
-    def _run(self, monkeypatch, artist_sid=None, vote="VOTE", **opts):
+    def _run(self, monkeypatch, artist_sid=None, vote="VOTE", methode="vote", **opts):
         rt = _runtime([])
         artist = _artist(rt)
         artist.spotify_id = artist_sid
-        monkeypatch.setattr("src.utils.update_kworb._vote_artist_spotify_id", lambda a, dm: vote)
+
+        def _vote(a, dm, detail=None):
+            (detail if detail is not None else {}).update(methode=methode, voix=4, total=5)
+            return vote
+
+        monkeypatch.setattr("src.utils.update_kworb._vote_artist_spotify_id", _vote)
         etat = identite._artiste_spotify(rt, artist, identite.OptionsIdentite(**opts), Hooks())
         return etat, rt.data_manager.spotify_artiste
 
@@ -248,7 +253,12 @@ class TestArtisteSpotify:
 
     def test_vote(self, monkeypatch):
         etat, ecrits = self._run(monkeypatch)
-        assert "VOTE" in etat and ecrits == ["VOTE"]
+        assert etat == "votée (VOTE, 4/5 voix)" and ecrits == ["VOTE"]
+
+    def test_le_repli_par_nom_est_dit(self, monkeypatch):
+        """Faute de voix, le vote cherche par NOM (homonymes) : le bilan le dit."""
+        etat, ecrits = self._run(monkeypatch, methode="nom")
+        assert "cherchée par NOM" in etat and "à vérifier" in etat and ecrits == ["VOTE"]
 
 
 class TestRattrapageDiscogs:

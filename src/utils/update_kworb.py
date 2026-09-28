@@ -84,7 +84,9 @@ def _names_match(page_name: str | None, artist_name: str) -> bool:
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
 
 
-def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | None:
+def _vote_artist_spotify_id(
+    artist, data_manager, max_pages: int = 5, *, detail: dict | None = None
+) -> str | None:
     """
     Déduit l'ID Spotify de l'ARTISTE par vote majoritaire sur les crédits de
     plusieurs de ses morceaux (pages embed). Doubles garde-fous anti-Limsa
@@ -93,7 +95,12 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | N
       · vote NAME-AWARE : seul l'artiste crédité portant le bon nom vote —
         un morceau dont aucun crédité ne matche s'abstient.
     Secours : recherche par nom si pas assez de morceaux propres avec spotify_id.
+
+    `detail` (optionnel) reçoit COMMENT l'ID a été obtenu — `methode` = « vote »
+    (avec `voix`/`total`) ou « nom » (recherche par nom, homonymes possibles) :
+    un bilan qui ne le dit pas présente un repli fragile comme un vote.
     """
+    detail = detail if detail is not None else {}
     from collections import Counter
 
     try:
@@ -124,9 +131,11 @@ def _vote_artist_spotify_id(artist, data_manager, max_pages: int = 5) -> str | N
                 total = sum(votes.values())
                 if (count >= 2 and count > total / 2) or total == 1:
                     logger.info(f"🗳️ ID artiste Spotify: {best} ({count}/{total} voix, non-feats)")
+                    detail.update(methode="vote", voix=count, total=total)
                     return best
                 logger.warning(f"🗳️ Vote ID artiste non concluant: {dict(votes)}")
             # Secours : recherche par nom (ambiguïté possible)
+            detail.update(methode="nom", voix=0, total=sum(votes.values()))
             return scraper.get_artist_spotify_id(artist.name)
     except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
         logger.error(f"Vote ID artiste Spotify échoué: {e}")

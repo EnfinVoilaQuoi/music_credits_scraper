@@ -391,8 +391,9 @@ def _artiste_spotify(runtime, artist, options: OptionsIdentite, hooks: Hooks) ->
     hooks.progress(0, 1, "Artiste", "Spotify")
     from src.utils.update_kworb import _vote_artist_spotify_id
 
+    comment: dict = {}
     try:
-        vote = _vote_artist_spotify_id(artist, dm)
+        vote = _vote_artist_spotify_id(artist, dm, detail=comment)
     except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
         logger.exception("Identité (artiste Spotify) : échec")
         return f"panne — {e}"
@@ -403,8 +404,10 @@ def _artiste_spotify(runtime, artist, options: OptionsIdentite, hooks: Hooks) ->
         return f"mémorisée ({artist.spotify_id}) — le vote rend {vote}, non appliqué"
     dm.update_artist_spotify_id(artist.id, vote)
     artist.spotify_id = vote
-    # Le vote se replie sur une recherche par NOM quand les voix manquent : dit.
-    return f"votée ou cherchée par nom ({vote})"
+    if comment.get("methode") == "vote":
+        return f"votée ({vote}, {comment['voix']}/{comment['total']} voix)"
+    # Repli sur une recherche par NOM (voix insuffisantes) : homonymes possibles.
+    return f"cherchée par NOM, faute de voix ({vote}) — à vérifier"
 
 
 def _nature_des_disques(runtime, artist, options, bilan: BilanIdentite, hits_albums) -> None:

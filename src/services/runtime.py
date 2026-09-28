@@ -115,6 +115,14 @@ class Manque(StrEnum):
     TIMESTAMPS = "timestamps"
     AUDIO = "audio"
     STREAMS = "streams"
+    #: Étape Identité. Deezer n'a pas de date de constat : une fiche hors
+    #: plateformes est redemandée à chaque passage (une requête — limite DITE).
+    IDENTITE_DEEZER = "identite_deezer"
+    #: Sans ID ET jamais tranchée : un « pas sur Spotify » DATÉ est un verdict,
+    #: pas un manque (e17, fiabilisé le 2026-09-28 : plus daté sur une panne).
+    IDENTITE_SPOTIFY = "identite_spotify"
+    #: Forçage : sans ID, verdict daté ou non (on redemande, on ne remplace pas).
+    IDENTITE_SPOTIFY_FORCE = "identite_spotify_force"
 
 
 def est_manquant(track: Track, kind: Manque) -> bool:
@@ -131,6 +139,12 @@ def est_manquant(track: Track, kind: Manque) -> bool:
         return track.audio.bpm is None or track.audio.key is None
     if kind is Manque.STREAMS:
         return track.streams.spotify_streams is None or track.streams.ytm_streams is None
+    if kind is Manque.IDENTITE_DEEZER:
+        return not track.deezer_id
+    if kind is Manque.IDENTITE_SPOTIFY:
+        return not track.spotify_id and not track.spotify_id_checked_at
+    if kind is Manque.IDENTITE_SPOTIFY_FORCE:
+        return not track.spotify_id
     raise ValueError(kind)
 
 

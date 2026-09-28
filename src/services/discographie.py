@@ -517,56 +517,14 @@ def _completer_par_deezer(runtime, artist, options, hooks, bilan) -> None:
     d'identité a besoin des albums en base). Le run reste complet pour Genius
     quoi qu'il arrive ici : un homonyme n'est jamais pris d'office, une source
     secondaire ne bloque pas le flux."""
-    from src.services import deezer_identite, ecarts_deezer
+    # Le corps vit dans l'étape Identité (`identite.catalogue_deezer`) : une
+    # fonction, deux appelants le temps que cette fin de run soit retirée. Ici
+    # une panne reste DITE sans rendre le run Genius incomplet.
+    from src.services import identite
 
-    enricher = runtime.data_enricher
-    if enricher is None or getattr(enricher, "deezer_client", None) is None:
-        bilan.deezer_motif = "client Deezer indisponible"
-        return
-    try:
-        from src.concurrency import async_loop
-
-        deezer_id = async_loop.run_sync(
-            deezer_identite.resoudre_async(
-                enricher.deezer_client,
-                enricher.http,
-                runtime.data_manager,
-                artist,
-                force_id=options.deezer_id,
-            )
-        )
-    except deezer_identite.ArtisteDeezerAmbigu as e:
-        bilan.deezer_motif = "artiste Deezer ambigu — à choisir dans la fenêtre « Écarts Deezer »"
-        bilan.ecarts_deezer = ecarts_deezer.BilanEcarts(complete=False, motif=bilan.deezer_motif)
-        bilan.ecarts_deezer.ambigu = e.candidats
-        hooks.confirmer_ecarts(bilan.ecarts_deezer)
-        return
-    except Exception as e:  # noqa: BLE001 — source secondaire : dit, jamais bloquant
-        logger.exception("Identité Deezer impossible")
-        bilan.deezer_motif = f"Deezer injoignable ({e})"
-        return
-    try:
-        bilan.ecarts_deezer = ecarts_deezer.detecter(
-            runtime,
-            artist,
-            deezer_id=deezer_id,
-            should_stop=hooks.should_stop,
-            genius_api=runtime.genius_api,
-        )
-    except Exception as e:  # noqa: BLE001 — idem
-        logger.exception("Détection des écarts Deezer échouée")
-        bilan.deezer_motif = f"Deezer : {e}"
-        return
-    # Les liens PROUVÉS s'écrivent ici, sans confirmation (décision 2026-09-22).
-    # Jusqu'au 2026-09-28 seule la fenêtre « Écarts Deezer » les écrivait : depuis
-    # qu'elle ne s'ouvre plus en fin de run (86a4e6c) et que la nature `link` n'est
-    # pas un signalement, ils étaient calculés puis PERDUS à chaque run.
-    ecarts_deezer.rattacher_liens_confirmes(
-        runtime.data_manager, artist, bilan.ecarts_deezer, should_stop=hooks.should_stop
-    )
-    ecarts_deezer.enregistrer_signalements(runtime.data_manager, artist, bilan.ecarts_deezer)
-    if bilan.ecarts_deezer.ecarts:
-        hooks.confirmer_ecarts(bilan.ecarts_deezer)
+    res = identite.catalogue_deezer(runtime, artist, hooks, force_id=options.deezer_id)
+    bilan.ecarts_deezer = res.ecarts
+    bilan.deezer_motif = res.motif
 
 
 def resume(bilan: BilanDisco, artist: Artist) -> str:

@@ -70,6 +70,8 @@ class Flow(StrEnum):
     """
 
     DISCO = "disco"
+    #: Étape Identité (2026-09-28) : relier les fiches aux plateformes.
+    IDENTITY = "identite"
     ENRICHMENT = "enrichment"
     STREAMS = "streams"
     CERTS = "certs"

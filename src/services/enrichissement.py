@@ -33,6 +33,12 @@ class OptionsEnrich:
     #: arbitrer dans « Groupes ». Champ dédié, pas un nom dans `sources` :
     #: celles-ci sont des PROVIDERS par morceau, gardés par `apis_available`.
     musicbrainz: bool = True
+    #: Nature des disques en fin de run (quand Deezer est une source du run).
+    types_albums: bool = True
+    #: Ajouter `spotify_id` aux sources (cf. docstring). L'étape Identité passe
+    #: `False` pour son passage Deezer SEUL, qui doit précéder le jugement des
+    #: IDs Spotify — sans source ReccoBeats, aucun second scrape n'est à craindre.
+    forcer_spotify_id: bool = True
 
 
 @dataclass
@@ -56,7 +62,7 @@ def sources_effectives(runtime: Runtime, options: OptionsEnrich) -> list[str]:
         if options.sources
         else list(runtime.data_enricher.get_available_sources())
     )
-    if "spotify_id" not in sources:
+    if "spotify_id" not in sources and options.forcer_spotify_id:
         sources.append("spotify_id")
     return sources
 
@@ -139,7 +145,7 @@ async def run_async(
             # allée au bout : la nature des disques (une fiche Deezer par
             # album, à partir des hits vus ce run) et l'identité (alias
             # proposés, oracle d'identité sur les albums en base).
-            if "deezer" in sources and enricher.deezer_client is not None:
+            if options.types_albums and "deezer" in sources and enricher.deezer_client is not None:
                 await _types_albums_deezer(runtime, artist, options, bilan, hooks)
             if options.musicbrainz:
                 await _propositions_identite(runtime, artist, bilan, hooks)
@@ -185,48 +191,24 @@ async def _propositions_identite(
     """Formations ET alias PROPOSÉS (jamais confirmés) par MusicBrainz + Discogs,
     sur le fil sync du run (les deux clients sont bloquants). Une saturation
     MusicBrainz est une PANNE, pas « pas d'alias »."""
-    from src.utils.formations import chercher_formations, liens_a_proposer
+    # Le corps vit dans l'étape Identité (une fonction, deux appelants le temps
+    # que cette fin de run soit retirée) ; ici sur le fil sync du run.
+    from src.services.identite import proposer_formations
 
-    enricher, dm = runtime.data_enricher, runtime.data_manager
     hooks.progress(0, 1, "Identité", "MusicBrainz")
     try:
-        rapport = await enricher.sync_runner.run(chercher_formations, artist, dm)
-        if rapport.panne_mb:
-            raise RuntimeError(rapport.panne_mb)
-        proposes, infos = liens_a_proposer(rapport, artist.name)
-        formations = [r for r in proposes if r.kind != "alias"]
-        alias = [r for r in proposes if r.kind == "alias"]
-        bilan.formations_proposees = await asyncio.to_thread(
-            dm.propose_artist_relations, artist.id, formations
-        )
-        bilan.alias_proposes = await asyncio.to_thread(
-            dm.propose_artist_relations, artist.id, alias
-        )
-        bilan.alias_infos = await asyncio.to_thread(
-            dm.propose_artist_relations, artist.id, infos, "info"
-        )
+        res = await runtime.data_enricher.sync_runner.run(proposer_formations, runtime, artist)
     except Exception as exc:  # dernier ressort : le run doit se DIRE incomplet
         logger.exception("Identité (MusicBrainz) : échec")
         bilan.erreurs.append(f"MusicBrainz (identité) : {exc}")
         bilan.complete = False
         bilan.identite = f"MusicBrainz en panne : {exc}"
         return
-    if rapport.mbid:
-        bilan.identite = f"MusicBrainz : {rapport.identite_mb or rapport.mbid}"
-    else:
-        bilan.identite = "MusicBrainz : artiste non résolu (rien proposé)"
-    identite_discogs = rapport.identite_discogs
-    if identite_discogs is not None and identite_discogs.origine != "inconnu":
-        libelles = {
-            "forcee": "forcée",
-            "memorisee": "mémorisée",
-            "disques": f"par les disques ({identite_discogs.detail})",
-            "annuaire": f"provisoire, annuaire ({identite_discogs.detail})",
-            "ambigu": f"ambiguë ({identite_discogs.detail})",
-        }
-        bilan.identite_discogs = (
-            f"Discogs : {libelles.get(identite_discogs.origine, identite_discogs.origine)}"
-        )
+    bilan.formations_proposees = res.formations
+    bilan.alias_proposes = res.alias
+    bilan.alias_infos = res.infos
+    bilan.identite = res.identite_mb
+    bilan.identite_discogs = res.identite_discogs
 
 
 def run(

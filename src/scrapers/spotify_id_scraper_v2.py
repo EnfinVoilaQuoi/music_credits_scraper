@@ -277,7 +277,12 @@ class SpotifyIDScraper:
         # L'observation s'ouvre APRÈS le cache : un morceau servi de mémoire ne
         # sollicite pas la source et ne doit pas peser dans ses compteurs.
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            return self._get_spotify_id_body(obs, artist, title, cache_key)
+            sid = self._get_spotify_id_body(obs, artist, title, cache_key)
+        if sid is None:
+            # `None` = absence CONSTATÉE seulement si Spotify a répondu ; sinon
+            # `SansReponse`, que l'appelant ne doit pas dater (2026-09-28).
+            source_usage.exiger_reponse(obs)
+        return sid
 
     def _get_spotify_id_body(self, obs, artist: str, title: str, cache_key: str) -> str | None:
         """Corps de `get_spotify_id`, sous l'observation ouverte par elle."""
@@ -299,6 +304,7 @@ class SpotifyIDScraper:
 
         found_tracks = []
         had_errors = False
+        timeouts = 0
 
         for query_idx, query in enumerate(search_queries):
             logger.info(f"📝 Essai {query_idx + 1}/{len(search_queries)}: '{query}'")
@@ -312,6 +318,7 @@ class SpotifyIDScraper:
                     self.page.wait_for_selector("a[href*='/track/']", timeout=self._timeout)
                 except PlaywrightTimeoutError:
                     logger.warning(f"⏰ Timeout pour: {query}")
+                    timeouts += 1
                     continue
 
                 track_selectors = [
@@ -362,64 +369,81 @@ class SpotifyIDScraper:
                         break
                 continue
 
-        if found_tracks:
-            found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
-            best = found_tracks[0]
+        if not found_tracks:
+            return self._rien_trouve(obs, title, had_errors, timeouts)
+        found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
+        llm_choice = None
+        if self._arbitrage_llm_utile(found_tracks):
+            llm_choice = self._select_track_with_llm(artist, title, found_tracks)
+        return self._retenir(obs, title, cache_key, found_tracks[0], llm_choice)
 
-            # Fallback LLM : si le choix heuristique est ambigu, demander au LLM
-            if len(found_tracks) > 1 and best["relevance"] < 0.8:
-                llm_choice = self._select_track_with_llm(artist, title, found_tracks)
-                # Le choix du LLM franchit le plancher LUI AUSSI. Sans cette
-                # condition il réintroduirait par la bande ce que le seuil vient
-                # d'écarter — il choisit un INDEX parmi les candidats présentés,
-                # y compris les mauvais.
-                if llm_choice is not None and llm_choice["relevance"] >= _MIN_RELEVANCE:
-                    best = llm_choice
-                    logger.info(f"🤖 SpotifyID LLM: choix affiné → {best['id']}")
+    # ── Fin de recherche : PARTAGÉE par les jumeaux sync et async ────────────
+    # (2026-09-28 : le jumeau async, celui que l'app emprunte, n'avait ni le
+    # plancher de pertinence ni le filtre du choix LLM — posés sur la seule
+    # voie sync par c0fbd50. La logique ne vit plus qu'ici.)
 
-            # PLANCHER de pertinence. La recherche Spotify rend TOUJOURS quelque
-            # chose — titres voisins, recommandations — donc `found_tracks` n'est
-            # jamais vide et, sans plancher, un identifiant était toujours
-            # produit : littéralement `found_tracks[0]`, même à 0,0. Mesuré le
-            # 2026-09-09 sur 36 requêtes réelles : **36 identifiants rendus, 19
-            # faux** (53 %), et 16 des 17 sous 0,60 étaient tous faux.
-            #
-            # Refuser est un BON résultat : « pas sur Spotify » est un verdict
-            # légitime (freestyles, Booska, lives, inédits), et
-            # `spotify_id_checked_at` (e17) le date pour qu'on ne cherche pas en
-            # boucle. Le garde-fou de justesse (`spotify_identity`) reste la
-            # dernière ligne ; ce plancher lui épargne le travail et surtout
-            # empêche le cache de se remplir de faux.
-            if best["relevance"] < _MIN_RELEVANCE:
-                logger.warning(
-                    f"❌ Meilleur candidat trop peu pertinent pour '{title}' : "
-                    f"{best['id']} à {best['relevance']:.2f} < {_MIN_RELEVANCE:.2f} — "
-                    f"aucun identifiant retenu"
-                )
-                obs.absent(f"aucun candidat pertinent pour '{title}'")
-                self.cache[cache_key] = "not_found"
-                self._save_cache()
-                return None
+    @staticmethod
+    def _arbitrage_llm_utile(found_tracks: list) -> bool:
+        """Choix heuristique ambigu (candidats TRIÉS) : on demande au LLM."""
+        return len(found_tracks) > 1 and found_tracks[0]["relevance"] < 0.8
 
-            sid = best["id"]
-            logger.info(f"✅ SÉLECTIONNÉ: {sid} (relevance: {best['relevance']:.2f})")
-            self.cache[cache_key] = sid
+    def _retenir(self, obs, title: str, cache_key: str, best: dict, llm_choice) -> str | None:
+        """Le candidat retenu, ou un refus MOTIVÉ (absence constatée)."""
+        # Le choix du LLM franchit le plancher LUI AUSSI. Sans cette condition il
+        # réintroduirait par la bande ce que le seuil vient d'écarter — il choisit
+        # un INDEX parmi les candidats présentés, y compris les mauvais.
+        if llm_choice is not None and llm_choice["relevance"] >= _MIN_RELEVANCE:
+            best = llm_choice
+            logger.info(f"🤖 SpotifyID LLM: choix affiné → {best['id']}")
+        # PLANCHER de pertinence. La recherche Spotify rend TOUJOURS quelque
+        # chose — titres voisins, recommandations — donc `found_tracks` n'est
+        # jamais vide et, sans plancher, un identifiant était toujours produit :
+        # littéralement `found_tracks[0]`, même à 0,0. Mesuré le 2026-09-09 sur
+        # 36 requêtes réelles : **36 identifiants rendus, 19 faux** (53 %), et 16
+        # des 17 sous 0,60 étaient tous faux.
+        #
+        # Refuser est un BON résultat : « pas sur Spotify » est un verdict
+        # légitime (freestyles, Booska, lives, inédits), et
+        # `spotify_id_checked_at` (e17) le date pour qu'on ne cherche pas en
+        # boucle. Le garde-fou de justesse (`spotify_identity`) reste la dernière
+        # ligne ; ce plancher lui épargne le travail et surtout empêche le cache
+        # de se remplir de faux.
+        if best["relevance"] < _MIN_RELEVANCE:
+            logger.warning(
+                f"❌ Meilleur candidat trop peu pertinent pour '{title}' : "
+                f"{best['id']} à {best['relevance']:.2f} < {_MIN_RELEVANCE:.2f} — "
+                f"aucun identifiant retenu"
+            )
+            obs.absent(f"aucun candidat pertinent pour '{title}'")
+            self.cache[cache_key] = "not_found"
             self._save_cache()
-            obs.ok()
-            return sid
-        else:
-            logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
-            # `had_errors` distingue déjà les deux cas que le comptage doit
-            # séparer : rien au catalogue (absence) VS la recherche a cassé.
-            if had_errors:
-                obs.fail(IssueKind.UNREACHABLE, "recherche interrompue par des erreurs techniques")
-            else:
-                obs.absent(f"aucun ID Spotify pour '{title}'")
-            # Ne pas cacher l'échec si des erreurs techniques ont eu lieu
-            if not had_errors:
-                self.cache[cache_key] = "not_found"
-                self._save_cache()
             return None
+
+        sid = best["id"]
+        logger.info(f"✅ SÉLECTIONNÉ: {sid} (relevance: {best['relevance']:.2f})")
+        self.cache[cache_key] = sid
+        self._save_cache()
+        obs.ok()
+        return sid
+
+    @staticmethod
+    def _rien_trouve(obs, title: str, had_errors: bool, timeouts: int) -> None:
+        """Aucun candidat lu : ce n'est JAMAIS une absence constatée.
+
+        La recherche Spotify rend toujours des titres voisins (cf. plancher) :
+        une page SANS aucun lien de piste n'a pas été rendue — erreurs, délai
+        dépassé, ou sélecteurs cassés. Le dire en « absent » faisait dater un
+        faux « pas sur Spotify » (`spotify_id_checked_at`) sur une panne ; rien
+        n'est mis en cache non plus (2026-09-28).
+        """
+        logger.warning(f"❌ Aucun candidat Spotify lu pour '{title}'")
+        if had_errors:
+            obs.fail(IssueKind.UNREACHABLE, "recherche interrompue par des erreurs techniques")
+        elif timeouts:
+            obs.fail(IssueKind.TIMEOUT, f"aucune page de résultats rendue ({timeouts} délai(s))")
+        else:
+            obs.fail(IssueKind.PARSE, "pages rendues sans lien de piste lisible")
+        return None
 
     def _select_track_with_llm(self, artist: str, title: str, found_tracks: list) -> dict | None:
         """

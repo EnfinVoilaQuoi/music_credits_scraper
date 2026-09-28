@@ -1969,6 +1969,31 @@ class TrackRepository:
             logger.error(f"Erreur lever_constat_instrumental({track_id}): {e}")
             return False
 
+    def oublier_constat_spotify(self, track_id: int) -> bool:
+        """Remet à « jamais cherché » un « pas sur Spotify » daté sur une PANNE
+        (2026-09-28 : le provider datait `spotify_id_checked_at` même quand la
+        recherche n'avait rien pu lire). Seulement sans ID — un ID en place est
+        un constat, pas un manque ; sœurs comprises, la colonne étant partagée
+        (sinon la synchronisation la recopierait au prochain enregistrement)."""
+        try:
+            with self.engine.begin() as conn:
+
+                def oublier(tid: int) -> None:
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET spotify_id_checked_at = NULL, updated_at = :now "
+                            "WHERE id = :id AND (spotify_id IS NULL OR spotify_id = '')"
+                        ),
+                        {"id": tid, "now": datetime.now()},
+                    )
+
+                oublier(track_id)
+                effacer_chez_les_soeurs(conn, track_id, oublier)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur oublier_constat_spotify({track_id}): {e}")
+            return False
+
     def retirer_mesures_source(
         self, track_id: int, source: str, champs=("bpm", "key", "mode")
     ) -> int:

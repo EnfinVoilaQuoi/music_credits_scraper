@@ -758,6 +758,11 @@ class GeniusAPI:
         except (requests.RequestException, ValueError) as e:
             logger.warning(f"Album du morceau Genius #{song_id} illisible : {e}")
             return None
+        if not song:
+            # 200 sans fiche : réponse illisible, pas « morceau sans album » — `{}`
+            # serait mémorisé 180 jours par `tracklists_genius` (2026-09-28).
+            logger.warning(f"Album du morceau Genius #{song_id} : réponse sans fiche")
+            return None
         album = song.get("album")
         if not isinstance(album, dict) or not album.get("id"):
             return {}

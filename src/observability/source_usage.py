@@ -28,7 +28,9 @@ from datetime import datetime
 
 from src.observability.issues import (
     DEFAULT_ABSENT_STATUSES,
+    SANS_REPONSE,
     IssueKind,
+    SansReponse,
     classify,
     classify_status,
     worst,
@@ -113,6 +115,8 @@ class Observation:
         self._declared: IssueKind | None = None
         self._detail = ""
         self._started = time.monotonic()
+        #: Le verdict ÉMIS à la sortie d'`observe()` — relu par `exiger_reponse`.
+        self.verdict: Verdict | None = None
 
     # ── Déclarations explicites du corps métier ────────────────────────────────
     def ok(self, detail: str = "") -> None:
@@ -331,10 +335,12 @@ def observe(
     try:
         yield obs
     except BaseException as exc:
-        _emit(obs.resolve(exc))
+        obs.verdict = obs.resolve(exc)
+        _emit(obs.verdict)
         raise
     else:
-        _emit(obs.resolve())
+        obs.verdict = obs.resolve()
+        _emit(obs.verdict)
     finally:
         with _lock:
             stack = _carriers.get(carrier)
@@ -428,6 +434,27 @@ def attempt(source_key: str, *, detail: str = ""):
     record_attempt(
         source_key, IssueKind.OK, detail=detail, latency_ms=int((time.monotonic() - start) * 1000)
     )
+
+
+def exiger_reponse(obs: Observation) -> None:
+    """Après un « rien trouvé » : lève `SansReponse` si la source n'a pas RÉPONDU.
+
+    S'appelle APRÈS la sortie du `with observe(...)` qui a produit `obs`, pour
+    que le verdict soit déjà émis (une exception levée dedans serait reclassée et
+    compterait deux fois). Imbriquée dans une observation externe de la même
+    source (réentrance), l'observation n'est pas encore résolue : son verdict
+    PROVISOIRE est calculé sans être émis — le verdict externe reste l'unique.
+    """
+    verdict = obs.verdict or obs.resolve()
+    if verdict.issue in SANS_REPONSE:
+        raise SansReponse(verdict.source_key, verdict.issue, verdict.detail)
+
+
+def a_repondu(obs: Observation) -> bool:
+    """La source a-t-elle RÉPONDU ? À consulter DANS le `with observe(...)`, avant
+    de mémoriser une absence (cache négatif, date de constat) : un « rien » rendu
+    sur une panne ne se mémorise pas. Verdict provisoire, jamais émis."""
+    return (obs.verdict or obs.resolve()).issue not in SANS_REPONSE
 
 
 def note_failure(source_key: str | None, exc: BaseException, *, detail: str = "") -> None:

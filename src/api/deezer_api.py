@@ -15,6 +15,7 @@ import httpx
 import requests
 
 from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.utils.deezer_identity import choisir_hit
 from src.utils.logger import get_logger
 
@@ -29,6 +30,15 @@ logger = get_logger(__name__)
 
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "deezer"
+
+#: Codes d'erreur de l'ENVELOPPE JSON (`docs/api/deezer-api.md` § Codes
+#: d'erreur) → verdict. 800 (DATA_NOT_FOUND) est une vraie absence : aucune
+#: tentative en échec. Code inconnu ⇒ PARSE (notre requête ou l'API a bougé).
+_KIND_ERREUR_DEEZER: dict[int, IssueKind | None] = {
+    4: IssueKind.THROTTLED,  # QUOTA
+    700: IssueKind.UNREACHABLE,  # SERVICE_BUSY
+    800: None,  # DATA_NOT_FOUND
+}
 
 
 class DeezerAPI:
@@ -73,6 +83,11 @@ class DeezerAPI:
             error_type = data["error"].get("type", "Unknown")
             error_message = data["error"].get("message", "Unknown error")
             logger.error(f"Erreur API Deezer: {error_type} - {error_message}")
+            # L'API porte son statut dans l'ENVELOPPE, en HTTP 200 : sans cette
+            # tentative, un quota dépassé passait pour « aucun hit » (absent).
+            kind = _KIND_ERREUR_DEEZER.get(data["error"].get("code"), IssueKind.PARSE)
+            if kind is not None:
+                source_usage.record_attempt(_SOURCE, kind, detail=f"{error_type} - {error_message}")
             return None
         return data
 
@@ -581,9 +596,10 @@ class DeezerAPI:
             )
             if track_data is None:
                 obs.absent("aucun hit concordant")
-            return self._build_enrichment_result(
-                track_data, previous_duration, scraped_release_date
-            )
+        if track_data is None:
+            # « Aucun hit » n'est une absence que si Deezer a RÉPONDU.
+            source_usage.exiger_reponse(obs)
+        return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
 
     async def enrich_track_async(
         self,
@@ -605,9 +621,9 @@ class DeezerAPI:
             )
             if track_data is None:
                 obs.absent("aucun hit concordant")
-            return self._build_enrichment_result(
-                track_data, previous_duration, scraped_release_date
-            )
+        if track_data is None:
+            source_usage.exiger_reponse(obs)
+        return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
 
     def _build_enrichment_result(
         self,

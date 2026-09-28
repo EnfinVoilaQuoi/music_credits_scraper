@@ -60,6 +60,28 @@ STRUCTURAL = frozenset({IssueKind.AUTH, IssueKind.PARSE, IssueKind.CRASH})
 FAILURES = TRANSIENT | STRUCTURAL
 #: Verdicts comptés dans le dénominateur (un appel a bien eu lieu).
 COUNTED = BENIGN | FAILURES
+#: Verdicts où la source n'a PAS répondu à la question : un « rien trouvé » rendu
+#: sous l'un d'eux ne vaut pas constat d'absence. `indeterminate` en fait partie —
+#: sans signal on ne conclut pas, et encore moins on ne date un constat.
+SANS_REPONSE = FAILURES | {IssueKind.INDETERMINATE}
+
+
+class SansReponse(Exception):
+    """La source n'a pas répondu : ni « trouvé », ni « absent » (2026-09-28).
+
+    Un client qui rend `None` sur une panne comme sur une absence fait perdre la
+    distinction à l'appelant, qui DATE alors un faux constat (« pas sur
+    Spotify » posé sur un navigateur mort). Levée APRÈS la sortie d'`observe()`
+    (`source_usage.exiger_reponse`), elle porte le verdict déjà émis : aucun
+    second verdict, aucune reclassification.
+    """
+
+    def __init__(self, source: str, kind: IssueKind, detail: str = "") -> None:
+        super().__init__(f"{source} sans réponse ({kind}) {detail}".strip())
+        self.source = source
+        self.kind = kind
+        self.detail = detail
+
 
 #: Du plus grave au plus bénin — arbitre le « pire » entre plusieurs tentatives.
 SEVERITY_ORDER: tuple[IssueKind, ...] = (
@@ -139,6 +161,10 @@ def classify_exception(
     exc: BaseException, *, absent_statuses: tuple[int, ...] = DEFAULT_ABSENT_STATUSES
 ) -> IssueKind:
     """Verdict déduit d'une exception, quelle que soit sa bibliothèque d'origine."""
+    if isinstance(exc, SansReponse):
+        # Notre propre constat, déjà qualifié : le reclasser en CRASH (classe
+        # inconnue) ferait d'un 429 un process cassé dans l'observation externe.
+        return exc.kind
     roots = _class_roots(exc)
     names = _class_names(exc)
 

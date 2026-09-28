@@ -137,7 +137,10 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
         # L'observation s'ouvre APRÈS le cache : un morceau servi de mémoire ne
         # sollicite pas la source et ne doit pas peser dans ses compteurs.
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            return await self._get_spotify_id_async_body(obs, artist, title, cache_key)
+            sid = await self._get_spotify_id_async_body(obs, artist, title, cache_key)
+        if sid is None:
+            source_usage.exiger_reponse(obs)
+        return sid
 
     async def _get_spotify_id_async_body(
         self, obs, artist: str, title: str, cache_key: str
@@ -161,6 +164,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
 
         found_tracks = []
         had_errors = False
+        timeouts = 0
 
         for query_idx, query in enumerate(search_queries):
             logger.info(f"📝 Essai {query_idx + 1}/{len(search_queries)}: '{query}'")
@@ -174,6 +178,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
                     await self.page.wait_for_selector("a[href*='/track/']", timeout=self._timeout)
                 except PlaywrightTimeoutError:
                     logger.warning(f"⏰ Timeout pour: {query}")
+                    timeouts += 1
                     continue
 
                 track_selectors = [
@@ -224,38 +229,18 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
                         break
                 continue
 
-        if found_tracks:
-            found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
-            best = found_tracks[0]
-
-            # Fallback LLM (Ollama bloquant → hors boucle) si choix ambigu
-            if len(found_tracks) > 1 and best["relevance"] < 0.8:
-                llm_choice = await asyncio.to_thread(
-                    self._select_track_with_llm, artist, title, found_tracks
-                )
-                if llm_choice is not None:
-                    best = llm_choice
-                    logger.info(f"🤖 SpotifyID LLM: choix affiné → {best['id']}")
-
-            sid = best["id"]
-            logger.info(f"✅ SÉLECTIONNÉ: {sid} (relevance: {best['relevance']:.2f})")
-            self.cache[cache_key] = sid
-            self._save_cache()
-            obs.ok()
-            return sid
-        else:
-            logger.warning(f"❌ Aucun ID Spotify trouvé pour '{title}'")
-            # `had_errors` distingue déjà les deux cas à séparer : rien au
-            # catalogue (absence) VS la recherche a cassé.
-            if had_errors:
-                obs.fail(IssueKind.UNREACHABLE, "recherche interrompue par des erreurs techniques")
-            else:
-                obs.absent(f"aucun ID Spotify pour '{title}'")
-            # Ne pas cacher l'échec si des erreurs techniques ont eu lieu
-            if not had_errors:
-                self.cache[cache_key] = "not_found"
-                self._save_cache()
-            return None
+        # Fin de recherche PARTAGÉE avec la voie sync (plancher de pertinence,
+        # filtre du choix LLM, « rien lu » ≠ absence) — seul le LLM, bloquant,
+        # passe ici par un thread.
+        if not found_tracks:
+            return self._rien_trouve(obs, title, had_errors, timeouts)
+        found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
+        llm_choice = None
+        if self._arbitrage_llm_utile(found_tracks):
+            llm_choice = await asyncio.to_thread(
+                self._select_track_with_llm, artist, title, found_tracks
+            )
+        return self._retenir(obs, title, cache_key, found_tracks[0], llm_choice)
 
     # ── Titre de page (miroir async) ────────────────────────────────────────
 

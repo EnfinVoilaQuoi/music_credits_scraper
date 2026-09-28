@@ -250,7 +250,7 @@ class ReccoBeatsIntegratedClient:
 
                 if not track_data:
                     obs.absent(f"Spotify ID {spotify_id} inconnu de ReccoBeats")
-                    self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
+                    self._cache_not_found(cache_key, f"Spotify ID {spotify_id}", obs)
                     return None
 
                 # Durée + audio features (BPM/Key/Mode...) via helper partagé
@@ -298,7 +298,7 @@ class ReccoBeatsIntegratedClient:
 
                 if not track_data:
                     obs.absent(f"Spotify ID {spotify_id} inconnu de ReccoBeats")
-                    self._cache_not_found(cache_key, f"Spotify ID {spotify_id}")
+                    self._cache_not_found(cache_key, f"Spotify ID {spotify_id}", obs)
                     return None
 
                 result = await self._enrich_result_with_features_async(
@@ -337,9 +337,14 @@ class ReccoBeatsIntegratedClient:
                     return cached
         return None
 
-    def _cache_not_found(self, cache_key: str, label: str) -> None:
-        """Mémorise un échec « not_found » (commun sync/async)."""
+    def _cache_not_found(self, cache_key: str, label: str, obs) -> None:
+        """Mémorise une ABSENCE « not_found » (commun sync/async) — seulement si
+        ReccoBeats a répondu : les clients rendent `None` sur une panne aussi,
+        qui était ainsi figée en absence pour tout le TTL (2026-09-28)."""
         logger.warning(f"❌ Aucune donnée ReccoBeats pour {label}")
+        if not source_usage.a_repondu(obs):
+            logger.warning("   ReccoBeats sans réponse : absence NON mémorisée")
+            return
         self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
         self._save_cache()
 
@@ -510,7 +515,7 @@ class ReccoBeatsIntegratedClient:
                 track_data = self.get_track_by_isrc(isrc)
                 if not track_data:
                     obs.absent(f"ISRC {isrc} inconnu de ReccoBeats")
-                    self._cache_not_found(cache_key, f"ISRC {isrc}")
+                    self._cache_not_found(cache_key, f"ISRC {isrc}", obs)
                     return None
 
                 result = self._enrich_result_with_features(
@@ -554,7 +559,7 @@ class ReccoBeatsIntegratedClient:
                 track_data = await self.get_track_by_isrc_async(http, isrc)
                 if not track_data:
                     obs.absent(f"ISRC {isrc} inconnu de ReccoBeats")
-                    self._cache_not_found(cache_key, f"ISRC {isrc}")
+                    self._cache_not_found(cache_key, f"ISRC {isrc}", obs)
                     return None
 
                 result = await self._enrich_result_with_features_async(

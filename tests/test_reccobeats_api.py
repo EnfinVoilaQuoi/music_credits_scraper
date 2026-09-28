@@ -183,9 +183,34 @@ class TestCache:
         """`_cached_spotify_info` ne sert QUE des données exploitables : une
         absence n'en est pas une. C'est `_not_found_is_fresh` qui la lit."""
         cle = client._get_cache_key("sp1")
-        client._cache_not_found(cle, "sp1")
+        client._cache_not_found(cle, "sp1", _repondu())
 
         assert client._cached_spotify_info(cle, "sp1", use_cache=True, force_refresh=False) is None
+
+
+def _repondu():
+    """Observation où ReccoBeats a RÉPONDU « inconnu » (200, contenu vide)."""
+    from src.observability import source_usage
+    from src.observability.issues import IssueKind
+
+    with source_usage.observe("reccobeats") as obs:
+        source_usage.record_attempt("reccobeats", IssueKind.OK)
+        obs.absent("inconnu")
+    return obs
+
+
+def test_une_panne_n_est_pas_memorisee_comme_absence(client):
+    """2026-09-28 : le client rend `None` sur une panne aussi ; figée en
+    « not_found », elle privait le morceau de ReccoBeats pendant tout le TTL."""
+    from src.observability import source_usage
+    from src.observability.issues import IssueKind
+
+    cle = client._get_cache_key("sp1")
+    with source_usage.observe("reccobeats") as obs:
+        source_usage.record_attempt("reccobeats", IssueKind.TIMEOUT)
+        obs.absent("rien")
+        client._cache_not_found(cle, "sp1", obs)
+    assert cle not in client.cache
 
 
 class TestPeremptionDuCacheNegatif:
@@ -196,7 +221,7 @@ class TestPeremptionDuCacheNegatif:
 
     def test_absence_fraiche_reconnue(self, client):
         cle = client._get_cache_key("sp1")
-        client._cache_not_found(cle, "sp1")
+        client._cache_not_found(cle, "sp1", _repondu())
 
         assert client._not_found_is_fresh(cle) is True
 

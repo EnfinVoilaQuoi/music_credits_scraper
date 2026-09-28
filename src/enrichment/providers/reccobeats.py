@@ -16,6 +16,7 @@ from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.enrichment.observation import Observation
 from src.models import Track
+from src.observability.issues import SansReponse
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import valider_identite, valider_identite_async
@@ -271,7 +272,8 @@ class ReccoBeatsProvider:
 
             return spotify_id
 
-        except PlaywrightError as e:
+        except (PlaywrightError, SansReponse) as e:
+            # Sans réponse : rien trouvé, rien daté — comme une erreur Playwright.
             logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
             return None
 
@@ -331,7 +333,8 @@ class ReccoBeatsProvider:
 
             return spotify_id
 
-        except PlaywrightError as e:
+        except (PlaywrightError, SansReponse) as e:
+            # Sans réponse : rien trouvé, rien daté — comme une erreur Playwright.
             logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
             return None
 

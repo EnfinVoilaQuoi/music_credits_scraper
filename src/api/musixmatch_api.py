@@ -630,9 +630,12 @@ class MusixmatchAPI:
                 return None  # les tentatives du transport font le verdict
             if not result or not result.get("lyrics_synced"):
                 # Musixmatch a répondu, sans synchro : une vraie absence, mémorisée.
-                self._noter_absence(track_name, artist_name)
                 if not result:
                     obs.absent("aucune parole synchronisée")
+                # … à condition d'avoir une RÉPONSE : un texte sans synchro en est
+                # une ; un vide rendu sur une tentative en échec ne se fige pas 30 j.
+                if result or source_usage.a_repondu(obs):
+                    self._noter_absence(track_name, artist_name)
             return result
 
     async def _try_fetch_async(

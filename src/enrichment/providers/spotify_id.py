@@ -13,6 +13,7 @@ from playwright.async_api import Error as PlaywrightError
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
+from src.observability.issues import SansReponse
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import valider_identite, valider_identite_async
 
@@ -112,8 +113,20 @@ class SpotifyIdProvider:
 
         # Utiliser le scraper Spotify_ID pour obtenir le bon ID
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
-        spotify_id = scraper.get_spotify_id(artist_name, track.title)
+        try:
+            spotify_id = scraper.get_spotify_id(artist_name, track.title)
+        except SansReponse as e:
+            return self._sans_reponse(track, e)
         return self._dater_et_valider(track, ctx, spotify_id, scraper.get_track_identity)
+
+    @staticmethod
+    def _sans_reponse(track: Track, e: SansReponse) -> None:
+        """Spotify n'a pas répondu : AUCUN constat daté (`spotify_id_checked_at`
+        reste tel quel) — « jamais cherché » reste vrai, la prochaine passe
+        recherchera. Dater ici faisait d'un navigateur mort un « pas sur
+        Spotify » permanent (2026-09-28). Partagé par les deux voies."""
+        logger.warning(f"⚠️ Spotify sans réponse pour '{track.title}' ({e.kind}) — rien daté")
+        return None
 
     @staticmethod
     def _dater_et_prevalider(
@@ -244,7 +257,10 @@ class SpotifyIdProvider:
         artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
 
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
-        spotify_id = await scraper.get_spotify_id_async(artist_name, track.title)
+        try:
+            spotify_id = await scraper.get_spotify_id_async(artist_name, track.title)
+        except SansReponse as e:
+            return self._sans_reponse(track, e)
         return await self._dater_et_valider_async(
             track, ctx, spotify_id, scraper.get_track_identity_async
         )

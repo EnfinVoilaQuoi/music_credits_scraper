@@ -11,6 +11,7 @@ from src.enrichment.base import Capability
 from src.enrichment.context import EnrichmentContext
 from src.enrichment.observation import Observation
 from src.models import ReleaseObservation, Track
+from src.observability.issues import SansReponse
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 
@@ -81,6 +82,10 @@ class DeezerProvider:
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
+        except SansReponse as e:
+            # Deezer n'a pas répondu : ni absence constatée, ni écriture.
+            logger.warning(f"⚠️ Deezer: sans réponse pour '{track.title}' ({e.kind})")
+            return False
         except Exception:
             # Dernier ressort : DeezerAPI.enrich_track gère déjà le réseau/JSON ;
             # ce qui remonte est un bug d'_apply_result → trace complète, ÉCHEC.
@@ -111,6 +116,9 @@ class DeezerProvider:
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
+        except SansReponse as e:
+            logger.warning(f"⚠️ Deezer: sans réponse pour '{track.title}' ({e.kind})")
+            return False
         except Exception:
             # Dernier ressort : DeezerAPI.enrich_track gère déjà le réseau/JSON ;
             # ce qui remonte est un bug d'_apply_result → trace complète, ÉCHEC.

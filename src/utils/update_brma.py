@@ -291,10 +291,11 @@ class UltratopUpdater:
         """Journal du run dans `<output_dir>/logs/`, sur la RACINE (tout le run).
 
         Jusqu'au 2026-09-28 c'était un `logging.basicConfig(handlers=[FileHandler…])`
-        dans le constructeur : NO-OP dès que la racine a déjà un handler (toujours,
-        les imports en posent), mais le FileHandler était CONSTRUIT quand même —
-        fichier créé vide, ouvert, jamais fermé (225 logs vides sur 245, et un par
-        test qui instanciait l'updater, jusque dans le vrai `data/`)."""
+        dans le constructeur : NO-OP dès que la racine a déjà un handler (en test
+        et dans la plupart des lancements — 20 journaux sur 245 avaient un contenu),
+        mais le FileHandler était CONSTRUIT quand même : fichier créé vide, ouvert,
+        jamais fermé (225 vides, un par test qui instanciait l'updater, jusque dans
+        le vrai `data/`)."""
         log_dir = self.output_dir / "logs"
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / f"ultratop_update_{datetime.now():%Y%m%d_%H%M%S}.log"

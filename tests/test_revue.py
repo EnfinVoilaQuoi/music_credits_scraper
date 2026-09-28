@@ -338,12 +338,23 @@ def test_liens_proposes_au_niveau_artiste():
 
 
 def test_detecter_trie_par_impact():
+    # Deux PAIRES : un cas par paire (2026-09-28), porté par la fiche d'id le
+    # plus bas.
     a, b = _t("Pour de vrai", 1), _t("Pour de Vrai", 2)
-    a.streams.spotify_streams, b.streams.spotify_streams = 10, 1000
-    doublon = [d for d in revue.DETECTEURS if d.code == "doublon"]
-    cas = revue.detecter(_ctx(a, b), detecteurs=doublon, detecteurs_artiste=())
-    assert [c.track_id for c in cas] == [2, 1]
+    c, d = _t("Autre", 3), _t("AUTRE", 4)
+    a.streams.spotify_streams, c.streams.spotify_streams = 10, 1000
+    doublon = [x for x in revue.DETECTEURS if x.code == "doublon"]
+    cas = revue.detecter(_ctx(a, b, c, d), detecteurs=doublon, detecteurs_artiste=())
+    assert [x.track_id for x in cas] == [3, 1]
     assert revue.par_detecteur(cas) == {"doublon": 2}
+
+
+def test_un_doublon_ne_fait_qu_un_cas_et_deux_disques_distincts_aucun():
+    a, b = _t("Intro", 1, album="The College Dropout"), _t("Intro", 2, album="Graduation")
+    assert revue.doublon_de_titre(a, _ctx(a, b)) is None
+    c, d = _t("I CAN'T WAIT", 3, album="BULLY"), _t("I CAN'T WAIT", 4, album="BULLY - DELUXE")
+    ctx = _ctx(c, d)
+    assert revue.doublon_de_titre(c, ctx) is not None and revue.doublon_de_titre(d, ctx) is None
 
 
 def _booba_lunatic(data_manager):
@@ -423,9 +434,10 @@ def test_fenetre_se_construit(racine_tk):
     from src.gui.windows.a_trancher import ATrancherWindow
 
     a, b = _t("Pour de vrai", 1), _t("Pour de Vrai", 2)
+    c, d = _t("Autre", 3), _t("AUTRE", 4)
     artiste = Artist(name="A2H")
     artiste.id = 1
-    artiste.tracks = [a, b]
+    artiste.tracks = [a, b, c, d]
     tranches = []
     dm = SimpleNamespace(
         get_artist_observations=lambda _id: {},

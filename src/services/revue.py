@@ -49,6 +49,7 @@ from src.utils.concordance_paroles import (
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.duree_youtube import SOURCE_AUDIO
 from src.utils.spotify_identity import CHAMP_ID_PROPOSE
+from src.utils.title_matching import cle_album
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
@@ -732,10 +733,20 @@ def _index_doublons(disco) -> dict[tuple, list]:
     return index
 
 
+def _disques_distincts(a, b) -> bool:
+    """Deux fiches rangées sur deux disques DIFFÉRENTS (ni sans album, ni
+    éditions d'un même disque — « BULLY » / « BULLY - DELUXE ») : deux morceaux
+    au même titre, pas un doublon (« Intro » de College Dropout et de
+    Graduation, « OUTSIDE » de 2016 et de JACKBOYS 2 — relevé le 2026-09-28)."""
+    ca, cb = cle_album(a.album), cle_album(b.album)
+    return bool(ca and cb) and not (ca.startswith(cb) or cb.startswith(ca))
+
+
 def doublon_de_titre(track, ctx):
     """Deux fiches de l'artiste au même titre, à la casse et à la ponctuation
     près (Booba « 3G » / « 3 G ») : doublon à fusionner, ou deux morceaux
-    distincts à renommer."""
+    distincts à renommer. UN cas par groupe, porté par la fiche d'identifiant le
+    plus bas (une paire en faisait deux, 2026-09-28)."""
     if track.secondary_role:
         return None
     cle = (cle_doublon(track.title), _interprete(track))
@@ -744,7 +755,12 @@ def doublon_de_titre(track, ctx):
         for t in ctx.memo("doublons", lambda: _index_doublons(ctx.disco)).get(cle, [])
         if t is not track
         and not (t.genius_id and track.genius_id and t.genius_id == track.genius_id)
+        and not _disques_distincts(t, track)
     ]
+    if autres and any(
+        t.id is not None and track.id is not None and t.id < track.id for t in autres
+    ):
+        return None
     if cle[0] and autres:
         return (
             f"même titre que « {autres[0].title} »"

@@ -112,6 +112,15 @@ def _confidence_key(confidence: float | None) -> float:
 #: elle ne suit pas un identifiant venu d'ailleurs — mais elle est lue au texte
 #: d'une page (« 2:30 »), donc à la seconde affichée, ce qui la place derrière
 #: les deux sources qui donnent la valeur du fichier.
+#: Champs DÉCLARÉS, jamais arbitrés (2026-09-28, prérequis du lot B) : une
+#: source les rapporte pour qu'on puisse RECOUPER (panneau « À trancher »),
+#: aucune colonne ne les porte. `reconcile` les saute : sinon, dès qu'une
+#: seconde source en déclarait un, le repli générique le tranchait à l'échelle
+#: de fiabilité BPM — qui ne le concerne pas. Un champ entre ici, pas dans
+#: `DISCOGRAPHY_PRIORITIES`, tant que sa source n'est pas indépendante et ne
+#: porte pas sur le même enregistrement.
+CHAMPS_DECLARES: frozenset[str] = frozenset({"spotify_id_propose"})
+
 DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
     # Mesuré le 2026-09-22 : cet ordre était en partie DÉCLARATIF — `ytmusic`
     # et `spotify_web` n'avaient jamais écrit UNE observation (0 en base contre
@@ -556,6 +565,7 @@ def reconcile(
         LYRICS_SYNCED_FIELD,
         SPOTIFY_STREAMS_FIELD,
         *DISCOGRAPHY_PRIORITIES,
+        *CHAMPS_DECLARES,
     }
     for field, obs_list in by_field.items():
         if field in handled:

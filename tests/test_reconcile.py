@@ -483,3 +483,26 @@ class TestArbitrageStreamsSpotify:
         obs = [self._obs("kworb", 100), self._obs("spotify_web", 999)]
         res = reconcile(obs, streams_master="spotify_web")
         assert res["spotify_streams"].value == 999
+
+
+class TestChampsDeclares:
+    """Prérequis du lot B (2026-09-28) : un champ DÉCLARÉ se recoupe, il ne se
+    tranche pas — même avec deux sources, aucun verdict, aucun avertissement."""
+
+    def test_le_champ_propose_par_songbpm_en_fait_partie(self):
+        from src.enrichment.reconcile import CHAMPS_DECLARES
+        from src.utils.spotify_identity import CHAMP_ID_PROPOSE
+
+        assert CHAMP_ID_PROPOSE in CHAMPS_DECLARES
+
+    def test_jamais_arbitre(self, caplog):
+        from src.enrichment.observation import Observation
+        from src.enrichment.reconcile import reconcile
+
+        obs = [
+            Observation("spotify_id_propose", "A" * 22, "songbpm"),
+            Observation("spotify_id_propose", "B" * 22, "autre"),
+        ]
+        with caplog.at_level("WARNING"):
+            assert "spotify_id_propose" not in reconcile(obs)
+        assert not [r for r in caplog.records if "GÉNÉRIQUE" in r.getMessage()]

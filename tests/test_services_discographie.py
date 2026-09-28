@@ -338,6 +338,15 @@ class TestCompleterParDeezer:
             "src.services.ecarts_deezer.enregistrer_signalements",
             lambda *a, **k: appels.append("signalements"),
         )
+
+        def _rattacher(dm, artist, bilan, **kw):
+            appels.append("rattachement")
+            liens = [e for e in bilan.ecarts if e.nature == "link"]
+            bilan.ecarts = [e for e in bilan.ecarts if e.nature != "link"]
+            bilan.rattachements_auto += len(liens)
+            return len(liens)
+
+        monkeypatch.setattr("src.services.ecarts_deezer.rattacher_liens_confirmes", _rattacher)
         bilan = d.run(runtime, artist, d.OptionsDisco(deezer=deezer, download_images=False), hooks)
         return bilan, recus, appels
 
@@ -348,9 +357,25 @@ class TestCompleterParDeezer:
         b.ecarts = [SimpleNamespace(coche=True, nature="absent")]
         bilan, recus, appels = self._run(monkeypatch, detection=b)
         # Les écarts deviennent aussi des signalements du panneau « À trancher ».
-        assert appels == ["identite", "detection", "signalements"]
+        assert appels == ["identite", "detection", "rattachement", "signalements"]
         assert recus == [b] and bilan.complete
         assert "1 écart(s)" in d_resume(bilan)
+
+    def test_les_liens_prouves_sont_ecrits_par_le_run(self, monkeypatch):
+        """Régression de 86a4e6c : seule la fenêtre (qui ne s'ouvre plus en fin
+        de run) écrivait les 🔗 — calculés puis perdus à chaque run disco."""
+        from src.services import ecarts_deezer as ed
+
+        b = ed.BilanEcarts(deezer_id=1236609)
+        b.ecarts = [
+            SimpleNamespace(coche=True, nature="link"),
+            SimpleNamespace(coche=True, nature="absent"),
+        ]
+        bilan, recus, appels = self._run(monkeypatch, detection=b)
+        # Rattachement AVANT signalements : un lien écrit n'est pas un cas à trancher.
+        assert appels.index("rattachement") < appels.index("signalements")
+        assert b.rattachements_auto == 1 and [e.nature for e in b.ecarts] == ["absent"]
+        assert "1 morceau(x) rattaché(s)" in d_resume(bilan)
 
     def test_no_deezer_n_appelle_rien(self, monkeypatch):
         bilan, recus, appels = self._run(monkeypatch, deezer=False)

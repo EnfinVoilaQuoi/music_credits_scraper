@@ -557,6 +557,13 @@ def _completer_par_deezer(runtime, artist, options, hooks, bilan) -> None:
         logger.exception("Détection des écarts Deezer échouée")
         bilan.deezer_motif = f"Deezer : {e}"
         return
+    # Les liens PROUVÉS s'écrivent ici, sans confirmation (décision 2026-09-22).
+    # Jusqu'au 2026-09-28 seule la fenêtre « Écarts Deezer » les écrivait : depuis
+    # qu'elle ne s'ouvre plus en fin de run (86a4e6c) et que la nature `link` n'est
+    # pas un signalement, ils étaient calculés puis PERDUS à chaque run.
+    ecarts_deezer.rattacher_liens_confirmes(
+        runtime.data_manager, artist, bilan.ecarts_deezer, should_stop=hooks.should_stop
+    )
     ecarts_deezer.enregistrer_signalements(runtime.data_manager, artist, bilan.ecarts_deezer)
     if bilan.ecarts_deezer.ecarts:
         hooks.confirmer_ecarts(bilan.ecarts_deezer)
@@ -591,6 +598,11 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
     msg += f"\n📅 {bilan.dates_api} dates de sortie récupérées via l'API"
     msg += f"\n💾 {bilan.sauves} morceaux sauvegardés en base"
     msg += f"\n📊 Total en base : {bilan.total_en_base} morceaux"
+    if bilan.ecarts_deezer is not None and bilan.ecarts_deezer.rattachements_auto:
+        msg += (
+            f"\n🔗 Deezer : {bilan.ecarts_deezer.rattachements_auto} morceau(x) "
+            "rattaché(s) à une parution (preuve sûre)"
+        )
     if bilan.ecarts_deezer is not None and bilan.ecarts_deezer.ecarts:
         e = bilan.ecarts_deezer
         msg += (

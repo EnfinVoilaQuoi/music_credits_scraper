@@ -746,6 +746,12 @@ def _video_couvre(socle: str, titre_video: str) -> bool:
         return True
     if socle.replace(" ", "") in titre_video.replace(" ", ""):
         return True  # « N°10 » / « N° 10 »
+    mots_socle = socle.split()
+    if len(mots_socle) >= 4 and "".join(m[0] for m in mots_socle) in titre_video.split():
+        # Le SIGLE du titre (« LMLVSB » pour « La mort leur va si bien »),
+        # mot entier, à partir de quatre mots (2026-09-28 : faux positifs relevés
+        # en échantillon ; en deçà, deux ou trois lettres se trouvent partout).
+        return True
     n = len(socle)
     fenetres = (titre_video[i : i + n] for i in range(max(1, len(titre_video) - n + 1)))
     return max((SequenceMatcher(None, socle, f).ratio() for f in fenetres), default=0) >= (

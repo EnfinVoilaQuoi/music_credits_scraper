@@ -221,6 +221,18 @@ class TestVideos:
         ):
             assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None
 
+    def test_le_sigle_du_titre_le_nomme(self):
+        """2026-09-28, relevé en échantillon : « LMLVSB », « BBHMM », « TGIF ».
+        Seulement à partir de quatre mots, et comme mot ENTIER."""
+        for titre, video in (
+            ("La mort leur va si bien (Twinsmatic Remix)", "Booba - LMLVSB (twinsmatic Remix)"),
+            ("Bitch Betta Have My Money", "Rihanna - BBHMM (Safaree)"),
+            ("T.G.I.F.", "Kid Cudi - TGIF ft. Chip Tha Ripper"),
+        ):
+            assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None
+        # Trois mots : un sigle de trois lettres se trouve partout.
+        assert revue.video_etrangere(_t("Mon Petit Chat", videos=[self._v("MPC live")])) is not None
+
     def test_la_parenthese_d_un_titre_generique_compte(self):
         t = _t("Intro (A2)", videos=[self._v("Booba - Intro")])
         assert revue.video_etrangere(t) is not None

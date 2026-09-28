@@ -88,7 +88,7 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
     def _detecter(self, force_id: int | None = None) -> None:
         runtime, artist = self.app.runtime, self.artist
         enricher = runtime.data_enricher
-        with source_usage.run_scope(Flow.DISCO, artist_id=artist.id, artist_name=artist.name):
+        with source_usage.run_scope(Flow.IDENTITY, artist_id=artist.id, artist_name=artist.name):
             try:
                 deezer_id = async_loop.run_sync(
                     deezer_identite.resoudre_async(
@@ -290,7 +290,9 @@ class EcartsDeezerWindow(ctk.CTkToplevel):
         def _travail():
             enricher = runtime.data_enricher
             client, http = enricher.deezer_client, enricher.http
-            with source_usage.run_scope(Flow.DISCO, artist_id=artist.id, artist_name=artist.name):
+            with source_usage.run_scope(
+                Flow.IDENTITY, artist_id=artist.id, artist_name=artist.name
+            ):
                 comptes = ecarts_deezer.creer_lignes(
                     runtime.data_manager,
                     artist,

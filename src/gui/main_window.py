@@ -17,7 +17,7 @@ from src.gui.windows.export_window import show_export_window
 from src.gui.windows.formations import show_formations
 from src.gui.windows.source_health import show_source_health
 from src.gui.windows.track_details import TrackDetailsWindow
-from src.gui.workers import enrichment, retrieval, streams
+from src.gui.workers import enrichment, identite, retrieval, streams
 from src.models import Artist, Track
 from src.observability import repository as usage_repository
 from src.services import artiste as artiste_service
@@ -205,6 +205,17 @@ class MainWindow:
             width=150,
         )
         self.get_tracks_button.pack(side="left", padx=5)
+
+        # 1 bis. Identité : relier les fiches aux plateformes (2026-09-28) —
+        # entre la discographie et tout ce qui CONSOMME les identifiants.
+        self.identite_button = ctk.CTkButton(
+            control_frame,
+            text="Identité",
+            command=lambda: identite.start_identite(self),
+            state="disabled",
+            width=120,
+        )
+        self.identite_button.pack(side="left", padx=5)
 
         # 2. Crédits & Paroles (menu combiné)
         self.scrape_button = ctk.CTkButton(
@@ -837,6 +848,7 @@ class MainWindow:
 
                 # Activer les boutons
                 self.scrape_button.configure(state="normal")
+                self.identite_button.configure(state="normal")
                 self.export_button.configure(state="normal")
 
                 if hasattr(self, "force_update_button"):
@@ -953,6 +965,7 @@ class MainWindow:
         # Si un scraping est en cours, désactiver certains boutons
         if self.is_scraping:
             self.scrape_button.configure(state="disabled")
+            self.identite_button.configure(state="disabled")
             if hasattr(self, "force_update_button"):
                 self.force_update_button.configure(state="disabled")
             if hasattr(self, "get_tracks_button"):
@@ -973,6 +986,7 @@ class MainWindow:
             # Aucun artiste chargé
             self.get_tracks_button.configure(state="disabled")
             self.scrape_button.configure(state="disabled")
+            self.identite_button.configure(state="disabled")
             self.export_button.configure(state="disabled")
             if hasattr(self, "force_update_button"):
                 self.force_update_button.configure(state="disabled")
@@ -992,6 +1006,7 @@ class MainWindow:
             # Artiste chargé mais pas de morceaux
             self.get_tracks_button.configure(state="normal")
             self.scrape_button.configure(state="disabled")
+            self.identite_button.configure(state="disabled")
             self.export_button.configure(state="disabled")
             if hasattr(self, "force_update_button"):
                 self.force_update_button.configure(state="disabled")
@@ -1013,6 +1028,7 @@ class MainWindow:
             # Artiste avec morceaux
             self.get_tracks_button.configure(state="normal")
             self.scrape_button.configure(state="normal")
+            self.identite_button.configure(state="normal")
             self.export_button.configure(state="normal")
             if hasattr(self, "force_update_button"):
                 self.force_update_button.configure(state="normal")

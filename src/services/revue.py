@@ -759,6 +759,65 @@ def _video_couvre(socle: str, titre_video: str) -> bool:
     )
 
 
+def _une_lettre_pres(a: str, b: str) -> bool:
+    """Distance d'édition ≤ 1 (« vu » / « vue »), même initiale."""
+    if a == b:
+        return True
+    if not a or not b or a[0] != b[0] or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b, strict=True)) == 1
+    court, long_ = (a, b) if len(a) < len(b) else (b, a)
+    return any(long_[:i] + long_[i + 1 :] == court for i in range(len(long_)))
+
+
+def _mots_a_une_lettre(socle: str, titre_video: str) -> bool:
+    """Chaque mot du titre (≥ 3 mots) se retrouve dans la vidéo à une lettre
+    près : « Vu D'Ici » / « Vue d'ici » (2026-09-28, faux positifs relevés)."""
+    mots_socle, mots_video = socle.split(), titre_video.split()
+    return len(mots_socle) >= 3 and all(
+        any(_une_lettre_pres(m, v) for v in mots_video) for m in mots_socle
+    )
+
+
+_FREESTYLE_RE = re.compile(r"\bfreestyles?\b", re.IGNORECASE)
+
+
+def _freestyle_d_emission(track, titre_video: str) -> bool:
+    """Un freestyle (ou une session d'émission) n'a pas de « titre » que la
+    vidéo reprendrait : « Gros freestyle de L'Entourage en live dans Planète
+    Rap ! » est publié « L'Entourage - Freestyle [Part. 1] #PlanèteRap ». Une
+    vidéo de freestyle ou de l'émission le couvre (2026-09-28)."""
+    titre = track.title or ""
+    if not (_FREESTYLE_RE.search(titre) or session_live(track)):
+        return False
+    return bool(_FREESTYLE_RE.search(titre_video) or _EMISSION_RE.search(titre_video))
+
+
+_SESSION_NOMMEE_RE = re.compile(
+    r"tiny\s*desk|colors|concert|show|tour|unplugged|storytellers|sessions?", re.IGNORECASE
+)
+
+
+def _titres_alternatifs(track) -> list[str]:
+    """Le contenu d'une parenthèse qui n'est PAS un descripteur de version est
+    un titre alternatif : « Bigger Than You (Do It Alone) », « Intro (Table
+    d'écoute) ». Deux mots au moins (un mot seul se trouve partout)."""
+    alternatifs = []
+    for contenu in re.findall(r"[\(\[]([^)\]]+)[\)\]]", track.title or ""):
+        mots_p = _mots(contenu)
+        if (
+            len(mots_p.split()) >= 2
+            and parse_variant(f"x ({contenu})").kind == Kind.NONE
+            # Un nom de SESSION n'est pas un titre : « Temptations (Tiny Desk
+            # Home) » était couvert par le Tiny Desk de Ty Dolla $ign.
+            and not _CONTEXTE_RE.search(contenu)
+            and not _SESSION_NOMMEE_RE.search(contenu)
+        ):
+            alternatifs.append(mots_p)
+    return alternatifs
+
+
 def video_etrangere(track, _ctx=None):
     """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
@@ -771,9 +830,17 @@ def video_etrangere(track, _ctx=None):
     if titre_generique(nu):
         nu = socle
 
+    alternatifs = _titres_alternatifs(track)
+
     def couvre(v) -> bool:
         titre = _mots(v.title)
-        return _video_couvre(socle, titre) or _video_couvre(nu, titre)
+        return (
+            _video_couvre(socle, titre)
+            or _video_couvre(nu, titre)
+            or any(_video_couvre(alt, titre) for alt in alternatifs)
+            or _mots_a_une_lettre(socle, titre)
+            or _freestyle_d_emission(track, v.title)
+        )
 
     suspectes = [v for v in track.videos or [] if v.title and not couvre(v)]
     if not suspectes:

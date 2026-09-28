@@ -233,6 +233,32 @@ class TestVideos:
         # Trois mots : un sigle de trois lettres se trouve partout.
         assert revue.video_etrangere(_t("Mon Petit Chat", videos=[self._v("MPC live")])) is not None
 
+    def test_freestyle_d_emission_titre_alternatif_et_graphie(self):
+        """2026-09-28 : 42 faux positifs sur 294 relevés et relus un à un."""
+        for titre, video in (
+            (
+                "Gros freestyle de L'Entourage en live dans Planète Rap !",
+                "L'Entourage - Freestyle [Part. 1] #PlanèteRap",
+            ),
+            ("Tim Westwood Freestyle", "Kid Cudi freestyle - Westwood"),
+            ("Bigger Than You (Do It Alone)", "Kid Cudi-Do It Alone"),
+            ("Intro (Table d'écoute)", "Table d'écoute"),
+            ("Vu D'Ici", "Vue d'ici (feat. Diam's, Eloquence)"),
+        ):
+            assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None, titre
+
+    def test_un_nom_de_session_n_est_pas_un_titre_alternatif(self):
+        """« Tiny Desk Home » nomme une session : la vidéo du Tiny Desk d'un
+        AUTRE artiste reste signalée."""
+        t = _t(
+            "Temptations (Tiny Desk Home)",
+            videos=[self._v("Ty Dolla $ign: Tiny Desk (Home) Concert")],
+        )
+        assert revue.video_etrangere(t) is not None
+
+    def test_une_graphie_proche_exige_trois_mots(self):
+        assert revue.video_etrangere(_t("Dreams", videos=[self._v("Drama")])) is not None
+
     def test_la_parenthese_d_un_titre_generique_compte(self):
         t = _t("Intro (A2)", videos=[self._v("Booba - Intro")])
         assert revue.video_etrangere(t) is not None

@@ -286,6 +286,8 @@ class TrackRepository:
                 "spotify_id_checked_at": track.spotify_id_checked_at,
                 # e19 : identifiants Deezer + drapeau « paroles explicites ».
                 "deezer_id": track.deezer_id,
+                # e41 : COALESCE à l'UPDATE, comme e17.
+                "deezer_checked_at": track.deezer_checked_at,
                 "deezer_url": track.deezer_url,
                 "explicit_lyrics": track.lyrics.explicit,
                 # E7-D1 : les colonnes audio ne sont plus écrites (pilotées par les
@@ -370,6 +372,7 @@ class TrackRepository:
                             :spotify_id_checked_at, spotify_id_checked_at),
                         deezer_id = CASE WHEN deezer_id IS NULL
                                          THEN :deezer_id ELSE deezer_id END,
+                        deezer_checked_at = COALESCE(:deezer_checked_at, deezer_checked_at),
                         deezer_url = COALESCE(:deezer_url, deezer_url),
                         -- COALESCE aussi : un run sans passage Deezer laisse
                         -- NULL, et NULL veut dire « jamais mesuré » — il ne
@@ -426,7 +429,7 @@ class TrackRepository:
                     INSERT INTO tracks (
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id, isrc, spotify_id_checked_at,
-                        deezer_id, deezer_url, explicit_lyrics,
+                        deezer_id, deezer_checked_at, deezer_url, explicit_lyrics,
                         duration, genre,
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
@@ -438,7 +441,7 @@ class TrackRepository:
                     ) VALUES (
                         :title, :artist_id, :album, :track_number, :release_date,
                         :genius_id, :spotify_id, :discogs_id, :isrc, :spotify_id_checked_at,
-                        :deezer_id, :deezer_url, :explicit_lyrics,
+                        :deezer_id, :deezer_checked_at, :deezer_url, :explicit_lyrics,
                         :duration, :genre,
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         COALESCE(:is_featuring, 0), :primary_artist_name, :featured_artists, :secondary_role,
@@ -2576,7 +2579,8 @@ class TrackRepository:
                 if ligne["deezer_id"] is not None and int(ligne["deezer_id"]) == vise:
                     conn.execute(
                         text(
-                            "UPDATE tracks SET deezer_id = NULL, deezer_url = NULL, updated_at = :now "
+                            "UPDATE tracks SET deezer_id = NULL, deezer_url = NULL, "
+                            "deezer_checked_at = NULL, updated_at = :now "
                             "WHERE id = :tid"
                         ),
                         {"tid": track_id, "now": datetime.now()},

@@ -69,6 +69,7 @@ _COLUMNS = [
     "lyrics_scraped_at",
     "instrumental",
     "unreleased",
+    "deezer_checked_at",
     "certifications",
     "album_certifications",
 ]

@@ -139,3 +139,49 @@ def test_le_rattachement_catalogue_pose_explicit_s_il_est_vide(data_manager):
     _renseigner_fiche(data_manager, SimpleNamespace(piste=piste2), relu)
     (relu,) = data_manager.get_artist_tracks(artist.id)
     assert relu.lyrics.explicit is True
+
+
+# ── e41 : le constat Deezer (2026-09-28) ─────────────────────────────────────
+
+
+class TestConstatDeezer:
+    def test_date_sur_reponse_meme_sans_hit(self):
+        class _Client:
+            async def enrich_track_async(self, *a, **k):
+                return {"success": False, "error": "Track non trouvé sur Deezer"}
+
+        track = Track(title="Inédit", artist=Artist(name="Isha"))
+        asyncio.run(DeezerProvider(_Client()).enrich_async(track, EnrichmentContext()))
+        assert track.deezer_checked_at is not None
+
+    def test_jamais_sur_une_panne(self):
+        class _Client:
+            async def enrich_track_async(self, *a, **k):
+                raise SansReponse("deezer", IssueKind.TIMEOUT)
+
+        track = Track(title="Inédit", artist=Artist(name="Isha"))
+        asyncio.run(DeezerProvider(_Client()).enrich_async(track, EnrichmentContext()))
+        assert track.deezer_checked_at is None
+
+    def test_une_fiche_tranchee_sort_de_la_selection(self):
+        from src.services.runtime import Manque, est_manquant
+
+        t = Track(title="x", artist=Artist(name="Isha"))
+        assert est_manquant(t, Manque.IDENTITE_DEEZER)
+        t.deezer_checked_at = "2026-09-28T01:00:00"
+        assert not est_manquant(t, Manque.IDENTITE_DEEZER)
+
+    def test_persiste_survit_et_part_avec_l_id(self, data_manager):
+        artist = Artist(name="Isha")
+        artist.id = data_manager.save_artist(artist)
+        track = Track(title="Durag", artist=artist)
+        track.deezer_id = 42
+        track.deezer_checked_at = "2026-09-28T01:00:00"
+        data_manager.save_track(track)
+        relu = data_manager.get_artist_tracks(artist.id)[0]
+        relu.deezer_checked_at = None  # un run qui ne passe pas par Deezer
+        data_manager.save_track(relu)
+        relu = data_manager.get_artist_tracks(artist.id)[0]
+        assert relu.deezer_checked_at is not None
+        data_manager.clear_track_deezer_id(relu.id)
+        assert data_manager.get_artist_tracks(artist.id)[0].deezer_checked_at is None

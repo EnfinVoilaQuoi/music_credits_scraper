@@ -600,6 +600,8 @@ class Track:
     # Deezer (e19) : identifiant + lien de la page du morceau. Servent à
     # l'identification et à la vérification, comme les autres IDs externes.
     deezer_id: int | None = None
+    # Dernier passage Deezer par morceau AYANT RÉPONDU (e41) — cf. e17.
+    deezer_checked_at: str | None = None
     deezer_url: str | None = None
 
     # Métadonnées

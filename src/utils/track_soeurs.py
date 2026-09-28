@@ -42,6 +42,7 @@ COLONNES_PARTAGEES = (
     "spotify_page_title",
     "discogs_id",
     "deezer_id",
+    "deezer_checked_at",
     "deezer_url",
     "explicit_lyrics",
     "genius_url",

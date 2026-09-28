@@ -164,6 +164,11 @@ tracks = Table(
     # 1 = inédit, 0 = sorti (une trace de plateforme le prouve). Sans lui, un
     # inédit porte un ⚠️ qu'aucun run ne pourra jamais lever.
     Column("unreleased", _BOOL),
+    # Migration e41 (2026-09-28) : date du dernier passage Deezer par morceau
+    # qui a eu une RÉPONSE, trouvé ou non. Calque de `spotify_id_checked_at` :
+    # sans elle, une fiche hors plateformes était redemandée à chaque passage
+    # de l'étape Identité. Jamais posée sur une panne (`SansReponse`).
+    Column("deezer_checked_at", TIMESTAMP),
     sqlite_autoincrement=True,
 )
 

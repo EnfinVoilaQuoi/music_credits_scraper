@@ -6,6 +6,8 @@ le scrutin du contexte, arbitré en fin de parcours (§8.3). L'ISRC alimente
 ReccoBeats (pivot inter-sources, non destructif).
 """
 
+from datetime import datetime
+
 from src.api.deezer_api import DeezerAPI
 from src.enrichment.base import Capability
 from src.enrichment.context import EnrichmentContext
@@ -82,6 +84,8 @@ class DeezerProvider:
                 # B0 : la piste déjà liée se LIT par son id.
                 deezer_id=track.deezer_id,
             )
+            # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
+            track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
         except SansReponse as e:
@@ -118,6 +122,8 @@ class DeezerProvider:
                 # B0 : la piste déjà liée se LIT par son id.
                 deezer_id=track.deezer_id,
             )
+            # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
+            track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
         except SansReponse as e:

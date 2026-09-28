@@ -318,3 +318,170 @@ def test_flux_identite_ventile_a_part():
     from src.observability.registry import Flow
 
     assert Flow.IDENTITY == "identite"
+
+
+# ── 1b porté depuis `test_services_enrichissement.TestFinDeRun` (2026-09-28) ──
+# La fin de run MusicBrainz d'Enrich est devenue la couche 1b : ses tests
+# suivent la voie survivante, avec les VRAIS `chercher_formations` et
+# `liens_a_proposer` (seuls les clients réseau sont simulés).
+
+
+class _DMFormations:
+    def __init__(self):
+        self.proposes = []
+
+    def get_artist_tracks(self, artist_id):
+        return [Track(title="x", album="Album A")]
+
+    def get_albums_for_artist(self, artist_id):
+        return []
+
+    def get_artist_relations(self, artist_id, status="confirmed"):
+        return []
+
+    def nature_connue_pour(self, nom):
+        return None
+
+    def propose_artist_relations(self, artist_id, relations, status="proposed"):
+        self.proposes.append((status, [r.related_name for r in relations]))
+        return len(relations)
+
+
+def _rt_formations(monkeypatch, mb):
+    import src.api.discogs_api as dg_mod
+    import src.api.musicbrainz_api as mb_mod
+
+    class _Dg:
+        def candidats_artiste(self, nom):
+            return []
+
+        def artistes_du_disque(self, release_id):
+            return None
+
+        def get_artist_groups(self, nom, attendues=None, artist_id=None):
+            return {"proposees": [], "confirmees": set(), "candidats": 0}
+
+    monkeypatch.setattr(mb_mod, "MusicBrainzAPI", lambda: mb)
+    monkeypatch.setattr(dg_mod, "DiscogsClient", lambda token: _Dg())
+    monkeypatch.setattr(dg_mod, "token_discogs", lambda: "t")
+    return SimpleNamespace(data_manager=_DMFormations())
+
+
+def _artiste_formations():
+    a = Artist(name="A")
+    a.id = 1
+    a.tracks = [Track(title="a", album="Album A")]
+    return a
+
+
+def test_formations_et_alias_proposes_jamais_confirmes(monkeypatch):
+    from src.api.musicbrainz_api import AliasArtiste, RelationGroupe
+
+    class _MB:
+        def resoudre_artiste(self, nom, nos_albums):
+            return SimpleNamespace(
+                mbid="mb-1",
+                relations=[RelationGroupe("member_of", "Panama Bende", "mb-pb", "Group")],
+                aliases=[AliasArtiste("Psmaker", "Artist name"), AliasArtiste("M.", "Legal name")],
+                desambiguation="Belgian rapper",
+                type="Person",
+            )
+
+    rt = _rt_formations(monkeypatch, _MB())
+    res = identite.proposer_formations(rt, _artiste_formations())
+    assert rt.data_manager.proposes == [
+        ("proposed", ["Panama Bende"]),
+        ("proposed", ["Psmaker"]),
+        ("info", ["M."]),
+    ]
+    assert (res.formations, res.alias, res.infos) == (1, 1, 1)
+    assert res.identite_mb == "MusicBrainz : Belgian rapper"
+    texte = identite.resume(identite.BilanIdentite(propositions=res), _artiste_formations())
+    assert "1 formation(s), 1 alias (1 pour info)" in texte and "Groupes" in texte
+
+
+def test_saturation_musicbrainz_est_une_panne(monkeypatch):
+    class _MB:
+        def resoudre_artiste(self, nom, nos_albums):
+            raise RuntimeError("503 saturé")
+
+    rt = _rt_formations(monkeypatch, _MB())
+    with pytest.raises(RuntimeError, match="503"):
+        identite.proposer_formations(rt, _artiste_formations())
+    assert rt.data_manager.proposes == []
+
+
+# ── 1a + 2a portés depuis `test_services_discographie.TestCompleterParDeezer` ──
+
+
+class TestCatalogueDeezer:
+    """Artiste Deezer puis catalogue : liens prouvés écrits AVANT les
+    signalements, écarts par le hook, ambiguïté remontée sans bloquer, panne
+    DITE (jamais levée)."""
+
+    def _run(self, monkeypatch, *, identite_rendue=None, detection=None, client=True):
+        rt = SimpleNamespace(
+            data_manager=object(),
+            genius_api=None,
+            data_enricher=SimpleNamespace(deezer_client=object() if client else None, http=None),
+        )
+        recus, appels = [], []
+
+        async def _resoudre(*a, **k):
+            appels.append("identite")
+            if isinstance(identite_rendue, Exception):
+                raise identite_rendue
+            return identite_rendue or 1236609
+
+        def _detecter(runtime, artist, **kw):
+            appels.append("detection")
+            if isinstance(detection, Exception):
+                raise detection
+            return detection
+
+        def _rattacher(dm, artist, bilan, **kw):
+            appels.append("rattachement")
+            liens = [e for e in bilan.ecarts if e.nature == "link"]
+            bilan.ecarts = [e for e in bilan.ecarts if e.nature != "link"]
+            bilan.rattachements_auto += len(liens)
+
+        import asyncio
+
+        monkeypatch.setattr("src.services.deezer_identite.resoudre_async", _resoudre)
+        monkeypatch.setattr("src.concurrency.async_loop.run_sync", asyncio.run)
+        monkeypatch.setattr("src.services.ecarts_deezer.detecter", _detecter)
+        monkeypatch.setattr("src.services.ecarts_deezer.rattacher_liens_confirmes", _rattacher)
+        monkeypatch.setattr(
+            "src.services.ecarts_deezer.enregistrer_signalements",
+            lambda *a, **k: appels.append("signalements"),
+        )
+        a = Artist(name="A")
+        a.id = 1
+        res = identite.catalogue_deezer(rt, a, Hooks(confirmer_ecarts=recus.append))
+        return res, recus, appels
+
+    def test_liens_ecrits_avant_les_signalements_et_ecarts_par_le_hook(self, monkeypatch):
+        from src.services import ecarts_deezer as ed
+
+        b = ed.BilanEcarts(deezer_id=1236609)
+        b.ecarts = [SimpleNamespace(nature="link"), SimpleNamespace(nature="absent", coche=True)]
+        res, recus, appels = self._run(monkeypatch, detection=b)
+        assert appels == ["identite", "detection", "rattachement", "signalements"]
+        assert recus == [b] and b.rattachements_auto == 1 and not res.panne
+        assert res.deezer_id == 1236609
+
+    def test_artiste_ambigu_remonte_les_candidats_sans_panne(self, monkeypatch):
+        from src.services.deezer_identite import ArtisteDeezerAmbigu, CandidatDeezer
+
+        exc = ArtisteDeezerAmbigu("A", [CandidatDeezer(1, "A"), CandidatDeezer(2, "A")])
+        res, recus, appels = self._run(monkeypatch, identite_rendue=exc)
+        assert not res.panne and res.deezer_id is None and "ambigu" in res.motif
+        assert [c.id for c in recus[0].ambigu] == [1, 2] and "detection" not in appels
+
+    def test_deezer_en_panne_est_dit_jamais_leve(self, monkeypatch):
+        res, recus, _ = self._run(monkeypatch, detection=RuntimeError("timeout"))
+        assert res.panne and "timeout" in res.motif and recus == []
+
+    def test_sans_client_rien_n_est_appele(self, monkeypatch):
+        res, recus, appels = self._run(monkeypatch, client=False)
+        assert res.panne and appels == [] and "indisponible" in res.motif

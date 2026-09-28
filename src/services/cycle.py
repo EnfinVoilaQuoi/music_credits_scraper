@@ -11,7 +11,7 @@ artiste), continue sur l'échec d'une étape (consigné) et s'arrête sur
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from src.models import Artist
 from src.observability import source_usage
@@ -101,12 +101,7 @@ def executer_etape(
         raise ValueError(f"étape inconnue : {etape!r}")
     with source_usage.run_scope(_FLOWS[etape], artist_id=artist.id, artist_name=artist.name):
         if etape == "disco":
-            opts = options.disco
-            if "identite" in options.etapes():
-                # Deezer (artiste + catalogue) appartient à l'étape Identité :
-                # dans un cycle qui la lance, la disco ne le refait pas.
-                opts = replace(opts, deezer=False)
-            return discographie.run(runtime, artist, opts, hooks)
+            return discographie.run(runtime, artist, options.disco, hooks)
         if etape == "identite":
             # Toujours « manquants » par construction (ce qui n'est pas relié) ;
             # `--force` élargit, `--manquants` n'y change rien.
@@ -118,11 +113,7 @@ def executer_etape(
         if etape == "enrich":
             kinds = (Manque.AUDIO,) if options.manquants else ()
             tracks = selection_morceaux(runtime, artist, manquants=kinds)
-            opts = options.enrich
-            if "identite" in options.etapes():
-                # Propositions MB/Discogs et nature des disques : étape Identité.
-                opts = replace(opts, musicbrainz=False, types_albums=False)
-            return enrichissement.run(runtime, artist, tracks, opts, hooks)
+            return enrichissement.run(runtime, artist, tracks, options.enrich, hooks)
         if etape == "streams":
             ids = options.streams.track_ids
             if options.manquants:

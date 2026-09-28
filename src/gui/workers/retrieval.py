@@ -45,7 +45,6 @@ def get_tracks(app):
     include_secondary_var = ctk.BooleanVar(value=False)  # Autres rôles (Additional Voices…)
     respect_deleted_var = ctk.BooleanVar(value=True)  # Ne pas réajouter les morceaux supprimés
     download_images_var = ctk.BooleanVar(value=True)  # Télécharger photos/covers/vignettes (Media)
-    deezer_var = ctk.BooleanVar(value=True)  # Compléter par Deezer (écarts listés, jamais créés)
 
     # Interface — le contenu scrolle, les boutons d'action restent en bas.
     ctk.CTkLabel(
@@ -183,38 +182,7 @@ def get_tracks(app):
         justify="left",
     ).pack(anchor="w", padx=15, pady=(0, 8))
 
-    # Checkbox : compléter par Deezer (2026-09-21) + bouton « Écarts Deezer » seul
-    deezer_frame = ctk.CTkFrame(scroll)
-    deezer_frame.pack(fill="x", padx=15, pady=(0, 5))
-    ctk.CTkCheckBox(
-        deezer_frame,
-        text="Compléter par Deezer en fin de run",
-        variable=deezer_var,
-        font=("Arial", 12),
-    ).pack(anchor="w", padx=15, pady=(12, 4))
-    ctk.CTkLabel(
-        deezer_frame,
-        text="🎧 Ce que le catalogue des distributeurs publie et que Genius n'a pas (trous,\n"
-        "versions, apparitions) : LISTÉ pour validation, jamais créé par le run.",
-        text_color="gray",
-        font=("Arial", 10),
-        justify="left",
-    ).pack(anchor="w", padx=15, pady=(0, 4))
-
-    def _ecarts_seuls() -> None:
-        from src.gui.windows.ecarts_deezer import show_ecarts_deezer
-
-        dialog.destroy()
-        show_ecarts_deezer(app)
-
-    ctk.CTkButton(
-        deezer_frame,
-        text="🎧 Écarts Deezer seuls (sans refaire Genius)",
-        command=_ecarts_seuls,
-        fg_color="gray30",
-        hover_color="gray20",
-        state="normal" if discographie_chargee(app) else "disabled",
-    ).pack(anchor="w", padx=15, pady=(0, 12))
+    # Deezer (catalogue, écarts) : bouton « Identité » depuis le 2026-09-28.
 
     # Nombre maximum de morceaux
     max_songs_frame = ctk.CTkFrame(scroll)
@@ -269,7 +237,6 @@ def get_tracks(app):
         include_prods = include_prods_var.get()
         respect_deleted = respect_deleted_var.get()
         download_images = download_images_var.get()
-        deezer = deezer_var.get()
         dialog.destroy()
         start_track_retrieval(
             app,
@@ -281,7 +248,6 @@ def get_tracks(app):
             include_prods=include_prods,
             respect_deleted=respect_deleted,
             download_images=download_images,
-            deezer=deezer,
         )
 
     def cancel():
@@ -325,7 +291,6 @@ def start_track_retrieval(
     include_secondary: bool = False,
     respect_deleted: bool = True,
     download_images: bool = True,
-    deezer: bool = True,
     include_prods: bool = True,
 ):
     """Lance la récupération des morceaux avec les options choisies.
@@ -343,7 +308,6 @@ def start_track_retrieval(
         include_prods=include_prods,
         respect_deleted=respect_deleted,
         download_images=download_images,
-        deezer=deezer,
     )
     app.get_tracks_button.configure(state="disabled", text="Récupération...")
 
@@ -363,26 +327,13 @@ def start_track_retrieval(
             ),
         )
 
-    def confirmer_ecarts(bilan_ecarts):
-        # Les écarts Deezer ne s'imposent plus en fin de run (2026-09-27) : ils
-        # sont au panneau « À trancher », avec leurs actions (créer, rattacher,
-        # délier). SEULE une identité AMBIGUË ouvre encore la fenêtre : il faut
-        # choisir l'artiste Deezer avant que quoi que ce soit soit détecté.
-        if not bilan_ecarts.ambigu:
-            return
-        from src.gui.windows.ecarts_deezer import show_ecarts_deezer
-
-        app.root.after(0, lambda b=bilan_ecarts: show_ecarts_deezer(app, b))
-
     def get_tracks():
         try:
             bilan = discographie.run(
                 app.runtime,
                 artist,
                 options,
-                Hooks(
-                    progress=progress, should_stop=stop_requested, confirmer_ecarts=confirmer_ecarts
-                ),
+                Hooks(progress=progress, should_stop=stop_requested),
             )
             app.tracks = artist.tracks
             texte = discographie.resume(bilan, artist)

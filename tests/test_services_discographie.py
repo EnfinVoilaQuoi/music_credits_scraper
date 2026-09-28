@@ -290,121 +290,15 @@ class TestTracklists:
 
     def test_le_titre_manquant_est_sauve_et_compte(self, monkeypatch):
         monkeypatch.setattr("src.config.DELAY_BETWEEN_REQUESTS", 0)
-        bilan, dm, prefill = self._run(disco.OptionsDisco(download_images=False, deezer=False))
+        bilan, dm, prefill = self._run(disco.OptionsDisco(download_images=False))
         assert ("save", "Intro") in dm.journal and bilan.titres_album == 1
         assert prefill == ["Intro"]
         assert "1 titre(s) d'album" in disco.resume(bilan, Artist(name="MC Solaar"))
 
     def test_no_tracklists_n_appelle_rien(self):
-        options = disco.OptionsDisco(download_images=False, deezer=False, tracklists=False)
+        options = disco.OptionsDisco(download_images=False, tracklists=False)
         bilan, dm, _ = self._run(options)
         assert ("save", "Intro") not in dm.journal and bilan.titres_album == 0
-
-
-class TestCompleterParDeezer:
-    """Le run discographie se prolonge par Deezer (2026-09-21) : les écarts sont
-    LISTÉS via le hook `confirmer_ecarts`, jamais créés ; une source secondaire
-    ne rend jamais le run incomplet."""
-
-    def _run(self, monkeypatch, *, deezer=True, identite=None, detection=None):
-        from src.services import discographie as d
-
-        artist = Artist(name="A")
-        artist.id = 1
-        dm = _DM([])
-        runtime = _runtime(dm, [_t("Durag", gid=1, album="LVA")])
-        runtime.data_enricher = SimpleNamespace(deezer_client=object(), http=None)
-        recus = []
-        hooks = Hooks(confirmer_ecarts=recus.append)
-        appels = []
-
-        async def _resoudre(*a, **k):
-            appels.append("identite")
-            if isinstance(identite, Exception):
-                raise identite
-            return identite or 1236609
-
-        monkeypatch.setattr("src.services.deezer_identite.resoudre_async", _resoudre)
-        monkeypatch.setattr("src.concurrency.async_loop.run_sync", lambda coro: _sync(coro))
-
-        def _detecter(runtime, artist, **kw):
-            appels.append("detection")
-            if isinstance(detection, Exception):
-                raise detection
-            return detection
-
-        monkeypatch.setattr("src.services.ecarts_deezer.detecter", _detecter)
-        monkeypatch.setattr(
-            "src.services.ecarts_deezer.enregistrer_signalements",
-            lambda *a, **k: appels.append("signalements"),
-        )
-
-        def _rattacher(dm, artist, bilan, **kw):
-            appels.append("rattachement")
-            liens = [e for e in bilan.ecarts if e.nature == "link"]
-            bilan.ecarts = [e for e in bilan.ecarts if e.nature != "link"]
-            bilan.rattachements_auto += len(liens)
-            return len(liens)
-
-        monkeypatch.setattr("src.services.ecarts_deezer.rattacher_liens_confirmes", _rattacher)
-        bilan = d.run(runtime, artist, d.OptionsDisco(deezer=deezer, download_images=False), hooks)
-        return bilan, recus, appels
-
-    def test_les_ecarts_passent_par_le_hook(self, monkeypatch):
-        from src.services import ecarts_deezer as ed
-
-        b = ed.BilanEcarts(deezer_id=1236609)
-        b.ecarts = [SimpleNamespace(coche=True, nature="absent")]
-        bilan, recus, appels = self._run(monkeypatch, detection=b)
-        # Les écarts deviennent aussi des signalements du panneau « À trancher ».
-        assert appels == ["identite", "detection", "rattachement", "signalements"]
-        assert recus == [b] and bilan.complete
-        assert "1 écart(s)" in d_resume(bilan)
-
-    def test_les_liens_prouves_sont_ecrits_par_le_run(self, monkeypatch):
-        """Régression de 86a4e6c : seule la fenêtre (qui ne s'ouvre plus en fin
-        de run) écrivait les 🔗 — calculés puis perdus à chaque run disco."""
-        from src.services import ecarts_deezer as ed
-
-        b = ed.BilanEcarts(deezer_id=1236609)
-        b.ecarts = [
-            SimpleNamespace(coche=True, nature="link"),
-            SimpleNamespace(coche=True, nature="absent"),
-        ]
-        bilan, recus, appels = self._run(monkeypatch, detection=b)
-        # Rattachement AVANT signalements : un lien écrit n'est pas un cas à trancher.
-        assert appels.index("rattachement") < appels.index("signalements")
-        assert b.rattachements_auto == 1 and [e.nature for e in b.ecarts] == ["absent"]
-        assert "1 morceau(x) rattaché(s)" in d_resume(bilan)
-
-    def test_no_deezer_n_appelle_rien(self, monkeypatch):
-        bilan, recus, appels = self._run(monkeypatch, deezer=False)
-        assert appels == [] and recus == [] and bilan.ecarts_deezer is None
-
-    def test_artiste_ambigu_remonte_les_candidats_sans_bloquer(self, monkeypatch):
-        from src.services.deezer_identite import ArtisteDeezerAmbigu, CandidatDeezer
-
-        exc = ArtisteDeezerAmbigu("A", [CandidatDeezer(1, "A"), CandidatDeezer(2, "A")])
-        bilan, recus, appels = self._run(monkeypatch, identite=exc)
-        assert bilan.complete and "ambigu" in bilan.deezer_motif
-        assert len(recus) == 1 and [c.id for c in recus[0].ambigu] == [1, 2]
-
-    def test_deezer_en_panne_ne_rend_pas_le_run_incomplet(self, monkeypatch):
-        bilan, recus, _ = self._run(monkeypatch, detection=RuntimeError("timeout"))
-        assert bilan.complete and "timeout" in bilan.deezer_motif and recus == []
-
-
-def _sync(coro):
-    import asyncio
-
-    return asyncio.run(coro)
-
-
-def d_resume(bilan):
-    from src.services import discographie as d
-
-    artist = Artist(name="A")
-    return d.resume(bilan, artist)
 
 
 def test_une_page_d_edition_est_notee_sur_l_original():

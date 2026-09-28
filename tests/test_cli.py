@@ -70,9 +70,14 @@ class TestParsingEnrichStreams:
     def test_enrich(self):
         o = cli.options_enrich(_parse("enrich", "S", "--sources", "reccobeats, deezer", "--force"))
         assert o.sources == ("reccobeats", "deezer") and o.force_update
-        assert o.musicbrainz  # identité en fin de run : cochée par défaut
         assert cli.options_enrich(_parse("enrich", "S")).sources is None
-        assert not cli.options_enrich(_parse("enrich", "S", "--no-musicbrainz")).musicbrainz
+
+    def test_drapeaux_deplaces_vers_identite(self, capsys):
+        """2026-09-28 : reconnus pour DIRE où ils sont passés, rien n'est lancé."""
+        assert cli.executer(_parse("enrich", "S", "--no-musicbrainz"), runtime=None) == cli.ERREUR
+        assert "identite S --no-musicbrainz" in capsys.readouterr().out
+        assert cli.executer(_parse("disco", "S", "--deezer-id", "42"), runtime=None) == cli.ERREUR
+        assert "identite S --deezer-id 42" in capsys.readouterr().out
 
     def test_streams(self):
         o = cli.options_streams(
@@ -192,7 +197,7 @@ class TestParsingIdentite:
         o = cli.options_cycle(
             _parse("cycle", "Isha", "--no-deezer", "--force-identite", "--no-nature-disques")
         )
-        assert o.identite.deezer is False and o.disco.deezer is False
+        assert o.identite.deezer is False
         assert o.identite.force and not o.enrich.force_update
         assert not o.identite.nature_disques
 

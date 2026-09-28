@@ -193,26 +193,6 @@ class TestEtapeIdentite:
         cycle.executer_etape(_rt([]), _artist([]), "identite", o, Hooks())
         assert vus == [o.identite]
 
-    def test_disco_et_enrich_ne_doublonnent_pas_l_identite(self, monkeypatch):
-        vus = {}
-        monkeypatch.setattr(
-            discographie, "run", lambda rt, a, o, h: vus.setdefault("disco", o) and Bilan()
-        )
-        monkeypatch.setattr(
-            enrichissement, "run", lambda rt, a, t, o, h: vus.setdefault("enrich", o) and Bilan()
-        )
-        rt, a = _rt([]), _artist([])
-        avec = cycle.OptionsCycle()
-        cycle.executer_etape(rt, a, "disco", avec, Hooks())
-        cycle.executer_etape(rt, a, "enrich", avec, Hooks())
-        assert vus["disco"].deezer is False
-        assert vus["enrich"].musicbrainz is False and vus["enrich"].types_albums is False
-        vus.clear()
-        sans = cycle.OptionsCycle(skip=("identite",))
-        cycle.executer_etape(rt, a, "disco", sans, Hooks())
-        cycle.executer_etape(rt, a, "enrich", sans, Hooks())
-        assert vus["disco"].deezer is True and vus["enrich"].musicbrainz is True
-
     def test_rattrapage_discogs_en_fin_de_cycle(self, monkeypatch):
         from src.services import identite, revue_auto
 

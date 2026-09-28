@@ -37,11 +37,8 @@ class OptionsDisco:
     include_prods: bool = True
     respect_deleted: bool = True
     download_images: bool = True
-    #: Compléter par Deezer en fin de run : les disques et pistes que Genius
-    #: n'a pas, LISTÉS pour validation (jamais créés par le run).
-    deezer: bool = True
-    #: Identifiant Deezer forcé (CLI `--deezer-id`) quand l'oracle est ambigu.
-    deezer_id: int | None = None
+    # Deezer (artiste, catalogue, écarts) n'est plus une fin de run de la
+    # discographie : c'est l'étape Identité (2026-09-28). Disco = Genius seul.
     #: Compléter les albums de l'artiste par leur tracklist Genius : les titres
     #: signés par un autre (intro d'un DJ, interlude d'un beatmaker) et ceux que
     #: la liste des morceaux omet (décision utilisateur 2026-09-24).
@@ -74,10 +71,6 @@ class BilanDisco(Bilan):
     total_en_base: int = 0
     #: Certifs/relations recalculées mais NON enregistrées (contrôle de fin de flux).
     oublies: list[str] = field(default_factory=list)
-    #: Écarts Deezer (BilanEcarts) — None si non demandé ou impossible.
-    ecarts_deezer: object = None
-    #: Pourquoi Deezer n'a rien donné (« artiste ambigu », « injoignable »…).
-    deezer_motif: str = ""
 
 
 @dataclass
@@ -448,8 +441,6 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
         f"✅ Merge terminé : {bilan.nouveaux} nouveaux, {bilan.mis_a_jour} mis à jour, "
         f"{bilan.sauves} sauvegardés, {bilan.doublons_evites} doublons évités"
     )
-    if options.deezer and bilan.complete and not hooks.should_stop():
-        _completer_par_deezer(runtime, artist, options, hooks, bilan)
     return bilan
 
 
@@ -512,21 +503,6 @@ def _completer_par_tracklists(runtime, artist, tracks, exclus, options, hooks, b
     return completion.pistes
 
 
-def _completer_par_deezer(runtime, artist, options, hooks, bilan) -> None:
-    """Ce que Deezer a et que Genius n'a pas — APRÈS la sauvegarde (l'oracle
-    d'identité a besoin des albums en base). Le run reste complet pour Genius
-    quoi qu'il arrive ici : un homonyme n'est jamais pris d'office, une source
-    secondaire ne bloque pas le flux."""
-    # Le corps vit dans l'étape Identité (`identite.catalogue_deezer`) : une
-    # fonction, deux appelants le temps que cette fin de run soit retirée. Ici
-    # une panne reste DITE sans rendre le run Genius incomplet.
-    from src.services import identite
-
-    res = identite.catalogue_deezer(runtime, artist, hooks, force_id=options.deezer_id)
-    bilan.ecarts_deezer = res.ecarts
-    bilan.deezer_motif = res.motif
-
-
 def resume(bilan: BilanDisco, artist: Artist) -> str:
     """Le compte rendu de fin — texte unique pour la fenêtre GUI et la CLI."""
     if bilan.recuperes == 0 and bilan.motif:
@@ -556,21 +532,6 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
     msg += f"\n📅 {bilan.dates_api} dates de sortie récupérées via l'API"
     msg += f"\n💾 {bilan.sauves} morceaux sauvegardés en base"
     msg += f"\n📊 Total en base : {bilan.total_en_base} morceaux"
-    if bilan.ecarts_deezer is not None and bilan.ecarts_deezer.rattachements_auto:
-        msg += (
-            f"\n🔗 Deezer : {bilan.ecarts_deezer.rattachements_auto} morceau(x) "
-            "rattaché(s) à une parution (preuve sûre)"
-        )
-    if bilan.ecarts_deezer is not None and bilan.ecarts_deezer.ecarts:
-        e = bilan.ecarts_deezer
-        msg += (
-            f"\n🎧 Deezer : {len(e.ecarts)} écart(s) de discographie "
-            f"(dont {len(e.coches())} coché(s) d'office) — à valider → bouton « À trancher »"
-        )
-    elif bilan.deezer_motif:
-        msg += f"\n🎧 Deezer : {bilan.deezer_motif}"
-    elif bilan.ecarts_deezer is not None:
-        msg += "\n🎧 Deezer : aucun écart, la base a tout ce que Deezer publie"
     if not bilan.complete:
         msg += f"\n\n⚠️ Run INCOMPLET : {bilan.motif}"
     if bilan.erreurs:

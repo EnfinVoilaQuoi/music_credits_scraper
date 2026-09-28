@@ -81,20 +81,39 @@ def _disco_args(p: argparse.ArgumentParser) -> None:
     _bool_flags(
         p, "tracklists", True, "compléter les albums de l'artiste par leur tracklist Genius"
     )
-    _bool_flags(p, "deezer", True, "compléter par Deezer (écarts listés, jamais créés)")
-    p.add_argument("--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu")
+
+
+#: Drapeaux DÉPLACÉS vers `identite` le 2026-09-28 : encore reconnus par la
+#: sous-commande d'origine, pour DIRE où ils sont passés plutôt qu'échouer en
+#: « unrecognized arguments ».
+_DEPLACES = {"disco": ("--deezer-id", "--no-deezer"), "enrich": ("--no-musicbrainz",)}
+
+
+def _anciens_drapeaux(p: argparse.ArgumentParser, commande: str) -> None:
+    for drapeau in _DEPLACES[commande]:
+        dest = "ancien_" + drapeau.strip("-").replace("-", "_")
+        if drapeau == "--deezer-id":
+            p.add_argument(drapeau, dest=dest, default=None, help=argparse.SUPPRESS)
+        else:
+            p.add_argument(drapeau, dest=dest, action="store_true", help=argparse.SUPPRESS)
+
+
+def _drapeaux_deplaces(a: argparse.Namespace) -> list[str]:
+    """Les drapeaux déplacés présents, tels qu'à retaper (valeur comprise)."""
+    vus = []
+    for d in _DEPLACES.get(a.commande, ()):
+        valeur = getattr(a, "ancien_" + d.strip("-").replace("-", "_"), None)
+        if valeur:
+            vus.append(d if valeur is True else f"{d} {valeur}")
+    return vus
 
 
 def _identite_args(p: argparse.ArgumentParser, *, etape_seule: bool) -> None:
-    """Étape Identité. Dans le cycle, `--no-deezer`, `--deezer-id` (disco) et
-    `--no-musicbrainz` (enrich) sont PARTAGÉS avec elle, et son forçage se dit
-    `--force-identite` (`--force` y est déjà le `force_update` d'enrich)."""
-    if etape_seule:
-        _bool_flags(p, "deezer", True, "artiste et catalogue Deezer, Deezer par morceau")
-        p.add_argument(
-            "--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu"
-        )
-        _bool_flags(p, "musicbrainz", True, "formations et alias PROPOSÉS (MusicBrainz + Discogs)")
+    """Étape Identité. Dans le cycle, son forçage se dit `--force-identite`
+    (`--force` y est déjà le `force_update` d'enrich)."""
+    _bool_flags(p, "deezer", True, "artiste et catalogue Deezer, Deezer par morceau")
+    p.add_argument("--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu")
+    _bool_flags(p, "musicbrainz", True, "formations et alias PROPOSÉS (MusicBrainz + Discogs)")
     _bool_flags(p, "par-morceau", True, "IDs Deezer puis Spotify des morceaux non reliés")
     _bool_flags(p, "spotify-artiste", True, "ID Spotify de l'artiste (vote)")
     _bool_flags(p, "nature-disques", True, "EP / album / single (catalogue Deezer)")
@@ -137,9 +156,6 @@ def _enrich_args(p: argparse.ArgumentParser) -> None:
         "discogs) ; défaut = toutes les sources disponibles",
     )
     p.add_argument("--force", action="store_true", help="force_update")
-    _bool_flags(
-        p, "musicbrainz", True, "identité en fin de run (alias PROPOSÉS, à arbitrer dans Groupes)"
-    )
 
 
 def _streams_args(p: argparse.ArgumentParser) -> None:
@@ -169,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     d = sub.add_parser("disco", help="discographie Genius (illimitée par défaut)")
     _artiste_args(d)
     _disco_args(d)
+    _anciens_drapeaux(d, "disco")
 
     i = sub.add_parser(
         "identite", help="relier les fiches aux plateformes (Deezer, Spotify, MusicBrainz)"
@@ -191,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     _artiste_args(e)
     _manquants_arg(e)
     _enrich_args(e)
+    _anciens_drapeaux(e, "enrich")
 
     s = sub.add_parser("streams", help="streams Spotify / YouTube Music")
     _artiste_args(s)
@@ -248,21 +266,19 @@ def options_disco(a: argparse.Namespace) -> discographie.OptionsDisco:
         include_prods=a.prods,
         respect_deleted=a.respecter_supprimes,
         download_images=a.images,
-        deezer=a.deezer,
-        deezer_id=a.deezer_id,
         tracklists=a.tracklists,
     )
 
 
 def options_identite(a: argparse.Namespace) -> identite.OptionsIdentite:
     return identite.OptionsIdentite(
-        deezer=getattr(a, "deezer", True),
-        musicbrainz=getattr(a, "musicbrainz", True),
+        deezer=a.deezer,
+        musicbrainz=a.musicbrainz,
         par_morceau=a.par_morceau,
         spotify_artiste=a.spotify_artiste,
         nature_disques=a.nature_disques,
         force=a.force_identite,
-        deezer_id=getattr(a, "deezer_id", None),
+        deezer_id=a.deezer_id,
         spotify_id=a.spotify_artist_id or None,
     )
 
@@ -288,7 +304,6 @@ def options_enrich(a: argparse.Namespace) -> enrichissement.OptionsEnrich:
     return enrichissement.OptionsEnrich(
         sources=_liste(a.sources) or None,
         force_update=a.force,
-        musicbrainz=a.musicbrainz,
     )
 
 
@@ -403,6 +418,13 @@ def _imprimer_bilan(titre: str, texte: str) -> None:
 
 def executer(a: argparse.Namespace, runtime: Runtime) -> int:
     hooks = _hooks()
+    deplaces = _drapeaux_deplaces(a)
+    if deplaces:
+        print(
+            f"❌ {', '.join(deplaces)} : déplacé vers l'étape Identité (2026-09-28) — "
+            f"python -m src.cli identite {a.nom} {' '.join(deplaces)}"
+        )
+        return ERREUR
     if a.commande == "artiste":
         art = _charger(runtime, a, creer=True)
         print(f"✅ {art.name} — ID Genius {art.genius_id} — {len(art.tracks)} morceau(x) en base")

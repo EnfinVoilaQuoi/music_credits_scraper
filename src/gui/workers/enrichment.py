@@ -111,26 +111,7 @@ def start_enrichment(app):
                 anchor="w", padx=25
             )
 
-    # Identité en FIN de run (2026-09-16) : hors de la boucle des providers —
-    # ce n'est pas une source par morceau mais un appel par artiste, après que
-    # les albums sont connus (oracle d'identité). Les alias sont PROPOSÉS, à
-    # arbitrer dans « Groupes » ; rien n'est confirmé automatiquement.
-    mb_frame = ctk.CTkFrame(dialog)
-    mb_frame.pack(fill="x", padx=20, pady=5)
-    musicbrainz_var = ctk.BooleanVar(value=True)
-    ctk.CTkCheckBox(
-        mb_frame,
-        text="MusicBrainz (identité : alias de scène, Discogs en confirmation) 🪪",
-        variable=musicbrainz_var,
-    ).pack(anchor="w")
-    ctk.CTkLabel(
-        mb_frame,
-        text="En fin de run, une fois par artiste. Les alias sont PROPOSÉS — à arbitrer "
-        "dans « Groupes ».",
-        font=("Arial", 9),
-        text_color="gray",
-    ).pack(anchor="w", padx=25)
-
+    # MusicBrainz (formations, alias) : bouton « Identité » depuis le 2026-09-28.
     separator = ctk.CTkFrame(dialog, height=2, fg_color="gray")
     separator.pack(fill="x", padx=20, pady=15)
 
@@ -203,14 +184,11 @@ def start_enrichment(app):
 
         force_update = force_var.get()
 
-        musicbrainz = musicbrainz_var.get()
-
         dialog.destroy()
         run_enrichment(
             app,
             selected_sources,
             force_update=force_update,
-            musicbrainz=musicbrainz,
         )
 
     ctk.CTkButton(dialog, text="Démarrer", command=start_enrichment).pack(pady=20)
@@ -220,7 +198,6 @@ def run_enrichment(
     app,
     sources: list[str],
     force_update: bool = False,
-    musicbrainz: bool = True,
 ):
     """Exécute l'enrichissement avec les sources sélectionnées.
 
@@ -245,7 +222,6 @@ def run_enrichment(
     options = enrichissement.OptionsEnrich(
         sources=tuple(sources),
         force_update=force_update,
-        musicbrainz=musicbrainz,
     )
     disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
     artist = app.current_artist

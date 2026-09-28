@@ -1,7 +1,7 @@
 """Nature des disques : combler `albums.record_type` pour TOUS les artistes.
 
-`_types_albums_deezer` ne tourne qu'en FIN d'enrichissement, une fois par
-artiste. Résultat mesuré le 2026-09-23 : sur les 7 436 morceaux qui portent un
+La nature des disques ne tourne que dans l'étape Identité (fin d'enrichissement
+jusqu'au 2026-09-28), une fois par artiste. Résultat mesuré le 2026-09-23 : sur les 7 436 morceaux qui portent un
 album, **2 457 seulement sont sur un disque typé** — 1 133 sur un disque connu
 mais non qualifié, et 3 846 sur un disque absent de la table `albums`, qui
 n'est pas un catalogue mais le magasin des streams d'album.

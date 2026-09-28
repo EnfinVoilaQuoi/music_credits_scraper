@@ -645,12 +645,12 @@ class DeezerAPI:
     # single, compilation), et `explicit`, durée, ISRC venaient alors d'un autre
     # enregistrement que celui lié.
 
-    #: Champs de la fiche `/track/{id}` ABSENTS d'un hit de recherche. Les
-    #: branches du provider qui les lisent n'ont jamais servi : les activer ici
-    #: serait une règle neuve — `release_date` est celle de l'ÉDITION (un best-of
-    #: 2020 pour un titre de 2005, écartée pour la même raison par les écarts
-    #: Deezer), et le BPM Deezer n'a jamais été mesuré contre le vote.
-    _HORS_HIT = ("release_date", "bpm")
+    #: Champs de la fiche `/track/{id}` qu'on ne transmet PAS au provider. Vide
+    #: depuis la décision utilisateur du 2026-09-28 : `release_date` (celle de
+    #: l'ÉDITION liée) et `bpm` (candidat au vote) sont transmis. La date reste
+    #: gardée par le provider — retenue seulement si la fiche n'en a pas, ou si
+    #: elle CONCORDE avec la date Genius ; un best-of qui contredit est écarté.
+    _HORS_HIT: tuple[str, ...] = ()
 
     @classmethod
     def _comme_un_hit(cls, fiche: dict | None) -> dict | None:

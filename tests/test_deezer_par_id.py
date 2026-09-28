@@ -25,8 +25,8 @@ FICHE = {
     "duration": 176,
     "isrc": "FR8R61600004",
     "explicit_lyrics": True,
-    "release_date": "2016-10-01",  # date de l'ÉDITION — jamais transmise
-    "bpm": 97.5,  # jamais mesuré contre le vote — jamais transmis
+    "release_date": "2016-10-01",  # date de l'ÉDITION — transmise depuis le 28/09
+    "bpm": 97.5,  # candidat au vote — transmis depuis le 28/09
     "album": {"id": 14175306, "title": "DKR"},
     "artist": {"id": 1, "name": "Booba"},
 }
@@ -81,7 +81,8 @@ def test_id_connu_lu_par_id_sans_recherche(voie):
     assert api.urls == ["track/133165774"] and api.recherches == 0
     d = r["data"]
     assert d["deezer_track_id"] == 133165774 and d["deezer_explicit_lyrics"] is True
-    assert d["deezer_release_date"] is None and d["deezer_bpm"] is None
+    # Décision utilisateur 2026-09-28 : date d'édition et BPM transmis.
+    assert d["deezer_release_date"] == "2016-10-01" and d["deezer_bpm"] == 97.5
 
 
 def test_id_retire_du_catalogue_repli_sur_la_recherche(voie):

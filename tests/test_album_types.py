@@ -244,3 +244,65 @@ def test_search_album_async_falls_back_to_free_query():
     )
     assert [h["id"] for h in hits] == [1]
     assert seen == ['artist:"Isha" album:"La vie augmente Vol.1"', "Isha La vie augmente Vol.1"]
+
+
+# ── Voie CATALOGUE (2026-09-28) : les disques lus par les écarts Deezer ──────
+
+
+def _disque(did, titre, rt, nb, artiste=1236609):
+    from src.services.ecarts_deezer import AlbumDeezer
+
+    return AlbumDeezer(id=did, title=titre, record_type=rt, artist_id=artiste, nb_tracks=nb)
+
+
+def test_fiches_du_catalogue_exact_propre_et_sans_single_homonyme():
+    tracks = [
+        _track(1, "La vie augmente Vol.1"),
+        _track(2, "La vie augmente Vol.1"),
+        _track(3, "Drôle d'oiseau"),
+        _track(4, "Drôle d'oiseau"),
+        _track(5, "Chardons"),
+    ]
+    albums = [
+        _disque(10, "La Vie Augmente, Vol. 1", "ep", 10),  # graphie Deezer
+        _disque(20, "Drôle d'oiseau", "single", 1),  # le single homonyme
+        _disque(21, "Drôle d'oiseau", "ep", 9),
+        _disque(30, "Chardons", "album", 12, artiste=999),  # disque d'un AUTRE
+    ]
+    fiches, motifs = at.fiches_du_catalogue(albums, 1236609, tracks)
+    assert {t: (f.id, f.record_type) for t, f in fiches.items()} == {
+        "La vie augmente Vol.1": (10, "ep"),
+        "Drôle d'oiseau": (21, "ep"),
+    }
+    assert motifs == []
+
+
+def test_fiches_du_catalogue_editions_en_desaccord_ne_tranchent_pas():
+    tracks = [_track(1, "X"), _track(2, "X")]
+    albums = [_disque(1, "X", "album", 12), _disque(2, "X", "ep", 12)]
+    fiches, motifs = at.fiches_du_catalogue(albums, 1236609, tracks)
+    assert fiches == {} and motifs == ["X : éditions Deezer en désaccord (album, ep)"]
+
+
+def test_fiches_du_catalogue_sans_identite_d_artiste():
+    assert at.fiches_du_catalogue([_disque(1, "X", "ep", 3)], None, [_track(1, "X")]) == ({}, [])
+
+
+def test_le_catalogue_passe_avant_les_hits_et_ne_coute_aucune_requete():
+    tracks = [_track(1, "Drôle d'oiseau", 2), _track(2, "Drôle d'oiseau", 2)]
+    client = _Client({2: {"id": 2, "title": "Drôle d'oiseau", "record_type": "single"}})
+    catalogue = {"Drôle d'oiseau": at.FicheAlbum(21, "Drôle d'oiseau", "ep", 9)}
+    ecrits = []
+    bilan = asyncio.run(
+        at.types_albums_deezer(
+            client, None, tracks, {}, lambda *a: ecrits.append(a) or True, catalogue=catalogue
+        )
+    )
+    assert client.calls == [] and ecrits == [("Drôle d'oiseau", "ep", 21)]
+    assert bilan.renseignes == 1
+
+
+def test_la_detection_expose_le_catalogue_lu():
+    from src.services.ecarts_deezer import BilanEcarts
+
+    assert BilanEcarts().albums == []

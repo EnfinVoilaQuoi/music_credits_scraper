@@ -213,6 +213,10 @@ class BilanEcarts(Bilan):
     ambigu: list = field(default_factory=list)
     #: Liens prouvés écrits sans confirmation pendant cette détection.
     rattachements_auto: int = 0
+    #: Le catalogue LU (disques + pistes), pour ce qui s'en sert sans relire
+    #: Deezer — la nature des disques (`album_types.fiches_du_catalogue`).
+    #: Jamais sérialisé dans les signalements.
+    albums: list[AlbumDeezer] = field(default_factory=list)
 
     def compteurs(self) -> Counter:
         return Counter(e.nature for e in self.ecarts)
@@ -657,6 +661,7 @@ async def detecter_async(
     cocher_par_defaut(ecarts, base)
     bilan.ecarts = ecarts
     bilan.editions_jumelles = jumelles
+    bilan.albums = albums
     return bilan
 
 

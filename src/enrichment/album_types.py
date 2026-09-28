@@ -133,6 +133,55 @@ def choisir_fiche_recherche(hits, title: str, nb_morceaux: int) -> FicheAlbum | 
     return max(candidates, key=lambda f: (f.nb_tracks, -f.id))
 
 
+def fiches_du_catalogue(
+    albums, artist_deezer_id: int | None, tracks
+) -> tuple[dict[str, FicheAlbum], list[str]]:
+    """Les fiches du CATALOGUE Deezer de l'artiste (lu par les écarts, zéro
+    requête de plus), par album de la base — `(fiches, motifs)`.
+
+    Preuve plus forte que les hits du provider : l'identité de l'artiste Deezer
+    est VÉRIFIÉE (oracle `deezer_identite`) et chaque disque porte déjà son
+    `record_type`. Seuls les disques DE l'artiste comptent (un album d'un autre
+    où il est invité ne qualifie pas le sien) ; titre normalisé EXACT
+    (`_cle_titre`, la règle de la recherche d'album) ; même garde que la
+    recherche contre le single homonyme ; plusieurs éditions à la même clé qui
+    se CONTREDISENT sur la nature ⇒ rien (dit dans les motifs). `albums` =
+    objets à `id`, `title`, `record_type`, `nb_tracks`, `artist_id`, `pistes`.
+    """
+    fiches: dict[str, FicheAlbum] = {}
+    motifs: list[str] = []
+    if not artist_deezer_id:
+        return fiches, motifs
+    par_cle: dict[str, list[FicheAlbum]] = {}
+    for a in albums or ():
+        if a.artist_id != artist_deezer_id:
+            continue
+        fiche = fiche_album(
+            {
+                "id": a.id,
+                "title": a.title,
+                "record_type": a.record_type,
+                "nb_tracks": a.nb_tracks or len(a.pistes or ()),
+            }
+        )
+        if fiche is not None and fiche.record_type is not None:
+            par_cle.setdefault(_cle_titre(fiche.title), []).append(fiche)
+    for title, groupe in regrouper(tracks).items():
+        candidates = [
+            f
+            for f in par_cle.get(_cle_titre(title), ())
+            if not (groupe.nb_morceaux >= 2 and f.nb_tracks < 2)
+        ]
+        if not candidates:
+            continue
+        natures = {f.record_type for f in candidates}
+        if len(natures) > 1:
+            motifs.append(f"{title} : éditions Deezer en désaccord ({', '.join(sorted(natures))})")
+            continue
+        fiches[title] = max(candidates, key=lambda f: (f.nb_tracks, -f.id))
+    return fiches, motifs
+
+
 def verdict(fiche: FicheAlbum | None, nb_morceaux: int) -> tuple[str | None, str | None]:
     """(record_type à écrire, motif de rejet)."""
     if fiche is None:
@@ -161,27 +210,34 @@ async def types_albums_deezer(
     *,
     force: bool = False,
     artist_name: str = "",
+    catalogue: Mapping[str, FicheAlbum] | None = None,
 ) -> BilanTypes:
     """Une fiche par album, puis `ecrire(title, record_type, deezer_album_id)`.
 
-    Deux voies : l'identifiant d'album le plus fréquent parmi les hits des
-    morceaux (posé par le provider ce run), sinon — avec `artist_name` — la
-    recherche d'album par (artiste, titre), titre normalisé EXACT. `deja` = les
-    lignes `albums` déjà en base, par titre brut : un album déjà qualifié n'est
-    pas redemandé sauf `force`. L'écriture (sync, SQLite) passe par
-    `asyncio.to_thread`.
+    Trois voies, de la preuve la plus forte à la plus faible (2026-09-28) :
+    `catalogue` (fiches du catalogue de l'artiste Deezer VÉRIFIÉ,
+    `fiches_du_catalogue`, zéro requête), l'identifiant d'album le plus
+    fréquent parmi les hits des morceaux (posé par le provider ce run), sinon —
+    avec `artist_name` — la recherche d'album par (artiste, titre), titre
+    normalisé EXACT. `deja` = les lignes `albums` déjà en base, par titre brut :
+    un album déjà qualifié n'est pas redemandé sauf `force`. L'écriture (sync,
+    SQLite) passe par `asyncio.to_thread`.
     """
     bilan = BilanTypes()
+    catalogue = catalogue or {}
     for title, groupe in sorted(regrouper(tracks).items()):
         connu = deja.get(title) or {}
-        album_id = choisir_id(groupe.ids)
+        du_catalogue = catalogue.get(title)
+        album_id = du_catalogue.id if du_catalogue else choisir_id(groupe.ids)
         # Déjà qualifié : on ne redemande que si un NOUVEL identifiant apparaît.
         deja_su = bool(connu.get("record_type")) and (
             album_id is None or connu.get("deezer_album_id") == album_id
         )
         if deja_su and not force:
             continue
-        if album_id is not None:
+        if du_catalogue is not None:
+            fiche = du_catalogue
+        elif album_id is not None:
             fiche = fiche_album(await client.get_album_async(http, album_id))
         elif artist_name:
             hits = await client.search_album_async(http, artist_name, title)

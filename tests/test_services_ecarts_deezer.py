@@ -341,6 +341,8 @@ class TestDetecterAsync:
         artist.id = 1
         bilan = asyncio.run(ed.detecter_async(client, None, self._DM(), artist, deezer_id=NOUS))
         assert bilan.complete and bilan.albums_lus == 2
+        # Le catalogue lu est exposé (nature des disques, sans relire Deezer).
+        assert len(bilan.albums) == 2
         assert [(e.nature, e.titre) for e in bilan.ecarts] == [
             ("link", "MW2"),
             ("absent", "Inédit"),

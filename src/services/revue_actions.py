@@ -71,6 +71,22 @@ def _rejeter_video(ctx: ContexteAction, cas: Cas) -> str:
     return f"vidéo {vid} retirée de « {track.title} »"
 
 
+def _rejeter_video_partagee(ctx: ContexteAction, cas: Cas) -> str:
+    """La vidéo quitte TOUTES les fiches qu'elle ne nomme pas (un geste pour
+    un « album entier » rattaché à dix titres)."""
+    from src.utils.youtube_integration import reject_youtube_link
+
+    vid = cas.preuves["video_id"]
+    url = f"https://www.youtube.com/watch?v={vid}"
+    faites = []
+    for tid in cas.preuves.get("track_ids") or []:
+        track = ctx.tracks.get(tid)
+        if track is not None:
+            reject_youtube_link(ctx.data_manager, track, url, ctx.artiste.name)
+            faites.append(track.title)
+    return f"vidéo {vid} retirée de {len(faites)} fiche(s)"
+
+
 def _retirer_spotify(ctx: ContexteAction, cas: Cas) -> str:
     from src.utils.corrections_fiches import memoriser_id_refuse
     from src.utils.spotify_audit import rejeter_spotify_id
@@ -267,6 +283,16 @@ def _action_retirer_lrc() -> Action:
 def actions_pour(cas: Cas) -> list[Action]:
     """Les actions proposées pour un cas (hors « ✓ Normal », toujours là)."""
     d = cas.detecteur
+    if d == "video_partagee":
+        return [
+            Action(
+                "rejeter_video_partagee",
+                "✖️ Retirer de ces fiches",
+                _rejeter_video_partagee,
+                f"Retirer cette vidéo de {len(cas.preuves.get('track_ids') or [])} fiche(s) ? "
+                "Ses vues ne seront plus comptées pour elles.",
+            )
+        ]
     if d == "video_etrangere":
         return [
             Action(

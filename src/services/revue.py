@@ -818,10 +818,8 @@ def _titres_alternatifs(track) -> list[str]:
     return alternatifs
 
 
-def video_etrangere(track, _ctx=None):
-    """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
-    celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
-    Dermot Kennedy, 918 k vues, comptées dans les streams YouTube)."""
+def video_nomme(track, v) -> bool:
+    """Le titre de la vidéo `v` nomme-t-il le morceau `track` ?"""
     socle = _mots(parse_variant(track.title).socle)
     # Une parenthèse qui n'est pas un descripteur fait partie du titre Genius
     # (« Pursuit of Happiness (Nightmare) » : le clip officiel ne la porte pas) —
@@ -829,20 +827,42 @@ def video_etrangere(track, _ctx=None):
     nu = _mots(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
     if titre_generique(nu):
         nu = socle
+    titre = _mots(v.title)
+    return (
+        _video_couvre(socle, titre)
+        or _video_couvre(nu, titre)
+        or any(_video_couvre(alt, titre) for alt in _titres_alternatifs(track))
+        or _mots_a_une_lettre(socle, titre)
+        or _freestyle_d_emission(track, v.title)
+    )
 
-    alternatifs = _titres_alternatifs(track)
 
-    def couvre(v) -> bool:
-        titre = _mots(v.title)
-        return (
-            _video_couvre(socle, titre)
-            or _video_couvre(nu, titre)
-            or any(_video_couvre(alt, titre) for alt in alternatifs)
-            or _mots_a_une_lettre(socle, titre)
-            or _freestyle_d_emission(track, v.title)
-        )
+def _proprietaires_des_videos(ctx) -> dict[str, list]:
+    """`{video_id: [fiches qui la portent]}` — mémorisé par ouverture."""
 
-    suspectes = [v for v in track.videos or [] if v.title and not couvre(v)]
+    def fabrique():
+        par_video: dict[str, list] = {}
+        for t in ctx.disco:
+            for v in t.videos or []:
+                if v.video_id:
+                    par_video.setdefault(v.video_id, []).append(t)
+        return par_video
+
+    return ctx.memo("proprietaires_videos", fabrique)
+
+
+def video_etrangere(track, ctx=None):
+    """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
+    celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
+    Dermot Kennedy, 918 k vues, comptées dans les streams YouTube). Une vidéo
+    PORTÉE PAR PLUSIEURS FICHES se juge une fois, au niveau de l'artiste
+    (`video_partagee`) — un « album entier » faisait un cas par titre."""
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    suspectes = [
+        v
+        for v in track.videos or []
+        if v.title and len(proprietaires.get(v.video_id, ())) < 2 and not video_nomme(track, v)
+    ]
     if not suspectes:
         return None
     v = max(suspectes, key=lambda x: x.views or 0)
@@ -850,6 +870,38 @@ def video_etrangere(track, _ctx=None):
         f"vidéo « {v.title} » ({v.video_id}) ne nomme pas le morceau",
         {"video_id": v.video_id, "titre": v.title, "impact": v.views or 0},
     )
+
+
+def video_partagee(ctx):
+    """Une vidéo portée par PLUSIEURS fiches qui n'en nomme pas au moins une
+    (album entier, EP complet, film, freestyle collectif mal rattaché) : UN
+    cas, avec les fiches concernées — ses vues sont comptées sur chacune."""
+    cas = []
+    for video_id, fiches in _proprietaires_des_videos(ctx).items():
+        if len(fiches) < 2:
+            continue
+        v = next(x for x in fiches[0].videos if x.video_id == video_id)
+        if not v.title:
+            continue
+        muettes = [t for t in fiches if not video_nomme(t, v)]
+        if not muettes:
+            continue
+        noms = ", ".join(f"« {t.title} »" for t in muettes[:4])
+        if len(muettes) > 4:
+            noms += f" et {len(muettes) - 4} autre(s)"
+        cas.append(
+            (
+                v.title,
+                f"vidéo portée par {len(fiches)} fiches, ne nomme pas {noms}",
+                {
+                    "video_id": video_id,
+                    "kind": video_id,
+                    "track_ids": [t.id for t in muettes],
+                    "impact": v.views or 0,
+                },
+            )
+        )
+    return cas
 
 
 def vues_youtube_anormales(track, _ctx=None):
@@ -1001,6 +1053,7 @@ DETECTEURS: tuple[Detecteur, ...] = (
 
 DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("liens_proposes", "Alias / formations proposés", "👥", liens_proposes),
+    DetecteurArtiste("video_partagee", "Vidéo portée par plusieurs fiches", "🎞️", video_partagee),
 )
 
 
@@ -1019,7 +1072,7 @@ def detecter(ctx: Contexte, detecteurs=DETECTEURS, detecteurs_artiste=DETECTEURS
     for d in detecteurs_artiste:
         for libelle, motif, preuves in d.juger(ctx):
             cle = f"artiste|{libelle}|{preuves.get('kind', '')}"
-            cas.append(Cas(d.code, None, libelle, motif, 0, preuves, cle))
+            cas.append(Cas(d.code, None, libelle, motif, preuves.get("impact", 0), preuves, cle))
     return sorted(cas, key=lambda c: (-c.impact, c.detecteur, c.morceau))
 
 

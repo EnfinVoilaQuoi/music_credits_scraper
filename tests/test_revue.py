@@ -607,3 +607,46 @@ class TestAutrePriseHorsPlateformes:
         ctx = _ctx(o, d)
         assert revue.lrc_d_une_autre_fiche(d, ctx) is None
         assert "peut-être celui de « Hurricane »" in revue.lrc_douteux(d, ctx)[0]
+
+
+class TestVideoPartagee:
+    """2026-09-28 : une vidéo portée par plusieurs fiches (« album entier » sur
+    dix titres) se juge UNE fois, pas une fois par fiche."""
+
+    @staticmethod
+    def _v(vid, titre, vues=100):
+        return TrackVideo(video_id=vid, title=titre, views=vues)
+
+    def test_un_cas_par_video_avec_les_fiches_muettes(self):
+        album = self._v(
+            "ALB", "BEN plg - Paraît que les miracles n'existent pas (Album entier)", 5000
+        )
+        a = _t("Béni", 1, videos=[album])
+        b = _t("Le riz et la sauce", 2, videos=[album])
+        ctx = _ctx(a, b)
+        assert revue.video_etrangere(a, ctx) is None and revue.video_etrangere(b, ctx) is None
+        ((libelle, motif, preuves),) = revue.video_partagee(ctx)
+        assert preuves["track_ids"] == [1, 2] and preuves["impact"] == 5000
+        assert "portée par 2 fiches" in motif
+
+    def test_un_clip_double_qui_nomme_ses_deux_titres_n_est_pas_signale(self):
+        clip = self._v("DBL", "Booba - Donjon & 2h22")
+        ctx = _ctx(_t("Donjon", 1, videos=[clip]), _t("2h22", 2, videos=[clip]))
+        assert revue.video_partagee(ctx) == []
+
+    def test_l_action_retire_la_video_de_toutes_les_fiches_muettes(self, monkeypatch):
+        from src.services import revue_actions
+
+        retraits = []
+        monkeypatch.setattr(
+            "src.utils.youtube_integration.reject_youtube_link",
+            lambda dm, track, url, nom: retraits.append((track.id, url)),
+        )
+        a, b = _t("Béni", 1), _t("Le riz", 2)
+        cas = revue.Cas(
+            "video_partagee", None, "x", "m", 0, {"video_id": "ALB", "track_ids": [1, 2]}, "k"
+        )
+        (action,) = revue_actions.actions_pour(cas)
+        ctx = revue_actions.ContexteAction(None, _A, {1: a, 2: b})
+        assert "2 fiche(s)" in action.executer(ctx, cas)
+        assert [tid for tid, _ in retraits] == [1, 2]

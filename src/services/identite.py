@@ -342,7 +342,10 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
             k = relier_ids_kworb(artist, runtime.data_manager)
             bilan.kworb_ids, bilan.kworb_editions = k["ids_poses"], k["editions"]
             if not k["page"]:
-                bilan.artistes["kworb"] = "aucune page validée (ID Spotify d'artiste manquant ?)"
+                bilan.artistes["kworb"] = (
+                    "aucune page validée — artiste absent de Kworb (sous son seuil), "
+                    "page d'un homonyme, ou ID Spotify d'artiste inconnu"
+                )
         except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
             logger.exception("Identité (Kworb) : échec")
             bilan.artistes["kworb"] = f"panne — {e}"

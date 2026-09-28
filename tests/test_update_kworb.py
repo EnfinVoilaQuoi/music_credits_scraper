@@ -459,21 +459,39 @@ class TestAgregationEtBackfill:
         assert dm.streams_writes == [(1, 1500, 15, datetime(2026, 9, 1))]
         assert res["matched"] == 2  # deux lignes matchées, une seule écriture
 
-    def test_backfill_de_l_id_spotify(self):
-        """Kworb donne l'URL du track : on en profite pour compléter la base."""
+    def test_le_comptage_n_ecrit_plus_d_id(self):
+        """② de l'étape Identité (2026-09-28) : les streams vont à la fiche
+        rapprochée par titre, l'ID reste à poser par `relier_ids_kworb`."""
         dm = _DataManager([_track(1, "Titre")])
         res = update_kworb_streams(
             _Artist(), dm, scraper=_Scraper(songs=_page([_entry("Titre", spotify_id="SP9")]))
         )
+        assert dm.track_spotify_ids == [] and res["matched"] == 1
+        assert "spotify_ids_backfilled" not in res
+
+    def test_l_etape_identite_pose_l_id(self):
+        """Kworb donne l'URL du track : l'étape Identité en profite."""
+        dm = _DataManager([_track(1, "Titre")])
+        res = uk.relier_ids_kworb(
+            _Artist(), dm, scraper=_Scraper(songs=_page([_entry("Titre", spotify_id="SP9")]))
+        )
         assert dm.track_spotify_ids == [(1, "SP9")]
-        assert res["spotify_ids_backfilled"] == 1
+        assert res == {"ids_poses": 1, "editions": 0, "lignes": 1, "page": True}
+        assert dm.streams_writes == []  # l'identité ne compte rien
 
     def test_id_existant_jamais_ecrase(self):
         dm = _DataManager([_track(1, "Titre", spotify_id="DEJA")])
-        update_kworb_streams(
+        uk.relier_ids_kworb(
             _Artist(), dm, scraper=_Scraper(songs=_page([_entry("Titre", spotify_id="SP9")]))
         )
         assert dm.track_spotify_ids == []
+
+    def test_sans_id_d_artiste_rien_n_est_relie(self):
+        dm = _DataManager([_track(1, "Titre")])
+        artiste = _Artist()
+        artiste.spotify_id = None
+        res = uk.relier_ids_kworb(artiste, dm, scraper=_Scraper(songs=_page([_entry("Titre")])))
+        assert res["page"] is False and dm.track_spotify_ids == []
 
     def test_totaux_artiste(self):
         dm = _DataManager([])
@@ -901,6 +919,18 @@ def _run(tracks, entries, identites=None, **kw):
     return res, dm
 
 
+def _relier(tracks, entries, identites=None):
+    """L'étape Identité sur la même page (② : c'est elle qui pose les ID)."""
+    dm = _DataManager(tracks)
+    res = uk.relier_ids_kworb(
+        _Artist(),
+        dm,
+        scraper=_Scraper(songs=_page(entries)),
+        lire_identite=lambda sid: (identites or {}).get(sid),
+    )
+    return res, dm
+
+
 def _identite(nom, artistes, duree):
     return {"name": nom, "artists": artistes, "duration": duree}
 
@@ -941,6 +971,14 @@ class TestEditionsDeDiffusion:
             ],
         )
         assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 1400)]
+        assert dm.editions == []  # le comptage ne relie rien (②)
+        _, dm = _relier(
+            tracks,
+            [
+                _entry("Impossible", 1000, 10, "SP1"),
+                _entry("Impossible - Radio Edit", 400, 4, "SPR"),
+            ],
+        )
         assert dm.editions == [(1, "Radio Edit", "SPR")]
         assert dm.track_spotify_ids == []  # jamais l'ID principal
 
@@ -1079,7 +1117,9 @@ class TestRenditions:
         assert dm.streams_writes == [(2, 14_000_000, 100, datetime(2026, 9, 1))]
         # Le souche garde l'indication, avec le pointeur vers la fiche.
         assert dm.variant_fiches == [(1, "SPA", 2)]
-        assert dm.track_spotify_ids == [(2, "SPA")]  # la fiche reçoit l'ID de Kworb
+        assert dm.track_spotify_ids == []  # le comptage ne relie rien (②)
+        _, dm = _relier(tracks, [_entry("Nudes - Acoustic", 14_000_000, 100, "SPA")])
+        assert dm.track_spotify_ids == [(2, "SPA")]  # l'étape Identité lui pose l'ID
 
     def test_une_variante_deja_rattachee_rejoint_sa_fiche(self):
         parent = _track(1, "Blues", spotify_id="SP1")

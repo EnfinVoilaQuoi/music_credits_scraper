@@ -82,18 +82,25 @@ def espions(monkeypatch):
         identite, "_artiste_spotify", lambda *a: appels.append("spotify") or "mémorisée"
     )
     monkeypatch.setattr(identite, "_nature_des_disques", lambda *a: appels.append("nature"))
+    monkeypatch.setattr(
+        "src.utils.update_kworb.relier_ids_kworb",
+        lambda artist, dm: appels.append("kworb")
+        or {"ids_poses": 0, "editions": 0, "lignes": 0, "page": True},
+    )
     return appels
 
 
 def test_l_ordre_des_couches_est_celui_de_la_preuve(espions):
     rt = _runtime([_t(1), _t(2)])
     bilan = identite.run(rt, _artist(rt), identite.OptionsIdentite(), Hooks())
+    # 1c avant Kworb (il lui faut l'ID d'artiste), Kworb avant le scraper (②).
     assert espions == [
         "deezer",
         "musicbrainz",
         "passage:deezer",
-        "passage:spotify_id",
         "spotify",
+        "kworb",
+        "passage:spotify_id",
         "nature",
     ]
     assert bilan.complete
@@ -490,3 +497,23 @@ class TestCatalogueDeezer:
     def test_sans_client_rien_n_est_appele(self, monkeypatch):
         res, recus, appels = self._run(monkeypatch, client=False)
         assert res.panne and appels == [] and "indisponible" in res.motif
+
+
+def test_couche_kworb_compte_et_panne_dite(espions, monkeypatch):
+    rt = _runtime([_t(1)])
+    monkeypatch.setattr(
+        "src.utils.update_kworb.relier_ids_kworb",
+        lambda artist, dm: {"ids_poses": 3, "editions": 1, "lignes": 9, "page": True},
+    )
+    a = _artist(rt)
+    bilan = identite.run(rt, a, identite.OptionsIdentite(), Hooks())
+    assert (bilan.kworb_ids, bilan.kworb_editions) == (3, 1)
+    assert "Kworb : 3 ID Spotify posé(s), 1 édition(s)" in identite.resume(bilan, a)
+
+    def casse(artist, dm):
+        raise RuntimeError("kworb.net injoignable")
+
+    monkeypatch.setattr("src.utils.update_kworb.relier_ids_kworb", casse)
+    bilan = identite.run(rt, _artist(rt), identite.OptionsIdentite(), Hooks())
+    assert not bilan.complete and "injoignable" in bilan.artistes["kworb"]
+    assert espions[-2:] == ["passage:spotify_id", "nature"]  # les suivantes tournent

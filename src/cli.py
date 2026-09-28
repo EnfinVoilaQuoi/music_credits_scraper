@@ -116,6 +116,7 @@ def _identite_args(p: argparse.ArgumentParser, *, etape_seule: bool) -> None:
     _bool_flags(p, "musicbrainz", True, "formations et alias PROPOSÉS (MusicBrainz + Discogs)")
     _bool_flags(p, "par-morceau", True, "IDs Deezer puis Spotify des morceaux non reliés")
     _bool_flags(p, "spotify-artiste", True, "ID Spotify de l'artiste (vote)")
+    _bool_flags(p, "kworb-ids", True, "ID Spotify lus sur le catalogue Kworb de l'artiste")
     _bool_flags(p, "nature-disques", True, "EP / album / single (catalogue Deezer)")
     p.add_argument(
         "--force" if etape_seule else "--force-identite",
@@ -276,6 +277,7 @@ def options_identite(a: argparse.Namespace) -> identite.OptionsIdentite:
         musicbrainz=a.musicbrainz,
         par_morceau=a.par_morceau,
         spotify_artiste=a.spotify_artiste,
+        kworb=a.kworb_ids,
         nature_disques=a.nature_disques,
         force=a.force_identite,
         deezer_id=a.deezer_id,

@@ -10,10 +10,13 @@ les fonctions EXISTANTES dans l'ordre de la force de la preuve, et rien d'autre
     1b MusicBrainz+Discogs (formations et alias PROPOSÉS, identité Discogs)
     2a catalogue Deezer    (écarts : liens prouvés écrits, le reste « à trancher »)
     3a Deezer par morceau  (provider ; B0 : la piste liée se lit par son id)
-    3b Spotify par morceau (provider, gate `valider_identite`) — APRÈS 3a, pour
-       qu'une durée INDÉPENDANTE existe au moment du jugement (73 variantes
-       avaient hérité de l'ID de l'original quand la durée « suivait » l'ID)
-    1c artiste Spotify     (vote sur les IDs des non-feats — plus de voix après 3b)
+    1c artiste Spotify     (vote sur les IDs des non-feats — Kworb en a besoin)
+    2c catalogue Kworb     (le vrai catalogue Spotify de l'artiste, ID compris ;
+       déménagé du run Streams le 2026-09-28, qui ne fait plus que compter)
+    3b Spotify par morceau (scraper + LLM, gate `valider_identite`, pour ce que
+       Kworb n'a pas relié) — APRÈS 3a, pour qu'une durée INDÉPENDANTE existe au
+       moment du jugement (73 variantes avaient hérité de l'ID de l'original
+       quand la durée « suivait » l'ID)
     2b nature des disques  (catalogue > hits de 3a > recherche d'album)
 
 Une panne d'une couche rend le run INCOMPLET mais n'empêche pas les suivantes ;
@@ -52,6 +55,7 @@ class OptionsIdentite:
     musicbrainz: bool = True  # 1b
     par_morceau: bool = True  # 3a + 3b
     spotify_artiste: bool = True  # 1c
+    kworb: bool = True  # 2c
     nature_disques: bool = True  # 2b
     force: bool = False
     deezer_id: int | None = None
@@ -93,6 +97,8 @@ class BilanIdentite(Bilan):
     #: IDs Spotify posés au passage 3b sans AUCUNE durée indépendante sur la
     #: fiche — la contre-vérification (③) les rejugera quand une arrivera.
     spotify_sans_duree: int = 0
+    kworb_ids: int = 0
+    kworb_editions: int = 0
     types_albums: int = 0
     albums_ignores: list[str] = field(default_factory=list)
     avant: dict[str, int] = field(default_factory=dict)
@@ -319,6 +325,30 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
             hits_albums = {t.id: t._deezer_album_id for t in tracks if t._deezer_album_id}
         _recharger(runtime, artist)
 
+    # 1c — artiste Spotify (avant Kworb, qui en a besoin pour trouver la page)
+    if options.spotify_artiste and not arret("artiste Spotify"):
+        bilan.artistes["spotify"] = _artiste_spotify(runtime, artist, options, hooks)
+        if bilan.artistes["spotify"].startswith("panne"):
+            panne("artiste Spotify", bilan.artistes["spotify"])
+
+    # 2c — catalogue Spotify via Kworb (② 2026-09-28) : la page Kworb est le
+    # vrai catalogue de l'artiste, ID compris ; APRÈS 3a (durée Deezer connue
+    # au jugement) et AVANT le scraper, qui ne cherche plus que le reste.
+    if options.kworb and not arret("Kworb"):
+        hooks.progress(0, 1, "Catalogue Spotify", "Kworb")
+        try:
+            from src.utils.update_kworb import relier_ids_kworb
+
+            k = relier_ids_kworb(artist, runtime.data_manager)
+            bilan.kworb_ids, bilan.kworb_editions = k["ids_poses"], k["editions"]
+            if not k["page"]:
+                bilan.artistes["kworb"] = "aucune page validée (ID Spotify d'artiste manquant ?)"
+        except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
+            logger.exception("Identité (Kworb) : échec")
+            bilan.artistes["kworb"] = f"panne — {e}"
+            panne("Kworb", str(e))
+        _recharger(runtime, artist)
+
     # 3b — Spotify par morceau (APRÈS 3a : une durée indépendante existe)
     if options.par_morceau and not arret("Spotify par morceau"):
         kinds = (Manque.IDENTITE_SPOTIFY_FORCE,) if options.force else (Manque.IDENTITE_SPOTIFY,)
@@ -335,12 +365,6 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         bilan.spotify_sans_duree = sum(
             1 for t in artist.tracks if t.id in sans_duree and t.spotify_id
         )
-
-    # 1c — artiste Spotify
-    if options.spotify_artiste and not arret("artiste Spotify"):
-        bilan.artistes["spotify"] = _artiste_spotify(runtime, artist, options, hooks)
-        if bilan.artistes["spotify"].startswith("panne"):
-            panne("artiste Spotify", bilan.artistes["spotify"])
 
     # 2b — nature des disques
     if options.nature_disques and options.deezer and not arret("nature des disques"):
@@ -439,6 +463,11 @@ def resume(bilan: BilanIdentite, artist: Artist) -> str:
             )
         if e.ecarts:
             lignes.append(f"🎧 Deezer : {len(e.ecarts)} écart(s) → bouton « À trancher »")
+    if bilan.kworb_ids or bilan.kworb_editions:
+        lignes.append(
+            f"🔗 Kworb : {bilan.kworb_ids} ID Spotify posé(s), "
+            f"{bilan.kworb_editions} édition(s) rattachée(s)"
+        )
     if bilan.deezer_morceaux or bilan.spotify_morceaux:
         lignes.append(
             f"🔎 Par morceau : {bilan.deezer_morceaux} via Deezer, "

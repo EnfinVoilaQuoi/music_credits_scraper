@@ -46,6 +46,11 @@ _COUCHES = (
         "Vote sur les morceaux non-feat ; un ID déjà mémorisé n'est pas remplacé.",
     ),
     (
+        "kworb",
+        "Kworb : catalogue Spotify de l'artiste 🔗",
+        "Les ID Spotify que liste sa page Kworb (même gate d'identité) ; avant le scraper.",
+    ),
+    (
         "nature_disques",
         "Nature des disques (EP / album / single) 💿",
         "Catalogue Deezer d'abord ; une saisie manuelle n'est jamais écrasée.",

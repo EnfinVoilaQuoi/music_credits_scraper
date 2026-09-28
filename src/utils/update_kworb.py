@@ -6,7 +6,8 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
     (Bug historique : l'ID d'Isha pointait vers Limsa d'Aulnay, élu par un vote
     dominé par les pages de ses feats.)
   · MATCHING PAR SPOTIFY ID d'abord (les lignes Kworb contiennent l'URL du track),
-    titre normalisé en fallback ; backfill des spotify_id manquants en base.
+    titre normalisé en fallback. Les spotify_id manquants sont posés par
+    `relier_ids_kworb`, dans l'étape Identité (2026-09-28) — ce run COMPTE.
   · Fraîcheur = date "Last updated" de la page Kworb (pas now()).
   · Totaux artiste (récap Total/As lead/As feature) stockés sur artists.
   · Albums : total calculé sur les MORCEAUX de l'album, jamais en sommant les
@@ -839,6 +840,85 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     return None, spotify_artist_id
 
 
+def relier_ids_kworb(artist, data_manager, scraper=None, lire_identite=None) -> dict:
+    """Les ID Spotify que la page Kworb de l'artiste RELIE à ses fiches — et
+    rien d'autre : ni stream, ni total, ni signalement (② de l'étape Identité,
+    décision utilisateur 2026-09-28 : Kworb lit le vrai catalogue Spotify, il
+    déménage dans l'étape qui relie ; le run Streams ne fait plus que COMPTER).
+
+    Même page validée, même index, même `rapprocher`, mêmes décisions
+    mémorisées et même garde « autre upload » que le comptage : deux verdicts
+    de rapprochement divergents seraient deux vérités. Écrit : l'ID d'une
+    ÉDITION sur l'édition (`editions.rattacher`), l'ID d'une fiche qui n'en a
+    pas après le gate d'identité (le plus fort des deux — la durée de Deezer
+    est connue quand l'étape l'appelle).
+
+    Rend `{ids_poses, editions, lignes, page}` ; `page` = False si aucune page
+    validée (artiste Spotify inconnu, homonyme) — rien n'est écrit alors.
+    """
+    res = {"ids_poses": 0, "editions": 0, "lignes": 0, "page": False}
+    spotify_artist_id = getattr(artist, "spotify_id", None)
+    if not spotify_artist_id:
+        logger.info(f"Kworb (identité) : pas d'ID Spotify pour '{artist.name}' — rien à relier")
+        return res
+    scraper = scraper or KworbScraper()
+    page_songs, _ = _scrape_validated(scraper, artist, data_manager, spotify_artist_id)
+    if not page_songs:
+        return res
+    res["page"] = True
+    index = construire_index(data_manager.get_artist_tracks(artist.id))
+    lire_identite = lire_identite or spotify_identity.lire_identite_http
+    try:
+        from src.utils.kworb_links_manager import KworbLinksManager
+
+        decisions = KworbLinksManager().load(artist.name)
+    except (OSError, ValueError):
+        decisions = {"confirmed": {}, "rejected": [], "decisions": {}}
+    lus_web = data_manager.get_stream_observation_values("spotify_web")
+    ids_page = {e["spotify_id"] for e in page_songs["entries"] if e.get("spotify_id")}
+
+    for entry in page_songs["entries"]:
+        res["lignes"] += 1
+        sid = entry.get("spotify_id")
+        if not sid:
+            continue
+        r = rapprocher(entry, index, artist, decisions, lire_identite)
+        # Variantes, propositions, lignes sans fiche : l'affaire du comptage.
+        if r.track is None or r.suggestion is not None or r.rendition_de is not None:
+            continue
+        if r.via == "rendition_id":
+            continue
+        track, via = r.track, r.via
+        if via in ("title", "title+artistes", "fuzzy", "sous_titre") and autre_upload_que_la_fiche(
+            track, sid, entry["streams"], ids_page, lus_web
+        ):
+            continue
+        if via == "edition":
+            # L'ID de l'édition est noté SUR l'édition, jamais comme ID principal
+            # de l'original (la récolte Spotify lui attribuerait son compteur).
+            from src.services.editions import rattacher
+
+            rattacher(data_manager, track, entry["title"], "kworb", spotify_id=sid)
+            res["editions"] += 1
+            continue
+        if (  # noqa: SIM102
+            via != "id"
+            and not track.spotify_id
+            # Kworb rapproche par titre avant de livrer son lien : l'ID peut
+            # désigner un autre morceau (1 cas sur 130 mesuré). Une requête
+            # n'est dépensée que lorsqu'un ID est sur le point d'être écrit.
+            and valider_identite(track, sid, lire_identite=lire_identite)
+        ):
+            if data_manager.update_track_spotify_id(track.id, sid):
+                track.spotify_id = sid
+                res["ids_poses"] += 1
+    logger.info(
+        f"🔗 Kworb (identité) : {res['ids_poses']} ID posé(s), {res['editions']} édition(s) "
+        f"sur {res['lignes']} lignes"
+    )
+    return res
+
+
 def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None) -> dict:
     """Scrape kworb.net et met à jour les streams des morceaux et albums de l'artiste.
 
@@ -847,11 +927,11 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         data_manager: instance de DataManager
         scraper: KworbScraper injecté (StreamsProvider) ; créé en interne si None
         lire_identite: lecteur d'identité Spotify (embed) injectable ; par défaut
-            `lire_identite_http` — sert aux homonymes, aux remix, au backfill.
+            `lire_identite_http` — sert aux homonymes et aux remix.
 
     Returns:
         dict résumé {matched, unmatched, albums_updated, unmatched_titles,
-                     matched_by_id, matched_by_title, spotify_ids_backfilled,
+                     matched_by_id, matched_by_title,
                      albums_excluded, artist_name, kworb_updated}
     """
     result = {
@@ -867,7 +947,6 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         # Rapprochements INCERTAINS (bande sous le seuil auto) : NON écrits,
         # à confirmer/rejeter par l'utilisateur (mémorisé ensuite).
         "suggestions": [],  # [{kworb_title, streams, daily, track_id, db_title, score}]
-        "spotify_ids_backfilled": 0,
         "albums_excluded": [],
         "artist_name": None,
         "kworb_updated": None,
@@ -1123,33 +1202,9 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 f"sert « {entry['title']} » — à vérifier (identifiants Spotify)"
             )
 
-        # Backfill du Spotify ID depuis le lien Kworb (jamais d'écrasement).
-        # L'if interne est volontairement séparé : c'est une écriture DB dont
-        # le résultat conditionne la suite, pas une simple condition.
-        if via == "edition":
-            # L'ID de l'édition est noté SUR l'édition, jamais comme ID principal
-            # de l'original (la récolte Spotify lui attribuerait le compteur de
-            # l'édition).
-            from src.services.editions import rattacher
-
-            rattacher(
-                data_manager, track, entry["title"], "kworb", spotify_id=entry.get("spotify_id")
-            )
-            result.setdefault("editions", []).append((entry["title"], track.title))
-        if (  # noqa: SIM102
-            via not in ("id", "edition")
-            and entry.get("spotify_id")
-            and not getattr(track, "spotify_id", None)
-            # Kworb rapproche par titre avant de livrer son lien : l'ID qu'il
-            # propose peut désigner un autre morceau (1 cas sur les 130 qu'il
-            # a posés). Une requête n'est dépensée que lorsqu'un ID est sur le
-            # point d'être écrit.
-            and valider_identite(track, entry["spotify_id"], lire_identite=lire_identite)
-        ):
-            if data_manager.update_track_spotify_id(track.id, entry["spotify_id"]):
-                track.spotify_id = entry["spotify_id"]
-                result["spotify_ids_backfilled"] += 1
-
+        # Plus d'écriture d'ID ici (② de l'étape Identité, 2026-09-28) : les ID
+        # d'édition et le backfill sont posés par `relier_ids_kworb`, appelé par
+        # l'étape Identité. Ce run ne fait plus que COMPTER.
         agg.setdefault(track.id, []).append(
             {
                 "title": entry["title"],
@@ -1230,8 +1285,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             )
     logger.info(
         f"Songs Kworb: {result['matched']} matchés "
-        f"({result['matched_by_id']} par ID, {result['matched_by_title']} par titre, "
-        f"{result['spotify_ids_backfilled']} ID backfillés), "
+        f"({result['matched_by_id']} par ID, {result['matched_by_title']} par titre), "
         f"{result['unmatched']} non matchés"
     )
     if result["unmatched_titles"]:
@@ -1371,7 +1425,6 @@ if __name__ == "__main__":
         f"Morceaux matchés    : {summary['matched']} "
         f"({summary['matched_by_id']} par ID, {summary['matched_by_title']} par titre)"
     )
-    print(f"Spotify IDs backfillés : {summary['spotify_ids_backfilled']}")
     print(f"Morceaux non matchés: {summary['unmatched']}")
     print(
         f"Albums mis à jour   : {summary['albums_updated']} "

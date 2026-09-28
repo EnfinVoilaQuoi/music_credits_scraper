@@ -148,11 +148,26 @@ def candidats_exacts(nom_recherche: str, artistes: list[dict]) -> list[dict]:
 
     L'égalité porte sur `normalize_name`, donc casse, accents et apostrophes sont
     déjà neutralisés : « Shurik'N » retrouve bien « Shurik’n ».
+
+    Un alias de type « Artist name » vaut le nom (décision utilisateur
+    2026-09-28) : MusicBrainz a renommé Kanye West « Ye », et l'égalité sur le
+    seul nom le rendait introuvable. Seul ce type : un « Search hint » ou un
+    « Legal name » ne désigne pas le nom d'artiste. Le départage par albums
+    communs reste la preuve.
     """
     cible = normalize_name(nom_recherche)
     if not cible:
         return []
-    return [a for a in artistes if a.get("name") and normalize_name(a["name"]) == cible]
+
+    def nomme(a: dict) -> bool:
+        if a.get("name") and normalize_name(a["name"]) == cible:
+            return True
+        return any(
+            x.get("type") == "Artist name" and normalize_name(x.get("name") or "") == cible
+            for x in a.get("aliases") or []
+        )
+
+    return [a for a in artistes if nomme(a)]
 
 
 def relations_membre(detail: dict) -> list[RelationGroupe]:
@@ -307,7 +322,11 @@ class MusicBrainzAPI:
         """Candidats bruts pour un nom. Le filtrage est l'affaire de l'appelant."""
         with source_usage.observe(_SOURCE, label=f"recherche {nom}") as obs:
             try:
-                data = self._get("/artist/", {"query": f'artist:"{nom}"', "limit": limite})
+                # `alias:` aussi : un artiste RENOMMÉ (Kanye West → « Ye ») ne
+                # sort pas d'une recherche sur le seul nom.
+                data = self._get(
+                    "/artist/", {"query": f'artist:"{nom}" OR alias:"{nom}"', "limit": limite}
+                )
             except MusicBrainzSature as e:
                 # La source parle et demande de réessayer : `throttled`, jamais
                 # `broken` — et l'exception REMONTE, un `[]` la ferait passer

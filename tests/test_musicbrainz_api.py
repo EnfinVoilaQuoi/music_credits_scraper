@@ -308,3 +308,32 @@ class TestRetryAfter:
         from src.api.musicbrainz_api import _retry_after
 
         assert _retry_after("5") == 5.0
+
+
+class TestAliasNomDArtiste:
+    """2026-09-28 : MusicBrainz a renommé Kanye West « Ye » ; un alias de type
+    « Artist name » vaut le nom, pas un « Search hint » ni un « Legal name »."""
+
+    def test_alias_nom_d_artiste_accepte(self):
+        from src.api.musicbrainz_api import candidats_exacts
+
+        ye = {
+            "name": "Ye",
+            "aliases": [
+                {"name": "Kanye West", "type": "Artist name"},
+                {"name": "KanYeWest", "type": "Search hint"},
+            ],
+        }
+        assert candidats_exacts("Kanye West", [ye]) == [ye]
+
+    def test_indice_de_recherche_et_etat_civil_refuses(self):
+        from src.api.musicbrainz_api import candidats_exacts
+
+        autre = {
+            "name": "Quelqu'un",
+            "aliases": [
+                {"name": "Kanye West", "type": "Search hint"},
+                {"name": "Kanye West", "type": "Legal name"},
+            ],
+        }
+        assert candidats_exacts("Kanye West", [autre]) == []

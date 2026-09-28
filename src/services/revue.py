@@ -549,6 +549,12 @@ ECART_AUTRE_FICHE = 0.3
 #: preuve soit formelle — lives, remix, démos qui reprennent le refrain, doublons
 #: de casse (83 cas mesurés entre 0,4 et 0,6) : à trancher.
 PROPRE_MAX_FORMEL = 0.4
+#: … sauf quand le LRC colle NETTEMENT mieux à l'autre fiche (2026-09-28) :
+#: au moins 70 % de ses paires, 25 points au-dessus des siennes, et moins de
+#: 60 % avec les siennes. Relu sur la base entière : les 22 cas ainsi rendus
+#: formels étaient TOUS une autre prise portant le LRC de son original (démo,
+#: remix, « Version 1 », live, remaster, medley — le plus bas : 71 % contre 41 %).
+AUTRE_MIN_NET, ECART_MIN_NET, PROPRE_MAX_NET = 0.70, 0.25, 0.60
 #: Une paire de mots présente dans plus de fiches que cela (« i m », « you
 #: know ») ne sert pas à désigner des candidates : l'index ne garde que les
 #: paires rares, et seules les meilleures candidates sont comparées en entier.
@@ -644,8 +650,17 @@ def _lrc_formel(track, ctx, trouve) -> bool:
     AUTRE PRISE hors plateformes et que l'autre fiche est SON original (une démo,
     un live inédit n'ont aucun LRC à eux — le refrain commun fait monter le
     recouvrement sans rien prouver)."""
-    autre, _meilleur, propre = trouve
-    return propre < PROPRE_MAX_FORMEL or autre is autre_prise_hors_plateformes(track, ctx)
+    autre, meilleur, propre = trouve
+    if propre < PROPRE_MAX_FORMEL or autre is autre_prise_hors_plateformes(track, ctx):
+        return True
+    # Deux versions SŒURS (aucune n'est l'original) posent une question de
+    # fusion : elles restent au détecteur `doublon_lrc`.
+    return (
+        meilleur >= AUTRE_MIN_NET
+        and meilleur - propre >= ECART_MIN_NET
+        and propre < PROPRE_MAX_NET
+        and not _versions_soeurs(track, autre)
+    )
 
 
 def lrc_d_une_autre_fiche(track, ctx):

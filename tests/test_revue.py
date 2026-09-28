@@ -616,11 +616,13 @@ class TestAutrePriseHorsPlateformes:
         assert revue._lrc_autre_candidat(d, ctx)[2] >= revue.PROPRE_MAX_FORMEL
         assert revue.lrc_d_une_autre_fiche(d, ctx)
         assert revue.lrc_douteux(d, ctx) is None
-        # Sur une plateforme, ce n'est plus formel : à trancher.
+        # Sur une plateforme, la preuve reste formelle depuis le 2026-09-28 : le
+        # LRC colle NETTEMENT mieux à l'original (100 % contre ~48 %) — la règle
+        # « nette », relue sur les 22 cas réels qu'elle rend formels.
         d.spotify_id = "SP"
         ctx = _ctx(o, d)
-        assert revue.lrc_d_une_autre_fiche(d, ctx) is None
-        assert "peut-être celui de « Hurricane »" in revue.lrc_douteux(d, ctx)[0]
+        assert revue.lrc_d_une_autre_fiche(d, ctx)
+        assert revue.lrc_douteux(d, ctx) is None
 
 
 class TestVideoPartagee:

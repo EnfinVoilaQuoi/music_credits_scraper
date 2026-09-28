@@ -86,6 +86,30 @@ def _retirer_spotify(ctx: ContexteAction, cas: Cas) -> str:
     )
 
 
+def _poser_id_propose(ctx: ContexteAction, cas: Cas) -> str:
+    """L'utilisateur a tranché : l'ID passe quand même le gate d'identité
+    (artiste, durée), le titre étant tranché par lui — même règle que les
+    décisions Kworb (`titres_tranches`). Écrivain : celui du backfill."""
+    from src.utils.spotify_identity import valider_identite
+
+    track = _fiche(ctx, cas)
+    sid = cas.preuves["spotify_id_propose"]
+    if not valider_identite(track, sid, titres_tranches=True):
+        raise ValueError(f"l'ID {sid} ne passe pas le contrôle d'identité (artiste ou durée)")
+    ctx.data_manager.update_track_spotify_id(track.id, sid, source=cas.preuves["source"])
+    return f"ID Spotify {sid} posé sur « {track.title} »"
+
+
+def _refuser_id_propose(ctx: ContexteAction, cas: Cas) -> str:
+    from src.utils.corrections_fiches import memoriser_id_refuse
+
+    track = _fiche(ctx, cas)
+    sid = cas.preuves["spotify_id_propose"]
+    # Mémorisé : ni reproposé ici, ni posé par un run (gate d'identité).
+    memoriser_id_refuse(track, sid)
+    return f"ID {sid} refusé pour « {track.title} »"
+
+
 def _retirer_songbpm(ctx: ContexteAction, cas: Cas) -> str:
     track = _fiche(ctx, cas)
     n = ctx.data_manager.retirer_mesures_songbpm(track.id)
@@ -251,6 +275,20 @@ def actions_pour(cas: Cas) -> list[Action]:
                 _rejeter_video,
                 "Rejeter cette vidéo ? Ses vues ne seront plus comptées pour ce morceau.",
             )
+        ]
+    if d == "id_spotify_propose":
+        refuser = Action("refuser_id", "✖️ Refuser", _refuser_id_propose)
+        if cas.preuves.get("spotify_id_fiche"):
+            return [refuser]
+        return [
+            Action(
+                "poser_id",
+                "✔️ Poser l'ID",
+                _poser_id_propose,
+                f"Poser l'ID {cas.preuves['spotify_id_propose']} sur cette fiche ?",
+                reseau=True,
+            ),
+            refuser,
         ]
     if d in _CODES_ID_SPOTIFY and cas.preuves.get("spotify_id"):
         return [

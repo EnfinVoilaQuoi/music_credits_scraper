@@ -210,14 +210,34 @@ def test_indisponible_renvoie_false():
 
 
 class TestVoieSyncResiduelle:
-    def test_spotify_id_de_songbpm_accepte_si_unique(self):
-        scraper = _FakeScraper({"spotify_id": "SP_NEW"})
+    def test_l_id_de_songbpm_est_declare_jamais_pose(self):
+        """② de l'étape Identité (2026-09-28) : SongBPM n'écrit plus d'ID, il le
+        PROPOSE (observation relue par le panneau « À trancher »)."""
+        from src.utils.spotify_identity import CHAMP_ID_PROPOSE
+
+        scraper = _FakeScraper({"spotify_id": "SP_NEW", "bpm": 120})
         track = _track()
         ctx = EnrichmentContext(
             artist_tracks=[_track()], validate_spotify_id_unique=lambda *_: True
         )
-        assert SongBpmProvider(scraper).enrich(track, ctx) is True
-        assert track.spotify_id == "SP_NEW"
+        SongBpmProvider(scraper).enrich(track, ctx)
+        assert track.spotify_id is None and track.get_all_spotify_ids() == []
+        proposes = [
+            (o.field, o.value, o.source) for o in ctx.observations if o.field == CHAMP_ID_PROPOSE
+        ]
+        assert proposes == [(CHAMP_ID_PROPOSE, "SP_NEW", "songbpm")]
+
+    def test_un_id_deja_porte_n_est_pas_repropose(self):
+        from src.utils.spotify_identity import CHAMP_ID_PROPOSE
+
+        scraper = _FakeScraper({"spotify_id": "SP1", "bpm": 120})
+        track = _track()
+        track.spotify_id = "SP1"
+        ctx = EnrichmentContext(
+            artist_tracks=[_track()], validate_spotify_id_unique=lambda *_: True
+        )
+        SongBpmProvider(scraper).enrich(track, ctx)
+        assert not [o for o in ctx.observations if o.field == CHAMP_ID_PROPOSE]
 
     def test_timeout_du_timer_fait_jeter_le_resultat(self, monkeypatch):
         """Le Timer n'interrompt rien (l'API sync de Playwright n'est pas

@@ -17,7 +17,7 @@ from src.enrichment.observation import Observation
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
-from src.utils.spotify_identity import valider_identite
+from src.utils.spotify_identity import CHAMP_ID_PROPOSE
 from src.utils.track_mapper import _clean_duration
 
 logger = get_logger(__name__)
@@ -235,26 +235,17 @@ class SongBpmProvider:
             logger.info(f"🎵 Key/Mode SongBPM: {key_value}/{mode_value} pour {track.title}")
             updated = True
 
-        # Spotify ID depuis SongBPM (avec validation stricte)
+        # L'ID Spotify de la page SongBPM est DÉCLARÉ, plus jamais écrit (② de
+        # l'étape Identité, décision utilisateur 2026-09-28). Sa page est
+        # trouvée par une recherche de TITRE : c'était le producteur le moins
+        # fiable mesuré (44 des 73 variantes à l'ID de l'original, ~7,5 % de ses
+        # 588 ID contre ~1,6 % au scraper), et il passe APRÈS l'étape Identité —
+        # écrire contredirait le verdict qu'elle vient de rendre. Un ID que la
+        # fiche ne porte pas devient une proposition du panneau « À trancher ».
         songbpm_spotify_id = track_data.get("spotify_id")
-        if songbpm_spotify_id and (not track.spotify_id):
-            # Valider l'unicité
-            if (
-                artist_tracks
-                and ctx.validate_spotify_id_unique
-                and ctx.validate_spotify_id_unique(songbpm_spotify_id, track, artist_tracks)
-                # Unique ne veut pas dire juste : SongBPM rapproche par artiste
-                # et titre, il se trompe de morceau comme un autre.
-                and valider_identite(track, songbpm_spotify_id)
-            ):
-                track.spotify_id = songbpm_spotify_id
-                track.add_spotify_id(songbpm_spotify_id, source="songbpm")
-                logger.info(f"🎵 Spotify ID ajouté depuis SongBPM: {track.spotify_id}")
-                updated = True
-            else:
-                logger.warning(
-                    f"⚠️ REJET: Spotify ID de SongBPM déjà utilisé: {songbpm_spotify_id}"
-                )
+        if songbpm_spotify_id and songbpm_spotify_id not in track.get_all_spotify_ids():
+            ctx.observations.append(Observation(CHAMP_ID_PROPOSE, songbpm_spotify_id, self.name))
+            logger.info(f"🎵 SongBPM propose l'ID Spotify {songbpm_spotify_id} (à trancher)")
 
         # Durée. SongBPM la rend telle que sa PAGE l'écrit — « 2:30 », du texte.
         # C'est l'écrivain que le lot B-bis cherchait : les 19 durées mal typées

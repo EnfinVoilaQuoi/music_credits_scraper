@@ -37,6 +37,12 @@ logger = get_logger(__name__)
 #: rien. Au-delà, c'est un autre enregistrement.
 TOLERANCE_DUREE = 5
 
+#: Champ d'OBSERVATION d'un ID Spotify PROPOSÉ par une source qui n'a plus le
+#: droit d'en poser (② de l'étape Identité, 2026-09-28 : SongBPM lit un ID sur
+#: sa page, trouvée par une recherche de titre). Déclaré, jamais écrit en
+#: colonne : le panneau « À trancher » le montre (`revue.id_spotify_propose`).
+CHAMP_ID_PROPOSE = "spotify_id_propose"
+
 #: Fournisseur des fiches de l'artiste : `artist_id -> [(track_id, titre)]`.
 #: Posé par `DataManager` — ce module ne touche jamais la base. `None` (tests
 #: purs, scripts sans base) ⇒ la règle « ID d'une autre fiche » est inactive.

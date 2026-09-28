@@ -48,6 +48,7 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.duree_youtube import SOURCE_AUDIO
+from src.utils.spotify_identity import CHAMP_ID_PROPOSE
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
@@ -186,6 +187,40 @@ def duree_songbpm_dementie(track, _ctx=None):
             {"youtube": yt, "songbpm": sb},
         )
     return None
+
+
+def id_spotify_propose(track, ctx):
+    """Un ID Spotify PROPOSÉ par une source qui n'a plus le droit d'en poser
+    (SongBPM, ② de l'étape Identité — 2026-09-28) et que la fiche ne porte pas.
+    Fiche sans ID : l'utilisateur peut le poser. Fiche à un AUTRE ID : peut-être
+    une autre édition, peut-être l'ID de la fiche est faux — c'est dit, rien
+    n'est tranché. Un ID déjà refusé (`retirer_id_spotify`) n'est plus montré."""
+    proposes = {
+        str(o.value): o.source
+        for o in ctx.obs.get(track.id, [])
+        if o.field == CHAMP_ID_PROPOSE and o.value
+    }
+    connus = set(track.get_all_spotify_ids())
+    candidats = sorted(sid for sid in proposes if sid not in connus)
+    if not candidats:
+        return None
+    from src.utils.corrections_fiches import ids_refuses
+
+    refuses = ids_refuses(track)
+    candidats = [sid for sid in candidats if sid not in refuses]
+    if not candidats:
+        return None
+    sid = candidats[0]
+    source = proposes[sid]
+    if track.spotify_id:
+        motif = f"{source} désigne l'ID Spotify {sid} — la fiche porte {track.spotify_id}"
+    else:
+        motif = f"{source} propose l'ID Spotify {sid} (fiche sans ID)"
+    return motif, {
+        "spotify_id_propose": sid,
+        "spotify_id_fiche": track.spotify_id,
+        "source": source,
+    }
 
 
 def duree_spotify_dementie(track, _ctx=None):
@@ -856,6 +891,7 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("vues_ytm", "Vues YouTube anormales", "📈", vues_youtube_anormales),
     Detecteur("duree_songbpm", "Durée SongBPM démentie par YouTube", "⏱️", duree_songbpm_dementie),
     Detecteur("duree_spotify", "Durée de l'ID Spotify démentie", "🎧", duree_spotify_dementie),
+    Detecteur("id_spotify_propose", "ID Spotify proposé (SongBPM)", "🆔", id_spotify_propose),
     Detecteur(
         "songbpm_original",
         "Version sans plateforme aux mesures SongBPM de l'original",

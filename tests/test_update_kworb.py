@@ -647,12 +647,19 @@ class TestValidationDIdentite:
             "ART1": _page([_entry("Titre")], nom="Limsa d'Aulnay"),
             "BONID": _page([_entry("Titre", 700)], nom="Isha"),
         }
+        # Le COMPTAGE ne revote plus (② 2026-09-28) : il s'arrête sans rien écrire…
         dm = _DataManager([_track(1, "Titre")])
-        scraper = _Scraper(songs=lambda sid: pages.get(sid))
-        res = update_kworb_streams(_Artist(name="Isha"), dm, scraper=scraper)
-        assert res["matched"] == 1
-        assert dm.artist_spotify_id == "BONID"
-        assert dm.streams_writes[0][1] == 700
+        res = update_kworb_streams(
+            _Artist(name="Isha"), dm, scraper=_Scraper(songs=lambda sid: pages.get(sid))
+        )
+        assert res["matched"] == 0 and dm.streams_writes == []
+        assert dm.artist_spotify_id is None
+        # … c'est l'étape Identité qui corrige l'ID d'artiste, puis relie.
+        dm = _DataManager([_track(1, "Titre")])
+        res = uk.relier_ids_kworb(
+            _Artist(name="Isha"), dm, scraper=_Scraper(songs=lambda sid: pages.get(sid))
+        )
+        assert res["page"] is True and dm.artist_spotify_id == "BONID"
 
     def test_revote_infructueux_abandonne(self, monkeypatch):
         """Deuxième page toujours au mauvais nom : abandon, aucune écriture."""
@@ -684,14 +691,15 @@ class TestValidationDIdentite:
         res = update_kworb_streams(_Artist(), dm, scraper=_Scraper(songs=None))
         assert res["matched"] == 0
 
-    def test_sans_id_artiste_le_vote_est_tente(self, monkeypatch):
-        monkeypatch.setattr(uk, "_vote_artist_spotify_id", lambda *a, **k: "VOTE1")
+    def test_sans_id_artiste_le_comptage_ne_vote_pas(self, monkeypatch):
+        """② (2026-09-28) : l'identité d'artiste se pose dans l'étape Identité."""
+        votes = []
+        monkeypatch.setattr(uk, "_vote_artist_spotify_id", lambda *a, **k: votes.append(1))
         dm = _DataManager([_track(1, "Titre")])
         scraper = _Scraper(songs=_page([_entry("Titre")]))
         res = update_kworb_streams(_Artist(spotify_id=None), dm, scraper=scraper)
-        assert dm.artist_spotify_id == "VOTE1"
-        assert scraper.songs_calls == ["VOTE1"]
-        assert res["matched"] == 1
+        assert votes == [] and scraper.songs_calls == [] and res["matched"] == 0
+        assert "Identité" in res["error"]
 
     def test_sans_id_artiste_et_vote_infructueux(self, monkeypatch):
         """Aucune identité fiable : on s'arrête avant même de scraper."""

@@ -550,23 +550,29 @@ def test_les_editions_connues_de_la_BASE_sont_visitees():
 
 # ── Entrée publique : résolution de l'ID artiste et propriété du scraper ──────
 class TestEntreePublique:
-    def test_sans_id_artiste_le_vote_tranche(self, monkeypatch):
-        """Le vote (Playwright SYNC) se fait AVANT d'entrer dans la boucle."""
+    def test_sans_id_artiste_aucun_vote_ici(self, monkeypatch):
+        """② (2026-09-28) : Streams CONSOMME l'ID d'artiste, l'étape Identité le
+        pose. Sans lui, rien n'est voté ni crawlé, et c'est dit."""
         import src.utils.update_spotify_streams as uss
 
         artist = _Artist()
         artist.spotify_id = None
         dm = _DataManager()
-        dm.ids_poses = []
-        dm.update_artist_spotify_id = lambda aid, sid: dm.ids_poses.append((aid, sid))
-
-        monkeypatch.setattr("src.utils.update_kworb._vote_artist_spotify_id", lambda a, d: None)
+        votes = []
+        monkeypatch.setattr(
+            "src.utils.update_kworb._vote_artist_spotify_id", lambda a, d: votes.append(1)
+        )
         result = uss.update_spotify_streams(artist, dm)
         assert result["aborted"].startswith("aucun ID artiste") and result["pages"] == 0
+        assert "Identité" in result["aborted"] and votes == []
 
-        monkeypatch.setattr(
-            "src.utils.update_kworb._vote_artist_spotify_id", lambda a, d: "voted0000000000000000x"
-        )
+    def test_avec_id_artiste_le_crawl_le_consomme(self, monkeypatch):
+        import src.utils.update_spotify_streams as uss
+
+        artist = _Artist()
+        artist.spotify_id = "voted0000000000000000x"
+        dm = _DataManager()
+        dm.ids_poses = []
         ferme = []
 
         class _ScraperMuet:
@@ -582,7 +588,7 @@ class TestEntreePublique:
         monkeypatch.setattr(uss, "_crawl", faux_crawl)
         monkeypatch.setattr(uss.async_loop, "run_sync", lambda coro: asyncio.run(coro))
         result = uss.update_spotify_streams(artist, dm)
-        assert dm.ids_poses == [(_NOUS, "voted0000000000000000x")]
+        assert dm.ids_poses == []
         assert result["spotify_artist_id"] == "voted0000000000000000x"
         assert ferme == [True]  # scraper créé ici → fermé ici
 

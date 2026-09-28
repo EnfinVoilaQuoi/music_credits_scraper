@@ -146,25 +146,13 @@ def update_spotify_streams(
 
 
 def _resolve_artist_id(artist, data_manager, result: dict) -> str | None:
-    """ID artiste Spotify, voté si absent — AVANT d'entrer dans la boucle async.
-
-    Le vote passe par `SpotifyIDScraper`, qui est en Playwright SYNCHRONE : le
-    lancer depuis la boucle asyncio la bloquerait. Il se fait donc ici, dans le
-    thread appelant.
-    """
+    """ID artiste Spotify — CONSOMMÉ, jamais voté ici (② de l'étape Identité,
+    2026-09-28 : seule l'étape Identité produit l'identité d'artiste)."""
     if artist.spotify_id:
         return artist.spotify_id
-
-    from src.utils.update_kworb import _vote_artist_spotify_id
-
-    voted = _vote_artist_spotify_id(artist, data_manager)
-    if not voted:
-        result["aborted"] = "aucun ID artiste Spotify (vote infructueux)"
-        logger.warning(f"Spotify web : pas d'ID artiste pour '{artist.name}' — abandon")
-        return None
-    data_manager.update_artist_spotify_id(artist.id, voted)
-    artist.spotify_id = voted
-    return voted
+    result["aborted"] = "aucun ID artiste Spotify — lancer l'étape Identité"
+    logger.warning(f"Spotify web : pas d'ID artiste pour '{artist.name}' — étape Identité d'abord")
+    return None
 
 
 async def _crawl(

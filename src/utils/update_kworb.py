@@ -803,8 +803,12 @@ def _oublier_observations_perimees(
             )
 
 
-def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
+def _scrape_validated(scraper, artist, data_manager, spotify_artist_id, *, revoter=True):
     """Scrape la page songs et valide l'identité. Re-vote une fois si mismatch.
+
+    `revoter=False` pour le COMPTAGE (② de l'étape Identité, 2026-09-28) : seul
+    l'étape Identité produit l'identité d'artiste ; un run de streams qui tombe
+    sur une page d'un homonyme s'arrête et le DIT, sans remplacer l'ID.
 
     Returns:
         (page_songs, spotify_artist_id_corrigé) — page_songs=None si échec/identité fausse.
@@ -823,6 +827,9 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id):
     else:
         logger.warning(f"⚠️ Page Kworb vide/absente pour {spotify_artist_id} — re-vote")
 
+    if not revoter:
+        logger.warning("   Streams ne revote pas l'ID d'artiste : relancer l'étape Identité")
+        return None, spotify_artist_id
     revoted = _vote_artist_spotify_id(artist, data_manager)
     if not revoted or revoted == spotify_artist_id:
         return None, spotify_artist_id
@@ -972,15 +979,13 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     spotify_artist_id: str | None = getattr(artist, "spotify_id", None)
 
     if not spotify_artist_id:
-        logger.info(f"spotify_id manquant pour '{artist.name}' — vote sur les pages tracks")
-        spotify_artist_id = _vote_artist_spotify_id(artist, data_manager)
-        if spotify_artist_id:
-            data_manager.update_artist_spotify_id(artist.id, spotify_artist_id)
-            artist.spotify_id = spotify_artist_id
-            logger.info(f"✅ spotify_id artiste récupéré et stocké: {spotify_artist_id}")
-        else:
-            logger.error(f"❌ Impossible de récupérer l'ID Spotify de '{artist.name}'. Abandon.")
-            return result
+        # L'identité d'artiste appartient à l'étape Identité (② 2026-09-28) : le
+        # comptage ne la vote plus, il la CONSOMME.
+        logger.error(
+            f"❌ Pas d'ID Spotify pour '{artist.name}' — lancer l'étape Identité. Abandon."
+        )
+        result["error"] = "ID Spotify d'artiste manquant (étape Identité)"
+        return result
 
     logger.info(f"🎵 Mise à jour Kworb pour '{artist.name}' (spotify_id={spotify_artist_id})")
 
@@ -989,7 +994,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
 
     # ── 2. Page songs + VALIDATION D'IDENTITÉ ─────────────────────────────────
     page_songs, spotify_artist_id = _scrape_validated(
-        scraper, artist, data_manager, spotify_artist_id
+        scraper, artist, data_manager, spotify_artist_id, revoter=False
     )
 
     if not page_songs:

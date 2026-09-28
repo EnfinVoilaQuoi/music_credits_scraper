@@ -79,6 +79,8 @@ class DeezerProvider:
                 previous_duration=previous_duration,
                 scraped_release_date=scraped_release_date,
                 artist_deezer_id=self._artist_deezer_id(track),
+                # B0 : la piste déjà liée se LIT par son id.
+                deezer_id=track.deezer_id,
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 
@@ -113,6 +115,8 @@ class DeezerProvider:
                 previous_duration=previous_duration,
                 scraped_release_date=scraped_release_date,
                 artist_deezer_id=self._artist_deezer_id(track),
+                # B0 : la piste déjà liée se LIT par son id.
+                deezer_id=track.deezer_id,
             )
             return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
 

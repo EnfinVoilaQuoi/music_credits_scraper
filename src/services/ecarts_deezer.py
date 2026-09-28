@@ -814,7 +814,12 @@ def _renseigner_fiche(dm, e: Ecart, track: Track) -> list[str]:
         deezer_id=p.id,
         deezer_url=p.link,
         isrc=p.isrc if isrc_compatible else None,
+        explicit_lyrics=p.explicit,
     )
+    if ecrites.get("explicit_lyrics"):
+        # La piste liée le porte ; seul le provider le posait, et seulement sur
+        # son propre hit — parfois une autre édition (2026-09-28).
+        track.lyrics.explicit = bool(p.explicit)
     if ecrites.get("deezer_id"):
         track.deezer_id = p.id
         apports.append("id Deezer")

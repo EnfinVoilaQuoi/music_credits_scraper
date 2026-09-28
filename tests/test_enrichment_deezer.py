@@ -22,18 +22,33 @@ class _FakeDeezerClient:
         self.calls = []
 
     def enrich_track(
-        self, artist, title, previous_duration, scraped_release_date, artist_deezer_id=None
+        self,
+        artist,
+        title,
+        previous_duration,
+        scraped_release_date,
+        artist_deezer_id=None,
+        deezer_id=None,
     ):
         self.calls.append((artist, title, previous_duration, scraped_release_date))
         self.ids = getattr(self, "ids", []) + [artist_deezer_id]
+        self.piste_ids = getattr(self, "piste_ids", []) + [deezer_id]
         return self._result
 
     async def enrich_track_async(
-        self, http, artist, title, previous_duration, scraped_release_date, artist_deezer_id=None
+        self,
+        http,
+        artist,
+        title,
+        previous_duration,
+        scraped_release_date,
+        artist_deezer_id=None,
+        deezer_id=None,
     ):
         """Jumeau async : même signature au `http` près (session partagée)."""
         self.calls.append((artist, title, previous_duration, scraped_release_date))
         self.ids = getattr(self, "ids", []) + [artist_deezer_id]
+        self.piste_ids = getattr(self, "piste_ids", []) + [deezer_id]
         return self._result
 
 

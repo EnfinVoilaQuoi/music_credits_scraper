@@ -572,6 +572,7 @@ class DeezerAPI:
         previous_duration: int | None = None,
         scraped_release_date: str | None = None,
         artist_deezer_id: int | None = None,
+        deezer_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Enrichit les données d'un track avec vérifications
@@ -583,17 +584,23 @@ class DeezerAPI:
             scraped_release_date: Date de sortie depuis le scraping
             artist_deezer_id: id Deezer de l'artiste (e30) — quand il est connu,
                 le gate d'identité juge l'artiste par id plutôt que par nom.
+            deezer_id: id Deezer de la PISTE déjà liée à la fiche — lue par id
+                (`_comme_un_hit`), la recherche libre n'est plus qu'un repli.
 
         Returns:
             Données enrichies avec vérifications
         """
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = self.search_track(
-                artist,
-                title,
-                previous_duration=previous_duration,
-                artist_deezer_id=artist_deezer_id,
-            )
+            track_data = None
+            if deezer_id:
+                track_data = self._comme_un_hit(self._make_request(f"track/{deezer_id}"))
+            if track_data is None and self._chercher_apres_id(deezer_id, obs):
+                track_data = self.search_track(
+                    artist,
+                    title,
+                    previous_duration=previous_duration,
+                    artist_deezer_id=artist_deezer_id,
+                )
             if track_data is None:
                 obs.absent("aucun hit concordant")
         if track_data is None:
@@ -609,21 +616,56 @@ class DeezerAPI:
         previous_duration: int | None = None,
         scraped_release_date: str | None = None,
         artist_deezer_id: int | None = None,
+        deezer_id: int | None = None,
     ) -> dict[str, Any]:
         """Jumeau async d'`enrich_track` (mêmes vérifications, même forme de retour)."""
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = await self.search_track_async(
-                http,
-                artist,
-                title,
-                previous_duration=previous_duration,
-                artist_deezer_id=artist_deezer_id,
-            )
+            track_data = None
+            if deezer_id:
+                track_data = self._comme_un_hit(
+                    await self._make_request_async(http, f"track/{deezer_id}")
+                )
+            if track_data is None and self._chercher_apres_id(deezer_id, obs):
+                track_data = await self.search_track_async(
+                    http,
+                    artist,
+                    title,
+                    previous_duration=previous_duration,
+                    artist_deezer_id=artist_deezer_id,
+                )
             if track_data is None:
                 obs.absent("aucun hit concordant")
         if track_data is None:
             source_usage.exiger_reponse(obs)
         return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
+
+    # ── Lecture par id (B0, 2026-09-28) — PARTAGÉE par les deux jumeaux ───────
+    # Le provider cherchait « {artiste} {titre} » même quand la fiche portait
+    # déjà son `deezer_id` : le hit pouvait être une AUTRE piste (édition clean,
+    # single, compilation), et `explicit`, durée, ISRC venaient alors d'un autre
+    # enregistrement que celui lié.
+
+    #: Champs de la fiche `/track/{id}` ABSENTS d'un hit de recherche. Les
+    #: branches du provider qui les lisent n'ont jamais servi : les activer ici
+    #: serait une règle neuve — `release_date` est celle de l'ÉDITION (un best-of
+    #: 2020 pour un titre de 2005, écartée pour la même raison par les écarts
+    #: Deezer), et le BPM Deezer n'a jamais été mesuré contre le vote.
+    _HORS_HIT = ("release_date", "bpm")
+
+    @classmethod
+    def _comme_un_hit(cls, fiche: dict | None) -> dict | None:
+        """La fiche piste ramenée à la forme d'un hit de recherche."""
+        if not fiche or not fiche.get("id"):
+            return None
+        return {k: v for k, v in fiche.items() if k not in cls._HORS_HIT}
+
+    @staticmethod
+    def _chercher_apres_id(deezer_id, obs) -> bool:
+        """Après une lecture par id sans fiche, rechercher ? Seulement si Deezer
+        a RÉPONDU (id retiré du catalogue, code 800) : sur une panne, la
+        recherche pourrait tomber sur une autre édition — on s'arrête, et
+        `exiger_reponse` le dira."""
+        return not deezer_id or source_usage.a_repondu(obs)
 
     def _build_enrichment_result(
         self,

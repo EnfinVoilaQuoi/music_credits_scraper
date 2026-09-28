@@ -2426,14 +2426,18 @@ class TrackRepository:
         deezer_id: int | None = None,
         deezer_url: str | None = None,
         isrc: str | None = None,
+        explicit_lyrics: bool | None = None,
     ) -> dict:
         """Remplit les colonnes d'identité SANS jamais remplacer (« le premier
         renseigne, personne ne remplace »). Rend `{colonne: True}` pour ce qui a
-        été écrit — l'appelant sait ainsi si SA valeur est celle de la base."""
+        été écrit — l'appelant sait ainsi si SA valeur est celle de la base.
+        `explicit_lyrics` suit la même règle que le provider Deezer (posé s'il
+        est NULL) : c'est un attribut de la piste liée, pas un vote."""
         candidats = {
             "deezer_id": int(deezer_id) if deezer_id is not None else None,
             "deezer_url": deezer_url or None,
             "isrc": (isrc or "").strip().upper() or None,
+            "explicit_lyrics": bool(explicit_lyrics) if explicit_lyrics is not None else None,
         }
         candidats = {k: v for k, v in candidats.items() if v is not None}
         if not candidats:
@@ -2442,7 +2446,10 @@ class TrackRepository:
             with self.engine.begin() as conn:
                 avant = (
                     conn.execute(
-                        text("SELECT deezer_id, deezer_url, isrc FROM tracks WHERE id = :tid"),
+                        text(
+                            "SELECT deezer_id, deezer_url, isrc, explicit_lyrics "
+                            "FROM tracks WHERE id = :tid"
+                        ),
                         {"tid": track_id},
                     )
                     .mappings()

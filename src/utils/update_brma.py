@@ -283,23 +283,27 @@ class UltratopUpdater:
             self.logger.info(message)
 
     def setup_logging(self):
-        """Configuration du système de logging"""
+        """Logger de l'updater. Le journal FICHIER n'est branché que par `main()`
+        (`brancher_journal_fichier`), pas à chaque construction."""
+        self.logger = get_logger(__name__)
+
+    def brancher_journal_fichier(self) -> logging.Handler:
+        """Journal du run dans `<output_dir>/logs/`, sur la RACINE (tout le run).
+
+        Jusqu'au 2026-09-28 c'était un `logging.basicConfig(handlers=[FileHandler…])`
+        dans le constructeur : NO-OP dès que la racine a déjà un handler (toujours,
+        les imports en posent), mais le FileHandler était CONSTRUIT quand même —
+        fichier créé vide, ouvert, jamais fermé (225 logs vides sur 245, et un par
+        test qui instanciait l'updater, jusque dans le vrai `data/`)."""
         log_dir = self.output_dir / "logs"
         log_dir.mkdir(exist_ok=True)
-
         log_file = log_dir / f"ultratop_update_{datetime.now():%Y%m%d_%H%M%S}.log"
-
-        # encoding='utf-8' sur le FileHandler + stream stdout (déjà ré-encodé
-        # UTF-8 plus haut) : sinon les emojis (❌, →) crashent en cp1252.
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.FileHandler(log_file, encoding="utf-8"),
-                logging.StreamHandler(sys.stdout),
-            ],
-        )
-        self.logger = get_logger(__name__)
+        # encoding='utf-8' : sinon les emojis (❌, →) crashent en cp1252.
+        handler = logging.FileHandler(log_file, encoding="utf-8")
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logging.getLogger().addHandler(handler)
+        return handler
 
     def random_delay(self):
         """Délai aléatoire entre les requêtes"""
@@ -1192,6 +1196,7 @@ def main():
         delay_min=args.delay_min,
         delay_max=args.delay_max,
     )
+    updater.brancher_journal_fichier()
 
     if args.dedup:
         rapport = updater.dedup_database(apply=not args.dry_run)

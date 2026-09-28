@@ -7,6 +7,7 @@ de la cover de Skylar Grey et les streams du morceau de Travis Scott.
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -114,7 +115,7 @@ def _upgrade(db_path: Path, revision: str) -> None:
 def test_migration_leve_les_doublons_puis_autorise_les_homonymes(tmp_path):
     db = tmp_path / "avant_e36.db"
     _upgrade(db, _AVANT)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Josman'), (2, 'Django')")
         # Vrai doublon (même page) : l'ID reste sur la plus ancienne.
         conn.execute(
@@ -125,7 +126,7 @@ def test_migration_leve_les_doublons_puis_autorise_les_homonymes(tmp_path):
             "(4, 'Locke', 2, 14175368, 'u/locke')"
         )
     _upgrade(db, _APRES)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         ids = dict(conn.execute("SELECT id, genius_id FROM tracks").fetchall())
         assert ids == {1: 638651, 2: None, 3: None, 4: None}
         # Deux genius_id différents au même titre : permis.

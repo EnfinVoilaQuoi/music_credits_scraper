@@ -12,6 +12,7 @@ sera donc immédiatement détectée.
 """
 
 import sqlite3
+from contextlib import closing
 
 from sqlalchemy.dialects import sqlite
 
@@ -56,7 +57,7 @@ def _fresh_db(tmp_path) -> Database:
 
 def test_meme_ensemble_de_tables(tmp_path):
     db = _fresh_db(tmp_path)
-    with sqlite3.connect(db.db_path) as conn:
+    with closing(sqlite3.connect(db.db_path)) as conn, conn:
         # alembic_version n'existe pas encore (introduite en E1c) : on compare
         # les tables métier, qui doivent coïncider terme à terme.
         assert set(schema.metadata.tables) == _db_tables(conn)
@@ -64,7 +65,7 @@ def test_meme_ensemble_de_tables(tmp_path):
 
 def test_colonnes_et_types_identiques(tmp_path):
     db = _fresh_db(tmp_path)
-    with sqlite3.connect(db.db_path) as conn:
+    with closing(sqlite3.connect(db.db_path)) as conn, conn:
         for name, table in schema.metadata.tables.items():
             assert _meta_columns(table) == _db_columns(
                 conn, name
@@ -76,7 +77,7 @@ def test_contraintes_not_null_identiques(tmp_path):
     # coïncider. On exclut les clés primaires (SQLite rapporte notnull=0 sur un
     # INTEGER PRIMARY KEY même s'il est de fait non nul).
     db = _fresh_db(tmp_path)
-    with sqlite3.connect(db.db_path) as conn:
+    with closing(sqlite3.connect(db.db_path)) as conn, conn:
         for name, table in schema.metadata.tables.items():
             assert _meta_notnull_non_pk(table) == _db_notnull_non_pk(
                 conn, name
@@ -87,7 +88,7 @@ def test_metadata_couvre_les_46_migrations(tmp_path):
     # Filet supplémentaire : le nombre total de colonnes déclarées dans le
     # MetaData égale celui de la base legacy (aucune migration oubliée).
     db = _fresh_db(tmp_path)
-    with sqlite3.connect(db.db_path) as conn:
+    with closing(sqlite3.connect(db.db_path)) as conn, conn:
         for name, table in schema.metadata.tables.items():
             assert len(table.columns) == len(
                 _db_columns(conn, name)

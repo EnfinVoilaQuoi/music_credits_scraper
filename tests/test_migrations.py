@@ -10,6 +10,7 @@ gelée : `db.py` puis le bootstrap Alembic s'en servent). Deux scénarios critiq
 """
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -105,6 +106,6 @@ def test_datamanager_fresh_est_au_head_alembic(data_manager):
     """
     from src.persistence.bootstrap import _head_revision
 
-    with sqlite3.connect(data_manager.db_path) as c:
+    with closing(sqlite3.connect(data_manager.db_path)) as c, c:
         rev = c.execute("SELECT version_num FROM alembic_version").fetchall()
     assert rev == [(_head_revision(),)]

@@ -9,6 +9,7 @@ prochain démarrage.
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from alembic.runtime.migration import MigrationContext
@@ -28,7 +29,7 @@ HEAD = _head_revision()  # révision head courante (e4_observations depuis E4)
 
 def _versions(db_path: str):
     """Contenu de alembic_version, ou None si la table n'existe pas."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='alembic_version'"
         ).fetchone()
@@ -77,7 +78,7 @@ def test_backup_pre_alembic_est_stampe_a_e1_pas_au_head(tmp_path):
     et la table observations ne serait jamais créée sur une base restaurée."""
     path = str(tmp_path / "restored.db")
     _upgrade_to(path, LEGACY_HEAD_REVISION)  # base au schéma e1 (pas d'observations)
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("DROP TABLE alembic_version")
         conn.execute("PRAGMA user_version = 46")
         conn.commit()
@@ -96,7 +97,7 @@ def test_backup_ancien_sous_46_est_rattrape_puis_stampe(tmp_path):
     être RATTRAPÉ (colonnes ajoutées jusqu'à 46) PUIS stampé — pas juste stampé,
     sinon le stamp mentirait sur le schéma (E3b, base restaurée)."""
     path = str(tmp_path / "vieux.db")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         # Schéma « d'origine » (avant migrations user_version) : les colonnes de
         # base uniquement, user_version = 0, aucune alembic_version.
         conn.executescript("""
@@ -118,7 +119,7 @@ def test_backup_ancien_sous_46_est_rattrape_puis_stampe(tmp_path):
 
     ensure_stamped(path)
 
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         tcols = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")}
         uv = conn.execute("PRAGMA user_version").fetchone()[0]
     # Échantillon de colonnes ajoutées par le rattrapage (parmi les 46 migrations).
@@ -134,7 +135,7 @@ def test_base_neuve_est_au_head_pour_alembic(tmp_path):
     assert _current_revision(db.db_path) == HEAD
 
     # upgrade head : aucune erreur, aucune table recréée/perdue.
-    with sqlite3.connect(db.db_path) as conn:
+    with closing(sqlite3.connect(db.db_path)) as conn, conn:
         avant = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     engine = create_engine(f"sqlite:///{Path(db.db_path).as_posix()}")
     try:
@@ -145,7 +146,7 @@ def test_base_neuve_est_au_head_pour_alembic(tmp_path):
             conn.commit()
     finally:
         engine.dispose()
-    with sqlite3.connect(db.db_path) as conn:
+    with closing(sqlite3.connect(db.db_path)) as conn, conn:
         apres = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert avant == apres
 
@@ -154,7 +155,7 @@ def test_e31_reprend_les_albums_de_reference_sans_dupliquer_les_tracks(tmp_path)
     """La migration e31 transforme le pointeur historique en lien N↔N."""
     path = str(tmp_path / "release-backfill.db")
     _upgrade_to(path, "e30_artist_deezer_id")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Diams')")
         conn.execute(
             "INSERT INTO tracks (id, title, artist_id, album, track_number) "
@@ -168,7 +169,7 @@ def test_e31_reprend_les_albums_de_reference_sans_dupliquer_les_tracks(tmp_path)
         )
         conn.commit()
     _upgrade_to(path, "e31_release_catalog")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         releases = conn.execute("SELECT title, scope FROM releases").fetchall()
         links = conn.execute(
             "SELECT track_id, track_number, source, matched_by FROM release_tracks"
@@ -182,7 +183,7 @@ def test_e31_reprend_les_albums_de_reference_sans_dupliquer_les_tracks(tmp_path)
 def test_e32_reprend_les_identifiants_deezer_et_resiste_a_une_relance(tmp_path):
     path = str(tmp_path / "release-identifiers.db")
     _upgrade_to(path, "e31_release_catalog")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
         conn.execute("INSERT INTO tracks (id, title, artist_id) VALUES (1, 'T', 1)")
         conn.execute(
@@ -196,7 +197,7 @@ def test_e32_reprend_les_identifiants_deezer_et_resiste_a_une_relance(tmp_path):
         conn.commit()
     _upgrade_to(path, "e32_release_identity_pipeline")
     _upgrade_to(path, "e32_release_identity_pipeline")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         assert conn.execute("SELECT source, external_id FROM release_identifiers").fetchall() == [
             ("deezer", "55")
         ]
@@ -211,7 +212,7 @@ def test_e33_la_parution_heritee_rejoint_sa_jumelle_deezer(tmp_path):
     parutions Deezer d'un même titre (deux éditions)."""
     path = str(tmp_path / "release-adoption.db")
     _upgrade_to(path, "e32_release_identity_pipeline")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
         conn.executemany(
             "INSERT INTO tracks (id, title, artist_id, album) VALUES (?, ?, 1, '…')",
@@ -246,7 +247,7 @@ def test_e33_la_parution_heritee_rejoint_sa_jumelle_deezer(tmp_path):
         conn.commit()
     _upgrade_to(path, "e33_release_legacy_adoption")
     _upgrade_to(path, "e33_release_legacy_adoption")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         assert conn.execute("SELECT id, identity_key FROM releases ORDER BY id").fetchall() == [
             (2, "deezer:6"),
             (3, "deezer:7"),
@@ -268,7 +269,7 @@ def test_e4_backfill_bpm_key_mode(tmp_path):
     source `key_mode_source`) ; aucune obs si pas de source."""
     path = str(tmp_path / "backfill.db")
     _upgrade_to(path, LEGACY_HEAD_REVISION)  # schéma e1, pas encore d'observations
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
         # T1 : bpm (avec confiance) + key + mode
         conn.execute(
@@ -288,7 +289,7 @@ def test_e4_backfill_bpm_key_mode(tmp_path):
     # Épinglé à e4 (pas HEAD) : on isole le backfill e4 du backfill legacy e10.
     _upgrade_to(path, "e4_observations")
 
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         rows = conn.execute(
             "SELECT track_id, field, value, source, confidence "
             "FROM observations ORDER BY track_id, field"
@@ -307,7 +308,7 @@ def test_e10_backfill_legacy_observations(tmp_path):
     time_signature, et bpm_alt seulement quand aucune VRAIE source bpm n'existe."""
     path = str(tmp_path / "legacy.db")
     _upgrade_to(path, "e9_media_images")  # schéma pré-e10 (observations existe déjà)
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
         # T1 : bpm avec une VRAIE observation déjà présente -> pas de legacy.
         conn.execute("INSERT INTO tracks (id, title, artist_id, bpm) VALUES (1, 'T1', 1, 140)")
@@ -343,7 +344,7 @@ def test_e10_backfill_legacy_observations(tmp_path):
 
     _upgrade_to(path, HEAD)  # applique e10
 
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         legacy = conn.execute(
             "SELECT track_id, field, value, confidence FROM observations "
             "WHERE source = 'legacy' ORDER BY track_id, field"
@@ -362,7 +363,7 @@ def test_e11_backfill_musical_key_orphans(tmp_path):
     sans paire key/mode en observations), pour les préserver au drop E7-D2."""
     path = str(tmp_path / "orphans.db")
     _upgrade_to(path, "e10_backfill_legacy_obs")
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
         # T1 : orphelin (musical_key, aucune obs key/mode) -> rétro-dérivé 11/0.
         conn.execute(
@@ -385,7 +386,7 @@ def test_e11_backfill_musical_key_orphans(tmp_path):
 
     _upgrade_to(path, HEAD)  # applique e11
 
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         legacy = conn.execute(
             "SELECT track_id, field, value FROM observations "
             "WHERE source = 'legacy' ORDER BY track_id, field"

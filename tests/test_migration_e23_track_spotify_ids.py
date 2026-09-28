@@ -10,6 +10,7 @@ e23, et elle ne s'invente pas (même convention que le backfill audio d'e10).
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -35,7 +36,7 @@ def _base_peuplee(tmp_path: Path, lignes) -> Path:
     """`lignes` : (titre, spotify_id)."""
     db = tmp_path / "avant_e23.db"
     _upgrade(db, _AVANT)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artiste')")
         for i, (titre, sid) in enumerate(lignes, start=1):
             conn.execute(
@@ -46,7 +47,7 @@ def _base_peuplee(tmp_path: Path, lignes) -> Path:
 
 
 def _entrees(db: Path) -> list[tuple]:
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         return conn.execute(
             "SELECT track_id, spotify_id, source, is_primary FROM track_spotify_ids "
             "ORDER BY track_id"
@@ -78,7 +79,7 @@ def test_la_colonne_nest_pas_touchee(tmp_path):
 
     _upgrade(db, _APRES)
 
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT spotify_id FROM tracks WHERE id = 1").fetchone() == (
             "3VXzVGAWFSrH47dBtTOPws",
         )
@@ -92,6 +93,6 @@ def test_genius_id_est_indexe(tmp_path):
 
     _upgrade(db, _APRES)
 
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         index = {r[1] for r in conn.execute("PRAGMA index_list(tracks)")}
     assert "ix_tracks_genius_id" in index

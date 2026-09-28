@@ -29,11 +29,11 @@ from playwright.sync_api import Error as PlaywrightError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.scrapers.kworb_scraper import KworbScraper
+from src.utils import spotify_identity
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import (
     artiste_etranger,
     identite_concorde,
-    lire_identite_http,
     valider_identite,
 )
 from src.utils.version_descriptors import (
@@ -942,7 +942,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     # ── 4. Streams des morceaux ───────────────────────────────────────────────
     tracks = data_manager.get_artist_tracks(artist.id)
     index = construire_index(tracks)
-    lire_identite = lire_identite or lire_identite_http
+    # lu dans son module À L'APPEL : importé par nom, l'original était figé et la
+    # neutralisation des tests (conftest) ne l'atteignait pas — le test de backfill
+    # interrogeait le vrai open.spotify.com (mesuré 2026-09-28)
+    lire_identite = lire_identite or spotify_identity.lire_identite_http
     result["ids_partages"] = [
         (sid, sorted(t.title for t in ts)) for sid, ts in sorted(index.ids_partages.items())
     ]

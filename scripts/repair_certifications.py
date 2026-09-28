@@ -27,6 +27,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from contextlib import closing
 
 # Fix encodage Windows (règle projet : reconfigure, jamais de re-wrapping)
 if sys.platform == "win32":
@@ -81,7 +82,7 @@ def analyser(dm: DataManager, filtre_artiste: str | None):
     """Recalcule tout et rend la liste des morceaux à réécrire."""
     matcher = get_cert_matcher()
     changements = []
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         artistes = conn.execute("select id, name from artists order by name").fetchall()
 
     for artiste_id, nom in artistes:

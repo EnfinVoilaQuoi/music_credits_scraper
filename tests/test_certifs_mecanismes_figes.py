@@ -235,6 +235,9 @@ class TestNettoyageEnErreurRendUnCodeNonNul:
             def __init__(self, *a, **k):
                 pass
 
+            def brancher_journal_fichier(self):
+                pass
+
             def dedup_database(self, apply=True):
                 return {"error": "x"}
 

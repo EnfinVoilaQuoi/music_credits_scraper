@@ -42,9 +42,9 @@ from datetime import datetime
 from src.enrichment.observation import Observation
 from src.models import ReleaseObservation
 from src.models.track import Credit, CreditRole, Track
-from src.utils import version_heritage
+from src.utils import spotify_identity, version_heritage
 from src.utils.logger import get_logger
-from src.utils.spotify_identity import lire_identite_http, valider_identite
+from src.utils.spotify_identity import valider_identite
 from src.utils.title_matching import clean_stored_title, names_match_as_words, normalize_title
 
 logger = get_logger(__name__)
@@ -179,7 +179,9 @@ def appliquer(
     """
     if decision not in DECISIONS:
         raise ValueError(f"décision inconnue : {decision!r}")
-    lire_identite = lire_identite or lire_identite_http
+    # lu dans son module À L'APPEL : importé par nom, l'original était figé et la
+    # neutralisation des tests (conftest) ne l'atteignait pas
+    lire_identite = lire_identite or spotify_identity.lire_identite_http
     titre = proposition["kworb_title"]
     sid = proposition.get("spotify_id")
     streams, daily = proposition["streams"], proposition.get("daily")

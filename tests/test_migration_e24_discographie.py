@@ -12,6 +12,7 @@ des observations illisibles.
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -37,7 +38,7 @@ def _base(tmp_path: Path, lignes) -> Path:
     """`lignes` : (titre, duration, release_date, isrc)."""
     db = tmp_path / "avant_e24.db"
     _upgrade(db, _AVANT)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Flynt')")
         for i, (titre, duree, date, isrc) in enumerate(lignes, start=1):
             conn.execute(
@@ -49,7 +50,7 @@ def _base(tmp_path: Path, lignes) -> Path:
 
 
 def _obs(db: Path) -> list[tuple]:
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         return conn.execute(
             "SELECT track_id, field, value, source FROM observations ORDER BY track_id, field"
         ).fetchall()
@@ -74,7 +75,7 @@ def test_aucune_valeur_de_colonne_ne_change(tmp_path):
 
     _upgrade(db, _APRES)
 
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute(
             "SELECT duration, release_date, isrc FROM tracks WHERE id = 1"
         ).fetchone() == (249, "2006-01-01", "FRPJQ1501290")
@@ -88,7 +89,7 @@ def test_une_duree_ecrite_2h30_est_normalisee_des_DEUX_cotes(tmp_path):
 
     _upgrade(db, _APRES)
 
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT duration FROM tracks WHERE id = 1").fetchone() == (150,)
         assert conn.execute("SELECT typeof(duration) FROM tracks WHERE id = 1").fetchone() == (
             "integer",
@@ -103,7 +104,7 @@ def test_une_duree_illisible_n_est_pas_devinee(tmp_path):
 
     _upgrade(db, _APRES)
 
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT duration FROM tracks WHERE id = 1").fetchone() == (
             "à peu près trois minutes",
         )

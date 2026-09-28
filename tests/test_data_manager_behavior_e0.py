@@ -16,6 +16,7 @@ identique jusqu'à E6 (triple écriture), donc ces lectures restent valides.
 """
 
 import sqlite3
+from contextlib import closing
 
 from src.models import Artist, Credit, CreditRole, Track
 
@@ -48,7 +49,7 @@ def _lire_track(data_manager, artist_id, track_id) -> Track | None:
 
 def _scalar(data_manager, sql, params=()):
     """Lecture SQL brute (état sans getter public : crédits/erreurs, colonnes Kworb)."""
-    with sqlite3.connect(data_manager.db_path) as conn:
+    with closing(sqlite3.connect(data_manager.db_path)) as conn, conn:
         return conn.execute(sql, params).fetchone()
 
 
@@ -57,13 +58,13 @@ def _count(data_manager, sql, params=()) -> int:
 
 
 def _rows(data_manager, sql, params=()):
-    with sqlite3.connect(data_manager.db_path) as conn:
+    with closing(sqlite3.connect(data_manager.db_path)) as conn, conn:
         return conn.execute(sql, params).fetchall()
 
 
 def _ajoute_obs(data_manager, track_id, field, source, value="x", confidence=None):
     """Insère une observation brute (pas d'API publique avant E5)."""
-    with sqlite3.connect(data_manager.db_path) as conn:
+    with closing(sqlite3.connect(data_manager.db_path)) as conn, conn:
         conn.execute(
             "INSERT INTO observations (track_id, field, value, source, confidence, seen_at) "
             "VALUES (?, ?, ?, ?, ?, '2026-01-01')",

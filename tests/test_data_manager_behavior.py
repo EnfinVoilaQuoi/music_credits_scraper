@@ -10,6 +10,7 @@ Deux rôles :
 """
 
 import sqlite3
+from contextlib import closing
 
 from src.enrichment.observation import Observation
 from src.models import Artist, Track
@@ -222,7 +223,7 @@ class TestConversionDuree:
     (données héritées : certaines lignes historiques stockent la durée en MM:SS)."""
 
     def _set_duration_sql(self, data_manager, value):
-        with sqlite3.connect(data_manager.db_path) as conn:
+        with closing(sqlite3.connect(data_manager.db_path)) as conn, conn:
             conn.execute("UPDATE tracks SET duration = ?", (value,))
 
     def test_duree_texte_mm_ss(self, data_manager):

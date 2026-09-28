@@ -11,6 +11,7 @@ C'est le garde-fou qui autorise E3 à remplacer `_init_database` par
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -34,7 +35,7 @@ def _upgrade_head(db_path: str) -> None:
 
 def _snapshot(db_path: str) -> dict:
     """Empreinte du schéma : colonnes (table_info) + UNIQUE, hors alembic_version."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         tables = [
             r[0]
             for r in conn.execute(

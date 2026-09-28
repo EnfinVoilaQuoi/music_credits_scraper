@@ -8,6 +8,7 @@ migration.
 """
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -36,7 +37,7 @@ def _base_a_la_revision_precedente(tmp_path: Path) -> Path:
 
 def _peupler(db: Path, lignes) -> None:
     """`lignes` : (titre, url, source, kind, views, views_updated)."""
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artiste')")
         for i, (titre, url, source, kind, views, vu) in enumerate(lignes, start=1):
             conn.execute(
@@ -48,7 +49,7 @@ def _peupler(db: Path, lignes) -> None:
 
 
 def _videos(db: Path) -> list[tuple]:
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         return conn.execute(
             "SELECT track_id, video_id, url, kind, source, views, views_updated "
             "FROM track_videos ORDER BY track_id"

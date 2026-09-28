@@ -2,6 +2,7 @@
 l'artiste est relu (par nom, par id via les morceaux)."""
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -27,10 +28,10 @@ def _upgrade(db_path: Path, revision: str) -> None:
 def test_la_colonne_arrive_vide(tmp_path):
     db = tmp_path / "avant_e30.db"
     _upgrade(db, _AVANT)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Isha')")
     _upgrade(db, _APRES)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT deezer_id FROM artists").fetchone() == (None,)
 
 

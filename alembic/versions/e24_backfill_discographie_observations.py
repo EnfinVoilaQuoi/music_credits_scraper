@@ -33,8 +33,8 @@ observations illisibles et le problème serait déplacé au lieu d'être résolu
 Les colonnes elles-mêmes sont normalisées dans le même mouvement.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence, Union
 
 import sqlalchemy as sa
 
@@ -43,9 +43,9 @@ from src.utils.track_mapper import _clean_duration
 
 # revision identifiers, used by Alembic.
 revision: str = "e24_discographie_obs"
-down_revision: Union[str, Sequence[str], None] = "e23_track_spotify_ids"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e23_track_spotify_ids"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 #: Les trois champs, et comment lire leur colonne. `duration` est la seule à
 #: demander une coercition — les deux autres sont du texte verbatim.

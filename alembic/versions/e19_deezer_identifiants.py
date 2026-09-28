@@ -32,7 +32,7 @@ résolution (`deezer_cover_xl` / `deezer_picture_xl` → `media_enricher` →
 fichier sur disque + `tracks.cover_path`). C'était un doublon dégradé.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -40,9 +40,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e19_deezer_identifiants"
-down_revision: Union[str, Sequence[str], None] = "e18_credit_tracks"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e18_credit_tracks"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

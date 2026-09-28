@@ -15,7 +15,7 @@ persisté par l'ancien code. 'manual' = statu quo EXACT (protège les canaux
 épinglés existants, ex. Django) ; 'inferred' les rendrait ré-écrasables.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -23,9 +23,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e8_ytm_channel_source"
-down_revision: Union[str, Sequence[str], None] = "e5_drop_combined_bpm_obs"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e5_drop_combined_bpm_obs"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -34,8 +34,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("ytm_channel_source", sa.Text(), nullable=True))
     op.get_bind().execute(
         sa.text(
-            "UPDATE artists SET ytm_channel_source='manual' "
-            "WHERE ytm_channel_id IS NOT NULL"
+            "UPDATE artists SET ytm_channel_source='manual' " "WHERE ytm_channel_id IS NOT NULL"
         )
     )
 

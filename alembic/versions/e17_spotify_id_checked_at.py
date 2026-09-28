@@ -26,7 +26,7 @@ sans ISRC en base**. L'ISRC sert dans l'autre sens (présent sans ID = résoluti
 ratée, 67 morceaux), jamais comme preuve d'absence.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -34,9 +34,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e17_spotify_id_checked"
-down_revision: Union[str, Sequence[str], None] = "e16_backfill_kworb_streams"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e16_backfill_kworb_streams"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

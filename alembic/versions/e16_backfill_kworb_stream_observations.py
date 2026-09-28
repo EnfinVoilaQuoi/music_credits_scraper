@@ -25,7 +25,7 @@ antérieur à cette migration) n'est pas touché — sans quoi on fabriquerait u
 observation « kworb » portant une valeur qui ne vient pas de lui.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -33,9 +33,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e16_backfill_kworb_streams"
-down_revision: Union[str, Sequence[str], None] = "e15_album_editions"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e15_album_editions"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

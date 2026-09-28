@@ -40,10 +40,10 @@ jobs:
         run: playwright install chromium
 
       - name: Ruff (lint)
-        run: ruff check src scripts tests
+        run: ruff check src scripts tests alembic
 
       - name: Black (formatage)
-        run: black --check src scripts tests
+        run: black --check src scripts tests alembic
 
       # Garde-fou refacto Phase 4 (couche « domaine ») : le modèle et le mapper
       # n'accèdent JAMAIS à leurs propres champs via getattr/hasattr défensif —

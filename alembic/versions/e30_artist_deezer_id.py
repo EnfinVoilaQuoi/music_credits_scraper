@@ -14,7 +14,7 @@ recouvrement d'albums) et mémorisée ici — jamais reprise au rang de recherch
     pas choisi ; jamais écrit sur une ambiguïté.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -22,9 +22,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e30_artist_deezer_id"
-down_revision: Union[str, Sequence[str], None] = "e29_variant_track_id"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e29_variant_track_id"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

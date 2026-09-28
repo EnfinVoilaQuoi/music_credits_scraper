@@ -49,7 +49,9 @@ def upgrade() -> None:
         op.create_table(
             "release_track_sources",
             sa.Column("id", sa.Integer(), primary_key=True),
-            sa.Column("release_track_id", sa.Integer(), sa.ForeignKey("release_tracks.id"), nullable=False),
+            sa.Column(
+                "release_track_id", sa.Integer(), sa.ForeignKey("release_tracks.id"), nullable=False
+            ),
             sa.Column("source", sa.Text(), nullable=False),
             sa.Column("external_track_id", sa.Text()),
             sa.Column("matched_by", sa.Text(), nullable=False),
@@ -60,23 +62,19 @@ def upgrade() -> None:
 
     # L'ancien champ Deezer devient une preuve parmi d'autres. INSERT OR IGNORE
     # tolère autant les relances que les doublons déjà présents.
-    op.execute(
-        """
+    op.execute("""
         INSERT OR IGNORE INTO release_identifiers
             (release_id, artist_id, source, external_id, created_at)
         SELECT id, artist_id, 'deezer', CAST(deezer_album_id AS TEXT), CURRENT_TIMESTAMP
         FROM releases WHERE deezer_album_id IS NOT NULL
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         INSERT OR IGNORE INTO release_track_sources
             (release_track_id, source, external_track_id, matched_by, created_at)
         SELECT id, COALESCE(source, 'legacy'), CAST(source_track_id AS TEXT),
                COALESCE(matched_by, 'legacy'), CURRENT_TIMESTAMP
         FROM release_tracks
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

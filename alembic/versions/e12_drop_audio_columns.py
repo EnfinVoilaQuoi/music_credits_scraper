@@ -20,7 +20,7 @@ Les ATTRIBUTS `Track.bpm/key/mode/...` SUBSISTENT (posés par la réconciliation
 seule la persistance colonne disparaît. `to_dict`/GUI lisent les attributs.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -28,9 +28,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e12_drop_audio_columns"
-down_revision: Union[str, Sequence[str], None] = "e11_musical_key_orphans"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e11_musical_key_orphans"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 _DROPPED = (
     "bpm",

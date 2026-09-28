@@ -24,7 +24,7 @@ Backfill : tout album déjà pourvu d'un total est marqué 'kworb'. C'est le seu
 choix exact — Kworb était la seule source d'albums jusqu'ici.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -32,9 +32,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e14_album_streams_source"
-down_revision: Union[str, Sequence[str], None] = "e13_source_usage"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e13_source_usage"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -43,8 +43,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("spotify_streams_source", sa.Text(), nullable=True))
     op.get_bind().execute(
         sa.text(
-            "UPDATE albums SET spotify_streams_source='kworb' "
-            "WHERE spotify_streams IS NOT NULL"
+            "UPDATE albums SET spotify_streams_source='kworb' " "WHERE spotify_streams IS NOT NULL"
         )
     )
 

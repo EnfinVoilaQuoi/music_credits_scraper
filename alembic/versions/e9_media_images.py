@@ -20,7 +20,7 @@ position), reflétées à l'identique dans `src/persistence/schema.py` (garde-fo
 `test_alembic_baseline` / `test_schema_reflects_db` sur l'ordre et le compte).
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -28,9 +28,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e9_media_images"
-down_revision: Union[str, Sequence[str], None] = "e8_ytm_channel_source"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e8_ytm_channel_source"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -43,9 +43,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("yt_thumbnail_path", sa.Text(), nullable=True))
         batch_op.add_column(sa.Column("youtube_video_kind", sa.Text(), nullable=True))
         batch_op.add_column(sa.Column("youtube_video_views", sa.Integer(), nullable=True))
-        batch_op.add_column(
-            sa.Column("youtube_video_views_updated", sa.TIMESTAMP(), nullable=True)
-        )
+        batch_op.add_column(sa.Column("youtube_video_views_updated", sa.TIMESTAMP(), nullable=True))
 
 
 def downgrade() -> None:

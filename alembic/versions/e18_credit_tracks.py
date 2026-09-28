@@ -41,7 +41,7 @@ Aucune suppression de ligne ici : une migration de schéma n'efface pas de donn�
 """
 
 import re
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -49,9 +49,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e18_credit_tracks"
-down_revision: Union[str, Sequence[str], None] = "e17_spotify_id_checked"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e17_spotify_id_checked"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 #: Référence de piste Discogs : « 16 », « A1 », « B3 », « A5,A6,B2 ».

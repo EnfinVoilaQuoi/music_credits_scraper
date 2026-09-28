@@ -63,8 +63,7 @@ def upgrade() -> None:
     # Backfill conservateur : une ligne historique = une parution own et un
     # seul lien legacy. Les titres restent tels quels pour que le lien soit
     # parfaitement réversible et qu'aucune normalisation ne fusionne deux CD.
-    op.execute(
-        """
+    op.execute("""
         INSERT OR IGNORE INTO releases (artist_id, title, scope, identity_key, created_at, updated_at)
         SELECT artist_id, MIN(trim(album)), 'own',
                'legacy:' || artist_id || ':' || lower(trim(album)),
@@ -72,10 +71,8 @@ def upgrade() -> None:
         FROM tracks
         WHERE album IS NOT NULL AND trim(album) != ''
         GROUP BY artist_id, lower(trim(album))
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         INSERT OR IGNORE INTO release_tracks
             (release_id, track_id, track_number, source, matched_by, created_at, updated_at)
         SELECT r.id, t.id, t.track_number, 'legacy', 'legacy', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -84,8 +81,7 @@ def upgrade() -> None:
           ON r.artist_id = t.artist_id
          AND r.identity_key = 'legacy:' || t.artist_id || ':' || lower(trim(t.album))
         WHERE t.album IS NOT NULL AND trim(t.album) != ''
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

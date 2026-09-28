@@ -37,8 +37,8 @@ Idempotent (les gardes `NOT EXISTS` sautorisent un re-run) et réversible (le
 downgrade supprime les observations `legacy`). Essai sur COPIE avant la prod.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence, Union
 
 import sqlalchemy as sa
 
@@ -46,9 +46,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e10_backfill_legacy_obs"
-down_revision: Union[str, Sequence[str], None] = "e9_media_images"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e9_media_images"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 LEGACY = "legacy"
 
@@ -72,8 +72,8 @@ def upgrade() -> None:
 
     # bpm / key / mode / time_signature : colonne renseignée, aucune obs du champ.
     backfill("bpm", "bpm", "t.bpm IS NOT NULL", confidence="CAST(t.bpm_confidence AS REAL)")
-    backfill("key", '"key"', "t.\"key\" IS NOT NULL AND t.\"key\" != ''")
-    backfill("mode", '"mode"', "t.\"mode\" IS NOT NULL AND t.\"mode\" != ''")
+    backfill("key", '"key"', 't."key" IS NOT NULL AND t."key" != \'\'')
+    backfill("mode", '"mode"', 't."mode" IS NOT NULL AND t."mode" != \'\'')
     backfill(
         "time_signature",
         "time_signature",

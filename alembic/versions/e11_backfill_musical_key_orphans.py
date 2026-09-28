@@ -21,8 +21,8 @@ date de migration. Idempotent (l'orphelin traité n'en est plus un). Essai sur
 COPIE avant la prod.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence, Union
 
 import sqlalchemy as sa
 
@@ -31,9 +31,9 @@ from src.utils.music_theory import musical_key_to_pitch_mode
 
 # revision identifiers, used by Alembic.
 revision: str = "e11_musical_key_orphans"
-down_revision: Union[str, Sequence[str], None] = "e10_backfill_legacy_obs"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e10_backfill_legacy_obs"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

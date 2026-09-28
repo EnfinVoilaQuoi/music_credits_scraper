@@ -30,8 +30,8 @@ s'extraie. La provenance est recopiée VERBATIM (pas de défaut inventé) et les
 vues suivent leur horodatage d'origine.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence, Union
 
 import sqlalchemy as sa
 
@@ -40,9 +40,9 @@ from src.utils.youtube_utils import extract_video_id
 
 # revision identifiers, used by Alembic.
 revision: str = "e20_track_videos"
-down_revision: Union[str, Sequence[str], None] = "e19_deezer_identifiants"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e19_deezer_identifiants"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

@@ -56,7 +56,7 @@ rapprochement de noms automatique n'a pas le droit de décider seul qui joue ave
 qui.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -64,9 +64,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e22_artist_relations"
-down_revision: Union[str, Sequence[str], None] = "e21_track_video_title"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e21_track_video_title"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

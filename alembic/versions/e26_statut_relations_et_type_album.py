@@ -26,7 +26,7 @@ Deux besoins nés du générateur « Timeline » (2026-09-15/16).
    implicite : tout l'existant a été confirmé à la main → `confirmed`.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -34,9 +34,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e26_statut_album"
-down_revision: Union[str, Sequence[str], None] = "e25_lignes_soeurs"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e25_lignes_soeurs"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -47,9 +47,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("deezer_album_id", sa.Integer(), nullable=True))
     with op.batch_alter_table("artist_relations") as batch_op:
         batch_op.add_column(
-            sa.Column(
-                "status", sa.Text(), nullable=False, server_default=sa.text("'confirmed'")
-            )
+            sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'confirmed'"))
         )
         batch_op.add_column(sa.Column("detail", sa.Text(), nullable=True))
 

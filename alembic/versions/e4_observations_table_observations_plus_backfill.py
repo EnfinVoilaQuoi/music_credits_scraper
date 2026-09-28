@@ -22,8 +22,8 @@ observation par `bpm_source` non nul et une par champ non nul (key/mode) dont
 `key_mode_source` est renseigné.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence, Union
 
 import sqlalchemy as sa
 
@@ -31,9 +31,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e4_observations"
-down_revision: Union[str, Sequence[str], None] = "e1_initial_schema"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "e1_initial_schema"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

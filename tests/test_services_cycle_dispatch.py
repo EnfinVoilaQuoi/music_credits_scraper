@@ -177,3 +177,62 @@ class TestResumes:
 
     def test_etapes_disponibles(self):
         assert list(cycle.etapes_disponibles()) == list(cycle.ETAPES)
+
+
+class TestEtapeIdentite:
+    """2026-09-28 : `identite` entre disco et credits ; dans un cycle qui la
+    lance, disco ne refait pas Deezer et enrich ni MusicBrainz ni la nature des
+    disques (une responsabilité, une étape)."""
+
+    def test_aiguillage(self, monkeypatch):
+        from src.services import identite
+
+        vus = []
+        monkeypatch.setattr(identite, "run", lambda rt, a, o, h: vus.append(o) or Bilan())
+        o = cycle.OptionsCycle(identite=identite.OptionsIdentite(force=True))
+        cycle.executer_etape(_rt([]), _artist([]), "identite", o, Hooks())
+        assert vus == [o.identite]
+
+    def test_disco_et_enrich_ne_doublonnent_pas_l_identite(self, monkeypatch):
+        vus = {}
+        monkeypatch.setattr(
+            discographie, "run", lambda rt, a, o, h: vus.setdefault("disco", o) and Bilan()
+        )
+        monkeypatch.setattr(
+            enrichissement, "run", lambda rt, a, t, o, h: vus.setdefault("enrich", o) and Bilan()
+        )
+        rt, a = _rt([]), _artist([])
+        avec = cycle.OptionsCycle()
+        cycle.executer_etape(rt, a, "disco", avec, Hooks())
+        cycle.executer_etape(rt, a, "enrich", avec, Hooks())
+        assert vus["disco"].deezer is False
+        assert vus["enrich"].musicbrainz is False and vus["enrich"].types_albums is False
+        vus.clear()
+        sans = cycle.OptionsCycle(skip=("identite",))
+        cycle.executer_etape(rt, a, "disco", sans, Hooks())
+        cycle.executer_etape(rt, a, "enrich", sans, Hooks())
+        assert vus["disco"].deezer is True and vus["enrich"].musicbrainz is True
+
+    def test_rattrapage_discogs_en_fin_de_cycle(self, monkeypatch):
+        from src.services import identite, revue_auto
+
+        monkeypatch.setattr(cycle, "executer_etape", lambda *a: identite.BilanIdentite())
+        monkeypatch.setattr(
+            cycle.artiste, "charger_ou_ajouter", lambda rt, n, genius_id=None: _artist([])
+        )
+        monkeypatch.setattr(
+            revue_auto, "corriger_apres_run", lambda dm, a: SimpleNamespace(appliquees=[])
+        )
+        appels = []
+        monkeypatch.setattr(
+            identite,
+            "rattraper_discogs",
+            lambda rt, a: appels.append(a.name)
+            or identite.PropositionsIdentite(identite_discogs="Discogs : par les disques"),
+        )
+        bilan = cycle.run(_rt([]), "Swing", cycle.OptionsCycle(only=("identite",)), Hooks())
+        assert appels == ["Swing"]
+        assert "fin de cycle" in bilan.etapes["identite"].artistes["discogs"]
+        appels.clear()
+        cycle.run(_rt([]), "Swing", cycle.OptionsCycle(only=("disco",)), Hooks())
+        assert appels == []

@@ -32,6 +32,7 @@ from src.services import (  # noqa: E402
     cycle,
     discographie,
     enrichissement,
+    identite,
     streams,
 )
 from src.services.runtime import Hooks, Runtime  # noqa: E402
@@ -82,6 +83,28 @@ def _disco_args(p: argparse.ArgumentParser) -> None:
     )
     _bool_flags(p, "deezer", True, "compléter par Deezer (écarts listés, jamais créés)")
     p.add_argument("--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu")
+
+
+def _identite_args(p: argparse.ArgumentParser, *, etape_seule: bool) -> None:
+    """Étape Identité. Dans le cycle, `--no-deezer`, `--deezer-id` (disco) et
+    `--no-musicbrainz` (enrich) sont PARTAGÉS avec elle, et son forçage se dit
+    `--force-identite` (`--force` y est déjà le `force_update` d'enrich)."""
+    if etape_seule:
+        _bool_flags(p, "deezer", True, "artiste et catalogue Deezer, Deezer par morceau")
+        p.add_argument(
+            "--deezer-id", type=int, help="ID Deezer de l'artiste quand l'oracle est ambigu"
+        )
+        _bool_flags(p, "musicbrainz", True, "formations et alias PROPOSÉS (MusicBrainz + Discogs)")
+    _bool_flags(p, "par-morceau", True, "IDs Deezer puis Spotify des morceaux non reliés")
+    _bool_flags(p, "spotify-artiste", True, "ID Spotify de l'artiste (vote)")
+    _bool_flags(p, "nature-disques", True, "EP / album / single (catalogue Deezer)")
+    p.add_argument(
+        "--force" if etape_seule else "--force-identite",
+        dest="force_identite",
+        action="store_true",
+        help="redemander aussi ce qui est déjà relié ou daté (sans jamais remplacer)",
+    )
+    p.add_argument("--spotify-artist-id", help="ID Spotify de l'artiste, forcé")
 
 
 def _deezer_args(p: argparse.ArgumentParser) -> None:
@@ -147,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
     _artiste_args(d)
     _disco_args(d)
 
+    i = sub.add_parser(
+        "identite", help="relier les fiches aux plateformes (Deezer, Spotify, MusicBrainz)"
+    )
+    _artiste_args(i)
+    _identite_args(i, etape_seule=True)
+
     _deezer_args(
         sub.add_parser(
             "deezer", help="écarts de discographie Deezer (rapport ; --creer pour écrire)"
@@ -192,6 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--only", help=f"étapes à lancer, parmi {','.join(cycle.ETAPES)}")
     g.add_argument("--skip", help="étapes à sauter")
     _disco_args(cy)
+    _identite_args(cy, etape_seule=False)
     _credits_args(cy)
     _enrich_args(cy)
     _streams_args(cy)
@@ -221,6 +251,19 @@ def options_disco(a: argparse.Namespace) -> discographie.OptionsDisco:
         deezer=a.deezer,
         deezer_id=a.deezer_id,
         tracklists=a.tracklists,
+    )
+
+
+def options_identite(a: argparse.Namespace) -> identite.OptionsIdentite:
+    return identite.OptionsIdentite(
+        deezer=getattr(a, "deezer", True),
+        musicbrainz=getattr(a, "musicbrainz", True),
+        par_morceau=a.par_morceau,
+        spotify_artiste=a.spotify_artiste,
+        nature_disques=a.nature_disques,
+        force=a.force_identite,
+        deezer_id=getattr(a, "deezer_id", None),
+        spotify_id=a.spotify_artist_id or None,
     )
 
 
@@ -266,6 +309,7 @@ def options_cycle(a: argparse.Namespace) -> cycle.OptionsCycle:
         skip=_liste(a.skip),
         manquants=a.manquants,
         disco=options_disco(a),
+        identite=options_identite(a),
         credits=options_credits(a),
         enrich=options_enrich(a),
         streams=options_streams(a),
@@ -279,6 +323,7 @@ def options_etape_seule(a: argparse.Namespace, etape: str) -> cycle.OptionsCycle
         genius_id=a.genius_id,
         manquants=getattr(a, "manquants", False),
         disco=options_disco(a) if etape == "disco" else discographie.OptionsDisco(),
+        identite=options_identite(a) if etape == "identite" else identite.OptionsIdentite(),
         credits=options_credits(a) if etape == "credits" else credits.OptionsCredits(),
         enrich=options_enrich(a) if etape == "enrich" else enrichissement.OptionsEnrich(),
         streams=options_streams(a) if etape == "streams" else streams.OptionsStreams(),
@@ -389,7 +434,8 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
         for etape, b in bilan.etapes.items():
             _imprimer_bilan(etape, cycle.resume_etape(etape, b, options, art))
         _imprimer_bilan("Cycle", cycle.resume(bilan, options))
-        return code_de(bilan)
+        ambigu = _deezer_ambigu(bilan.etapes.get("identite"))
+        return AMBIGU if ambigu else code_de(bilan)
 
     # Une étape seule : le cycle restreint à elle, avec les MÊMES règles.
     etape = "certifs" if a.commande == "certifs" else a.commande  # certifs → action "search"
@@ -397,7 +443,22 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
     art = _charger(runtime, a, creer=(etape == "disco"))
     b = cycle.executer_etape(runtime, art, etape, options, hooks)
     _imprimer_bilan(etape, cycle.resume_etape(etape, b, options, art))
+    if etape == "identite" and _deezer_ambigu(b):
+        return AMBIGU
     return code_de(b)
+
+
+def _deezer_ambigu(b) -> bool:
+    """L'étape Identité ne LÈVE pas sur un homonyme Deezer (les couches
+    suivantes tournent quand même) : la CLI liste les candidats et rend 3."""
+    catalogue = getattr(b, "catalogue", None)
+    candidats = getattr(getattr(catalogue, "ecarts", None), "ambigu", None)
+    if not candidats:
+        return False
+    print("❓ Artiste Deezer ambigu. Candidats (trancher avec --deezer-id) :")
+    for c in candidats:
+        print(f"   • {c.id}  {c.name}  ({c.nb_album} disques, {c.nb_fan} fans, {c.detail})")
+    return True
 
 
 def _executer_revue(a: argparse.Namespace, runtime: Runtime) -> int:

@@ -88,7 +88,7 @@ class TestParsingCycle:
 
     def test_etapes(self):
         o = cli.options_cycle(_parse("cycle", "S", "--skip", "streams,certifs", "--manquants"))
-        assert o.etapes() == ["disco", "credits", "enrich"] and o.manquants
+        assert o.etapes() == ["disco", "identite", "credits", "enrich"] and o.manquants
         o = cli.options_cycle(_parse("cycle", "S", "--only", "enrich"))
         assert o.etapes() == ["enrich"]
 
@@ -178,3 +178,31 @@ class TestEtapeSeule:
         monkeypatch.setattr(cli.cycle, "resume_etape", lambda *a: "ok")
         assert cli.main(["credits", "S", "--manquants", "--no-discogs"]) == cli.COMPLET
         assert vus == {"etape": "credits", "manquants": True, "discogs": False}
+
+
+class TestParsingIdentite:
+    def test_etape_seule(self):
+        o = cli.options_etape_seule(
+            _parse("identite", "Isha", "--force", "--deezer-id", "1236609", "--no-musicbrainz"),
+            "identite",
+        ).identite
+        assert o.force and o.deezer_id == 1236609 and not o.musicbrainz and o.par_morceau
+
+    def test_dans_le_cycle_les_drapeaux_sont_partages(self):
+        o = cli.options_cycle(
+            _parse("cycle", "Isha", "--no-deezer", "--force-identite", "--no-nature-disques")
+        )
+        assert o.identite.deezer is False and o.disco.deezer is False
+        assert o.identite.force and not o.enrich.force_update
+        assert not o.identite.nature_disques
+
+    def test_homonyme_deezer_rend_le_code_3(self, capsys):
+        from src.services import identite
+        from src.services.deezer_identite import CandidatDeezer
+        from src.services.ecarts_deezer import BilanEcarts
+
+        e = BilanEcarts(complete=False)
+        e.ambigu = [CandidatDeezer(1, "Isha"), CandidatDeezer(2, "Isha")]
+        b = identite.BilanIdentite(catalogue=identite.CatalogueDeezer(ecarts=e))
+        assert cli._deezer_ambigu(b) is True and "--deezer-id" in capsys.readouterr().out
+        assert cli._deezer_ambigu(identite.BilanIdentite()) is False

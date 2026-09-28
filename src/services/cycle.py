@@ -1,7 +1,8 @@
 """Le cycle complet d'un artiste, étape par étape — sans widget.
 
-add/load → disco (illimitée) → credits (crédits + paroles + timestamps) →
-enrich → streams → certifs (recherche par artiste puis application). Chaque
+add/load → disco (illimitée) → identite (relier les fiches aux plateformes) →
+credits (crédits + paroles + timestamps) → enrich → streams → certifs
+(recherche par artiste puis application). Chaque
 étape tourne sous SON `run_scope` (l'usage des sources est compté POUR cet
 artiste), continue sur l'échec d'une étape (consigné) et s'arrête sur
 `should_stop`. `complete` ne vaut que si TOUTES les étapes le sont.
@@ -10,20 +11,29 @@ artiste), continue sur l'échec d'une étape (consigné) et s'arrête sur
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from src.models import Artist
 from src.observability import source_usage
 from src.observability.registry import Flow
-from src.services import artiste, certifs, credits, discographie, enrichissement, streams
+from src.services import (
+    artiste,
+    certifs,
+    credits,
+    discographie,
+    enrichissement,
+    identite,
+    streams,
+)
 from src.services.runtime import Bilan, Hooks, Manque, Runtime, selection_morceaux
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-ETAPES: tuple[str, ...] = ("disco", "credits", "enrich", "streams", "certifs")
+ETAPES: tuple[str, ...] = ("disco", "identite", "credits", "enrich", "streams", "certifs")
 _FLOWS = {
     "disco": Flow.DISCO,
+    "identite": Flow.IDENTITY,
     "credits": Flow.ENRICHMENT,
     "enrich": Flow.ENRICHMENT,
     "streams": Flow.STREAMS,
@@ -39,6 +49,7 @@ class OptionsCycle:
     #: Ne traiter que les morceaux à donnée ABSENTE (définition PAR flux).
     manquants: bool = False
     disco: discographie.OptionsDisco = discographie.OptionsDisco()
+    identite: identite.OptionsIdentite = identite.OptionsIdentite()
     credits: credits.OptionsCredits = credits.OptionsCredits()
     enrich: enrichissement.OptionsEnrich = enrichissement.OptionsEnrich()
     streams: streams.OptionsStreams = streams.OptionsStreams()
@@ -90,7 +101,16 @@ def executer_etape(
         raise ValueError(f"étape inconnue : {etape!r}")
     with source_usage.run_scope(_FLOWS[etape], artist_id=artist.id, artist_name=artist.name):
         if etape == "disco":
-            return discographie.run(runtime, artist, options.disco, hooks)
+            opts = options.disco
+            if "identite" in options.etapes():
+                # Deezer (artiste + catalogue) appartient à l'étape Identité :
+                # dans un cycle qui la lance, la disco ne le refait pas.
+                opts = replace(opts, deezer=False)
+            return discographie.run(runtime, artist, opts, hooks)
+        if etape == "identite":
+            # Toujours « manquants » par construction (ce qui n'est pas relié) ;
+            # `--force` élargit, `--manquants` n'y change rien.
+            return identite.run(runtime, artist, options.identite, hooks)
         if etape == "credits":
             kinds = manques_credits(options.credits) if options.manquants else ()
             tracks = selection_morceaux(runtime, artist, manquants=kinds)
@@ -98,7 +118,11 @@ def executer_etape(
         if etape == "enrich":
             kinds = (Manque.AUDIO,) if options.manquants else ()
             tracks = selection_morceaux(runtime, artist, manquants=kinds)
-            return enrichissement.run(runtime, artist, tracks, options.enrich, hooks)
+            opts = options.enrich
+            if "identite" in options.etapes():
+                # Propositions MB/Discogs et nature des disques : étape Identité.
+                opts = replace(opts, musicbrainz=False, types_albums=False)
+            return enrichissement.run(runtime, artist, tracks, opts, hooks)
         if etape == "streams":
             ids = options.streams.track_ids
             if options.manquants:
@@ -158,12 +182,30 @@ def run(runtime: Runtime, nom: str, options: OptionsCycle, hooks: Hooks) -> Bila
         # preuve formelle que les étapes ont rendues visibles.
         from src.services import revue_auto
 
+        if "identite" in bilan.etapes and options.identite.musicbrainz:
+            _rattraper_discogs(runtime, artist, bilan)
         _recharger(runtime, artist)
         bilan.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
     if any(not b.complete for b in bilan.etapes.values()) and bilan.complete:
         rates = [e for e, b in bilan.etapes.items() if not b.complete]
         bilan.interrompu(f"étape(s) incomplète(s) : {', '.join(rates)}")
     return bilan
+
+
+def _rattraper_discogs(runtime: Runtime, artist: Artist, bilan: BilanCycle) -> None:
+    """L'identité Discogs vote sur les disques lus par C&P et Enrich, APRÈS
+    l'étape Identité : retentée ici, sous le flux Identité (plan ①)."""
+    with source_usage.run_scope(Flow.IDENTITY, artist_id=artist.id, artist_name=artist.name):
+        try:
+            res = identite.rattraper_discogs(runtime, artist)
+        except Exception as e:  # noqa: BLE001 — une passe de fin ne fait pas échouer le cycle
+            logger.exception("Rattrapage de l'identité Discogs en échec")
+            bilan.erreurs.append(f"identité Discogs (fin de cycle) : {e}")
+            return
+    if res is not None and res.identite_discogs:
+        b = bilan.etapes.get("identite")
+        if isinstance(b, identite.BilanIdentite):
+            b.artistes["discogs"] = f"{res.identite_discogs} (fin de cycle)"
 
 
 def resume(bilan: BilanCycle, options: OptionsCycle) -> str:
@@ -186,6 +228,8 @@ def resume_etape(etape: str, b: Bilan, options: OptionsCycle, artist: Artist) ->
     """Le compte rendu détaillé d'UNE étape, celui de son service."""
     if etape == "disco":
         return discographie.resume(b, artist)
+    if etape == "identite":
+        return identite.resume(b, artist)
     if etape == "credits":
         return credits.resume(b, options.credits)
     if etape == "enrich":

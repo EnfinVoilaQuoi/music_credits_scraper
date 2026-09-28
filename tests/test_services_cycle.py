@@ -77,8 +77,9 @@ class TestRun:
             return n["v"] > 2
 
         bilan = cycle.run(_rt(), "Swing", cycle.OptionsCycle(), Hooks(should_stop=stop))
-        assert list(bilan.etapes) == ["disco", "credits"]
-        assert bilan.non_lancees == ["enrich", "streams", "certifs"] and not bilan.complete
+        assert list(bilan.etapes) == ["disco", "identite"]
+        assert bilan.non_lancees == ["credits", "enrich", "streams", "certifs"]
+        assert not bilan.complete
 
 
 class TestManquesCredits:

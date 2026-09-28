@@ -83,9 +83,20 @@ def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -
             # Le TITRE est conservé (e21) : c'est lui qui dit ce que la vidéo
             # COUVRE, donc ce qui rend vérifiable une vidéo partagée par
             # plusieurs morceaux — « Donjon & 2h22 » est un clip double.
+            # La vidéo du lien `youtube_url` peut être absente de la table : le
+            # relevé l'y INSÈRE — avec la provenance que la fiche connaît, sans
+            # quoi elle naissait sans source (387 lignes au 2026-09-28, toutes
+            # des liens Genius). Pour une vidéo déjà connue, la source n'est de
+            # toute façon pas remplacée (`source_lien_retenue`).
+            principale = vid == extract_video_id(track.youtube_url)
             mesurees.append(
                 TrackVideo(
-                    video_id=vid, kind=kind, views=info.get("views"), title=info.get("title")
+                    video_id=vid,
+                    url=track.youtube_url if principale else None,
+                    source=track.youtube_url_source if principale else None,
+                    kind=kind,
+                    views=info.get("views"),
+                    title=info.get("title"),
                 )
             )
             report["videos"] += 1

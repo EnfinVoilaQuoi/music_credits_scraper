@@ -183,3 +183,28 @@ def test_limitation_aux_morceaux_coches(monkeypatch):
     assert report["updated"] == 1
     assert [t for t, _, _ in dm.calls] == [1]
     assert api.demandes == [["dQw4w9WgXcQ"]]
+
+
+def test_la_video_principale_inseree_garde_la_provenance_du_lien(monkeypatch):
+    """2026-09-28 : le relevé INSÉRAIT la vidéo du lien `youtube_url` sans sa
+    provenance (387 lignes sans source, toutes des liens Genius). La fiche la
+    connaît : elle est recopiée ; une vidéo secondaire n'en invente aucune."""
+    _patch_ytm(
+        monkeypatch,
+        {
+            "AAAAAAAAAAA": {"title": "Clip", "views": 10},
+            "BBBBBBBBBBB": {"title": "Topic", "views": 5},
+        },
+    )
+    track = _track(
+        1, "https://www.youtube.com/watch?v=AAAAAAAAAAA", [TrackVideo(video_id="BBBBBBBBBBB")]
+    )
+    track.youtube_url_source = "genius_media"
+    ecrites = []
+    dm = _FakeDM()
+    dm.record_track_videos = lambda tid, videos: ecrites.extend(videos) or len(videos)
+    update_video_views(_artist(), [track], dm)
+    par_id = {v.video_id: v for v in ecrites}
+    assert par_id["AAAAAAAAAAA"].source == "genius_media"
+    assert par_id["AAAAAAAAAAA"].url == "https://www.youtube.com/watch?v=AAAAAAAAAAA"
+    assert par_id["BBBBBBBBBBB"].source is None

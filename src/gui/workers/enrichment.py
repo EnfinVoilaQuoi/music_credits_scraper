@@ -43,14 +43,9 @@ def start_enrichment(app):
 
     # Variables pour les checkboxes
     sources_vars = {}
-    # `spotify_id` n'est PAS dans cette liste, et ce n'est pas un oubli : ce
-    # n'est pas à l'utilisateur de décider si le scraper sert. La fenêtre
-    # l'avouait elle-même — « laisser coché suffit » — et une case dont la
-    # notice dit de ne pas y toucher n'est pas un réglage, c'est un piège à
-    # clic. Le source est AUTO-RÉGULÉ : `SpotifyIdProvider.gate()` saute quand
-    # un identifiant valide existe déjà ou quand la voie ISRC a satisfait
-    # ReccoBeats. Il est injecté de force dans `start_enrichment` (voir la
-    # raison là-bas, qui n'est pas celle qu'on croit).
+    # `spotify_id` n'est PAS dans cette liste : depuis le 2026-09-28
+    # l'enrichissement ne cherche plus d'identifiant, il CONSOMME celui que
+    # l'étape Identité a posé (bouton « Identité »).
     sources_info = {
         "reccobeats": "ReccoBeats (BPM/Key/Mode via ISRC) 🎵",
         "getsongbpm": "GetSongBPM API (2ᵉ vote BPM/Key/Mode) 🎹",
@@ -172,15 +167,6 @@ def start_enrichment(app):
         if not selected_sources:
             messagebox.showwarning("Attention", "Sélectionnez au moins une source")
             return
-
-        # ⚠️ `spotify_id` est ajouté de FORCE, et pas seulement parce que l'app
-        # décide seule de s'en servir. `data_enricher` calcule
-        # `allow_spotify_scrape=("spotify_id" not in sources)` : la présence de
-        # la clé dit à ReccoBeats de NE PAS scraper l'identifiant de son côté.
-        # L'omettre déclencherait donc un SECOND scrape Playwright par morceau —
-        # l'inverse exact de ce qu'on cherche. Retirer cette ligne « puisque la
-        # case n'existe plus » doublerait le coût du run en silence.
-        selected_sources.append("spotify_id")
 
         force_update = force_var.get()
 

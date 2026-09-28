@@ -188,13 +188,6 @@ def test_ordre_nominal_et_finalize_entre_deezer_et_discogs():
     ]
     assert results == {name: True for name in ALL_SOURCES}
     assert seen["bpm_at_discogs"] == 120
-    assert fakes["deezer"].last_ctx.allow_spotify_scrape is False  # spotify_id dans sources
-
-
-def test_allow_spotify_scrape_si_etape_spotify_id_absente():
-    enricher, fakes, _ = _enricher()
-    enricher.enrich_track(_track(), sources=["reccobeats"])
-    assert fakes["reccobeats"].last_ctx.allow_spotify_scrape is True
 
 
 # ──────────────────────────────────────────────────────────────────────

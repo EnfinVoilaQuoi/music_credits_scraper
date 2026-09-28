@@ -96,10 +96,6 @@ class DataEnricher:
         self._reccobeats_provider = ReccoBeatsProvider(
             client_factory=lambda: ReccoBeatsIntegratedClient(headless=headless_reccobeats),
             deezer_client=self.deezer_client,
-            # EMPRUNT : le scraper Spotify appartient à SpotifyIdProvider (qui le
-            # ferme) ; ReccoBeats l'utilise au moment du fallback, sans le posséder.
-            spotify_scraper_getter=lambda: self._spotify_id_provider.scraper,
-            spotify_scraper_async_getter=lambda: self._spotify_id_provider.async_scraper,
         )
         # Factory seulement si la clé API est présente (le ctor lève sans elle) :
         # même visibilité qu'avant dans la liste de sources de la GUI.
@@ -475,8 +471,6 @@ class DataEnricher:
             artist_tracks=artist_tracks or [],
             bpm_ballot=ballot,
             validate_spotify_id_unique=self.validate_spotify_id_unique,
-            # ReccoBeats ne re-scrape pas le Spotify ID si l'étape spotify_id le fait déjà
-            allow_spotify_scrape=("spotify_id" not in sources),
             results=results,
         )
         return sources, ctx, ballot, results

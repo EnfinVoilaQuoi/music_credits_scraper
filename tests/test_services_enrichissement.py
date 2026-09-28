@@ -126,12 +126,18 @@ class TestTeardown:
 
 
 class TestBatch:
-    def test_spotify_id_toujours_dans_les_sources(self, monkeypatch):
+    def test_l_enrichissement_ne_cherche_plus_d_id(self, monkeypatch):
+        """2026-09-28 : la recherche d'ID appartient à l'étape Identité. Par
+        défaut elle est RETIRÉE des sources disponibles ; seul un appel qui la
+        nomme (le passage 3b d'Identité) la lance."""
         rt, enricher, _ = _setup(monkeypatch)
         _run(rt, _tracks("x"), enr.OptionsEnrich(sources=("reccobeats",)))
-        assert enricher.sources_vues == ["reccobeats", "spotify_id"]
-        _run(rt, _tracks("x"))  # None → disponibles + spotify_id
-        assert enricher.sources_vues == ["reccobeats", "deezer", "spotify_id"]
+        assert enricher.sources_vues == ["reccobeats"]
+        enricher.get_available_sources = lambda: ["reccobeats", "deezer", "spotify_id"]
+        _run(rt, _tracks("x"))
+        assert enricher.sources_vues == ["reccobeats", "deezer"]
+        _run(rt, _tracks("x"), enr.OptionsEnrich(sources=("spotify_id",)))
+        assert enricher.sources_vues == ["spotify_id"]
 
     def test_save_puis_record_pending_par_morceau(self, monkeypatch):
         rt, enricher, journal = _setup(monkeypatch)

@@ -264,14 +264,19 @@ class TestRattrapageDiscogs:
         assert identite.rattraper_discogs(rt, _artist(rt)) is not None
 
 
-def test_sources_effectives_sans_spotify_id_force():
-    from src.services.enrichissement import OptionsEnrich, sources_effectives
+def test_les_passages_nomment_leur_source_et_rien_d_autre(monkeypatch):
+    """Le VRAI `_passage` (jamais simulé ici) : le 2026-09-28 il passait encore
+    deux options retirées à `OptionsEnrich` — TypeError en réel, invisible tant
+    que les tests le remplaçaient."""
+    from src.services import enrichissement
 
+    vus = []
+    monkeypatch.setattr(enrichissement, "run", lambda rt, a, t, o, h: vus.append(o) or "b")
+    assert identite._passage(None, None, [], "deezer", Hooks()) == "b"
+    identite._passage(None, None, [], "spotify_id", Hooks())
+    assert [o.sources for o in vus] == [("deezer",), ("spotify_id",)]
     rt = SimpleNamespace(data_enricher=SimpleNamespace(get_available_sources=lambda: []))
-    assert sources_effectives(rt, OptionsEnrich(sources=("deezer",))) == ["deezer", "spotify_id"]
-    assert sources_effectives(rt, OptionsEnrich(sources=("deezer",), forcer_spotify_id=False)) == [
-        "deezer"
-    ]
+    assert enrichissement.sources_effectives(rt, vus[0]) == ["deezer"]
 
 
 def test_resume_dit_l_essentiel(espions):

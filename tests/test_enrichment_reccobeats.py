@@ -4,7 +4,6 @@ Deux voies : ISRC (try_by_isrc) et Spotify ID (enrich). Clients mockés.
 """
 
 import pytest
-from playwright.async_api import Error as PlaywrightError
 
 from src.enrichment.context import EnrichmentContext
 from src.enrichment.providers.reccobeats import ReccoBeatsProvider
@@ -94,22 +93,10 @@ def test_enrich_par_spotify_id_existant_valide():
     assert track.duration == 200
 
 
-def test_enrich_scrape_spotify_si_autorise():
-    client = _FakeReccoClient(track_info={"success": True, "bpm": 100})
-    scraper = _FakeSpotifyScraper(spotify_id="scraped99", page_title="Solo - Sofiane Pamart")
-    provider = ReccoBeatsProvider(client, spotify_scraper_getter=lambda: scraper)
-    track = _track()
-    ctx = EnrichmentContext(allow_spotify_scrape=True)
-    assert provider.enrich(track, ctx) is True
-    assert track.spotify_id == "scraped99"
-
-
-def test_enrich_sans_id_ni_scrape_renvoie_false():
-    scraper = _FakeSpotifyScraper(None)
-    provider = ReccoBeatsProvider(_FakeReccoClient(), spotify_scraper_getter=lambda: scraper)
-    track = _track()
-    ctx = EnrichmentContext(allow_spotify_scrape=False)
-    assert provider.enrich(track, ctx) is False
+def test_enrich_sans_id_ne_cherche_rien_et_renvoie_false():
+    """Depuis le 2026-09-28 ReccoBeats CONSOMME l'ID posé par l'étape Identité :
+    sans ID, il ne cherche pas (plus de repli scraper) et rend un échec."""
+    assert ReccoBeatsProvider(_FakeReccoClient()).enrich(_track(), EnrichmentContext()) is False
 
 
 def test_try_by_isrc_emet_observation_provenance():
@@ -265,57 +252,18 @@ def test_enrich_async_avec_id_existant():
     assert ("reccobeats", 140) in ctx.bpm_ballot.candidates
 
 
-def test_enrich_async_id_duplique_est_rescrape():
-    """Un ID existant non validé est EFFACÉ et re-scrapé — même règle des deux
-    côtés, sinon les deux voies divergeraient sur la même base."""
-    provider = ReccoBeatsProvider(
-        _FakeReccoClientAsync(track_info={"success": True, "bpm": 100}),
-        spotify_scraper_async_getter=lambda: _FakeScraperAsync(spotify_id="NOUVEAU"),
-    )
+def test_enrich_async_id_duplique_est_ignore_sans_rescrape():
+    """Un ID existant non validé est ignoré ; plus de re-scrape ici — même règle
+    des deux côtés."""
+    provider = ReccoBeatsProvider(_FakeReccoClientAsync(track_info={"success": True, "bpm": 100}))
     track = _track()
     track.spotify_id = "DUPLIQUE"
-    ctx = EnrichmentContext(sync_runner=_SyncRunner())
-    assert asyncio.run(provider.enrich_async(track, ctx)) is True
-    assert track.spotify_id == "NOUVEAU"
-
-
-def test_enrich_async_scrape_via_le_jumeau_async():
-    """Un scraper async configuré est utilisé NATIVEMENT, sans passer par le
-    pont sync (qui bloquerait un thread pour rien)."""
-    runner = _SyncRunner()
-    provider = ReccoBeatsProvider(
-        _FakeReccoClientAsync(track_info={"success": True, "bpm": 100}),
-        spotify_scraper_async_getter=lambda: _FakeScraperAsync(spotify_id="SP1"),
+    ctx = EnrichmentContext(
+        artist_tracks=[Track(title="Autre")],
+        validate_spotify_id_unique=lambda *a: False,
+        sync_runner=_SyncRunner(),
     )
-    ctx = EnrichmentContext(sync_runner=runner)
-    assert asyncio.run(provider.enrich_async(_track(), ctx)) is True
-    assert runner.appels == 0
-
-
-def test_enrich_async_repli_sur_le_pont_sync():
-    """Sans variante async configurée (cas par défaut aujourd'hui), le scrape
-    passe par le pont sync — le comportement doit rester identique."""
-    runner = _SyncRunner()
-    provider = ReccoBeatsProvider(
-        _FakeReccoClientAsync(track_info={"success": True, "bpm": 100}),
-        spotify_scraper_getter=lambda: _FakeSpotifyScraper(spotify_id="SP1"),
-    )
-    ctx = EnrichmentContext(sync_runner=runner)
-    assert asyncio.run(provider.enrich_async(_track(), ctx)) is True
-    assert runner.appels == 1
-
-
-def test_enrich_async_scrape_interdit():
-    """`allow_spotify_scrape=False` : l'étape 0 a déjà tenté le scrape, on ne
-    rouvre pas un navigateur pour le même morceau."""
-    runner = _SyncRunner()
-    provider = ReccoBeatsProvider(
-        _FakeReccoClientAsync(),
-        spotify_scraper_async_getter=lambda: _FakeScraperAsync(spotify_id="SP1"),
-    )
-    ctx = EnrichmentContext(allow_spotify_scrape=False, sync_runner=runner)
-    assert asyncio.run(provider.enrich_async(_track(), ctx)) is False
-    assert runner.appels == 0
+    assert asyncio.run(provider.enrich_async(track, ctx)) is False
 
 
 def test_enrich_async_sans_id_disponible():
@@ -472,58 +420,7 @@ class TestVoieIsrcSync:
         assert vus == ["Principal"]
 
 
-class TestScraperEmprunteSync:
-    """Le scraper Spotify est EMPRUNTÉ à `SpotifyIdProvider` : jamais possédé,
-    jamais fermé ici."""
-
-    def _provider(self, scraper):
-        return ReccoBeatsProvider(
-            _FakeReccoClient(track_info={"success": True, "bpm": 120}),
-            spotify_scraper_getter=lambda: scraper,
-        )
-
-    def test_scrape_interdit_par_le_contexte(self):
-        """L'étape 0 a déjà tenté le scrape : pas de second navigateur."""
-        p = self._provider(_FakeSpotifyScraper(spotify_id="SP1"))
-        ctx = EnrichmentContext(allow_spotify_scrape=False)
-        assert p.enrich(_track(), ctx) is False
-
-    def test_aucun_scraper_prete(self):
-        p = ReccoBeatsProvider(_FakeReccoClient(), spotify_scraper_getter=lambda: None)
-        assert p.enrich(_track(), EnrichmentContext()) is False
-
-    def test_id_scrape_rejete_si_duplicata(self):
-        p = self._provider(_FakeSpotifyScraper(spotify_id="dup"))
-        ctx = EnrichmentContext(
-            artist_tracks=[Track(title="Autre")], validate_spotify_id_unique=lambda *a: False
-        )
-        track = _track()
-        assert p.enrich(track, ctx) is False
-        assert track.spotify_id is None
-
-    def test_titre_de_page_pose(self):
-        p = self._provider(_FakeSpotifyScraper(spotify_id="SP1", page_title="Solo - Pamart"))
-        track = _track()
-        assert p.enrich(track, EnrichmentContext()) is True
-        assert track.spotify_page_title == "Solo - Pamart"
-
-    def test_titre_de_page_illisible_n_annule_rien(self):
-        class _Scraper(_FakeSpotifyScraper):
-            def get_spotify_page_title(self, spotify_id):
-                raise PlaywrightError("page morte")
-
-        p = self._provider(_Scraper(spotify_id="SP1"))
-        track = _track()
-        assert p.enrich(track, EnrichmentContext()) is True
-        assert track.spotify_id == "SP1"
-
-    def test_scraper_en_erreur(self):
-        class _Scraper(_FakeSpotifyScraper):
-            def get_spotify_id(self, artist, title):
-                raise PlaywrightError("navigateur mort")
-
-        assert self._provider(_Scraper()).enrich(_track(), EnrichmentContext()) is False
-
+class TestEchecsSync:
     def test_echec_complet_sans_id(self):
         """Ni ID existant ni ID scrapé : `_apply_spotify_info` conclut à l'ÉCHEC
         (branche distincte du succès partiel)."""
@@ -545,48 +442,7 @@ class TestScraperEmprunteSync:
         assert [r for r in caplog.records if r.exc_info], "traceback attendu"
 
 
-class TestScraperEmprunteAsync:
-    """Miroir async du bloc précédent. Les deux voies portent CHACUNE leur
-    validation d'unicité et leur garde sur le titre de page : c'est exactement
-    la forme de duplication qui a laissé un défaut vivre côté Musixmatch."""
-
-    def _provider(self, scraper):
-        return ReccoBeatsProvider(
-            _FakeReccoClientAsync(track_info={"success": True, "bpm": 120}),
-            spotify_scraper_async_getter=lambda: scraper,
-        )
-
-    def test_id_scrape_rejete_si_duplicata(self):
-        p = self._provider(_FakeScraperAsync(spotify_id="dup"))
-        ctx = EnrichmentContext(
-            artist_tracks=[Track(title="Autre")], validate_spotify_id_unique=lambda *a: False
-        )
-        track = _track()
-        assert asyncio.run(p.enrich_async(track, ctx)) is False
-        assert track.spotify_id is None
-
-    def test_titre_de_page_illisible_n_annule_rien(self):
-        class _Scraper(_FakeScraperAsync):
-            async def get_spotify_page_title_async(self, spotify_id):
-                raise PlaywrightError("page morte")
-
-        p = self._provider(_Scraper(spotify_id="SP1"))
-        track = _track()
-        assert asyncio.run(p.enrich_async(track, EnrichmentContext())) is True
-        assert track.spotify_id == "SP1"
-
-    def test_scraper_en_erreur(self):
-        class _Scraper(_FakeScraperAsync):
-            async def get_spotify_id_async(self, artist, title):
-                raise PlaywrightError("navigateur mort")
-
-        p = self._provider(_Scraper())
-        assert asyncio.run(p.enrich_async(_track(), EnrichmentContext())) is False
-
-    def test_aucun_id_trouve(self):
-        p = self._provider(_FakeScraperAsync(spotify_id=None))
-        assert asyncio.run(p.enrich_async(_track(), EnrichmentContext())) is False
-
+class TestEchecsAsync:
     def test_erreur_inattendue_tracee(self, caplog):
         class _Client(_FakeReccoClientAsync):
             async def get_track_info_async(self, http, spotify_id):
@@ -598,18 +454,10 @@ class TestScraperEmprunteAsync:
         assert [r for r in caplog.records if r.exc_info], "traceback attendu"
 
 
-def test_fermeture_ne_touche_pas_au_scraper_emprunte():
-    """Le scraper Spotify appartient à `SpotifyIdProvider` : ReccoBeats ne le
-    ferme jamais, sinon deux providers se disputeraient le même navigateur."""
-    scraper = _FakeSpotifyScraper()
-    scraper.close = lambda: setattr(scraper, "ferme", True)
+def test_fermeture_ferme_son_client():
     client = _FakeReccoClient()
     client.close = lambda: setattr(client, "ferme", True)
-
-    provider = ReccoBeatsProvider(
-        client_factory=lambda: client, spotify_scraper_getter=lambda: scraper
-    )
+    provider = ReccoBeatsProvider(client_factory=lambda: client)
     provider._resource.get()
     provider.close()
     assert getattr(client, "ferme", False) is True
-    assert getattr(scraper, "ferme", False) is False

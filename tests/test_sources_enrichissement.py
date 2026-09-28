@@ -6,10 +6,9 @@ toucher n'est pas un réglage. Le source est AUTO-RÉGULÉ : `SpotifyIdProvider.
 saute quand un identifiant valide existe déjà ou quand la voie ISRC a satisfait
 ReccoBeats.
 
-⚠️ Mais la CLÉ doit rester dans la liste transmise, et c'est contre-intuitif :
-`data_enricher` calcule `allow_spotify_scrape=("spotify_id" not in sources)`, si
-bien que la présence de la clé dit à ReccoBeats de **ne pas** scraper de son
-côté. L'omettre déclencherait un SECOND scrape Playwright par morceau.
+Depuis le 2026-09-28 la clé n'est plus du tout transmise : l'enrichissement
+ne cherche plus d'identifiant (ni provider `spotify_id`, ni repli scraper dans
+ReccoBeats) — c'est l'étape Identité qui les pose, Enrich les CONSOMME.
 
 Ces tests portent sur le SOURCE et non sur les widgets : le dialogue ne se monte
 pas sans Tk, mais ce qui compte ici est un invariant de câblage, et il se lit.
@@ -69,20 +68,21 @@ class TestLaCaseADisparu:
         assert not any("laisser coché suffit" in c for c in chaines)
 
 
-class TestLaCleEstQuandMemeTransmise:
-    """L'invariant qui se ferait retirer par mégarde — « la case n'existe plus,
-    donc la ligne ne sert plus » — et qui doublerait le coût du run."""
+class TestEnrichNeChercheAucunIdentifiant:
+    """L'invariant qui remplace l'ancien (« la clé est quand même transmise ») :
+    un consommateur qui produit ce qu'il consomme rend le résultat dépendant de
+    l'ordre des runs — la raison d'être de l'étape Identité."""
 
-    def test_spotify_id_est_injecte_dans_la_liste(self):
-        assert 'selected_sources.append("spotify_id")' in SOURCE
+    def test_le_dialogue_n_injecte_plus_spotify_id(self):
+        assert 'append("spotify_id")' not in SOURCE
 
-    def test_la_RAISON_est_ecrite_sur_place(self):
-        """Un invariant contre-intuitif sans sa raison se fait supprimer au
-        premier nettoyage. Le commentaire doit nommer le mécanisme."""
-        assert "allow_spotify_scrape" in SOURCE
+    def test_le_drapeau_du_repli_n_existe_plus(self):
+        racine = FICHIER.parents[2]
+        for relatif in ("utils/data_enricher.py", "enrichment/context.py"):
+            assert "allow_spotify_scrape" not in (racine / relatif).read_text(encoding="utf-8")
 
-    def test_le_mecanisme_est_toujours_celui_decrit(self):
-        """Si `data_enricher` cessait de dériver le drapeau de la liste, ce test
-        deviendrait le seul endroit à le dire — donc il vérifie l'autre bout."""
-        enricheur = (FICHIER.parents[2] / "utils" / "data_enricher.py").read_text(encoding="utf-8")
-        assert 'allow_spotify_scrape=("spotify_id" not in sources)' in enricheur
+    def test_reccobeats_ne_scrape_plus_d_identifiant(self):
+        recco = (FICHIER.parents[2] / "enrichment" / "providers" / "reccobeats.py").read_text(
+            encoding="utf-8"
+        )
+        assert "get_spotify_id" not in recco and "add_spotify_id" not in recco

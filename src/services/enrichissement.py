@@ -23,18 +23,14 @@ logger = get_logger(__name__)
 @dataclass(frozen=True)
 class OptionsEnrich:
     """Les cases du dialogue « Enrichir ». `sources=None` = toutes les sources
-    DISPONIBLES (clés API/sessions présentes). `spotify_id` est toujours ajouté :
-    `data_enricher` calcule `allow_spotify_scrape=("spotify_id" not in sources)`,
-    l'omettre déclencherait un SECOND scrape Playwright par morceau côté ReccoBeats."""
+    DISPONIBLES (clés API/sessions présentes), SAUF `spotify_id` : depuis le
+    2026-09-28 l'enrichissement ne cherche plus d'ID Spotify, il consomme celui
+    que l'étape Identité a posé (qui, elle, passe `sources=("spotify_id",)`)."""
 
     sources: tuple[str, ...] | None = None
     force_update: bool = False
     # MusicBrainz/Discogs (formations, alias) et nature des disques ne sont plus
     # des fins de run de l'enrichissement : c'est l'étape Identité (2026-09-28).
-    #: Ajouter `spotify_id` aux sources (cf. docstring). L'étape Identité passe
-    #: `False` pour son passage Deezer SEUL, qui doit précéder le jugement des
-    #: IDs Spotify — sans source ReccoBeats, aucun second scrape n'est à craindre.
-    forcer_spotify_id: bool = True
 
 
 @dataclass
@@ -50,8 +46,9 @@ def sources_effectives(runtime: Runtime, options: OptionsEnrich) -> list[str]:
         if options.sources
         else list(runtime.data_enricher.get_available_sources())
     )
-    if "spotify_id" not in sources and options.forcer_spotify_id:
-        sources.append("spotify_id")
+    if not options.sources:
+        # Par défaut, aucune recherche d'ID : elle appartient à l'étape Identité.
+        sources = [s for s in sources if s != "spotify_id"]
     return sources
 
 

@@ -207,7 +207,6 @@ def test_ordre_nominal_identique_a_la_voie_sync():
     ]
     assert results == {name: True for name in ALL_SOURCES}
     assert seen["bpm_at_discogs"] == 120
-    assert fakes["deezer"].last_ctx.allow_spotify_scrape is False
 
 
 def test_voie_isrc_satisfaite_court_circuite_spotify_et_reccobeats():

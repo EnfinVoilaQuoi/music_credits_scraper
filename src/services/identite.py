@@ -239,16 +239,11 @@ def rattraper_discogs(runtime: Runtime, artist: Artist) -> PropositionsIdentite 
 
 def _passage(runtime, artist, tracks, source: str, hooks: Hooks):
     """UN provider sur une sélection, par le pipeline d'enrichissement (teardown
-    et gardes réutilisés tels quels). `forcer_spotify_id=False` : le passage
-    Deezer ne doit PAS embarquer le scrape Spotify, qu'il précède exprès."""
+    et gardes réutilisés tels quels) — sources EXPLICITES, donc le passage
+    Deezer n'embarque pas le scrape Spotify, qu'il précède exprès."""
     from src.services import enrichissement
 
-    options = enrichissement.OptionsEnrich(
-        sources=(source,),
-        musicbrainz=False,
-        types_albums=False,
-        forcer_spotify_id=(source == "spotify_id"),
-    )
+    options = enrichissement.OptionsEnrich(sources=(source,))
     return enrichissement.run(runtime, artist, tracks, options, hooks)
 
 

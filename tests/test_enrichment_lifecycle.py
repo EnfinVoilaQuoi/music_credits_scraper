@@ -89,28 +89,6 @@ def test_factory_en_echec_marque_la_ressource_cassee():
     assert calls == [1]
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Ownership du scraper Spotify partagé (SpotifyIdProvider ↔ ReccoBeats)
-# ──────────────────────────────────────────────────────────────────────
-
-
-def test_scraper_partage_ferme_par_son_proprietaire_seulement():
-    spotify = SpotifyIdProvider(scraper_factory=_FakeResource)
-    client = _FakeResource()  # client ReccoBeats injecté → jamais fermé
-    recco = ReccoBeatsProvider(client=client, spotify_scraper_getter=lambda: spotify.scraper)
-
-    borrowed = recco._spotify_scraper_getter()  # EMPRUNT au moment de l'usage
-    assert borrowed is spotify.scraper  # même instance, créée lazy
-
-    recco.close()  # ne ferme NI le scraper emprunté NI le client injecté
-    assert borrowed.closed == 0
-    assert client.closed == 0
-
-    spotify.close()  # le propriétaire ferme
-    assert borrowed.closed == 1
-    assert spotify.scraper is not borrowed  # recréé pour le run suivant
-
-
 def test_provider_ferme_son_client_cree_par_factory():
     created = []
 
@@ -222,7 +200,6 @@ def test_tous_les_providers_declarent_leur_capacite():
     from src.enrichment.providers.getsongbpm import GetSongBpmProvider
     from src.enrichment.providers.reccobeats import ReccoBeatsProvider
     from src.enrichment.providers.songbpm import SongBpmProvider
-    from src.enrichment.providers.spotify_id import SpotifyIdProvider
 
     classes = [
         BpmFinderProvider,

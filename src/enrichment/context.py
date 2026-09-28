@@ -26,7 +26,6 @@ class EnrichmentContext:
     # Efface les données audio d'un morceau dont toutes les sources ont échoué.
     # Autorise ReccoBeats à scraper un Spotify ID (False si l'étape spotify_id de
     # l'orchestrateur l'a déjà fait → évite un double scrape Playwright par morceau).
-    allow_spotify_scrape: bool = True
     # Validation d'unicité d'un Spotify ID (fournie par l'orchestrateur ; logique
     # partagée avec le scraper spotify_id / reccobeats). Signature :
     # (spotify_id, current_track, artist_tracks) -> bool.

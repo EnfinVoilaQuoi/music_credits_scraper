@@ -9,17 +9,13 @@ logique. Deux points d'entrée pour l'orchestrateur :
 Le BPM alimente le scrutin partagé (§8.3) ; l'unicité d'ID passe par le contexte.
 """
 
-from playwright.async_api import Error as PlaywrightError
-
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.enrichment.observation import Observation
 from src.models import Track
-from src.observability.issues import SansReponse
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
-from src.utils.spotify_identity import valider_identite, valider_identite_async
 
 logger = get_logger(__name__)
 # playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
@@ -36,20 +32,15 @@ class ReccoBeatsProvider:
         self,
         client=None,
         deezer_client=None,
-        spotify_scraper_getter=None,
         client_factory=None,
-        spotify_scraper_async_getter=None,
     ):
         # PROPRIÉTAIRE de son client HTTP (créé lazy, fermé par close()).
         self._resource = LazyResource(client, client_factory, label="client ReccoBeats")
         # Client Deezer PARTAGÉ (résolution ISRC) : possédé par DataEnricher,
         # sans ressource à fermer.
         self._deezer = deezer_client
-        # EMPRUNT : le scraper Spotify appartient à SpotifyIdProvider — jamais
-        # stocké, jamais fermé ici ; le getter est appelé au moment de l'usage.
-        self._spotify_scraper_getter = spotify_scraper_getter
-        # EMPRUNT de la variante ASYNC (F3b) — même règle d'ownership.
-        self._spotify_scraper_async_getter = spotify_scraper_async_getter
+        # Plus de repli « scraper Spotify » ici (2026-09-28) : un ID se pose
+        # dans l'étape Identité, ReccoBeats ne fait que le CONSOMMER.
 
     def is_available(self) -> bool:
         return self._resource.available()
@@ -218,126 +209,6 @@ class ReccoBeatsProvider:
         track.spotify_id = None
         return None
 
-    def _spotify_id_via_scraper(
-        self, track: Track, ctx: EnrichmentContext, artist_name: str
-    ) -> str | None:
-        """Étape 1b (commun sync/async) : fallback scraper Spotify EMPRUNTÉ.
-
-        Sur la voie async, ce bloc entier tourne sur le thread sync dédié du
-        run — le scraper Playwright y naît et y travaille (affinité).
-        """
-        if not ctx.allow_spotify_scrape:
-            logger.info(
-                "⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
-            )
-            return None
-        spotify_scraper = self._spotify_scraper_getter() if self._spotify_scraper_getter else None
-        if not spotify_scraper:
-            return None
-
-        artist_tracks = ctx.artist_tracks
-        logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
-        try:
-            spotify_id = spotify_scraper.get_spotify_id(artist_name, track.title)
-
-            if spotify_id:
-                # Valider l'unicité
-                if (
-                    artist_tracks
-                    and ctx.validate_spotify_id_unique
-                    and not ctx.validate_spotify_id_unique(spotify_id, track, artist_tracks)
-                ):
-                    logger.error(f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}")
-                    spotify_id = None
-                # La JUSTESSE est une autre question que l'unicité : un ID unique
-                # peut parfaitement désigner le morceau de quelqu'un d'autre
-                # (mesuré le 2026-09-08 : 34 % des IDs d'un run réel).
-                elif not valider_identite(track, spotify_id, spotify_scraper.get_track_identity):
-                    spotify_id = None
-                else:
-                    logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
-                    track.spotify_id = spotify_id
-                    track.add_spotify_id(spotify_id, source="scraper")
-
-                    # Récupérer le titre de la page Spotify pour vérification
-                    try:
-                        page_title = spotify_scraper.get_spotify_page_title(spotify_id)
-                        if page_title:
-                            track.spotify_page_title = page_title
-                            logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-                    except PlaywrightError as e:
-                        logger.debug(f"Impossible de récupérer le titre de page: {e}")
-            else:
-                logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
-
-            return spotify_id
-
-        except (PlaywrightError, SansReponse) as e:
-            # Sans réponse : rien trouvé, rien daté — comme une erreur Playwright.
-            logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
-            return None
-
-    async def _spotify_id_via_scraper_async(
-        self, track: Track, ctx: EnrichmentContext, artist_name: str
-    ) -> str | None:
-        """Miroir async (F3b) de `_spotify_id_via_scraper` : scraper Playwright
-        ASYNC emprunté, natif dans la boucle. Sans variante async configurée,
-        repli sur le pont sync F2 (bloc sync sur le thread dédié du run)."""
-        if not ctx.allow_spotify_scrape:
-            logger.info(
-                "⏭️ ReccoBeats: scrape Spotify déjà tenté à l'étape 0 → pas de second scrape"
-            )
-            return None
-        scraper = (
-            self._spotify_scraper_async_getter() if self._spotify_scraper_async_getter else None
-        )
-        if scraper is None:
-            return await ctx.sync_runner.run(self._spotify_id_via_scraper, track, ctx, artist_name)
-
-        artist_tracks = ctx.artist_tracks
-        logger.info(f"🔍 Appel SpotifyIDScraper pour '{artist_name}' - '{track.title}'")
-        try:
-            spotify_id = await scraper.get_spotify_id_async(artist_name, track.title)
-
-            if spotify_id:
-                # Valider l'unicité
-                if (
-                    artist_tracks
-                    and ctx.validate_spotify_id_unique
-                    and not ctx.validate_spotify_id_unique(spotify_id, track, artist_tracks)
-                ):
-                    logger.error(f"❌ REJET: Spotify ID du scraper déjà utilisé: {spotify_id}")
-                    spotify_id = None
-                # La JUSTESSE est une autre question que l'unicité : un ID unique
-                # peut parfaitement désigner le morceau de quelqu'un d'autre
-                # (mesuré le 2026-09-08 : 34 % des IDs d'un run réel).
-                elif not await valider_identite_async(
-                    track, spotify_id, scraper.get_track_identity_async
-                ):
-                    spotify_id = None
-                else:
-                    logger.info(f"✅ Spotify ID trouvé par le scraper: {spotify_id}")
-                    track.spotify_id = spotify_id
-                    track.add_spotify_id(spotify_id, source="scraper")
-
-                    # Récupérer le titre de la page Spotify pour vérification
-                    try:
-                        page_title = await scraper.get_spotify_page_title_async(spotify_id)
-                        if page_title:
-                            track.spotify_page_title = page_title
-                            logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-                    except PlaywrightError as e:
-                        logger.debug(f"Impossible de récupérer le titre de page: {e}")
-            else:
-                logger.warning("❌ SpotifyIDScraper n'a pas trouvé d'ID")
-
-            return spotify_id
-
-        except (PlaywrightError, SansReponse) as e:
-            # Sans réponse : rien trouvé, rien daté — comme une erreur Playwright.
-            logger.error(f"❌ Erreur SpotifyIDScraper: {e}")
-            return None
-
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Voie Spotify ID (ISRC déjà tentée en amont par l'orchestrateur)."""
         try:
@@ -352,12 +223,8 @@ class ReccoBeatsProvider:
             # La voie ISRC a déjà été tentée en amont (enrich_track) : on ne la
             # rejoue pas ici (équivalent skip_isrc=True de l'historique).
 
-            # ÉTAPE 1 : Spotify ID — existant validé, sinon fallback scraper
+            # ÉTAPE 1 : l'ID posé par l'étape Identité (jamais cherché ici).
             spotify_id = self._existing_spotify_id(track, ctx)
-            if not spotify_id:
-                spotify_id = self._spotify_id_via_scraper(track, ctx, artist_name)
-
-            # 1c. Si toujours pas d'ID, échec
             if not spotify_id:
                 logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
                 return False
@@ -380,8 +247,8 @@ class ReccoBeatsProvider:
             return False
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Voie async (F2) : API via httpx partagé, fallback scraper sur le
-        thread sync dédié du run, application identique à la voie sync."""
+        """Voie async (F2) : API via httpx partagé, application identique à la
+        voie sync."""
         try:
             client = self._resource.get()
             if not client:
@@ -392,9 +259,6 @@ class ReccoBeatsProvider:
             logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
 
             spotify_id = self._existing_spotify_id(track, ctx)
-            if not spotify_id:
-                spotify_id = await self._spotify_id_via_scraper_async(track, ctx, artist_name)
-
             if not spotify_id:
                 logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
                 return False

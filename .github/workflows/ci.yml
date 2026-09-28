@@ -4,15 +4,26 @@
 # masquent le problème » (ex. P0 §3.1) est détectée au premier push.
 name: CI
 
+# Toute branche poussée est vérifiée, pas seulement main : une branche de
+# worktree (claude/…) poussée sans PR n'était contrôlée qu'une fois fusionnée.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+
+# Un nouveau push sur la même branche annule le run devenu caduc (sauf sur main,
+# où chaque commit a son propre groupe : un run en attente y serait annulé aussi).
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'dernier' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   checks:
     # windows-latest : mêmes conditions que le poste de dev (app Windows-only)
     runs-on: windows-latest
+    # Dernier filet (run nominal ~20 min) ; un test bloqué est coupé bien avant,
+    # et nommé, par pytest-timeout (pyproject).
+    timeout-minutes: 45
     env:
       PYTHONUTF8: "1"
 
@@ -26,11 +37,12 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            constraints.txt
 
       - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt
           pip install -e .
 
       # Binaires navigateur (le paquet pip playwright n'installe QUE la lib) :
@@ -87,3 +99,23 @@ jobs:
       # instancient un vrai client réseau restent délibérément non couvertes.
       - name: Cliquet de couverture (hors GUI)
         run: coverage report --omit="src/gui/*,src/main.py" --fail-under=86
+
+  # Prévient le studio (dépôt privé therapie_studio) qu'un nouveau main public
+  # est vert : sa CI rejoue ses tests contre ce commit. Inerte tant que le secret
+  # STUDIO_DISPATCH_TOKEN n'est pas posé (jeton à grain fin, dépôt therapie_studio
+  # seul, permission « Contents: read and write »). Sans lui, le filet est le run
+  # nocturne du studio.
+  prevenir-studio:
+    needs: checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.STUDIO_DISPATCH_TOKEN }}
+    steps:
+      - name: Signal repository_dispatch
+        if: env.GH_TOKEN != ''
+        run: >-
+          gh api repos/EnfinVoilaQuoi/therapie_studio/dispatches
+          -f event_type=public-main
+          -f "client_payload[sha]=${{ github.sha }}"

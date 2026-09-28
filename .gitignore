@@ -45,6 +45,7 @@ lib/*
 *.html
 *.txt
 !requirements*.txt
+!constraints.txt
 *.mp3
 
 # Tests

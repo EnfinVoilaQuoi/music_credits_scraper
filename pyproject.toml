@@ -78,6 +78,19 @@ known-first-party = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Un test bloqué (fil Playwright, worker qui ne rend pas la main) ÉCHOUE en nommant
+# le test et la pile de chaque fil, au lieu de figer la CI : le plus lent mesure
+# 3 s (2026-09-28), 120 s ne sanctionne qu'un blocage. Méthode `thread` : Windows
+# n'a pas SIGALRM.
+timeout = 120
+timeout_method = "thread"
+# Ressource non fermée = ERREUR (2026-09-28 : 91 connexions sqlite et 85 fichiers
+# de log orphelins, tous corrigés). Une fuite constatée par le ramasse-miettes
+# arrive en « unraisable » : les deux filtres sont nécessaires.
+filterwarnings = [
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
 
 [tool.coverage.run]
 source = ["src"]

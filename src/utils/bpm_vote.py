@@ -14,7 +14,11 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Rang de fiabilité des sources — départage à ÉGALITÉ de vote (le vote prime).
-BPM_SOURCE_RANK = {"reccobeats": 3, "getsongbpm": 2, "songbpm": 1, "deezer": 0}
+#: Fiabilité (départage à égalité de voix / de confiance, BPM ET tonalité).
+#: SongBPM passe DEVANT GetSongBPM le 2026-09-28, sur mesure : dans les 64
+#: désaccords à trois sources de la base, la source isolée était GetSongBPM 61
+#: fois (95 %), SongBPM 3 fois — et il gagnait pourtant les 57 conflits à deux.
+BPM_SOURCE_RANK = {"reccobeats": 3, "songbpm": 2, "getsongbpm": 1, "deezer": 0}
 
 # Seuil sous lequel un BPM ISOLÉ (1 seule source) est considéré half-time et
 # remonté en double-time (logique prod rap & co.). N'agit PAS quand plusieurs

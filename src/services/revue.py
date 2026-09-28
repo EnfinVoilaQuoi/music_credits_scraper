@@ -267,11 +267,37 @@ def _meme_tempo(a: float, b: float) -> bool:
     return any(abs(a * k - b) <= TOLERANCE_BPM * b for k in (0.5, 1, 2))
 
 
+#: Source isolée dans 61 des 64 désaccords à trois sources (2026-09-28) : un
+#: désaccord À DEUX où elle est seule contre une source fiable s'explique.
+SOURCE_PEU_FIABLE = "getsongbpm"
+
+
+def _desaccord_explique(valeurs: dict, retenue, meme) -> bool:
+    """Le désaccord ne demande rien à l'utilisateur (2026-09-28, panneau le
+    moins rempli possible) : la valeur RETENUE est celle d'une majorité stricte
+    de sources — mesuré, le cas des 64 désaccords à trois sources —, ou celle de
+    la source fiable face à GetSongBPM seul contre elle."""
+    if retenue is None:
+        return False
+    d_accord = [s for s, v in valeurs.items() if meme(retenue, v)]
+    if len(d_accord) * 2 > len(valeurs):
+        return True
+    return (
+        len(valeurs) == 2
+        and SOURCE_PEU_FIABLE in valeurs
+        and d_accord == [s for s in valeurs if s != SOURCE_PEU_FIABLE]
+    )
+
+
 def bpm_desaccord(track, ctx):
     """Les sources de BPM se contredisent (hors octave) et le vote a tranché
-    SANS le dire (Booba « Lunatic » : GetSongBPM 83, ReccoBeats et SongBPM 130)."""
+    SANS le dire (Booba « Lunatic » : GetSongBPM 83, ReccoBeats et SongBPM 130).
+    Un désaccord que la majorité ou la fiabilité explique n'est pas montré."""
     bpms = {s: float(v) for s, v in _mesures(ctx, track, "bpm").items()}
     vals = list(bpms.values())
+    retenu = float(track.audio.bpm) if track.audio.bpm is not None else None
+    if _desaccord_explique(bpms, retenu, _meme_tempo):
+        return None
     if len(vals) > 1 and not all(_meme_tempo(vals[0], v) for v in vals[1:]):
         detail = ", ".join(f"{s} {v:g}" for s, v in sorted(bpms.items()))
         return (f"BPM en désaccord : {detail}", {"bpm": bpms})
@@ -302,6 +328,13 @@ def tonalite_desaccord(track, ctx):
         except (KeyError, ValueError):
             continue
     vals = list(paires.values())
+    retenue = (
+        (int(track.audio.key), int(track.audio.mode))
+        if track.audio.key is not None and track.audio.mode is not None
+        else None
+    )
+    if _desaccord_explique(paires, retenue, _meme_tonalite):
+        return None
     if len(vals) > 1 and not all(_meme_tonalite(vals[0], v) for v in vals[1:]):
         noms = ("do", "do♯", "ré", "mi♭", "mi", "fa", "fa♯", "sol", "la♭", "la", "si♭", "si")
         detail = ", ".join(

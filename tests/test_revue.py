@@ -350,7 +350,9 @@ def _booba_lunatic(data_manager):
     a = Artist(name="Booba")
     a.id = data_manager.save_artist(a)
     t = Track(title="Lunatic", artist=a)
-    t.observations += [Observation("bpm", 83, "getsongbpm"), Observation("bpm", 130, "songbpm")]
+    # Deux sources FIABLES en désaccord (2026-09-28 : GetSongBPM seul contre une
+    # autre s'explique et n'est plus montré — cf. `TestDesaccordsExpliques`).
+    t.observations += [Observation("bpm", 83, "reccobeats"), Observation("bpm", 130, "songbpm")]
     data_manager.save_track(t)
     a.tracks = data_manager.get_artist_tracks(a.id)
     return a
@@ -650,3 +652,63 @@ class TestVideoPartagee:
         ctx = revue_actions.ContexteAction(None, _A, {1: a, 2: b})
         assert "2 fiche(s)" in action.executer(ctx, cas)
         assert [tid for tid, _ in retraits] == [1, 2]
+
+
+class TestDesaccordsExpliques:
+    """2026-09-28 : un désaccord que la majorité ou la fiabilité mesurée
+    explique ne demande rien (64 cas à majorité : le vote l'a TOUJOURS suivie ;
+    GetSongBPM isolé dans 61 sur 64)."""
+
+    @staticmethod
+    def _t(bpm_retenu, obs, key=None, mode=None):
+        t = _t("x", 1)
+        t.audio.bpm, t.audio.key, t.audio.mode = bpm_retenu, key, mode
+        return t, _ctx(t, obs={1: obs})
+
+    def test_majorite_suivie(self):
+        t, ctx = self._t(
+            130,
+            [
+                Observation("bpm", 83, "getsongbpm"),
+                Observation("bpm", 130, "songbpm"),
+                Observation("bpm", 130, "reccobeats"),
+            ],
+        )
+        assert revue.bpm_desaccord(t, ctx) is None
+
+    def test_getsongbpm_seul_contre_une_source_fiable(self):
+        t, ctx = self._t(
+            130, [Observation("bpm", 83, "getsongbpm"), Observation("bpm", 130, "songbpm")]
+        )
+        assert revue.bpm_desaccord(t, ctx) is None
+
+    def test_deux_sources_fiables_restent_signalees(self):
+        t, ctx = self._t(
+            130, [Observation("bpm", 83, "reccobeats"), Observation("bpm", 130, "songbpm")]
+        )
+        assert revue.bpm_desaccord(t, ctx) is not None
+
+    def test_tonalite_majoritaire(self):
+        t, ctx = self._t(
+            None,
+            [
+                Observation("key", 4, "getsongbpm"),
+                Observation("mode", 1, "getsongbpm"),
+                Observation("key", 9, "songbpm"),
+                Observation("mode", 0, "songbpm"),
+                Observation("key", 9, "reccobeats"),
+                Observation("mode", 0, "reccobeats"),
+            ],
+            key=9,
+            mode=0,
+        )
+        assert revue.tonalite_desaccord(t, ctx) is None
+
+    def test_songbpm_passe_devant_getsongbpm(self):
+        from src.utils.bpm_vote import BPM_SOURCE_RANK
+
+        assert (
+            BPM_SOURCE_RANK["reccobeats"]
+            > BPM_SOURCE_RANK["songbpm"]
+            > BPM_SOURCE_RANK["getsongbpm"]
+        )

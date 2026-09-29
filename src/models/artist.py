@@ -17,6 +17,8 @@ class Artist:
     genius_id: int | None = None
     spotify_id: str | None = None
     discogs_id: int | None = None
+    # e42 : 'manuelle' | 'disques' | 'musicbrainz' (None = posé avant e42).
+    discogs_id_source: str | None = None
     spotify_monthly_listeners: int | None = None
     ytm_monthly_listeners: int | None = None
     # Chantier « Media » : chemin relatif (à IMAGES_DIR) de la photo de profil.

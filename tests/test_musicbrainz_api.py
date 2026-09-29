@@ -337,3 +337,21 @@ class TestAliasNomDArtiste:
             ],
         }
         assert candidats_exacts("Kanye West", [autre]) == []
+
+
+def test_discogs_ids_des_relations_d_url():
+    """Les pages Discogs liées (`inc=url-rels`), sans doublon ; les autres
+    liens (site officiel, Wikidata) ne comptent pas."""
+    from src.api.musicbrainz_api import discogs_ids_de
+
+    detail = {
+        "relations": [
+            {"type": "discogs", "url": {"resource": "https://www.discogs.com/artist/6244752"}},
+            {"type": "discogs", "url": {"resource": "https://www.discogs.com/artist/42-Isha"}},
+            {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q1"}},
+            {"type": "member of band", "target-type": "artist"},
+            {"type": "discogs", "url": {"resource": "https://www.discogs.com/artist/6244752"}},
+        ]
+    }
+    assert discogs_ids_de(detail) == [42, 6244752]
+    assert discogs_ids_de({}) == []

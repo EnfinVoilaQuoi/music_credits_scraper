@@ -407,6 +407,7 @@ def test_formations_et_alias_proposes_jamais_confirmes(monkeypatch):
                 aliases=[AliasArtiste("Psmaker", "Artist name"), AliasArtiste("M.", "Legal name")],
                 desambiguation="Belgian rapper",
                 type="Person",
+                discogs_ids=[],
             )
 
     rt = _rt_formations(monkeypatch, _MB())

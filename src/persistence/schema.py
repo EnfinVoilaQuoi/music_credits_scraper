@@ -74,6 +74,10 @@ artists = Table(
     Column("image_path", Text),
     # e30 : identifiant Deezer tranché par l'oracle d'identité (jamais le 1ᵉʳ hit).
     Column("deezer_id", Integer),
+    # e42 : provenance de `discogs_id` — 'manuelle' | 'disques' | 'musicbrainz'
+    # (NULL = posé avant e42, tenu pour vérifié). Une identité 'musicbrainz'
+    # reste révisable par le vote des disques (`services/discogs_identite`).
+    Column("discogs_id_source", Text),
     sqlite_autoincrement=True,
 )
 

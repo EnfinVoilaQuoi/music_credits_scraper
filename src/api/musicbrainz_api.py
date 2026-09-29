@@ -31,6 +31,7 @@ serait pas le même sans ces mesures :
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -134,6 +135,9 @@ class CandidatArtiste:
     albums_communs: int = 0
     relations: list[RelationGroupe] = field(default_factory=list)
     aliases: list[AliasArtiste] = field(default_factory=list)
+    #: Pages Discogs que la fiche MusicBrainz lie (relations d'URL, posées à
+    #: la main par ses contributeurs) — identité Discogs, 2026-09-29.
+    discogs_ids: list[int] = field(default_factory=list)
 
 
 # ── Logique PURE (testable sans réseau) ──────────────────────────────────────
@@ -224,6 +228,21 @@ def aliases_de(detail: dict) -> list[AliasArtiste]:
             )
         )
     return out
+
+
+_DISCOGS_ARTISTE_RE = re.compile(r"discogs\.com/artist/(\d+)")
+
+
+def discogs_ids_de(detail: dict) -> list[int]:
+    """Les ids des pages d'artiste Discogs liées (`inc=url-rels`). Plusieurs
+    pages sont courantes : Discogs découpe une personne par nom de scène.
+    Fonction pure."""
+    ids = set()
+    for rel in detail.get("relations") or []:
+        m = _DISCOGS_ARTISTE_RE.search(str((rel.get("url") or {}).get("resource") or ""))
+        if m:
+            ids.add(int(m.group(1)))
+    return sorted(ids)
 
 
 def compter_albums_communs(detail: dict, nos_albums: set[str]) -> int:
@@ -377,7 +396,9 @@ class MusicBrainzAPI:
         candidats = []
         for brut in exacts:
             # Les alias voyagent dans la MÊME requête : aucun appel de plus.
-            detail = self.details_artiste(brut["id"], inc="artist-rels+release-groups+aliases")
+            detail = self.details_artiste(
+                brut["id"], inc="artist-rels+url-rels+release-groups+aliases"
+            )
             candidats.append(
                 CandidatArtiste(
                     mbid=brut["id"],
@@ -388,6 +409,7 @@ class MusicBrainzAPI:
                     albums_communs=compter_albums_communs(detail, nos_albums),
                     relations=relations_membre(detail),
                     aliases=aliases_de(detail),
+                    discogs_ids=discogs_ids_de(detail),
                 )
             )
 

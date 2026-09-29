@@ -118,6 +118,19 @@ def _delier_deezer(ctx: ContexteAction, cas: Cas) -> str:
     )
 
 
+def _choisir_discogs(cle: str):
+    """Tranche l'identité Discogs contredite : la page choisie devient
+    `manuelle` (plus jamais révisée par le vote)."""
+
+    def executer(ctx: ContexteAction, cas: Cas) -> str:
+        choix = int(cas.preuves[cle])
+        ctx.data_manager.update_artist_discogs_id(ctx.artiste.id, choix, "manuelle")
+        ctx.artiste.discogs_id, ctx.artiste.discogs_id_source = choix, "manuelle"
+        return f"identité Discogs de {ctx.artiste.name} : page {choix}"
+
+    return executer
+
+
 def _poser_id_propose(ctx: ContexteAction, cas: Cas) -> str:
     """L'utilisateur a tranché : l'ID passe quand même le gate d'identité
     (artiste, durée), le titre étant tranché par lui — même règle que les
@@ -341,6 +354,19 @@ def actions_pour(cas: Cas) -> list[Action]:
                 f"Retirer l'ID {cas.preuves['spotify_id']} ? Les streams et mesures qui en "
                 "découlent partent avec lui, et il ne sera plus reposé.",
             )
+        ]
+    if d == "discogs_contredit":
+        return [
+            Action(
+                "discogs_musicbrainz",
+                f"Page {cas.preuves['musicbrainz']} (MusicBrainz)",
+                _choisir_discogs("musicbrainz"),
+            ),
+            Action(
+                "discogs_disques",
+                f"Page {cas.preuves['disques']} (disques)",
+                _choisir_discogs("disques"),
+            ),
         ]
     if d == "duree_deezer":
         return [

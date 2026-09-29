@@ -39,8 +39,8 @@ class _DM:
     def get_artist_tracks(self, artist_id):
         return self._tracks
 
-    def update_artist_discogs_id(self, artist_id, discogs_id):
-        self.ecrit = discogs_id
+    def update_artist_discogs_id(self, artist_id, discogs_id, source=None):
+        self.ecrit, self.source = discogs_id, source
         return True
 
 
@@ -133,6 +133,70 @@ class TestResoudre:
     def test_inconnu(self):
         identite = di.resoudre(_Client(), _DM(), _isha())
         assert identite.id is None and identite.origine == "inconnu"
+
+
+class TestLienMusicBrainz:
+    """Décision utilisateur 2026-09-29 : un lien MusicBrainz unique vaut
+    identité, plusieurs contraignent le vote ; garde-fou : les disques peuvent
+    CONTREDIRE, rien n'est alors écrasé."""
+
+    def test_lien_unique_vaut_identite_sans_disque(self):
+        dm = _DM([])
+        artist = _isha()
+        identite = di.resoudre(_Client(), dm, artist, mb_discogs=[6244752])
+        assert identite.id == 6244752 and identite.origine == "musicbrainz"
+        assert identite.verifiee
+        assert (dm.ecrit, dm.source) == (6244752, "musicbrainz")
+        assert artist.discogs_id_source == "musicbrainz"
+
+    def test_lien_unique_confirme_par_les_disques(self):
+        client = _Client(disques={1: [ISHA_7], 2: [ISHA_7]})
+        dm = _DM([_t(1), _t(2)])
+        identite = di.resoudre(client, dm, _isha(), mb_discogs=[6244752])
+        assert identite.origine == "disques" and dm.source == "disques"
+
+    def test_contredit_par_les_disques_rien_n_est_ecrit(self):
+        client = _Client(disques={1: [(5, "Isha (2)")], 2: [(5, "Isha (2)")]})
+        dm = _DM([_t(1), _t(2)])
+        identite = di.resoudre(client, dm, _isha(), mb_discogs=[6244752])
+        assert identite.origine == "contredite" and identite.id is None
+        assert (identite.selon_musicbrainz, identite.selon_disques) == (6244752, 5)
+        assert dm.ecrit is None
+
+    def test_une_identite_musicbrainz_reste_revisable(self):
+        artist = _isha(6244752)
+        artist.discogs_id_source = "musicbrainz"
+        # Pas encore de disques : elle tient, sans rien réécrire.
+        dm = _DM([])
+        assert di.resoudre(_Client(), dm, artist).origine == "musicbrainz"
+        assert dm.ecrit is None
+        # Les disques la contredisent : à trancher, la base garde l'ID.
+        client = _Client(disques={1: [(5, "Isha (2)")], 2: [(5, "Isha (2)")]})
+        dm = _DM([_t(1), _t(2)])
+        assert di.resoudre(client, dm, artist).origine == "contredite"
+        assert dm.ecrit is None and artist.discogs_id == 6244752
+        # Les disques la confirment : elle devient `disques`, plus jamais revotée.
+        client = _Client(disques={1: [ISHA_7], 2: [ISHA_7]})
+        dm = _DM([_t(1), _t(2)])
+        assert di.resoudre(client, dm, artist).origine == "disques"
+        assert artist.discogs_id_source == "disques"
+        assert di.resoudre(client, _DM(), artist).origine == "memorisee"
+
+    def test_plusieurs_liens_contraignent_le_vote_et_l_annuaire(self):
+        """Les disques votent pour une page que MusicBrainz ne lie pas : elle
+        ne peut pas être élue."""
+        client = _Client(
+            disques={1: [(5, "Isha (2)")], 2: [(5, "Isha (2)")], 3: [ISHA_7]},
+            annuaire=[ISHA_7, (5, "Isha (2)"), (9, "Isha (9)")],
+        )
+        dm = _DM([_t(1), _t(2), _t(3)])
+        identite = di.resoudre(client, dm, _isha(), mb_discogs=[6244752, 9])
+        # Une voix pour Isha (7) : pas assez pour le vote ; l'annuaire restreint
+        # aux liens garde deux pages — ambigu.
+        assert identite.origine == "ambigu" and dm.ecrit is None
+        client.annuaire = [ISHA_7, (5, "Isha (2)")]
+        identite = di.resoudre(client, _DM([_t(1), _t(2), _t(3)]), _isha(), mb_discogs=[6244752, 9])
+        assert identite.id == 6244752 and identite.origine == "musicbrainz"
 
 
 class TestRepository:

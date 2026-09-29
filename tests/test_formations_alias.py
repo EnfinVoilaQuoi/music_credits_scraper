@@ -174,7 +174,12 @@ class _MB:
         if not self.retenu:
             return None
         return SimpleNamespace(
-            mbid="mb-1", relations=[], aliases=self.aliases, desambiguation="rapper", type=None
+            mbid="mb-1",
+            relations=[],
+            aliases=self.aliases,
+            desambiguation="rapper",
+            type=None,
+            discogs_ids=[],
         )
 
 

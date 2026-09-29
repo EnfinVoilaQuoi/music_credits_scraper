@@ -109,6 +109,7 @@ class _FauxMB:
             aliases=self._aliases,
             desambiguation="Belgian rapper",
             type="Person",
+            discogs_ids=[],
         )
 
 

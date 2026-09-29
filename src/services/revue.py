@@ -1278,6 +1278,7 @@ DETECTEURS_DE_RUN: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("deezer_link_candidate", "Deezer : parution à confirmer", "❓", None),
     DetecteurArtiste("deezer_link_review", "Deezer : lien à revoir", "🔓", None),
     DetecteurArtiste("spotify_audit", "Spotify : identifiant démenti", "🔍", None),
+    DetecteurArtiste("discogs_contredit", "Discogs : MusicBrainz contredit", "💽", None),
 )
 CODES_KWORB = tuple(d.code for d in DETECTEURS_DE_RUN if d.code.startswith("kworb_"))
 #: Les propositions EN ATTENTE, tirées des `suggestions` du run (pas d'`a_trancher`).

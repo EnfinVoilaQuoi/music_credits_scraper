@@ -131,6 +131,7 @@ class ArtistRepository:
                             artists.c.genius_id,
                             artists.c.spotify_id,
                             artists.c.discogs_id,
+                            artists.c.discogs_id_source,
                             artists.c.image_path,
                             artists.c.deezer_id,
                         ).where(artists.c.name == name)
@@ -149,6 +150,7 @@ class ArtistRepository:
                 genius_id=row["genius_id"],
                 spotify_id=row["spotify_id"],
                 discogs_id=row["discogs_id"],
+                discogs_id_source=row["discogs_id_source"],
                 image_path=row["image_path"],
                 deezer_id=row["deezer_id"],
             )
@@ -1103,15 +1105,22 @@ class ArtistRepository:
             logger.error(f"Erreur update_artist_deezer_id (artist_id={artist_id}): {e}")
             return False
 
-    def update_artist_discogs_id(self, artist_id: int, discogs_id: int | None) -> bool:
+    def update_artist_discogs_id(
+        self, artist_id: int, discogs_id: int | None, source: str | None = None
+    ) -> bool:
         """Identifiant Discogs de l'artiste — écrivain dédié, tranché par
-        l'oracle `services/discogs_identite` (vote par disques) ou choisi à la
-        main ; `None` efface. Pendant de `update_artist_deezer_id`."""
+        l'oracle `services/discogs_identite` (vote par disques, lien
+        MusicBrainz) ou choisi à la main ; `None` efface. `source` (e42) dit
+        d'où il vient. Pendant de `update_artist_deezer_id`."""
         try:
             stmt = (
                 update(artists)
                 .where(artists.c.id == artist_id)
-                .values(discogs_id=discogs_id, updated_at=datetime.now())
+                .values(
+                    discogs_id=discogs_id,
+                    discogs_id_source=source if discogs_id is not None else None,
+                    updated_at=datetime.now(),
+                )
             )
             with self.engine.begin() as conn:
                 conn.execute(stmt)

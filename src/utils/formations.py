@@ -364,6 +364,7 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
 
     relations_mb = []
     alias_mb = []
+    discogs_mb: list[int] = []
     try:
         if mb is None:
             from src.api.musicbrainz_api import MusicBrainzAPI
@@ -381,6 +382,7 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
         else:
             relations_mb = retenu.relations
             alias_mb = retenu.aliases
+            discogs_mb = retenu.discogs_ids
             rapport.mbid = retenu.mbid
             rapport.identite_mb = retenu.desambiguation or retenu.type
     except Exception as e:  # noqa: BLE001 — une source en panne ne vide pas la fenêtre
@@ -400,7 +402,9 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
         # le bon homonyme, et une identité VÉRIFIÉE fait lire la fiche par id.
         # Une identité provisoire (annuaire, candidat unique) ne l'autorise pas :
         # la recherche par nom garde alors sa garde de contradiction.
-        identite = discogs_identite.resoudre(discogs, data_manager, artist, tracks=tracks)
+        identite = discogs_identite.resoudre(
+            discogs, data_manager, artist, tracks=tracks, mb_discogs=discogs_mb
+        )
         rapport.identite_discogs = identite
         if identite.origine == "disques":
             rapport.diagnostics.append(f"Discogs : identité par les disques ({identite.detail}).")
@@ -408,6 +412,13 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
             rapport.diagnostics.append(
                 f"Discogs : identité provisoire (annuaire, {identite.detail}) — non mémorisée."
             )
+        elif identite.origine == "musicbrainz":
+            rapport.diagnostics.append(
+                f"Discogs : identité par le lien MusicBrainz ({identite.detail}) — "
+                "en attente de confirmation par les disques."
+            )
+        elif identite.origine == "contredite":
+            rapport.diagnostics.append(f"Discogs : identité CONTREDITE ({identite.detail}).")
         elif identite.origine == "ambigu":
             rapport.diagnostics.append(f"Discogs : identité ambiguë ({identite.detail}).")
 

@@ -187,6 +187,8 @@ _LIBELLES_DISCOGS = {
     "forcee": "forcée",
     "memorisee": "mémorisée",
     "disques": "par les disques",
+    "musicbrainz": "lien MusicBrainz, à confirmer par les disques",
+    "contredite": "CONTREDITE — MusicBrainz et les disques divergent (à trancher)",
     "annuaire": "provisoire, annuaire",
     "ambigu": "ambiguë",
 }
@@ -218,11 +220,34 @@ def proposer_formations(runtime: Runtime, artist: Artist) -> PropositionsIdentit
     idd = rapport.identite_discogs
     if idd is not None and idd.origine != "inconnu":
         libelle = _LIBELLES_DISCOGS.get(idd.origine, idd.origine)
-        if idd.origine in ("disques", "annuaire", "ambigu") and idd.detail:
+        if idd.origine in ("disques", "musicbrainz", "annuaire", "ambigu") and idd.detail:
             libelle += f" ({idd.detail})"
         res.identite_discogs = f"Discogs : {libelle}"
     res.discogs_a_revoir = idd is None or idd.origine not in ("forcee", "memorisee", "disques")
+    if idd is not None and idd.origine != "inconnu":
+        _signaler_contradiction(dm, artist, idd)
     return res
+
+
+def _signaler_contradiction(dm, artist: Artist, idd) -> None:
+    """Garde-fou de l'identité MusicBrainz : une contradiction des disques est
+    un cas « À trancher » (remplacé à chaque résolution, donc effacé dès que
+    l'identité est tranchée ou confirmée)."""
+    from src.services import revue
+
+    cas = []
+    if idd.origine == "contredite":
+        cas.append(
+            revue.cas_de_run(
+                "discogs_contredit",
+                None,
+                f"Identité Discogs de {artist.name}",
+                f"MusicBrainz lie la page Discogs {idd.selon_musicbrainz}, les disques "
+                f"élisent {idd.selon_disques} — laquelle est « {artist.name} » ?",
+                {"musicbrainz": idd.selon_musicbrainz, "disques": idd.selon_disques},
+            )
+        )
+    dm.remplacer_signalements(artist.id, "discogs_contredit", cas)
 
 
 def rattraper_discogs(runtime: Runtime, artist: Artist) -> PropositionsIdentite | None:

@@ -597,6 +597,9 @@ class Track:
     # elle, un `spotify_id` vide ne dit pas si le morceau est absent de
     # Spotify ou si personne n'a jamais regardé.
     spotify_id_checked_at: str | None = None
+    # Titre servi par la page de l'ID Spotify (« Titre • Artistes ») : dit
+    # quelle VERSION l'ID désigne (détecteur `id_spotify_version`).
+    spotify_page_title: str | None = None
     # Deezer (e19) : identifiant + lien de la page du morceau. Servent à
     # l'identification et à la vérification, comme les autres IDs externes.
     deezer_id: int | None = None

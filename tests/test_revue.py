@@ -41,6 +41,23 @@ class TestDurees:
         t = _t("X", spotify_id="SP", durations_observees={"reccobeats": 150})
         assert revue.duree_spotify_dementie(t) is None
 
+    def test_deezer_et_ytm_sont_des_temoins(self):
+        """« New God Flow.1 » (295 s chez Deezer) portait l'ID de *New God
+        Flow* (357 s). Deezer est une autre plateforme : 6 s, c'est une édition."""
+        t = _t("X", spotify_id="SP", durations_observees={"deezer": 295, "reccobeats": 357})
+        assert "deezer 295 s" in revue.duree_spotify_dementie(t)[0]
+        t = _t("X", spotify_id="SP", durations_observees={"deezer": 232, "spotify_web": 226})
+        assert revue.duree_spotify_dementie(t) is None
+        t = _t("X", spotify_id="SP", durations_observees={"ytmusic": 232, "spotify_web": 226})
+        assert revue.duree_spotify_dementie(t) is not None
+
+    def test_id_deezer_dementi(self):
+        t = _t("X", deezer_id=12, durations_observees={"deezer": 150, "youtube": 200})
+        motif, preuves = revue.duree_deezer_dementie(t)
+        assert "autre version" in motif and preuves["deezer_id"] == 12
+        t = _t("X", deezer_id=12, durations_observees={"deezer": 199, "ytmusic": 200})
+        assert revue.duree_deezer_dementie(t) is None
+
     def test_generique_meme_duree(self):
         a, b = _t("Intro", 1, duration=94), _t("Outro", 2, duration=94)
         c = _t("Matrix (Intro)", 3, duration=94)  # le morceau Matrix, pas une intro
@@ -194,6 +211,34 @@ class TestLrcAutreFiche:
         assert "lrc_autre_fiche" in revue.CODES_FORMELS
         assert "certif_autre_titre" in revue.CODES_FORMELS
         assert "lrc_douteux" not in revue.CODES_FORMELS
+
+
+class TestContreVerification:
+    def test_id_spotify_d_une_autre_version(self):
+        t = _t("Repose en paix (Remix)", spotify_id="SP")
+        t.spotify_page_title = "Repose en paix • Booba"
+        motif, preuves = revue.id_spotify_autre_version(t)
+        assert "« Repose en paix »" in motif and preuves["spotify_id"] == "SP"
+        t = _t("Amnesia", spotify_id="SP")
+        t.spotify_page_title = "Amnesia - Notre Dame & Harry Kaze Remix • Sébastien Tellier"
+        assert revue.id_spotify_autre_version(t) is not None
+
+    def test_le_remixeur_credite_designe_le_remix(self):
+        t = _t("Know No Better (BROHUG Remix)", spotify_id="SP")
+        t.spotify_page_title = "Know No Better • Major Lazer, BROHUG, Travis Scott"
+        assert revue.id_spotify_autre_version(t) is None
+        t.spotify_page_title = "Know No Better • Major Lazer, Travis Scott"
+        assert revue.id_spotify_autre_version(t) is not None
+
+    def test_meme_id_spotify_sur_deux_pages(self):
+        a = _t("Castro", 1, spotify_id="SP", spotify_ids=["SP"], genius_id=10, album="A")
+        b = _t("Castro", 2, spotify_id="SP", spotify_ids=["SP"], genius_id=11, album="B")
+        soeur = _t("Castro", 3, spotify_id="SP", spotify_ids=["SP"], genius_id=10, album="A")
+        ctx = _ctx(a, b, soeur)
+        motif, preuves = revue.id_spotify_partage(a, ctx)
+        assert preuves["autres"] == [2] and "deux pages Genius" in motif
+        assert revue.id_spotify_partage(b, ctx) is None  # un cas par groupe
+        assert revue.id_spotify_partage(soeur, _ctx(a, soeur)) is None
 
 
 class TestDoublons:

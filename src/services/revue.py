@@ -48,8 +48,8 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.duree_youtube import SOURCE_AUDIO
-from src.utils.spotify_identity import CHAMP_ID_PROPOSE
-from src.utils.title_matching import cle_album
+from src.utils.spotify_identity import CHAMP_ID_PROPOSE, variante_etrangere
+from src.utils.title_matching import cle_album, names_match_as_words
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
@@ -224,20 +224,105 @@ def id_spotify_propose(track, ctx):
     }
 
 
+#: Durées INDÉPENDANTES d'un identifiant, et l'écart qui les dément : l'audio
+#: Topic et la piste YTM sont le fichier du distributeur (97-99 % à ≤ 2 s) ;
+#: Deezer est une autre plateforme, dont les éditions diffèrent de quelques
+#: secondes (mesuré 2026-09-29 : un écart de 6 s sur 400 fiches, une édition).
+_DUREES_TEMOINS = ((SOURCE_AUDIO, ECART_DUREE_S), ("ytmusic", ECART_DUREE_S), ("deezer", 10))
+
+
 def duree_spotify_dementie(track, _ctx=None):
-    """L'audio Topic dément la durée de l'identifiant Spotify : l'ID désigne
-    peut-être un autre enregistrement (ses streams et ses mesures avec)."""
-    yt = _duree_youtube(track)
-    if not yt or not track.spotify_id:
+    """Une durée indépendante (audio Topic, piste YTM, Deezer) dément celle de
+    l'identifiant Spotify : l'ID désigne peut-être un autre enregistrement (ses
+    streams et ses mesures avec) — Kanye « New God Flow.1 » (295 s chez Deezer)
+    portait l'ID de *New God Flow* (357 s)."""
+    if not track.spotify_id:
         return None
-    for src in _SOURCES_PAR_ID_SPOTIFY:
-        d = (track.durations_observees or {}).get(src)
-        if d and abs(yt - d) > ECART_DUREE_S:
+    durees = track.durations_observees or {}
+    for temoin, ecart in _DUREES_TEMOINS:
+        ref = durees.get(temoin)
+        for src in _SOURCES_PAR_ID_SPOTIFY:
+            d = durees.get(src)
+            if ref and d and abs(ref - d) > ecart:
+                return (
+                    f"durée de l'ID Spotify ({src}) {d} s ≠ {temoin} {ref} s — "
+                    "autre enregistrement ?",
+                    {temoin: ref, src: d, "spotify_id": track.spotify_id},
+                )
+    return None
+
+
+def duree_deezer_dementie(track, _ctx=None):
+    """L'audio Topic ou la piste YTM dément la durée de l'identifiant Deezer :
+    le hit Deezer est peut-être celui d'une autre version."""
+    durees = track.durations_observees or {}
+    dz = durees.get("deezer")
+    if not track.deezer_id or not dz:
+        return None
+    for temoin, ecart in _DUREES_TEMOINS:
+        ref = durees.get(temoin)
+        if temoin != "deezer" and ref and abs(ref - dz) > ecart:
             return (
-                f"durée de l'ID Spotify ({src}) {d} s ≠ audio YouTube {yt} s — "
-                "autre enregistrement ?",
-                {"youtube": yt, src: d, "spotify_id": track.spotify_id},
+                f"durée Deezer {dz} s ≠ {temoin} {ref} s — autre version ?",
+                {temoin: ref, "deezer": dz, "deezer_id": track.deezer_id},
             )
+    return None
+
+
+def id_spotify_autre_version(track, _ctx=None):
+    """Le titre de la page Spotify porte un descripteur de version que la fiche
+    n'a pas, ou l'inverse : « Repose en paix (Remix) » portait l'ID de
+    *Repose en paix*, « Waves (OG) » celui de *waves* de Miguel (la signature
+    des 73 variantes de 2026-09-21, sur des ID antérieurs au gate). Un remix
+    dont le REMIXEUR est crédité sur la page est bien le remix (« Know No
+    Better (BROHUG Remix) », titré « Know No Better » chez Spotify)."""
+    page = track.spotify_page_title
+    if not track.spotify_id or not page:
+        return None
+    titre, _, credits = page.partition(" • ")
+    if not variante_etrangere(track, {"name": titre}):
+        return None
+    remixeur = parse_variant(track.title).remixer
+    if remixeur and names_match_as_words(remixeur, credits):
+        return None
+    return (
+        f"l'ID Spotify sert « {titre} » — une autre version ?",
+        {"spotify_id": track.spotify_id, "spotify_sert": titre},
+    )
+
+
+def id_spotify_partage(track, ctx):
+    """Deux fiches qui ne sont pas des lignes sœurs (pages Genius différentes)
+    portent la même édition Spotify : c'est le MÊME enregistrement, deux pages
+    Genius pour un morceau (Kanye « Castro » ×2, « SKY CITY » / « Sky City »).
+    UN cas par groupe ; un doublon de titre déjà signalé n'en refait pas un."""
+
+    def fabrique():
+        par_id: dict[str, list] = {}
+        for t in ctx.disco:
+            for sid in set(t.spotify_ids or ([t.spotify_id] if t.spotify_id else [])):
+                par_id.setdefault(sid, []).append(t)
+        return par_id
+
+    index = ctx.memo("par_spotify_id", fabrique)
+    for sid in track.spotify_ids or ([track.spotify_id] if track.spotify_id else []):
+        autres = [
+            t
+            for t in index.get(sid, ())
+            if t is not track and not (t.genius_id and t.genius_id == track.genius_id)
+        ]
+        if not autres or any(
+            t.id is not None and track.id is not None and t.id < track.id for t in autres
+        ):
+            continue
+        if all(doublon_de_titre(t, ctx) or doublon_de_titre(track, ctx) for t in autres):
+            continue
+        return (
+            f"même ID Spotify que « {autres[0].title} »"
+            + (f" ({autres[0].artist.name})" if autres[0].artist else "")
+            + " — même enregistrement, deux pages Genius ?",
+            {"autres": [t.id for t in autres], "spotify_id": sid},
+        )
     return None
 
 
@@ -1109,6 +1194,11 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("vues_ytm", "Vues YouTube anormales", "📈", vues_youtube_anormales),
     Detecteur("duree_songbpm", "Durée SongBPM démentie par YouTube", "⏱️", duree_songbpm_dementie),
     Detecteur("duree_spotify", "Durée de l'ID Spotify démentie", "🎧", duree_spotify_dementie),
+    Detecteur("duree_deezer", "Durée de l'ID Deezer démentie", "🎧", duree_deezer_dementie),
+    Detecteur(
+        "id_spotify_version", "ID Spotify d'une autre version", "🔀", id_spotify_autre_version
+    ),
+    Detecteur("id_spotify_partage", "Même ID Spotify, deux pages", "👯", id_spotify_partage),
     Detecteur("id_spotify_propose", "ID Spotify proposé (SongBPM)", "🆔", id_spotify_propose),
     Detecteur(
         "songbpm_original",

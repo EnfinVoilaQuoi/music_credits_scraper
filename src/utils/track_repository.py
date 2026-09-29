@@ -319,7 +319,7 @@ class TrackRepository:
                 # astérisque sans nous prévenir.
                 "unreleased": constat_a_ecrire(track),
                 "anecdotes": track.anecdotes,
-                "spotify_page_title": getattr(track, "spotify_page_title", None),
+                "spotify_page_title": track.spotify_page_title,
                 # Chantier « Media » : chemins d'images (kind/vues vidéo passent par
                 # update_track_video_views, jamais ici).
                 "cover_path": track.media.cover_path,

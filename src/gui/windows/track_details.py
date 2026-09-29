@@ -363,7 +363,7 @@ class TrackDetailsWindow:
                 info_label.pack(side="left", padx=5)
 
                 # Tooltip avec le titre de la page Spotify si disponible
-                if hasattr(track, "spotify_page_title") and track.spotify_page_title:
+                if track.spotify_page_title:
                     spotify_tooltip_text = f"Titre Spotify:\n{track.spotify_page_title[:80]}"
                     if len(track.spotify_page_title) > 80:
                         spotify_tooltip_text += "..."
@@ -398,7 +398,7 @@ class TrackDetailsWindow:
                 spotify_label.bind("<Button-1>", lambda e: webbrowser.open(spotify_url))
 
                 # Tooltip avec le titre de la page Spotify si disponible
-                if hasattr(track, "spotify_page_title") and track.spotify_page_title:
+                if track.spotify_page_title:
                     spotify_tooltip_text = f"Titre Spotify:\n{track.spotify_page_title[:80]}"
                     if len(track.spotify_page_title) > 80:
                         spotify_tooltip_text += "..."
@@ -899,7 +899,7 @@ class TrackDetailsWindow:
         if track.spotify_id:
             tech_textbox.insert("end", f"🎧 Spotify ID: {track.spotify_id}\n")
             # Afficher le titre de la page Spotify si disponible (pour vérification)
-            if hasattr(track, "spotify_page_title") and track.spotify_page_title:
+            if track.spotify_page_title:
                 # Limiter à 50 premiers caractères pour l'affichage
                 display_title = track.spotify_page_title[:50]
                 if len(track.spotify_page_title) > 50:

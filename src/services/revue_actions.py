@@ -20,9 +20,15 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 #: Détecteurs dont les preuves portent l'ID Spotify à retirer.
-_CODES_ID_SPOTIFY = ("kworb_variante", "spotify_audit", "duree_spotify", "kworb_id_partage")
+_CODES_ID_SPOTIFY = (
+    "kworb_variante",
+    "spotify_audit",
+    "duree_spotify",
+    "kworb_id_partage",
+    "id_spotify_version",
+)
 _CODES_SONGBPM = ("songbpm_copie", "duree_songbpm", "songbpm_original")
-_CODES_DOUBLON = ("doublon", "doublon_inedit", "doublon_lrc")
+_CODES_DOUBLON = ("doublon", "doublon_inedit", "doublon_lrc", "id_spotify_partage")
 
 
 @dataclass
@@ -98,6 +104,16 @@ def _retirer_spotify(ctx: ContexteAction, cas: Cas) -> str:
     memoriser_id_refuse(track, sid)
     return (
         f"ID {sid} retiré de « {track.title} », avec "
+        f"{len(rapport.get('observations_retirees', []))} observation(s) qui en découlaient"
+    )
+
+
+def _delier_deezer(ctx: ContexteAction, cas: Cas) -> str:
+    track = _fiche(ctx, cas)
+    did = cas.preuves["deezer_id"]
+    rapport = ctx.data_manager.clear_track_deezer_id(track.id, int(did))
+    return (
+        f"ID Deezer {did} retiré de « {track.title} », avec "
         f"{len(rapport.get('observations_retirees', []))} observation(s) qui en découlaient"
     )
 
@@ -324,6 +340,16 @@ def actions_pour(cas: Cas) -> list[Action]:
                 _retirer_spotify,
                 f"Retirer l'ID {cas.preuves['spotify_id']} ? Les streams et mesures qui en "
                 "découlent partent avec lui, et il ne sera plus reposé.",
+            )
+        ]
+    if d == "duree_deezer":
+        return [
+            Action(
+                "delier_deezer",
+                "✂️ Délier Deezer",
+                _delier_deezer,
+                f"Retirer l'ID Deezer {cas.preuves['deezer_id']} ? L'ISRC, la durée et les "
+                "mesures qui en découlent partent avec lui.",
             )
         ]
     if d in _CODES_SONGBPM:

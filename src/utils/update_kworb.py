@@ -828,6 +828,16 @@ def _scrape_validated(scraper, artist, data_manager, spotify_artist_id, *, revot
     if page and page["entries"] and _names_match(page_name, artist.name):
         return page, spotify_artist_id
 
+    if page is None and scraper.absente and not revoter:
+        # 404 au COMPTAGE : Kworb ne suit pas cet artiste (sous son seuil).
+        # Conseiller de relancer l'Identité bouclait — elle a fait le même
+        # constat (B.B. Jacques, 2026-09-29).
+        logger.info(
+            f"ℹ️ '{artist.name}' n'a pas de page Kworb (sous son seuil) : "
+            "les streams viennent des pages Spotify"
+        )
+        return None, spotify_artist_id
+
     if page and page_name and not _names_match(page_name, artist.name):
         logger.warning(
             f"🚨 Page Kworb de {spotify_artist_id} = '{page_name}' ≠ '{artist.name}' "
@@ -1007,7 +1017,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     )
 
     if not page_songs:
-        logger.error("❌ Impossible d'obtenir une page Kworb validée. Aucune écriture.")
+        if scraper.absente:
+            result["absent_de_kworb"] = True
+        else:
+            logger.error("❌ Impossible d'obtenir une page Kworb validée. Aucune écriture.")
         return result
 
     result["artist_name"] = page_songs["artist_name"]

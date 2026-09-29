@@ -49,6 +49,10 @@ class KworbScraper:
 
     BASE_URL = "https://kworb.net/spotify/artist/{artist_id}_{type}.html"
 
+    #: La dernière page demandée n'existe PAS (404) : Kworb ne suit pas cet
+    #: artiste (sous son seuil). Distingue ce `None` d'une panne réseau.
+    absente = False
+
     def scrape_songs(self, spotify_artist_id: str) -> dict | None:
         """Page songs d'un artiste.
 
@@ -86,10 +90,12 @@ class KworbScraper:
             return self._fetch_and_parse_body(url, obs)
 
     def _fetch_and_parse_body(self, url: str, obs) -> dict | None:
+        self.absente = False
         try:
             resp = source_usage.requests_get(_SOURCE, url, headers=_HEADERS, timeout=_TIMEOUT)
             if resp.status_code == 404:
-                logger.warning(f"Page Kworb introuvable (404): {url}")
+                logger.info(f"Page Kworb inexistante (404) : {url}")
+                self.absente = True
                 return None
             resp.raise_for_status()
             # Kworb sert de l'UTF-8 sans header charset → requests retombe en

@@ -116,6 +116,8 @@ class _DataManager:
 
 
 class _Scraper:
+    absente = False
+
     def __init__(self, songs=None, albums=None):
         self._songs = songs
         self._albums = albums or {"entries": [], "last_updated": None}
@@ -1457,3 +1459,26 @@ class TestATrancher:
         assert [(d["track"], d["morceau"], d["impact"]) for d in non_relies] == [
             (None, "Inconnu", 500)
         ]
+
+
+class TestArtisteAbsentDeKworb:
+    """404 au comptage : Kworb ne suit pas l'artiste (sous son seuil). Le run
+    conseillait de relancer l'Identité, qui avait fait le même constat — une
+    boucle (B.B. Jacques, 2026-09-29). On le DIT, sans erreur ni conseil."""
+
+    def test_404_dit_absent_sans_accuser_l_identite(self, caplog):
+        scraper = _Scraper(songs=None)
+        scraper.absente = True
+        dm = _DataManager([])
+        with caplog.at_level("INFO"):
+            res = update_kworb_streams(_Artist(), dm, scraper=scraper)
+        assert res["absent_de_kworb"] is True
+        assert "relancer l'étape Identité" not in caplog.text
+        assert not [r for r in caplog.records if r.levelname == "ERROR"]
+        assert dm.streams_writes == []
+
+    def test_panne_reseau_reste_une_erreur(self, caplog):
+        dm = _DataManager([])
+        res = update_kworb_streams(_Artist(), dm, scraper=_Scraper(songs=None))
+        assert "absent_de_kworb" not in res
+        assert "Impossible d'obtenir une page Kworb validée" in caplog.text

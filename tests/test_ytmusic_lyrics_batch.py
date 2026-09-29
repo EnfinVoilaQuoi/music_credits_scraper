@@ -111,6 +111,21 @@ class TestParoles:
         assert res["lyrics"] == "Des paroles"
         assert res["lyrics_synced"] is None
 
+    def test_synchro_sans_horodatage_replie_sur_le_texte_brut(self, api):
+        """YTM sert parfois le conteneur synchronisé SANS `cueRange` : ytmusicapi
+        lève `KeyError('cueRange')`. Les paroles brutes existent quand même
+        (2026-09-29 : 177 morceaux perdus et comptés `parse`)."""
+        api.yt = _YTLyrics(
+            watch={"lyrics": "browse1"},
+            lyrics_sync=KeyError("cueRange"),
+            lyrics={"lyrics": "Yeah, yeah\nDes paroles"},
+        )
+
+        res = api.get_lyrics("Django", "Anthracite", video_ids=("v1",))
+        assert res["lyrics"] == "Yeah, yeah\nDes paroles"
+        assert res["lyrics_synced"] is None
+        assert res["video_id"] == "v1"
+
     def test_aucun_resultat(self, api):
         api.yt = _YTLyrics(search=[])
         assert api.get_lyrics("ISHA", "Titre") is None

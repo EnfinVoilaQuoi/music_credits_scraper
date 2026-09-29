@@ -437,8 +437,14 @@ class YTMusicAPI:
         # Demander la version synchronisée ; fallback texte brut si indispo
         try:
             data = self.yt.get_lyrics(lyrics_id, timestamps=True)
-        except (YTMusicError, requests.RequestException):
+        except (YTMusicError, requests.RequestException, KeyError):
             # Certaines pistes n'ont pas de version synchronisée → texte brut.
+            # `KeyError` : YTM sert parfois le conteneur « synchronisé » SANS
+            # aucun horodatage (lignes sans `cueRange`, mesuré 50/50 sur Django
+            # « Anthracite ») et ytmusicapi plante en le lisant ; il n'y a alors
+            # pas de LRC à sauver, mais le texte brut existe. Sans ce repli, le
+            # morceau perdait aussi ses paroles et comptait en `parse` (177 cas
+            # du 22 au 29/09).
             data = self.yt.get_lyrics(lyrics_id)
         raw = data.get("lyrics") if isinstance(data, dict) else None
         synced = None

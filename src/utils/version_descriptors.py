@@ -502,6 +502,30 @@ def meme_socle(a: str | None, b: str | None) -> bool:
     return bool(sa) and sa == normalize_title(parse_variant(b or "").socle)
 
 
+def meme_version(a: str | None, b: str | None) -> bool:
+    """Un résultat de RECHERCHE au titre proche est-il la même VERSION ?
+
+    Garde des sources qui rapprochent un titre par inclusion (SongBPM,
+    GetSongBPM) : leur appariement assoupli laisserait « Blues (Live at AK
+    Studios) » prendre les mesures de « Blues », et « Intro » celles de
+    « Doigt D'Honneur (Intro) ». Deux règles : des descripteurs de familles
+    DIFFÉRENTES désignent un autre enregistrement ; un titre GÉNÉRIQUE (hors
+    parenthèses) n'est reconnu que titre complet égal. Plus large que
+    `titres_equivalents` à dessein : le socle n'a pas à être égal, l'appelant
+    juge le reste du titre.
+    """
+    a, b = a or "", b or ""
+    if not meme_famille(parse_variant(a), parse_variant(b)):
+        return False
+    if titre_generique(_sans_parentheses(a)) or titre_generique(_sans_parentheses(b)):
+        return normalize_title(a) == normalize_title(b)
+    return True
+
+
+def _sans_parentheses(titre: str) -> str:
+    return re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre).strip()
+
+
 def doublons_evidents(fiches) -> bool:
     """Ces fiches d'un même artiste sont-elles À L'ÉVIDENCE le même enregistrement ?
 

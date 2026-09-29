@@ -28,6 +28,7 @@ from src.observability import source_usage
 # Import logger
 from src.utils.logger import get_logger
 from src.utils.title_matching import either_contains_as_words, normalize_name
+from src.utils.version_descriptors import meme_version
 
 logger = get_logger(__name__)
 
@@ -184,6 +185,11 @@ class GetSongBPMFetcher:
                 ha_name = str(ha or "")
             if self._norm(ha_name) != na:
                 continue  # artiste = ancre stricte
+            # Même VERSION (règle partagée avec SongBPM) : sans elle, le repli
+            # par inclusion ci-dessous donnait à « Intro » de Josman le BPM de
+            # « Doigt D'Honneur (Intro) », et à « Blues » celui de son live.
+            if not meme_version(title, h.get("title", "")):
+                continue
             ht = self._norm(h.get("title", ""))
             if ht == nt:
                 return h  # match parfait titre + artiste

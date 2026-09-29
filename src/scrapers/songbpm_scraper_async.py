@@ -18,6 +18,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright_async
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.utils.logger import log_api
@@ -138,7 +139,11 @@ class SongBPMScraperAsync(SongBPMScraper):
             if detail_url.startswith("/"):
                 detail_url = "https://songbpm.com" + detail_url
             logger.info(f"📄 Navigation détails: {detail_url}")
-            await self.page.goto(detail_url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            self._noter_reponse(
+                await self.page.goto(
+                    detail_url, wait_until="domcontentloaded", timeout=timeout * 1000
+                )
+            )
 
             content_selectors = [
                 "div.lg\\:prose-xl",
@@ -279,7 +284,11 @@ class SongBPMScraperAsync(SongBPMScraper):
         try:
             if reload_homepage:
                 logger.info("🌐 Chargement page d'accueil SongBPM...")
-                await self.page.goto(self.base_url, wait_until="domcontentloaded", timeout=30_000)
+                self._noter_reponse(
+                    await self.page.goto(
+                        self.base_url, wait_until="domcontentloaded", timeout=30_000
+                    )
+                )
                 await self._handle_cookies_async()
 
             search_selector = "input[name='query'][placeholder='type a song, get a bpm']"
@@ -287,6 +296,9 @@ class SongBPMScraperAsync(SongBPMScraper):
                 await self.page.wait_for_selector(search_selector, timeout=10_000)
             except PlaywrightTimeoutError:
                 logger.error("⏰ Champ de recherche introuvable")
+                source_usage.record_attempt(
+                    _SOURCE, IssueKind.PARSE, detail="champ de recherche introuvable"
+                )
                 return None
 
             search_query = f"{artist_name} {track_title}"
@@ -338,11 +350,13 @@ class SongBPMScraperAsync(SongBPMScraper):
             )
             return None
 
-        except PlaywrightTimeoutError:
+        except PlaywrightTimeoutError as e:
+            source_usage.note_failure(_SOURCE, e)
             logger.error("❌ SongBPM: Timeout Playwright")
             await self._reset_browser_on_error_async()
             return None
         except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
+            source_usage.note_failure(_SOURCE, e)
             logger.error(f"❌ SongBPM: Erreur recherche: {e}")
             await self._reset_browser_on_error_async()
             return None
@@ -386,6 +400,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         )
         if result:
             log_api("SongBPM", f"search/{track_title}", True)
+            obs.ok()
             return result
 
         # Fallback sans parenthèses
@@ -404,6 +419,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                 )
                 if result:
                     log_api("SongBPM", f"search/{track_title}", True)
+                    obs.ok()
                     return result
 
         log_api("SongBPM", f"search/{track_title}", False)

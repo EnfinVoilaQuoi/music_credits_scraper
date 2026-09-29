@@ -20,6 +20,7 @@ from playwright.sync_api import (
 )
 
 from src.observability import source_usage
+from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.llm_extractor import (
     BUDGET_TEXTE_SONGBPM,
@@ -27,8 +28,8 @@ from src.utils.llm_extractor import (
     get_shared_extractor,
 )
 from src.utils.logger import get_logger, log_api
-from src.utils.title_matching import either_contains_as_words, normalize_title
-from src.utils.version_descriptors import meme_famille, parse_variant, titre_generique
+from src.utils.title_matching import either_contains_as_words
+from src.utils.version_descriptors import meme_version
 
 logger = get_logger(__name__)
 
@@ -143,6 +144,15 @@ class SongBPMScraper:
             normalized = re.sub(pattern, "", normalized, flags=re.IGNORECASE)
         return normalized.strip()
 
+    @staticmethod
+    def _noter_reponse(reponse) -> None:
+        """Une navigation = une TENTATIVE (statut HTTP), sous l'observation en
+        cours. Sans elles, un succès sortait `indeterminate` et une panne
+        avalée devenait `absent` (2026-09-29 : 186 `indeterminate` en un jour).
+        Commun aux deux jumeaux : `goto` rend la réponse, ou `None`."""
+        if reponse is not None:
+            source_usage.record_response(reponse.url, reponse.status, source_key=_SOURCE)
+
     def _remove_parentheses_and_brackets(self, title: str) -> str:
         cleaned = re.sub(r"\s*\([^)]*\)", "", title)
         cleaned = re.sub(r"\s*\[[^\]]*\]", "", cleaned)
@@ -171,15 +181,13 @@ class SongBPMScraper:
         184 groupes aux valeurs dupliquées). Deux règles, les mêmes que pour
         Spotify et Deezer : des descripteurs de familles DIFFÉRENTES désignent
         un autre enregistrement (live, acoustique, remix, instrumental…) ; un
-        titre GÉNÉRIQUE n'est reconnu que titre complet égal.
+        titre GÉNÉRIQUE n'est reconnu que titre complet égal. Le verdict est
+        partagé avec GetSongBPM (`version_descriptors.meme_version`).
         """
-        a = self._normalize_title_for_matching(search_title)
-        b = self._normalize_title_for_matching(result_title)
-        if not meme_famille(parse_variant(a), parse_variant(b)):
-            return False
-        if titre_generique(self._title_key(a)) or titre_generique(self._title_key(b)):
-            return normalize_title(a) == normalize_title(b)
-        return True
+        return meme_version(
+            self._normalize_title_for_matching(search_title),
+            self._normalize_title_for_matching(result_title),
+        )
 
     def _match_track(
         self,
@@ -274,7 +282,9 @@ class SongBPMScraper:
             if detail_url.startswith("/"):
                 detail_url = "https://songbpm.com" + detail_url
             logger.info(f"📄 Navigation détails: {detail_url}")
-            self.page.goto(detail_url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            self._noter_reponse(
+                self.page.goto(detail_url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            )
 
             content_selectors = [
                 "div.lg\\:prose-xl",
@@ -472,7 +482,9 @@ class SongBPMScraper:
         try:
             if reload_homepage:
                 logger.info("🌐 Chargement page d'accueil SongBPM...")
-                self.page.goto(self.base_url, wait_until="domcontentloaded", timeout=30_000)
+                self._noter_reponse(
+                    self.page.goto(self.base_url, wait_until="domcontentloaded", timeout=30_000)
+                )
                 self._handle_cookies()
 
             search_selector = "input[name='query'][placeholder='type a song, get a bpm']"
@@ -480,6 +492,9 @@ class SongBPMScraper:
                 self.page.wait_for_selector(search_selector, timeout=10_000)
             except PlaywrightTimeoutError:
                 logger.error("⏰ Champ de recherche introuvable")
+                source_usage.record_attempt(
+                    _SOURCE, IssueKind.PARSE, detail="champ de recherche introuvable"
+                )
                 return None
 
             search_query = f"{artist_name} {track_title}"
@@ -531,11 +546,13 @@ class SongBPMScraper:
             )
             return None
 
-        except PlaywrightTimeoutError:
+        except PlaywrightTimeoutError as e:
+            source_usage.note_failure(_SOURCE, e)
             logger.error("❌ SongBPM: Timeout Playwright")
             self._reset_browser_on_error()
             return None
         except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
+            source_usage.note_failure(_SOURCE, e)
             logger.error(f"❌ SongBPM: Erreur recherche: {e}")
             self._reset_browser_on_error()
             return None
@@ -585,6 +602,7 @@ class SongBPMScraper:
         )
         if result:
             log_api("SongBPM", f"search/{track_title}", True)
+            obs.ok()
             return result
 
         # Fallback sans parenthèses
@@ -603,6 +621,7 @@ class SongBPMScraper:
                 )
                 if result:
                     log_api("SongBPM", f"search/{track_title}", True)
+                    obs.ok()
                     return result
 
         log_api("SongBPM", f"search/{track_title}", False)

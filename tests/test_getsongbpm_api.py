@@ -93,12 +93,31 @@ class TestSelectionDuHit:
         hits = [_song(artiste="Un Autre")]
         assert client._select_hit(hits, "ISHA", "Titre") is None
 
-    def test_titre_contenu_sert_de_repli(self, client):
-        hits = [_song(titre="Titre (Remix)")]
-        assert client._select_hit(hits, "ISHA", "Titre")["title"] == "Titre (Remix)"
+    @pytest.mark.parametrize(
+        ("cherche", "propose"),
+        [
+            ("Titre", "Titre (Remix)"),
+            ("Blues", "Blues (Live at AK Studios)"),
+            ("Boulbi (Instrumental)", "Boulbi"),
+            # Mesuré en direct le 2026-09-29 : c'est ce hit que l'API sert en
+            # premier pour « Intro » de Josman.
+            ("Intro", "Doigt D'Honneur (Intro)"),
+            ("Intro (A2)", "Intro"),
+        ],
+    )
+    def test_une_autre_version_n_est_jamais_retenue(self, client, cherche, propose):
+        """Le repli par inclusion prenait le BPM d'une AUTRE version (remix,
+        live) ou d'un autre morceau au titre générique — règle partagée avec
+        SongBPM (`version_descriptors.meme_version`)."""
+        hits = [_song(titre=propose)]
+        assert client._select_hit(hits, "ISHA", cherche) is None
+
+    def test_titre_generique_identique_retenu(self, client):
+        hits = [_song(titre="Doigt D'Honneur (Intro)"), _song(titre="Intro")]
+        assert client._select_hit(hits, "ISHA", "Intro")["title"] == "Intro"
 
     def test_match_parfait_prime_sur_le_repli(self, client):
-        hits = [_song(titre="Titre (Remix)"), _song(titre="Titre")]
+        hits = [_song(titre="Titre Bonus"), _song(titre="Titre")]
         assert client._select_hit(hits, "ISHA", "Titre")["title"] == "Titre"
 
     @pytest.mark.parametrize(

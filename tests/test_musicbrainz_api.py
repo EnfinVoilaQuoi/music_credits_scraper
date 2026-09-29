@@ -296,6 +296,58 @@ class TestReessaiSur503:
         assert len(file) == 1
 
 
+class TestVerdictDUsage:
+    """Avant le 2026-09-29, un succès n'était jamais déclaré et `_get` ne
+    relevait aucune tentative : tous les appels réussis sortaient
+    `indeterminate` (15 sur 15 le 29/09), le panneau ne voyait rien."""
+
+    @pytest.fixture(autouse=True)
+    def _propre(self):
+        from src.observability import source_usage as su
+
+        su.reset()
+        su.set_sink(None)
+        yield
+        su.reset()
+        su.set_sink(None)
+
+    def _verdicts(self):
+        from src.observability import source_usage as su
+
+        return [(v.issue, v.attempts) for v in su.flush()]
+
+    def test_recherche_reussie_est_ok(self, monkeypatch):
+        from src.observability.issues import IssueKind
+
+        api, _ = _client(monkeypatch, [_Reponse(200, {"artists": [{"id": "e0e1"}]})])
+        api.rechercher_artiste("Kid Cudi")
+        assert self._verdicts() == [(IssueKind.OK, 1)]
+
+    def test_recherche_vide_est_absent(self, monkeypatch):
+        from src.observability.issues import IssueKind
+
+        api, _ = _client(monkeypatch, [_Reponse(200, {"artists": []})])
+        api.rechercher_artiste("Personne")
+        assert self._verdicts() == [(IssueKind.ABSENT, 1)]
+
+    def test_lookup_reussi_apres_un_503_est_ok(self, monkeypatch):
+        """Le 503 compte comme tentative bridée ; le verdict reste le succès."""
+        from src.observability.issues import IssueKind
+
+        api, _ = _client(monkeypatch, [_Reponse(503, retry_after="0"), _Reponse(200, {})])
+        api.details_artiste("mbid")
+        assert self._verdicts() == [(IssueKind.OK, 2)]
+
+    def test_503_persistant_est_bride(self, monkeypatch):
+        from src.api.musicbrainz_api import _TENTATIVES, MusicBrainzSature
+        from src.observability.issues import IssueKind
+
+        api, _ = _client(monkeypatch, [_Reponse(503)] * _TENTATIVES)
+        with pytest.raises(MusicBrainzSature):
+            api.details_artiste("mbid")
+        assert self._verdicts() == [(IssueKind.THROTTLED, _TENTATIVES)]
+
+
 class TestRetryAfter:
     def test_jamais_sous_la_cadence(self):
         from src.api.musicbrainz_api import _INTERVALLE_MIN_S, _retry_after

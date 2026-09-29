@@ -39,7 +39,7 @@ from typing import Any
 import requests
 
 from src.observability import source_usage
-from src.observability.issues import IssueKind
+from src.observability.issues import IssueKind, SansReponse
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
 
@@ -65,12 +65,17 @@ _INTERVALLE_MIN_S = 1.1
 _TENTATIVES = 4
 
 
-class MusicBrainzSature(RuntimeError):
+class MusicBrainzSature(SansReponse, RuntimeError):
     """503 persistant après `_TENTATIVES` essais : la source parle, mais pas à nous.
 
     Levée (jamais avalée en `[]`/`None`) pour qu'un appelant ne confonde pas
-    « pas de réponse » avec « pas de résultat ».
+    « pas de réponse » avec « pas de résultat ». `SansReponse` porte le verdict
+    `throttled` jusqu'au classifieur : l'ancien `obs.fail(THROTTLED)` suivi d'un
+    `raise` était écrasé par la classification de l'exception, rangée `crash`.
     """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(_SOURCE, IssueKind.THROTTLED, detail)
 
 
 #: UUID du type de relation « member of band ». On s'appuie sur l'identifiant et
@@ -323,8 +328,22 @@ class MusicBrainzAPI:
                     f"{_BASE_URL}{chemin}", params={**params, "fmt": "json"}, timeout=self.timeout
                 )
             except requests.RequestException as e:
+                source_usage.note_failure(_SOURCE, e)
                 logger.warning(f"MusicBrainz injoignable ({chemin}): {e}")
                 raise
+            # Chaque aller-retour est une TENTATIVE : sans elles, un succès
+            # (jamais déclaré avant le 2026-09-29) sortait en `indeterminate`.
+            # Le 503 est un bridage, pas une panne (`classify_status` y lirait
+            # `unreachable`).
+            if reponse.status_code == 503:
+                source_usage.record_attempt(_SOURCE, IssueKind.THROTTLED, status_code=503)
+            else:
+                source_usage.record_response(
+                    f"{_BASE_URL}{chemin}",
+                    reponse.status_code,
+                    headers=reponse.headers,
+                    source_key=_SOURCE,
+                )
             if reponse.status_code != 503:
                 reponse.raise_for_status()
                 return reponse.json()
@@ -340,20 +359,16 @@ class MusicBrainzAPI:
     def rechercher_artiste(self, nom: str, limite: int = 25) -> list[dict]:
         """Candidats bruts pour un nom. Le filtrage est l'affaire de l'appelant."""
         with source_usage.observe(_SOURCE, label=f"recherche {nom}") as obs:
-            try:
-                # `alias:` aussi : un artiste RENOMMÉ (Kanye West → « Ye ») ne
-                # sort pas d'une recherche sur le seul nom.
-                data = self._get(
-                    "/artist/", {"query": f'artist:"{nom}" OR alias:"{nom}"', "limit": limite}
-                )
-            except MusicBrainzSature as e:
-                # La source parle et demande de réessayer : `throttled`, jamais
-                # `broken` — et l'exception REMONTE, un `[]` la ferait passer
-                # pour « aucun artiste de ce nom ».
-                obs.fail(IssueKind.THROTTLED, str(e))
-                raise
+            # `alias:` aussi : un artiste RENOMMÉ (Kanye West → « Ye ») ne sort
+            # pas d'une recherche sur le seul nom. Une saturation REMONTE
+            # (`throttled`, jamais `[]` qui se lirait « aucun artiste de ce nom »).
+            data = self._get(
+                "/artist/", {"query": f'artist:"{nom}" OR alias:"{nom}"', "limit": limite}
+            )
             artistes = data.get("artists") or []
-            if not artistes:
+            if artistes:
+                obs.ok()
+            else:
                 obs.absent()
             return artistes
 
@@ -364,11 +379,9 @@ class MusicBrainzAPI:
         muet ferait disparaître un homonyme du départage, en silence).
         """
         with source_usage.observe(_SOURCE, label=f"lookup {mbid}") as obs:
-            try:
-                return self._get(f"/artist/{mbid}", {"inc": inc})
-            except MusicBrainzSature as e:
-                obs.fail(IssueKind.THROTTLED, str(e))
-                raise
+            details = self._get(f"/artist/{mbid}", {"inc": inc})
+            obs.ok()
+            return details
 
     def resoudre_artiste(self, nom: str, nos_albums: set[str]) -> CandidatArtiste | None:
         """Nom → l'artiste MusicBrainz correspondant, relations comprises.

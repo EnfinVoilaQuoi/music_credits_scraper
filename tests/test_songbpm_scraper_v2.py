@@ -443,3 +443,114 @@ class TestRepliSansParentheses:
 
     def test_l_original_n_est_pas_la_version_live(self, scraper):
         assert not scraper._match_track("Blues", "A2H", "Blues (Live at AK Studios)", "A2H")
+
+
+# ───────────────────────────────────────────── verdict d'usage (observabilité)
+
+
+class _PageRecherche:
+    """Page dont la navigation échoue, ou réussit sans aucun résultat."""
+
+    def __init__(self, erreur=None):
+        self._erreur = erreur
+
+    def goto(self, url, **_):
+        if self._erreur:
+            raise self._erreur
+        return type("R", (), {"url": url, "status": 200})()
+
+    def wait_for_selector(self, selecteur, **_):
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+        if selecteur == "div.bg-card":
+            raise PlaywrightTimeoutError("aucun résultat")
+
+    def fill(self, *_):
+        pass
+
+    def press(self, *_):
+        pass
+
+    def query_selector(self, *_):
+        return None
+
+
+class TestVerdictDUsage:
+    """Avant le 2026-09-29 : un succès n'était jamais déclaré (186
+    `indeterminate` le 29/09) et une panne navigateur, avalée par
+    `_perform_search`, finissait en `absent` — une panne MUETTE."""
+
+    @pytest.fixture(autouse=True)
+    def _propre(self, scraper, monkeypatch):
+        from src.observability import source_usage as su
+
+        su.reset()
+        su.set_sink(None)
+        monkeypatch.setattr(scraper, "_ensure_driver", lambda: None)
+        monkeypatch.setattr(scraper, "_reset_browser_on_error", lambda: None)
+        yield
+        su.reset()
+        su.set_sink(None)
+
+    @staticmethod
+    def _issues():
+        from src.observability import source_usage as su
+
+        return [v.issue for v in su.flush()]
+
+    def test_succes_declare_ok(self, scraper, monkeypatch):
+        from src.observability.issues import IssueKind
+
+        scraper.page = _PageRecherche()
+        monkeypatch.setattr(scraper, "_perform_search", lambda **_: {"bpm": 140})
+        assert scraper.search_track("Titre", "Jul") == {"bpm": 140}
+        assert self._issues() == [IssueKind.OK]
+
+    def test_aucun_resultat_reste_absent(self, scraper):
+        from src.observability.issues import IssueKind
+
+        scraper.page = _PageRecherche()
+        assert scraper.search_track("Titre", "Jul") is None
+        assert self._issues() == [IssueKind.ABSENT]
+
+    def test_panne_navigateur_n_est_pas_une_absence(self, scraper):
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+        from src.observability.issues import IssueKind
+
+        scraper.page = _PageRecherche(erreur=PlaywrightTimeoutError("goto"))
+        assert scraper.search_track("Titre", "Jul") is None
+        (issue,) = self._issues()
+        assert issue not in (IssueKind.ABSENT, IssueKind.INDETERMINATE)
+
+    def test_jumeau_async_meme_verdicts(self, monkeypatch):
+        """Le jumeau async est celui de l'app : même capteur, mêmes verdicts."""
+        import asyncio
+
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutErrorAsync
+
+        from src.observability.issues import IssueKind
+        from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
+
+        class _PageAsync:
+            async def goto(self, *_, **__):
+                raise PlaywrightTimeoutErrorAsync("goto")
+
+        s = SongBPMScraperAsync(headless=True)
+        s.page = _PageAsync()
+
+        async def _rien(*_, **__):
+            return None
+
+        monkeypatch.setattr(s, "_ensure_driver_async", _rien)
+        monkeypatch.setattr(s, "_reset_browser_on_error_async", _rien)
+        assert asyncio.run(s.search_track_async("Titre", "Jul")) is None
+        (issue,) = self._issues()
+        assert issue not in (IssueKind.ABSENT, IssueKind.INDETERMINATE)
+
+        async def _trouve(**_):
+            return {"bpm": 140}
+
+        monkeypatch.setattr(s, "_perform_search_async", _trouve)
+        asyncio.run(s.search_track_async("Titre", "Jul"))
+        assert self._issues() == [IssueKind.OK]

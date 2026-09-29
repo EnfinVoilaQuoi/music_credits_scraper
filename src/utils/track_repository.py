@@ -4705,12 +4705,10 @@ class TrackRepository:
         d'un autre morceau, sans que rien ne le signale plus — l'ID fautif, lui,
         aurait disparu.
 
-        Ce que la fonction NE fait PAS, faute de pouvoir le prouver : effacer
-        `duration`. ReccoBeats l'écrit *si elle est vide* — une durée déjà venue
-        de Deezer ne vient donc pas de l'ID, et rien en base ne dit aujourd'hui
-        laquelle des deux on a. Le rapport la SIGNALE (`duree_suspecte`) et
-        l'appelant tranche. Le lot B (provenance de `duration` en observations)
-        rendra ce doute caduc.
+        La durée suit ses OBSERVATIONS (lot B) : celles des sources interrogées
+        par l'ID partent, la colonne est ré-arbitrée sur ce qui reste (vide s'il
+        ne reste rien). Une durée `legacy` restante n'a pas de provenance : le
+        rapport la SIGNALE (`duree_suspecte`) et l'appelant tranche.
 
         Returns:
             Un rapport de ce qui a été retiré (et de ce qui reste à trancher).
@@ -4813,8 +4811,22 @@ class TrackRepository:
                 if valeurs:
                     conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
 
-                if ligne["duration"] and any(src == "reccobeats" for _, src in liees):
-                    rapport["duree_suspecte"] = ligne["duration"]
+                # Les champs de DISCOGRAPHIE retirés (la durée ReccoBeats ou
+                # spotify_web) se ré-arbitrent comme les streams : depuis le lot
+                # B la colonne n'est que le verdict des observations. Sans ce
+                # geste, la durée de l'AUTRE morceau restait en colonne sans plus
+                # aucune preuve (2026-09-29 : « WHERE I'M FROM » gardait les
+                # 190 s de BUTTERFLY EFFECT, 55 colonnes sans observation).
+                champs = {f for f, _ in liees if f in self.COLONNES_DISCOGRAPHIE}
+                if champs:
+                    self._ecrire_colonnes_discographie(
+                        conn, track_id, self._arbitrer_discographie(conn, track_id, champs)
+                    )
+                reste = conn.execute(
+                    text("SELECT duration FROM tracks WHERE id = :tid"), {"tid": track_id}
+                ).scalar()
+                if reste and any(src == "reccobeats" for _, src in liees):
+                    rapport["duree_suspecte"] = reste
 
             logger.info(
                 f"🧹 ID Spotify {vise} retiré du morceau {track_id} "

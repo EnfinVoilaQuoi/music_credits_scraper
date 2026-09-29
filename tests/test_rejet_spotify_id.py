@@ -232,6 +232,37 @@ class TestRejetDeLId:
         (relu,) = data_manager.get_artist_tracks(track.artist.id)
         assert relu.duration is None
 
+    def test_la_duree_venue_de_lid_part_avec_lui(self, data_manager):
+        """Depuis le lot B, une durée ReccoBeats est une OBSERVATION : l'ID parti,
+        la colonne est ré-arbitrée. Avant le 2026-09-29 elle restait en place sans
+        plus aucune preuve (« WHERE I'M FROM » gardait les 190 s de BUTTERFLY
+        EFFECT)."""
+        track = _morceau(data_manager, duree=None)
+        data_manager.record_discography_observations(
+            track.id, [Observation(field="duration", value=190, source="reccobeats")]
+        )
+
+        rapport = data_manager.clear_track_spotify_id(track.id)
+
+        (relu,) = data_manager.get_artist_tracks(track.artist.id)
+        assert relu.duration is None
+        assert rapport["duree_suspecte"] is None
+
+    def test_une_duree_independante_reprend_la_colonne(self, data_manager):
+        track = _morceau(data_manager, duree=None)
+        data_manager.record_discography_observations(
+            track.id,
+            [
+                Observation(field="duration", value=190, source="reccobeats"),
+                Observation(field="duration", value=212, source="youtube"),
+            ],
+        )
+
+        data_manager.clear_track_spotify_id(track.id)
+
+        (relu,) = data_manager.get_artist_tracks(track.artist.id)
+        assert relu.duration == 212
+
     def test_sans_observation_reccobeats_la_duree_nest_pas_suspecte(self, data_manager):
         track = _morceau(data_manager, duree=249)
         rapport = data_manager.clear_track_spotify_id(track.id)

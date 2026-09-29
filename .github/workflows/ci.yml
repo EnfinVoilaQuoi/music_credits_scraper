@@ -39,7 +39,12 @@ jobs:
             requirements-dev.txt
             constraints.txt
 
+      # `bash` et non PowerShell : pwsh ne s'arrête pas sur l'échec d'une
+      # commande native AU MILIEU du script. Le 2026-09-28, `pip install -r` a
+      # échoué (conflit ytmusicapi requirements/constraints), `pip install -e .`
+      # a réussi derrière, et l'erreur n'est apparue qu'à l'étape suivante.
       - name: Installer les dépendances
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt

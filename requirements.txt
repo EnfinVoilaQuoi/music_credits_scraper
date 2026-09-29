@@ -33,7 +33,7 @@ networkx>=3.3
 svgwrite>=1.4.3
 
 # YouTube integration
-ytmusicapi==1.8.0
+ytmusicapi==1.12.1
 google-api-python-client>=2.100.0
 
 # Planification de tâches

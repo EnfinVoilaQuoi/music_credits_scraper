@@ -61,3 +61,21 @@ class TestConcerneLaPiste:
         """On ne sait pas où est le morceau dans le disque : on ne retire rien."""
         assert concerne_la_piste("C2", None)
         assert concerne_la_piste("C2", "")
+
+    def test_n_tiret_m_est_une_plage_sur_un_disque_sans_faces(self):
+        """Empty7, compositeur « 1-15 » d'un album de Django : sur un disque
+        numéroté « 6 », c'est une plage — lu comme « disque 1, piste 15 », le
+        crédit juste partait (2026-09-29)."""
+        assert concerne_la_piste("1-15", "6")
+        assert concerne_la_piste("2-4", "3")
+        assert not concerne_la_piste("2-4", "5")
+        # Sur un disque multiple (« 1-6 »), c'est bien une position.
+        assert concerne_la_piste("1-15", "1-15")
+        assert not concerne_la_piste("1-15", "1-6")
+
+    def test_deux_numerotations_on_ne_conclut_pas(self):
+        """« Pinocchio Story », piste « 12 » d'une tracklist de CD, face à des
+        crédits cités en faces de vinyle : rien n'est comparable."""
+        assert concerne_la_piste("A2, B1 to B3, D2", "12")
+        assert concerne_la_piste("3, 5", "B2")
+        assert not concerne_la_piste("C2", "A1")

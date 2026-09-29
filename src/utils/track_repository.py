@@ -2129,6 +2129,35 @@ class TrackRepository:
             logger.error(f"Erreur forget_credit({track_id}, {name}, {role}): {e}")
             return 0
 
+    def forget_discogs_credits(self, track_id: int, cles) -> int:
+        """Retire des crédits DISCOGS précis `(nom, rôle, pistes)` du morceau ET
+        de ses lignes jumelles — `synchroniser_soeurs` fait une UNION, un crédit
+        laissé chez une sœur reviendrait au prochain `save_track`. Rend le
+        nombre de lignes retirées. Réparation des crédits de disque écrits avant
+        le filtre par position (`scripts/repair_discogs_pistes.py`)."""
+        from src.utils.track_soeurs import ids_soeurs
+
+        try:
+            with self.engine.begin() as conn:
+                gid = conn.execute(
+                    text("SELECT genius_id FROM tracks WHERE id = :t"), {"t": track_id}
+                ).scalar()
+                jumelles, _ = ids_soeurs(conn, track_id, gid)
+                n = 0
+                for tid in [track_id, *jumelles]:
+                    for nom, role, pistes in cles:
+                        n += conn.execute(
+                            text(
+                                "DELETE FROM credits WHERE track_id = :t AND source = 'discogs' "
+                                "AND name = :n AND role = :r AND COALESCE(tracks, '') = :p"
+                            ),
+                            {"t": tid, "n": nom, "r": role, "p": pistes or ""},
+                        ).rowcount
+            return n
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur forget_discogs_credits({track_id}): {e}")
+            return 0
+
     def record_secondary_role(self, track_id: int, role: str | None) -> bool:
         """Écrit VERBATIM le rôle secondaire (`save_track` le passe en COALESCE :
         il ne sait pas le remplacer par un rôle plus juste, « Writer » → « Cover »)."""

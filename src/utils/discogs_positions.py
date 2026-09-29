@@ -43,13 +43,21 @@ def _developper_plage(borne_a: str, borne_b: str) -> set[str] | None:
     return {f"{a['prefixe']}{n}" for n in range(debut, fin + 1)}
 
 
-def positions_citees(tracks: str | None) -> set[str] | None:
+#: « 1-15 » : disque 1 piste 15, OU les pistes 1 à 15 — les deux s'écrivent.
+_TIRET = re.compile(r"^(?P<debut>\d+)-(?P<fin>\d+)$")
+
+
+def positions_citees(tracks: str | None, *, tiret_plage: bool = False) -> set[str] | None:
     """Les positions nommées par un champ `tracks` Discogs.
 
     Rend `None` quand le crédit ne cible AUCUNE piste en particulier — champ
     vide (il vaut alors pour tout le disque) ou syntaxe non reconnue. Dans les
     deux cas l'appelant doit rester permissif : un crédit qu'on ne sait pas
     situer se garde, on ne le perd pas sur un doute de syntaxe.
+
+    `tiret_plage` : le disque numérote ses pistes SANS disque (« 6 »), donc
+    « 1-15 » y est une PLAGE et non la piste 15 du disque 1 (2026-09-29 :
+    Empty7, compositeur « 1-15 » d'un album de Django, jugé hors de la piste 6).
     """
     texte = (tracks or "").strip()
     if not texte:
@@ -60,7 +68,7 @@ def positions_citees(tracks: str | None) -> set[str] | None:
         element = _normaliser(morceau)
         if not element:
             continue
-        plage = _PLAGE.match(element)
+        plage = _PLAGE.match(element) or (_TIRET.match(element) if tiret_plage else None)
         if plage:
             developpee = _developper_plage(plage["debut"], plage["fin"])
             if developpee is None:
@@ -82,10 +90,19 @@ def concerne_la_piste(tracks: str | None, position: str | None) -> bool:
     crédit en place : la faute mesurée était l'attribution en trop, mais perdre
     un crédit juste parce qu'on n'a pas su lire une position serait pire.
     """
-    citees = positions_citees(tracks)
-    if citees is None:
-        return True
     position = _normaliser(position or "")
     if not position:
         return True
+    citees = positions_citees(tracks, tiret_plage="-" not in position)
+    if citees is None:
+        return True
+    # Deux numérotations sur un même disque (« Pinocchio Story » piste « 12 »,
+    # crédits cités « A2, B1 to B3, D2 » : tracklist de CD, crédits de vinyle) :
+    # aucune position citée n'est comparable à la nôtre, on ne conclut pas.
+    if not any(_a_des_lettres(c) == _a_des_lettres(position) for c in citees):
+        return True
     return position in citees
+
+
+def _a_des_lettres(position: str) -> bool:
+    return any(ch.isalpha() for ch in position)

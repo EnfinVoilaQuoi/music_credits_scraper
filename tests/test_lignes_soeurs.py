@@ -352,3 +352,20 @@ class TestRoleSecondaireEtGroupes:
         (track,) = data_manager.discographie_reunie(membre)
         assert track.membre_de_la_formation is False
         assert track.secondary_role == "Additional Voices"
+
+
+def test_un_credit_discogs_hors_piste_part_de_toutes_les_jumelles(data_manager, famille):
+    """Lot B5 : laissé chez une sœur, l'UNION de `synchroniser_soeurs` le
+    ramènerait au prochain `save_track`."""
+    riche, pauvre = famille
+    for credit in (
+        Credit(name="Mr Hudson", role=CreditRole.VOCALS, tracks="C2", source="discogs"),
+        Credit(name="No I.D.", role=CreditRole.PRODUCER, tracks="A1", source="discogs"),
+    ):
+        riche.add_credit(credit)
+    data_manager.save_track(riche)
+    cle = ("Mr Hudson", CreditRole.VOCALS.value, "C2")
+    assert data_manager.forget_discogs_credits(riche.id, [cle]) == 2
+    for t in (riche, pauvre):
+        noms = {c.name for c in data_manager.get_artist_tracks(t.artist.id)[0].credits}
+        assert noms == {"No I.D."}

@@ -606,6 +606,10 @@ class Track:
     # Dernier passage Deezer par morceau AYANT RÉPONDU (e41) — cf. e17.
     deezer_checked_at: str | None = None
     deezer_url: str | None = None
+    # Apple Music (e43) : ID proposé par Genius et VÉRIFIÉ par iTunes, et date
+    # de la dernière vérification qui a eu une réponse (retenu ou démenti).
+    apple_music_id: str | None = None
+    apple_music_checked_at: str | None = None
 
     # Métadonnées
     # Audio (BPM/key/mode + provenance) regroupé en sous-objet `audio` (Phase 5) :

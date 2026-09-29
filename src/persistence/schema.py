@@ -173,6 +173,10 @@ tracks = Table(
     # sans elle, une fiche hors plateformes était redemandée à chaque passage
     # de l'étape Identité. Jamais posée sur une panne (`SansReponse`).
     Column("deezer_checked_at", TIMESTAMP),
+    # e43 (lot B6) : ID Apple Music VÉRIFIÉ (proposé par Genius, contrôlé par
+    # iTunes lookup), et date de la vérification ayant eu une RÉPONSE.
+    Column("apple_music_id", Text),
+    Column("apple_music_checked_at", TIMESTAMP),
     sqlite_autoincrement=True,
 )
 

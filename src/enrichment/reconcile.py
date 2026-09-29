@@ -119,7 +119,7 @@ def _confidence_key(confidence: float | None) -> float:
 #: de fiabilité BPM — qui ne le concerne pas. Un champ entre ici, pas dans
 #: `DISCOGRAPHY_PRIORITIES`, tant que sa source n'est pas indépendante et ne
 #: porte pas sur le même enregistrement.
-CHAMPS_DECLARES: frozenset[str] = frozenset({"spotify_id_propose"})
+CHAMPS_DECLARES: frozenset[str] = frozenset({"spotify_id_propose", "apple_music_id_propose"})
 
 DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
     # Mesuré le 2026-09-22 : cet ordre était en partie DÉCLARATIF — `ytmusic`
@@ -136,10 +136,13 @@ DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
     # ordinaire, fiche hors plateformes) ne sert qu'en l'absence de tout le
     # reste — ReccoBeats reste en queue (il exige un ID Spotify, que ces fiches
     # n'ont pas : les deux ne se croisent pas) (2026-09-27).
+    # `apple_music` (lot B6, 2026-09-29) : la fiche iTunes d'un identifiant
+    # VÉRIFIÉ — le fichier du distributeur, comme l'audio Topic (mesuré à ±1 s).
     "duration": (
         "deezer",
         "ytmusic",
         "youtube",
+        "apple_music",
         "songbpm",
         "spotify_web",
         "youtube_video",

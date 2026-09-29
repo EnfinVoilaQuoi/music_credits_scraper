@@ -136,6 +136,8 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
     track.deezer_id = _clean_int(row["deezer_id"])
     track.deezer_checked_at = _clean(row["deezer_checked_at"])
     track.deezer_url = _clean(row["deezer_url"])
+    track.apple_music_id = _clean(row["apple_music_id"])
+    track.apple_music_checked_at = _clean(row["apple_music_checked_at"])
     # Tri-état préservé : `bool()` sur un NULL donnerait False, c'est-à-dire
     # « Deezer dit que non » là où on ne sait rien (e19).
     _explicite = _clean_int(row["explicit_lyrics"])

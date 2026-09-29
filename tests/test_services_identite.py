@@ -83,6 +83,9 @@ def espions(monkeypatch):
     )
     monkeypatch.setattr(identite, "_nature_des_disques", lambda *a: appels.append("nature"))
     monkeypatch.setattr(
+        identite, "verifier_apple_music", lambda *a, **k: appels.append("apple") or (0, 0)
+    )
+    monkeypatch.setattr(
         "src.utils.update_kworb.relier_ids_kworb",
         lambda artist, dm: appels.append("kworb")
         or {"ids_poses": 0, "editions": 0, "lignes": 0, "page": True},
@@ -98,6 +101,7 @@ def test_l_ordre_des_couches_est_celui_de_la_preuve(espions):
         "deezer",
         "musicbrainz",
         "passage:deezer",
+        "apple",
         "spotify",
         "kworb",
         "passage:spotify_id",
@@ -528,3 +532,67 @@ def test_couche_kworb_compte_et_panne_dite(espions, monkeypatch):
     bilan = identite.run(rt, _artist(rt), identite.OptionsIdentite(), Hooks())
     assert not bilan.complete and "injoignable" in bilan.artistes["kworb"]
     assert espions[-2:] == ["passage:spotify_id", "nature"]  # les suivantes tournent
+
+
+class TestAppleMusic:
+    """3c (lot B6) : Genius PROPOSE, iTunes vérifie, seul un ID concordant est écrit."""
+
+    class _DMApple:
+        def __init__(self, obs):
+            self.obs, self.ecrits, self.durees = obs, {}, {}
+
+        def get_artist_observations(self, artist_id):
+            return self.obs
+
+        def record_apple_music(self, tid, am):
+            self.ecrits[tid] = am
+
+        def record_duration_observation(self, tid, secondes, source):
+            self.durees[tid] = (secondes, source)
+
+    class _Client:
+        def __init__(self, fiches):
+            self.fiches, self.demandes = fiches, None
+
+        def lookup(self, ids):
+            self.demandes = set(ids)
+            return {i: f for i, f in self.fiches.items() if i in self.demandes}
+
+    def _cas(self):
+        from src.enrichment.observation import Observation
+        from src.models import Artist
+
+        artist = Artist(name="Kanye West")
+        artist.id = 1
+        bon = Track(title="Stronger", artist=artist)
+        faux = Track(title="Gold Digger", artist=artist)
+        deja = Track(title="Heartless", artist=artist)
+        bon.id, faux.id, deja.id = 1, 2, 3
+        deja.apple_music_checked_at = "2026-09-29T00:00:00"
+        artist.tracks = [bon, faux, deja]
+        obs = {
+            t.id: [Observation("apple_music_id_propose", am, "genius")]
+            for t, am in ((bon, "11"), (faux, "22"), (deja, "33"))
+        }
+        client = self._Client(
+            {
+                "11": {
+                    "artistName": "Kanye West",
+                    "trackName": "Stronger",
+                    "trackTimeMillis": 311000,
+                },
+                "22": {"artistName": "Beau Monga", "trackName": "Gold Digger"},
+            }
+        )
+        return artist, self._DMApple(obs), client
+
+    def test_verifie_ecrit_le_bon_date_le_faux(self):
+        artist, dm, client = self._cas()
+        rt = SimpleNamespace(data_manager=dm)
+        assert identite.verifier_apple_music(rt, artist, client=client) == (1, 1)
+        assert dm.ecrits == {1: "11", 2: None}
+        assert dm.durees == {1: (311, "apple_music")}
+        # Déjà vérifié : pas redemandé, sauf à forcer.
+        assert client.demandes == {"11", "22"}
+        identite.verifier_apple_music(rt, artist, client=client, force=True)
+        assert "33" in client.demandes

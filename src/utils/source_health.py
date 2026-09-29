@@ -496,6 +496,15 @@ SOURCES: list[SourceSpec] = [
         families=(Family.CREDITS,),
     ),
     SourceSpec(
+        key="itunes",
+        label="iTunes lookup (identité Apple Music, durée)",
+        # Josman « AhGars! » : un identifiant qui répond dans la boutique FR.
+        fast_url="https://itunes.apple.com/lookup?id=1611396832&country=fr",
+        fast_marker="trackTimeMillis",
+        notes="aucune clé ; ~20 appels/min ; 200 ID par requête",
+        families=(Family.IDENTITE,),
+    ),
+    SourceSpec(
         key="deezer",
         label="Deezer (durée canonique)",
         fast_url=f"https://api.deezer.com/track/{_DEEZER_TRACK_ID}",

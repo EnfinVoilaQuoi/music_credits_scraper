@@ -51,6 +51,11 @@ _COUCHES = (
         "Les ID Spotify que liste sa page Kworb (même gate d'identité) ; avant le scraper.",
     ),
     (
+        "apple",
+        "Apple Music : ID proposés par Genius 🍎",
+        "Vérifiés par iTunes (artiste + titre) ; un ID vérifié apporte sa durée.",
+    ),
+    (
         "nature_disques",
         "Nature des disques (EP / album / single) 💿",
         "Catalogue Deezer d'abord ; une saisie manuelle n'est jamais écrasée.",
@@ -64,7 +69,7 @@ def start_identite(app):
         return
     dialog = ctk.CTkToplevel(app.root)
     dialog.title("Identité — relier les fiches aux plateformes")
-    dialog.geometry("520x560")
+    dialog.geometry("520x610")
     dialog.transient(app.root)
     dialog.grab_set()
 

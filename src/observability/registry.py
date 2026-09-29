@@ -117,6 +117,7 @@ DOMAIN_TO_KEY: dict[str, str] = {
     "apic-desktop.musixmatch.com": "musixmatch",
     "snepmusique.com": "snep",
     "musicbrainz.org": "musicbrainz",
+    "itunes.apple.com": "itunes",
     # The BACKPACKERZ : API REST WordPress ouverte (photos, usage autorisé avec
     # citation). Le site ET son CDN d'uploads sont le même hôte.
     "www.thebackpackerz.com": "backpackerz",

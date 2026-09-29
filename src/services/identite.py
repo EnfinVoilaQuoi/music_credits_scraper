@@ -42,7 +42,7 @@ logger = get_logger(__name__)
 #: Sources de durée INDÉPENDANTES de l'ID Spotify (`DISCOGRAPHY_PRIORITIES`
 #: hors spotify_web et reccobeats, qui lisent la durée PAR l'ID).
 DUREES_INDEPENDANTES = frozenset(
-    {"deezer", "ytmusic", "youtube", "songbpm", "youtube_video", "manual"}
+    {"deezer", "ytmusic", "youtube", "apple_music", "songbpm", "youtube_video", "manual"}
 )
 
 
@@ -56,6 +56,7 @@ class OptionsIdentite:
     par_morceau: bool = True  # 3a + 3b
     spotify_artiste: bool = True  # 1c
     kworb: bool = True  # 2c
+    apple: bool = True  # 3c
     nature_disques: bool = True  # 2b
     force: bool = False
     deezer_id: int | None = None
@@ -99,6 +100,9 @@ class BilanIdentite(Bilan):
     spotify_sans_duree: int = 0
     kworb_ids: int = 0
     kworb_editions: int = 0
+    #: 3c : ID Apple Music proposés par Genius, vérifiés / démentis par iTunes.
+    apple_ids: int = 0
+    apple_dementis: int = 0
     types_albums: int = 0
     albums_ignores: list[str] = field(default_factory=list)
     avant: dict[str, int] = field(default_factory=dict)
@@ -350,6 +354,20 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
             hits_albums = {t.id: t._deezer_album_id for t in tracks if t._deezer_album_id}
         _recharger(runtime, artist)
 
+    # 3c — Apple Music (lot B6) : les ID que Genius PROPOSE, vérifiés par
+    # iTunes ; AVANT 3b, leur durée est indépendante de l'ID Spotify.
+    if options.apple and not arret("Apple Music"):
+        hooks.progress(0, 1, "ID proposés par Genius", "Apple Music")
+        try:
+            bilan.apple_ids, bilan.apple_dementis = verifier_apple_music(
+                runtime, artist, force=options.force
+            )
+        except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
+            logger.exception("Identité (Apple Music) : échec")
+            bilan.artistes["apple_music"] = f"panne — {e}"
+            panne("Apple Music", str(e))
+        _recharger(runtime, artist)
+
     # 1c — artiste Spotify (avant Kworb, qui en a besoin pour trouver la page)
     if options.spotify_artiste and not arret("artiste Spotify"):
         bilan.artistes["spotify"] = _artiste_spotify(runtime, artist, options, hooks)
@@ -401,6 +419,46 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     _recharger(runtime, artist)
     bilan.apres = compter_ids(artist.tracks, dm.get_albums_for_artist(artist.id))
     return bilan
+
+
+def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client=None):
+    """3c — `(retenus, démentis)`. Les `apple_music_id` que Genius a DÉCLARÉS
+    passent le contrôle d'identité (`apple_identity.fiche_concorde`) sur la
+    fiche iTunes, lue par lots de 150 ; seul un ID qui concorde est écrit, avec
+    sa durée (`apple_music`). Chaque RÉPONSE date la vérification — un ID absent
+    de toutes les boutiques ou démenti n'est plus redemandé (sauf `force`) ; une
+    panne du lookup lève et ne date rien."""
+    from src.api.itunes_api import ITunesAPI
+    from src.utils.apple_identity import CHAMP_APPLE_PROPOSE, SOURCE_APPLE, duree_de, fiche_concorde
+
+    dm = runtime.data_manager
+    obs = dm.get_artist_observations(artist.id)
+    proposes: dict[int, str] = {}
+    for t in artist.tracks:
+        if t.apple_music_id or (t.apple_music_checked_at and not force):
+            continue
+        for o in obs.get(t.id, []):
+            if o.field == CHAMP_APPLE_PROPOSE and o.value:
+                proposes[t.id] = str(o.value)
+    if not proposes:
+        return 0, 0
+    fiches = (client or ITunesAPI()).lookup(set(proposes.values()))
+    par_id = {t.id: t for t in artist.tracks}
+    retenus = dementis = 0
+    for tid, am in proposes.items():
+        track = par_id[tid]
+        ok, motif = fiche_concorde(track, fiches.get(am))
+        if ok:
+            retenus += 1
+            dm.record_apple_music(tid, am)
+            duree = duree_de(fiches[am])
+            if duree:
+                dm.record_duration_observation(tid, duree, SOURCE_APPLE)
+        else:
+            dementis += 1
+            dm.record_apple_music(tid, None)
+            logger.info(f"Apple Music {am} refusé pour « {track.title} » : {motif}")
+    return retenus, dementis
 
 
 def _artiste_spotify(runtime, artist, options: OptionsIdentite, hooks: Hooks) -> str:
@@ -494,6 +552,11 @@ def resume(bilan: BilanIdentite, artist: Artist) -> str:
             )
         if e.ecarts:
             lignes.append(f"🎧 Deezer : {len(e.ecarts)} écart(s) → bouton « À trancher »")
+    if bilan.apple_ids or bilan.apple_dementis:
+        lignes.append(
+            f"🍎 Apple Music : {bilan.apple_ids} ID vérifié(s), "
+            f"{bilan.apple_dementis} refusé(s) ou absent(s) de la boutique"
+        )
     if bilan.kworb_ids or bilan.kworb_editions:
         lignes.append(
             f"🔗 Kworb : {bilan.kworb_ids} ID Spotify posé(s), "

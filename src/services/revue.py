@@ -228,7 +228,12 @@ def id_spotify_propose(track, ctx):
 #: Topic et la piste YTM sont le fichier du distributeur (97-99 % à ≤ 2 s) ;
 #: Deezer est une autre plateforme, dont les éditions diffèrent de quelques
 #: secondes (mesuré 2026-09-29 : un écart de 6 s sur 400 fiches, une édition).
-_DUREES_TEMOINS = ((SOURCE_AUDIO, ECART_DUREE_S), ("ytmusic", ECART_DUREE_S), ("deezer", 10))
+_DUREES_TEMOINS = (
+    (SOURCE_AUDIO, ECART_DUREE_S),
+    ("ytmusic", ECART_DUREE_S),
+    ("apple_music", ECART_DUREE_S),
+    ("deezer", 10),
+)
 
 
 def duree_spotify_dementie(track, _ctx=None):

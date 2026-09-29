@@ -44,6 +44,8 @@ COLONNES_PARTAGEES = (
     "deezer_id",
     "deezer_checked_at",
     "deezer_url",
+    "apple_music_id",
+    "apple_music_checked_at",
     "explicit_lyrics",
     "genius_url",
     "spotify_url",

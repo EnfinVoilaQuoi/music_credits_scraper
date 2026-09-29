@@ -20,6 +20,7 @@ from src.models import Artist, ReleaseObservation, Track
 from src.models.track import _PRODUCER_ROLES
 from src.observability import source_usage
 from src.utils import credits_genius_api
+from src.utils.apple_identity import CHAMP_APPLE_PROPOSE
 from src.utils.credit_roles import map_role
 from src.utils.inedits import porte_le_marqueur, titre_sans_marqueur
 from src.utils.logger import get_logger, log_api
@@ -532,6 +533,7 @@ class GeniusAPI:
                         # Crédits PROVISOIRES de la fiche déjà lue (aucun appel de
                         # plus) : le scrape les remplacera.
                         credits_genius_api.poser(track, detail["song"])
+                        self.declarer_apple_music(track, detail["song"])
                     if porte_le_marqueur(titre_brut):
                         track.unreleased = True
                     if track.release_date is not None:
@@ -852,6 +854,8 @@ class GeniusAPI:
             )
             changed = True
 
+        if self.declarer_apple_music(track, song):
+            changed = True
         sid, yt = self._extract_media(song)
         # Le lien media de Genius n'est pas plus sûr qu'un autre : 3,1 % du stock
         # historique — largement du `genius_media` — désigne un artiste étranger
@@ -1137,6 +1141,17 @@ class GeniusAPI:
         if not image_url or "default_avatar" in image_url:
             return None
         return image_url
+
+    @staticmethod
+    def declarer_apple_music(track: "Track", song: dict) -> bool:
+        """L'`apple_music_id` de la fiche est DÉCLARÉ, jamais posé : Genius en
+        porte des faux (« Gold Digger » de Kanye → Beau Monga) ; l'étape
+        Identité le vérifie par iTunes (lot B6, 2026-09-29)."""
+        am = song.get("apple_music_id") if isinstance(song, dict) else None
+        if not am or track.apple_music_id:
+            return False
+        track.observations.append(Observation(CHAMP_APPLE_PROPOSE, str(am), "genius"))
+        return True
 
     @staticmethod
     def _extract_media(song: dict):

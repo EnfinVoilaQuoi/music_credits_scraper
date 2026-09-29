@@ -459,6 +459,66 @@ class ReccoBeatsIntegratedClient:
             return None
 
     @staticmethod
+    def spotify_id_du_href(href: str | None) -> str | None:
+        """`https://open.spotify.com/track/<id>` → `<id>`."""
+        if not href or "/track/" not in href:
+            return None
+        return href.rsplit("/track/", 1)[1].split("?")[0].strip() or None
+
+    def spotify_ids_par_isrc(self, isrcs) -> dict[str, list[str]]:
+        """`{isrc: [ID Spotify, le plus populaire d'abord]}` (lot B2, 2026-09-29).
+
+        La voie ISRC de l'enrichissement lisait le `href` Spotify de chaque
+        pressing et le JETAIT : mesuré, sur 294 fiches à ISRC sans ID Spotify,
+        94 en avaient un dans le CACHE (93 passent le gate d'identité). Le cache
+        répond d'abord, sans réseau ; le reste part par lots de 40 ISRC
+        (`/track?ids=`). Un lot sans réponse est COMPTÉ (`self.lots_en_panne`)
+        et n'emporte pas les autres — ce que le cache sait reste utilisable ;
+        un ISRC absent d'un lot qui a répondu est une vraie absence. N'écrit
+        rien : l'appelant passe chaque ID par le gate d'identité."""
+        from src.observability.issues import SansReponse
+
+        voulus = list(dict.fromkeys(i.upper() for i in isrcs if i))
+        out: dict[str, list[str]] = {}
+        restants = []
+        self.lots_en_panne = 0
+        for isrc in voulus:
+            e = self.cache.get(f"isrc::{isrc}")
+            sid = self.spotify_id_du_href((e or {}).get("href"))
+            if sid:
+                out[isrc] = [sid]
+            else:
+                restants.append(isrc)
+        for i in range(0, len(restants), 40):
+            lot = restants[i : i + 40]
+            try:
+                contenu = self._lot_isrc(lot, attendre=bool(i))
+            except (requests.RequestException, ValueError, SansReponse) as e:
+                self.lots_en_panne += 1
+                logger.warning(f"ReccoBeats : lot de {len(lot)} ISRC sans réponse ({e})")
+                continue
+            for e in sorted(contenu, key=lambda t: t.get("popularity", 0), reverse=True):
+                sid = self.spotify_id_du_href(e.get("href"))
+                cle = (e.get("isrc") or "").upper()
+                if sid and cle in lot and sid not in out.setdefault(cle, []):
+                    out[cle].append(sid)
+        return out
+
+    def _lot_isrc(self, lot: list[str], *, attendre: bool) -> list[dict]:
+        """UN lot `/track?ids=` sous son observation ; lève sur panne."""
+        with source_usage.observe(_SOURCE, label=f"isrc ×{len(lot)}") as obs:
+            time.sleep(1.0 if attendre else 0)  # cadence prudente entre deux lots
+            url = f"{self.recco_base_url}/track"
+            response = self.recco_session.get(url, params={"ids": ",".join(lot)}, timeout=30)
+            source_usage.record_response(url, response.status_code, headers=response.headers)
+            response.raise_for_status()
+            contenu = response.json().get("content", [])
+            if not contenu:
+                obs.absent(f"aucun des {len(lot)} ISRC connu de ReccoBeats")
+        source_usage.exiger_reponse(obs)
+        return contenu
+
+    @staticmethod
     def _best_isrc_hit(content: list) -> dict | None:
         """Entrée la plus populaire parmi les pressings d'un ISRC (commun sync/async)."""
         if not content:

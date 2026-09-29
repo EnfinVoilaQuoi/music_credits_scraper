@@ -596,3 +596,31 @@ class TestAppleMusic:
         assert client.demandes == {"11", "22"}
         identite.verifier_apple_music(rt, artist, client=client, force=True)
         assert "33" in client.demandes
+
+
+class TestIsrcVersSpotify:
+    """3d (lot B2) : l'ISRC désigne l'enregistrement, ReccoBeats ses pressings."""
+
+    def test_premier_id_qui_passe_le_gate(self, monkeypatch):
+        from src.models import Artist
+
+        artist = Artist(name="Isha")
+        a, b, deja = (Track(title=t, artist=artist) for t in ("Durag", "Idole", "Frr"))
+        a.id, b.id, deja.id = 1, 2, 3
+        a.isrc, b.isrc, deja.isrc = "fr1", "FR2", "FR3"
+        deja.spotify_id = "X"
+        artist.tracks = [a, b, deja]
+        ecrits = []
+        dm = SimpleNamespace(
+            update_track_spotify_id=lambda tid, sid, source: ecrits.append((tid, sid, source))
+            or True
+        )
+        client = SimpleNamespace(
+            spotify_ids_par_isrc=lambda isrcs: {"FR1": ["faux", "bon"], "FR2": ["autre"]}
+        )
+        monkeypatch.setattr(
+            "src.utils.spotify_identity.valider_identite",
+            lambda t, sid, lire_identite=None: sid == "bon",
+        )
+        n = identite.relier_par_isrc(SimpleNamespace(data_manager=dm), artist, client=client)
+        assert n == 1 and ecrits == [(1, "bon", "reccobeats_isrc")]

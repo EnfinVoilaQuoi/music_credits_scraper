@@ -57,6 +57,7 @@ class OptionsIdentite:
     spotify_artiste: bool = True  # 1c
     kworb: bool = True  # 2c
     apple: bool = True  # 3c
+    isrc: bool = True  # 3d
     nature_disques: bool = True  # 2b
     force: bool = False
     deezer_id: int | None = None
@@ -103,6 +104,8 @@ class BilanIdentite(Bilan):
     #: 3c : ID Apple Music proposés par Genius, vérifiés / démentis par iTunes.
     apple_ids: int = 0
     apple_dementis: int = 0
+    #: 3d : ID Spotify tirés de l'ISRC (ReccoBeats), gate d'identité passé.
+    isrc_spotify: int = 0
     types_albums: int = 0
     albums_ignores: list[str] = field(default_factory=list)
     avant: dict[str, int] = field(default_factory=dict)
@@ -368,6 +371,19 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
             panne("Apple Music", str(e))
         _recharger(runtime, artist)
 
+    # 3d — ISRC → Spotify (lot B2) : l'ISRC (Deezer, vérifié) désigne
+    # l'ENREGISTREMENT ; ReccoBeats en connaît les pressings Spotify. Avant le
+    # scraper, qui ne cherchera plus que le reste.
+    if options.isrc and not arret("ISRC → Spotify"):
+        hooks.progress(0, 1, "ID Spotify par l'ISRC", "ReccoBeats")
+        try:
+            bilan.isrc_spotify = relier_par_isrc(runtime, artist)
+        except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
+            logger.exception("Identité (ISRC → Spotify) : échec")
+            bilan.artistes["isrc"] = f"panne — {e}"
+            panne("ISRC → Spotify", str(e))
+        _recharger(runtime, artist)
+
     # 1c — artiste Spotify (avant Kworb, qui en a besoin pour trouver la page)
     if options.spotify_artiste and not arret("artiste Spotify"):
         bilan.artistes["spotify"] = _artiste_spotify(runtime, artist, options, hooks)
@@ -459,6 +475,41 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
             dm.record_apple_music(tid, None)
             logger.info(f"Apple Music {am} refusé pour « {track.title} » : {motif}")
     return retenus, dementis
+
+
+def relier_par_isrc(runtime, artist: Artist, *, client=None, lire_identite=None) -> int:
+    """3d — les fiches à ISRC sans ID Spotify reçoivent l'ID que ReccoBeats
+    associe à cet ISRC, s'il passe le gate d'identité (artiste, durée, titre).
+    Mesuré le 2026-09-29 : 294 fiches concernées, 94 résolues par le seul cache
+    ReccoBeats, 93 validées. Rend le nombre d'ID posés."""
+    from src.utils.spotify_identity import valider_identite
+
+    fiches = [t for t in artist.tracks if t.isrc and not t.spotify_id]
+    if not fiches:
+        return 0
+    if client is None:
+        from src.api.reccobeats_api import ReccoBeatsIntegratedClient
+
+        client = ReccoBeatsIntegratedClient()
+    par_isrc = client.spotify_ids_par_isrc({t.isrc for t in fiches})
+    poses = 0
+    for t in fiches:
+        for sid in par_isrc.get(t.isrc.upper(), []):
+            if valider_identite(t, sid, lire_identite=lire_identite):
+                if runtime.data_manager.update_track_spotify_id(
+                    t.id, sid, source="reccobeats_isrc"
+                ):
+                    t.spotify_id = sid
+                    poses += 1
+                break
+    logger.info(f"🔑 ISRC → Spotify : {poses} ID posé(s) sur {len(fiches)} fiche(s) à ISRC")
+    if getattr(client, "lots_en_panne", 0):
+        # Ce que le cache savait est posé ; le reste attend une réponse.
+        raise RuntimeError(
+            f"ReccoBeats : {client.lots_en_panne} lot(s) d'ISRC sans réponse "
+            f"({poses} ID posé(s) depuis le cache)"
+        )
+    return poses
 
 
 def _artiste_spotify(runtime, artist, options: OptionsIdentite, hooks: Hooks) -> str:
@@ -557,6 +608,8 @@ def resume(bilan: BilanIdentite, artist: Artist) -> str:
             f"🍎 Apple Music : {bilan.apple_ids} ID vérifié(s), "
             f"{bilan.apple_dementis} refusé(s) ou absent(s) de la boutique"
         )
+    if bilan.isrc_spotify:
+        lignes.append(f"🔑 ISRC → Spotify : {bilan.isrc_spotify} ID posé(s) (ReccoBeats)")
     if bilan.kworb_ids or bilan.kworb_editions:
         lignes.append(
             f"🔗 Kworb : {bilan.kworb_ids} ID Spotify posé(s), "

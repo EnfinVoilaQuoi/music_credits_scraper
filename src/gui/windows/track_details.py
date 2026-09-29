@@ -30,6 +30,7 @@ _LIBELLES_SOURCE_SPOTIFY = {
     "scraper": "scrape Spotify",
     "songbpm": "SongBPM",
     "kworb": "Kworb",
+    "reccobeats_isrc": "ISRC (ReccoBeats)",
     "manual": "saisi manuellement ✎",
     "legacy": "inconnue (avant e23)",
 }

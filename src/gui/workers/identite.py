@@ -56,6 +56,11 @@ _COUCHES = (
         "Vérifiés par iTunes (artiste + titre) ; un ID vérifié apporte sa durée.",
     ),
     (
+        "isrc",
+        "ISRC → Spotify (ReccoBeats) 🔑",
+        "L'ISRC désigne l'enregistrement ; l'ID passe le même gate que les autres.",
+    ),
+    (
         "nature_disques",
         "Nature des disques (EP / album / single) 💿",
         "Catalogue Deezer d'abord ; une saisie manuelle n'est jamais écrasée.",
@@ -69,7 +74,7 @@ def start_identite(app):
         return
     dialog = ctk.CTkToplevel(app.root)
     dialog.title("Identité — relier les fiches aux plateformes")
-    dialog.geometry("520x610")
+    dialog.geometry("520x660")
     dialog.transient(app.root)
     dialog.grab_set()
 

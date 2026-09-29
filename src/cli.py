@@ -118,6 +118,7 @@ def _identite_args(p: argparse.ArgumentParser, *, etape_seule: bool) -> None:
     _bool_flags(p, "spotify-artiste", True, "ID Spotify de l'artiste (vote)")
     _bool_flags(p, "kworb-ids", True, "ID Spotify lus sur le catalogue Kworb de l'artiste")
     _bool_flags(p, "apple", True, "ID Apple Music proposés par Genius, vérifiés par iTunes")
+    _bool_flags(p, "isrc", True, "ID Spotify tirés de l'ISRC (ReccoBeats), gate d'identité")
     _bool_flags(p, "nature-disques", True, "EP / album / single (catalogue Deezer)")
     p.add_argument(
         "--force" if etape_seule else "--force-identite",
@@ -280,6 +281,7 @@ def options_identite(a: argparse.Namespace) -> identite.OptionsIdentite:
         spotify_artiste=a.spotify_artiste,
         kworb=a.kworb_ids,
         apple=a.apple,
+        isrc=a.isrc,
         nature_disques=a.nature_disques,
         force=a.force_identite,
         deezer_id=a.deezer_id,

@@ -461,3 +461,36 @@ def test_fermeture_ferme_son_client():
     provider._resource.get()
     provider.close()
     assert getattr(client, "ferme", False) is True
+
+
+def test_spotify_ids_par_isrc_le_cache_d_abord(monkeypatch):
+    """Lot B2 : la voie ISRC gardait le `href` Spotify en cache sans s'en servir."""
+    from src.api.reccobeats_api import ReccoBeatsIntegratedClient
+
+    client = ReccoBeatsIntegratedClient.__new__(ReccoBeatsIntegratedClient)
+    client.cache = {"isrc::FR1": {"href": "https://open.spotify.com/track/AAA"}}
+    client.recco_base_url = "https://api.reccobeats.com/v1"
+    appels = []
+
+    class _Resp:
+        status_code, headers = 200, {}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "content": [
+                    {"isrc": "FR2", "href": "https://open.spotify.com/track/BBB", "popularity": 1},
+                    {"isrc": "FR2", "href": "https://open.spotify.com/track/CCC", "popularity": 9},
+                ]
+            }
+
+    client.recco_session = type(
+        "S", (), {"get": lambda self, url, params, timeout: appels.append(params) or _Resp()}
+    )()
+    assert client.spotify_ids_par_isrc(["fr1", "FR2", "FR3"]) == {
+        "FR1": ["AAA"],
+        "FR2": ["CCC", "BBB"],
+    }
+    assert appels == [{"ids": "FR2,FR3"}]

@@ -901,9 +901,14 @@ def video_nomme(track, v) -> bool:
     # (« Pursuit of Happiness (Nightmare) » : le clip officiel ne la porte pas) —
     # sauf sur un titre générique, qu'elle seule distingue (« Intro (A2) »).
     nu = _mots(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
-    if titre_generique(nu):
-        nu = socle
     titre = _mots(v.title)
+    if titre_generique(nu):
+        # … mais la vidéo que la page Genius du morceau désigne elle-même, et
+        # qui porte le mot générique (« Intro (0.9) » → « Intro », « Outro
+        # (A2) » → « Booba - Outro (Son Officiel) »), est bien la sienne.
+        if v.source == "genius_media" and set(nu.split()) <= set(titre.split()):
+            return True
+        nu = socle
     variantes = [socle, *_parties_de_medley(track)]
     if _FREESTYLE_RE.search(track.title or ""):
         # « Rap contenders freestyle » est publié « Rap Contenders » : le mot

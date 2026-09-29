@@ -289,6 +289,11 @@ class TestVideos:
     def test_la_parenthese_d_un_titre_generique_compte(self):
         t = _t("Intro (A2)", videos=[self._v("Booba - Intro")])
         assert revue.video_etrangere(t) is not None
+        # … sauf quand c'est la vidéo que la page Genius du morceau désigne.
+        v = TrackVideo(video_id="vid", title="Booba - Intro", views=10, source="genius_media")
+        assert revue.video_etrangere(_t("Intro (A2)", videos=[v])) is None
+        v = TrackVideo(video_id="vid", title="Booba - Garcimore", source="genius_media")
+        assert revue.video_etrangere(_t("Intro (A2)", videos=[v])) is not None
 
     def test_vues_youtube_anormales(self):
         t = _t("Cruella")

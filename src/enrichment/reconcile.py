@@ -144,6 +144,9 @@ DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
         "youtube",
         "apple_music",
         "songbpm",
+        # Durée de la piste sur le disque Discogs, saisie par des contributeurs
+        # (35/36 à ±5 s de Deezer, 2026-09-29) : après SongBPM.
+        "discogs",
         "spotify_web",
         "youtube_video",
         "reccobeats",

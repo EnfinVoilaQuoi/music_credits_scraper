@@ -9,6 +9,7 @@ import discogs_client
 import requests
 from discogs_client.exceptions import DiscogsAPIError, HTTPError
 
+from src.enrichment.observation import Observation
 from src.models import Artist, ArtistRelation, Credit, CreditRole, Track
 from src.observability import source_usage
 from src.observability.issues import IssueKind
@@ -16,6 +17,7 @@ from src.utils.discogs_identity import nom_sans_suffixe, release_concorde, titre
 from src.utils.discogs_positions import concerne_la_piste
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import normalize_name
+from src.utils.track_mapper import _clean_duration
 
 __all__ = ["DiscogsClient", "nom_sans_suffixe", "release_concorde", "token_discogs"]
 
@@ -780,6 +782,16 @@ class DiscogsClient:
                 track.discogs_id = track_data["discogs_id"]
                 logger.info(f"💿 Discogs ID ajouté: {track.discogs_id}")
                 updated = True
+
+            # Durée de la piste sur le disque (lot B5, 2026-09-29) : déjà lue,
+            # elle était jetée. Mesurée à ±5 s de Deezer sur 35 pistes sur 36 —
+            # saisie par des contributeurs, elle est DÉCLARÉE et arbitrée en bas
+            # de l'ordre (`DISCOGRAPHY_PRIORITIES`), jamais posée en colonne ici.
+            duree = _clean_duration(track_data.get("duration"))
+            if duree:
+                track.observations.append(Observation("duration", duree, "discogs"))
+                if (track.durations_observees or {}).get("discogs") != duree:
+                    updated = True
 
             # Genre (si pas déjà présent)
             if track_data.get("genres") and (force_update or not track.genre):

@@ -380,6 +380,24 @@ class TestEnrichissementDuTrack:
 
         assert client.enrich_track_data(track) == "not_needed"
 
+    def test_la_duree_de_la_piste_est_declaree(self, client, monkeypatch):
+        """Lot B5 : lue avec le disque, elle était jetée — déclarée, jamais posée
+        en colonne (arbitrée en bas de l'ordre)."""
+        self._stub(client, monkeypatch, _donnees(duration="3:31"))
+        track = _track(discogs_id=42, genre="Rap")
+        assert client.enrich_track_data(track) is True
+        assert [(o.field, o.value, o.source) for o in track.observations] == [
+            ("duration", 211, "discogs")
+        ]
+        assert track.duration is None
+        # Déjà connue à l'identique : rien de neuf.
+        track.observations.clear()
+        track.durations_observees = {"discogs": 211}
+        assert client.enrich_track_data(track) == "not_needed"
+        # Durée illisible ou absente : rien.
+        self._stub(client, monkeypatch, _donnees(duration=""))
+        assert client.enrich_track_data(_track(discogs_id=42, genre="Rap")) == "not_needed"
+
     def test_discogs_id_pose(self, client, monkeypatch):
         self._stub(client, monkeypatch, _donnees(genres=None))
         track = _track()

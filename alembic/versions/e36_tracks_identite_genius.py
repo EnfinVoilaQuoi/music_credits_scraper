@@ -39,8 +39,8 @@ from alembic import op
 
 revision: str = "e36_tracks_identite_genius"
 down_revision: str | Sequence[str] | None = "e35_relations_suffixe_nature"
-branch_labels = None
-depends_on = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 _CONVENTION = {"uq": "uq_%(table_name)s_%(column_0_name)s"}
 

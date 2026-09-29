@@ -22,8 +22,8 @@ from alembic import op
 
 revision: str = "e42_discogs_id_source"
 down_revision: str | Sequence[str] | None = "e41_deezer_checked_at"
-branch_labels = None
-depends_on = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

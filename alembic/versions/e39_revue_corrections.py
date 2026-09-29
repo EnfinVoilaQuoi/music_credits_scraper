@@ -18,8 +18,8 @@ from alembic import op
 
 revision: str = "e39_revue_corrections"
 down_revision: str | Sequence[str] | None = "e38_revue"
-branch_labels = None
-depends_on = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

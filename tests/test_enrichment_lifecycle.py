@@ -6,8 +6,6 @@ empruntée (scraper Spotify utilisé par ReccoBeats) n'est jamais fermée par lu
 close() est idempotent et ré-ouvrable (recréation au run suivant).
 """
 
-import pytest
-
 from src.enrichment.base import LazyResource
 from src.enrichment.providers.reccobeats import ReccoBeatsProvider
 from src.enrichment.providers.songbpm import SongBpmProvider
@@ -224,10 +222,28 @@ def test_pas_de_del_non_deterministe():
     assert not hasattr(SpotifyIDScraper, "__del__")
 
 
-def test_bpmfinder_scraper_expose_pour_la_gui():
+def test_bpmfinder_scraper_expose_pour_la_gui(monkeypatch):
     # manual_entry (✏️) accède à data_enricher.bpmfinder_scraper : la propriété
-    # de compat délègue au provider (None si source non configurée).
+    # de compat délègue au provider (None si source non configurée). Les DEUX
+    # branches, indépendamment de la machine — le test se sautait là où BPM
+    # Finder est configuré, et la branche « configuré » n'était jamais testée.
+    from src.scrapers import bpmfinder_scraper as mod
+
+    monkeypatch.setattr(mod.BPMFinderScraper, "credentials_or_session_available", lambda: False)
     enricher = DataEnricher()
-    if enricher.apis_available["bpmfinder"]:
-        pytest.skip("BPM Finder configuré sur cette machine (session/credentials)")
+    assert not enricher.apis_available["bpmfinder"]
     assert enricher.bpmfinder_scraper is None
+
+    class _Faux:
+        def __init__(self, headless):
+            self.headless = headless
+
+        @staticmethod
+        def credentials_or_session_available():
+            return True
+
+    monkeypatch.setattr(mod, "BPMFinderScraper", _Faux)
+    enricher = DataEnricher()
+    assert enricher.apis_available["bpmfinder"]
+    scraper = enricher.bpmfinder_scraper
+    assert isinstance(scraper, _Faux) and scraper.headless

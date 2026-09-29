@@ -644,6 +644,17 @@ def _chercher_lrc_autre(track, ctx):
     return autre, meilleur, propre
 
 
+def _part_du_lrc(autre, track, ctx) -> float:
+    """Part des paires du LRC que les paroles de l'autre fiche EXPLIQUENT. La
+    part commune retient le meilleur des deux sens : un EXTRAIT (« Manque de
+    sommeil » de barely afk, huit lignes du refrain de *way back* samplées)
+    y fait 100 % contre le LRC entier du morceau (2026-09-29 : six corrections
+    fautives sur 25, toutes sous 45 %)."""
+    paires = bigrammes(track.lyrics.synced)
+    les_siens = _references_bigrammes(ctx)[autre.id][1]
+    return len(les_siens & paires) / len(paires) if paires else 0.0
+
+
 def _lrc_formel(track, ctx, trouve) -> bool:
     """Le LRC est-il FORMELLEMENT celui de l'autre fiche ? Oui sous 40 % de
     paires avec ses propres paroles ; oui aussi, au-delà, quand la fiche est une
@@ -657,6 +668,7 @@ def _lrc_formel(track, ctx, trouve) -> bool:
     # fusion : elles restent au détecteur `doublon_lrc`.
     return (
         meilleur >= AUTRE_MIN_NET
+        and _part_du_lrc(autre, track, ctx) >= AUTRE_MIN_NET
         and meilleur - propre >= ECART_MIN_NET
         and propre < PROPRE_MAX_NET
         and not _versions_soeurs(track, autre)
@@ -892,13 +904,25 @@ def video_nomme(track, v) -> bool:
     if titre_generique(nu):
         nu = socle
     titre = _mots(v.title)
+    variantes = [socle, *_parties_de_medley(track)]
+    if _FREESTYLE_RE.search(track.title or ""):
+        # « Rap contenders freestyle » est publié « Rap Contenders » : le mot
+        # « freestyle » manque souvent à la vidéo, le reste la nomme.
+        sans = _mots(_FREESTYLE_RE.sub(" ", parse_variant(track.title).socle))
+        if sans:
+            variantes.append(sans)
     return (
-        _video_couvre(socle, titre)
+        any(_video_couvre(x, titre) or _mots_a_une_lettre(x, titre) for x in variantes)
         or _video_couvre(nu, titre)
         or any(_video_couvre(alt, titre) for alt in _titres_alternatifs(track))
-        or _mots_a_une_lettre(socle, titre)
         or _freestyle_d_emission(track, v.title)
     )
+
+
+def _parties_de_medley(track) -> list[str]:
+    """« Solitaire / Leçon de vie » : la vidéo d'un medley en nomme une partie."""
+    parties = [_mots(p) for p in (track.title or "").split("/")]
+    return [p for p in parties if p] if len(parties) > 1 else []
 
 
 def _proprietaires_des_videos(ctx) -> dict[str, list]:

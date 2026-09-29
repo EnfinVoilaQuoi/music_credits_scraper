@@ -176,6 +176,20 @@ class TestLrcAutreFiche:
         soeur = _fiche_paroles("Ghost Town", 4, ORIGINAL, genius_id=7)
         assert revue.lrc_d_une_autre_fiche(d, _ctx(d, heritee, soeur)) is None
 
+    def test_un_extrait_contenu_dans_le_lrc_n_en_est_pas_l_auteur(self):
+        """« Manque de sommeil » (barely afk) sample huit lignes du refrain de
+        *way back* : le LRC entier de *way back (Live)* y fait 100 % dans le
+        sens de l'extrait, mais l'extrait n'en explique qu'une petite part."""
+        refrain = " ".join(f"ligne{i} mot{i}" for i in range(22))
+        live_propre = refrain + " " + " ".join(f"live{i} cri{i}" for i in range(16))
+        lrc = refrain + " " + " ".join(f"studio{i} vers{i}" for i in range(60))
+        extrait = _fiche_paroles("Manque de sommeil", 1, refrain)
+        live = _fiche_paroles("way back (Live)", 2, live_propre, lrc=lrc)
+        ctx = _ctx(extrait, live)
+        trouve = revue._lrc_autre_candidat(live, ctx)
+        assert trouve is not None and trouve[0] is extrait
+        assert revue.lrc_d_une_autre_fiche(live, ctx) is None
+
     def test_detecteur_formel(self):
         assert "lrc_autre_fiche" in revue.CODES_FORMELS
         assert "certif_autre_titre" in revue.CODES_FORMELS
@@ -246,6 +260,19 @@ class TestVideos:
             ("Vu D'Ici", "Vue d'ici (feat. Diam's, Eloquence)"),
         ):
             assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None, titre
+
+    def test_freestyle_sans_le_mot_et_parties_de_medley(self):
+        """2026-09-29 : 18 faux positifs de plus, relus un à un."""
+        for titre, video in (
+            ("A Million and One Freestyle", "Kanye West - A Million and One [FULL]"),
+            ("Freestyle chez Lapwass", "LUCIO BUKOwSKI CHEZ OSTER LAPWASS"),
+            ("Je perds mon temps/Freestyle Quai 54", "Booba - J'perds mon temps"),
+            ("Space X / Alien", "Kanye West - Alien (Audio)"),
+        ):
+            assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None, titre
+        # Sans le mot « freestyle », le reste doit encore nommer la vidéo.
+        t = _t("A Million and One Freestyle", videos=[self._v("Kanye West - Stronger")])
+        assert revue.video_etrangere(t) is not None
 
     def test_un_nom_de_session_n_est_pas_un_titre_alternatif(self):
         """« Tiny Desk Home » nomme une session : la vidéo du Tiny Desk d'un

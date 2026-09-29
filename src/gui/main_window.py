@@ -83,6 +83,18 @@ class MainWindow:
         # Gerer la fermeture de l'application
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
+        # Ollama : lancé s'il ne tourne pas, signalé s'il reste absent
+        # (2026-09-29 — un run entier avait tourné sans, seul le log le disait).
+        start_worker(self._verifier_ollama, name="ollama-demarrage")
+
+    def _verifier_ollama(self):
+        from src.utils.ollama_demarrage import assurer_ollama
+
+        etat = assurer_ollama()
+        if not etat.pret:
+            logger.warning(f"🦙 {etat.message}")
+            self.root.after(0, lambda: messagebox.showwarning("Ollama", etat.message))
+
     def _create_widgets(self):
         """Crée tous les widgets de l'interface - VERSION RÉORGANISÉE"""
         # Frame principale

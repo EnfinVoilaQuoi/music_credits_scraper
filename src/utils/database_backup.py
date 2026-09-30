@@ -3,7 +3,6 @@ Module de backup automatique de la base de données
 Crée des backups avant les opérations critiques
 """
 
-import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -233,7 +232,9 @@ def get_backup_manager() -> DatabaseBackupManager:
 
 if __name__ == "__main__":
     # Test du système de backup
-    logging.basicConfig(level=logging.INFO)
+    from src.utils.logger import configurer_journaux
+
+    configurer_journaux(console="tout")
 
     manager = DatabaseBackupManager()
 

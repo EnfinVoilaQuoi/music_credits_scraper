@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.services.revue import CODES_FORMELS, Cas, Revue, analyser
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -108,6 +108,10 @@ _CORRECTEURS = {
 }
 
 
+@etape_de_flux(
+    "Corrections automatiques",
+    verdict=lambda r: (not r.echecs, f"{len(r.echecs)} échec(s)"),
+)
 def corriger(dm, artiste) -> BilanCorrections:
     """Applique toutes les corrections à preuve formelle de l'artiste (sa
     discographie chargée) et les consigne. Idempotent : une correction faite

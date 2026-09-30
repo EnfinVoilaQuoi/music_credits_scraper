@@ -71,7 +71,7 @@ def espions(monkeypatch):
         appels.append("musicbrainz")
         return identite.PropositionsIdentite(identite_mb="MusicBrainz : Isha")
 
-    def passage(runtime, artist, tracks, source, hooks):
+    def passage(runtime, artist, tracks, source, hooks, tache):
         appels.append(f"passage:{source}")
         return SimpleNamespace(traites=len(tracks), complete=True, motif="")
 
@@ -158,7 +158,7 @@ def test_l_id_spotify_est_juge_avec_la_duree_deezer(monkeypatch):
     rt = _runtime([_t(1), _t(2)])
     vus = {}
 
-    def passage(runtime, artist, tracks, source, hooks):
+    def passage(runtime, artist, tracks, source, hooks, tache):
         if source == "deezer":
             for t in tracks:  # le provider déclare sa durée, en base
                 stocke = rt.data_manager.stock[t.id]
@@ -184,7 +184,7 @@ def test_l_id_spotify_est_juge_avec_la_duree_deezer(monkeypatch):
 def test_un_id_spotify_sans_duree_independante_est_compte(monkeypatch):
     rt = _runtime([_t(1, durations_observees={"reccobeats": 180})])
 
-    def passage(runtime, artist, tracks, source, hooks):
+    def passage(runtime, artist, tracks, source, hooks, tache):
         if source == "spotify_id":
             rt.data_manager.stock[1].spotify_id = "sp1"
         return SimpleNamespace(traites=len(tracks), complete=True, motif="")
@@ -204,7 +204,7 @@ def test_selection_manquants_et_force(monkeypatch):
     rt = _runtime([lie, date, vierge])
     recus = {}
 
-    def passage(runtime, artist, tracks, source, hooks):
+    def passage(runtime, artist, tracks, source, hooks, tache):
         recus.setdefault(source, []).append(sorted(t.id for t in tracks))
         return SimpleNamespace(traites=len(tracks), complete=True, motif="")
 
@@ -292,12 +292,15 @@ def test_les_passages_nomment_leur_source_et_rien_d_autre(monkeypatch):
     from src.services import enrichissement
 
     vus = []
-    monkeypatch.setattr(enrichissement, "run", lambda rt, a, t, o, h: vus.append(o) or "b")
-    assert identite._passage(None, None, [], "deezer", Hooks()) == "b"
-    identite._passage(None, None, [], "spotify_id", Hooks())
-    assert [o.sources for o in vus] == [("deezer",), ("spotify_id",)]
+    monkeypatch.setattr(
+        enrichissement, "run", lambda rt, a, t, o, h, tache: vus.append((o, tache)) or "b"
+    )
+    assert identite._passage(None, None, [], "deezer", Hooks(), "Deezer par morceau") == "b"
+    identite._passage(None, None, [], "spotify_id", Hooks(), "Spotify par morceau")
+    assert [o.sources for o, _ in vus] == [("deezer",), ("spotify_id",)]
+    assert [t for _, t in vus] == ["Deezer par morceau", "Spotify par morceau"]
     rt = SimpleNamespace(data_enricher=SimpleNamespace(get_available_sources=lambda: []))
-    assert enrichissement.sources_effectives(rt, vus[0]) == ["deezer"]
+    assert enrichissement.sources_effectives(rt, vus[0][0]) == ["deezer"]
 
 
 def test_resume_dit_l_essentiel(espions):

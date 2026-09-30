@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from src.concurrency import async_loop
 from src.models import Artist, Track
 from src.services.runtime import Bilan, Hooks, Runtime
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -86,8 +86,15 @@ async def _stop_playwright_async() -> None:
     await stop_playwright_async()
 
 
+@etape_de_flux("Enrichissement", nom_depuis="tache")
 async def run_async(
-    runtime: Runtime, artist: Artist, tracks: list[Track], options: OptionsEnrich, hooks: Hooks
+    runtime: Runtime,
+    artist: Artist,
+    tracks: list[Track],
+    options: OptionsEnrich,
+    hooks: Hooks,
+    *,
+    tache: str = "Enrichissement",
 ) -> BilanEnrich:
     """À exécuter SUR la boucle unique, sous `run_scope(Flow.ENRICHMENT)`
     (le scope est une pile de process : visible depuis la boucle ET le thread
@@ -109,7 +116,7 @@ async def run_async(
                 logger.info("⏹️ Arrêt demandé — enrichissement interrompu entre deux morceaux")
                 bilan.interrompu(f"arrêt demandé : {bilan.traites}/{n} traités")
                 break
-            hooks.progress(i, n, track.title, "Enrichissement")
+            hooks.progress(i, n, track.title, tache)
             results = await enricher.enrich_track_async(
                 track,
                 sources=sources,
@@ -131,12 +138,20 @@ async def run_async(
 
 
 def run(
-    runtime: Runtime, artist: Artist, tracks: list[Track], options: OptionsEnrich, hooks: Hooks
+    runtime: Runtime,
+    artist: Artist,
+    tracks: list[Track],
+    options: OptionsEnrich,
+    hooks: Hooks,
+    *,
+    tache: str = "Enrichissement",
 ) -> BilanEnrich:
     """Pont sync pour la CLI : soumet la coroutine à la boucle et attend.
     JAMAIS depuis la boucle elle-même (deadlock — garde-fou d'`async_loop`)."""
     async_loop.start()
-    return async_loop.submit(run_async(runtime, artist, tracks, options, hooks)).result()
+    return async_loop.submit(
+        run_async(runtime, artist, tracks, options, hooks, tache=tache)
+    ).result()
 
 
 # ── Résumé ─────────────────────────────────────────────────────────────────

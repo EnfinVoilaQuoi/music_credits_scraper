@@ -20,7 +20,7 @@ from typing import NamedTuple
 from src.models import Artist
 from src.services.runtime import Bilan, Runtime
 from src.utils.cert_normalize import drapeau
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -166,6 +166,11 @@ def _relancer_via_cdp(
     return code, sortie_cdp or sortie
 
 
+@etape_de_flux(
+    "Mise à jour des certifs",
+    sujet=lambda a, k: a[0] if a else k.get("nom", ""),
+    verdict=lambda r: (r[0] == 0, f"code de sortie {r[0]}"),
+)
 def executer_maj(
     nom: str,
     *,
@@ -210,6 +215,7 @@ class BilanCertifs(Bilan):
         return [ligne for ligne in self.lignes if "❌" in ligne or "interrompu" in ligne]
 
 
+@etape_de_flux("Mise à jour globale des certifs", sujet=lambda a, k: "")
 def mettre_a_jour(
     noms: Iterable[str] | None = None,
     *,
@@ -270,6 +276,9 @@ def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
     return noms_de_recherche(artist.name, formations)
 
 
+@etape_de_flux(
+    "Recherche de certifs", sujet=lambda a, k: " ; ".join(a[0] if a else k.get("noms", []))
+)
 def rechercher_artiste(
     noms: list[str],
     *,
@@ -347,6 +356,7 @@ def rechercher_artiste(
     return bilan
 
 
+@etape_de_flux("Application des certifs")
 def appliquer(runtime: Runtime, artist: Artist) -> BilanCertifs:
     """Rematche les certifs de l'artiste depuis les CSV clean puis persiste (E7h).
 

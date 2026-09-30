@@ -15,6 +15,7 @@ from enum import StrEnum
 from src.api.genius_api import GeniusAPI
 from src.concurrency import lifecycle
 from src.models import Artist, Track
+from src.utils import logger as journal
 from src.utils.data_enricher import DataEnricher
 from src.utils.data_manager import DataManager
 from src.utils.deleted_tracks_manager import DeletedTracksManager
@@ -103,6 +104,21 @@ class Hooks:
     #: (BilanEcarts) — appelé en fin de run discographie quand Deezer a des
     #: écarts à faire valider ; la GUI ouvre la fenêtre, la CLI liste.
     confirmer_ecarts: Callable[[object], None] = _ecarts_headless
+
+    def __post_init__(self) -> None:
+        # Tout avancement est AUSSI raconté en console (espacé) : la GUI garde
+        # sa barre, la CLI n'imprime plus chaque morceau, et les deux montrent
+        # le même récit. Marqué pour qu'un `replace()` ne l'enveloppe pas deux fois.
+        brut = self.progress
+        if getattr(brut, "_raconte", False):
+            return
+
+        def progress(courant: int, total: int, libelle: str, tache: str = "") -> None:
+            journal.avancement(courant, total, libelle, tache)
+            brut(courant, total, libelle, tache)
+
+        progress._raconte = True
+        self.progress = progress
 
 
 class Manque(StrEnum):

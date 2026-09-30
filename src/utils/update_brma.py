@@ -24,7 +24,7 @@ from src.scrapers.ultratop_fetch import preparer_route_cdp
 from src.utils import cert_clean_report, cert_store
 from src.utils.cert_normalize import reperer_fantomes
 from src.utils.llm_extractor import secours_apres_panne
-from src.utils.logger import get_logger
+from src.utils.logger import ajouter_journal_fichier, get_logger
 
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
 # vaut alors src/utils/, donc `import src.*` (ajouté pour le fetch anti-Cloudflare)
@@ -287,7 +287,7 @@ class UltratopUpdater:
         (`brancher_journal_fichier`), pas à chaque construction."""
         self.logger = get_logger(__name__)
 
-    def brancher_journal_fichier(self) -> logging.Handler:
+    def brancher_journal_fichier(self) -> logging.Handler | None:
         """Journal du run dans `<output_dir>/logs/`, sur la RACINE (tout le run).
 
         Jusqu'au 2026-09-28 c'était un `logging.basicConfig(handlers=[FileHandler…])`
@@ -299,12 +299,7 @@ class UltratopUpdater:
         log_dir = self.output_dir / "logs"
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / f"ultratop_update_{datetime.now():%Y%m%d_%H%M%S}.log"
-        # encoding='utf-8' : sinon les emojis (❌, →) crashent en cp1252.
-        handler = logging.FileHandler(log_file, encoding="utf-8")
-        handler.setLevel(logging.INFO)
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        logging.getLogger().addHandler(handler)
-        return handler
+        return ajouter_journal_fichier(log_file)
 
     def random_delay(self):
         """Délai aléatoire entre les requêtes"""

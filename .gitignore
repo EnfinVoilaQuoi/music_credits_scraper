@@ -89,7 +89,6 @@ Lancer_Venv_Admin.bat
 Lancer_Venv_Admin.ps1
 
 # Script, Fix & Driver
-src/scripts/
 # scripts/ : ignoré par défaut (one-shot, diagnostics), SAUF les outils maintenus.
 # `scripts/*` (et non `scripts/`) pour que les négations fonctionnent, et pour que
 # Black/Ruff (qui respectent le gitignore) voient les fichiers maintenus.

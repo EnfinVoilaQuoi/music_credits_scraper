@@ -15,7 +15,7 @@ from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
 from src.services.runtime import Bilan, Hooks, Runtime
 from src.utils.credits_genius_api import SOURCE_API
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -331,6 +331,7 @@ def _retablir_sans_reponse(
                     setattr(t.lyrics, c, etat[f"lyrics.{c}"])
 
 
+@etape_de_flux("Crédits & paroles")
 def run(
     runtime: Runtime,
     artist: Artist,

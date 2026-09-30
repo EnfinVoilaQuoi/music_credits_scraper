@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 
 from src.models import Artist, Track
 from src.services.runtime import Bilan, Hooks, Manque, Runtime, selection_morceaux
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -275,14 +275,14 @@ def rattraper_discogs(runtime: Runtime, artist: Artist) -> PropositionsIdentite 
 # ── 3a / 3b : par morceau ────────────────────────────────────────────────────
 
 
-def _passage(runtime, artist, tracks, source: str, hooks: Hooks):
+def _passage(runtime, artist, tracks, source: str, hooks: Hooks, tache: str):
     """UN provider sur une sélection, par le pipeline d'enrichissement (teardown
     et gardes réutilisés tels quels) — sources EXPLICITES, donc le passage
     Deezer n'embarque pas le scrape Spotify, qu'il précède exprès."""
     from src.services import enrichissement
 
     options = enrichissement.OptionsEnrich(sources=(source,))
-    return enrichissement.run(runtime, artist, tracks, options, hooks)
+    return enrichissement.run(runtime, artist, tracks, options, hooks, tache=tache)
 
 
 def _recharger(runtime: Runtime, artist: Artist) -> None:
@@ -292,6 +292,7 @@ def _recharger(runtime: Runtime, artist: Artist) -> None:
 # ── Orchestration ────────────────────────────────────────────────────────────
 
 
+@etape_de_flux("Identité")
 def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks) -> BilanIdentite:
     """Les couches dans l'ordre de la preuve. Sync : appelée depuis le fil du
     worker ou de la CLI, jamais depuis la boucle asyncio."""
@@ -349,7 +350,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         kinds = () if options.force else (Manque.IDENTITE_DEEZER,)
         tracks = selection_morceaux(runtime, artist, manquants=kinds)
         if tracks:
-            b = _passage(runtime, artist, tracks, "deezer", hooks)
+            b = _passage(runtime, artist, tracks, "deezer", hooks, "Deezer par morceau")
             bilan.deezer_morceaux = b.traites
             if not b.complete:
                 panne("Deezer par morceau", b.motif)
@@ -419,7 +420,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
             t.id for t in tracks if not (set(t.durations_observees) & DUREES_INDEPENDANTES)
         }
         if tracks:
-            b = _passage(runtime, artist, tracks, "spotify_id", hooks)
+            b = _passage(runtime, artist, tracks, "spotify_id", hooks, "Spotify par morceau")
             bilan.spotify_morceaux = b.traites
             if not b.complete:
                 panne("Spotify par morceau", b.motif)

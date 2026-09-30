@@ -15,7 +15,7 @@ from src.models import Artist, Track
 from src.services.runtime import Bilan, Hooks, Runtime
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.credits_genius_api import unir as unir_credits
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 from src.utils.title_matching import cle_album
 from src.utils.version_descriptors import titre_generique
 
@@ -289,6 +289,7 @@ def _filtrer_non_musique(nouveaux: list[Track]) -> tuple[list[Track], list[str]]
     return gardes, ecartes
 
 
+@etape_de_flux("Discographie")
 def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -> BilanDisco:
     """Récupère, fusionne, rematch les certifs, télécharge les images, sauve.
 

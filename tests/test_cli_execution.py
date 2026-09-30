@@ -14,12 +14,21 @@ from src.services import artiste, certifs
 from tests.test_cli import sans_effets  # noqa: F401 — fixture partagée
 
 
-class TestProgresConsole:
-    def test_avec_et_sans_total(self, capsys):
-        cli._progres_console(2, 5, "Titre", "Genius")
-        cli._progres_console(0, 0, "SNEP…", "Certifs")
-        out = capsys.readouterr().out
-        assert "  [Genius] 2/5 — Titre" in out and "  [Certifs] SNEP…" in out
+class TestRecitConsole:
+    def test_l_avancement_passe_par_le_recit_et_non_par_print(self, capsys, caplog):
+        """La CLI n'imprime plus chaque morceau : son hook est le récit espacé,
+        le même que la console de la GUI (`tests/test_journal_recit.py`)."""
+        caplog.set_level("INFO", logger="recit")
+        cli._hooks().progress(0, 0, "SNEP…", "Certifs")
+        assert capsys.readouterr().out == ""
+        assert "▸ Certifs — SNEP…" in caplog.text
+
+    def test_verbeux_passe_la_console_en_mode_tout(self, monkeypatch):
+        vus = []
+        monkeypatch.setattr(cli, "configurer_journaux", lambda console=None: vus.append(console))
+        cli._configurer_console(cli.build_parser().parse_args(["-v", "disco", "Isha"]))
+        cli._configurer_console(cli.build_parser().parse_args(["disco", "Isha"]))
+        assert vus == ["tout", "recit"]
 
 
 class TestCtrlC:

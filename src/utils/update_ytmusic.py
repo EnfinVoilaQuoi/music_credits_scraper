@@ -15,7 +15,6 @@ porte un videoId DIFFÉRENT de sa version audio et ne vit pas sur le canal
 vues du clip d'un morceau d'album n'étaient donc comptées nulle part.
 """
 
-import logging
 import sys
 
 import requests
@@ -873,10 +872,9 @@ if __name__ == "__main__":
     parser.add_argument("artist_name", help="Nom exact de l'artiste dans la DB")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-    )
+    from src.utils.logger import configurer_journaux
+
+    configurer_journaux(console="tout")
 
     from src.utils.data_manager import DataManager
 

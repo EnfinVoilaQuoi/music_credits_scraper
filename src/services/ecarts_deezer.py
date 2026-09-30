@@ -44,7 +44,7 @@ from src.models.track import Credit, CreditRole, Track
 from src.services.deezer_identite import cle_album
 from src.services.runtime import Bilan
 from src.utils import version_heritage
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 from src.utils.title_matching import (
     base_album_key,
     clean_stored_title,
@@ -665,6 +665,7 @@ async def detecter_async(
     return bilan
 
 
+@etape_de_flux("Écarts Deezer")
 def detecter(runtime, artist, *, deezer_id: int, should_stop=None, genius_api=None) -> BilanEcarts:
     """Pont sync (CLI, worker GUI) : la session async vit sur la boucle unique."""
     from src.concurrency import async_loop
@@ -969,6 +970,7 @@ def delier(dm, artist, e: Ecart) -> str:
     return compte
 
 
+@etape_de_flux("Création des écarts Deezer")
 def creer_lignes(
     dm, artist, ecarts: list[Ecart], *, lire_piste=None, heriter=None, should_stop=lambda: False
 ) -> list[str]:

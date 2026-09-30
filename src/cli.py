@@ -36,7 +36,7 @@ from src.services import (  # noqa: E402
     streams,
 )
 from src.services.runtime import Hooks, Runtime  # noqa: E402
-from src.utils.logger import get_logger  # noqa: E402
+from src.utils.logger import configurer_journaux, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -179,6 +179,12 @@ def _certifs_sources_arg(p: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m src.cli", description=__doc__.split("\n\n")[0])
+    p.add_argument(
+        "-v",
+        "--verbeux",
+        action="store_true",
+        help="console : tout le journal INFO, pas seulement le récit des étapes",
+    )
     sub = p.add_subparsers(dest="commande", required=True)
 
     a = sub.add_parser("artiste", help="charger ou ajouter un artiste")
@@ -361,15 +367,15 @@ def code_de(bilan) -> int:
 
 
 # ── Exécution ────────────────────────────────────────────────────────────────
-def _progres_console(courant: int, total: int, libelle: str, tache: str = "") -> None:
-    if total:
-        print(f"  [{tache}] {courant}/{total} — {libelle}", flush=True)
-    else:
-        print(f"  [{tache}] {libelle}", flush=True)
-
-
 def _hooks() -> Hooks:
-    return Hooks(progress=_progres_console, should_stop=lifecycle.stop_requested)
+    # Progression par défaut (muette) : `Hooks` la raconte déjà en console,
+    # espacée — imprimer chaque morceau ici la doublait (cf. `utils/logger`).
+    return Hooks(should_stop=lifecycle.stop_requested)
+
+
+def _configurer_console(a: argparse.Namespace) -> None:
+    """Récit seul par défaut ; `-v` = tout l'INFO de tous les modules."""
+    configurer_journaux(console="tout" if a.verbeux else "recit")
 
 
 def _installer_ctrl_c() -> None:
@@ -563,6 +569,7 @@ def _executer_deezer(a: argparse.Namespace, runtime: Runtime, hooks) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
+    _configurer_console(a)
     _installer_ctrl_c()
     runtime = Runtime.build()
     # Persistance de l'usage des sources (sans elle, les verdicts sont jetés).

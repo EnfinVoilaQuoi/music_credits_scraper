@@ -24,7 +24,7 @@ from datetime import datetime
 import requests
 
 from src.utils import nouveautes_cache
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -90,6 +90,7 @@ def _ids_connus(dm, artist) -> set[int]:
     return {t.genius_id for t in (dm.get_artist_tracks(artist.id) or []) if t.genius_id}
 
 
+@etape_de_flux("Nouveautés")
 def verifier(runtime, artist, *, force: bool = False, maintenant=None) -> Verification:
     """Les titres Genius absents de la base, au plus une fois par jour.
 

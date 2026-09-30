@@ -4,7 +4,7 @@ import sys
 
 from src.config import DEBUG, GENIUS_API_KEY
 from src.gui.main_window import MainWindow
-from src.utils.logger import get_logger
+from src.utils.logger import configurer_journaux, get_logger
 
 logger = get_logger(__name__)
 
@@ -33,6 +33,8 @@ def check_configuration():
 
 def main():
     """Fonction principale"""
+    # Console = récit des runs (+ avertissements) ; DEBUG=true = tout l'INFO.
+    configurer_journaux()
     logger.info("Démarrage de Music Credits Scraper")
 
     # Vérifier la configuration

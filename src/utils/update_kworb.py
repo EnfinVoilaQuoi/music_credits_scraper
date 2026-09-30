@@ -20,7 +20,6 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
 """
 
 import difflib
-import logging
 import re
 import sys
 from collections import defaultdict
@@ -1428,10 +1427,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-    )
+    from src.utils.logger import configurer_journaux
+
+    configurer_journaux(console="tout")
 
     from src.utils.data_manager import DataManager
 

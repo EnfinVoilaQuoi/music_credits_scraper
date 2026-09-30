@@ -26,6 +26,7 @@ from src.services import (
     streams,
 )
 from src.services.runtime import Bilan, Hooks, Manque, Runtime, selection_morceaux
+from src.utils import logger as journal
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -133,31 +134,38 @@ def executer_etape(
             )
             return streams.run(runtime, artist, opts, hooks)
         if etape == "certifs":
-            noms = certifs.noms_de_recherche_pour(runtime, artist)
-            bilan = certifs.rechercher_artiste(
-                noms,
-                sources=options.certifs_sources,
-                progres=lambda msg: hooks.progress(0, 0, msg, "Certifs"),
-            )
-            _recharger(runtime, artist)
-            appli = certifs.appliquer(runtime, artist)
-            bilan.certifies = appli.certifies
-            bilan.erreurs.extend(appli.erreurs)
-            bilan.rapport += f"\n\n{appli.rapport}"
-            return bilan
+            with journal.etape("Certifications", artist.name) as e:
+                noms = certifs.noms_de_recherche_pour(runtime, artist)
+                bilan = certifs.rechercher_artiste(
+                    noms,
+                    sources=options.certifs_sources,
+                    progres=lambda msg: hooks.progress(0, 0, msg, "Certifs"),
+                )
+                _recharger(runtime, artist)
+                appli = certifs.appliquer(runtime, artist)
+                bilan.certifies = appli.certifies
+                bilan.erreurs.extend(appli.erreurs)
+                bilan.rapport += f"\n\n{appli.rapport}"
+                return e.conclure(bilan)
         raise AssertionError(etape)  # toutes les clés de _FLOWS sont traitées ci-dessus
 
 
 def run(runtime: Runtime, nom: str, options: OptionsCycle, hooks: Hooks) -> BilanCycle:
     artist = artiste.charger_ou_ajouter(runtime, nom, genius_id=options.genius_id)
-    bilan = BilanCycle(artist_name=artist.name)
     etapes = options.etapes()
+    with journal.etape("Cycle", f"{artist.name} ({len(etapes)} étapes)") as e:
+        return e.conclure(_run(runtime, artist, etapes, options, hooks))
+
+
+def _run(
+    runtime: Runtime, artist: Artist, etapes: list[str], options: OptionsCycle, hooks: Hooks
+) -> BilanCycle:
+    bilan = BilanCycle(artist_name=artist.name)
     for i, etape in enumerate(etapes):
         if hooks.should_stop():
             bilan.non_lancees = etapes[i:]
             bilan.interrompu(f"arrêt demandé avant {etape}")
             break
-        logger.info(f"═══ Cycle {artist.name} — étape {i + 1}/{len(etapes)} : {etape}")
         try:
             b = executer_etape(runtime, artist, etape, options, hooks)
         except Exception as e:

@@ -16,7 +16,7 @@ import time
 from sqlalchemy import text
 
 from src.models import Artist, Track
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -127,6 +127,10 @@ def rejeter_spotify_id(data_manager, track, spotify_id: str) -> dict:
     return rapport
 
 
+@etape_de_flux(
+    "Vérification des ID Spotify",
+    sujet=lambda a, k: f"{len(a[0] if a else k.get('lignes', []))} fiche(s)",
+)
 def verifier_lignes(
     lignes: list[dict],
     lire_identite=None,

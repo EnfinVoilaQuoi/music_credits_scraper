@@ -15,7 +15,7 @@ from src.config import settings
 from src.enrichment.providers.streams import StreamsProvider
 from src.models import Artist
 from src.services.runtime import Bilan, Hooks, Runtime
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
 
@@ -72,6 +72,7 @@ def _epingler_canal_ytm(runtime: Runtime, artist: Artist, brut: str) -> None:
         logger.warning(f"Canal YTM non résolu: {brut!r} — recherche automatique utilisée")
 
 
+@etape_de_flux("Streams")
 def run(
     runtime: Runtime,
     artist: Artist,

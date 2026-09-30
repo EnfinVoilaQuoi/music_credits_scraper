@@ -5,7 +5,6 @@ Compatible avec le système de gestion unifié des certifications
 """
 
 import argparse
-import logging
 import re
 import sys
 import time
@@ -34,7 +33,7 @@ from src.utils.cert_normalize import (
     riaa_level,
     riaa_units,
 )
-from src.utils.logger import get_logger
+from src.utils.logger import ajouter_journal_fichier, configurer_journaux, get_logger
 
 logger = get_logger(__name__)
 
@@ -67,29 +66,19 @@ class RIAADatabaseUpdater:
         self.scraper = None
 
     def setup_logging(self):
-        """Configure le système de logging"""
-        log_format = "%(asctime)s - %(levelname)s - %(message)s"
+        """Logger de l'updater. Le journal du RUN (`update_log.txt`) n'est
+        branché que par `main()` (`brancher_journal_fichier`), comme BRMA.
 
-        # Logger vers fichier
-        file_handler = logging.FileHandler(self.log_path, encoding="utf-8")
-        file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(logging.Formatter(log_format))
-
-        # Logger vers console
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(logging.Formatter(log_format))
-
-        # Configuration du logger
+        Jusqu'au 2026-09-30, chaque construction posait sur le logger un
+        FileHandler ET un handler console DIRECT (bloquant sous QuickEdit,
+        doublé à chaque nouvelle instance), avec `propagate = False` pour éviter
+        un doublon — si bien que les lignes RIAA n'atteignaient jamais les
+        journaux du jour. La console et les fichiers se configurent désormais
+        en un seul point (`utils/logger.configurer_journaux`)."""
         self.logger = get_logger(__name__)
-        self.logger.setLevel(logging.INFO)
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
-        # Sans cela, chaque ligne s'affiche DEUX fois : une par ce handler, une
-        # par celui de la racine (posé par un `basicConfig` d'import). Le bruit
-        # était doublé jusque dans la fenêtre de fin de la GUI, qui relaie cette
-        # sortie.
-        self.logger.propagate = False
+
+    def brancher_journal_fichier(self) -> None:
+        ajouter_journal_fichier(self.log_path)
 
     def get_last_update_date(self) -> datetime | None:
         """Date de la dernière certif connue — lue depuis certif_riaa.csv (le
@@ -1109,6 +1098,8 @@ def main():
     )
 
     args = parser.parse_args()
+    # Script en ligne de commande : sa sortie EST le récit (relayée par la GUI).
+    configurer_journaux(console="tout")
 
     if sys.platform == "win32":
         try:
@@ -1141,6 +1132,7 @@ def main():
 
     # Initialise le gestionnaire
     updater = RIAADatabaseUpdater()
+    updater.brancher_journal_fichier()
 
     if args.auto:
         # Mise à jour automatique

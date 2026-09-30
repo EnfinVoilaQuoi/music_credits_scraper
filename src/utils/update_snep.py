@@ -826,11 +826,9 @@ def schedule_monthly_update() -> bool:
 
     # Configuration du logging pour le mode automatique
     log_file = Path(DATA_PATH) / "certifications" / "snep" / "update_log.txt"
-    logging.basicConfig(
-        filename=str(log_file),
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
+    from src.utils.logger import ajouter_journal_fichier
+
+    ajouter_journal_fichier(log_file)
 
     logging.info("=" * 50)
     logging.info("Début de la mise à jour mensuelle programmée")

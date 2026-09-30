@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.models import ArtistRelation
-from src.utils.logger import get_logger
+from src.utils.logger import etape_de_flux, get_logger
 from src.utils.title_matching import normalize_name, normalize_title
 
 logger = get_logger(__name__)
@@ -345,6 +345,7 @@ def trier_decisions(lignes) -> list[tuple[Candidat, str, str | None]]:
     return changes
 
 
+@etape_de_flux("Formations et alias", sujet=lambda a, k: (a[0] if a else k["artist"]).name)
 def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportFormations:
     """Interroge les deux sources pour un artiste et rend des candidats.
 

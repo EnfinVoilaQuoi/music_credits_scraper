@@ -105,6 +105,9 @@ class TestMain:
 
     def test_auto(self, monkeypatch):
         class _Updater:
+            def brancher_journal_fichier(self):
+                pass
+
             def update_missing_months(self):
                 return True
 
@@ -113,6 +116,9 @@ class TestMain:
 
     def test_stats(self, monkeypatch, capsys):
         class _Updater:
+            def brancher_journal_fichier(self):
+                pass
+
             def get_statistics(self):
                 return {
                     "total": 2,

@@ -78,6 +78,12 @@ def start_identite(app):
     dialog.transient(app.root)
     dialog.grab_set()
 
+    # Les boutons d'action sont ancrés EN BAS, avant le contenu : à une échelle
+    # d'affichage Windows > 100 %, une hauteur fixe masquait « Démarrer »
+    # (2026-09-30). La hauteur est ensuite ajustée au contenu (`_ajuster`).
+    barre = ctk.CTkFrame(dialog, fg_color="transparent")
+    barre.pack(side="bottom", fill="x", padx=20, pady=15)
+
     ctk.CTkLabel(dialog, text="Couches à lancer :", font=("Arial", 14)).pack(pady=10)
     cases = {}
     for champ, libelle, aide in _COUCHES:
@@ -108,12 +114,12 @@ def start_identite(app):
         show_ecarts_deezer(app)
 
     ctk.CTkButton(
-        dialog,
+        barre,
         text="🎧 Écarts Deezer (fenêtre détaillée)",
         command=_ecarts,
         fg_color="gray30",
         hover_color="gray40",
-    ).pack(anchor="w", padx=20, pady=(10, 0))
+    ).pack(side="left")
 
     def _demarrer():
         options = identite.OptionsIdentite(
@@ -122,7 +128,22 @@ def start_identite(app):
         dialog.destroy()
         run_identite(app, options)
 
-    ctk.CTkButton(dialog, text="Démarrer", command=_demarrer).pack(pady=15)
+    ctk.CTkButton(barre, text="Démarrer", command=_demarrer).pack(side="right")
+    _ajuster_hauteur(dialog)
+
+
+def _ajuster_hauteur(dialog, largeur: int = 520, marge: int = 80) -> None:
+    """Hauteur = celle que demande le contenu, plafonnée à l'écran. `geometry`
+    de customtkinter attend des unités NON mises à l'échelle alors que
+    `winfo_reqheight` rend des pixels réels : on divise par l'échelle."""
+    try:
+        dialog.update_idletasks()
+        echelle = ctk.ScalingTracker.get_window_scaling(dialog) or 1.0
+        voulue = dialog.winfo_reqheight() / echelle
+        ecran = dialog.winfo_screenheight() / echelle - marge
+        dialog.geometry(f"{largeur}x{int(min(voulue, ecran))}")
+    except Exception as e:  # noqa: BLE001 - confort d'affichage, jamais bloquant
+        logger.debug(f"Hauteur de la fenêtre Identité non ajustée : {e}")
 
 
 def run_identite(app, options: identite.OptionsIdentite):

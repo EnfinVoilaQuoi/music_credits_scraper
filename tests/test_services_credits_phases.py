@@ -207,6 +207,7 @@ class TestPhaseSynchro:
             "errors": [],
             "lyrics_scraped": 1,
             "instrumental": 0,
+            "non_transcrites": 0,
         }
 
     def test_provider_qui_leve_est_consigne_sans_perdre_la_sauvegarde(self):

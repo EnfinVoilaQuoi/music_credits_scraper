@@ -197,6 +197,7 @@ class TestFluxCredits:
             "errors": [],
             "lyrics_scraped": 0,
             "instrumental": 1,
+            "non_transcrites": 0,
         }
         assert "instrumentaux" in credits.resume(bilan, opts)
 

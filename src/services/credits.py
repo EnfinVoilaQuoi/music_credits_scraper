@@ -311,7 +311,14 @@ def _retablir_sans_reponse(
         etat = avant.get(id(t))
         if etat is None:
             continue
-        if options.force_paroles and not t.lyrics.text and t.lyrics.instrumental is None:
+        # « Pas encore transcrites » est une RÉPONSE de la page (constat daté) :
+        # la rétablir par l'état d'avant la ferait relire au run suivant.
+        if (
+            options.force_paroles
+            and not t.lyrics.text
+            and t.lyrics.instrumental is None
+            and not t.lyrics.non_transcrites()
+        ):
             t.anecdotes = t.anecdotes or etat["anecdotes"]
             for c in _CHAMPS_PAROLES:
                 setattr(t.lyrics, c, etat[f"lyrics.{c}"])
@@ -400,7 +407,7 @@ def run(
             avant = _reset_forces(tracks, options)
             synchro_obtenue: set[int] = set()
             if options.paroles_genius:
-                besoin = [t for t in tracks if t.lyrics.a_chercher()]
+                besoin = [t for t in tracks if t.lyrics.page_genius_a_relire()]
                 if besoin:
                     scraper = scraper or clients.genius()
                     bilan.paroles = scraper.scrape_lyrics_batch(
@@ -468,12 +475,14 @@ def run(
             if bilan.paroles is None:
                 n_ok = sum(1 for t in tracks if t.lyrics.present and t.lyrics.text)
                 n_instru = sum(1 for t in tracks if t.lyrics.instrumental)
+                n_attente = sum(1 for t in tracks if t.lyrics.non_transcrites())
                 bilan.paroles = {
-                    "success": n_ok + n_instru,
-                    "failed": n - n_ok - n_instru,
+                    "success": n_ok + n_instru + n_attente,
+                    "failed": n - n_ok - n_instru - n_attente,
                     "errors": [],
                     "lyrics_scraped": n_ok,
                     "instrumental": n_instru,
+                    "non_transcrites": n_attente,
                 }
 
         bilan = _sauver(runtime, artist, tracks, bilan)
@@ -548,6 +557,11 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
         msg += f"  - Réussis: {bilan.paroles['success']}\n  - Échoués: {bilan.paroles['failed']}\n"
         if bilan.paroles.get("instrumental"):
             msg += f"  - dont instrumentaux 🎹 : {bilan.paroles['instrumental']}\n"
+        if bilan.paroles.get("non_transcrites"):
+            msg += (
+                f"  - dont pas encore transcrites 📭 : {bilan.paroles['non_transcrites']} "
+                "(relues dans 30 j)\n"
+            )
         if bilan.paroles.get("errors"):
             msg += f"  - Erreurs: {len(bilan.paroles['errors'])}\n"
     if bilan.sync and options.sync:

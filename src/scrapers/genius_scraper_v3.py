@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from src.config import DELAY_BETWEEN_REQUESTS
 from src.models import Credit, CreditRole, ReleaseObservation, Track
+from src.models.track import SOURCE_NON_TRANSCRITES
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 from src.utils import credits_genius_api
 from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
@@ -29,6 +30,13 @@ logger = get_logger(__name__)
 _LYRICS_PLACEHOLDER_SEL = "[class*='LyricsPlaceholder']"
 _INSTRUMENTAL_TEXT = "this song is an instrumental"
 _INSTRUMENTAL_STATE = re.compile(r'instrumental\\?":\s*true')
+# Paroles pas encore transcrites (2026-09-29) : même placeholder, autre message
+# (« Lyrics for this song have yet to be transcribed. Please check back once the
+# song has been released. ») et `lyricsPlaceholderReason` dans l'état de la page
+# (« unreleased » mesuré sur 30 pages — ce qui n'en fait PAS un inédit : 6 pages
+# B.B. Jacques le portent pour des morceaux sortis).
+_NON_TRANSCRITES_TEXT = "yet to be transcribed"
+_PLACEHOLDER_REASON_STATE = re.compile(r'lyricsPlaceholderReason\\?":\s*\\?"(\w+)')
 
 # ---------------------------------------------------------------------------
 # JS injecté dans la page Genius pour révéler la section crédits complète
@@ -305,19 +313,22 @@ class GeniusScraperV3(CrawlAIScraperBase):
             "errors": [],
             "lyrics_scraped": 0,
             "instrumental": 0,
+            "non_transcrites": 0,
         }
         total = len(tracks)
         for i, track in enumerate(tracks):
             try:
-                if not track.lyrics.a_chercher():
-                    # Déjà récupérées pendant le scrape crédits, ou instrumental
-                    # constaté — pas de re-crawl
+                if not track.lyrics.page_genius_a_relire():
+                    # Déjà récupérées pendant le scrape crédits, instrumental
+                    # constaté, ou page lue récemment sans paroles — pas de re-crawl
                     results["success"] += 1
                     if track.lyrics.instrumental:
                         results["instrumental"] += 1
+                    elif track.lyrics.non_transcrites():
+                        results["non_transcrites"] += 1
                     else:
                         results["lyrics_scraped"] += 1
-                    logger.debug(f"V3: paroles déjà présentes pour '{track.title}' — skip")
+                    logger.debug(f"V3: paroles déjà traitées pour '{track.title}' — skip")
                 else:
                     lyrics = self.scrape_track_lyrics(track)
                     if lyrics:
@@ -327,6 +338,10 @@ class GeniusScraperV3(CrawlAIScraperBase):
                         # Pas de paroles PAR NATURE : un constat, pas un échec.
                         results["success"] += 1
                         results["instrumental"] += 1
+                    elif track.lyrics.non_transcrites():
+                        # Pas de paroles POUR L'INSTANT : un constat daté.
+                        results["success"] += 1
+                        results["non_transcrites"] += 1
                     else:
                         track.lyrics.present = False
                         results["failed"] += 1
@@ -340,7 +355,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 progress_callback(i + 1, total, track.title)
         logger.info(
             f"V3: paroles terminées — {results['lyrics_scraped']} récupérées, "
-            f"{results['instrumental']} instrumentaux, {results['failed']} échecs"
+            f"{results['instrumental']} instrumentaux, "
+            f"{results['non_transcrites']} pas encore transcrites, {results['failed']} échecs"
         )
         return results
 
@@ -383,6 +399,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
             track.lyrics.present = True
             track.lyrics.instrumental = False
             track.lyrics.scraped_at = datetime.now()
+            if track.lyrics.source == SOURCE_NON_TRANSCRITES:
+                track.lyrics.source = "genius"  # les paroles sont arrivées
             logger.info(f"✅ Paroles récupérées pour '{track.title}' ({len(lyrics.split())} mots)")
             # « Unreleased » / « Please check back once the song has been
             # released » : le placeholder d'un inédit est un CONSTAT (e34).
@@ -399,6 +417,15 @@ class GeniusScraperV3(CrawlAIScraperBase):
             track.lyrics.scraped_at = datetime.now()
             track.lyrics.source = "genius"
             logger.info(f"🎹 Instrumental constaté sur Genius pour '{track.title}'")
+        elif self._non_transcrites_bs4(soup):
+            # La page a répondu, sans paroles POUR L'INSTANT : un constat daté,
+            # relu après `RELIRE_NON_TRANSCRITES` (Lyrics.page_genius_a_relire).
+            # `instrumental` n'est pas touché : rien n'a été constaté à ce sujet.
+            track.lyrics.text = None
+            track.lyrics.present = False
+            track.lyrics.scraped_at = datetime.now()
+            track.lyrics.source = SOURCE_NON_TRANSCRITES
+            logger.info(f"📭 Paroles pas encore transcrites sur Genius pour '{track.title}'")
         return lyrics
 
     @staticmethod
@@ -486,6 +513,25 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 script.string
             ):
                 return True
+        return False
+
+    @staticmethod
+    def _non_transcrites_bs4(soup) -> bool:
+        """« Lyrics for this song have yet to be transcribed » : le placeholder
+        affiché (texte), ou une `lyricsPlaceholderReason` autre qu'instrumental
+        dans `__PRELOADED_STATE__`. Jamais vrai si un conteneur de paroles
+        existe (même règle que `_is_instrumental_bs4`)."""
+        if soup.find("div", {"data-lyrics-container": "true"}):
+            return False
+        for el in soup.select(_LYRICS_PLACEHOLDER_SEL):
+            if _NON_TRANSCRITES_TEXT in el.get_text(" ", strip=True).lower():
+                return True
+        for script in soup.find_all("script"):
+            etat = script.string or ""
+            if "__PRELOADED_STATE__" in etat:
+                m = _PLACEHOLDER_REASON_STATE.search(etat)
+                if m and m.group(1) != "instrumental":
+                    return True
         return False
 
     def _extract_album_bs4(self, html: str) -> str | None:

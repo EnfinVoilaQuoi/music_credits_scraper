@@ -44,6 +44,9 @@ _GENIUS_SONG_URL = "https://genius.com/Josman-dans-le-vide-lyrics"
 # Page SANS paroles par nature (« This song is an instrumental ») : le parseur
 # doit la distinguer d'un scrape raté (2026-09-20).
 _GENIUS_INSTRUMENTAL_URL = "https://genius.com/Lucio-bukowski-nuage-doort-interlude-lyrics"
+# Page SANS paroles POUR L'INSTANT (« Lyrics for this song have yet to be
+# transcribed ») : un constat daté, relu au bout de 30 j (2026-09-29).
+_GENIUS_NON_TRANSCRITES_URL = "https://genius.com/Bb-jacques-thankful-lyrics"
 # Spotify web : sentinelle ISHA, choisie EXPRÈS. C'est l'artiste sur lequel le
 # projet s'est déjà trompé d'identité (streams de Limsa d'Aulnay écrits sur Isha,
 # JOURNAL 2026-07-02), et ses « Recommandés » sont truffés de Limsa d'Aulnay :
@@ -142,6 +145,14 @@ CAPTURES: list[dict] = [
         "name": "genius_instrumental_page",
         "path": "genius/instrumental_page.html",
         "url": _GENIUS_INSTRUMENTAL_URL,
+        "method": "requests",
+        "fallback": "playwright",
+        # Aucune parole sur la page : rien à expurger.
+    },
+    {
+        "name": "genius_non_transcrites_page",
+        "path": "genius/non_transcrites_page.html",
+        "url": _GENIUS_NON_TRANSCRITES_URL,
         "method": "requests",
         "fallback": "playwright",
         # Aucune parole sur la page : rien à expurger.

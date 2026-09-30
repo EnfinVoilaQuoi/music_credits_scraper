@@ -79,7 +79,8 @@ def format_credits_cell(track) -> str:
 def format_lyrics_cell(track) -> str:
     """Cellule « Paroles » du tableau : ✓ = texte, ⏱ = timestamps (en plus ou
     seuls), 🎹 = instrumental CONSTATÉ sur Genius (scrape réussi, pas de paroles
-    par nature — e27), vide = rien ou jamais cherché."""
+    par nature — e27), 📭 = page Genius lue sans paroles « pas encore
+    transcrites » (relue au bout de 30 j), vide = rien ou jamais cherché."""
     has_text = bool(track.lyrics.present)
     has_sync = bool(track.lyrics.synced)
     if has_text and has_sync:
@@ -90,6 +91,8 @@ def format_lyrics_cell(track) -> str:
         return "✓"
     if track.lyrics.instrumental:
         return "🎹"
+    if track.lyrics.non_transcrites():
+        return "📭"
     return ""
 
 

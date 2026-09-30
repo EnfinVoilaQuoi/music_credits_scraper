@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -388,6 +388,14 @@ class Streams:
     ytm_streams_updated: datetime | None = None
 
 
+#: `lyrics_source` d'une page Genius LUE qui n'avait pas encore de paroles
+#: (placeholder « yet to be transcribed »). Préfixe `genius` : les purges des
+#: paroles Genius (`LIKE 'genius%'`) l'emportent avec elles.
+SOURCE_NON_TRANSCRITES = "genius:non_transcrites"
+#: Délai avant de relire une telle page : ses paroles arrivent avec la sortie.
+RELIRE_NON_TRANSCRITES = timedelta(days=30)
+
+
 @dataclass
 class Lyrics:
     """Paroles d'un morceau (texte + synchro LRC + provenance).
@@ -423,6 +431,33 @@ class Lyrics:
         # Le TEXTE fait foi : `present` n'est que la colonne `has_lyrics`, qui
         # en dérive à l'écriture.
         return not self.instrumental and not (self.text or "").strip()
+
+    def non_transcrites(self) -> bool:
+        """La page Genius a été LUE et affichait « Lyrics for this song have yet
+        to be transcribed » (constat daté, `source = SOURCE_NON_TRANSCRITES`)."""
+        return self.source == SOURCE_NON_TRANSCRITES and not (self.text or "").strip()
+
+    def page_genius_a_relire(self, maintenant: datetime | None = None) -> bool:
+        """Faut-il (re)lire la PAGE Genius pour ses paroles ?
+
+        `a_chercher()`, sauf si la page a été lue il y a moins de
+        `RELIRE_NON_TRANSCRITES` et n'avait pas encore de paroles : sans ce
+        constat daté, ~30 pages étaient re-crawlées à CHAQUE run (12 s de
+        timeout chacune) et comptées en échec (2026-09-29). Le délai reste court
+        parce que ces paroles ARRIVENT (souvent le jour de la sortie). Seul le
+        scrape Genius le consulte : YTM continue de chercher le texte, un
+        morceau sorti pouvant y avoir ses paroles."""
+        if not self.a_chercher():
+            return False
+        if not self.non_transcrites() or not self.scraped_at:
+            return True
+        lu = self.scraped_at
+        if isinstance(lu, str):
+            try:
+                lu = datetime.fromisoformat(lu)
+            except ValueError:
+                return True
+        return (maintenant or datetime.now()) - lu >= RELIRE_NON_TRANSCRITES
 
 
 @dataclass

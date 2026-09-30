@@ -91,6 +91,11 @@ class Contexte:
     #: `track_id` → type d'une parution `own` confirmée (catalogue e31),
     #: prioritaire : elle sait qu'un enregistrement vit sur plusieurs disques.
     types_par_morceau: Mapping[int, str | None] = MappingProxyType({})
+    #: Identifiants des fiches où l'artiste n'est PAS l'interprète principal
+    #: (invité, rôle secondaire, producteur) — verdict de `participation`, le
+    #: seul juge, calculé par `services.validation`. Son groupe, ses alias et un
+    #: album en duo/trio restent les siens (décision utilisateur 2026-09-30).
+    invite: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
@@ -268,6 +273,11 @@ def sur_un_album_de_lartiste(track, ctx: Contexte) -> bool | None:
     par_morceau = ctx.types_par_morceau.get(getattr(track, "id", None), "__absent__")
     if par_morceau not in ("__absent__", None):
         return par_morceau in TYPES_AVEC_TIMESTAMPS
+    # Le catalogue ne connaît que ses disques PROPRES (`scope='own'`) ; la carte
+    # des albums, elle, porte aussi ceux où il n'est qu'invité — 1 462 fiches y
+    # exigeaient les timestamps de l'album d'un AUTRE (mesuré 2026-09-30).
+    if getattr(track, "id", None) in ctx.invite:
+        return False
     # `cle_album` (title_matching) et non le normaliseur du GUI : c'est la clé
     # du catalogue des parutions, et un module de `src/utils` n'importe pas
     # `src/gui` (qui tirerait tout le pipeline).
@@ -311,6 +321,8 @@ def paroles_valides(track, ctx: Contexte) -> tuple[tuple[Manque, ...], tuple[str
     sur_album = sur_un_album_de_lartiste(track, ctx)
     if sur_album is None:
         details.append(f"Timestamps non exigés — nature du disque « {track.album} » inconnue")
+    elif not sur_album and track.album and getattr(track, "id", None) in ctx.invite:
+        details.append("Timestamps non exigés — invité sur le disque d'un autre artiste")
     elif not sur_album:
         details.append("Timestamps non exigés — le morceau n'est pas extrait d'un album")
     elif not track.lyrics.synced:

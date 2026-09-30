@@ -63,4 +63,31 @@ def construire_contexte(dm, artist, desactives=()) -> Contexte:
         desactives=frozenset(desactives),
         types_par_album=types_par_album,
         types_par_morceau=types_par_morceau,
+        invite=_fiches_d_invite(dm, artist),
+    )
+
+
+def _fiches_d_invite(dm, artist) -> frozenset:
+    """Les fiches où l'artiste n'est pas l'interprète principal, selon
+    `participation` — le SEUL juge (alias et formations confirmés comptent
+    comme lui, un album en duo/trio le crédite en principal). Les timestamps
+    ne sont exigés que sur SES albums (décision utilisateur 2026-09-30)."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from src.utils.participation import Participation, participation
+
+    tracks = list(artist.tracks or [])
+    if not tracks:
+        return frozenset()
+    try:
+        noms = dm.noms_de_lartiste(artist.id, artist.name)
+        formations = dm.noms_des_formations(artist.id)
+    except SQLAlchemyError as e:
+        # Best-effort : sans les noms, rien n'est écarté (on exige comme avant).
+        logger.warning(f"Noms et formations illisibles pour {artist.name} : {e}")
+        return frozenset()
+    return frozenset(
+        t.id
+        for t in tracks
+        if t.id is not None and participation(t, noms, formations) is not Participation.PRINCIPAL
     )

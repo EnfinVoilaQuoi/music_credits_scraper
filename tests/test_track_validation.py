@@ -161,6 +161,21 @@ class TestParoles:
         ctx = contexte({ALBUM: "single"}, types_morceaux={1: "album"})
         assert tv.Manque.TIMESTAMPS in tv.evaluer(t, ctx).manques
 
+    def test_invite_sur_l_album_d_un_autre_pas_de_timestamps(self):
+        """1 462 fiches exigeaient les timestamps de l'album d'un AUTRE (2026-09-30)."""
+        t = morceau(synced=None)
+        ctx = tv.Contexte(types_par_album={ALBUM: "album"}, invite=frozenset({1}))
+        constat = tv.evaluer(t, ctx)
+        assert tv.Manque.TIMESTAMPS not in constat.manques
+        assert any("invité sur le disque d'un autre" in d for d in constat.details)
+
+    def test_le_catalogue_de_ses_disques_prime_sur_l_invitation(self):
+        """Le catalogue ne connaît que ses disques propres : *Black Album* de
+        Lunatic reste un album de Booba même si Genius le dit invité."""
+        t = morceau(synced=None)
+        ctx = tv.Contexte(types_par_morceau={1: "album"}, invite=frozenset({1}))
+        assert tv.Manque.TIMESTAMPS in tv.evaluer(t, ctx).manques
+
     def test_paroles_absentes_partout(self):
         t = morceau(lyrics=None, synced=None)
         assert tv.Manque.PAROLES in tv.evaluer(t, contexte({ALBUM: "single"})).manques

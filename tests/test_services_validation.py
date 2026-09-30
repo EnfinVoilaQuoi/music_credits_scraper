@@ -24,9 +24,44 @@ class _DM:
         assert scope == "own"
         return self._parutions
 
+    def noms_de_lartiste(self, artist_id, nom):
+        return {nom, "Ye"}
 
-def _artist(id_=1):
-    return SimpleNamespace(id=id_, name="A2H", tracks=[])
+    def noms_des_formations(self, artist_id):
+        return {"Lunatic"}
+
+
+def _artist(id_=1, tracks=()):
+    return SimpleNamespace(id=id_, name="A2H", tracks=list(tracks))
+
+
+def _fiche(id_, principal=None, feat=False, role=None):
+    from src.models import Track
+
+    t = Track(title=f"T{id_}", artist=None)
+    t.id = id_
+    t.primary_artist_name = principal
+    t.is_featuring = feat
+    t.secondary_role = role
+    return t
+
+
+def test_les_fiches_d_invite_sont_celles_ou_il_n_est_pas_principal():
+    """Décision utilisateur 2026-09-30 : timestamps exigés sur SES albums
+    (groupe, alias, duo/trio compris), pas sur ceux où il n'est qu'invité."""
+    fiches = [
+        _fiche(1),  # son morceau
+        _fiche(2, principal="Dinaa", feat=True),  # invité chez un autre
+        _fiche(3, principal="Lunatic", feat=True),  # son groupe
+        _fiche(4, principal="Ye", feat=True),  # son alias
+        _fiche(5, principal="Josué", role="Producer"),  # producteur chez un autre
+    ]
+    ctx = construire_contexte(_DM(), _artist(tracks=fiches))
+    assert ctx.invite == frozenset({2, 5})
+
+
+def test_sans_morceaux_charges_personne_n_est_invite():
+    assert construire_contexte(_DM(), _artist()).invite == frozenset()
 
 
 def test_les_types_d_albums_sont_indexes_par_cle():

@@ -12,6 +12,7 @@ from src.gui.panels import albums_view
 from src.models import ReleaseObservation
 from src.utils.logger import get_logger
 from src.utils.pages_genius import titre_affiche
+from src.utils.track_validation import Contexte, album_affiche
 
 logger = get_logger(__name__)
 
@@ -189,7 +190,8 @@ def populate_tracks_table(app):
                 artist_display = f"{artist_display} · 🎙️ {_sec_role}"
                 title = f"🎙️ {title}"
 
-            album = track.album or ""
+            # Un single n'est pas un album : la colonne le tait (la fiche le garde).
+            album = album_affiche(track, ctx or Contexte())
 
             # Date de sortie - FORMAT FRANÇAIS (JJ/MM/AAAA)
             release_date = ""
@@ -908,7 +910,10 @@ def sort_column(app, col):
             # normalize_text : tri insensible aux accents (« Étoile » avec les E)
             sort_key = lambda t: helpers.normalize_text(t.title)
         elif col == "Album":
-            sort_key = lambda t: helpers.normalize_text(t.album or "")
+            # Trier sur ce qui est AFFICHÉ (un single tu n'a pas de nom de disque).
+            _ctx = app.contexte_validation() if hasattr(app, "contexte_validation") else None
+            _ctx = _ctx or Contexte()
+            sort_key = lambda t: helpers.normalize_text(album_affiche(t, _ctx))
         elif col == "Artiste principal":
             sort_key = lambda t: helpers.normalize_text(
                 (t.primary_artist_name or t.artist.name) if t.artist else ""
@@ -1014,7 +1019,7 @@ def sort_column(app, col):
             sort_key = get_streams_total
         elif col == "Statut":
             # Complet > incomplet > inédit (rien à exiger) > sans info > désactivé.
-            status_order = {"✅": 1, "⚠️": 2, "🔒": 3, "🕳️": 4, "❌": 5}
+            status_order = {"✅": 1, "⚠️": 2, "🔒": 3, "📅": 3, "🕳️": 4, "❌": 5}
             ctx_tri = app.contexte_validation() if hasattr(app, "contexte_validation") else None
 
             def get_status_value(t):

@@ -172,6 +172,30 @@ class TestParoles:
         assert any("instrumental" in d for d in constat.details)
 
 
+class TestAlbumAffiche:
+    """Décision utilisateur 2026-09-30 : un single n'est pas nommé dans la
+    colonne Album. Seul le type du distributeur décide."""
+
+    def test_un_single_type_n_est_pas_affiche(self):
+        t = morceau(title="Nobody", album="Nobody")
+        assert tv.album_affiche(t, contexte({cle_album("Nobody"): "single"})) == ""
+        assert t.album == "Nobody"  # la donnée ne bouge pas
+
+    @pytest.mark.parametrize("type_disque", ["album", "ep", "compile", None])
+    def test_le_reste_est_affiche(self, type_disque):
+        t = morceau()
+        assert tv.album_affiche(t, contexte({ALBUM: type_disque})) == "Bipolaire"
+
+    def test_un_titre_egal_au_disque_ne_prouve_rien(self):
+        """*Rétina* est le titre phare d'un vrai EP de 8 titres."""
+        t = morceau(title="Rétina", album="Rétina")
+        assert tv.album_affiche(t, contexte({cle_album("Rétina"): "ep"})) == "Rétina"
+        assert tv.album_affiche(t, contexte({})) == "Rétina"
+
+    def test_sans_disque(self):
+        assert tv.album_affiche(morceau(album=None), contexte()) == ""
+
+
 class TestStreams:
     def test_les_deux_plateformes_servies(self):
         assert tv.streams_valides(morceau())
@@ -210,6 +234,56 @@ class TestHorsDuCompte:
     def test_un_tri_etat_a_None_n_est_pas_un_inedit(self):
         assert not tv.est_inedit(morceau(unreleased=None))
         assert not tv.est_inedit(morceau(unreleased=False))
+
+    def test_une_sortie_future_est_a_venir(self):
+        """Django, BEN plg (2026-09-30) : l'album annoncé ne doit rien réclamer."""
+        from datetime import date, timedelta
+
+        demain = (date.today() + timedelta(days=1)).isoformat()
+        constat = tv.evaluer(morceau(release_date=demain, bpm=None, lyrics=None, yt=None))
+        assert constat.verdict is tv.Verdict.A_VENIR and constat.icone == "📅"
+        assert not constat.compte_a_valider and constat.manques == ()
+        assert "sortie prévue le" in constat.details[0]
+
+    def test_a_venir_passe_avant_sans_info(self):
+        """La page d'un morceau annoncé est vide PAR NATURE : pas 🕳️."""
+        from datetime import date, timedelta
+
+        t = morceau(
+            release_date=(date.today() + timedelta(days=17)).isoformat(),
+            album=None,
+            lyrics=None,
+            synced=None,
+            spotify_id=None,
+            sp=None,
+            credits=[],
+        )
+        t.lyrics.scraped_at = "2026-09-29 06:38:01"
+        t.last_scraped = "2026-09-29 06:38:01"
+        assert tv.evaluer(t).verdict is tv.Verdict.A_VENIR
+
+    @pytest.mark.parametrize(
+        ("valeur", "attendu"),
+        [
+            ("2026-10-16", "2026-10-16"),  # l'album de Django
+            ("2026-09-30", None),  # le jour même : sorti
+            ("2021-06-15", None),
+            ("2026", None),  # précision année : borne basse, jamais « à venir »
+            ("2027", "2027-01-01"),
+            (None, None),
+        ],
+    )
+    def test_sortie_a_venir(self, valeur, attendu):
+        from datetime import date
+
+        t = morceau(release_date=valeur)
+        assert tv.sortie_a_venir(t, aujourd_hui=date(2026, 9, 30)) == attendu
+
+    def test_le_geste_humain_prime_sur_la_sortie_future(self):
+        from datetime import date, timedelta
+
+        t = morceau(id=7, release_date=(date.today() + timedelta(days=5)).isoformat())
+        assert tv.evaluer(t, contexte(desactives={7})).verdict is tv.Verdict.DESACTIVE
 
     def test_une_icone_distincte_par_verdict(self):
         assert set(tv.ICONES) == set(tv.Verdict)

@@ -26,9 +26,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from types import MappingProxyType
 
+from src.utils.dates import completer
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import inedit_par_le_texte, texte_utile
 from src.utils.title_matching import cle_album, normalize_name
@@ -46,6 +48,7 @@ class Verdict(StrEnum):
     VALIDE = "valide"
     INCOMPLET = "incomplet"
     INEDIT = "inedit"
+    A_VENIR = "a_venir"
     SANS_INFO = "sans_info"
     DESACTIVE = "desactive"
 
@@ -69,6 +72,7 @@ ICONES = MappingProxyType(
         Verdict.VALIDE: "✅",
         Verdict.INCOMPLET: "⚠️",
         Verdict.INEDIT: "🔒",
+        Verdict.A_VENIR: "📅",
         Verdict.SANS_INFO: "🕳️",
         Verdict.DESACTIVE: "❌",
     }
@@ -182,6 +186,21 @@ def est_inedit(track) -> bool:
     return getattr(track, "unreleased", None) is True
 
 
+def sortie_a_venir(track, aujourd_hui: date | None = None) -> str | None:
+    """La date (`AAAA-MM-JJ`) d'une sortie POSTÉRIEURE à aujourd'hui, sinon None.
+
+    Même idée que l'inédit 🔒, mais on SAIT quand ça sort (décision utilisateur
+    2026-09-30 : l'album à paraître de Django, celui de BEN plg). La colonne
+    est une date complète dont une précision moindre donne la BORNE BASSE
+    (« 2026 » → 2026-01-01) : un doute ne met donc jamais un morceau sorti « à
+    venir ». Le jour venu, le verdict tombe de lui-même — rien n'est stocké.
+    """
+    jour = completer(track.release_date) if track.release_date else None
+    if not jour:
+        return None
+    return jour if jour > (aujourd_hui or date.today()).isoformat() else None
+
+
 #: En dessous, le « texte » n'en est pas un : « (...) », « a », « ,,e, ».
 _PAROLES_SIGNIFICATIVES = 20
 
@@ -258,6 +277,20 @@ def sur_un_album_de_lartiste(track, ctx: Contexte) -> bool | None:
     return type_album in TYPES_AVEC_TIMESTAMPS
 
 
+def album_affiche(track, ctx: Contexte) -> str:
+    """Le nom de disque à AFFICHER dans la table : vide quand l'album repère
+    n'est qu'un SINGLE (décision utilisateur 2026-09-30 — un single n'est pas
+    un album, le nommer dans la colonne le laisse croire). Seul le TYPE du
+    distributeur décide (`albums.record_type`, Deezer) : un disque non typé
+    reste affiché, un titre égal au nom du disque ne prouve rien (*Seul(s)*,
+    *Rétina*, *Doberman* sont les titres phares de vrais EP). Affichage
+    seulement : `track.album` et la fiche ne changent pas."""
+    album = (track.album or "").strip()
+    if album and ctx.types_par_album.get(cle_album(album)) == "single":
+        return ""
+    return track.album or ""
+
+
 def paroles_valides(track, ctx: Contexte) -> tuple[tuple[Manque, ...], tuple[str, ...]]:
     """Manques de paroles, et ce qu'on a décidé de ne PAS exiger.
 
@@ -286,7 +319,8 @@ def paroles_valides(track, ctx: Contexte) -> tuple[tuple[Manque, ...], tuple[str
 
 
 def evaluer(track, ctx: Contexte | None = None) -> Constat:
-    """Le verdict d'un morceau. Ordre : désactivé → inédit → manques.
+    """Le verdict d'un morceau. Ordre : désactivé → à venir → sans info →
+    inédit → manques.
 
     Le geste humain prime : un inédit qu'on a désactivé reste ❌.
     """
@@ -294,6 +328,17 @@ def evaluer(track, ctx: Contexte | None = None) -> Constat:
     try:
         if getattr(track, "id", None) is not None and track.id in ctx.desactives:
             return Constat(verdict=Verdict.DESACTIVE, compte_a_valider=False)
+        # AVANT « sans info » : la page d'un morceau annoncé est vide PAR
+        # NATURE (paroles non transcrites, aucune plateforme) — ce n'est pas
+        # une page à trier.
+        sortie = sortie_a_venir(track)
+        if sortie:
+            a, m, j = sortie.split("-")
+            return Constat(
+                verdict=Verdict.A_VENIR,
+                compte_a_valider=False,
+                details=(f"Rien n'est exigé — sortie prévue le {j}/{m}/{a}",),
+            )
         if sans_info(track):
             return Constat(
                 verdict=Verdict.SANS_INFO,

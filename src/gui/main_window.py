@@ -745,6 +745,7 @@ class MainWindow:
                     1 for c in constats if c.verdict is Verdict.INCOMPLET
                 )
                 tracks_inedits = sum(1 for c in constats if c.verdict is Verdict.INEDIT)
+                tracks_a_venir = sum(1 for c in constats if c.verdict is Verdict.A_VENIR)
                 tracks_sans_info = sum(1 for c in constats if c.verdict is Verdict.SANS_INFO)
                 disques_sans_type = len(
                     {
@@ -793,6 +794,8 @@ class MainWindow:
                     # Rien ne leur est exigé : ils ne sont pas « à valider »,
                     # mais les taire ferait croire à un total incohérent.
                     line2 += f" (+{tracks_inedits} inédits 🔒)"
+                if tracks_a_venir:
+                    line2 += f" (+{tracks_a_venir} à venir 📅)"
                 if tracks_sans_info:
                     # Pages lues qui ne disent rien : à vérifier, pas à valider.
                     line2 += f" (+{tracks_sans_info} sans info 🕳️)"

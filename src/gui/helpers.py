@@ -104,8 +104,8 @@ def get_track_status_icon(track, disabled_ids, ctx=None) -> str:
     signature ne bouge pas, les appelants non plus ; `ctx` (facultatif) porte
     la nature des disques, sans quoi les timestamps ne sont jamais exigés.
 
-    ✅ complet · ⚠️ incomplet · 🔒 inédit (rien n'est exigé) · 🕳️ page Genius
-    sans aucune info · ❌ désactivé.
+    ✅ complet · ⚠️ incomplet · 🔒 inédit (rien n'est exigé) · 📅 à venir
+    (sortie datée dans le futur) · 🕳️ page Genius sans aucune info · ❌ désactivé.
     """
     contexte = ctx or Contexte(desactives=frozenset(disabled_ids or ()))
     return evaluer(track, contexte).icone

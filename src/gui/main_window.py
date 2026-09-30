@@ -141,20 +141,6 @@ class MainWindow:
         )
         self.formations_button.pack(side="left", padx=5)
 
-        # « Nouveautés » FORCE la vérification des titres Genius absents de la
-        # base ; sans clic, elle se fait seule au plus une fois par jour au
-        # chargement d'un artiste (cf. `services.nouveautes`).
-        self.nouveautes_button = ctk.CTkButton(
-            search_frame,
-            text="Nouveautés",
-            command=lambda: nouveautes_gui.verifier_maintenant(self),
-            state="disabled",
-            width=110,
-            fg_color="#5e35b1",
-            hover_color="#4527a0",
-        )
-        self.nouveautes_button.pack(side="left", padx=5)
-
         # « À trancher » : ce que les détecteurs trouvent suspect dans la
         # discographie chargée (lecture seule, calculé à l'ouverture).
         self.a_trancher_button = ctk.CTkButton(
@@ -1010,8 +996,6 @@ class MainWindow:
                 self.streams_button.configure(state="disabled")
             if hasattr(self, "formations_button"):
                 self.formations_button.configure(state="disabled")
-            if hasattr(self, "nouveautes_button"):
-                self.nouveautes_button.configure(state="disabled")
             if hasattr(self, "a_trancher_button"):
                 self.a_trancher_button.configure(state="disabled")
         elif not self.current_artist.tracks:
@@ -1032,10 +1016,6 @@ class MainWindow:
                 self.formations_button.configure(state="disabled")
             if hasattr(self, "a_trancher_button"):
                 self.a_trancher_button.configure(state="disabled")
-            if hasattr(self, "nouveautes_button"):
-                # Un artiste sans morceau est justement celui pour qui la
-                # vérification a le plus à dire.
-                self.nouveautes_button.configure(state="normal")
         else:
             # Artiste avec morceaux
             self.get_tracks_button.configure(state="normal")
@@ -1055,8 +1035,6 @@ class MainWindow:
                 # homonymes par recouvrement d'albums, il lui faut la
                 # discographie. Sans elle, « Swing » reste indécidable.
                 self.formations_button.configure(state="normal")
-            if hasattr(self, "nouveautes_button"):
-                self.nouveautes_button.configure(state="normal")
             if hasattr(self, "a_trancher_button"):
                 self.a_trancher_button.configure(state="normal")
                 self._compter_a_trancher()

@@ -24,7 +24,8 @@ def verifier_en_fond(app, *, force: bool = False) -> None:
     """Lance la vérification hors du thread Tk et pose le badge au retour.
 
     Appelée au chargement d'un artiste (`force=False` : le cache journalier
-    évite l'appel) et par le bouton « Nouveautés » (`force=True`).
+    évite l'appel) et en fin de run Discographie (`force=True`). Le bouton
+    « Nouveautés » a été retiré le 2026-09-30 : le run Disco fait la même chose.
     """
     artist = app.current_artist
     if artist is None:
@@ -43,14 +44,6 @@ def verifier_en_fond(app, *, force: bool = False) -> None:
             logger.debug("Retour GUI des nouveautés abandonné : application fermée")
 
     run_worker(_travail, name="nouveautes")
-
-
-def verifier_maintenant(app) -> None:
-    """Bouton « Nouveautés » : ignore le cache et DIT le résultat."""
-    if app.current_artist is None:
-        messagebox.showinfo("Nouveautés", "Chargez d'abord un artiste.")
-        return
-    verifier_en_fond(app, force=True)
 
 
 def _appliquer(app, artist, verification, *, annoncer: bool) -> None:

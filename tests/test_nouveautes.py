@@ -17,8 +17,12 @@ from src.utils import nouveautes_cache
 @pytest.fixture(autouse=True)
 def _cache_isole(tmp_path, monkeypatch):
     """Le cache est un FICHIER : sans redirection, un test écrirait dans
-    `data/` réel (défaut mesuré le 2026-09-03 sur les fixtures dataviz)."""
+    `data/` réel (défaut mesuré le 2026-09-03 sur les fixtures dataviz). Même
+    chose pour `fiches.json` (pages fusionnées), lu par `genius_ids_ecartes`."""
+    from src.utils import corrections_fiches
+
     monkeypatch.setattr(nouveautes_cache, "FICHIER", tmp_path / "nouveautes_cache.json")
+    monkeypatch.setattr(corrections_fiches, "charger", lambda: {})
 
 
 class _Genius:
@@ -35,10 +39,14 @@ class _Genius:
         return {"songs": self._songs}
 
 
-def _runtime(genius, tracks=()):
+def _runtime(genius, tracks=(), supprimes=(), editions=()):
     return SimpleNamespace(
         genius_api=SimpleNamespace(genius=genius),
-        data_manager=SimpleNamespace(get_artist_tracks=lambda aid: list(tracks)),
+        data_manager=SimpleNamespace(
+            get_artist_tracks=lambda aid: list(tracks),
+            get_artist_edition_genius_ids=lambda aid: set(editions),
+        ),
+        deleted=SimpleNamespace(load_deleted_ids=lambda nom: set(supprimes)),
     )
 
 
@@ -59,6 +67,33 @@ def test_titres_inconnus_sont_des_nouveautes():
     # UN appel, page 1, triée par date de sortie.
     assert genius.appels == 1 and genius.demande["page"] == 1
     assert genius.demande["sort"] == "release_date"
+
+
+def test_ce_que_l_import_ecarte_n_est_pas_une_nouveaute():
+    """Django (2026-09-30) : 4 morceaux d'un homonyme, supprimés en juillet, que
+    l'import ignore mais que le badge 🆕 reproposait après chaque run Disco."""
+    genius = _Genius(
+        [
+            _song(1, "Migalhas (Ao Vivo)"),  # supprimé par l'utilisateur
+            _song(2, "Édition deluxe"),  # édition rattachée à sa fiche
+            _song(3, "Interview with Isha"),  # page non musicale
+            _song(4, "Vrai inédit"),
+        ]
+    )
+    v = nouveautes.verifier(_runtime(genius, supprimes={1}, editions={2}), _artist())
+    assert [n.titre for n in v.nouveautes] == ["Vrai inédit"]
+
+
+def test_une_page_fusionnee_n_est_pas_une_nouveaute(monkeypatch):
+    from src.utils import corrections_fiches
+
+    monkeypatch.setattr(
+        corrections_fiches,
+        "charger",
+        lambda: {"Isha": [{"fiche": {"genius_id": 5}, "fusionner_dans": {"titre": "X"}}]},
+    )
+    v = nouveautes.verifier(_runtime(_Genius([_song(5, "Doublon")])), _artist())
+    assert v.nouveautes == ()
 
 
 def test_rien_a_signaler_rend_une_liste_vide():

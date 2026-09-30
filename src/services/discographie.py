@@ -257,6 +257,23 @@ def _filtrer_supprimes(
     return nouveaux, 0
 
 
+def genius_ids_ecartes(runtime: Runtime, artist: Artist) -> set[int]:
+    """Pages Genius que l'import ÉCARTE VOLONTAIREMENT pour cet artiste : les
+    morceaux supprimés par l'utilisateur, les pages fusionnées à la main dans une
+    autre fiche, les éditions rattachées à leur fiche — les ensembles que `run`
+    filtre (lui y ajoute l'option `respect_deleted`). Lu par la vérification des
+    nouveautés, qui sans lui reproposait à chaque fois ce que l'import refuse
+    (Django : 4 morceaux brésiliens et indiens d'un homonyme, supprimés en
+    juillet, toujours en 🆕)."""
+    from src.utils.corrections_fiches import genius_ids_absorbes
+
+    return (
+        runtime.deleted.load_deleted_ids(artist.name)
+        | genius_ids_absorbes(artist.name)
+        | runtime.data_manager.get_artist_edition_genius_ids(artist.id)
+    )
+
+
 def _filtrer_non_musique(nouveaux: list[Track]) -> tuple[list[Track], list[str]]:
     """Pages non musicales que seul le NOM D'ALBUM trahit (« On Politics »
     rangé dans *Visionary Streams of Consciousness*) : le titre est déjà filtré

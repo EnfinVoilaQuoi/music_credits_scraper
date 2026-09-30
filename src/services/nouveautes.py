@@ -116,7 +116,13 @@ def verifier(runtime, artist, *, force: bool = False, maintenant=None) -> Verifi
     if not chansons:
         return Verification(motif="aucun morceau rendu par Genius")
 
-    connus = _ids_connus(runtime.data_manager, artist)
+    # Ce que l'import écarte volontairement (supprimés, fusionnés, éditions,
+    # pages non musicales) n'est pas « à récupérer » : sans ce filtre, le badge
+    # le reproposait après chaque run Discographie.
+    from src.services.discographie import genius_ids_ecartes
+    from src.utils.pages_genius import page_non_morceau
+
+    connus = _ids_connus(runtime.data_manager, artist) | genius_ids_ecartes(runtime, artist)
     nouveautes = tuple(
         Nouveaute(
             genius_id=int(c["id"]),
@@ -125,7 +131,9 @@ def verifier(runtime, artist, *, force: bool = False, maintenant=None) -> Verifi
             date=(c.get("release_date_for_display") or c.get("release_date")),
         )
         for c in chansons
-        if c.get("id") and int(c["id"]) not in connus
+        if c.get("id")
+        and int(c["id"]) not in connus
+        and page_non_morceau(c.get("title") or "", None) != "non-musique"
     )
     nouveautes_cache.ecrire(
         artist.id,

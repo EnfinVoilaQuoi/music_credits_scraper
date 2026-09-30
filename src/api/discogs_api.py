@@ -768,7 +768,7 @@ class DiscogsClient:
             )
 
             if not track_data:
-                logger.warning(f"⚠️ Aucune donnée Discogs pour '{track.title}'")
+                logger.info(f"∅ Aucune donnée Discogs pour '{track.title}'")
                 return False
 
             updated = False

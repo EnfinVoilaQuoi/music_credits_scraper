@@ -226,7 +226,7 @@ class ReccoBeatsProvider:
             # ÉTAPE 1 : l'ID posé par l'étape Identité (jamais cherché ici).
             spotify_id = self._existing_spotify_id(track, ctx)
             if not spotify_id:
-                logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
+                logger.info(f"∅ ReccoBeats: aucun Spotify ID disponible pour '{track.title}'")
                 return False
 
             # ÉTAPE 2 : appeler ReccoBeats avec l'ID
@@ -260,7 +260,7 @@ class ReccoBeatsProvider:
 
             spotify_id = self._existing_spotify_id(track, ctx)
             if not spotify_id:
-                logger.warning(f"ReccoBeats: ❌ Aucun Spotify ID disponible pour '{track.title}'")
+                logger.info(f"∅ ReccoBeats: aucun Spotify ID disponible pour '{track.title}'")
                 return False
 
             logger.info(f"🎵 Appel ReccoBeats API avec Spotify ID: {spotify_id}")

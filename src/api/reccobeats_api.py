@@ -5,7 +5,6 @@ Le scraping Spotify ID est géré par SpotifyIDScraper (module séparé)
 """
 
 import json
-import logging
 import time
 from typing import TYPE_CHECKING
 
@@ -341,10 +340,10 @@ class ReccoBeatsIntegratedClient:
         """Mémorise une ABSENCE « not_found » (commun sync/async) — seulement si
         ReccoBeats a répondu : les clients rendent `None` sur une panne aussi,
         qui était ainsi figée en absence pour tout le TTL (2026-09-28)."""
-        logger.warning(f"❌ Aucune donnée ReccoBeats pour {label}")
         if not source_usage.a_repondu(obs):
-            logger.warning("   ReccoBeats sans réponse : absence NON mémorisée")
+            logger.warning(f"ReccoBeats sans réponse pour {label} : absence NON mémorisée")
             return
+        logger.info(f"∅ Aucune donnée ReccoBeats pour {label}")
         self.cache[cache_key] = {"error": "not_found", "timestamp": time.time()}
         self._save_cache()
 
@@ -766,7 +765,9 @@ class ReccoBeatsIntegratedClient:
 
 # Test simple
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    from src.utils.logger import configurer_journaux
+
+    configurer_journaux(console="tout")
 
     client = ReccoBeatsIntegratedClient()
 

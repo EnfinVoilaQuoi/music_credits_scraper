@@ -38,7 +38,7 @@ class DeezerProvider:
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> None:
         """Jamais de skip : vérification de cohérence + enrichissement complémentaire."""
-        logger.info(f"🎵 Appel de Deezer API pour '{track.title}'")
+        logger.debug(f"🎵 Appel de Deezer API pour '{track.title}'")
         return None
 
     @staticmethod
@@ -53,7 +53,7 @@ class DeezerProvider:
     def _artist_name(track: Track) -> str:
         """Artiste de recherche : artiste principal si featuring (commun sync/async)."""
         if track.is_featuring and track.primary_artist_name:
-            logger.info(
+            logger.debug(
                 f"🎤 Featuring détecté, utilisation de l'artiste principal: "
                 f"{track.primary_artist_name}"
             )
@@ -68,7 +68,7 @@ class DeezerProvider:
 
         try:
             artist_name = self._artist_name(track)
-            logger.info(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
+            logger.debug(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
 
             # Récupérer les données existantes pour vérification
             previous_duration = track.duration
@@ -107,7 +107,7 @@ class DeezerProvider:
 
         try:
             artist_name = self._artist_name(track)
-            logger.info(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
+            logger.debug(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
 
             previous_duration = track.duration
             scraped_release_date = track.release_date
@@ -147,7 +147,7 @@ class DeezerProvider:
         force_update = ctx.force_update
 
         if not result["success"]:
-            logger.warning(f"❌ Deezer: {result.get('error', 'Erreur inconnue')}")
+            logger.info(f"∅ Deezer: {result.get('error', 'Erreur inconnue')}")
             return False
 
         data = result["data"]
@@ -156,15 +156,15 @@ class DeezerProvider:
 
         # Logs des vérifications
         if verifications:
-            logger.info("🔍 Deezer: Vérifications:")
+            logger.debug("🔍 Deezer: Vérifications:")
 
             if "duration" in verifications:
                 dur_check = verifications["duration"]
                 if dur_check["is_valid"]:
                     if dur_check.get("difference") is not None:
-                        logger.info(f"   ✅ Duration cohérente (diff: {dur_check['difference']}s)")
+                        logger.debug(f"   ✅ Duration cohérente (diff: {dur_check['difference']}s)")
                     else:
-                        logger.info(f"   ℹ️ {dur_check['message']}")
+                        logger.debug(f"   ℹ️ {dur_check['message']}")
                 else:
                     logger.warning(f"   ⚠️ Duration incohérente! {dur_check['message']}")
 
@@ -172,13 +172,15 @@ class DeezerProvider:
                 date_check = verifications["release_date"]
                 if date_check["is_valid"]:
                     if date_check.get("dates_match") is True:
-                        logger.info("   ✅ Release date cohérente")
+                        logger.debug("   ✅ Release date cohérente")
                     elif date_check.get("dates_match") is False:
-                        logger.warning(
-                            f"   ⚠️ Release dates différentes: Deezer={date_check.get('deezer_date')} vs Scraping={date_check.get('scraped_date')}"
+                        # Deezer décrit une ÉDITION (best-of, réédition) : un
+                        # écart de date est NORMAL, pas un avertissement.
+                        logger.info(
+                            f"   ℹ️ Release dates différentes: Deezer={date_check.get('deezer_date')} vs Scraping={date_check.get('scraped_date')}"
                         )
                     else:
-                        logger.info(f"   ℹ️ {date_check['message']}")
+                        logger.debug(f"   ℹ️ {date_check['message']}")
                 else:
                     logger.warning(f"   ⚠️ {date_check['message']}")
 
@@ -203,7 +205,7 @@ class DeezerProvider:
             if should_update_duration:
                 ctx.observations.append(Observation("duration", data["deezer_duration"], self.name))
                 track.duration = data["deezer_duration"]
-                logger.info(f"   ✅ Duration mise à jour: {track.duration}s")
+                logger.debug(f"   ✅ Duration mise à jour: {track.duration}s")
                 updated = True
             else:
                 logger.warning("   ⚠️ Duration Deezer ignorée (incohérente)")
@@ -223,17 +225,17 @@ class DeezerProvider:
                 )
                 # Convertir au format utilisé dans la base de données
                 track.release_date = data["deezer_release_date"]
-                logger.info(f"   ✅ Release date mise à jour: {track.release_date}")
+                logger.debug(f"   ✅ Release date mise à jour: {track.release_date}")
                 updated = True
             elif date_check.get("dates_match") is False:
-                logger.warning("   ⚠️ Release date Deezer ignorée (différente du scraping)")
+                logger.debug("   ℹ️ Release date Deezer ignorée (différente du scraping)")
 
         # Stocker les métadonnées supplémentaires (toujours, pas de vérification nécessaire).
         # e19 : ce sont désormais de VRAIES colonnes — jusque-là ces valeurs étaient
         # posées sur l'objet puis perdues en fin de run, faute de place en base.
         if data.get("deezer_track_id") and (force_update or not track.deezer_id):
             track.deezer_id = data["deezer_track_id"]
-            logger.info(f"   ✅ Deezer ID: {track.deezer_id}")
+            logger.debug(f"   ✅ Deezer ID: {track.deezer_id}")
             updated = True
 
         # Album du hit : PAS une donnée du morceau (pas de `updated`), juste la
@@ -259,7 +261,7 @@ class DeezerProvider:
             ctx.observations.append(Observation("isrc", data["deezer_isrc"], self.name))
         if data.get("deezer_isrc") and (not track.isrc or force_update):
             track.isrc = data["deezer_isrc"]
-            logger.info(f"   ✅ ISRC: {track.isrc}")
+            logger.debug(f"   ✅ ISRC: {track.isrc}")
             updated = True
 
         # BPM Deezer : candidat (souvent absent/0) — vote arbitré par le scrutin.
@@ -268,12 +270,12 @@ class DeezerProvider:
         sbpm = sanitize_bpm(data.get("deezer_bpm"))
         if sbpm is not None:
             ctx.bpm_ballot.add("deezer", sbpm)
-            logger.info(f"   ✅ BPM (Deezer, opportuniste, candidat): {sbpm}")
+            logger.debug(f"   ✅ BPM (Deezer, opportuniste, candidat): {sbpm}")
             updated = True
 
         if data.get("deezer_link") and (force_update or not track.deezer_url):
             track.deezer_url = data["deezer_link"]
-            logger.info(f"   ✅ Deezer URL: {track.deezer_url}")
+            logger.debug(f"   ✅ Deezer URL: {track.deezer_url}")
             updated = True
 
         # Drapeau « parental advisory » (booléen, pas un texte). `is not None`
@@ -284,7 +286,7 @@ class DeezerProvider:
             force_update or track.lyrics.explicit is None
         ):
             track.lyrics.explicit = data["deezer_explicit_lyrics"]
-            logger.info(f"   ✅ Paroles explicites: {track.lyrics.explicit}")
+            logger.debug(f"   ✅ Paroles explicites: {track.lyrics.explicit}")
             updated = True
 
         # `deezer_picture` (cover_medium) n'est PAS repris ici : le chantier

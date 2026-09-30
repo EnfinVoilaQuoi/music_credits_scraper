@@ -541,8 +541,8 @@ class SongBPMScraper:
                     log_api("SongBPM", f"search/{track_title}", True)
                     return result
 
-            logger.warning(
-                f"❌ Aucune correspondance parmi {min(len(results), max_results_to_check)} résultat(s)"
+            logger.info(
+                f"∅ Aucune correspondance parmi {min(len(results), max_results_to_check)} résultat(s)"
             )
             return None
 

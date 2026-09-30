@@ -188,7 +188,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             credits = self._extract_with_llm(markdown, track)
 
         if not credits:
-            logger.warning(f"GeniusScraperV3: aucun crédit trouvé pour '{track.title}'")
+            logger.info(f"∅ GeniusScraperV3: aucun crédit trouvé pour '{track.title}'")
 
         self.derniers_ecarts_api = None
         if credits:
@@ -267,7 +267,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                     results["success"] += 1
                 else:
                     results["failed"] += 1
-                    logger.warning(f"V3: aucun crédit pour '{track.title}'")
+                    logger.info(f"∅ V3: aucun crédit pour '{track.title}'")
             except Exception as e:
                 # Boucle batch résiliente : l'échec d'un morceau est consigné et
                 # n'arrête pas les suivants. logger.exception = trace complète.

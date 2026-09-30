@@ -633,7 +633,7 @@ class TrackRepository:
         result: list[Track] = []
 
         try:
-            logger.info(f"🔍 Chargement des tracks pour artist_id: {artist_id}")
+            logger.debug(f"🔍 Chargement des tracks pour artist_id: {artist_id}")
 
             with self.engine.connect() as conn:
                 # ✅ ÉTAPE 1: Récupérer d'abord les infos de l'artiste
@@ -672,7 +672,7 @@ class TrackRepository:
                 total_count = conn.execute(
                     select(func.count()).select_from(tracks).where(tracks.c.artist_id == artist_id)
                 ).scalar()
-                logger.info(f"📊 {total_count} tracks trouvés en base")
+                logger.debug(f"📊 {total_count} tracks trouvés en base")
 
                 if total_count == 0:
                     return result
@@ -699,7 +699,7 @@ class TrackRepository:
                     .mappings()
                     .all()
                 )
-                logger.info(f"📦 {len(rows)} lignes récupérées")
+                logger.debug(f"📦 {len(rows)} lignes récupérées")
                 _t_rows = time.monotonic()
 
                 # E6 : observations de TOUT l'artiste en 1 requête (pas par track),
@@ -766,7 +766,7 @@ class TrackRepository:
 
                 # Compter les tracks avec musical_key
                 tracks_with_key = sum(1 for t in result if t.audio.musical_key)
-                logger.info(
+                logger.debug(
                     f"✅ {len(result)} tracks chargés avec succès ({tracks_with_key} avec musical_key)"
                 )
 

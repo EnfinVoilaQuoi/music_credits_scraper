@@ -409,8 +409,8 @@ class SpotifyIDScraper:
         # ligne ; ce plancher lui épargne le travail et surtout empêche le cache
         # de se remplir de faux.
         if best["relevance"] < _MIN_RELEVANCE:
-            logger.warning(
-                f"❌ Meilleur candidat trop peu pertinent pour '{title}' : "
+            logger.info(
+                f"∅ Meilleur candidat trop peu pertinent pour '{title}' : "
                 f"{best['id']} à {best['relevance']:.2f} < {_MIN_RELEVANCE:.2f} — "
                 f"aucun identifiant retenu"
             )

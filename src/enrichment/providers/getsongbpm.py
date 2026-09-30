@@ -134,7 +134,7 @@ class GetSongBpmProvider:
         pose (sinon faux ÉCHEC → nettoyage, cf. data_enricher._clear...).
         """
         if song_data.error:
-            logger.warning(f"GetSongBPM: ❌ {song_data.error}")
+            logger.info(f"∅ GetSongBPM: {song_data.error}")
             return False
 
         updated = False

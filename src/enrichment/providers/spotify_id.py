@@ -153,7 +153,7 @@ class SpotifyIdProvider:
         track.spotify_id_checked_at = datetime.now().isoformat(timespec="seconds")
 
         if not spotify_id:
-            logger.warning(f"❌ Aucun Spotify ID trouvé via scraper pour '{track.title}'")
+            logger.info(f"∅ Aucun Spotify ID trouvé via scraper pour '{track.title}'")
             return None
 
         # Valider l'unicité de l'ID trouvé
@@ -200,7 +200,7 @@ class SpotifyIdProvider:
         """Scrape un Spotify ID unique et le pose (+ titre de page pour vérif)."""
         spotify_id = self.get_unique_spotify_id(track, ctx, force_scraper=True)
         if not spotify_id:
-            logger.warning("❌ Échec récupération Spotify ID via scraper")
+            logger.info("∅ Aucun Spotify ID retenu par le scraper")
             return False
 
         track.spotify_id = spotify_id
@@ -230,7 +230,7 @@ class SpotifyIdProvider:
 
         spotify_id = await self._get_unique_spotify_id_async(track, ctx, scraper)
         if not spotify_id:
-            logger.warning("❌ Échec récupération Spotify ID via scraper")
+            logger.info("∅ Aucun Spotify ID retenu par le scraper")
             return False
 
         track.spotify_id = spotify_id

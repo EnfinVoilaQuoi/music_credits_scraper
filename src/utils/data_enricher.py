@@ -504,19 +504,24 @@ class DataEnricher:
         )
 
     def _log_run_summary(self, track, results: dict) -> None:
-        """Résumé final d'un run (commun sync/async)."""
-        logger.info(f"📊 RÉSUMÉ enrichissement '{track.title}':")
-        logger.info(f"   • Résultats: {results}")
-        logger.info(f"   • Spotify ID: {track.spotify_id}")
-        logger.info(f"   • BPM: {track.audio.bpm}")
-        # key/mode/deezer_id = attributs dynamiques (mapper/providers) → getattr
-        logger.info(f"   • Key: {track.audio.key}, Mode: {track.audio.mode}")
-        logger.info(f"   • Musical Key: {track.audio.musical_key}")
-        logger.info(f"   • Duration: {track.duration}")
-        logger.info(f"   • Release Date: {track.release_date}")
-        logger.info(f"   • Deezer ID: {getattr(track, 'deezer_id', 'N/A')}")
-        logger.info(f"   • Discogs ID: {track.discogs_id}")
-        logger.info(f"   • Crédits totaux: {len(track.credits)}")
+        """Résumé final d'un run (commun sync/async) — UNE ligne par morceau.
+
+        C'était un bloc de onze lignes (« • Discogs ID: None »…), soit 42 % du
+        journal d'une journée à lui seul (mesuré le 2026-09-30) : le diagnostic
+        s'y noyait. Tout y est encore, sur une ligne."""
+        par_verdict: dict[str, list[str]] = {}
+        for nom, verdict in results.items():
+            cle = {True: "ok", False: "rien", None: "erreur"}.get(verdict, str(verdict))
+            par_verdict.setdefault(cle, []).append(nom)
+        sources = " ; ".join(f"{k} : {', '.join(v)}" for k, v in par_verdict.items())
+        audio = track.audio
+        logger.info(
+            f"📊 '{track.title}' — {sources or 'aucune source'} | BPM {audio.bpm} · "
+            f"{audio.musical_key or f'{audio.key}/{audio.mode}'} · durée {track.duration} · "
+            f"sortie {track.release_date} | ID spotify {track.spotify_id} · "
+            f"deezer {track.deezer_id} · discogs {track.discogs_id} | "
+            f"{len(track.credits)} crédit(s)"
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Orchestration (Refacto Phase 3.4) — l'ordre d'appel des sources est
@@ -559,7 +564,7 @@ class DataEnricher:
             if outcome is True:
                 logger.info(f"✅ {name} SUCCÈS pour '{track.title}'")
             elif outcome is False:
-                logger.warning(f"❌ {name} ÉCHEC pour '{track.title}'")
+                logger.info(f"∅ {name} : rien d'appliqué pour '{track.title}'")
         except Exception:
             # Frontière d'exception du batch (dernier ressort) : un provider qui
             # lève ne stoppe pas le run. logger.exception = trace complète.
@@ -585,7 +590,7 @@ class DataEnricher:
             if outcome is True:
                 logger.info(f"✅ {name} SUCCÈS pour '{track.title}'")
             elif outcome is False:
-                logger.warning(f"❌ {name} ÉCHEC pour '{track.title}'")
+                logger.info(f"∅ {name} : rien d'appliqué pour '{track.title}'")
         except Exception:
             # Frontière d'exception du batch (dernier ressort), cf. jumeau sync.
             logger.exception(f"❌ Erreur {name} pour {track.title}")

@@ -124,7 +124,7 @@ class GetSongBPMFetcher:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
         except OSError as e:
-            print(f"⚠ Erreur sauvegarde cache: {e}")
+            logger.warning(f"GetSongBPM : échec de sauvegarde du cache : {e}")
 
     def _get_cache_key(self, artist: str, title: str) -> str:
         """Génère une clé de cache unique"""
@@ -261,24 +261,26 @@ class GetSongBPMFetcher:
                 elif response.status_code == 429:
                     # Rate limit atteint
                     wait_time = 10 * (attempt + 1)
-                    print(f"    ⚠ Rate limit! Attente {wait_time}s...")
+                    logger.warning(f"⏰ GetSongBPM : rate limit (429), attente {wait_time} s")
                     time.sleep(wait_time)
                     continue
 
                 elif response.status_code == 401:
-                    print("    ✗ API Key invalide ou expirée")
+                    logger.error("❌ GetSongBPM : clé API invalide ou expirée (401)")
                     return None
 
                 elif response.status_code == 404:
                     return None
 
                 else:
-                    print(f"    ⚠ Erreur API: Status {response.status_code}")
+                    logger.warning(f"GetSongBPM : erreur API (HTTP {response.status_code})")
                     return None
 
             except requests.exceptions.RequestException as e:
                 source_usage.note_failure(_SOURCE, e)
-                print(f"    ⚠ Erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}): {e}")
+                logger.warning(
+                    f"GetSongBPM : erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}) : {e}"
+                )
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(2**attempt)
                 continue
@@ -301,23 +303,25 @@ class GetSongBPMFetcher:
 
                 elif response.status_code == 429:
                     wait_time = 10 * (attempt + 1)
-                    print(f"    ⚠ Rate limit! Attente {wait_time}s...")
+                    logger.warning(f"⏰ GetSongBPM : rate limit (429), attente {wait_time} s")
                     await asyncio.sleep(wait_time)
                     continue
 
                 elif response.status_code == 401:
-                    print("    ✗ API Key invalide ou expirée")
+                    logger.error("❌ GetSongBPM : clé API invalide ou expirée (401)")
                     return None
 
                 elif response.status_code == 404:
                     return None
 
                 else:
-                    print(f"    ⚠ Erreur API: Status {response.status_code}")
+                    logger.warning(f"GetSongBPM : erreur API (HTTP {response.status_code})")
                     return None
 
             except httpx.HTTPError as e:
-                print(f"    ⚠ Erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}): {e}")
+                logger.warning(
+                    f"GetSongBPM : erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}) : {e}"
+                )
                 if attempt < self.MAX_RETRIES - 1:
                     await asyncio.sleep(2**attempt)
                 continue

@@ -17,6 +17,7 @@ que personne (moi le premier) ne refasse le raisonnement sans refaire la mesure.
 Aucun réseau ici : `_render` est remplacé, et on observe les URL demandées.
 """
 
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -139,3 +140,33 @@ class TestRobustesse:
 
     def test_une_page_sans_ligne_donne_une_liste_vide(self, scraper):
         assert scraper.scrape_by_artist("Inconnu", get_details=False) == []
+
+
+_FIXTURE_SANS_RESULTAT = Path(__file__).parent / "fixtures" / "riaa" / "search_no_results.html"
+
+
+class TestAbsenceOuEchec:
+    """« Aucune certification RIAA trouvée (ou Cloudflare non résolu) » avouait
+    ne pas savoir (2026-10-01). Le site DIT « No matching results » : seule cette
+    phrase autorise à conclure qu'un artiste n'est pas certifié aux USA."""
+
+    def test_le_message_du_site_est_une_absence(self, scraper):
+        scraper.reponse = _FIXTURE_SANS_RESULTAT.read_text(encoding="utf-8")
+        assert scraper.scrape_by_artist("Lucio Bukowski", get_details=False) == []
+        assert scraper.sans_resultat and not scraper.lecture_echouee
+
+    def test_une_page_vide_SANS_message_est_un_echec(self, scraper):
+        """Le défi Cloudflare se rend très bien : il ne porte aucune ligne."""
+        scraper.reponse = "<html><title>Just a moment...</title><body></body></html>"
+        assert scraper.scrape_by_artist("Lucio Bukowski", get_details=False) == []
+        assert scraper.lecture_echouee and not scraper.sans_resultat
+
+    def test_le_marqueur_n_est_pas_dans_une_page_de_resultats(self):
+        """Garde inverse sur la fixture réelle à 11 lignes (Daft Punk)."""
+        from src.scrapers.riaa_scraper_v2 import sans_resultat
+
+        html = (Path(__file__).parent / "fixtures" / "riaa" / "search_results.html").read_text(
+            encoding="utf-8"
+        )
+        assert not sans_resultat(html)
+        assert sans_resultat(_FIXTURE_SANS_RESULTAT.read_text(encoding="utf-8"))

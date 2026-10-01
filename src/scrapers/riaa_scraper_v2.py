@@ -156,6 +156,9 @@ _LEVEL_WORDS = {
 _ONGLET_CLASSIQUE = "default-award"
 _ONGLET_LATIN = "platinum-latin"
 
+#: Bloc que le site rend À LA PLACE du tableau quand la recherche n'a rien donné.
+_SANS_RESULTAT = ".tw-gnp-no-results"
+
 _BADGE_ALT_RE = re.compile(r"badge\s+([A-Za-z]+)\s+level\s+(\d+)", re.I)
 _BADGE_SRC_RE = re.compile(r"(?:([A-Za-z]+)_)?(\d+)_big", re.I)
 #: Libellé de palier tel qu'écrit dans la timeline : « 15X PLATINUM », « ORO »…
@@ -320,7 +323,15 @@ class RIAAScraperV2:
         #: l'appelant qui découpe une fenêtre en tirait la pire conclusion —
         #: avancer le curseur (fenêtre définitivement sautée) puis RALLONGER la
         #: tranche suivante, l'échec accélérant ainsi le balayage.
+        #:
+        #: Posé AUSSI quand la page s'est rendue sans résultat ET sans le
+        #: message « No matching results » du site (2026-10-01) : un défi
+        #: Cloudflare se rend très bien, il ne porte simplement aucune ligne.
         self.lecture_echouee: bool = False
+        #: Le dernier rendu porte-t-il le constat POSITIF « aucun résultat »
+        #: (`.tw-gnp-no-results`) ? C'est la seule chose qui autorise à conclure
+        #: qu'un artiste n'a pas de certification RIAA, plutôt qu'à un échec.
+        self.sans_resultat: bool = False
 
     # ------------------------------------------------------------------ public
     @staticmethod
@@ -413,15 +424,22 @@ class RIAAScraperV2:
                 return []
             return self._parse_verifie(html, get_details, obs)
 
-    @staticmethod
-    def _parse_verifie(html: str, get_details: bool, obs) -> list[dict]:
+    def _parse_verifie(self, html: str, get_details: bool, obs) -> list[dict]:
         """Parse en distinguant « rien à dire » de « on ne sait plus lire ».
 
-        Des lignes `tr.table_award_row` dans le HTML mais aucune extraite = le
-        parseur ne comprend plus la page : c'est un échec de communication
-        (`parse`), jamais un `absent` — le seul verdict exclu du numérateur est
-        aussi le seul capable de rendre une panne muette, et c'est précisément ce
-        qui s'est produit ici pendant deux mois.
+        Trois cas à zéro résultat, et un seul est une absence :
+
+        · des lignes `tr.table_award_row` mais aucune extraite = le parseur ne
+          comprend plus la page → `parse`. Le seul verdict exclu du numérateur
+          est aussi le seul capable de rendre une panne muette, et c'est
+          précisément ce qui s'est produit ici pendant deux mois ;
+        · aucune ligne ET le message « No matching results » du site → `absent`,
+          la recherche a abouti (`sans_resultat`) ;
+        · aucune ligne et AUCUN message → ni l'un ni l'autre : défi Cloudflare
+          rendu à la place des résultats, ou formulaire refait. C'était un
+          `absent` jusqu'au 2026-10-01 — « Aucune certification RIAA trouvée
+          (ou Cloudflare non résolu) » avouait ne pas savoir, et l'appelant
+          tranchait en échec un artiste simplement jamais certifié aux USA.
         """
         resultats = _parse_results(html, get_details)
         if resultats:
@@ -433,8 +451,17 @@ class RIAAScraperV2:
                 "le gabarit du site a changé (re-capturer les fixtures)."
             )
             obs.fail(IssueKind.PARSE, f"{lignes_vues} lignes non parsées")
+            self.lecture_echouee = True
+        elif sans_resultat(html):
+            obs.absent("aucune certification (« No matching results »)")
+            self.sans_resultat = True
         else:
-            obs.absent("aucune certification")
+            logger.error(
+                "RIAA : page rendue sans résultat NI message « No matching "
+                "results » — défi Cloudflare ou formulaire refait."
+            )
+            obs.fail(IssueKind.BLOCKED, "ni résultat ni message « aucun résultat »")
+            self.lecture_echouee = True
         return []
 
     # Compat ancienne API
@@ -452,6 +479,7 @@ class RIAAScraperV2:
         tentatives = _Tentatives()
         self.tronque = False
         self.lecture_echouee = False
+        self.sans_resultat = False
         try:
             html = async_loop.run_sync(self._render_async(url, load_all, get_details, tentatives))
             self.lecture_echouee = html is None
@@ -523,12 +551,16 @@ class RIAAScraperV2:
             with tentatives.aller_retour("goto"):
                 await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
             try:
-                await page.wait_for_selector("tr.table_award_row", timeout=20_000)
+                # Les lignes OU le message « aucun résultat » : attendre les seules
+                # lignes coûtait 20 s à chaque artiste jamais certifié aux USA.
+                await page.wait_for_selector(
+                    f"tr.table_award_row, {_SANS_RESULTAT}", timeout=20_000
+                )
             except PatchrightError:
                 # La page a bien répondu (le `goto` est compté OK) : l'absence de
                 # lignes est un constat de CONTENU, que `_parse_verifie` tranchera
-                # en `absent` ou `parse`. Rien à imputer au transport ici.
-                logger.warning("RIAA : aucune ligne (page vide / Cloudflare ?)")
+                # (`parse` ou défi Cloudflare). Rien à imputer au transport ici.
+                logger.warning("RIAA : ni ligne ni « aucun résultat » (Cloudflare ?)")
                 return await page.content()
 
             if load_all:
@@ -821,6 +853,17 @@ def _parse_details_legacy(det, base: dict) -> list[dict]:
             }
         )
     return history
+
+
+def sans_resultat(html: str) -> bool:
+    """La page porte-t-elle le constat « No matching results » du site ?
+
+    Relevé sur riaa.com le 2026-10-01 : une recherche par artiste jamais certifié
+    (« Lucio Bukowski ») comme une fenêtre de dates vide (01-03/01/1955) rendent
+    le même bloc `div.tw-gnp-no-results` dans `#gnp-results`. Fixture :
+    `tests/fixtures/riaa/search_no_results.html`.
+    """
+    return BeautifulSoup(html or "", "html.parser").select_one(_SANS_RESULTAT) is not None
 
 
 def _count_award_rows(html: str) -> int:

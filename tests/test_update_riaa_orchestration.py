@@ -10,6 +10,7 @@ from datetime import datetime
 import pytest
 
 from src.utils import update_riaa as u
+from src.utils.cert_recherche import Issue, Verdict
 from tests import test_riaa_raw
 from tests.test_certifs_codes_de_sortie import _lancer
 
@@ -50,18 +51,36 @@ class TestFusion:
         assert updater.update_from_scraped_data([{"artist": "A"}]) == (0, 0)
 
 
+def _scraper_vide(sans_resultat):
+    class _Scraper:
+        def __init__(self, headless=True):
+            self.sans_resultat = False
+
+        def scrape_by_artist(self, artist, get_details=False):
+            self.sans_resultat = sans_resultat
+            return []
+
+    return _Scraper
+
+
 class TestFetchArtist:
-    def test_sans_resultat_rend_false(self, monkeypatch, riaa_tmp, capsys):
-        class _Scraper:
-            def __init__(self, headless=True):
-                pass
+    def test_message_aucun_resultat_est_une_ABSENCE(self, monkeypatch, riaa_tmp, capsys):
+        """Le site a DIT « No matching results » : l'artiste n'est pas certifié
+        aux USA, la recherche a abouti (2026-10-01)."""
+        monkeypatch.setattr(
+            "src.scrapers.riaa_scraper_v2.RIAAScraperV2", _scraper_vide(sans_resultat=True)
+        )
+        verdict = u.fetch_artist("Nobody")
+        assert verdict.issue is Issue.ABSENT
+        assert "aucune certification" in capsys.readouterr().out
 
-            def scrape_by_artist(self, artist, get_details=False):
-                return []
-
-        monkeypatch.setattr("src.scrapers.riaa_scraper_v2.RIAAScraperV2", _Scraper)
-        assert u.fetch_artist("Nobody") is False
-        assert "Aucune certification" in capsys.readouterr().out
+    def test_page_vide_SANS_message_est_un_ECHEC(self, monkeypatch, riaa_tmp):
+        """Défi Cloudflare rendu à la place des résultats : on ne sait pas."""
+        monkeypatch.setattr(
+            "src.scrapers.riaa_scraper_v2.RIAAScraperV2", _scraper_vide(sans_resultat=False)
+        )
+        verdict = u.fetch_artist("Nobody")
+        assert verdict.issue is Issue.ECHEC and "Cloudflare" in verdict.motif
 
     def test_fusionne_les_resultats(self, monkeypatch, riaa_tmp):
         vus = {}
@@ -77,7 +96,8 @@ class TestFetchArtist:
         monkeypatch.setattr("src.scrapers.riaa_scraper_v2.RIAAScraperV2", _Scraper)
         monkeypatch.setattr(u, "_flatten_records", lambda r: [{"Artist": "Drake"}])
         monkeypatch.setattr(u, "_merge_certif_csv", lambda rows: (10, 1))
-        assert u.fetch_artist("Drake") is True and vus["details"] is True
+        verdict = u.fetch_artist("Drake")
+        assert verdict.issue is Issue.CERTIFIE and verdict.lignes == 1 and vus["details"] is True
 
 
 class TestMain:
@@ -96,11 +116,21 @@ class TestMain:
         assert _lancer(u, "--from", "01-01-2024", "--to", "31-01-2024") == 1
         assert vus == {"d": "01-01-2024", "f": "31-01-2024"}
 
-    def test_artistes_repetables(self, monkeypatch):
+    def test_artistes_repetables(self, monkeypatch, capsys):
         vus = []
-        monkeypatch.setattr(u, "fetch_artist", lambda n: vus.append(n) or n == "B")
+
+        def absent_sauf_b(n):
+            vus.append(n)
+            return Verdict(n, Issue.CERTIFIE, 4) if n == "B" else Verdict(n, Issue.ABSENT)
+
+        monkeypatch.setattr(u, "fetch_artist", absent_sauf_b)
         assert _lancer(u, "--artist", "A", "--artist", "B") == 0 and vus == ["A", "B"]
-        monkeypatch.setattr(u, "fetch_artist", lambda n: False)
+        # La DERNIÈRE ligne est le bilan que la fenêtre reprend.
+        derniere = capsys.readouterr().out.strip().splitlines()[-1]
+        assert derniere.startswith("∅ A") and "✅ B : 4" in derniere
+        monkeypatch.setattr(u, "fetch_artist", lambda n: Verdict(n, Issue.ABSENT))
+        assert _lancer(u, "--artist", "A") == 0
+        monkeypatch.setattr(u, "fetch_artist", lambda n: Verdict(n, Issue.ECHEC, motif="x"))
         assert _lancer(u, "--artist", "A") == 1
 
     def test_auto(self, monkeypatch):

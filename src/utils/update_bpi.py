@@ -34,6 +34,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
+import httpx
 import pandas as pd
 
 from src.concurrency import async_loop
@@ -42,6 +43,7 @@ from src.observability.registry import Flow
 from src.scrapers.bpi_scraper import BpiScraper
 from src.utils import cert_clean_report, cert_store
 from src.utils.cert_normalize import FORMAT_JOUR_CLI, bpi_level, bpi_units, jour_cli, lire_jour_cli
+from src.utils.cert_recherche import CODE_ECHEC, Issue, Verdict, conclure
 from src.utils.logger import get_logger
 
 if sys.stdout and "pytest" not in sys.modules:
@@ -384,24 +386,41 @@ def fetch_artists(noms: list[str]) -> bool:
     discographie certifiée.
     """
 
+    verdicts: list[Verdict] = []
+
     async def travail(scraper):
         sorties: list[dict] = []
         for nom in noms:
             print(f"--- BPI : {nom}")
-            sorties.extend(await scraper.scrape_by_artist(nom, get_details=True))
+            try:
+                lot = await scraper.scrape_by_artist(nom, get_details=True)
+            except httpx.HTTPError as e:
+                # Déjà classé par l'observation ; ici on le DIT et on passe au
+                # nom suivant — il remontait jusqu'à `main` en trace brute.
+                verdicts.append(Verdict(nom, Issue.ECHEC, motif=f"réseau : {type(e).__name__}"))
+                continue
+            if lot:
+                verdicts.append(Verdict(nom, Issue.CERTIFIE, lignes=len(lot)))
+            elif scraper.sans_resultat:
+                verdicts.append(Verdict(nom, Issue.ABSENT, motif=scraper.motif))
+            else:
+                verdicts.append(
+                    Verdict(nom, Issue.ECHEC, motif=scraper.motif or "réponse illisible")
+                )
+            sorties.extend(lot)
         return sorties
 
     collecte = _collecte(travail)
     lignes = _horodater(collecte.lignes)
-    if not lignes:
-        print("❌ Aucune certification BPI trouvée pour ces artistes")
-        return False
-    total, ajoutees = _merge_certif_csv(lignes, source="ARTIST")
-    print(f"✅ BPI : {len(lignes)} vue(s), {ajoutees} ajoutée(s) au brut (clean : {total})")
+    if lignes:
+        total, ajoutees = _merge_certif_csv(lignes, source="ARTIST")
+        print(f"✅ BPI : {len(lignes)} vue(s), {ajoutees} ajoutée(s) au brut (clean : {total})")
+    code, bilan = conclure(verdicts)
     if collecte.tronque:
         _dire_troncature("Relevé par artiste")
-        return False
-    return True
+        code, bilan = CODE_ECHEC, f"{bilan} · ⚠️ relevé TRONQUÉ"
+    print(bilan)
+    return code == 0
 
 
 def fetch_periode(debut: str, fin: str) -> bool:

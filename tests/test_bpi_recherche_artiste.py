@@ -317,12 +317,38 @@ class TestVerdictsDAbsence:
         assert run(scraper.scrape_by_artist("Inconnu Total")) == []
         # Aucune requête de résultats : sans id, il n'y a rien à demander.
         assert [c for c, _, _ in scraper.appels if c == "/"] == []
+        # L'annuaire ne liste que des certifiés : un corps vide en 200 (mesuré
+        # sur le site le 2026-10-01) est un constat, pas une panne.
+        assert scraper.sans_resultat and not scraper.lecture_echouee
+        assert "annuaire" in scraper.motif
 
     def test_entites_trouvees_mais_aucune_certification(self, scraper):
         scraper.reponses["/artists"] = [page_annuaire((1, "MOZART")), ""]
         scraper.reponses["/"] = [PAGE_VIDE]
         assert run(scraper.scrape_by_artist("Mozart")) == []
         assert len([c for c, _, _ in scraper.appels if c == "/"]) == 1
+        assert scraper.sans_resultat and not scraper.lecture_echouee
+
+    def test_annuaire_illisible_n_est_PAS_une_absence(self, scraper):
+        """Un corps NON vide sans entrée lisible : l'annuaire a changé de
+        gabarit. Rendre « aucune entité » ferait passer la panne pour
+        « jamais certifié au Royaume-Uni »."""
+        scraper.reponses["/artists"] = ["<ul><li>gabarit inconnu</li></ul>"]
+        assert run(scraper.scrape_by_artist("Sigala")) == []
+        assert scraper.lecture_echouee and not scraper.sans_resultat
+
+    def test_liste_illisible_n_est_PAS_une_absence(self, scraper):
+        """Ni ligne ni « No … found » : ce n'est pas une fin de liste."""
+        scraper.reponses["/artists"] = [page_annuaire((1, "SIGALA")), ""]
+        scraper.reponses["/"] = ["<div>maintenance</div>"]
+        assert run(scraper.scrape_by_artist("Sigala")) == []
+        assert scraper.lecture_echouee and not scraper.sans_resultat
+
+    def test_le_constat_est_remis_a_zero_entre_deux_noms(self, scraper):
+        scraper.reponses["/artists"] = ["<ul><li>gabarit inconnu</li></ul>", ""]
+        run(scraper.scrape_by_artist("A"))
+        run(scraper.scrape_by_artist("B"))
+        assert scraper.sans_resultat and not scraper.lecture_echouee
 
     def test_une_fenetre_sans_certification(self, scraper):
         scraper.reponses["/"] = [PAGE_VIDE]

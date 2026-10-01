@@ -420,6 +420,15 @@ class BpiScraper:
         #: `full_sweep` annonçait « ✅ Balayage terminé » sur un corpus tronqué.
         #: Même défaut que RIAA, corrigé le même jour (2026-09-09).
         self.tronque: bool = False
+        #: Constat de la DERNIÈRE recherche par artiste, quand elle n'a rien rendu
+        #: (2026-10-01). Calque de RIAA : `sans_resultat` n'est posé que si le
+        #: site l'a DIT (annuaire vide en 200, liste « No certified awards
+        #: found ») ; `lecture_echouee` quand une réponse n'a pas pu être lue.
+        #: Sans eux, l'appelant affichait « ❌ aucune certification » aussi bien
+        #: pour un rappeur jamais certifié au Royaume-Uni que pour un gabarit cassé.
+        self.sans_resultat: bool = False
+        self.lecture_echouee: bool = False
+        self.motif: str = ""
 
     # -- transport -----------------------------------------------------------
     def _session(self) -> AsyncHttpSession:
@@ -500,6 +509,12 @@ class BpiScraper:
             if not entetes_connus:
                 entetes_connus = entetes(html)
             if not lot:
+                if not est_vide(html):
+                    # Ni ligne ni message de fin : la page n'est pas une fin de
+                    # liste. G1/G2 ont déjà posé leur verdict ; une page de
+                    # continuation illisible, elle, n'en posait AUCUN.
+                    self.lecture_echouee = True
+                    obs.fail(IssueKind.PARSE, f"page {page} sans ligne ni message de fin")
                 break
             lignes.extend(lot)
             page += 1
@@ -591,6 +606,17 @@ class BpiScraper:
                 html = await self._get("/artists", params={"q": nom, "page": page}, hx=False)
                 lot = parse_annuaire(html)
                 if not lot:
+                    # Fin de liste = corps VIDE en 200 (mesuré le 2026-10-01 :
+                    # « Zorglubxyz », « Lucio Bukowski », et la page 2 de
+                    # « Sigala »). Un corps NON vide sans entrée lisible est un
+                    # annuaire qu'on ne sait plus lire — pas « aucun artiste ».
+                    if (html or "").strip():
+                        self.lecture_echouee = True
+                        logger.error(
+                            f"BPI : annuaire « {nom} » page {page} non vide mais "
+                            "sans entrée lisible — gabarit changé ?"
+                        )
+                        obs.fail(IssueKind.PARSE, f"annuaire illisible (page {page})")
                     break
                 trouves.extend(lot)
                 page += 1
@@ -623,15 +649,32 @@ class BpiScraper:
             return retenus
 
     async def scrape_by_artist(self, artist: str, get_details: bool = True) -> list[dict]:
-        """Toutes les certifications des entités correspondant à `artist`."""
+        """Toutes les certifications des entités correspondant à `artist`.
+
+        Rien rendu ⇒ `sans_resultat` OU `lecture_echouee` est posé, avec `motif`.
+        L'annuaire ne liste que des artistes CERTIFIÉS : « aucune entité » y vaut
+        donc « jamais certifié au Royaume-Uni sous ce nom ».
+        """
+        self.sans_resultat = self.lecture_echouee = False
+        self.motif = ""
         with source_usage.observe(_SOURCE, label=f"artiste:{artist}") as obs:
             entites = await self.resoudre_artistes(artist)
             if not entites:
+                if self.lecture_echouee:
+                    self.motif = "annuaire illisible (gabarit changé ?)"
+                    return []
+                self.sans_resultat = True
+                self.motif = "absent de l'annuaire des artistes certifiés"
                 obs.absent(f"aucune entité BPI pour « {artist} »")
                 return []
 
             lignes = await self._collecter(obs, artistes=tuple(i for i, _ in entites))
             if not lignes:
+                if self.lecture_echouee:
+                    self.motif = "liste de certifications illisible (gabarit changé ?)"
+                    return []
+                self.sans_resultat = True
+                self.motif = f"{len(entites)} entité(s), « No certified awards found »"
                 obs.absent(f"aucune certification pour « {artist} »")
                 return []
             if get_details:

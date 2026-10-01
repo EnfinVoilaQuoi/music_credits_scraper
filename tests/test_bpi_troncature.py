@@ -113,6 +113,66 @@ class TestUneCollecteTronqueeNeSeDitPasTerminee:
         assert len(u._load_bpi_raw()) == 2
 
 
+class _ScraperParNom:
+    """Rend, par nom, des lignes, une absence constatée, un échec ou une exception."""
+
+    tronque = False
+
+    def __init__(self, reponses):
+        self.reponses = reponses
+        self.sans_resultat = self.lecture_echouee = False
+        self.motif = ""
+
+    async def scrape_by_artist(self, nom, **k):
+        r = self.reponses[nom]
+        if isinstance(r, Exception):
+            raise r
+        self.sans_resultat = r == "absent"
+        self.lecture_echouee = r == "echec"
+        motifs = {"absent": "absent de l'annuaire", "echec": "annuaire illisible"}
+        self.motif = motifs.get(r, "") if isinstance(r, str) else ""
+        return r if isinstance(r, list) else []
+
+    async def aclose(self):
+        pass
+
+
+class TestRechercheParArtiste:
+    """Absence ≠ échec (2026-10-01) : un rappeur jamais certifié au Royaume-Uni
+    sortait en « ❌ Aucune certification BPI trouvée », code 1."""
+
+    @pytest.fixture
+    def lancer(self, bpi_tmp, monkeypatch):
+        import asyncio
+
+        def _lancer(reponses, noms):
+            faux = _ScraperParNom(reponses)
+            monkeypatch.setattr(
+                u, "_collecte", lambda travail: u.Collecte(asyncio.run(travail(faux)), False)
+            )
+            return u.fetch_artists(noms)
+
+        return _lancer
+
+    def test_une_absence_constatee_est_un_succes(self, lancer, capsys):
+        assert lancer({"Lucio Bukowski": "absent"}, ["Lucio Bukowski"]) is True
+        derniere = capsys.readouterr().out.strip().splitlines()[-1]
+        assert derniere.startswith("∅ Lucio Bukowski : aucune certification")
+
+    def test_un_annuaire_illisible_est_un_echec(self, lancer, capsys):
+        assert lancer({"X": "echec"}, ["X"]) is False
+        assert "❌ X : annuaire illisible" in capsys.readouterr().out
+
+    def test_une_erreur_reseau_n_emporte_pas_les_noms_suivants(self, lancer, capsys):
+        import httpx
+
+        reponses = {"A": httpx.ConnectError("coupé"), "B": [_ligne("B")]}
+        assert lancer(reponses, ["A", "B"]) is False
+        derniere = capsys.readouterr().out.strip().splitlines()[-1]
+        assert "❌ A : réseau : ConnectError" in derniere and "✅ B : 1" in derniere
+        assert len(u._load_bpi_raw()) == 1, "ce que B a rendu est gardé"
+
+
 class TestUneCollecteEntiereReste_un_succes:
     """Le pendant : sans plafond atteint, rien ne change."""
 

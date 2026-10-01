@@ -26,12 +26,16 @@ reste (filtrage, fusion, régénération du clean, méta) tourne pour de vrai su
 
 import json
 import re as _re
+from pathlib import Path
 
 import pytest
 import requests
 
 import tests.test_update_snep_scrape as _tus  # `_page` réexposée par attribut (F811)
 from src.utils import update_snep as us
+from src.utils.cert_recherche import Issue
+
+_FIXTURE_SANS_RESULTAT = Path(__file__).parent / "fixtures" / "snep" / "artiste_sans_resultat.html"
 
 RAW_HEADER = (
     "Interprete;Titre;Éditeur / Distributeur;Catégorie;Certification;"
@@ -106,7 +110,7 @@ class TestRecuperationParArtiste:
 
     def test_nominal(self, site, snep_dir):
         ok = self._lancer(site, snep_dir, [_ligne("IAM", "DEMAIN C'EST LOIN")])
-        assert ok is True
+        assert ok.issue is Issue.CERTIFIE
         brut = (snep_dir / "certif-.csv").read_text(encoding="utf-8-sig")
         assert "DEMAIN C'EST LOIN" in brut
 
@@ -117,16 +121,16 @@ class TestRecuperationParArtiste:
             snep_dir,
             [_ligne("IAM", "VRAI TITRE"), _ligne("WILLIAMS", "FAUX TITRE")],
         )
-        assert ok is True
+        assert ok.issue is Issue.CERTIFIE
         brut = (snep_dir / "certif-.csv").read_text(encoding="utf-8-sig")
         assert "VRAI TITRE" in brut
         assert "FAUX TITRE" not in brut
 
     def test_que_du_bruit_abandonne(self, site, snep_dir):
         """Aucune ligne ne correspond : on n'écrit RIEN plutôt que d'écrire du
-        bruit (artiste mal orthographié ou inconnu)."""
+        bruit. Le SNEP a RÉPONDU — c'est une absence sous ce nom, pas un échec."""
         ok = self._lancer(site, snep_dir, [_ligne("WILLIAMS"), _ligne("LIAM")])
-        assert ok is False
+        assert ok.issue is Issue.ABSENT and "2 ligne(s) d'autres artistes" in ok.motif
         assert not (snep_dir / "certif-.csv").exists()
 
     def test_fusion_avec_l_existant(self, site, snep_dir):
@@ -169,21 +173,39 @@ class TestEchecsReseau:
     def test_page_artiste_inaccessible(self, site, snep_dir):
         pages, _ = site
         pages[1] = requests.ConnectionError("HTTP 503")
-        assert us.fetch_artist_certifications("IAM") is False
+        assert us.fetch_artist_certifications("IAM").issue is Issue.ECHEC
 
-    def test_aucun_bloc_abandonne(self, site, snep_dir):
-        """Page servie mais vide : artiste inconnu du SNEP, on n'écrit rien."""
+    def test_aucun_resultat_DIT_par_le_site_est_une_absence(self, site, snep_dir):
+        """Page RÉELLE (`?interprete=Lucio Bukowski`, 2026-10-01) : le SNEP
+        répond « aucun résultat ». L'artiste n'est pas certifié en France — la
+        recherche a abouti, ce n'est pas un échec. Rien n'est écrit."""
+        pages, _ = site
+        pages[1] = _FIXTURE_SANS_RESULTAT.read_text(encoding="utf-8")
+        verdict = us.fetch_artist_certifications("Lucio Bukowski")
+        assert verdict.issue is Issue.ABSENT
+        assert not (snep_dir / "certif-.csv").exists()
+
+    def test_page_vide_SANS_message_est_un_echec(self, site, snep_dir):
+        """Ni bloc ni « aucun résultat » : pas la page qu'on sait lire. Conclure
+        « pas certifié » sur un gabarit changé rendrait la panne muette."""
         pages, _ = site
         pages[1] = "<html>rien ici</html>"
-        assert us.fetch_artist_certifications("Inconnu") is False
+        assert us.fetch_artist_certifications("Inconnu").issue is Issue.ECHEC
         assert not (snep_dir / "certif-.csv").exists()
+
+    def test_page_artiste_vide_laisse_la_confirmation_indecise(self, site):
+        """La confirmation des retraits garde sa règle : une page « aucun
+        résultat » dit « crédit réécrit ? », pas « certifications retirées »."""
+        pages, _ = site
+        pages[1] = _FIXTURE_SANS_RESULTAT.read_text(encoding="utf-8")
+        assert us._page_artiste("Lucio Bukowski") is None
 
     def test_page_suivante_inaccessible_abandonne(self, site, snep_dir):
         """Un listing partiel n'est pas un listing : la 2ᵉ page tombe, rien
         n'est écrit (une récupération tronquée passerait pour complète)."""
         pages, _ = site
         pages[1] = _html([_ligne("IAM", f"T{i}") for i in range(30)], last_page=3)
-        assert us.fetch_artist_certifications("IAM") is False
+        assert us.fetch_artist_certifications("IAM").issue is Issue.ECHEC
         assert not (snep_dir / "certif-.csv").exists()
 
 
@@ -202,7 +224,7 @@ class TestListingComplet:
 
     def test_recuperation_par_artiste_n_est_plus_tronquee_a_30(self, site, snep_dir):
         lignes, appels = self._site_de_65(site)
-        assert us.fetch_artist_certifications("CELINE DION") is True
+        assert us.fetch_artist_certifications("CELINE DION").issue is Issue.CERTIFIE
         brut = (snep_dir / "certif-.csv").read_text(encoding="utf-8-sig")
         assert sum(1 for ligne in lignes if ligne in brut) == 65
         assert _tus.TestScrapeYear._pages_vues(appels) == [1, 2]

@@ -26,9 +26,13 @@ def _rt(dm):
 
 
 @pytest.fixture
-def sans_magasin(monkeypatch):
-    """`rechercher_artiste` lit les CSV clean : on les vide, jamais `data/` réel."""
+def sans_magasin(monkeypatch, tmp_path):
+    """`rechercher_artiste` lit les CSV clean : on les vide, jamais `data/` réel
+    (ni la fraîcheur du corpus BRMA, que le bilan date)."""
     monkeypatch.setattr("src.utils.cert_artist.certifications", lambda noms: [])
+    monkeypatch.setattr("src.enrichment.cert_source._CERT_DIR", tmp_path)
+    (tmp_path / "brma").mkdir()
+    (tmp_path / "brma" / "certif_brma.csv").write_text("", encoding="utf-8")
     monkeypatch.setattr("src.utils.cert_matcher.reset_cert_matcher", lambda: None)
 
 

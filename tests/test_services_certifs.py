@@ -90,15 +90,18 @@ class TestMettreAJour:
 
 
 class TestRechercherArtiste:
-    def test_un_sous_processus_par_source_avec_tous_les_noms(self, monkeypatch):
+    def test_un_sous_processus_par_source_avec_tous_les_noms(self, monkeypatch, tmp_path):
         monkeypatch.setattr("src.utils.cert_artist.certifications", lambda noms: [])
+        monkeypatch.setattr("src.enrichment.cert_source._CERT_DIR", tmp_path)
         monkeypatch.setattr("src.utils.cert_matcher.reset_cert_matcher", lambda: None)
         lanceur = _Lanceur()
         bilan = certifs.rechercher_artiste(["Shurik'N", "IAM"], lancer=lanceur)
         assert [t.split(" ")[0] for _, t, _ in lanceur.appels] == ["SNEP", "RIAA", "BPI"]
         cmd = lanceur.appels[0][0]
         assert cmd[-4:] == ["--artist", "Shurik'N", "--artist", "IAM"]
-        assert bilan.complete and "BRMA : corpus local" in bilan.rapport
+        # Corpus BRMA absent (tmp_path vide) : rien n'a pu être lu, c'est DIT.
+        assert "BRMA : ❌ corpus local absent" in bilan.rapport
+        assert not bilan.complete
 
     def test_sans_nom(self):
         assert not certifs.rechercher_artiste([]).complete

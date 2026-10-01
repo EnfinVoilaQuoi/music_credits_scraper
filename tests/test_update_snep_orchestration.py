@@ -13,6 +13,7 @@ import pytest
 import requests
 
 from src.utils import update_snep as us
+from src.utils.cert_recherche import Issue, Verdict
 from src.utils.update_snep import BilanAnnee
 from tests.test_update_snep_scrape import HEADER
 
@@ -236,5 +237,9 @@ class TestMain:
         monkeypatch.setattr(us, "check_for_updates", lambda: False)
         assert _lancer(us, "--check") == 1
         vus = []
-        monkeypatch.setattr(us, "fetch_artist_certifications", lambda n: vus.append(n) or n == "B")
+        monkeypatch.setattr(
+            us,
+            "fetch_artist_certifications",
+            lambda n: vus.append(n) or Verdict(n, Issue.CERTIFIE if n == "B" else Issue.ABSENT),
+        )
         assert _lancer(us, "--artist", "A", "--artist", "B") == 0 and vus == ["A", "B"]

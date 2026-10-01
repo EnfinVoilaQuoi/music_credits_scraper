@@ -33,6 +33,7 @@ from src.utils.cert_normalize import (
     riaa_level,
     riaa_units,
 )
+from src.utils.cert_recherche import Issue, Verdict, conclure
 from src.utils.logger import ajouter_journal_fichier, configurer_journaux, get_logger
 
 logger = get_logger(__name__)
@@ -765,21 +766,32 @@ def _merge_certif_csv(new_rows: list[dict], backup: bool = True, *, partial: str
     return (len(clean), len(combined) - before)
 
 
-def fetch_artist(artist: str) -> bool:
+def fetch_artist(artist: str) -> Verdict:
     """Récupère les certifs RIAA d'un artiste (avec MORE DETAILS) et les fusionne
-    dans certif_riaa.csv (CSV-centré, alimente le matcher)."""
+    dans certif_riaa.csv (CSV-centré, alimente le matcher).
+
+    Une absence n'est conclue que sur le message « No matching results » du
+    site (`RIAAScraperV2.sans_resultat`) ; une page sans ligne ni message est un
+    échec — c'est lui seul qui déclenche le repli CDP de la fenêtre.
+    """
     from src.scrapers.riaa_scraper_v2 import RIAAScraperV2
 
     print(f"=== RIAA par artiste : {artist} ===")
     scraper = RIAAScraperV2(headless=True)
     records = scraper.scrape_by_artist(artist, get_details=True)
     if not records:
-        print("Aucune certification RIAA trouvée (ou Cloudflare non résolu)")
-        return False
+        if scraper.sans_resultat:
+            verdict = Verdict(artist, Issue.ABSENT, motif="« No matching results » sur riaa.com")
+        else:
+            verdict = Verdict(
+                artist, Issue.ECHEC, motif="page non lue (défi Cloudflare ou gabarit changé)"
+            )
+        print(verdict.texte())
+        return verdict
     rows = _flatten_records(records)
     total, added = _merge_certif_csv(rows)
     print(f"✅ RIAA {artist} : {added} ligne(s) ajoutée(s) (total {total})")
-    return True
+    return Verdict(artist, Issue.CERTIFIE, lignes=len(rows), motif=f"{added} nouvelle(s) au brut")
 
 
 #: Nombre de lignes VISÉ par tranche de balayage.
@@ -1123,12 +1135,11 @@ def main():
 
     # Récup par artiste : CSV-centré, pas besoin de la base sqlite
     if args.artist:
-        # Un seul nom en échec ne condamne pas les autres : le code de sortie
-        # dit « au moins un nom a rendu quelque chose », pas « tous ».
-        ok = False
-        for nom in args.artist:
-            ok = fetch_artist(nom) or ok
-        sys.exit(0 if ok else 1)
+        # Chaque nom est tenté ; un échec ne condamne pas les suivants, mais il
+        # rend le code non nul. Une ABSENCE, elle, sort en 0 (`cert_recherche`).
+        code, bilan = conclure([fetch_artist(nom) for nom in args.artist])
+        print(bilan)
+        sys.exit(code)
 
     # Initialise le gestionnaire
     updater = RIAADatabaseUpdater()

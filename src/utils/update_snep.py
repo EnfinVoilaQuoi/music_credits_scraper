@@ -19,6 +19,7 @@ from src.observability import repository as usage_repository
 from src.observability import source_usage
 from src.observability.registry import Flow
 from src.utils import cert_store, snep_vues
+from src.utils.cert_recherche import Issue, Verdict, conclure
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -874,6 +875,9 @@ def _lignes_artiste(nom: str, *, dire=safe_print) -> list[str] | None:
     except requests.RequestException as e:
         dire(f"❌ Page artiste inaccessible : {e}")
         return None
+    if sans_resultat(html):
+        dire(f"∅ Le SNEP répond « aucun résultat » pour {libelle}")
+        return []
     nb_pages = _discover_last_page(html)
     lignes = _lignes_du_filtre(session, filtre, html, nb_pages, libelle=libelle)
     if lignes is not None:
@@ -894,14 +898,37 @@ def _lignes_artiste(nom: str, *, dire=safe_print) -> list[str] | None:
             if row not in vues:
                 vues.add(row)
                 lignes.append(row)
+    if not lignes:
+        # Ni bloc ni « aucun résultat » : la page n'est pas celle qu'on sait lire.
+        # Rendre [] ferait conclure qu'un artiste n'est pas certifié en France.
+        dire(f"❌ {libelle} : page sans certification NI message « aucun résultat » — gabarit ?")
+        return None
     return lignes
 
 
-def fetch_artist_certifications(artist_name: str) -> bool:
+#: Message que le site rend À LA PLACE des blocs quand le filtre ne trouve rien
+#: (relevé le 2026-10-01 sur `?interprete=Lucio Bukowski` ; fixture
+#: `tests/fixtures/snep/artiste_sans_resultat.html`).
+_SANS_RESULTAT_RE = _re.compile(r"aucun\s+r[ée]sultat\s+ne\s+correspond", _re.I)
+
+
+def sans_resultat(html: str) -> bool:
+    """La page porte-t-elle le constat « aucun résultat » du SNEP ?
+
+    Seul ce message autorise à conclure qu'un artiste n'a AUCUNE certification
+    en France ; une page vide sans lui est un échec de lecture.
+    """
+    return bool(_SANS_RESULTAT_RE.search(html or ""))
+
+
+def fetch_artist_certifications(artist_name: str) -> Verdict:
     """
     Récupère TOUTES les certifications d'un artiste via le filtre ?interprete=
     du site SNEP (les pages, pas l'export — cf. `_lignes_artiste`), les
     fusionne dans le CSV maître et réimporte en base.
+
+    Rend un `Verdict` : une absence (« aucun résultat », ou seulement des
+    homonymes écartés par le filtre mot entier) n'est PAS un échec.
     """
     safe_print("=" * 60)
     safe_print(f"CERTIFICATIONS SNEP — ARTISTE : {artist_name}")
@@ -909,7 +936,9 @@ def fetch_artist_certifications(artist_name: str) -> bool:
 
     export = _lignes_artiste(artist_name)
     if export is None:
-        return False
+        return Verdict(artist_name, Issue.ECHEC, motif="pages du SNEP non lues")
+    if not export:
+        return Verdict(artist_name, Issue.ABSENT, motif="« aucun résultat » sur snepmusique.com")
     safe_print(f"✅ {len(export)} certification(s) renvoyée(s) par le SNEP")
     lines = [_CSV_HEADER, *export]
 
@@ -934,11 +963,13 @@ def fetch_artist_certifications(artist_name: str) -> bool:
         f"{len(kept) - 1} gardée(s), {dropped} bruit écarté(s)"
     )
     if len(kept) <= 1:
-        safe_print(
-            "⚠️ Aucune ligne ne correspond exactement — abandon "
-            "(artiste mal orthographié ou inconnu ?)"
+        # Le SNEP a répondu, mais seulement avec des homonymes partiels
+        # (« IAM » → WILLIAMS) : c'est une absence sous CE nom, pas une panne.
+        return Verdict(
+            artist_name,
+            Issue.ABSENT,
+            motif=f"{dropped} ligne(s) d'autres artistes, aucune à ce nom exact",
         )
-        return False
 
     # 4. Fusionner dans le CSV maître
     dest_path = Path(DATA_PATH) / "certifications" / "snep" / "certif-.csv"
@@ -967,7 +998,7 @@ def fetch_artist_certifications(artist_name: str) -> bool:
     safe_print("\n📄 Régénération du CSV canonique (clean)...")
     _, after = _rebuild_canonical(source="ARTIST")
     safe_print(f"✅ Clean régénéré : {after} certification(s)")
-    return True
+    return Verdict(artist_name, Issue.CERTIFIE, lignes=len(kept) - 1, motif=f"{added} nouvelle(s)")
 
 
 def backfill_years(years) -> BilanAnnee:
@@ -1053,13 +1084,11 @@ def main() -> int:
     if args.year:
         return 0 if backfill_years(args.year).complete else 1
     if args.artist:
-        # Un nom inconnu du SNEP ne doit pas empêcher les suivants d'aboutir : le
-        # code dit « au moins un nom a rendu quelque chose », pas « tous », comme
-        # sur RIAA et BPI.
-        ok = False
-        for nom in args.artist:
-            ok = fetch_artist_certifications(nom) or ok
-        return 0 if ok else 1
+        # Chaque nom est tenté ; un ÉCHEC rend le code non nul, une absence non
+        # (« aucun résultat » est une réponse) — même règle sur les trois sources.
+        code, bilan = conclure([fetch_artist_certifications(nom) for nom in args.artist])
+        safe_print(bilan)
+        return code
     if args.scheduled:
         # Mode silencieux pour les tâches planifiées
         return 0 if schedule_monthly_update() else 1

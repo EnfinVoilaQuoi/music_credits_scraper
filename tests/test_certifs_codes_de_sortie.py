@@ -19,6 +19,7 @@ import pytest
 import src.utils.update_bpi as bpi
 import src.utils.update_riaa as riaa
 import src.utils.update_snep as snep
+from src.utils.cert_recherche import Issue, Verdict
 
 
 def _lancer(module, *argv):
@@ -61,14 +62,38 @@ class TestSnep:
         monkeypatch.setattr(snep, "update_snep_database", lambda: False)
         assert _lancer(snep) == 1
 
-    def test_un_artiste_sur_deux_suffit(self, monkeypatch):
-        """Même règle que RIAA/BPI : « au moins un nom a rendu », pas « tous »."""
-        monkeypatch.setattr(snep, "fetch_artist_certifications", lambda nom: nom == "IAM")
-        assert _lancer(snep, "--artist", "Inconnu", "--artist", "IAM") == 0
+    def test_une_absence_n_est_pas_un_echec(self, monkeypatch):
+        """« aucun résultat » est une RÉPONSE : le run a abouti (2026-10-01).
 
-    def test_aucun_artiste_trouve_rend_un_code_NON_NUL(self, monkeypatch):
-        monkeypatch.setattr(snep, "fetch_artist_certifications", lambda nom: False)
-        assert _lancer(snep, "--artist", "Inconnu") == 1
+        Avant, un artiste jamais certifié en France sortait en 1, comme une
+        panne — et la fenêtre l'affichait en ❌ ÉCHEC.
+        """
+        monkeypatch.setattr(
+            snep,
+            "fetch_artist_certifications",
+            lambda nom: (
+                Verdict(nom, Issue.CERTIFIE, 3) if nom == "IAM" else Verdict(nom, Issue.ABSENT)
+            ),
+        )
+        assert _lancer(snep, "--artist", "Inconnu", "--artist", "IAM") == 0
+        assert _lancer(snep, "--artist", "Inconnu") == 0
+
+    def test_un_echec_sur_un_nom_rend_un_code_NON_NUL(self, monkeypatch):
+        """Même si un autre nom a rendu : taire l'échec serait annoncer complet
+        un run partiel. Le nom suivant est tout de même tenté."""
+        vus = []
+
+        def faux(nom):
+            vus.append(nom)
+            return (
+                Verdict(nom, Issue.ECHEC, motif="coupure")
+                if nom == "A"
+                else Verdict(nom, Issue.CERTIFIE, 2)
+            )
+
+        monkeypatch.setattr(snep, "fetch_artist_certifications", faux)
+        assert _lancer(snep, "--artist", "A", "--artist", "B") == 1
+        assert vus == ["A", "B"]
 
 
 class TestBpi:

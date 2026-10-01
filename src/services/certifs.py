@@ -74,6 +74,31 @@ def ligne_bilan(source: str, code: int, sortie: str) -> str:
     )
 
 
+def ligne_brma(certs: Iterable[dict], fraicheur: dict | None = None) -> str:
+    """BRMA dans le bilan d'une recherche par artiste : ce que DIT le corpus local.
+
+    Ultratop n'a pas de recherche par artiste ; on lit le corpus balayé année par
+    année. Une absence y vaut donc ce que vaut le corpus — d'où sa date — et un
+    corpus ABSENT n'est pas une absence de certification mais un échec : il n'y a
+    rien eu à lire. Avant le 2026-10-01 la ligne disait « corpus local » sans
+    dire ce qu'on y avait trouvé, ni même s'il existait.
+    """
+    if fraicheur is None:
+        from src.enrichment.cert_source import BrmaCertificationSource
+
+        fraicheur = BrmaCertificationSource().freshness()
+    if not fraicheur["available"]:
+        return "BRMA : ❌ corpus local absent (certif_brma.csv) — rien à lire"
+    n = sum(1 for c in certs if c["body"] == "BRMA")
+    date = str(fraicheur["last_global"] or "")[:10] or "date inconnue"
+    if n:
+        return f"BRMA : ✅ {n} certification(s) dans le corpus local (balayé le {date})"
+    return (
+        f"BRMA : ∅ aucune certification dans le corpus local (balayé le {date} ; "
+        "Ultratop n'a pas de recherche par artiste)"
+    )
+
+
 def _rien(_: str) -> None:
     return None
 
@@ -339,7 +364,7 @@ def rechercher_artiste(
         logger.exception("Rafraîchissement du matcher")
 
     certs_apres = certifications(noms)
-    bilan.lignes.append("BRMA : corpus local (Ultratop n'a pas de recherche par artiste)")
+    bilan.lignes.append(ligne_brma(certs_apres))
     # Le rapport dit CE QU'ON A, pas seulement combien — et l'ÉCART d'abord :
     # « 12 certifications » se lit pareil qu'on en ait rapporté douze ou zéro.
     neuves = nouveautes(certs_avant, certs_apres)

@@ -488,6 +488,11 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     if bilan.heritages:
         artist.tracks = dm.get_artist_tracks(artist.id)
     constater_instrumentaux(dm, artist.tracks)
+    # Fiches sans page Genius où chante un autre artiste de la base : sa ligne
+    # (CORRECTIFS 1.17) — rattrape aussi celles créées avant la règle.
+    from src.services.lignes_tiers import rattraper
+
+    rattraper(dm, artist, artist.tracks)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)
     bilan.albums_api = sum(1 for t in nouveaux if t.album)

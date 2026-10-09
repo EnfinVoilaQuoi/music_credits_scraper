@@ -96,3 +96,14 @@ def test_la_fiche_au_titre_exact_garde_seule_la_certif():
     live = Track(title="Mr. Rager (Prime Day Show x Kid Cudi)", artist=cudi)
     apply_certifications(cudi, [original, live], _Matcher([_certif("MR RAGER")]))
     assert len(original.certs.entries) == 1 and live.certs.entries == []
+
+
+def test_certif_d_une_version_portee_par_l_original():
+    """CORRECTIFS 1.16 : la fiche morceau le dit (« ↩ certif de … »)."""
+    from src.utils.cert_titres import certif_d_une_version
+
+    assert certif_d_une_version("Dolce Camara", "DOLCE CAMARA (SNIGHT B REMIX)")
+    assert not certif_d_une_version("Dolce Camara", "DOLCE CAMARA")
+    assert not certif_d_une_version(
+        "Dolce Camara (Snight B Remix)", "DOLCE CAMARA (SNIGHT B REMIX)"
+    )

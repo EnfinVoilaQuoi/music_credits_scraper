@@ -117,6 +117,18 @@ class ArtistRepository:
         with self.engine.connect() as conn:
             return [r[0] for r in conn.execute(select(artists.c.name)).fetchall()]
 
+    def artistes_de_la_base(self) -> list[Artist]:
+        """Tous les artistes en base, LÉGERS (id et nom, sans morceaux) — pour
+        repérer qu'une fiche en concerne un autre (`services.lignes_tiers`)."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(select(artists.c.id, artists.c.name)).fetchall()
+        faits = []
+        for aid, nom in lignes:
+            a = Artist(name=nom)
+            a.id = aid
+            faits.append(a)
+        return faits
+
     def get_artist_by_name(self, name: str) -> Artist | None:
         """Récupère un artiste par son nom - VERSION CORRIGÉE"""
         try:

@@ -67,6 +67,16 @@ def _sous_titre(titre: str, autre_cle: str) -> bool:
     return parse_variant(titre).kind == Kind.NONE
 
 
+def certif_d_une_version(titre_fiche: str | None, titre_certif: str | None) -> bool:
+    """La certif est celle d'une VERSION (« DOLCE CAMARA (SNIGHT B REMIX) ») que
+    la fiche — l'original — porte faute de fiche pour la version : l'écran le
+    dit (« ↩ certif de … »), décision utilisateur 2026-10-09."""
+    return (
+        parse_variant(titre_certif).kind != Kind.NONE
+        and parse_variant(titre_fiche).kind == Kind.NONE
+    )
+
+
 def certif_du_morceau(titre_fiche: str | None, titre_certif: str | None) -> bool:
     f, c = cle(titre_fiche), cle(titre_certif)
     if not f or not c:

@@ -1118,6 +1118,10 @@ def creer_lignes(
             + ")"
         )
         logger.info(comptes[-1])
+        # Un autre artiste de la base y chante : il reçoit sa ligne (CORRECTIFS 1.17).
+        from src.services.lignes_tiers import donner_aux_interpretes
+
+        comptes += donner_aux_interpretes(dm, track, artist)
     return comptes
 
 

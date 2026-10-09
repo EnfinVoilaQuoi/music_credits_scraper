@@ -258,6 +258,12 @@ def appliquer(
     dm.record_spotify_streams(
         track.id, streams, "kworb", updated_at=kworb_date, daily_streams=daily
     )
+    if decision in ("collab", "tiers"):
+        # Une ligne créée où un autre artiste de la base chante : il reçoit la
+        # sienne (CORRECTIFS 1.17).
+        from src.services.lignes_tiers import donner_aux_interpretes
+
+        donner_aux_interpretes(dm, track, artist)
     _memoriser(track.id)
     role = {
         "edition": "même enregistrement, compté",

@@ -1105,28 +1105,14 @@ class TrackDetailsWindow:
         notebook.add(cert_frame, text="🏆 Certifications")
 
         try:
-            from src.utils.cert_matcher import get_cert_matcher
+            from src.utils.cert_titres import certif_d_une_version
 
-            matcher = get_cert_matcher()
-
-            # Raccordement UNIFIÉ multi-pays (SNEP 🇫🇷 + BRMA 🇧🇪 + RIAA 🇺🇸)
-            _extra = []
-            _pan = track.primary_artist_name
-            if _pan and _pan != self.app.current_artist.name:
-                _extra.append(_pan)
-            _fa = track.featured_artists
-            if isinstance(_fa, str) and _fa:
-                _extra.append(_fa)
-            elif isinstance(_fa, (list, tuple)):
-                _extra.extend(str(x) for x in _fa if x)
-            track_certs = matcher.get_track_certifications(
-                self.app.current_artist.name, track.title, extra_artists=_extra
-            )
-            album_certs = (
-                matcher.get_album_certifications(self.app.current_artist.name, track.album)
-                if track.album
-                else []
-            )
+            # Ce qui est ENREGISTRÉ (CORRECTIFS 1.16, 2026-10-09) : l'onglet
+            # recalculait avec le matcher brut, qui ignore les refus « À
+            # trancher », l'exclusivité et le filtre album d'`apply_certifications`
+            # — « Life » y montrait encore le Diamant de « TUBA LIFE ».
+            track_certs = list(track.certs.reelles)
+            album_certs = list(track.certs.album_entries or [])
 
             echos = track.certs.echos
             if echos:
@@ -1196,6 +1182,11 @@ class TrackDetailsWindow:
                             line = f"{emoji} {lvl.upper()}"
                             if c.get("title"):
                                 line += f" — {c.get('title')}"
+                            if certif_d_une_version(track.title, c.get("title")):
+                                # La version n'a sa fiche nulle part : l'original
+                                # la porte, et l'écran dit à qui elle appartient
+                                # (décision utilisateur 2026-10-09).
+                                line += f"   ↩ certif de « {c.get('title')} »"
                             txt += line + "\n"
                             if c.get("release_date"):
                                 txt += (

@@ -14,6 +14,7 @@ nous a pas transmis ce qu'elle contient.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from enum import StrEnum
 
@@ -157,6 +158,24 @@ def _from_httpx(exc: BaseException, names: set[str], absent: tuple[int, ...]) ->
     return IssueKind.UNREACHABLE  # ConnectError, TransportError…
 
 
+_HTTP_DANS_LE_MESSAGE = re.compile(r"HTTP (\d{3})")
+
+
+def _from_ytmusicapi(exc: BaseException, absent: tuple[int, ...]) -> IssueKind:
+    """`ytmusicapi` ne lève qu'une `YTMusicError` générique, le code HTTP dans
+    son MESSAGE. « No content returned » = la vidéo n'a pas ce qu'on demande
+    (clip sans onglet paroles, vidéo privée) : une ABSENCE, pas un process
+    cassé — rangée en `crash`, elle faisait d'un « pas de paroles » un échec à
+    retenter (CORRECTIFS 1.13, 2026-10-09)."""
+    message = str(exc)
+    if "No content returned" in message:
+        return IssueKind.ABSENT
+    m = _HTTP_DANS_LE_MESSAGE.search(message)
+    if m:
+        return classify_status(int(m.group(1)), absent_statuses=absent)
+    return IssueKind.CRASH
+
+
 def classify_exception(
     exc: BaseException, *, absent_statuses: tuple[int, ...] = DEFAULT_ABSENT_STATUSES
 ) -> IssueKind:
@@ -174,6 +193,13 @@ def classify_exception(
         return _from_requests(names)
     if "httpx" in roots:
         return _from_httpx(exc, names, absent_statuses)
+    if "ytmusicapi" in roots:
+        return _from_ytmusicapi(exc, absent_statuses)
+    if "CancelledError" in names:
+        # Une annulation, dans ce projet, vient d'un délai de GARDE posé par
+        # l'appelant (`asyncio.timeout(30)` de SongBPM : 148 « crash » sur une
+        # journée) ou de l'arrêt de l'app — jamais d'un process qui casse.
+        return IssueKind.TIMEOUT
     if "JSONDecodeError" in names:
         return IssueKind.PARSE
     if "TimeoutError" in names:  # asyncio/builtins — sous-classe d'OSError, testé AVANT

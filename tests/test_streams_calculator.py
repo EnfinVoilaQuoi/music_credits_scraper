@@ -122,3 +122,44 @@ class TestCumulSelonLaParticipation:
         tous = [principal, feat, prod, auteur, groupe]
         assert total_discographie(tous, ("Shurik’n",), ("IAM",)) == 3 * 1000
         assert total_discographie(tous, ("Shurik’n",), ("IAM",), prods=True) == 4 * 1000
+
+
+class TestUnEnregistrementUneFois:
+    """CORRECTIFS 1.11 (2026-10-09) : le cumul ne compte pas deux fois le même
+    enregistrement (deux pages Genius, deux éditions, une ligne sœur)."""
+
+    def _t(self, sp, *, gid=None, sid=None, ytm=None):
+        from src.models.track import Track
+
+        t = Track(title="X", genius_id=gid, spotify_id=sid)
+        t.streams.spotify_streams, t.streams.ytm_streams = sp, ytm
+        return t
+
+    def test_meme_id_spotify_compte_une_fois(self):
+        from src.utils.streams_calculator import total_discographie
+
+        assert (
+            total_discographie([self._t(4000, gid=1, sid="A"), self._t(4000, gid=2, sid="A")])
+            == 10000
+        )
+
+    def test_deux_editions_au_meme_compteur(self):
+        """Booba « Sale mood » / « MOOD » : deux ID, le même compteur."""
+        from src.utils.streams_calculator import total_discographie
+
+        tous = [self._t(91_000_267, gid=1, sid="A"), self._t(91_000_267, gid=2, sid="B")]
+        assert total_discographie(tous) == int(91_000_267 / 0.40)
+
+    def test_ligne_soeur_comptee_une_fois(self):
+        from src.utils.streams_calculator import total_discographie
+
+        assert total_discographie([self._t(4000, gid=7), self._t(4000, gid=7)]) == 10000
+
+    def test_les_vues_youtube_d_une_autre_page_comptent(self):
+        """Deux pages du même morceau peuvent porter deux vidéos distinctes (clip
+        / audio) : leurs vues ne sont pas un double compte."""
+        from src.utils.streams_calculator import calculate_total_streams, total_discographie
+
+        tous = [self._t(4000, gid=1, sid="A", ytm=100), self._t(4000, gid=2, sid="A", ytm=50)]
+        attendu = calculate_total_streams(4000, 100) + calculate_total_streams(None, 50)
+        assert total_discographie(tous) == attendu

@@ -30,6 +30,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.scrapers.kworb_scraper import KworbScraper
 from src.utils import spotify_identity
+from src.utils.discogs_identity import nom_sans_suffixe
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import (
     artiste_etranger,
@@ -69,18 +70,21 @@ def _names_match(page_name: str | None, artist_name: str) -> bool:
     « Misha Van Der Werf ». Après correctif il en reste 4, toutes légitimes :
     « ISHA », « Isha (7) », « Sch (5) » (suffixes de désambiguïsation Genius)
     et « Jazzy Jazz », retenue par le repli difflib et non par l'inclusion.
+
+    Le repli `difflib ≥ 0,8` est RETIRÉ (CORRECTIFS 1.14, 2026-10-09) : mesuré
+    sur les 17 035 noms en base, il n'acceptait rien de légitime en dehors des
+    suffixes d'homonymes (« Booba (2) », « Travis Scott (2) »), désormais
+    retirés avant de comparer — et il acceptait Damso pour Diam's, Sting pour
+    Swing, AISHA pour Isha, Medeline pour Médine, Jazzy Jazz pour Jazzy Bazz.
+    Kworb affiche le nom Spotify EXACT : il n'y a pas de coquille à tolérer.
     """
     if not page_name:
         return False
-    a, b = _normalize_title(page_name), _normalize_title(artist_name)
+    a = _normalize_title(nom_sans_suffixe(page_name))
+    b = _normalize_title(nom_sans_suffixe(artist_name))
     if not a or not b:
         return False
-    if a == b or contains_as_words(a, b) or contains_as_words(b, a):
-        return True
-    import difflib
-
-    # Repli tolérant aux coquilles (« Nekfeu » / « Nekfeuu »), inchangé.
-    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.8
+    return a == b or contains_as_words(a, b) or contains_as_words(b, a)
 
 
 def _vote_artist_spotify_id(

@@ -16,6 +16,7 @@ vues du clip d'un morceau d'album n'étaient donc comptées nulle part.
 """
 
 import sys
+from types import SimpleNamespace
 
 import requests
 from sqlalchemy.exc import SQLAlchemyError
@@ -831,13 +832,27 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     # Audio d'une chaîne Topic = le fichier du distributeur ; vidéo ordinaire
     # seulement hors plateformes (cf. `duree_youtube`). Une vidéo partagée par
     # plusieurs fiches (clip double compris) ne dit la durée d'aucune.
+    from src.services.revue import video_nomme
+
     result["durees_youtube"] = 0
     for track_id, vids in vid_counts.items():
         fiche = tracks_par_id.get(track_id)
         if fiche is None:
             continue
-        propres = [details_videos[v] for v in vids if v not in partagees and v in details_videos]
-        verdict = duree_a_declarer(propres, not fiche.spotify_id and not fiche.deezer_id)
+        propres = [
+            {**details_videos[v], "source": sources.get((track_id, v))}
+            for v in vids
+            if v not in partagees and v in details_videos
+        ]
+        verdict = duree_a_declarer(
+            propres,
+            not fiche.spotify_id and not fiche.deezer_id,
+            # Le juge du panneau « À trancher » (🎬 vidéo étrangère) : une
+            # vidéo qui ne nomme pas le morceau ne lui donne pas sa durée.
+            recevable=lambda v, fiche=fiche: video_nomme(
+                fiche, SimpleNamespace(title=v.get("title"), source=v.get("source"))
+            ),
+        )
         if verdict and data_manager.record_duration_observation(track_id, *verdict):
             result["durees_youtube"] += 1
     if result["durees_youtube"]:

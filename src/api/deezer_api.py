@@ -287,7 +287,9 @@ class DeezerAPI:
         (chacune porte déjà `record_type` et `nb_tracks`). Repli quand aucun
         morceau de l'album n'a de hit : mesuré, la recherche AVANCÉE par
         morceau rend 0 résultat pour « Isha » alors que celle par album marche."""
-        with source_usage.observe(_SOURCE, label=f"album {artist} — {title}") as obs:
+        with source_usage.observe(
+            _SOURCE, label=f"album {artist} — {title}", hors_morceau=True
+        ) as obs:
             data = await self._make_request_async(
                 http, "search/album", {"q": f'artist:"{artist}" album:"{title}"', "limit": 10}
             )
@@ -307,7 +309,7 @@ class DeezerAPI:
     async def get_album_async(self, http: "AsyncHttpSession", album_id: int) -> dict | None:
         """Jumeau async de `get_album`, sous observation : c'est la fiche qui porte
         `record_type` (nature du disque), absente du hit de recherche."""
-        with source_usage.observe(_SOURCE, label=f"album {album_id}") as obs:
+        with source_usage.observe(_SOURCE, label=f"album {album_id}", hors_morceau=True) as obs:
             data = await self._make_request_async(http, f"album/{album_id}")
             if not data:
                 obs.absent("fiche album absente")
@@ -324,7 +326,7 @@ class DeezerAPI:
         259696952) ; le bon (1236609, 44 albums) vient après. L'identité se
         décide par l'oracle (`services/deezer_identite`), pas par le rang.
         """
-        with source_usage.observe(_SOURCE, label=f"artistes « {name} »") as obs:
+        with source_usage.observe(_SOURCE, label=f"artistes « {name} »", hors_morceau=True) as obs:
             data = await self._make_request_async(
                 http, "search/artist", {"q": name, "limit": limit}
             )
@@ -335,7 +337,7 @@ class DeezerAPI:
 
     async def get_artist_async(self, http: "AsyncHttpSession", artist_id: int) -> dict | None:
         """`GET /artist/{id}` — la fiche (nom, nb_album, nb_fan, picture)."""
-        with source_usage.observe(_SOURCE, label=f"artiste {artist_id}") as obs:
+        with source_usage.observe(_SOURCE, label=f"artiste {artist_id}", hors_morceau=True) as obs:
             data = await self._make_request_async(http, f"artist/{artist_id}")
             if not data:
                 obs.absent("fiche artiste absente")
@@ -375,7 +377,9 @@ class DeezerAPI:
         """`GET /artist/{id}/albums` — les disques où l'artiste APPARAÎT, y
         compris ceux des autres (AD$ d'Ocho chez Freeze) : à qualifier par
         `album.artist` de la fiche."""
-        with source_usage.observe(_SOURCE, label=f"albums de {artist_id}") as obs:
+        with source_usage.observe(
+            _SOURCE, label=f"albums de {artist_id}", hors_morceau=True
+        ) as obs:
             albums = await self._paginate_async(http, f"artist/{artist_id}/albums")
             if not albums:
                 obs.absent("aucun disque")
@@ -385,7 +389,7 @@ class DeezerAPI:
         """`GET /album/{id}/tracks` — `title`, `title_short`, `title_version`,
         `isrc`, `duration`, `track_position`, `disk_number`, `explicit_lyrics`,
         `artist` (principal seulement : les contributeurs sont sur `/track/{id}`)."""
-        with source_usage.observe(_SOURCE, label=f"pistes de {album_id}") as obs:
+        with source_usage.observe(_SOURCE, label=f"pistes de {album_id}", hors_morceau=True) as obs:
             pistes = await self._paginate_async(http, f"album/{album_id}/tracks")
             if not pistes:
                 obs.absent("aucune piste")

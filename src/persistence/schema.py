@@ -608,6 +608,33 @@ source_usage_failures = Table(
 )
 
 
+# Suivi des échecs PAR MORCEAU (e44, 2026-09-30) : « ce qui n'est pas passé »,
+# gardé de côté pour être retenté (`--echecs`). Une ligne par (morceau, source),
+# posée au premier échec de communication, mise à jour aux suivants, RETIRÉE
+# dès que la source RÉPOND pour ce morceau (`ok` ou `absent` — une absence est
+# une réponse, il n'y a rien à retenter). `skipped`/`config`/`indeterminate` ne
+# touchent à rien : ils ne disent pas si la source aurait répondu. Contrairement
+# à `source_usage_failures` (fenêtre de diagnostic de 50 par source), rien n'y
+# est rogné : un run de 500 morceaux à 200 échecs les garde tous.
+source_track_failures = Table(
+    "source_track_failures",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("track_id", Integer, ForeignKey("tracks.id"), nullable=False),
+    Column("source_key", Text, nullable=False),
+    Column("flow", Text, nullable=False),
+    Column("artist_id", Integer, ForeignKey("artists.id")),
+    Column("issue", Text, nullable=False),
+    Column("status_code", Integer),
+    Column("message", Text),
+    Column("n_echecs", Integer, nullable=False),
+    Column("premier_echec", TIMESTAMP),
+    Column("dernier_echec", TIMESTAMP),
+    UniqueConstraint("track_id", "source_key"),
+    sqlite_autoincrement=True,
+)
+
+
 # Panneau « À trancher », étape 3 (e38, 2026-09-27). Deux notions distinctes :
 # - `revue_verdicts` : la mémoire des DÉCISIONS de l'utilisateur sur un cas
 #   (« c'est normal »). Clé = (artiste, détecteur, clé du cas) ; la clé du cas

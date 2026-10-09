@@ -17,7 +17,7 @@ from src.utils.credits_genius_api import SOURCE_API
 from src.utils.credits_genius_api import unir as unir_credits
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.title_matching import cle_album
-from src.utils.version_descriptors import titre_generique
+from src.utils.version_descriptors import titre_generique, titres_confondus
 
 logger = get_logger(__name__)
 
@@ -124,9 +124,10 @@ def fusionner(
     """Rapproche chaque morceau fraîchement récupéré d'un morceau en base et
     lui transfère ce que l'API Genius ne fournit pas.
 
-    Trois niveaux, du plus sûr au plus lâche : `genius_id` → (titre, album) →
-    titre seul (doublons de casse : on prend le candidat le plus COMPLET).
-    Les deux derniers ne rattachent un morceau Genius qu'à une fiche SANS
+    Quatre niveaux, du plus sûr au plus lâche : `genius_id` → (titre, album) →
+    titre seul (doublons de casse : on prend le candidat le plus COMPLET) →
+    titre ÉQUIVALENT d'une autre graphie (`_fiche_sans_page_equivalente`).
+    Les trois derniers ne rattachent un morceau Genius qu'à une fiche SANS
     genius_id (même règle que `save_track`, e36).
     Quand un existant est trouvé : bpm / tonalité / paroles / crédits / certifs
     sont PRÉSERVÉS si le nouveau ne les porte pas, et `track.id` est repris —
@@ -189,6 +190,8 @@ def fusionner(
                         len(t.credits),
                     ),
                 )
+        if existant is None and track.genius_id:
+            existant = _fiche_sans_page_equivalente(track, existants, adoptable)
         if existant is None:
             fusion.nouveaux += 1
             continue
@@ -216,6 +219,39 @@ def fusionner(
             adoptees.add(existant.id)
         track.id = existant.id
     return fusion
+
+
+def _fiche_sans_page_equivalente(track: Track, existants: list[Track], adoptable) -> Track | None:
+    """4ᵉ niveau : une fiche SANS page Genius (créée par les écarts Deezer, une
+    décision Kworb) au titre ÉQUIVALENT mais d'une autre graphie — apostrophe
+    ’/', « œ », « (feat. X) », « (Live 2006) » / « - Live 2006 », « 3 G » /
+    « 3G ». Les niveaux 2 et 3 comparent `title.lower()` : la complétion des
+    tracklists a ainsi DOUBLÉ 22 fiches (CORRECTIFS 1.1, 2026-10-09 — Diam's
+    ×11 *Au tour de ma bulle*, A2H « J'observe et je retiens »).
+
+    Un titre générique ne s'adopte que dans son album (un par projet). Plusieurs
+    candidats : celui du même album, sinon RIEN — on ne choisit pas au hasard.
+    """
+    candidats = [
+        t
+        for t in existants
+        if adoptable(t) and not t.genius_id and titres_confondus(t.title, track.title)
+    ]
+    meme_album = [
+        t for t in candidats if track.album and cle_album(t.album or "") == cle_album(track.album)
+    ]
+    if titre_generique(track.title):
+        candidats = meme_album
+    if len(candidats) == 1:
+        return candidats[0]
+    if len(meme_album) == 1:
+        return meme_album[0]
+    if candidats:
+        logger.warning(
+            f"⚠️ « {track.title} » : {len(candidats)} fiches sans page Genius au titre "
+            f"équivalent ({', '.join(t.title for t in candidats)}) — aucune adoptée"
+        )
+    return None
 
 
 def _rattacher_editions(dm, nouveaux: list[Track], existants: list[Track]) -> tuple[list, int]:
@@ -446,11 +482,12 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     bilan.fusions_inedits = fusionner_doublons_inedits(dm, artist, artist.tracks)
     if bilan.fusions_inedits:
         artist.tracks = dm.get_artist_tracks(artist.id)
-    from src.services.versions import heriter_versions
+    from src.services.versions import constater_instrumentaux, heriter_versions
 
     bilan.heritages = heriter_versions(dm, artist.tracks)
     if bilan.heritages:
         artist.tracks = dm.get_artist_tracks(artist.id)
+    constater_instrumentaux(dm, artist.tracks)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)
     bilan.albums_api = sum(1 for t in nouveaux if t.album)

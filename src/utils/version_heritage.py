@@ -15,13 +15,17 @@ de `version_descriptors` :
     instrumental                 NON      oui       oui    (constat instrumental)
     a cappella                   oui      oui       NON    (la voix seule)
     remix tiers / collab         NON      oui       NON    (le remixeur produit)
-    démo / alternate / snippet   NON      oui       NON    (autre prise, autre texte)
+    démo / alternate / snippet   NON      NON       NON    (autre prise, autre équipe)
     reference                    NON      NON       NON    (chantée par un autre)
 
 Démo, prise alternative et snippet : décision utilisateur du 2026-09-28 — une
 démo n'était dans aucune ligne et retombait sur « edition » (paroles ET
-production de l'original), alors que son texte diffère souvent. Une référence
-est l'œuvre d'un AUTRE artiste pour celui-ci : elle n'hérite de rien.
+production de l'original), alors que son texte diffère souvent. Depuis le
+2026-10-09 ils n'héritent plus des AUTEURS non plus : ceux de la version finale
+incluent souvent des gens arrivés après la démo (« Hurricane (Donda Demo) »
+héritait de The Weeknd et Lil Baby). Une référence est l'œuvre d'un AUTRE
+artiste pour celui-ci : elle n'hérite de rien. Le remix garde les auteurs : ceux
+de l'original le sont aussi du remix (leur refrain, leur couplet y sont).
 
 Règles d'écriture : UNION, jamais remplacement — un crédit ou des paroles que la
 version porte déjà priment ; la provenance est EXPLICITE (`Credit.source =
@@ -79,11 +83,34 @@ REGLES: dict[str, Regle] = {
     "a_cappella": Regle(paroles=True, ecriture=True, production=False),
     "remix_named": Regle(paroles=False, ecriture=True, production=False),
     "remix_bare": Regle(paroles=False, ecriture=True, production=False),
-    "demo": Regle(paroles=False, ecriture=True, production=False),
-    "alternate": Regle(paroles=False, ecriture=True, production=False),
-    "snippet": Regle(paroles=False, ecriture=True, production=False),
+    "demo": Regle(paroles=False, ecriture=False, production=False),
+    "alternate": Regle(paroles=False, ecriture=False, production=False),
+    "snippet": Regle(paroles=False, ecriture=False, production=False),
     "reference": Regle(paroles=False, ecriture=False, production=False),
 }
+
+
+#: Un GROUPE du titre (parenthèses, crochets, ou segment après « - ») qui dit
+#: « instrumental » : « (Instru) », « (Version Instrumentale) », « (Instrumental
+#: - BTB Version) » — ce dernier rangé « edition » par `parse_variant`.
+_SANS_VOIX = re.compile(
+    r"[\(\[][^\)\]]*\binstru(?:mental|mentale|mentaux)?\b[^\)\]]*[\)\]]"
+    r"|\s[-–]\s[^-–]*\binstru(?:mental|mentale)?\b",
+    re.IGNORECASE,
+)
+
+
+def est_instrumental(titre: str | None) -> bool:
+    """Le TITRE désigne-t-il une version instrumentale ? Famille `instrumental`,
+    ou un descripteur qui le dit autrement : « (Version Instrumentale) » range
+    sous « edition » (*Version* l'emporte dans `parse_variant`) alors que ce
+    n'est pas le même enregistrement. Décision utilisateur 2026-10-09 : un tel
+    titre est CONSTATÉ instrumental — ni paroles ni LRC."""
+    if not titre:
+        return False
+    if famille_de(titre) == "instrumental":
+        return True
+    return bool(_SANS_VOIX.search(titre))
 
 
 def famille_de(titre: str) -> str | None:

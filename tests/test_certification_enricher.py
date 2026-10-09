@@ -318,7 +318,9 @@ class TestHomonymesDepuisE36:
         kanye = Artist(name="Kanye West")
         glee = Track(title="American Boy", artist=kanye, is_featuring=True)
         glee.primary_artist_name, glee.secondary_role = "Glee Cast", "Writer"
-        m = _MatcherParArtiste({"Kanye West": [_match(artist_name="ESTELLE FT KANYE WEST")]})
+        m = _MatcherParArtiste(
+            {"Kanye West": [_match(artist_name="ESTELLE FT KANYE WEST", title="AMERICAN BOY")]}
+        )
         apply_certifications(kanye, [glee], m)
         assert glee.certs.entries == []
         assert m.cherches == []  # rien n'est même cherché
@@ -330,7 +332,7 @@ class TestHomonymesDepuisE36:
         t.primary_artist_name, t.secondary_role = "John Legend", "Producer"
         m = _MatcherParArtiste(
             {
-                "John Legend": [_match(artist_name="JOHN LEGEND")],
+                "John Legend": [_match(artist_name="JOHN LEGEND", title="HEAVEN")],
                 "Kanye West": [_match(artist_name="KANYE WEST", title="HEAVEN")],
             }
         )
@@ -346,7 +348,7 @@ class TestHomonymesDepuisE36:
         t = Track(title="X", artist=kanye, is_featuring=True)
         t.primary_artist_name, t.secondary_role = "Autre", "Additional Vocals"
         t.credits = [Credit(name="Kanye West", role=CreditRole.PRODUCER)]
-        m = _MatcherParArtiste({"Autre": [_match(artist_name="AUTRE")]})
+        m = _MatcherParArtiste({"Autre": [_match(artist_name="AUTRE", title="X")]})
         apply_certifications(kanye, [t], m)
         assert len(t.certs.entries) == 1
 
@@ -355,7 +357,7 @@ class TestHomonymesDepuisE36:
         kanye = Artist(name="Kanye West")
         t = Track(title="Diamonds", artist=kanye, is_featuring=True)
         t.primary_artist_name = "Teairra Marí"
-        m = _MatcherParArtiste({"Kanye West": [_match(artist_name="KANYE WEST")]})
+        m = _MatcherParArtiste({"Kanye West": [_match(artist_name="KANYE WEST", title="DIAMONDS")]})
         apply_certifications(kanye, [t], m)
         assert t.certs.entries == []
 
@@ -371,7 +373,9 @@ class TestHomonymesDepuisE36:
             Credit(name="JuL", role=CreditRole.FEATURED),
             Credit(name="SCH", role=CreditRole.FEATURED),
         ]
-        m = _MatcherParArtiste({"SCH": [_match(artist_name="JUL FEAT. SCH, NAPS, KOFS")]})
+        m = _MatcherParArtiste(
+            {"SCH": [_match(artist_name="JUL FEAT. SCH, NAPS, KOFS", title="BANDE ORGANISÉE")]}
+        )
         apply_certifications(sch, [t], m)
         assert len(t.certs.entries) == 1
 
@@ -379,7 +383,9 @@ class TestHomonymesDepuisE36:
         orelsan = Artist(name="OrelSan")
         t = Track(title="Millions", artist=orelsan, is_featuring=True)
         t.primary_artist_name = "No Limit (FRA)"
-        m = _MatcherParArtiste({"OrelSan": [_match(artist_name="NO LIMIT, ORELSAN, NINHO")]})
+        m = _MatcherParArtiste(
+            {"OrelSan": [_match(artist_name="NO LIMIT, ORELSAN, NINHO", title="MILLIONS")]}
+        )
         apply_certifications(orelsan, [t], m)
         assert len(t.certs.entries) == 1
 
@@ -390,7 +396,7 @@ def test_alias_confirme_vaut_fiche_propre():
     kanye = Artist(name="Kanye West")
     t = Track(title="PABLO", artist=kanye, is_featuring=True)
     t.primary_artist_name, t.secondary_role = "Ye", "Producer"
-    m = _MatcherParArtiste({"Kanye West": [_match(artist_name="KANYE WEST")]})
+    m = _MatcherParArtiste({"Kanye West": [_match(artist_name="KANYE WEST", title="PABLO")]})
     apply_certifications(kanye, [t], m, alias=("Ye",))
     assert len(t.certs.entries) == 1
     apply_certifications(kanye, [t], m)  # sans l'alias : un autre interprète

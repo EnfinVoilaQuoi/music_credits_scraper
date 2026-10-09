@@ -170,9 +170,22 @@ class TestNomsCorrespondent:
     def test_non_correspondances(self, page, artiste):
         assert _names_match(page, artiste) is False
 
-    def test_coquille_toleree(self):
-        """Seuil difflib à 0,8 : une lettre de travers ne casse pas l'identité."""
-        assert _names_match("Nekfeu", "Nekfeuu") is True
+    @pytest.mark.parametrize(
+        ("page", "artiste"),
+        [
+            ("Damso", "Diam’s"),
+            ("Sting", "Swing"),
+            ("AISHA", "Isha"),
+            ("Medeline", "Médine"),
+            ("Jazzy Jazz", "Jazzy Bazz"),
+            ("SDRM", "SDM"),
+        ],
+    )
+    def test_un_nom_voisin_n_est_pas_le_notre(self, page, artiste):
+        """CORRECTIFS 1.14 (2026-10-09) : le repli difflib ≥ 0,8 acceptait ces
+        noms (mesuré sur 17 035 noms en base) — retiré, Kworb affiche le nom
+        Spotify exact."""
+        assert _names_match(page, artiste) is False
 
     @pytest.mark.parametrize(
         "page",
@@ -195,7 +208,10 @@ class TestNomsCorrespondent:
     def test_misha_nest_pas_isha(self):
         assert _names_match("Misha Van Der Werf", "Isha") is False
 
-    @pytest.mark.parametrize(("page", "artiste"), [("Isha (7)", "Isha"), ("Sch (5)", "SCH")])
+    @pytest.mark.parametrize(
+        ("page", "artiste"),
+        [("Isha (7)", "Isha"), ("Sch (5)", "SCH"), ("Booba (2)", "Booba"), ("PLK", "PLK (5)")],
+    )
     def test_suffixe_de_desambiguisation_genius_conserve(self, page, artiste):
         """Ce que le correctif devait épargner : « Isha (7) » reste notre Isha."""
         assert _names_match(page, artiste) is True

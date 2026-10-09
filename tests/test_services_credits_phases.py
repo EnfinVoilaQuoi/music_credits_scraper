@@ -191,7 +191,7 @@ class TestPhaseSynchro:
 
     def test_texte_de_repli_compte(self):
         class _LyricsTexte(_Lyrics):
-            def enrich(self, track, artist_name, *, need_sync, need_text):
+            def enrich(self, track, artist_name, *, need_sync, need_text, garde=None):
                 track.lyrics.text, track.lyrics.present = "ytm", True
                 return SimpleNamespace(
                     lyrics_synced=None, synced_kind=None, synced_is_cross=False, text="ytm"

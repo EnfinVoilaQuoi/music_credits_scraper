@@ -133,7 +133,7 @@ class LyricsProvider:
     # ── Enrichissement paroles d'UN morceau ─────────────────────────────────
 
     def enrich(
-        self, track, artist_name: str, *, need_sync: bool, need_text: bool
+        self, track, artist_name: str, *, need_sync: bool, need_text: bool, garde=None
     ) -> SyncedLyricsOutcome:
         """Résout la synchro/texte du morceau (resolver pur) PUIS applique au track
         (observations + colonnes + fallback texte). Renvoie l'`outcome` : le worker
@@ -147,6 +147,7 @@ class LyricsProvider:
             need_sync=need_sync,
             need_text=need_text,
             sync_ytm=self._sync_ytm,
+            garde=garde,
         )
         track.observations.extend(outcome.observations)
         if outcome.lyrics_synced is not None:

@@ -50,16 +50,40 @@ def _accord(durees: list[int]) -> int | None:
     return sorted(durees)[len(durees) // 2]
 
 
-def duree_a_declarer(videos: list[dict], hors_plateformes: bool) -> tuple[int, str] | None:
-    """`videos` : `{"duration": s, "channel": nom}` des vidéos PROPRES à la
-    fiche. Rend `(secondes, source)` ou None — plusieurs vidéos du même niveau
-    en désaccord (> 2 s) ne concluent pas."""
+#: Une vidéo qui n'est pas LE morceau : extrait, émission ou compilation
+#: entière (mesuré le 2026-10-09 : « LEGO » 3 181 s = un Planète Rap,
+#: « Hella » 15 s = un extrait, « Pas de boulot » 1 610 s = une mixtape).
+NON_MORCEAU = re.compile(
+    r"snippet|extrait|mixtape|mix-tape|mix[eé] par|plan[eè]te ?rap|full album|"
+    r"int[ée]gral|\(\d ?- ?\d\)|best of|meilleur de",
+    re.IGNORECASE,
+)
+
+
+def duree_a_declarer(
+    videos: list[dict], hors_plateformes: bool, recevable=None
+) -> tuple[int, str] | None:
+    """`videos` : `{"duration": s, "channel": nom, "title": titre}` des vidéos
+    PROPRES à la fiche. Rend `(secondes, source)` ou None — plusieurs vidéos du
+    même niveau en désaccord (> 2 s) ne concluent pas.
+
+    Une vidéo ORDINAIRE ne donne sa durée que si son titre est connu, n'est ni
+    un extrait ni une émission (`NON_MORCEAU`), et que `recevable(video)` —
+    le juge « la vidéo nomme-t-elle le morceau ? » de l'appelant — l'accepte
+    (décision utilisateur 2026-10-09, CORRECTIFS 1.10)."""
     topic = [v["duration"] for v in videos if v.get("duration") and est_topic(v.get("channel"))]
     if topic:
         d = _accord(topic)
         return (d, SOURCE_AUDIO) if d else None
     if not hors_plateformes:
         return None
-    autres = [v["duration"] for v in videos if v.get("duration")]
+    autres = [
+        v["duration"]
+        for v in videos
+        if v.get("duration")
+        and v.get("title")
+        and not NON_MORCEAU.search(v["title"])
+        and (recevable is None or recevable(v))
+    ]
     d = _accord(autres)
     return (d, SOURCE_VIDEO) if d else None

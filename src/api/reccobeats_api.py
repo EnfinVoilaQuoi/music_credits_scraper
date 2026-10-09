@@ -505,7 +505,7 @@ class ReccoBeatsIntegratedClient:
 
     def _lot_isrc(self, lot: list[str], *, attendre: bool) -> list[dict]:
         """UN lot `/track?ids=` sous son observation ; lève sur panne."""
-        with source_usage.observe(_SOURCE, label=f"isrc ×{len(lot)}") as obs:
+        with source_usage.observe(_SOURCE, label=f"isrc ×{len(lot)}", hors_morceau=True) as obs:
             time.sleep(1.0 if attendre else 0)  # cadence prudente entre deux lots
             url = f"{self.recco_base_url}/track"
             response = self.recco_session.get(url, params={"ids": ",".join(lot)}, timeout=30)

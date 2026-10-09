@@ -116,6 +116,7 @@ scripts/*
 # Certifications : réécriture des rattachements par sous-chaîne (2026-09-06)
 !scripts/repair_certifications.py
 !scripts/audit_spotify_ids.py
+!scripts/audit_donnees.py
 !scripts/repair_spotify_ids.py
 !scripts/repair_deezer_ids.py
 !scripts/repair_chimeres_genius.py

@@ -164,26 +164,39 @@ def est_manquant(track: Track, kind: Manque) -> bool:
     raise ValueError(kind)
 
 
+def morceaux_en_echec(runtime: Runtime, sources: Iterable[str]) -> set[int]:
+    """Les morceaux qu'au moins une de ces sources n'a pas servis : un échec de
+    communication resté sans réponse depuis (`source_track_failures`, e44)."""
+    from src.observability.repository import SourceUsageRepository
+
+    return SourceUsageRepository(runtime.data_manager.engine).morceaux_en_echec(sources)
+
+
 def selection_morceaux(
     runtime: Runtime,
     artist: Artist,
     *,
     manquants: Iterable[Manque] = (),
+    echecs: Iterable[str] = (),
     track_ids: Iterable[int] | None = None,
 ) -> list[Track]:
     """« Tous les morceaux » d'un flux : la discographie RÉUNIE (comme la GUI),
     moins les désactivés, restreinte aux `track_ids` s'ils sont donnés, puis
     aux morceaux auxquels il manque AU MOINS UNE des données `manquants`
     (union : `credits --manquants` traite un morceau sans Discogs même s'il a
-    ses crédits Genius)."""
+    ses crédits Genius) OU qu'une des sources `echecs` n'a pas servis
+    (`--echecs` : ce qui n'est pas passé, retenté — une ABSENCE constatée n'y
+    est pas, la source a répondu)."""
     desactives = runtime.disabled.load_disabled_tracks(artist.name)
     tracks = [t for t in artist.tracks if t.id not in desactives]
     if track_ids is not None:
         voulus = set(track_ids)
         tracks = [t for t in tracks if t.id in voulus]
     kinds = tuple(manquants)
-    if kinds:
-        tracks = [t for t in tracks if any(est_manquant(t, k) for k in kinds)]
+    sources = tuple(echecs)
+    if kinds or sources:
+        en_echec = morceaux_en_echec(runtime, sources) if sources else set()
+        tracks = [t for t in tracks if t.id in en_echec or any(est_manquant(t, k) for k in kinds)]
     return tracks
 
 

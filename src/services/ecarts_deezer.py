@@ -52,7 +52,13 @@ from src.utils.title_matching import (
     normalize_name,
     normalize_title,
 )
-from src.utils.version_descriptors import MOTS_DE_MEME_MORCEAU, Kind, meme_prise, parse_variant
+from src.utils.version_descriptors import (
+    MOTS_DE_MEME_MORCEAU,
+    Kind,
+    meme_prise,
+    parse_variant,
+    titres_confondus,
+)
 
 logger = get_logger(__name__)
 
@@ -297,6 +303,7 @@ def _match_existing(
     by_isrc: dict[str, list[Track]],
     by_title: dict[str, list[Track]],
     title_key: str | None = None,
+    by_compact: dict[str, list[Track]] | None = None,
 ) -> tuple[Track | None, str | None]:
     """La fiche que cette piste désigne, et la PREUVE du rapprochement.
 
@@ -317,6 +324,10 @@ def _match_existing(
             if normalize_title(track.title) == title_key:
                 return track, "isrc"
     candidats = by_title.get(title_key, [])
+    if not candidats and by_compact:
+        # Même titre à l'ESPACE près : « 3 G » / « 3G », « A V L D » / « AVLD »,
+        # « POL-AK » / « Polak » — créés en double par les écarts (CORRECTIFS 1.3).
+        candidats = by_compact.get(title_key.replace(" ", ""), [])
     if not candidats:
         return None, None
     if piste.duration is not None:
@@ -367,6 +378,7 @@ def classer(
     """
     titres: dict[str, Track] = {}
     titres_tous: dict[str, list[Track]] = {}
+    titres_compacts: dict[str, list[Track]] = {}
     deezer_ids: dict[int, Track] = {}
     isrcs: dict[str, list[Track]] = {}
     socles: dict[str, Track] = {}
@@ -374,6 +386,7 @@ def classer(
         k = normalize_title(t.title)
         titres.setdefault(k, t)
         titres_tous.setdefault(k, []).append(t)
+        titres_compacts.setdefault(k.replace(" ", ""), []).append(t)
         if t.deezer_id:
             deezer_ids[int(t.deezer_id)] = t
         if t.isrc:
@@ -405,6 +418,7 @@ def classer(
                 by_isrc=isrcs,
                 by_title=titres_tous,
                 title_key=cle_piste,
+                by_compact=titres_compacts,
             )
             present = est_a_nous or connu or notre_id in {cid for cid, _ in p.contributors}
             if existing is not None:
@@ -688,11 +702,33 @@ def detecter(runtime, artist, *, deezer_id: int, should_stop=None, genius_api=No
 # ── Création (sur validation) ────────────────────────────────────────────────
 
 
-def _existant(dm, artist, titre: str) -> Track | None:
-    cle = normalize_title(titre)
-    return next(
-        (t for t in dm.get_artist_tracks(artist.id) if normalize_title(t.title) == cle), None
-    )
+def _deja_en_base(e: Ecart, base: list[Track]) -> tuple[Track | None, str | None]:
+    """La piste est-elle CONNUE de la base telle qu'elle est AU MOMENT de créer ?
+
+    Un écart peut dater : signalé par un run, appliqué des jours plus tard depuis
+    « À trancher » — entre-temps la fiche a pu être fusionnée, liée, renseignée.
+    A2H « Home Sweet Home (Episode 2) », fusionné à la main le 29/09, recréé le
+    30/09 depuis un signalement périmé alors que la fiche gardée portait déjà
+    l'ISRC de la piste (CORRECTIFS 1.2, 2026-10-09). `(fiche, preuve)` :
+    `deezer_id` et `isrc` à titre compatible ⇒ on RATTACHE ; `isrc_autre_titre`
+    ⇒ on ne crée pas, sans rien affirmer (l'ISRC d'une fiche peut être faux) ;
+    `title` (même titre à la graphie près) ⇒ rien.
+    """
+    p = e.piste
+    for t in base:
+        if t.deezer_id and int(t.deezer_id) == p.id:
+            return t, "deezer_id"
+    if p.isrc:
+        memes = [t for t in base if t.isrc and str(t.isrc).upper() == p.isrc.upper()]
+        for t in memes:
+            if titres_confondus(t.title, p.title):
+                return t, "isrc"
+        if memes:
+            return memes[0], "isrc_autre_titre"
+    for t in base:
+        if titres_confondus(t.title, p.title):
+            return t, "title"
+    return None, None
 
 
 def _date(texte: str | None) -> datetime | None:
@@ -982,6 +1018,7 @@ def creer_lignes(
     """
     comptes: list[str] = []
     albums_poses: set[int] = set()
+    base: list[Track] | None = None
     for e in ecarts:
         # Le stop est testé ENTRE deux unités seulement : une fiche déjà en
         # écriture reste atomique, la suivante ne démarre pas à la fermeture.
@@ -1000,8 +1037,29 @@ def creer_lignes(
             else:
                 comptes.append(f"« {e.titre} » : rattachement impossible")
             continue
-        if _existant(dm, artist, e.titre) is not None:
-            comptes.append(f"« {e.titre} » existe déjà — rien")
+        if base is None:
+            base = dm.get_artist_tracks(artist.id)
+        connue, preuve = _deja_en_base(e, base)
+        if preuve in ("deezer_id", "isrc"):
+            e.existing_track, e.matched_by = connue, preuve
+            if _lier_parution(dm, artist, e, connue):
+                comptes.append(
+                    f"« {e.titre} » déjà en base (« {connue.title} », {preuve}) — "
+                    f"rattaché à « {e.album.title} », rien créé"
+                )
+            else:
+                comptes.append(f"« {e.titre} » déjà en base (« {connue.title} ») — rien créé")
+            logger.info(comptes[-1])
+            continue
+        if preuve == "isrc_autre_titre":
+            comptes.append(
+                f"« {e.titre} » : son ISRC est déjà porté par « {connue.title} » — rien créé, "
+                "à vérifier"
+            )
+            logger.warning(comptes[-1])
+            continue
+        if preuve == "title":
+            comptes.append(f"« {e.titre} » existe déjà (« {connue.title} ») — rien")
             continue
         contributeurs = e.piste.contributors
         if not contributeurs and lire_piste is not None:
@@ -1016,6 +1074,7 @@ def creer_lignes(
             (heriter or version_heritage.heriter)(track, e.socle)
         dm.save_track(track)
         dm.record_pending(track)
+        base.append(track)  # deux écarts de la même piste ne la créent pas deux fois
         if track.observations:
             dm.upsert_observations(track.id, track.observations)
         if e.nature != "apparition" and e.album.id not in albums_poses:

@@ -227,7 +227,7 @@ def telecharger(
     """
     posts: list[dict] = []
     page = 1
-    with source_usage.observe(_SOURCE, label="wp-json certifications_du_sn"):
+    with source_usage.observe(_SOURCE, label="wp-json certifications_du_sn", hors_morceau=True):
         while True:
             params = {"per_page": _PAR_PAGE, "page": page, "_fields": _CHAMPS + ",link"}
             if modified_after:

@@ -46,6 +46,27 @@ def _cancel_pending_tasks(loop: asyncio.AbstractEventLoop) -> None:
             logger.warning(f"⚠️ Task terminée sur exception pendant l'arrêt : {exc!r}")
 
 
+def gestionnaire_exceptions(loop, context: dict) -> None:
+    """Gestionnaire de la boucle : le bruit CONNU passe en DEBUG, le reste suit
+    le gestionnaire par défaut.
+
+    Quand notre délai de garde annule une recherche Playwright (SongBPM,
+    `asyncio.timeout(30)`), l'attente interne d'un sélecteur se termine plus
+    tard en `TargetClosedError` — la page vient d'être fermée pour recycler le
+    driver — et asyncio crie « Future exception was never retrieved » (27 fois
+    sur une journée, CORRECTIFS 1.13). Cette erreur ne porte sur rien qu'on
+    attende encore."""
+    exc = context.get("exception")
+    if (
+        exc is not None
+        and type(exc).__name__ == "TargetClosedError"
+        and "never retrieved" in str(context.get("message", ""))
+    ):
+        logger.debug(f"Attente Playwright orpheline après annulation (page fermée) : {exc}")
+        return
+    loop.default_exception_handler(context)
+
+
 class AsyncLoopThread:
     """Une boucle asyncio dans un thread dédié, pilotable depuis les autres threads."""
 
@@ -73,6 +94,7 @@ class AsyncLoopThread:
     def _run(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        loop.set_exception_handler(gestionnaire_exceptions)
         self._loop = loop
         loop.call_soon(self._ready.set)
         try:

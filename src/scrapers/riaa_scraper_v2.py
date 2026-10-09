@@ -382,7 +382,7 @@ class RIAAScraperV2:
         start, end = _norm_date(start_date), _norm_date(end_date)
         url = self._search_url(start=start, end=end, by_certification_date=date_option != "release")
         logger.info(f"RIAA dates {start}→{end} (détails={get_details})")
-        with source_usage.observe(_SOURCE, label=f"{start}→{end}") as obs:
+        with source_usage.observe(_SOURCE, label=f"{start}→{end}", hors_morceau=True) as obs:
             html = self._render(url, load_all=True, get_details=get_details)
             if not html:
                 obs.fail(IssueKind.UNREACHABLE, "page non rendue")
@@ -417,7 +417,7 @@ class RIAAScraperV2:
         """
         url = self._search_url(artist=artist)
         logger.info(f"RIAA artiste '{artist}' (détails={get_details})")
-        with source_usage.observe(_SOURCE, label=f"artiste {artist}") as obs:
+        with source_usage.observe(_SOURCE, label=f"artiste {artist}", hors_morceau=True) as obs:
             html = self._render(url, load_all=True, get_details=get_details)
             if not html:
                 obs.fail(IssueKind.UNREACHABLE, "page non rendue")

@@ -185,6 +185,7 @@ DIFFUSION_FORTS = frozenset(
         "edited",
         "remaster",
         "remastered",
+        "remast",  # abréviation du SNEP (« JE DANSE LE MIA REMAST 2016 »)
         "mono",
         "stereo",
         "censored",
@@ -485,6 +486,19 @@ def titres_equivalents(a: str | None, b: str | None) -> bool:
     if normalize_title(va.socle) != normalize_title(vb.socle):
         return False
     return meme_famille(va, vb)
+
+
+def titres_confondus(a: str | None, b: str | None) -> bool:
+    """`titres_equivalents`, ou les mêmes lettres une fois les ESPACES retirés.
+
+    Pour reconnaître une fiche déjà en base sous une autre GRAPHIE (« 3 G » /
+    « 3G », « A V L D » / « AVLD », « POL-AK » / « Polak ») — jamais pour juger
+    une identité de plateforme : les gates gardent `titres_equivalents`.
+    """
+    if titres_equivalents(a, b):
+        return True
+    ca = normalize_title(a or "").replace(" ", "")
+    return bool(ca) and ca == normalize_title(b or "").replace(" ", "")
 
 
 def meme_socle(a: str | None, b: str | None) -> bool:

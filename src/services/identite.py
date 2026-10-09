@@ -34,6 +34,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from src.models import Artist, Track
+from src.observability import source_usage
 from src.services.runtime import Bilan, Hooks, Manque, Runtime, selection_morceaux
 from src.utils.logger import etape_de_flux, get_logger
 
@@ -496,7 +497,9 @@ def relier_par_isrc(runtime, artist: Artist, *, client=None, lire_identite=None)
     poses = 0
     for t in fiches:
         for sid in par_isrc.get(t.isrc.upper(), []):
-            if valider_identite(t, sid, lire_identite=lire_identite):
+            with source_usage.track_scope(t.id):
+                concorde = valider_identite(t, sid, lire_identite=lire_identite)
+            if concorde:
                 if runtime.data_manager.update_track_spotify_id(
                     t.id, sid, source="reccobeats_isrc"
                 ):

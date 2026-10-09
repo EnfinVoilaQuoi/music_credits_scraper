@@ -49,6 +49,9 @@ class OptionsCycle:
     skip: tuple[str, ...] = ()
     #: Ne traiter que les morceaux à donnée ABSENTE (définition PAR flux).
     manquants: bool = False
+    #: ... ou (union) ceux qu'une source du flux n'a pas servis : un échec de
+    #: communication resté sans réponse (`source_track_failures`, e44).
+    echecs: bool = False
     disco: discographie.OptionsDisco = discographie.OptionsDisco()
     identite: identite.OptionsIdentite = identite.OptionsIdentite()
     credits: credits.OptionsCredits = credits.OptionsCredits()
@@ -109,11 +112,15 @@ def executer_etape(
             return identite.run(runtime, artist, options.identite, hooks)
         if etape == "credits":
             kinds = manques_credits(options.credits) if options.manquants else ()
-            tracks = selection_morceaux(runtime, artist, manquants=kinds)
+            sources = options.credits.sources_suivies() if options.echecs else ()
+            tracks = selection_morceaux(runtime, artist, manquants=kinds, echecs=sources)
             return credits.run(runtime, artist, tracks, options.credits, hooks)
         if etape == "enrich":
             kinds = (Manque.AUDIO,) if options.manquants else ()
-            tracks = selection_morceaux(runtime, artist, manquants=kinds)
+            sources = (
+                enrichissement.sources_suivies(runtime, options.enrich) if options.echecs else ()
+            )
+            tracks = selection_morceaux(runtime, artist, manquants=kinds, echecs=sources)
             return enrichissement.run(runtime, artist, tracks, options.enrich, hooks)
         if etape == "streams":
             ids = options.streams.track_ids

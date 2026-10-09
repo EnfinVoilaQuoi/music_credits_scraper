@@ -73,10 +73,29 @@ def total_discographie(tracks, noms=(), formations=(), *, prods: bool = False) -
     — Spotify + YTM, cf. `calculate_total_streams`) plus ses variantes
     rattachées (Spotify seul)."""
     total = 0
+    # CORRECTIFS 1.11 (2026-10-09) : un enregistrement ne compte qu'UNE fois.
+    # Deux pages Genius du même morceau portent le même compteur Spotify (Kid
+    # Cudi « Soundtrack 2 My Life » ×2 = 370 M chacune ; Booba « Sale mood » /
+    # « MOOD », deux éditions, 91 M chacune) ; une discographie RÉUNIE peut
+    # contenir la ligne d'un groupe et la ligne sœur du membre (même page).
+    # YouTube Music n'a pas ce défaut : le run n'attribue une vidéo portée par
+    # plusieurs fiches à AUCUNE.
+    pages, ids, compteurs = set(), set(), set()
     for t in morceaux_comptes(tracks, noms, formations, prods=prods):
-        est = calculate_total_streams(t.streams.spotify_streams, t.streams.ytm_streams)
+        if t.genius_id:
+            if t.genius_id in pages:
+                continue
+            pages.add(t.genius_id)
+        sp = t.streams.spotify_streams
+        deja = (t.spotify_id and t.spotify_id in ids) or (sp and sp > 1000 and sp in compteurs)
+        if t.spotify_id:
+            ids.add(t.spotify_id)
+        if sp and sp > 1000:
+            compteurs.add(sp)
+        est = calculate_total_streams(None if deja else sp, t.streams.ytm_streams)
         total += est or 0
-        total += calculate_total_streams(streams_variantes(t), None) or 0
+        if not deja:
+            total += calculate_total_streams(streams_variantes(t), None) or 0
     return total
 
 

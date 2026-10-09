@@ -569,7 +569,7 @@ class UltratopUpdater:
             self._demarrer_run()
         self.pages_demandees += 1
         bilan: dict = {}
-        with source_usage.observe(_SOURCE, label=f"{year}/{category}") as obs:
+        with source_usage.observe(_SOURCE, label=f"{year}/{category}", hors_morceau=True) as obs:
             soup = (
                 self.fetch_page_with_retry(year, category)
                 if avec_retry

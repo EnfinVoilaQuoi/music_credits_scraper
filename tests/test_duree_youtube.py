@@ -22,10 +22,19 @@ def test_un_clip_ne_dit_rien_d_un_morceau_de_plateforme():
 
 
 def test_hors_plateformes_la_video_est_la_publication():
-    assert duree_a_declarer([{"duration": 150, "channel": "Booska-P"}], True) == (
-        150,
-        "youtube_video",
-    )
+    video = {"duration": 150, "channel": "Booska-P", "title": "Isha - Freestyle"}
+    assert duree_a_declarer([video], True) == (150, "youtube_video")
+
+
+def test_une_video_ordinaire_doit_etre_le_morceau():
+    """CORRECTIFS 1.10 (2026-10-09) : ni extrait, ni émission, ni titre absent,
+    ni vidéo que le juge de l'appelant refuse."""
+    for titre in ("B.B. Jacques - Machine (Snippet)", "Booba - Hella (extrait futur single)"):
+        assert duree_a_declarer([{"duration": 20, "channel": "X", "title": titre}], True) is None
+    assert duree_a_declarer([{"duration": 150, "channel": "X"}], True) is None
+    video = {"duration": 150, "channel": "X", "title": "Denzel Curry - Curry Wuz Here"}
+    assert duree_a_declarer([video], True, recevable=lambda v: False) is None
+    assert duree_a_declarer([video], True, recevable=lambda v: True) == (150, "youtube_video")
 
 
 def test_desaccord_ne_conclut_pas():

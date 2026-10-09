@@ -432,7 +432,11 @@ def test_duree_de_l_audio_topic_et_repli_hors_plateformes(sans_recherche):
         vues={"audioaudioa": 5, "freestylefr": 7, "clipsurspot": 9, "clipdouble1": 3},
         details={
             "audioaudioa": {"duration": 193, "channel": "Isha - Topic"},
-            "freestylefr": {"duration": 150, "channel": "Booska-P"},
+            "freestylefr": {
+                "duration": 150,
+                "channel": "Booska-P",
+                "title": "Isha - Freestyle | Booska",
+            },
             "clipsurspot": {"duration": 240, "channel": "ISHA"},
             "clipdouble1": {"duration": 400, "channel": "ISHA"},
         },
@@ -449,3 +453,28 @@ def test_duree_de_l_audio_topic_et_repli_hors_plateformes(sans_recherche):
 
     assert sorted(dm.durees) == [(1, 193, "youtube"), (2, 150, "youtube_video")]
     assert result["durees_youtube"] == 2
+
+
+def test_une_video_qui_ne_nomme_pas_le_morceau_ne_donne_pas_sa_duree(sans_recherche):
+    """CORRECTIFS 1.10 : « LEGO » prenait les 3 181 s d'un Planète Rap entier,
+    « Morts pour rien » la durée d'un reportage sans rapport."""
+    api = FakeAPI(
+        raw_tracks=[],
+        vues={"planeterap1": 9, "reportage01": 9},
+        details={
+            "planeterap1": {
+                "duration": 3181,
+                "channel": "Skyrock",
+                "title": '#PlanèteRap BB Jacques "BlackBird" avec Fred Musa ! (1-5)',
+            },
+            "reportage01": {"duration": 3823, "channel": "X", "title": "zied&Bouna"},
+        },
+    )
+    tracks = [
+        _track(1, "LEGO", youtube_url="https://youtu.be/planeterap1"),
+        _track(2, "Morts pour rien", youtube_url="https://youtu.be/reportage01"),
+    ]
+
+    dm, _ = _lancer(api, tracks)
+
+    assert dm.durees == []

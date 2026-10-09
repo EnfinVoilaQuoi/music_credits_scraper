@@ -1118,6 +1118,11 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM track_spotify_ids WHERE track_id = :tid"), {"tid": track_id}
                 )
+                # Suivi des échecs par morceau (e44) : idem.
+                conn.execute(
+                    text("DELETE FROM source_track_failures WHERE track_id = :tid"),
+                    {"tid": track_id},
+                )
                 # Parutions (e31/e32) : pas de cascade SQLite, les preuves
                 # (`release_track_sources`) partent AVANT le lien qu'elles portent.
                 conn.execute(
@@ -1171,6 +1176,13 @@ class TrackRepository:
                     ),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
+                # Suivi des échecs (e44) : ceux du doublon portaient sur SA fiche
+                # (son titre, ses identifiants) ; la fiche conservée garde les
+                # siens, et un run retentera ce qui manque encore.
+                conn.execute(
+                    text("DELETE FROM source_track_failures WHERE track_id = :delete_id"),
+                    {"delete_id": delete_id},
+                )
                 # Observations : dédup par la clé unique (field, source) — le keep
                 # gagne (on écarte celles du doublon déjà couvertes) — puis
                 # réaffectation du reste. Pas de cascade FK (E4).
@@ -1192,7 +1204,27 @@ class TrackRepository:
                 # de fusion le fait pour les colonnes, jetait des vues qui
                 # comptent. Seule une vidéo déjà présente sur le morceau conservé
                 # est écartée (clé `video_id`, pas l'URL : `youtu.be/X` et
-                # `watch?v=X` sont la même vidéo).
+                # `watch?v=X` sont la même vidéo). Avant de l'écarter, son relevé
+                # de vues le plus RÉCENT passe sur la copie gardée (CORRECTIFS
+                # 1.4) : les deux fiches ont pu relever la même vidéo à des dates
+                # différentes.
+                total_sans_video = self._total_sans_video(conn, (keep_id, delete_id))
+                conn.execute(
+                    text("""
+                    UPDATE track_videos SET
+                      views = (SELECT d.views FROM track_videos d
+                               WHERE d.track_id = :delete_id AND d.video_id = track_videos.video_id),
+                      views_updated = (SELECT d.views_updated FROM track_videos d
+                               WHERE d.track_id = :delete_id AND d.video_id = track_videos.video_id)
+                    WHERE track_id = :keep_id AND EXISTS (
+                        SELECT 1 FROM track_videos d
+                        WHERE d.track_id = :delete_id AND d.video_id = track_videos.video_id
+                          AND d.views IS NOT NULL
+                          AND (track_videos.views IS NULL OR track_videos.views_updated IS NULL
+                               OR d.views_updated > track_videos.views_updated)
+                    )"""),
+                    {"delete_id": delete_id, "keep_id": keep_id},
+                )
                 conn.execute(
                     text("""
                     DELETE FROM track_videos WHERE track_id = :delete_id AND EXISTS (
@@ -1284,6 +1316,7 @@ class TrackRepository:
                 valeurs = self._arbitrer_streams(conn, keep_id)
                 if valeurs:
                     conn.execute(update(tracks).where(tracks.c.id == keep_id).values(**valeurs))
+                self._ytm_apres_fusion(conn, keep_id, delete_id, total_sans_video)
                 # `instrumental` (e27) n'est PAS symétrique comme `unreleased` :
                 # il doit rester cohérent avec les paroles que la ligne
                 # conserve. La règle vit dans `track_soeurs`, avec sa mesure.
@@ -1335,6 +1368,113 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur fusion track {delete_id} → {keep_id}: {e}")
             return False
+
+    def _ytm_apres_fusion(
+        self, conn, keep_id: int, delete_id: int, total_sans_video: bool = False
+    ) -> None:
+        """Vues YouTube Music et vidéo principale de la fiche gardée, APRÈS la
+        réunion des vidéos (CORRECTIFS 1.4, 2026-10-09).
+
+        Même règle que le run YTM (`update_ytmusic`, étape 6) : la somme des vues
+        des vidéos de la fiche, chacune une fois, HORS celles qu'une autre fiche
+        du même artiste porte encore (non attribuables). Deux doublons
+        partageaient souvent leur vidéo, qui ne comptait donc pour AUCUN des
+        deux : la fusion la rend attribuable. Une vidéo d'un AUTRE morceau ne se
+        règle pas ici — elle se rejette (✖️) avant de fusionner.
+
+        Sans aucune vue mesurée, ou quand l'une des fiches portait un total sans
+        vidéo connue derrière (antérieur à e20), on ne peut rien recalculer : on
+        garde le plus grand des deux totaux plutôt que d'en perdre un en silence
+        (Josman « Boss », 68 182 vues).
+        """
+        lignes = {
+            int(r["id"]): r
+            for r in conn.execute(
+                text(
+                    "SELECT id, artist_id, ytm_streams, ytm_streams_updated, youtube_url, "
+                    "youtube_url_source, youtube_video_kind, youtube_video_views, "
+                    "youtube_video_views_updated FROM tracks WHERE id IN (:k, :d)"
+                ),
+                {"k": keep_id, "d": delete_id},
+            ).mappings()
+        }
+        garde, autre = lignes.get(keep_id), lignes.get(delete_id)
+        if garde is None:
+            return
+        vues = conn.execute(
+            text("""
+            SELECT v.views FROM track_videos v
+            WHERE v.track_id = :k AND v.views IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM track_videos o JOIN tracks t ON t.id = o.track_id
+                WHERE o.video_id = v.video_id AND o.track_id NOT IN (:k, :d)
+                  AND t.artist_id = :aid
+            )"""),
+            {"k": keep_id, "d": delete_id, "aid": garde["artist_id"]},
+        ).all()
+        totaux = [r["ytm_streams"] for r in (garde, autre) if r and r["ytm_streams"]]
+        if vues:
+            total = sum(int(v[0]) for v in vues)
+            if total_sans_video and total < max(totaux, default=0):
+                total = max(totaux)
+        elif totaux:
+            total = max(totaux)
+        else:
+            total = None
+        if total is not None and total != garde["ytm_streams"]:
+            maintenant = datetime.now()
+            conn.execute(
+                update(tracks)
+                .where(tracks.c.id == keep_id)
+                .values(ytm_streams=total, ytm_streams_updated=maintenant)
+            )
+            self._upsert_observations(
+                conn,
+                keep_id,
+                [Observation("ytm_streams", total, "ytmusic", seen_at=maintenant)],
+            )
+        # Vidéo principale : la gardée sans lien reprend celui de l'autre ; deux
+        # liens différents, le PROTÉGÉ (manuel, Genius) l'emporte sur la recherche.
+        if (
+            autre is not None
+            and autre["youtube_url"]
+            and (
+                not garde["youtube_url"]
+                or (
+                    autre["youtube_url_source"] in _YT_SOURCES_PROTEGEES
+                    and garde["youtube_url_source"] not in _YT_SOURCES_PROTEGEES
+                )
+            )
+        ):
+            conn.execute(
+                text(
+                    "UPDATE tracks SET youtube_url = :u, youtube_url_source = :s, "
+                    "youtube_video_kind = :k, youtube_video_views = :v, "
+                    "youtube_video_views_updated = :vu WHERE id = :id"
+                ),
+                {
+                    "u": autre["youtube_url"],
+                    "s": autre["youtube_url_source"],
+                    "k": autre["youtube_video_kind"],
+                    "v": autre["youtube_video_views"],
+                    "vu": autre["youtube_video_views_updated"],
+                    "id": keep_id,
+                },
+            )
+
+    @staticmethod
+    def _total_sans_video(conn, ids: tuple[int, ...]) -> bool:
+        """L'une des fiches porte-t-elle un total YTM sans AUCUNE vidéo mesurée
+        derrière (vues relevées avant e20) ? Lu AVANT la réunion des vidéos."""
+        return bool(
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM tracks t WHERE t.id IN :ids AND t.ytm_streams > 0 "
+                    "AND NOT EXISTS (SELECT 1 FROM track_videos v "
+                    "WHERE v.track_id = t.id AND v.views IS NOT NULL)"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": list(ids)},
+            ).scalar()
+        )
 
     # ──────────────────────────────────────────────────────────────────────────
     # Streams Spotify (Kworb · Spotify web)

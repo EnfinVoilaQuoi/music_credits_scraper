@@ -594,7 +594,7 @@ class BpiScraper:
           problème que `cert_artist.noms_de_recherche`, mais résolu ici PAR LA
           SOURCE, sans heuristique de notre part.
         """
-        with source_usage.observe(_SOURCE, label=f"annuaire:{nom}") as obs:
+        with source_usage.observe(_SOURCE, label=f"annuaire:{nom}", hors_morceau=True) as obs:
             aiguille = normalize_name(nom)
             if not aiguille:
                 obs.skipped("nom vide")
@@ -657,7 +657,7 @@ class BpiScraper:
         """
         self.sans_resultat = self.lecture_echouee = False
         self.motif = ""
-        with source_usage.observe(_SOURCE, label=f"artiste:{artist}") as obs:
+        with source_usage.observe(_SOURCE, label=f"artiste:{artist}", hors_morceau=True) as obs:
             entites = await self.resoudre_artistes(artist)
             if not entites:
                 if self.lecture_echouee:
@@ -691,7 +691,7 @@ class BpiScraper:
         depuis ne ressort PAS dans la fenêtre de son palier d'origine. Cette
         méthode sert l'incrémental, pas la reconstitution d'historique.
         """
-        with source_usage.observe(_SOURCE, label=f"{debut}→{fin}") as obs:
+        with source_usage.observe(_SOURCE, label=f"{debut}→{fin}", hors_morceau=True) as obs:
             lignes = await self._collecter(obs, debut=debut, fin=fin)
             if not lignes:
                 obs.absent(f"aucune certification entre {debut} et {fin}")
@@ -713,7 +713,7 @@ class BpiScraper:
         insertion décale ce qui suit), mais il ne bouge pas à chaque certification
         hebdomadaire — et la dédup par identité absorbe les doublons.
         """
-        with source_usage.observe(_SOURCE, label="corpus complet") as obs:
+        with source_usage.observe(_SOURCE, label="corpus complet", hors_morceau=True) as obs:
             lignes = await self._collecter(obs, tri="artist.name asc")
             if not lignes:
                 obs.absent("corpus vide")

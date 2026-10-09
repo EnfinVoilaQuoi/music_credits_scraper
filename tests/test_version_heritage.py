@@ -87,13 +87,15 @@ class TestHeriter:
         h = vh.heriter(v, _socle())
         assert not h.paroles and [c.role for c in v.credits] == [CreditRole.WRITER]
 
-    def test_demo_alternate_snippet_n_heritent_que_l_ecriture(self):
-        """Décision utilisateur 2026-09-28 : autre prise, souvent autre texte."""
+    def test_demo_alternate_snippet_n_heritent_de_rien(self):
+        """Décisions utilisateur 2026-09-28 (paroles) puis 2026-10-09 (auteurs) :
+        autre prise, souvent autre texte, et une équipe qui a pu s'agrandir
+        après la démo (« Hurricane (Donda Demo) »)."""
         for titre in ("Suzy (Demo)", "Suzy [V3]", "Suzy [Snippet]"):
             v = _version(titre)
             h = vh.heriter(v, _socle())
             assert not h.paroles and v.lyrics.text is None, titre
-            assert [c.role for c in v.credits] == [CreditRole.WRITER], titre
+            assert v.credits == [], titre
 
     def test_une_reference_n_herite_de_rien(self):
         v = _version("Suzy (Kendrick Lamar Reference)")

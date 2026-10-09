@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from src.concurrency import async_loop
 from src.models import Artist, Track
+from src.observability import source_usage
 from src.services.runtime import Bilan, Hooks, Runtime
 from src.utils.logger import etape_de_flux, get_logger
 
@@ -48,8 +49,23 @@ def sources_effectives(runtime: Runtime, options: OptionsEnrich) -> list[str]:
     )
     if not options.sources:
         # Par défaut, aucune recherche d'ID : elle appartient à l'étape Identité.
-        sources = [s for s in sources if s != "spotify_id"]
+        # BPM Finder n'est pas lancé d'office (dernier recours, lent) : il se
+        # demande explicitement (case GUI, `--sources bpmfinder`).
+        sources = [s for s in sources if s not in ("spotify_id", "bpmfinder")]
     return sources
+
+
+def sources_suivies(runtime: Runtime, options: OptionsEnrich) -> tuple[str, ...]:
+    """Les clés de source (observabilité) que ce run interrogera — celles dont
+    les échecs en attente sélectionnent les morceaux de `--echecs`."""
+    from src.observability.registry import PROVIDER_TO_KEYS
+
+    cles: list[str] = []
+    for nom in sources_effectives(runtime, options):
+        for cle in PROVIDER_TO_KEYS.get(nom, (nom,)):
+            if cle not in cles:
+                cles.append(cle)
+    return tuple(cles)
 
 
 def _stop_playwright_sync() -> None:
@@ -117,12 +133,15 @@ async def run_async(
                 bilan.interrompu(f"arrêt demandé : {bilan.traites}/{n} traités")
                 break
             hooks.progress(i, n, track.title, tache)
-            results = await enricher.enrich_track_async(
-                track,
-                sources=sources,
-                force_update=options.force_update,
-                artist_tracks=artist.tracks,
-            )
+            # Les verdicts des sources interrogées pour CE morceau lui sont
+            # rattachés (suivi des échecs, `--echecs`).
+            with source_usage.track_scope(track.id):
+                results = await enricher.enrich_track_async(
+                    track,
+                    sources=sources,
+                    force_update=options.force_update,
+                    artist_tracks=artist.tracks,
+                )
             bilan.resultats.append({"title": track.title, "results": results})
             # Sauvegarder après chaque enrichissement (SQLite hors boucle).
             await asyncio.to_thread(dm.save_track, track)

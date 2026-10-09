@@ -159,8 +159,9 @@ class SpotifyIdProvider:
         # Valider l'unicité de l'ID trouvé
         validate = ctx.validate_spotify_id_unique
         if validate and not validate(spotify_id, track, ctx.artist_tracks):
-            logger.error(f"❌ ERREUR: Spotify ID trouvé par scraper est déjà utilisé: {spotify_id}")
-            logger.error("   Cela ne devrait pas arriver. Vérifiez la base de données.")
+            # Le refus est déjà journalisé (et compté) par le validateur ; le
+            # candidat appartient à une autre fiche, rien n'est écrit.
+            logger.info(f"⏭ Candidat Spotify {spotify_id} écarté : déjà porté par une autre fiche")
             return None
 
         logger.info(f"✅ Spotify ID unique trouvé via scraper: {spotify_id}")

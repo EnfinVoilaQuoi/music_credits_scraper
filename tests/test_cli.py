@@ -65,6 +65,15 @@ class TestParsingCredits:
         assert _parse("credits", "Swing", "--manquants").manquants
         assert not _parse("credits", "Swing").manquants
 
+    def test_echecs(self):
+        assert _parse("credits", "Swing", "--echecs").echecs
+        assert _parse("enrich", "Swing", "--echecs").echecs
+        assert cli.options_cycle(_parse("cycle", "Swing", "--echecs")).echecs
+        assert not cli.options_etape_seule(_parse("credits", "Swing"), "credits").echecs
+        # Streams n'a pas d'échec par morceau (pages artiste/album) : pas de drapeau.
+        with pytest.raises(SystemExit):
+            _parse("streams", "Swing", "--echecs")
+
 
 class TestParsingEnrichStreams:
     def test_enrich(self):
@@ -183,6 +192,40 @@ class TestEtapeSeule:
         monkeypatch.setattr(cli.cycle, "resume_etape", lambda *a: "ok")
         assert cli.main(["credits", "S", "--manquants", "--no-discogs"]) == cli.COMPLET
         assert vus == {"etape": "credits", "manquants": True, "discogs": False}
+
+
+class TestCommandeEchecs:
+    def test_liste_par_source_les_morceaux_de_l_artiste(self, sans_effets, monkeypatch, capsys):
+        art = SimpleNamespace(
+            name="S",
+            id=1,
+            tracks=[SimpleNamespace(id=1, title="Un"), SimpleNamespace(id=2, title="Deux")],
+        )
+        monkeypatch.setattr(cli.artiste, "charger", lambda rt, nom: art)
+        vus = {}
+
+        class _Repo:
+            def __init__(self, engine):
+                pass
+
+            def echecs_suivis(self, *, track_ids):
+                vus["ids"] = set(track_ids)
+                return [
+                    {
+                        "track_id": 2,
+                        "source_key": "lrclib",
+                        "issue": "timeout",
+                        "n_echecs": 3,
+                        "dernier_echec": "2026-09-30T10:00:00",
+                        "message": "délai",
+                    }
+                ]
+
+        monkeypatch.setattr("src.observability.repository.SourceUsageRepository", _Repo)
+        assert cli.main(["echecs", "S"]) == cli.COMPLET
+        sortie = capsys.readouterr().out
+        assert vus["ids"] == {1, 2}
+        assert "lrclib — 1 morceau(x)" in sortie and "Deux  [timeout ×3" in sortie
 
 
 class TestParsingIdentite:

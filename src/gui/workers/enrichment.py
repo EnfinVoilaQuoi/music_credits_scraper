@@ -58,7 +58,8 @@ def start_enrichment(app):
     available = app.data_enricher.get_available_sources()
 
     for source, description in sources_info.items():
-        var = ctk.BooleanVar(value=source in available)
+        # BPM Finder : dernier recours, décoché par défaut.
+        var = ctk.BooleanVar(value=source in available and source != "bpmfinder")
         sources_vars[source] = var
 
         frame = ctk.CTkFrame(dialog)

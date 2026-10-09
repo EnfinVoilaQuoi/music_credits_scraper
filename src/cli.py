@@ -69,6 +69,17 @@ def _manquants_arg(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _echecs_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--echecs",
+        action="store_true",
+        help=(
+            "ne traiter que les morceaux qu'une source de CE flux n'a pas servis "
+            "(échec resté sans réponse ; avec --manquants : l'union des deux)"
+        ),
+    )
+
+
 def _disco_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-songs", type=int, help="plafond DUR (debug) ; défaut = illimité")
     _bool_flags(p, "features", True, "inclure les featurings")
@@ -156,7 +167,7 @@ def _enrich_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--sources",
         help="liste séparée par des virgules (reccobeats,getsongbpm,songbpm,bpmfinder,deezer,"
-        "discogs) ; défaut = toutes les sources disponibles",
+        "discogs) ; défaut = toutes les sources disponibles sauf bpmfinder",
     )
     p.add_argument("--force", action="store_true", help="force_update")
 
@@ -211,11 +222,13 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("credits", help="crédits, paroles, timestamps sur tous les morceaux")
     _artiste_args(c)
     _manquants_arg(c)
+    _echecs_arg(c)
     _credits_args(c)
 
     e = sub.add_parser("enrich", help="BPM/key/Spotify ID/… sur tous les morceaux")
     _artiste_args(e)
     _manquants_arg(e)
+    _echecs_arg(e)
     _enrich_args(e)
     _anciens_drapeaux(e, "enrich")
 
@@ -233,6 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
     upd = ce_sub.add_parser("update", help="MàJ GLOBALE des magasins (longue)")
     upd.add_argument("sources", nargs="*", help="parmi SNEP BRMA RIAA BPI (défaut : les 4)")
 
+    ec = sub.add_parser(
+        "echecs", help="morceaux gardés de côté : échecs de source restés sans réponse"
+    )
+    _artiste_args(ec)
+
     rv = sub.add_parser("revue", help="panneau « À trancher » : compte des cas par détecteur")
     _artiste_args(rv)
     rv.add_argument(
@@ -244,6 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     cy = sub.add_parser("cycle", help="l'enchaînement complet")
     _artiste_args(cy)
     _manquants_arg(cy)
+    _echecs_arg(cy)
     g = cy.add_mutually_exclusive_group()
     g.add_argument("--only", help=f"étapes à lancer, parmi {','.join(cycle.ETAPES)}")
     g.add_argument("--skip", help="étapes à sauter")
@@ -335,6 +354,7 @@ def options_cycle(a: argparse.Namespace) -> cycle.OptionsCycle:
         only=_liste(a.only),
         skip=_liste(a.skip),
         manquants=a.manquants,
+        echecs=a.echecs,
         disco=options_disco(a),
         identite=options_identite(a),
         credits=options_credits(a),
@@ -349,6 +369,7 @@ def options_etape_seule(a: argparse.Namespace, etape: str) -> cycle.OptionsCycle
     return cycle.OptionsCycle(
         genius_id=a.genius_id,
         manquants=getattr(a, "manquants", False),
+        echecs=getattr(a, "echecs", False),
         disco=options_disco(a) if etape == "disco" else discographie.OptionsDisco(),
         identite=options_identite(a) if etape == "identite" else identite.OptionsIdentite(),
         credits=options_credits(a) if etape == "credits" else credits.OptionsCredits(),
@@ -461,6 +482,9 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
     if a.commande == "revue":
         return _executer_revue(a, runtime)
 
+    if a.commande == "echecs":
+        return _executer_echecs(a, runtime)
+
     if a.commande == "cycle":
         options = options_cycle(a)
         bilan = cycle.run(runtime, a.nom, options, hooks)
@@ -514,6 +538,34 @@ def _executer_revue(a: argparse.Namespace, runtime: Runtime) -> int:
     ]
     lignes.append(f"\n{len(r.actifs)} cas à trancher, {len(r.masques)} marqué(s) normal(aux)")
     _imprimer_bilan(f"À trancher — {art.name}", "\n".join(lignes))
+    return COMPLET
+
+
+def _executer_echecs(a: argparse.Namespace, runtime: Runtime) -> int:
+    """Ce qui attend d'être retenté (zéro réseau) : par source, les morceaux
+    dont le dernier appel a échoué sans qu'aucune réponse soit venue depuis."""
+    from src.observability.repository import SourceUsageRepository
+
+    art = _charger(runtime, a, creer=False)
+    titres = {t.id: t.title for t in art.tracks if t.id is not None}
+    lignes = SourceUsageRepository(runtime.data_manager.engine).echecs_suivis(track_ids=titres)
+    par_source: dict[str, list[dict]] = {}
+    for r in lignes:
+        par_source.setdefault(r["source_key"], []).append(r)
+    sortie = []
+    for source, rs in sorted(par_source.items(), key=lambda x: -len(x[1])):
+        sortie.append(f"{source} — {len(rs)} morceau(x)")
+        for r in rs[:15]:
+            sortie.append(
+                f"   • {titres[r['track_id']]}  [{r['issue']}"
+                + (f" ×{r['n_echecs']}" if r["n_echecs"] > 1 else "")
+                + f", {str(r['dernier_echec'])[:16]}]  {r['message'] or ''}".rstrip()
+            )
+        if len(rs) > 15:
+            sortie.append(f"   … et {len(rs) - 15} autre(s)")
+    if par_source:
+        sortie.append("\nRetenter : `credits <nom> --echecs` / `enrich <nom> --echecs`")
+    _imprimer_bilan(f"Échecs en attente — {art.name}", "\n".join(sortie) or "aucun")
     return COMPLET
 
 

@@ -42,7 +42,7 @@ class _Lyrics:
         self.appels = []
         self.closed = False
 
-    def enrich(self, track, artist_name, *, need_sync, need_text):
+    def enrich(self, track, artist_name, *, need_sync, need_text, garde=None):
         self.appels.append((track.title, artist_name, need_sync, need_text))
         return SimpleNamespace(
             lyrics_synced="[00:01.00] x" if need_sync else None,

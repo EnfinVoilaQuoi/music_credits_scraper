@@ -21,6 +21,7 @@ from src.enrichment.observation import Observation
 from src.utils.concordance_paroles import jugeable, lrc_dementi, paroles_de_reference
 from src.utils.logger import get_logger
 from src.utils.lyrics_sync import compare_synced
+from src.utils.version_descriptors import meme_socle
 
 logger = get_logger(__name__)
 
@@ -77,6 +78,7 @@ def resolve_track_synced_lyrics(
     need_text: bool,
     sync_ytm: bool,
     now: datetime | None = None,
+    garde=None,
 ) -> SyncedLyricsOutcome:
     """Résout timestamps (LRCLIB/YTM/Musixmatch) + fallback TEXTE (YTM) d'un morceau.
 
@@ -85,9 +87,20 @@ def resolve_track_synced_lyrics(
     déjà présent / forcé) gouvernent respectivement la passe timestamps et la passe
     texte ; `sync_ytm` autorise le LRC YTM comme source 2 (le client YTM peut exister
     pour le seul fallback texte).
+
+    `garde` (`lrc_garde.GardeLrc`, construite par l'appelant sur la discographie)
+    refuse un LRC qui appartient à une AUTRE fiche de l'artiste — ce que les
+    paroles de la fiche seule ne peuvent pas dire quand elle n'en a pas.
     """
+    from src.utils.lrc_garde import sans_lrc
+
     out = SyncedLyricsOutcome()
     now = now or datetime.now()
+    if sans_lrc(track):
+        # Instrumental (titre ou constat) : ni LRC ni texte à chercher
+        # (décision utilisateur 2026-10-09 — la page Genius d'un instrumental
+        # recopie souvent les paroles de l'original, que la synchro « confirmait »).
+        return out
 
     duration = getattr(track, "duration", None)
     # Paroles Genius du morceau : l'oracle qui DÉMENT un LRC d'un autre morceau
@@ -105,6 +118,10 @@ def resolve_track_synced_lyrics(
             return None
         if lrc and refuses and empreinte_lrc(lrc) in refuses:
             logger.info(f"⏭ {track.title}: LRC {source} écarté — refusé à la main")
+            return None
+        motif = garde.motif(track, lrc) if (lrc and garde is not None) else None
+        if motif:
+            logger.info(f"⏭ {track.title}: LRC {source} écarté — {motif}")
             return None
         return lrc
 
@@ -145,7 +162,21 @@ def resolve_track_synced_lyrics(
                 album_name=getattr(track, "album", None),
                 duration=duration,
             )
-            if lr:
+            titre_lrclib = (lr or {}).get("title")
+            if (
+                lr
+                and titre_lrclib
+                and not jugeable(paroles)
+                and not meme_socle(track.title, titre_lrclib)
+            ):
+                # Sans paroles pour démentir, le titre est la seule garde : la
+                # recherche LRCLIB rapproche par mots CONTENUS (« Fin » ←
+                # « Histoire sans fin », CORRECTIFS 1.6) — même règle que YTM.
+                logger.info(
+                    f"⏭ {track.title}: LRC LRCLIB écarté — titre « {titre_lrclib} » "
+                    "d'un autre morceau, et aucune parole pour juger"
+                )
+            elif lr:
                 lrclib_lrc = _retenu(lr.get("lyrics_synced"), "LRCLIB")
         except (AttributeError, TypeError, KeyError) as e:
             # LRCLIBAPI gère déjà son réseau → accès inattendu seul ; on continue.

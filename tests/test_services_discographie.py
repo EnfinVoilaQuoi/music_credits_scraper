@@ -78,6 +78,51 @@ class TestFusionner:
         sien = _t("Interlude", gid=6, album="Qui Sème Le Vent Récolte Le Tempo")
         assert disco.fusionner([sien], [deezer]).mis_a_jour == 1 and sien.id == 9
 
+    @pytest.mark.parametrize(
+        ("en_base", "genius"),
+        [
+            ("J'observe et je retiens", "J’observe et je retiens"),
+            ("Pornostar (feat. Driver)", "Pornostar"),
+            ("Car Tu Portes Mon Nom (Live 2006)", "Car tu portes mon nom - Live 2006"),
+            ("La Boulette (Pt. 2; Live 2006)", "La Boulette - Pt. 2 - Live 2006"),
+            ("Mové Lang Remix", "Mové lang (Remix)"),
+            ("Cœur propre & mains sales", "Coeur propre & mains sales"),
+            ("3 G", "3G"),
+            ("A V L D", "AVLD"),
+        ],
+    )
+    def test_niveau_4_titre_equivalent_d_une_autre_graphie(self, en_base, genius):
+        """CORRECTIFS 1.1 (2026-10-09) : la complétion des tracklists Genius
+        doublait les fiches créées par les écarts Deezer à une apostrophe près."""
+        deezer = _t(en_base, tid=9637)
+        page = _t(genius, gid=4589960)
+        f = disco.fusionner([page], [deezer])
+        assert page.id == 9637 and (f.nouveaux, f.mis_a_jour) == (0, 1)
+
+    def test_niveau_4_jamais_une_autre_version(self):
+        deezer = _t("Téléphone (Extrait de CRCLR MVT SAISON II)", tid=9743)
+        page = _t("Téléphone", gid=6783685)
+        assert disco.fusionner([page], [deezer]).nouveaux == 1 and page.id is None
+
+    def test_niveau_4_jamais_une_fiche_qui_a_sa_page(self):
+        autre_page = _t("J'observe et je retiens", gid=1, tid=5)
+        page = _t("J’observe et je retiens", gid=2)
+        assert disco.fusionner([page], [autre_page]).nouveaux == 1 and page.id is None
+
+    def test_niveau_4_ambigu_ne_choisit_pas(self):
+        a = _t("L'histoire", album="A", tid=1)
+        b = _t("L'histoire", album="B", tid=2)
+        page = _t("L’histoire", gid=3)
+        assert disco.fusionner([page], [a, b]).nouveaux == 1 and page.id is None
+        page_b = _t("L’histoire", gid=4, album="B")
+        disco.fusionner([page_b], [a, b])
+        assert page_b.id == 2
+
+    def test_niveau_4_generique_dans_son_album_seulement(self):
+        deezer = _t("Intro’", album="Autre", tid=1)
+        page = _t("Intro'", gid=2, album="Projet")
+        assert disco.fusionner([page], [deezer]).nouveaux == 1
+
     def test_roles_connus_pour_maj(self):
         """MàJ : la vérification au détail des rôles secondaires n'est payée que
         pour les morceaux nouveaux (2026-09-24)."""

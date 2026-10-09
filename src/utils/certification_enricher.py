@@ -13,6 +13,7 @@ import re
 from src.models import Artist, Track
 from src.models.certification import Certification
 from src.models.track import CreditRole
+from src.utils.cert_titres import certif_du_morceau, cle
 from src.utils.corrections_fiches import certifs_refusees, cle_certif
 from src.utils.logger import get_logger
 from src.utils.participation import Participation, participation
@@ -210,6 +211,30 @@ def echos_de_versions(tracks: list[Track]) -> int:
     return n
 
 
+def _exclusivite(tracks: list[Track]) -> int:
+    """Une certif dont le titre est EXACTEMENT celui d'une autre fiche de
+    l'artiste n'appartient qu'à elle (CORRECTIFS 1.9) : c'est ce qui départage
+    l'original et sa version au descripteur inconnu (« Mr. Rager (Prime Day Show
+    x Kid Cudi) » ← « MR RAGER », « Au bout des rêves (Freestyle) »). Rend le
+    nombre de fiches qui n'ont plus aucune certification réelle."""
+    titres = {cle(t.title) for t in tracks if t.title}
+    perdues = 0
+    for track in tracks:
+        if not track.certs.needs_write or not track.certs.entries:
+            continue
+        propre = cle(track.title)
+        avant = bool(track.certs.reelles)
+        track.certs.entries = [
+            e
+            for e in track.certs.entries
+            if (c := cle(e.get("title"))) == propre or c not in titres
+        ]
+        _poser_plus_haute(track)
+        if avant and not track.certs.reelles:
+            perdues += 1
+    return perdues
+
+
 def apply_certifications(
     artist: Artist, tracks: list[Track], matcher, *, alias=(), formations=()
 ) -> int:
@@ -237,6 +262,15 @@ def apply_certifications(
                 else []
             )
             matches = [m for m in matches if _credite(m, exiges)]
+            # CORRECTIFS 1.9 (2026-10-09) : une certif d'ALBUM ne va jamais sur
+            # un morceau (« Trône » prenait le Diamant de l'album), et le titre
+            # doit être celui du morceau — le matcher, par mots contenus, n'est
+            # qu'un pré-filtre (« Life » ← « TUBA LIFE »).
+            matches = [
+                m
+                for m in matches
+                if m.get("category") != "album" and certif_du_morceau(track.title, m.get("title"))
+            ]
             if parse_variant(track.title).kind != Kind.NONE:
                 # Une VERSION ne prend pas les certifs de l'original : le
                 # rapprochement par titre tronqué donnait « DOUBLE PONEY » à
@@ -285,6 +319,7 @@ def apply_certifications(
             # ce qui est en base et on le fait savoir en fin de flux.
             track.certs.needs_write = False
 
+    enriched -= _exclusivite(tracks)
     if enriched:
         logger.info(f"🏆 {enriched}/{len(tracks)} morceaux enrichis avec certifications")
     albums_with_certs = sum(1 for t in tracks if t.certs.album_entries)

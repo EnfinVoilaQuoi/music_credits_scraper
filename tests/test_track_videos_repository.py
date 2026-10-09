@@ -195,6 +195,80 @@ class TestSuppressionEtFusion:
         assert len(data_manager.get_track_videos(garde.id)) == 1
 
 
+class TestVuesYtmApresFusion:
+    """CORRECTIFS 1.4 (2026-10-09) : le total YTM de la fiche gardée se
+    RECALCULE depuis les vidéos réunies, avec la règle du run YTM."""
+
+    @staticmethod
+    def _ytm(dm, track_id):
+        with dm.engine.connect() as conn:
+            return conn.exec_driver_sql(
+                "SELECT ytm_streams FROM tracks WHERE id = ?", (track_id,)
+            ).scalar()
+
+    def _paire(self, dm):
+        artist = _artiste(dm)
+        return artist, _morceau(dm, artist, "Déluge"), _morceau(dm, artist, "Deluge")
+
+    def test_clip_et_audio_differents_se_cumulent(self, data_manager):
+        _, garde, doublon = self._paire(data_manager)
+        data_manager.record_track_videos(garde.id, [TrackVideo(video_id="a" * 11, views=100)])
+        data_manager.record_track_videos(doublon.id, [TrackVideo(video_id="b" * 11, views=50)])
+        data_manager.update_track_ytm_streams(garde.id, 100)
+        data_manager.update_track_ytm_streams(doublon.id, 50)
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        assert self._ytm(data_manager, garde.id) == 150
+
+    def test_meme_video_comptee_une_fois_au_releve_le_plus_recent(self, data_manager):
+        _, garde, doublon = self._paire(data_manager)
+        data_manager.record_track_videos(garde.id, [TrackVideo(video_id="a" * 11, views=100)])
+        data_manager.record_track_videos(doublon.id, [TrackVideo(video_id="a" * 11, views=150)])
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        (video,) = data_manager.get_track_videos(garde.id)
+        assert video.views == 150 and self._ytm(data_manager, garde.id) == 150
+
+    def test_une_video_encore_portee_par_une_autre_fiche_ne_compte_pas(self, data_manager):
+        """Clip double « 2h22 / Donjon » : non attribuable, comme dans le run."""
+        artist, garde, doublon = self._paire(data_manager)
+        tierce = _morceau(data_manager, artist, "Donjon")
+        data_manager.record_track_videos(garde.id, [TrackVideo(video_id="a" * 11, views=100)])
+        data_manager.record_track_videos(doublon.id, [TrackVideo(video_id="c" * 11, views=900)])
+        data_manager.record_track_videos(tierce.id, [TrackVideo(video_id="c" * 11, views=900)])
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        assert self._ytm(data_manager, garde.id) == 100
+
+    def test_un_total_sans_video_connue_n_est_pas_perdu(self, data_manager):
+        """Josman « Boss » : 68 182 vues relevées avant e20, sans vidéo derrière."""
+        _, garde, doublon = self._paire(data_manager)
+        data_manager.record_track_videos(garde.id, [TrackVideo(video_id="a" * 11, views=66)])
+        data_manager.update_track_ytm_streams(garde.id, 66)
+        data_manager.update_track_ytm_streams(doublon.id, 68182)
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        assert self._ytm(data_manager, garde.id) == 68182
+
+    def test_la_garde_sans_lien_reprend_la_video_principale(self, data_manager):
+        _, garde, doublon = self._paire(data_manager)
+        data_manager.update_track_youtube_url(
+            doublon.id, "https://www.youtube.com/watch?v=" + "b" * 11, "genius_media"
+        )
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        with data_manager.engine.connect() as conn:
+            url, source = conn.exec_driver_sql(
+                "SELECT youtube_url, youtube_url_source FROM tracks WHERE id = ?", (garde.id,)
+            ).one()
+        assert url.endswith("b" * 11) and source == "genius_media"
+
+
 class TestTitreDeLaVideo:
     """e21 — le titre est ce qui rend VÉRIFIABLE une vidéo partagée : « Donjon
     & 2h22 » est un clip double légitime, un titre qui ne nomme qu'un morceau

@@ -359,7 +359,7 @@ def _as_resolution(field: str, obs) -> Resolution:
 
 
 def _reconcile_lyrics_synced(
-    observations: list, track_duration, paroles: str | None = None
+    observations: list, track_duration, paroles: str | None = None, instrumental: bool = False
 ) -> Resolution | None:
     """Départage les LRC synchronisés par source (réutilise `compare_synced`).
 
@@ -381,6 +381,13 @@ def _reconcile_lyrics_synced(
     """
     from src.utils.concordance_paroles import lrc_dementi
 
+    if instrumental:
+        # Un instrumental CONSTATÉ n'a aucun LRC (décision utilisateur
+        # 2026-10-09) : verdict VIDE, sinon la colonne garderait celui que la
+        # page Genius, recopiant les paroles de l'original, avait fait « confirmer ».
+        if any(o.source in _SOURCES_LRC for o in observations):
+            return Resolution(LYRICS_SYNCED_FIELD, None, None, None)
+        return None
     by_source = {o.source: o for o in observations if not lrc_dementi(paroles, o.value)}
     lrclib = by_source.get("lrclib")
     ytm = by_source.get("ytmusic")
@@ -504,6 +511,7 @@ def reconcile(
     track_duration=None,
     streams_master: str = "kworb",
     paroles: str | None = None,
+    instrumental: bool = False,
 ) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.
 
@@ -514,7 +522,8 @@ def reconcile(
     `track_duration` (secondes) alimente la stratégie `lyrics_synced` (départage
     par la durée réelle dans `compare_synced`) ; il entre par PARAMÈTRE pour que
     le moteur reste pur (aucune lecture de `Track`). Les deux appelants passent
-    `track.duration`. `paroles` (le texte Genius) écarte les LRC qu'il dément.
+    `track.duration`. `paroles` (le texte Genius) écarte les LRC qu'il dément ;
+    `instrumental` (constat) n'en retient aucun.
     """
     by_field: dict[str, list] = {}
     for obs in observations:
@@ -535,7 +544,7 @@ def reconcile(
 
     lyrics_obs = by_field.get(LYRICS_SYNCED_FIELD, [])
     if lyrics_obs:
-        lyrics_res = _reconcile_lyrics_synced(lyrics_obs, track_duration, paroles)
+        lyrics_res = _reconcile_lyrics_synced(lyrics_obs, track_duration, paroles, instrumental)
         if lyrics_res is not None:
             resolutions[LYRICS_SYNCED_FIELD] = lyrics_res
 

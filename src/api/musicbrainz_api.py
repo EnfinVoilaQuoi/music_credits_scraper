@@ -358,7 +358,7 @@ class MusicBrainzAPI:
 
     def rechercher_artiste(self, nom: str, limite: int = 25) -> list[dict]:
         """Candidats bruts pour un nom. Le filtrage est l'affaire de l'appelant."""
-        with source_usage.observe(_SOURCE, label=f"recherche {nom}") as obs:
+        with source_usage.observe(_SOURCE, label=f"recherche {nom}", hors_morceau=True) as obs:
             # `alias:` aussi : un artiste RENOMMÉ (Kanye West → « Ye ») ne sort
             # pas d'une recherche sur le seul nom. Une saturation REMONTE
             # (`throttled`, jamais `[]` qui se lirait « aucun artiste de ce nom »).
@@ -378,7 +378,7 @@ class MusicBrainzAPI:
         Lève `MusicBrainzSature` sur 503 persistant (jamais `None` : un lookup
         muet ferait disparaître un homonyme du départage, en silence).
         """
-        with source_usage.observe(_SOURCE, label=f"lookup {mbid}") as obs:
+        with source_usage.observe(_SOURCE, label=f"lookup {mbid}", hors_morceau=True) as obs:
             details = self._get(f"/artist/{mbid}", {"inc": inc})
             obs.ok()
             return details

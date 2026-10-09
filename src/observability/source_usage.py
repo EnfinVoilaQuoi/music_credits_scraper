@@ -105,10 +105,15 @@ class Observation:
         track_id: int | None = None,
         label: str = "",
         absent_statuses: tuple[int, ...] = DEFAULT_ABSENT_STATUSES,
+        hors_morceau: bool = False,
     ) -> None:
         self.source_key = source_key
         self.artist_id = artist_id
         self.track_id = track_id
+        #: L'appel porte sur un artiste, un disque, un lot ou la session : il ne
+        #: prend JAMAIS le morceau ambiant (`track_scope`), sans quoi le premier
+        #: morceau d'un run serait accusé — ou blanchi — pour un appel collectif.
+        self.hors_morceau = hors_morceau
         self.label = label
         self.absent_statuses = absent_statuses
         self.attempts: list[Attempt] = []
@@ -217,7 +222,7 @@ class Observation:
             issue=issue,
             flow=current_flow(),
             artist_id=self.artist_id if self.artist_id is not None else current_artist_id(),
-            track_id=self.track_id,
+            track_id=self._morceau(),
             detail=detail[:300],
             status_code=status,
             latency_ms=int((time.monotonic() - self._started) * 1000),
@@ -225,10 +230,18 @@ class Observation:
             expected_blocked=expected_blocked,
         )
 
+    def _morceau(self) -> int | None:
+        """Le morceau visé : explicite d'abord, sinon l'ambiant — jamais pour un
+        appel `hors_morceau`."""
+        if self.track_id is not None:
+            return self.track_id
+        return None if self.hors_morceau else current_track_id()
+
 
 # ── État de process : scopes de run, piles par unité d'exécution, tampon ───────
 _lock = threading.Lock()
 _scopes: list[RunScope] = []
+_morceaux: list[int | None] = []
 _carriers: dict[tuple[str, int], list[Observation]] = {}
 _buffer: list[Verdict] = []
 _sink: Callable[[list[Verdict]], None] | None = None
@@ -294,6 +307,40 @@ def current_artist_id() -> int | None:
     return scope.artist_id if scope else None
 
 
+# ── Morceau en cours (contexte ambiant, posé par les boucles par morceau) ──────
+@contextmanager
+def track_scope(track_id: int | None):
+    """Déclare le morceau en cours de traitement : tout verdict émis pendant ce
+    bloc lui est rattaché (sauf `observe(..., hors_morceau=True)`).
+
+    Posé par les BOUCLES par morceau (enrichissement, crédits Genius/Discogs,
+    synchro), pas par les 74 capteurs : un client ne reçoit qu'un titre et un
+    artiste, il ne connaît pas la fiche.
+
+    Pile de PROCESS, comme `run_scope`, et non par carrier : l'observation vit
+    souvent de l'autre côté du pont `async_loop.run_sync` par rapport à la
+    boucle qui traite les morceaux, et une pile par Task ou par thread y perdrait
+    le morceau. Valide parce que les morceaux sont traités UN À UN (aucun
+    `gather` sur des morceaux) — la même hypothèse que pour l'artiste.
+    """
+    with _lock:
+        _morceaux.append(track_id)
+    try:
+        yield
+    finally:
+        with _lock:
+            # Retrait par la fin : le bloc le plus interne sort le premier.
+            for i in range(len(_morceaux) - 1, -1, -1):
+                if _morceaux[i] == track_id:
+                    del _morceaux[i]
+                    break
+
+
+def current_track_id() -> int | None:
+    with _lock:
+        return _morceaux[-1] if _morceaux else None
+
+
 # ── Le capteur ────────────────────────────────────────────────────────────────
 @contextmanager
 def observe(
@@ -303,12 +350,19 @@ def observe(
     track_id: int | None = None,
     label: str = "",
     absent_statuses: tuple[int, ...] = DEFAULT_ABSENT_STATUSES,
+    hors_morceau: bool = False,
 ) -> Iterator[Observation]:
     """Encadre UN appel logique à une source et en tire un verdict unique.
 
     N'avale rien : une exception est classée puis ré-élevée, donc les
     `try/except` existants des appelants continuent de fonctionner à
     l'identique.
+
+    `hors_morceau=True` se déclare au site d'un appel qui porte sur un artiste,
+    un disque, un LOT de morceaux ou la session : il ne prend pas le morceau
+    ambiant de `track_scope`. Sans ce drapeau, un appel collectif déclenché par
+    le premier morceau d'un run (un cache qui se remplit) lui serait imputé — et
+    son succès effacerait l'échec réel de ce morceau dans le suivi des échecs.
 
     RÉENTRANT par source : si une observation de la même source est déjà
     ouverte ici, on la réutilise au lieu d'en ouvrir une seconde. Sans quoi une
@@ -328,6 +382,7 @@ def observe(
         track_id=track_id,
         label=label,
         absent_statuses=absent_statuses,
+        hors_morceau=hors_morceau,
     )
     carrier = _carrier()
     with _lock:
@@ -392,7 +447,8 @@ def record_attempt(
             )
         elif source_key:
             # Hors de toute observation : on garde la trace au niveau source,
-            # sans inventer de rattachement.
+            # sans inventer de rattachement — ni au morceau ambiant : une
+            # tentative orpheline signale un capteur mal placé, pas un morceau.
             _emit(
                 Verdict(
                     source_key=source_key,
@@ -524,6 +580,7 @@ def reset() -> None:
     """Remise à zéro complète — réservée aux tests."""
     with _lock:
         _scopes.clear()
+        _morceaux.clear()
         _carriers.clear()
         _buffer.clear()
 

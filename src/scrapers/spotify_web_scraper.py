@@ -106,7 +106,7 @@ class SpotifyWebScraper(CrawlAIScraperBase):
              'albums': {album_id: titre}}, ou None si la page n'est pas venue.
         """
         url = self.artist_url(artist_id)
-        with source_usage.observe(_SOURCE, label=url) as obs:
+        with source_usage.observe(_SOURCE, label=url, hors_morceau=True) as obs:
             html = await sess.fetch(
                 url,
                 wait_for='css:[data-testid="tracklist-row"]',
@@ -216,7 +216,7 @@ class SpotifyWebScraper(CrawlAIScraperBase):
             même enregistrement (cf. `parse_album_tracks`).
         """
         url = self.album_url(album_id)
-        with source_usage.observe(_SOURCE, label=url) as obs:
+        with source_usage.observe(_SOURCE, label=url, hors_morceau=True) as obs:
             html = await sess.fetch(
                 url,
                 wait_for='css:[data-testid="tracklist-row"]',

@@ -155,6 +155,9 @@ class LRCLIBAPI:
             "lyrics": plain,
             "source": "LRCLIB",
             "lrclib_id": obj.get("id"),
+            # Titre du morceau CHEZ LRCLIB : le résolveur exige le même socle
+            # quand la fiche n'a pas de paroles pour juger (CORRECTIFS 1.6).
+            "title": obj.get("trackName"),
             "duration": obj.get("duration"),
             "instrumental": bool(obj.get("instrumental")),
         }

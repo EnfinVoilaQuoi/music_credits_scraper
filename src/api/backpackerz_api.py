@@ -347,7 +347,7 @@ class BackpackerzApi:
     # -- lecture -------------------------------------------------------------
     async def find_tag(self, nom: str) -> Tag | None:
         """Le tag de l'artiste, ou `None` ; `TagAmbigu` si plusieurs égalités exactes."""
-        with source_usage.observe(_SOURCE, label=f"tag:{nom}") as obs:
+        with source_usage.observe(_SOURCE, label=f"tag:{nom}", hors_morceau=True) as obs:
             if not normalize_name(nom):
                 obs.skipped("nom vide")
                 return None
@@ -365,7 +365,7 @@ class BackpackerzApi:
 
     async def articles(self, tag_id: int) -> list[Article]:
         """Les articles où le tag est posé, du plus récent au plus ancien."""
-        with source_usage.observe(_SOURCE, label=f"articles:tag{tag_id}") as obs:
+        with source_usage.observe(_SOURCE, label=f"articles:tag{tag_id}", hors_morceau=True) as obs:
             brut = await self._pages(
                 "/posts",
                 {"tags": tag_id, "_fields": "id,title,link,date,featured_media"},
@@ -380,7 +380,9 @@ class BackpackerzApi:
 
     async def photos_of_article(self, article_id: int) -> list[Photo]:
         """TOUTES les images attachées à un article (pas seulement la une)."""
-        with source_usage.observe(_SOURCE, label=f"photos:article{article_id}") as obs:
+        with source_usage.observe(
+            _SOURCE, label=f"photos:article{article_id}", hors_morceau=True
+        ) as obs:
             brut = await self._pages("/media", {"parent": article_id, "media_type": "image"}, obs)
             photos = parse_photos(brut)
             if not photos:
@@ -394,7 +396,9 @@ class BackpackerzApi:
         ids = sorted({int(i) for i in ids if i})
         if not ids:
             return []
-        with source_usage.observe(_SOURCE, label=f"photos:ids×{len(ids)}") as obs:
+        with source_usage.observe(
+            _SOURCE, label=f"photos:ids×{len(ids)}", hors_morceau=True
+        ) as obs:
             photos: list[Photo] = []
             for debut in range(0, len(ids), _PER_PAGE):
                 tranche = ids[debut : debut + _PER_PAGE]
@@ -412,7 +416,7 @@ class BackpackerzApi:
 
     async def photos_named(self, nom: str) -> list[Photo]:
         """Voie RAPIDE : les images dont le titre nomme l'artiste (incomplète, cf. piège 2)."""
-        with source_usage.observe(_SOURCE, label=f"photos:search:{nom}") as obs:
+        with source_usage.observe(_SOURCE, label=f"photos:search:{nom}", hors_morceau=True) as obs:
             if not normalize_name(nom):
                 obs.skipped("nom vide")
                 return []

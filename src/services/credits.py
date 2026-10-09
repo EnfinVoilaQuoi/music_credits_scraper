@@ -13,9 +13,11 @@ from dataclasses import dataclass
 
 from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
+from src.observability import source_usage
 from src.services.runtime import Bilan, Hooks, Runtime
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.logger import etape_de_flux, get_logger
+from src.utils.lrc_garde import GardeLrc, sans_lrc
 
 logger = get_logger(__name__)
 
@@ -67,6 +69,24 @@ class OptionsCredits:
             ]
             out.append(f"Timestamps {'/'.join(srcs)}{'(forcé)' if self.force_sync else ''}")
         return out
+
+    def sources_suivies(self) -> tuple[str, ...]:
+        """Les clés de source (observabilité) interrogées MORCEAU PAR MORCEAU
+        par ce run — celles dont les échecs en attente sélectionnent les
+        morceaux de `--echecs`. La phase YouTube lit les descriptions par LOT :
+        elle n'a pas d'échec par morceau."""
+        cles = []
+        if self.genius or self.paroles_genius:
+            cles += ["genius_scrape", "genius_api"]
+        if self.discogs:
+            cles.append("discogs")
+        if self.sync_lrclib:
+            cles.append("lrclib")
+        if self.sync_ytm or self.paroles_ytm:
+            cles.append("ytmusic")
+        if self.sync_musixmatch:
+            cles.append("musixmatch")
+        return tuple(cles)
 
     def secondes_par_morceau(self) -> int:
         return (
@@ -380,7 +400,9 @@ def run(
                     break
                 hooks.progress(i, n, t.title, "Discogs")
                 try:
-                    if client.enrich_track_data(t, force_update=options.force_credits):
+                    with source_usage.track_scope(t.id):
+                        trouve = client.enrich_track_data(t, force_update=options.force_credits)
+                    if trouve:
                         ok += 1
                     else:
                         ko += 1
@@ -428,6 +450,10 @@ def run(
                     cpt = dict.fromkeys(
                         ("lrclib", "ytm", "musixmatch", "cross", "review", "text"), 0
                     )
+                    # Les LRC des AUTRES fiches de l'artiste (discographie réunie,
+                    # pas la seule sélection) : un LRC qui appartient à l'une d'elles
+                    # n'est pas celui de la fiche visée (CORRECTIFS 1.5 / 1.7).
+                    garde = GardeLrc(artist.tracks or tracks)
                     for i, t in enumerate(tracks, 1):
                         if hooks.should_stop():
                             bilan.interrompu("arrêt demandé pendant la synchro")
@@ -436,19 +462,27 @@ def run(
                         # Un instrumental constaté n'a ni texte ni timestamps à
                         # chercher — le retenter à chaque run serait l'échec
                         # perpétuel que le constat sert à éviter.
-                        instrumental = bool(t.lyrics.instrumental)
+                        instrumental = sans_lrc(t)
                         need_sync = (
                             options.sync
                             and not instrumental
                             and not (has_sync and not options.force_sync)
                         )
-                        need_text = options.paroles_ytm and t.lyrics.a_chercher()
+                        need_text = (
+                            options.paroles_ytm and not instrumental and t.lyrics.a_chercher()
+                        )
                         if not need_sync and not need_text:
                             continue
-                        outcome = provider.enrich(
-                            t, nom_artiste_pour(t, artist), need_sync=need_sync, need_text=need_text
-                        )
+                        with source_usage.track_scope(t.id):
+                            outcome = provider.enrich(
+                                t,
+                                nom_artiste_pour(t, artist),
+                                need_sync=need_sync,
+                                need_text=need_text,
+                                garde=garde,
+                            )
                         if outcome.lyrics_synced is not None:
+                            garde.noter(t)
                             synchro_obtenue.add(id(t))
                             if outcome.synced_kind in cpt:
                                 cpt[outcome.synced_kind] += 1
@@ -487,6 +521,10 @@ def run(
                 }
 
         bilan = _sauver(runtime, artist, tracks, bilan)
+        if options.paroles or options.sync:
+            from src.services.versions import constater_instrumentaux
+
+            constater_instrumentaux(runtime.data_manager, tracks)
         if options.sync or options.paroles:
             # Un LRC fraîchement posé peut être celui d'une autre fiche.
             from src.services import revue_auto

@@ -81,6 +81,17 @@ class TestPertinence:
         score = scraper._calculate_relevance("Jul", "Bande organisée", "Jul - Autre chose")
         assert 0.4 <= score < 1.0
 
+    def test_le_nom_seul_n_atteint_pas_le_plancher(self, scraper):
+        """CORRECTIFS 1.12 (2026-10-09) : « Kid Cudi » valait 0,4 + 0,1 + 0,1 =
+        0,60 sans un mot du titre — le plancher était franchi par le nom seul."""
+        from src.scrapers.spotify_id_scraper_v2 import _MIN_RELEVANCE
+
+        score = scraper._calculate_relevance(
+            "Kid Cudi", "Spirale", "Kid Cudi - Pursuit of Happiness"
+        )
+        assert score < _MIN_RELEVANCE
+        assert scraper._calculate_relevance("BEN plg", "Spirale", "BEN plg - Spirale") >= 0.6
+
     def test_aucune_correspondance(self, scraper):
         assert scraper._calculate_relevance("Jul", "Titre", "Rien de commun") == 0.0
 

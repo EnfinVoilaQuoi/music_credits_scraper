@@ -537,7 +537,9 @@ class DiscogsClient:
         cible = normalize_name(nom)
         if not cible:
             return []
-        with source_usage.observe(_SOURCE, label=f"recherche artiste {nom}") as obs:
+        with source_usage.observe(
+            _SOURCE, label=f"recherche artiste {nom}", hors_morceau=True
+        ) as obs:
             resultats = list(self.client.search(nom, type="artist").page(0))
             exacts = [a for a in resultats if normalize_name(nom_sans_suffixe(a.name)) == cible]
             if not exacts:
@@ -567,7 +569,7 @@ class DiscogsClient:
         Returns:
             ``{"titre", "artistes": [(id, nom)], "pistes": [(titre, [(id, nom)])]}``
         """
-        with source_usage.observe(_SOURCE, label=f"disque {release_id}") as obs:
+        with source_usage.observe(_SOURCE, label=f"disque {release_id}", hors_morceau=True) as obs:
             try:
                 with source_usage.attempt(_SOURCE, detail="release"):
                     release = self.client.release(int(release_id))
@@ -631,7 +633,7 @@ class DiscogsClient:
 
         if artist_id is not None:
             with (
-                source_usage.observe(_SOURCE, label=f"formations #{artist_id}"),
+                source_usage.observe(_SOURCE, label=f"formations #{artist_id}", hors_morceau=True),
                 source_usage.attempt(_SOURCE, detail="artist"),
             ):
                 liens = self._liens_de(self.client.artist(int(artist_id)))
@@ -650,7 +652,9 @@ class DiscogsClient:
         confirmants = 0
 
         for artiste in candidats:
-            with source_usage.observe(_SOURCE, label=f"formations {artiste.name}"):
+            with source_usage.observe(
+                _SOURCE, label=f"formations {artiste.name}", hors_morceau=True
+            ):
                 liens = self._liens_de(artiste)
             noms_lies = {normalize_name(rel.related_name) for rel in liens}
             communs = noms_lies & attendues_norm

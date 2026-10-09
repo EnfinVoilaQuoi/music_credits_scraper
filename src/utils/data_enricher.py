@@ -237,11 +237,13 @@ class DataEnricher:
         Le refus existait déjà ; ce qui manquait, c'est qu'il laisse une trace.
         Un conflit d'identité n'est pas un échec de SOURCE — il n'a donc pas sa
         place dans `source_usage`, dont toute la taxonomie dit « échec de
-        communication ». Il est journalisé en ERROR (le seul niveau qui atteigne
-        les fichiers de log) et accumulé pour la fin de run.
+        communication ». Journalisé en WARNING (2026-10-09 : en ERROR il
+        remplissait `errors.log` — 275 lignes sur une série de runs, toutes
+        des candidats que le garde d'identité aurait refusés de toute façon)
+        et accumulé pour la fin de run.
         """
         self.spotify_id_conflits.append((spotify_id, current_track.title, titre_tiers))
-        logger.error(
+        logger.warning(
             f"❌ Spotify ID {spotify_id} REFUSÉ pour '{current_track.title}' : "
             f"déjà revendiqué par un autre titre, '{titre_tiers}'"
         )
@@ -496,6 +498,7 @@ class DataEnricher:
                 track.observations,
                 track_duration=track.duration,
                 paroles=paroles_de_reference(track.lyrics.text, track.lyrics.source),
+                instrumental=bool(track.lyrics.instrumental),
             ),
         )
         logger.info(

@@ -227,7 +227,8 @@ class SpotifyIDScraper:
         text_lower = self._normalize_apostrophes(text).lower()
         if artist_lower in text_lower:
             score += 0.4
-        if title_lower in text_lower:
+        titre_present = title_lower in text_lower
+        if titre_present:
             score += 0.4
         for word in artist_lower.split():
             if len(word) > 2 and word in text_lower:
@@ -235,6 +236,13 @@ class SpotifyIDScraper:
         for word in title_lower.split():
             if len(word) > 2 and word in text_lower:
                 score += 0.1
+                titre_present = True
+        # Sans un mot du TITRE, le candidat n'est qu'« un morceau de l'artiste » :
+        # il ne doit pas atteindre le plancher (0,60). Un nom en deux mots
+        # (« Kid Cudi », « BEN plg ») y arrivait seul (0,4 + 0,1 + 0,1) — 387
+        # sélections à 0,60 sur la série du 2026-10-01/04 (CORRECTIFS 1.12).
+        if not titre_present:
+            score = min(score, 0.5)
         return min(score, 1.0)
 
     # ──────────────────────────────────────────────────────────────────────────

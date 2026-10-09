@@ -4,8 +4,10 @@ Objet AUTONOME prenant un `engine`, et non un mixin de `DataManager` : un
 capteur posé dans `src/api/` doit pouvoir écrire sans passer par la façade —
 et sans en tirer l'import.
 
-Deux tables, deux régimes : des compteurs agrégés qu'on incrémente en upsert,
-et une fenêtre glissante des derniers échecs qu'on purge au vidage.
+Trois tables, trois régimes : des compteurs agrégés qu'on incrémente en
+upsert, une fenêtre glissante des derniers échecs qu'on purge au vidage (le
+diagnostic), et le suivi des échecs PAR MORCEAU, qui ne se vide que lorsque la
+source répond (ce qui est à retenter).
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.observability.issues import FAILURES
+from src.observability.issues import BENIGN, FAILURES
 
 #: Nombre d'échecs conservés PAR SOURCE — plafond dur d'environ 800 lignes.
 FAILURE_WINDOW = 50
@@ -46,6 +48,7 @@ class SourceUsageRepository:
         echecs = [v for v in lot if v.issue in FAILURES]
         if echecs:
             self.push_failures(echecs, keep=keep)
+        self.suivre_morceaux(lot)
 
     def upsert_daily(self, counters: Sequence[DailyCounter]) -> None:
         """Incrémente les compteurs agrégés (création si la ligne n'existe pas).
@@ -136,7 +139,102 @@ class SourceUsageRepository:
         except SQLAlchemyError:
             _log().exception("source_usage: échecs non archivés")
 
+    def suivre_morceaux(self, verdicts: Sequence[Any]) -> None:
+        """Tient `source_track_failures` : un échec de communication pose ou met à
+        jour la ligne (morceau, source), une RÉPONSE de la source (`ok`,
+        `absent`) la retire. Les autres natures ne touchent à rien.
+
+        Seuls les verdicts portant un morceau comptent — un appel `hors_morceau`
+        (artiste, disque, lot) n'y entre jamais et n'en efface jamais rien. Les
+        verdicts sont traités DANS L'ORDRE d'émission : un succès qui suit un
+        échec du même morceau dans le même lot le retire.
+        """
+        lot = [
+            v
+            for v in verdicts
+            if v.track_id is not None and (v.issue in FAILURES or v.issue in BENIGN)
+        ]
+        if not lot:
+            return
+        try:
+            with self.engine.begin() as conn:
+                for v in lot:
+                    cle = {"tid": v.track_id, "src": v.source_key}
+                    if v.issue in BENIGN:
+                        conn.execute(
+                            text(
+                                "DELETE FROM source_track_failures "
+                                "WHERE track_id = :tid AND source_key = :src"
+                            ),
+                            cle,
+                        )
+                        continue
+                    params = {
+                        **cle,
+                        "flow": v.flow,
+                        "aid": v.artist_id,
+                        "issue": str(v.issue),
+                        "code": v.status_code,
+                        "msg": (v.detail or "")[:300],
+                        "at": _isoformat(v.at),
+                    }
+                    maj = conn.execute(
+                        text(
+                            "UPDATE source_track_failures SET flow = :flow, "
+                            "  artist_id = :aid, issue = :issue, status_code = :code, "
+                            "  message = :msg, n_echecs = n_echecs + 1, dernier_echec = :at "
+                            "WHERE track_id = :tid AND source_key = :src"
+                        ),
+                        params,
+                    ).rowcount
+                    if not maj:
+                        conn.execute(
+                            text(
+                                "INSERT INTO source_track_failures "
+                                "(track_id, source_key, flow, artist_id, issue, status_code, "
+                                " message, n_echecs, premier_echec, dernier_echec) "
+                                "VALUES (:tid, :src, :flow, :aid, :issue, :code, "
+                                " :msg, 1, :at, :at)"
+                            ),
+                            params,
+                        )
+        except SQLAlchemyError:
+            _log().exception("source_usage: suivi des échecs par morceau non enregistré")
+
     # ── Lecture ────────────────────────────────────────────────────────────────
+    def echecs_suivis(
+        self,
+        *,
+        sources: Iterable[str] | None = None,
+        track_ids: Iterable[int] | None = None,
+    ) -> list[dict]:
+        """Les échecs en attente d'une réponse, du plus récent au plus ancien,
+        restreints aux `sources` et/ou aux `track_ids` s'ils sont donnés."""
+        clauses, params = [], {}
+        for nom, valeurs, colonne in (
+            ("src", sources, "source_key"),
+            ("tid", track_ids, "track_id"),
+        ):
+            if valeurs is None:
+                continue
+            valeurs = list(valeurs)
+            if not valeurs:
+                return []
+            noms = [f"{nom}{i}" for i in range(len(valeurs))]
+            clauses.append(f"{colonne} IN ({', '.join(':' + n for n in noms)})")
+            params.update(zip(noms, valeurs, strict=True))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        return self._rows(
+            "SELECT track_id, source_key, flow, artist_id, issue, status_code, message, "
+            "n_echecs, premier_echec, dernier_echec FROM source_track_failures"
+            f"{where} ORDER BY dernier_echec DESC, id DESC",
+            params,
+        )
+
+    def morceaux_en_echec(self, sources: Iterable[str] | None = None) -> set[int]:
+        """Les morceaux qu'au moins une de ces `sources` n'a pas servis."""
+        return {r["track_id"] for r in self.echecs_suivis(sources=sources)}
+
     def daily(
         self,
         *,

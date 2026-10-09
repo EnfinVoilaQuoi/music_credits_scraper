@@ -1,0 +1,211 @@
+"""Garde des paroles synchronisées (CORRECTIFS 1.5 / 1.7 / 1.8, 2026-10-09).
+
+Cas réels de l'audit du 2026-10-09 : « Fin » portait le LRC d'« Histoire sans
+fin », « 3500 (Chopped & Screwed) » celui de « 3500 », « Boulbi (Instrumental) »
+des paroles et un LRC.
+"""
+
+import pytest
+
+from src.enrichment.observation import Observation
+from src.enrichment.reconcile import reconcile
+from src.models.artist import Artist
+from src.models.track import Track
+from src.services.versions import constater_instrumentaux
+from src.utils.lrc_garde import GardeLrc, sans_lrc
+from src.utils.synced_lyrics_resolver import resolve_track_synced_lyrics
+from src.utils.version_heritage import est_instrumental
+
+_TEXTE = (
+    "le temps passe et rien ne change jamais vraiment dans la ville "
+    "où les rêves se perdent entre les murs gris du quartier "
+    "on avance quand même la tête haute malgré les doutes "
+    "chaque jour une histoire sans fin qui recommence encore"
+)
+_MOTS = _TEXTE.split()
+_PAROLES = "\n".join(" ".join(_MOTS[i : i + 6]) for i in range(0, len(_MOTS), 6))
+_LRC = "\n".join(
+    f"[00:{10 + 5 * i:02d}.00] {' '.join(_MOTS[j : j + 6])}"
+    for i, j in enumerate(range(0, len(_MOTS), 6))
+)
+
+
+def _t(titre, *, tid, gid=None, paroles=None, lrc=None, instrumental=None):
+    t = Track(title=titre, artist=Artist(name="BEN plg"), genius_id=gid)
+    t.id = tid
+    t.lyrics.text, t.lyrics.source = paroles, ("genius" if paroles else None)
+    t.lyrics.synced, t.lyrics.instrumental = lrc, instrumental
+    return t
+
+
+class TestInstrumental:
+    @pytest.mark.parametrize(
+        "titre",
+        [
+            "Boulbi (Instrumental)",
+            "I Am Somebody (Instrumental)",
+            "Ma France à Moi (Version Instrumentale)",
+            "Tallac (Instru)",
+        ],
+    )
+    def test_titres_instrumentaux(self, titre):
+        assert est_instrumental(titre)
+
+    @pytest.mark.parametrize(
+        "titre", ["Instrumental", "Hot Shit (Acapella)", "Boulbi", "Heartless (Remix)"]
+    )
+    def test_titres_qui_n_en_sont_pas(self, titre):
+        assert not est_instrumental(titre)
+
+    def test_aucun_lrc_pour_un_instrumental(self):
+        assert sans_lrc(_t("Boulbi (Instrumental)", tid=1))
+        assert sans_lrc(_t("Ultra", tid=2, instrumental=True))
+        assert GardeLrc().motif(_t("Boulbi (Instrumental)", tid=1), _LRC)
+
+    def test_le_resolveur_ne_cherche_rien_pour_un_instrumental(self):
+        class _Interdit:
+            def __getattr__(self, nom):
+                raise AssertionError(f"aucune source interrogée ({nom})")
+
+        out = resolve_track_synced_lyrics(
+            _t("Boulbi (Instrumental)", tid=1),
+            "Booba",
+            lrclib=_Interdit(),
+            ytm=_Interdit(),
+            need_sync=True,
+            need_text=True,
+            sync_ytm=True,
+        )
+        assert out.lyrics_synced is None and out.text is None and out.observations == []
+
+    def test_l_arbitrage_ne_retient_aucun_lrc_pour_un_instrumental_constate(self):
+        obs = [Observation("lyrics_synced", _LRC, "lrclib")]
+        verdict = reconcile(obs, instrumental=True)["lyrics_synced"]
+        assert verdict.value is None
+        assert reconcile(obs)["lyrics_synced"].value == _LRC
+
+    def test_constat_par_le_titre_vide_paroles_et_lrc(self):
+        class _DM:
+            constates: list = []
+
+            def constater_instrumental(self, tid):
+                self.constates.append(tid)
+                return True
+
+        a_vider = _t("Boulbi (Instrumental)", tid=1, paroles=_PAROLES, lrc=_LRC)
+        deja = _t("Tallac (Instrumental)", tid=2, instrumental=True)
+        chante = _t("Boulbi", tid=3, paroles=_PAROLES, lrc=_LRC)
+        dm = _DM()
+        assert constater_instrumentaux(dm, [a_vider, deja, chante]) == 1
+        assert dm.constates == [1]
+        assert a_vider.lyrics.instrumental is True
+        assert a_vider.lyrics.text is None and a_vider.lyrics.synced is None
+        assert chante.lyrics.synced == _LRC
+
+
+class TestAutreMorceau:
+    def test_le_lrc_confirme_par_une_autre_fiche_est_refuse(self):
+        """BEN plg « Fin » (sans paroles Genius) recevait celui d'« Histoire sans fin »."""
+        histoire = _t("Histoire sans fin", tid=7673, gid=1, paroles=_PAROLES, lrc=_LRC)
+        fin = _t("Fin", tid=12025, gid=2)
+        motif = GardeLrc([histoire, fin]).motif(fin, _LRC)
+        assert motif and "Histoire sans fin" in motif
+
+    def test_la_fiche_qui_le_porte_le_garde(self):
+        histoire = _t("Histoire sans fin", tid=7673, gid=1, paroles=_PAROLES, lrc=_LRC)
+        assert GardeLrc([histoire]).motif(histoire, _LRC) is None
+
+    def test_une_autre_fiche_dont_les_paroles_ne_le_confirment_pas_ne_compte_pas(self):
+        sans = _t("Histoire sans fin", tid=7673, gid=1, lrc=_LRC)
+        fin = _t("Fin", tid=12025, gid=2)
+        assert GardeLrc([sans, fin]).motif(fin, _LRC) is None
+
+    def test_une_ligne_soeur_partage_son_lrc(self):
+        """Même page Genius chez un autre artiste : même enregistrement."""
+        chez_a = _t("Histoire sans fin", tid=1, gid=9, paroles=_PAROLES, lrc=_LRC)
+        chez_b = _t("Histoire sans fin (feat. X)", tid=2, gid=9)
+        assert GardeLrc([chez_a]).motif(chez_b, _LRC) is None
+
+    def test_noter_rend_un_lrc_du_run_visible(self):
+        garde = GardeLrc()
+        histoire = _t("Histoire sans fin", tid=7673, gid=1, paroles=_PAROLES, lrc=_LRC)
+        garde.noter(histoire)
+        assert garde.motif(_t("Fin", tid=12025, gid=2), _LRC)
+
+
+class TestVersions:
+    @pytest.mark.parametrize(
+        "version",
+        [
+            "3500 (Chopped & Screwed)",
+            "3500 (Live)",
+            "3500 (Remix)",
+            "3500 (Demo)",
+            "3500 (Sped Up)",
+            "3500 (Acapella)",
+            "3500 (Radio Edit)",
+        ],
+    )
+    def test_une_autre_prise_ne_garde_pas_le_lrc_de_l_original(self, version):
+        original = _t("3500", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
+        v = _t(version, tid=2, gid=2)
+        motif = GardeLrc([original]).motif(v, _LRC)
+        assert motif and "original" in motif
+
+    @pytest.mark.parametrize(
+        "version", ["3500 (Remastered 2016)", "3500 (Promo CD Version)", "3500 (Bonus Track)"]
+    )
+    def test_le_meme_enregistrement_garde_le_lrc_de_l_original(self, version):
+        original = _t("3500", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
+        assert GardeLrc([original]).motif(_t(version, tid=2, gid=2), _LRC) is None
+
+    def test_le_resolveur_ecarte_le_lrc_refuse_par_la_garde(self):
+        class _LRCLIB:
+            def get_synced(self, *a, **k):
+                return {"lyrics_synced": _LRC}
+
+        original = _t("3500", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
+        version = _t("3500 (Chopped & Screwed)", tid=2, gid=2)
+        out = resolve_track_synced_lyrics(
+            version,
+            "Travis Scott",
+            lrclib=_LRCLIB(),
+            need_sync=True,
+            need_text=False,
+            sync_ytm=False,
+            garde=GardeLrc([original]),
+        )
+        assert out.lyrics_synced is None and out.observations == []
+
+
+class TestLrclibSansParoles:
+    """CORRECTIFS 1.6 : sans paroles Genius pour juger, LRCLIB doit rendre le
+    même socle de titre (comme YTM)."""
+
+    class _LRCLIB:
+        def __init__(self, titre):
+            self.titre = titre
+
+        def get_synced(self, *a, **k):
+            return {"lyrics_synced": _LRC, "title": self.titre}
+
+    def _resoudre(self, track, titre_lrclib):
+        return resolve_track_synced_lyrics(
+            track,
+            "BEN plg",
+            lrclib=self._LRCLIB(titre_lrclib),
+            need_sync=True,
+            need_text=False,
+            sync_ytm=False,
+        )
+
+    def test_un_autre_titre_est_refuse(self):
+        assert self._resoudre(_t("Fin", tid=1), "Histoire sans fin").lyrics_synced is None
+
+    def test_le_meme_titre_passe(self):
+        assert self._resoudre(_t("Fin", tid=1), "Fin").lyrics_synced == _LRC
+
+    def test_des_paroles_qui_confirment_suffisent(self):
+        """Avec paroles jugeables, c'est la concordance qui décide, pas le titre."""
+        fiche = _t("1 pour la plume", tid=1, paroles=_PAROLES)
+        assert self._resoudre(fiche, "Un pour la plume").lyrics_synced == _LRC

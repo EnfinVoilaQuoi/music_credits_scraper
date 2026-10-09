@@ -132,7 +132,10 @@ class GeniusAPI:
         artist_name_lower = artist_name.lower()
 
         with source_usage.observe(
-            _SOURCE, label=f"recherche {artist_name}", absent_statuses=_ABSENT
+            _SOURCE,
+            label=f"recherche {artist_name}",
+            absent_statuses=_ABSENT,
+            hors_morceau=True,
         ) as obs:
             try:
                 resp = source_usage.requests_get(
@@ -1043,7 +1046,9 @@ class GeniusAPI:
             return None
         url, artiste_slug, album_slug = parts
 
-        with source_usage.observe(_SOURCE, label=f"album:{artiste_slug}/{album_slug}") as obs:
+        with source_usage.observe(
+            _SOURCE, label=f"album:{artiste_slug}/{album_slug}", hors_morceau=True
+        ) as obs:
             album_id = self._resolve_album_id(url, artiste_slug, album_slug)
             if not album_id:
                 obs.absent("aucun morceau de la recherche ne mène à cet album")

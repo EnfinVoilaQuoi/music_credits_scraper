@@ -624,6 +624,9 @@ class YTMusicAPI:
                                 item.get("contentDetails", {}).get("duration")
                             ),
                             "channel": item.get("snippet", {}).get("channelTitle"),
+                            # Le titre dit ce que la vidéo COUVRE : une durée ne
+                            # se prend qu'à une vidéo qui nomme le morceau.
+                            "title": item.get("snippet", {}).get("title"),
                         }
             except (GoogleApiError, OSError, KeyError, ValueError) as e:
                 logger.error(f"Erreur YouTube Data API v3 (batch {i // _YT_BATCH_SIZE + 1}): {e}")

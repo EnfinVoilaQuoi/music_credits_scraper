@@ -86,7 +86,7 @@ class KworbScraper:
         # UNE observation par page demandée. Le shim `requests_get` est
         # indispensable ici : le `except` ci-dessous AVALE l'erreur et rend
         # None, si bien qu'aucun échec n'atteindrait le capteur autrement.
-        with source_usage.observe(_SOURCE, label=url) as obs:
+        with source_usage.observe(_SOURCE, label=url, hors_morceau=True) as obs:
             return self._fetch_and_parse_body(url, obs)
 
     def _fetch_and_parse_body(self, url: str, obs) -> dict | None:

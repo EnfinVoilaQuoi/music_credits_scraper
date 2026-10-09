@@ -106,6 +106,13 @@ class TestDetectionPage:
         assert scraper._apply_lyrics_from_html(page_a_paroles, t)
         assert t.lyrics.instrumental is False and t.lyrics.present is True
 
+    def test_titre_instrumental_ignore_les_paroles_recopiees(self, scraper, page_a_paroles):
+        """Booba « Boulbi (Instrumental) » : la page Genius recopie les paroles de
+        l'original (décision utilisateur 2026-10-09, CORRECTIFS 1.8)."""
+        t = Track(title="Dans le vide (Instrumental)", artist=Artist(name="Josman"))
+        assert scraper._apply_lyrics_from_html(page_a_paroles, t) == ""
+        assert t.lyrics.instrumental is True and t.lyrics.text is None
+
     def test_page_muette_ne_conclut_pas(self, scraper):
         """Ni conteneur ni placeholder (page-défi, HTML tronqué) : on ne sait
         rien, le tri-état reste `None` — même règle qu'`absent`."""

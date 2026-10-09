@@ -151,3 +151,48 @@ def test_worst():
     assert worst([IssueKind.BLOCKED, IssueKind.CRASH]) == IssueKind.CRASH
     assert worst([]) is None
     assert worst([IssueKind.SKIPPED]) is None  # hors échelle
+
+
+@pytest.mark.parametrize(
+    ("message", "attendu"),
+    [
+        ("No content returned. Possible causes: …", IssueKind.ABSENT),
+        ("Server returned HTTP 429: Too Many Requests.", IssueKind.THROTTLED),
+        ("Server returned HTTP 503: Service Unavailable.", IssueKind.UNREACHABLE),
+        ("quelque chose d'autre", IssueKind.CRASH),
+    ],
+)
+def test_ytmusicapi_lu_dans_son_message(message, attendu):
+    """CORRECTIFS 1.13 (2026-10-09) : « pas de paroles pour cette vidéo » sortait
+    en `crash`, donc en échec à retenter."""
+    from ytmusicapi.exceptions import YTMusicError
+
+    assert classify(exc=YTMusicError(message)) is attendu
+
+
+def test_une_annulation_est_un_delai():
+    """SongBPM : `asyncio.timeout(30)` annule la recherche (148 « crash »)."""
+    import asyncio
+
+    assert classify(exc=asyncio.CancelledError()) is IssueKind.TIMEOUT
+
+
+def test_l_attente_playwright_orpheline_ne_remonte_pas(caplog):
+    from src.concurrency.async_loop import gestionnaire_exceptions
+
+    class TargetClosedError(Exception):
+        pass
+
+    appels = []
+
+    class _Boucle:
+        def default_exception_handler(self, context):
+            appels.append(context)
+
+    gestionnaire_exceptions(
+        _Boucle(),
+        {"message": "Future exception was never retrieved", "exception": TargetClosedError("x")},
+    )
+    assert appels == []
+    gestionnaire_exceptions(_Boucle(), {"message": "autre", "exception": ValueError("y")})
+    assert len(appels) == 1

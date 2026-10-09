@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from src.config import DELAY_BETWEEN_REQUESTS
 from src.models import Credit, CreditRole, ReleaseObservation, Track
 from src.models.track import SOURCE_NON_TRANSCRITES
+from src.observability import source_usage
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 from src.utils import credits_genius_api
 from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
@@ -20,6 +21,7 @@ from src.utils.inedits import titre_sans_marqueur
 from src.utils.llm_extractor import LLMExtractor, build_credits_prompt
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import inedit_par_le_texte, instrumental_par_le_texte
+from src.utils.version_heritage import est_instrumental
 
 logger = get_logger(__name__)
 
@@ -256,7 +258,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
             try:
                 logger.info(f"V3: scraping {i+1}/{total}: {track.title}")
                 self.derniers_ecarts_api = None
-                self.scrape_track_credits(track)
+                with source_usage.track_scope(track.id):
+                    self.scrape_track_credits(track)
                 ecarts = self.derniers_ecarts_api
                 if ecarts is not None:
                     results["api_remplaces"] += 1
@@ -330,7 +333,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
                         results["lyrics_scraped"] += 1
                     logger.debug(f"V3: paroles déjà traitées pour '{track.title}' — skip")
                 else:
-                    lyrics = self.scrape_track_lyrics(track)
+                    with source_usage.track_scope(track.id):
+                        lyrics = self.scrape_track_lyrics(track)
                     if lyrics:
                         results["success"] += 1
                         results["lyrics_scraped"] += 1
@@ -380,6 +384,11 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # paroles, c'est le constat d'un instrumental (11 fiches le portaient
         # comme texte, 2026-09-26).
         instrumental_ecrit = instrumental_par_le_texte(lyrics)
+        # Un TITRE instrumental l'est quoi que la page affiche : Genius y
+        # recopie souvent les paroles de l'original (Booba « Boulbi
+        # (Instrumental) », 3 320 caractères) — décision utilisateur 2026-10-09.
+        if lyrics and est_instrumental(track.title):
+            instrumental_ecrit = True
         if instrumental_ecrit:
             lyrics = ""
         if lyrics:

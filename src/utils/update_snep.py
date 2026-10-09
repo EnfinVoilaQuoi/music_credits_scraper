@@ -231,7 +231,7 @@ def _fetch(session, url: str, timeout: int = None) -> str:
     """
     timeout = timeout or SELENIUM_TIMEOUT
     last_exc = None
-    with source_usage.observe(_SOURCE, label=url) as obs:
+    with source_usage.observe(_SOURCE, label=url, hors_morceau=True) as obs:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 resp = session.get(url, timeout=timeout)

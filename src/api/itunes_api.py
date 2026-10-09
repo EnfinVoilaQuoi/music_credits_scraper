@@ -50,7 +50,9 @@ class ITunesAPI:
 
     def _lot(self, ids: list[str], boutique: str) -> dict[str, dict]:
         """`{id: fiche}` d'un lot ; lève sur panne (l'appelant ne date rien)."""
-        with source_usage.observe(_SOURCE, label=f"lookup ×{len(ids)} ({boutique})") as obs:
+        with source_usage.observe(
+            _SOURCE, label=f"lookup ×{len(ids)} ({boutique})", hors_morceau=True
+        ) as obs:
             self._attendre_son_tour()
             resp = source_usage.requests_get(
                 _SOURCE,

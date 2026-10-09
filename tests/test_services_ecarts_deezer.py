@@ -60,6 +60,13 @@ class TestClasser:
         ]
         assert jumelles == []
 
+    def test_titre_a_l_espace_pres_est_connu(self):
+        """Booba « 3 G » créé par les écarts à côté de « 3G » (CORRECTIFS 1.3)."""
+        base = [_track("3G", "Temps mort"), _track("AVLD", "Temps mort")]
+        albums = [_album(1, "Temps mort", [_piste(10, "3 G"), _piste(11, "A V L D")])]
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        assert {e.nature for e in ecarts} == {"link"}
+
     def test_disque_absent_de_l_artiste_principal(self):
         albums = [_album(2, "Hourvari", [_piste(20, "Wunderlich"), _piste(21, "Ceux qui")])]
         ecarts, _ = ed.classer(albums, [_track("Autre chose")], [], NOUS)
@@ -406,7 +413,36 @@ class TestCreerLignes:
         e = ed.Ecart("absent", _album(7, "Chardons Bleus", [piste]), piste)
         ed.creer_lignes(data_manager, artist, [e])
         comptes = ed.creer_lignes(data_manager, artist, [e])
-        assert len(data_manager.get_artist_tracks(artist.id)) == 1 and "existe déjà" in comptes[0]
+        assert len(data_manager.get_artist_tracks(artist.id)) == 1 and "déjà en base" in comptes[0]
+
+    def test_ecart_perime_isrc_d_une_fiche_fusionnee_rien_cree(self):
+        """A2H « Home Sweet Home (Episode 2) » (CORRECTIFS 1.2) : fusionné à la
+        main dans « En attendant l'album (Episode 2) », qui portait l'ISRC, puis
+        recréé depuis un signalement périmé. Titres différents : on ne crée pas,
+        on n'affirme pas non plus le lien (un ISRC en base peut être faux)."""
+        gardee = _track("En attendant l’album (Episode 2)", isrc="FR6V82386863")
+
+        class _DM:
+            def get_artist_tracks(self, _):
+                return [gardee]
+
+            def save_track(self, _):
+                raise AssertionError("aucune fiche ne doit être créée")
+
+        artist = Artist(name="A2H")
+        artist.id = 1
+        piste = _piste(76807198, "Home Sweet Home (Episode 2)", isrc="FR6V82386863")
+        e = ed.Ecart("absent", _album(7, "En attendant l'album", [piste]), piste)
+        (compte,) = ed.creer_lignes(_DM(), artist, [e])
+        assert "rien créé" in compte and "En attendant" in compte
+
+    def test_ecart_perime_titre_d_une_autre_graphie_rien_cree(self, data_manager):
+        artist = self._artiste(data_manager)
+        data_manager.save_track(Track(title="J'observe et je retiens", artist=artist))
+        piste = _piste(81449104, "J’observe et je retiens")
+        e = ed.Ecart("absent", _album(7, "Christmas Tape", [piste]), piste)
+        (compte,) = ed.creer_lignes(data_manager, artist, [e])
+        assert len(data_manager.get_artist_tracks(artist.id)) == 1 and "existe déjà" in compte
 
     def test_stop_ne_demarre_pas_la_prochaine_ecriture(self, data_manager):
         artist = self._artiste(data_manager)

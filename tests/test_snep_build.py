@@ -323,3 +323,31 @@ class TestUnifierCredits:
         )
         gardees, exclues = exclure_retirees(rows, {cle})
         assert not gardees and len(exclues) == 1
+
+
+class TestCorrectionsManuellesDansLeClean:
+    """2026-10-10 : une correction de libellé ne touchait que le BRUT ; le clean
+    accumulant, l'ancienne écriture restait à côté — la même certification
+    comptée deux fois (*M'LAH* / *MLAH*, Cut Killer « …ABDEL pr »)."""
+
+    def test_l_ancienne_ecriture_accumulee_est_absorbee(self, tmp_path):
+        from src.utils.snep_build import rebuild, write_canonical_csv
+
+        ligne = {
+            "artist": "LES NEGRESSES VERTES",
+            "publisher": "DELABEL",
+            "category": "Albums",
+            "certification": "Or",
+            "release_date": "1991-12-09",
+            "certification_date": "1991-12-09",
+        }
+        clean = tmp_path / "certif_snep.csv"
+        write_canonical_csv([{**ligne, "title": "M'LAH"}, {**ligne, "title": "MLAH"}], clean)
+        brut = _write_raw(
+            tmp_path, "LES NEGRESSES VERTES;MLAH;DELABEL;Albums;Or;09/12/1991;09/12/1991"
+        )
+        fixes = {"LES NEGRESSES VERTES|M'LAH": {"artist": "LES NEGRESSES VERTES", "title": "MLAH"}}
+
+        rebuild(brut, clean, tmp_path / "meta.json", fixes=fixes)
+
+        assert [r["title"] for r in read_canonical_csv(clean)] == ["MLAH"]

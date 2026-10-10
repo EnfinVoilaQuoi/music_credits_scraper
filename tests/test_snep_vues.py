@@ -147,6 +147,26 @@ class TestExclusionDuClean:
         rows = [self._row("Or", "2025-11-27")]
         assert exclure_retirees(rows, set()) == (rows, [])
 
+    def test_rebuild_lit_lui_meme_les_retirees(self, tmp_path):
+        """2026-10-10 : le nettoyeur appelait `rebuild` SANS les retirées, et
+        chaque nettoyage remettait dans le clean les 27 certifications que le
+        SNEP a retirées. `rebuild` les lit désormais dans le sidecar du brut."""
+        from src.utils.snep_build import read_canonical_csv, rebuild
+
+        brut = tmp_path / "certif-.csv"
+        platine = _l("JUL", "MIMI", "Platine")
+        brut.write_text(
+            "Interprete;Titre;Éditeur / Distributeur;Catégorie;Certification;"
+            f"Date de sortie;Date de constat\n{platine}\n{_l('JUL', 'MIMI', 'Or', constat='27/11/2025')}\n",
+            encoding="utf-8",
+        )
+        snep_vues.enregistrer(brut, reconcilier([platine], []), le=date(2026, 9, 14))
+        clean = tmp_path / "certif_snep.csv"
+
+        rebuild(brut, clean, tmp_path / "meta.json")
+
+        assert [r["certification"] for r in read_canonical_csv(clean)] == ["Or"]
+
 
 class TestConfirmationParArtiste:
     """Le classement `?annee=` n'est pas fiable ligne à ligne (cache par page,

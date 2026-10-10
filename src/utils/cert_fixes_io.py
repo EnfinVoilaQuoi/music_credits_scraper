@@ -66,13 +66,18 @@ def charger_fixes(source: str) -> dict:
     Fichier absent ou illisible → dictionnaire vide : une correction manquante
     doit dégrader le nettoyage, jamais l'empêcher.
     """
-    chemin = chemin_fixes(source)
+    return charger_fixes_de(chemin_fixes(source))
+
+
+def charger_fixes_de(chemin: Path) -> dict:
+    """Même lecture, depuis un chemin explicite (le rebuild SNEP lit le fichier
+    voisin de SON brut — un test sur dossier temporaire ne touche pas `data/`)."""
     if not chemin.exists():
         return {}
     try:
         data = json.loads(chemin.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        logger.warning(f"Corrections manuelles {source} illisibles ({e}) — ignorées")
+        logger.warning(f"Corrections manuelles {chemin} illisibles ({e}) — ignorées")
         return {}
     fixes = data.get("fixes")
     return fixes if isinstance(fixes, dict) else {}

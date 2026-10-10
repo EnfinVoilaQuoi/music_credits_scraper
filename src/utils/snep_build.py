@@ -19,8 +19,15 @@ from pathlib import Path
 import pandas as pd
 
 from src.models.certification import CertificationCategory, CertificationLevel
-from src.utils import cert_store
-from src.utils.cert_normalize import normalize_text, repair_extra_separators, reperer_fantomes
+from src.utils import cert_store, snep_vues
+from src.utils.cert_fixes_io import FICHIER as FICHIER_FIXES
+from src.utils.cert_fixes_io import charger_fixes_de
+from src.utils.cert_normalize import (
+    apply_manual_fixes,
+    normalize_text,
+    repair_extra_separators,
+    reperer_fantomes,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -504,6 +511,23 @@ def write_meta(path: Path, source: str, count: int, *, partial: str = "") -> Non
     cert_store.ecrire_fraicheur(path, source, count=count, partial=partial)
 
 
+def corriger_libelles(rows: list[dict], fixes: dict) -> list[dict]:
+    """Applique les corrections MANUELLES aux lignes du clean (`fixes` :
+    `cert_fixes_io`, indexé sur le libellé fautif).
+
+    Le nettoyeur ne corrigeait que le BRUT : le clean ACCUMULANT, l'ancienne
+    écriture y restait à côté de la nouvelle — la même certification comptée
+    deux fois (mesuré 2026-10-10 : *M'LAH* / *MLAH* des Négresses Vertes, la
+    compilation Cut Killer coupée « …ABDEL pr »). Corrigée ici, elle retombe
+    sur la même clé et la fusion l'absorbe.
+    """
+    if not fixes:
+        return rows
+    for row in rows:
+        row["artist"], row["title"] = apply_manual_fixes(row["artist"], row["title"], fixes)
+    return rows
+
+
 def rebuild(
     raw_path: Path,
     csv_path: Path,
@@ -511,15 +535,24 @@ def rebuild(
     source: str = "GLOBAL",
     *,
     partial: str = "",
-    retirees: set[tuple] | frozenset = frozenset(),
+    retirees: set[tuple] | frozenset | None = None,
+    fixes: dict | None = None,
 ) -> int:
     """Régénère le clean en fusionnant le brut courant dans l'existant (accumule),
     puis écrit le CSV canonique + le sidecar meta. Retourne le nombre de lignes.
 
     `retirees` : clés de lignes du brut que le site ne montre plus (cf.
-    `snep_vues.cles_retirees`) — exclues du clean, jamais du brut."""
-    existing = read_canonical_csv(csv_path)
-    new = canonical_rows_from_raw(read_raw_snep_csv(raw_path))
+    `snep_vues.cles_retirees`) — exclues du clean, jamais du brut. Par défaut,
+    LUES dans le sidecar du brut : jusqu'au 2026-10-10 le nettoyeur appelait
+    `rebuild` sans elles, et chaque nettoyage remettait dans le clean les
+    certifications que le SNEP a retirées (MAES *Pure* « Triple Diamant »,
+    JUL *MIMI* Platine — 27 lignes)."""
+    if retirees is None:
+        retirees = snep_vues.cles_retirees(raw_path)
+    if fixes is None:
+        fixes = charger_fixes_de(raw_path.parent / FICHIER_FIXES)
+    existing = corriger_libelles(read_canonical_csv(csv_path), fixes)
+    new = corriger_libelles(canonical_rows_from_raw(read_raw_snep_csv(raw_path)), fixes)
     merged, fantomes = purger_fantomes(merge_canonical(existing, new))
     merged, exclues = exclure_retirees(merged, set(retirees))
     if exclues:

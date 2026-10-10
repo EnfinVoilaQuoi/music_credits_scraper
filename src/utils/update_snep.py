@@ -721,7 +721,6 @@ def _rebuild_canonical(source: str = "GLOBAL", *, partial: str = "") -> tuple[in
         snep / "certif_snep.meta.json",
         source=source,
         partial=partial,
-        retirees=snep_vues.cles_retirees(brut),
     )
     reset_cert_matcher()
     return before, after

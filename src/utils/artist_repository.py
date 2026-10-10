@@ -180,6 +180,11 @@ class ArtistRepository:
                             artists.c.discogs_id_source,
                             artists.c.image_path,
                             artists.c.deezer_id,
+                            # Lus pour le bandeau : jusqu'au 2026-10-11 ils ne
+                            # l'étaient pas, si bien qu'aucune GUI n'affichait
+                            # les auditeurs mensuels pourtant relevés en base.
+                            artists.c.spotify_monthly_listeners,
+                            artists.c.ytm_monthly_listeners,
                         ).where(artists.c.name == name)
                     )
                     .mappings()
@@ -198,6 +203,8 @@ class ArtistRepository:
                 discogs_id=row["discogs_id"],
                 discogs_id_source=row["discogs_id_source"],
                 image_path=row["image_path"],
+                spotify_monthly_listeners=row["spotify_monthly_listeners"],
+                ytm_monthly_listeners=row["ytm_monthly_listeners"],
                 deezer_id=row["deezer_id"],
             )
 

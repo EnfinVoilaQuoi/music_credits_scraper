@@ -157,7 +157,9 @@ def _split_names(raw: str) -> list[str]:
     result = []
     for p in parts:
         cleaned = _NAME_CLEAN_RE.sub("", p).strip().rstrip(".")
-        if cleaned and len(cleaned) > 1:
+        # « Prod : https://youtu.be/… » (Jazzy Bazz, 1989 Freestyle) : le beat
+        # est un LIEN, pas un nom — il sortait en Producer.
+        if cleaned and len(cleaned) > 1 and not _URL_RE.search(cleaned):
             result.append(cleaned)
     return result
 
@@ -226,7 +228,7 @@ def parse_description_clip_llm(
     for entry in data.get("credits", []):
         role_label = entry.get("role", "")
         for name in entry.get("names", []):
-            if not name or name.lower() not in text_lower:
+            if not name or name.lower() not in text_lower or _URL_RE.search(name):
                 continue
             credits.append(Credit(name=name, role=map_role(role_label), source="youtube_clip"))
     return credits

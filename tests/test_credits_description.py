@@ -255,3 +255,33 @@ def test_un_poste_de_tournage_n_est_pas_un_producteur():
         ("Dtweezer", "Producer"),
         ("Kore", "Producer"),
     ]
+
+
+# Description réelle (Jazzy Bazz « 1989 Freestyle », clip officiel, relevée le
+# 2026-10-10) : le beat est désigné par un LIEN, qui sortait en Producer.
+JAZZY_BAZZ_1989 = """\
+Réalisé par Lomi
+https://www.instagram.com/lomi_qln/
+
+Prod : https://youtu.be/6WxjNcvgGtU
+Enregistré et mixé au Goldstein Studio par Johnny Ola
+Masterisé par Bryan Pachaud
+"""
+
+
+def test_un_lien_n_est_pas_un_producteur():
+    assert [(c.name, c.role.value) for c in parse_description_clip(JAZZY_BAZZ_1989)] == [
+        ("Lomi", "Video Director"),
+        ("Bryan Pachaud", "Mastering Engineer"),
+    ]
+
+
+def test_le_repli_llm_ne_retient_pas_un_lien():
+    """Le lien est bien « présent dans le texte » : la garde verbatim seule le
+    laissait passer."""
+    extractor = MagicMock()
+    extractor.extract.return_value = (
+        '{"credits": [{"role": "Producer", "names": ["https://youtu.be/6WxjNcvgGtU"]}]}'
+    )
+    extractor.clean_json_response.side_effect = lambda x: x
+    assert parse_description_clip_llm("Prod : https://youtu.be/6WxjNcvgGtU", extractor) == []

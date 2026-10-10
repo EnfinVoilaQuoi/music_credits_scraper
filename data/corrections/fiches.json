@@ -164,6 +164,9 @@
       },
       "retirer_id_spotify": [
         "5Y5dlBMUM5rTrpNo445yUC"
+      ],
+      "retirer_id_deezer": [
+        479308372
       ]
     },
     {
@@ -256,6 +259,48 @@
       "retirer_id_spotify": [
         "1uFKIIkJGN04w6WaLiU0Nu"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 354973
+      },
+      "retirer_lrc": [
+        "a8a76bbe2c2ed7d1"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5076147
+      },
+      "retirer_lrc": [
+        "dc93d6fa912a7823"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 357496
+      },
+      "retirer_lrc": [
+        "5694aad31068ea8a",
+        "e815f60078d617a2"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 14308629
+      },
+      "retirer_lrc": [
+        "c8999ef5e7c24d9a",
+        "2d6d31b09c8a1efb"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8117430
+      },
+      "retirer_id_spotify": [
+        "5TlGrvOMiAltKgRw3anXKo"
+      ]
     }
   ],
   "Diam’s": [
@@ -310,7 +355,11 @@
         "genius_id": 166708
       },
       "retirer_id_spotify": [
-        "7bneLZnKB9b3j8uHYUnH8Q"
+        "7bneLZnKB9b3j8uHYUnH8Q",
+        "72vPqfnXPcfofA97o2N924"
+      ],
+      "retirer_id_deezer": [
+        3113143
       ]
     },
     {
@@ -372,6 +421,22 @@
       "retirer_lrc": [
         "73859750ac26e1cf"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8567468
+      },
+      "retirer_videos": [
+        "uZTKZg-a37o"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 8567463
+      },
+      "retirer_videos": [
+        "eqLmaTTgGV4"
+      ]
     }
   ],
   "Freeze Corleone": [
@@ -384,6 +449,9 @@
       },
       "retirer_id_spotify": [
         "1Pit975hbTxrwgf2BRixEb"
+      ],
+      "retirer_id_deezer": [
+        583688052
       ]
     },
     {
@@ -418,6 +486,22 @@
       "retirer_id_spotify": [
         "19zwmHkdVDpKPSKjCrUeLF"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2918972
+      },
+      "retirer_lrc": [
+        "54500d592530d14c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7086811
+      },
+      "retirer_id_spotify": [
+        "2dRzGAT4MJRfNeh1EmdMRw"
+      ]
     }
   ],
   "Josman": [
@@ -447,6 +531,198 @@
       "fusionner_dans": {
         "genius_id": 704799
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 2845429
+      },
+      "retirer_lrc": [
+        "81faa3b37940f6bc"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3051581
+      },
+      "retirer_lrc": [
+        "63c87b7bcbe2fd95"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3394137
+      },
+      "retirer_lrc": [
+        "fc2bd9570319eb54"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 501805
+      },
+      "retirer_lrc": [
+        "94ea1475b0f619d4"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6042785
+      },
+      "retirer_lrc": [
+        "665368ab58da46ca"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2289871
+      },
+      "retirer_lrc": [
+        "979bf24b50bfff16"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 655212
+      },
+      "retirer_lrc": [
+        "9fd2b26774f6765e"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 380609
+      },
+      "retirer_lrc": [
+        "33d6bbb87b2ac209"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2454739
+      },
+      "retirer_lrc": [
+        "a4eec8099948c386"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 501812
+      },
+      "retirer_lrc": [
+        "7cec6adf6f4ae949"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 1790856
+      },
+      "retirer_lrc": [
+        "e1bf0556e1450262"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2410431
+      },
+      "retirer_lrc": [
+        "b7d407a852d6d8ae"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2289501
+      },
+      "retirer_lrc": [
+        "d67c0a0cf6dbbcd5"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2289492
+      },
+      "retirer_lrc": [
+        "8ffa245f30cac1c0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3164882
+      },
+      "retirer_lrc": [
+        "dc5aa84a9bf186d3"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 654154
+      },
+      "retirer_lrc": [
+        "7cec6adf6f4ae949"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 4114048
+      },
+      "retirer_lrc": [
+        "7cec6adf6f4ae949"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 656573
+      },
+      "retirer_lrc": [
+        "33d6bbb87b2ac209"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2212672
+      },
+      "retirer_lrc": [
+        "665368ab58da46ca"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2170215
+      },
+      "retirer_lrc": [
+        "c2f3b0ade84e35a6"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 1906012
+      },
+      "retirer_lrc": [
+        "ff87cb639cc18720"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 381662
+      },
+      "retirer_lrc": [
+        "ec87e71b6f159a2e"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 7910394
+      },
+      "retirer_lrc": [
+        "c2c1368c4fc4f52c"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 656508
+      },
+      "retirer_lrc": [
+        "6fee6cc4d6a16396"
+      ]
     }
   ],
   "Kanye West": [
@@ -702,6 +978,9 @@
       },
       "retirer_lrc": [
         "0fad439676efcc00"
+      ],
+      "retirer_videos": [
+        "DTq4XEliPag"
       ]
     },
     {
@@ -1524,7 +1803,8 @@
         "5e5MKPtJuFb8NaeSEyV5gD"
       ],
       "retirer_lrc": [
-        "342055792094caf8"
+        "342055792094caf8",
+        "e3e006f5d1d8438c"
       ]
     },
     {
@@ -1739,6 +2019,94 @@
       "retirer_id_spotify": [
         "0Rm4wxYv40fHHVTReKvuA8"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 401434
+      },
+      "fusionner_dans": {
+        "genius_id": 5742
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 9803974
+      },
+      "retirer_id_spotify": [
+        "6xYpDxLFz0jAA5DehPRtZN"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 54
+      },
+      "retirer_id_spotify": [
+        "1pRSp49Gv25229S37plBxN"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2410689
+      },
+      "retirer_videos": [
+        "LXeQ6bmV7oU"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 1859
+      },
+      "retirer_videos": [
+        "K-Ce7iZgBB8"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5490
+      },
+      "retirer_videos": [
+        "kqBX7nnxCU0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 786
+      },
+      "retirer_videos": [
+        "kqBX7nnxCU0"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 25792
+      },
+      "retirer_videos": [
+        "IzNunT2AOO4"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9368607
+      },
+      "retirer_videos": [
+        "lFY4ZN0Xn4U"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5866153
+      },
+      "retirer_videos": [
+        "-nVd_2fn5Jc"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 414590
+      },
+      "retirer_lrc": [
+        "04676074b2f6026d"
+      ]
     }
   ],
   "Kid Cudi": [
@@ -1817,6 +2185,12 @@
           "title": "PURSUIT OF HAPPINESS (NIGHTMARE)",
           "certification": "4x Platinum",
           "certification_date": "2016-09-16"
+        },
+        {
+          "body": "RIAA",
+          "title": "PURSUIT OF HAPPINESS (NIGHTMARE)",
+          "certification": "5x Platinum",
+          "certification_date": "2019-03-13"
         }
       ],
       "retirer_id_spotify": [
@@ -1886,6 +2260,97 @@
       "retirer_id_spotify": [
         "2K4MFPEhRKdEB6k9jGsaju"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6954565
+      },
+      "retirer_lrc": [
+        "49789ed748e8864e"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5437
+      },
+      "retirer_lrc": [
+        "0fad439676efcc00"
+      ],
+      "retirer_videos": [
+        "DTq4XEliPag"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 63760
+      },
+      "retirer_lrc": [
+        "7e6a3e85e856376b"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 51851
+      },
+      "retirer_id_spotify": [
+        "0IH3D0P8OrQFs6ajcqbm0R"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 198188
+      },
+      "retirer_id_spotify": [
+        "0Ns3nvzgfC6Yh3j5apV66n"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6309828
+      },
+      "retirer_id_spotify": [
+        "2Pq2jkcG80UOshPWyAV9gG"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 496306
+      },
+      "retirer_id_spotify": [
+        "7bMNtFJ5fSkKcFiwBdhQpV"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 198904
+      },
+      "retirer_id_spotify": [
+        "20bJBbPapGQ4bqs0YcA9xY"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 6970508
+      },
+      "retirer_id_spotify": [
+        "5DSnUNB2twRRILYWqDB634"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 71195
+      },
+      "retirer_id_spotify": [
+        "5092gEBKku94Y60XdC4EUE"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5866153
+      },
+      "retirer_videos": [
+        "-nVd_2fn5Jc"
+      ]
     }
   ],
   "SDM": [
@@ -1941,6 +2406,14 @@
       },
       "retirer_id_spotify": [
         "3jqBLwtTiUYismDiZgAgPE"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 371583
+      },
+      "retirer_videos": [
+        "G0kcHpm05PQ"
       ]
     }
   ],
@@ -2504,6 +2977,86 @@
       "retirer_id_spotify": [
         "1mOTZnPLDiy59hv6sRQl0Q"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3389849
+      },
+      "retirer_videos": [
+        "WxfvYzs_V84"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3389892
+      },
+      "retirer_videos": [
+        "I-AW_O7p164"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3389869
+      },
+      "retirer_videos": [
+        "I-AW_O7p164"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3389856
+      },
+      "retirer_videos": [
+        "I-AW_O7p164"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3389948
+      },
+      "retirer_videos": [
+        "WxfvYzs_V84"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5603632
+      },
+      "retirer_videos": [
+        "vv7GTYVTdkQ"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5676726
+      },
+      "retirer_videos": [
+        "7kPYCBXeYV8"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 3389916
+      },
+      "retirer_videos": [
+        "emRnq5FfWgs"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2410689
+      },
+      "retirer_videos": [
+        "LXeQ6bmV7oU"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 9368607
+      },
+      "retirer_videos": [
+        "lFY4ZN0Xn4U"
+      ]
     }
   ],
   "MC Solaar": [
@@ -2653,6 +3206,46 @@
       "fusionner_dans": {
         "genius_id": 96927
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 287667
+      },
+      "retirer_id_spotify": [
+        "39JllpMUGACgRmivMFGeEZ"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5395
+      },
+      "retirer_videos": [
+        "JG2CVKqLnGs"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5215
+      },
+      "retirer_videos": [
+        "2t845D8Sb0Q"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 111178
+      },
+      "retirer_videos": [
+        "ZDzu5tY5xCM"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 104284
+      },
+      "retirer_videos": [
+        "1QyPHjKDSKg"
+      ]
     }
   ],
   "Népal": [
@@ -2683,6 +3276,14 @@
       "fusionner_dans": {
         "genius_id": 56282
       }
+    },
+    {
+      "fiche": {
+        "genius_id": 104284
+      },
+      "retirer_videos": [
+        "1QyPHjKDSKg"
+      ]
     }
   ],
   "PLK": [
@@ -2719,6 +3320,14 @@
       },
       "retirer_lrc": [
         "a9f0063ba3813ab2"
+      ]
+    },
+    {
+      "fiche": {
+        "genius_id": 5911316
+      },
+      "retirer_id_spotify": [
+        "2GaNnc4E24c6NrZaY6NjE4"
       ]
     }
   ],
@@ -2899,6 +3508,22 @@
       "retirer_id_spotify": [
         "48fN1dTkwXvhNsRN5NQkig"
       ]
+    },
+    {
+      "fiche": {
+        "genius_id": 2065915
+      },
+      "fusionner_dans": {
+        "genius_id": 61280
+      }
+    },
+    {
+      "fiche": {
+        "genius_id": 741806
+      },
+      "retirer_videos": [
+        "_KJnxeGMTgY"
+      ]
     }
   ],
   "Swing": [
@@ -2916,6 +3541,36 @@
       },
       "retirer_id_spotify": [
         "5gBZ0oJ7aGFIJtbBRRT3SO"
+      ]
+    }
+  ],
+  "BEN plg": [
+    {
+      "fiche": {
+        "genius_id": 8483120
+      },
+      "fusionner_dans": {
+        "genius_id": 5980855
+      }
+    }
+  ],
+  "Jazzy Bazz": [
+    {
+      "fiche": {
+        "genius_id": 443413
+      },
+      "retirer_id_spotify": [
+        "0ScxYjtY8C39LG7xMCseyL"
+      ]
+    }
+  ],
+  "Django": [
+    {
+      "fiche": {
+        "genius_id": 3266744
+      },
+      "retirer_videos": [
+        "uJEaiH3tcsw"
       ]
     }
   ]

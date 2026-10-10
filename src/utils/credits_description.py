@@ -38,6 +38,14 @@ _TOPIC_NON_CREDIT_KEYS = {"released on", "provided to youtube by", "auto-generat
 #: https://… », « https://lnk.to/… » : 4 « Other » écrits sur UN morceau).
 _URL_RE = re.compile(r"https?://|www\.|//[a-z0-9.-]+\.[a-z]{2,}", re.IGNORECASE)
 
+#: « Composer: D.R » : « droits réservés », la mention d'un auteur INCONNU, pas
+#: un nom (mesuré 2026-10-10 : 31 crédits Topic, dont 20 déjà en base).
+_NOM_ANONYME = re.compile(r"d\.?\s?r\.?|droits?\s+r[ée]serv[ée]s", re.IGNORECASE)
+
+
+def _nom_anonyme(name: str) -> bool:
+    return bool(_NOM_ANONYME.fullmatch(name.strip()))
+
 
 def est_description_topic(text: str | None, channel: str | None = None) -> bool:
     """Une description Topic se reconnaît à son canal « … - Topic » ou à sa
@@ -64,6 +72,10 @@ def parse_description_topic(text: str) -> list[Credit] | None:
 
     credits: list[Credit] = []
     found_role_line = False
+    # La ligne qui SUIT « Titre · Artiste » est le titre du DISQUE : avec un
+    # deux-points (« The Blueprint 2: The Gift & The Curse », « Old School : Rap
+    # français ») elle sortait en crédit Other (14 Topic sur 745, 2026-10-10).
+    apres_titre = False
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -73,6 +85,13 @@ def parse_description_topic(text: str) -> list[Credit] | None:
             continue
 
         m_label = _LABEL_RE.match(line)
+        if apres_titre:
+            apres_titre = False
+            if not m_label and not line.lower().startswith("released on"):
+                continue
+        if "·" in line:
+            apres_titre = True
+            continue
         if m_label:
             credits.append(
                 Credit(name=m_label.group(1).strip(), role=CreditRole.LABEL, source="youtube_topic")
@@ -86,6 +105,9 @@ def parse_description_topic(text: str) -> list[Credit] | None:
         roles_part, _, name = line.partition(":")
         name = name.strip()
         if not name or roles_part.strip().lower() in _TOPIC_NON_CREDIT_KEYS:
+            continue
+        if _nom_anonyme(name):
+            found_role_line = True
             continue
 
         role_labels = [r.strip() for r in roles_part.split(",") if r.strip()]
@@ -104,14 +126,16 @@ def parse_description_topic(text: str) -> list[Credit] | None:
 _CLIP_PATTERNS: list[tuple[re.Pattern[str], CreditRole]] = [
     (
         re.compile(
-            r"(?:Prod(?:uit|\.)?|Produc(?:tion|ed))\s+(?:by\s+|par\s+|:\s*)(.+)", re.IGNORECASE
+            r"(?:Prod(?:uit|\.)?|Produc(?:tion|ed))\s*(?:(?:by|par)\s*:?\s*|:\s*)(.+)",
+            re.IGNORECASE,
         ),
         CreditRole.PRODUCER,
     ),
     # « Prod A2H », « (Prod Dtweezer) », « Prod: X » — la forme NUE du rap FR
-    # (mesuré sur A2H : 3 producteurs sur 16 descriptions, tous manqués).
+    # (mesuré sur A2H : 3 producteurs sur 16 descriptions, tous manqués). « Prod »
+    # est un MOT : sans limite, « Producer: X » rendait le nom « ucer: X ».
     (
-        re.compile(r"(?:^|\()Prod\.?\s*:?\s*(?!by\b|par\b)([^)\n]+)", re.IGNORECASE),
+        re.compile(r"(?:^|\()Prod\b\.?\s*:?\s*(?!by\b|par\b)([^)\n]+)", re.IGNORECASE),
         CreditRole.PRODUCER,
     ),
     (re.compile(r"Beat\s+by\s+(.+)", re.IGNORECASE), CreditRole.PRODUCER),
@@ -142,7 +166,9 @@ _CLIP_PATTERNS: list[tuple[re.Pattern[str], CreditRole]] = [
     ),
 ]
 
-_NAME_SPLIT_RE = re.compile(r"\s*[,&x]\s+|\s+(?:et|and|feat\.?)\s+", re.IGNORECASE)
+#: « x » sépare deux noms seulement entre deux espaces : « Apex Martin » était
+#: coupé en « Ape » et « Martin » (Travis Scott, Fire).
+_NAME_SPLIT_RE = re.compile(r"\s*[,&]\s+|\s+x\s+|\s+(?:et|and|feat\.?)\s+", re.IGNORECASE)
 _NAME_CLEAN_RE = re.compile(r"[(\[@#].*$")
 
 _LLM_VOCAB = re.compile(
@@ -156,7 +182,9 @@ def _split_names(raw: str) -> list[str]:
     parts = _NAME_SPLIT_RE.split(raw.strip())
     result = []
     for p in parts:
-        cleaned = _NAME_CLEAN_RE.sub("", p).strip().rstrip(".")
+        cleaned = _NAME_CLEAN_RE.sub("", p).strip(" :-–").rstrip(".")
+        if cleaned.endswith(")") and "(" not in cleaned:  # « (Prod. by RZA) »
+            cleaned = cleaned[:-1].rstrip()
         # « Prod : https://youtu.be/… » (Jazzy Bazz, 1989 Freestyle) : le beat
         # est un LIEN, pas un nom — il sortait en Producer.
         if cleaned and len(cleaned) > 1 and not _URL_RE.search(cleaned):

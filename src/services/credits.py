@@ -166,8 +166,13 @@ class Clients:
     ytmusic_meta: Callable[[], object] = _ytmusic_api
 
 
-def _manque_credits(track: Track) -> bool:
-    """True si le morceau n'a aucun Producer ni Writer/Composer DIRECT.
+def _manque_production(track: Track) -> bool:
+    """True si le morceau n'a aucun crédit de PRODUCTION direct.
+
+    Des auteurs seuls ne dispensent plus de la description YouTube (décision
+    utilisateur 2026-10-10) : « DCR (Dolce Camara Remix) » avait ses auteurs
+    Genius et aucun producteur, la phase le sautait alors que seule la
+    description nomme le beatmaker.
 
     Un crédit PROVISOIRE de l'API Genius (`genius_api`) ne compte pas non
     plus : il ne dispense de rien, le scrape le remplacera.
@@ -177,8 +182,21 @@ def _manque_credits(track: Track) -> bool:
     description YouTube Topic — seule source de SA production — n'était jamais
     lue (2026-09-24). L'héritage s'efface ensuite devant la source directe
     (`version_heritage.sans_heritage_couvert`)."""
-    roles = {c.role for c in track.credits if c.source not in ("heritage", SOURCE_API)}
-    return not (roles & _PRODUCER_ROLES) and not (roles & _WRITER_ROLES)
+    return not (_roles_directs(track) & _PRODUCER_ROLES)
+
+
+def _roles_directs(track: Track) -> set:
+    return {c.role for c in track.credits if c.source not in ("heritage", SOURCE_API)}
+
+
+def _clip_lisible(track: Track, options: OptionsCredits) -> bool:
+    """La description LIBRE d'un clip ne se lit que pour un morceau sans aucun
+    auteur direct (ou en mode « tout »). Mesuré le 2026-10-10 contre Genius,
+    Discogs et les Topic : 32 producteurs de clip justes pour 34 faux — la
+    production du CLIP (« Palace Prod », « Producteur délégué »), une tracklist
+    entière, de la prose. Un morceau qui a déjà ses auteurs ne lit donc que
+    sa Topic, structurée par le distributeur."""
+    return options.tout_youtube or not (_roles_directs(track) & _WRITER_ROLES)
 
 
 def _phase_youtube(
@@ -197,7 +215,7 @@ def _phase_youtube(
     )
     from src.utils.youtube_utils import video_pour_credits
 
-    selection = tracks if options.tout_youtube else [t for t in tracks if _manque_credits(t)]
+    selection = tracks if options.tout_youtube else [t for t in tracks if _manque_production(t)]
     if not selection:
         bilan.youtube = {"topic": 0, "clip": 0, "llm": 0, "skipped": len(tracks)}
         return
@@ -253,7 +271,11 @@ def _phase_youtube(
                 if new_credits:
                     topic_count += 1
 
-        if not new_credits and kind in ("clip", "unknown", "audio"):
+        if (
+            not new_credits
+            and kind in ("clip", "unknown", "audio")
+            and _clip_lisible(track, options)
+        ):
             parsed_clip = parse_description_clip(desc) if not est_topic else []
             if not parsed_clip:
                 extractor = None

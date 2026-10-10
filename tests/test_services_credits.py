@@ -234,13 +234,13 @@ def test_un_credit_herite_ne_dispense_pas_de_la_description_youtube():
     """Une version acoustique hérite ses auteurs : sa production n'est connue que
     par SA description Topic, qui doit donc être lue (2026-09-24)."""
     from src.models.track import Credit, CreditRole, Track
-    from src.services.credits import _manque_credits
+    from src.services.credits import _manque_production
 
     t = Track(title="Grenadine (Acoustic)")
     t.credits = [Credit(name="A2H", role=CreditRole.WRITER, source="heritage")]
-    assert _manque_credits(t)
+    assert _manque_production(t)
     t.credits.append(Credit(name="Tefa", role=CreditRole.PRODUCER, source="youtube_topic"))
-    assert not _manque_credits(t)
+    assert not _manque_production(t)
 
 
 def test_la_garde_lrc_lit_la_discographie_en_base_si_rien_n_est_charge():

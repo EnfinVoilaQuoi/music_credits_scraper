@@ -18,7 +18,7 @@ from src.models import Artist, Track
 from src.models.track import Credit, CreditRole
 from src.scrapers.genius_scraper_v3 import GeniusScraperV3
 from src.services import discographie as disco
-from src.services.credits import _manque_credits
+from src.services.credits import _manque_production
 from src.services.runtime import Manque, est_manquant
 from src.utils import credits_genius_api as cga
 from src.utils.track_validation import credits_confirmes
@@ -128,9 +128,9 @@ class TestStatut:
     def test_ne_dispense_pas_de_la_phase_youtube(self):
         t = Track(title="T")
         t.credits = [_api("A", CreditRole.PRODUCER), _api("B", CreditRole.WRITER)]
-        assert _manque_credits(t)
+        assert _manque_production(t)
         t.credits.append(_c("C", CreditRole.PRODUCER, "discogs"))
-        assert not _manque_credits(t)
+        assert not _manque_production(t)
 
     def test_ne_confirment_rien(self):
         t = Track(title="T")

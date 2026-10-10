@@ -111,6 +111,40 @@ class TestPhaseYouTube:
         bilan = credits.run(_rt(), Artist(name="Booba"), [t], _opts(), Hooks(), cl)
         assert bilan.youtube["skipped"] == 1
 
+    def test_des_auteurs_sans_producteur_ne_dispensent_pas(self):
+        """« DCR (Dolce Camara Remix) » : auteurs Genius, aucun producteur —
+        la description est lue (décision utilisateur 2026-10-10), rien n'est
+        retiré de ce que Genius dit."""
+        vid = "AgFG6_TGdTY"
+        genius = [
+            Credit(name="Booba", role=CreditRole.WRITER, source="genius"),
+            Credit(name="SDM", role=CreditRole.WRITER, source="genius"),
+        ]
+        t = _track(
+            "DCR (Dolce Camara Remix)",
+            videos=[TrackVideo(video_id=vid, kind="audio")],
+            creds=genius,
+        )
+        cl, _ = _clients_yt({vid: {"description": TOPIC_DESC}})
+        bilan = credits.run(_rt(), Artist(name="Booba"), [t], _opts(), Hooks(), cl)
+
+        assert bilan.youtube["selection"] == 1
+        assert all(c in t.credits for c in genius)
+        prods = {c.name for c in t.credits if c.role is CreditRole.PRODUCER}
+        assert prods == {"Booba", "Tysko"}
+        assert all(c.source == "youtube_topic" for c in t.credits if c not in genius)
+
+    def test_des_auteurs_sans_producteur_ne_lisent_pas_un_clip(self):
+        """Un clip ne dit pas si « Prod » est celle du beat ou du tournage :
+        un morceau qui a ses auteurs ne lit que sa Topic (2026-10-10)."""
+        vid = "CLIP123abcd"
+        auteur = Credit(name="A2H", role=CreditRole.WRITER, source="genius")
+        t = _track("Savage", youtube_url=f"https://youtube.com/watch?v={vid}", creds=[auteur])
+        cl, _ = _clients_yt({vid: {"description": "Prod : Maude Rebreyend pour Palace Prod"}})
+        bilan = credits.run(_rt(), Artist(name="A2H"), [t], _opts(), Hooks(), cl)
+        assert bilan.youtube["selection"] == 1
+        assert t.credits == [auteur]
+
     def test_tout_mode_includes_all(self):
         vid = "TOPIC_VID_1"
         t = _track(

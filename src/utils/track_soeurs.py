@@ -46,6 +46,8 @@ COLONNES_PARTAGEES = (
     "deezer_url",
     "apple_music_id",
     "apple_music_checked_at",
+    # Même page Genius (la clé des sœurs est `genius_id`) : même détail lu.
+    "genius_detail_checked_at",
     "explicit_lyrics",
     "genius_url",
     "spotify_url",

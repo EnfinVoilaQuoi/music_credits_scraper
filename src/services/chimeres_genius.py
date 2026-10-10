@@ -21,10 +21,9 @@ def reposer_page(dm, genius, track_id: int, artiste_genius_id, chanson: dict) ->
         return "SAUTÉ : l'artiste n'est pas crédité au détail de la page"
     kind, role = relation
     principal = (chanson.get("primary_artist") or {}).get("name")
+    # Réponse de DÉTAIL : `precision_de_la_date` lit alors `release_date` /
+    # `release_date_for_display` (le détail n'a pas de composants).
     date = genius.precision_de_la_date(chanson)
-    if date is None:
-        brute = genius._extract_release_date_from_song(chanson)
-        date = brute.strftime("%Y-%m-%d") if brute else None
     ok = dm.rattacher_page_genius(
         track_id,
         genius_id=chanson["id"],

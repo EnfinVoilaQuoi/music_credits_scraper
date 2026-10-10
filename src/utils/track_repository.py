@@ -293,6 +293,8 @@ class TrackRepository:
                 # e43 : identité (le premier renseigne) + constat en COALESCE.
                 "apple_music_id": track.apple_music_id,
                 "apple_music_checked_at": track.apple_music_checked_at,
+                # e45 : constat en COALESCE (un run sans prefill ne l'efface pas).
+                "genius_detail_checked_at": track.genius_detail_checked_at,
                 "explicit_lyrics": track.lyrics.explicit,
                 # E7-D1 : les colonnes audio ne sont plus écrites (pilotées par les
                 # observations, reconcile au mapper) → clés retirées de params.
@@ -382,6 +384,8 @@ class TrackRepository:
                                               THEN :apple_music_id ELSE apple_music_id END,
                         apple_music_checked_at = COALESCE(
                             :apple_music_checked_at, apple_music_checked_at),
+                        genius_detail_checked_at = COALESCE(
+                            :genius_detail_checked_at, genius_detail_checked_at),
                         -- COALESCE aussi : un run sans passage Deezer laisse
                         -- NULL, et NULL veut dire « jamais mesuré » — il ne
                         -- doit pas effacer un constat précédent.
@@ -438,7 +442,7 @@ class TrackRepository:
                         title, artist_id, album, track_number, release_date,
                         genius_id, spotify_id, discogs_id, isrc, spotify_id_checked_at,
                         deezer_id, deezer_checked_at, deezer_url, explicit_lyrics,
-                        apple_music_id, apple_music_checked_at,
+                        apple_music_id, apple_music_checked_at, genius_detail_checked_at,
                         duration, genre,
                         genius_url, spotify_url, youtube_url, youtube_url_source,
                         is_featuring, primary_artist_name, featured_artists, secondary_role,
@@ -451,7 +455,7 @@ class TrackRepository:
                         :title, :artist_id, :album, :track_number, :release_date,
                         :genius_id, :spotify_id, :discogs_id, :isrc, :spotify_id_checked_at,
                         :deezer_id, :deezer_checked_at, :deezer_url, :explicit_lyrics,
-                        :apple_music_id, :apple_music_checked_at,
+                        :apple_music_id, :apple_music_checked_at, :genius_detail_checked_at,
                         :duration, :genre,
                         :genius_url, :spotify_url, :youtube_url, :youtube_url_source,
                         COALESCE(:is_featuring, 0), :primary_artist_name, :featured_artists, :secondary_role,

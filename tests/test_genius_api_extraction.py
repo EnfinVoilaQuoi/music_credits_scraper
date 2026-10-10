@@ -354,6 +354,44 @@ class TestBesoinDuDetail:
         )
         assert api._needs_song_api(t) is False
 
+    def test_detail_lu_recemment_n_est_pas_relu(self, api):
+        """e45 : sans relation ni ID Spotify, la garde restait ouverte POUR
+        TOUJOURS (10 010 fiches sur 11 368 relues à chaque run, 2026-10-10)."""
+        t = _track(genius_detail_checked_at="2026-10-01T12:00:00")
+        assert t.detail_genius_a_lire(maintenant=datetime(2026, 10, 10)) is False
+
+    def test_detail_relu_apres_trente_jours(self, api):
+        t = _track(genius_detail_checked_at="2026-08-01T12:00:00")
+        assert t.detail_genius_a_lire(maintenant=datetime(2026, 10, 10)) is True
+
+    def test_date_illisible_ne_bloque_rien(self, api):
+        assert _track(genius_detail_checked_at="pas une date").detail_genius_a_lire() is True
+
+
+class TestConstatDuDetail:
+    """La date n'est posée que sur une RÉPONSE de Genius (e45)."""
+
+    def test_reponse_datee_meme_sans_rien_a_poser(self):
+        api = GeniusAPI.__new__(GeniusAPI)
+        api.genius = _FauxGenius(songs={123: {"song": {}}})
+        t = _track(album="A")
+        api.apply_song_metadata(t)
+        assert t.genius_detail_checked_at is not None
+
+    def test_absence_datee(self):
+        api = GeniusAPI.__new__(GeniusAPI)
+        api.genius = _FauxGenius(songs={})
+        t = _track()
+        api.apply_song_metadata(t)
+        assert t.genius_detail_checked_at is not None
+
+    def test_panne_non_datee(self):
+        api = GeniusAPI.__new__(GeniusAPI)
+        api.genius = _FauxGenius(songs=requests.RequestException("timeout"))
+        t = _track()
+        assert api.apply_song_metadata(t) is False
+        assert t.genius_detail_checked_at is None
+
 
 # ────────────────────────────────────────────── méthodes appelant l'API
 
@@ -855,3 +893,51 @@ class TestPreremplissageParLApiDetail:
 
         api._prefill_via_song_api([t])
         assert vus == []
+
+
+class TestConstatPersiste:
+    def test_survit_a_un_run_sans_prefill(self, data_manager):
+        from src.models.artist import Artist
+
+        artist = Artist(name="Isha")
+        artist.id = data_manager.save_artist(artist)
+        track = Track(title="Durag", artist=artist)
+        track.genius_id = 123
+        track.genius_detail_checked_at = "2026-10-10T01:00:00"
+        data_manager.save_track(track)
+        relu = data_manager.get_artist_tracks(artist.id)[0]
+        assert relu.genius_detail_checked_at == "2026-10-10T01:00:00"
+        relu.genius_detail_checked_at = None  # un run qui ne lit pas le détail
+        data_manager.save_track(relu)
+        assert data_manager.get_artist_tracks(artist.id)[0].genius_detail_checked_at is not None
+
+
+class TestPasseFeatsDeLEnrichissement:
+    """`DataEnricher._apply_genius_feat_metadata` refaisait l'appel de l'import
+    pour ~1 400 feats à chaque run : même prédicat que le prefill désormais."""
+
+    class _Client:
+        def __init__(self):
+            self.appels = []
+
+        def apply_song_metadata(self, track):
+            self.appels.append(track.title)
+            return False
+
+    def _passe(self, track):
+        from src.utils.data_enricher import DataEnricher
+
+        enricher = DataEnricher.__new__(DataEnricher)
+        enricher.genius_client = self._Client()
+        enricher._apply_genius_feat_metadata(track)
+        return enricher.genius_client.appels
+
+    def test_detail_deja_lu_a_l_import_pas_de_second_appel(self):
+        t = _track(is_featuring=True, genius_detail_checked_at=datetime.now().isoformat())
+        assert self._passe(t) == []
+
+    def test_detail_jamais_lu_le_filet_joue(self):
+        assert self._passe(_track(is_featuring=True)) == ["Titre"]
+
+    def test_morceau_principal_jamais_concerne(self):
+        assert self._passe(_track(is_featuring=False)) == []

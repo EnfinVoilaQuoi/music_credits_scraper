@@ -620,16 +620,16 @@ class DataEnricher:
                 logger.warning(f"⚠️ Fermeture async provider {provider.name}: {e}")
 
     def _apply_genius_feat_metadata(self, track) -> None:
-        """FEATS : media/album/relations via API Genius AVANT ReccoBeats
-        (le Spotify ID Genius fiabilise la chaîne ; 1 appel/feat espace les
-        requêtes). Les primaires ont déjà été traités à l'import
-        (_prefill_via_song_api)."""
-        if not (
-            track.is_featuring
-            and self.genius_client
-            and track.genius_id
-            and (not track.spotify_id or not track.relationships)
-        ):
+        """FEATS : media/album/relations via API Genius AVANT ReccoBeats.
+
+        Primaires ET feats passent déjà par le même appel à l'import
+        (`_prefill_via_song_api`) ; cette passe n'est plus qu'un FILET pour les
+        fiches dont le détail n'a pas été lu récemment (import sans prefill,
+        fiches créées ailleurs) — même prédicat, `Track.detail_genius_a_lire`.
+        Avant le constat daté (e45), elle refaisait l'appel de l'import pour
+        ~1 400 feats à chaque run.
+        """
+        if not (track.is_featuring and self.genius_client and track.detail_genius_a_lire()):
             return
         try:
             if self.genius_client.apply_song_metadata(track):

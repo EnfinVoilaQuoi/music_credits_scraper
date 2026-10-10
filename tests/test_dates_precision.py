@@ -193,6 +193,30 @@ class TestGeniusDeclareSaPrecision:
 
         assert GeniusAPI.precision_de_la_date({}) is None
 
+    @pytest.mark.parametrize(
+        ("detail", "attendu"),
+        [
+            # Réponses RÉELLES de `GET /songs/{id}` (2026-10-10) : pas de
+            # composants, la date partielle ne vit que dans l'affichage.
+            (
+                {"release_date": "2026-05-29", "release_date_for_display": "May 29, 2026"},
+                "2026-05-29",
+            ),
+            ({"release_date": None, "release_date_for_display": "February 2006"}, "2006-02"),
+            ({"release_date": None, "release_date_for_display": "2011"}, "2011"),
+            ({"release_date": None, "release_date_for_display": None}, None),
+            ({"release_date": None, "release_date_for_display": "Spring 2011"}, None),
+        ],
+    )
+    def test_reponse_de_detail(self, detail, attendu):
+        """Le détail n'a pas `release_date_components` : sans ce repli,
+        `chimeres_genius.reposer_page` ne déclarait AUCUNE date."""
+        from src.api.genius_api import GeniusAPI
+
+        assert (
+            GeniusAPI.precision_de_la_date({"release_date_components": None, **detail}) == attendu
+        )
+
 
 class TestPositionDansLaPeriode:
     """Appartenance à un groupe (2026-09-24) : n'exclure que ce qui est PROUVÉ

@@ -177,6 +177,10 @@ tracks = Table(
     # iTunes lookup), et date de la vérification ayant eu une RÉPONSE.
     Column("apple_music_id", Text),
     Column("apple_music_checked_at", TIMESTAMP),
+    # e45 (2026-10-10) : dernière lecture du détail Genius `/songs/{id}` ayant
+    # eu une RÉPONSE. Sans elle, la garde du prefill restait ouverte pour
+    # toujours (aucune relation, pas sur Spotify) : un appel par morceau et par run.
+    Column("genius_detail_checked_at", TIMESTAMP),
     sqlite_autoincrement=True,
 )
 

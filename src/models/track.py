@@ -394,6 +394,10 @@ class Streams:
 SOURCE_NON_TRANSCRITES = "genius:non_transcrites"
 #: Délai avant de relire une telle page : ses paroles arrivent avec la sortie.
 RELIRE_NON_TRANSCRITES = timedelta(days=30)
+#: Délai de relecture du DÉTAIL `GET /songs/{id}` déjà lu (e45) : Genius y
+#: ajoute ses liens media et ses relations au fil du temps, mais pas d'un run à
+#: l'autre.
+RELIRE_DETAIL_GENIUS = timedelta(days=30)
 
 
 @dataclass
@@ -644,6 +648,8 @@ class Track:
     deezer_id: int | None = None
     # Dernier passage Deezer par morceau AYANT RÉPONDU (e41) — cf. e17.
     deezer_checked_at: str | None = None
+    # Dernière lecture du détail Genius `/songs/{id}` AYANT RÉPONDU (e45).
+    genius_detail_checked_at: str | None = None
     deezer_url: str | None = None
     # Apple Music (e43) : ID proposé par Genius et VÉRIFIÉ par iTunes, et date
     # de la dernière vérification qui a eu une réponse (retenu ou démenti).
@@ -1089,6 +1095,36 @@ class Track:
             self.spotify_id = new_id
 
         return True
+
+    def detail_genius_a_lire(self, maintenant: datetime | None = None) -> bool:
+        """Faut-il (re)lire le détail Genius `GET /songs/{id}` (album, media,
+        relations, crédits provisoires) ?
+
+        SEUL prédicat, pour le prefill de l'import ET la passe des feats de
+        l'enrichissement. Sans constat daté, « il manque quelque chose » restait
+        vrai pour toujours : la plupart des morceaux n'ont aucune relation, ou ne
+        sont pas sur Spotify — mesuré le 2026-10-10, garde ouverte pour 10 010
+        fiches sur 11 368 à CHAQUE run discographie, et une seconde fois pour
+        les feats à l'enrichissement. Un détail lu il y a moins de
+        `RELIRE_DETAIL_GENIUS` a dit ce que Genius savait.
+        """
+        if not self.genius_id:
+            return False
+        lu = self.genius_detail_checked_at
+        if lu:
+            try:
+                lu = datetime.fromisoformat(lu) if isinstance(lu, str) else lu
+            except ValueError:
+                lu = None
+            if lu and (maintenant or datetime.now()) - lu < RELIRE_DETAIL_GENIUS:
+                return False
+        return (
+            (not self.album and not self.album_override)
+            or not self.spotify_id
+            or not self.youtube_url
+            or self.youtube_url_source == "search_auto"
+            or not self.relationships
+        )
 
     def get_all_spotify_ids(self) -> list[str]:
         """Retourne tous les Spotify IDs du track (legacy + liste, sans doublons)."""

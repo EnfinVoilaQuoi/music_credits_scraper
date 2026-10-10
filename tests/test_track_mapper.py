@@ -72,6 +72,7 @@ _COLUMNS = [
     "deezer_checked_at",
     "apple_music_id",
     "apple_music_checked_at",
+    "genius_detail_checked_at",
     "certifications",
     "album_certifications",
 ]

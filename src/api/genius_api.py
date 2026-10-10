@@ -36,6 +36,13 @@ _SOURCE = "genius_api"
 #: L'API Genius n'a pas de « pas au catalogue » : un 404 y serait une rupture.
 _ABSENT: tuple[int, ...] = ()
 
+_DATE_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
+#: `release_date_for_display` du détail est toujours en anglais.
+_MOIS_ANGLAIS = (
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+)  # fmt: skip
+
 
 class QuotaGeniusAtteint(Exception):
     """HTTP 429 : le quota JOURNALIER de l'API (10 000 requêtes / 24 h, mesuré
@@ -650,18 +657,13 @@ class GeniusAPI:
 
     @staticmethod
     def _needs_song_api(track: "Track") -> bool:
-        """True si album/Spotify/YouTube/relations manquent (→ un appel détail utile).
+        """True si un appel détail est utile — `Track.detail_genius_a_lire`
+        (album/Spotify/YouTube/relations manquants, détail non lu récemment).
 
         Un lien YouTube 'search_auto' (recherche persistée) compte comme manquant :
         Genius est prioritaire et doit pouvoir le remplacer par le lien officiel.
         """
-        return bool(track.genius_id) and (
-            (not track.album and not track.album_override)
-            or not track.spotify_id
-            or not track.youtube_url
-            or track.youtube_url_source == "search_auto"
-            or not track.relationships
-        )
+        return track.detail_genius_a_lire()
 
     # Types de relation AMONT à conserver (ce qui a inspiré le morceau)
     _REL_UPSTREAM = {"samples", "interpolates", "cover_of", "remix_of"}
@@ -832,6 +834,9 @@ class GeniusAPI:
                 return False
             if not data:
                 obs.absent(f"morceau #{track.genius_id} sans détail")
+            if source_usage.a_repondu(obs):
+                # Constat daté (e45) : Genius a RÉPONDU, même pour ne rien dire.
+                track.genius_detail_checked_at = datetime.now().isoformat(timespec="seconds")
         song = (data or {}).get("song") or {}
         changed = False
 
@@ -1218,7 +1223,7 @@ class GeniusAPI:
         """
         composants = song.get("release_date_components")
         if not isinstance(composants, dict):
-            return None
+            return GeniusAPI._precision_du_detail(song)
         annee = composants.get("year")
         if not annee:
             return None
@@ -1231,6 +1236,30 @@ class GeniusAPI:
             return f"{int(annee):04d}"
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _precision_du_detail(song: dict) -> str | None:
+        """La même date, lue sur une réponse de DÉTAIL `/songs/{id}`.
+
+        Le détail n'a PAS `release_date_components` (mesuré 2026-10-10) :
+        `release_date` n'y est renseigné que pour une date COMPLÈTE, une date
+        partielle ne vit que dans `release_date_for_display` (« 2011 »,
+        « February 2006 », toujours en anglais).
+        """
+        complete = song.get("release_date")
+        if isinstance(complete, str) and _DATE_ISO.fullmatch(complete):
+            return complete
+        affichee = song.get("release_date_for_display")
+        if not isinstance(affichee, str):
+            return None
+        affichee = affichee.strip()
+        if re.fullmatch(r"\d{4}", affichee):
+            return affichee
+        mois_annee = re.fullmatch(r"([A-Za-z]+) (\d{4})", affichee)
+        if mois_annee and mois_annee.group(1).lower() in _MOIS_ANGLAIS:
+            mois = _MOIS_ANGLAIS.index(mois_annee.group(1).lower()) + 1
+            return f"{mois_annee.group(2)}-{mois:02d}"
+        return None
 
     def _extract_release_date_from_song(self, song: dict) -> datetime | None:
         """Extrait la date de sortie depuis les données de l'API.

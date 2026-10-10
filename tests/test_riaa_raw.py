@@ -676,6 +676,38 @@ class TestPaliersMalDates:
     def test_seule_ligne_du_palier_gardee(self):
         assert len(self._clean([self._site("3x Platinum", "2018-09-21")])) == 1
 
+    def test_le_titre_se_compare_sans_featuring(self):
+        """Le site affiche le titre de la certification qui a matché : 2 Chainz
+        « GOOD DRANK » au 2017-10-06 (Platinum ce jour-là), « GOOD DRANK (FEAT.
+        GUCCI MANE, QUAVO) » au vrai 2x Platinum du 2021-06-28."""
+        faux = self._site("2x Platinum", "2017-10-06")
+        faux["Title"] = "GOOD DRANK"
+        vrai = self._site("2x Platinum", "2021-06-28")
+        vrai["Title"] = "GOOD DRANK (FEAT. GUCCI MANE, QUAVO)"
+        clean = self._clean([faux, vrai])
+        assert list(clean["Certification_Date"]) == ["2021-06-28"]
+
+    def test_un_remix_reste_un_autre_award(self):
+        remix = self._site("Platinum", "2015-01-01")
+        remix["Title"] = "ALL MINE (REMIX)"
+        assert len(self._clean([remix, self._site("Platinum", "2020-01-01")])) == 2
+
+    def test_une_ligne_sans_famille_se_compare_a_toutes(self):
+        """Ancien scraper, avant la famille : Kanye « BOUND 2 » 5x au 2020-09-23
+        (2x ce jour-là), vrai 5x le 2023-10-11 lu par le scraper actuel."""
+        clean = self._clean(
+            [self._site("5x Platinum", "2020-09-23", ""), self._site("5x Platinum", "2023-10-11")]
+        )
+        assert list(clean["Certification_Date"]) == ["2023-10-11"]
+
+    def test_une_ligne_avec_famille_ignore_les_lignes_sans_famille(self):
+        """Sens inverse : une ligne sans famille plus tardive peut être l'AUTRE
+        award (ST ou DI) — on ne s'en sert pas pour accuser."""
+        clean = self._clean(
+            [self._site("Gold", "1999-01-01", "ST"), self._site("Gold", "2010-01-01", "")]
+        )
+        assert len(clean) == 2
+
 
 def test_ajouts_au_brut_jamais_negatifs(riaa_tmp):
     """2026-10-10 : « -21 nouvelle(s) au brut » — des doublons exacts déjà au

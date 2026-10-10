@@ -35,6 +35,7 @@ from src.utils.cert_normalize import (
 )
 from src.utils.cert_recherche import Issue, Verdict, conclure
 from src.utils.logger import ajouter_journal_fichier, configurer_journaux, get_logger
+from src.utils.title_matching import strip_featuring
 
 logger = get_logger(__name__)
 
@@ -494,7 +495,11 @@ def _flatten_records(records: list[dict]) -> list[dict]:
                     }
                 )
         else:
-            niveau = _riaa_level(rec.get("award_level") or rec.get("certification_level", ""))
+            # Le palier que la DATE de la ligne décrit, jamais le badge courant
+            # (`award_level`) : dans une recherche par dates ils diffèrent, et
+            # écrire le badge fabriquait un 3x Platinum daté du jour du Platinum
+            # (Kanye « ALL MINE » au 2018-09-21, cf. `_palier_de_la_date`).
+            niveau = _riaa_level(rec.get("certification_level") or rec.get("award_level", ""))
             rows.append(
                 {
                     **base,
@@ -676,24 +681,39 @@ def _ecarter_paliers_mal_dates(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
     palier à une date plus TARDIVE : un faux ne peut porter que la date d'un
     palier inférieur, donc antérieure. Le résidu (faux dont le vrai palier n'a
     jamais été lu) reste : rien ne le distingue d'une ligne juste.
+
+    Deux trous refermés le même jour, mesurés en confrontant le reste au site :
+    ① le site affiche le TITRE de la certification qui a matché, pas celui de
+    l'award — « GOOD DRANK » au 2017-10-06 (Platinum ce jour-là), « GOOD DRANK
+    (FEAT. GUCCI MANE, QUAVO) » au 2x Platinum du 2021-06-28 : le titre se
+    compare donc SANS mention de featuring (`strip_featuring` ; « (Remix) »
+    reste, c'est un autre award) ; ② les lignes de l'ANCIEN scraper n'ont pas
+    de famille (Kanye *BOUND 2* 5x au 2020-09-23, vrai 5x le 2023-10-11) : une
+    ligne sans famille se compare à toutes les familles de l'award, une ligne
+    qui en a une, à la sienne seulement. 70 lignes de plus ; 25 vérifiées sur
+    le site ou par la timeline, toutes fausses.
+
+    Le balayage lui-même n'en fabrique plus depuis (`riaa_scraper_v2.
+    _palier_de_la_date`) : la règle répare le brut d'avant.
     """
     if df.empty:
         return df, df.iloc[0:0]
+    famille = df["Award_Family"].astype(str).str.strip().str.upper()
     cle = (
         df["Artist"].map(normalize_text)
         + "|"
-        + df["Title"].map(normalize_text)
+        + df["Title"].map(lambda t: normalize_text(strip_featuring(str(t))) or normalize_text(t))
         + "|"
         + df["Format_Type"].astype(str).str.upper()
         + "|"
         + df["Award_Programme"].astype(str).str.upper()
         + "|"
-        + df["Award_Family"].astype(str).str.upper()
-        + "|"
         + df["Certification_Type"].astype(str).str.upper()
     )
     quand = df["Certification_Date"].map(_riaa_iso)
-    plus_tard = quand.groupby(cle).transform("max")
+    plus_tard_famille = quand.groupby(cle + "|" + famille).transform("max")
+    plus_tard_award = quand.groupby(cle).transform("max")
+    plus_tard = plus_tard_famille.where(famille != "", plus_tard_award)
     balayage = df["Release_Date"].astype(str).str.strip() == ""
     ecartees = balayage & (quand != "") & (quand < plus_tard)
     return df[~ecartees], df[ecartees]

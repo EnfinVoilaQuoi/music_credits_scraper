@@ -69,6 +69,13 @@ def _riaa_artist_url() -> str:
     return RIAAScraperV2._search_url(artist=_RIAA_ARTIST)
 
 
+def _riaa_date_url(debut: str, fin: str) -> str:
+    """URL de recherche RIAA par dates de certification (cf. `_riaa_artist_url`)."""
+    from src.scrapers.riaa_scraper_v2 import RIAAScraperV2
+
+    return RIAAScraperV2._search_url(start=debut, end=fin)
+
+
 _LRCLIB_PARAMS = {  # /get exact : Josman — Dans le vide (album Matrix, 243 s en base)
     "track_name": "Dans le vide",
     "artist_name": "Josman",
@@ -163,6 +170,17 @@ CAPTURES: list[dict] = [
         # URL construite par le scraper lui-même : le formulaire du site a changé
         # (2026-09-06) et une URL recopiée ici se serait périmée en silence.
         "url": _riaa_artist_url(),
+        "method": "riaa",
+    },
+    {
+        # Recherche par DATES (une journée, timelines comprises) : elle rend le
+        # badge COURANT de l'award à la date de la certification qui a matché —
+        # Kanye « ALL MINE » 3x Platinum au 2018-09-21, jour de son Platinum.
+        # Le palier de la date se lit sur le bouton de partage ; la timeline
+        # sert d'oracle dans `test_riaa_recherche_par_dates.py`.
+        "name": "riaa_search_by_date",
+        "path": "riaa/search_by_date.html",
+        "url": _riaa_date_url("2018-09-21", "2018-09-21"),
         "method": "riaa",
     },
     {

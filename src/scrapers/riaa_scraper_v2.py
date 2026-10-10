@@ -37,7 +37,11 @@ les seuils d'unités n'ont rien à voir avec les Gold/Platinum US. L'ancienne re
 `(\\d+)_big` lisait `la_61_big.png` comme « 61x Platinum » : un niveau inventé.
 
 Deux entrées :
-  - scrape_by_date_range(from, to)  → bulk, ligne principale.
+  - scrape_by_date_range(from, to)  → bulk, ligne principale. ⚠️ Le badge y est
+    le palier COURANT de l'award, la date celle de la certification qui a
+    matché : le palier de la date se lit sur le bouton de partage
+    (`_palier_de_la_date`, mesuré le 2026-10-10). Un award n'y a qu'UNE ligne
+    par fenêtre — la plus récente de ses certifications dans la fenêtre.
   - scrape_by_artist(artist)        → complet (timeline = historique des paliers).
 """
 
@@ -390,6 +394,7 @@ class RIAAScraperV2:
             resultats = self._parse_verifie(html, get_details, obs)
             if resultats and date_option != "release":
                 _verifier_fenetre(resultats, start, end, obs)
+            _signaler_paliers_non_lus(resultats)
             return resultats
 
     def scrape_by_artist(self, artist: str, get_details: bool = True) -> list[dict]:
@@ -733,6 +738,59 @@ def _verifier_fenetre(resultats: list[dict], start: str, end: str, obs) -> None:
         )
 
 
+def _signaler_paliers_non_lus(resultats: list[dict]) -> None:
+    """Dans une recherche par dates, une ligne SANS palier de partage retombe sur
+    le badge courant — possiblement daté d'un autre palier. Toutes = le site a
+    retiré ou renommé le bouton : c'est le défaut du 2026-10-10 qui revient."""
+    non_lus = [r for r in resultats if not r.get("palier_de_la_date_lu")]
+    if not non_lus:
+        return
+    exemple = f"{non_lus[0]['artist']} — {non_lus[0]['title']}"
+    if len(non_lus) == len(resultats):
+        logger.error(
+            f"RIAA : aucune des {len(resultats)} lignes ne porte le palier de sa date "
+            f"(bouton de partage absent ?) — badge courant retenu, paliers "
+            f"possiblement mal datés (ex. {exemple})."
+        )
+    else:
+        logger.warning(
+            f"RIAA : {len(non_lus)}/{len(resultats)} ligne(s) sans palier de partage, "
+            f"badge courant retenu (ex. {exemple})"
+        )
+
+
+def _palier_de_la_date(row, famille: str) -> str:
+    """Palier de la certification dont la ligne affiche la DATE, lu sur le
+    bouton de partage ; "" si la ligne n'en porte pas.
+
+    Mesuré sur riaa.com le 2026-10-10 (fixture `riaa/search_by_date.html`) :
+    une recherche par DATES rend chaque award qui a UNE certification dans la
+    fenêtre, avec la date de CETTE certification mais le badge COURANT de
+    l'award. Kanye *ALL MINE* au 2018-09-21 : badge 3x Platinum, alors que la
+    timeline donne Platinum ce jour-là et 3x Platinum le 2023-06-14. Écrire
+    (badge, date) fabriquait un 3x Platinum daté de 2018 — 659 lignes du clean
+    écartées le même jour par `update_riaa._ecarter_paliers_mal_dates`.
+
+    Le bouton de partage, lui, décrit la certification qui a MATCHÉ :
+    `data-share-img` en est le badge (`1_big.png` = Platinum pour ALL MINE), et
+    `share=` son identifiant, distinct de celui de l'award. 215 lignes sur
+    215 concordent avec la timeline sur sept fenêtres (41 latines ; badge faux
+    pour la date sur 41 d'entre elles) ; dans une recherche par
+    artiste il est identique au badge (c'est la dernière qui matche). Le texte
+    du tweet ne sert pas : « #Platinum » y vaut aussi pour un 15x.
+
+    Le numéro du fichier est celui des badges ; la famille est celle de
+    l'award (badge `alt`), le nom de fichier ne la portant pas toujours.
+    """
+    bouton = row.select_one("button.share_text[data-share-img]")
+    if not bouton:
+        return ""
+    m = _BADGE_SRC_RE.search(bouton.get("data-share-img", ""))
+    if not m:
+        return ""
+    return _level_from_number(int(m.group(2)), famille or (m.group(1) or "").upper())
+
+
 def _parse_main(row) -> dict | None:
     """Ligne principale du tableau.
 
@@ -757,6 +815,7 @@ def _parse_main(row) -> dict | None:
     level, famille = _badge_infos(img.get("src", ""), img.get("alt", "")) if img else ("", "")
     if not (artist and title):
         return None
+    palier_date = _palier_de_la_date(row, famille)
     return {
         "artist": artist,
         "title": title,
@@ -764,8 +823,13 @@ def _parse_main(row) -> dict | None:
         "release_date": "",
         "label": label,
         "format": fmt,
+        # Palier COURANT de l'award (le badge) — jamais daté par la ligne.
         "award_level": level,
-        "certification_level": level,
+        # Palier de la certification que la DATE de la ligne décrit. Ils
+        # diffèrent dans une recherche par dates (cf. `_palier_de_la_date`) ;
+        # sans donnée de partage, on retombe sur le badge, comme avant.
+        "certification_level": palier_date or level,
+        "palier_de_la_date_lu": bool(palier_date),
         # Programme relevé À LA SOURCE (famille du badge) plutôt que déduit du
         # libellé : c'est la seule façon de le savoir pour une ligne dont le
         # niveau serait écrit dans l'autre vocabulaire, comme l'a fait l'ancien
@@ -778,7 +842,7 @@ def _parse_main(row) -> dict | None:
         # NUMÉRIQUE — le libellé de format dit « SINGLE » dans les deux cas —
         # et cette distinction décide du seuil applicable avant août 2006.
         "award_family": famille,
-        "units": _units_for(level),
+        "units": _units_for(palier_date or level),
     }
 
 

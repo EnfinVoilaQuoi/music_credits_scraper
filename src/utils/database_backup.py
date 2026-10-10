@@ -4,7 +4,7 @@ Crée des backups avant les opérations critiques
 """
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from src.config import DATA_DIR, DATABASE_URL
@@ -17,6 +17,37 @@ logger = get_logger(__name__)
 # pré-fetch de retrieval.py retournait None en silence (AUDIT.md §4).
 _DEFAULT_DB_PATH = DATABASE_URL.replace("sqlite:///", "")
 _DEFAULT_BACKUP_DIR = DATA_DIR / "backups"
+
+#: Rétention PAR ÂGE (décision utilisateur 2026-10-10). Une rotation à 10 avait
+#: chassé en quelques heures la sauvegarde d'avant 23 fusions : un NOMBRE fixe,
+#: quel qu'il soit, est vidé par une journée chargée — précisément celle où l'on
+#: en a besoin. Tout est gardé pendant `TOUT_GARDER`, puis la dernière de chaque
+#: jour jusqu'à `PAR_JOUR`, puis la dernière de chaque semaine ; jamais moins de
+#: `PLANCHER` sauvegardes, quel que soit leur âge.
+TOUT_GARDER = timedelta(days=7)
+PAR_JOUR = timedelta(days=30)
+PLANCHER = 10
+
+
+def a_garder(dates: list[datetime], maintenant: datetime, plancher: int = PLANCHER) -> set[int]:
+    """PUR. Indices des sauvegardes à garder, d'après leurs dates."""
+    ordre = sorted(range(len(dates)), key=lambda i: dates[i], reverse=True)
+    gardes = set(ordre[:plancher])
+    vus: set[tuple] = set()
+    for i in ordre:  # du plus récent au plus ancien : le premier vu d'un panier gagne
+        age = maintenant - dates[i]
+        if age < TOUT_GARDER:
+            gardes.add(i)
+            continue
+        if age < PAR_JOUR:
+            panier = ("jour", dates[i].date())
+        else:
+            annee, semaine, _ = dates[i].isocalendar()
+            panier = ("semaine", annee, semaine)
+        if panier not in vus:
+            vus.add(panier)
+            gardes.add(i)
+    return gardes
 
 
 class DatabaseBackupManager:
@@ -70,8 +101,8 @@ class DatabaseBackupManager:
             if self._verify_backup(backup_path):
                 logger.info(f"✅ Backup créé avec succès: {backup_path}")
 
-                # Nettoyer les anciens backups (garder les 10 derniers)
-                self._cleanup_old_backups(keep=10)
+                # Nettoyer les anciens backups (rétention par âge)
+                self._cleanup_old_backups()
 
                 return backup_path
             else:
@@ -124,16 +155,16 @@ class DatabaseBackupManager:
             if conn is not None:
                 conn.close()
 
-    def _cleanup_old_backups(self, keep: int = 10):
-        """Nettoie les anciens backups en ne gardant que les N derniers"""
+    def _cleanup_old_backups(self, plancher: int = PLANCHER, maintenant: datetime | None = None):
+        """Retire les sauvegardes que la rétention par âge ne garde pas (`a_garder`)."""
         try:
-            backups = sorted(self.backup_dir.glob("backup_*.db"), key=lambda p: p.stat().st_mtime)
-
-            # Supprimer les plus anciens si on en a trop
-            if len(backups) > keep:
-                for backup in backups[:-keep]:
+            backups = list(self.backup_dir.glob("backup_*.db"))
+            dates = [datetime.fromtimestamp(p.stat().st_mtime) for p in backups]
+            gardes = a_garder(dates, maintenant or datetime.now(), plancher)
+            for i, backup in enumerate(backups):
+                if i not in gardes:
                     backup.unlink()
-                    logger.debug(f"Ancien backup supprimé: {backup.name}")
+                    logger.info(f"Ancienne sauvegarde retirée : {backup.name}")
 
         except (OSError, sqlite3.Error) as e:
             logger.error(f"Erreur nettoyage backups: {e}")

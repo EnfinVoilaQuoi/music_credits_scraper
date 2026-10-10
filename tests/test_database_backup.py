@@ -140,13 +140,13 @@ class TestRotation:
 
     def test_garde_les_n_plus_recents(self, manager):
         self._semer(manager, 5)
-        manager._cleanup_old_backups(keep=2)
+        manager._cleanup_old_backups(plancher=2)
         restants = sorted(p.name for p in manager.backup_dir.glob("backup_*.db"))
         assert restants == ["backup_seed3_20260903_120000.db", "backup_seed4_20260904_120000.db"]
 
     def test_ne_supprime_rien_sous_le_seuil(self, manager):
         self._semer(manager, 3)
-        manager._cleanup_old_backups(keep=10)
+        manager._cleanup_old_backups(plancher=10)
         assert len(list(manager.backup_dir.glob("backup_*.db"))) == 3
 
     def test_creation_plafonne_a_dix(self, manager):
@@ -158,7 +158,47 @@ class TestRotation:
     def test_erreur_de_nettoyage_silencieuse(self, manager):
         """Un nettoyage qui échoue ne doit pas faire perdre le backup tout juste créé."""
         manager.backup_dir = _DossierCasse()
-        manager._cleanup_old_backups(keep=1)  # ne lève pas
+        manager._cleanup_old_backups(plancher=1)  # ne lève pas
+
+
+class TestRetentionParAge:
+    """Décision utilisateur 2026-10-10 : la rotation à 10 avait chassé en
+    quelques heures la sauvegarde d'avant 23 fusions."""
+
+    MAINTENANT = db_mod.datetime(2026, 10, 10, 12, 0)
+
+    def _jours(self, *ages):
+        return [self.MAINTENANT - db_mod.timedelta(days=a) for a in ages]
+
+    def test_une_journee_chargee_ne_chasse_rien_de_la_semaine(self):
+        dates = self._jours(*([0] * 15), 3, 6.9)
+        assert db_mod.a_garder(dates, self.MAINTENANT) == set(range(17))
+
+    def test_au_dela_de_7_jours_la_derniere_de_chaque_jour(self):
+        # trois le même jour (il y a 10 j), une il y a 20 j
+        d = self.MAINTENANT - db_mod.timedelta(days=10)
+        dates = [d, d.replace(hour=8), d.replace(hour=18), self.MAINTENANT - db_mod.timedelta(20)]
+        assert db_mod.a_garder(dates, self.MAINTENANT, plancher=0) == {2, 3}
+
+    def test_au_dela_de_30_jours_la_derniere_de_chaque_semaine(self):
+        lundi = db_mod.datetime(2026, 8, 3, 12)  # > 30 j
+        dates = [lundi, lundi + db_mod.timedelta(days=2), lundi + db_mod.timedelta(days=7)]
+        assert db_mod.a_garder(dates, self.MAINTENANT, plancher=0) == {1, 2}
+
+    def test_le_plancher_garde_les_plus_recentes_quel_que_soit_leur_age(self):
+        vieux = db_mod.datetime(2025, 1, 6, 12)
+        dates = [vieux + db_mod.timedelta(minutes=i) for i in range(12)]  # même semaine
+        assert db_mod.a_garder(dates, self.MAINTENANT) == set(range(2, 12))
+
+    def test_nettoyage_sur_disque(self, manager):
+        for nom, age in (("recente", 1), ("j10_matin", 10.2), ("j10_soir", 10), ("an", 400)):
+            p = manager.backup_dir / f"backup_{nom}.db"
+            _make_db(p)
+            t = (self.MAINTENANT - db_mod.timedelta(days=age)).timestamp()
+            os.utime(p, (t, t))
+        manager._cleanup_old_backups(plancher=0, maintenant=self.MAINTENANT)
+        restants = sorted(p.name for p in manager.backup_dir.glob("backup_*.db"))
+        assert restants == ["backup_an.db", "backup_j10_soir.db", "backup_recente.db"]
 
 
 class TestRestauration:

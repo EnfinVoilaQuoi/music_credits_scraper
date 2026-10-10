@@ -1178,6 +1178,84 @@ class TestRenditions:
         assert res["unmatched"] == 1 and dm.variant_writes == []
 
 
+def _secondaire(id_, titre, primary, role):
+    t = _track(id_, titre, feat=True, primary=primary)
+    t.secondary_role = role
+    return t
+
+
+class TestSocleAmbigu:
+    """2026-10-10 — 13 propositions sur 21 restaient sans socle : le même titre
+    existe chez l'artiste en fiche principale ET en rôle secondaire."""
+
+    def test_la_fiche_principale_est_le_socle(self):
+        """Diam's « Marine » #8155 et la reprise d'Amel Bent #9958."""
+        tracks = [_track(1, "Marine"), _secondaire(2, "Marine", "Amel Bent", "Cover")]
+        res, dm = _run(tracks, [_entry("Marine - Version 2006", 100, 1, "SPV")])
+        assert dm.variant_writes == [(1, "SPV", 100, 1, "Marine - Version 2006")]
+
+    def test_un_remix_reste_une_proposition_avec_son_socle(self):
+        """Kid Cudi « Day ‘N’ Nite » #3509 / remix de Le Boeuf #9993 : le
+        remix nommé n'est jamais rattaché d'office, mais il a son socle."""
+        tracks = [
+            _track(1, "Day ‘N’ Nite", spotify_id="SP1"),
+            _secondaire(2, "Day ‘N’ Nite", "Le Boeuf", "Remix"),
+        ]
+        res, dm = _run(tracks, [_entry("Day 'N' Nite - Crookers Remix", 50, 1, "SPR")])
+        assert dm.variant_writes == [] and dm.streams_writes == []
+        (s,) = res["suggestions"]
+        assert (s["kind"], s["parent_track_id"]) == ("remix_named", 1)
+
+    def test_l_artiste_invite_s_efface_devant_sa_fiche(self):
+        tracks = [_track(1, "Mood"), _track(2, "Mood", feat=True, primary="Autre")]
+        res, dm = _run(tracks, [_entry("Mood - Live", 100, 1, "SPL")])
+        assert [w[0] for w in dm.variant_writes] == [1]
+
+    def test_seules_des_fiches_secondaires_ne_font_pas_un_socle(self):
+        """Une reprise n'est jamais l'original de la page Kworb de l'artiste —
+        même seule (elle était rattachée d'office avant)."""
+        tracks = [_secondaire(1, "Marine", "Amel Bent", "Cover")]
+        res, dm = _run(tracks, [_entry("Marine - Version 2006", 100, 1, "SPV")])
+        assert dm.variant_writes == []
+        (s,) = res["suggestions"]
+        assert s["parent_track_id"] is None and s["proposition"] == "ignore"
+        assert any("rôle secondaire" in m for m in s["motifs"])
+
+    def test_socle_a_sous_titre_propose_sans_rattacher(self):
+        """« Pursuit of Happiness (Nightmare) » est l'original ; le titre nu
+        n'existe qu'en reprises. Proposé, jamais d'office."""
+        tracks = [
+            _track(1, "Pursuit of Happiness (Nightmare)", spotify_id="SP1"),
+            _secondaire(2, "Pursuit of Happiness", "Lissie", "Cover"),
+            _secondaire(3, "Pursuit of Happiness", "Chance Peña", "Cover"),
+        ]
+        res, dm = _run(tracks, [_entry("Pursuit of Happiness - Live", 100, 1, "SPL")])
+        assert dm.variant_writes == []
+        (s,) = res["suggestions"]
+        assert (s["parent_track_id"], s["proposition"]) == (1, "rendition")
+        assert any("sous-titre" in m for m in s["motifs"])
+
+    def test_une_version_ou_l_artiste_n_est_pas_premier_credite_est_proposee(self):
+        """OrelSan : « Jour Meilleur (feat. Orelsan) - Lost Frequencies Edit »
+        (Kworb `*`) est la sortie de Lost Frequencies, pas une prise d'OrelSan."""
+        tracks = [_track(1, "Jour meilleur"), _secondaire(2, "Jour meilleur", "Styleto", "Cover")]
+        e = _entry("Jour Meilleur (feat. Orelsan) - Lost Frequencies Edit", 3_735_179, 1, "SPE")
+        e["is_feature"] = True
+        res, dm = _run(tracks, [e])
+        assert dm.variant_writes == []
+        (s,) = res["suggestions"]
+        assert (s["parent_track_id"], s["proposition"]) == (1, "rendition")
+        assert any("premier crédité" in m for m in s["motifs"])
+
+    def test_deux_fiches_principales_restent_ambigues(self):
+        tracks = [_track(1, "Meilleur"), _track(2, "MEILLEUR")]
+        assert uk.original_de("meilleur", uk.construire_index(tracks)).fiche is None
+
+    def test_un_titre_generique_a_sous_titre_n_est_pas_un_socle(self):
+        tracks = [_track(1, "Intro (Late Registration)")]
+        assert uk.original_de("intro", uk.construire_index(tracks)).fiche is None
+
+
 class TestRemix:
     def test_remix_nomme_propose_tiers_sans_ecrire(self):
         identites = {

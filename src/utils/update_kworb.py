@@ -489,6 +489,52 @@ def _departager_homonymes(lignes: list[dict], track, lire_identite) -> tuple[lis
     return retenues, ecartees
 
 
+@dataclass
+class Socle:
+    """La fiche ORIGINALE d'une version Kworb, telle que `original_de` l'a trouvée."""
+
+    fiche: object = None
+    #: Fiches qui portaient ce socle quand aucune n'a pu être retenue.
+    candidats: list = field(default_factory=list)
+    #: Trouvée par un SOUS-TITRE (« Pursuit of Happiness (Nightmare) ») : jamais
+    #: de rattachement automatique, une proposition seulement.
+    par_sous_titre: bool = False
+
+
+def original_de(socle: str, index: Index) -> Socle:
+    """La fiche ORIGINALE dont `socle` (titre normalisé) est le titre nu.
+
+    Le même titre existe souvent deux fois chez l'artiste : sa fiche et une
+    ligne en RÔLE SECONDAIRE (Kid Cudi « Day ‘N’ Nite » #3509 et le remix de Le
+    Boeuf #9993, Diam's « Marine » et la reprise d'Amel Bent) — exiger un
+    parent unique laissait 13 propositions sur 21 sans socle (2026-10-10).
+    Même règle que pour les lignes au titre nu : une fiche en rôle secondaire
+    n'est jamais l'original de SA page Kworb. Entre plusieurs fiches
+    principales, celle où l'artiste n'est pas invité l'emporte si elle est seule.
+
+    Sans fiche principale au titre nu, la fiche à SOUS-TITRE unique est l'original
+    (« Pursuit of Happiness (Nightmare) ») — un titre générique jamais.
+    """
+    parents = index.by_socle.get(socle, [])
+    principales = [p for p in parents if not p.secondary_role]
+    if len(principales) > 1:
+        siennes = [p for p in principales if not p.is_featuring]
+        if len(siennes) == 1:
+            principales = siennes
+    if len(principales) == 1:
+        return Socle(fiche=principales[0])
+    if principales or titre_generique(socle):
+        return Socle(candidats=principales or parents)
+    fiches = {
+        f.id: f
+        for f, _ in index.by_titre_court.get(socle, [])
+        if not f.secondary_role and parse_variant(f.title).kind == Kind.NONE
+    }
+    if len(fiches) == 1:
+        return Socle(fiche=next(iter(fiches.values())), par_sous_titre=True)
+    return Socle(candidats=list(fiches.values()) or parents)
+
+
 def _fiche_de_la_version(v, index: Index):
     """Une FICHE de cette version existe-t-elle déjà (« Nudes (Live at AK
     Studios) » chez Genius pour « Nudes - Acoustic » chez Spotify) ? Alors la
@@ -527,8 +573,11 @@ def _candidats_remix_existants(v, index: Index) -> list:
 def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) -> dict:
     """Le dict que le dialogue affiche pour un remix — jamais écrit d'office."""
     socle = _normalize_title(v.socle)
-    parents = index.by_socle.get(socle) or index.by_title.get(socle) or []
-    parent = parents[0] if len(parents) == 1 else None
+    trouve = original_de(socle, index)
+    parent = trouve.fiche
+    if parent is None and not trouve.candidats:
+        parents = index.by_title.get(socle) or []
+        parent = parents[0] if len(parents) == 1 else None
     identite = lire_identite(entry["spotify_id"]) if entry.get("spotify_id") else None
     credited = [a for a in (identite or {}).get("artists") or [] if a]
     proposition = "tiers" if v.kind == Kind.REMIX_NAMED else "collab"
@@ -724,12 +773,20 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
         fiche = _fiche_de_la_version(v, index)
         if fiche is not None:
             return Rapprochement(track=fiche, via="fiche")
-        parents = index.by_socle.get(socle, [])
-        if len(parents) == 1 and sid and not rejete:
-            return Rapprochement(rendition_de=parents[0], via="rendition_auto")
-        parent = parents[0] if len(parents) == 1 else None
+        trouve = original_de(socle, index)
+        parent, parents = trouve.fiche, trouve.candidats
+        # Kworb `*` : l'artiste n'est pas premier crédité — la version est la
+        # sortie d'un autre (« Jour Meilleur (feat. Orelsan) - Lost Frequencies
+        # Edit », un remix nommé que la taxonomie lit « Edit ») : proposée.
+        tiers = bool(entry.get("is_feature"))
+        if parent is not None and sid and not rejete and not trouve.par_sous_titre and not tiers:
+            return Rapprochement(rendition_de=parent, via="rendition_auto")
         if parent is None and not parents:
             return Rapprochement(motif="aucun")
+        if trouve.par_sous_titre:
+            motifs.append(f"socle trouvé par son sous-titre : « {parent.title} »")
+        if tiers:
+            motifs.append("Kworb : l'artiste n'est pas premier crédité (*)")
         return Rapprochement(
             suggestion={
                 "kworb_title": entry["title"],
@@ -747,7 +804,17 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
                 "existants": [],
                 "proposition": "rendition" if parent else "ignore",
                 "motifs": motifs
-                + ([] if parent else [f"{len(parents)} morceaux portent ce socle"]),
+                + (
+                    []
+                    if parent
+                    else [
+                        (
+                            f"{len(parents)} fiche(s) en rôle secondaire portent ce socle"
+                            if all(p.secondary_role for p in parents)
+                            else f"{len(parents)} morceaux portent ce socle"
+                        )
+                    ]
+                ),
                 "track_id": parent.id if parent else None,
                 "db_title": parent.title if parent else None,
                 "score": 0.0,
@@ -1176,9 +1243,9 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             # garde quand même l'indication (décision utilisateur), avec le
             # pointeur vers la fiche — affichée sans compter.
             socle = _normalize_title(parse_variant(entry["title"]).socle)
-            parents = index.by_socle.get(socle) or []
+            trouve = original_de(socle, index)
             parent = index.by_rendition_id.get(entry["spotify_id"]) or (
-                parents[0] if len(parents) == 1 else None
+                None if trouve.par_sous_titre else trouve.fiche
             )
             if parent is not None and parent.id != track.id:
                 data_manager.record_variant_streams(

@@ -115,6 +115,9 @@ scripts/*
 !scripts/discogs_genius_oracle.py
 # Certifications : réécriture des rattachements par sous-chaîne (2026-09-06)
 !scripts/repair_certifications.py
+!scripts/repair_lrc_garde.py
+!scripts/repair_durees_video.py
+!scripts/fusionner_doublons_deezer.py
 !scripts/audit_spotify_ids.py
 !scripts/audit_donnees.py
 !scripts/repair_spotify_ids.py

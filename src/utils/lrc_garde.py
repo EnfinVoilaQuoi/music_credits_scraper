@@ -66,6 +66,19 @@ def _autre_enregistrement(titre: str) -> bool:
     return bool(_RADIO_EDIT.search(edition))
 
 
+#: Au-delà, deux durées ne sont pas le même fichier audio (2 s = même fichier,
+#: 5 s = même enregistrement d'une plateforme à l'autre, cf. écarts Deezer).
+ECART_DUREE_S = 5
+
+
+def _durees_dementent(track, autre) -> bool:
+    try:
+        a, b = int(track.duration), int(autre.duration)
+    except (TypeError, ValueError):
+        return False
+    return abs(a - b) > ECART_DUREE_S
+
+
 class GardeLrc:
     def __init__(self, tracks=()):
         self._par_lrc: dict[str, list] = {}
@@ -94,6 +107,19 @@ class GardeLrc:
             if meme_socle(track.title, autre.title):
                 if _autre_enregistrement(track.title) and not _autre_enregistrement(autre.title):
                     return f"LRC de l'original « {autre.title} » (autre enregistrement)"
+                if (
+                    famille_de(track.title) is not None
+                    and famille_de(autre.title) is None
+                    and _durees_dementent(track, autre)
+                ):
+                    # « X Version » range en « édition » (*Version* l'emporte) :
+                    # « PABLO (Stem Player Version) » 372 s, « Cold (Yeezus Tour
+                    # Version) »… La durée ne CONFIRME jamais, elle DÉMENT ici
+                    # (décision utilisateur 2026-10-09).
+                    return (
+                        f"LRC de « {autre.title} » ({autre.duration} s), "
+                        f"fiche de {track.duration} s"
+                    )
                 continue
             if titres_confondus(track.title, autre.title):
                 continue  # doublon de fiche : affaire de fusion, pas de LRC

@@ -228,3 +228,19 @@ class TestSelection:
             SimpleNamespace(), Artist(name="A"), "credits", opts, SimpleNamespace()
         )
         assert "discogs" in vus["echecs"] and "genius_scrape" not in vus["echecs"]
+
+
+class TestRequalification:
+    """CORRECTIFS 1.13 : les lignes écrites avant le correctif de classement."""
+
+    def test_absence_retiree_annulation_en_timeout(self, repo):
+        repo.record(
+            [
+                _v(IssueKind.CRASH, 1, "ytmusic", detail="pas de paroles pour cette vidéo"),
+                _v(IssueKind.CRASH, 2, "songbpm", detail="CancelledError: "),
+                _v(IssueKind.CRASH, 3, "ytmusic", detail="KeyError: 'videoId'"),
+            ]
+        )
+        assert repo.requalifier_anciens_echecs() == (1, 1)
+        restes = {r["track_id"]: r["issue"] for r in repo.echecs_suivis()}
+        assert restes == {2: "timeout", 3: "crash"}

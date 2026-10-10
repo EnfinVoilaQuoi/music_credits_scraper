@@ -209,3 +209,28 @@ class TestLrclibSansParoles:
         """Avec paroles jugeables, c'est la concordance qui décide, pas le titre."""
         fiche = _t("1 pour la plume", tid=1, paroles=_PAROLES)
         assert self._resoudre(fiche, "Un pour la plume").lyrics_synced == _LRC
+
+
+class TestDementiParLaDuree:
+    """« X Version » range en « édition » ; la durée DÉMENT (2026-10-10)."""
+
+    def test_version_nommee_de_duree_differente(self):
+        original = _t("PABLO", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
+        original.duration = 180
+        stem = _t("PABLO (Stem Player Version)", tid=2, gid=2)
+        stem.duration = 372
+        assert GardeLrc([original]).motif(stem, _LRC)
+
+    def test_l_original_garde_son_lrc(self):
+        original = _t("PABLO", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
+        original.duration = 180
+        stem = _t("PABLO (Stem Player Version)", tid=2, gid=2, lrc=_LRC)
+        stem.duration = 372
+        assert GardeLrc([original, stem]).motif(original, _LRC) is None
+
+    def test_meme_duree_meme_enregistrement(self):
+        original = _t("FRANCHISE", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
+        original.duration = 202
+        promo = _t("FRANCHISE (Promo CD Version)", tid=2, gid=2)
+        promo.duration = 203
+        assert GardeLrc([original]).motif(promo, _LRC) is None

@@ -201,6 +201,36 @@ class SourceUsageRepository:
         except SQLAlchemyError:
             _log().exception("source_usage: suivi des échecs par morceau non enregistré")
 
+    def requalifier_anciens_echecs(self) -> tuple[int, int]:
+        """Applique aux lignes DÉJÀ suivies les règles de classement du
+        2026-10-10 (CORRECTIFS 1.13), écrites avant elles : une absence ou un
+        refus d'YTM (« pas de paroles pour cette vidéo », « titre non
+        confirmé », « aucun résultat ») est une RÉPONSE — la ligne part, comme
+        `suivre_morceaux` la retirerait ; une annulation par notre délai de garde
+        (`CancelledError`) est un `timeout`. Rend (retirées, requalifiées)."""
+        reponses = (
+            "message LIKE 'pas de paroles%' OR message LIKE '%non confirmé%' "
+            "OR message LIKE 'aucun résultat%'"
+        )
+        try:
+            with self.engine.begin() as conn:
+                retirees = conn.execute(
+                    text(
+                        "DELETE FROM source_track_failures "
+                        f"WHERE issue = 'crash' AND ({reponses})"
+                    )
+                ).rowcount
+                requalifiees = conn.execute(
+                    text(
+                        "UPDATE source_track_failures SET issue = 'timeout' "
+                        "WHERE issue = 'crash' AND message LIKE 'CancelledError%'"
+                    )
+                ).rowcount
+        except SQLAlchemyError:
+            _log().exception("source_usage: requalification des échecs suivis impossible")
+            return 0, 0
+        return retirees, requalifiees
+
     # ── Lecture ────────────────────────────────────────────────────────────────
     def echecs_suivis(
         self,

@@ -331,3 +331,14 @@ def test_artiste_absent_propose_l_ajout(qtbot, fenetre, monkeypatch):
     fenetre.charger("Inconnu")
     qtbot.waitUntil(lambda: bool(demandes), timeout=10_000)
     assert fenetre.chargement is None
+
+
+def test_auto_completion_insere_le_nom_seul(qtbot, fenetre):
+    from src.gui_qt.fenetre import ROLE_NOM
+
+    qtbot.waitUntil(lambda: bool(fenetre.artistes), timeout=10_000)
+    fenetre._completer("is")
+    item = fenetre._modele_completion.item(0)
+    assert item.data(ROLE_NOM) == "Isha"
+    assert item.text().startswith("Isha") and "titre" in item.text()
+    assert fenetre.completion.completionRole() == ROLE_NOM

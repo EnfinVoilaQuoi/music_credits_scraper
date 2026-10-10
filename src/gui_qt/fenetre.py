@@ -50,6 +50,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+ROLE_NOM = Qt.ItemDataRole.UserRole + 10
+
 #: (clé, libellé, icône, étapes du cycle). Ordre de la barre des flux.
 FLUX = (
     ("disco", "Discographie", "playlist-add", ("disco",)),
@@ -153,7 +155,9 @@ class FenetrePrincipale(QMainWindow):
         self._modele_completion = QStandardItemModel(self)
         self.completion = QCompleter(self._modele_completion, self)
         self.completion.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
-        self.completion.setCompletionRole(Qt.ItemDataRole.EditRole)
+        # Le NOM est inséré, le détail seulement affiché : `QStandardItem` confond
+        # EditRole et DisplayRole, d'où un rôle à part pour la complétion.
+        self.completion.setCompletionRole(ROLE_NOM)
         self.recherche.setCompleter(self.completion)
         self.b_groupes = _bouton_icone(
             "users-group",
@@ -285,8 +289,7 @@ class FenetrePrincipale(QMainWindow):
         self._modele_completion.clear()
         for a in suggestions(texte, self.artistes, limite=15):
             item = QStandardItem(f"{a.nom}    —  {a.detail}")
-            item.setData(a.nom, Qt.ItemDataRole.EditRole)
-            item.setData(f"{a.nom}    —  {a.detail}", Qt.ItemDataRole.DisplayRole)
+            item.setData(a.nom, ROLE_NOM)
             self._modele_completion.appendRow(item)
 
     def charger(self, nom: str) -> None:

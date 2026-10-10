@@ -498,3 +498,42 @@ def test_resume_des_artistes(data_manager):
     (resume,) = dm.resume_des_artistes()
     assert resume["name"] == "Isha" and resume["tracks_count"] == 1
     assert resume["last_update"] == datetime.now().date().isoformat()
+
+
+class TestChargement:
+    """Charger un artiste pour l'affichage — lectures seules, base de test."""
+
+    @pytest.fixture
+    def runtime(self, data_manager, tmp_path):
+        from types import SimpleNamespace
+
+        from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+        desactives = DisabledTracksManager()
+        desactives.disabled_tracks_dir = tmp_path
+        artiste = Artist(name="Isha")
+        data_manager.save_artist(artiste)
+        for i, titre in enumerate(("Ailleurs", "Bitume"), start=1):
+            t = morceau(id=None, title=titre)
+            t.artist = artiste
+            data_manager.save_track(t)
+        return SimpleNamespace(data_manager=data_manager, disabled=desactives)
+
+    def test_charger_artiste_absent(self, runtime):
+        from src.presentation import chargement
+
+        assert chargement.charger(runtime, "Inconnu") is None
+
+    def test_charger_puis_desactiver(self, runtime):
+        from src.presentation import chargement
+
+        c = chargement.charger(runtime, "Isha")
+        assert {ligne.track.title for ligne in c.lignes} == {"Ailleurs", "Bitume"}
+        assert c.cartouche.ligne_titres.startswith("2 titres")
+        cible = c.lignes[0].id
+        changees = c.avec_desactives({cible})
+        assert [ligne.id for ligne in changees] == [cible]
+        assert next(ligne for ligne in c.lignes if ligne.id == cible).desactive
+        assert c.cartouche.compteurs["desactives"] == 1
+        # Réactiver ne touche que la ligne qui change.
+        assert [ligne.id for ligne in c.avec_desactives(set())] == [cible]

@@ -58,7 +58,8 @@ def start_streams_update(app):
     # rafraîchissement de quelques secondes.
     kworb_var = ctk.BooleanVar(value=True)
     spotify_light_var = ctk.BooleanVar(value=True)
-    spotify_full_var = ctk.BooleanVar(value=False)
+    # Cochée par défaut (décision utilisateur 2026-10-10).
+    spotify_full_var = ctk.BooleanVar(value=True)
     ytm_var = ctk.BooleanVar(value=True)
 
     ctk.CTkCheckBox(dialog, text="Spotify — Kworb (rapide)", variable=kworb_var).pack(
@@ -165,7 +166,7 @@ def run_streams_update(
     fetch_ytm: bool,
     ytm_channel_raw: str = "",
     fetch_spotify_web: bool = False,
-    spotify_full_crawl: bool = False,
+    spotify_full_crawl: bool = True,
     track_ids=None,
 ):
     """Lance la récupération des streams dans un thread daemon.

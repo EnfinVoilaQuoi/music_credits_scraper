@@ -271,3 +271,41 @@ def test_la_garde_lrc_lit_la_discographie_en_base_si_rien_n_est_charge():
     )
     credits.run(_rt(_DMDisco()), artiste, [version], opts, Hooks(), cl)
     assert lyr.garde.motif(version, "[00:01.00] x") is not None
+
+
+def test_une_page_genius_recente_n_est_pas_relue_sans_forcer():
+    """Décision utilisateur 2026-10-10 : un run sans `--manquants` relisait
+    TOUTES les pages Genius, même lues la veille."""
+    from datetime import datetime, timedelta
+
+    maintenant = datetime(2026, 10, 10)
+    recente = _track("Récente", last_scraped=maintenant - timedelta(days=3))
+    ancienne = _track("Ancienne", last_scraped=maintenant - timedelta(days=45))
+    jamais = _track("Jamais")
+    assert credits.pages_a_relire(
+        [recente, ancienne, jamais], force=False, maintenant=maintenant
+    ) == [
+        ancienne,
+        jamais,
+    ]
+    assert len(credits.pages_a_relire([recente, ancienne, jamais], force=True)) == 3
+
+
+def test_le_run_ne_passe_au_scraper_que_les_pages_a_relire():
+    from datetime import datetime
+
+    recente = _track("Récente", last_scraped=datetime.now())
+    ancienne = _track("Ancienne")
+    lues = []
+
+    class _GeniusTrace(_Genius):
+        def scrape_multiple_tracks(self, tracks, progress_callback=None):
+            lues.extend(t.title for t in tracks)
+            return super().scrape_multiple_tracks(tracks, progress_callback)
+
+    cl, _, _ = _clients(genius=_GeniusTrace())
+    opts = credits.OptionsCredits(
+        genius=True, discogs=False, paroles_genius=False, paroles_ytm=False, sync_lrclib=False
+    )
+    bilan = credits.run(_rt(), Artist(name="Swing"), [recente, ancienne], opts, Hooks(), cl)
+    assert lues == ["Ancienne"] and bilan.genius_recents == 1

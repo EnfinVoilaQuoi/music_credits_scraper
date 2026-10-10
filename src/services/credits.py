@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
@@ -107,6 +108,23 @@ class BilanCredits(Bilan):
     paroles: dict | None = None
     sync: dict | None = None
     sauves: int = 0
+    #: Pages Genius lues il y a moins de `RELECTURE_GENIUS`, non relues.
+    genius_recents: int = 0
+
+
+#: Une page Genius lue depuis moins longtemps n'est pas relue, sauf crédits
+#: forcés (décision utilisateur 2026-10-10 : « je pensais même que c'était déjà
+#: le cas ») — un run sans `--manquants` relisait TOUTES les pages, plusieurs
+#: heures de navigateur chez Kanye (~3 700 fiches) pour des pages vues la veille.
+RELECTURE_GENIUS = timedelta(days=30)
+
+
+def pages_a_relire(tracks, *, force: bool, maintenant: datetime | None = None) -> list:
+    """PUR. Les morceaux dont la page Genius est à (re)lire."""
+    if force:
+        return list(tracks)
+    seuil = (maintenant or datetime.now()) - RELECTURE_GENIUS
+    return [t for t in tracks if t.last_scraped is None or t.last_scraped < seuil]
 
 
 def _genius_scraper():
@@ -378,8 +396,15 @@ def run(
             # Pas de purge anticipée en mode forcé (2026-09-27) : le scraper
             # remplace les crédits `genius` d'un morceau quand SA page est lue,
             # et seulement alors — un échec de page n'efface rien.
+            a_lire = pages_a_relire(tracks, force=options.force_credits)
+            bilan.genius_recents = len(tracks) - len(a_lire)
+            if bilan.genius_recents:
+                logger.info(
+                    f"Genius : {bilan.genius_recents} page(s) lue(s) depuis moins de "
+                    f"{RELECTURE_GENIUS.days} j, non relue(s) (forcer pour tout relire)"
+                )
             bilan.genius = scraper.scrape_multiple_tracks(
-                tracks, progress_callback=lambda c, tot, nom: hooks.progress(c, tot, nom, "Genius")
+                a_lire, progress_callback=lambda c, tot, nom: hooks.progress(c, tot, nom, "Genius")
             )
         if hooks.should_stop():
             bilan.interrompu("arrêt demandé après les crédits Genius")
@@ -572,6 +597,11 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
     if bilan.genius:
         msg += "🎵 Crédits Genius:\n"
         msg += f"  - Réussis: {bilan.genius['success']}\n  - Échoués: {bilan.genius['failed']}\n"
+        if bilan.genius_recents:
+            msg += (
+                f"  - Pages lues depuis moins de {RELECTURE_GENIUS.days} j, non relues: "
+                f"{bilan.genius_recents}\n"
+            )
         if bilan.genius.get("errors"):
             msg += f"  - Erreurs: {len(bilan.genius['errors'])}\n"
         if bilan.genius.get("api_remplaces"):

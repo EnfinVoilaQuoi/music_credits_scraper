@@ -43,7 +43,9 @@ class OptionsStreams:
 
     kworb: bool = True
     spotify_web: bool = True
-    spotify_full: bool = False
+    # Par défaut (décision utilisateur 2026-10-10) : Kworb ne liste rien sous
+    # ~100 000 streams, seules les pages d'album Spotify les donnent.
+    spotify_full: bool = True
     ytm: bool = True
     ytm_channel: str = ""
     track_ids: frozenset[int] | None = None

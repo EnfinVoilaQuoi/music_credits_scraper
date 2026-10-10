@@ -175,7 +175,9 @@ def _enrich_args(p: argparse.ArgumentParser) -> None:
 def _streams_args(p: argparse.ArgumentParser) -> None:
     _bool_flags(p, "kworb", True, "Spotify via Kworb (rapide)")
     _bool_flags(p, "spotify-web", True, "page artiste Spotify (auditeurs mensuels + top 10)")
-    p.add_argument("--spotify-full", action="store_true", help="tous les morceaux et albums")
+    # Actif par défaut (décision utilisateur 2026-10-10 : « je l'active à chaque
+    # fois ») — Kworb ne liste rien sous ~100 000 streams.
+    _bool_flags(p, "spotify-full", True, "tous les morceaux et albums")
     _bool_flags(p, "ytm-streams", True, "YouTube Music")
     p.add_argument("--ytm-channel", default="", help="@handle, lien ou UC… à épingler")
 

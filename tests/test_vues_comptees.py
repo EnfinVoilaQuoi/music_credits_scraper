@@ -137,3 +137,36 @@ def test_un_verdict_normal_recalcule_le_total_aussitot(data_manager):
     data_manager.annuler_verdict(t.artist.id, DETECTEUR, cas.cle)
     apres_verdict(data_manager, cas)
     assert _ytm(data_manager, t.id) == 52_583
+
+
+def test_rejeter_la_video_partagee_rend_ses_vues_a_l_autre_fiche(data_manager):
+    """« All of the Lights (Remix) » portait la vidéo de l'original : partagée,
+    elle ne comptait nulle part. Rejetée du remix, elle compte pour l'original
+    — tout de suite, pas au prochain run."""
+    from src.utils.youtube_integration import reject_youtube_link
+
+    class _Chercheur:
+        def forget(self, *_):
+            return True
+
+    a = Artist(name="Kanye West")
+    a.id = data_manager.save_artist(a)
+    original = Track(title="All of the Lights", artist=a, genius_id=1)
+    remix = Track(title="All of the Lights (Remix)", artist=a, genius_id=2)
+    for t in (original, remix):
+        data_manager.save_track(t)
+    clip = TrackVideo(
+        video_id="CLIPCLIP001", title="All Of The Lights", source="search_auto", views=64
+    )
+    data_manager.record_track_videos(original.id, [clip])
+    data_manager.record_track_videos(remix.id, [clip])
+    assert data_manager.recalculer_vues_ytm(original.id) is None  # partagée : ne compte pas
+    remix = next(x for x in data_manager.get_artist_tracks(a.id) if x.id == remix.id)
+    reject_youtube_link(
+        data_manager,
+        remix,
+        "https://www.youtube.com/watch?v=CLIPCLIP001",
+        "Kanye West",
+        searcher=_Chercheur(),
+    )
+    assert _ytm(data_manager, original.id) == 64

@@ -69,6 +69,20 @@ def _vues_mesurees(track, video_id) -> bool:
     return any(v.video_id == video_id and v.views for v in track.videos)
 
 
+def _oublier_video(data_manager, track, video_id) -> None:
+    """Oublie la vidéo de la fiche ET recalcule les totaux qui en dépendent : le
+    sien si elle était mesurée, et celui des autres fiches de l'artiste qui la
+    portent — elle cesse d'être partagée, elles l'excluaient."""
+    mesuree = _vues_mesurees(track, video_id)
+    autres = data_manager.fiches_mesurant_video(video_id, track.id)
+    data_manager.forget_track_video(track.id, video_id)
+    track.videos = [v for v in track.videos if v.video_id != video_id]
+    if mesuree:
+        data_manager.recalculer_vues_ytm(track.id)
+    for tid in autres:
+        data_manager.recalculer_vues_ytm(tid)
+
+
 def clear_youtube_link(data_manager, track) -> None:
     """Retire le lien YouTube d'un morceau (retour à la recherche live).
 
@@ -79,11 +93,7 @@ def clear_youtube_link(data_manager, track) -> None:
     video_id = extract_video_id(track.youtube_url)
     data_manager.clear_track_youtube_link(track.id)
     if video_id:
-        mesuree = _vues_mesurees(track, video_id)
-        data_manager.forget_track_video(track.id, video_id)
-        track.videos = [v for v in track.videos if v.video_id != video_id]
-        if mesuree:
-            data_manager.recalculer_vues_ytm(track.id)
+        _oublier_video(data_manager, track, video_id)
     track.youtube_url = None
     track.youtube_url_source = None
     logger.info(f"🔗 Lien YouTube retiré : '{track.title}'")
@@ -104,14 +114,10 @@ def reject_youtube_link(data_manager, track, url: str, artiste_courant: str, sea
         from src.utils.corrections_fiches import memoriser_video_refusee
 
         memoriser_video_refusee(track, video_id)
-        mesuree = _vues_mesurees(track, video_id)
-        data_manager.forget_track_video(track.id, video_id)
-        track.videos = [v for v in track.videos if v.video_id != video_id]
-        if mesuree:
-            # Sans recalcul, le total garde les vues de la vidéo rejetée
-            # jusqu'au prochain run YTM (Diam's, 2026-10-10 : 143 206 pour
-            # une vidéo restante à 105 453).
-            data_manager.recalculer_vues_ytm(track.id)
+        # Sans recalcul, le total garde les vues de la vidéo rejetée jusqu'au
+        # prochain run YTM (Diam's, 2026-10-10 : 143 206 pour une vidéo
+        # restante à 105 453).
+        _oublier_video(data_manager, track, video_id)
     if video_id and extract_video_id(track.youtube_url) == video_id:
         data_manager.clear_track_youtube_link(track.id)
         track.youtube_url = None

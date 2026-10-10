@@ -369,3 +369,14 @@ def test_un_credit_discogs_hors_piste_part_de_toutes_les_jumelles(data_manager, 
     for t in (riche, pauvre):
         noms = {c.name for c in data_manager.get_artist_tracks(t.artist.id)[0].credits}
         assert noms == {"No I.D."}
+
+
+def test_la_duree_de_la_soeur_suit_ses_observations(data_manager, famille):
+    """2026-10-10 : 43 fiches à durée VIDE malgré leurs observations — la ligne
+    enregistrée ré-arbitrait seule, la sœur recevait les observations sans que
+    sa colonne suive (Kanye « Heartless », sœur de la ligne Kid Cudi à 210 s)."""
+    riche, pauvre = famille
+    riche.observations = [Observation("duration", 210, "deezer")]
+    data_manager.save_track(riche)
+    assert _colonne(data_manager, riche.id, "duration") == 210
+    assert _colonne(data_manager, pauvre.id, "duration") == 210

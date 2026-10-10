@@ -33,6 +33,7 @@ from src.utils.track_mapper import _clean_duration, track_from_row
 from src.utils.track_soeurs import (
     effacer_chez_les_soeurs,
     fusionner_constat_instrumental,
+    ids_soeurs,
     synchroniser_soeurs,
 )
 from src.utils.version_descriptors import titre_generique
@@ -559,6 +560,15 @@ class TrackRepository:
                     )
                     track._credits_genius_frais = False
                 synchroniser_soeurs(conn, track.id, track.genius_id)
+                # Les sœurs reçoivent des observations : leurs colonnes suivent.
+                # Sans ça, la ligne enregistrée ré-arbitrait seule (2026-10-10 :
+                # 43 fiches à durée VIDE malgré leurs observations — Kanye
+                # « Heartless », sœur de la ligne Kid Cudi à 210 s).
+                for soeur in ids_soeurs(conn, track.id, track.genius_id)[0]:
+                    self._rearbitrer_duree_et_date(conn, soeur)
+                    valeurs = self._arbitrer_streams(conn, soeur)
+                    if valeurs:
+                        conn.execute(update(tracks).where(tracks.c.id == soeur).values(**valeurs))
 
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
@@ -1144,6 +1154,23 @@ class TrackRepository:
             logger.error(f"Erreur suppression track {track_id}: {e}")
             return False
 
+    #: Colonnes d'identité qu'une fusion recopie si la fiche gardée ne les a
+    #: pas. `genius_id`/`genius_url` n'y sont pas : la page de la fiche gardée
+    #: est son identité, celle de l'absorbée est mémorisée à part.
+    _COLONNES_IDENTITE_FUSION = (
+        "spotify_id",
+        "spotify_url",
+        "spotify_page_title",
+        "spotify_id_checked_at",
+        "isrc",
+        "discogs_id",
+        "deezer_id",
+        "deezer_url",
+        "deezer_checked_at",
+        "apple_music_id",
+        "apple_music_checked_at",
+    )
+
     def merge_tracks(self, keep_id: int, delete_id: int) -> bool:
         """Fusionne delete_id dans keep_id : transfère les crédits (en écartant
         ceux déjà présents à l'identique sur le morceau conservé) et les erreurs
@@ -1152,6 +1179,22 @@ class TrackRepository:
         AVANT (règle projet : backup avant toute opération destructive)."""
         try:
             with self.engine.begin() as conn:
+                # Identité : la fiche gardée COMBLE ses colonnes vides depuis
+                # l'autre, sans jamais en remplacer une (« le premier renseigne,
+                # personne ne remplace »). Sans ça, une fiche Deezer absorbée par
+                # sa page Genius emportait son `deezer_id` (2026-10-10 : les 23
+                # fusions du lot 1.1 l'avaient perdu ; le dialogue de l'app ne le
+                # recopiait pas non plus). Avant `track_spotify_ids` : `is_primary`
+                # se recale sur la colonne.
+                for col in self._COLONNES_IDENTITE_FUSION:
+                    conn.execute(
+                        text(
+                            f"UPDATE tracks SET {col} = "
+                            f"(SELECT {col} FROM tracks WHERE id = :delete_id) "
+                            f"WHERE id = :keep_id AND ({col} IS NULL OR {col} = '')"
+                        ),
+                        {"keep_id": keep_id, "delete_id": delete_id},
+                    )
                 # Un scrape de l'une des deux fiches vaut pour la fusion : les
                 # provisoires de l'API partent AVANT la dédup, sinon l'un d'eux
                 # écarterait le crédit scrapé identique de l'autre fiche.
@@ -1316,6 +1359,10 @@ class TrackRepository:
                 valeurs = self._arbitrer_streams(conn, keep_id)
                 if valeurs:
                     conn.execute(update(tracks).where(tracks.c.id == keep_id).values(**valeurs))
+                # Même chose pour la durée et la date (2026-10-10 : Flynt « Un
+                # pour la plume (Version équipe) » gardait une durée VIDE avec
+                # cinq observations à 256-257 s).
+                self._rearbitrer_duree_et_date(conn, keep_id)
                 self._ytm_apres_fusion(conn, keep_id, delete_id, total_sans_video)
                 # `instrumental` (e27) n'est PAS symétrique comme `unreleased` :
                 # il doit rester cohérent avec les paroles que la ligne
@@ -2220,6 +2267,17 @@ class TrackRepository:
                         self._ecrire_colonnes_discographie(
                             conn, tid, self._arbitrer_discographie(conn, tid, ["duration"])
                         )
+                    if "spotify_streams" in champs:
+                        # Même règle que `clear_track_spotify_id` : sans
+                        # observation restante, la colonne est VIDÉE (sinon
+                        # elle garderait le compteur d'un autre morceau).
+                        valeurs = self._arbitrer_streams(conn, tid) or {
+                            "spotify_streams": None,
+                            "spotify_streams_updated": None,
+                        }
+                        if source == "kworb":
+                            valeurs["spotify_daily_streams"] = None
+                        conn.execute(update(tracks).where(tracks.c.id == tid).values(**valeurs))
 
                 retirer(track_id)
                 effacer_chez_les_soeurs(conn, track_id, retirer)
@@ -2322,7 +2380,6 @@ class TrackRepository:
         laissé chez une sœur reviendrait au prochain `save_track`. Rend le
         nombre de lignes retirées. Réparation des crédits de disque écrits avant
         le filtre par position (`scripts/repair_discogs_pistes.py`)."""
-        from src.utils.track_soeurs import ids_soeurs
 
         try:
             with self.engine.begin() as conn:
@@ -2552,6 +2609,36 @@ class TrackRepository:
             else:
                 valeurs[colonne] = str(verdict.value) if verdict.value is not None else None
         return valeurs
+
+    def rearbitrer_duree_et_date(self, track_id: int) -> bool:
+        """Écrivain PUBLIC de `_rearbitrer_duree_et_date` — réparation des
+        colonnes restées en retard sur leurs observations (CORRECTIFS 2.2)."""
+        try:
+            with self.engine.begin() as conn:
+                self._rearbitrer_duree_et_date(conn, track_id)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur rearbitrer_duree_et_date({track_id}): {e}")
+            return False
+
+    def _rearbitrer_duree_et_date(self, conn, track_id: int) -> None:
+        """Ré-arbitre `duration` et `release_date` d'une ligne dont les
+        observations ont bougé (fusion, propagation aux sœurs). Seulement les
+        champs qui ONT une observation : sans elle, l'arbitrage viderait une
+        colonne qu'aucune provenance n'explique. Jamais l'ISRC : colonne
+        d'identité, qui se remplit sans se remplacer."""
+        champs = [
+            f
+            for f in ("duration", "release_date")
+            if conn.execute(
+                text("SELECT 1 FROM observations WHERE track_id = :t AND field = :f"),
+                {"t": track_id, "f": f},
+            ).first()
+        ]
+        if champs:
+            self._ecrire_colonnes_discographie(
+                conn, track_id, self._arbitrer_discographie(conn, track_id, champs)
+            )
 
     def _ecrire_colonnes_discographie(self, conn, track_id: int, valeurs: dict) -> None:
         """UPDATE en `text()` NON typé : `release_date` est un TIMESTAMP qui
@@ -4603,6 +4690,24 @@ class TrackRepository:
             logger.error(f"Erreur record_track_videos (track_id={track_id}): {e}")
             return 0
 
+    def fiches_mesurant_video(self, video_id: str, track_id: int) -> list[int]:
+        """Les AUTRES fiches du même artiste qui portent cette vidéo, mesurée.
+        Quand elle quitte une fiche, elle cesse d'être partagée : leur total,
+        qui l'excluait, doit être recalculé (2026-10-10, « All of the Lights »
+        après le rejet de la vidéo de l'original sur le remix)."""
+        with self.engine.connect() as conn:
+            return [
+                r[0]
+                for r in conn.execute(
+                    text(
+                        "SELECT v.track_id FROM track_videos v JOIN tracks t ON t.id = v.track_id "
+                        "WHERE v.video_id = :vid AND v.track_id != :tid AND v.views IS NOT NULL "
+                        "AND t.artist_id = (SELECT artist_id FROM tracks WHERE id = :tid)"
+                    ),
+                    {"vid": video_id, "tid": track_id},
+                )
+            ]
+
     def forget_track_video(self, track_id: int, video_id: str) -> bool:
         """Retire UNE vidéo d'un morceau (rejet d'un lien automatique erroné).
 
@@ -4641,6 +4746,21 @@ class TrackRepository:
                 (i, t)
                 for i, t in conn.execute(
                     text("SELECT id, title FROM tracks WHERE artist_id = :a"), {"a": artist_id}
+                )
+            ]
+
+    def titres_des_fiches_propres(self, artist_id: int) -> list[tuple[int, str]]:
+        """`[(id, titre)]` des fiches PROPRES de l'artiste — ni ligne d'invité,
+        ni rôle secondaire (gate d'identité Spotify, `sienne_homonyme`)."""
+        with self.engine.connect() as conn:
+            return [
+                (i, t)
+                for i, t in conn.execute(
+                    text(
+                        "SELECT id, title FROM tracks WHERE artist_id = :a "
+                        "AND COALESCE(is_featuring, 0) = 0 AND secondary_role IS NULL"
+                    ),
+                    {"a": artist_id},
                 )
             ]
 

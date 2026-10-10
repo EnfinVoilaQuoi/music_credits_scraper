@@ -336,3 +336,22 @@ def test_ecart_deezer_applique_depuis_le_panneau(monkeypatch):
     assert revue_actions.executer(creer, ctx, cas) == "créé"
     ((ecarts, kw),) = recus
     assert ecarts[0].piste.title == "Inédit" and kw["lire_piste"] == "LECTEUR"
+
+
+def test_retirer_les_streams_d_une_source_re_arbitre_la_colonne(data_manager):
+    """CORRECTIFS 2.2 : retirer les streams Kworb d'une fiche (Kanye « Don't
+    Like » de ticklemytip, 303 M d'un autre morceau) doit vider la colonne,
+    pas laisser le chiffre en place."""
+    from src.models import Artist, Track
+
+    a = Artist(name="Kanye West")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Don't Like", artist=a)
+    data_manager.save_track(t)
+    data_manager.record_spotify_streams(t.id, 303_604_342, "kworb", daily_streams=9)
+    assert data_manager.retirer_mesures_source(t.id, "kworb", ("spotify_streams",)) == 1
+    with data_manager.engine.connect() as conn:
+        ligne = conn.exec_driver_sql(
+            "SELECT spotify_streams, spotify_daily_streams FROM tracks WHERE id = ?", (t.id,)
+        ).one()
+    assert tuple(ligne) == (None, None)

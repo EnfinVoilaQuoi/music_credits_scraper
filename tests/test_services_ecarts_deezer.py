@@ -153,16 +153,46 @@ class TestClasser:
     def test_titre_generique_sans_duree_reste_a_confirmer(self):
         base = [_track("Intro", "Album A"), _track("Outro", "Album A")]
         base[1].duration = 60
-        albums = [_album(9, "Album B", [_piste(90, "Intro"), _piste(91, "Outro")])]
+        albums = [_album(9, "Album A", [_piste(90, "Intro"), _piste(91, "Outro")])]
         albums[0].pistes[0].duration = None
         albums[0].pistes[1].duration = 61
         ecarts, _ = ed.classer(albums, base, [], NOUS)
         # Deux « Intro » sans durée comparable : rien ne dit que c'est la même ;
-        # « Outro » à 1 s près : lien.
+        # « Outro » du même disque à 1 s près : lien.
         assert [(e.nature, e.matched_by, e.coche) for e in ecarts] == [
             ("link_candidate", "title_generique", False),
             ("link", "title_duration", True),
         ]
+
+    def test_titre_generique_d_un_autre_disque_reste_a_confirmer_meme_a_duree_egale(self):
+        """Freeze Corleone, 2026-10-10 : l'« Intro » de *Projet Blue Beam* reliée
+        à l'« INTRO » de *RIYAD SADIO* (214 s des deux côtés). Chaque projet a
+        son intro : la durée ne suffit pas, il faut le même disque."""
+        base = [_track("INTRO", "RIYAD SADIO")]
+        base[0].duration = 200
+        albums = [_album(9, "Projet Blue Beam", [_piste(90, "Intro")])]
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        assert [(e.nature, e.matched_by) for e in ecarts] == [("link_candidate", "title_generique")]
+
+    def test_piste_du_disque_ne_va_pas_a_la_ligne_d_invite_d_un_autre(self):
+        """Diam's, 2026-10-10 : « Par amour » de *Dans ma bulle* posé sur la
+        ligne « Par Amour » de Dinos feat. Diam's (même titre, durée égale)."""
+        invite = _track("Par Amour", "Hiver à Paris")
+        invite.is_featuring, invite.primary_artist_name = True, "Dinos"
+        invite.duration = 200
+        sienne = _track("Par amour", "Dans ma bulle")
+        albums = [_album(9, "Dans ma bulle", [_piste(90, "Par amour")])]
+        ecarts, _ = ed.classer(albums, [invite, sienne], [], NOUS)
+        assert [(e.nature, e.existing_track) for e in ecarts] == [("link", sienne)]
+        # Seule la ligne d'invité porte ce titre : à confirmer, jamais d'office.
+        ecarts, _ = ed.classer(albums, [invite], [], NOUS)
+        assert [(e.nature, e.matched_by) for e in ecarts] == [
+            ("link_candidate", "title_autre_principal")
+        ]
+        # Le principal crédité sur la piste : c'est bien ce morceau.
+        albums[0].pistes[0].contributors = [(77, "Dinos")]
+        ecarts, _ = ed.classer(albums, [invite], [], NOUS)
+        assert [(e.nature, e.matched_by) for e in ecarts] == [("link", "title_duration")]
 
     def test_edition_generique_rejoint_le_socle_par_isrc(self):
         base = [_track("Pas de côté", "Chansons", isrc="FR123")]
@@ -630,3 +660,64 @@ def test_un_ecart_se_reconstruit_depuis_son_signalement():
         socle,
     )
     assert r.piste.contributors == [(5, "X")] and r.coche and r.album.pistes == []
+
+
+class TestHomonymesDeLaBase:
+    def test_disque_d_un_autre_va_a_sa_ligne(self):
+        """Kid Cudi, 2026-10-10 : « Reborn » de KIDS SEE GHOSTS posé sur le
+        « Reborn » de Dirty Nice (même titre, durée égale)."""
+        ksg = _track("Reborn", "KIDS SEE GHOSTS")
+        ksg.is_featuring, ksg.primary_artist_name, ksg.duration = True, "KIDS SEE GHOSTS", 200
+        autre = _track("Reborn")
+        autre.is_featuring, autre.primary_artist_name, autre.duration = True, "Dirty Nice", 200
+        piste = _piste(90, "Reborn", artist_id=555, contributors=[(NOUS, "Nous")])
+        piste.artist_name = "KIDS SEE GHOSTS"
+        albums = [_album(9, "KIDS SEE GHOSTS", [piste], artist_id=555)]
+        for base in ([autre, ksg], [ksg, autre]):
+            ecarts, _ = ed.classer(albums, base, [], NOUS)
+            assert [(e.matched_by, e.existing_track) for e in ecarts] == [("title_duration", ksg)]
+
+    def test_deux_fiches_meme_titre_meme_duree_a_confirmer(self):
+        a, b = _track("Boss", "X"), _track("BOSS", "Y")
+        a.duration = b.duration = 200
+        albums = [_album(9, "Z", [_piste(90, "Boss")])]
+        ecarts, _ = ed.classer(albums, [a, b], [], NOUS)
+        assert [(e.nature, e.matched_by) for e in ecarts] == [("link_candidate", "title_ambigu")]
+
+
+class TestMemoireDesRefus:
+    """2026-10-10 : un ID Deezer délié n'avait AUCUNE mémoire — « L.U.N.A.T.I.C. »
+    et « Par Amour » le reprenaient au run suivant."""
+
+    def test_piste_deliee_ne_revient_pas_sur_la_fiche(self):
+        from src.models import Artist
+        from src.utils.corrections_fiches import memoriser_deezer_refuse
+
+        fiche = _track("Par amour", "Dans ma bulle")
+        fiche.artist = Artist(name="Diam's")
+        fiche.duration = 200
+        albums = [_album(9, "Dans ma bulle", [_piste(90, "Par amour")])]
+        assert [e.nature for e in ed.classer(albums, [fiche], [], NOUS)[0]] == ["link"]
+        memoriser_deezer_refuse(fiche, 90)
+        ecarts, _ = ed.classer(albums, [fiche], [], NOUS)
+        # Plus rattachée : la piste redevient un écart (à créer ou non, au choix).
+        assert all(e.existing_track is None for e in ecarts)
+
+    def test_provider_ignore_une_piste_refusee(self):
+        from types import SimpleNamespace
+
+        from src.enrichment.providers.deezer import DeezerProvider
+        from src.models import Artist
+        from src.utils.corrections_fiches import memoriser_deezer_refuse
+
+        fiche = _track("L.U.N.A.T.I.C.", "Black Album")
+        fiche.artist = Artist(name="Booba")
+        memoriser_deezer_refuse(fiche, 479308372)
+        resultat = {
+            "success": True,
+            "data": {"deezer_track_id": 479308372, "deezer_duration": 214, "isrc": "FR8R61000008"},
+            "verifications": {},
+        }
+        ctx = SimpleNamespace(force_update=False)
+        assert DeezerProvider()._apply_result(fiche, ctx, resultat, None, None) is False
+        assert fiche.deezer_id is None and fiche.isrc is None

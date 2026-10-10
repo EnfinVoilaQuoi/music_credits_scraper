@@ -44,6 +44,7 @@ from src.models.track import Credit, CreditRole, Track
 from src.services.deezer_identite import cle_album
 from src.services.runtime import Bilan
 from src.utils import version_heritage
+from src.utils.corrections_fiches import deezer_refuses, memoriser_deezer_refuse
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.title_matching import (
     base_album_key,
@@ -304,6 +305,8 @@ def _match_existing(
     by_title: dict[str, list[Track]],
     title_key: str | None = None,
     by_compact: dict[str, list[Track]] | None = None,
+    album: str | None = None,
+    notre_id: int | None = None,
 ) -> tuple[Track | None, str | None]:
     """La fiche que cette piste désigne, et la PREUVE du rapprochement.
 
@@ -315,6 +318,15 @@ def _match_existing(
     sauf titre générique (Intro/Outro/Interlude…) où deux morceaux distincts
     portent couramment le même mot ⇒ `title_generique` (à confirmer).
     `(None, None)` quand aucune fiche ne porte ce titre.
+
+    Deux gardes au rapprochement par TITRE (CORRECTIFS 2.2, 2026-10-10) :
+    une piste du disque de l'artiste (`notre_id`) ne désigne pas d'office sa
+    LIGNE D'INVITÉ chez un autre principal — « Par amour » de Diam's posé sur
+    le « Par Amour » de Dinos feat. Diam's, « Lunatic » de Booba sur le
+    « L.U.N.A.T.I.C. » de Lunatic — sauf si ce principal est crédité sur la
+    piste (`title_autre_principal`, à confirmer) ; et un titre GÉNÉRIQUE ne
+    se rapproche par la durée que dans le MÊME `album` (« INTRO » de *RIYAD
+    SADIO* reliée à l'« Intro » de *Projet Blue Beam*).
     """
     title_key = title_key or normalize_title(piste.title)
     if piste.id in by_deezer_id:
@@ -330,11 +342,41 @@ def _match_existing(
         candidats = by_compact.get(title_key.replace(" ", ""), [])
     if not candidats:
         return None, None
+    # Une piste DÉLIÉE à la main ne revient pas sur cette fiche.
+    candidats = [t for t in candidats if piste.id not in deezer_refuses(t)]
+    if not candidats:
+        return None, None
+    siennes = [t for t in candidats if not _invite_d_un_autre(t, piste, notre_id)]
+    if not siennes:
+        return candidats[0], "title_autre_principal"
+    candidats = siennes
+    if len(candidats) > 1:
+        # Disque d'un AUTRE (KIDS SEE GHOSTS) : sa ligne est celle dont il est le
+        # principal, pas l'homonyme d'un troisième (« Reborn » de Dirty Nice).
+        du_disque = [
+            t
+            for t in candidats
+            if t.is_featuring
+            and t.primary_artist_name
+            and piste.artist_name
+            and names_match_as_words(t.primary_artist_name, piste.artist_name)
+        ]
+        candidats = du_disque or candidats
+    generique = bool(set(title_key.split()) & MOTS_DE_MEME_MORCEAU)
+    if generique and album is not None:
+        meme_disque = [t for t in candidats if t.album and cle_album(t.album) == cle_album(album)]
+        if not meme_disque:
+            return candidats[0], "title_generique"
+        candidats = meme_disque
     if piste.duration is not None:
         datees = [t for t in candidats if t.duration is not None]
-        for track in datees:
-            if abs(int(piste.duration) - int(track.duration)) <= 2:
-                return track, "title_duration"
+        a_duree = [t for t in datees if abs(int(piste.duration) - int(t.duration)) <= 2]
+        if len(a_duree) > 1:
+            # Deux fiches au même titre et à la même durée : la première venue
+            # n'est pas une preuve (CORRECTIFS 2.2).
+            return a_duree[0], "title_ambigu"
+        if a_duree:
+            return a_duree[0], "title_duration"
         if datees and len(datees) == len(candidats):
             return datees[0], "title_duration_conflict"
     if set(title_key.split()) & MOTS_DE_MEME_MORCEAU:
@@ -346,6 +388,17 @@ def _match_existing(
     return candidats[0], "title"
 
 
+def _invite_d_un_autre(track: Track, piste: PisteDeezer, notre_id: int | None) -> bool:
+    """La fiche est la ligne d'INVITÉ de l'artiste chez un autre principal, et la
+    piste — sur le disque de l'artiste — ne crédite pas ce principal."""
+    if notre_id is None or piste.artist_id != notre_id:
+        return False
+    if not (track.is_featuring and track.primary_artist_name):
+        return False
+    credites = [piste.artist_name, *(nom for _, nom in piste.contributors)]
+    return not any(names_match_as_words(track.primary_artist_name, n) for n in credites if n)
+
+
 def _motif_preuve(piste: PisteDeezer, track: Track, preuve: str) -> str:
     return {
         "deezer_id": "même identifiant Deezer",
@@ -354,6 +407,9 @@ def _motif_preuve(piste: PisteDeezer, track: Track, preuve: str) -> str:
         "title": "même titre (durée non comparable)",
         "title_generique": "titre générique, durée non comparable — à confirmer",
         "title_ambigu": "plusieurs fiches portent ce titre — à confirmer",
+        "title_autre_principal": (
+            f"fiche d'invité chez {track.primary_artist_name}, absent de la piste — à confirmer"
+        ),
         "title_duration_conflict": (
             f"même titre, durée différente (Deezer {piste.duration} s / base {track.duration} s)"
             " — à confirmer"
@@ -419,6 +475,8 @@ def classer(
                 by_title=titres_tous,
                 title_key=cle_piste,
                 by_compact=titres_compacts,
+                album=album.title,
+                notre_id=notre_id,
             )
             present = est_a_nous or connu or notre_id in {cid for cid, _ in p.contributors}
             if existing is not None:
@@ -988,6 +1046,7 @@ def delier(dm, artist, e: Ecart) -> str:
         )
     if statut != "removed":
         return f"« {e.titre} » : lien avec « {e.album.title} » déjà absent"
+    memoriser_deezer_refuse(track, e.piste.id)
     compte = f"« {e.titre} » délié de « {e.album.title} »"
     if track.deezer_id is not None and int(track.deezer_id) == int(e.piste.id):
         rapport = dm.clear_track_deezer_id(track.id, e.piste.id)

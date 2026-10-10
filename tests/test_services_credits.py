@@ -241,3 +241,33 @@ def test_un_credit_herite_ne_dispense_pas_de_la_description_youtube():
     assert _manque_credits(t)
     t.credits.append(Credit(name="Tefa", role=CreditRole.PRODUCER, source="youtube_topic"))
     assert not _manque_credits(t)
+
+
+def test_la_garde_lrc_lit_la_discographie_en_base_si_rien_n_est_charge():
+    """2026-10-10 : un lanceur passait l'artiste sans ses morceaux ; la garde ne
+    voyait que la SÉLECTION, sans l'original — « Kids See Ghosts (Orchestral) »
+    a pris le LRC de « Kids See Ghosts »."""
+    original = _track("Kids See Ghosts")
+    original.lyrics.synced = "[00:01.00] x"
+    version = _track("Kids See Ghosts (Orchestral)")
+
+    class _DMDisco(_DM):
+        def get_artist_tracks(self, artist_id):
+            return [original, version]
+
+    class _LyricsGarde(_Lyrics):
+        def enrich(self, track, artist_name, *, need_sync, need_text, garde=None):
+            self.garde = garde
+            return super().enrich(
+                track, artist_name, need_sync=need_sync, need_text=need_text, garde=garde
+            )
+
+    lyr = _LyricsGarde()
+    cl, _, _ = _clients(lyrics=lyr)
+    artiste = Artist(name="Kid Cudi")
+    artiste.id = 20
+    opts = credits.OptionsCredits(
+        genius=False, discogs=False, paroles_genius=False, paroles_ytm=False, sync_lrclib=True
+    )
+    credits.run(_rt(_DMDisco()), artiste, [version], opts, Hooks(), cl)
+    assert lyr.garde.motif(version, "[00:01.00] x") is not None

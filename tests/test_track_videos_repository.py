@@ -334,3 +334,65 @@ class TestTitresInvisibles:
         assert data_manager.rename_track(track.id, "\u200bbank") is True
         (lu,) = data_manager.get_artist_tracks(artist.id)
         assert lu.title == "bank"
+
+
+def test_la_fusion_comble_l_identite_sans_rien_remplacer(data_manager):
+    """2026-10-10 : une fiche Deezer absorbée par sa page Genius emportait son
+    `deezer_id` (23 fusions du lot 1.1)."""
+    from sqlalchemy import text
+
+    from src.models import Artist, Track
+
+    a = Artist(name="A2H")
+    a.id = data_manager.save_artist(a)
+    page = Track(title="En attendant l'album (Episode 2)", artist=a, genius_id=336500)
+    page.isrc = "FR6V82386863"
+    deezer = Track(title="Home Sweet Home (Episode 2)", artist=a)
+    deezer.deezer_id, deezer.isrc = 76807198, "AUTRE"
+    for t in (page, deezer):
+        data_manager.save_track(t)
+    with data_manager.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE tracks SET deezer_url = 'https://www.deezer.com/track/76807198' "
+                "WHERE id = :i"
+            ),
+            {"i": deezer.id},
+        )
+    assert data_manager.merge_tracks(page.id, deezer.id)
+    with data_manager.engine.connect() as conn:
+        ligne = conn.execute(
+            text("SELECT deezer_id, deezer_url, isrc, genius_id FROM tracks WHERE id = :i"),
+            {"i": page.id},
+        ).one()
+    assert tuple(ligne) == (
+        76807198,
+        "https://www.deezer.com/track/76807198",
+        "FR6V82386863",  # celui de la fiche gardée : rien n'est remplacé
+        336500,
+    )
+
+
+def test_la_fusion_re_arbitre_la_duree(data_manager):
+    """Flynt « Un pour la plume (Version équipe) » : la fiche Deezer absorbée
+    apportait cinq observations de durée, la colonne restait vide."""
+    from sqlalchemy import text
+
+    from src.enrichment.observation import Observation
+    from src.models import Artist, Track
+
+    a = Artist(name="Flynt")
+    a.id = data_manager.save_artist(a)
+    page = Track(title="Un pour la plume (Version équipe)", artist=a, genius_id=1)
+    deezer = Track(title="1 pour la plume (version équipe)", artist=a)
+    for t in (page, deezer):
+        data_manager.save_track(t)
+    data_manager.record_discography_observations(
+        deezer.id, [Observation("duration", 256, "deezer")]
+    )
+    assert data_manager.merge_tracks(page.id, deezer.id)
+    with data_manager.engine.connect() as conn:
+        assert (
+            conn.execute(text("SELECT duration FROM tracks WHERE id = :i"), {"i": page.id}).scalar()
+            == 256
+        )

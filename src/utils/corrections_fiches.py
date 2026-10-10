@@ -11,6 +11,9 @@ dit. Le fichier est donc relu par les PRODUCTEURS, à trois endroits :
 
   · `ids_refuses` — le gate d'identité Spotify refuse un ID retiré à la main
     (sinon Kworb ou le scraper le reposent au prochain run) ;
+  · `deezer_refuses` — même chose pour une piste Deezer DÉLIÉE (écarts Deezer,
+    provider par morceau) : sans elle, « L.U.N.A.T.I.C. » et « Par Amour »
+    reprenaient au run suivant l'ID qu'on venait de leur retirer (2026-10-10) ;
   · `credits_refuses` — `save_track` n'écrit pas un crédit retiré (Genius
     ressert « Matthieu Cabaret — Composer », qui est le compositing du clip) ;
   · `genius_ids_absorbes` — une page Genius FUSIONNÉE dans une autre fiche n'est
@@ -81,6 +84,10 @@ def entrees_du_morceau(track) -> list[dict]:
 
 def ids_refuses(track) -> set[str]:
     return {sid for e in entrees_du_morceau(track) for sid in e.get("retirer_id_spotify") or []}
+
+
+def deezer_refuses(track) -> set[int]:
+    return {int(did) for e in entrees_du_morceau(track) for did in e.get("retirer_id_deezer") or []}
 
 
 def credits_refuses(track) -> set[tuple[str, str]]:
@@ -178,6 +185,12 @@ def memoriser_id_refuse(track, spotify_id: str) -> None:
     le gate d'identité (`ids_refuses`), sans quoi Kworb ou le scraper le
     reposeraient au prochain run."""
     _ajouter_a_la_fiche(track, "retirer_id_spotify", spotify_id)
+
+
+def memoriser_deezer_refuse(track, deezer_id: int) -> None:
+    """Consigne une piste Deezer DÉLIÉE de la fiche (`deezer_refuses`) : ni les
+    écarts Deezer ni le provider par morceau ne la reposent."""
+    _ajouter_a_la_fiche(track, "retirer_id_deezer", int(deezer_id))
 
 
 def cle_certif(entree: dict) -> tuple:

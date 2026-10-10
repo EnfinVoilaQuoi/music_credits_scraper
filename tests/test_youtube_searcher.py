@@ -290,3 +290,37 @@ class TestPurgeDuCache:
         écrite, pas une clé voisine."""
         searcher.search_track("JUL", "Bande Organisée")
         assert searcher.forget("jul", "bande organisée") is True
+
+
+class TestAutreVersion:
+    """2026-10-10 : « Black Skinhead » (42 M) passait au-dessus du seuil pour la
+    fiche « Black Skinhead (Remix) », « All Of The Lights » (64 M) pour son
+    remix — mesuré : 32 des 1 687 vidéos posées par la recherche."""
+
+    def test_l_original_n_est_pas_le_remix(self):
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score(
+                "Black Skinhead", ["Kanye West"], "Kanye West", "Black Skinhead (Remix)"
+            )
+            == 0.0
+        )
+        assert relevance_score("Interlude", ["Django"], "Django", "Nuit (Interlude)") == 0.0
+
+    def test_la_meme_version_reste_notee(self):
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score(
+                "Black Skinhead (Remix)", ["Kanye West"], "Kanye West", "Black Skinhead (Remix)"
+            )
+            > 0.9
+        )
+
+    def test_bonus_vaut_le_titre_nu(self):
+        from src.utils.version_descriptors import meme_version_publiee
+
+        assert meme_version_publiee("LE NOM DU PÈRE (Bonus)", "LE NOM DU PÈRE")
+        assert meme_version_publiee("Champions du monde", "Champions du monde (Bonus Track)")
+        assert not meme_version_publiee("Ring Ring [Extended Version]", "Ring Ring")

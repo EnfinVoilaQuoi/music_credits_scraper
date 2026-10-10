@@ -573,6 +573,17 @@ def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) ->
     }
 
 
+def _recevable(fiche, sid, lire_identite) -> bool:
+    """Une fiche en RÔLE SECONDAIRE ne reçoit une ligne trouvée par son TITRE
+    que si Spotify crédite son principal. Sans principal connu, rien à
+    vérifier ; sans identité lisible, rien n'est PROUVÉ (refus)."""
+    if not fiche.secondary_role or not fiche.primary_artist_name:
+        return True
+    identite = lire_identite(sid) if sid else None
+    credites = [a for a in (identite or {}).get("artists") or [] if a]
+    return any(names_match_as_words(fiche.primary_artist_name, a) for a in credites)
+
+
 def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> Rapprochement:
     """À quel morceau de la base appartient cette ligne Kworb ?
 
@@ -636,6 +647,11 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
     principales = [c for c in candidates if not c.secondary_role]
     if principales and len(principales) < len(candidates):
         candidates = principales
+    if len(candidates) == 1 and not _recevable(candidates[0], sid, lire_identite):
+        # Seule une fiche en RÔLE SECONDAIRE porte ce titre : Kanye auteur d'un
+        # « Don't Like » de ticklemytip recevait les 303 M de SON « Don't Like »
+        # (2026-10-10). Elle n'est la ligne que si Spotify crédite son principal.
+        candidates = []
     if len(candidates) == 1:
         return Rapprochement(track=candidates[0], via="title")
     if len(candidates) > 1:
@@ -653,11 +669,11 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
     # Un rapprochement REJETÉ par l'utilisateur ne revient jamais par une règle.
     rejete = norm in (decisions.get("rejected") or [])
     fiche = None if rejete else _par_sous_titre(entry["title"], norm, index)
-    if fiche is not None:
+    if fiche is not None and _recevable(fiche, sid, lire_identite):
         return Rapprochement(track=fiche, via="sous_titre")
 
     ftrack, fscore = _fuzzy_unique(entry["title"], index.tracks)
-    if ftrack:
+    if ftrack and _recevable(ftrack, sid, lire_identite):
         return Rapprochement(track=ftrack, via="fuzzy", score=fscore)
 
     confirmed = decisions.get("confirmed", {})

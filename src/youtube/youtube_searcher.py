@@ -12,6 +12,7 @@ from ytmusicapi.exceptions import YTMusicError
 from src.config import DATA_DIR, YOUTUBE_CACHE_TTL_HOURS
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
+from src.utils.version_descriptors import meme_version_publiee
 
 logger = get_logger(__name__)
 
@@ -45,6 +46,13 @@ def relevance_score(
     `update_ytmusic`). Le seuil de persistance, lui, n'est PAS abaissé : la
     contrepartie de ce relâchement est la validation humaine (✔️/✖️).
     """
+    # Une AUTRE VERSION n'est pas le morceau, quelle que soit la ressemblance
+    # du texte : « Black Skinhead » passait au-dessus du seuil pour « Black
+    # Skinhead (Remix) » et ses 42 M de vues entraient dans le total du remix
+    # (2026-10-10). Mesuré sur 1 687 vidéos posées par la recherche : 34 refus,
+    # presque tous de vrais faux (remix ← original, original ← remix).
+    if result_title and not meme_version_publiee(target_title, result_title):
+        return 0.0
     cible_titre = normalize_title(target_title)
     title_similarity = difflib.SequenceMatcher(
         None, cible_titre, normalize_title(result_title or "")

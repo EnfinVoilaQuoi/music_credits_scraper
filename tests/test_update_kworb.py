@@ -1418,6 +1418,20 @@ def test_les_fiches_en_role_secondaire_ne_disputent_pas_le_titre():
     assert [w[0] for w in dm.streams_writes] == [1]
 
 
+def test_seule_fiche_en_role_secondaire_exige_son_principal_credite():
+    """Kanye, 2026-10-10 : seul « Don't Like » de ticklemytip (Kanye auteur)
+    portait ce titre — il recevait les 303 M du « Don't Like » de Kanye."""
+    disse = _track(1, "Don't Like", feat=True, primary="ticklemytip")
+    disse.secondary_role = "Writer"
+    kanye = {"name": "Don't Like", "artists": ["Kanye West", "Pusha T"], "duration": 300}
+    res, dm = _run([disse], [_entry("Don't Like", 303_604_342, 9, "KANYE")], {"KANYE": kanye})
+    assert dm.streams_writes == []
+    # Spotify crédite le principal : c'est bien sa ligne.
+    sienne = {"name": "Don't Like", "artists": ["ticklemytip", "Kanye West"], "duration": 300}
+    res, dm = _run([disse], [_entry("Don't Like", 5, 1, "TMT")], {"TMT": sienne})
+    assert [w[0] for w in dm.streams_writes] == [1]
+
+
 class TestSousTitre:
     """6D (2026-09-24) — la même chanson, un sous-titre d'un côté ou de l'autre."""
 

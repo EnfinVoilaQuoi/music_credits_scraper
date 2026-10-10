@@ -39,6 +39,7 @@ class DataManager(ArtistRepository, TrackRepository, RevueRepository):
         from src.utils import spotify_identity
 
         spotify_identity.fournisseur_titres = self.titres_des_fiches
+        spotify_identity.fournisseur_propres = self.titres_des_fiches_propres
 
     @property
     def db_path(self) -> str:

@@ -41,6 +41,9 @@ class _FauxDM:
         self.videos.append((track_id, [(v.video_id, v.source) for v in videos]))
         return len(videos)
 
+    def fiches_mesurant_video(self, video_id, track_id):
+        return []
+
     def forget_track_video(self, track_id, video_id):
         self.oubliees.append((track_id, video_id))
         return True

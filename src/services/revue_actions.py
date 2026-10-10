@@ -109,9 +109,13 @@ def _retirer_spotify(ctx: ContexteAction, cas: Cas) -> str:
 
 
 def _delier_deezer(ctx: ContexteAction, cas: Cas) -> str:
+    from src.utils.corrections_fiches import memoriser_deezer_refuse
+
     track = _fiche(ctx, cas)
     did = cas.preuves["deezer_id"]
     rapport = ctx.data_manager.clear_track_deezer_id(track.id, int(did))
+    # Mémorisé : ni les écarts Deezer ni le provider ne la reposent.
+    memoriser_deezer_refuse(track, int(did))
     return (
         f"ID Deezer {did} retiré de « {track.title} », avec "
         f"{len(rapport.get('observations_retirees', []))} observation(s) qui en découlaient"

@@ -48,6 +48,10 @@ CHAMP_ID_PROPOSE = "spotify_id_propose"
 #: purs, scripts sans base) ⇒ la règle « ID d'une autre fiche » est inactive.
 fournisseur_titres = None
 
+#: Fiches PROPRES de l'artiste (ni invité, ni rôle secondaire) :
+#: `artist_id -> [(track_id, titre)]`. Même contrat que `fournisseur_titres`.
+fournisseur_propres = None
+
 
 def fiche_du_titre_spotify(track, identite: dict | None) -> str | None:
     """Le titre d'une AUTRE fiche de l'artiste que l'ID désigne, ou None.
@@ -70,6 +74,40 @@ def fiche_du_titre_spotify(track, identite: dict | None) -> str | None:
         fiches = fournisseur_titres(artist_id)
     except Exception:  # noqa: BLE001 — garde-fou : un fournisseur en panne ne refuse rien
         logger.exception("Fournisseur de titres en échec")
+        return None
+    for tid, titre in fiches:
+        if tid != track.id and titres_equivalents(titre, nom):
+            return titre
+    return None
+
+
+def sienne_homonyme(track, identite: dict | None) -> str | None:
+    """Sur une ligne d'INVITÉ, l'ID désigne-t-il la PROPRE fiche homonyme de
+    l'artiste ? → son titre, sinon None.
+
+    Le gate accepte l'artiste de la ligne OU le principal (`noms_attendus`) :
+    Dinos « Par Amour » feat. Diam's recevait donc l'ID de « Par amour » de
+    Diam's, Hiatus « Soundtrack 2 My Life » celui de Kid Cudi (2026-10-10).
+    Exiger le principal partout refusait surtout des ID JUSTES — mesuré sur les
+    lignes d'invité : graphies (« CYRIL.mp4 » / « CYRILmp4 », « $tanlee (FRA) »)
+    et compilations où Genius met le producteur ou le collectif en principal
+    (Kilomaître, Sachons Dire Non). Ce qui sépare les vrais faux : Spotify ne
+    crédite pas le principal ET l'artiste a SA fiche au titre servi."""
+    if not (track.is_featuring and track.primary_artist_name) or fournisseur_propres is None:
+        return None
+    credites = [a for a in (identite or {}).get("artists") or [] if a]
+    nom = (identite or {}).get("name")
+    if not credites or not nom:
+        return None
+    if any(names_match_as_words(track.primary_artist_name, a) for a in credites):
+        return None
+    artist_id = getattr(track.artist, "id", None)
+    if not artist_id:
+        return None
+    try:
+        fiches = fournisseur_propres(artist_id)
+    except Exception:  # noqa: BLE001 — garde-fou : un fournisseur en panne ne refuse rien
+        logger.exception("Fournisseur de fiches propres en échec")
         return None
     for tid, titre in fiches:
         if tid != track.id and titres_equivalents(titre, nom):
@@ -271,6 +309,8 @@ def _juger(
         )
         return False
     autre = None if titres_tranches else fiche_du_titre_spotify(track, identite)
+    if autre is None:
+        autre = sienne_homonyme(track, identite)
     if autre is not None:
         logger.warning(
             f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — c'est celui "

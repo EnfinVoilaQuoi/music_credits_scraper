@@ -15,6 +15,7 @@ from src.enrichment.observation import Observation
 from src.models import ReleaseObservation, Track
 from src.observability.issues import SansReponse
 from src.utils.bpm_vote import sanitize_bpm
+from src.utils.corrections_fiches import deezer_refuses
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -153,6 +154,12 @@ class DeezerProvider:
         data = result["data"]
         verifications = result["verifications"]
         updated = False
+
+        # Une piste DÉLIÉE à la main de cette fiche ne revient pas : tout ce
+        # qu'elle porte (durée, ISRC, date) décrit un autre enregistrement.
+        if data.get("deezer_track_id") and int(data["deezer_track_id"]) in deezer_refuses(track):
+            logger.info(f"∅ Deezer: piste {data['deezer_track_id']} refusée pour '{track.title}'")
+            return False
 
         # Logs des vérifications
         if verifications:

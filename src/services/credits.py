@@ -453,7 +453,15 @@ def run(
                     # Les LRC des AUTRES fiches de l'artiste (discographie réunie,
                     # pas la seule sélection) : un LRC qui appartient à l'une d'elles
                     # n'est pas celui de la fiche visée (CORRECTIFS 1.5 / 1.7).
-                    garde = GardeLrc(artist.tracks or tracks)
+                    # Sans discographie chargée (lanceur qui ne passe que
+                    # l'artiste), la lire en base : la seule SÉLECTION ne
+                    # contient pas l'original et la garde ne voit rien
+                    # (2026-10-10, « Kids See Ghosts (Orchestral) »).
+                    garde = GardeLrc(
+                        artist.tracks
+                        or (artist.id and runtime.data_manager.get_artist_tracks(artist.id))
+                        or tracks
+                    )
                     for i, t in enumerate(tracks, 1):
                         if hooks.should_stop():
                             bilan.interrompu("arrêt demandé pendant la synchro")

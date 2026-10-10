@@ -88,6 +88,7 @@ def _gate_spotify_sans_fournisseur(monkeypatch):
     from src.utils import spotify_identity
 
     monkeypatch.setattr(spotify_identity, "fournisseur_titres", None)
+    monkeypatch.setattr(spotify_identity, "fournisseur_propres", None)
 
 
 @pytest.fixture(autouse=True)

@@ -290,3 +290,58 @@ def test_l_id_d_une_autre_fiche_est_refuse(monkeypatch):
 
     monkeypatch.setattr(si, "fournisseur_titres", lambda aid: [(1, "Only")])
     assert si.valider_identite(only, "SP", lambda s: identite) is True
+
+
+class TestLigneDInviteHomonyme:
+    """2026-10-10 : Dinos « Par Amour » feat. Diam's recevait l'ID de « Par amour »
+    de Diam's — le gate acceptait l'artiste de la LIGNE. Exiger le principal
+    partout refusait surtout des ID justes (mesuré : graphies, compilations) ;
+    la règle retenue exige en plus que l'artiste ait SA fiche au titre servi."""
+
+    def _ligne(self):
+        from src.models import Artist, Track
+
+        diams = Artist(name="Diam's")
+        diams.id = 27
+        t = Track(title="Par Amour", artist=diams)
+        t.id, t.is_featuring, t.primary_artist_name = 1, True, "Dinos"
+        return t
+
+    def test_id_de_la_fiche_propre_refuse(self, monkeypatch):
+        from src.utils import spotify_identity as si
+
+        identite = {"name": "Par amour", "artists": ["Diam's"], "duration": None}
+        monkeypatch.setattr(si, "fournisseur_propres", lambda aid: [(2, "Par amour")])
+        assert si.valider_identite(self._ligne(), "SP", lambda s: identite) is False
+
+    def test_sans_fiche_propre_l_id_reste(self, monkeypatch):
+        """Compilation où Genius met le producteur en principal (Kilomaître) :
+        Spotify ne le crédite pas, l'ID est juste."""
+        from src.utils import spotify_identity as si
+
+        identite = {"name": "Par Amour", "artists": ["Diam's"], "duration": None}
+        monkeypatch.setattr(si, "fournisseur_propres", lambda aid: [(3, "Autre chose")])
+        assert si.valider_identite(self._ligne(), "SP", lambda s: identite) is True
+
+    def test_principal_credite_l_id_reste(self, monkeypatch):
+        from src.utils import spotify_identity as si
+
+        identite = {"name": "Par Amour", "artists": ["Dinos", "Diam's"], "duration": None}
+        monkeypatch.setattr(si, "fournisseur_propres", lambda aid: [(2, "Par amour")])
+        assert si.valider_identite(self._ligne(), "SP", lambda s: identite) is True
+
+
+def test_fiches_propres_excluent_invites_et_roles_secondaires(data_manager):
+    from src.models import Artist, Track
+
+    a = Artist(name="Diam's")
+    a.id = data_manager.save_artist(a)
+    propre = Track(title="Par amour", artist=a)
+    invite = Track(title="Par Amour (Dinos)", artist=a)
+    invite.is_featuring, invite.primary_artist_name = True, "Dinos"
+    second = Track(title="Écrit pour un autre", artist=a)
+    second.is_featuring, second.primary_artist_name = True, "X"
+    second.secondary_role = "Writer"
+    for t in (propre, invite, second):
+        data_manager.save_track(t)
+    assert data_manager.titres_des_fiches_propres(a.id) == [(propre.id, "Par amour")]

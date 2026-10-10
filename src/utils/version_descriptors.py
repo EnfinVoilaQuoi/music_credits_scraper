@@ -536,6 +536,22 @@ def meme_version(a: str | None, b: str | None) -> bool:
     return True
 
 
+def meme_version_publiee(a: str | None, b: str | None) -> bool:
+    """`meme_version`, une mention « Bonus » / « Bonus Track » SEULE valant le
+    titre nu : c'est la place du morceau sur une édition, pas une autre prise
+    (« LE NOM DU PÈRE (Bonus) » = « LE NOM DU PÈRE »). Pas « Extended », « Radio
+    Edit » ni « Mixed », qui sont d'autres montages. Garde de la recherche
+    YouTube (2026-10-10)."""
+    if meme_version(a, b):
+        return True
+    va, vb = parse_variant(a or ""), parse_variant(b or "")
+
+    def bonus_seul(v: Variant) -> bool:
+        return v.kind == Kind.RENDITION and _mots_de_rendition(v) == {"bonus"}
+
+    return (va.kind == Kind.NONE and bonus_seul(vb)) or (vb.kind == Kind.NONE and bonus_seul(va))
+
+
 def _sans_parentheses(titre: str) -> str:
     return re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre).strip()
 

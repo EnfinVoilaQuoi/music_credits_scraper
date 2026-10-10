@@ -341,7 +341,7 @@ class TestCartouche:
         c = cartouche.construire(Artist(name="Isha"), ls, ctx, noms=NOMS)
         assert c.compteurs["albums"] == 1  # le single ne compte pas, le feat non plus
         assert c.compteurs["desactives"] == 1
-        assert c.ligne_titres.startswith("4 titres (3 principaux · 1 feats)")
+        assert c.ligne_titres.startswith("4 titres (3 principaux · 1 feat)")
         assert "1 titre désactivé" in c.ligne_titres
 
     def test_formations_confirmees_seulement(self):

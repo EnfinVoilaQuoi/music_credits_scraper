@@ -106,14 +106,14 @@ def construire(
     albums = nb_albums(lignes, ctx)
 
     detail = " · ".join(
-        texte
-        for n, texte in (
-            (par_categorie[Participation.PRINCIPAL], "principaux"),
-            (par_categorie[Participation.FEAT], "feats"),
-            (par_categorie[Participation.PROD], "prods"),
-            (par_categorie[Participation.SECONDAIRE], "rôles secondaires"),
+        _pluriel(n, singulier, pluriel)
+        for n, singulier, pluriel in (
+            (par_categorie[Participation.PRINCIPAL], "principal", "principaux"),
+            (par_categorie[Participation.FEAT], "feat", "feats"),
+            (par_categorie[Participation.PROD], "prod", "prods"),
+            (par_categorie[Participation.SECONDAIRE], "rôle secondaire", "rôles secondaires"),
         )
-        for texte in ([f"{fmt.nombre(n)} {texte}"] if n else [])
+        if n
     )
     morceaux = [_pluriel(len(lignes), "titre") + (f" ({detail})" if detail else "")]
     if albums:

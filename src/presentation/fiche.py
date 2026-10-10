@@ -156,8 +156,8 @@ def _sections_par_role(credits, titre: str, icone: str) -> list[Section]:
 def onglet_credits(track) -> Onglet:
     musique = track.get_music_credits()
     video = track.get_video_credits()
-    musicaux = _sections_par_role(musique, "Crédits musicaux", "playlist")
-    videos = _sections_par_role(video, "Crédits vidéo", "brand-youtube")
+    musicaux = _sections_par_role(musique, "Crédits musicaux", "music")
+    videos = _sections_par_role(video, "Crédits vidéo", "video")
     from src.utils.credits_genius_api import sont_provisoires
 
     bandeau = f"Musicaux : {len(musique)} • Vidéos : {len(video)}"
@@ -195,7 +195,7 @@ def onglet_paroles(track) -> Onglet:
     lyr = track.lyrics
     sections = []
     if (track.anecdotes or "").strip():
-        sections.append(Section("Anecdotes & informations", "info-circle", texte=track.anecdotes))
+        sections.append(Section("Anecdotes & informations", "bulb", texte=track.anecdotes))
     if lyr.instrumental:
         etat = "🎹 Instrumental constaté sur Genius — pas de paroles par nature"
     elif lyr.non_transcrites():
@@ -210,7 +210,7 @@ def onglet_paroles(track) -> Onglet:
     entrees = tuple(Entree(t, discret=True) for t in (etat, synchro) if t)
     titre = "Paroles structurées et synchronisées" if lyr.synced else "Paroles structurées"
     sections.append(
-        Section(titre, "list-details", entrees, texte=texte_paroles(track), vide="Pas de paroles.")
+        Section(titre, "pencil", entrees, texte=texte_paroles(track), vide="Pas de paroles.")
     )
     morceaux = []
     if (track.anecdotes or "").strip():
@@ -226,12 +226,12 @@ def onglet_paroles(track) -> Onglet:
 # ── Onglet Samples ───────────────────────────────────────────────────────────
 
 _RELATIONS = (
-    ("samples", "Sample de", "Samples"),
-    ("interpolates", "Interpole", "Interpolations"),
-    ("cover_of", "Reprise de", "Reprises"),
-    ("remix_of", "Remix de", "Remix"),
-    ("version_of", "Version de", "Versions"),
-    ("translation_fr", "Traduction FR", "Traductions"),
+    ("samples", "Sample de", "Samples", "disc"),
+    ("interpolates", "Interpole", "Interpolations", "disc"),
+    ("cover_of", "Reprise de", "Reprises", "microphone-2"),
+    ("remix_of", "Remix de", "Remix", "vinyl"),
+    ("version_of", "Version de", "Versions", "vinyl"),
+    ("translation_fr", "Traduction FR", "Traductions", "language"),
 )
 
 
@@ -240,7 +240,7 @@ def onglet_samples(track) -> Onglet:
     for r in track.relationships or []:
         par_type[r.get("type")].append(r)
     sections, bandeau = [], []
-    for cle, titre, pluriel in _RELATIONS:
+    for cle, titre, pluriel, icone in _RELATIONS:
         items = par_type.get(cle) or []
         if not items:
             continue
@@ -248,6 +248,7 @@ def onglet_samples(track) -> Onglet:
         sections.append(
             Section(
                 titre,
+                icone,
                 entrees=tuple(
                     Entree(
                         f"{r.get('artist') or '?'} - {r.get('title') or '?'}",
@@ -307,7 +308,8 @@ def _entrees_certifs(certs, track) -> list[Section]:
                     Entree(f"↩ écho de « {c['echo_titre']} » (non compté)", discret=True)
                 )
         drapeau = liste[0].get("flag", "")
-        sections.append(Section(f"{drapeau} {corps}".strip(), "award", tuple(entrees)))
+        icone = {"SNEP": "diamond", "BRMA": "medal"}.get(corps, "military-award")
+        sections.append(Section(f"{drapeau} {corps}".strip(), icone, tuple(entrees)))
     return sections
 
 
@@ -488,7 +490,7 @@ def onglet_technique(track) -> Onglet:
         Entree("Streams YouTube", fmt.nombre(st.ytm_streams), "", _date(st.ytm_streams_updated)),
     ]
     sections = (
-        Section("Identifiants", "list-details", tuple(ids)),
+        Section("Identifiants", "diamond", tuple(ids)),
         Section("Discographie", "playlist", tuple(disco)),
         Section("Contenu", "list-check", tuple(contenu)),
         Section("Audio", "ruler-measure", tuple(audio)),

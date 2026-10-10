@@ -603,15 +603,19 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
         """Audite les certifs SNEP de l'artiste face à sa discographie :
         liste les certifs orphelines (rattachées à aucun morceau).
 
-        Le champ accepte plusieurs noms, mais l'audit n'en prend qu'UN : il
-        confronte des certifs à la discographie CHARGÉE, et celle-ci est celle
-        de l'artiste principal. Auditer le nom d'un groupe contre les morceaux
-        d'un membre déclarerait orphelin tout ce que le membre n'a pas dans sa
-        propre discographie — ce que le lot « groupes » traitera en réunissant
-        les discographies, pas en changeant ce que compte l'audit.
+        L'audit confronte des certifs à la discographie CHARGÉE, qui est la
+        discographie RÉUNIE de l'artiste courant (ses groupes compris). Il
+        audite donc ses alias et ses GROUPES avec lui (`certifs.noms_d_audit_pour`),
+        jamais ses collectifs, qui n'apportent que les morceaux où il est
+        présent. Pour un autre nom que l'artiste courant, seul ce nom.
         """
         noms = self._noms_artiste()
         artist = noms[0] if noms else ""
+        autres, ecartes = [], []
+        courant = getattr(self.app, "current_artist", None) if self.app else None
+        if courant and courant.id and artist == courant.name:
+            tous, ecartes = certifs.noms_d_audit_pour(self.app.runtime, courant)
+            autres = tous[1:]
         if not artist:
             messagebox.showwarning("Artiste manquant", "Saisis un nom d'artiste.", parent=self)
             return
@@ -631,7 +635,7 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
 
                 self._set_progress(f"🔎 Audit des certifs de {artist}...")
                 res = get_cert_matcher().audit_artist_certifications(
-                    artist, self.artist_tracks, self.artist_albums
+                    artist, self.artist_tracks, self.artist_albums, autres_noms=autres
                 )
 
                 probable = [o for o in res["orphans"] if o["ratio"] >= 0.6]
@@ -641,6 +645,10 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 L.append("=" * 50)
                 L.append(f"🔎 AUDIT CERTIFS — {res['artist']}")
                 L.append("=" * 50)
+                if autres:
+                    L.append(f"Noms audités : {' ; '.join([artist, *autres])}")
+                if ecartes:
+                    L.append(f"Collectifs non audités    : {' ; '.join(ecartes)}")
                 L.append(f"Certifs SNEP de l'artiste : {res['total']}")
                 L.append(f"Rattachées à un morceau   : {res.get('matched_tracks', 0)}")
                 L.append(f"Rattachées à un album     : {res.get('matched_albums', 0)}")
@@ -649,8 +657,9 @@ class CertificationUpdateDialog(ctk.CTkToplevel):
                 def fmt(o):
                     d = (o["certification_date"] or "")[:10]
                     kind = o.get("kind", "morceau")
+                    sous = f" — sous « {o['nom']} »" if o.get("nom") not in (None, artist) else ""
                     return (
-                        f"  • {o['title']!r} ({o['certification']}, {o['category']}, {d})\n"
+                        f"  • {o['title']!r} ({o['certification']}, {o['category']}, {d}){sous}\n"
                         f"      ≈ {kind} proche : {o['closest']!r}  (sim. {o['ratio']})"
                     )
 

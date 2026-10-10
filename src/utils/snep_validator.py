@@ -31,7 +31,7 @@ import pandas as pd
 
 # Fonctions pures partagées avec le nettoyeur (mêmes règles des deux côtés :
 # sans ça les deux outils annonçaient des comptes de doublons incomparables).
-from src.utils.cert_coverage import annee_assez_dense
+from src.utils.cert_coverage import annee_assez_dense, annees_effondrees
 from src.utils.cert_normalize import (
     LEVEL_CANON,
     apply_manual_fixes,
@@ -149,6 +149,7 @@ def validate_snep_csv(
         "recent_years": list(recent_years),
         "per_year": {},
         "missing_years": [],
+        "annees_effondrees": [],
         "month_gaps": [],
         "low_months": [],
         "duplicates": [],
@@ -386,6 +387,7 @@ def validate_snep_csv(
             for y, c in per_year.items()
             if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
         ]
+        report["annees_effondrees"] = [c.decrire() for c in annees_effondrees(per_year)]
 
         # Années à scanner pour les trous mensuels
         if full_mode:
@@ -538,6 +540,11 @@ def format_report(report: dict) -> str:
             "Années ENTIÈREMENT absentes (trou)",
             [str(y) for y in report["missing_years"]],
             limit=40,
+        )
+    if report.get("annees_effondrees"):
+        section(
+            "Années EFFONDRÉES (volume < ¼ des années qui les bornent — à vérifier sur le site)",
+            report["annees_effondrees"],
         )
 
     # Trous mensuels groupés par année (lisible même sur tout l'historique)

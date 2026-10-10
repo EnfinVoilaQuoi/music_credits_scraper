@@ -137,6 +137,25 @@ class TestNomsDeRecherche:
         assert certifs.noms_de_recherche_pour(_rt(dm), art) == ["X"]
 
 
+class TestNomsDAudit:
+    def test_groupes_audites_collectifs_ecartes(self):
+        """Un groupe apporte TOUS ses morceaux à la discographie réunie, un
+        collectif seulement ceux où le membre est présent (2026-10-10)."""
+        rels = [
+            ArtistRelation(kind="member_of", related_name="Lunatic", formation="groupe"),
+            ArtistRelation(kind="member_of", related_name="92i", formation="collectif"),
+            ArtistRelation(kind="member_of", related_name="Sans nature"),
+            ArtistRelation(kind="alias", related_name="B2O"),
+        ]
+        dm = SimpleNamespace(get_artist_relations=lambda aid: rels)
+        art = Artist(name="Booba")
+        art.id = 4
+        assert certifs.noms_d_audit_pour(_rt(dm), art) == (
+            ["Booba", "Lunatic", "B2O"],
+            ["92i", "Sans nature"],
+        )
+
+
 class TestRechercherArtisteErreurs:
     def test_source_sans_recherche_par_artiste_est_dite(self, sans_magasin):
         lanceur = _Lanceur()

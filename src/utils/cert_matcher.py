@@ -17,6 +17,7 @@ lignes au même format ; le matcher ne change pas.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -496,7 +497,11 @@ class CertMatcher:
         return self._format(exact)
 
     def audit_artist_certifications(
-        self, artist_name: str, track_titles: list[str], album_titles: list[str] | None = None
+        self,
+        artist_name: str,
+        track_titles: list[str],
+        album_titles: list[str] | None = None,
+        autres_noms: Iterable[str] = (),
     ) -> dict[str, Any]:
         """Audite les certifs SNEP d'un artiste face à sa discographie connue.
 
@@ -506,6 +511,12 @@ class CertMatcher:
         une certif probablement TRONQUÉE/corrompue (proche d'un titre existant)
         d'une certif réellement ABSENTE de la discographie. Une certif d'album est
         comparée aux albums ; une certif single/vidéo aux morceaux.
+
+        `autres_noms` : les noms sous lesquels la discographie FOURNIE est aussi
+        créditée (alias, GROUPES dont elle réunit les morceaux — jamais un
+        collectif, qui n'apporte que les morceaux où le membre est présent :
+        ses autres certifs passeraient pour orphelines). Une certif trouvée par
+        deux noms ne compte qu'une fois ; chaque orpheline dit sous quel nom.
         """
         import difflib
 
@@ -526,8 +537,16 @@ class CertMatcher:
         # Une seule implémentation de l'ancrage, partagée avec les accesseurs :
         # cet audit portait sa propre copie, et c'est ce qui avait permis aux
         # accesseurs de garder la sous-chaîne nue jusqu'au 2026-09-06.
-        sous = self._sous_ensemble_artiste(a)
-        certs = [r for _, r in sous[sous["body"] == "SNEP"].iterrows()]
+        certs, vus = [], set()
+        for nom in [artist_name, *autres_noms]:
+            cle = self._norm(nom)
+            if not cle:
+                continue
+            sous = self._sous_ensemble_artiste(cle)
+            for idx, r in sous[sous["body"] == "SNEP"].iterrows():
+                if idx not in vus:
+                    vus.add(idx)
+                    certs.append((nom, r))
 
         track_cleans = [self._norm(t) for t in track_titles if t]
         album_cleans = [self._norm(x) for x in (album_titles or []) if x]
@@ -535,7 +554,7 @@ class CertMatcher:
         matched_tracks = 0
         matched_albums = 0
         orphans = []
-        for cert in certs:
+        for nom, cert in certs:
             ct = cert["title_clean"] or ""
             if not ct:
                 continue
@@ -571,6 +590,7 @@ class CertMatcher:
             orphans.append(
                 {
                     "kind": "album" if is_album else "morceau",
+                    "nom": nom,
                     "title": cert["title"],
                     "certification": cert["level"],
                     "category": cert["cat"],

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.utils.cert_coverage import annee_assez_dense
+from src.utils.cert_coverage import annee_assez_dense, annees_effondrees
 from src.utils.cert_normalize import NIVEAUX_BRMA, brma_niveau_connu
 
 REQUIRED_COLS = ["artist", "title", "category", "certification_level", "certification_date"]
@@ -70,6 +70,7 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
         "recent_years": list(recent_years),
         "per_year": {},
         "missing_years": [],
+        "annees_effondrees": [],
         "month_gaps": [],
         "low_months": [],
         "duplicates": [],
@@ -170,6 +171,7 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
             for y, c in per_year.items()
             if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
         ]
+        report["annees_effondrees"] = [c.decrire() for c in annees_effondrees(per_year)]
         scan_years = [y for y, c in per_year.items() if annee_assez_dense(c)]
         for y in scan_years:
             for m in range(1, 13):
@@ -261,6 +263,11 @@ def format_report(report: dict) -> str:
             "Années ENTIÈREMENT absentes (trou)",
             [str(y) for y in report["missing_years"]],
             limit=40,
+        )
+    if report.get("annees_effondrees"):
+        section(
+            "Années EFFONDRÉES (volume < ¼ des années qui les bornent — à vérifier sur le site)",
+            report["annees_effondrees"],
         )
 
     gaps = report.get("month_gaps", [])

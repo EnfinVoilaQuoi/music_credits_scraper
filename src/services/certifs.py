@@ -301,6 +301,32 @@ def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
     return noms_de_recherche(artist.name, formations)
 
 
+def noms_d_audit_pour(runtime: Runtime, artist: Artist) -> tuple[list[str], list[str]]:
+    """Les noms sous lesquels auditer la discographie CHARGÉE de l'artiste, et
+    les formations écartées de l'audit.
+
+    Mêmes noms que la recherche (`noms_de_recherche_pour`), moins les
+    COLLECTIFS — et les formations sans nature, qui n'élargissent rien : la
+    discographie réunie n'en contient que les morceaux où l'artiste est
+    présent, si bien que leurs autres certifs passeraient pour orphelines. Un
+    GROUPE apporte tous ses morceaux, son nom s'audite donc contre la même
+    discographie.
+    """
+    recherche = noms_de_recherche_pour(runtime, artist)
+    ecartes: set[str] = set()
+    if artist.id:
+        try:
+            ecartes = {
+                rel.related_name
+                for rel in runtime.data_manager.get_artist_relations(artist.id)
+                if rel.kind == "member_of" and rel.formation != "groupe"
+            }
+        except Exception:
+            logger.exception("Formations indisponibles pour l'audit des certifs")
+    noms = [n for n in recherche if n not in ecartes]
+    return noms, sorted(ecartes)
+
+
 @etape_de_flux(
     "Recherche de certifs", sujet=lambda a, k: " ; ".join(a[0] if a else k.get("noms", []))
 )

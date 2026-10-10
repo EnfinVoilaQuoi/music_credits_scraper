@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.utils.cert_coverage import annee_assez_dense
+from src.utils.cert_coverage import annee_assez_dense, annees_effondrees
 from src.utils.cert_normalize import bpi_level, bpi_level_connu, bpi_units
 
 REQUIRED_COLS = ["artist", "title", "certification_level", "certification_date"]
@@ -64,6 +64,7 @@ def validate_bpi_csv(
         "recent_years": list(recent_years),
         "per_year": {},
         "missing_years": [],
+        "annees_effondrees": [],
         "month_gaps": [],
         "low_months": [],
         "duplicates": [],
@@ -185,6 +186,7 @@ def validate_bpi_csv(
             for y, c in per_year.items()
             if c == 0 and (per_year.get(y - 1, 0) > 0 or per_year.get(y + 1, 0) > 0)
         ]
+        report["annees_effondrees"] = [c.decrire() for c in annees_effondrees(per_year)]
         for y in [y for y, c in per_year.items() if annee_assez_dense(c)]:
             for m in range(1, 13):
                 per = pd.Period(f"{y}-{m:02d}", freq="M")
@@ -271,6 +273,11 @@ def format_report(report: dict) -> str:
             "Années ENTIÈREMENT absentes (trou)",
             [str(y) for y in report["missing_years"]],
             limit=40,
+        )
+    if report.get("annees_effondrees"):
+        section(
+            "Années EFFONDRÉES (volume < ¼ des années qui les bornent — à vérifier sur le site)",
+            report["annees_effondrees"],
         )
     gaps = report.get("month_gaps", [])
     if gaps:

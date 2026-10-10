@@ -63,3 +63,40 @@ class TestUnSeulReferentiel:
             source = pathlib.Path(f"src/utils/{module}.py").read_text(encoding="utf-8")
             assert "MEANINGFUL_YEAR_THRESHOLD" not in source, module
             assert "annee_assez_dense" in source, module
+
+
+class TestAnneesEffondrees:
+    """2026-10-10 : une année qui s'effondre n'était jamais regardée (trous
+    mensuels cherchés sur les seules années denses). Comptes RÉELS du SNEP."""
+
+    SNEP = {2006: 114, 2007: 182, 2008: 128, 2009: 6, 2010: 4, 2011: 5,
+            2012: 4, 2013: 7, 2014: 13, 2015: 136, 2016: 106}  # fmt: skip
+
+    def test_le_creux_snep_2009_2014_est_nomme_en_une_suite(self):
+        from src.utils.cert_coverage import Creux, annees_effondrees
+
+        assert annees_effondrees(self.SNEP) == [Creux(2009, 2014, (6, 4, 5, 4, 7, 13), 128, 136)]
+
+    def test_le_debut_d_un_corpus_n_est_pas_un_effondrement(self):
+        """SNEP 1988-1993 (6 à 18 par an) avant 1994 (197) : pas de borne avant."""
+        from src.utils.cert_coverage import annees_effondrees
+
+        assert annees_effondrees({1990: 6, 1991: 13, 1992: 18, 1993: 17, 1994: 197}) == []
+
+    def test_l_annee_en_cours_n_est_pas_un_effondrement(self):
+        from src.utils.cert_coverage import annees_effondrees
+
+        assert annees_effondrees({2024: 1500, 2025: 1600, 2026: 40}) == []
+
+    def test_une_baisse_ordinaire_n_est_rien(self):
+        """RIAA 2006 → 2007 : 1 071 → 605, du simple au double — pas un creux."""
+        from src.utils.cert_coverage import annees_effondrees
+
+        assert annees_effondrees({2006: 1071, 2007: 605, 2008: 774}) == []
+
+    def test_description(self):
+        from src.utils.cert_coverage import Creux
+
+        assert Creux(2009, 2010, (6, 4), 128, 136).decrire() == (
+            "2009-2010 : 6, 4 certification(s) par an, entre 128 (2008) et 136 (2011)"
+        )

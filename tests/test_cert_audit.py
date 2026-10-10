@@ -113,3 +113,28 @@ def test_certif_au_titre_tout_symbole_ni_matchee_ni_orpheline():
     assert res["total"] == 2
     assert res["matched_tracks"] == 1
     assert res["orphans"] == []
+
+
+def test_les_groupes_de_l_artiste_sont_audites_avec_lui():
+    """2026-10-10 : l'audit n'interrogeait que le nom principal — les certifs
+    d'IAM restaient hors audit pour Shurik'n, dont la discographie RÉUNIE
+    contient pourtant les morceaux du groupe."""
+    m = _matcher_with(
+        [
+            _row("SNEP", "Shurik'n", "Où je vis", cat="album"),
+            _row("SNEP", "IAM", "Petit frère"),
+            _row("SNEP", "IAM", "Absent du corpus"),
+        ]
+    )
+    res = m.audit_artist_certifications(
+        "Shurik'n", ["Petit frère"], ["Où je vis"], autres_noms=["IAM"]
+    )
+    assert res["total"] == 3
+    assert res["matched"] == 2
+    assert [(o["title"], o["nom"]) for o in res["orphans"]] == [("Absent du corpus", "IAM")]
+
+
+def test_une_certif_vue_par_deux_noms_compte_une_fois():
+    m = _matcher_with([_row("SNEP", "Kanye West & Kid Cudi", "Reborn")])
+    res = m.audit_artist_certifications("Kanye West", ["Reborn"], [], autres_noms=["Kid Cudi"])
+    assert res["total"] == 1

@@ -27,6 +27,8 @@ Mesuré sur les corpus réels le 2026-09-06 :
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 #: Espérance de mois vides au-delà de laquelle on renonce à conclure. Un mois :
 #: en dessous, un trou est le régime normal de l'année.
 _TOLERANCE_MOIS_VIDES = 1.0
@@ -44,3 +46,64 @@ def annee_assez_dense(n_certifications: int) -> bool:
     les signaler ne dirait rien de la qualité de la collecte.
     """
     return mois_vides_attendus(n_certifications) < _TOLERANCE_MOIS_VIDES
+
+
+# ─────────────────────────────────────────────── années qui s'EFFONDRENT
+#: Une année « s'effondre » quand elle tombe sous le QUART de ses deux bornes.
+_FACTEUR_EFFONDREMENT = 4
+
+
+class Creux(NamedTuple):
+    """Une suite d'années consécutives effondrées entre deux années fournies."""
+
+    debut: int
+    fin: int
+    comptes: tuple[int, ...]
+    avant: int
+    apres: int
+
+    def decrire(self) -> str:
+        periode = str(self.debut) if self.debut == self.fin else f"{self.debut}-{self.fin}"
+        return (
+            f"{periode} : {', '.join(map(str, self.comptes))} certification(s) par an, "
+            f"entre {self.avant} ({self.debut - 1}) et {self.apres} ({self.fin + 1})"
+        )
+
+
+def annees_effondrees(par_annee: dict[int, int]) -> list[Creux]:
+    """Les suites d'années dont le volume s'effondre face à leurs DEUX bornes.
+
+    Angle mort que ce module laissait (2026-10-10) : les trous mensuels ne sont
+    cherchés que dans les années denses, donc une année qui s'effondre n'est
+    jamais regardée — SNEP 2009-2014 (4 à 13 certifications par an entre deux
+    années à 128 et 136) passait sans un mot, et il a fallu interroger le site
+    à la main pour conclure que la source était vide aussi. Comparer une année à
+    ses voisines immédiates ne suffit pas : le creux SNEP dure SIX ans, chaque
+    année y a des voisines effondrées. La règle raisonne donc sur une SUITE,
+    bornée de part et d'autre par une année dense (`annee_assez_dense`), chacune
+    de ses années sous le quart des deux bornes. Le début d'un corpus (SNEP
+    1976-1993, rampe avant 1994) n'est pas un effondrement : pas de borne avant.
+
+    Mesuré sur les quatre corpus le 2026-10-10 : SNEP 2009-2014 seulement ;
+    RIAA, BRMA et BPI : rien. L'effondrement est NOMMÉ, même légitime — c'est
+    une information, pas une anomalie à compter.
+    """
+    annees = sorted(par_annee)
+    creux: list[Creux] = []
+    i = 1
+    while i < len(annees):
+        avant = par_annee[annees[i - 1]]
+        seuil = avant / _FACTEUR_EFFONDREMENT
+        if not annee_assez_dense(avant) or par_annee[annees[i]] >= seuil:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(annees) and par_annee[annees[j + 1]] < seuil:
+            j += 1
+        if j + 1 < len(annees) and annees[j + 1] == annees[j] + 1:
+            apres = par_annee[annees[j + 1]]
+            comptes = tuple(par_annee[annees[k]] for k in range(i, j + 1))
+            if annee_assez_dense(apres) and max(comptes) < apres / _FACTEUR_EFFONDREMENT:
+                creux.append(Creux(annees[i], annees[j], comptes, avant, apres))
+        i = j + 1
+    return creux

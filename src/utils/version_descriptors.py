@@ -541,13 +541,17 @@ def meme_version_publiee(a: str | None, b: str | None) -> bool:
     titre nu : c'est la place du morceau sur une édition, pas une autre prise
     (« LE NOM DU PÈRE (Bonus) » = « LE NOM DU PÈRE »). Pas « Extended », « Radio
     Edit » ni « Mixed », qui sont d'autres montages. Garde de la recherche
-    YouTube (2026-10-10)."""
+    YouTube (2026-10-10).
+
+    Une session COLORS vaut aussi le morceau : « les Colors c'est toujours un
+    seul morceau, ça compte pour le morceau original » (décision utilisateur
+    2026-10-10) — ses vues vont à la fiche du titre."""
     if meme_version(a, b):
         return True
     va, vb = parse_variant(a or ""), parse_variant(b or "")
 
     def bonus_seul(v: Variant) -> bool:
-        return v.kind == Kind.RENDITION and _mots_de_rendition(v) == {"bonus"}
+        return v.kind == Kind.RENDITION and _mots_de_rendition(v) in ({"bonus"}, {"colors"})
 
     return (va.kind == Kind.NONE and bonus_seul(vb)) or (vb.kind == Kind.NONE and bonus_seul(va))
 

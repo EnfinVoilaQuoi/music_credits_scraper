@@ -324,3 +324,10 @@ class TestAutreVersion:
         assert meme_version_publiee("LE NOM DU PÈRE (Bonus)", "LE NOM DU PÈRE")
         assert meme_version_publiee("Champions du monde", "Champions du monde (Bonus Track)")
         assert not meme_version_publiee("Ring Ring [Extended Version]", "Ring Ring")
+
+    def test_une_session_colors_vaut_le_morceau(self):
+        """Décision utilisateur 2026-10-10 : un COLORS est un seul morceau."""
+        from src.utils.version_descriptors import meme_version_publiee
+
+        assert meme_version_publiee("Loup noir", "Loup noir - A COLORS SHOW")
+        assert not meme_version_publiee("Loup noir", "Loup noir (Live)")

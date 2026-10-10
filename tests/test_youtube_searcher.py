@@ -325,9 +325,16 @@ class TestAutreVersion:
         assert meme_version_publiee("Champions du monde", "Champions du monde (Bonus Track)")
         assert not meme_version_publiee("Ring Ring [Extended Version]", "Ring Ring")
 
-    def test_une_session_colors_vaut_le_morceau(self):
-        """Décision utilisateur 2026-10-10 : un COLORS est un seul morceau."""
+    def test_une_performance_d_un_seul_morceau_vaut_le_morceau(self):
+        """Décision utilisateur 2026-10-10 (option 2) : COLORS, live, session
+        acoustique comptent pour l'original ; remix, démo, instrumental non."""
         from src.utils.version_descriptors import meme_version_publiee
 
         assert meme_version_publiee("Loup noir", "Loup noir - A COLORS SHOW")
-        assert not meme_version_publiee("Loup noir", "Loup noir (Live)")
+        assert meme_version_publiee("Double discours", "Double Discours - Live")
+        assert meme_version_publiee("Nudes", "Nudes (Acoustic)")
+        assert not meme_version_publiee("Apprentissage (Remix)", "Apprentissage")
+        assert not meme_version_publiee("Space Cadet", "Space Cadet (Demo)")
+        assert not meme_version_publiee("Harley Davidson", "Harley Davidson (Instrumental)")
+        # Jamais l'inverse : la fiche du live ne reçoit pas le clip studio.
+        assert not meme_version_publiee("Double Discours - Live", "Double discours")

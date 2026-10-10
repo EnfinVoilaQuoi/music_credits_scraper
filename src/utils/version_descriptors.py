@@ -537,23 +537,36 @@ def meme_version(a: str | None, b: str | None) -> bool:
 
 
 def meme_version_publiee(a: str | None, b: str | None) -> bool:
-    """`meme_version`, une mention « Bonus » / « Bonus Track » SEULE valant le
+    """La vidéo `b` peut-elle compter pour la fiche `a` ? ASYMÉTRIQUE.
+
+    `meme_version`, une mention « Bonus » / « Bonus Track » SEULE valant le
     titre nu : c'est la place du morceau sur une édition, pas une autre prise
     (« LE NOM DU PÈRE (Bonus) » = « LE NOM DU PÈRE »). Pas « Extended », « Radio
     Edit » ni « Mixed », qui sont d'autres montages. Garde de la recherche
     YouTube (2026-10-10).
 
-    Une session COLORS vaut aussi le morceau : « les Colors c'est toujours un
-    seul morceau, ça compte pour le morceau original » (décision utilisateur
-    2026-10-10) — ses vues vont à la fiche du titre."""
+    Une PERFORMANCE d'un seul morceau vaut aussi le morceau (live, session,
+    COLORS, acoustique) : « une vidéo consacrée à un seul morceau, quelle que
+    soit la version, compte pour ce morceau » (décision utilisateur 2026-10-10,
+    option 2) — ses vues vont à la fiche du titre. Jamais un remix, une démo,
+    un instrumental ni un autre montage. Un concert entier ou une émission ne
+    nomme pas un seul morceau : la ressemblance du titre les écarte."""
     if meme_version(a, b):
         return True
     va, vb = parse_variant(a or ""), parse_variant(b or "")
 
     def bonus_seul(v: Variant) -> bool:
-        return v.kind == Kind.RENDITION and _mots_de_rendition(v) in ({"bonus"}, {"colors"})
+        return v.kind == Kind.RENDITION and _mots_de_rendition(v) == {"bonus"}
 
-    return (va.kind == Kind.NONE and bonus_seul(vb)) or (vb.kind == Kind.NONE and bonus_seul(va))
+    def performance(v: Variant) -> bool:
+        familles = _familles_de_rendition(v) if v.kind == Kind.RENDITION else set()
+        return bool(familles) and familles <= {"live", "acoustique"}
+
+    if (va.kind == Kind.NONE and bonus_seul(vb)) or (vb.kind == Kind.NONE and bonus_seul(va)):
+        return True
+    # Une performance compte pour l'ORIGINAL — jamais l'inverse : la fiche
+    # d'un live ne reçoit pas le clip studio de l'original.
+    return va.kind == Kind.NONE and performance(vb)
 
 
 def _sans_parentheses(titre: str) -> str:

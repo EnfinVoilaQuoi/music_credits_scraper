@@ -10,9 +10,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from src.utils.bpm_vote import BpmBallot
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.models import Track
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -23,9 +26,6 @@ class EnrichmentContext:
     artist_tracks: list["Track"] = field(default_factory=list)
     # Scrutin BPM commun à toutes les sources du run (arbitré en fin de parcours).
     bpm_ballot: BpmBallot = field(default_factory=BpmBallot)
-    # Efface les données audio d'un morceau dont toutes les sources ont échoué.
-    # Autorise ReccoBeats à scraper un Spotify ID (False si l'étape spotify_id de
-    # l'orchestrateur l'a déjà fait → évite un double scrape Playwright par morceau).
     # Validation d'unicité d'un Spotify ID (fournie par l'orchestrateur ; logique
     # partagée avec le scraper spotify_id / reccobeats). Signature :
     # (spotify_id, current_track, artist_tracks) -> bool.
@@ -58,3 +58,26 @@ class EnrichmentContext:
         la valeur PERSISTÉE (`track.audio.key`) pour rester fidèle : un morceau déjà
         enrichi porte sa key persistée sans observation fraîche."""
         return any(o.field == field for o in self.observations)
+
+    def spotify_id_utilisable(self, track: "Track", usage: str) -> str | None:
+        """L'ID Spotify de la fiche, sauf s'il est revendiqué par un AUTRE titre.
+
+        UNE règle pour les providers qui interrogent PAR l'ID (ReccoBeats,
+        SongBPM) — ils en avaient deux, divergentes. Le validateur consulte la
+        base ENTIÈRE (2026-09-08) : `artist_tracks` n'est qu'un complément pour
+        ce qui n'est pas encore persisté, son absence n'empêche plus de vérifier.
+        Sans validateur, rien ne permet de conclure : un ID non vérifiable n'est
+        pas un ID fautif, il est gardé. L'ID n'est jamais effacé de la fiche :
+        l'ignorer pour cette source suffit (et le re-scrape qui suivait jadis
+        l'effacement n'existe plus).
+        """
+        spotify_id = track.spotify_id
+        if not spotify_id or self.validate_spotify_id_unique is None:
+            return spotify_id
+        if self.validate_spotify_id_unique(spotify_id, track, self.artist_tracks or []):
+            return spotify_id
+        logger.info(
+            f"∅ {usage} : Spotify ID {spotify_id} revendiqué par un autre titre, "
+            f"non interrogé pour '{track.title}'"
+        )
+        return None

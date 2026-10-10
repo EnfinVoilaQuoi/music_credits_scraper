@@ -125,19 +125,9 @@ class SongBpmProvider:
         return track.artist.name if hasattr(track.artist, "name") else str(track.artist)
 
     def _validated_spotify_id(self, track: Track, ctx: EnrichmentContext) -> str | None:
-        """Spotify ID du track, ignoré s'il est un duplicata (commun sync/async)."""
-        spotify_id = track.spotify_id
-        if (
-            spotify_id
-            and ctx.artist_tracks
-            and ctx.validate_spotify_id_unique
-            and not ctx.validate_spotify_id_unique(spotify_id, track, ctx.artist_tracks)
-        ):
-            logger.warning(
-                "⚠️ Spotify ID du track est un duplicata, ignoré pour la recherche SongBPM"
-            )
-            return None
-        return spotify_id
+        """Spotify ID du track, ignoré s'il est revendiqué par un autre titre
+        (commun sync/async ; règle partagée avec ReccoBeats)."""
+        return ctx.spotify_id_utilisable(track, "SongBPM")
 
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         scraper = self._resource.get()

@@ -236,9 +236,7 @@ def test_try_by_isrc_async_sans_client():
 
 
 def test_enrich_async_avec_id_existant():
-    """Même contexte que la voie sync : sans `artist_tracks` NI validateur
-    d'unicité, un ID existant est considéré comme un doublon et re-scrapé
-    (comportement historique, cf. `_existing_spotify_id`)."""
+    """Un ID existant que le validateur accepte est interrogé (voie async)."""
     provider = ReccoBeatsProvider(
         _FakeReccoClientAsync(track_info={"success": True, "bpm": 140, "key": 0, "mode": 1})
     )
@@ -297,8 +295,7 @@ def _avec_id(spotify_id="4cOdK2wGLETKBW3PvgPWqT"):
 
 
 def _ctx_id_valide(**kw):
-    """`_existing_spotify_id` n'accepte un ID existant que s'il a de quoi le
-    VÉRIFIER : sans `artist_tracks` ni validateur, il le jette et re-scrape."""
+    """Contexte où le validateur d'unicité accepte l'ID existant."""
     return EnrichmentContext(
         artist_tracks=[Track(title="Autre")], validate_spotify_id_unique=lambda *a: True, **kw
     )
@@ -494,3 +491,29 @@ def test_spotify_ids_par_isrc_le_cache_d_abord(monkeypatch):
         "FR2": ["CCC", "BBB"],
     }
     assert appels == [{"ids": "FR2,FR3"}]
+
+
+class TestIdExistantUtilisable:
+    """`EnrichmentContext.spotify_id_utilisable` (2026-10-10) : un ID n'est
+    écarté que s'il est REVENDIQUÉ par un autre titre — jamais faute de pouvoir
+    le vérifier, et jamais effacé de la fiche."""
+
+    def test_sans_artist_tracks_le_validateur_juge_quand_meme(self):
+        vus = []
+        ctx = EnrichmentContext(
+            validate_spotify_id_unique=lambda sid, t, tr: vus.append(tr) or True
+        )
+        provider = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True, "bpm": 120}))
+        assert provider.enrich(_avec_id(), ctx) is True
+        assert vus == [[]]
+
+    def test_sans_validateur_l_id_est_garde(self):
+        provider = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True, "bpm": 120}))
+        assert provider.enrich(_avec_id(), EnrichmentContext()) is True
+
+    def test_id_revendique_ignore_sans_etre_efface(self):
+        track = _avec_id("PRIS")
+        ctx = EnrichmentContext(validate_spotify_id_unique=lambda *a: False)
+        provider = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True, "bpm": 120}))
+        assert provider.enrich(track, ctx) is False
+        assert track.spotify_id == "PRIS"

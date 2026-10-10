@@ -194,20 +194,13 @@ class ReccoBeatsProvider:
         return False
 
     def _existing_spotify_id(self, track: Track, ctx: EnrichmentContext) -> str | None:
-        """Étape 1a (commun sync/async) : ID existant validé, sinon None.
+        """Étape 1a (commun sync/async) : l'ID de la fiche, s'il est utilisable.
 
-        Comportement historique : sans artist_tracks ou si l'ID est un
-        duplicata, on l'ignore et on le re-scrape (l'ID dupliqué est effacé).
+        Jusqu'au 2026-10-10, un ID était JETÉ (et effacé de la fiche) faute de
+        `artist_tracks` — avec le message « est un duplicata », alors qu'on
+        n'avait simplement pas de quoi le vérifier. Règle partagée avec SongBPM.
         """
-        if not track.spotify_id:
-            return None
-        validate = ctx.validate_spotify_id_unique
-        if ctx.artist_tracks and validate and validate(track.spotify_id, track, ctx.artist_tracks):
-            logger.info(f"✅ Spotify ID existant validé: {track.spotify_id}")
-            return track.spotify_id
-        logger.warning("⚠️ Spotify ID existant est un duplicata, il sera ignoré")
-        track.spotify_id = None
-        return None
+        return ctx.spotify_id_utilisable(track, "ReccoBeats")
 
     def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Voie Spotify ID (ISRC déjà tentée en amont par l'orchestrateur)."""

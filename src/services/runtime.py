@@ -55,6 +55,24 @@ class Runtime:
         )
 
 
+def fermer(runtime: Runtime) -> None:
+    """La fermeture d'un processus qui a construit un `Runtime` — UN ordre pour
+    la CLI et la GUI PyQt6 (celui de `MainWindow._on_closing`) : workers et
+    boucle asyncio d'abord (drapeau, annulation, join à budget), puis les
+    ressources SYNC des providers et Playwright sur le fil principal."""
+    lifecycle.shutdown_workers()
+    try:
+        runtime.data_enricher.close()
+    except Exception:  # noqa: BLE001 — fermeture best-effort
+        logger.warning("Fermeture DataEnricher", exc_info=True)
+    try:
+        from src.scrapers.playwright_manager import stop_playwright
+
+        stop_playwright()
+    except Exception:  # noqa: BLE001 — fermeture best-effort
+        logger.warning("Arrêt Playwright", exc_info=True)
+
+
 def _progres_muet(courant: int, total: int, libelle: str, tache: str = "") -> None:
     return None
 

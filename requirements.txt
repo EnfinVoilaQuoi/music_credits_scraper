@@ -9,6 +9,9 @@ requests>=2.31.0
 
 # Interface graphique
 customtkinter==5.2.1
+# Refonte PyQt6 (2026-10-11, `python -m src.gui_qt`) — CustomTkinter reste la
+# version stable tant que chaque flux n'est pas validé en PyQt6.
+PyQt6==6.11.0
 
 # Base de données (migration SQLAlchemy Core + Alembic, phase E).
 # NB : 2.0.23 était incompatible Python 3.13 (import échoue : garde TypingOnly

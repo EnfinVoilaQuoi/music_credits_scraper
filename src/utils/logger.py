@@ -414,6 +414,20 @@ def avancement(courant: int, total: int, libelle: str = "", tache: str = "") -> 
         _recit.info(f"{_retrait()}  {tache} {courant}/{total} ({pourcent} %){suite}")
 
 
+def ecouter_recit(handler: logging.Handler) -> logging.Handler:
+    """Branche un ÉCOUTEUR du récit dans l'application (centre des tâches de la
+    GUI PyQt6) : il reçoit les mêmes lignes ▶/▸ … ✔/⚠/✖ que la console, en plus
+    d'elle. Seul point d'ajout permis hors de `configurer_journaux` (crible
+    `test_logger_cablage`) ; actif sous pytest aussi — c'est un affichage, pas
+    un journal. Le handler doit ne JAMAIS bloquer (signal Qt, file)."""
+    _recit.addHandler(handler)
+    return handler
+
+
+def ne_plus_ecouter_recit(handler: logging.Handler) -> None:
+    _recit.removeHandler(handler)
+
+
 # ── Accès ────────────────────────────────────────────────────────────────────
 
 

@@ -15,11 +15,15 @@ sur un clone frais.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Tests PyQt6 (pytest-qt) : jamais de fenêtre à l'écran, en local comme en CI.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def load_fixture(relpath: str) -> str:

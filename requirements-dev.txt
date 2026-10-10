@@ -5,6 +5,8 @@ ruff==0.15.21
 pytest==9.1.1
 pytest-cov==7.1.0
 pytest-timeout==2.4.0
+# Tests de la GUI PyQt6 (hors écran : QT_QPA_PLATFORM=offscreen, tests/conftest.py).
+pytest-qt==4.5.0
 
 # Debug visuel du pipeline Bubble Prod (CLI `scripts/bubble_prod.py --debug`,
 # import lazy uniquement — jamais importé par l'app ni les tests).

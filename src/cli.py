@@ -35,7 +35,7 @@ from src.services import (  # noqa: E402
     identite,
     streams,
 )
-from src.services.runtime import Hooks, Runtime  # noqa: E402
+from src.services.runtime import Hooks, Runtime, fermer  # noqa: E402
 from src.utils.logger import configurer_journaux, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
@@ -417,19 +417,9 @@ def _installer_ctrl_c() -> None:
 
 
 def _fermer(runtime: Runtime) -> None:
-    """Le même ordre que `MainWindow._on_closing` : workers et boucle, puis les
-    ressources SYNC des providers et Playwright sur le fil principal."""
-    lifecycle.shutdown_workers()
-    try:
-        runtime.data_enricher.close()
-    except Exception:  # noqa: BLE001 — fermeture best-effort
-        logger.warning("Fermeture DataEnricher", exc_info=True)
-    try:
-        from src.scrapers.playwright_manager import stop_playwright
-
-        stop_playwright()
-    except Exception:  # noqa: BLE001 — fermeture best-effort
-        logger.warning("Arrêt Playwright", exc_info=True)
+    """Le même ordre que `MainWindow._on_closing` — `services.runtime.fermer`,
+    partagé avec la GUI PyQt6."""
+    fermer(runtime)
 
 
 def deezer_ambigu():

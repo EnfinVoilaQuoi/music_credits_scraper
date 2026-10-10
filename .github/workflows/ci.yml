@@ -103,7 +103,7 @@ jobs:
       # couvert, jamais pour « faire un chiffre » — les fabriques paresseuses qui
       # instancient un vrai client réseau restent délibérément non couvertes.
       - name: Cliquet de couverture (hors GUI)
-        run: coverage report --omit="src/gui/*,src/main.py" --fail-under=86
+        run: coverage report --omit="src/gui/*,src/gui_qt/*,src/main.py" --fail-under=86
 
   # Prévient le studio (dépôt privé therapie_studio) qu'un nouveau main public
   # est vert : sa CI rejoue ses tests contre ce commit. Inerte tant que le secret

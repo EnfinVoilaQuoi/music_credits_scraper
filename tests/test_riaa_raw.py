@@ -623,3 +623,65 @@ class TestDeuxRepresentationsUneCertification:
         clean = u._clean_from_raw(u._align_columns(pd.DataFrame([imp, site])))
         assert len(clean) == 1
         assert clean.iloc[0]["Award_Family"] == "DI"
+
+
+class TestPaliersMalDates:
+    """Une recherche par DATES rend le badge COURANT avec la date de la
+    certification qui a matché (2026-10-10 : Kanye « ALL MINE » 3x Platinum au
+    2018-09-21, date du Platinum ; le vrai 3x est au 2023-06-14)."""
+
+    def _site(self, level, date, family="DI"):
+        r = _row(title="ALL MINE", level=level, date=date)
+        r.update({"Release_Date": "", "Award_Family": family})
+        return r
+
+    def _timeline(self, level, date):
+        r = self._site(level, date)
+        r["Release_Date"] = "2018-05-31"
+        return r
+
+    def _clean(self, lignes, report=None):
+        return u._clean_from_raw(u._align_columns(pd.DataFrame(lignes)), report)
+
+    def test_le_badge_courant_a_la_date_d_un_palier_inferieur_est_ecarte(self):
+        report = {}
+        clean = self._clean(
+            [
+                self._site("3x Platinum", "2018-09-21"),
+                self._site("3x Platinum", "2023-06-14"),
+                self._timeline("Platinum", "2018-09-21"),
+            ],
+            report,
+        )
+        assert sorted(
+            zip(clean["Certification_Type"], clean["Certification_Date"], strict=True)
+        ) == [
+            ("3x Platinum", "2023-06-14"),
+            ("Platinum", "2018-09-21"),
+        ]
+        assert report["paliers_mal_dates"] == 1
+
+    def test_une_ligne_confirmee_par_la_timeline_n_est_jamais_ecartee(self):
+        clean = self._clean(
+            [self._timeline("Platinum", "2015-01-01"), self._site("Platinum", "2020-01-01")]
+        )
+        assert len(clean) == 2
+
+    def test_un_single_physique_n_est_pas_compare_au_numerique(self):
+        clean = self._clean(
+            [self._site("Gold", "1999-01-01", "ST"), self._site("Gold", "2010-01-01", "DI")]
+        )
+        assert len(clean) == 2
+
+    def test_seule_ligne_du_palier_gardee(self):
+        assert len(self._clean([self._site("3x Platinum", "2018-09-21")])) == 1
+
+
+def test_ajouts_au_brut_jamais_negatifs(riaa_tmp):
+    """2026-10-10 : « -21 nouvelle(s) au brut » — des doublons exacts déjà au
+    brut étaient retirés par la fusion et décomptés des ajouts."""
+    pd.DataFrame([_row("A", "T"), _row("A", "T")]).to_csv(riaa_tmp / "riaa_raw.csv", index=False)
+    _, added = u._merge_certif_csv([_row("A", "T")])
+    assert added == 0
+    _, added = u._merge_certif_csv([_row("B", "U")])
+    assert added == 1

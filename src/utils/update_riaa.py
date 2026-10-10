@@ -631,6 +631,13 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
     df = _combiner_representations(df).drop(columns="_k")
     if report is not None:
         report["duplicates_removed"] = avant - len(df)
+    df, mal_dates = _ecarter_paliers_mal_dates(df)
+    if report is not None:
+        report["paliers_mal_dates"] = len(mal_dates)
+        report["paliers_mal_dates_examples"] = [
+            f"{r.Artist} — {r.Title} : {r.Certification_Type} au {r.Certification_Date}"
+            for r in mal_dates.head(15).itertuples()
+        ]
 
     # Unités RECALCULÉES pour toutes les lignes, et non seulement complétées :
     # elles dépendent de la date, du format et de la FAMILLE, donc une valeur
@@ -648,6 +655,48 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
         )
     ]
     return df
+
+
+def _ecarter_paliers_mal_dates(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Écarte du clean les lignes de BALAYAGE PAR DATES qui portent un palier à
+    la date d'un AUTRE palier. Rend (gardées, écartées) ; le brut garde tout.
+
+    Mesuré le 2026-10-10 : une recherche par dates rend chaque award qui a UNE
+    certification dans la fenêtre, avec son badge COURANT et la date de la
+    certification qui a matché — pas celle du palier affiché. Kanye *ALL MINE* :
+    « 3x Platinum » au 2018-09-21 (date du Platinum ; la timeline donne le 3x
+    au 2023-06-14) ; Big Sean *I KNOW* : « 3x Platinum » au 2017-05-30 (date du
+    Platinum de l'import). 616 lignes sur 49 634.
+
+    Une ligne de balayage se reconnaît à l'absence de date de SORTIE, que ni la
+    timeline ni l'import ne laissent vide (après `_combiner_representations`,
+    une ligne confirmée par l'une d'elles l'a récupérée). Elle est écartée quand
+    le MÊME award — artiste, titre, format, programme ET famille (un single
+    physique `ST` et un single numérique `DI` sont deux awards) — a le MÊME
+    palier à une date plus TARDIVE : un faux ne peut porter que la date d'un
+    palier inférieur, donc antérieure. Le résidu (faux dont le vrai palier n'a
+    jamais été lu) reste : rien ne le distingue d'une ligne juste.
+    """
+    if df.empty:
+        return df, df.iloc[0:0]
+    cle = (
+        df["Artist"].map(normalize_text)
+        + "|"
+        + df["Title"].map(normalize_text)
+        + "|"
+        + df["Format_Type"].astype(str).str.upper()
+        + "|"
+        + df["Award_Programme"].astype(str).str.upper()
+        + "|"
+        + df["Award_Family"].astype(str).str.upper()
+        + "|"
+        + df["Certification_Type"].astype(str).str.upper()
+    )
+    quand = df["Certification_Date"].map(_riaa_iso)
+    plus_tard = quand.groupby(cle).transform("max")
+    balayage = df["Release_Date"].astype(str).str.strip() == ""
+    ecartees = balayage & (quand != "") & (quand < plus_tard)
+    return df[~ecartees], df[ecartees]
 
 
 def _combiner_representations(df: pd.DataFrame) -> pd.DataFrame:
@@ -741,7 +790,11 @@ def _merge_certif_csv(new_rows: list[dict], backup: bool = True, *, partial: str
     new_df = _align_columns(pd.DataFrame(new_rows))
 
     raw = _load_riaa_raw()
-    before = len(raw)
+    # Compté contre le brut DÉDOUBLONNÉ : `combined` l'est, et des doublons
+    # exacts déjà présents au brut (rendus identiques par l'alignement) faisaient
+    # annoncer « -21 nouvelle(s) au brut » sur un run qui n'avait rien perdu
+    # (2026-10-10, KIDS SEE GHOSTS).
+    before = len(raw.drop_duplicates()) if not raw.empty else 0
     combined = (
         pd.concat([raw, new_df], ignore_index=True) if not raw.empty else new_df
     ).drop_duplicates(ignore_index=True)
@@ -1017,6 +1070,8 @@ def clean_certif_csv(apply: bool = True) -> dict:
         {
             "empty_removed": 0,
             "duplicates_removed": 0,
+            "paliers_mal_dates": 0,
+            "paliers_mal_dates_examples": [],
             "formats_normalises": 0,
             "niveaux_normalises": 0,
             "empty_examples": [],
@@ -1055,6 +1110,7 @@ def format_clean_report(report: dict) -> str:
             ("Doublons retirés", report.get("duplicates_removed", 0)),
             ("Formats normalisés", report.get("formats_normalises", 0)),
             ("Niveaux normalisés", report.get("niveaux_normalises", 0)),
+            ("Paliers mal datés écartés (balayage)", report.get("paliers_mal_dates", 0)),
         ],
         sections=[
             ("Formats normalisés", report.get("format_changes") or {}),
@@ -1064,7 +1120,11 @@ def format_clean_report(report: dict) -> str:
             (
                 f"Lignes retirées ({report.get('empty_removed', 0)})",
                 [ex[:90] for ex in report.get("empty_examples") or []],
-            )
+            ),
+            (
+                f"Paliers mal datés écartés ({report.get('paliers_mal_dates', 0)})",
+                [ex[:90] for ex in report.get("paliers_mal_dates_examples") or []],
+            ),
         ],
         note_dry_run=(
             "ℹ️  DRY-RUN : rien n'a été écrit. Relance sans --dry-run pour "

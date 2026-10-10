@@ -13,6 +13,8 @@ sa part individuelle (plus précis que diviser par 65 %).
   - Les deux      → total = (spotify + ytm) / 0.65
 """
 
+from src.utils.title_matching import cle_album
+
 # ── Parts de marché ───────────────────────────────────────────────────────────
 SPOTIFY_SHARE = 0.40
 YTM_SHARE = 0.25
@@ -96,7 +98,71 @@ def total_discographie(tracks, noms=(), formations=(), *, prods: bool = False) -
         total += est or 0
         if not deja:
             total += calculate_total_streams(streams_variantes(t), None) or 0
+    # Les clips DOUBLES (une vidéo, plusieurs morceaux du même album) ne sont
+    # comptés par aucun morceau : ils le sont ici, une fois. Des vues YouTube
+    # de morceaux qui ont presque toujours Spotify aussi : la part COMBINÉE.
+    total += int(
+        sum(clips_doubles(morceaux_comptes(tracks, noms, formations, prods=prods)).values())
+        / COMBINED_SHARE
+    )
     return total
+
+
+def clips_doubles(tracks) -> dict[str, int]:
+    """`{clé d'album: vues}` des vidéos portées par PLUSIEURS morceaux d'un même
+    album — chacune comptée UNE fois (décision utilisateur 2026-10-10 : « un
+    double clip est quasi tout le temps issu du même album, on le compte au
+    niveau de l'album »).
+
+    Le run YouTube Music n'attribue une vidéo partagée à AUCUN morceau. Mesuré :
+    38 des 98 vidéos partagées portent sur le même album (105 M de vues) ; les
+    autres — fiches d'albums différents (« Intro » de deux projets), fiche sans
+    album (doublons, fiche de version) — sont des erreurs, pas des clips
+    doubles : elles restent hors compte. Lignes sœurs et doublons d'une même
+    page Genius ne font pas un clip double."""
+    porteurs: dict[str, list] = {}
+    vues: dict[str, int] = {}
+    for t in tracks:
+        for v in t.videos or []:
+            if v.video_id and v.views:
+                porteurs.setdefault(v.video_id, []).append(t)
+                vues[v.video_id] = max(vues.get(v.video_id, 0), int(v.views))
+    par_album: dict[str, int] = {}
+    for video_id, fiches in porteurs.items():
+        if len({t.genius_id or ("fiche", t.id) for t in fiches}) < 2:
+            continue
+        if any(not t.album for t in fiches):
+            continue
+        cles = {cle_album(t.album) for t in fiches}
+        if len(cles) != 1:
+            continue
+        cle = cles.pop()
+        par_album[cle] = par_album.get(cle, 0) + vues[video_id]
+    return par_album
+
+
+def totaux_albums_ytm(tracks) -> dict[str, tuple[set[str], int]]:
+    """`{clé d'album: (titres tels qu'écrits, total)}` — le total YouTube Music
+    d'un album = ses morceaux (audio + clips, déjà dédoublonnés par vidéo) +
+    ses clips doubles (décision utilisateur 2026-10-10 ; il ne comptait que les
+    pistes audio de la page album, aucun clip). Une page Genius ne compte
+    qu'une fois (doublons, lignes d'une discographie réunie)."""
+    titres: dict[str, set[str]] = {}
+    totaux: dict[str, int] = {}
+    pages = set()
+    for t in tracks:
+        if not t.album:
+            continue
+        cle = cle_album(t.album)
+        titres.setdefault(cle, set()).add(t.album)
+        if t.genius_id:
+            if (cle, t.genius_id) in pages:
+                continue
+            pages.add((cle, t.genius_id))
+        totaux[cle] = totaux.get(cle, 0) + (t.streams.ytm_streams or 0)
+    for cle, n in clips_doubles(tracks).items():
+        totaux[cle] = totaux.get(cle, 0) + n
+    return {cle: (titres[cle], n) for cle, n in totaux.items() if cle in titres}
 
 
 def calculate_total_monthly_listeners(

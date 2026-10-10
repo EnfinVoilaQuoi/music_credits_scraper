@@ -163,3 +163,36 @@ class TestUnEnregistrementUneFois:
         tous = [self._t(4000, gid=1, sid="A", ytm=100), self._t(4000, gid=2, sid="A", ytm=50)]
         attendu = calculate_total_streams(4000, 100) + calculate_total_streams(None, 50)
         assert total_discographie(tous) == attendu
+
+
+class TestClipsDoubles:
+    """Décision utilisateur 2026-10-10 : une vidéo de plusieurs morceaux du MÊME
+    album compte une fois, au niveau de l'album (aucun morceau ne la compte)."""
+
+    def _fiche(self, tid, titre, album, gid=None, videos=(), ytm=None):
+        from src.models import Track, TrackVideo
+
+        t = Track(title=titre, album=album, genius_id=gid)
+        t.id = tid
+        t.videos = [TrackVideo(video_id=v, views=n) for v, n in videos]
+        t.streams.ytm_streams = ytm
+        return t
+
+    def test_meme_album_compte_une_fois(self):
+        from src.utils.streams_calculator import clips_doubles, totaux_albums_ytm
+
+        a = self._fiche(1, "Avec une rose", "L'amour", 1, [("CLIP0000001", 531_930)], ytm=100)
+        b = self._fiche(2, "Masterclass", "L’amour", 2, [("CLIP0000001", 531_930)], ytm=50)
+        assert list(clips_doubles([a, b]).values()) == [531_930]
+        ((titres, total),) = totaux_albums_ytm([a, b]).values()
+        assert total == 100 + 50 + 531_930
+
+    def test_albums_differents_ou_ligne_soeur_ne_comptent_pas(self):
+        from src.utils.streams_calculator import clips_doubles
+
+        intro_a = self._fiche(1, "INTRO", "RIYAD SADIO", 1, [("INTRO000001", 10)])
+        intro_b = self._fiche(2, "Intro", "Projet Blue Beam", 2, [("INTRO000001", 10)])
+        assert clips_doubles([intro_a, intro_b]) == {}
+        soeur = self._fiche(3, "Grünt #33", "Grünt", 7, [("GRUNT000001", 10)])
+        soeur_bis = self._fiche(4, "Grünt #33", "Grünt", 7, [("GRUNT000001", 10)])
+        assert clips_doubles([soeur, soeur_bis]) == {}

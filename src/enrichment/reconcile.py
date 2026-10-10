@@ -119,7 +119,12 @@ def _confidence_key(confidence: float | None) -> float:
 #: de fiabilité BPM — qui ne le concerne pas. Un champ entre ici, pas dans
 #: `DISCOGRAPHY_PRIORITIES`, tant que sa source n'est pas indépendante et ne
 #: porte pas sur le même enregistrement.
-CHAMPS_DECLARES: frozenset[str] = frozenset({"spotify_id_propose", "apple_music_id_propose"})
+CHAMPS_DECLARES: frozenset[str] = frozenset(
+    # `discogs_position` (2026-10-10, CORRECTIFS 2.6) : la place de la piste sur
+    # le disque Discogs (« B3 », « 12 »), qui dit à quelles pistes un crédit
+    # de disque se rapporte — stockée pour que l'audit se rejoue sans réseau.
+    {"spotify_id_propose", "apple_music_id_propose", "discogs_position"}
+)
 
 DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
     # Mesuré le 2026-09-22 : cet ordre était en partie DÉCLARATIF — `ytmusic`

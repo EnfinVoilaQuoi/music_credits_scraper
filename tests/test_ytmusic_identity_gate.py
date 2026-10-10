@@ -93,11 +93,14 @@ def test_report_album_overlap_normalise():
 def _track(idx, title, album="Alb", spotify_streams=None, youtube_url=None, videos=None):
     return SimpleNamespace(
         id=idx,
+        genius_id=None,
         spotify_id=None,
         deezer_id=None,
         title=title,
         album=album,
-        streams=SimpleNamespace(spotify_streams=spotify_streams),  # Phase 5 : sous-objet
+        streams=SimpleNamespace(
+            spotify_streams=spotify_streams, ytm_streams=None
+        ),  # Phase 5 : sous-objet
         is_featuring=False,
         primary_artist_name=None,
         youtube_url=youtube_url,

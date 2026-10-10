@@ -37,7 +37,7 @@ def _track(
         deezer_id=deezer_id,
         title=title,
         album=album,
-        streams=SimpleNamespace(spotify_streams=spotify_streams),
+        streams=SimpleNamespace(spotify_streams=spotify_streams, ytm_streams=None),
         is_featuring=False,
         primary_artist_name=None,
         youtube_url=youtube_url,
@@ -100,6 +100,10 @@ class FakeDM:
 
     def update_track_ytm_streams(self, track_id, total):
         self.stream_writes.append((track_id, total))
+        # Relu par les totaux d'album de fin de run, comme la vraie base.
+        for t in self._tracks:
+            if t.id == track_id:
+                t.streams.ytm_streams = total
         return True
 
     def update_album_ytm_streams(self, artist_id, album_title, total):
@@ -119,6 +123,10 @@ class FakeDM:
 
     def record_track_videos(self, track_id, videos):
         self.video_writes.append((track_id, sorted(v.video_id for v in videos)))
+        for t in self._tracks:
+            if t.id == track_id:
+                connues = {v.video_id for v in t.videos}
+                t.videos = list(t.videos) + [v for v in videos if v.video_id not in connues]
         return len(videos)
 
 
@@ -409,6 +417,8 @@ class TestTotalDalbum:
 
         dm, _ = _lancer(api, tracks)
 
+        # Décision 2026-10-10 : total d'album = morceaux + clips doubles, le clip
+        # double compté UNE fois (il ne l'est par aucun des deux morceaux).
         assert dm.album_writes == [("Alb", 1007)]  # et non 2007
 
 

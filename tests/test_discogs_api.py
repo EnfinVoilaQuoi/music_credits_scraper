@@ -380,6 +380,16 @@ class TestEnrichissementDuTrack:
 
         assert client.enrich_track_data(track) == "not_needed"
 
+    def test_la_position_de_la_piste_est_declaree(self, client, monkeypatch):
+        """CORRECTIFS 2.6 : la position (« B3 ») dit quels crédits de disque
+        concernent la piste — stockée pour rejouer l'audit sans réseau."""
+        self._stub(client, monkeypatch, _donnees(position="B3"))
+        track = _track()
+        client.enrich_track_data(track)
+        assert ("discogs_position", "B3", "discogs") in [
+            (o.field, o.value, o.source) for o in track.observations
+        ]
+
     def test_la_duree_de_la_piste_est_declaree(self, client, monkeypatch):
         """Lot B5 : lue avec le disque, elle était jetée — déclarée, jamais posée
         en colonne (arbitrée en bas de l'ordre)."""

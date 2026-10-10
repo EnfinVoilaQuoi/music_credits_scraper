@@ -607,11 +607,6 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     videos_vues: dict[int, dict[str, TrackVideo]] = {}
 
     for album_title, raw_tracks in tracks_by_album.items():
-        # Total d'album indexé PAR VIDEOID, comme les totaux par morceau : une
-        # vidéo qui couvre deux titres du disque (clip double) est listée sur
-        # les deux, et l'additionner deux fois gonflerait le total de l'album.
-        album_vid_counts: dict[str, int] = {}
-
         for entry in raw_tracks:
             streams = api.resolve_streams(entry, view_counts)
             norm = _normalize_title(entry["title"])
@@ -635,7 +630,6 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                     video_id = entry.get("video_id")
                     vid = video_id or f"_novid_{album_title}_{norm}"
                     vid_counts.setdefault(matched_track.id, {})[vid] = streams
-                    album_vid_counts[vid] = streams
                     covered_track_ids.add(matched_track.id)
                     if video_id:
                         videos_vues.setdefault(matched_track.id, {})[video_id] = TrackVideo(
@@ -662,9 +656,9 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         # Sous SÉLECTION, pas de total d'album : il s'additionne sur tous les
         # morceaux du disque, dont les compteurs ne sont plus demandés. L'écrire
         # donnerait un total amputé — plus faux que pas de total du tout.
-        album_total_streams = sum(album_vid_counts.values())
-        if album_total_streams > 0 and track_ids is None:
-            data_manager.update_album_ytm_streams(artist.id, album_title, album_total_streams)
+        # Le total d'ALBUM ne s'écrit plus ici (page album = pistes audio
+        # seules) : il est recalculé en fin de run depuis les morceaux, clips
+        # compris, plus les clips doubles (`streams_calculator.totaux_albums_ytm`).
 
         result["albums_processed"] += 1
 
@@ -859,6 +853,17 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
 
     for track_id, videos in videos_vues.items():
         data_manager.record_track_videos(track_id, list(videos.values()))
+
+    # Totaux d'ALBUM : les morceaux tels qu'écrits ci-dessus + les clips doubles
+    # (décision utilisateur 2026-10-10). Sous SÉLECTION, rien : un total qui
+    # s'additionne sur des compteurs non relus serait amputé.
+    if track_ids is None:
+        from src.utils.streams_calculator import totaux_albums_ytm
+
+        for titres, total in totaux_albums_ytm(data_manager.get_artist_tracks(artist.id)).values():
+            if total > 0:
+                for titre in titres:
+                    data_manager.update_album_ytm_streams(artist.id, titre, total)
 
     # ── Étape 7 : durée d'après les vidéos PROPRES à la fiche (2026-09-27) ────
     # Audio d'une chaîne Topic = le fichier du distributeur ; vidéo ordinaire

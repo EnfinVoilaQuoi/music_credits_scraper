@@ -79,3 +79,27 @@ class TestConcerneLaPiste:
         assert concerne_la_piste("A2, B1 to B3, D2", "12")
         assert concerne_la_piste("3, 5", "B2")
         assert not concerne_la_piste("C2", "A1")
+
+
+def test_la_position_declaree_est_enregistree(data_manager):
+    """CORRECTIFS 2.6 : sans elle, l'audit des crédits de disque exige le réseau."""
+    from sqlalchemy import text
+
+    from src.enrichment.observation import Observation
+    from src.models import Artist, Track
+
+    a = Artist(name="Jazzy Bazz")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Memento Mori", artist=a)
+    t.observations.append(Observation("discogs_position", "2", "discogs"))
+    data_manager.save_track(t)
+    with data_manager.engine.connect() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT value FROM observations WHERE track_id = :t AND field = 'discogs_position'"
+                ),
+                {"t": t.id},
+            ).scalar()
+            == "2"
+        )

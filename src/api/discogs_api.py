@@ -787,6 +787,14 @@ class DiscogsClient:
                 logger.info(f"💿 Discogs ID ajouté: {track.discogs_id}")
                 updated = True
 
+            # Position de la piste sur le disque (2026-10-10, CORRECTIFS 2.6) :
+            # c'est elle qui dit quels crédits de disque la concernent. Déclarée,
+            # jamais arbitrée : l'audit des crédits se rejoue ensuite hors ligne.
+            if track_data.get("position"):
+                track.observations.append(
+                    Observation("discogs_position", str(track_data["position"]), "discogs")
+                )
+
             # Durée de la piste sur le disque (lot B5, 2026-09-29) : déjà lue,
             # elle était jetée. Mesurée à ±5 s de Deezer sur 35 pistes sur 36 —
             # saisie par des contributeurs, elle est DÉCLARÉE et arbitrée en bas

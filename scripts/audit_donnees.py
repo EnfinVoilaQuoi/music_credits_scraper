@@ -36,7 +36,7 @@ from src.utils.concordance_paroles import (
     recouvrement_bigrammes,
 )
 from src.utils.duree_youtube import NON_MORCEAU
-from src.utils.title_matching import normalize_title
+from src.utils.title_matching import cle_album, normalize_title
 from src.utils.version_descriptors import (
     Kind,
     meme_socle,
@@ -362,6 +362,12 @@ def streams(c, par) -> list[Cas]:
             and len({ids[x[0]]["genius_id"] for x in liste} - {None})
             + sum(1 for x in liste if ids[x[0]]["genius_id"] is None)
             > 1
+            # Clip double d'un même album : compté une fois au niveau de
+            # l'album (décision utilisateur 2026-10-10) — pas une anomalie.
+            and not (
+                all(ids[x[0]]["album"] for x in liste)
+                and len({cle_album(ids[x[0]]["album"]) for x in liste}) == 1
+            )
         ):
             t = ids[liste[0][0]]
             cas.append(

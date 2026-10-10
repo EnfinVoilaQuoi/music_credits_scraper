@@ -107,3 +107,12 @@ def test_certif_d_une_version_portee_par_l_original():
     assert not certif_d_une_version(
         "Dolce Camara (Snight B Remix)", "DOLCE CAMARA (SNIGHT B REMIX)"
     )
+
+
+def test_une_place_dans_le_projet_n_est_pas_un_sous_titre():
+    """« ALL OF THE LIGHTS (INTERLUDE) » est l'Interlude, un autre morceau ;
+    « Matrix (Intro) » côté fiche reste le morceau Matrix (2026-10-10)."""
+    from src.utils.cert_titres import certif_du_morceau
+
+    assert not certif_du_morceau("All of the Lights", "ALL OF THE LIGHTS (INTERLUDE)")
+    assert certif_du_morceau("Make Her Say (I Poke Her Face)", "MAKE HER SAY")

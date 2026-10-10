@@ -29,6 +29,7 @@ class _FakeDeezerClient:
         scraped_release_date,
         artist_deezer_id=None,
         deezer_id=None,
+        album=None,
     ):
         self.calls.append((artist, title, previous_duration, scraped_release_date))
         self.ids = getattr(self, "ids", []) + [artist_deezer_id]
@@ -44,6 +45,7 @@ class _FakeDeezerClient:
         scraped_release_date,
         artist_deezer_id=None,
         deezer_id=None,
+        album=None,
     ):
         """Jumeau async : même signature au `http` près (session partagée)."""
         self.calls.append((artist, title, previous_duration, scraped_release_date))

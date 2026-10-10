@@ -833,6 +833,7 @@ class DiscogsClient:
                 # mesuré le 2026-09-03 : 818 paires propres à Discogs contre 22
                 # concordantes).
                 track.credits = [c for c in track.credits if c.source != "discogs"]
+                track._credits_discogs_frais = True
 
                 # Discogs crédite au niveau du DISQUE et dit à quelles PISTES
                 # chaque crédit se rapporte (`tracks`). Ce champ était stocké et

@@ -24,9 +24,9 @@ de titre qui a produit les 5 %.
 from __future__ import annotations
 
 from src.utils.logger import get_logger
-from src.utils.title_matching import names_match_as_words
+from src.utils.title_matching import cle_album, names_match_as_words
 from src.utils.track_mapper import _clean_duration
-from src.utils.version_descriptors import titres_equivalents
+from src.utils.version_descriptors import titre_generique, titres_equivalents
 
 logger = get_logger(__name__)
 
@@ -124,6 +124,7 @@ def hit_concorde(
     artist_deezer_id: int | None = None,
     noms_acceptes=(),
     tolerance: int = TOLERANCE_DUREE,
+    album: str | None = None,
 ) -> tuple[bool, str]:
     """Le hit est-il le morceau cherché ? → `(verdict, motif)`.
 
@@ -149,6 +150,12 @@ def hit_concorde(
         return False, f"artiste : Deezer crédite {credites}, attendu {artist_name}"
     if variante_etrangere(hit, title=title):
         return False, f"titre : Deezer sert « {titre_deezer(hit)} », attendu « {title} »"
+    # Un titre GÉNÉRIQUE (« Intro ») ne désigne une fiche que dans SON disque :
+    # l'« Intro » de *0.9* allait sur celle d'*Autopsie Vol. 3* (Booba,
+    # 2026-10-10 — même titre, même durée de 18 s).
+    disque = ((hit.get("album") or {}).get("title")) or ""
+    if album and disque and titre_generique(title) and cle_album(disque) != cle_album(album):
+        return False, f"titre générique : piste du disque « {disque} », attendu « {album} »"
     duree_base = _clean_duration(previous_duration)
     duree_hit = _clean_duration(hit.get("duration"))
     if duree_base and duree_hit and abs(duree_base - duree_hit) > tolerance:

@@ -600,6 +600,28 @@ class TestAppleMusic:
         identite.verifier_apple_music(rt, artist, client=client, force=True)
         assert "33" in client.demandes
 
+    def test_une_fiche_inedite_ne_recoit_pas_l_id_du_titre_sorti(self):
+        """Booba, 2026-10-10 : la page de « Cavaliero (Feat. Koba LaD) » (première
+        version, jamais sortie) déclarait l'ID Apple du « CAVALIERO » sorti."""
+        from src.enrichment.observation import Observation
+        from src.models import Artist
+
+        artist = Artist(name="Booba")
+        artist.id = 1
+        sorti = Track(title="CAVALIERO", artist=artist)
+        inedit = Track(title="Cavaliero (Feat. Koba LaD)", artist=artist)
+        sorti.id, inedit.id = 1, 2
+        inedit.unreleased = 1
+        artist.tracks = [sorti, inedit]
+        obs = {
+            t.id: [Observation("apple_music_id_propose", "15", "genius")] for t in (sorti, inedit)
+        }
+        client = self._Client({"15": {"artistName": "Booba", "trackName": "CAVALIERO"}})
+        dm = self._DMApple(obs)
+        rt = SimpleNamespace(data_manager=dm)
+        identite.verifier_apple_music(rt, artist, client=client)
+        assert dm.ecrits == {1: "15", 2: None}
+
 
 class TestIsrcVersSpotify:
     """3d (lot B2) : l'ISRC désigne l'enregistrement, ReccoBeats ses pressings."""
@@ -627,3 +649,25 @@ class TestIsrcVersSpotify:
         )
         n = identite.relier_par_isrc(SimpleNamespace(data_manager=dm), artist, client=client)
         assert n == 1 and ecrits == [(1, "bon", "reccobeats_isrc")]
+
+
+def test_retirer_un_id_apple_emporte_sa_duree(data_manager):
+    from sqlalchemy import text
+
+    from src.models import Artist
+
+    a = Artist(name="Booba")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Cavaliero (Feat. Koba LaD)", artist=a, genius_id=9067199)
+    data_manager.save_track(t)
+    data_manager.record_apple_music(t.id, "1501535559")
+    data_manager.record_duration_observation(t.id, 139, "apple_music")
+    assert data_manager.clear_track_apple_music_id(t.id)
+    with data_manager.engine.connect() as conn:
+        ligne = conn.execute(
+            text(
+                "SELECT apple_music_id, duration, apple_music_checked_at FROM tracks WHERE id = :i"
+            ),
+            {"i": t.id},
+        ).one()
+    assert ligne[0] is None and ligne[1] is None and ligne[2] is not None

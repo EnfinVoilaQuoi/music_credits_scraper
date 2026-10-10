@@ -462,9 +462,35 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
         return 0, 0
     fiches = (client or ITunesAPI()).lookup(set(proposes.values()))
     par_id = {t.id: t for t in artist.tracks}
+    # Un identifiant de boutique désigne UN enregistrement publié (2026-10-10,
+    # Booba : la page de « Cavaliero (Feat. Koba LaD) », première version
+    # jamais sortie, déclarait l'ID du « CAVALIERO » sorti — et la fiche iTunes
+    # concorde, le « feat. » retiré). Jamais à une fiche INÉDITE ; jamais s'il
+    # est déjà porté par une autre fiche de l'artiste ; proposé par plusieurs
+    # fiches publiées, à aucune (rien ne départage, rien n'est daté).
+    portes = {t.apple_music_id: t.id for t in artist.tracks if t.apple_music_id}
+    publies = [tid for tid in proposes if par_id[tid].unreleased != 1]
+    demandes: dict[str, int] = {}
+    for tid in publies:
+        demandes[proposes[tid]] = demandes.get(proposes[tid], 0) + 1
     retenus = dementis = 0
     for tid, am in proposes.items():
         track = par_id[tid]
+        if track.unreleased == 1:
+            dementis += 1
+            dm.record_apple_music(tid, None)
+            logger.info(f"Apple Music {am} refusé pour « {track.title} » : fiche inédite")
+            continue
+        if am in portes and portes[am] != tid:
+            dementis += 1
+            dm.record_apple_music(tid, None)
+            logger.info(f"Apple Music {am} refusé pour « {track.title} » : déjà porté")
+            continue
+        if demandes.get(am, 0) > 1:
+            logger.info(
+                f"Apple Music {am} proposé par plusieurs fiches : « {track.title} » laissée"
+            )
+            continue
         ok, motif = fiche_concorde(track, fiches.get(am))
         if ok:
             retenus += 1

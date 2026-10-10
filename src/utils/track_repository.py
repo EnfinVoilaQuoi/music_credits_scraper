@@ -541,24 +541,28 @@ class TrackRepository:
             # donc de ses sœurs au moment même où elle naît, ce qui rend l'ajout
             # d'un artiste déjà couvert par un autre presque gratuit.
             if track.id:
-                if track._credits_genius_frais:
-                    # Crédits de la page relus : la page est celle de TOUTES
-                    # les sœurs. Leurs crédits `genius` partent AVANT l'union,
-                    # qui ne sait qu'ajouter et réinjecterait les anciens
-                    # (mesuré 2026-09-26 : « The Morning », trois lignes chez
-                    # Kanye, Cudi et Travis, gardait les « Recorded At »
-                    # découpés à côté des lieux entiers).
+                # Crédits relus (page Genius, disque Discogs) : la source est
+                # celle de TOUTES les sœurs. Leurs crédits de cette source
+                # partent AVANT l'union, qui ne sait qu'ajouter et réinjecterait
+                # les anciens (mesuré 2026-09-26 : « The Morning », trois lignes
+                # chez Kanye, Cudi et Travis, gardait les « Recorded At »
+                # découpés ; 2026-10-10 : *808s & Heartbreak* gardait ses
+                # crédits Discogs hors piste chez Kanye et Kid Cudi).
+                for frais, source in (
+                    ("_credits_genius_frais", "genius"),
+                    ("_credits_discogs_frais", "discogs"),
+                ):
+                    if not getattr(track, frais):
+                        continue
                     effacer_chez_les_soeurs(
                         conn,
                         track.id,
-                        lambda jumelle: conn.execute(
-                            text(
-                                "DELETE FROM credits WHERE track_id = :tid " "AND source = 'genius'"
-                            ),
-                            {"tid": jumelle},
+                        lambda jumelle, source=source: conn.execute(
+                            text("DELETE FROM credits WHERE track_id = :tid AND source = :src"),
+                            {"tid": jumelle, "src": source},
                         ),
                     )
-                    track._credits_genius_frais = False
+                    setattr(track, frais, False)
                 synchroniser_soeurs(conn, track.id, track.genius_id)
                 # Les sœurs reçoivent des observations : leurs colonnes suivent.
                 # Sans ça, la ligne enregistrée ré-arbitrait seule (2026-10-10 :
@@ -569,6 +573,12 @@ class TrackRepository:
                     valeurs = self._arbitrer_streams(conn, soeur)
                     if valeurs:
                         conn.execute(update(tracks).where(tracks.c.id == soeur).values(**valeurs))
+                    # Et son total YouTube Music, sur les vidéos reçues (2026-10-10 :
+                    # Kanye « Heartless » 258 M en colonne, 466 M de vidéos propres).
+                    # Seulement si elle a des vidéos mesurées : sans elles, le
+                    # recalcul viderait un total qu'aucune vidéo n'explique.
+                    if self._a_des_videos_mesurees(conn, soeur):
+                        self._recalculer_vues_ytm(conn, soeur)
 
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(
@@ -2621,6 +2631,17 @@ class TrackRepository:
             logger.error(f"Erreur rearbitrer_duree_et_date({track_id}): {e}")
             return False
 
+    @staticmethod
+    def _a_des_videos_mesurees(conn, track_id: int) -> bool:
+        return bool(
+            conn.execute(
+                text(
+                    "SELECT 1 FROM track_videos WHERE track_id = :t AND views IS NOT NULL LIMIT 1"
+                ),
+                {"t": track_id},
+            ).first()
+        )
+
     def _rearbitrer_duree_et_date(self, conn, track_id: int) -> None:
         """Ré-arbitre `duration` et `release_date` d'une ligne dont les
         observations ont bougé (fusion, propagation aux sœurs). Seulement les
@@ -4166,45 +4187,49 @@ class TrackRepository:
         (verdicts « ✓ Normal » compris). Rend le nouveau total (ou None)."""
         try:
             with self.engine.begin() as conn:
-                aid = conn.execute(
-                    text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": track_id}
-                ).scalar()
-                lignes = conn.execute(
-                    text("""
-                    SELECT v.video_id, v.views FROM track_videos v
-                    WHERE v.track_id = :t AND v.views IS NOT NULL AND NOT EXISTS (
-                        SELECT 1 FROM track_videos o JOIN tracks t ON t.id = o.track_id
-                        WHERE o.video_id = v.video_id AND o.track_id != :t
-                          AND t.artist_id = :aid
-                    )"""),
-                    {"t": track_id, "aid": aid},
-                ).all()
-                if exclues is None:
-                    exclues = self._videos_exclues(conn, track_id, aid)
-                comptees = [int(n) for vid, n in lignes if vid not in exclues]
-                if comptees:
-                    total = sum(comptees)
-                    maintenant = datetime.now()
-                    conn.execute(
-                        update(tracks)
-                        .where(tracks.c.id == track_id)
-                        .values(ytm_streams=total, ytm_streams_updated=maintenant)
-                    )
-                    self._upsert_observations(
-                        conn,
-                        track_id,
-                        [Observation("ytm_streams", total, "ytmusic", seen_at=maintenant)],
-                    )
-                    return total
-                conn.execute(update(tracks).where(tracks.c.id == track_id).values(ytm_streams=None))
-                conn.execute(
-                    text("DELETE FROM observations WHERE track_id = :t AND field = 'ytm_streams'"),
-                    {"t": track_id},
-                )
-                return None
+                return self._recalculer_vues_ytm(conn, track_id, exclues)
         except SQLAlchemyError as e:
             logger.error(f"Erreur recalculer_vues_ytm (track_id={track_id}): {e}")
             return None
+
+    def _recalculer_vues_ytm(self, conn, track_id: int, exclues=None) -> int | None:
+        """Corps de `recalculer_vues_ytm`, dans la transaction de l'appelant."""
+        aid = conn.execute(
+            text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": track_id}
+        ).scalar()
+        lignes = conn.execute(
+            text("""
+            SELECT v.video_id, v.views FROM track_videos v
+            WHERE v.track_id = :t AND v.views IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM track_videos o JOIN tracks t ON t.id = o.track_id
+                WHERE o.video_id = v.video_id AND o.track_id != :t
+                  AND t.artist_id = :aid
+            )"""),
+            {"t": track_id, "aid": aid},
+        ).all()
+        if exclues is None:
+            exclues = self._videos_exclues(conn, track_id, aid)
+        comptees = [int(n) for vid, n in lignes if vid not in exclues]
+        if comptees:
+            total = sum(comptees)
+            maintenant = datetime.now()
+            conn.execute(
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(ytm_streams=total, ytm_streams_updated=maintenant)
+            )
+            self._upsert_observations(
+                conn,
+                track_id,
+                [Observation("ytm_streams", total, "ytmusic", seen_at=maintenant)],
+            )
+            return total
+        conn.execute(update(tracks).where(tracks.c.id == track_id).values(ytm_streams=None))
+        conn.execute(
+            text("DELETE FROM observations WHERE track_id = :t AND field = 'ytm_streams'"),
+            {"t": track_id},
+        )
+        return None
 
     def update_track_video_views(
         self, track_id: int, views: int | None, kind: str | None = None
@@ -4329,6 +4354,47 @@ class TrackRepository:
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_apple_music (track_id={track_id}): {e}")
+            return False
+
+    def clear_track_apple_music_id(self, track_id: int) -> bool:
+        """Retire un ID Apple Music posé à tort — pendant de `record_apple_music`
+        (lignes SŒURS comprises) : l'ID et la durée `apple_music` qu'il a
+        apportée partent, la durée est ré-arbitrée ; la date de vérification
+        RESTE (l'ID n'est pas reproposé). Cas d'origine, 2026-10-10 : Booba
+        « Cavaliero (Feat. Koba LaD) », version inédite, portait l'ID du titre
+        sorti."""
+        try:
+            with self.engine.begin() as conn:
+                gid = conn.execute(
+                    text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
+                ).scalar()
+                lignes = [track_id]
+                if gid is not None:
+                    lignes = [
+                        r[0]
+                        for r in conn.execute(
+                            text("SELECT id FROM tracks WHERE genius_id = :g"), {"g": gid}
+                        )
+                    ]
+                for tid in lignes:
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET apple_music_id = NULL, updated_at = :now WHERE id = :t"
+                        ),
+                        {"t": tid, "now": datetime.now()},
+                    )
+                    conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :t AND source = 'apple_music'"
+                        ),
+                        {"t": tid},
+                    )
+                    self._ecrire_colonnes_discographie(
+                        conn, tid, self._arbitrer_discographie(conn, tid, ["duration"])
+                    )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur clear_track_apple_music_id (track_id={track_id}): {e}")
             return False
 
     def record_unreleased(self, track_id: int, valeur: bool | None) -> bool:

@@ -33,6 +33,7 @@ def _track(
     return SimpleNamespace(
         id=idx,
         genius_id=None,
+        artist=SimpleNamespace(name="Isha"),
         spotify_id=spotify_id,
         deezer_id=deezer_id,
         title=title,
@@ -119,6 +120,13 @@ class FakeDM:
 
     def record_duration_observation(self, track_id, secondes, source):
         self.durees.append((track_id, secondes, source))
+        return True
+
+    def forget_track_video(self, track_id, video_id):
+        self.oublis = getattr(self, "oublis", []) + [(track_id, video_id)]
+        return True
+
+    def clear_track_youtube_link(self, track_id):
         return True
 
     def record_track_videos(self, track_id, videos):
@@ -334,19 +342,17 @@ class TestVideoPartagee:
         assert sorted(dm.stream_writes) == [(1, 100), (2, 200)]
         assert result["vues_non_attribuees"] == 5252528
 
-    def test_le_rapport_nomme_la_video_et_ses_morceaux(self, sans_recherche):
+    def test_la_video_va_au_seul_morceau_qu_elle_nomme(self, sans_recherche):
+        """Titre connu (e21) qui ne nomme qu'UN des deux morceaux : elle quitte
+        l'autre et compte pour lui (2026-10-10, `porteurs_d_une_autre_version`) —
+        avant, partagée, elle n'était comptée nulle part."""
         api, tracks = self._clip_double()
-        # Titre connu d'une passe « vues des vidéos » précédente (e21). Il ne
-        # nomme qu'UN des deux morceaux : rien d'évident, à vérifier.
         tracks[0].videos = [TrackVideo(video_id="clipdouble0", title="B.B. Jacques - Donjon")]
         dm, result = _lancer(api, tracks)
 
-        (partagee,) = result["videos_partagees"]
-        assert partagee["video_id"] == "clipdouble0"
-        assert partagee["titre_video"] == "B.B. Jacques - Donjon"
-        assert partagee["morceaux"] == ["2h22", "Donjon"]
-        assert partagee["url"].endswith("clipdouble0")
-        assert partagee["vues"] == 5252528
+        assert dm.oublis == [(2, "clipdouble0")]
+        assert result["videos_partagees"] == []
+        assert sorted(dm.stream_writes) == [(1, 100 + 5252528), (2, 200)]
 
     def test_sans_titre_connu_le_lien_suffit_a_verifier(self, sans_recherche):
         _, result = _lancer(*self._clip_double())
@@ -496,3 +502,36 @@ def test_une_video_qui_ne_nomme_pas_le_morceau_ne_donne_pas_sa_duree(sans_recher
     dm, _ = _lancer(api, tracks)
 
     assert dm.durees == []
+
+
+def test_une_video_partagee_va_a_la_fiche_qu_elle_designe():
+    """2026-10-10 : 21 vidéos partagées (648 M de vues) n'étaient comptées par
+    aucune fiche alors que leur titre en désignait une seule."""
+    from src.utils.update_ytmusic import porteurs_d_une_autre_version
+
+    fiches = {
+        1: SimpleNamespace(title="Trèfle d’Or"),
+        2: SimpleNamespace(title="Trèfle d’Or (Version clip)"),
+        3: SimpleNamespace(title="Outro (Labrador bleu)"),
+        4: SimpleNamespace(title="OUTRO"),
+        5: SimpleNamespace(title="Avec une rose"),
+        6: SimpleNamespace(title="Masterclass"),
+    }
+    vid_counts = {1: {"T": 9}, 2: {"T": 9}, 3: {"O": 5}, 4: {"O": 5}, 5: {"C": 1}, 6: {"C": 1}}
+    titres = {
+        "T": "L'Or Du Commun - Trèfle D'or",
+        "O": "Outro",
+        "C": "A2H - Avec une rose / Masterclass",  # clip double : rien à retirer
+    }
+    assert sorted(porteurs_d_une_autre_version(vid_counts, titres, fiches)) == [
+        (2, "T"),
+        (3, "O"),
+    ]
+    # Une vidéo qui ne NOMME aucune de ses fiches (l'EP entier) ne va à aucune.
+    ep = {7: SimpleNamespace(title="Hey Mama (Orchestral)"), 8: SimpleNamespace(title="I Wonder")}
+    assert (
+        porteurs_d_une_autre_version(
+            {7: {"E": 2}, 8: {"E": 2}}, {"E": "Kanye West - Glow In The Dark EP"}, ep
+        )
+        == []
+    )

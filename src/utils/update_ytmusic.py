@@ -239,6 +239,48 @@ def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
 _RATTACHEMENTS_AFFIRMES = frozenset({"ytm_album", "manual", "genius_media"})
 
 
+def porteurs_d_une_autre_version(vid_counts: dict, titres: dict, fiches: dict) -> list:
+    """PUR. `[(track_id, video_id)]` : une vidéo partagée dont le TITRE ne
+    désigne qu'une partie de ses fiches quitte les autres (2026-10-10, règle
+    asymétrique `meme_version_publiee` — une performance compte pour
+    l'original, jamais l'inverse ; un autre montage n'est pas la fiche).
+
+    Mesuré : 21 vidéos partagées sur 98 (648 M de vues) étaient dans ce cas —
+    le clip de « Trèfle d'Or » sur la fiche « (Version clip) », l'« OUTRO » de
+    *FAITES PAS CHIER* sur « Outro (Labrador bleu) ». Partagées, elles
+    n'étaient comptées par AUCUNE fiche. Titre inconnu ⇒ on ne conclut pas ;
+    aucune fiche ne l'accepte ⇒ rien (c'est une erreur, pas un arbitrage).
+    `titres` : `{video_id: titre}` ; `fiches` : `{track_id: fiche}`.
+    """
+    from types import SimpleNamespace
+
+    from src.services.revue import video_nomme
+    from src.utils.version_descriptors import meme_version_publiee
+
+    def designe(fiche, titre) -> bool:
+        # La vidéo NOMME la fiche (sinon « Glow In The Dark EP », l'EP entier,
+        # serait donné au seul titre qu'il ne contredit pas) ET en est la
+        # bonne version.
+        return meme_version_publiee(fiche.title, titre) and video_nomme(
+            fiche, SimpleNamespace(title=titre, source=None)
+        )
+
+    par_video: dict = {}
+    for track_id, vids in vid_counts.items():
+        for video_id in vids:
+            par_video.setdefault(video_id, []).append(track_id)
+    retraits = []
+    for video_id, track_ids in par_video.items():
+        titre = titres.get(video_id)
+        if len(track_ids) < 2 or not titre:
+            continue
+        connus = [t for t in track_ids if t in fiches]
+        ok = [t for t in connus if designe(fiches[t], titre)]
+        if ok and len(ok) < len(connus):
+            retraits += [(t, video_id) for t in connus if t not in ok]
+    return retraits
+
+
 def rattachements_de_recherche_a_retirer(vid_counts: dict, sources: dict) -> list:
     """PUR. `[(track_id, video_id)]` : une vidéo partagée par plusieurs fiches,
     que l'une tient par un rattachement AFFIRMÉ et les autres par la seule
@@ -791,6 +833,36 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         logger.info(
             f"🧹 Vidéo {video_id} retirée de « {fiche.title if fiche else track_id} » "
             "(trouvée par recherche, rattachée ailleurs par le canal ou à la main)"
+        )
+
+    # Une vidéo partagée dont le titre ne désigne qu'une partie de ses fiches
+    # quitte les autres — refus MÉMORISÉ, sinon le lien Genius la reposerait.
+    from src.utils.corrections_fiches import memoriser_video_refusee
+
+    titres_videos = {
+        v: (details_videos.get(v) or {}).get("title")
+        for vids in vid_counts.values()
+        for v in vids
+        if (details_videos.get(v) or {}).get("title")
+    }
+    for t in db_tracks:
+        for v in t.videos or []:
+            if v.title:
+                titres_videos.setdefault(v.video_id, v.title)
+    for track_id, video_id in porteurs_d_une_autre_version(
+        vid_counts, titres_videos, tracks_par_id
+    ):
+        vid_counts[track_id].pop(video_id, None)
+        videos_vues.get(track_id, {}).pop(video_id, None)
+        fiche = tracks_par_id[track_id]
+        memoriser_video_refusee(fiche, video_id)
+        data_manager.forget_track_video(track_id, video_id)
+        if video_id in (fiche.youtube_url or ""):
+            data_manager.clear_track_youtube_link(track_id)
+        result["recherches_ecartees"] += 1
+        logger.info(
+            f"🧹 Vidéo « {titres_videos.get(video_id)} » retirée de « {fiche.title} » "
+            "(elle désigne une autre version, portée aussi par la bonne fiche)"
         )
 
     partagees = videos_partagees(vid_counts)

@@ -32,6 +32,7 @@ from src.utils.version_descriptors import (
     Kind,
     est_edition_de_diffusion,
     parse_variant,
+    titre_generique,
     titres_equivalents,
 )
 
@@ -94,6 +95,12 @@ def certif_du_morceau(titre_fiche: str | None, titre_certif: str | None) -> bool
         # Mots EN PLUS côté certif : seulement une édition du même
         # enregistrement, ou un sous-titre entre parenthèses.
         reste = c[len(f) :].strip()
+        if titre_generique(reste):
+            # « ALL OF THE LIGHTS (INTERLUDE) » : une PLACE dans le projet n'est
+            # pas un sous-titre, c'est un autre morceau (l'Interlude de *My
+            # Beautiful Dark Twisted Fantasy*, 2026-10-10). Côté fiche, l'inverse
+            # reste vrai : « Matrix (Intro) » est le morceau Matrix.
+            return False
         return est_edition_de_diffusion(reste.lower()) or _sous_titre(titre_certif, f)
     if f.startswith(c):
         # Certif plus COURTE : coupée par la source (en plein mot, au moins 8

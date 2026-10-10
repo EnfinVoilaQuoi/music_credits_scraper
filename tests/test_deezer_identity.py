@@ -187,3 +187,22 @@ class TestSansMatiereOnNeConclutPas:
         assert not variante_etrangere(None, title="Durag")
         assert not variante_etrangere({"title": "Durag"}, title="")
         assert not variante_etrangere({"title": "", "title_short": ""}, title="Durag")
+
+
+def test_un_titre_generique_exige_le_meme_disque():
+    """Booba, 2026-10-10 : l'« Intro » de *0.9* (18 s) posée sur l'« Intro »
+    d'*Autopsie Vol. 3* (18 s aussi)."""
+    from src.utils.deezer_identity import hit_concorde
+
+    hit = {
+        "title": "Intro",
+        "duration": 18,
+        "artist": {"id": 1, "name": "Booba"},
+        "album": {"title": "0.9"},
+    }
+    ok, motif = hit_concorde(hit, artist_name="Booba", title="Intro", album="Autopsie Vol. 3")
+    assert not ok and "générique" in motif
+    assert hit_concorde(hit, artist_name="Booba", title="Intro", album="0.9")[0]
+    # Un titre qui n'est pas générique ne dépend pas du disque (best-of, single).
+    hit["title"] = "Tallac"
+    assert hit_concorde(hit, artist_name="Booba", title="Tallac", album="Autopsie Vol. 3")[0]

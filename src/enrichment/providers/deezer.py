@@ -84,6 +84,7 @@ class DeezerProvider:
                 artist_deezer_id=self._artist_deezer_id(track),
                 # B0 : la piste déjà liée se LIT par son id.
                 deezer_id=track.deezer_id,
+                album=track.album,
             )
             # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
             track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")
@@ -122,6 +123,7 @@ class DeezerProvider:
                 artist_deezer_id=self._artist_deezer_id(track),
                 # B0 : la piste déjà liée se LIT par son id.
                 deezer_id=track.deezer_id,
+                album=track.album,
             )
             # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
             track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")

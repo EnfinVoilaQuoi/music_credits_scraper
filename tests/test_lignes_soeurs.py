@@ -380,3 +380,36 @@ def test_la_duree_de_la_soeur_suit_ses_observations(data_manager, famille):
     data_manager.save_track(riche)
     assert _colonne(data_manager, riche.id, "duration") == 210
     assert _colonne(data_manager, pauvre.id, "duration") == 210
+
+
+def test_un_disque_discogs_relu_vaut_pour_les_soeurs(data_manager, famille):
+    """2026-10-10, *808s & Heartbreak* : chaque ligne relue récupérait par
+    l'union les crédits hors piste que l'autre gardait — aucune ne se nettoyait."""
+    riche, pauvre = famille
+    pauvre.add_credit(
+        Credit(name="Mr Hudson", role=CreditRole.PRODUCER, source="discogs", tracks="C2")
+    )
+    data_manager.save_track(pauvre)
+    riche.credits = [Credit(name="No I.D.", role=CreditRole.PRODUCER, source="discogs")]
+    riche._credits_discogs_frais = True
+    data_manager.save_track(riche)
+    with data_manager.engine.connect() as conn:
+        noms = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM credits WHERE track_id = :t AND source = 'discogs'"),
+                {"t": pauvre.id},
+            )
+        }
+    assert noms == {"No I.D."}
+
+
+def test_le_total_youtube_de_la_soeur_suit_ses_videos(data_manager, famille):
+    """2026-10-10 : Kanye « Heartless » gardait 258 M en colonne pour 466 M de
+    vidéos reçues de la ligne Kid Cudi."""
+    riche, pauvre = famille
+    data_manager.record_track_videos(
+        riche.id, [TrackVideo(video_id="CLIPGRUNT33", source="genius_media", views=5000)]
+    )
+    data_manager.save_track(riche)
+    assert _colonne(data_manager, pauvre.id, "ytm_streams") == 5000

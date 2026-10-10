@@ -609,6 +609,10 @@ class Track:
     # crédits `genius` au lieu de laisser l'union réinjecter les anciens.
     # Consommé et remis à False par ``save_track``.
     _credits_genius_frais: bool = field(default=False, repr=False)
+    # Même chose pour Discogs : le disque relu vaut pour toutes les sœurs
+    # (2026-10-10, *808s & Heartbreak* chez Kanye et Kid Cudi : chaque ligne
+    # relue récupérait par l'union les crédits hors piste de l'autre).
+    _credits_discogs_frais: bool = field(default=False, repr=False)
     # Parutions vues pendant le run. Consommées et vidées par ``save_track``.
     release_observations: list["ReleaseObservation"] = field(default_factory=list, repr=False)
 

@@ -156,3 +156,28 @@ def test_somme_connue():
     assert somme_connue([]) is None
     assert somme_connue([3, None, 4]) == 7
     assert somme_connue([0]) == 0
+
+
+def test_une_page_sans_charset_est_lue_en_utf8(monkeypatch):
+    """Kworb sert de l'UTF-8 sans le déclarer : lu en latin-1, « Grand Garçon »
+    devenait « Grand GarÃ§on » — deux albums d'Isha l'étaient encore en base
+    (écrits le 2026-06-12, avant le correctif ; réparés le 2026-10-10)."""
+    from src.observability import source_usage
+
+    class _Reponse:
+        status_code = 200
+        encoding = "ISO-8859-1"  # ce que requests suppose sans charset
+        content = "<html><body><h1>Grand Garçon</h1></body></html>".encode()
+
+        @property
+        def text(self):
+            return self.content.decode(self.encoding)
+
+        def raise_for_status(self):
+            pass
+
+    reponse = _Reponse()
+    monkeypatch.setattr(source_usage, "requests_get", lambda *a, **k: reponse)
+    KworbScraper()._fetch_and_parse("https://kworb.net/spotify/artist/x.html")
+    assert reponse.encoding == "utf-8"
+    assert "Garçon" in reponse.text

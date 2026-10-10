@@ -18,8 +18,8 @@ RACINE = Path(__file__).resolve().parents[1]
 # Seuls chemins où BLE001 peut rester ignoré. N'en AJOUTER aucun.
 EXEMPTES_AUTORISES = {"scripts/**", "tests/**", "src/gui/**"}
 
-# Nombre d'`except` larges dans src/gui, mesuré le 2026-09-28. Ne fait que BAISSER.
-PLAFOND_GUI = 58
+# Nombre d'`except` larges dans src/gui, mesuré le 2026-10-11. Ne fait que BAISSER.
+PLAFOND_GUI = 56
 
 
 def _exemptions_ble001() -> set[str]:

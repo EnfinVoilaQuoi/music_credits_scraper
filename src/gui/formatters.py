@@ -1,27 +1,9 @@
 """Présentation des certifications pour la GUI.
 
 Le modèle `Track` ne doit pas savoir que « Diamant » = 💎 : toute la mise en
-forme lisible des certifications (emoji, texte, durées) vit ici.
+forme lisible des certifications (emoji, texte, durées) vit dans
+`src/presentation/format.py` depuis le 2026-10-11 (partagée avec la GUI PyQt6) ;
+ré-exportée ici, même nom, même comportement.
 """
 
-_EMOJI_MAP = {
-    # BPI (UK) : palier SOUS l'or, propre à ce corps.
-    "Silver": "🥈",
-    "Or": "🥇",
-    "Double Or": "🥇🥇",
-    "Triple Or": "🥇🥇🥇",
-    "Platine": "💿",
-    "Double Platine": "💿💿",
-    "Triple Platine": "💿💿💿",
-    "Diamant": "💎",
-    "Double Diamant": "💎💎",
-    "Triple Diamant": "💎💎💎",
-    "Quadruple Diamant": "💎💎💎💎",
-}
-
-
-def certification_emoji(level: str | None) -> str:
-    """Retourne un emoji correspondant au niveau de certification."""
-    if not level:
-        return ""
-    return _EMOJI_MAP.get(level, "🏆")
+from src.presentation.format import certification_emoji  # noqa: F401 — ré-export

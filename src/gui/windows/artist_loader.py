@@ -3,7 +3,7 @@
 from tkinter import messagebox
 
 import customtkinter as ctk
-from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.utils.logger import get_logger
 
@@ -259,53 +259,12 @@ def load_existing_artist(app):
 
 
 def get_artists_with_stats(app):
-    """Récupère la liste des artistes avec leurs statistiques - VERSION AVEC DEBUG"""
+    """Les artistes en base avec leurs statistiques — requête UNIQUE dans le
+    repository (`resume_des_artistes`), partagée avec la GUI PyQt6."""
     try:
-        logger.info("🔍 Début récupération des artistes avec stats")
-
-        query = text("""
-            SELECT
-                a.name,
-                COUNT(DISTINCT t.id) AS tracks_count,
-                COUNT(DISTINCT c.id) AS credits_count,
-                MAX(t.updated_at) AS last_update,
-                a.created_at
-            FROM artists a
-            LEFT JOIN tracks t ON a.id = t.artist_id
-            LEFT JOIN credits c ON t.id = c.track_id
-            GROUP BY a.id, a.name, a.created_at
-            ORDER BY a.name
-        """)
-        # Moteur SQLAlchemy Core (façade.engine) : la Row est accessible par index
-        # comme l'ancien curseur sqlite3 ; les dates viennent en TEXT (text() non
-        # typé) → tranche str défensive.
-        with app.data_manager.engine.connect() as conn:
-            rows = conn.execute(query).fetchall()
-        logger.info(f"📊 {len(rows)} lignes récupérées de la base")
-
-        artists_data = []
-        for i, row in enumerate(rows):
-            try:
-                artist_info = {
-                    "name": row[0],
-                    "tracks_count": row[1] or 0,
-                    "credits_count": row[2] or 0,
-                    "last_update": str(row[3])[:10] if row[3] else None,
-                    "created_at": str(row[4])[:10] if row[4] else None,
-                }
-                artists_data.append(artist_info)
-
-            except Exception as row_error:
-                logger.error(f"❌ Erreur sur la ligne {i}: {row_error}")
-                logger.error(f"Contenu de la ligne: {row}")
-
-        logger.info(f"✅ {len(artists_data)} artistes traités avec succès")
+        artists_data = app.data_manager.resume_des_artistes()
+        logger.info(f"✅ {len(artists_data)} artistes en base")
         return artists_data
-
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.error(f"❌ Erreur lors de la récupération des artistes: {e}")
-        logger.error(f"Type d'erreur: {type(e)}")
-        import traceback
-
-        logger.error(f"Traceback: {traceback.format_exc()}")
         return []

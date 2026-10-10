@@ -1,8 +1,21 @@
-"""Fonctions pures de formatage et de statut partagées par les composants GUI"""
+"""Fonctions pures de formatage et de statut partagées par les composants GUI
 
-import unicodedata
+Les cellules, la table des émojis de source et les dates vivent dans
+`src/presentation/format.py` depuis le 2026-10-11 (partagées avec la GUI PyQt6) :
+elles sont ré-exportées ici, mêmes noms, même comportement.
+"""
+
 from datetime import datetime
 
+from src.presentation.format import (  # noqa: F401 — ré-exports
+    EMOJI_SOURCE,
+    format_credits_cell,
+    format_date,
+    format_datetime,
+    format_lyrics_cell,
+    lignes_de_credits,
+    normalize_text,
+)
 from src.utils.logger import get_logger
 from src.utils.track_validation import Contexte, evaluer
 
@@ -66,36 +79,6 @@ def format_lyrics_for_display(lyrics: str) -> str:
     return "\n".join(formatted_lines)
 
 
-def format_credits_cell(track) -> str:
-    """Cellule « Crédits » du tableau : le nombre, suivi de ⏳ quand ce ne
-    sont que des crédits PROVISOIRES de l'API Genius (le scrape n'est pas
-    passé : il manque au moins les contributeurs sans page Genius)."""
-    from src.utils.credits_genius_api import sont_provisoires
-
-    n = len(track.credits)
-    return f"{n} ⏳" if sont_provisoires(track.credits) else str(n)
-
-
-def format_lyrics_cell(track) -> str:
-    """Cellule « Paroles » du tableau : ✓ = texte, ⏱ = timestamps (en plus ou
-    seuls), 🎹 = instrumental CONSTATÉ sur Genius (scrape réussi, pas de paroles
-    par nature — e27), 📭 = page Genius lue sans paroles « pas encore
-    transcrites » (relue au bout de 30 j), vide = rien ou jamais cherché."""
-    has_text = bool(track.lyrics.present)
-    has_sync = bool(track.lyrics.synced)
-    if has_text and has_sync:
-        return "✓⏱"
-    if has_sync:
-        return "⏱"
-    if has_text:
-        return "✓"
-    if track.lyrics.instrumental:
-        return "🎹"
-    if track.lyrics.non_transcrites():
-        return "📭"
-    return ""
-
-
 def get_track_status_icon(track, disabled_ids, ctx=None) -> str:
     """Icône de statut — ADAPTATEUR MINCE sur `src/utils/track_validation.py`.
 
@@ -141,155 +124,6 @@ def get_release_year_safely(track):
             logger.debug(f"Erreur parsing date '{track.release_date}': {e}")
 
     return None
-
-
-def format_date(release_date):
-    """Formate une date pour l'affichage en format français DD/MM/YYYY"""
-    if not release_date:
-        return "N/A"
-
-    try:
-        # Si c'est déjà un objet datetime
-        if hasattr(release_date, "strftime"):
-            return release_date.strftime("%d/%m/%Y")
-
-        # Si c'est une chaîne
-        if isinstance(release_date, str):
-            # Convertir de YYYY-MM-DD vers DD/MM/YYYY
-            date_str = str(release_date)[:10]  # Prendre YYYY-MM-DD
-            if len(date_str) == 10 and "-" in date_str:
-                try:
-                    dt = datetime.strptime(date_str, "%Y-%m-%d")
-                    return dt.strftime("%d/%m/%Y")
-                except (ValueError, TypeError):
-                    pass
-            # Si format ISO avec T
-            if "T" in str(release_date):
-                try:
-                    dt = datetime.fromisoformat(
-                        str(release_date).replace("Z", "+00:00").split("T")[0]
-                    )
-                    return dt.strftime("%d/%m/%Y")
-                except (ValueError, TypeError):
-                    pass
-            return date_str
-
-        return str(release_date)[:10]
-
-    except (ValueError, TypeError, AttributeError) as e:
-        logger.debug(f"Erreur formatage date '{release_date}': {e}")
-        return "N/A"
-
-
-def format_datetime(date_value):
-    """Formate une date avec heure en format français DD/MM/YYYY à HH:MM"""
-    if not date_value:
-        return "N/A"
-
-    try:
-        # Si c'est déjà un objet datetime
-        if hasattr(date_value, "strftime"):
-            return date_value.strftime("%d/%m/%Y à %H:%M")
-
-        # Si c'est une chaîne
-        if isinstance(date_value, str):
-            # Format ISO avec T (ex: 2024-10-05T14:23:45)
-            if "T" in date_value:
-                try:
-                    dt = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
-                    return dt.strftime("%d/%m/%Y à %H:%M")
-                except (ValueError, TypeError):
-                    pass
-
-            # Format YYYY-MM-DD HH:MM:SS
-            if len(date_value) > 10 and " " in date_value:
-                try:
-                    dt = datetime.strptime(date_value[:19], "%Y-%m-%d %H:%M:%S")
-                    return dt.strftime("%d/%m/%Y à %H:%M")
-                except (ValueError, TypeError):
-                    pass
-
-            # Format court YYYY-MM-DD (sans heure)
-            if len(date_value) == 10:
-                try:
-                    dt = datetime.strptime(date_value, "%Y-%m-%d")
-                    return dt.strftime("%d/%m/%Y")
-                except (ValueError, TypeError):
-                    pass
-
-            return date_value
-
-        return str(date_value)
-
-    except (ValueError, TypeError, AttributeError) as e:
-        logger.debug(f"Erreur formatage datetime '{date_value}': {e}")
-        return "N/A"
-
-
-def normalize_text(text: str) -> str:
-    """Normalise le texte pour le tri (sans accents, minuscules)"""
-    if not text:
-        return ""
-    # Supprimer les accents
-    text = unicodedata.normalize("NFD", str(text))
-    text = "".join(char for char in text if unicodedata.category(char) != "Mn")
-    # Convertir en minuscules
-    return text.lower()
-
-
-#: Émoji par source de crédit. Table UNIQUE : la fiche morceau en avait deux
-#: copies (musique et vidéo), et celle des vidéos avait perdu `deezer`,
-#: `spotify_web`, `kworb` et `heritage` — les crédits venus de là s'affichaient
-#: tous avec le même 🔗 « source inconnue ».
-EMOJI_SOURCE = {
-    "genius": "🎤",
-    "genius_api": "🎫",
-    "spotify": "🎧",
-    "spotify_web": "🎧",
-    "deezer": "🎵",
-    "discogs": "💿",
-    "lastfm": "📻",
-    "kworb": "📈",
-    "heritage": "↩",
-    "youtube_topic": "▶️",
-    "youtube_clip": "🎬",
-}
-
-
-def lignes_de_credits(credits) -> list[str]:
-    """Une ligne d'affichage PAR PERSONNE, et non par ligne de base.
-
-    Deux sources qui créditent la même personne au même rôle sont un ACCORD,
-    pas deux crédits : « 🎤💿 Skread » dit la même chose que deux lignes
-    empilées, en le disant mieux. Mesuré le 2026-09-22 : **136 accords** de ce
-    genre dormaient déjà en base et s'affichaient en double.
-
-    Ni la base ni les sources ne perdent quoi que ce soit — c'est de
-    l'affichage : `credits` garde une ligne par source, chacune avec sa
-    provenance, et le reclassement des `Other` (`scripts/reclass_credit_roles`)
-    peut donc en ajouter sans « fabriquer un doublon ».
-
-    Les personnes gardent l'ordre d'arrivée ; leurs émojis sont triés pour que
-    deux morceaux affichent la même paire dans le même ordre.
-    """
-    from src.utils.credit_normalize import identity_key
-
-    par_personne: dict[str, dict] = {}
-    for credit in credits:
-        cle = identity_key(credit.name) or (credit.name or "").lower()
-        entree = par_personne.setdefault(cle, {"nom": credit.name, "emojis": [], "details": []})
-        emoji = EMOJI_SOURCE.get(credit.source, "🔗")
-        if emoji not in entree["emojis"]:
-            entree["emojis"].append(emoji)
-        detail = (credit.role_detail or "").strip()
-        if detail and detail not in entree["details"]:
-            entree["details"].append(detail)
-
-    lignes = []
-    for entree in par_personne.values():
-        detail = f" ({', '.join(entree['details'])})" if entree["details"] else ""
-        lignes.append(f"{''.join(sorted(entree['emojis']))} {entree['nom']}{detail}")
-    return lignes
 
 
 def hauteur_texte(texte: str | None, *, mini: int = 60, maxi: int = 240) -> int:

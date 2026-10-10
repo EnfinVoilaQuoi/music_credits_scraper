@@ -70,10 +70,23 @@ def morceaux_comptes(tracks, noms=(), formations=(), *, prods: bool = False) -> 
     return [t for t in tracks if compte_comme_sien(participation(t, noms, formations), prods=prods)]
 
 
-def total_discographie(tracks, noms=(), formations=(), *, prods: bool = False) -> int:
+def total_discographie(
+    tracks, noms=(), formations=(), *, prods: bool = False, mesure: bool = False
+) -> int:
     """Cumul estimé d'une discographie : chaque morceau COMPTÉ (`morceaux_comptes`
     — Spotify + YTM, cf. `calculate_total_streams`) plus ses variantes
-    rattachées (Spotify seul)."""
+    rattachées (Spotify seul).
+
+    `mesure=True` rend le cumul MESURÉ — la somme des compteurs publiés, sans
+    l'extrapolation par part de marché (décision utilisateur 2026-10-11 : le
+    bandeau montre d'abord ce que les plateformes publient). Mêmes règles de
+    dédoublonnage dans les deux cas."""
+
+    def cumul(sp, yt):
+        if mesure:
+            return (sp or 0) + (yt or 0)
+        return calculate_total_streams(sp, yt) or 0
+
     total = 0
     # CORRECTIFS 1.11 (2026-10-09) : un enregistrement ne compte qu'UNE fois.
     # Deux pages Genius du même morceau portent le même compteur Spotify (Kid
@@ -94,17 +107,16 @@ def total_discographie(tracks, noms=(), formations=(), *, prods: bool = False) -
             ids.add(t.spotify_id)
         if sp and sp > 1000:
             compteurs.add(sp)
-        est = calculate_total_streams(None if deja else sp, t.streams.ytm_streams)
-        total += est or 0
+        total += cumul(None if deja else sp, t.streams.ytm_streams)
         if not deja:
-            total += calculate_total_streams(streams_variantes(t), None) or 0
+            total += cumul(streams_variantes(t), None)
     # Les clips DOUBLES (une vidéo, plusieurs morceaux du même album) ne sont
     # comptés par aucun morceau : ils le sont ici, une fois. Des vues YouTube
     # de morceaux qui ont presque toujours Spotify aussi : la part COMBINÉE.
-    total += int(
-        sum(clips_doubles(morceaux_comptes(tracks, noms, formations, prods=prods)).values())
-        / COMBINED_SHARE
+    vues_clips = sum(
+        clips_doubles(morceaux_comptes(tracks, noms, formations, prods=prods)).values()
     )
+    total += vues_clips if mesure else int(vues_clips / COMBINED_SHARE)
     return total
 
 

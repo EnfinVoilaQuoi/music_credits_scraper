@@ -117,6 +117,40 @@ class ArtistRepository:
         with self.engine.connect() as conn:
             return [r[0] for r in conn.execute(select(artists.c.name)).fetchall()]
 
+    def resume_des_artistes(self) -> list[dict[str, Any]]:
+        """Chaque artiste en base avec son nombre de titres, de crédits, et la
+        date de sa dernière écriture (`MAX(tracks.updated_at)` — le dernier run
+        qui l'a touché). Une ligne par artiste, triée par nom.
+
+        Requête UNIQUE pour les deux interfaces : la fenêtre « Charger » de
+        CustomTkinter et l'auto-complétion PyQt6. Dates en TEXTE (`text()` non
+        typé) tranchées à « AAAA-MM-JJ »."""
+        query = text("""
+            SELECT
+                a.name,
+                COUNT(DISTINCT t.id) AS tracks_count,
+                COUNT(DISTINCT c.id) AS credits_count,
+                MAX(t.updated_at) AS last_update,
+                a.created_at
+            FROM artists a
+            LEFT JOIN tracks t ON a.id = t.artist_id
+            LEFT JOIN credits c ON t.id = c.track_id
+            GROUP BY a.id, a.name, a.created_at
+            ORDER BY a.name
+        """)
+        with self.engine.connect() as conn:
+            rows = conn.execute(query).fetchall()
+        return [
+            {
+                "name": row[0],
+                "tracks_count": row[1] or 0,
+                "credits_count": row[2] or 0,
+                "last_update": str(row[3])[:10] if row[3] else None,
+                "created_at": str(row[4])[:10] if row[4] else None,
+            }
+            for row in rows
+        ]
+
     def artistes_de_la_base(self) -> list[Artist]:
         """Tous les artistes en base, LÉGERS (id et nom, sans morceaux) — pour
         repérer qu'une fiche en concerne un autre (`services.lignes_tiers`)."""

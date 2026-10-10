@@ -879,6 +879,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         verdict = duree_a_declarer(
             propres,
             not fiche.spotify_id and not fiche.deezer_id,
+            titre_fiche=fiche.title,
             # Le juge du panneau « À trancher » (🎬 vidéo étrangère) : une
             # vidéo qui ne nomme pas le morceau ne lui donne pas sa durée.
             recevable=lambda v, fiche=fiche: video_nomme(

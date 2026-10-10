@@ -60,8 +60,20 @@ NON_MORCEAU = re.compile(
 )
 
 
+#: Au-delà, une vidéo ordinaire n'est pas un morceau — sauf si la FICHE elle-même
+#: est une émission (Grünt, Rentre dans le Cercle, freestyle long). Seuil de
+#: l'audit (`duree_aberrante`) ; mesuré le 2026-10-10 : Diam's « Morts pour
+#: rien » avait reçu les 64 min d'un reportage qui nommait le titre.
+DUREE_MAX_MORCEAU = 15 * 60
+FICHE_EMISSION = re.compile(
+    r"gr[üu]nt|rentre dans le cercle|freestyle|cypher|session|\blive\b|planète rap|"
+    r"planete rap|colors|mixtape|medley|[ée]pisode",
+    re.IGNORECASE,
+)
+
+
 def duree_a_declarer(
-    videos: list[dict], hors_plateformes: bool, recevable=None
+    videos: list[dict], hors_plateformes: bool, recevable=None, titre_fiche: str | None = None
 ) -> tuple[int, str] | None:
     """`videos` : `{"duration": s, "channel": nom, "title": titre}` des vidéos
     PROPRES à la fiche. Rend `(secondes, source)` ou None — plusieurs vidéos du
@@ -84,6 +96,11 @@ def duree_a_declarer(
         and v.get("title")
         and not NON_MORCEAU.search(v["title"])
         and (recevable is None or recevable(v))
+        and (
+            v["duration"] <= DUREE_MAX_MORCEAU
+            or titre_fiche is None
+            or FICHE_EMISSION.search(titre_fiche)
+        )
     ]
     d = _accord(autres)
     return (d, SOURCE_VIDEO) if d else None

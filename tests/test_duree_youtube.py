@@ -47,3 +47,14 @@ def test_rangs_de_l_arbitrage():
     ordre = DISCOGRAPHY_PRIORITIES["duration"]
     assert ordre.index("youtube") < ordre.index("songbpm")
     assert ordre.index("youtube_video") == len(ordre) - 2  # ReccoBeats reste en queue
+
+
+def test_une_video_tres_longue_ne_donne_pas_sa_duree_a_un_morceau():
+    """Diam's « Morts pour rien » (2026-10-10) : 64 min d'un reportage qui
+    nommait le titre. Une émission (Grünt) garde la sienne."""
+    from src.utils.duree_youtube import duree_a_declarer
+
+    reportage = [{"duration": 3823, "channel": "x", "title": "zied&Bouna mort pour rien"}]
+    assert duree_a_declarer(reportage, True, titre_fiche="Morts pour rien") is None
+    grunt = [{"duration": 2893, "channel": "Grünt", "title": "Grünt #33"}]
+    assert duree_a_declarer(grunt, True, titre_fiche="Grünt #33") == (2893, "youtube_video")

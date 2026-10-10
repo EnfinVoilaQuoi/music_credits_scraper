@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from src.services import vues_comptees
 from src.services.revue import _titre_sans_feat, video_nomme
 from src.utils.concordance_paroles import (
     jugeable,
@@ -328,8 +329,21 @@ def streams(c, par) -> list[Cas]:
     ids = {t["id"]: t for ts in par.values() for t in ts}
     vids = collections.defaultdict(list)
     sommes = collections.Counter()
-    for r in c.execute("SELECT track_id, video_id, views FROM track_videos"):
+    # Règle des vues comptées (`services.vues_comptees`) : un lien Genius qui
+    # ne nomme pas le morceau ne compte pas, sauf « ✓ Normal ».
+    valides = collections.defaultdict(set)
+    for r in c.execute(
+        "SELECT artist_id, cle FROM revue_verdicts WHERE detecteur = ?", (vues_comptees.DETECTEUR,)
+    ):
+        valides[r["artist_id"]].add(r["cle"])
+    for r in c.execute("SELECT track_id, video_id, views, title, source FROM track_videos"):
         if r["track_id"] in ids:
+            t = ids[r["track_id"]]
+            fiche = SimpleNamespace(id=t["id"], title=t["title"], genius_id=t["genius_id"])
+            if not vues_comptees.vue_comptee(
+                fiche, r["video_id"], r["title"], r["source"], valides[t["artist_id"]]
+            ):
+                r = {"track_id": r["track_id"], "video_id": r["video_id"], "views": 0}
             # Par ARTISTE : les lignes sœurs (même enregistrement chez l'invité)
             # partagent leurs vidéos par construction, ce n'est pas un double compte.
             vids[(ids[r["track_id"]]["artist_id"], r["video_id"])].append(

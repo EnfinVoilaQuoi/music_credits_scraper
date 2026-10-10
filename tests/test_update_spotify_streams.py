@@ -688,3 +688,13 @@ def test_mode_leger_visite_les_morceaux_a_id_sans_stream():
     asyncio.run(_crawl(_Artist(), dm, scraper, "artistid", None, result, False))
     assert scraper.visited == [_ID_B] and result["sans_stream"] == 1
     assert {c["track_id"]: c["streams"] for c in dm.streams_calls}[11] == 42
+
+
+def test_un_morceau_sans_aucun_compteur_passe_en_tete():
+    """2026-10-10 : chez Kanye, le budget de pages s'épuisait sur des morceaux
+    que Kworb couvre déjà — 114 restaient sans stream après le crawl complet."""
+    now = datetime.now()
+    sans = _Track(11, _ID_B, streams=None)
+    dm = _DataManager(tracks=[_Track(10, _ID_A), sans])
+    dates = {11: (now - timedelta(days=30)).isoformat()}  # A jamais vu, B vu
+    assert _build_queue(_Artist(), dm, dates, now, set()) == [_ID_B, _ID_A]

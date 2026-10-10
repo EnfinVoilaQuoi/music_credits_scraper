@@ -326,10 +326,19 @@ def _build_queue(artist, data_manager, seen_dates: dict, now: datetime, releves:
         raw = seen_dates.get(track.id)
         if _is_fresh(raw, now, max_age):
             continue
-        # Jamais vu → tout en haut (None trie avant n'importe quelle date).
-        candidates.append((_parse_seen_at(raw) or datetime.min, track.spotify_id))
-    candidates.sort(key=lambda c: c[0])
-    return [spotify_id for _, spotify_id in candidates]
+        # Sans AUCUN compteur d'abord (2026-10-10 : chez Kanye, le budget de
+        # pages s'épuisait sur des morceaux que Kworb couvre déjà, et 114
+        # morceaux restaient sans stream) ; puis jamais vu → tout en haut
+        # (None trie avant n'importe quelle date).
+        candidates.append(
+            (
+                bool(track.streams.spotify_streams),
+                _parse_seen_at(raw) or datetime.min,
+                track.spotify_id,
+            )
+        )
+    candidates.sort(key=lambda c: (c[0], c[1]))
+    return [spotify_id for _, _, spotify_id in candidates]
 
 
 def _declarer_durees(durees: dict | None, data_manager, id_map: dict, result: dict) -> None:

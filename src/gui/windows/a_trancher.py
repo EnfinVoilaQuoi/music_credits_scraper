@@ -21,6 +21,7 @@ import customtkinter as ctk
 
 from src.services import revue_actions, revue_auto
 from src.services.revue import Cas, Revue, analyser, par_detecteur, tous_les_detecteurs
+from src.services.vues_comptees import apres_verdict
 
 #: Au-delà, la fenêtre deviendrait lente à construire ; le tri par impact met
 #: de toute façon en haut ce qui compte.
@@ -295,6 +296,7 @@ class ATrancherWindow(ctk.CTkToplevel):
         self.app.data_manager.trancher_cas(
             self.artiste.id, c.detecteur, c.cle, morceau=c.morceau, motif=c.motif
         )
+        apres_verdict(self.app.data_manager, c)
         self.revue.actifs.remove(c)
         self.revue.masques.append(c)
         self._rafraichir()
@@ -389,6 +391,7 @@ class ATrancherWindow(ctk.CTkToplevel):
 
     def _retablir(self, c: Cas) -> None:
         self.app.data_manager.annuler_verdict(self.artiste.id, c.detecteur, c.cle)
+        apres_verdict(self.app.data_manager, c)
         self.revue.masques.remove(c)
         self.revue.actifs.append(c)
         self.revue.actifs.sort(key=lambda x: (-x.impact, x.detecteur, x.morceau))

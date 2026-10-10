@@ -1401,9 +1401,10 @@ class TrackRepository:
         garde, autre = lignes.get(keep_id), lignes.get(delete_id)
         if garde is None:
             return
+        exclues = self._videos_exclues(conn, keep_id, garde["artist_id"])
         vues = conn.execute(
             text("""
-            SELECT v.views FROM track_videos v
+            SELECT v.video_id, v.views FROM track_videos v
             WHERE v.track_id = :k AND v.views IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM track_videos o JOIN tracks t ON t.id = o.track_id
                 WHERE o.video_id = v.video_id AND o.track_id NOT IN (:k, :d)
@@ -1412,10 +1413,19 @@ class TrackRepository:
             {"k": keep_id, "d": delete_id, "aid": garde["artist_id"]},
         ).all()
         totaux = [r["ytm_streams"] for r in (garde, autre) if r and r["ytm_streams"]]
-        if vues:
-            total = sum(int(v[0]) for v in vues)
+        comptees = [int(n) for vid, n in vues if vid not in exclues]
+        if comptees:
+            total = sum(comptees)
             if total_sans_video and total < max(totaux, default=0):
                 total = max(totaux)
+        elif vues:
+            # Seules des vidéos qui ne sont pas le morceau : rien à compter.
+            conn.execute(update(tracks).where(tracks.c.id == keep_id).values(ytm_streams=None))
+            conn.execute(
+                text("DELETE FROM observations WHERE track_id = :t AND field = 'ytm_streams'"),
+                {"t": keep_id},
+            )
+            total = None
         elif totaux:
             total = max(totaux)
         else:
@@ -1460,6 +1470,43 @@ class TrackRepository:
                     "id": keep_id,
                 },
             )
+
+    @staticmethod
+    def _videos_exclues(conn, track_id: int, artist_id) -> set[str]:
+        """Les vidéos de la fiche dont les vues ne comptent pas
+        (`services.vues_comptees`, décision utilisateur 2026-10-10), lues dans la
+        transaction en cours — verdicts « ✓ Normal » compris."""
+        from types import SimpleNamespace
+
+        from src.persistence.schema import revue_verdicts
+        from src.services.vues_comptees import DETECTEUR, videos_exclues
+
+        fiche = (
+            conn.execute(
+                text("SELECT id, title, genius_id FROM tracks WHERE id = :t"), {"t": track_id}
+            )
+            .mappings()
+            .first()
+        )
+        if fiche is None:
+            return set()
+        videos = [
+            SimpleNamespace(video_id=r["video_id"], title=r["title"], source=r["source"])
+            for r in conn.execute(
+                text("SELECT video_id, title, source FROM track_videos WHERE track_id = :t"),
+                {"t": track_id},
+            ).mappings()
+        ]
+        valides = {
+            r[0]
+            for r in conn.execute(
+                select(revue_verdicts.c.cle).where(
+                    revue_verdicts.c.artist_id == artist_id,
+                    revue_verdicts.c.detecteur == DETECTEUR,
+                )
+            )
+        }
+        return videos_exclues(SimpleNamespace(**fiche), videos, valides)
 
     @staticmethod
     def _total_sans_video(conn, ids: tuple[int, ...]) -> bool:
@@ -4022,6 +4069,55 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")
             return False
+
+    def recalculer_vues_ytm(self, track_id: int, exclues=None) -> int | None:
+        """Recalcule `ytm_streams` depuis les vidéos de la fiche déjà mesurées,
+        HORS `exclues` (vidéos qui ne sont pas le morceau, `services.vues_comptees`)
+        et hors celles qu'une autre fiche du même artiste porte (règle du run
+        YTM). Sans aucune vidéo comptable, le total est VIDÉ — une valeur ancienne
+        y compterait encore la vidéo écartée. `exclues=None` : relues en base
+        (verdicts « ✓ Normal » compris). Rend le nouveau total (ou None)."""
+        try:
+            with self.engine.begin() as conn:
+                aid = conn.execute(
+                    text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": track_id}
+                ).scalar()
+                lignes = conn.execute(
+                    text("""
+                    SELECT v.video_id, v.views FROM track_videos v
+                    WHERE v.track_id = :t AND v.views IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM track_videos o JOIN tracks t ON t.id = o.track_id
+                        WHERE o.video_id = v.video_id AND o.track_id != :t
+                          AND t.artist_id = :aid
+                    )"""),
+                    {"t": track_id, "aid": aid},
+                ).all()
+                if exclues is None:
+                    exclues = self._videos_exclues(conn, track_id, aid)
+                comptees = [int(n) for vid, n in lignes if vid not in exclues]
+                if comptees:
+                    total = sum(comptees)
+                    maintenant = datetime.now()
+                    conn.execute(
+                        update(tracks)
+                        .where(tracks.c.id == track_id)
+                        .values(ytm_streams=total, ytm_streams_updated=maintenant)
+                    )
+                    self._upsert_observations(
+                        conn,
+                        track_id,
+                        [Observation("ytm_streams", total, "ytmusic", seen_at=maintenant)],
+                    )
+                    return total
+                conn.execute(update(tracks).where(tracks.c.id == track_id).values(ytm_streams=None))
+                conn.execute(
+                    text("DELETE FROM observations WHERE track_id = :t AND field = 'ytm_streams'"),
+                    {"t": track_id},
+                )
+                return None
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur recalculer_vues_ytm (track_id={track_id}): {e}")
+            return None
 
     def update_track_video_views(
         self, track_id: int, views: int | None, kind: str | None = None

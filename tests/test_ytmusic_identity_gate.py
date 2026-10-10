@@ -171,6 +171,12 @@ class FakeDM:
         self.stream_writes.append((track_id, total))
         return True
 
+    def verdicts_revue(self, artist_id):
+        return {}
+
+    def recalculer_vues_ytm(self, track_id, exclues=frozenset()):
+        return None
+
     def update_album_ytm_streams(self, artist_id, album_title, total):
         self.album_writes.append((album_title, total))
         return True

@@ -808,9 +808,41 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     # sans quoi elle se lit comme une baisse inexpliquée des compteurs.
     result["vues_non_attribuees"] = sum(vues_par_video.get(vid, 0) for vid in partagees)
 
+    # Une vidéo liée par Genius qui ne nomme pas le morceau (pub, podcast,
+    # sketch) ne compte pas ses vues, sauf validation ✔️ (décision utilisateur
+    # 2026-10-10, `services.vues_comptees`).
+    from src.services.vues_comptees import cles_validees, videos_exclues
+
+    valides = cles_validees(data_manager, artist.id)
+    titres_connus = {(t.id, v.video_id): v.title for t in db_tracks for v in (t.videos or [])}
+    result["vues_ecartees"] = 0
     for track_id, vids in sorted(vid_counts.items()):
-        comptees = {v: n for v, n in vids.items() if v not in partagees}
+        fiche = tracks_par_id.get(track_id)
+        exclues = (
+            videos_exclues(
+                fiche,
+                [
+                    SimpleNamespace(
+                        video_id=v,
+                        title=(details_videos.get(v) or {}).get("title")
+                        or titres_connus.get((track_id, v)),
+                        source=sources.get((track_id, v)),
+                    )
+                    for v in vids
+                ],
+                valides,
+            )
+            if fiche is not None
+            else set()
+        )
+        result["vues_ecartees"] += sum(vids[v] for v in exclues if v in vids)
+        comptees = {v: n for v, n in vids.items() if v not in partagees and v not in exclues}
         total = sum(comptees.values())
+        if not comptees and exclues:
+            # Sa seule vidéo n'est pas le morceau : un ancien total la compterait
+            # encore — il est recalculé (vidé s'il ne reste rien).
+            data_manager.recalculer_vues_ytm(track_id, exclues)
+            continue
         if not comptees:
             # Toutes ses vidéos sont ambiguës : ne rien écrire vaut mieux
             # qu'écrire 0, qui se lirait comme « jamais écouté ».

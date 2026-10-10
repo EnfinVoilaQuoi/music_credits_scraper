@@ -48,6 +48,7 @@ def set_youtube_link(data_manager, track, url: str, *, source: str = "manual") -
     if not video_id:
         return False
 
+    mesuree = _vues_mesurees(track, video_id)
     data_manager.update_track_youtube_url(track.id, url, source)
     data_manager.record_track_videos(
         track.id, [TrackVideo(video_id=video_id, url=url, source=source)]
@@ -56,8 +57,16 @@ def set_youtube_link(data_manager, track, url: str, *, source: str = "manual") -
     track.youtube_url_source = source
     if not any(v.video_id == video_id for v in track.videos):
         track.videos.append(TrackVideo(video_id=video_id, url=url, source=source))
+    if mesuree:
+        # Une vidéo déjà mesurée qui change de provenance (✔️ d'un lien Genius
+        # qui ne nommait pas le morceau) compte désormais : le total suit.
+        data_manager.recalculer_vues_ytm(track.id)
     logger.info(f"🔗 Lien YouTube {source} : '{track.title}' → {url}")
     return True
+
+
+def _vues_mesurees(track, video_id) -> bool:
+    return any(v.video_id == video_id and v.views for v in track.videos)
 
 
 def clear_youtube_link(data_manager, track) -> None:
@@ -70,8 +79,11 @@ def clear_youtube_link(data_manager, track) -> None:
     video_id = extract_video_id(track.youtube_url)
     data_manager.clear_track_youtube_link(track.id)
     if video_id:
+        mesuree = _vues_mesurees(track, video_id)
         data_manager.forget_track_video(track.id, video_id)
         track.videos = [v for v in track.videos if v.video_id != video_id]
+        if mesuree:
+            data_manager.recalculer_vues_ytm(track.id)
     track.youtube_url = None
     track.youtube_url_source = None
     logger.info(f"🔗 Lien YouTube retiré : '{track.title}'")
@@ -92,8 +104,14 @@ def reject_youtube_link(data_manager, track, url: str, artiste_courant: str, sea
         from src.utils.corrections_fiches import memoriser_video_refusee
 
         memoriser_video_refusee(track, video_id)
+        mesuree = _vues_mesurees(track, video_id)
         data_manager.forget_track_video(track.id, video_id)
         track.videos = [v for v in track.videos if v.video_id != video_id]
+        if mesuree:
+            # Sans recalcul, le total garde les vues de la vidéo rejetée
+            # jusqu'au prochain run YTM (Diam's, 2026-10-10 : 143 206 pour
+            # une vidéo restante à 105 453).
+            data_manager.recalculer_vues_ytm(track.id)
     if video_id and extract_video_id(track.youtube_url) == video_id:
         data_manager.clear_track_youtube_link(track.id)
         track.youtube_url = None

@@ -118,6 +118,7 @@ scripts/*
 !scripts/repair_lrc_garde.py
 !scripts/repair_durees_video.py
 !scripts/fusionner_doublons_deezer.py
+!scripts/repair_vues_videos_genius.py
 !scripts/audit_spotify_ids.py
 !scripts/audit_donnees.py
 !scripts/repair_spotify_ids.py

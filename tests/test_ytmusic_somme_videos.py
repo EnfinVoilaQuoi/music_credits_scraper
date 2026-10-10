@@ -32,6 +32,7 @@ def _track(
 ):
     return SimpleNamespace(
         id=idx,
+        genius_id=None,
         spotify_id=spotify_id,
         deezer_id=deezer_id,
         title=title,
@@ -104,6 +105,13 @@ class FakeDM:
     def update_album_ytm_streams(self, artist_id, album_title, total):
         self.album_writes.append((album_title, total))
         return True
+
+    def verdicts_revue(self, artist_id):
+        return {}
+
+    def recalculer_vues_ytm(self, track_id, exclues=frozenset()):
+        self.stream_writes.append((track_id, None))
+        return None
 
     def record_duration_observation(self, track_id, secondes, source):
         self.durees.append((track_id, secondes, source))

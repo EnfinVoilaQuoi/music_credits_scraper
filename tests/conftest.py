@@ -195,3 +195,16 @@ def racine_tk():
     root.withdraw()
     yield root
     root.destroy()
+
+
+def pytest_runtest_teardown(item):
+    """Après un test qui a touché Tk, le ramasse-miettes passe SUR LE FIL
+    PRINCIPAL. Sinon les variables Tk de ses widgets restent en cycles et sont
+    collectées plus tard par n'importe quel fil : un fil de fond qui détruit un
+    objet Tk attend ~1 s la boucle principale puis lève « main thread is not
+    in main loop » — 5 objets, 5 s, et `test_en_fond_signale_l_echec` dépassait
+    son délai en CI (2026-10-11)."""
+    if "racine_tk" in getattr(item, "fixturenames", ()):
+        import gc
+
+        gc.collect()

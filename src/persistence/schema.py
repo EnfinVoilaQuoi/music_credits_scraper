@@ -459,6 +459,19 @@ Index("ix_tracks_genius_id", tracks.c.genius_id)
 # streams de Travis ; 117 fiches, 132 collisions loggées). Une fiche Genius est
 # désormais unique par (artiste, genius_id) ; le titre ne reste unique que
 # parmi les fiches SANS genius_id (Deezer, remix Kworb), qui n'ont que lui.
+# Clé d'un crédit sûre face aux NULL (e47). Le `UNIQUE(…, role_detail)` de la
+# table laisse passer deux crédits identiques dont `role_detail` est NULL (deux
+# NULL sont DISTINCTS dans un index UNIQUE SQLite) — 12 doublons en base ; tout
+# le code tient NULL et '' pour la même clé (`_unir_credits`, `add_credit`).
+Index(
+    "ux_credits_cle",
+    credits.c.track_id,
+    credits.c.name,
+    credits.c.role,
+    text("IFNULL(role_detail, '')"),
+    unique=True,
+)
+
 Index(
     "ux_tracks_artist_genius",
     tracks.c.artist_id,

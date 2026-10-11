@@ -117,14 +117,16 @@ class TestReclasserCredits:
     def test_reclasse_et_retire(self, data_manager):
         a = _artiste(data_manager)
         tid = _track(data_manager, a)
+        # Bob est déjà Producer : son « Other » reclassé en Producer n'est
+        # possible qu'une fois le doublon retiré (clé unique e47).
         with data_manager.engine.begin() as conn:
-            for nom in ("Alice", "Bob", "Bob"):
+            for nom, role in (("Alice", "Other"), ("Bob", "Other"), ("Bob", "Producer")):
                 conn.execute(
                     text(
                         "INSERT INTO credits (track_id, name, role, source) "
-                        "VALUES (:t, :n, 'Other', 'genius')"
+                        "VALUES (:t, :n, :r, 'genius')"
                     ),
-                    {"t": tid, "n": nom},
+                    {"t": tid, "n": nom, "r": role},
                 )
         (ca, _, _), (cb, _, _), (cb2, _, _) = self._credits(data_manager, tid)
 

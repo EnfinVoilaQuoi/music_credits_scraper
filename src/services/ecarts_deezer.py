@@ -836,7 +836,13 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
         track.is_featuring = True
         track.primary_artist_name = a.artist_name or None
     credits: list[Credit] = []
+    vus: set[str] = set()
     for _cid, nom in contributeurs or a.contributors:
+        # Deezer liste parfois la même personne deux fois (deux rôles) : un
+        # seul crédit (doublons Akalex, Dee Mad, Snight B — e47).
+        if nom in vus:
+            continue
+        vus.add(nom)
         if not nom_de_contributeur_plausible(nom):
             logger.info(f"Contributeur Deezer écarté (nom malformé) : « {nom} »")
             continue

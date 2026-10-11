@@ -216,3 +216,33 @@ def upgrade_to_head(db_path: str) -> None:
         logger.info(f"Alembic upgrade head appliqué ({current} → {head}) : {db_path}")
     finally:
         engine.dispose()
+
+
+def ecarts_au_schema(db_path: str) -> list[str]:
+    """Colonnes de la base PHYSIQUE qui divergent de `schema.py`.
+
+    Les tests comparent des bases NEUVES (`test_alembic_baseline`) : ils ne
+    voient pas une colonne restée sur une vraie base parce qu'une migration
+    l'a oubliée — `tracks.musical_key`, laissée par e12 et retirée par e47.
+    Rend une ligne lisible par écart (colonne en trop ou manquante), vide si
+    la base est conforme. Lecture seule, sans effet.
+    """
+    from src.persistence.schema import metadata
+
+    ecarts: list[str] = []
+    with closing(sqlite3.connect(f"file:{Path(db_path).as_posix()}?mode=ro", uri=True)) as conn:
+        for table in metadata.sorted_tables:
+            physiques = {r[1] for r in conn.execute(f"PRAGMA table_info({table.name})")}
+            if not physiques:
+                ecarts.append(f"{table.name} : table absente")
+                continue
+            declarees = {c.name for c in table.columns}
+            ecarts += [
+                f"{table.name}.{c} : en base, absente de schema.py"
+                for c in sorted(physiques - declarees)
+            ]
+            ecarts += [
+                f"{table.name}.{c} : déclarée, absente de la base"
+                for c in sorted(declarees - physiques)
+            ]
+    return ecarts

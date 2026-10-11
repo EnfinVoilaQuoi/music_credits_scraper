@@ -1922,6 +1922,15 @@ class TrackRepository:
             return 0, 0
         try:
             with self.engine.begin() as conn:
+                # Les doublons partent AVANT les reclassements : sinon un crédit
+                # reclassé vers le rôle d'un doublon encore présent heurterait
+                # la clé unique (e47) et ferait échouer toute la transaction.
+                retires = 0
+                for credit_id in suppressions:
+                    res = conn.execute(
+                        text("DELETE FROM credits WHERE id = :id"), {"id": int(credit_id)}
+                    )
+                    retires += int(res.rowcount or 0)
                 changes = 0
                 for credit_id, role in roles.items():
                     res = conn.execute(
@@ -1929,12 +1938,6 @@ class TrackRepository:
                         {"role": role, "id": int(credit_id)},
                     )
                     changes += int(res.rowcount or 0)
-                retires = 0
-                for credit_id in suppressions:
-                    res = conn.execute(
-                        text("DELETE FROM credits WHERE id = :id"), {"id": int(credit_id)}
-                    )
-                    retires += int(res.rowcount or 0)
             logger.info(f"🔁 {changes} crédit(s) reclassé(s), {retires} doublon(s) retiré(s)")
             return changes, retires
         except SQLAlchemyError as e:

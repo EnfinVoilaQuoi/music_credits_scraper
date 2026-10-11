@@ -86,3 +86,22 @@ def test_upgrade_head_equivaut_au_schema_legacy(tmp_path):
     Database(str(legacy_db))  # E3b : schéma créé par `alembic upgrade head`
 
     assert _snapshot(str(alembic_db)) == _snapshot(str(legacy_db))
+
+
+def test_ecarts_au_schema_voit_une_colonne_oubliee(tmp_path):
+    """Les deux tests ci-dessus comparent des bases NEUVES : une colonne restée
+    sur une VRAIE base (e12 avait oublié `tracks.musical_key`) leur échappe.
+    Le contrôle de démarrage, lui, compare la base physique à `schema.py`."""
+    from src.persistence.bootstrap import ecarts_au_schema
+
+    db = tmp_path / "base.db"
+    _upgrade_head(str(db))
+    assert ecarts_au_schema(str(db)) == []
+
+    with closing(sqlite3.connect(db)) as conn, conn:
+        conn.execute("ALTER TABLE tracks ADD COLUMN musical_key TEXT")
+        conn.execute("ALTER TABLE credits DROP COLUMN tracks")
+    assert sorted(ecarts_au_schema(str(db))) == [
+        "credits.tracks : déclarée, absente de la base",
+        "tracks.musical_key : en base, absente de schema.py",
+    ]

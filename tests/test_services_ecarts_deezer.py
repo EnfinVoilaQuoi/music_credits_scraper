@@ -407,7 +407,11 @@ class TestCreerLignes:
     def test_une_ligne_complete_depuis_deezer(self, data_manager):
         artist = self._artiste(data_manager)
         piste = _piste(
-            70, "Coal lla", isrc="FRX", contributors=[(NOUS, "Lucio Bukowski"), (5, "DJ Fly")]
+            70,
+            "Coal lla",
+            isrc="FRX",
+            # Deezer liste parfois la même personne deux fois (deux rôles).
+            contributors=[(NOUS, "Lucio Bukowski"), (5, "DJ Fly"), (5, "DJ Fly")],
         )
         e = ed.Ecart("absent", _album(7, "Chardons Bleus", [piste]), piste)
         e.genius = {"id": 4242, "title": "Coal lla", "url": "https://genius.com/x"}
@@ -423,6 +427,7 @@ class TestCreerLignes:
             ("DJ Fly", CreditRole.FEATURED),
             ("Label X", CreditRole.LABEL),
         }
+        assert len(t.credits) == 2
         obs = data_manager.get_observations(t.id)
         assert {(o.field, o.source) for o in obs} >= {
             ("duration", "deezer"),

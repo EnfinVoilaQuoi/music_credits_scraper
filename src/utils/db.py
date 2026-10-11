@@ -73,7 +73,7 @@ class Database:
         `src.utils.__init__` importe `DataManager` → `db` — un import au niveau
         module recréerait un cycle. Ici, `src.utils` est déjà chargé.
         """
-        from src.persistence.bootstrap import ensure_stamped, upgrade_to_head
+        from src.persistence.bootstrap import ecarts_au_schema, ensure_stamped, upgrade_to_head
 
         # 1. Base pré-Alembic AVEC schéma → rattrapage legacy + stamp (une base
         #    vierge est ignorée : créée par l'upgrade ci-dessous).
@@ -82,4 +82,8 @@ class Database:
         #    révisions en attente ; backup auto avant tout upgrade réel ; no-op si
         #    déjà à jour (démarrage normal).
         upgrade_to_head(self.db_path)
+        # 3. La base PHYSIQUE suit-elle `schema.py` ? (une migration qui oublie
+        #    une colonne ne se voit sur aucune base de test neuve)
+        for ecart in ecarts_au_schema(self.db_path):
+            logger.warning(f"⚠️ Schéma : {ecart}")
         logger.info("Base de données initialisée (schéma Alembic à jour)")

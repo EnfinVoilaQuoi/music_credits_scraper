@@ -79,3 +79,25 @@ class TestInvitesDUnTitre:
         assert strip_featuring("SMILE (WITH THE WEEKND)") == "SMILE"
         assert strip_featuring("Titre (avec Jul)") == "Titre"
         assert strip_featuring("Titre (feat. Drake)") == "Titre"
+
+
+class TestArtisteDUneVideo:
+    """2026-10-11 : la ressemblance brute faisait passer des inconnus au-dessus
+    du seuil de persistance (0,90), et laissait dessous les chaînes à plusieurs
+    artistes."""
+
+    def test_un_homonyme_proche_ne_passe_plus(self):
+        from src.youtube.youtube_searcher import relevance_score
+
+        for cible, chaine in [("Isha", "Misha"), ("Isha", "AISHA"), ("Swing", "Sting")]:
+            assert relevance_score("Life", [chaine], cible, "Life") < 0.90, chaine
+
+    def test_une_chaine_qui_nomme_l_artiste_passe(self):
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score("Gange", ["Lucio Bukowski & Oster Lapwass"], "Lucio Bukowski", "Gange")
+            == 1.0
+        )
+        assert relevance_score("PANAMA", ["UZI"], "UZI (FRA 77)", "PANAMA") == 1.0
+        assert relevance_score("Pas certifié", ["CYRILmp4"], "CYRIL.mp4", "Pas certifié") == 1.0

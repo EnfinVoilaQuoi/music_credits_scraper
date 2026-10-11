@@ -11,7 +11,11 @@ from ytmusicapi.exceptions import YTMusicError
 
 from src.config import DATA_DIR, YOUTUBE_CACHE_TTL_HOURS
 from src.utils.logger import get_logger
-from src.utils.title_matching import normalize_name, normalize_title
+from src.utils.title_matching import (
+    names_match_as_words,
+    normalize_name,
+    normalize_title,
+)
 from src.utils.version_descriptors import meme_version_publiee
 
 logger = get_logger(__name__)
@@ -58,16 +62,33 @@ def relevance_score(
         None, cible_titre, normalize_title(result_title or "")
     ).ratio()
 
-    cible_artiste = normalize_name(target_artist)
-    artist_similarity = max(
-        (
-            difflib.SequenceMatcher(None, cible_artiste, normalize_name(a)).ratio()
-            for a in result_artists
-        ),
-        default=0.0,
-    )
+    return (title_similarity * 0.6) + (_similarite_artiste(target_artist, result_artists) * 0.4)
 
-    return (title_similarity * 0.6) + (artist_similarity * 0.4)
+
+def _similarite_artiste(cible: str, artistes: list[str]) -> float:
+    """1 si la chaîne NOMME l'artiste (mots entiers, ou même graphie compactée —
+    « CYRIL.mp4 » / « CYRILmp4 »), sinon la ressemblance plafonnée à 0,5.
+
+    La ressemblance brute faisait passer des INCONNUS au-dessus du seuil de
+    persistance : Isha ← « Misha » 0,96, Isha ← « AISHA », Swing ← « Sting »
+    0,92, Médine ← « Medeline » — la règle des noms par mots entiers
+    (2026-09-04) n'avait pas atteint cette fonction. Et elle laissait sous le
+    seuil les chaînes qui nomment PLUSIEURS artistes (« Lucio Bukowski & Nestor
+    Kéa », « UZI » pour « UZI (FRA 77) »). Mesuré le 2026-10-11 sur les 2 786
+    recherches du cache : 62 meilleurs résultats passent le seuil (61 justes ; un
+    faux, « Mission Cobra Part. 3 » ← « Part. 2 », affaire de TITRE), 2 en
+    sortent (Isha ← « AISHA », faux ; Dame Dash ← « Damon Dash », un alias).
+    """
+    cible_compacte = normalize_name(cible).replace(" ", "")
+    meilleur = 0.0
+    for a in artistes:
+        if names_match_as_words(cible, a) or (
+            cible_compacte and cible_compacte == normalize_name(a).replace(" ", "")
+        ):
+            return 1.0
+        ratio = difflib.SequenceMatcher(None, normalize_name(cible), normalize_name(a)).ratio()
+        meilleur = max(meilleur, min(ratio, 0.5))
+    return meilleur
 
 
 class YouTubeSearcher:

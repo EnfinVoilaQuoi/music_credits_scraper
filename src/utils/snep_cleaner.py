@@ -1,16 +1,22 @@
-"""Nettoyage du CSV maître SNEP (déterministe, sans LLM).
+"""Nettoyage SNEP (déterministe, sans LLM) : régénère le CLEAN, ne touche JAMAIS au BRUT.
 
-Corrige les anomalies repérées par `snep_validator` :
+Jusqu'au 2026-10-11, ce module réécrivait le brut `certif-.csv` sur place
+(restauration des « ? », corrections manuelles, casse, doublons) — contre la
+convention « brut permanent + clean dérivé ». Le brut ne reflétait plus la
+source, et le clean, qui accumule, gardait l'ancienne écriture à côté de la
+restaurée (« DON?T SPEAK » / « DON'T SPEAK »). Les corrections vivent désormais
+dans la dérivation du clean (`snep_build.deriver` / `rebuild`) ; le rapport
+décrit ce que la dérivation normalise, et le verdict « déjà propre » compare le
+clean dérivé au fichier en place.
+
+Anomalies que la dérivation corrige (repérées par `snep_validator`) :
   - normalise la CASSE des niveaux et catégories (ex: "Double diamant" → "Double Diamant") ;
   - supprime les artefacts de tabulation / espaces parasites dans les champs ;
   - retire les doublons exacts (artiste + titre + niveau + date de constat) ;
   - retire les lignes au champ critique vide (artiste ou titre manquant), listées dans le rapport.
 
-Sécurité : un BACKUP horodaté est créé avant toute écriture (règle projet),
-et le mode est DRY-RUN par défaut — il faut `apply=True` (ou `--apply` en CLI)
-pour réellement réécrire le CSV. Le format est préservé à l'identique
-(7 colonnes ';', BOM UTF-8, dates JJ/MM/AAAA en chaînes, labels requotés si
-besoin), donc compatible avec le reste du pipeline.
+Sécurité : le clean est sauvegardé avant réécriture (`rebuild`), et le mode
+est DRY-RUN par défaut — il faut `apply=True` (ou `--apply` en CLI).
 
 CLI :
     python -m src.utils.snep_cleaner            # dry-run (rapport seulement)
@@ -20,11 +26,10 @@ CLI :
 from __future__ import annotations
 
 import csv
-import io
 import sys
 from pathlib import Path
 
-from src.utils import cert_clean_report, cert_store
+from src.utils import cert_clean_report
 from src.utils.cert_fixes_io import charger_fixes
 from src.utils.cert_normalize import (
     apply_manual_fixes,
@@ -201,39 +206,27 @@ def clean_snep_csv(csv_path: str | Path, apply: bool = False, reimport: bool = T
         ]
 
     report["rows_out"] = len(out_rows)
-    # SNEP nettoie le fichier SUR PLACE : « déjà propre » s'y lit directement du
-    # nombre de modifications comptées, sans comparaison de fichiers.
-    modifiees = (
-        report["levels_recased"]
-        + report["categories_recased"]
-        + report["whitespace_fixed"]
-        + report["duplicates_removed"]
-        + report["empty_removed"]
-        + report["apostrophes_restored"]
-        + report["manual_fixes_applied"]
-        + report["fantomes_retires"]
-    )
-    report["lignes_modifiees"] = modifiees
-    report["deja_propre"] = modifiees == 0
+    # « Déjà propre » : le clean DÉRIVÉ est-il celui qui est en place ? Les
+    # compteurs ci-dessus décrivent la dérivation depuis le brut, qui les
+    # rapporte à chaque exécution (le brut garde ses « ? ») : seule la
+    # comparaison dit si réécrire servirait à quelque chose.
+    from src.utils.snep_build import CANONICAL_COLUMNS, deriver
+
+    clean_path = csv_path.parent / "certif_snep.csv"
+
+    def cle(row):
+        return tuple(row.get(c, "") for c in CANONICAL_COLUMNS)
+
+    en_place = {cle(r) for r in read_canonical_csv(clean_path)}
+    nouveau = {cle(r) for r in deriver(csv_path, clean_path)["lignes"]}
+    report["lignes_modifiees"] = len(en_place ^ nouveau)
+    report["deja_propre"] = report["lignes_modifiees"] == 0
 
     if apply:
-        # Sauvegarde AVANT toute écriture, via la brique partagée (rétention,
-        # dossier `backups/`) — ce site y avait échappé au lot 1.
-        backup = cert_store.sauvegarder(csv_path)
-        report["backup"] = str(backup) if backup else None
-
-        buf = io.StringIO()
-        writer = csv.writer(
-            buf, delimiter=";", quotechar='"', quoting=csv.QUOTE_MINIMAL, lineterminator="\n"
-        )
-        for fields in out_rows:
-            writer.writerow(fields)
-        csv_path.write_text("﻿" + header + "\n" + buf.getvalue(), encoding="utf-8")
         report["applied"] = True
-
         if reimport:
-            # Régénère le CSV canonique (clean) depuis le brut nettoyé, puis
-            # rafraîchit le matcher — plus d'import DB (convention brut+clean).
+            # Régénère le CSV canonique (clean) depuis le brut — qui n'est PAS
+            # réécrit —, puis rafraîchit le matcher.
             from src.utils.cert_matcher import reset_cert_matcher
             from src.utils.snep_build import rebuild
 

@@ -27,6 +27,7 @@ from src.utils.cert_normalize import (
     normalize_text,
     repair_extra_separators,
     reperer_fantomes,
+    restore_apostrophes,
 )
 from src.utils.logger import get_logger
 
@@ -528,6 +529,54 @@ def corriger_libelles(rows: list[dict], fixes: dict) -> list[dict]:
     return rows
 
 
+def restaurer_libelles(rows: list[dict]) -> list[dict]:
+    """Restaure les « ? » corrompus (élision, ligature) des lignes du CLEAN.
+
+    Jusqu'au 2026-10-11 c'est le nettoyeur qui le faisait — en RÉÉCRIVANT LE
+    BRUT, contre la convention « brut permanent + clean dérivé ». Le brut ne
+    reflétait plus la source, et le clean, qui accumule, gardait l'ancienne
+    écriture à côté de la restaurée (« DON?T SPEAK » / « DON'T SPEAK »). La
+    restauration vit désormais ici, appliquée à l'existant comme au nouveau."""
+    for row in rows:
+        row["artist"], _ = restore_apostrophes(row["artist"])
+        row["title"], _ = restore_apostrophes(row["title"])
+    return rows
+
+
+def deriver(
+    raw_path: Path,
+    csv_path: Path,
+    *,
+    retirees: set[tuple] | frozenset | None = None,
+    fixes: dict | None = None,
+) -> dict:
+    """Le clean tel que `rebuild` l'écrirait, SANS rien écrire : `{"lignes",
+    "fantomes", "exclues", "reecrites", "depuis_brut"}`. Sert le passage à blanc
+    du nettoyeur, qui ne touche plus jamais au brut."""
+    if retirees is None:
+        retirees = snep_vues.cles_retirees(raw_path)
+    if fixes is None:
+        fixes = charger_fixes_de(raw_path.parent / FICHIER_FIXES)
+    existing = corriger_libelles(restaurer_libelles(read_canonical_csv(csv_path)), fixes)
+    new = corriger_libelles(
+        restaurer_libelles(canonical_rows_from_raw(read_raw_snep_csv(raw_path))), fixes
+    )
+    merged, fantomes = purger_fantomes(merge_canonical(existing, new))
+    merged, exclues = exclure_retirees(merged, set(retirees))
+    merged, reecrites = unifier_credits(merged)
+    if reecrites:
+        # Deux lignes d'un même événement pouvaient vivre sous deux crédits : une
+        # fois le crédit unifié, elles se retrouvent dans le même groupe.
+        merged = merge_canonical([], merged)
+    return {
+        "lignes": merged,
+        "fantomes": fantomes,
+        "exclues": exclues,
+        "reecrites": reecrites,
+        "depuis_brut": len(new),
+    }
+
+
 def rebuild(
     raw_path: Path,
     csv_path: Path,
@@ -540,6 +589,7 @@ def rebuild(
 ) -> int:
     """Régénère le clean en fusionnant le brut courant dans l'existant (accumule),
     puis écrit le CSV canonique + le sidecar meta. Retourne le nombre de lignes.
+    Ne touche JAMAIS au brut.
 
     `retirees` : clés de lignes du brut que le site ne montre plus (cf.
     `snep_vues.cles_retirees`) — exclues du clean, jamais du brut. Par défaut,
@@ -547,24 +597,14 @@ def rebuild(
     `rebuild` sans elles, et chaque nettoyage remettait dans le clean les
     certifications que le SNEP a retirées (MAES *Pure* « Triple Diamant »,
     JUL *MIMI* Platine — 27 lignes)."""
-    if retirees is None:
-        retirees = snep_vues.cles_retirees(raw_path)
-    if fixes is None:
-        fixes = charger_fixes_de(raw_path.parent / FICHIER_FIXES)
-    existing = corriger_libelles(read_canonical_csv(csv_path), fixes)
-    new = corriger_libelles(canonical_rows_from_raw(read_raw_snep_csv(raw_path)), fixes)
-    merged, fantomes = purger_fantomes(merge_canonical(existing, new))
-    merged, exclues = exclure_retirees(merged, set(retirees))
+    d = deriver(raw_path, csv_path, retirees=retirees, fixes=fixes)
+    merged, fantomes, exclues, reecrites = d["lignes"], d["fantomes"], d["exclues"], d["reecrites"]
     if exclues:
         logger.info(
             f"🚫 {len(exclues)} ligne(s) retirée(s) par le SNEP exclue(s) du clean "
             "(conservées dans le brut, cf. certif-.vues.json)"
         )
-    merged, reecrites = unifier_credits(merged)
     if reecrites:
-        # Deux lignes d'un même événement pouvaient vivre sous deux crédits : une
-        # fois le crédit unifié, elles se retrouvent dans le même groupe.
-        merged = merge_canonical([], merged)
         logger.info(f"🖊️ {reecrites} crédit(s) d'artiste unifié(s) sur le crédit courant du site")
     # `rebuild` RÉÉCRIT le clean à chaque appel : il se sauvegarde donc toujours,
     # et plus seulement lorsqu'une purge de fantômes retire quelque chose. La
@@ -579,5 +619,5 @@ def rebuild(
         )
     write_canonical_csv(merged, csv_path)
     write_meta(meta_path, source, len(merged), partial=partial)
-    logger.info(f"📄 certif_snep.csv : {len(merged)} lignes ({len(new)} depuis le brut)")
+    logger.info(f"📄 certif_snep.csv : {len(merged)} lignes ({d['depuis_brut']} depuis le brut)")
     return len(merged)

@@ -1,8 +1,9 @@
 """Nettoyage du CSV maître SNEP (`snep_cleaner`).
 
-Module à 0 % de couverture alors qu'il RÉÉCRIT le CSV brut de référence : le
-dry-run par défaut et le backup horodaté avant écriture sont les deux garde-fous
-qui empêchent d'y perdre des données, et rien ne les vérifiait.
+Depuis le 2026-10-11 le nettoyeur ne RÉÉCRIT PLUS le brut (convention « brut
+permanent + clean dérivé ») : ses corrections vivent dans la dérivation du clean
+(`snep_build.deriver` / `rebuild`). Ces tests gardent les deux moitiés du
+contrat : le brut reste intact à l'octet, et le clean porte les corrections.
 
 Tout se joue sur des CSV jetables en `tmp_path`, au format brut réel (7 colonnes
 ';', BOM UTF-8, CRLF, dates JJ/MM/AAAA).
@@ -68,29 +69,20 @@ class TestDryRun:
 
 
 class TestApplication:
-    def test_backup_horodate_avant_ecriture(self, csv_path, tmp_path):
-        """Règle projet : jamais d'écriture sans backup préalable."""
-        avant = csv_path.read_bytes()
-        rapport = clean_snep_csv(csv_path, apply=True, reimport=False)
+    def test_le_brut_n_est_jamais_reecrit(self, tmp_path):
+        """2026-10-11 : le nettoyeur réécrivait le brut sur place (« ? »
+        restaurés, casse, doublons) — le brut ne reflétait plus la source."""
+        p = _ecrire(tmp_path / "certif-.csv", [_ligne(title="L?EMPIRE", lvl="or"), _ligne()])
+        avant = p.read_bytes()
+        clean_snep_csv(p, apply=True, reimport=True)
+        assert p.read_bytes() == avant
+        assert not list((tmp_path / "backups").glob("certif-_backup_*.csv"))
 
-        backups = list((tmp_path / "backups").glob("*_backup_*.csv"))
-        assert len(backups) == 1
-        assert rapport["backup"] == str(backups[0])
-        # Le backup porte l'état d'AVANT nettoyage, à l'octet près.
-        assert backups[0].read_bytes() == avant
-
-    def test_format_preserve(self, tmp_path):
-        p = _ecrire(tmp_path / "certif-.csv", [_ligne(lvl="or")])
-        clean_snep_csv(p, apply=True, reimport=False)
-        contenu = p.read_text(encoding="utf-8-sig")
-        assert contenu.startswith(HEADER)
-        assert contenu.splitlines()[1].split(";")[4] == "Or"
-        # BOM conservé. Le writer csv pose des LF mais `write_text` applique
-        # ensuite la traduction de fin de ligne de la plateforme : sous Windows
-        # le fichier réécrit reste en CRLF, comme le brut d'origine.
-        assert p.read_bytes().startswith(b"\xef\xbb\xbf")
-        # Le fichier réécrit se relit sans perte.
-        assert clean_snep_csv(p)["rows_in"] == 1
+    def test_le_clean_porte_les_corrections(self, tmp_path):
+        p = _ecrire(tmp_path / "certif-.csv", [_ligne(title="L?EMPIRE", lvl="or")])
+        clean_snep_csv(p, apply=True, reimport=True)
+        clean = (tmp_path / "certif_snep.csv").read_text(encoding="utf-8-sig")
+        assert "L'EMPIRE" in clean and "L?EMPIRE" not in clean
 
     def test_reimport_declenche(self, csv_path, monkeypatch):
         """`apply` régénère le CSV clean et invalide le matcher en mémoire."""
@@ -135,11 +127,8 @@ class TestNormalisation:
 
     def test_espaces_et_tabulations(self, tmp_path):
         p = _ecrire(tmp_path / "c.csv", [_ligne(artist="  JUL\t ", title="MY   WORLD")])
-        rapport = clean_snep_csv(p, apply=True, reimport=False)
+        rapport = clean_snep_csv(p)
         assert rapport["whitespace_fixed"] == 1
-        champs = p.read_text(encoding="utf-8-sig").splitlines()[1].split(";")
-        assert champs[0] == "JUL"
-        assert champs[1] == "MY WORLD"
 
 
 class TestCaracteresCorrompus:
@@ -156,9 +145,9 @@ class TestCaracteresCorrompus:
     )
     def test_restauration_en_contexte_sur(self, tmp_path, saisi, attendu):
         p = _ecrire(tmp_path / "c.csv", [_ligne(title=saisi)])
-        rapport = clean_snep_csv(p, apply=True, reimport=False)
+        rapport = clean_snep_csv(p, apply=True, reimport=True)
         assert rapport["apostrophes_restored"] == 1
-        assert p.read_text(encoding="utf-8-sig").splitlines()[1].split(";")[1] == attendu
+        assert f",{attendu}," in (tmp_path / "certif_snep.csv").read_text(encoding="utf-8-sig")
 
     def test_point_d_interrogation_ambigu_intact(self, tmp_path):
         """Un '?' hors contexte sûr peut être une vraie ponctuation : on n'y touche pas."""
@@ -228,10 +217,9 @@ class TestLecture:
         p = _ecrire(
             tmp_path / "c.csv", ["JUL;MY WORLD;POLYDOR;UNIVERSAL;Albums;Or;01/01/2019;02/10/2025"]
         )
-        rapport = clean_snep_csv(p, apply=True, reimport=False)
+        rapport = clean_snep_csv(p)
         assert rapport["malformed_kept"] == 0
         assert rapport["rows_out"] == 1
-        assert '"POLYDOR;UNIVERSAL"' in p.read_text(encoding="utf-8-sig")
 
     def test_lignes_vides_ignorees(self, tmp_path):
         p = tmp_path / "c.csv"
@@ -277,7 +265,6 @@ class TestRapport:
         texte = format_report(rapport)
         assert "APPLIQUÉ" in texte
         assert "DRY-RUN" not in texte
-        assert rapport["backup"] in texte
 
     def test_erreur(self, tmp_path):
         texte = format_report(clean_snep_csv(tmp_path / "fantome.csv"))
@@ -409,8 +396,12 @@ class TestVerdictDeNettoyage:
     """
 
     def test_un_csv_sans_rien_a_faire(self, tmp_path, monkeypatch):
+        """« Rien à faire » = le clean en place est déjà celui que la
+        dérivation produirait (2026-10-11 : le brut n'étant plus réécrit, ses
+        compteurs se répètent à chaque passage et ne disent plus rien)."""
         monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
         p = _ecrire(tmp_path / "c.csv", [_ligne()])
+        clean_snep_csv(p, apply=True, reimport=True)
 
         rapport = clean_snep_csv(p)
 
@@ -445,5 +436,6 @@ class TestVerdictDeNettoyage:
     def test_le_verdict_apparait_dans_le_rendu(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sc, "charger_fixes", lambda source: {})
         p = _ecrire(tmp_path / "c.csv", [_ligne()])
+        clean_snep_csv(p, apply=True, reimport=True)
 
         assert "DÉJÀ à jour" in format_report(clean_snep_csv(p))

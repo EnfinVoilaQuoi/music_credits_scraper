@@ -155,9 +155,6 @@ class SongBpmProvider:
 
             def timeout_func():
                 timer_expired["value"] = True
-                logger.error(
-                    f"⏰ SongBPM timeout après {timeout_seconds}s — le résultat sera ignoré"
-                )
 
             timer = threading.Timer(timeout_seconds, timeout_func)
             timer.start()
@@ -170,7 +167,10 @@ class SongBpmProvider:
                 timer.cancel()
 
             if timer_expired["value"]:
-                logger.error(f"❌ SongBPM: Timeout expiré pour '{track.title}'")
+                logger.warning(
+                    f"⏰ SongBPM : délai de {timeout_seconds}s dépassé pour "
+                    f"'{track.title}' — résultat ignoré"
+                )
                 return False
 
             if not track_data:
@@ -179,7 +179,7 @@ class SongBpmProvider:
             return self._apply_track_data(track, ctx, track_data)
 
         except TimeoutError as e:
-            logger.error(f"⏰ SongBPM timeout pour {track.title}: {e}")
+            logger.warning(f"⏰ SongBPM : délai dépassé pour '{track.title}' : {e}")
             return False
         except (PlaywrightError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Erreur SongBPM pour {track.title}: {e}")
@@ -280,8 +280,14 @@ class SongBpmProvider:
                         track.title, artist_name, spotify_id=spotify_id, fetch_details=True
                     )
             except TimeoutError:
-                logger.error(f"⏰ SongBPM timeout après {timeout_seconds}s — recherche annulée")
-                logger.error(f"❌ SongBPM: Timeout expiré pour '{track.title}'")
+                # Un délai sur UN morceau n'est pas une erreur du programme : il
+                # est compté (`timeout`, observabilité) et le morceau sera
+                # retenté. En ERROR, 318 lignes du 01-03/10 noyaient le journal
+                # des erreurs.
+                logger.warning(
+                    f"⏰ SongBPM : délai de {timeout_seconds}s dépassé pour "
+                    f"'{track.title}' — recherche annulée"
+                )
                 await scraper.aclose()  # recyclé : recréé au prochain usage
                 return False
 

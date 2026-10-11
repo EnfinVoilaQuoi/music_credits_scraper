@@ -998,7 +998,8 @@ class TrackRepository:
         if conn is not None:
             self._upsert_et_arbitrer(conn, track_id, observations)
         else:
-            with self.engine.begin() as conn:
+            # Chantier A : la fiche et ses sœurs recalculées avant le commit.
+            with self._ecrire() as conn:
                 self._upsert_et_arbitrer(conn, track_id, observations)
 
     def _upsert_et_arbitrer(self, conn, track_id: int, observations) -> None:
@@ -1028,10 +1029,12 @@ class TrackRepository:
         if conn is not None:
             self._delete_observations(conn, track_id, field)
         else:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 self._delete_observations(conn, track_id, field)
 
     def _delete_observations(self, conn, track_id: int, field: str) -> None:
+        self._toucher(conn, track_id)
         conn.execute(
             text("DELETE FROM observations WHERE track_id = :tid AND field = :field"),
             {"tid": track_id, "field": field},
@@ -2080,7 +2083,8 @@ class TrackRepository:
 
         fait = [False]
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def oublier(tid: int) -> None:
                     ligne = conn.execute(
@@ -2146,7 +2150,8 @@ class TrackRepository:
         `retirer_lrc`)."""
         total = [0]
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def retirer(tid: int) -> None:
                     if retirees is not None:
@@ -2200,7 +2205,8 @@ class TrackRepository:
 
         bilan = [0, False]
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def reverifier(tid: int) -> None:
                     ligne = conn.execute(
@@ -2269,7 +2275,8 @@ class TrackRepository:
         morceau (*Intro (A2)* portait celui de *G5 (Intro)*, la reprise
         instrumentale de *Ghost Town* par Justice Der celui du titre chanté)."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def poser(tid: int) -> None:
                     conn.execute(
@@ -2301,7 +2308,8 @@ class TrackRepository:
         les a cappella avec les instrumentaux). Le morceau redevient « à
         chercher » pour les paroles ; rien d'autre n'est touché."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def lever(tid: int) -> None:
                     conn.execute(
@@ -2326,7 +2334,8 @@ class TrackRepository:
         un constat, pas un manque ; sœurs comprises, la colonne étant partagée
         (sinon la synchronisation la recopierait au prochain enregistrement)."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def oublier(tid: int) -> None:
                     conn.execute(
@@ -2357,7 +2366,8 @@ class TrackRepository:
         marqueurs = ", ".join(f":c{i}" for i in range(len(champs)))
         params_champs = {f"c{i}": c for i, c in enumerate(champs)}
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def retirer(tid: int) -> None:
                     total[0] += conn.execute(
@@ -2397,7 +2407,8 @@ class TrackRepository:
         observations : les retirer suffit. Rend le nombre retiré."""
         total = [0]
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def retirer(tid: int) -> None:
                     total[0] += conn.execute(
@@ -2431,7 +2442,8 @@ class TrackRepository:
         params = {f"r{i}": r for i, r in enumerate(gardes)}
         bilan = [0, False]
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def retirer(tid: int) -> None:
                     bilan[0] += conn.execute(
@@ -2571,7 +2583,7 @@ class TrackRepository:
         de Kworb, seule source à en donner.
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 # seen_at = fraîcheur de la source VERBATIM (chemin text() de
                 # `_upsert_observations`) : date « Last updated » pour Kworb,
                 # instant du scrape pour Spotify.
@@ -2607,7 +2619,8 @@ class TrackRepository:
         arbitré : il part avec l'observation Kworb.
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 supprimees = conn.execute(
                     text(
                         "DELETE FROM observations WHERE track_id = :tid "
@@ -2988,7 +3001,7 @@ class TrackRepository:
         if not observations:
             return {}
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._upsert_observations(conn, track_id, observations)
                 valeurs = self._isrc_sans_remplacer(
                     conn,
@@ -3016,7 +3029,8 @@ class TrackRepository:
         if colonne is None:
             raise ValueError(f"champ non arbitrable : {field!r}")
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 actuelle = conn.execute(
                     text(
                         "SELECT value FROM observations "
@@ -3319,7 +3333,8 @@ class TrackRepository:
         """
         rapport = self._rapport_deezer()
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 self._retirer_id_deezer(conn, track_id, deezer_id, rapport)
                 vise = rapport["id_retire"]
                 if vise is None:
@@ -3361,7 +3376,8 @@ class TrackRepository:
         résolution ISRC est peut-être encore valide, ce n'est pas un orphelin)."""
         rapport = {"reccobeats_retirees": []}
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 ligne = (
                     conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
                     .mappings()
@@ -3440,7 +3456,8 @@ class TrackRepository:
         toucher (ce n'est pas de là que vient cet ISRC)."""
         rapport = self._rapport_isrc()
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 ancien = conn.execute(
                     text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id}
                 ).scalar()
@@ -3489,7 +3506,8 @@ class TrackRepository:
         """
         rapport = {"id_retire": None, "lignes": [], "credits_retires": 0}
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 ligne = (
                     conn.execute(
                         text("SELECT discogs_id FROM tracks WHERE id = :tid"), {"tid": track_id}
@@ -3556,7 +3574,8 @@ class TrackRepository:
                 )
                 .values(spotify_id=spotify_id)
             )
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 conn.execute(stmt)
             self.record_track_spotify_ids(
                 track_id, [TrackSpotifyId(spotify_id=spotify_id, source=source)]
@@ -4712,7 +4731,8 @@ class TrackRepository:
         « Cavaliero (Feat. Koba LaD) », version inédite, portait l'ID du titre
         sorti."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 gid = conn.execute(
                     text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
                 ).scalar()
@@ -4894,7 +4914,8 @@ class TrackRepository:
 
         total = [0]
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
 
                 def retirer(tid: int) -> None:
                     ligne = conn.execute(
@@ -5367,7 +5388,8 @@ class TrackRepository:
         now = datetime.now()
         ecrites = 0
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 principal = conn.execute(
                     text("SELECT spotify_id FROM tracks WHERE id = :tid"), {"tid": track_id}
                 ).scalar()
@@ -5451,7 +5473,8 @@ class TrackRepository:
         chemin par lequel un ID quitte la table.
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 supprimes = conn.execute(
                     text(
                         "DELETE FROM track_spotify_ids WHERE track_id = :tid AND spotify_id = :sid"
@@ -5615,7 +5638,8 @@ class TrackRepository:
             "duree_suspecte": None,
         }
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 self._retirer_id_spotify(conn, track_id, spotify_id, rapport)
                 vise = rapport["id_retire"]
                 if not vise:
@@ -5679,7 +5703,8 @@ class TrackRepository:
         d'écriture ET d'effacement par les observations.
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 self._delete_observations(conn, track_id, "duration")
                 conn.execute(
                     text("UPDATE tracks SET duration = NULL, updated_at = :now WHERE id = :tid"),
@@ -5785,7 +5810,8 @@ class TrackRepository:
         if not spotify_id:
             return False
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 nature = conn.execute(
                     text(
                         "SELECT kind FROM track_spotify_ids "

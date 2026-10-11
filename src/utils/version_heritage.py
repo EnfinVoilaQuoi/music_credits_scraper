@@ -40,7 +40,7 @@ import re
 from dataclasses import dataclass
 
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES, Credit, CreditRole
-from src.utils.version_descriptors import Kind, parse_variant
+from src.utils.version_descriptors import Kind, parse_variant, titre_generique
 
 SOURCE = "heritage"
 
@@ -215,7 +215,13 @@ def socle_parmi(titre: str | None, fiches, index: IndexSocles | None = None) -> 
         # du remix, jamais l'original (décision utilisateur 2026-09-27).
         candidats = index.par_cle.get(normalize_title(remix), [])
         return candidats[0] if len(candidats) == 1 else None
-    cle = normalize_title(parse_variant(titre).socle)
+    socle = parse_variant(titre).socle
+    if titre_generique(socle):
+        # Chaque projet a son intro : « Intro (Live) » ne désigne pas, à lui seul,
+        # l'unique « Intro » d'un AUTRE disque (même règle que `fusionner`,
+        # `save_track` et le gate Deezer, qui exigent le même album).
+        return None
+    cle = normalize_title(socle)
     candidats = [t for t in index.par_cle.get(cle, []) if id(t) in index.nues]
     if len(candidats) > 1:
         candidats = [t for t in candidats if not t.secondary_role]

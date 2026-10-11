@@ -222,11 +222,20 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     """
     nk = _normalize_title(entry_title)
     ventree = parse_variant(entry_title)
+    if titre_generique(entry_title):
+        # « Interlude 1 » ressemble à 90 % à « Interlude 2 » : chaque projet a les
+        # siens, une ressemblance n'en désigne aucun (2026-10-11).
+        return None, 0.0
+    numeros = re.findall(r"\d+", entry_title)
     hits = []
     for t in tracks:
         # Une coquille, pas une AUTRE VERSION : « The New Workout Plan - Live
         # Version » ressemblait à 91 % à « (Long Version) » (2026-09-24).
         if not _meme_version_stricte(ventree, parse_variant(t.title)):
+            continue
+        # Ni une autre PARTIE : « Freestyle 2 » / « Freestyle 3 », « Bande
+        # organisée 2 » / « Bande organisée » (63 paires en base, 2026-10-11).
+        if re.findall(r"\d+", t.title) != numeros or titre_generique(t.title):
             continue
         r = difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio()
         if r >= threshold:

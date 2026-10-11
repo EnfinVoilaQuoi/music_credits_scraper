@@ -16,6 +16,7 @@ from difflib import SequenceMatcher
 
 from src.utils.title_matching import (
     _strip_accents,
+    developper_ligatures,
     either_contains_as_words,
     names_match_as_words,
     normalize_name,
@@ -35,7 +36,9 @@ _FEAT_RE = re.compile(r"\b(feat|ft|featuring|with|avec)\b.*$")
 
 def _title_core(title: str) -> str:
     """Titre nu pour comparaison : retire (feat…), [remaster], suffixes feat."""
-    t = _strip_accents((title or "").lower())
+    # Ligatures AVANT les accents : « Cœur » perdait son œ et ne valait plus
+    # « Coeur » qu'à 0,67, sous le seuil d'acceptation (2026-10-11).
+    t = _strip_accents(developper_ligatures(title or "").lower())
     t = _PAREN_RE.sub(" ", t)
     t = _FEAT_RE.sub(" ", t)
     return re.sub(r"[^a-z0-9]+", " ", t).strip()

@@ -49,7 +49,7 @@ from src.utils.concordance_paroles import (
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.duree_youtube import SOURCE_AUDIO
 from src.utils.spotify_identity import CHAMP_ID_PROPOSE, variante_etrangere
-from src.utils.title_matching import cle_album, names_match_as_words
+from src.utils.title_matching import cle_album, developper_ligatures, names_match_as_words
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
@@ -155,7 +155,7 @@ def impact(track) -> int:
 
 
 def _mots(texte: str | None) -> str:
-    t = (texte or "").replace("œ", "oe").replace("Œ", "OE").replace("æ", "ae")
+    t = developper_ligatures(texte or "")
     t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode().casefold()
     return " ".join(re.sub(r"[\W_]+", " ", t).split())
 

@@ -126,6 +126,9 @@ RENDITION_WORDS = frozenset(
 _MOTS_COMPOSES = (
     (re.compile(r"\bfirst\s+edition\b"), "firstedition"),
     (re.compile(r"\bfirst\s+pressing\b"), "firstpressing"),
+    # « Intro (Mix-Tape Evolution) » est l'intro d'une MIXTAPE, pas un remix
+    # (2026-10-11 : lue « remix nu », son original devenait l'Intro d'un autre projet).
+    (re.compile(r"\bmix\s+tapes?\b"), "mixtape"),
 )
 
 #: Un groupe qui porte l'un de ces mots n'est PAS une version : « Return of the
@@ -196,7 +199,7 @@ _DIFFUSION_COMPAGNONS = frozenset({"version", "edit", "mix", "the"})
 
 _VOCABULAIRE = RENDITION_WORDS | frozenset(REMIX_WORDS) | DIFFUSION_FORTS
 
-_REMIX_RE = re.compile(r"\b(" + "|".join(REMIX_WORDS) + r")\b", re.IGNORECASE)
+_REMIX_RE = re.compile(r"\b(" + "|".join(REMIX_WORDS) + r")\b(?![\s\-]*tapes?\b)", re.IGNORECASE)
 _GROUPE_FINAL_RE = re.compile(r"\s*[\(\[]([^()\[\]]*)[\)\]]\s*$")
 _TIRET_RE = re.compile(r"\s+[-–—]\s+")
 _CITATION_RE = re.compile(r"[\"“”]([^\"“”]*)[\"“”]|(?<!\w)'([^']*)'(?!\w)")

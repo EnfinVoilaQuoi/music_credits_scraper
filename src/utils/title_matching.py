@@ -220,6 +220,29 @@ _FEAT_DANS_UN_GROUPE = re.compile(
 )
 
 
+_GROUPE_D_INVITES = re.compile(
+    r"\s*[\(\[]\s*(feat|ft|avec|with)\b\.?([^\)\]]*)[\)\]]", re.IGNORECASE
+)
+
+#: Un groupe « (with …) » / « (avec …) » qui porte l'un de ces mots n'est pas
+#: une liste d'invités : « (With You Remix) » est un remix, « (with DJ Akademiks
+#: Intro) » une version (2026-10-11, mesuré sur 58 275 titres de la base et des
+#: certifs : ces deux-là, plus « (WITHOUT YOU) » que l'absence de limite de mot
+#: lisait comme « with »). Pas de règle d'article : « (with The Weeknd) ».
+_PAS_DES_INVITES = frozenset(
+    {"remix", "rmx", "mix", "edit", "version", "intro", "outro", "interlude", "live", "skit"}
+)
+
+
+def _retirer_si_invites(m: re.Match) -> str:
+    if m.group(1).lower() in ("feat", "ft"):
+        return ""
+    mots = re.findall(r"[a-z0-9]+", _strip_accents(m.group(2).lower()))
+    if not mots or _PAS_DES_INVITES & set(mots):
+        return m.group(0)
+    return ""
+
+
 def strip_featuring(s: str) -> str:
     """Retire les mentions de featuring d'un titre, graphie conservée par ailleurs.
 
@@ -234,7 +257,7 @@ def strip_featuring(s: str) -> str:
     if not s:
         return ""
     # Retirer les suffixes featuring : "Titre (feat. X)" / "[feat. X]" → "Titre"
-    s = re.sub(r"\s*[\(\[]\s*(?:feat|ft|avec|with)\.?[^\)\]]*[\)\]]", "", s, flags=re.IGNORECASE)
+    s = _GROUPE_D_INVITES.sub(_retirer_si_invites, s)
     # « Titre (Remix feat. X) » : la mention d'invité DANS un groupe ouvert part
     # seule, le groupe reste (« (Remix) »). Sans ce cran, l'expression suivante
     # coupait de « feat. » jusqu'à la fin — parenthèse fermante comprise — et

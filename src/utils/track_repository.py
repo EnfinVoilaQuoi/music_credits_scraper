@@ -739,6 +739,7 @@ class TrackRepository:
                 # e20 : vidéos YouTube de tout l'artiste en 1 requête, même
                 # motif que les observations (surtout pas un N+1 par morceau).
                 videos_by_track = self._videos_by_artist(conn, artist_id)
+                credits_by_track = self._credits_by_artist(conn, artist_id)
 
                 # e23 : IDs Spotify de tout l'artiste, même motif. C'est ce qui
                 # RANIME `Track.spotify_ids` — écrit et testé de longue date,
@@ -778,8 +779,10 @@ class TrackRepository:
                             e.spotify_id for e in track.spotify_id_entries if not e.est_rendition
                         ]
 
-                        # Chargement crédits (a besoin de la connexion → hors mapper)
-                        track.credits = self._get_track_credits(conn, row["id"])
+                        # Crédits de tout l'artiste lus en UNE requête (2026-10-11 :
+                        # le N+1 coûtait 1,9 s par chargement chez Kanye West, et
+                        # un cycle recharge la discographie une vingtaine de fois).
+                        track.credits = credits_by_track.get(row["id"], [])
 
                         result.append(track)
 
@@ -819,48 +822,65 @@ class TrackRepository:
 
     def _get_track_credits(self, conn, track_id: int) -> list[Credit]:
         """Récupère les crédits d'un morceau (connexion Core fournie par l'appelant)."""
-        result: list[Credit] = []
-
         try:
-            credit_rows = (
-                conn.execute(select(credits).where(credits.c.track_id == track_id)).mappings().all()
-            )
-
-            for row in credit_rows:
-                name = row["name"]
-                role_str = row["role"]
-                if not (name and role_str):
-                    continue
-                # Conversion du rôle string vers enum
-                try:
-                    role = CreditRole(role_str)
-                except ValueError:
-                    # Une valeur d'enum inconnue en base est le symptôme
-                    # « clé masquée » (2026-09-03) : elle doit se voir.
-                    logger.warning(
-                        f"Rôle de crédit inconnu en base : {role_str!r} "
-                        f"(track_id={track_id}) — classé OTHER"
-                    )
-                    role = CreditRole.OTHER
-                result.append(
-                    Credit(
-                        name=str(name),
-                        role=role,
-                        role_detail=row["role_detail"],
-                        tracks=row["tracks"],
-                        # `legacy` et non « genius » : une source absente ne
-                        # s'invente pas (un rescrape Genius purgerait la ligne
-                        # comme la sienne). 0 ligne concernée au 2026-09-24.
-                        source=str(row["source"] or "legacy"),
-                    )
-                )
-
+            rows = conn.execute(select(credits).where(credits.c.track_id == track_id)).mappings()
+            return [c for r in rows if (c := self._credit_depuis_ligne(r)) is not None]
         except (SQLAlchemyError, KeyError, ValueError, TypeError) as e:
             # `warning`, pas `debug` : une lecture qui casse rendrait des
             # morceaux SANS crédit sans aucune trace dans les fichiers de log.
             logger.warning(f"Erreur _get_track_credits (track_id={track_id}): {e}")
+            return []
 
-        return result
+    def _credits_by_artist(self, conn, artist_id: int) -> dict[int, list[Credit]]:
+        """Crédits de tous les morceaux d'un artiste, en UNE requête (pas de N+1),
+        dans l'ordre que rendait la lecture par morceau (celui de l'index unique
+        `(track_id, name, role, role_detail)`, que SQLite y parcourait)."""
+        par_track: dict[int, list[Credit]] = {}
+        try:
+            rows = conn.execute(
+                text(
+                    "SELECT c.* FROM credits c JOIN tracks t ON t.id = c.track_id "
+                    "WHERE t.artist_id = :aid "
+                    "ORDER BY c.track_id, c.name, c.role, c.role_detail, c.id"
+                ),
+                {"aid": artist_id},
+            ).mappings()
+            for r in rows:
+                credit = self._credit_depuis_ligne(r)
+                if credit is not None:
+                    par_track.setdefault(r["track_id"], []).append(credit)
+        except (SQLAlchemyError, KeyError, ValueError, TypeError) as e:
+            logger.warning(f"Erreur _credits_by_artist (artist_id={artist_id}): {e}")
+        return par_track
+
+    @staticmethod
+    def _credit_depuis_ligne(row) -> Credit | None:
+        """Une ligne `credits` → `Credit` (None si nom ou rôle manquant)."""
+        name = row["name"]
+        role_str = row["role"]
+        if not (name and role_str):
+            return None
+        # Conversion du rôle string vers enum
+        try:
+            role = CreditRole(role_str)
+        except ValueError:
+            # Une valeur d'enum inconnue en base est le symptôme
+            # « clé masquée » (2026-09-03) : elle doit se voir.
+            logger.warning(
+                f"Rôle de crédit inconnu en base : {role_str!r} "
+                f"(track_id={row['track_id']}) — classé OTHER"
+            )
+            role = CreditRole.OTHER
+        return Credit(
+            name=str(name),
+            role=role,
+            role_detail=row["role_detail"],
+            tracks=row["tracks"],
+            # `legacy` et non « genius » : une source absente ne
+            # s'invente pas (un rescrape Genius purgerait la ligne
+            # comme la sienne). 0 ligne concernée au 2026-09-24.
+            source=str(row["source"] or "legacy"),
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Observations (phase E5) — provenance scalaire par (track, field, source).

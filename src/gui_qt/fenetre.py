@@ -470,11 +470,11 @@ class FenetrePrincipale(QMainWindow):
             f"Portée : toute la discographie ({len(c.lignes)} titres, désactivés exclus).\n"
             "Réglages : ceux par défaut (les mêmes que la CLI)."
         )
-        manquants = QCheckBox("Seulement les morceaux à donnée manquante")
+        manquants = QCheckBox("Seulement les morceaux à donnée manquante ou en échec")
         manquants.setChecked(True)
         manquants.setToolTip(
-            "Ne traiter que les morceaux auxquels il manque la donnée de CE flux "
-            "(sans elle, les crédits sont re-scrapés pour TOUS les morceaux)."
+            "Ne traiter que les morceaux auxquels il manque la donnée de CE flux, "
+            "et ceux qu'une source n'a pas servis. Décoché : tous les morceaux."
         )
         boite.setCheckBox(manquants)
         boite.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
@@ -486,7 +486,7 @@ class FenetrePrincipale(QMainWindow):
         def corps(hooks):
             from src.services import cycle
 
-            options = cycle.OptionsCycle(only=etapes, manquants=seulement)
+            options = cycle.OptionsCycle(only=etapes, tout=not seulement)
             return cycle.run(self.runtime, nom, options, hooks)
 
         if self.taches.lancer(cle, f"{libelle} — {nom}", corps):

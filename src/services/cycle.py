@@ -25,7 +25,7 @@ from src.services import (
     identite,
     streams,
 )
-from src.services.runtime import Bilan, Hooks, Manque, Runtime, selection_morceaux
+from src.services.runtime import Bilan, Hooks, Manque, Runtime, restriction, selection_morceaux
 from src.utils import logger as journal
 from src.utils.logger import get_logger
 
@@ -47,11 +47,14 @@ class OptionsCycle:
     genius_id: int | None = None
     only: tuple[str, ...] = ()
     skip: tuple[str, ...] = ()
-    #: Ne traiter que les morceaux à donnée ABSENTE (définition PAR flux).
+    #: Sans rien demander, une étape NON forcée ne traite que les morceaux à
+    #: donnée ABSENTE (définition PAR flux) et ceux qu'une source du flux n'a pas
+    #: servis (`source_track_failures`, e44) — décision utilisateur 2026-10-11
+    #: (`runtime.restriction`). `manquants` / `echecs` seuls restreignent au seul
+    #: critère demandé ; `tout` traite tous les morceaux sans forcer les valeurs.
     manquants: bool = False
-    #: ... ou (union) ceux qu'une source du flux n'a pas servis : un échec de
-    #: communication resté sans réponse (`source_track_failures`, e44).
     echecs: bool = False
+    tout: bool = False
     disco: discographie.OptionsDisco = discographie.OptionsDisco()
     identite: identite.OptionsIdentite = identite.OptionsIdentite()
     credits: credits.OptionsCredits = credits.OptionsCredits()
@@ -111,15 +114,19 @@ def executer_etape(
             # `--force` élargit, `--manquants` n'y change rien.
             return identite.run(runtime, artist, options.identite, hooks)
         if etape == "credits":
-            kinds = manques_credits(options.credits) if options.manquants else ()
-            sources = options.credits.sources_suivies() if options.echecs else ()
+            par_manque, par_echec = restriction(
+                options.credits.force(), options.tout, options.manquants, options.echecs
+            )
+            kinds = manques_credits(options.credits) if par_manque else ()
+            sources = options.credits.sources_suivies() if par_echec else ()
             tracks = selection_morceaux(runtime, artist, manquants=kinds, echecs=sources)
             return credits.run(runtime, artist, tracks, options.credits, hooks)
         if etape == "enrich":
-            kinds = (Manque.AUDIO,) if options.manquants else ()
-            sources = (
-                enrichissement.sources_suivies(runtime, options.enrich) if options.echecs else ()
+            par_manque, par_echec = restriction(
+                options.enrich.force_update, options.tout, options.manquants, options.echecs
             )
+            kinds = (Manque.AUDIO,) if par_manque else ()
+            sources = enrichissement.sources_suivies(runtime, options.enrich) if par_echec else ()
             tracks = selection_morceaux(runtime, artist, manquants=kinds, echecs=sources)
             return enrichissement.run(runtime, artist, tracks, options.enrich, hooks)
         if etape == "streams":

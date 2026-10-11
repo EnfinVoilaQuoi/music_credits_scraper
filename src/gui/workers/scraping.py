@@ -76,8 +76,32 @@ def start_combined_scraping(
         return
 
     disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
+    # Sans forcer : seulement les morceaux à donnée manquante et ceux en échec
+    # (décision utilisateur 2026-10-11, même règle que la CLI).
+    complets = 0
+    if not options.force():
+        from src.services.cycle import manques_credits
+        from src.services.runtime import morceaux_a_traiter
+
+        a_traiter = morceaux_a_traiter(
+            app.runtime,
+            selected_tracks_list,
+            manquants=manques_credits(options),
+            echecs=options.sources_suivies(),
+        )
+        complets = len(selected_tracks_list) - len(a_traiter)
+        if not a_traiter:
+            messagebox.showinfo(
+                "Crédits & Paroles",
+                f"Les {len(selected_tracks_list)} morceaux sélectionnés sont complets et "
+                "sans échec en attente.\nCocher « forcer » pour tous les relire.",
+            )
+            return
+        selected_tracks_list = a_traiter
     confirm_msg = f"Scraping de {', '.join(options.taches())}\n\n"
     confirm_msg += f"📊 Morceaux: {len(selected_tracks_list)}\n"
+    if complets:
+        confirm_msg += f"✔️ {complets} déjà complets ignorés (forcer pour les relire)\n"
     if disabled_count > 0:
         confirm_msg += f"⚠️ {disabled_count} désactivés ignorés\n"
     estime = len(selected_tracks_list) * options.secondes_par_morceau()

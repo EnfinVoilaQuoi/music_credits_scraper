@@ -210,12 +210,41 @@ def selection_morceaux(
     if track_ids is not None:
         voulus = set(track_ids)
         tracks = [t for t in tracks if t.id in voulus]
+    return morceaux_a_traiter(runtime, tracks, manquants=manquants, echecs=echecs)
+
+
+def morceaux_a_traiter(
+    runtime: Runtime,
+    tracks: list[Track],
+    *,
+    manquants: Iterable[Manque] = (),
+    echecs: Iterable[str] = (),
+) -> list[Track]:
+    """Parmi `tracks`, ceux auxquels il manque AU MOINS UNE des données
+    `manquants` OU qu'une des sources `echecs` n'a pas servis. Sans critère :
+    tous. La règle « sans forcer, seulement les manquants et les échecs »
+    (décision utilisateur 2026-10-11) passe par ici, pour tous les appelants."""
     kinds = tuple(manquants)
     sources = tuple(echecs)
-    if kinds or sources:
-        en_echec = morceaux_en_echec(runtime, sources) if sources else set()
-        tracks = [t for t in tracks if t.id in en_echec or any(est_manquant(t, k) for k in kinds)]
-    return tracks
+    if not (kinds or sources):
+        return list(tracks)
+    en_echec = morceaux_en_echec(runtime, sources) if sources else set()
+    return [t for t in tracks if t.id in en_echec or any(est_manquant(t, k) for k in kinds)]
+
+
+def restriction(force: bool, tout: bool, manquants: bool, echecs: bool) -> tuple[bool, bool]:
+    """(filtrer sur les manquants, filtrer sur les échecs) pour une étape.
+
+    Décision utilisateur 2026-10-11 : SANS forcer, un run n'interroge que les
+    morceaux à donnée manquante et ceux en échec — il réinterrogeait tout
+    (l'enrichissement d'Isha : 53 min pour ~250 morceaux, presque tous complets).
+    Forcer, ou demander `tout`, traite tous les morceaux ; un seul des deux
+    critères demandé explicitement (`--manquants` ou `--echecs`) restreint à lui."""
+    if force or tout:
+        return False, False
+    if not (manquants or echecs):
+        return True, True
+    return manquants, echecs
 
 
 @dataclass

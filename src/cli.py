@@ -65,7 +65,18 @@ def _manquants_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--manquants",
         action="store_true",
-        help="ne traiter que les morceaux dont la donnée de CE flux est absente",
+        help=(
+            "seulement les morceaux dont la donnée de CE flux est absente (par défaut, "
+            "sans forcer : les manquants ET les échecs)"
+        ),
+    )
+
+
+def _tout_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--tout",
+        action="store_true",
+        help="tous les morceaux, même complets (sans forcer le remplacement des valeurs)",
     )
 
 
@@ -221,16 +232,20 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
 
-    c = sub.add_parser("credits", help="crédits, paroles, timestamps sur tous les morceaux")
+    c = sub.add_parser(
+        "credits", help="crédits, paroles, timestamps (sans forcer : manquants et échecs)"
+    )
     _artiste_args(c)
     _manquants_arg(c)
     _echecs_arg(c)
+    _tout_arg(c)
     _credits_args(c)
 
-    e = sub.add_parser("enrich", help="BPM/key/Spotify ID/… sur tous les morceaux")
+    e = sub.add_parser("enrich", help="BPM/key/durée (sans forcer : manquants et échecs)")
     _artiste_args(e)
     _manquants_arg(e)
     _echecs_arg(e)
+    _tout_arg(e)
     _enrich_args(e)
     _anciens_drapeaux(e, "enrich")
 
@@ -265,6 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
     _artiste_args(cy)
     _manquants_arg(cy)
     _echecs_arg(cy)
+    _tout_arg(cy)
     g = cy.add_mutually_exclusive_group()
     g.add_argument("--only", help=f"étapes à lancer, parmi {','.join(cycle.ETAPES)}")
     g.add_argument("--skip", help="étapes à sauter")
@@ -357,6 +373,7 @@ def options_cycle(a: argparse.Namespace) -> cycle.OptionsCycle:
         skip=_liste(a.skip),
         manquants=a.manquants,
         echecs=a.echecs,
+        tout=a.tout,
         disco=options_disco(a),
         identite=options_identite(a),
         credits=options_credits(a),
@@ -372,6 +389,7 @@ def options_etape_seule(a: argparse.Namespace, etape: str) -> cycle.OptionsCycle
         genius_id=a.genius_id,
         manquants=getattr(a, "manquants", False),
         echecs=getattr(a, "echecs", False),
+        tout=getattr(a, "tout", False),
         disco=options_disco(a) if etape == "disco" else discographie.OptionsDisco(),
         identite=options_identite(a) if etape == "identite" else identite.OptionsIdentite(),
         credits=options_credits(a) if etape == "credits" else credits.OptionsCredits(),

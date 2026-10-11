@@ -196,6 +196,25 @@ def run_enrichment(
         force_update=force_update,
     )
     disabled_count = len(app.selected_tracks) - len(selected_tracks_list)
+    # Sans forcer : seulement les morceaux sans BPM/tonalité et ceux en échec
+    # (décision utilisateur 2026-10-11, même règle que la CLI).
+    if not force_update:
+        from src.services.runtime import Manque, morceaux_a_traiter
+
+        a_traiter = morceaux_a_traiter(
+            app.runtime,
+            selected_tracks_list,
+            manquants=(Manque.AUDIO,),
+            echecs=enrichissement.sources_suivies(app.runtime, options),
+        )
+        if not a_traiter:
+            messagebox.showinfo(
+                "Enrichissement",
+                f"Les {len(selected_tracks_list)} morceaux sélectionnés sont complets et "
+                "sans échec en attente.\nCocher « forcer » pour tous les réinterroger.",
+            )
+            return
+        selected_tracks_list = a_traiter
     artist = app.current_artist
     app.enrich_button.configure(state="disabled", text="Enrichissement...")
     app.progress_bar.set(0)

@@ -71,6 +71,10 @@ class OptionsCredits:
             out.append(f"Timestamps {'/'.join(srcs)}{'(forcé)' if self.force_sync else ''}")
         return out
 
+    def force(self) -> bool:
+        """Une des phases est forcée : le run traite alors TOUS les morceaux."""
+        return self.force_credits or self.force_paroles or self.force_sync
+
     def sources_suivies(self) -> tuple[str, ...]:
         """Les clés de source (observabilité) interrogées MORCEAU PAR MORCEAU
         par ce run — celles dont les échecs en attente sélectionnent les

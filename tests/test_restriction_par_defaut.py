@@ -36,6 +36,7 @@ def _morceau(tid, bpm=None, key=None):
 def test_seuls_les_manquants_et_les_echecs_restent(monkeypatch):
     complet, sans_bpm, en_echec = _morceau(1, 90, 5), _morceau(2), _morceau(3, 90, 5)
     monkeypatch.setattr(rt, "morceaux_en_echec", lambda runtime, sources: {3})
+    monkeypatch.setattr(rt, "absences_recentes", lambda runtime, sources: {})
     garde = morceaux_a_traiter(
         SimpleNamespace(),
         [complet, sans_bpm, en_echec],

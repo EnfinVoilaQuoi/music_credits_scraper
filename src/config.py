@@ -151,6 +151,11 @@ class Settings(BaseSettings):
     # entrées sur 930 dans le cache réel. Un mois est le compromis : le catalogue
     # ReccoBeats bouge lentement, mais un morceau ajouté finit par être repêché.
     reccobeats_not_found_ttl_days: int = 30
+    # Délai pendant lequel une source qui a RÉPONDU « rien » pour un morceau
+    # n'est pas redemandée hors mode forcé (`source_track_absences`, e46). Même
+    # valeur que les mémoires d'absence existantes (ReccoBeats, Musixmatch,
+    # relecture Genius) : un mois.
+    delai_absence_jours: int = 30
 
     # --- Streams Spotify : qui écrit la colonne, et à quel rythme scraper ---
     # `streams_master` désigne la source qui écrit `tracks.spotify_streams` ;

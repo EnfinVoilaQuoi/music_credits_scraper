@@ -182,6 +182,33 @@ def est_manquant(track: Track, kind: Manque) -> bool:
     raise ValueError(kind)
 
 
+#: Sources (clés d'observabilité) dont une RÉPONSE « rien » couvre la donnée
+#: d'un flux. Une donnée manquante n'est plus redemandée (hors mode forcé) quand
+#: une de ces sources a constaté l'absence depuis moins de
+#: `settings.delai_absence_jours` (e46). « Une » et non « toutes » : une source
+#: qui n'a pas été appelée (ReccoBeats sans ID Spotify) ne laisse aucun constat,
+#: et le morceau resterait redemandé à vie. Les sources en ÉCHEC, elles, sont
+#: reprises par la sélection « échecs ».
+SOURCES_DU_MANQUE: dict[Manque, tuple[str, ...]] = {
+    Manque.CREDITS_GENIUS: ("genius_scrape",),
+    Manque.CREDITS_DISCOGS: ("discogs",),
+    Manque.PAROLES: ("genius_scrape", "ytmusic"),
+    Manque.TIMESTAMPS: ("lrclib", "ytmusic", "musixmatch"),
+    Manque.AUDIO: ("reccobeats", "getsongbpm", "songbpm", "deezer"),
+}
+
+
+def absences_recentes(runtime: Runtime, sources: Iterable[str]) -> dict[int, set[str]]:
+    """`{track_id: {sources}}` des absences constatées dans le délai (e46)."""
+    from datetime import datetime, timedelta
+
+    from src.config import settings
+    from src.observability.repository import SourceUsageRepository
+
+    depuis = datetime.now() - timedelta(days=settings.delai_absence_jours)
+    return SourceUsageRepository(runtime.data_manager.engine).absences_recentes(sources, depuis)
+
+
 def morceaux_en_echec(runtime: Runtime, sources: Iterable[str]) -> set[int]:
     """Les morceaux qu'au moins une de ces sources n'a pas servis : un échec de
     communication resté sans réponse depuis (`source_track_failures`, e44)."""
@@ -229,7 +256,17 @@ def morceaux_a_traiter(
     if not (kinds or sources):
         return list(tracks)
     en_echec = morceaux_en_echec(runtime, sources) if sources else set()
-    return [t for t in tracks if t.id in en_echec or any(est_manquant(t, k) for k in kinds)]
+    couvrantes = {s for k in kinds for s in SOURCES_DU_MANQUE.get(k, ())}
+    absences = absences_recentes(runtime, couvrantes) if couvrantes else {}
+
+    def manque(t: Track, k: Manque) -> bool:
+        # Une donnée qu'une source a récemment déclarée ABSENTE n'est plus à
+        # redemander : c'est une réponse, pas un trou (2026-10-11).
+        return est_manquant(t, k) and not (
+            absences.get(t.id, set()) & set(SOURCES_DU_MANQUE.get(k, ()))
+        )
+
+    return [t for t in tracks if t.id in en_echec or any(manque(t, k) for k in kinds)]
 
 
 def restriction(force: bool, tout: bool, manquants: bool, echecs: bool) -> tuple[bool, bool]:

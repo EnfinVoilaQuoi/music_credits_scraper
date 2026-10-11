@@ -170,8 +170,10 @@ class TestSelectionMorceaux:
         a = self._artist()
         assert [t.id for t in selection_morceaux(_runtime(_FakeDM()), a, track_ids=[3])] == [3]
 
-    def test_manquants_est_une_union(self):
+    def test_manquants_est_une_union(self, monkeypatch):
         """Un morceau auquel il manque L'UNE des données demandées est retenu."""
+        # Faux DataManager sans base : aucun constat d'absence (e46).
+        monkeypatch.setattr("src.services.runtime.absences_recentes", lambda rt, sources: {})
         a = self._artist()
         a.tracks[1].lyrics.present, a.tracks[1].lyrics.text = True, "x"
         # Morceau 2 : audio complet, paroles présentes → exclu ; 1 et 3 gardés.

@@ -244,3 +244,51 @@ class TestRequalification:
         assert repo.requalifier_anciens_echecs() == (1, 1)
         restes = {r["track_id"]: r["issue"] for r in repo.echecs_suivis()}
         assert restes == {2: "timeout", 3: "crash"}
+
+
+# ── Les absences constatées (e46, 2026-10-11) ─────────────────────────────────
+class TestAbsences:
+    """Une source qui a RÉPONDU « rien » n'est plus redemandée hors mode forcé,
+    pendant `settings.delai_absence_jours` — Discogs n'a rien pour 146 des 173
+    morceaux d'Isha, qui étaient redemandés à chaque run."""
+
+    def test_une_absence_est_datee_et_un_succes_la_retire(self, repo):
+        maintenant = datetime.now()
+        repo.record([_v(IssueKind.ABSENT, source="discogs", at=maintenant)])
+        assert repo.absences_recentes(["discogs"], maintenant - timedelta(days=1)) == {
+            1: {"discogs"}
+        }
+        repo.record([_v(IssueKind.OK, source="discogs", at=maintenant)])
+        assert repo.absences_recentes(["discogs"], maintenant - timedelta(days=1)) == {}
+
+    def test_un_echec_ne_pose_ni_ne_retire_d_absence(self, repo):
+        maintenant = datetime.now()
+        repo.record([_v(IssueKind.ABSENT, source="discogs", at=maintenant)])
+        repo.record([_v(IssueKind.TIMEOUT, source="discogs", at=maintenant)])
+        assert repo.absences_recentes(["discogs"], maintenant - timedelta(days=1)) == {
+            1: {"discogs"}
+        }
+
+    def test_une_absence_recente_n_est_plus_un_manque(self, data_manager, repo):
+        a = _artiste()
+        a.tracks[0].audio.bpm = None
+        a.tracks[1].audio.bpm = None
+        repo.record([_v(IssueKind.ABSENT, track_id=1, source="getsongbpm", at=datetime.now())])
+        sel = selection_morceaux(_runtime(data_manager), a, manquants=[Manque.AUDIO])
+        assert [t.id for t in sel] == [2]
+
+    def test_une_absence_trop_ancienne_redevient_un_manque(self, data_manager, repo):
+        a = _artiste()
+        a.tracks[0].audio.bpm = None
+        ancienne = datetime.now() - timedelta(days=400)
+        repo.record([_v(IssueKind.ABSENT, track_id=1, source="getsongbpm", at=ancienne)])
+        sel = selection_morceaux(_runtime(data_manager), a, manquants=[Manque.AUDIO])
+        assert [t.id for t in sel] == [1]
+
+    def test_l_absence_d_une_autre_famille_ne_couvre_pas(self, data_manager, repo):
+        """Discogs qui n'a rien ne dispense pas de chercher un BPM."""
+        a = _artiste()
+        a.tracks[0].audio.bpm = None
+        repo.record([_v(IssueKind.ABSENT, track_id=1, source="discogs", at=datetime.now())])
+        sel = selection_morceaux(_runtime(data_manager), a, manquants=[Manque.AUDIO])
+        assert [t.id for t in sel] == [1]

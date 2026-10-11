@@ -1196,6 +1196,10 @@ class TrackRepository:
                     text("DELETE FROM source_track_failures WHERE track_id = :tid"),
                     {"tid": track_id},
                 )
+                conn.execute(
+                    text("DELETE FROM source_track_absences WHERE track_id = :tid"),
+                    {"tid": track_id},
+                )
                 # Parutions (e31/e32) : pas de cascade SQLite, les preuves
                 # (`release_track_sources`) partent AVANT le lien qu'elles portent.
                 conn.execute(
@@ -1302,6 +1306,12 @@ class TrackRepository:
                 # siens, et un run retentera ce qui manque encore.
                 conn.execute(
                     text("DELETE FROM source_track_failures WHERE track_id = :delete_id"),
+                    {"delete_id": delete_id},
+                )
+                # Constats d'absence (e46) : même raison — ils décrivaient les
+                # recherches faites avec la fiche absorbée.
+                conn.execute(
+                    text("DELETE FROM source_track_absences WHERE track_id = :delete_id"),
                     {"delete_id": delete_id},
                 )
                 # Observations : dédup par la clé unique (field, source) — le keep

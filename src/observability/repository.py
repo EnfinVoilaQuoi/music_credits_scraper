@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.observability.issues import BENIGN, FAILURES
+from src.observability.issues import BENIGN, FAILURES, IssueKind
 
 #: Nombre d'échecs conservés PAR SOURCE — plafond dur d'environ 800 lignes.
 FAILURE_WINDOW = 50
@@ -168,6 +168,7 @@ class SourceUsageRepository:
                             ),
                             cle,
                         )
+                        self._noter_absence(conn, v, cle)
                         continue
                     params = {
                         **cle,
@@ -200,6 +201,55 @@ class SourceUsageRepository:
                         )
         except SQLAlchemyError:
             _log().exception("source_usage: suivi des échecs par morceau non enregistré")
+
+    @staticmethod
+    def _noter_absence(conn, v, cle: dict) -> None:
+        """Tient `source_track_absences` (e46) : `absent` pose ou date le constat
+        (morceau, source), `ok` le retire — la source a trouvé, plus rien à
+        mémoriser."""
+        if v.issue != IssueKind.ABSENT:
+            conn.execute(
+                text(
+                    "DELETE FROM source_track_absences "
+                    "WHERE track_id = :tid AND source_key = :src"
+                ),
+                cle,
+            )
+            return
+        params = {**cle, "at": _isoformat(v.at)}
+        maj = conn.execute(
+            text(
+                "UPDATE source_track_absences SET derniere_absence = :at "
+                "WHERE track_id = :tid AND source_key = :src"
+            ),
+            params,
+        ).rowcount
+        if not maj:
+            conn.execute(
+                text(
+                    "INSERT INTO source_track_absences "
+                    "(track_id, source_key, premiere_absence, derniere_absence) "
+                    "VALUES (:tid, :src, :at, :at)"
+                ),
+                params,
+            )
+
+    def absences_recentes(self, sources: Iterable[str], depuis: datetime) -> dict[int, set[str]]:
+        """`{track_id: {sources}}` des constats d'absence posés depuis `depuis`."""
+        sources = list(sources)
+        if not sources:
+            return {}
+        noms = [f"s{i}" for i in range(len(sources))]
+        lignes = self._rows(
+            "SELECT track_id, source_key FROM source_track_absences "
+            f"WHERE source_key IN ({', '.join(':' + n for n in noms)}) "
+            "AND derniere_absence >= :depuis",
+            {**dict(zip(noms, sources, strict=True)), "depuis": _isoformat(depuis)},
+        )
+        par_morceau: dict[int, set[str]] = {}
+        for r in lignes:
+            par_morceau.setdefault(r["track_id"], set()).add(r["source_key"])
+        return par_morceau
 
     def requalifier_anciens_echecs(self) -> tuple[int, int]:
         """Applique aux lignes DÉJÀ suivies les règles de classement du

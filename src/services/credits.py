@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
 from src.observability import source_usage
-from src.services.runtime import Bilan, Hooks, Runtime
+from src.services.runtime import Bilan, Hooks, Manque, Runtime, morceaux_a_traiter
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.lrc_garde import GardeLrc, sans_lrc
@@ -114,6 +114,8 @@ class BilanCredits(Bilan):
     sauves: int = 0
     #: Pages Genius lues il y a moins de `RELECTURE_GENIUS`, non relues.
     genius_recents: int = 0
+    #: Morceaux non redemandés à Discogs : crédits déjà là, ou « rien » récent.
+    discogs_ignores: int = 0
 
 
 #: Une page Genius lue depuis moins longtemps n'est pas relue, sauf crédits
@@ -430,12 +432,22 @@ def run(
             # délai dépassé ou une réponse vide les effaçait (16 crédits justes
             # perdus sur un run A2H). `enrich_track_data` purge les siens quand
             # un disque est TROUVÉ, et seulement alors.
+            # Sans forcer, seulement ce qui manque (2026-10-11) : un morceau qui a
+            # ses crédits Discogs, ou dont Discogs a récemment répondu « rien »,
+            # n'est pas redemandé (le morceau peut être là pour une autre phase).
+            a_lire = (
+                tracks
+                if options.force_credits
+                else morceaux_a_traiter(runtime, tracks, manquants=(Manque.CREDITS_DISCOGS,))
+            )
+            bilan.discogs_ignores = len(tracks) - len(a_lire)
             ok = ko = 0
-            for i, t in enumerate(tracks, 1):
+            n_discogs = len(a_lire)
+            for i, t in enumerate(a_lire, 1):
                 if hooks.should_stop():
                     bilan.interrompu("arrêt demandé pendant Discogs")
                     break
-                hooks.progress(i, n, t.title, "Discogs")
+                hooks.progress(i, n_discogs, t.title, "Discogs")
                 try:
                     with source_usage.track_scope(t.id):
                         trouve = client.enrich_track_data(t, force_update=options.force_credits)
@@ -627,9 +639,13 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
         msg += "\n"
     if bilan.discogs:
         msg += "💿 Crédits Discogs:\n"
-        msg += (
-            f"  - Réussis: {bilan.discogs['success']}\n  - Échoués: {bilan.discogs['failed']}\n\n"
-        )
+        msg += f"  - Réussis: {bilan.discogs['success']}\n  - Échoués: {bilan.discogs['failed']}\n"
+        if bilan.discogs_ignores:
+            msg += (
+                f"  - Non redemandés : {bilan.discogs_ignores} (crédits déjà là, ou Discogs a "
+                "répondu « rien » récemment — forcer pour tout relire)\n"
+            )
+        msg += "\n"
     if bilan.youtube:
         yt = bilan.youtube
         msg += "▶️ Crédits YouTube:\n"

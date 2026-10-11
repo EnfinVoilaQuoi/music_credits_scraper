@@ -639,6 +639,24 @@ source_track_failures = Table(
 )
 
 
+# Absences PAR MORCEAU (e46, 2026-10-11) : la source a RÉPONDU qu'elle n'avait
+# rien pour ce morceau. Posée au verdict `absent`, mise à jour aux suivants,
+# RETIRÉE au verdict `ok`. Un morceau dont toutes les sources d'un flux ont un
+# constat récent n'est plus « manquant » pour ce flux (`runtime.est_manquant`),
+# jusqu'à expiration du délai (`settings.delai_absence_jours`).
+source_track_absences = Table(
+    "source_track_absences",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("track_id", Integer, ForeignKey("tracks.id"), nullable=False),
+    Column("source_key", Text, nullable=False),
+    Column("premiere_absence", TIMESTAMP),
+    Column("derniere_absence", TIMESTAMP),
+    UniqueConstraint("track_id", "source_key"),
+    sqlite_autoincrement=True,
+)
+
+
 # Panneau « À trancher », étape 3 (e38, 2026-09-27). Deux notions distinctes :
 # - `revue_verdicts` : la mémoire des DÉCISIONS de l'utilisateur sur un cas
 #   (« c'est normal »). Clé = (artiste, détecteur, clé du cas) ; la clé du cas

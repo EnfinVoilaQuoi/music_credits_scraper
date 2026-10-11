@@ -15,6 +15,13 @@ from src.services import certifs, credits, cycle, discographie, enrichissement, 
 from src.services.runtime import Bilan, Hooks, Manque, Runtime
 
 
+@pytest.fixture(autouse=True)
+def _aucune_absence_memorisee(monkeypatch):
+    """Les faux runtimes de ce fichier n'ont pas de base : la lecture des
+    constats d'absence (e46) est neutralisée — aucun constat."""
+    monkeypatch.setattr("src.services.runtime.absences_recentes", lambda runtime, sources: {})
+
+
 def _rt(tracks):
     dm = SimpleNamespace(discographie_reunie=lambda a: list(tracks))
     disabled = SimpleNamespace(load_disabled_tracks=lambda nom: set())

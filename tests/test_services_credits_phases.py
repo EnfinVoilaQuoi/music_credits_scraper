@@ -8,11 +8,20 @@ lève, et le texte du résumé. Les fakes viennent du fichier voisin.
 
 from types import SimpleNamespace
 
+import pytest
+
 from src.models import Artist, Track
 from src.models.track import Credit, CreditRole
 from src.services import credits
 from src.services.runtime import Hooks
 from tests.test_services_credits import _DM, _clients, _Genius, _Lyrics, _rt, _track
+
+
+@pytest.fixture(autouse=True)
+def _aucune_absence_memorisee(monkeypatch):
+    """Les faux runtimes de ce fichier n'ont pas de base : la lecture des
+    constats d'absence (e46) est neutralisée — aucun constat."""
+    monkeypatch.setattr("src.services.runtime.absences_recentes", lambda runtime, sources: {})
 
 
 class TestOptions:

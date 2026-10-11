@@ -388,14 +388,16 @@ class TestVideoPartagee:
         assert result["videos_partagees"] == [] and result["partages_evidents"] == 1
 
     def test_un_morceau_sans_video_propre_nest_pas_ecrit_a_zero(self, sans_recherche):
-        """0 se lirait comme « jamais écouté » : on préfère ne rien écrire."""
+        """0 se lirait comme « jamais écouté » : jamais écrit. Mais l'ancien total,
+        qui comptait la vidéo partagée, est recalculé — VIDÉ faute de vidéo propre
+        (2026-10-11 : 17 fiches gardaient 26 M de vues aussi comptées à l'album)."""
         api = FakeAPI(raw_tracks=[], vues={"partageeee0": 900})
         tracks = [
             _track(1, "Innocent", youtube_url="https://youtu.be/partageeee0"),
             _track(2, "Interlude", youtube_url="https://youtu.be/partageeee0"),
         ]
         dm, _ = _lancer(api, tracks)
-        assert dm.stream_writes == []
+        assert sorted(dm.stream_writes) == [(1, None), (2, None)]
 
     def test_la_regle_se_resout_quand_lambiguite_est_levee(self, sans_recherche):
         """Après un ✖️ Rejeter sur le mauvais lien, la vidéo n'est plus partagée

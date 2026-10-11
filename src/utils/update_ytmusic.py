@@ -910,11 +910,15 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             data_manager.recalculer_vues_ytm(track_id, exclues)
             continue
         if not comptees:
-            # Toutes ses vidéos sont ambiguës : ne rien écrire vaut mieux
-            # qu'écrire 0, qui se lirait comme « jamais écouté ».
+            # Toutes ses vidéos sont PARTAGÉES : leurs vues comptent au niveau de
+            # l'album (clips doubles, décision du 2026-10-10), jamais sur la
+            # fiche. Garder l'ancien total les comptait deux fois (2026-10-11 :
+            # 17 fiches, 26 M de vues) ; le recalcul VIDE la colonne (NULL, pas
+            # 0 — « jamais écouté » ne s'écrit pas) faute de vidéo propre.
+            data_manager.recalculer_vues_ytm(track_id)
             logger.info(
                 f"⏸️ « {tracks_par_id[track_id].title} » : "
-                "aucune vidéo qui lui soit propre — total inchangé"
+                "aucune vidéo qui lui soit propre — total recalculé sans les partagées"
             )
             continue
         data_manager.update_track_ytm_streams(track_id, total)

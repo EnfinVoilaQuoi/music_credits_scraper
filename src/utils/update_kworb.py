@@ -214,8 +214,8 @@ def _meme_version_stricte(a, b) -> bool:
 
 def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     """Rapproche un titre Kworb d'UN SEUL morceau en base par similarité
-    (difflib sur titre normalisé) — attrape les coquilles (« Rhythm » vs
-    « Rythm »). GARDE-FOUS anti-fusion : ne matche QUE s'il existe
+    (difflib sur titre normalisé) — attrape les coquilles (« Rhythm is love »
+    vs « Rythm is love », « Judgmental C**t »). GARDE-FOUS anti-fusion : ne matche QUE s'il existe
     exactement UN candidat au-dessus du seuil (abstention si ambigu, ex.
     plusieurs variantes « My Love »). Ne strippe PAS les descripteurs de
     version (Acoustic/Intro/Remix) → studio et acoustique restent distincts.
@@ -237,7 +237,14 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
         # organisée 2 » / « Bande organisée » (63 paires en base, 2026-10-11).
         if re.findall(r"\d+", t.title) != numeros or titre_generique(t.title):
             continue
-        r = difflib.SequenceMatcher(None, nk, _normalize_title(t.title)).ratio()
+        nt = _normalize_title(t.title)
+        # Ni un titre COURT : une lettre y change le mot (« Seul » / « Seuil »,
+        # « Hate » / « Hater », « Love » / « Loved » — 224 paires de fiches
+        # distinctes en zone de flou). Mesuré le 2026-10-11 : les 4 rapprochements
+        # flous du rejeu complet ont tous ≥ 6 lettres (décision utilisateur).
+        if min(len(nk), len(nt)) < 6:
+            continue
+        r = difflib.SequenceMatcher(None, nk, nt).ratio()
         if r >= threshold:
             hits.append((r, t))
     return (hits[0][1], hits[0][0]) if len(hits) == 1 else (None, 0.0)

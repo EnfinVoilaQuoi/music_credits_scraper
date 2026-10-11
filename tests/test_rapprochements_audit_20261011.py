@@ -49,8 +49,13 @@ class TestFlouKworb:
             assert _fuzzy_unique(kworb, [_fiche(base)])[0] is None, (kworb, base)
 
     def test_une_coquille_reste_rattrapee(self):
-        fiche = _fiche("Rythm")
-        assert _fuzzy_unique("Rhythm", [fiche])[0] is fiche
+        fiche = _fiche("Judgmental Cunt")
+        assert _fuzzy_unique("Judgmental C**t", [fiche])[0] is fiche
+
+    def test_un_titre_court_n_est_jamais_rapproche_par_ressemblance(self):
+        """Décision utilisateur 2026-10-11 : une lettre change le mot."""
+        for kworb, base in [("Seul", "Seuil"), ("Hater", "Hate"), ("Loved", "Love")]:
+            assert _fuzzy_unique(kworb, [_fiche(base)])[0] is None, (kworb, base)
 
 
 class TestLigatures:

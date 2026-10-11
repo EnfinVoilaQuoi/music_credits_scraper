@@ -287,8 +287,8 @@ class TestHomonymes:
 
 class TestRapprochementFlou:
     def test_coquille_rapprochee(self):
-        tracks = [_track(1, "Rythm"), _track(2, "Complètement autre chose")]
-        trouve, score = _fuzzy_unique("Rhythm", tracks)
+        tracks = [_track(1, "Rythm is love"), _track(2, "Complètement autre chose")]
+        trouve, score = _fuzzy_unique("Rhythm is love", tracks)
         assert trouve.id == 1
         assert score >= 0.87
 
@@ -373,10 +373,10 @@ class TestNiveauxDeRapprochement:
         assert dm.streams_writes == []
 
     def test_niveau_3_flou(self):
-        t = _track(1, "Rythm")
-        res, _ = self._run([t], [_entry("Rhythm")])
+        t = _track(1, "Rythm is love")
+        res, _ = self._run([t], [_entry("Rhythm is love")])
         assert res["matched_by_fuzzy"] == 1
-        assert res["fuzzy_matched"][0][0] == "Rhythm"
+        assert res["fuzzy_matched"][0][0] == "Rhythm is love"
 
     def test_niveau_4_suggestion_non_ecrite(self):
         """Une suggestion attend l'utilisateur : ni écrite, ni comptée

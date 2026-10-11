@@ -143,13 +143,38 @@ def _aucun_chrome_de_debug(monkeypatch):
     monkeypatch.setattr("src.scrapers.cdp_chrome.ensure_cdp_chrome", lambda *a, **k: None)
 
 
+@pytest.fixture(scope="session")
+def _gabarit_base_migree(tmp_path_factory):
+    """UNE base migrée jusqu'à `head` pour toute la session, copiée par test.
+
+    Chaque `DataManager()` sur un fichier neuf rejoue toutes les révisions
+    Alembic : 1,1 s par base, ~600 bases par suite, soit ~11 des 14 minutes
+    (mesuré 2026-10-11). Sur une copie déjà à `head`, `_ensure_schema` ne fait
+    plus rien : 0,03 s. La migration elle-même reste testée là où c'est son
+    sujet (`test_alembic_*`, qui construisent leurs propres bases).
+    """
+    import src.utils.data_manager as dm_mod
+
+    gabarit = tmp_path_factory.mktemp("gabarit") / "gabarit.db"
+    origine = dm_mod.DATABASE_URL
+    dm_mod.DATABASE_URL = f"sqlite:///{gabarit.as_posix()}"
+    try:
+        dm_mod.DataManager()
+    finally:
+        dm_mod.DATABASE_URL = origine
+    return gabarit
+
+
 @pytest.fixture
-def data_manager(tmp_path, monkeypatch):
+def data_manager(tmp_path, monkeypatch, _gabarit_base_migree):
     # DataManager n'importe plus les certifications au démarrage (elles vivent
     # dans certif_snep.csv) : seule la base à isoler reste à monkeypatcher.
+    import shutil
+
     import src.utils.data_manager as dm_mod
 
     db_file = tmp_path / "test_music_credits.db"
+    shutil.copyfile(_gabarit_base_migree, db_file)
     monkeypatch.setattr(dm_mod, "DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
     return dm_mod.DataManager()
 

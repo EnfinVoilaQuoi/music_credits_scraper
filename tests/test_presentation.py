@@ -513,7 +513,7 @@ class TestChargement:
         desactives.disabled_tracks_dir = tmp_path
         artiste = Artist(name="Isha")
         data_manager.save_artist(artiste)
-        for i, titre in enumerate(("Ailleurs", "Bitume"), start=1):
+        for titre in ("Ailleurs", "Bitume"):
             t = morceau(id=None, title=titre)
             t.artist = artiste
             data_manager.save_track(t)

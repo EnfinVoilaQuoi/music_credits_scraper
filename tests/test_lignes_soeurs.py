@@ -413,3 +413,20 @@ def test_le_total_youtube_de_la_soeur_suit_ses_videos(data_manager, famille):
     )
     data_manager.save_track(riche)
     assert _colonne(data_manager, pauvre.id, "ytm_streams") == 5000
+
+
+def test_la_ligne_ENREGISTREE_suit_les_observations_recues_de_sa_soeur(data_manager, famille):
+    """2026-10-11 : SCH « Kimono » sans streams en colonne malgré 22,7 M
+    d'observation Kworb — l'union verse les observations de la sœur dans la ligne
+    enregistrée APRÈS son propre arbitrage, et seule la sœur était ré-arbitrée."""
+    riche, pauvre = famille
+    data_manager.upsert_observations(
+        pauvre.id,
+        [
+            Observation("spotify_streams", 22_700_000, "kworb"),
+            Observation("duration", 201, "deezer"),
+        ],
+    )
+    data_manager.save_track(riche)
+    assert _colonne(data_manager, riche.id, "spotify_streams") == 22_700_000
+    assert _colonne(data_manager, riche.id, "duration") == 201

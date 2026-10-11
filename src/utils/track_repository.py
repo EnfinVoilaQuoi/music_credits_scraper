@@ -572,7 +572,12 @@ class TrackRepository:
                 # Sans ça, la ligne enregistrée ré-arbitrait seule (2026-10-10 :
                 # 43 fiches à durée VIDE malgré leurs observations — Kanye
                 # « Heartless », sœur de la ligne Kid Cudi à 210 s).
-                for soeur in ids_soeurs(conn, track.id, track.genius_id)[0]:
+                # La ligne ENREGISTRÉE aussi : l'union lui verse les observations
+                # de ses sœurs APRÈS son propre arbitrage (2026-10-11 : SCH
+                # « Kimono » sans streams en colonne, 22,7 M d'observation Kworb
+                # reçue de sa sœur).
+                jumelles = ids_soeurs(conn, track.id, track.genius_id)[0]
+                for soeur in [track.id, *jumelles] if jumelles else []:
                     self._rearbitrer_duree_et_date(conn, soeur)
                     valeurs = self._arbitrer_streams(conn, soeur)
                     if valeurs:

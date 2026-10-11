@@ -2,6 +2,7 @@
 
 import difflib
 import pickle
+import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
@@ -57,12 +58,61 @@ def relevance_score(
     # presque tous de vrais faux (remix ← original, original ← remix).
     if result_title and not meme_version_publiee(target_title, result_title):
         return 0.0
+    # Ni une autre PARTIE (2026-10-11) : « Mission Cobra Part. 3 » ressemblait à
+    # 97 % à « Part. 2 », « Gimme A Second 2 » à « Gimme A Second ».
+    if result_title and numeros_de_partie(
+        target_title, [target_artist, *result_artists]
+    ) != numeros_de_partie(result_title, [target_artist, *result_artists]):
+        return 0.0
     cible_titre = normalize_title(target_title)
     title_similarity = difflib.SequenceMatcher(
         None, cible_titre, normalize_title(result_title or "")
     ).ratio()
 
     return (title_similarity * 0.6) + (_similarite_artiste(target_artist, result_artists) * 0.4)
+
+
+_MARQUEUR_DE_PARTIE = re.compile(
+    r"\b(?:part|pt|partie|vol|volume|episode|épisode|ep|chapitre|chapter|n°|no)\b\.?\s*"
+    r"(\d{1,3}|[ivx]{1,4})\b|#\s*(\d{1,3})\b",
+    re.IGNORECASE,
+)
+_ROMAINS = {
+    "i": 1,
+    "ii": 2,
+    "iii": 3,
+    "iv": 4,
+    "v": 5,
+    "vi": 6,
+    "vii": 7,
+    "viii": 8,
+    "ix": 9,
+    "x": 10,
+}
+
+
+def numeros_de_partie(titre: str, artistes=()) -> frozenset[int]:
+    """Les numéros de PARTIE d'un titre : après « Part », « Pt », « Vol »,
+    « Épisode », « # »…, plus un nombre isolé en FIN de titre principal
+    (« Gimme A Second 2 », « Le chill 2 »).
+
+    Les autres nombres ne comptent pas — « 3 Milliards » / « trois milliards »,
+    « 1 pour la plume », une année entre parenthèses, un artiste (« A2H ») —
+    sans quoi la garde refusait des vidéos justes (mesuré le 2026-10-11 : une
+    garde sur TOUS les chiffres perdait 16 liens justes sur 18 écartés).
+    """
+    texte = titre or ""
+    for nom in artistes:
+        if nom:
+            texte = re.sub(rf"(?i)(?<!\w){re.escape(nom)}(?!\w)", " ", texte)
+    numeros = set()
+    for m in _MARQUEUR_DE_PARTIE.finditer(texte):
+        brut = (m.group(1) or m.group(2)).lower()
+        numeros.add(_ROMAINS[brut] if brut in _ROMAINS else int(brut))
+    principal = re.split(r"\s[-–]\s|[(\[]", texte, maxsplit=1)[0].strip()
+    if m := re.search(r"\s(\d{1,3})$", principal):
+        numeros.add(int(m.group(1)))
+    return frozenset(numeros)
 
 
 def _similarite_artiste(cible: str, artistes: list[str]) -> float:

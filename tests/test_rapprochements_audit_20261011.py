@@ -120,3 +120,32 @@ class TestPertinenceDuScraperSpotify:
     def test_le_bon_candidat_garde_son_score(self):
         assert self._score("SCH", "Gomorra", "SCH - Gomorra") == 1.0
         assert self._score("Jul", "Tchikita", "Jul & SCH - Tchikita") == 1.0
+
+
+class TestNumeroDePartieYouTube:
+    """Décision utilisateur 2026-10-11 : ne pas embarquer « Mission Cobra
+    Part. 3 » ← « Part. 2 », sans perdre « 1 pour la plume » ni « trois
+    milliards » (une garde sur tous les chiffres en perdait 16 justes)."""
+
+    def test_une_autre_partie_est_refusee(self):
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score("Mission Cobra Part. 2", ["RAS"], "RAS (FRA)", "Mission Cobra Part. 3")
+            == 0
+        )
+        assert (
+            relevance_score("Gimme A Second", ["Rich The Kid"], "Rich The Kid", "Gimme A Second 2")
+            == 0
+        )
+
+    def test_les_autres_nombres_ne_comptent_pas(self):
+        from src.youtube.youtube_searcher import relevance_score
+
+        for cible, video, artiste in [
+            ("Un pour la plume", "1 pour la plume", "Flynt"),
+            ("L’Homme Qui Voulait 3 Milliards", "L'homme qui voulait trois milliards", "MC Solaar"),
+            ("Dose of Dopeness", "DOSE OF DOPENESS (2007)", "Kid Cudi"),
+            ("Freestyle (Doudou)", "Freestyle (Doudou) - A2H", "A2H"),
+        ]:
+            assert relevance_score(video, [artiste], artiste, cible) > 0, cible

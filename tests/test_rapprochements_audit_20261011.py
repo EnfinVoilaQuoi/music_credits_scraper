@@ -101,3 +101,22 @@ class TestArtisteDUneVideo:
         )
         assert relevance_score("PANAMA", ["UZI"], "UZI (FRA 77)", "PANAMA") == 1.0
         assert relevance_score("Pas certifié", ["CYRILmp4"], "CYRIL.mp4", "Pas certifié") == 1.0
+
+
+class TestPertinenceDuScraperSpotify:
+    """2026-10-11 : artiste et mots du titre se cherchaient par SOUS-CHAÎNE."""
+
+    def _score(self, artiste, titre, texte):
+        from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+
+        return SpotifyIDScraper.__new__(SpotifyIDScraper)._calculate_relevance(
+            artiste, titre, texte
+        )
+
+    def test_un_nom_contenu_dans_un_autre_ne_compte_pas(self):
+        assert self._score("SCH", "Gomorra", "ScHoolboy Q - Collard Greens") < 0.4
+        assert self._score("Isha", "Fin", "Misha - Infinity") < 0.4
+
+    def test_le_bon_candidat_garde_son_score(self):
+        assert self._score("SCH", "Gomorra", "SCH - Gomorra") == 1.0
+        assert self._score("Jul", "Tchikita", "Jul & SCH - Tchikita") == 1.0

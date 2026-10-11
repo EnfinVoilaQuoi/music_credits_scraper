@@ -31,7 +31,7 @@ from src.scrapers.playwright_manager import get_playwright
 from src.utils.fichiers_json import ecrire_atomique, lire_cache
 from src.utils.llm_extractor import build_spotify_match_prompt, get_shared_extractor
 from src.utils.logger import get_logger
-from src.utils.title_matching import names_match_as_words
+from src.utils.title_matching import contains_as_words, names_match_as_words, normalize_name
 
 logger = get_logger(__name__)
 
@@ -219,19 +219,23 @@ class SpotifyIDScraper:
         if not text:
             return 0.5
         score = 0.0
-        artist_lower = self._normalize_apostrophes(artist).lower()
-        title_lower = self._normalize_apostrophes(title).lower()
-        text_lower = self._normalize_apostrophes(text).lower()
-        if artist_lower in text_lower:
+        # Par MOTS ENTIERS, jamais par sous-chaîne (2026-10-11) : « SCH » était
+        # « contenu » dans « ScHoolboy Q », « fin » dans « infinity » — la règle
+        # des noms du 2026-09-04 n'avait pas atteint ce score.
+        artiste = normalize_name(self._normalize_apostrophes(artist))
+        titre = normalize_name(self._normalize_apostrophes(title))
+        texte = normalize_name(self._normalize_apostrophes(text))
+        mots_du_texte = set(texte.split())
+        if artiste and contains_as_words(artiste, texte):
             score += 0.4
-        titre_present = title_lower in text_lower
+        titre_present = bool(titre) and contains_as_words(titre, texte)
         if titre_present:
             score += 0.4
-        for word in artist_lower.split():
-            if len(word) > 2 and word in text_lower:
+        for word in artiste.split():
+            if len(word) > 2 and word in mots_du_texte:
                 score += 0.1
-        for word in title_lower.split():
-            if len(word) > 2 and word in text_lower:
+        for word in titre.split():
+            if len(word) > 2 and word in mots_du_texte:
                 score += 0.1
                 titre_present = True
         # Sans un mot du TITRE, le candidat n'est qu'« un morceau de l'artiste » :

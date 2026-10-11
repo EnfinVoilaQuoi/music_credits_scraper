@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import argparse
 import signal
+import sqlite3
 import sys
+
+from sqlalchemy.exc import SQLAlchemyError
 
 # JAMAIS en re-wrappant (un second wrapper ferme le buffer partagé au GC) ;
 # garde pytest : le stdout de capture ne se reconfigure pas.
@@ -41,6 +44,9 @@ from src.utils.logger import configurer_journaux, get_logger  # noqa: E402
 logger = get_logger(__name__)
 
 COMPLET, ERREUR, PARTIEL, AMBIGU = 0, 1, 2, 3
+#: Run complet, mais l'audit de fin de run a une famille EN HAUSSE depuis le
+#: précédent du même artiste (chantier B : le run a dégradé la base).
+EN_HAUSSE = 4
 
 
 # ── Construction du parseur ──────────────────────────────────────────────────
@@ -58,6 +64,11 @@ def _artiste_args(p: argparse.ArgumentParser) -> None:
         "--genius-id",
         type=int,
         help="ID Genius quand le slug ne suffit pas (la CLI ne choisit jamais un candidat)",
+    )
+    p.add_argument(
+        "--sans-audit",
+        action="store_true",
+        help="pas d'audit des données en fin de run (comparé au run précédent de l'artiste)",
     )
 
 
@@ -276,6 +287,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="applique les corrections à preuve FORMELLE (journalisées, rétablissables)",
     )
 
+    au = sub.add_parser(
+        "audit", help="audit des données (lecture seule) : familles d'erreurs et invariants"
+    )
+    au.add_argument("noms", nargs="*", help="artistes (tels qu'en base) ; aucun = toute la base")
+    au.add_argument("--detail", action="append", help="lister une famille (« all » = toutes)")
+    au.add_argument("--comparer", help="JSON d'un audit précédent (code 4 si une famille monte)")
+    au.add_argument("--json", help="écrire l'audit complet en JSON")
+    au.add_argument(
+        "--sans-persistance", action="store_true", help="sans les invariants (plus rapide)"
+    )
+
     cy = sub.add_parser("cycle", help="l'enchaînement complet")
     _artiste_args(cy)
     _manquants_arg(cy)
@@ -459,7 +481,60 @@ def _imprimer_bilan(titre: str, texte: str) -> None:
     print(f"\n──── {titre} ────\n{texte}\n", flush=True)
 
 
+def _executer_audit(a: argparse.Namespace, runtime: Runtime) -> int:
+    """Audit à la demande ; `--comparer` rend 4 si une famille a monté."""
+    import json
+    from pathlib import Path
+
+    from src.services import audit
+
+    try:
+        resultat = audit.auditer(
+            runtime.data_manager, a.noms or None, persistance=not a.sans_persistance
+        )
+    except ValueError as e:
+        print(f"❌ {e}")
+        return ERREUR
+    reference = json.loads(Path(a.comparer).read_text(encoding="utf-8")) if a.comparer else None
+    print(audit.tableau(resultat, reference))
+    if a.detail:
+        print(audit.detail(resultat, a.detail))
+    if a.json:
+        Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.json).write_text(
+            json.dumps(resultat.vers_dict(), ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    return EN_HAUSSE if reference and audit.en_hausse(resultat, reference) else COMPLET
+
+
+def _audit_de_fin(a: argparse.Namespace, runtime: Runtime, art, code: int) -> int:
+    """L'audit de l'artiste après un run, comparé à son audit précédent
+    (chantier B). Un run COMPLET qui fait monter une famille rend 4."""
+    if getattr(a, "sans_audit", False) or art is None or getattr(art, "id", None) is None:
+        return code
+    from src.services import audit
+
+    try:
+        resultat, hausse, avait_ref = audit.apres_run(runtime.data_manager, art)
+    except (ValueError, OSError, sqlite3.Error, SQLAlchemyError) as e:
+        logger.warning(f"Audit de fin de run impossible : {e}")
+        return code
+    _imprimer_bilan("Audit des données", audit.resume_fin_de_run(resultat, hausse, avait_ref))
+    return EN_HAUSSE if (hausse and avait_ref and code == COMPLET) else code
+
+
 def executer(a: argparse.Namespace, runtime: Runtime) -> int:
+    """La commande, puis — pour une étape sur un artiste — l'audit de fin."""
+    if a.commande == "audit":
+        return _executer_audit(a, runtime)
+    code, art = _executer_commande(a, runtime)
+    if art is not None:
+        code = _audit_de_fin(a, runtime, art, code)
+    return code
+
+
+def _executer_commande(a: argparse.Namespace, runtime: Runtime) -> tuple[int, object]:
+    """Rend (code, artiste à auditer ou None)."""
     hooks = _hooks()
     deplaces = _drapeaux_deplaces(a)
     if deplaces:
@@ -467,33 +542,33 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
             f"❌ {', '.join(deplaces)} : déplacé vers l'étape Identité (2026-09-28) — "
             f"python -m src.cli identite {a.nom} {' '.join(deplaces)}"
         )
-        return ERREUR
+        return ERREUR, None
     if a.commande == "artiste":
         art = _charger(runtime, a, creer=True)
         print(f"✅ {art.name} — ID Genius {art.genius_id} — {len(art.tracks)} morceau(x) en base")
-        return COMPLET
+        return COMPLET, None
 
     if a.commande == "certifs" and a.action == "update":
         bilan = certifs.mettre_a_jour(
             a.sources or None, should_stop=lifecycle.stop_requested, progres=print
         )
         _imprimer_bilan("Certifs — mise à jour globale", "\n".join(bilan.lignes))
-        return code_de(bilan)
+        return code_de(bilan), None
 
     if a.commande == "certifs" and a.action == "apply":
         art = _charger(runtime, a, creer=False)
         bilan = certifs.appliquer(runtime, art)
         _imprimer_bilan("Certifs — application", bilan.rapport)
-        return code_de(bilan)
+        return code_de(bilan), art
 
     if a.commande == "deezer":
-        return _executer_deezer(a, runtime, hooks)
+        return _executer_deezer(a, runtime, hooks), None
 
     if a.commande == "revue":
-        return _executer_revue(a, runtime)
+        return _executer_revue(a, runtime), None
 
     if a.commande == "echecs":
-        return _executer_echecs(a, runtime)
+        return _executer_echecs(a, runtime), None
 
     if a.commande == "cycle":
         options = options_cycle(a)
@@ -503,7 +578,7 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
             _imprimer_bilan(etape, cycle.resume_etape(etape, b, options, art))
         _imprimer_bilan("Cycle", cycle.resume(bilan, options))
         ambigu = _deezer_ambigu(bilan.etapes.get("identite"))
-        return AMBIGU if ambigu else code_de(bilan)
+        return (AMBIGU if ambigu else code_de(bilan)), art
 
     # Une étape seule : le cycle restreint à elle, avec les MÊMES règles.
     etape = "certifs" if a.commande == "certifs" else a.commande  # certifs → action "search"
@@ -512,8 +587,8 @@ def executer(a: argparse.Namespace, runtime: Runtime) -> int:
     b = cycle.executer_etape(runtime, art, etape, options, hooks)
     _imprimer_bilan(etape, cycle.resume_etape(etape, b, options, art))
     if etape == "identite" and _deezer_ambigu(b):
-        return AMBIGU
-    return code_de(b)
+        return AMBIGU, art
+    return code_de(b), art
 
 
 def _deezer_ambigu(b) -> bool:

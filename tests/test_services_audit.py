@@ -1,0 +1,118 @@
+"""Chantier B — l'audit des données comme définition de « fini ».
+
+Les invariants de persistance ont une cible ZÉRO : chacun est montré ici sur
+une base saine (rien), puis sur la base qu'on abîme exprès (le défaut se voit).
+"""
+
+import pytest
+from sqlalchemy import text
+
+from src.models import Artist, Track
+from src.services import audit as au
+
+
+@pytest.fixture
+def isha(data_manager):
+    a = Artist(name="Isha")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Durag", artist=a)
+    t.genius_id = 4242
+    data_manager.save_track(t)
+    return a, t
+
+
+def _sql(dm, requete, **params):
+    with dm.engine.begin() as conn:
+        conn.execute(text(requete), params)
+
+
+def _familles(audit):
+    return audit.compte()
+
+
+class TestInvariants:
+    def test_base_saine_aucun_invariant(self, data_manager, isha):
+        audit = au.auditer(data_manager)
+        assert not any(_familles(audit).get(f) for f in au.INVARIANTS)
+
+    def test_colonne_qui_ne_suit_pas_ses_observations(self, data_manager, isha):
+        """La colonne `duration` dit 999 s, ses observations disent 200 s."""
+        _, t = isha
+        from src.enrichment.observation import Observation
+
+        data_manager.record_discography_observations(t.id, [Observation("duration", 200, "deezer")])
+        _sql(data_manager, "UPDATE tracks SET duration = 999 WHERE id = :t", t=t.id)
+
+        audit = au.auditer(data_manager, ["Isha"])
+        (cas,) = [c for c in audit.cas if c.famille == "colonne_verdict"]
+        assert cas.pistes == [t.id] and "duration 999 → 200" in cas.libelle
+
+    def test_soeurs_divergentes(self, data_manager, isha):
+        _, t = isha
+        swing = Artist(name="Swing")
+        swing.id = data_manager.save_artist(swing)
+        soeur = Track(title="Durag", artist=swing)
+        soeur.genius_id = 4242
+        data_manager.save_track(soeur)
+        _sql(data_manager, "UPDATE tracks SET lyrics_synced = '[00:01.00] a' WHERE id = :t", t=t.id)
+        _sql(
+            data_manager,
+            "UPDATE tracks SET lyrics_synced = '[00:01.00] b' WHERE id = :t",
+            t=soeur.id,
+        )
+
+        audit = au.auditer(data_manager, ["Isha"])
+        cas = [c for c in audit.cas if c.famille == "soeurs_divergentes"]
+        assert len(cas) == 1 and "lyrics_synced : 2 valeurs sur 2 lignes" in cas[0].libelle
+
+    def test_un_horodatage_different_n_est_pas_une_divergence(self, data_manager, isha):
+        assert au._volatile("lyrics_scraped_at") and au._volatile("youtube_video_views")
+        assert not au._volatile("lyrics_synced")
+
+    def test_orphelin_et_schema_sur_la_base_entiere(self, data_manager, isha):
+        _sql(
+            data_manager,
+            "INSERT INTO credits (track_id, name, role, source) VALUES (999, 'X', 'Writer', 'g')",
+        )
+        audit = au.auditer(data_manager)
+        (cas,) = [c for c in audit.cas if c.famille == "orphelin"]
+        assert cas.libelle == "credits : 1 ligne(s) sans fiche"
+        # Sur un artiste, ni orphelins ni schéma : ils ne portent sur personne.
+        assert "orphelin" not in _familles(au.auditer(data_manager, ["Isha"]))
+
+    def test_artiste_inconnu(self, data_manager, isha):
+        with pytest.raises(ValueError, match="Personne"):
+            au.auditer(data_manager, ["Personne"])
+
+
+class TestHausse:
+    def _audit(self, **compte):
+        a = au.Audit(date="d", perimetre="p")
+        for famille, n in compte.items():
+            a.cas += [au.Cas(famille, "A", [], "") for _ in range(n)]
+        return a
+
+    def test_une_famille_qui_monte(self):
+        ref = self._audit(id_partage=2, duree_aberrante=5).vers_dict()
+        assert au.en_hausse(self._audit(id_partage=3, duree_aberrante=1), ref) == {
+            "id_partage": (2, 3)
+        }
+
+    def test_sans_reference_seuls_les_invariants_montent(self):
+        audit = self._audit(duree_aberrante=4, colonne_verdict=1)
+        assert au.en_hausse(audit, None) == {"colonne_verdict": (0, 1)}
+
+    def test_la_reference_suit_la_base(self, data_manager, isha, tmp_path):
+        """Fin de run : comparé au PRÉCÉDENT audit du même artiste, puis le
+        remplace — la référence suit la base, un même défaut ne crie qu'une fois."""
+        a, t = isha
+        _, hausse, avait = au.apres_run(data_manager, a, tmp_path)
+        assert hausse == {} and not avait
+
+        _sql(data_manager, "UPDATE tracks SET duration = 5 WHERE id = :t", t=t.id)
+        audit, hausse, avait = au.apres_run(data_manager, a, tmp_path)
+        assert avait and hausse["duree_aberrante"] == (0, 1)
+        assert "duree_aberrante : 0 → 1" in au.resume_fin_de_run(audit, hausse, avait)
+
+        _, hausse, _ = au.apres_run(data_manager, a, tmp_path)
+        assert "duree_aberrante" not in hausse

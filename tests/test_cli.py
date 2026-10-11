@@ -132,6 +132,17 @@ def sans_effets(monkeypatch):
     monkeypatch.setattr(cli, "_fermer", lambda runtime: None)
     monkeypatch.setattr(cli, "_installer_ctrl_c", lambda: None)
     monkeypatch.setattr(cli.usage_repository, "attach", lambda engine: None)
+    # L'audit de fin de run lit une vraie base : neutralisé ici, testé à part.
+    from src.services import audit
+
+    rt.audits = []
+
+    def faux_audit(dm, art, dossier=None):
+        rt.audits.append(art.name)
+        return audit.Audit(date="d", perimetre=art.name), rt.hausse, rt.avait_reference
+
+    rt.hausse, rt.avait_reference = {}, False
+    monkeypatch.setattr(audit, "apres_run", faux_audit)
     return rt
 
 
@@ -176,6 +187,48 @@ class TestCodesDeSortie:
 
         monkeypatch.setattr(cli.artiste, "charger_ou_ajouter", boom)
         assert cli.main(["artiste", "add", "S"]) == cli.ERREUR
+
+
+class TestAuditDeFin:
+    """Chantier B : une étape sur un artiste se termine par son audit, comparé
+    au précédent ; un run COMPLET qui fait monter une famille rend 4."""
+
+    def _etape(self, monkeypatch, bilan=None):
+        art = SimpleNamespace(name="S", id=1, tracks=[])
+        monkeypatch.setattr(cli.artiste, "charger", lambda rt, nom: art)
+        monkeypatch.setattr(
+            cli.cycle, "executer_etape", lambda *a: bilan if bilan is not None else Bilan()
+        )
+        monkeypatch.setattr(cli.cycle, "resume_etape", lambda *a: "ok")
+
+    def test_famille_en_hausse_rend_4(self, sans_effets, monkeypatch, capsys):
+        self._etape(monkeypatch)
+        sans_effets.hausse, sans_effets.avait_reference = {"id_partage": (2, 3)}, True
+        assert cli.main(["enrich", "S"]) == cli.EN_HAUSSE
+        assert "id_partage : 2 → 3" in capsys.readouterr().out
+
+    def test_premier_audit_ne_change_pas_le_code(self, sans_effets, monkeypatch):
+        """Sans référence, les invariants non nuls ne sont pas imputés au run."""
+        self._etape(monkeypatch)
+        sans_effets.hausse, sans_effets.avait_reference = {"soeurs_divergentes": (0, 4)}, False
+        assert cli.main(["enrich", "S"]) == cli.COMPLET
+
+    def test_un_run_partiel_reste_partiel(self, sans_effets, monkeypatch):
+        b = Bilan()
+        b.interrompu("arrêt demandé")
+        self._etape(monkeypatch, b)
+        sans_effets.hausse, sans_effets.avait_reference = {"id_partage": (2, 3)}, True
+        assert cli.main(["enrich", "S"]) == cli.PARTIEL
+
+    def test_sans_audit(self, sans_effets, monkeypatch):
+        self._etape(monkeypatch)
+        assert cli.main(["enrich", "S", "--sans-audit"]) == cli.COMPLET
+        assert sans_effets.audits == []
+
+    def test_les_commandes_de_lecture_ne_s_auditent_pas(self, sans_effets, monkeypatch):
+        monkeypatch.setattr(cli, "_executer_revue", lambda a, rt: cli.COMPLET)
+        assert cli.main(["revue", "S"]) == cli.COMPLET
+        assert sans_effets.audits == []
 
 
 class TestEtapeSeule:

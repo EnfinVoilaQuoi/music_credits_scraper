@@ -24,10 +24,11 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from src.config import settings
+from src.config import BASE_DIR, settings
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
+from src.utils.fichiers_json import ecrire_atomique, lire_cache
 from src.utils.llm_extractor import build_spotify_match_prompt, get_shared_extractor
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
@@ -53,8 +54,9 @@ _UA = (
 class SpotifyIDScraper:
     """Scraper pour récupérer les IDs Spotify via recherche directe (Playwright)"""
 
-    def __init__(self, cache_file: str = "spotify_ids_cache.json", headless: bool = True):
-        self.cache_file = cache_file
+    def __init__(self, cache_file: str | None = None, headless: bool = True):
+        # Ancré sur la racine du projet, pas sur le dossier courant.
+        self.cache_file = cache_file or str(BASE_DIR / "spotify_ids_cache.json")
         self.cache = self._load_cache()
         self.headless = headless
         self._playwright: PlaywrightInstance | None = None
@@ -136,17 +138,12 @@ class SpotifyIDScraper:
     # ──────────────────────────────────────────────────────────────────────────
 
     def _load_cache(self):
-        try:
-            with open(self.cache_file, encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
+        return lire_cache(self.cache_file)
 
     def _save_cache(self):
         try:
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-        except OSError as e:
+            ecrire_atomique(self.cache_file, self.cache)
+        except (OSError, TypeError) as e:
             logger.error(f"Erreur sauvegarde cache: {e}")
 
     def _get_cache_key(self, artist: str, title: str) -> str:

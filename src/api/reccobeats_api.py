@@ -4,16 +4,16 @@ Responsabilité UNIQUE : Récupérer les données musicales (BPM, Key, Mode) dep
 Le scraping Spotify ID est géré par SpotifyIDScraper (module séparé)
 """
 
-import json
 import time
 from typing import TYPE_CHECKING
 
 import httpx
 import requests
 
-from src.config import RECCOBEATS_NOT_FOUND_TTL_DAYS
+from src.config import BASE_DIR, RECCOBEATS_NOT_FOUND_TTL_DAYS
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.fichiers_json import ecrire_atomique, lire_cache
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ _ASYNC_HEADERS = {"Accept": "application/json", "User-Agent": "ReccoBeats-Python
 class ReccoBeatsIntegratedClient:
     """Client ReccoBeats pour récupération BPM/Key/Mode/Audio Features"""
 
-    def __init__(self, cache_file: str = "reccobeats_cache.json", headless: bool = False):
+    def __init__(self, cache_file: str | None = None, headless: bool = False):
         """
         Initialise le client ReccoBeats
 
@@ -41,7 +41,8 @@ class ReccoBeatsIntegratedClient:
             cache_file: Fichier de cache JSON
             headless: Paramètre conservé pour compatibilité (non utilisé)
         """
-        self.cache_file = cache_file
+        # Ancré sur la racine du projet, pas sur le dossier courant.
+        self.cache_file = cache_file or str(BASE_DIR / "reccobeats_cache.json")
         self.cache = self._load_cache()
 
         # Configuration ReccoBeats API
@@ -55,18 +56,13 @@ class ReccoBeatsIntegratedClient:
 
     def _load_cache(self) -> dict:
         """Charge le cache depuis le fichier"""
-        try:
-            with open(self.cache_file, encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
+        return lire_cache(self.cache_file)
 
     def _save_cache(self):
         """Sauvegarde le cache"""
         try:
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-        except OSError as e:
+            ecrire_atomique(self.cache_file, self.cache)
+        except (OSError, TypeError) as e:
             logger.error(f"Erreur sauvegarde cache: {e}")
 
     def _get_cache_key(self, spotify_id: str) -> str:

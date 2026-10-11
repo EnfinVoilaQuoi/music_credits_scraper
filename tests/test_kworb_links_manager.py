@@ -51,11 +51,17 @@ class TestLecture:
         assert data == {"confirmed": {}, "rejected": [], "decisions": {}}
 
     def test_fichier_corrompu_ne_fait_pas_crasher(self, manager):
-        """Un JSON tronqué ne doit pas bloquer le run : on repart d'une mémoire
-        vide, quitte à redemander une fois."""
+        """Un JSON tronqué ne doit pas bloquer le run : on décide sur une mémoire
+        vide, quitte à redemander une fois — mais marquée illisible, pour ne
+        jamais la réécrire par-dessus (2026-10-11)."""
         manager.base_dir.mkdir(parents=True, exist_ok=True)
         (manager.base_dir / "Jul.json").write_text("{ceci n'est pas du JSON", encoding="utf-8")
-        assert manager.load("Jul") == {"confirmed": {}, "rejected": [], "decisions": {}}
+        assert manager.load("Jul") == {
+            "_illisible": True,
+            "confirmed": {},
+            "rejected": [],
+            "decisions": {},
+        }
 
     def test_structure_partielle_completee(self, manager):
         """Un vieux fichier sans la clé `rejected` reste exploitable."""
@@ -163,3 +169,21 @@ class TestTaxonomie:
             "kind": "ignore",
             "track_id": None,
         }
+
+
+def test_un_fichier_illisible_n_est_jamais_ecrase(manager):
+    """2026-10-11 : relu comme vide, il était remplacé par la seule décision
+    suivante — toutes les autres étaient perdues."""
+    chemin = manager._path("Jul")
+    chemin.write_text('{"confirmed": {"bande organisee": 1', encoding="utf-8")
+    manager.confirm("Jul", "On verra", 2)
+    assert chemin.read_text(encoding="utf-8") == '{"confirmed": {"bande organisee": 1'
+
+
+def test_le_dossier_par_defaut_ne_depend_pas_du_dossier_courant(monkeypatch, tmp_path):
+    from src.config import DATA_DIR
+
+    monkeypatch.chdir(tmp_path)
+    m = KworbLinksManager.__new__(KworbLinksManager)
+    KworbLinksManager.__init__(m)
+    assert m.base_dir == DATA_DIR / "kworb_links"

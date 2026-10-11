@@ -6,7 +6,6 @@ IMPORTANT: Backlink obligatoire vers getsongbpm.com pour usage gratuit
 """
 
 import asyncio
-import json
 import os
 import sys
 import time
@@ -23,7 +22,9 @@ if TYPE_CHECKING:
 if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from src.config import BASE_DIR
 from src.observability import source_usage
+from src.utils.fichiers_json import ecrire_atomique, lire_cache
 
 # Import logger
 from src.utils.logger import get_logger
@@ -70,7 +71,7 @@ class GetSongBPMFetcher:
     RATE_LIMIT_DELAY = 1.2  # ~1.2s entre requêtes = ~3000/heure max
     MAX_RETRIES = 3
 
-    def __init__(self, api_key: str | None = None, cache_file: str = "getsongbpm_cache.json"):
+    def __init__(self, api_key: str | None = None, cache_file: str | None = None):
         """
         Initialise le client GetSongBPM
 
@@ -87,7 +88,8 @@ class GetSongBPMFetcher:
                 "d'environnement ou passez api_key au constructeur. "
                 "Obtenez votre clé sur: https://getsongbpm.com/api"
             )
-        self.cache_file = cache_file
+        # Ancré sur la racine du projet, pas sur le dossier courant.
+        self.cache_file = cache_file or str(BASE_DIR / "getsongbpm_cache.json")
         self.cache = self._load_cache()
         self.session = requests.Session()
 
@@ -112,18 +114,13 @@ class GetSongBPMFetcher:
 
     def _load_cache(self) -> dict:
         """Charge le cache depuis le fichier"""
-        try:
-            with open(self.cache_file, encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
+        return lire_cache(self.cache_file)
 
     def _save_cache(self):
         """Sauvegarde le cache dans le fichier"""
         try:
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-        except OSError as e:
+            ecrire_atomique(self.cache_file, self.cache)
+        except (OSError, TypeError) as e:
             logger.warning(f"GetSongBPM : échec de sauvegarde du cache : {e}")
 
     def _get_cache_key(self, artist: str, title: str) -> str:

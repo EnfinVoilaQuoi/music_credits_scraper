@@ -44,7 +44,8 @@ class TestCache:
     def test_ecriture_impossible_journalisee(self, tmp_path, monkeypatch, caplog):
         s = SpotifyIDScraper(cache_file=str(tmp_path / "cache.json"))
         monkeypatch.setattr(
-            "builtins.open", lambda *a, **k: (_ for _ in ()).throw(OSError("disque plein"))
+            "src.utils.fichiers_json.os.replace",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("disque plein")),
         )
         s._save_cache()  # ne lève pas
         assert "Erreur sauvegarde cache" in caplog.text

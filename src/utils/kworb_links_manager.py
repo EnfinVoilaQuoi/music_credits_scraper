@@ -16,10 +16,11 @@ Clé = titre Kworb normalisé (via title_matching.normalize_title) pour être
 stable entre les runs malgré ponctuation/casse.
 """
 
-import json
 import re
 from pathlib import Path
 
+from src.config import DATA_DIR
+from src.utils.fichiers_json import MemoireIllisible, ecrire_atomique, lire_memoire
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
 
@@ -27,8 +28,10 @@ logger = get_logger(__name__)
 
 
 class KworbLinksManager:
-    def __init__(self, base_dir: str = "data/kworb_links"):
-        self.base_dir = Path(base_dir)
+    def __init__(self, base_dir: str | None = None):
+        # Ancré sur DATA_DIR : relatif au dossier courant, un lancement depuis
+        # ailleurs lisait et écrivait une mémoire FANTÔME (même piège que BRMA).
+        self.base_dir = Path(base_dir) if base_dir else Path(DATA_DIR) / "kworb_links"
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, artist_name: str) -> Path:
@@ -37,20 +40,24 @@ class KworbLinksManager:
 
     def load(self, artist_name: str) -> dict:
         try:
-            data = json.loads(self._path(artist_name).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, TypeError):
-            data = {}
+            data = lire_memoire(self._path(artist_name))
+        except MemoireIllisible as e:
+            # Lu comme vide pour décider, mais JAMAIS réécrit : la première
+            # décision mémorisée effaçait toutes les autres (2026-10-11).
+            logger.error(f"Décisions Kworb illisibles, elles ne seront pas réécrites : {e}")
+            data = {"_illisible": True}
         data.setdefault("confirmed", {})
         data.setdefault("rejected", [])
         data.setdefault("decisions", {})
         return data
 
     def _save(self, artist_name: str, data: dict):
+        if data.get("_illisible"):
+            logger.error(f"Décisions Kworb de {artist_name} illisibles : rien n'est écrit")
+            return
         try:
-            self._path(artist_name).write_text(
-                json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
-            )
-        except (OSError, json.JSONDecodeError, TypeError) as e:
+            ecrire_atomique(self._path(artist_name), data, indent=1)
+        except (OSError, TypeError) as e:
             logger.error(f"Sauvegarde décisions Kworb échouée ({artist_name}): {e}")
 
     def confirm(self, artist_name: str, kworb_title: str, track_id: int):

@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.config import DATA_DIR
+from src.utils.fichiers_json import ecrire_atomique
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,8 +29,12 @@ class DeletedTracksManager:
         safe_name = safe_name.replace(" ", "_").lower()
         return self.deleted_tracks_dir / f"{safe_name}_deleted.json"
 
-    def _read(self, artist_name: str) -> dict[str, dict]:
-        """Retourne un dict {genius_id(str): {genius_id, title, deleted_at}}."""
+    def _read(self, artist_name: str, *, pour_ecrire: bool = False) -> dict[str, dict] | None:
+        """Retourne un dict {genius_id(str): {genius_id, title, deleted_at}}.
+
+        Fichier illisible : `{}` pour une simple lecture, `None` pour un écrivain
+        — qui refuse alors d'écrire au lieu d'effacer l'historique (2026-10-11).
+        """
         file_path = self._get_artist_file(artist_name)
         if not file_path.exists():
             return {}
@@ -45,7 +50,7 @@ class DeletedTracksManager:
             return out
         except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(f"Erreur lecture morceaux supprimés pour {artist_name}: {e}")
-            return {}
+            return None if pour_ecrire else {}
 
     def _write(self, artist_name: str, entries: dict[str, dict]) -> bool:
         try:
@@ -56,8 +61,7 @@ class DeletedTracksManager:
                 "last_updated": str(datetime.now()),
                 "version": "1.0",
             }
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            ecrire_atomique(file_path, data)
             return True
         except (OSError, json.JSONDecodeError, TypeError) as e:
             logger.error(f"Erreur écriture morceaux supprimés pour {artist_name}: {e}")
@@ -68,7 +72,9 @@ class DeletedTracksManager:
         if not genius_id:
             logger.debug(f"Suppression non mémorisée (pas de genius_id): {title}")
             return False
-        entries = self._read(artist_name)
+        entries = self._read(artist_name, pour_ecrire=True)
+        if entries is None:
+            return False
         entries[str(genius_id)] = {
             "genius_id": genius_id,
             "title": title,
@@ -93,7 +99,9 @@ class DeletedTracksManager:
 
     def remove_deleted(self, artist_name: str, genius_id: int) -> bool:
         """Retire un morceau de l'historique (pour autoriser son réajout)."""
-        entries = self._read(artist_name)
+        entries = self._read(artist_name, pour_ecrire=True)
+        if entries is None:
+            return False
         if str(genius_id) in entries:
             del entries[str(genius_id)]
             return self._write(artist_name, entries)

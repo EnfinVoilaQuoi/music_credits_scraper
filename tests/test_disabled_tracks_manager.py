@@ -64,7 +64,10 @@ class TestAllerRetour:
         assert data["last_updated"]
 
     def test_ecriture_impossible(self, manager, monkeypatch, caplog):
-        monkeypatch.setattr("builtins.open", lambda *a, **k: (_ for _ in ()).throw(OSError("hs")))
+        monkeypatch.setattr(
+            "src.utils.fichiers_json.os.replace",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("hs")),
+        )
         assert manager.save_disabled_tracks("Jul", {1}) is False
         assert "Erreur lors de la sauvegarde" in caplog.text
 

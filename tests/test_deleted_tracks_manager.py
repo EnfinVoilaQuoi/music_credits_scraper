@@ -115,7 +115,10 @@ class TestLecture:
         assert manager.load_deleted_ids("Jul") == {111}
 
     def test_ecriture_impossible(self, manager, monkeypatch, caplog):
-        monkeypatch.setattr("builtins.open", lambda *a, **k: (_ for _ in ()).throw(OSError("hs")))
+        monkeypatch.setattr(
+            "src.utils.fichiers_json.os.replace",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("hs")),
+        )
         assert manager.add_deleted("Jul", 111, "A") is False
         assert "Erreur écriture morceaux supprimés" in caplog.text
 
@@ -152,3 +155,12 @@ class TestRetrait:
         )
         assert manager.clear("Jul") is False
         assert "Erreur suppression historique" in caplog.text
+
+
+def test_un_historique_illisible_n_est_jamais_ecrase(manager):
+    """2026-10-11 : relu comme vide, il était remplacé par la seule suppression
+    suivante — les morceaux supprimés auparavant revenaient au run suivant."""
+    chemin = manager._get_artist_file("Jul")
+    chemin.write_text('{"deleted_tracks": [{"genius_id": 1', encoding="utf-8")
+    assert manager.add_deleted("Jul", 111, "A") is False
+    assert chemin.read_text(encoding="utf-8") == '{"deleted_tracks": [{"genius_id": 1'

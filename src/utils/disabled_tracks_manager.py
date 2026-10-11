@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.config import DATA_DIR
+from src.utils.fichiers_json import ecrire_atomique
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,8 +49,7 @@ class DisabledTracksManager:
                 "version": "2.0",  # Version 2.0 utilise des IDs au lieu d'indices
             }
 
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            ecrire_atomique(file_path, data)
 
             logger.info(
                 f"Morceaux désactivés sauvegardés pour {artist_name}: {len(disabled_track_ids)} morceaux"

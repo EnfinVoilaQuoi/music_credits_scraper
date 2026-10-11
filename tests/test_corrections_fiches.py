@@ -180,3 +180,13 @@ def test_une_fusion_par_regle_est_memorisee_une_fois():
     cf.memoriser_fusion("SCH", {"genius_id": 10207486}, {"genius_id": 5363682})
     assert cf.genius_ids_absorbes("SCH") == {10207486}
     assert len(cf.charger()["SCH"]) == 1
+
+
+def test_un_fichier_illisible_n_est_JAMAIS_ecrase(fichier):
+    """2026-10-11 : un `fiches.json` illisible était relu comme `{}`, et la
+    première décision mémorisée le remplaçait — toutes les autres étaient perdues."""
+    cf.FICHIER.write_text('{"A2H": [{"fiche": {"genius_id": 1}', encoding="utf-8")
+    cf.memoriser_id_refuse(_t("x", genius_id=2), "ABC")
+    cf.memoriser_fusion("A2H", {"genius_id": 3}, {"genius_id": 4})
+    assert cf.FICHIER.read_text(encoding="utf-8") == '{"A2H": [{"fiche": {"genius_id": 1}'
+    assert list(cf.FICHIER.parent.glob("fiches.json.illisible-*"))

@@ -29,6 +29,7 @@ import json
 from pathlib import Path
 
 from src.config import DATA_DIR
+from src.utils.fichiers_json import MemoireIllisible, ecrire_atomique, lire_memoire
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
 
@@ -54,6 +55,18 @@ def charger() -> dict:
         donnees = {}
     _cache.update(chemin=FICHIER, mtime=mtime, donnees=donnees)
     return donnees
+
+
+def _relire_pour_ecrire() -> dict | None:
+    """Le fichier, pour le MODIFIER. `None` s'il est illisible : on refuse alors
+    d'écrire — réécrire par-dessus effacerait toutes les décisions qu'il garde
+    (avant le 2026-10-11, un fichier illisible était remplacé par la seule
+    entrée qu'on ajoutait)."""
+    try:
+        return lire_memoire(FICHIER)
+    except MemoireIllisible as e:
+        logger.error(f"Corrections de fiches illisibles, rien n'y est écrit : {e}")
+        return None
 
 
 def designe(designation: dict, *, genius_id, titre: str | None, album: str | None) -> bool:
@@ -119,16 +132,14 @@ def designation_de(track) -> dict:
 def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
     """Consigne une fusion décidée par une RÈGLE (pas à la main) : sans elle, le
     prochain import recréerait la page absorbée (`genius_ids_absorbes`)."""
-    try:
-        donnees = json.loads(FICHIER.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        donnees = {}
+    donnees = _relire_pour_ecrire()
+    if donnees is None:
+        return
     entrees = donnees.setdefault(artiste, [])
     if any(e.get("fiche") == absorbee and e.get("fusionner_dans") for e in entrees):
         return
     entrees.append({"fiche": absorbee, "fusionner_dans": gardee})
-    FICHIER.parent.mkdir(parents=True, exist_ok=True)
-    FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    ecrire_atomique(FICHIER, donnees, fin="\n")
 
 
 def _ajouter_a_la_fiche(track, cle: str, valeur, meme=None) -> bool:
@@ -138,10 +149,9 @@ def _ajouter_a_la_fiche(track, cle: str, valeur, meme=None) -> bool:
     if not artiste or valeur in (None, ""):
         return False
     meme = meme or (lambda a, b: a == b)
-    try:
-        donnees = json.loads(FICHIER.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        donnees = {}
+    donnees = _relire_pour_ecrire()
+    if donnees is None:
+        return False
     entrees = donnees.setdefault(artiste, [])
     fiche = designation_de(track)
     ligne = next((e for e in entrees if e.get("fiche") == fiche), None)
@@ -152,8 +162,7 @@ def _ajouter_a_la_fiche(track, cle: str, valeur, meme=None) -> bool:
     if any(meme(x, valeur) for x in liste):
         return False
     liste.append(valeur)
-    FICHIER.parent.mkdir(parents=True, exist_ok=True)
-    FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    ecrire_atomique(FICHIER, donnees, fin="\n")
     return True
 
 
@@ -164,9 +173,8 @@ def _retirer_de_la_fiche(track, cle: str, valeur, meme=None) -> bool:
     if not artiste:
         return False
     meme = meme or (lambda a, b: a == b)
-    try:
-        donnees = json.loads(FICHIER.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    donnees = _relire_pour_ecrire()
+    if donnees is None:
         return False
     ligne = next(
         (e for e in donnees.get(artiste, []) if e.get("fiche") == designation_de(track)), None
@@ -176,7 +184,7 @@ def _retirer_de_la_fiche(track, cle: str, valeur, meme=None) -> bool:
     ligne[cle] = [x for x in ligne[cle] if not meme(x, valeur)]
     if not ligne[cle]:
         del ligne[cle]
-    FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    ecrire_atomique(FICHIER, donnees, fin="\n")
     return True
 
 

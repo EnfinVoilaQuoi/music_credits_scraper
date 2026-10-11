@@ -159,7 +159,7 @@ class TestCycleDeVie:
         def casse(*a, **k):
             raise OSError("disque")
 
-        monkeypatch.setattr("builtins.open", casse)
+        monkeypatch.setattr("src.utils.fichiers_json.os.replace", casse)
         with caplog.at_level("ERROR"):
             client._save_cache()
         assert any("Erreur sauvegarde cache" in r.message for r in caplog.records)

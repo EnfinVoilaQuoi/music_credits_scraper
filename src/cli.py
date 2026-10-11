@@ -297,6 +297,9 @@ def build_parser() -> argparse.ArgumentParser:
     au.add_argument(
         "--sans-persistance", action="store_true", help="sans les invariants (plus rapide)"
     )
+    au.add_argument(
+        "--sans-revue", action="store_true", help="sans les cas du panneau « À trancher »"
+    )
 
     cy = sub.add_parser("cycle", help="l'enchaînement complet")
     _artiste_args(cy)
@@ -490,7 +493,10 @@ def _executer_audit(a: argparse.Namespace, runtime: Runtime) -> int:
 
     try:
         resultat = audit.auditer(
-            runtime.data_manager, a.noms or None, persistance=not a.sans_persistance
+            runtime.data_manager,
+            a.noms or None,
+            persistance=not a.sans_persistance,
+            revue=not a.sans_revue,
         )
     except ValueError as e:
         print(f"❌ {e}")

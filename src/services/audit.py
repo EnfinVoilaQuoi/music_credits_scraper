@@ -538,14 +538,57 @@ def ecarts_de_schema(db_path) -> list[Cas]:
     return [Cas("schema", "—", [], e) for e in ecarts_au_schema(str(db_path))]
 
 
+# ── Le panneau « À trancher » (chantier B, lot 3) ──────────────────────────────
+
+
+def familles_revue() -> dict[str, str]:
+    """Une famille par détecteur du panneau : l'audit compte ce que le panneau
+    MONTRE (hors « ✓ Normal »). En fin de run, une hausse veut dire « ce run a
+    créé des cas à trancher »."""
+    from src.services import revue
+
+    return {f"revue:{d.code}": f"À TRANCHER — {d.libelle}" for d in revue.tous_les_detecteurs()}
+
+
+def toutes_les_familles() -> dict[str, str]:
+    return {**FAMILLES, **familles_revue()}
+
+
+def a_trancher(dm, noms: list[str]) -> list[Cas]:
+    """Les cas ACTIFS du panneau pour chaque artiste — sa discographie RÉUNIE
+    (la sienne + groupes + part dans ses collectifs), exactement ce que la
+    fenêtre ouvre. Zéro réseau, zéro écriture (`revue.analyser`)."""
+    from src.services import revue
+
+    cas = []
+    for nom in noms:
+        artiste = dm.get_artist_by_name(nom)
+        if artiste is None:
+            continue
+        artiste.tracks = dm.discographie_reunie(artiste)
+        for c in revue.analyser(dm, artiste).actifs:
+            cas.append(
+                Cas(
+                    f"revue:{c.detecteur}",
+                    artiste.name,
+                    [c.track_id] if c.track_id else [],
+                    f"{c.morceau} — {c.motif}",
+                )
+            )
+    return cas
+
+
 # ── Orchestration ───────────────────────────────────────────────────────────
 
 
-def auditer(dm, noms: list[str] | None = None, *, persistance: bool = True) -> Audit:
+def auditer(
+    dm, noms: list[str] | None = None, *, persistance: bool = True, revue: bool = True
+) -> Audit:
     """L'audit de `noms` (toute la base si None). `persistance` ajoute les
     invariants (le passage à blanc de `rematerialiser` coûte ~36 s sur toute
-    la base, une fraction de seconde par artiste). Orphelins et schéma ne
-    portent sur aucun artiste : seulement sur un audit de toute la base."""
+    la base, une fraction de seconde par artiste) ; `revue`, les cas du panneau
+    « À trancher ». Orphelins et schéma ne portent sur aucun artiste :
+    seulement sur un audit de toute la base."""
     with closing(_connexion(dm.db_path)) as c:
         artistes = None
         if noms:
@@ -578,6 +621,8 @@ def auditer(dm, noms: list[str] | None = None, *, persistance: bool = True) -> A
         audit.cas += colonnes_verdict(dm, pistes)
         if not noms:
             audit.cas += ecarts_de_schema(dm.db_path)
+    if revue:
+        audit.cas += a_trancher(dm, noms or dm.get_artist_names())
     return audit
 
 
@@ -592,7 +637,7 @@ def en_hausse(audit: Audit, reference: dict | None) -> dict[str, tuple[int, int]
     avant = reference.get("compte", {})
     return {
         f: (avant.get(f, 0), compte.get(f, 0))
-        for f in FAMILLES
+        for f in toutes_les_familles()
         if compte.get(f, 0) > avant.get(f, 0)
     }
 
@@ -604,13 +649,16 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
     if reference:
         lignes.append(f"comparé à : {reference.get('perimetre')} — {reference.get('date')}")
     lignes.append("")
-    for code, libelle in FAMILLES.items():
+    revue = familles_revue()
+    for code, libelle in {**FAMILLES, **revue}.items():
         n = compte.get(code, 0)
+        if code in revue and not n and not ref.get(code):
+            continue  # ~25 détecteurs : seuls ceux qui ont des cas s'affichent
         delta = ""
         if reference:
             d = n - ref.get(code, 0)
             delta = f"  ({'+' if d > 0 else ''}{d})" if d else "  (=)"
-        lignes.append(f"{n:6}{delta:10}  {code:20} {libelle}")
+        lignes.append(f"{n:6}{delta:10}  {code:28} {libelle}")
     lignes.append(f"\n{len(audit.cas)} cas au total")
     return "\n".join(lignes)
 
@@ -618,13 +666,14 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
 def detail(audit: Audit, familles) -> str:
     """Les cas des `familles` (« all » = toutes), triés par artiste."""
     familles = set(familles or ())
+    toutes = toutes_les_familles()
     sortie = []
-    for code in FAMILLES:
+    for code in toutes:
         if "all" not in familles and code not in familles:
             continue
         liste = [cas for cas in audit.cas if cas.famille == code]
         if liste:
-            sortie.append(f"\n── {code} ({len(liste)}) — {FAMILLES[code]}")
+            sortie.append(f"\n── {code} ({len(liste)}) — {toutes[code]}")
             for cas in sorted(liste, key=lambda x: (x.artiste, x.libelle)):
                 sortie.append(f"  [{cas.artiste}] {cas.libelle}")
     return "\n".join(sortie)

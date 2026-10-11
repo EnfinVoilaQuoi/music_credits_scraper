@@ -37,10 +37,18 @@ def main(argv=None) -> int:
     p.add_argument(
         "--sans-persistance", action="store_true", help="sans les invariants de persistance"
     )
+    p.add_argument(
+        "--sans-revue", action="store_true", help="sans les cas du panneau « À trancher »"
+    )
     a = p.parse_args(argv)
 
     try:
-        audit = audit_mod.auditer(DataManager(), a.artiste, persistance=not a.sans_persistance)
+        audit = audit_mod.auditer(
+            DataManager(),
+            a.artiste,
+            persistance=not a.sans_persistance,
+            revue=not a.sans_revue,
+        )
     except ValueError as e:
         raise SystemExit(str(e)) from e
     reference = json.loads(a.comparer.read_text(encoding="utf-8")) if a.comparer else None

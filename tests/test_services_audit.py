@@ -116,3 +116,35 @@ class TestHausse:
 
         _, hausse, _ = au.apres_run(data_manager, a, tmp_path)
         assert "duree_aberrante" not in hausse
+
+
+class TestATrancher:
+    """Chantier B, lot 3 : l'audit compte ce que le panneau « À trancher »
+    montre — un « ✓ Normal » le retire du compte, comme du panneau."""
+
+    def test_un_doublon_de_titre_est_compte_puis_masque(self, data_manager, isha):
+        a, _ = isha
+        for titre in ("Boss", "BOSS"):
+            data_manager.save_track(Track(title=titre, artist=a))
+
+        audit = au.auditer(data_manager, ["Isha"], persistance=False)
+        doublons = [c for c in audit.cas if c.famille == "revue:doublon"]
+        assert doublons and "revue:doublon" in au.toutes_les_familles()
+
+        from src.services import revue
+
+        artiste = data_manager.get_artist_by_name("Isha")
+        artiste.tracks = data_manager.discographie_reunie(artiste)
+        for cas in revue.analyser(data_manager, artiste).actifs:
+            if cas.detecteur == "doublon":
+                data_manager.trancher_cas(a.id, cas.detecteur, cas.cle)
+
+        audit = au.auditer(data_manager, ["Isha"], persistance=False)
+        assert not [c for c in audit.cas if c.famille == "revue:doublon"]
+
+    def test_sans_revue(self, data_manager, isha):
+        a, _ = isha
+        for titre in ("Boss", "BOSS"):
+            data_manager.save_track(Track(title=titre, artist=a))
+        audit = au.auditer(data_manager, ["Isha"], persistance=False, revue=False)
+        assert not any(c.famille.startswith("revue:") for c in audit.cas)

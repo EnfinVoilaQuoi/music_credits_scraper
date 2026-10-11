@@ -183,6 +183,20 @@ class TestEitherContainsAsWords:
     def test_sous_chaine_intra_mot(self, a, b):
         assert either_contains_as_words(a, b) is False
 
+    @pytest.mark.parametrize(
+        ("a", "b", "attendu"),
+        [
+            ("ridin'", "ridin'", True),
+            ("ridin'", "ridin' dirty", True),
+            ("ridin'", "ridin's", False),
+            ("$tanlee", "feat $tanlee", True),
+        ],
+    )
+    def test_aiguille_a_bord_non_mot(self, a, b, attendu):
+        """`\\b` ne s'ancre pas après une apostrophe ni avant un « $ »
+        (défaut vu dans `cert_matcher` le 2026-10-12)."""
+        assert either_contains_as_words(a, b) is attendu
+
 
 class TestCleanStoredTitle:
     """Les caractères SANS LARGEUR fabriquent des doublons invisibles.

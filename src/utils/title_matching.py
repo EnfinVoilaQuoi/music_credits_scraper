@@ -32,7 +32,12 @@ def contains_as_words(needle: str, haystack: str) -> bool:
     """
     if not needle or not haystack:
         return False
-    return re.search(rf"\b{re.escape(needle)}\b", haystack) is not None
+    # `(?<!\w)…(?!\w)` et non `\b…\b` : `\b` ne s'ancre pas après une apostrophe
+    # ni avant un « $ » — une aiguille « ridin' » ne se contenait pas elle-même
+    # (défaut vu dans `cert_matcher` le 2026-10-12). Neutre pour les appelants
+    # actuels, qui normalisent en `[a-z0-9 ]` (mesuré : 0 nom ni titre en base
+    # à bord non-mot après `normalize_name`/`normalize_title`).
+    return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
 
 
 def either_contains_as_words(a: str, b: str) -> bool:

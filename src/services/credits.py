@@ -210,14 +210,13 @@ def _phase_youtube(
     from src.utils.credits_description import (
         est_description_topic,
         parse_description_clip,
-        parse_description_clip_llm,
         parse_description_topic,
     )
     from src.utils.youtube_utils import video_pour_credits
 
     selection = tracks if options.tout_youtube else [t for t in tracks if _manque_production(t)]
     if not selection:
-        bilan.youtube = {"topic": 0, "clip": 0, "llm": 0, "skipped": len(tracks)}
+        bilan.youtube = {"topic": 0, "clip": 0, "skipped": len(tracks)}
         return
 
     video_ids = []
@@ -238,7 +237,7 @@ def _phase_youtube(
             descriptions[vid] = info.get("description")
             canaux[vid] = info.get("channel")
 
-    topic_count = clip_count = llm_count = 0
+    topic_count = clip_count = 0
     existing_credits: dict[int, set[tuple[str, str]]] = {}
 
     for vid, (track, kind) in track_by_vid.items():
@@ -277,18 +276,6 @@ def _phase_youtube(
             and _clip_lisible(track, options)
         ):
             parsed_clip = parse_description_clip(desc) if not est_topic else []
-            if not parsed_clip:
-                extractor = None
-                try:
-                    from src.utils.llm_extractor import get_shared_extractor
-
-                    extractor = get_shared_extractor()
-                except Exception:  # noqa: BLE001
-                    pass
-                if extractor:
-                    parsed_clip = parse_description_clip_llm(desc, extractor)
-                    if parsed_clip:
-                        llm_count += 1
 
             if parsed_clip:
                 for c in parsed_clip:
@@ -307,7 +294,6 @@ def _phase_youtube(
         "clip": clip_count,
         "avec_video": len(track_by_vid),
         "descriptions": sum(1 for d in descriptions.values() if d),
-        "llm": llm_count,
         "selection": len(selection),
     }
 
@@ -644,8 +630,6 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
         yt = bilan.youtube
         msg += "▶️ Crédits YouTube:\n"
         msg += f"  - Topic: {yt['topic']} • Clip: {yt['clip']}"
-        if yt.get("llm"):
-            msg += f" • LLM: {yt['llm']}"
         msg += (
             f"\n  - Sélection: {yt.get('selection', '?')} morceaux, "
             f"{yt.get('avec_video', 0)} avec une vidéo, "

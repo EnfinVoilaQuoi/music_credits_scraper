@@ -1,11 +1,8 @@
 """Tests des parseurs de descriptions YouTube (Topic et clip)."""
 
-from unittest.mock import MagicMock
-
 from src.models.track import CreditRole
 from src.utils.credits_description import (
     parse_description_clip,
-    parse_description_clip_llm,
     parse_description_topic,
 )
 
@@ -138,36 +135,6 @@ class TestParseDescriptionClip:
 # ── Repli LLM ────────────────────────────────────────────────────────────────
 
 
-class TestParseDescriptionClipLLM:
-    def test_rejects_hallucinated_names(self):
-        extractor = MagicMock()
-        extractor.extract.return_value = '{"credits": [{"role": "Producer", "names": ["INVENTÉ"]}]}'
-        extractor.clean_json_response.side_effect = lambda x: x
-        result = parse_description_clip_llm("Prod by Tysko", extractor)
-        assert not any(c.name == "INVENTÉ" for c in result)
-
-    def test_keeps_verbatim_names(self):
-        extractor = MagicMock()
-        extractor.extract.return_value = '{"credits": [{"role": "Producer", "names": ["Tysko"]}]}'
-        extractor.clean_json_response.side_effect = lambda x: x
-        result = parse_description_clip_llm("Prod by Tysko", extractor)
-        assert len(result) == 1
-        assert result[0].name == "Tysko"
-        assert result[0].role is CreditRole.PRODUCER
-
-    def test_no_vocab_word_returns_empty(self):
-        extractor = MagicMock()
-        result = parse_description_clip_llm("Abonnez-vous", extractor)
-        assert result == []
-        extractor.extract.assert_not_called()
-
-    def test_extractor_error_returns_empty(self):
-        extractor = MagicMock()
-        extractor.extract.side_effect = RuntimeError("ollama down")
-        result = parse_description_clip_llm("Prod by someone", extractor)
-        assert result == []
-
-
 # ── Mesuré sur A2H (2026-09-22) : 16 descriptions, 4 crédits trouvés ─────────
 
 WAXX_AUDIO = """\
@@ -274,17 +241,6 @@ def test_un_lien_n_est_pas_un_producteur():
         ("Lomi", "Video Director"),
         ("Bryan Pachaud", "Mastering Engineer"),
     ]
-
-
-def test_le_repli_llm_ne_retient_pas_un_lien():
-    """Le lien est bien « présent dans le texte » : la garde verbatim seule le
-    laissait passer."""
-    extractor = MagicMock()
-    extractor.extract.return_value = (
-        '{"credits": [{"role": "Producer", "names": ["https://youtu.be/6WxjNcvgGtU"]}]}'
-    )
-    extractor.clean_json_response.side_effect = lambda x: x
-    assert parse_description_clip_llm("Prod : https://youtu.be/6WxjNcvgGtU", extractor) == []
 
 
 # Topic réelle (Diam's, relevée le 2026-10-10) : le disque porte un deux-points

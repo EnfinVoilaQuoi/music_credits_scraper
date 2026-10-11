@@ -18,7 +18,6 @@ from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 from src.utils import credits_genius_api
 from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
 from src.utils.inedits import titre_sans_marqueur
-from src.utils.llm_extractor import LLMExtractor, build_credits_prompt
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import inedit_par_le_texte, instrumental_par_le_texte
 from src.utils.version_heritage import est_instrumental
@@ -113,12 +112,6 @@ class GeniusScraperV3(CrawlAIScraperBase):
         super().__init__(headless)
         #: Écarts API/page du dernier morceau scrapé (None : rien à comparer).
         self.derniers_ecarts_api = None
-        self._llm = LLMExtractor(model="llama3.2")
-        if not self._llm.is_available():
-            logger.warning(
-                "GeniusScraperV3: Ollama/llama3.2 non disponible — "
-                "le fallback BeautifulSoup sera utilisé automatiquement"
-            )
         logger.info("GeniusScraperV3 initialisé (Crawl4AI + Ollama)")
 
     # -------------------------------------------------------------------------
@@ -181,13 +174,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
         if html:
             credits = self._extract_fallback_bs4(html)
 
-        # 2. Fallback LLM si le parsing HTML n'a rien donné (DOM Genius modifié)
-        if not credits and markdown:
-            logger.info(
-                f"GeniusScraperV3: parsing HTML sans résultat, fallback LLM "
-                f"pour '{track.title}'"
-            )
-            credits = self._extract_with_llm(markdown, track)
+        # Le repli LLM sur le markdown a été RETIRÉ le 2026-10-11 : inatteignable
+        # (le markdown vaut toujours None) et non ancré — l'idée est au WIP.
 
         if not credits:
             logger.info(f"∅ GeniusScraperV3: aucun crédit trouvé pour '{track.title}'")
@@ -583,111 +571,6 @@ class GeniusScraperV3(CrawlAIScraperBase):
             if text and len(text) > 50:
                 return re.sub(r"\s+", " ", text).strip()
         return None
-
-    # -------------------------------------------------------------------------
-    # Extraction via LLM
-    # -------------------------------------------------------------------------
-
-    def _extract_with_llm(self, markdown: str, track: Track) -> list[Credit]:
-        """Isole la section crédits du markdown, envoie au LLM, retourne List[Credit]."""
-        credits_section = self._extract_credits_section(markdown)
-        if not credits_section:
-            logger.debug(
-                f"GeniusScraperV3: section crédits introuvable dans le markdown "
-                f"de '{track.title}'"
-            )
-            return []
-
-        prompt = build_credits_prompt(credits_section)
-        data = self._llm.extract_json(prompt)
-
-        if not data:
-            return []
-
-        return self._parse_llm_response(data)
-
-    def _extract_credits_section(self, markdown: str) -> str | None:
-        """
-        Isole la section Credits du markdown Genius.
-        La structure typique après Crawl4AI :
-            ## Credits
-            **Producer**\\nMike Dean\\n**Writer**\\n...
-        """
-        # Stratégie 1 : header markdown "Credits"
-        patterns = [
-            r"(?i)#+\s*credits\b(.*?)(?=\n#+\s|\Z)",
-            r"(?i)\*\*credits\*\*(.*?)(?=\n\*\*[A-Z]|\Z)",
-        ]
-        for pattern in patterns:
-            m = re.search(pattern, markdown, re.DOTALL)
-            if m:
-                section = m.group(0).strip()
-                if len(section) > 50:
-                    return section
-
-        # Stratégie 2 : densité de mots-clés crédit (quand pas de heading explicite)
-        credit_keywords = [
-            "Producer",
-            "Writer",
-            "Engineer",
-            "Mixing",
-            "Mastering",
-            "Executive Producer",
-            "Co-Producer",
-            "Vocals",
-            "Composer",
-            "Featuring",
-            "Drums",
-            "Guitar",
-            "Piano",
-        ]
-        lines = markdown.split("\n")
-        keyword_indices = [
-            i
-            for i, line in enumerate(lines)
-            if any(kw.lower() in line.lower() for kw in credit_keywords)
-        ]
-        if len(keyword_indices) >= 2:
-            start = max(0, keyword_indices[0] - 2)
-            end = min(len(lines), keyword_indices[-1] + 10)
-            return "\n".join(lines[start:end])
-
-        return None
-
-    def _parse_llm_response(self, data: dict) -> list[Credit]:
-        """Convertit la réponse JSON du LLM en List[Credit]."""
-        credits: list[Credit] = []
-        raw_credits = data.get("credits", [])
-
-        if not isinstance(raw_credits, list):
-            logger.warning("GeniusScraperV3: format JSON inattendu (credits n'est pas une liste)")
-            return []
-
-        for entry in raw_credits:
-            if not isinstance(entry, dict):
-                continue
-            role_str = str(entry.get("role", "")).strip()
-            names = entry.get("names", [])
-            if not role_str or not isinstance(names, list):
-                continue
-
-            role_enum = self._map_genius_role_to_enum(role_str)
-
-            for name in names:
-                name = str(name).strip()
-                if len(name) < 2 or est_relation_deguisee(name) or valeur_vide(name):
-                    continue
-                credits.append(
-                    Credit(
-                        name=name,
-                        role=role_enum,
-                        role_detail=role_str if role_enum == CreditRole.OTHER else None,
-                        source="genius",
-                    )
-                )
-                logger.debug(f"GeniusScraperV3 LLM: {name} — {role_enum.value}")
-
-        return self._deduplicate_credits(credits)
 
     # -------------------------------------------------------------------------
     # Fallback BeautifulSoup (logique v2)

@@ -8,7 +8,6 @@ Deux familles :
 
 from __future__ import annotations
 
-import json
 import re
 from typing import TYPE_CHECKING
 
@@ -16,7 +15,7 @@ from src.models.track import Credit, CreditRole
 from src.utils.credit_roles import map_role
 
 if TYPE_CHECKING:
-    from src.utils.llm_extractor import LLMExtractor
+    pass
 
 # ── Topic ────────────────────────────────────────────────────────────────────
 
@@ -171,11 +170,6 @@ _CLIP_PATTERNS: list[tuple[re.Pattern[str], CreditRole]] = [
 _NAME_SPLIT_RE = re.compile(r"\s*[,&]\s+|\s+x\s+|\s+(?:et|and|feat\.?)\s+", re.IGNORECASE)
 _NAME_CLEAN_RE = re.compile(r"[(\[@#].*$")
 
-_LLM_VOCAB = re.compile(
-    r"\b(?:prod|beat|mix|master|réal|written|paroles|écrit|engineer|ingé)\b",
-    re.IGNORECASE,
-)
-
 
 def _split_names(raw: str) -> list[str]:
     """Découpe une chaîne de noms séparés par virgule, &, x, et, and."""
@@ -219,44 +213,4 @@ def parse_description_clip(text: str) -> list[Credit]:
                 for name in _split_names(m.group(1)):
                     credits.append(Credit(name=name, role=role, source="youtube_clip"))
                 break
-    return credits
-
-
-# ── Repli LLM pour clip ─────────────────────────────────────────────────────
-
-
-def parse_description_clip_llm(
-    text: str,
-    extractor: LLMExtractor,
-) -> list[Credit]:
-    """Repli LLM pour les descriptions de clip sans match regex.
-
-    Un nom n'est retenu que s'il apparaît VERBATIM dans la description
-    (garde anti-hallucination, comme l'ancrage Kworb).
-    """
-    if not text or not _LLM_VOCAB.search(text):
-        return []
-
-    from src.utils.llm_extractor import build_credits_prompt
-
-    prompt = build_credits_prompt(text)
-    try:
-        raw = extractor.extract(prompt)
-    except Exception:  # noqa: BLE001
-        return []
-
-    raw_json = extractor.clean_json_response(raw)
-    try:
-        data = json.loads(raw_json)
-    except (json.JSONDecodeError, ValueError):
-        return []
-
-    credits: list[Credit] = []
-    text_lower = text.lower()
-    for entry in data.get("credits", []):
-        role_label = entry.get("role", "")
-        for name in entry.get("names", []):
-            if not name or name.lower() not in text_lower or _URL_RE.search(name):
-                continue
-            credits.append(Credit(name=name, role=map_role(role_label), source="youtube_clip"))
     return credits

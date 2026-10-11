@@ -408,6 +408,19 @@ class TestAncrageParMot:
         res = matcher_mots.get_track_certifications("Swing", "S'en aller")
         assert [r["artist_name"] for r in res] == ["SWING FEAT. ANGÈLE"]
 
+    def test_aiguille_finissant_par_une_apostrophe(self):
+        """`normalize_text` garde l'apostrophe ; `\\b` ne s'ancrait pas après elle
+        et « RIDIN' » ne se contenait pas lui-même (2026-10-12 : 2 certifs RIAA
+        perdues, « WHOLE LOTTA LOVIN' (FT. TRAVIS SCOTT) »)."""
+        col = pd.Series(["WHOLE LOTTA LOVIN' FT TRAVIS SCOTT", "RIDIN'", "RIDIN'S", "XRIDIN'"])
+        assert cm._contient_en_mots(col, "RIDIN'").tolist() == [False, True, False, False]
+        assert cm._contient_en_mots(col, "WHOLE LOTTA LOVIN'").tolist() == [
+            True,
+            False,
+            False,
+            False,
+        ]
+
     def test_recherche_par_artiste_aussi_ancree(self, matcher_mots):
         """`get_artist_certifications` portait le même défaut."""
         noms = {r["artist_name"] for r in matcher_mots.get_artist_certifications("SCH")}

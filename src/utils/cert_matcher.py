@@ -55,8 +55,8 @@ def _contient_en_mots(colonne: pd.Series, aiguille: str) -> pd.Series:
 
     Les valeurs `*_clean` sortent de `cert_normalize.normalize_text` : majuscules,
     sans accents, ponctuation retirée sauf apostrophe et trait d'union, symboles
-    translittérés (« $ » → « S »). Elles commencent et finissent donc par un
-    caractère de mot, ce qui rend l'ancrage `\\b` prévisible.
+    translittérés (« $ » → « S »). L'apostrophe peut donc les terminer
+    (« RIDIN' ») : l'ancrage se fait par regards arrière/avant, pas par `\\b`.
 
     Deux passes, pour le coût : la sous-chaîne est une condition NÉCESSAIRE de
     l'inclusion en mots entiers, et sa recherche littérale est bien plus rapide
@@ -69,8 +69,12 @@ def _contient_en_mots(colonne: pd.Series, aiguille: str) -> pd.Series:
     grossier = colonne.str.contains(aiguille, regex=False, na=False)
     if not grossier.any():
         return grossier
+    # `(?<!\w)…(?!\w)` et non `\b…\b` : `normalize_text` GARDE l'apostrophe, et
+    # `\b` ne s'ancre pas après elle — « RIDIN' » ne se contenait pas lui-même
+    # (2026-10-12 : seule la branche exacte rattachait le Diamant de Booba
+    # « Ridin’ »).
     ancre = colonne[grossier].str.contains(
-        r"\b" + re.escape(aiguille) + r"\b", regex=True, na=False
+        r"(?<!\w)" + re.escape(aiguille) + r"(?!\w)", regex=True, na=False
     )
     return grossier & ancre.reindex(colonne.index, fill_value=False)
 

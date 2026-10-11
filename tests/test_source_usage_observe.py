@@ -74,6 +74,16 @@ def test_absent_derriere_un_parse_devient_parse():
     assert _verdicts()[0].issue == IssueKind.PARSE
 
 
+def test_absent_repondu_couvre_un_echec_anterieur():
+    """Une requête qui a RÉPONDU et couvre les précédentes (LRCLIB : /search
+    après un /get tombé) : son « rien » est une absence, pas une panne."""
+    with su.observe("lrclib") as obs:
+        obs.note_attempt(IssueKind.UNREACHABLE, status_code=503)
+        obs.note_status(200)
+        obs.absent("aucune parole", repondu=True)
+    assert _verdicts()[0].issue == IssueKind.ABSENT
+
+
 # ── Déclarations explicites ────────────────────────────────────────────────────
 def test_declaration_explicite_prime_sur_les_tentatives():
     with su.observe("songbpm") as obs:

@@ -237,17 +237,18 @@ class LRCLIBAPI:
     ) -> dict | None:
         """Jumeau async de `search` (sélection via `_best_search_hit`, partagée)."""
         results = await self._search_raw_async(http, track_name, artist_name)
-        return self._select_hit(results, track_name, artist_name, duration, require_synced)
+        return self._select_hit(results or [], track_name, artist_name, duration, require_synced)
 
     async def _search_raw_async(
         self, http: "AsyncHttpSession", track_name: str, artist_name: str | None
-    ) -> list:
-        """Jumeau async de `_search_raw` (résultats bruts, sélection séparée)."""
+    ) -> list | None:
+        """Résultats bruts de `/search` (sélection séparée) ; `None` = pas de
+        réponse (panne, délai), à ne pas confondre avec une liste VIDE."""
         params = {"track_name": track_name}
         if artist_name:
             params["artist_name"] = artist_name
         results = await self._request_async(http, "/search", params)
-        return results if isinstance(results, list) else []
+        return results if isinstance(results, list) else None
 
     async def get_synced_async(
         self,
@@ -282,7 +283,8 @@ class LRCLIBAPI:
 
         # Une SEULE requête `/search` pour les deux passes : `require_synced`
         # est un filtre local (cf. `_search_raw`).
-        results = await self._search_raw_async(http, track_name, artist_name)
+        reponse = await self._search_raw_async(http, track_name, artist_name)
+        results = reponse or []
 
         hit = self._select_hit(results, track_name, artist_name, duration, True)
         if hit and hit.get("lyrics_synced"):
@@ -299,5 +301,8 @@ class LRCLIBAPI:
             obs.ok()
             return hit
 
-        obs.absent("aucune parole pour ce morceau")
+        # `/search` a répondu : son « rien » vaut absence même si le `/get`
+        # exact est tombé avant (314 morceaux épinglés en échec à tort, audit
+        # du 2026-10-11). S'il n'a pas répondu, l'échec du transport parle.
+        obs.absent("aucune parole pour ce morceau", repondu=reponse is not None)
         return None

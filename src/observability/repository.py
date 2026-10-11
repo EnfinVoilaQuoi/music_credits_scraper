@@ -28,6 +28,9 @@ from src.observability.issues import BENIGN, FAILURES, IssueKind
 #: Nombre d'échecs conservés PAR SOURCE — plafond dur d'environ 800 lignes.
 FAILURE_WINDOW = 50
 
+#: Sources retirées du projet : leurs échecs suivis n'attendent plus de réponse.
+SOURCES_RETIREES = ("bpmfinder",)
+
 
 class SourceUsageRepository:
     """Lecture/écriture des compteurs d'usage. Ne lève jamais vers l'appelant."""
@@ -257,10 +260,18 @@ class SourceUsageRepository:
         refus d'YTM (« pas de paroles pour cette vidéo », « titre non
         confirmé », « aucun résultat ») est une RÉPONSE — la ligne part, comme
         `suivre_morceaux` la retirerait ; une annulation par notre délai de garde
-        (`CancelledError`) est un `timeout`. Rend (retirées, requalifiées)."""
+        (`CancelledError`) est un `timeout`.
+
+        Règles du 2026-10-11 : une absence LRCLIB que `/search` a rendue en 200
+        après un `/get` tombé est une réponse — elle devient un CONSTAT
+        d'absence (e46), daté comme l'échec ; les lignes d'une source RETIRÉE
+        du projet (BPM Finder) partent. Rend (retirées, requalifiées)."""
         reponses = (
             "message LIKE 'pas de paroles%' OR message LIKE '%non confirmé%' "
             "OR message LIKE 'aucun résultat%'"
+        )
+        lrclib_repondu = (
+            "source_key = 'lrclib' AND status_code = 200 " "AND message LIKE 'aucune parole%'"
         )
         try:
             with self.engine.begin() as conn:
@@ -268,6 +279,25 @@ class SourceUsageRepository:
                     text(
                         "DELETE FROM source_track_failures "
                         f"WHERE issue = 'crash' AND ({reponses})"
+                    )
+                ).rowcount
+                conn.execute(
+                    text(
+                        "INSERT INTO source_track_absences "
+                        "(track_id, source_key, premiere_absence, derniere_absence) "
+                        "SELECT f.track_id, f.source_key, f.premier_echec, f.dernier_echec "
+                        f"FROM source_track_failures f WHERE {lrclib_repondu} "
+                        "AND NOT EXISTS (SELECT 1 FROM source_track_absences a "
+                        "WHERE a.track_id = f.track_id AND a.source_key = f.source_key)"
+                    )
+                )
+                retirees += conn.execute(
+                    text(f"DELETE FROM source_track_failures WHERE {lrclib_repondu}")
+                ).rowcount
+                retirees += conn.execute(
+                    text(
+                        "DELETE FROM source_track_failures WHERE source_key IN "
+                        f"({', '.join(repr(s) for s in SOURCES_RETIREES)})"
                     )
                 ).rowcount
                 requalifiees = conn.execute(

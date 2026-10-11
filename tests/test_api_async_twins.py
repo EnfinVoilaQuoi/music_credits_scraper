@@ -296,6 +296,50 @@ def test_lrclib_get_synced_async_not_found():
     assert asyncio.run(LRCLIBAPI().get_synced_async(_http(handler), "Solo", "X")) is None
 
 
+def _verdict_lrclib(monkeypatch, handler):
+    """Rejoue `get_synced_async` (/get puis /search) et rend son verdict."""
+    from src.api import lrclib_api
+    from src.observability import source_usage as su
+
+    monkeypatch.setattr(lrclib_api, "MAX_RETRIES", 1)
+    su.reset()
+    assert (
+        asyncio.run(
+            LRCLIBAPI().get_synced_async(
+                _http(handler), "Solo", "X", album_name="Album", duration=200
+            )
+        )
+        is None
+    )
+    verdicts = [v for v in su.flush() if v.source_key == "lrclib"]
+    assert len(verdicts) == 1
+    return verdicts[0].issue
+
+
+def test_lrclib_absence_repondue_par_search_apres_get_en_panne(monkeypatch):
+    """Audit 2026-10-11 : 314 morceaux épinglés « unreachable » alors que
+    `/search` avait répondu 200 sans rien — le `/get` exact était tombé avant."""
+    from src.observability.issues import IssueKind
+
+    def handler(request):
+        if request.url.path.endswith("/get"):
+            return httpx.Response(503)
+        return httpx.Response(200, json=[])
+
+    assert _verdict_lrclib(monkeypatch, handler) == IssueKind.ABSENT
+
+
+def test_lrclib_search_sans_reponse_reste_un_echec(monkeypatch):
+    from src.observability.issues import IssueKind
+
+    def handler(request):
+        if request.url.path.endswith("/get"):
+            return httpx.Response(404, json={"code": 404})
+        return httpx.Response(503)
+
+    assert _verdict_lrclib(monkeypatch, handler) == IssueKind.UNREACHABLE
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Musixmatch
 # ──────────────────────────────────────────────────────────────────────

@@ -118,6 +118,7 @@ class Observation:
         self.absent_statuses = absent_statuses
         self.attempts: list[Attempt] = []
         self._declared: IssueKind | None = None
+        self._absence_repondue = False
         self._detail = ""
         self._started = time.monotonic()
         #: Le verdict ÉMIS à la sortie d'`observe()` — relu par `exiger_reponse`.
@@ -128,14 +129,21 @@ class Observation:
         """La donnée a été obtenue."""
         self._declare(IssueKind.OK, detail)
 
-    def absent(self, detail: str = "") -> None:
+    def absent(self, detail: str = "", *, repondu: bool = False) -> None:
         """La source n'a pas cette donnée — JAMAIS un échec de communication.
 
         Attention : cette déclaration ne fait pas foi à elle seule. Si une
         tentative a échoué pendant l'observation, c'est cet échec qui gagne —
         « rien trouvé » derrière un 403 n'est pas une absence, c'est un blocage.
+
+        `repondu=True` : l'absence vient d'une requête qui a RÉPONDU et qui
+        couvre les précédentes (LRCLIB : `/search` en 200 après un `/get` en
+        panne — la recherche voit tout ce que le match exact verrait). Les
+        échecs antérieurs ne la démentent alors plus ; à n'employer que si
+        l'appelant SAIT que cette dernière requête a abouti.
         """
         self._declare(IssueKind.ABSENT, detail)
+        self._absence_repondue = repondu
 
     def parse_error(self, detail: str) -> None:
         """La source a répondu mais sa structure a changé (le scrape cassé)."""
@@ -207,7 +215,9 @@ class Observation:
         elif self._declared == IssueKind.ABSENT:
             # LE point de l'exigence centrale : « rien trouvé » ne vaut absence
             # que si le transport n'a rien à redire. Sinon c'est lui qui parle.
-            issue = IssueKind.ABSENT if pire in (None, IssueKind.OK, IssueKind.ABSENT) else pire
+            # Sauf absence déclarée sur une réponse qui couvre les précédentes.
+            repondu = self._absence_repondue or pire in (None, IssueKind.OK, IssueKind.ABSENT)
+            issue = IssueKind.ABSENT if repondu else pire
         elif self._declared is not None:
             issue = self._declared
         elif pire is None:

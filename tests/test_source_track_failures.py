@@ -245,6 +245,21 @@ class TestRequalification:
         restes = {r["track_id"]: r["issue"] for r in repo.echecs_suivis()}
         assert restes == {2: "timeout", 3: "crash"}
 
+    def test_absence_lrclib_repondue_devient_un_constat(self, repo):
+        """2026-10-11 : `/search` en 200 sans rien après un `/get` tombé était
+        classé `unreachable` (313 morceaux) ; BPM Finder est retiré du projet."""
+        aucune = "aucune parole pour ce morceau"
+        repo.record(
+            [
+                _v(IssueKind.UNREACHABLE, 1, "lrclib", detail=aucune, status_code=200),
+                _v(IssueKind.UNREACHABLE, 2, "lrclib", detail=aucune, status_code=503),
+                _v(IssueKind.AUTH, 3, "bpmfinder", detail="session"),
+            ]
+        )
+        assert repo.requalifier_anciens_echecs() == (2, 0)
+        assert [r["track_id"] for r in repo.echecs_suivis()] == [2]
+        assert repo.absences_recentes(["lrclib"], _T0 - timedelta(days=1)) == {1: {"lrclib"}}
+
 
 # ── Les absences constatées (e46, 2026-10-11) ─────────────────────────────────
 class TestAbsences:

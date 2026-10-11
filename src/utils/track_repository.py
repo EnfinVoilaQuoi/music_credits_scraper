@@ -8,6 +8,7 @@ constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule Core phase E2).
 
 import json
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -1135,6 +1136,8 @@ class TrackRepository:
             return 0
 
     def _upsert_observations(self, conn, track_id: int, observations) -> None:
+        if observations:
+            self._toucher(conn, track_id)
         for obs in observations:
             # `seen_at` verbatim (string) comme le backfill E4 et le stockage
             # legacy ; datetime → format legacy, absent → maintenant.
@@ -2794,6 +2797,67 @@ class TrackRepository:
         "ytm_streams",
         "has_lyrics",
     )
+
+    # ── Chantier A : recalcul en fin de transaction ─────────────────────────────
+    #: Clé de `Connection.info` : les fiches dont un FAIT a bougé dans la
+    #: transaction en cours (observations, vidéos…). ⚠️ `info` vit sur la
+    #: connexion PHYSIQUE, que le pool réutilise : `_ecrire` la vide toujours.
+    _A_RECALCULER = "fiches_a_recalculer"
+
+    @contextmanager
+    def _ecrire(self):
+        """La transaction d'un écrivain converti au chantier A. Les primitives
+        qui déplacent des faits notent la fiche (`_toucher`) ; avant le commit,
+        chaque fiche notée ET ses sœurs passent par `_rematerialiser_fiche` —
+        l'écrivain n'a plus à se souvenir de recalculer (la famille de bugs n°1
+        de l'audit du 2026-10-11). Sans `_ecrire`, `_toucher` ne fait rien : la
+        bascule se fait un écrivain à la fois."""
+        with self.engine.begin() as conn:
+            conn.info[self._A_RECALCULER] = set()
+            try:
+                yield conn
+                self._recalculer_touchees(conn)
+            finally:
+                conn.info.pop(self._A_RECALCULER, None)
+
+    @staticmethod
+    def _porteurs_des_videos(conn, track_id: int, video_ids) -> list[int]:
+        """Les AUTRES fiches du même artiste qui portent l'une de ces vidéos."""
+        video_ids = [v for v in video_ids if v]
+        if not video_ids:
+            return []
+        vids = bindparam("vids", expanding=True)
+        return [
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT DISTINCT v.track_id FROM track_videos v "
+                    "JOIN tracks t ON t.id = v.track_id "
+                    "WHERE v.video_id IN :vids AND v.track_id != :tid "
+                    "AND t.artist_id = (SELECT artist_id FROM tracks WHERE id = :tid)"
+                ).bindparams(vids),
+                {"vids": video_ids, "tid": track_id},
+            )
+        ]
+
+    @classmethod
+    def _toucher(cls, conn, *track_ids) -> None:
+        touchees = conn.info.get(cls._A_RECALCULER)
+        if touchees is not None:
+            touchees.update(t for t in track_ids if t is not None)
+
+    def _recalculer_touchees(self, conn) -> None:
+        touchees = conn.info.get(self._A_RECALCULER) or set()
+        a_faire = set(touchees)
+        for tid in touchees:
+            gid = conn.execute(
+                text("SELECT genius_id FROM tracks WHERE id = :t"), {"t": tid}
+            ).scalar()
+            if gid:
+                a_faire.update(ids_soeurs(conn, tid, gid)[0])
+        touchees.clear()
+        for tid in sorted(a_faire):
+            self._rematerialiser_fiche(conn, tid)
 
     def _rematerialiser_fiche(self, conn, track_id: int) -> None:
         """Recalcule les colonnes DÉRIVÉES d'une fiche depuis ce qui les fonde :
@@ -4979,7 +5043,17 @@ class TrackRepository:
         now = datetime.now()
         ecrites = 0
         try:
-            with self.engine.begin() as conn:
+            # Chantier A : le total `ytm_streams` (et celui des sœurs) suit les
+            # vues écrites, en fin de transaction — sans quoi la colonne gardait
+            # la somme du relevé précédent (invariant `colonne_verdict`).
+            with self._ecrire() as conn:
+                # La fiche, et les autres fiches de l'artiste qui portent ces
+                # vidéos : une vidéo partagée n'est comptée par AUCUNE.
+                self._toucher(
+                    conn,
+                    track_id,
+                    *self._porteurs_des_videos(conn, track_id, [v.video_id for v in videos]),
+                )
                 existantes = {
                     r["video_id"]: r
                     for r in conn.execute(
@@ -5065,7 +5139,13 @@ class TrackRepository:
         seul chemin par lequel une vidéo quitte la table.
         """
         try:
-            with self.engine.begin() as conn:
+            # Chantier A : son total et celui des autres fiches de l'artiste qui
+            # la portaient (elle cesse d'être partagée) suivent, en fin de
+            # transaction.
+            with self._ecrire() as conn:
+                self._toucher(
+                    conn, track_id, *self._porteurs_des_videos(conn, track_id, [video_id])
+                )
                 supprimees = conn.execute(
                     text("DELETE FROM track_videos WHERE track_id = :tid AND video_id = :vid"),
                     {"tid": track_id, "vid": video_id},

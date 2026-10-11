@@ -17,15 +17,16 @@ def _fiche_decalee(dm):
     a.id = dm.save_artist(a)
     t = Track(title="Bitume", artist=a)
     dm.save_track(t)
-    # Des faits écrits en contournant les écrivains : la colonne a décroché.
+    # L'écrivain d'abord : converti au chantier A, il recalcule la fiche — il
+    # effacerait un décrochage fabriqué avant lui.
+    dm.record_track_videos(t.id, [TrackVideo(video_id="bitumeclip0", source="manual", views=500)])
+    # Puis des faits écrits en CONTOURNANT les écrivains : la colonne décroche.
     with dm.engine.begin() as conn:
         dm._upsert_observations(conn, t.id, [Observation("spotify_streams", 1000, "kworb")])
         conn.execute(
             text("UPDATE tracks SET lyrics = 'couplet', has_lyrics = 0 WHERE id = :t"),
             {"t": t.id},
         )
-    dm.record_track_videos(t.id, [TrackVideo(video_id="bitumeclip0", source="manual", views=500)])
-    with dm.engine.begin() as conn:
         conn.execute(text("UPDATE tracks SET ytm_streams = 1 WHERE id = :t"), {"t": t.id})
     return t
 

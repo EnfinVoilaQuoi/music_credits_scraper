@@ -21,6 +21,15 @@ from src.services import audit
 _GENIUS = 9001
 
 
+def _ytm(dm, track_id):
+    from sqlalchemy import text
+
+    with dm.engine.connect() as conn:
+        return conn.execute(
+            text("SELECT ytm_streams FROM tracks WHERE id = :t"), {"t": track_id}
+        ).scalar()
+
+
 def _invariants(dm) -> dict[str, list[str]]:
     resultat = audit.auditer(dm)
     return {
@@ -89,6 +98,37 @@ class TestApresChaqueEcrivain:
         )
         data_manager.recalculer_vues_ytm(tid)
         assert _invariants(data_manager) == {}
+
+    def test_videos_seules_le_total_suit(self, data_manager, base):
+        """Chantier A, lot 1 : `record_track_videos` recalcule en fin de
+        transaction — plus besoin d'appeler `recalculer_vues_ytm` derrière
+        (l'oubli laissait `ytm_streams` sur le relevé précédent)."""
+        tid = base["durag"].id
+        data_manager.record_track_videos(
+            tid, [TrackVideo(video_id="AAAAAAAAAAA", source="ytm_album", views=500, title="Durag")]
+        )
+        assert _invariants(data_manager) == {}
+        data_manager.record_track_videos(
+            tid, [TrackVideo(video_id="AAAAAAAAAAA", source="ytm_album", views=900, title="Durag")]
+        )
+        assert _invariants(data_manager) == {}
+
+    def test_video_qui_devient_partagee_puis_cesse(self, data_manager, base):
+        """Une vidéo portée par deux fiches d'un artiste n'est comptée par
+        AUCUNE : l'écrire sur la seconde change le total de la PREMIÈRE ;
+        l'oublier le lui rend."""
+        durag, doublon = base["durag"].id, base["doublon"].id
+        video = TrackVideo(video_id="AAAAAAAAAAA", source="ytm_album", views=500, title="Durag")
+        data_manager.record_track_videos(durag, [video])
+        assert _ytm(data_manager, durag) == 500
+
+        data_manager.record_track_videos(doublon, [video])
+        assert _invariants(data_manager) == {}
+        assert not _ytm(data_manager, durag)
+
+        data_manager.forget_track_video(doublon, "AAAAAAAAAAA")
+        assert _invariants(data_manager) == {}
+        assert _ytm(data_manager, durag) == 500
 
     def test_ids_spotify_puis_retrait(self, data_manager, base):
         tid = base["isha"].id

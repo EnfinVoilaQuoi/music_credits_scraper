@@ -371,7 +371,9 @@ class DataEnricher:
         """
         sources, ctx, ballot, results = self._start_run(track, sources, force_update, artist_tracks)
 
+        n_avant = len(track.observations)
         self._apply_genius_feat_metadata(track)
+        pre_etape = track.observations[n_avant:]
 
         # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright) : si l'ISRC
         # fournit BPM/Key via ReccoBeats, les gates spotify_id/reccobeats skippent.
@@ -394,7 +396,7 @@ class DataEnricher:
             self._run_step(provider, track, ctx, sources, results)
 
         # Réconciliation (§8.3) — le MOTEUR pilote les colonnes legacy, AVANT Discogs
-        self._finalize_run(track, ballot, ctx)
+        self._finalize_run(track, ballot, ctx, pre_etape)
 
         self._run_step(self._discogs_provider, track, ctx, sources, results)
 
@@ -419,7 +421,9 @@ class DataEnricher:
         ctx.http = self._http
         ctx.sync_runner = self.sync_runner
 
+        n_avant = len(track.observations)
         await ctx.sync_runner.run(self._apply_genius_feat_metadata, track)
+        pre_etape = track.observations[n_avant:]
 
         # VOIE ISRC PRIORITAIRE (même gating que la voie sync)
         if "reccobeats" in sources and self.apis_available.get("reccobeats"):
@@ -436,7 +440,7 @@ class DataEnricher:
             await self._run_step_async(provider, track, ctx, sources, results)
 
         # Réconciliation (§8.3) — le MOTEUR pilote les colonnes legacy, AVANT Discogs
-        self._finalize_run(track, ballot, ctx)
+        self._finalize_run(track, ballot, ctx, pre_etape)
 
         await self._run_step_async(self._discogs_provider, track, ctx, sources, results)
 
@@ -477,7 +481,7 @@ class DataEnricher:
         )
         return sources, ctx, ballot, results
 
-    def _finalize_run(self, track, ballot, ctx) -> None:
+    def _finalize_run(self, track, ballot, ctx, pre_etape=()) -> None:
         """Réconciliation du run (commun sync/async).
 
         Observations PAR SOURCE du run (BPM du scrutin + key/mode normalisés
@@ -491,7 +495,13 @@ class DataEnricher:
         from src.enrichment.reconcile import apply_resolutions, reconcile
         from src.utils.concordance_paroles import paroles_de_reference
 
-        track.observations = self._collect_run_observations(ballot.candidates, ctx.observations)
+        # `pre_etape` : ce que la passe Genius des feats a DÉCLARÉ (l'ID Apple
+        # Music proposé par la page). Remplacer la liste l'effaçait, et le détail
+        # étant daté, il n'était relu que 30 jours plus tard (2026-10-11).
+        track.observations = [
+            *pre_etape,
+            *self._collect_run_observations(ballot.candidates, ctx.observations),
+        ]
         apply_resolutions(
             track,
             reconcile(

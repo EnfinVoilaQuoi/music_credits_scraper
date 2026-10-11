@@ -311,3 +311,23 @@ def test_pont_sync_execute_sur_le_thread_dedie():
 
     assert results["songbpm"] is True
     assert songbpm.seen_thread == SYNC_THREAD
+
+
+def test_ce_que_la_passe_genius_declare_survit_au_run():
+    """2026-10-11 : la passe Genius des feats déclare l'ID Apple Music proposé
+    par la page ; `_finalize_run` REMPLAÇAIT la liste et l'effaçait — le détail
+    étant daté, il n'était relu qu'un mois plus tard."""
+    from src.enrichment.observation import Observation
+
+    class _Genius:
+        def apply_song_metadata(self, track):
+            track.observations.append(Observation("apple_music_id_propose", "123", "genius"))
+            return True
+
+    enricher, _, _ = _enricher()
+    enricher.genius_client = _Genius()
+    track = _track(is_featuring=True, genius_id=1)
+
+    _run(enricher, track)
+
+    assert ("apple_music_id_propose", "genius") in {(o.field, o.source) for o in track.observations}

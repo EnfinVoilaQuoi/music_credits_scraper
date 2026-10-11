@@ -430,3 +430,79 @@ def test_la_ligne_ENREGISTREE_suit_les_observations_recues_de_sa_soeur(data_mana
     data_manager.save_track(riche)
     assert _colonne(data_manager, riche.id, "spotify_streams") == 22_700_000
     assert _colonne(data_manager, riche.id, "duration") == 201
+
+
+def test_la_soeur_qui_recoit_les_paroles_est_marquee_avec_paroles(data_manager, famille):
+    """2026-10-11 : 72 fiches portaient des paroles avec `has_lyrics = 0` — le
+    comblement tient `0` pour une valeur et ne le remplaçait pas."""
+    riche, pauvre = famille
+    riche.lyrics.text = "Premier couplet…"
+    data_manager.save_track(riche)
+    assert _colonne(data_manager, pauvre.id, "has_lyrics") == 1
+
+
+def test_l_id_spotify_recu_d_une_soeur_est_marque_principal(data_manager, famille):
+    """2026-10-11 : 82 lignes sœurs avaient `tracks.spotify_id` comblé par la
+    sœur, sans que la ligne de `track_spotify_ids` reçue soit marquée principale."""
+    chez_swing, chez_isha = famille
+    chez_isha.spotify_id = "3VXzVGAWFSrH47dBtTOPws"
+    data_manager.save_track(chez_isha)
+    data_manager.record_track_spotify_ids(
+        chez_isha.id, [TrackSpotifyId(spotify_id="3VXzVGAWFSrH47dBtTOPws", source="kworb")]
+    )
+    data_manager.save_track(chez_swing)
+
+    assert _colonne(data_manager, chez_swing.id, "spotify_id") == "3VXzVGAWFSrH47dBtTOPws"
+    assert [e.is_primary for e in data_manager.get_track_spotify_ids(chez_swing.id)] == [True]
+
+
+class TestRetraitDUnIdSpotifyChezLesSoeurs:
+    """2026-10-11 : un ID retiré d'une ligne restait chez sa sœur, et l'union
+    des sœurs le RENDAIT à la ligne d'où on venait de le retirer (Kid Cudi
+    « Sky City » portait l'ID refusé chez Kanye West)."""
+
+    _ID = "3VXzVGAWFSrH47dBtTOPws"
+
+    def _poser(self, data_manager, track, sid):
+        track.spotify_id = sid
+        data_manager.save_track(track)
+        data_manager.record_track_spotify_ids(
+            track.id, [TrackSpotifyId(spotify_id=sid, source="kworb")]
+        )
+
+    def test_le_retrait_vaut_pour_la_soeur_et_ne_revient_pas(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        self._poser(data_manager, chez_isha, self._ID)
+        data_manager.upsert_observations(
+            chez_isha.id, [Observation("spotify_streams", 1000, "kworb")]
+        )
+        data_manager.save_track(chez_swing)  # union : Swing reçoit l'ID
+        assert _colonne(data_manager, chez_swing.id, "spotify_id") == self._ID
+
+        data_manager.clear_track_spotify_id(chez_swing.id)
+        chez_isha.spotify_id = None
+        data_manager.save_track(chez_isha)  # une écriture quelconque relance l'union
+
+        for t in (chez_swing, chez_isha):
+            assert _colonne(data_manager, t.id, "spotify_id") is None
+            assert data_manager.get_track_spotify_ids(t.id) == []
+            assert _colonne(data_manager, t.id, "spotify_streams") is None
+
+    def test_une_soeur_a_son_PROPRE_id_garde_ses_mesures(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        self._poser(data_manager, chez_isha, "7a0tTD7xdvKsNcJfMIDWp4")
+        data_manager.record_track_spotify_ids(
+            chez_isha.id, [TrackSpotifyId(spotify_id=self._ID, source="kworb")]
+        )
+        data_manager.upsert_observations(
+            chez_isha.id, [Observation("spotify_streams", 1000, "kworb")]
+        )
+        data_manager.save_track(chez_swing)
+
+        data_manager.clear_track_spotify_id(chez_swing.id, self._ID)
+
+        assert _colonne(data_manager, chez_isha.id, "spotify_id") == "7a0tTD7xdvKsNcJfMIDWp4"
+        assert [e.spotify_id for e in data_manager.get_track_spotify_ids(chez_isha.id)] == [
+            "7a0tTD7xdvKsNcJfMIDWp4"
+        ]
+        assert _colonne(data_manager, chez_isha.id, "spotify_streams") == 1000

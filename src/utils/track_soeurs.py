@@ -376,6 +376,17 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
             {**trous, "tid": cible},
         )
         rapport["colonnes"] += len(trous)
+    # `has_lyrics` n'est que le reflet de `lyrics` : `0` étant une VALEUR pour
+    # le comblement, une ligne qui recevait les paroles gardait son `0`
+    # (2026-10-11 : 72 fiches à paroles marquées « sans paroles »).
+    marques = ", ".join(f":f{n}" for n in range(len(famille)))
+    conn.execute(
+        text(
+            f"UPDATE tracks SET has_lyrics = 1 WHERE id IN ({marques}) "  # noqa: S608
+            "AND lyrics IS NOT NULL AND lyrics <> '' AND COALESCE(has_lyrics, 0) = 0"
+        ),
+        {f"f{n}": tid for n, tid in enumerate(famille)},
+    )
 
     # Un scrape chez une sœur vaut pour tout l'enregistrement : les crédits
     # PROVISOIRES de l'API partent AVANT l'union. Ce n'est pas un retrait de
@@ -393,6 +404,17 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     rapport["observations"] = _unir_observations(conn, famille)
     rapport["videos"] = _unir_table_additive(conn, famille, "track_videos", "video_id")
     rapport["spotify_ids"] = _unir_table_additive(conn, famille, "track_spotify_ids", "spotify_id")
+    # `is_primary` RECOPIE `tracks.spotify_id` : une colonne comblée par une
+    # sœur et un ID reçu par l'union n'étaient jamais marqués principaux
+    # (2026-10-11 : 82 lignes sœurs sans ID principal dans la table).
+    conn.execute(
+        text(
+            "UPDATE track_spotify_ids SET is_primary = "
+            "(spotify_id = (SELECT t.spotify_id FROM tracks t WHERE t.id = track_id)) "
+            f"WHERE track_id IN ({marques})"  # noqa: S608
+        ),
+        {f"f{n}": tid for n, tid in enumerate(famille)},
+    )
     return rapport
 
 

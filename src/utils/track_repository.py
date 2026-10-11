@@ -5117,6 +5117,115 @@ class TrackRepository:
     #: ses mesures survivent au rejet de l'ID.
     SOURCES_LIEES_A_L_ID_SPOTIFY = ("reccobeats", "spotify_web", "kworb")
 
+    def _retirer_id_spotify(self, conn, track_id: int, spotify_id, rapport: dict) -> dict:
+        """Les trois gestes de `clear_track_spotify_id` sur UNE ligne, dans la
+        transaction de l'appelant (la ligne visée, puis chacune de ses sœurs)."""
+        ligne = (
+            conn.execute(
+                text("SELECT spotify_id, duration FROM tracks WHERE id = :tid"),
+                {"tid": track_id},
+            )
+            .mappings()
+            .first()
+        )
+        if ligne is None:
+            logger.warning(f"clear_track_spotify_id : morceau {track_id} introuvable")
+            return rapport
+        vise = spotify_id or ligne["spotify_id"]
+        if not vise:
+            return rapport
+        rapport["id_retire"] = vise
+
+        conn.execute(
+            text("DELETE FROM track_spotify_ids WHERE track_id = :tid AND spotify_id = :sid"),
+            {"tid": track_id, "sid": vise},
+        )
+
+        if ligne["spotify_id"] == vise:
+            conn.execute(
+                text(
+                    "UPDATE tracks SET spotify_id = NULL, spotify_page_title = NULL, "
+                    "spotify_id_checked_at = NULL, updated_at = :now WHERE id = :tid"
+                ),
+                {"tid": track_id, "now": datetime.now()},
+            )
+            rapport["colonne_effacee"] = True
+            # `is_primary` RECOPIE la colonne : celle-ci étant vide,
+            # plus aucune édition n'est principale. Laisser le drapeau
+            # levé sur une édition survivante en ferait un second
+            # verdict, qui contredirait le premier. On ne PROMEUT pas
+            # non plus l'édition restante : elle n'a pas été jugée digne
+            # d'être celle qu'on ouvre, et la promouvoir d'office
+            # ressusciterait peut-être un autre ID fautif.
+            conn.execute(
+                text("UPDATE track_spotify_ids SET is_primary = 0 WHERE track_id = :tid"),
+                {"tid": track_id},
+            )
+
+        # `expanding=True` : sans lui, SQLAlchemy passe le tuple comme
+        # UN paramètre et SQLite refuse « IN ? ».
+        sources = bindparam("sources", expanding=True)
+        params = {"tid": track_id, "sources": list(self.SOURCES_LIEES_A_L_ID_SPOTIFY)}
+        retirees = (
+            conn.execute(
+                text(
+                    "SELECT field, source FROM observations WHERE track_id = :tid "
+                    "AND source IN :sources"
+                ).bindparams(sources),
+                params,
+            )
+            .mappings()
+            .all()
+        )
+        if retirees:
+            conn.execute(
+                text(
+                    "DELETE FROM observations WHERE track_id = :tid AND source IN :sources"
+                ).bindparams(sources),
+                params,
+            )
+        rapport["observations_retirees"] = [(r["field"], r["source"]) for r in retirees]
+
+        # Les colonnes de streams suivent les observations qui restent.
+        # `_arbitrer_streams` rend {} quand il n'en reste AUCUNE : c'est
+        # justement le cas où la colonne doit être vidée, pas laissée
+        # telle quelle avec le chiffre d'un autre morceau.
+        # NB : itérer les `RowMapping` de `retirees` donnerait leurs CLÉS
+        # (« field », « source »), pas leurs valeurs — d'où la liste de
+        # tuples ci-dessus, qui est la forme du rapport.
+        liees = rapport["observations_retirees"]
+        valeurs = self._arbitrer_streams(conn, track_id)
+        if not valeurs and any(f == "spotify_streams" for f, _ in liees):
+            valeurs = {"spotify_streams": None, "spotify_streams_updated": None}
+        # Le QUOTIDIEN ne vient que de Kworb, qui attribue PAR ID Spotify
+        # et n'est pas arbitré (aucune autre source ne le publie) : il
+        # n'a donc pas de verdict qui le remette d'aplomb, et rester en
+        # place ferait de lui le seul reliquat visible du morceau de
+        # quelqu'un d'autre. Oublié au premier jet — 3 lignes le
+        # portaient encore après le nettoyage du 2026-09-08.
+        if any(src == "kworb" for _, src in liees):
+            valeurs["spotify_daily_streams"] = None
+        if valeurs:
+            conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
+
+        # Les champs de DISCOGRAPHIE retirés (la durée ReccoBeats ou
+        # spotify_web) se ré-arbitrent comme les streams : depuis le lot
+        # B la colonne n'est que le verdict des observations. Sans ce
+        # geste, la durée de l'AUTRE morceau restait en colonne sans plus
+        # aucune preuve (2026-09-29 : « WHERE I'M FROM » gardait les
+        # 190 s de BUTTERFLY EFFECT, 55 colonnes sans observation).
+        champs = {f for f, _ in liees if f in self.COLONNES_DISCOGRAPHIE}
+        if champs:
+            self._ecrire_colonnes_discographie(
+                conn, track_id, self._arbitrer_discographie(conn, track_id, champs)
+            )
+        reste = conn.execute(
+            text("SELECT duration FROM tracks WHERE id = :tid"), {"tid": track_id}
+        ).scalar()
+        if reste and any(src == "reccobeats" for _, src in liees):
+            rapport["duree_suspecte"] = reste
+        return rapport
+
     def clear_track_spotify_id(self, track_id: int, spotify_id: str | None = None) -> dict:
         """Rejette l'ID Spotify d'un morceau — les trois gestes indissociables.
 
@@ -5152,112 +5261,43 @@ class TrackRepository:
         }
         try:
             with self.engine.begin() as conn:
-                ligne = (
-                    conn.execute(
-                        text("SELECT spotify_id, duration FROM tracks WHERE id = :tid"),
-                        {"tid": track_id},
-                    )
-                    .mappings()
-                    .first()
-                )
-                if ligne is None:
-                    logger.warning(f"clear_track_spotify_id : morceau {track_id} introuvable")
-                    return rapport
-                vise = spotify_id or ligne["spotify_id"]
+                self._retirer_id_spotify(conn, track_id, spotify_id, rapport)
+                vise = rapport["id_retire"]
                 if not vise:
                     return rapport
-                rapport["id_retire"] = vise
 
-                conn.execute(
-                    text(
-                        "DELETE FROM track_spotify_ids WHERE track_id = :tid AND spotify_id = :sid"
-                    ),
-                    {"tid": track_id, "sid": vise},
-                )
+                # Même enregistrement chez un autre artiste (ligne SŒUR) : l'ID y
+                # est tout aussi faux. Laissé là, l'union des sœurs le rendait à
+                # la ligne d'où on venait de le retirer (2026-10-11 : Kid Cudi
+                # « Sky City » portait un ID refusé chez Kanye West).
+                # Une sœur dont la colonne porte un AUTRE ID (non remplaçable) ne
+                # perd que la ligne de table : ses mesures peuvent venir du sien.
+                def chez_la_soeur(jumelle):
+                    propre = conn.execute(
+                        text("SELECT spotify_id FROM tracks WHERE id = :tid"), {"tid": jumelle}
+                    ).scalar()
+                    if propre and propre != vise:
+                        conn.execute(
+                            text(
+                                "DELETE FROM track_spotify_ids "
+                                "WHERE track_id = :tid AND spotify_id = :sid"
+                            ),
+                            {"tid": jumelle, "sid": vise},
+                        )
+                        return
+                    self._retirer_id_spotify(
+                        conn,
+                        jumelle,
+                        vise,
+                        {
+                            "id_retire": None,
+                            "colonne_effacee": False,
+                            "observations_retirees": [],
+                            "duree_suspecte": None,
+                        },
+                    )
 
-                if ligne["spotify_id"] == vise:
-                    conn.execute(
-                        text(
-                            "UPDATE tracks SET spotify_id = NULL, spotify_page_title = NULL, "
-                            "spotify_id_checked_at = NULL, updated_at = :now WHERE id = :tid"
-                        ),
-                        {"tid": track_id, "now": datetime.now()},
-                    )
-                    rapport["colonne_effacee"] = True
-                    # `is_primary` RECOPIE la colonne : celle-ci étant vide,
-                    # plus aucune édition n'est principale. Laisser le drapeau
-                    # levé sur une édition survivante en ferait un second
-                    # verdict, qui contredirait le premier. On ne PROMEUT pas
-                    # non plus l'édition restante : elle n'a pas été jugée digne
-                    # d'être celle qu'on ouvre, et la promouvoir d'office
-                    # ressusciterait peut-être un autre ID fautif.
-                    conn.execute(
-                        text("UPDATE track_spotify_ids SET is_primary = 0 WHERE track_id = :tid"),
-                        {"tid": track_id},
-                    )
-
-                # `expanding=True` : sans lui, SQLAlchemy passe le tuple comme
-                # UN paramètre et SQLite refuse « IN ? ».
-                sources = bindparam("sources", expanding=True)
-                params = {"tid": track_id, "sources": list(self.SOURCES_LIEES_A_L_ID_SPOTIFY)}
-                retirees = (
-                    conn.execute(
-                        text(
-                            "SELECT field, source FROM observations WHERE track_id = :tid "
-                            "AND source IN :sources"
-                        ).bindparams(sources),
-                        params,
-                    )
-                    .mappings()
-                    .all()
-                )
-                if retirees:
-                    conn.execute(
-                        text(
-                            "DELETE FROM observations WHERE track_id = :tid AND source IN :sources"
-                        ).bindparams(sources),
-                        params,
-                    )
-                rapport["observations_retirees"] = [(r["field"], r["source"]) for r in retirees]
-
-                # Les colonnes de streams suivent les observations qui restent.
-                # `_arbitrer_streams` rend {} quand il n'en reste AUCUNE : c'est
-                # justement le cas où la colonne doit être vidée, pas laissée
-                # telle quelle avec le chiffre d'un autre morceau.
-                # NB : itérer les `RowMapping` de `retirees` donnerait leurs CLÉS
-                # (« field », « source »), pas leurs valeurs — d'où la liste de
-                # tuples ci-dessus, qui est la forme du rapport.
-                liees = rapport["observations_retirees"]
-                valeurs = self._arbitrer_streams(conn, track_id)
-                if not valeurs and any(f == "spotify_streams" for f, _ in liees):
-                    valeurs = {"spotify_streams": None, "spotify_streams_updated": None}
-                # Le QUOTIDIEN ne vient que de Kworb, qui attribue PAR ID Spotify
-                # et n'est pas arbitré (aucune autre source ne le publie) : il
-                # n'a donc pas de verdict qui le remette d'aplomb, et rester en
-                # place ferait de lui le seul reliquat visible du morceau de
-                # quelqu'un d'autre. Oublié au premier jet — 3 lignes le
-                # portaient encore après le nettoyage du 2026-09-08.
-                if any(src == "kworb" for _, src in liees):
-                    valeurs["spotify_daily_streams"] = None
-                if valeurs:
-                    conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
-
-                # Les champs de DISCOGRAPHIE retirés (la durée ReccoBeats ou
-                # spotify_web) se ré-arbitrent comme les streams : depuis le lot
-                # B la colonne n'est que le verdict des observations. Sans ce
-                # geste, la durée de l'AUTRE morceau restait en colonne sans plus
-                # aucune preuve (2026-09-29 : « WHERE I'M FROM » gardait les
-                # 190 s de BUTTERFLY EFFECT, 55 colonnes sans observation).
-                champs = {f for f, _ in liees if f in self.COLONNES_DISCOGRAPHIE}
-                if champs:
-                    self._ecrire_colonnes_discographie(
-                        conn, track_id, self._arbitrer_discographie(conn, track_id, champs)
-                    )
-                reste = conn.execute(
-                    text("SELECT duration FROM tracks WHERE id = :tid"), {"tid": track_id}
-                ).scalar()
-                if reste and any(src == "reccobeats" for _, src in liees):
-                    rapport["duree_suspecte"] = reste
+                effacer_chez_les_soeurs(conn, track_id, chez_la_soeur)
 
             logger.info(
                 f"🧹 ID Spotify {vise} retiré du morceau {track_id} "

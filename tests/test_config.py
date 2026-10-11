@@ -83,9 +83,6 @@ def test_backward_compat_names_present():
         "SPOTIFY_CLIENT_SECRET",
         "GETSONGBPM_API_KEY",
         "YOUTUBE_API_KEY",
-        "BPMFINDER_EMAIL",
-        "BPMFINDER_PASSWORD",
-        "BPMFINDER_SESSION_FILE",
         "DEBUG",
         "LOG_LEVEL",
         "SELENIUM_TIMEOUT",
@@ -154,4 +151,3 @@ def test_reccobeats_not_found_ttl_read_from_env(monkeypatch):
 def test_derived_paths():
     assert config.DATABASE_URL.endswith("data/music_credits.db")
     assert str(config.DATA_DIR) == config.DATA_PATH
-    assert config.BPMFINDER_SESSION_FILE.name == ".bpmfinder_session.json"

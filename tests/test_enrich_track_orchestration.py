@@ -12,7 +12,6 @@ réels : seul `enrich()` est simulé, si bien qu'après la Phase 3.4 (gating dé
 dans `gate()` des providers) ces tests exercent la VRAIE logique de gating.
 """
 
-from src.enrichment.providers.bpmfinder import BpmFinderProvider
 from src.enrichment.providers.deezer import DeezerProvider
 from src.enrichment.providers.discogs import DiscogsProvider
 from src.enrichment.providers.getsongbpm import GetSongBpmProvider
@@ -28,7 +27,6 @@ ALL_SOURCES = [
     "reccobeats",
     "getsongbpm",
     "songbpm",
-    "bpmfinder",
     "deezer",
     "discogs",
 ]
@@ -73,10 +71,6 @@ class _FakeGetSongBpm(_FakeEnrich, GetSongBpmProvider):
 
 
 class _FakeSongBpm(_FakeEnrich, SongBpmProvider):
-    pass
-
-
-class _FakeBpmFinder(_FakeEnrich, BpmFinderProvider):
     pass
 
 
@@ -134,7 +128,6 @@ def _enricher(**overrides):
         "reccobeats": _FakeRecco(calls),
         "getsongbpm": _FakeGetSongBpm(calls),
         "songbpm": _FakeSongBpm(calls),
-        "bpmfinder": _FakeBpmFinder(calls),
         "deezer": _FakeDeezer(calls),
         "discogs": _FakeDiscogs(calls),
     }
@@ -147,7 +140,6 @@ def _enricher(**overrides):
     enricher._reccobeats_provider = fakes["reccobeats"]
     enricher._getsongbpm_provider = fakes["getsongbpm"]
     enricher._songbpm_provider = fakes["songbpm"]
-    enricher._bpmfinder_provider = fakes["bpmfinder"]
     enricher._deezer_provider = fakes["deezer"]
     enricher._discogs_provider = fakes["discogs"]
     return enricher, fakes, calls
@@ -182,7 +174,6 @@ def test_ordre_nominal_et_finalize_entre_deezer_et_discogs():
         "reccobeats",
         "getsongbpm",
         "songbpm",
-        "bpmfinder",
         "deezer",
         "discogs",
     ]
@@ -253,7 +244,6 @@ def _enricher_tout_en_echec(songbpm=None):
         "reccobeats": _FakeRecco(calls, result=False),
         "getsongbpm": _FakeGetSongBpm(calls, result=False),
         "songbpm": songbpm if songbpm is not None else _FakeSongBpm(calls, result=False),
-        "bpmfinder": _FakeBpmFinder(calls, result=False),
         "deezer": _FakeDeezer(calls, result=False),
         "discogs": _FakeDiscogs(calls, result=False),
     }

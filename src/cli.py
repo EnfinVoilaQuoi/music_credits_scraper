@@ -166,8 +166,8 @@ def _credits_args(p: argparse.ArgumentParser) -> None:
 def _enrich_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--sources",
-        help="liste séparée par des virgules (reccobeats,getsongbpm,songbpm,bpmfinder,deezer,"
-        "discogs) ; défaut = toutes les sources disponibles sauf bpmfinder",
+        help="liste séparée par des virgules (reccobeats,getsongbpm,songbpm,deezer,discogs) ; "
+        "défaut = toutes les sources disponibles sauf discogs (déjà lu par l'étape crédits)",
     )
     p.add_argument("--force", action="store_true", help="force_update")
 

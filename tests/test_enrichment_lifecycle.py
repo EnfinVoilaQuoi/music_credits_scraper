@@ -19,7 +19,6 @@ ALL_SOURCES = {
     "reccobeats",
     "getsongbpm",
     "songbpm",
-    "bpmfinder",
     "deezer",
     "discogs",
 }
@@ -148,7 +147,6 @@ def test_close_appelle_le_close_de_chaque_provider():
     enricher._reccobeats_provider = fakes["reccobeats"]
     enricher._getsongbpm_provider = fakes["getsongbpm"]
     enricher._songbpm_provider = fakes["songbpm"]
-    enricher._bpmfinder_provider = fakes["bpmfinder"]
     enricher._deezer_provider = fakes["deezer"]
     enricher._discogs_provider = fakes["discogs"]
 
@@ -173,12 +171,11 @@ def test_close_continue_malgre_un_provider_qui_leve():
 
     enricher = DataEnricher.__new__(DataEnricher)
     enricher._spotify_id_provider = _BrokenProvider()
-    ok = [_OkProvider(n) for n in ("reccobeats", "getsongbpm", "songbpm", "bpmfinder", "deezer")]
+    ok = [_OkProvider(n) for n in ("reccobeats", "getsongbpm", "songbpm", "deezer")]
     (
         enricher._reccobeats_provider,
         enricher._getsongbpm_provider,
         enricher._songbpm_provider,
-        enricher._bpmfinder_provider,
         enricher._deezer_provider,
     ) = ok
     enricher._discogs_provider = _OkProvider("discogs")
@@ -192,7 +189,6 @@ def test_tous_les_providers_declarent_leur_capacite():
     # E7b (structurel) : chaque provider audio annonce {Capability.BPM}. Inerte
     # côté orchestrateur, mais le contrat est verrouillé ici.
     from src.enrichment.base import Capability
-    from src.enrichment.providers.bpmfinder import BpmFinderProvider
     from src.enrichment.providers.deezer import DeezerProvider
     from src.enrichment.providers.discogs import DiscogsProvider
     from src.enrichment.providers.getsongbpm import GetSongBpmProvider
@@ -200,7 +196,6 @@ def test_tous_les_providers_declarent_leur_capacite():
     from src.enrichment.providers.songbpm import SongBpmProvider
 
     classes = [
-        BpmFinderProvider,
         DeezerProvider,
         DiscogsProvider,
         GetSongBpmProvider,
@@ -220,30 +215,3 @@ def test_pas_de_del_non_deterministe():
     from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 
     assert not hasattr(SpotifyIDScraper, "__del__")
-
-
-def test_bpmfinder_scraper_expose_pour_la_gui(monkeypatch):
-    # manual_entry (✏️) accède à data_enricher.bpmfinder_scraper : la propriété
-    # de compat délègue au provider (None si source non configurée). Les DEUX
-    # branches, indépendamment de la machine — le test se sautait là où BPM
-    # Finder est configuré, et la branche « configuré » n'était jamais testée.
-    from src.scrapers import bpmfinder_scraper as mod
-
-    monkeypatch.setattr(mod.BPMFinderScraper, "credentials_or_session_available", lambda: False)
-    enricher = DataEnricher()
-    assert not enricher.apis_available["bpmfinder"]
-    assert enricher.bpmfinder_scraper is None
-
-    class _Faux:
-        def __init__(self, headless):
-            self.headless = headless
-
-        @staticmethod
-        def credentials_or_session_available():
-            return True
-
-    monkeypatch.setattr(mod, "BPMFinderScraper", _Faux)
-    enricher = DataEnricher()
-    assert enricher.apis_available["bpmfinder"]
-    scraper = enricher.bpmfinder_scraper
-    assert isinstance(scraper, _Faux) and scraper.headless

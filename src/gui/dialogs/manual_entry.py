@@ -1,11 +1,10 @@
-"""Dialogues de saisie manuelle par morceau (BPM/key, lien YouTube, renommage, BPM Finder local)"""
+"""Dialogues de saisie manuelle par morceau (BPM/key, lien YouTube, renommage)"""
 
 from datetime import datetime
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 
 import customtkinter as ctk
 
-from src.concurrency.lifecycle import start_worker
 from src.enrichment.observation import Observation
 from src.gui import helpers
 from src.utils.logger import get_logger
@@ -23,7 +22,7 @@ def manual_audio_entry(app, index: int):
     """Saisie manuelle BPM / Tonalité / Durée (source 'manual') — UN dialogue.
 
     Pour les morceaux hors de portée des sources auto : valeurs relevées
-    sur Sonoteller/BPM Finder, ou analyse d'un fichier local.
+    sur Sonoteller ou un autre outil.
     Tonalité EN ou FR ("G# minor", "Sol# mineur"…). Durée "3:24" ou secondes.
     """
     try:
@@ -257,103 +256,3 @@ def rename_track(app, index: int):
             "Renommer",
             "Échec : un morceau porte peut-être déjà ce titre (titre unique par artiste).",
         )
-
-
-def bpmfinder_local_file(app, index: int):
-    """Analyse un fichier audio LOCAL via BPM Finder → BPM/Key (source 'bpmfinder').
-
-    Pour les morceaux absents de YouTube. Lance l'analyse dans un thread
-    (le scraper est bloquant) et écrit les manques uniquement.
-    """
-    try:
-        track = app.current_artist.tracks[index]
-    except (IndexError, TypeError):
-        return
-
-    scraper = getattr(app.data_enricher, "bpmfinder_scraper", None)
-    if not scraper:
-        messagebox.showwarning("BPM Finder", "BPM Finder non configuré (BPMFINDER_EMAIL/PASSWORD).")
-        return
-
-    path = filedialog.askopenfilename(
-        title=f"Fichier audio pour « {track.title} »",
-        filetypes=[("Audio/Vidéo", "*.wav *.mp3 *.ogg *.flac *.m4a *.mp4 *.aac"), ("Tous", "*.*")],
-    )
-    if not path:
-        return
-
-    def run():
-        try:
-            app.root.after(
-                0,
-                lambda: (
-                    app.progress_label.configure(text=f"BPM Finder (fichier) : {track.title}…")
-                    if hasattr(app, "progress_label")
-                    else None
-                ),
-            )
-            res = scraper.analyze_file(path)
-        except Exception as e:
-            logger.error(f"BPM Finder fichier échec '{track.title}': {e}")
-            res = None
-        finally:
-            # Fermer le navigateur DANS ce thread (évite l'EPIPE Playwright
-            # à l'arrêt de l'app, cf. batch d'enrichissement).
-            try:
-                scraper.close()
-            except Exception:
-                pass
-
-        def done():
-            if not res:
-                messagebox.showerror(
-                    "BPM Finder", f"Analyse échouée pour « {track.title} » (voir logs)."
-                )
-                return
-            applied = []
-            _now = datetime.now()
-            if not track.audio.bpm and res.get("bpm"):
-                track.audio.bpm = res["bpm"]
-                track.audio.bpm_source = "bpmfinder"
-                # Observation `bpmfinder` : participe au vote à la relecture (E7a),
-                # sinon la mesure disparaîtrait sous la réconciliation E6.
-                track.observations.append(
-                    Observation(
-                        field="bpm", value=track.audio.bpm, source="bpmfinder", seen_at=_now
-                    )
-                )
-                applied.append(f"BPM={res['bpm']}")
-            if (
-                (track.audio.key is None or track.audio.mode is None)
-                and res.get("key") is not None
-                and res.get("mode") is not None
-            ):
-                from src.utils.music_theory import key_mode_to_french
-
-                track.audio.key = res["key"]
-                track.audio.mode = res["mode"]
-                track.audio.musical_key = key_mode_to_french(res["key"], res["mode"])
-                track.audio.key_mode_source = "bpmfinder"
-                track.observations.append(
-                    Observation(
-                        field="key", value=track.audio.key, source="bpmfinder", seen_at=_now
-                    )
-                )
-                track.observations.append(
-                    Observation(
-                        field="mode", value=track.audio.mode, source="bpmfinder", seen_at=_now
-                    )
-                )
-                applied.append(f"Tonalité={track.audio.musical_key}")
-            if applied:
-                app.data_manager.save_track(track)
-                app._populate_tracks_table()
-                messagebox.showinfo("BPM Finder", f"« {track.title} » : {', '.join(applied)}")
-            else:
-                messagebox.showinfo(
-                    "BPM Finder", f"« {track.title} » : rien à compléter (déjà rempli)."
-                )
-
-        app.root.after(0, done)
-
-    start_worker(run)

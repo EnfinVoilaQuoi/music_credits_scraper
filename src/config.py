@@ -69,8 +69,6 @@ class Settings(BaseSettings):
     spotify_client_secret: str | None = None
     getsongbpm_api_key: str | None = None
     youtube_api_key: str | None = None  # optionnel, fallback sur ytmusicapi
-    bpmfinder_email: str | None = None
-    bpmfinder_password: str | None = None
 
     # --- Application ---
     debug: bool = False
@@ -217,8 +215,6 @@ SPOTIFY_CLIENT_ID = settings.spotify_client_id
 SPOTIFY_CLIENT_SECRET = settings.spotify_client_secret
 GETSONGBPM_API_KEY = settings.getsongbpm_api_key
 YOUTUBE_API_KEY = settings.youtube_api_key
-BPMFINDER_EMAIL = settings.bpmfinder_email
-BPMFINDER_PASSWORD = settings.bpmfinder_password
 
 # Application
 DEBUG = settings.debug
@@ -267,7 +263,6 @@ BPI_MAX_PAGES = settings.bpi_max_pages
 
 # Chemins dérivés (non configurables par l'environnement)
 DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"
-BPMFINDER_SESSION_FILE = DATA_DIR / ".bpmfinder_session.json"
 DATA_PATH = str(DATA_DIR)
 
 # Dossier des exports studio (SVG Bubble Prod…). PAS de mkdir ici : la création

@@ -46,7 +46,6 @@ class TestLaCaseADisparu:
             "reccobeats",
             "getsongbpm",
             "songbpm",
-            "bpmfinder",
             "deezer",
             "discogs",
         }

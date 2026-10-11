@@ -111,7 +111,6 @@ DOMAIN_TO_KEY: dict[str, str] = {
     "www.ultratop.be": "brma",
     "ultratop.be": "brma",
     "songbpm.com": "songbpm",
-    "audioaidynamics.com": "bpmfinder",
     "music.youtube.com": "ytmusic",
     "www.youtube.com": "ytmusic",
     "apic-desktop.musixmatch.com": "musixmatch",
@@ -150,7 +149,6 @@ def key_for_domain(netloc: str | None) -> str | None:
 #: le booléen d'un provider : ce serait accuser LRCLIB parce que Musixmatch est
 #: tombé. Chaque sous-client ouvre sa propre observation.
 PROVIDER_TO_KEYS: dict[str, tuple[str, ...]] = {
-    "bpmfinder": ("bpmfinder",),
     "deezer": ("deezer",),
     "discogs": ("discogs",),
     "getsongbpm": ("getsongbpm",),

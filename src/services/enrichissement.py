@@ -49,9 +49,11 @@ def sources_effectives(runtime: Runtime, options: OptionsEnrich) -> list[str]:
     )
     if not options.sources:
         # Par défaut, aucune recherche d'ID : elle appartient à l'étape Identité.
-        # BPM Finder n'est pas lancé d'office (dernier recours, lent) : il se
-        # demande explicitement (case GUI, `--sources bpmfinder`).
-        sources = [s for s in sources if s not in ("spotify_id", "bpmfinder")]
+        # Discogs non plus : l'étape Crédits appelle la MÊME fonction
+        # (`enrich_track_data`) sur les mêmes morceaux — deux recherches par
+        # morceau et par cycle, ≈ 4 h chez Kanye West pour rien (décision
+        # utilisateur 2026-10-11). Il se demande explicitement (`--sources`).
+        sources = [s for s in sources if s not in ("spotify_id", "discogs")]
     return sources
 
 
@@ -123,9 +125,6 @@ async def run_async(
     dm = runtime.data_manager
     sources = sources_effectives(runtime, options)
     try:
-        # Ré-armer le disjoncteur BPM Finder (coupé après 3 échecs consécutifs
-        # au run précédent — l'enricher vit toute la session).
-        enricher.reset_bpmfinder_breaker()
         n = len(tracks)
         for i, track in enumerate(tracks):
             if hooks.should_stop():
@@ -175,13 +174,12 @@ def run(
 
 # ── Résumé ─────────────────────────────────────────────────────────────────
 # Étiquettes courtes des sources (générique : toute source présente dans
-# results est affichée, y compris bpmfinder).
+# results est affichée).
 _SRC_LABELS = {
     "spotify_id": "SP",
     "reccobeats": "RC",
     "getsongbpm": "GS",
     "songbpm": "SB",
-    "bpmfinder": "BF",
     "deezer": "DZ",
     "discogs": "DC",
 }

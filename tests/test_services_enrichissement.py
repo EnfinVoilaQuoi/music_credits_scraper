@@ -26,15 +26,11 @@ class _Enricher:
         self.results = results or {"reccobeats": True}
         self.sync_runner = _Runner(journal)
         self.sources_vues = None
-        self.reset = False
         self.deezer_client = None
         self.http = None
 
     def get_available_sources(self):
         return ["reccobeats", "deezer"]
-
-    def reset_bpmfinder_breaker(self):
-        self.reset = True
 
     async def enrich_track_async(self, track, *, sources, force_update, artist_tracks):
         self.sources_vues = list(sources)
@@ -142,7 +138,6 @@ class TestBatch:
     def test_save_puis_record_pending_par_morceau(self, monkeypatch):
         rt, enricher, journal = _setup(monkeypatch)
         bilan = _run(rt, _tracks("x", "y"))
-        assert enricher.reset
         assert [e for e in journal if isinstance(e, tuple)] == [
             ("enrich", "x"),
             ("save", "x"),

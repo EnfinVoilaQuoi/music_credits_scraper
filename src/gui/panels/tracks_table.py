@@ -533,10 +533,6 @@ def on_right_click(app, event):
                 command=lambda: manual_entry.manual_youtube_link(app, index),
             )
             context_menu.add_command(
-                label="🎚️ Analyser un fichier audio local (BPM/Key)…",
-                command=lambda: manual_entry.bpmfinder_local_file(app, index),
-            )
-            context_menu.add_command(
                 label="🏷️ Renommer le morceau…",
                 command=lambda: manual_entry.rename_track(app, index),
             )

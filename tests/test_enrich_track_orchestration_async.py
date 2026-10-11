@@ -10,7 +10,6 @@ import asyncio
 import threading
 
 from src.concurrency.serial_worker import SerialWorker
-from src.enrichment.providers.bpmfinder import BpmFinderProvider
 from src.enrichment.providers.deezer import DeezerProvider
 from src.enrichment.providers.discogs import DiscogsProvider
 from src.enrichment.providers.getsongbpm import GetSongBpmProvider
@@ -26,7 +25,6 @@ ALL_SOURCES = [
     "reccobeats",
     "getsongbpm",
     "songbpm",
-    "bpmfinder",
     "deezer",
     "discogs",
 ]
@@ -77,10 +75,6 @@ class _FakeGetSongBpm(_FakeEnrich, GetSongBpmProvider):
 
 
 class _FakeSongBpm(_FakeEnrich, SongBpmProvider):
-    pass
-
-
-class _FakeBpmFinder(_FakeEnrich, BpmFinderProvider):
     pass
 
 
@@ -153,7 +147,6 @@ def _enricher(**overrides):
         "reccobeats": _FakeRecco(calls),
         "getsongbpm": _FakeGetSongBpm(calls),
         "songbpm": _FakeSongBpm(calls),
-        "bpmfinder": _FakeBpmFinder(calls),
         "deezer": _FakeDeezer(calls),
         "discogs": _FakeDiscogs(calls),
     }
@@ -166,7 +159,6 @@ def _enricher(**overrides):
     enricher._reccobeats_provider = fakes["reccobeats"]
     enricher._getsongbpm_provider = fakes["getsongbpm"]
     enricher._songbpm_provider = fakes["songbpm"]
-    enricher._bpmfinder_provider = fakes["bpmfinder"]
     enricher._deezer_provider = fakes["deezer"]
     enricher._discogs_provider = fakes["discogs"]
     enricher._http = None  # les fakes ne touchent pas au réseau
@@ -201,7 +193,6 @@ def test_ordre_nominal_identique_a_la_voie_sync():
         "reccobeats",
         "getsongbpm",
         "songbpm",
-        "bpmfinder",
         "deezer",
         "discogs",
     ]
@@ -250,7 +241,6 @@ def test_forcer_sans_reponse_n_efface_rien():
             ("spotify_id", _FakeSpotify),
             ("getsongbpm", _FakeGetSongBpm),
             ("songbpm", _FakeSongBpm),
-            ("bpmfinder", _FakeBpmFinder),
             ("deezer", _FakeDeezer),
             ("discogs", _FakeDiscogs),
         ]

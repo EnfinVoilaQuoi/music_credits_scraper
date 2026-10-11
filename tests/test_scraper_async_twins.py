@@ -21,7 +21,6 @@ import asyncio
 
 import pytest
 
-from src.scrapers.bpmfinder_scraper_async import BPMFinderScraperAsync
 from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 from src.scrapers.spotify_id_scraper_async import SpotifyIDScraperAsync
@@ -134,20 +133,6 @@ class TestGardeFousSync:
             with pytest.raises(RuntimeError, match="async"):
                 appel()
 
-    def test_bpmfinder(self, tmp_path, monkeypatch):
-        import src.scrapers.bpmfinder_scraper as bf
-
-        monkeypatch.setattr(bf, "_CACHE_FILE", tmp_path / "cache.json")
-        s = BPMFinderScraperAsync(headless=True)
-        for appel in (
-            lambda: s._ensure_driver(),
-            lambda: s.analyze("https://youtu.be/x"),
-            lambda: s.analyze_file("f.mp3"),
-            lambda: s.close(),
-        ):
-            with pytest.raises(RuntimeError, match="async"):
-                appel()
-
 
 # ────────────────────────────────────────────────────── logique pure héritée
 
@@ -200,13 +185,6 @@ class TestLogiquePureHeritee:
             SpotifyIDScraperAsync.extract_spotify_id_from_url
             is SpotifyIDScraper.extract_spotify_id_from_url
         )
-
-    def test_bpmfinder_logique_identique(self):
-        from src.scrapers.bpmfinder_scraper import BPMFinderScraper
-
-        assert BPMFinderScraperAsync._cards_from_text is BPMFinderScraper._cards_from_text
-        assert BPMFinderScraperAsync._card_to_result is BPMFinderScraper._card_to_result
-        assert BPMFinderScraperAsync._video_id is BPMFinderScraper._video_id
 
     def test_songbpm_async_utilise_le_matching_herite(self):
         """Vérification d'usage, pas seulement d'identité."""

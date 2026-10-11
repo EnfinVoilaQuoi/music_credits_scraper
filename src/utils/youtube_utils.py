@@ -1,8 +1,7 @@
 """Helpers YouTube partagés : extraction de video id + URLs de vignettes.
 
-Factorise la regex de video id qui vivait en double (``update_ytmusic._extract_video_id``
-et ``bpmfinder_scraper.BPMFinderScraper._video_id``). Un seul endroit à corriger
-si un nouveau format d'URL apparaît.
+Un seul endroit pour la regex de video id (elle a vécu en double) : à corriger
+ici si un nouveau format d'URL apparaît.
 """
 
 import re

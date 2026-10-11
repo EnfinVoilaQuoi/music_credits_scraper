@@ -50,16 +50,16 @@ def start_enrichment(app):
         "reccobeats": "ReccoBeats (BPM/Key/Mode via ISRC) 🎵",
         "getsongbpm": "GetSongBPM API (2ᵉ vote BPM/Key/Mode) 🎹",
         "songbpm": "SongBPM Scraper (départage BPM/Key) 🎼",
-        "bpmfinder": "BPM Finder (dernier recours, via lien YouTube) 🎛️",
         "deezer": "Deezer (ISRC, durée, date de sortie) 🎶",
-        "discogs": "Discogs (crédits supplémentaires, labels) 💿",
+        "discogs": "Discogs (déjà lu par l'étape Crédits) 💿",
     }
 
     available = app.data_enricher.get_available_sources()
 
     for source, description in sources_info.items():
-        # BPM Finder : dernier recours, décoché par défaut.
-        var = ctk.BooleanVar(value=source in available and source != "bpmfinder")
+        # Discogs : décoché par défaut, l'étape Crédits lit déjà le même disque
+        # par la même fonction (2026-10-11).
+        var = ctk.BooleanVar(value=source in available and source != "discogs")
         sources_vars[source] = var
 
         frame = ctk.CTkFrame(dialog)
@@ -74,22 +74,7 @@ def start_enrichment(app):
         checkbox.pack(anchor="w")
 
         if source not in available:
-            _msg = "(API non configurée)"
-            if source == "bpmfinder":
-                _msg = (
-                    "(non configuré : BPMFINDER_EMAIL/PASSWORD dans .env ou "
-                    "variables Windows, puis relancer l'app —\n"
-                    " ou lancer scripts/bpmfinder_login.py une fois)"
-                )
-            ctk.CTkLabel(frame, text=_msg, text_color="gray").pack(anchor="w", padx=25)
-
-        # Info supplémentaire pour BPM Finder
-        if source == "bpmfinder":
-            info_text = (
-                "Dernier recours si BPM/Key manquent : analyse le lien YouTube.\n"
-                "Compte requis (BPMFINDER_EMAIL/PASSWORD) ; session réutilisée."
-            )
-            ctk.CTkLabel(frame, text=info_text, font=("Arial", 9), text_color="gray").pack(
+            ctk.CTkLabel(frame, text="(API non configurée)", text_color="gray").pack(
                 anchor="w", padx=25
             )
 

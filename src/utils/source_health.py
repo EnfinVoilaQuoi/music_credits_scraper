@@ -5,8 +5,8 @@ Deux niveaux de sonde, par source :
   - COMPLÈTE : rejoue le vrai chemin fetch+parse sur une **sentinelle** stable et
     vérifie des attendus minimaux → détecte un changement de structure qui casserait
     le pipeline. V1 : seulement les sources requests/JSON (Kworb, LRCLIB, Deezer,
-    GetSongBPM, Genius API). Les sources Playwright/login (RIAA, BRMA, SongBPM,
-    BPM Finder, scrape Genius, embed Spotify) restent en sonde rapide.
+    GetSongBPM, Genius API). Les sources Playwright (RIAA, BRMA, SongBPM,
+    scrape Genius, embed Spotify) restent en sonde rapide.
 
 Ce module n'importe RIEN de src.gui (AUDIT §8.4 : cœur pilotable sans interface).
 La GUI et la CLI branchent leurs callbacks (`progress_cb`, `should_stop`).
@@ -594,13 +594,6 @@ SOURCES: list[SourceSpec] = [
         fast_url="https://songbpm.com/",
         tolerate_403=True,
         notes="dernier recours BPM ; Cloudflare possible",
-        families=(Family.AUDIO,),
-    ),
-    SourceSpec(
-        key="bpmfinder",
-        label="BPM Finder (audioaidynamics)",
-        fast_url="https://audioaidynamics.com",
-        notes="login requis (BPMFINDER_EMAIL/PASSWORD) — sonde complète manuelle",
         families=(Family.AUDIO,),
     ),
     SourceSpec(

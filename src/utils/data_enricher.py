@@ -58,14 +58,12 @@ class DataEnricher:
         self.data_manager = data_manager
         self.spotify_id_conflits: list[tuple[str, str, str]] = []
         # NB : imports providers LOCAUX (règle anti-boucle src.utils ↔ src.enrichment).
-        from src.enrichment.providers.bpmfinder import BpmFinderProvider
         from src.enrichment.providers.deezer import DeezerProvider
         from src.enrichment.providers.discogs import DiscogsProvider
         from src.enrichment.providers.getsongbpm import GetSongBpmProvider
         from src.enrichment.providers.reccobeats import ReccoBeatsProvider
         from src.enrichment.providers.songbpm import SongBpmProvider
         from src.enrichment.providers.spotify_id import SpotifyIdProvider
-        from src.scrapers.bpmfinder_scraper import BPMFinderScraper
 
         # Clients racine partagés : Deezer (DeezerProvider + résolution ISRC de
         # ReccoBeats), Genius (pré-étape media des feats).
@@ -109,19 +107,9 @@ class DataEnricher:
             # Variante ASYNC (F3c) : vit dans la boucle, fermée par aclose().
             async_scraper_factory=lambda: SongBPMScraperAsync(headless=headless_songbpm),
         )
-        # Factory seulement si identifiants/session présents (même règle qu'avant).
-        # F3d : le jumeau ASYNC (BPMFinderScraperAsync) est PRÉPARÉ mais NON activé
-        # — enrich_async retombe sur le pont sync. Activation = ajouter
-        # `async_scraper_factory=lambda: BPMFinderScraperAsync(headless=True)` ici
-        # + le provider dans aclose_async_scrapers, après un run réel (login/quota,
-        # backend audioaidynamics rétabli). Cf. src/scrapers/bpmfinder_scraper_async.py.
-        if BPMFinderScraper.credentials_or_session_available():
-            self._bpmfinder_provider = BpmFinderProvider(
-                scraper_factory=lambda: BPMFinderScraper(headless=True)
-            )
-        else:
-            self._bpmfinder_provider = BpmFinderProvider()
-            logger.info("⏭️ BPM Finder non configuré (BPMFINDER_EMAIL/PASSWORD ou session absents)")
+        # BPM Finder (audioaidynamics) RETIRÉ le 2026-10-11 (décision utilisateur) :
+        # 61 % d'échecs sur 30 jours, 22-25 % de désaccord sur le BPM et 50 % sur
+        # la tonalité avec les autres sources, compte bridé.
         self._deezer_provider = DeezerProvider(self.deezer_client)
         discogs_token = token_discogs()
         self._discogs_provider = DiscogsProvider(
@@ -140,12 +128,6 @@ class DataEnricher:
             p.name: p.is_available() for p in [*self._pipeline, self._discogs_provider]
         }
         logger.info(f"Sources disponibles: {[k for k, v in self.apis_available.items() if v]}")
-
-    @property
-    def bpmfinder_scraper(self):
-        """Accès GUI direct (manual_entry ✏️) au scraper BPM Finder — créé à la
-        demande, None si la source n'est pas configurée."""
-        return self._bpmfinder_provider.scraper
 
     def close(self):
         """Ferme les ressources de toutes les sources (idempotent, ré-ouvrable :
@@ -347,12 +329,6 @@ class DataEnricher:
         """Retourne la liste des sources disponibles"""
         return [k for k, v in self.apis_available.items() if v]
 
-    def reset_bpmfinder_breaker(self):
-        """Ré-arme le disjoncteur BPM Finder — à appeler en début de run
-        d'enrichissement (l'instance DataEnricher vit toute la session GUI,
-        « pour le reste du run » ne doit pas déborder sur le run suivant)."""
-        self._bpmfinder_provider.reset_breaker()
-
     def enrich_track(
         self,
         track: Track,
@@ -414,7 +390,7 @@ class DataEnricher:
         gates, mêmes valeurs de résultat.
 
         Providers API purs (deezer, getsongbpm, reccobeats) via la session
-        httpx partagée ; scrapers sync (spotify_id, songbpm, bpmfinder,
+        httpx partagée ; scrapers sync (spotify_id, songbpm,
         discogs, Genius) sur le thread sync dédié du run (affinité Playwright).
         """
         sources, ctx, ballot, results = self._start_run(track, sources, force_update, artist_tracks)
@@ -455,7 +431,6 @@ class DataEnricher:
                 "reccobeats",
                 "getsongbpm",
                 "songbpm",
-                "bpmfinder",
                 "deezer",
                 "discogs",
             ]
@@ -551,7 +526,6 @@ class DataEnricher:
             self._reccobeats_provider,
             self._getsongbpm_provider,
             self._songbpm_provider,
-            self._bpmfinder_provider,
             self._deezer_provider,
         ]
 

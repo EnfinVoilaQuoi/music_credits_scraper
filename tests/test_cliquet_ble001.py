@@ -19,7 +19,7 @@ RACINE = Path(__file__).resolve().parents[1]
 EXEMPTES_AUTORISES = {"scripts/**", "tests/**", "src/gui/**"}
 
 # Nombre d'`except` larges dans src/gui, mesuré le 2026-10-11. Ne fait que BAISSER.
-PLAFOND_GUI = 56
+PLAFOND_GUI = 54
 
 
 def _exemptions_ble001() -> set[str]:

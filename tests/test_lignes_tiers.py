@@ -76,3 +76,30 @@ def test_rattraper_l_existant(data_manager):
     _remix(data_manager, booba, CreditRole.VOCALS)
     assert len(rattraper(data_manager, booba)) == 1
     assert len(data_manager.get_artist_tracks(sdm.id)) == 1
+
+
+def test_la_ligne_creee_a_les_totaux_de_ses_observations(data_manager):
+    """2026-10-11 : les lignes SDM de « Dolce Camara » recevaient les
+    observations Kworb (25,9 M) et les vidéos, sans que leurs colonnes suivent."""
+    from sqlalchemy import text
+
+    from src.enrichment.observation import Observation
+    from src.models import TrackVideo
+
+    booba, sdm = _artiste(data_manager, "Booba"), _artiste(data_manager, "SDM")
+    remix = _remix(data_manager, booba, CreditRole.FEATURED)
+    data_manager.record_spotify_streams(remix.id, 25_900_000, "kworb")
+    data_manager.upsert_observations(remix.id, [Observation("duration", 144, "deezer")])
+    data_manager.record_track_videos(
+        remix.id, [TrackVideo(video_id="dolcecamara", source="genius_media", views=750_000)]
+    )
+
+    donner_aux_interpretes(data_manager, remix, booba)
+
+    (ligne,) = data_manager.get_artist_tracks(sdm.id)
+    with data_manager.engine.connect() as conn:
+        spotify, ytm, duree = conn.execute(
+            text("SELECT spotify_streams, ytm_streams, duration FROM tracks WHERE id = :t"),
+            {"t": ligne.id},
+        ).one()
+    assert (spotify, ytm, duree) == (25_900_000, 750_000, 144)

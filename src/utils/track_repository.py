@@ -984,14 +984,34 @@ class TrackRepository:
         return par_fiche
 
     def upsert_observations(self, track_id: int, observations, *, conn=None) -> None:
-        """Upsert les observations d'un morceau (clé (field, source)). No-op si vide."""
+        """Upsert les observations d'un morceau (clé (field, source)) PUIS
+        ré-arbitre les colonnes des champs touchés. No-op si vide.
+
+        Le ré-arbitrage est dans la même transaction (2026-10-11) : les lignes
+        créées par `lignes_tiers` et `kworb_decisions` recevaient leurs
+        observations sans que leurs colonnes suivent — les deux lignes SDM de
+        « Dolce Camara » restaient sans streams malgré 25,9 M d'observation Kworb.
+        """
         if not observations:
             return
         if conn is not None:
-            self._upsert_observations(conn, track_id, observations)
+            self._upsert_et_arbitrer(conn, track_id, observations)
         else:
             with self.engine.begin() as conn:
-                self._upsert_observations(conn, track_id, observations)
+                self._upsert_et_arbitrer(conn, track_id, observations)
+
+    def _upsert_et_arbitrer(self, conn, track_id: int, observations) -> None:
+        self._upsert_observations(conn, track_id, observations)
+        champs = {o.field for o in observations}
+        discographie = champs & set(self.COLONNES_DISCOGRAPHIE)
+        if discographie:
+            self._ecrire_colonnes_discographie(
+                conn, track_id, self._arbitrer_discographie(conn, track_id, discographie)
+            )
+        if "spotify_streams" in champs:
+            valeurs = self._arbitrer_streams(conn, track_id)
+            if valeurs:
+                conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
 
     def delete_observations(self, track_id: int, field: str, *, conn=None) -> None:
         """Supprime toutes les observations d'un champ pour un morceau (composable).

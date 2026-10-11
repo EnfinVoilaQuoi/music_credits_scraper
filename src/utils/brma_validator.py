@@ -135,9 +135,9 @@ def validate_brma_csv(csv_path: str | Path, recent_years: tuple[int, ...] = (202
     # indispensable : un même nom peut être certifié en single ET en album (ex:
     # Amy Macdonald « This Is The Life ») → ce ne sont pas des doublons.
     key = (
-        artist.fillna("").str.upper()
+        artist.fillna("").str.strip().str.upper()  # la clé de `update_brma._dedup_df`
         + " | "
-        + title.fillna("").str.upper()
+        + title.fillna("").str.strip().str.upper()
         + " | "
         + category.fillna("")
         + " | "

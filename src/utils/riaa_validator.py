@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.utils.cert_coverage import annee_assez_dense, annees_effondrees
-from src.utils.cert_normalize import date_riaa, riaa_level, riaa_units
+from src.utils.cert_normalize import date_riaa, normalize_text, riaa_level, riaa_units
 
 REQUIRED_COLS = ["Artist", "Title", "Certification_Date", "Certification_Type"]
 LOW_MONTH_THRESHOLD = 3
@@ -158,11 +158,13 @@ def validate_riaa_csv(
                 f"base à backfiller"
             )
 
-    # Doublons (artiste+titre+format+niveau normalisé+date)
+    # Doublons (artiste+titre+format+niveau normalisé+date). Artiste et titre
+    # par `normalize_text`, LA clé du nettoyeur (`update_riaa._clean_from_raw`) :
+    # deux outils sur le même fichier partagent leur référentiel.
     key = (
-        artist.fillna("").str.upper()
+        artist.fillna("").map(normalize_text)
         + " | "
-        + title.fillna("").str.upper()
+        + title.fillna("").map(normalize_text)
         + " | "
         + fmt.fillna("").str.upper()
         + " | "

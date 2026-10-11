@@ -198,6 +198,12 @@ class TestDoublons:
         p = _ecrire(tmp_path / "c.csv", [_ligne(date="January 5, 2018"), _ligne(date="01/05/2018")])
         assert validate_riaa_csv(p)["stats"]["duplicates"] == 1
 
+    def test_titre_par_la_cle_du_nettoyeur(self, tmp_path):
+        """« #BEAUTIFUL » et « BEAUTIFUL » : le nettoyeur les fusionne
+        (`normalize_text`), le validateur doit les voir comme lui."""
+        p = _ecrire(tmp_path / "c.csv", [_ligne(title="#BEAUTIFUL"), _ligne(title="BEAUTIFUL")])
+        assert validate_riaa_csv(p)["stats"]["duplicates"] == 1
+
     def test_formats_differents_conserves(self, tmp_path):
         p = _ecrire(tmp_path / "c.csv", [_ligne(fmt="ALBUM"), _ligne(fmt="SINGLE")])
         assert validate_riaa_csv(p)["stats"]["duplicates"] == 0

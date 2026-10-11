@@ -1204,6 +1204,21 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM release_tracks WHERE track_id = :tid"), {"tid": track_id}
                 )
+                # Une variante pointée vers ce morceau (e29) n'a plus de fiche ;
+                # les cas et le journal de la revue ne désignent plus rien
+                # (2026-10-11 : 16 signalements pointaient des fiches supprimées).
+                conn.execute(
+                    text(
+                        "UPDATE track_spotify_ids SET variant_track_id = NULL "
+                        "WHERE variant_track_id = :tid"
+                    ),
+                    {"tid": track_id},
+                )
+                for table in ("revue_signalements", "revue_corrections"):
+                    conn.execute(
+                        text(f"DELETE FROM {table} WHERE track_id = :tid"),  # noqa: S608
+                        {"tid": track_id},
+                    )
                 deleted = conn.execute(
                     text("DELETE FROM tracks WHERE id = :tid"), {"tid": track_id}
                 ).rowcount
@@ -1463,6 +1478,16 @@ class TrackRepository:
                     ),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
+                # Revue et variantes (2026-10-11 : 16 signalements pointaient des
+                # fiches fusionnées) — le journal des corrections suit la fiche
+                # gardée, un signalement de l'absorbée sera recalculé sur elle.
+                for sql in (
+                    "UPDATE revue_corrections SET track_id = :keep_id WHERE track_id = :delete_id",
+                    "DELETE FROM revue_signalements WHERE track_id = :delete_id",
+                    "UPDATE track_spotify_ids SET variant_track_id = :keep_id "
+                    "WHERE variant_track_id = :delete_id",
+                ):
+                    conn.execute(text(sql), {"keep_id": keep_id, "delete_id": delete_id})
                 conn.execute(
                     text("DELETE FROM tracks WHERE id = :delete_id"), {"delete_id": delete_id}
                 )

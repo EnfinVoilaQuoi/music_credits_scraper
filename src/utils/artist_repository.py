@@ -283,6 +283,38 @@ class ArtistRepository:
                     {"aid": artist_id},
                 )
 
+                # 2d. Le reste des tables liées (2026-10-11 : la liste s'était
+                # arrêtée en e20, `delete_track` avait suivi — IDs Spotify,
+                # éditions, parutions, échecs suivis, revue, albums, auditeurs
+                # restaient orphelins, sans cascade pour les rattraper).
+                for sql in (
+                    "DELETE FROM track_spotify_ids WHERE track_id IN {morceaux}",
+                    "UPDATE track_spotify_ids SET variant_track_id = NULL "
+                    "WHERE variant_track_id IN {morceaux}",
+                    "DELETE FROM track_editions WHERE track_id IN {morceaux}",
+                    "DELETE FROM source_track_failures WHERE track_id IN {morceaux} "
+                    "OR artist_id = :aid",
+                    "DELETE FROM release_track_sources WHERE release_track_id IN "
+                    "(SELECT id FROM release_tracks WHERE track_id IN {morceaux} "
+                    "OR release_id IN (SELECT id FROM releases WHERE artist_id = :aid))",
+                    "DELETE FROM release_tracks WHERE track_id IN {morceaux} "
+                    "OR release_id IN (SELECT id FROM releases WHERE artist_id = :aid)",
+                    "DELETE FROM release_identifiers WHERE artist_id = :aid "
+                    "OR release_id IN (SELECT id FROM releases WHERE artist_id = :aid)",
+                    "DELETE FROM releases WHERE artist_id = :aid",
+                    "DELETE FROM albums WHERE artist_id = :aid",
+                    "DELETE FROM monthly_listeners_history WHERE artist_id = :aid",
+                    "DELETE FROM revue_verdicts WHERE artist_id = :aid",
+                    "DELETE FROM revue_signalements WHERE artist_id = :aid "
+                    "OR track_id IN {morceaux}",
+                    "DELETE FROM revue_corrections WHERE artist_id = :aid "
+                    "OR track_id IN {morceaux}",
+                ):
+                    conn.execute(
+                        text(sql.format(morceaux="(SELECT id FROM tracks WHERE artist_id = :aid)")),
+                        {"aid": artist_id},
+                    )
+
                 # 3. Supprimer les morceaux
                 deleted_tracks = conn.execute(
                     text("DELETE FROM tracks WHERE artist_id = :aid"), {"aid": artist_id}

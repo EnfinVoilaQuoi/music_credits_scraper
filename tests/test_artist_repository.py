@@ -189,3 +189,132 @@ class TestDatesLibres:
         assert (
             data_manager.update_artist_kworb_totals(artiste.id, total=1, kworb_date=valeur) is True
         )
+
+
+def test_supprimer_un_artiste_ne_laisse_aucun_orphelin(data_manager):
+    """2026-10-11 : `delete_artist` ne purgeait que 4 tables liées (sans cascade
+    en base) — IDs Spotify, éditions, parutions, échecs suivis, revue, albums et
+    auditeurs restaient orphelins. Garde GÉNÉRALE : toute table qui pointe un
+    morceau ou un artiste par colonne est remplie, puis vérifiée vide."""
+    from sqlalchemy import text
+
+    from src.models import Artist, Track
+
+    a = Artist(name="Isha")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Bitume", artist=a)
+    data_manager.save_track(t)
+    # Les observations de santé des sources sont un HISTORIQUE d'usage, pas
+    # une donnée de l'artiste : elles survivent délibérément.
+    gardees = {"source_usage_daily", "source_usage_failures", "artists", "tracks"}
+
+    with data_manager.engine.begin() as conn:
+        tables = [
+            r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+        ]
+        rid = None
+        for table in sorted(tables, key=lambda n: n != "releases"):
+            if table in gardees or table.startswith("sqlite") or table == "alembic_version":
+                continue
+            colonnes = conn.execute(text(f"PRAGMA table_info({table})")).all()
+            noms = {c[1] for c in colonnes}
+            if not noms & {"track_id", "artist_id", "release_id", "release_track_id"}:
+                continue
+            valeurs = {}
+            for _, nom, type_, notnull, defaut, pk in colonnes:
+                if pk:
+                    continue
+                if nom in ("track_id", "variant_track_id"):
+                    valeurs[nom] = t.id
+                elif nom in ("artist_id", "related_artist_id"):
+                    valeurs[nom] = a.id
+                elif nom == "release_id":
+                    valeurs[nom] = rid
+                elif nom == "release_track_id":
+                    valeurs[nom] = conn.execute(text("SELECT max(id) FROM release_tracks")).scalar()
+                elif notnull and defaut is None:
+                    valeurs[nom] = 1 if "INT" in (type_ or "").upper() else f"x-{table}-{nom}"
+            cols = ", ".join(valeurs)
+            marques = ", ".join(f":{c}" for c in valeurs)
+            conn.execute(text(f"INSERT INTO {table} ({cols}) VALUES ({marques})"), valeurs)
+            if table == "releases":
+                rid = conn.execute(text("SELECT max(id) FROM releases")).scalar()
+
+    assert data_manager.delete_artist("Isha")
+
+    with data_manager.engine.connect() as conn:
+        restes = {}
+        for table in tables:
+            if table in gardees or table.startswith("sqlite") or table == "alembic_version":
+                continue
+            noms = {c[1] for c in conn.execute(text(f"PRAGMA table_info({table})"))}
+            conditions = [f"{c} = :t" for c in ("track_id", "variant_track_id") if c in noms]
+            conditions += [f"{c} = :a" for c in ("artist_id", "related_artist_id") if c in noms]
+            if conditions:
+                n = conn.execute(
+                    text(f"SELECT count(*) FROM {table} WHERE {' OR '.join(conditions)}"),
+                    {"t": t.id, "a": a.id},
+                ).scalar()
+                if n:
+                    restes[table] = n
+            if "release_id" in noms:
+                n = conn.execute(
+                    text(
+                        f"SELECT count(*) FROM {table} WHERE release_id NOT IN (SELECT id FROM releases)"
+                    )
+                ).scalar()
+                if n:
+                    restes[f"{table}.release_id"] = n
+    assert restes == {}
+
+
+def test_supprimer_ou_fusionner_un_morceau_ne_laisse_pas_la_revue_orpheline(data_manager):
+    """2026-10-11 : 16 signalements de la revue pointaient des fiches supprimées
+    ou fusionnées."""
+    from sqlalchemy import text
+
+    from src.models import Artist, Track
+
+    a = Artist(name="Isha")
+    a.id = data_manager.save_artist(a)
+    garde, absorbee, supprimee = (Track(title=x, artist=a) for x in ("A", "A bis", "B"))
+    for t in (garde, absorbee, supprimee):
+        data_manager.save_track(t)
+    with data_manager.engine.begin() as conn:
+        for t in (absorbee, supprimee):
+            conn.execute(
+                text(
+                    "INSERT INTO revue_signalements (artist_id, detecteur, cle, track_id) "
+                    "VALUES (:a, 'x', :c, :t)"
+                ),
+                {"a": a.id, "c": f"k{t.id}", "t": t.id},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO revue_corrections (artist_id, detecteur, cle, track_id, action) "
+                    "VALUES (:a, 'x', :c, :t, 'test')"
+                ),
+                {"a": a.id, "c": f"k{t.id}", "t": t.id},
+            )
+
+    data_manager.merge_tracks(garde.id, absorbee.id)
+    data_manager.delete_track(supprimee.id)
+
+    with data_manager.engine.connect() as conn:
+        orphelins = (
+            conn.execute(
+                text(
+                    "SELECT count(*) FROM revue_signalements WHERE track_id NOT IN (SELECT id FROM tracks)"
+                )
+            ).scalar()
+            + conn.execute(
+                text(
+                    "SELECT count(*) FROM revue_corrections WHERE track_id NOT IN (SELECT id FROM tracks)"
+                )
+            ).scalar()
+        )
+        journal_garde = conn.execute(
+            text("SELECT count(*) FROM revue_corrections WHERE track_id = :t"), {"t": garde.id}
+        ).scalar()
+    assert orphelins == 0
+    assert journal_garde == 1

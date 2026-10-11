@@ -15,6 +15,7 @@ from src.models.certification import Certification
 from src.models.track import CreditRole
 from src.utils.cert_titres import certif_du_morceau, cle
 from src.utils.corrections_fiches import certifs_refusees, cle_certif
+from src.utils.dates import parse_flexible
 from src.utils.logger import get_logger
 from src.utils.participation import Participation, participation
 from src.utils.title_matching import names_match_as_words
@@ -64,10 +65,29 @@ def _noms_du_credit(credit: str | None) -> list[str]:
     return [n for n in noms if n]
 
 
+#: Ce qui sépare l'interprète d'un crédit d'organisme de ses invités.
+_INVITES_DU_CREDIT = re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s+", re.I)
+
+
+def _tete_du_credit(credit: str | None) -> str:
+    """« AYA NAKAMURA FEAT. SDM » → « AYA NAKAMURA » : l'interprète du disque."""
+    return _INVITES_DU_CREDIT.split(credit or "", maxsplit=1)[0]
+
+
 def _qui_chercher(
     track: Track, artist_name: str, alias=(), formations=()
-) -> tuple[str | None, list[str], list[str]]:
-    """(artiste recherché, artistes supplémentaires, noms EXIGÉS dans le crédit).
+) -> tuple[str | None, list[str], list[str], list[str]]:
+    """(artiste recherché, artistes supplémentaires, noms EXIGÉS dans le crédit,
+    noms dont l'un doit être en TÊTE du crédit).
+
+    La TÊTE (2026-10-11) : le crédit d'un organisme est « <interprète> FEAT.
+    <invités> ». Un nom attendu qui n'y figure qu'en invité désigne la ligne
+    d'invité du disque de QUELQU'UN D'AUTRE — « AYA NAKAMURA FEAT. SDM » allait
+    au « Daddy » de SDM (feat. Booba, 2021) et à la ligne de Booba, qui n'y est
+    pas crédité ; Booba « 92i » (Lunatic, 2000) prenait l'Or du « 92I » de SDM
+    (2021). Une fiche PRINCIPALE exige notre artiste (alias, formation, ou le
+    principal Genius) en tête ; un feat, le principal ou un invité de la fiche,
+    ou notre artiste. La production garde sa règle (l'interprète seul).
 
     Depuis e36 un artiste a des fiches HOMONYMES (2026-09-25) : les reprises où
     il n'est qu'AUTEUR (`secondary_role` — Glee Cast « American Boy ») et des
@@ -92,14 +112,15 @@ def _qui_chercher(
     p = participation(track, noms, formations)
     principal = track.primary_artist_name
     if p == Participation.SECONDAIRE:
-        return None, [], []
+        return None, [], [], []
     if p == Participation.PROD:
-        return (principal or None), [], []
+        return (principal or None), [], [], []
     extra = _extra_artists(track, artist_name)
     extra += [a for a in alias if a != artist_name and a not in extra]
     if p == Participation.PRINCIPAL:
         # Y compris l'interprète sous un alias confirmé (« Ye » pour Kanye West).
-        return artist_name, extra, []
+        en_tete = [*noms, *formations, *_noms_du_credit(principal)]
+        return artist_name, extra, [], en_tete
     exiges: list[str] = []
     if principal:
         exiges = _noms_du_credit(principal)
@@ -110,12 +131,15 @@ def _qui_chercher(
             for n in _noms_du_credit(c.name)
             if not names_match_as_words(artist_name, n)
         ]
-    return artist_name, extra, exiges
+    return artist_name, extra, exiges, [*exiges, *noms]
 
 
-def _credite(match: dict, exiges: list[str]) -> bool:
+def _credite(match: dict, exiges: list[str], en_tete=()) -> bool:
     credit = match.get("artist_name", "") or ""
-    return not exiges or any(names_match_as_words(n, credit) for n in exiges)
+    if exiges and not any(names_match_as_words(n, credit) for n in exiges):
+        return False
+    tete = _tete_du_credit(credit)
+    return not en_tete or any(n and names_match_as_words(n, tete) for n in en_tete)
 
 
 def _poser_plus_haute(track: Track) -> None:
@@ -235,6 +259,60 @@ def _exclusivite(tracks: list[Track]) -> int:
     return perdues
 
 
+def _rang_de_porteur(track: Track, entree: dict) -> tuple:
+    """Plus petit = meilleure fiche pour cette certification : certif non
+    antérieure à la sortie de la fiche, fiche datée, puis sortie la plus proche
+    de celle que l'organisme déclare."""
+    sortie = parse_flexible(track.release_date)
+    if sortie is None:
+        return (1, 2, 0)
+    certifiee = parse_flexible(entree.get("certification_date"))
+    avant_sortie = 1 if certifiee is not None and certifiee.date() < sortie.date() else 0
+    declaree = parse_flexible(entree.get("release_date"))
+    if declaree is None:
+        return (avant_sortie, 1, 0)
+    return (avant_sortie, 0, abs((declaree.date() - sortie.date()).days))
+
+
+def _homonymes(tracks: list[Track]) -> int:
+    """Une MÊME certification sur plusieurs fiches de même titre (`cle`) n'en
+    garde qu'une (2026-10-11) : depuis e36 un artiste peut avoir deux pages
+    Genius homonymes, et `_exclusivite`, qui raisonne par titre, les laissait
+    toutes deux certifiées — Travis « OUTSIDE » (2025) portait le Gold 2024 du
+    « outside » de 2016, Kanye « Famous » et « Ghost Town » sans date leurs
+    certifs en double. Rang : `_rang_de_porteur` ; à égalité, toutes gardées
+    (une fusion à faire, pas un choix à deviner). Pas de refus global d'une
+    certif antérieure à la sortie : la date d'une fiche est parfois celle d'une
+    compilation (Kid Cudi « Day 'N' Nite », 2020). Rend le nombre de fiches qui
+    n'ont plus aucune certification réelle."""
+    groupes: dict[tuple, list[tuple[Track, dict]]] = {}
+    for t in tracks:
+        if not t.certs.needs_write or not t.title:
+            continue
+        for e in t.certs.reelles:
+            k = (cle(t.title), *cle_certif(e), (e.get("artist_name") or "").strip().upper())
+            groupes.setdefault(k, []).append((t, e))
+    a_retirer: dict[int, list[dict]] = {}
+    for porteurs in groupes.values():
+        if len({id(t) for t, _ in porteurs}) < 2:
+            continue
+        meilleur = min(_rang_de_porteur(t, e) for t, e in porteurs)
+        for t, e in porteurs:
+            if _rang_de_porteur(t, e) != meilleur:
+                a_retirer.setdefault(id(t), []).append(e)
+    perdues = 0
+    for t in tracks:
+        retirees = a_retirer.get(id(t))
+        if not retirees:
+            continue
+        avant = bool(t.certs.reelles)
+        t.certs.entries = [e for e in t.certs.entries if not any(e is r for r in retirees)]
+        _poser_plus_haute(t)
+        if avant and not t.certs.reelles:
+            perdues += 1
+    return perdues
+
+
 def apply_certifications(
     artist: Artist, tracks: list[Track], matcher, *, alias=(), formations=()
 ) -> int:
@@ -254,14 +332,14 @@ def apply_certifications(
     for track in tracks:
         try:
             title = _normalize_title(track.title)
-            cherche, extra, exiges = _qui_chercher(track, artist.name, alias, formations)
+            cherche, extra, exiges, en_tete = _qui_chercher(track, artist.name, alias, formations)
 
             matches = (
                 matcher.get_track_certifications(cherche, title, extra_artists=extra)
                 if cherche
                 else []
             )
-            matches = [m for m in matches if _credite(m, exiges)]
+            matches = [m for m in matches if _credite(m, exiges, en_tete)]
             # CORRECTIFS 1.9 (2026-10-09) : une certif d'ALBUM ne va jamais sur
             # un morceau (« Trône » prenait le Diamant de l'album), et le titre
             # doit être celui du morceau — le matcher, par mots contenus, n'est
@@ -320,6 +398,7 @@ def apply_certifications(
             track.certs.needs_write = False
 
     enriched -= _exclusivite(tracks)
+    enriched -= _homonymes(tracks)
     if enriched:
         logger.info(f"🏆 {enriched}/{len(tracks)} morceaux enrichis avec certifications")
     albums_with_certs = sum(1 for t in tracks if t.certs.album_entries)

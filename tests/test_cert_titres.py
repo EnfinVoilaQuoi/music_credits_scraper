@@ -64,11 +64,11 @@ class _Matcher:
         return []
 
 
-def _certif(titre, categorie="single"):
+def _certif(titre, categorie="single", artiste="BOOBA"):
     return {
         "certification": "Diamant",
         "title": titre,
-        "artist_name": "BOOBA",
+        "artist_name": artiste,
         "category": categorie,
         "certification_date": "2022-07-21",
         "release_date": "2017-01-01",
@@ -94,7 +94,7 @@ def test_la_fiche_au_titre_exact_garde_seule_la_certif():
     cudi = Artist(name="Kid Cudi")
     original = Track(title="Mr. Rager", artist=cudi)
     live = Track(title="Mr. Rager (Prime Day Show x Kid Cudi)", artist=cudi)
-    apply_certifications(cudi, [original, live], _Matcher([_certif("MR RAGER")]))
+    apply_certifications(cudi, [original, live], _Matcher([_certif("MR RAGER", artiste="KID CUDI")]))
     assert len(original.certs.entries) == 1 and live.certs.entries == []
 
 

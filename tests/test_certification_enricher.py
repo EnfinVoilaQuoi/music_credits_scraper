@@ -192,7 +192,9 @@ class TestEchoDesVersions:
     (décision 2026-09-21) — visible, jamais compté."""
 
     def _disco(self):
-        artist = Artist(name="Diam’s")
+        # Le crédit des certifs factices est « Isha » (`_match`) : il doit
+        # nommer l'interprète en tête (2026-10-11).
+        artist = Artist(name="Isha")
         socle = Track(title="Suzy", artist=artist)
         socle.id = 1
         live = Track(title="Suzy (Live 2006)", artist=artist)
@@ -251,7 +253,11 @@ class TestEchoDesVersions:
         remix.id = 12
         remix.relationships = [{"type": "remix_of", "title": "All of the Lights"}]
         matcher = _FakeMatcher(
-            tracks={"All of the Lights (Remix)": [_match(title="ALL OF THE LIGHTS (REMIX)")]}
+            tracks={
+                "All of the Lights (Remix)": [
+                    _match(artist_name="KANYE WEST", title="ALL OF THE LIGHTS (REMIX)")
+                ]
+            }
         )
         apply_certifications(kanye, [reprise, original, remix], matcher)
         assert len(original.certs.echos) == 1
@@ -266,8 +272,10 @@ class TestEchoDesVersions:
         matcher = _FakeMatcher(
             tracks={
                 "Double Poney (Instrumental)": [
-                    _match(title="DOUBLE PONEY", certification="Diamant"),
-                    _match(title="DOUBLE PONEY (INSTRUMENTAL)", certification="Or"),
+                    _match(artist_name="BOOBA", title="DOUBLE PONEY", certification="Diamant"),
+                    _match(
+                        artist_name="BOOBA", title="DOUBLE PONEY (INSTRUMENTAL)", certification="Or"
+                    ),
                 ]
             }
         )
@@ -412,10 +420,88 @@ def test_une_certif_refusee_a_la_main_n_est_plus_rattachee(monkeypatch, tmp_path
     corrections_fiches._cache.update(chemin=None)
     artist = Artist(name="Booba")
     track = Track(title="Temps mort 2.0", artist=artist, genius_id=5)
-    fausse = _match(title="TEMPS MORT", certification="Or", certification_date="2003-01-21")
-    juste = _match(title="TEMPS MORT 2.0", certification="Or", certification_date="2016-02-01")
+    fausse = _match(
+        artist_name="BOOBA", title="TEMPS MORT", certification="Or", certification_date="2003-01-21"
+    )
+    juste = _match(
+        artist_name="BOOBA",
+        title="TEMPS MORT 2.0",
+        certification="Or",
+        certification_date="2016-02-01",
+    )
     matcher = _FakeMatcher(tracks={"Temps mort 2.0": [fausse, juste]})
 
     corrections_fiches.memoriser_certif_refusee(track, fausse)
     apply_certifications(artist, [track], matcher)
     assert track.certs.entries == [juste]
+
+
+class TestTeteDuCreditEtHomonymes:
+    """2026-10-11 : une certif ne va plus à la ligne d'invité du disque d'un
+    autre, ni deux fois à deux pages homonymes d'un même artiste."""
+
+    def test_un_invite_du_credit_n_est_pas_l_interprete(self):
+        """« AYA NAKAMURA FEAT. SDM » allait au « Daddy » de SDM (feat. Booba,
+        2021) — SDM n'y est qu'invité, c'est le disque d'Aya Nakamura."""
+        sdm = Artist(name="SDM")
+        le_sien = Track(title="Daddy", artist=sdm, release_date="2021-04-08")
+        chez_aya = Track(title="Daddy", artist=sdm, release_date="2023-01-27", is_featuring=True)
+        chez_aya.primary_artist_name = "Aya Nakamura"
+        aya = _match(artist_name="AYA NAKAMURA FEAT. SDM", title="DADDY", release_date="2023-01-27")
+        a_lui = _match(artist_name="SDM FEAT. BOOBA", title="DADDY", release_date="2021-04-08")
+        m = _MatcherParArtiste({"SDM": [aya, a_lui]})
+        apply_certifications(sdm, [le_sien, chez_aya], m)
+        assert [e["artist_name"] for e in le_sien.certs.entries] == ["SDM FEAT. BOOBA"]
+        assert [e["artist_name"] for e in chez_aya.certs.entries] == ["AYA NAKAMURA FEAT. SDM"]
+
+    def test_la_fiche_au_bon_millesime_garde_la_certif(self):
+        """Travis « OUTSIDE » (2025) portait le Gold 2024 du « outside » de 2016."""
+        travis = Artist(name="Travis Scott")
+        v2016 = Track(title="outside", artist=travis, release_date="2016-09-02")
+        v2025 = Track(title="OUTSIDE", artist=travis, release_date="2025-07-13")
+        gold = _match(
+            artist_name="TRAVIS SCOTT",
+            title="OUTSIDE",
+            certification="Gold",
+            certification_date="2024-08-28",
+            release_date="2016-09-01",
+            body="RIAA",
+        )
+        apply_certifications(travis, [v2016, v2025], _MatcherParArtiste({"Travis Scott": [gold]}))
+        assert len(v2016.certs.entries) == 1
+        assert v2025.certs.entries == []
+
+    def test_une_page_datee_passe_avant_une_page_sans_date(self):
+        kanye = Artist(name="Kanye West")
+        datee = Track(title="Famous", artist=kanye, release_date="2016-02-14")
+        sans_date = Track(title="Famous", artist=kanye)
+        m = _MatcherParArtiste({"Kanye West": [_match(artist_name="KANYE WEST", title="FAMOUS")]})
+        apply_certifications(kanye, [datee, sans_date], m)
+        assert len(datee.certs.entries) == 1
+        assert sans_date.certs.entries == []
+
+    def test_a_egalite_les_deux_fiches_la_gardent(self):
+        """Une égalité est une fusion à faire, pas un choix à deviner."""
+        kanye = Artist(name="Kanye West")
+        a = Track(title="Life Of The Party", artist=kanye, release_date="2021-08-29")
+        b = Track(title="Life of the Party", artist=kanye, release_date="2021-08-29")
+        m = _MatcherParArtiste(
+            {"Kanye West": [_match(artist_name="KANYE WEST", title="LIFE OF THE PARTY")]}
+        )
+        apply_certifications(kanye, [a, b], m)
+        assert len(a.certs.entries) == len(b.certs.entries) == 1
+
+    def test_un_projet_principal_passe_toujours_par_ses_interpretes(self):
+        """Le principal Genius est parfois un PROJET (« 13 Organisé ») que
+        l'organisme ne crédite pas : il nomme Jul, en tête."""
+        sch = Artist(name="SCH")
+        t = Track(title="Bande organisée", artist=sch, is_featuring=True)
+        t.primary_artist_name = "13 Organisé"
+        from src.models.track import Credit, CreditRole
+
+        t.credits = [Credit(name="Jul", role=CreditRole.FEATURED)]
+        m = _MatcherParArtiste(
+            {"SCH": [_match(artist_name="JUL FEAT. SCH, KOFS", title="BANDE ORGANISÉE")]}
+        )
+        apply_certifications(sch, [t], m)
+        assert len(t.certs.entries) == 1

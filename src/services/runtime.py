@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import StrEnum
 
 from src.api.genius_api import GeniusAPI
@@ -159,6 +160,37 @@ class Manque(StrEnum):
     IDENTITE_SPOTIFY_FORCE = "identite_spotify_force"
 
 
+def _instant(valeur) -> datetime | None:
+    if valeur is None or valeur == "":
+        return None
+    if isinstance(valeur, datetime):
+        return valeur
+    try:
+        return datetime.fromisoformat(str(valeur).strip())
+    except ValueError:
+        return None
+
+
+def constat_perime(checked_at, release_date, maintenant: datetime | None = None) -> bool:
+    """Un « pas sur cette plateforme » daté (`*_checked_at`) est-il à
+    redemander ? Jamais constaté : oui. Sinon il expire (décision utilisateur
+    2026-10-12) : `delai_constat_sortie_recente_jours` (30) si la sortie a moins
+    de `fenetre_sortie_recente_jours` (un an), `delai_constat_jours` (180)
+    sinon — date inconnue comprise. Un constat illisible vaut « jamais »."""
+    from src.config import settings
+
+    vu = _instant(checked_at)
+    if vu is None:
+        return True
+    maintenant = maintenant or datetime.now()
+    sortie = _instant(release_date)
+    recente = (
+        sortie is not None and (maintenant - sortie).days < settings.fenetre_sortie_recente_jours
+    )
+    delai = settings.delai_constat_sortie_recente_jours if recente else settings.delai_constat_jours
+    return (maintenant - vu.replace(tzinfo=None)) >= timedelta(days=delai)
+
+
 def est_manquant(track: Track, kind: Manque) -> bool:
     if kind is Manque.CREDITS_GENIUS:
         return not any(c.source == "genius" for c in track.credits)
@@ -174,9 +206,11 @@ def est_manquant(track: Track, kind: Manque) -> bool:
     if kind is Manque.STREAMS:
         return track.streams.spotify_streams is None or track.streams.ytm_streams is None
     if kind is Manque.IDENTITE_DEEZER:
-        return not track.deezer_id and not track.deezer_checked_at
+        return not track.deezer_id and constat_perime(track.deezer_checked_at, track.release_date)
     if kind is Manque.IDENTITE_SPOTIFY:
-        return not track.spotify_id and not track.spotify_id_checked_at
+        return not track.spotify_id and constat_perime(
+            track.spotify_id_checked_at, track.release_date
+        )
     if kind is Manque.IDENTITE_SPOTIFY_FORCE:
         return not track.spotify_id
     raise ValueError(kind)

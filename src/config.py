@@ -156,6 +156,14 @@ class Settings(BaseSettings):
     # valeur que les mémoires d'absence existantes (ReccoBeats, Musixmatch,
     # relecture Genius) : un mois.
     delai_absence_jours: int = 30
+    # « Pas sur Spotify / Deezer / Apple » (`*_checked_at`) : un constat qui
+    # EXPIRE, jamais définitif (décision utilisateur 2026-10-12) — un catalogue
+    # peut arriver des années après (litige avec un label, MC Solaar). 30 j si
+    # la sortie a moins d'un an (les distributeurs mettent en ligne en retard),
+    # 180 j sinon (~3 300 introuvables partout : freestyles, lives, leaks).
+    delai_constat_sortie_recente_jours: int = 30
+    delai_constat_jours: int = 180
+    fenetre_sortie_recente_jours: int = 365
 
     # --- Streams Spotify : qui écrit la colonne, et à quel rythme scraper ---
     # `streams_master` désigne la source qui écrit `tracks.spotify_streams` ;

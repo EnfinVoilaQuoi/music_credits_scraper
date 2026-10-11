@@ -7,6 +7,7 @@ jugement, le gate ne voyait rien).
 """
 
 import copy
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ import pytest
 from src.models.artist import Artist
 from src.models.track import Track
 from src.services import identite
-from src.services.runtime import Hooks, Manque, est_manquant
+from src.services.runtime import Hooks, Manque, constat_perime, est_manquant
 
 
 class _DM:
@@ -199,7 +200,8 @@ def test_un_id_spotify_sans_duree_independante_est_compte(monkeypatch):
 
 def test_selection_manquants_et_force(monkeypatch):
     lie = _t(1, deezer_id=5, spotify_id="sp")
-    date = _t(2, deezer_id=6, spotify_id_checked_at="2026-09-18")  # « pas sur Spotify »
+    maintenant = datetime.now().isoformat(timespec="seconds")
+    date = _t(2, deezer_id=6, spotify_id_checked_at=maintenant)  # « pas sur Spotify »
     vierge = _t(3)
     rt = _runtime([lie, date, vierge])
     recus = {}
@@ -223,10 +225,39 @@ def test_selection_manquants_et_force(monkeypatch):
 def test_predicats_manque():
     assert est_manquant(_t(1), Manque.IDENTITE_DEEZER)
     assert not est_manquant(_t(1, deezer_id=3), Manque.IDENTITE_DEEZER)
-    date = _t(2, spotify_id_checked_at="2026-09-18")
+    date = _t(2, spotify_id_checked_at=datetime.now().isoformat(timespec="seconds"))
     assert not est_manquant(date, Manque.IDENTITE_SPOTIFY)
     assert est_manquant(date, Manque.IDENTITE_SPOTIFY_FORCE)
     assert not est_manquant(_t(3, spotify_id="x"), Manque.IDENTITE_SPOTIFY_FORCE)
+
+
+class TestConstatQuiExpire:
+    """Décision utilisateur 2026-10-12 : « pas sur la plateforme » n'est jamais
+    définitif — 30 j si la sortie a moins d'un an, 180 j sinon."""
+
+    _AUJ = datetime(2026, 10, 12)
+
+    @pytest.mark.parametrize(
+        ("vu", "sortie", "a_redemander"),
+        [
+            (None, None, True),  # jamais constaté
+            ("2026-09-20T10:00:00", "2026-06-01", False),  # sortie récente, 22 j
+            ("2026-09-01T10:00:00", "2026-06-01", True),  # sortie récente, 41 j
+            ("2026-09-01T10:00:00", "2015-03-02", False),  # ancienne, 41 j
+            ("2026-03-01 10:00:00.5", "2015-03-02", True),  # ancienne, > 180 j
+            ("2026-09-01T10:00:00", None, False),  # date inconnue : 180 j
+            ("illisible", None, True),
+        ],
+    )
+    def test_delais(self, vu, sortie, a_redemander):
+        assert constat_perime(vu, sortie, self._AUJ) is a_redemander
+
+    def test_sortie_en_objet_datetime(self):
+        assert constat_perime("2026-09-01", datetime(2026, 6, 1), self._AUJ)
+
+    def test_est_manquant_suit_l_expiration(self):
+        vieux = _t(4, spotify_id_checked_at="2020-01-01T00:00:00")
+        assert est_manquant(vieux, Manque.IDENTITE_SPOTIFY)
 
 
 class TestArtisteSpotify:
@@ -571,7 +602,7 @@ class TestAppleMusic:
         faux = Track(title="Gold Digger", artist=artist)
         deja = Track(title="Heartless", artist=artist)
         bon.id, faux.id, deja.id = 1, 2, 3
-        deja.apple_music_checked_at = "2026-09-29T00:00:00"
+        deja.apple_music_checked_at = datetime.now().isoformat(timespec="seconds")
         artist.tracks = [bon, faux, deja]
         obs = {
             t.id: [Observation("apple_music_id_propose", am, "genius")]

@@ -169,7 +169,9 @@ class TestConstatDeezer:
 
         t = Track(title="x", artist=Artist(name="Isha"))
         assert est_manquant(t, Manque.IDENTITE_DEEZER)
-        t.deezer_checked_at = "2026-09-28T01:00:00"
+        from datetime import datetime
+
+        t.deezer_checked_at = datetime.now().isoformat(timespec="seconds")
         assert not est_manquant(t, Manque.IDENTITE_DEEZER)
 
     def test_persiste_survit_et_part_avec_l_id(self, data_manager):

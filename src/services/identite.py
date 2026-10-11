@@ -35,7 +35,14 @@ from dataclasses import dataclass, field
 
 from src.models import Artist, Track
 from src.observability import source_usage
-from src.services.runtime import Bilan, Hooks, Manque, Runtime, selection_morceaux
+from src.services.runtime import (
+    Bilan,
+    Hooks,
+    Manque,
+    Runtime,
+    constat_perime,
+    selection_morceaux,
+)
 from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
@@ -453,7 +460,10 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
     obs = dm.get_artist_observations(artist.id)
     proposes: dict[int, str] = {}
     for t in artist.tracks:
-        if t.apple_music_id or (t.apple_music_checked_at and not force):
+        # Un « pas sur Apple » daté EXPIRE (30 j sortie récente, 180 j sinon).
+        if t.apple_music_id or (
+            not force and not constat_perime(t.apple_music_checked_at, t.release_date)
+        ):
             continue
         for o in obs.get(t.id, []):
             if o.field == CHAMP_APPLE_PROPOSE and o.value:

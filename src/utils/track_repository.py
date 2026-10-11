@@ -2767,6 +2767,98 @@ class TrackRepository:
             return valeurs
         return {k: v for k, v in valeurs.items() if k != "isrc"}
 
+    #: Colonnes qu'un recalcul peut changer — celles qu'il compare avant/après.
+    COLONNES_REMATERIALISEES = (
+        "duration",
+        "release_date",
+        "isrc",
+        "spotify_streams",
+        "ytm_streams",
+        "has_lyrics",
+    )
+
+    def _rematerialiser_fiche(self, conn, track_id: int) -> None:
+        """Recalcule les colonnes DÉRIVÉES d'une fiche depuis ce qui les fonde :
+        durée et date depuis leurs observations, ISRC (remplir seulement),
+        streams Spotify (verdict), total YouTube Music (vidéos propres
+        mesurées), `has_lyrics` (paroles), `is_primary` (colonne Spotify).
+        Amorce du chantier A de l'audit du 2026-10-11 : UN point de calcul,
+        que les écrivains pourront appeler au lieu de chacun son recalcul."""
+        self._rearbitrer_duree_et_date(conn, track_id)
+        self._ecrire_colonnes_discographie(
+            conn,
+            track_id,
+            self._isrc_sans_remplacer(
+                conn, track_id, self._arbitrer_discographie(conn, track_id, {"isrc"})
+            ),
+        )
+        valeurs = self._arbitrer_streams(conn, track_id)
+        if valeurs:
+            conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
+        if self._a_des_videos_mesurees(conn, track_id):
+            self._recalculer_vues_ytm(conn, track_id)
+        conn.execute(
+            text(
+                "UPDATE tracks SET has_lyrics = CASE WHEN lyrics IS NOT NULL AND lyrics <> '' "
+                "THEN 1 ELSE 0 END WHERE id = :t"
+            ),
+            {"t": track_id},
+        )
+        conn.execute(
+            text(
+                "UPDATE track_spotify_ids SET is_primary = "
+                "(spotify_id = (SELECT t.spotify_id FROM tracks t WHERE t.id = track_id)) "
+                "WHERE track_id = :t"
+            ),
+            {"t": track_id},
+        )
+
+    def rematerialiser(
+        self, track_ids=None, *, appliquer: bool = False
+    ) -> dict[int, dict[str, tuple]]:
+        """Recalcule les colonnes dérivées (`_rematerialiser_fiche`) de
+        `track_ids` (toutes les fiches si None). Rend `{track_id: {colonne:
+        (avant, après)}}` pour ce qui CHANGE ; sans `appliquer`, la transaction
+        est annulée (passage à blanc)."""
+        colonnes = ", ".join(self.COLONNES_REMATERIALISEES)
+        changements: dict[int, dict[str, tuple]] = {}
+        with self.engine.connect() as conn:
+            transaction = conn.begin()
+            try:
+                ids = (
+                    list(track_ids)
+                    if track_ids is not None
+                    else [r[0] for r in conn.execute(text("SELECT id FROM tracks"))]
+                )
+                for tid in ids:
+                    avant = conn.execute(
+                        text(f"SELECT {colonnes} FROM tracks WHERE id = :t"), {"t": tid}
+                    ).first()
+                    if avant is None:
+                        continue
+                    self._rematerialiser_fiche(conn, tid)
+                    apres = conn.execute(
+                        text(f"SELECT {colonnes} FROM tracks WHERE id = :t"), {"t": tid}
+                    ).first()
+                    diff = {
+                        col: (a, b)
+                        for col, a, b in zip(
+                            self.COLONNES_REMATERIALISEES, avant, apres, strict=True
+                        )
+                        if str(a) != str(b)
+                    }
+                    if diff:
+                        changements[tid] = diff
+                if appliquer:
+                    transaction.commit()
+                else:
+                    transaction.rollback()
+            except SQLAlchemyError as e:
+                transaction.rollback()
+                logger.error(f"Erreur rematerialiser : {e}")
+                return {}
+        return changements
+
     def combler_isrc_vides(self, *, appliquer: bool = False) -> list[tuple[int, str, str]]:
         """Fiches à ISRC VIDE alors qu'une observation en donne un : rend
         `[(track_id, titre, isrc_du_verdict)]`, et l'écrit si `appliquer`.

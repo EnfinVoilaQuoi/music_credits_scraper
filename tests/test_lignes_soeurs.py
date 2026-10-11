@@ -506,3 +506,62 @@ class TestRetraitDUnIdSpotifyChezLesSoeurs:
             "7a0tTD7xdvKsNcJfMIDWp4"
         ]
         assert _colonne(data_manager, chez_isha.id, "spotify_streams") == 1000
+
+
+class TestRetraitDeezerEtIsrcChezLesSoeurs:
+    """2026-10-11 (audit §9.3) : même défaut que l'ID Spotify — un ID Deezer ou
+    un ISRC retiré d'une ligne restait chez sa sœur, et l'union le rendait."""
+
+    def _poser_deezer(self, data_manager, track, deezer_id, isrc):
+        track.deezer_id = deezer_id
+        data_manager.save_track(track)
+        data_manager.record_discography_observations(
+            track.id,
+            [Observation("duration", 201, "deezer"), Observation("isrc", isrc, "deezer")],
+        )
+
+    def test_l_id_deezer_part_de_toute_la_famille(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        self._poser_deezer(data_manager, chez_isha, 70, "FRX111")
+        data_manager.save_track(chez_swing)  # union : Swing reçoit tout
+        assert _colonne(data_manager, chez_swing.id, "duration") == 201
+
+        data_manager.clear_track_deezer_id(chez_swing.id)
+        chez_isha.deezer_id = None
+        data_manager.save_track(chez_isha)  # une écriture quelconque relance l'union
+
+        for t in (chez_swing, chez_isha):
+            assert _colonne(data_manager, t.id, "deezer_id") is None
+            assert _colonne(data_manager, t.id, "duration") is None
+            assert _colonne(data_manager, t.id, "isrc") is None
+            assert not [o for o in data_manager.get_observations(t.id) if o.source == "deezer"]
+
+    def test_une_soeur_a_son_propre_id_deezer_garde_tout(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        self._poser_deezer(data_manager, chez_isha, 70, "FRX111")
+        # Deux ID différents (état hérité : l'union ne remplace jamais une
+        # colonne d'identité déjà remplie, elle ne produit pas ce cas).
+        with data_manager.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE tracks SET deezer_id = 99 WHERE id = :t"), {"t": chez_swing.id}
+            )
+
+        data_manager.clear_track_deezer_id(chez_swing.id)
+
+        assert _colonne(data_manager, chez_isha.id, "deezer_id") == 70
+        assert _colonne(data_manager, chez_isha.id, "duration") == 201
+
+    def test_l_isrc_part_de_toute_la_famille(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        data_manager.save_track(chez_isha)
+        data_manager.record_discography_observations(
+            chez_isha.id, [Observation("isrc", "FRX222", "deezer")]
+        )
+        data_manager.save_track(chez_swing)  # l'ISRC voyage par son observation
+        assert _colonne(data_manager, chez_swing.id, "isrc") == "FRX222"
+
+        data_manager.clear_track_isrc(chez_swing.id)
+        data_manager.save_track(chez_isha)
+
+        for t in (chez_swing, chez_isha):
+            assert _colonne(data_manager, t.id, "isrc") is None

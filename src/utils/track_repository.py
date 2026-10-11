@@ -2737,11 +2737,12 @@ class TrackRepository:
         """Ré-arbitre `duration` et `release_date` d'une ligne dont les
         observations ont bougé (fusion, propagation aux sœurs). Seulement les
         champs qui ONT une observation : sans elle, l'arbitrage viderait une
-        colonne qu'aucune provenance n'explique. Jamais l'ISRC : colonne
-        d'identité, qui se remplit sans se remplacer."""
+        colonne qu'aucune provenance n'explique. L'ISRC, colonne d'identité,
+        se REMPLIT seulement (`_isrc_sans_remplacer`) : sans lui, un ISRC reçu
+        d'une sœur restait en observation sans jamais atteindre la colonne."""
         champs = [
             f
-            for f in ("duration", "release_date")
+            for f in ("duration", "release_date", "isrc")
             if conn.execute(
                 text("SELECT 1 FROM observations WHERE track_id = :t AND field = :f"),
                 {"t": track_id, "f": f},
@@ -2749,7 +2750,11 @@ class TrackRepository:
         ]
         if champs:
             self._ecrire_colonnes_discographie(
-                conn, track_id, self._arbitrer_discographie(conn, track_id, champs)
+                conn,
+                track_id,
+                self._isrc_sans_remplacer(
+                    conn, track_id, self._arbitrer_discographie(conn, track_id, champs)
+                ),
             )
 
     def _ecrire_colonnes_discographie(self, conn, track_id: int, valeurs: dict) -> None:
@@ -3087,6 +3092,146 @@ class TrackRepository:
             )
         return [(r["field"], r["source"]) for r in retirees]
 
+    @staticmethod
+    def _rapport_deezer() -> dict:
+        return {
+            "id_retire": None,
+            "colonne_effacee": False,
+            "observations_retirees": [],
+            "isrc_efface": False,
+            "release_date_effacee": False,
+            "liens_parution_retires": 0,
+            "parution_reperee": None,
+            "reccobeats_retirees": [],
+        }
+
+    def _retirer_id_deezer(self, conn, track_id: int, deezer_id, rapport: dict) -> dict:
+        """Les gestes de `clear_track_deezer_id` sur UNE ligne, dans la
+        transaction de l'appelant (la ligne visée, puis chacune de ses sœurs)."""
+        ligne = (
+            conn.execute(
+                text("SELECT deezer_id, isrc, release_date, album FROM tracks WHERE id = :tid"),
+                {"tid": track_id},
+            )
+            .mappings()
+            .first()
+        )
+        if ligne is None:
+            logger.warning(f"clear_track_deezer_id : morceau {track_id} introuvable")
+            return rapport
+        vise = deezer_id if deezer_id is not None else ligne["deezer_id"]
+        if vise is None:
+            return rapport
+        vise = int(vise)
+        rapport["id_retire"] = vise
+
+        if ligne["deezer_id"] is not None and int(ligne["deezer_id"]) == vise:
+            conn.execute(
+                text(
+                    "UPDATE tracks SET deezer_id = NULL, deezer_url = NULL, "
+                    "deezer_checked_at = NULL, updated_at = :now "
+                    "WHERE id = :tid"
+                ),
+                {"tid": track_id, "now": datetime.now()},
+            )
+            rapport["colonne_effacee"] = True
+
+        retirees = (
+            conn.execute(
+                text(
+                    "SELECT field, value FROM observations WHERE track_id = :tid "
+                    "AND source = 'deezer'"
+                ),
+                {"tid": track_id},
+            )
+            .mappings()
+            .all()
+        )
+        valeurs_deezer = {r["field"]: r["value"] for r in retirees}
+        if retirees:
+            conn.execute(
+                text("DELETE FROM observations WHERE track_id = :tid AND source = 'deezer'"),
+                {"tid": track_id},
+            )
+        rapport["observations_retirees"] = [(r["field"], "deezer") for r in retirees]
+
+        # Colonnes d'identité : effacées seulement si elles PORTENT la
+        # valeur deezer (sinon elles viennent d'une autre source).
+        effacements = {}
+        if (
+            ligne["isrc"]
+            and valeurs_deezer.get("isrc")
+            and (str(ligne["isrc"]).upper() == str(valeurs_deezer["isrc"]).upper())
+        ):
+            effacements["isrc"] = None
+            rapport["isrc_efface"] = True
+        # `meme_jour` et non `str(...)[:10]` : depuis que la PRÉCISION
+        # est portée par la forme de l'observation (« 2018 »,
+        # « 2018-05 »), une troncature à 10 caractères ne reconnaît plus
+        # la colonne complétée « 2018-01-01 » — et la colonne ne se
+        # viderait plus JAMAIS, en silence.
+        if (
+            ligne["release_date"]
+            and valeurs_deezer.get("release_date")
+            and meme_jour(ligne["release_date"], valeurs_deezer["release_date"])
+        ):
+            effacements["release_date"] = None
+            rapport["release_date_effacee"] = True
+        self._ecrire_colonnes_discographie(conn, track_id, effacements)
+
+        # Troisième geste : ce que ReccoBeats a tiré de l'ISRC part
+        # avec lui — seulement si l'ISRC EFFACÉ est celui qui l'a
+        # résolu (par `spotify_id`, les mesures sont indépendantes).
+        if rapport["isrc_efface"]:
+            rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
+
+        # Puis ré-arbitrage sur ce qui reste (une durée legacy ou
+        # songbpm reprend la colonne ; rien ⇒ NULL).
+        touches = {f for f in valeurs_deezer if f in self.COLONNES_DISCOGRAPHIE}
+        touches |= set(effacements)
+        touches |= {f for f, _ in rapport["reccobeats_retirees"]}
+        touches &= set(self.COLONNES_DISCOGRAPHIE)
+        if touches:
+            self._ecrire_colonnes_discographie(
+                conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
+            )
+
+        # Parutions prouvées par CETTE piste.
+        liens = (
+            conn.execute(
+                text(
+                    "SELECT rt.id AS rt_id, rt.release_id, r.title FROM release_tracks rt "
+                    "JOIN releases r ON r.id = rt.release_id "
+                    "WHERE rt.track_id = :tid AND EXISTS (SELECT 1 FROM release_track_sources s "
+                    "WHERE s.release_track_id = rt.id AND s.source = 'deezer' "
+                    "AND s.external_track_id = :ext)"
+                ),
+                {"tid": track_id, "ext": str(vise)},
+            )
+            .mappings()
+            .all()
+        )
+        for lien in liens:
+            conn.execute(
+                text(
+                    "DELETE FROM release_track_sources WHERE release_track_id = :rt "
+                    "AND source = 'deezer' AND external_track_id = :ext"
+                ),
+                {"rt": lien["rt_id"], "ext": str(vise)},
+            )
+            reste = conn.execute(
+                text("SELECT COUNT(*) FROM release_track_sources WHERE release_track_id = :rt"),
+                {"rt": lien["rt_id"]},
+            ).scalar()
+            if reste:
+                continue
+            if _est_album_repere(ligne["album"], lien["title"]):
+                rapport["parution_reperee"] = lien["title"]
+                continue
+            conn.execute(text("DELETE FROM release_tracks WHERE id = :rt"), {"rt": lien["rt_id"]})
+            rapport["liens_parution_retires"] += 1
+        return rapport
+
     def clear_track_deezer_id(self, track_id: int, deezer_id: int | None = None) -> dict:
         """Rejette l'ID Deezer d'un morceau — les trois gestes, pendant de
         `clear_track_spotify_id` (un hit Deezer faux écrit `deezer_id`, l'ISRC,
@@ -3108,148 +3253,29 @@ class TrackRepository:
            sans quoi le BPM et la tonalité d'un autre morceau restent en place
            sans que rien ne les rattache plus à une preuve.
         """
-        rapport = {
-            "id_retire": None,
-            "colonne_effacee": False,
-            "observations_retirees": [],
-            "isrc_efface": False,
-            "release_date_effacee": False,
-            "liens_parution_retires": 0,
-            "parution_reperee": None,
-            "reccobeats_retirees": [],
-        }
+        rapport = self._rapport_deezer()
         try:
             with self.engine.begin() as conn:
-                ligne = (
-                    conn.execute(
-                        text(
-                            "SELECT deezer_id, isrc, release_date, album FROM tracks WHERE id = :tid"
-                        ),
-                        {"tid": track_id},
-                    )
-                    .mappings()
-                    .first()
-                )
-                if ligne is None:
-                    logger.warning(f"clear_track_deezer_id : morceau {track_id} introuvable")
-                    return rapport
-                vise = deezer_id if deezer_id is not None else ligne["deezer_id"]
+                self._retirer_id_deezer(conn, track_id, deezer_id, rapport)
+                vise = rapport["id_retire"]
                 if vise is None:
                     return rapport
-                vise = int(vise)
-                rapport["id_retire"] = vise
 
-                if ligne["deezer_id"] is not None and int(ligne["deezer_id"]) == vise:
-                    conn.execute(
-                        text(
-                            "UPDATE tracks SET deezer_id = NULL, deezer_url = NULL, "
-                            "deezer_checked_at = NULL, updated_at = :now "
-                            "WHERE id = :tid"
-                        ),
-                        {"tid": track_id, "now": datetime.now()},
-                    )
-                    rapport["colonne_effacee"] = True
-
-                retirees = (
-                    conn.execute(
-                        text(
-                            "SELECT field, value FROM observations WHERE track_id = :tid "
-                            "AND source = 'deezer'"
-                        ),
-                        {"tid": track_id},
-                    )
-                    .mappings()
-                    .all()
-                )
-                valeurs_deezer = {r["field"]: r["value"] for r in retirees}
-                if retirees:
-                    conn.execute(
-                        text(
-                            "DELETE FROM observations WHERE track_id = :tid AND source = 'deezer'"
-                        ),
-                        {"tid": track_id},
-                    )
-                rapport["observations_retirees"] = [(r["field"], "deezer") for r in retirees]
-
-                # Colonnes d'identité : effacées seulement si elles PORTENT la
-                # valeur deezer (sinon elles viennent d'une autre source).
-                effacements = {}
-                if (
-                    ligne["isrc"]
-                    and valeurs_deezer.get("isrc")
-                    and (str(ligne["isrc"]).upper() == str(valeurs_deezer["isrc"]).upper())
-                ):
-                    effacements["isrc"] = None
-                    rapport["isrc_efface"] = True
-                # `meme_jour` et non `str(...)[:10]` : depuis que la PRÉCISION
-                # est portée par la forme de l'observation (« 2018 »,
-                # « 2018-05 »), une troncature à 10 caractères ne reconnaît plus
-                # la colonne complétée « 2018-01-01 » — et la colonne ne se
-                # viderait plus JAMAIS, en silence.
-                if (
-                    ligne["release_date"]
-                    and valeurs_deezer.get("release_date")
-                    and meme_jour(ligne["release_date"], valeurs_deezer["release_date"])
-                ):
-                    effacements["release_date"] = None
-                    rapport["release_date_effacee"] = True
-                self._ecrire_colonnes_discographie(conn, track_id, effacements)
-
-                # Troisième geste : ce que ReccoBeats a tiré de l'ISRC part
-                # avec lui — seulement si l'ISRC EFFACÉ est celui qui l'a
-                # résolu (par `spotify_id`, les mesures sont indépendantes).
-                if rapport["isrc_efface"]:
-                    rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
-
-                # Puis ré-arbitrage sur ce qui reste (une durée legacy ou
-                # songbpm reprend la colonne ; rien ⇒ NULL).
-                touches = {f for f in valeurs_deezer if f in self.COLONNES_DISCOGRAPHIE}
-                touches |= set(effacements)
-                touches |= {f for f, _ in rapport["reccobeats_retirees"]}
-                touches &= set(self.COLONNES_DISCOGRAPHIE)
-                if touches:
-                    self._ecrire_colonnes_discographie(
-                        conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
-                    )
-
-                # Parutions prouvées par CETTE piste.
-                liens = (
-                    conn.execute(
-                        text(
-                            "SELECT rt.id AS rt_id, rt.release_id, r.title FROM release_tracks rt "
-                            "JOIN releases r ON r.id = rt.release_id "
-                            "WHERE rt.track_id = :tid AND EXISTS (SELECT 1 FROM release_track_sources s "
-                            "WHERE s.release_track_id = rt.id AND s.source = 'deezer' "
-                            "AND s.external_track_id = :ext)"
-                        ),
-                        {"tid": track_id, "ext": str(vise)},
-                    )
-                    .mappings()
-                    .all()
-                )
-                for lien in liens:
-                    conn.execute(
-                        text(
-                            "DELETE FROM release_track_sources WHERE release_track_id = :rt "
-                            "AND source = 'deezer' AND external_track_id = :ext"
-                        ),
-                        {"rt": lien["rt_id"], "ext": str(vise)},
-                    )
-                    reste = conn.execute(
-                        text(
-                            "SELECT COUNT(*) FROM release_track_sources WHERE release_track_id = :rt"
-                        ),
-                        {"rt": lien["rt_id"]},
+                # Même enregistrement chez un autre artiste (ligne SŒUR) : l'ID et
+                # ce qui en découlait (observations `deezer` reçues par l'union,
+                # preuve de parution) y sont tout aussi faux — laissés là, l'union
+                # les rendait à la ligne d'où on venait de les retirer. Une sœur
+                # dont la colonne porte un AUTRE ID garde tout : ses observations
+                # `deezer` peuvent venir du sien.
+                def chez_la_soeur(jumelle):
+                    propre = conn.execute(
+                        text("SELECT deezer_id FROM tracks WHERE id = :tid"), {"tid": jumelle}
                     ).scalar()
-                    if reste:
-                        continue
-                    if _est_album_repere(ligne["album"], lien["title"]):
-                        rapport["parution_reperee"] = lien["title"]
-                        continue
-                    conn.execute(
-                        text("DELETE FROM release_tracks WHERE id = :rt"), {"rt": lien["rt_id"]}
-                    )
-                    rapport["liens_parution_retires"] += 1
+                    if propre is not None and int(propre) != vise:
+                        return
+                    self._retirer_id_deezer(conn, jumelle, vise, self._rapport_deezer())
+
+                effacer_chez_les_soeurs(conn, track_id, chez_la_soeur)
 
             logger.info(
                 f"🧹 ID Deezer {vise} retiré du morceau {track_id} "
@@ -3289,59 +3315,87 @@ class TrackRepository:
             logger.error(f"Erreur clear_orphan_reccobeats_measures (track_id={track_id}): {e}")
             return rapport
 
+    @staticmethod
+    def _rapport_isrc() -> dict:
+        return {
+            "isrc_efface": False,
+            "observations_retirees": [],
+            "reccobeats_retirees": [],
+        }
+
+    def _retirer_isrc(self, conn, track_id: int, rapport: dict) -> dict:
+        """Les gestes de `clear_track_isrc` sur UNE ligne, dans la transaction
+        de l'appelant (la ligne visée, puis chacune de ses sœurs)."""
+        ligne = (
+            conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
+            .mappings()
+            .first()
+        )
+        if ligne is None or not ligne["isrc"]:
+            return rapport
+
+        conn.execute(
+            text("UPDATE tracks SET isrc = NULL, updated_at = :now WHERE id = :tid"),
+            {"tid": track_id, "now": datetime.now()},
+        )
+        rapport["isrc_efface"] = True
+
+        retirees = (
+            conn.execute(
+                text(
+                    "SELECT field, source FROM observations WHERE track_id = :tid "
+                    "AND field = 'isrc'"
+                ),
+                {"tid": track_id},
+            )
+            .mappings()
+            .all()
+        )
+        if retirees:
+            conn.execute(
+                text("DELETE FROM observations WHERE track_id = :tid AND field = 'isrc'"),
+                {"tid": track_id},
+            )
+        rapport["observations_retirees"] = [(r["field"], r["source"]) for r in retirees]
+
+        rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
+
+        touches = {"isrc"} | {f for f, _ in rapport["reccobeats_retirees"]}
+        touches &= set(self.COLONNES_DISCOGRAPHIE)
+        if touches:
+            self._ecrire_colonnes_discographie(
+                conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
+            )
+        return rapport
+
     def clear_track_isrc(self, track_id: int) -> dict:
         """Retire un ISRC HÉRITÉ de l'ancien `get_isrc` (avant le gate du
         2026-09-08) : 719 fiches mesurées le 2026-09-22, jamais passées par
         aucune observation. Même forme que `clear_track_deezer_id` — colonne,
         observations, troisième geste — mais sans parution ni `deezer_id` à
         toucher (ce n'est pas de là que vient cet ISRC)."""
-        rapport = {
-            "isrc_efface": False,
-            "observations_retirees": [],
-            "reccobeats_retirees": [],
-        }
+        rapport = self._rapport_isrc()
         try:
             with self.engine.begin() as conn:
-                ligne = (
-                    conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
-                    .mappings()
-                    .first()
-                )
-                if ligne is None or not ligne["isrc"]:
+                ancien = conn.execute(
+                    text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id}
+                ).scalar()
+                self._retirer_isrc(conn, track_id, rapport)
+                if not rapport["isrc_efface"]:
                     return rapport
 
-                conn.execute(
-                    text("UPDATE tracks SET isrc = NULL, updated_at = :now WHERE id = :tid"),
-                    {"tid": track_id, "now": datetime.now()},
-                )
-                rapport["isrc_efface"] = True
+                # Le même ISRC chez une ligne SŒUR (même enregistrement, autre
+                # artiste) est tout aussi faux : laissé là, l'union le rendait.
+                # Une sœur qui porte un AUTRE ISRC garde le sien.
+                def chez_la_soeur(jumelle):
+                    propre = conn.execute(
+                        text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": jumelle}
+                    ).scalar()
+                    if propre and str(propre).upper() != str(ancien).upper():
+                        return
+                    self._retirer_isrc(conn, jumelle, self._rapport_isrc())
 
-                retirees = (
-                    conn.execute(
-                        text(
-                            "SELECT field, source FROM observations WHERE track_id = :tid "
-                            "AND field = 'isrc'"
-                        ),
-                        {"tid": track_id},
-                    )
-                    .mappings()
-                    .all()
-                )
-                if retirees:
-                    conn.execute(
-                        text("DELETE FROM observations WHERE track_id = :tid AND field = 'isrc'"),
-                        {"tid": track_id},
-                    )
-                rapport["observations_retirees"] = [(r["field"], r["source"]) for r in retirees]
-
-                rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
-
-                touches = {"isrc"} | {f for f, _ in rapport["reccobeats_retirees"]}
-                touches &= set(self.COLONNES_DISCOGRAPHIE)
-                if touches:
-                    self._ecrire_colonnes_discographie(
-                        conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
-                    )
+                effacer_chez_les_soeurs(conn, track_id, chez_la_soeur)
 
             logger.info(
                 f"🧹 ISRC retiré du morceau {track_id} "

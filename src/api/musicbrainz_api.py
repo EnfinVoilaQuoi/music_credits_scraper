@@ -1,6 +1,6 @@
 """Client MusicBrainz — appartenance à un GROUPE (lot 3).
 
-Doc de référence : `docs/api/musicbrainz-api.md`.
+Doc de référence : `../therapie_studio/notes/scraper/api/musicbrainz-api.md`.
 
 Rôle : **source 1** de « qui compose quelle formation ». Genius ne l'expose pas ;
 MusicBrainz la modélise explicitement, avec des dates. Discogs confirme.

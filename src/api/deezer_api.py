@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 #: Clé de `source_health.SOURCES` sous laquelle cet usage est compté.
 _SOURCE = "deezer"
 
-#: Codes d'erreur de l'ENVELOPPE JSON (`docs/api/deezer-api.md` § Codes
+#: Codes d'erreur de l'ENVELOPPE JSON (`notes/scraper/api/deezer-api.md` du studio, § Codes
 #: d'erreur) → verdict. 800 (DATA_NOT_FOUND) est une vraie absence : aucune
 #: tentative en échec. Code inconnu ⇒ PARSE (notre requête ou l'API a bougé).
 _KIND_ERREUR_DEEZER: dict[int, IssueKind | None] = {

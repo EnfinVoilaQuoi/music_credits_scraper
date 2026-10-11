@@ -1,7 +1,7 @@
 """
 Client API LRCLIB (lrclib.net) — paroles synchronisées (.lrc) libres, sans clé.
 
-Doc de référence : docs/api/lrclib-api.md.
+Doc de référence : ../therapie_studio/notes/scraper/api/lrclib-api.md.
 
 Rôle dans le projet : **SOURCE 1** des timestamps (paroles synchronisées), devant YTM.
 Renvoie du LRC (`[mm:ss.xx] ligne`) + le texte brut. **Aucun crédit** (paroles seules) :

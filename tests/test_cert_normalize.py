@@ -205,15 +205,14 @@ class TestMultiplicateur:
     acceptait un niveau qui n'existe pas.
     """
 
-    @pytest.mark.parametrize(
-        "niveau", ["4x Gold", "3x Gold", "2x Diamond", "2x Oro", "3x Diamante"]
-    )
+    @pytest.mark.parametrize("niveau", ["4x Gold", "3x Gold", "2x Diamond", "2x Oro"])
     def test_un_multiple_hors_platine_nest_pas_un_niveau(self, niveau):
         assert riaa_units(niveau) is None
         assert riaa_level(niveau) == niveau  # recopié, pas interprété
 
     @pytest.mark.parametrize(
-        ("niveau", "unites"), [("4x Platinum", 4_000_000), ("61x Platino", 3_660_000)]
+        ("niveau", "unites"),
+        [("4x Platinum", 4_000_000), ("61x Platino", 3_660_000), ("3x Diamante", 1_800_000)],
     )
     def test_le_platine_se_multiplie(self, niveau, unites):
         assert riaa_units(niveau) == unites
@@ -233,3 +232,22 @@ def test_palier_effectif_ramene_dix_platines_a_un_diamant():
     assert palier_effectif("Or") == (1, "or")
     # L'échelle affichée d'un titre suit le même ordre.
     assert _ordre_palier("12x Platinum") > _ordre_palier("Diamond") > _ordre_palier("9x Platinum")
+
+
+class TestUneCertifUnLibelle:
+    """2026-10-11 : « 10x Platinum » (import) et « Diamond » (site) le même jour
+    faisaient deux lignes du clean — la forme du SITE gagne."""
+
+    @pytest.mark.parametrize(
+        ("brut", "canon"),
+        [
+            ("10x Platinum", "Diamond"),
+            ("10X MULTI-PLATINUM", "Diamond"),
+            ("11x Platinum", "11x Platinum"),
+            ("10x Platino", "Diamante"),
+            ("30x Platino", "3x Diamante"),
+            ("31x Platino", "31x Platino"),
+        ],
+    )
+    def test_les_multiples_de_dix(self, brut, canon):
+        assert riaa_level(brut) == canon

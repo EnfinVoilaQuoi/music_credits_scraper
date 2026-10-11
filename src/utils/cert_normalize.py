@@ -782,6 +782,10 @@ _PALIERS_RIAA = {
     "diamante": ("Diamante", PROGRAMME_LATIN, 600_000),
 }
 
+#: Palier latin de même RANG qu'un palier US (autre échelle d'unités) : sert à
+#: reconnaître un award latin que l'ancien scraper écrivait en vocabulaire US.
+PALIER_LATIN_DU_US = {"gold": "oro", "platinum": "platino", "diamond": "diamante"}
+
 #: « 4x Multi-Platinum », « 2X PLATINO », « Multi-Platinum », « GOLD »…
 _NIVEAU_RIAA_RE = re.compile(r"^(?:(\d+)\s*x\s*)?(?:multi-?\s*)?([A-Za-zÀ-ÿ]+)$", re.I)
 
@@ -791,7 +795,9 @@ _NIVEAU_RIAA_RE = re.compile(r"^(?:(\d+)\s*x\s*)?(?:multi-?\s*)?([A-Za-zÀ-ÿ]+)
 #: fixe. Le commentaire le disait déjà ; le code, lui, multipliait n'importe
 #: quel palier, si bien que `riaa_units("4x Gold")` rendait 2 000 000 et que le
 #: validateur acceptait un niveau qui n'existe pas (attrapé par ses tests).
-_PALIERS_MULTIPLIABLES = {"platinum", "platino"}
+#: « 3x Diamante » existe chez les latins (Maná *Oye mi amor*, 2026-03-04) : il
+#: était inconnu du vocabulaire, donc sans unités (2026-10-11).
+_PALIERS_MULTIPLIABLES = {"platinum", "platino", "diamante"}
 
 
 def _decoder_niveau_riaa(level: str) -> tuple[int, tuple] | None:
@@ -823,6 +829,15 @@ def riaa_level(s: str) -> str:
     if decode is None:
         return s
     mult, (canon, _programme, _unites) = decode
+    # Une même certification arrivait sous deux libellés — « 10x Platinum » par
+    # l'import, « Diamond » par le site, le même jour (41 paires dans le clean,
+    # 2026-10-11) — et la clé de dédoublonnage porte le libellé. Forme du SITE :
+    # Diamond pour 10x Platinum ; N Diamante pour N×10 Platino (le latin écrit
+    # « 3x Diamante », le classique continue en « 11x Platinum »).
+    if canon == "Platinum" and mult == 10:
+        return "Diamond"
+    if canon == "Platino" and mult >= 10 and mult % 10 == 0:
+        mult, canon = mult // 10, "Diamante"
     return f"{mult}x {canon}" if mult > 1 else canon
 
 

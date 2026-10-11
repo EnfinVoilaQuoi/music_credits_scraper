@@ -26,6 +26,8 @@ from src.scrapers.riaa_scraper_v2 import RIAAScraperV2 as RIAAScraper
 from src.utils import cert_clean_report, cert_store
 from src.utils.cert_normalize import (
     FORMAT_JOUR_CLI,
+    PALIER_LATIN_DU_US,
+    decouper_multiplicateur,
     jour_cli,
     lire_jour_cli,
     normalize_text,
@@ -636,6 +638,13 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
     df = _combiner_representations(df).drop(columns="_k")
     if report is not None:
         report["duplicates_removed"] = avant - len(df)
+    df, jumelles = _ecarter_jumelles_latines(df)
+    if report is not None:
+        report["jumelles_latines"] = len(jumelles)
+        report["jumelles_latines_examples"] = [
+            f"{r.Artist} — {r.Title} : {r.Certification_Type} au {r.Certification_Date}"
+            for r in jumelles.head(15).itertuples()
+        ]
     df, mal_dates = _ecarter_paliers_mal_dates(df)
     if report is not None:
         report["paliers_mal_dates"] = len(mal_dates)
@@ -717,6 +726,52 @@ def _ecarter_paliers_mal_dates(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
     balayage = df["Release_Date"].astype(str).str.strip() == ""
     ecartees = balayage & (quand != "") & (quand < plus_tard)
     return df[~ecartees], df[ecartees]
+
+
+def _ecarter_jumelles_latines(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Écarte les lignes US de l'ANCIEN scraper qui doublent un award LATIN.
+
+    L'ancien scraper écrivait les awards latins en vocabulaire US (« Platinum »
+    pour « Platino ») : la même certification existe alors deux fois, et la
+    ligne US porte le barème US — 16,7 fois le latin. Mesuré le 2026-10-11 :
+    2 228 lignes, 8,4 milliards d'unités fausses (Abraham Mateo *Hablame
+    Bajito* Platinum + Platino le même jour). Une ligne est écartée quand elle
+    est US, SANS famille ni date de sortie (signature de l'ancien scraper), et
+    qu'une ligne LATIN a le même artiste, titre, format, date et le palier
+    équivalent au même multiplicateur. Sans jumelle, rien ne la distingue :
+    elle reste. Rend (gardées, écartées) ; le brut garde tout.
+    """
+    if df.empty:
+        return df, df.iloc[0:0]
+
+    def cle(r, palier):
+        return (
+            normalize_text(r.Artist),
+            normalize_text(r.Title),
+            str(r.Format_Type).upper(),
+            _riaa_iso(r.Certification_Date),
+            palier,
+        )
+
+    latines = set()
+    for r in df[df["Award_Programme"].astype(str).str.upper() == "LATIN"].itertuples():
+        mult, palier = decouper_multiplicateur(_riaa_level(r.Certification_Type))
+        latines.add(cle(r, (mult, palier)))
+
+    def jumelle(r) -> bool:
+        if str(r.Award_Programme).upper() != "US":
+            return False
+        if str(r.Award_Family).strip() or str(r.Release_Date).strip():
+            return False
+        mult, palier = decouper_multiplicateur(_riaa_level(r.Certification_Type))
+        latin = PALIER_LATIN_DU_US.get(palier)
+        if latin is None:
+            return False
+        # « 10x Platinum » est canonisé en Diamond ; son jumeau latin, en Diamante.
+        return cle(r, (mult, latin)) in latines
+
+    masque = pd.Series([jumelle(r) for r in df.itertuples()], index=df.index, dtype=bool)
+    return df[~masque], df[masque]
 
 
 def _combiner_representations(df: pd.DataFrame) -> pd.DataFrame:
@@ -1092,6 +1147,8 @@ def clean_certif_csv(apply: bool = True) -> dict:
             "duplicates_removed": 0,
             "paliers_mal_dates": 0,
             "paliers_mal_dates_examples": [],
+            "jumelles_latines": 0,
+            "jumelles_latines_examples": [],
             "formats_normalises": 0,
             "niveaux_normalises": 0,
             "empty_examples": [],
@@ -1131,6 +1188,7 @@ def format_clean_report(report: dict) -> str:
             ("Formats normalisés", report.get("formats_normalises", 0)),
             ("Niveaux normalisés", report.get("niveaux_normalises", 0)),
             ("Paliers mal datés écartés (balayage)", report.get("paliers_mal_dates", 0)),
+            ("Jumelles US d'awards latins écartées", report.get("jumelles_latines", 0)),
         ],
         sections=[
             ("Formats normalisés", report.get("format_changes") or {}),
@@ -1144,6 +1202,10 @@ def format_clean_report(report: dict) -> str:
             (
                 f"Paliers mal datés écartés ({report.get('paliers_mal_dates', 0)})",
                 [ex[:90] for ex in report.get("paliers_mal_dates_examples") or []],
+            ),
+            (
+                f"Jumelles US d'awards latins ({report.get('jumelles_latines', 0)})",
+                [ex[:90] for ex in report.get("jumelles_latines_examples") or []],
             ),
         ],
         note_dry_run=(

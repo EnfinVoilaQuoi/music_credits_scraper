@@ -1006,7 +1006,11 @@ class TrackRepository:
         discographie = champs & set(self.COLONNES_DISCOGRAPHIE)
         if discographie:
             self._ecrire_colonnes_discographie(
-                conn, track_id, self._arbitrer_discographie(conn, track_id, discographie)
+                conn,
+                track_id,
+                self._isrc_sans_remplacer(
+                    conn, track_id, self._arbitrer_discographie(conn, track_id, discographie)
+                ),
             )
         if "spotify_streams" in champs:
             valeurs = self._arbitrer_streams(conn, track_id)
@@ -2746,11 +2750,56 @@ class TrackRepository:
             {**valeurs, "now": datetime.now(), "tid": track_id},
         )
 
+    @staticmethod
+    def _isrc_sans_remplacer(conn, track_id: int, valeurs: dict) -> dict:
+        """L'ISRC est une colonne d'IDENTITÉ : un verdict la REMPLIT, ne la
+        remplace ni ne la vide jamais (décision utilisateur 2026-10-11). Deux
+        règles cohabitaient — remplissage seul dans `save_track` et
+        `fill_track_identities`, remplacement ici — et 80 colonnes restaient
+        vides malgré une observation. Les retraits explicites
+        (`clear_track_isrc`, `clear_track_deezer_id`) gardent leur geste."""
+        if "isrc" not in valeurs:
+            return valeurs
+        actuel = conn.execute(
+            text("SELECT isrc FROM tracks WHERE id = :t"), {"t": track_id}
+        ).scalar()
+        if actuel in (None, "") and valeurs["isrc"]:
+            return valeurs
+        return {k: v for k, v in valeurs.items() if k != "isrc"}
+
+    def combler_isrc_vides(self, *, appliquer: bool = False) -> list[tuple[int, str, str]]:
+        """Fiches à ISRC VIDE alors qu'une observation en donne un : rend
+        `[(track_id, titre, isrc_du_verdict)]`, et l'écrit si `appliquer`.
+        Rattrapage des colonnes laissées vides avant la règle « remplir sans
+        remplacer » (2026-10-11)."""
+        trouvees = []
+        try:
+            with self.engine.begin() as conn:
+                lignes = conn.execute(
+                    text(
+                        "SELECT DISTINCT t.id, t.title FROM tracks t JOIN observations o "
+                        "ON o.track_id = t.id AND o.field = 'isrc' "
+                        "WHERE t.isrc IS NULL OR t.isrc = ''"
+                    )
+                ).all()
+                for tid, titre in lignes:
+                    valeurs = self._arbitrer_discographie(conn, tid, {"isrc"})
+                    if valeurs.get("isrc"):
+                        trouvees.append((tid, titre, valeurs["isrc"]))
+                        if appliquer:
+                            self._ecrire_colonnes_discographie(conn, tid, {"isrc": valeurs["isrc"]})
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur combler_isrc_vides : {e}")
+            return []
+        return trouvees
+
     def _rearbitrer_discographie_apres_ecriture(self, conn, track: Track) -> None:
         champs = {o.field for o in track.observations} & set(self.COLONNES_DISCOGRAPHIE)
         if not champs:
             return
-        valeurs = self._arbitrer_discographie(conn, track.id, champs)
+        valeurs = self._isrc_sans_remplacer(
+            conn, track.id, self._arbitrer_discographie(conn, track.id, champs)
+        )
         self._ecrire_colonnes_discographie(conn, track.id, valeurs)
         for col, val in valeurs.items():
             setattr(track, col, val)
@@ -2767,8 +2816,10 @@ class TrackRepository:
         try:
             with self.engine.begin() as conn:
                 self._upsert_observations(conn, track_id, observations)
-                valeurs = self._arbitrer_discographie(
-                    conn, track_id, {o.field for o in observations}
+                valeurs = self._isrc_sans_remplacer(
+                    conn,
+                    track_id,
+                    self._arbitrer_discographie(conn, track_id, {o.field for o in observations}),
                 )
                 self._ecrire_colonnes_discographie(conn, track_id, valeurs)
             return valeurs

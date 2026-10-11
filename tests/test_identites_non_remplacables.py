@@ -161,3 +161,44 @@ class TestRienNestPerdu:
         entrees = {e.spotify_id: e.is_primary for e in data_manager.get_track_spotify_ids(track.id)}
         assert entrees == {_ID_A: True, _ID_B: False}
         assert set(data_manager.get_track_ids_by_spotify_id()) >= {_ID_A, _ID_B}
+
+
+class TestIsrcRempliJamaisRemplace:
+    """Décision utilisateur 2026-10-11 : l'ISRC est une identité — un verdict
+    d'observations la REMPLIT, ne la remplace jamais (80 colonnes vides malgré
+    une observation, deux règles contradictoires selon le chemin)."""
+
+    def _fiche(self, data_manager, isrc=None):
+        from src.models import Artist, Track
+
+        a = Artist(name="Isha")
+        a.id = data_manager.save_artist(a)
+        t = Track(title="Bitume", artist=a)
+        t.isrc = isrc
+        data_manager.save_track(t)
+        return t
+
+    def _isrc(self, data_manager, t):
+        from sqlalchemy import text
+
+        with data_manager.engine.connect() as conn:
+            return conn.execute(text("SELECT isrc FROM tracks WHERE id = :t"), {"t": t.id}).scalar()
+
+    def test_une_observation_remplit_une_colonne_vide(self, data_manager):
+        from src.enrichment.observation import Observation
+
+        t = self._fiche(data_manager)
+        data_manager.record_discography_observations(
+            t.id, [Observation("isrc", "FRZ042100088", "deezer")]
+        )
+        assert self._isrc(data_manager, t) == "FRZ042100088"
+
+    def test_une_observation_ne_remplace_pas_l_isrc_en_place(self, data_manager):
+        from src.enrichment.observation import Observation
+
+        t = self._fiche(data_manager, isrc="FRAAA0000001")
+        data_manager.record_discography_observations(
+            t.id, [Observation("isrc", "FRZ042100088", "deezer")]
+        )
+        data_manager.upsert_observations(t.id, [Observation("isrc", "FRZ042100099", "legacy")])
+        assert self._isrc(data_manager, t) == "FRAAA0000001"

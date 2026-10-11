@@ -204,7 +204,8 @@ class TrackRepository:
         # sont PAS typés → les strings de date (release_date, last_scraped…)
         # passent verbatim au driver, ce qui CONTOURNE le piège d'écriture
         # TIMESTAMP (qui refuse les strings sur un bind typé, cf. date_bind).
-        with self.engine.begin() as conn:
+        # `_ecrire` (chantier A) : recalcul de la fiche et de ses sœurs au commit.
+        with self._ecrire() as conn:
             if not track.artist or not track.artist.id:
                 raise ValueError("Le morceau doit avoir un artiste avec un ID")
 
@@ -569,26 +570,16 @@ class TrackRepository:
                     )
                     setattr(track, frais, False)
                 synchroniser_soeurs(conn, track.id, track.genius_id)
-                # Les sœurs reçoivent des observations : leurs colonnes suivent.
-                # Sans ça, la ligne enregistrée ré-arbitrait seule (2026-10-10 :
-                # 43 fiches à durée VIDE malgré leurs observations — Kanye
-                # « Heartless », sœur de la ligne Kid Cudi à 210 s).
-                # La ligne ENREGISTRÉE aussi : l'union lui verse les observations
-                # de ses sœurs APRÈS son propre arbitrage (2026-10-11 : SCH
-                # « Kimono » sans streams en colonne, 22,7 M d'observation Kworb
-                # reçue de sa sœur).
-                jumelles = ids_soeurs(conn, track.id, track.genius_id)[0]
-                for soeur in [track.id, *jumelles] if jumelles else []:
-                    self._rearbitrer_duree_et_date(conn, soeur)
-                    valeurs = self._arbitrer_streams(conn, soeur)
-                    if valeurs:
-                        conn.execute(update(tracks).where(tracks.c.id == soeur).values(**valeurs))
-                    # Et son total YouTube Music, sur les vidéos reçues (2026-10-10 :
-                    # Kanye « Heartless » 258 M en colonne, 466 M de vidéos propres).
-                    # Seulement si elle a des vidéos mesurées : sans elles, le
-                    # recalcul viderait un total qu'aucune vidéo n'explique.
-                    if self._a_des_videos_mesurees(conn, soeur):
-                        self._recalculer_vues_ytm(conn, soeur)
+                # Chantier A : la ligne enregistrée ET ses sœurs (qui viennent de
+                # recevoir des observations et des vidéos par l'union) sont
+                # rematérialisées en fin de transaction — durée, date, ISRC,
+                # streams, total YTM, has_lyrics, is_primary. Le recalcul à la
+                # main qu'il y avait ici n'en faisait qu'une partie, et seulement
+                # quand la fiche avait des sœurs (2026-10-10 « Heartless » :
+                # durée VIDE malgré ses observations, 258 M en colonne pour
+                # 466 M de vidéos ; 2026-10-11 « Kimono » : streams reçus d'une
+                # sœur jamais arbitrés).
+                self._toucher(conn, track.id)
 
             # commit auto à la sortie du bloc `engine.begin()`
             logger.info(

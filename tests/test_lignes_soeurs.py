@@ -565,3 +565,75 @@ class TestRetraitDeezerEtIsrcChezLesSoeurs:
 
         for t in (chez_swing, chez_isha):
             assert _colonne(data_manager, t.id, "isrc") is None
+
+
+class TestDonneesDePageLaPlusRecenteGagne:
+    """Décision utilisateur 2026-10-12 : une donnée lue sur la PAGE Genius
+    (anecdotes, relations, paroles) n'est plus figée à la première valeur chez
+    une sœur — la lecture la plus récente l'emporte, sans jamais vider."""
+
+    def _poser(self, dm, tid, **colonnes):
+        with dm.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE tracks SET "
+                    + ", ".join(f"{c} = :{c}" for c in colonnes)
+                    + " WHERE id = :tid"
+                ),
+                {**colonnes, "tid": tid},
+            )
+
+    def test_l_anecdote_relue_le_plus_recemment_gagne(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        self._poser(
+            data_manager,
+            chez_swing.id,
+            anecdotes="ancienne",
+            genius_detail_checked_at="2026-09-01T10:00:00",
+        )
+        self._poser(
+            data_manager,
+            chez_isha.id,
+            anecdotes="relue",
+            genius_detail_checked_at="2026-10-01T10:00:00",
+        )
+        with data_manager.engine.begin() as conn:
+            from src.utils.track_soeurs import synchroniser_soeurs
+
+            synchroniser_soeurs(conn, chez_swing.id, _GENIUS)
+            synchroniser_soeurs(conn, chez_swing.id, _GENIUS)  # idempotent
+        assert _colonne(data_manager, chez_swing.id, "anecdotes") == "relue"
+        assert _colonne(data_manager, chez_isha.id, "anecdotes") == "relue"
+
+    def test_une_valeur_vide_ne_se_transmet_jamais(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        self._poser(
+            data_manager,
+            chez_swing.id,
+            lyrics="Premier couplet",
+            lyrics_scraped_at="2026-09-01 10:00:00",
+        )
+        self._poser(data_manager, chez_isha.id, lyrics="", lyrics_scraped_at="2026-10-01 10:00:00")
+        data_manager.save_track(chez_isha)
+        assert _colonne(data_manager, chez_isha.id, "lyrics") == "Premier couplet"
+        assert _colonne(data_manager, chez_swing.id, "lyrics") == "Premier couplet"
+
+    def test_les_paroles_relues_remplacent_avec_leur_source(self, data_manager, famille):
+        chez_swing, chez_isha = famille
+        self._poser(
+            data_manager,
+            chez_swing.id,
+            lyrics="v1",
+            lyrics_source="genius",
+            lyrics_scraped_at="2026-09-01 10:00:00",
+        )
+        self._poser(
+            data_manager,
+            chez_isha.id,
+            lyrics="v2",
+            lyrics_source="genius",
+            lyrics_scraped_at="2026-10-01 10:00:00",
+        )
+        relu = data_manager.get_artist_tracks(chez_swing.artist.id)[0]
+        data_manager.save_track(relu)
+        assert _colonne(data_manager, chez_swing.id, "lyrics") == "v2"

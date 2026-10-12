@@ -1257,7 +1257,12 @@ class TrackRepository:
         scripts/merge_duplicates.py + dédup. Le BACKUP est à faire par l'appelant
         AVANT (règle projet : backup avant toute opération destructive)."""
         try:
-            with self.engine.begin() as conn:
+            # Chantier A (décision utilisateur 2026-10-12 : un total YTM vaut
+            # TOUJOURS la somme des vidéos mesurées) : la fiche gardée et ses
+            # sœurs sont rematérialisées au commit. `_ytm_apres_fusion` ne
+            # décide plus que pour une fiche sans aucune vidéo mesurée.
+            with self._ecrire() as conn:
+                self._toucher(conn, keep_id)
                 # Identité : la fiche gardée COMBLE ses colonnes vides depuis
                 # l'autre, sans jamais en remplacer une (« le premier renseigne,
                 # personne ne remplace »). Sans ça, une fiche Deezer absorbée par
@@ -2859,6 +2864,18 @@ class TrackRepository:
             ).scalar()
             if gid:
                 a_faire.update(ids_soeurs(conn, tid, gid)[0])
+        # Les AUTRES porteurs de leurs vidéos (même artiste) : une vidéo reçue
+        # par l'union des sœurs peut devenir partagée avec une fiche hors de la
+        # famille, dont le total change sans qu'elle ait été touchée
+        # (2026-10-12 : « Father Stretch My Hands, Pt. 1 », « Moon »).
+        for tid in list(a_faire):
+            videos = [
+                r[0]
+                for r in conn.execute(
+                    text("SELECT video_id FROM track_videos WHERE track_id = :t"), {"t": tid}
+                )
+            ]
+            a_faire.update(self._porteurs_des_videos(conn, tid, videos))
         touchees.clear()
         for tid in sorted(a_faire):
             self._rematerialiser_fiche(conn, tid)
@@ -2898,6 +2915,47 @@ class TrackRepository:
             ),
             {"t": track_id},
         )
+
+    def realigner_soeurs(self, *, appliquer: bool = False) -> dict[int, int]:
+        """Rejoue `synchroniser_soeurs` sur chaque famille de lignes sœurs (même
+        `genius_id` chez plusieurs artistes), puis rematérialise ses membres —
+        rattrapage des familles divergées avant la règle « la lecture la plus
+        récente de la page l'emporte » (2026-10-12). Rend `{genius_id: lignes
+        de page réécrites}` pour les familles qui changent ; sans `appliquer`,
+        la transaction est annulée (passage à blanc). Aucune règle n'est
+        réimplémentée ici : c'est la synchronisation de `save_track`."""
+        changes: dict[int, int] = {}
+        with self.engine.connect() as conn:
+            transaction = conn.begin()
+            try:
+                familles = conn.execute(
+                    text(
+                        "SELECT genius_id, MIN(id) FROM tracks WHERE genius_id IS NOT NULL "
+                        "GROUP BY genius_id HAVING COUNT(DISTINCT artist_id) > 1"
+                    )
+                ).all()
+                # Deux temps : TOUTES les synchronisations, puis le recalcul (via
+                # le mécanisme du chantier A, porteurs de vidéos compris) — une
+                # union dans une famille peut changer le total d'une autre.
+                conn.info[self._A_RECALCULER] = set()
+                try:
+                    for gid, tid in familles:
+                        rapport = synchroniser_soeurs(conn, tid, gid)
+                        self._toucher(conn, tid, *rapport["jumelles"])
+                        if rapport.get("donnees_de_page"):
+                            changes[gid] = rapport["donnees_de_page"]
+                    self._recalculer_touchees(conn)
+                finally:
+                    conn.info.pop(self._A_RECALCULER, None)
+                if appliquer:
+                    transaction.commit()
+                else:
+                    transaction.rollback()
+            except SQLAlchemyError as e:
+                transaction.rollback()
+                logger.error(f"Erreur realigner_soeurs: {e}")
+                return {}
+        return changes
 
     def rematerialiser(
         self, track_ids=None, *, appliquer: bool = False

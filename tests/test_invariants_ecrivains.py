@@ -130,6 +130,20 @@ class TestApresChaqueEcrivain:
         assert _invariants(data_manager) == {}
         assert _ytm(data_manager, durag) == 500
 
+    def test_video_recue_d_une_soeur_devient_partagee_hors_famille(self, data_manager, base):
+        """L'union des sœurs donne à « Grünt #33 » chez Isha la vidéo que porte
+        déjà « Durag » chez Isha : elle devient partagée, et le total de
+        « Durag » — hors de la famille, jamais touché — doit suivre (2026-10-12 :
+        « Father Stretch My Hands, Pt. 1 », « Moon »)."""
+        video = TrackVideo(video_id="AAAAAAAAAAA", source="ytm_album", views=500, title="Durag")
+        data_manager.record_track_videos(base["durag"].id, [video])
+        data_manager.record_track_videos(base["swing"].id, [video])
+        assert _ytm(data_manager, base["durag"].id) == 500
+
+        data_manager.save_track(base["swing"])  # union : Isha « Grünt #33 » reçoit la vidéo
+        assert _invariants(data_manager) == {}
+        assert not _ytm(data_manager, base["durag"].id)
+
     def test_ids_spotify_puis_retrait(self, data_manager, base):
         tid = base["isha"].id
         base["isha"].spotify_id = "3VXzVGAWFSrH47dBtTOPws"

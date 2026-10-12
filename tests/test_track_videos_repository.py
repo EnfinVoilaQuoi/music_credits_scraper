@@ -243,10 +243,22 @@ class TestVuesYtmApresFusion:
 
         assert self._ytm(data_manager, garde.id) == 100
 
-    def test_un_total_sans_video_connue_n_est_pas_perdu(self, data_manager):
-        """Josman « Boss » : 68 182 vues relevées avant e20, sans vidéo derrière."""
+    def test_un_total_sans_video_derriere_ne_l_emporte_plus(self, data_manager):
+        """Décision utilisateur 2026-10-12 : un total YTM vaut TOUJOURS la somme
+        des vidéos mesurées. Josman « Boss » gardait 68 182 vues relevées avant
+        e20 sans vidéo derrière, contre la vidéo mesurée de la fiche gardée."""
         _, garde, doublon = self._paire(data_manager)
         data_manager.record_track_videos(garde.id, [TrackVideo(video_id="a" * 11, views=66)])
+        data_manager.update_track_ytm_streams(garde.id, 66)
+        data_manager.update_track_ytm_streams(doublon.id, 68182)
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        assert self._ytm(data_manager, garde.id) == 66
+
+    def test_sans_aucune_video_mesuree_le_plus_grand_total_reste(self, data_manager):
+        """Rien à sommer : la fusion ne perd pas un total en silence."""
+        _, garde, doublon = self._paire(data_manager)
         data_manager.update_track_ytm_streams(garde.id, 66)
         data_manager.update_track_ytm_streams(doublon.id, 68182)
 

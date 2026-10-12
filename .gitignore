@@ -148,6 +148,10 @@ scripts/*
 !scripts/repair_riaa_digital_singles.py
 # Dataviz / export studio
 !scripts/backpackerz_photos.py
+# Chantier A (audit du 2026-10-11) : recalculs et réalignements rejouables.
+!scripts/rematerialiser.py
+!scripts/combler_isrc.py
+!scripts/realigner_soeurs.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

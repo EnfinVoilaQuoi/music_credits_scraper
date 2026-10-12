@@ -173,6 +173,68 @@ def ids_soeurs(conn, track_id: int, genius_id) -> tuple[list[int], list[int]]:
     return jumelles, doublons
 
 
+#: Données lues sur la PAGE Genius (même page pour toutes les sœurs) : la
+#: lecture la plus RÉCENTE l'emporte (décision utilisateur 2026-10-12). Le
+#: comblement seul figeait la première valeur chez une sœur alors que l'autre
+#: avait relu la page — 90 divergences (relations 64, anecdotes 21, paroles 5).
+#: Chaque groupe : (colonnes transmises ensemble, horloges de la lecture).
+DONNEES_DE_PAGE = (
+    (("lyrics", "lyrics_source", "lyrics_scraped_at"), ("lyrics_scraped_at",)),
+    (("anecdotes",), ("genius_detail_checked_at", "last_scraped")),
+    (("relationships",), ("genius_detail_checked_at", "last_scraped")),
+)
+
+
+def _aligner_sur_la_lecture_la_plus_recente(conn, famille: list[int]) -> int:
+    """Pour chaque groupe de `DONNEES_DE_PAGE`, la ligne renseignée dont la
+    lecture est la plus récente transmet sa valeur aux autres. Un REMPLACEMENT,
+    jamais un vidage : une valeur vide ne se transmet pas, et une ligne sans
+    horloge ne gagne que si aucune autre n'en a. Idempotent. Rend le nombre de
+    lignes réécrites."""
+    from sqlalchemy import text
+
+    marques = ", ".join(f":f{n}" for n in range(len(famille)))
+    params = {f"f{n}": tid for n, tid in enumerate(famille)}
+    reecrites = 0
+    for colonnes, horloges in DONNEES_DE_PAGE:
+        lignes = (
+            conn.execute(
+                text(
+                    f"SELECT id, {', '.join(dict.fromkeys(colonnes + horloges))} "  # noqa: S608
+                    f"FROM tracks WHERE id IN ({marques})"
+                ),
+                params,
+            )
+            .mappings()
+            .all()
+        )
+        # Une liste VIDE (« [] » : recalculée sans rien) n'est pas une valeur à
+        # transmettre — la laisser gagner viderait la sœur qui en a une.
+        candidates = [r for r in lignes if not _est_vide(r[colonnes[0]]) and r[colonnes[0]] != "[]"]
+        if not candidates:
+            continue
+
+        def horloge(r, horloges=horloges):
+            return max((str(r[h]) for h in horloges if not _est_vide(r[h])), default="")
+
+        gagnante = max(candidates, key=lambda r: (horloge(r), -r["id"]))
+        valeurs = {c: gagnante[c] for c in colonnes}
+        for r in lignes:
+            # Même valeur (seule l'horloge ou la provenance diffère) : rien à
+            # transmettre — ce serait du bruit, pas une divergence.
+            if r["id"] == gagnante["id"] or r[colonnes[0]] == valeurs[colonnes[0]]:
+                continue
+            conn.execute(
+                text(
+                    f"UPDATE tracks SET {', '.join(f'{c} = :{c}' for c in colonnes)} "  # noqa: S608
+                    "WHERE id = :tid"
+                ),
+                {**valeurs, "tid": r["id"]},
+            )
+            reecrites += 1
+    return reecrites
+
+
 def _colonnes_a_combler(conn, ids: list[int]) -> dict[int, dict]:
     """Pour chaque ligne de la famille, les colonnes partagées à REMPLIR.
 
@@ -340,7 +402,9 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     variantes de cette règle finiraient par diverger — c'est le défaut qui a
     coûté le plus cher à ce projet.
 
-    Elle ne fait que des UNIONS et des comblements, jamais de remplacement :
+    Elle ne fait que des UNIONS et des comblements — plus UN remplacement, pour
+    les données lues sur la page Genius (`DONNEES_DE_PAGE`) : la lecture la plus
+    récente l'emporte (décision utilisateur 2026-10-12). Rien n'est jamais vidé ;
     l'appeler deux fois, ou dans n'importe quel ordre, donne le même résultat.
 
     Les RETRAITS ne passent pas par ici — effacer une donnée chez une sœur est un
@@ -376,6 +440,9 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
             {**trous, "tid": cible},
         )
         rapport["colonnes"] += len(trous)
+    # Données de PAGE : la lecture la plus récente l'emporte (remplacement,
+    # jamais vidage) — décision utilisateur 2026-10-12.
+    rapport["donnees_de_page"] = _aligner_sur_la_lecture_la_plus_recente(conn, famille)
     # `has_lyrics` n'est que le reflet de `lyrics` : `0` étant une VALEUR pour
     # le comblement, une ligne qui recevait les paroles gardait son `0`
     # (2026-10-11 : 72 fiches à paroles marquées « sans paroles »).

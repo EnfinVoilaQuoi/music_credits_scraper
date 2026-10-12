@@ -135,6 +135,9 @@ class Contexte:
     disco: list
     obs: dict = field(default_factory=dict)  # track_id -> [Observation]
     relations_proposees: list = field(default_factory=list)
+    #: Divergences d'IDENTITÉ entre lignes sœurs, lues par `analyser`
+    #: (`divergences_identite_soeurs`) — le détecteur reste pur.
+    soeurs: list = field(default_factory=list)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -1087,6 +1090,29 @@ def video_partagee(ctx):
     return cas
 
 
+def soeurs_identite_divergente(ctx):
+    """Deux lignes du MÊME enregistrement (même page Genius, artistes
+    différents) portent deux identités différentes — deux ID Spotify, deux
+    liens YouTube, un « inédit » d'un côté seulement. Aucune n'est « la plus
+    récente » : l'une des deux est fausse, l'utilisateur tranche (décision
+    2026-10-12). La synchronisation ne fait que combler, elle ne verra jamais
+    ce cas."""
+    cas = []
+    for d in ctx.soeurs:
+        detail = " · ".join(f"{a} : {v}" for a, v in sorted(d["valeurs"].items()))
+        cas.append(
+            (
+                d["titre"],
+                f"{d['colonne']} différent selon la ligne — {detail}",
+                {
+                    "kind": f"{d['colonne']}:{'|'.join(sorted(map(str, d['valeurs'].values())))}",
+                    "track_ids": [d["track_id"]],
+                },
+            )
+        )
+    return cas
+
+
 def vues_youtube_anormales(track, _ctx=None):
     """Vues YouTube dix fois au-dessus des streams Spotify : une vidéo d'un
     autre morceau, ou d'un autre artiste, gonfle peut-être le total."""
@@ -1242,6 +1268,9 @@ DETECTEURS: tuple[Detecteur, ...] = (
 DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("liens_proposes", "Alias / formations proposés", "👥", liens_proposes),
     DetecteurArtiste("video_partagee", "Vidéo portée par plusieurs fiches", "🎞️", video_partagee),
+    DetecteurArtiste(
+        "soeurs_identite", "Lignes sœurs : identité divergente", "🧬", soeurs_identite_divergente
+    ),
 )
 
 
@@ -1363,13 +1392,13 @@ def analyser(data_manager, artiste) -> Revue:
     """Détecteurs hors ligne + signalements des runs, moins ce que
     l'utilisateur a déjà tranché. Quatre lectures, aucune écriture."""
     tracks = artiste.tracks or []
-    cas = detecter(
-        contexte(
-            tracks,
-            data_manager.get_artist_observations(artiste.id),
-            data_manager.get_artist_relations(artiste.id, status="proposed"),
-        )
+    ctx = contexte(
+        tracks,
+        data_manager.get_artist_observations(artiste.id),
+        data_manager.get_artist_relations(artiste.id, status="proposed"),
     )
+    ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
+    cas = detecter(ctx)
     cas += _cas_des_signalements(
         data_manager.signalements_revue(artiste.id), {t.id for t in tracks}
     )

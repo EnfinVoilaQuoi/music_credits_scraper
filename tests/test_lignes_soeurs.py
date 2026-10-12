@@ -637,3 +637,27 @@ class TestDonneesDePageLaPlusRecenteGagne:
         relu = data_manager.get_artist_tracks(chez_swing.artist.id)[0]
         data_manager.save_track(relu)
         assert _colonne(data_manager, chez_swing.id, "lyrics") == "v2"
+
+
+def test_une_identite_divergente_entre_soeurs_va_au_panneau(data_manager, famille):
+    """Deux ID Spotify différents sur le même enregistrement : aucune n'est
+    « la plus récente », l'utilisateur tranche (décision 2026-10-12)."""
+    from src.services import revue
+
+    chez_swing, chez_isha = famille
+    with data_manager.engine.begin() as conn:
+        for tid, sid in ((chez_swing.id, "AAAAAAAAAAAAAAAAAAAAAA"), (chez_isha.id, "B" * 22)):
+            conn.execute(
+                text("UPDATE tracks SET spotify_id = :s WHERE id = :t"), {"s": sid, "t": tid}
+            )
+
+    (d,) = data_manager.divergences_identite_soeurs(chez_isha.artist.id)
+    assert d["colonne"] == "spotify_id" and d["track_id"] == chez_isha.id
+    assert set(d["valeurs"]) == {"Swing", "Isha"}
+
+    artiste = data_manager.get_artist_by_name("Isha")
+    artiste.tracks = data_manager.discographie_reunie(artiste)
+    cas = [
+        c for c in revue.analyser(data_manager, artiste).actifs if c.detecteur == "soeurs_identite"
+    ]
+    assert len(cas) == 1 and "spotify_id différent" in cas[0].motif

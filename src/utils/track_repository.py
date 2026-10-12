@@ -2987,6 +2987,61 @@ class TrackRepository:
             {"t": track_id},
         )
 
+    #: Colonnes d'IDENTITÉ d'un enregistrement partagées par les sœurs : leur
+    #: divergence ne se corrige jamais seule (aucune n'est « la plus récente »),
+    #: elle se SIGNALE au panneau « À trancher » (décision 2026-10-12).
+    IDENTITES_DES_SOEURS = (
+        "spotify_id",
+        "deezer_id",
+        "apple_music_id",
+        "discogs_id",
+        "youtube_url",
+        "unreleased",
+    )
+
+    def divergences_identite_soeurs(self, artist_id: int) -> list[dict]:
+        """Pour les fiches de l'artiste qui ont des lignes sœurs, les colonnes
+        d'identité où la famille porte PLUSIEURS valeurs renseignées. Rend
+        `[{"track_id", "titre", "colonne", "valeurs": {artiste: valeur}}]`.
+        Lecture seule."""
+        colonnes = ", ".join(f"t.{c}" for c in self.IDENTITES_DES_SOEURS)
+        with self.engine.connect() as conn:
+            lignes = (
+                conn.execute(
+                    text(
+                        f"SELECT t.id, t.title, t.genius_id, t.artist_id, a.name AS artiste, "
+                        f"{colonnes} FROM tracks t JOIN artists a ON a.id = t.artist_id "
+                        "WHERE t.genius_id IN (SELECT genius_id FROM tracks WHERE artist_id = :aid "
+                        "AND genius_id IS NOT NULL) AND t.genius_id IN (SELECT genius_id FROM "
+                        "tracks WHERE genius_id IS NOT NULL GROUP BY genius_id "
+                        "HAVING COUNT(DISTINCT artist_id) > 1)"
+                    ),
+                    {"aid": artist_id},
+                )
+                .mappings()
+                .all()
+            )
+        familles: dict[int, list] = {}
+        for r in lignes:
+            familles.setdefault(r["genius_id"], []).append(r)
+        divergences = []
+        for membres in familles.values():
+            sienne = next((r for r in membres if r["artist_id"] == artist_id), None)
+            if sienne is None:
+                continue
+            for col in self.IDENTITES_DES_SOEURS:
+                valeurs = {r["artiste"]: r[col] for r in membres if r[col] not in (None, "")}
+                if len({str(v) for v in valeurs.values()}) > 1:
+                    divergences.append(
+                        {
+                            "track_id": sienne["id"],
+                            "titre": sienne["title"],
+                            "colonne": col,
+                            "valeurs": valeurs,
+                        }
+                    )
+        return divergences
+
     def realigner_soeurs(self, *, appliquer: bool = False) -> dict[int, int]:
         """Rejoue `synchroniser_soeurs` sur chaque famille de lignes sœurs (même
         `genius_id` chez plusieurs artistes), puis rematérialise ses membres —

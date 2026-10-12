@@ -431,6 +431,61 @@ def _familles_de_rendition(v: Variant) -> set[str]:
     return {nom for nom, membres in _FAMILLES_RENDITION.items() if mots & membres}
 
 
+_ANNEE = re.compile(r"\b(?:19|20)\d\d\b")
+_LIEU = re.compile(r"\b(?:at|au|aux|à|from|in|@)\s+\S", re.IGNORECASE)
+_MIX_SEUL = re.compile(r"\bmix\b", re.IGNORECASE)
+_REMIX = re.compile(r"\bremix\b", re.IGNORECASE)
+_EXTENDED = re.compile(r"\bextended\b", re.IGNORECASE)
+
+
+def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
+    """PUR. Deux descripteurs d'une même famille qui désignent pourtant deux
+    enregistrements — décisions utilisateur du 2026-10-12, chacune mesurée
+    sur toutes les paires réelles (chantier D) :
+
+    - une version LONGUE n'est pas l'autre (Booba « Nougat (Grace Kim Remix
+      Extended) » ≠ « (Grace Kim Remix) ») ;
+    - un descripteur COMPOSÉ porte un qualificatif de plus (Diam's « Ma France
+      à moi (Version Yann Tiersen; Live 2006) » ≠ « - Live 2006 ») ;
+    - deux ANNÉES différentes, deux captations ou deux démos (les huit
+      « Runaway » live passaient pour une seule) ;
+    - un live DATÉ face à un live sans date ni lieu (Diam's « DJ (Live) »,
+      2004, ≠ « DJ - Live 2006 ») — mais « Live 2006 » ≈ « Live au Zénith »,
+      le lieu d'un côté, l'année de l'autre ;
+    - un MIX n'est pas un remix (Kanye « Paranoid (NEW Mix) » ≠ « (Remix) »,
+      « Rough Mix », « Club Mix », « E-Mix ») sauf même remixeur nommé
+      (« Tiësto's Birthday Treatment Mix » / « … Remix »).
+    """
+    da, db = a.descriptor or "", b.descriptor or ""
+    if bool(_EXTENDED.search(da)) != bool(_EXTENDED.search(db)):
+        return True
+    if len([s for s in da.split(";") if s.strip()]) != len([s for s in db.split(";") if s.strip()]):
+        return True
+    ya, yb = set(_ANNEE.findall(da)), set(_ANNEE.findall(db))
+    if ya and yb and ya != yb:
+        return True
+    if (
+        "live" in _familles_de_rendition(a)
+        and "live" in _familles_de_rendition(b)
+        and bool(ya) != bool(yb)
+    ):
+        sans_date = da if not ya else db
+        avec_date = db if not ya else da
+        if not (_LIEU.search(sans_date) and not _LIEU.search(avec_date)):
+            return True
+    if a.est_remix and b.est_remix:
+
+        def mix_seul(d: str) -> bool:
+            return bool(_MIX_SEUL.search(d)) and not _REMIX.search(d)
+
+        meme_remixeur = bool(
+            a.remixer and b.remixer and normalize_title(a.remixer) == normalize_title(b.remixer)
+        )
+        if mix_seul(da) != mix_seul(db) and not meme_remixeur:
+            return True
+    return False
+
+
 def meme_prise(a: Variant, b: Variant) -> bool:
     """Deux renditions sont-elles la même PRISE, au sens strict ?
 
@@ -444,6 +499,8 @@ def meme_prise(a: Variant, b: Variant) -> bool:
     """
     if a.kind != Kind.RENDITION or b.kind != Kind.RENDITION:
         return False
+    if qualificatifs_incompatibles(a, b):
+        return False
     communes = _familles_de_rendition(a) & _familles_de_rendition(b)
     return bool(communes - {"edition"})
 
@@ -456,6 +513,8 @@ def meme_famille(a: Variant, b: Variant) -> bool:
     ≈ « Live au Zénith », mais « Live » ≠ « Acoustic » ≠ « Instrumental »). C'est ce prédicat qui laisse passer « Heartless
     (Remix) » face à « Heartless - Remix » et refuse « Heartless » nu.
     """
+    if qualificatifs_incompatibles(a, b):
+        return False
     if a.est_remix and b.est_remix:
         # Genius écrit « (Remix) », Spotify nomme le remixeur (« In Common - Black
         # Coffee Remix ») : un remix NU face à un remix NOMMÉ est le même remix

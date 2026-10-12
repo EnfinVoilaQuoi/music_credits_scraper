@@ -282,3 +282,39 @@ class TestPartiesDuMorceau:
 
     def test_un_numero_de_version_ne_separe_pas(self):
         assert meme_socle("You Don't Know My Name", "You Don't Know My Name (Radio Edit #2)")
+
+
+class TestQualificatifsIncompatibles:
+    """Décisions utilisateur du 2026-10-12 (chantier D), mesurées sur toutes
+    les paires réelles : 46 paires séparées, toutes vérifiées."""
+
+    @pytest.mark.parametrize(
+        "a, b",
+        [
+            ("Nougat (Grace Kim Remix Extended)", "Nougat (Grace Kim Remix)"),
+            ("Paranoid (NEW Mix)", "Paranoid (Remix)"),
+            ("Through The Wire (Rough Mix)", "Through the Wire (Remix)"),
+            ("Ma France à moi (Version Yann Tiersen; Live 2006)", "Ma France à moi - Live 2006"),
+            ("DJ (Live)", "DJ - Live 2006"),
+            ("Runaway (Live at Coachella 2011)", "Runaway (Live at Sydney 2014)"),
+            ("Praise God (July 2020 Demo)", "Praise God (July 2021 Demo)"),
+        ],
+    )
+    def test_deux_enregistrements(self, a, b):
+        assert not titres_equivalents(a, b)
+        assert not meme_prise(parse_variant(a), parse_variant(b))
+
+    @pytest.mark.parametrize(
+        "a, b",
+        [
+            ("Suzy - Live 2006", "Suzy (Live au Zénith)"),
+            (
+                "All of Me (Tiësto’s Birthday Treatment Mix)",
+                "All of Me (Tiësto’s Birthday Treatment Remix) [Radio Edit]",
+            ),
+            ("Heartless (Remix)", "Heartless - Remix"),
+            ("In Common (Remix)", "In Common - Black Coffee Remix"),
+        ],
+    )
+    def test_le_meme_enregistrement(self, a, b):
+        assert titres_equivalents(a, b)

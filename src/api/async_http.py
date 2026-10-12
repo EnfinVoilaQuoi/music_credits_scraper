@@ -20,6 +20,7 @@ from src.concurrency.rate_limiter import DomainRateLimiter
 from src.observability import source_usage
 from src.observability.issues import classify
 from src.observability.registry import key_for_domain
+from src.persistence import brut
 
 
 class AsyncHttpSession:
@@ -83,6 +84,15 @@ class AsyncHttpSession:
             headers=response.headers,
             latency_ms=int((time.monotonic() - start) * 1000),
         )
+        if response.is_success:
+            # Le BRUT des sources activées (chantier E) : rejouable hors ligne.
+            brut.consigner(
+                key_for_domain(netloc),
+                url,
+                response.status_code,
+                getattr(response, "content", None),
+                params,
+            )
         return response
 
     async def aclose(self) -> None:

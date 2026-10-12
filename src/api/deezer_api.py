@@ -16,6 +16,7 @@ import requests
 
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.persistence import brut
 from src.utils.deezer_identity import choisir_hit
 from src.utils.logger import get_logger
 
@@ -110,6 +111,11 @@ class DeezerAPI:
             response = self.session.get(url, params=params, timeout=10)
             source_usage.record_response(url, response.status_code, headers=response.headers)
             response.raise_for_status()
+            # Le BRUT (chantier E) : la voie async passe par AsyncHttpSession,
+            # qui le garde elle-même ; cette session-ci est propre à Deezer.
+            brut.consigner(
+                _SOURCE, url, response.status_code, getattr(response, "content", None), params
+            )
             return self._payload_or_none(response.json())
 
         except requests.exceptions.RequestException as e:

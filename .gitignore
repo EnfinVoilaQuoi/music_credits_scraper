@@ -23,6 +23,8 @@ drivers/*
 data/disabled_tracks/*
 data/artists/*
 data/logs/*
+# Brut des sources (chantier E) : 2 dernières lectures, compressées — jamais versionné
+data/brut/
 data/ultratop/*
 data/certifications/brma/backups/*
 data/certifications/brma/logs/*

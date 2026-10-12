@@ -624,4 +624,11 @@ def requests_get(source_key: str, url: str, **kwargs):
         latency_ms=int((time.monotonic() - start) * 1000),
         source_key=source_key,
     )
+    if 200 <= resp.status_code < 300:
+        # Le BRUT des sources activées (chantier E) : rejouable hors ligne.
+        from src.persistence import brut
+
+        brut.consigner(
+            source_key, url, resp.status_code, getattr(resp, "content", None), kwargs.get("params")
+        )
     return resp

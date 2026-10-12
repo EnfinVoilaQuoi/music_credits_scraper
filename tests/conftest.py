@@ -96,6 +96,17 @@ def _gate_spotify_sans_fournisseur(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _brut_isole(tmp_path, monkeypatch):
+    """AUCUN test n'écrit le brut réel des sources (`data/brut/brut.db`)."""
+    from src.persistence import brut
+
+    brut.fermer()
+    monkeypatch.setattr(brut, "CHEMIN", tmp_path / "brut" / "brut.db")
+    yield
+    brut.fermer()
+
+
+@pytest.fixture(autouse=True)
 def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
     """AUCUN test ne lit `data/corrections/fiches.json` réel : il est relu par le
     gate Spotify, `save_track` et l'import discographie (2026-09-24)."""

@@ -407,6 +407,47 @@ def rechercher_artiste(
     return bilan
 
 
+def _rematcher(dm, artist: Artist, bilan: BilanCertifs) -> None:
+    """Rematche les certifs de l'artiste depuis les CSV clean, persiste, et
+    note l'EMPREINTE de la règle (`regles`) : un changement de portier se
+    rejouera seul au run suivant."""
+    from src.services import regles
+    from src.utils.cert_matcher import get_cert_matcher, reset_cert_matcher
+    from src.utils.certification_enricher import apply_certifications
+
+    reset_cert_matcher()
+    alias = dm.noms_de_lartiste(artist.id, artist.name) - {artist.name}
+    formations = dm.noms_des_formations(artist.id)
+    bilan.certifies = apply_certifications(
+        artist,
+        artist.tracks,
+        get_cert_matcher(),
+        alias=tuple(sorted(alias)),
+        formations=tuple(sorted(formations)),
+    )
+    for track in artist.tracks:
+        dm.record_pending(track)
+    oublies = dm.certifications_non_enregistrees(artist.tracks)
+    if oublies:
+        logger.error(
+            f"Certifs recalculées mais NON enregistrées ({len(oublies)}): {', '.join(oublies[:8])}"
+        )
+        bilan.erreurs.extend(oublies)
+    else:
+        regles.marquer(dm, artist.name, "certifs")
+
+
+def recalculer(dm, artist: Artist) -> str:
+    """Le REJEU du portier des certifs (`regles.rejouer_perimes`) : le rematch
+    seul, hors ligne, sans les corrections de fin de run (c'est elles qui
+    l'appellent). Rend le compte rendu."""
+    bilan = BilanCertifs()
+    if not artist.tracks:
+        return "aucun morceau chargé"
+    _rematcher(dm, artist, bilan)
+    return f"{bilan.certifies} morceau(x) certifié(s)"
+
+
 @etape_de_flux("Application des certifs")
 def appliquer(runtime: Runtime, artist: Artist) -> BilanCertifs:
     """Rematche les certifs de l'artiste depuis les CSV clean puis persiste (E7h).
@@ -416,31 +457,11 @@ def appliquer(runtime: Runtime, artist: Artist) -> BilanCertifs:
     colonnes de certifs sont concernées, et le save complet ne savait pas
     RETIRER une certification devenue caduque.
     """
-    from src.utils.cert_matcher import get_cert_matcher, reset_cert_matcher
-    from src.utils.certification_enricher import apply_certifications
-
     bilan = BilanCertifs()
     if not artist.tracks:
         bilan.interrompu("aucun morceau chargé")
         return bilan
-    reset_cert_matcher()
-    alias = runtime.data_manager.noms_de_lartiste(artist.id, artist.name) - {artist.name}
-    formations = runtime.data_manager.noms_des_formations(artist.id)
-    bilan.certifies = apply_certifications(
-        artist,
-        artist.tracks,
-        get_cert_matcher(),
-        alias=tuple(sorted(alias)),
-        formations=tuple(sorted(formations)),
-    )
-    for track in artist.tracks:
-        runtime.data_manager.record_pending(track)
-    oublies = runtime.data_manager.certifications_non_enregistrees(artist.tracks)
-    if oublies:
-        logger.error(
-            f"Certifs recalculées mais NON enregistrées ({len(oublies)}): {', '.join(oublies[:8])}"
-        )
-        bilan.erreurs.extend(oublies)
+    _rematcher(runtime.data_manager, artist, bilan)
     # Une certification d'un autre titre, datée avant la sortie, est retirée
     # seule (preuve formelle, journalisée) ; la mémoire empêche le prochain
     # rematch de la reposer.

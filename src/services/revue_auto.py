@@ -144,7 +144,18 @@ def corriger(dm, artiste) -> BilanCorrections:
 
 def corriger_apres_run(dm, artiste) -> BilanCorrections:
     """Point d'accroche des runs : ne lève JAMAIS — une correction qui échoue ne
-    rend pas incomplet le run qui l'a précédée."""
+    rend pas incomplet le run qui l'a précédée.
+
+    D'abord les portiers dont la RÈGLE a changé depuis leur passage sur
+    l'artiste sont rejoués (`regles`, 2026-10-12) : une règle changée dans le
+    code n'écrit rien, rien d'autre ne la ferait repartir."""
+    try:
+        from src.services import regles
+
+        for compte_rendu in regles.rejouer_perimes(dm, artiste):
+            logger.info(f"🔁 {compte_rendu} ({artiste.name})")
+    except Exception:  # noqa: BLE001 - dernier ressort, trace complète
+        logger.exception(f"Rejeu des règles changées en échec pour {artiste.name}")
     try:
         return corriger(dm, artiste)
     except Exception:  # noqa: BLE001 - dernier ressort, trace complète

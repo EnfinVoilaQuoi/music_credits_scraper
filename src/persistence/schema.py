@@ -735,6 +735,20 @@ kworb_decisions = Table(
 )
 
 
+# L'empreinte de la RÈGLE qui a produit les verdicts d'un portier, par artiste
+# (e51) : un run qui trouve une autre empreinte rejoue le portier
+# (`src/services/regles.py`) — une règle changée dans le code n'écrit rien,
+# le recalcul à l'écriture du chantier A ne la voyait pas.
+regles_appliquees = Table(
+    "regles_appliquees",
+    metadata,
+    Column("artiste", Text, primary_key=True),
+    Column("portier", Text, primary_key=True),
+    Column("empreinte", Text, nullable=False),
+    Column("applique_le", TIMESTAMP),
+)
+
+
 # Panneau « À trancher », étape 3 (e38, 2026-09-27). Deux notions distinctes :
 # - `revue_verdicts` : la mémoire des DÉCISIONS de l'utilisateur sur un cas
 #   (« c'est normal »). Clé = (artiste, détecteur, clé du cas) ; la clé du cas

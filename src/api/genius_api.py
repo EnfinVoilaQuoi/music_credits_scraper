@@ -72,6 +72,13 @@ class GeniusAPI:
             retries=GENIUS_RETRIES,  # ✅ Nombre de tentatives en cas d'échec
         )
         self.genius.verbose = False  # Désactiver les prints de lyricsgenius
+        # Le brut (chantier E) : lyricsgenius a sa propre session, hors de nos
+        # points de passage — branchée ici pour être gardée et rejouable.
+        from src.persistence import brut
+
+        session = getattr(self.genius, "_session", None)
+        if session is not None:
+            brut.garder_session(session, _SOURCE)
         self.genius.remove_section_headers = True
         self.genius.skip_non_songs = True
         self.genius.excluded_terms = ["(Remix)", "(Live)"]  # Optionnel

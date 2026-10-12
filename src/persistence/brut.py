@@ -230,3 +230,29 @@ def servir(source: str | None, url: str, params=None) -> tuple[int, bytes] | Non
             return lus[0]["statut"] or 200, lus[0]["corps"]
     _rejeu["absentes"].append(f"{source or '?'} {url_sans_secret(url, params)}")
     return None
+
+
+def garder_session(session, source: str) -> None:
+    """Branche le brut sur une `requests.Session` qu'une bibliothèque garde
+    pour elle (lyricsgenius : ses appels ne passent par aucun de nos points de
+    passage). GET réussis gardés ; en rejeu, servis — ou erreur de connexion,
+    jamais le réseau."""
+    import requests
+
+    origine = session.request
+
+    def request(method, url, *args, **kwargs):
+        get = str(method).upper() == "GET"
+        if rejeu_actif():
+            lu = servir(source, url, kwargs.get("params")) if get else None
+            if lu is None:
+                raise requests.ConnectionError(f"brut absent (rejeu hors ligne) : {url}")
+            reponse = requests.models.Response()
+            reponse.status_code, reponse._content, reponse.url = lu[0], lu[1], url
+            return reponse
+        reponse = origine(method, url, *args, **kwargs)
+        if get and 200 <= reponse.status_code < 300:
+            consigner(source, url, reponse.status_code, reponse.content, kwargs.get("params"))
+        return reponse
+
+    session.request = request

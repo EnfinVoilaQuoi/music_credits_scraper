@@ -243,3 +243,28 @@ def test_les_pages_genius_sont_gardees_puis_rejouees():
         assert stub._crawl_page(url + "-absente") == (None, None)
     assert stub.crawls == 1
     assert compte["servies"] == 1 and len(compte["absentes"]) == 1
+
+
+def test_une_session_de_bibliotheque_est_gardee_puis_rejouee(monkeypatch):
+    """lyricsgenius garde sa propre `requests.Session` : `garder_session` la
+    branche sur le brut — gardée en temps normal, servie en rejeu."""
+    import requests
+
+    session = requests.Session()
+    appels = []
+
+    def reseau(method, url, *args, **kwargs):
+        appels.append(url)
+        reponse = requests.models.Response()
+        reponse.status_code, reponse._content = 200, b'{"song": 1}'
+        return reponse
+
+    monkeypatch.setattr(session, "request", reseau)
+    brut.garder_session(session, "genius_api")
+    url = "https://api.genius.com/songs/1"
+    assert session.request("GET", url).json() == {"song": 1}
+    with brut.rejeu():
+        assert session.request("GET", url).json() == {"song": 1}
+        with pytest.raises(requests.ConnectionError):
+            session.request("GET", url + "0")
+    assert appels == [url]

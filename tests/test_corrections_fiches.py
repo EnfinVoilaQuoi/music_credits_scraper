@@ -190,3 +190,30 @@ def test_un_fichier_illisible_n_est_JAMAIS_ecrase(fichier):
     cf.memoriser_fusion("A2H", {"genius_id": 3}, {"genius_id": 4})
     assert cf.FICHIER.read_text(encoding="utf-8") == '{"A2H": [{"fiche": {"genius_id": 1}'
     assert list(cf.FICHIER.parent.glob("fiches.json.illisible-*"))
+
+
+def test_un_refus_vaut_pour_les_lignes_soeurs(fichier):
+    """Chantier C (2026-10-12) : un refus décidé sur la ligne de Kanye protège
+    aussi la ligne sœur de Kid Cudi (même page Genius) — sans quoi l'union
+    des sœurs rendait la valeur refusée. Les certifications, recalculées PAR
+    ARTISTE, gardent leur refus à la ligne."""
+    certif = {"body": "RIAA", "title": "SKY CITY", "certification": "Gold", "date": "2022"}
+    fichier(
+        {
+            "Kanye West": [
+                {
+                    "fiche": {"genius_id": 7},
+                    "retirer_id_spotify": ["X" * 22],
+                    "retirer_videos": ["v" * 11],
+                    "retirer_lrc": ["abc"],
+                    "retirer_certifs": [certif],
+                }
+            ]
+        }
+    )
+    soeur = _t("Sky City", artiste="Kid Cudi", genius_id=7)
+    assert cf.ids_refuses(soeur) == {"X" * 22}
+    assert cf.videos_refusees(soeur) == {"v" * 11}
+    assert cf.lrc_refuses(soeur) == {"abc"}
+    assert cf.certifs_refusees(soeur) == set()
+    assert cf.ids_refuses(_t("Sky City", artiste="Kid Cudi", genius_id=8)) == set()

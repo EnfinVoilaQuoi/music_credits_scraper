@@ -95,19 +95,49 @@ def entrees_du_morceau(track) -> list[dict]:
     ]
 
 
+def entrees_de_l_enregistrement(track) -> list[dict]:
+    """Les entrées de la fiche ET celles qui désignent la même page Genius chez
+    un AUTRE artiste (ses lignes sœurs). Sert aux refus de ce que les sœurs
+    PARTAGENT (ID, vidéos, LRC, crédits) : un refus décidé sur la ligne de
+    Kanye protège aussi celle de Kid Cudi, sans quoi l'union des sœurs rendait
+    la valeur refusée (chantier C, 2026-10-12 : 40 refus sur des
+    enregistrements à lignes sœurs ne protégeaient que leur ligne). Pas pour
+    les certifications : elles sont recalculées PAR ARTISTE."""
+    entrees = list(entrees_du_morceau(track))
+    if track.genius_id is None:
+        return entrees
+    artiste = track.artist.name if track.artist else None
+    for autre, liste in charger().items():
+        if autre == artiste:
+            continue
+        entrees += [
+            e
+            for e in liste
+            if (e.get("fiche") or {}).get("genius_id") is not None
+            and int(e["fiche"]["genius_id"]) == int(track.genius_id)
+        ]
+    return entrees
+
+
 def ids_refuses(track) -> set[str]:
-    return {sid for e in entrees_du_morceau(track) for sid in e.get("retirer_id_spotify") or []}
+    return {
+        sid for e in entrees_de_l_enregistrement(track) for sid in e.get("retirer_id_spotify") or []
+    }
 
 
 def deezer_refuses(track) -> set[int]:
-    return {int(did) for e in entrees_du_morceau(track) for did in e.get("retirer_id_deezer") or []}
+    return {
+        int(did)
+        for e in entrees_de_l_enregistrement(track)
+        for did in e.get("retirer_id_deezer") or []
+    }
 
 
 def credits_refuses(track) -> set[tuple[str, str]]:
     """{(nom normalisé, rôle)} — le rôle est la valeur de `CreditRole`."""
     return {
         (normalize_name(c["nom"]), c["role"])
-        for e in entrees_du_morceau(track)
+        for e in entrees_de_l_enregistrement(track)
         for c in e.get("retirer_credits") or []
     }
 
@@ -243,7 +273,7 @@ def videos_refusees(track) -> set[str]:
     """Vidéos rejetées À LA MAIN (✖️ de la fiche ou du panneau) : ni Genius, ni la
     recherche, ni le canal YTM ne les rattachent plus à cette fiche (2026-09-27 —
     avant, le run discographie reposait le lien Genius rejeté)."""
-    return {v for e in entrees_du_morceau(track) for v in e.get("retirer_videos") or []}
+    return {v for e in entrees_de_l_enregistrement(track) for v in e.get("retirer_videos") or []}
 
 
 def memoriser_video_refusee(track, video_id: str) -> None:
@@ -262,7 +292,7 @@ def empreinte_lrc(lrc: str | None) -> str:
 
 def lrc_refuses(track) -> set[str]:
     """Empreintes des LRC retirés À LA MAIN : le résolveur ne les retient plus."""
-    return {x for e in entrees_du_morceau(track) for x in e.get("retirer_lrc") or []}
+    return {x for e in entrees_de_l_enregistrement(track) for x in e.get("retirer_lrc") or []}
 
 
 def memoriser_lrc_refuse(track, lrc: str) -> None:

@@ -756,12 +756,21 @@ class TestLyricsSyncedObservations:
     _LRC = "[00:01.00]alpha\n[00:05.00]beta\n[00:10.00]gamma\n[00:15.00]delta"
 
     def test_relecture_reconcilie_le_verdict(self, data_manager):
-        # 2 sources concordantes persistées → relecture via get_artist_tracks
-        # rend lyrics_synced = LRCLIB, confidence 2 (croisé).
+        # 2 sources concordantes ÉCRITES par l'écrivain → relecture via
+        # get_artist_tracks rend lyrics_synced = LRCLIB, confidence 2 (croisé).
+        # Depuis le chantier A (lot 4), le verdict est calculé à l'ÉCRITURE et
+        # lu en colonne : une observation glissée en SQL brut n'est plus vue.
+        from src.enrichment.observation import Observation
+
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "Sync")
-        _ajoute_obs(data_manager, track_id, "lyrics_synced", "lrclib", value=self._LRC)
-        _ajoute_obs(data_manager, track_id, "lyrics_synced", "ytmusic", value=self._LRC)
+        data_manager.upsert_observations(
+            track_id,
+            [
+                Observation("lyrics_synced", self._LRC, "lrclib"),
+                Observation("lyrics_synced", self._LRC, "ytmusic"),
+            ],
+        )
 
         lu = _lire_track(data_manager, artist.id, track_id)
         assert lu.lyrics.synced == self._LRC

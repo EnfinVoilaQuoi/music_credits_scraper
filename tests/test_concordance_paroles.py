@@ -210,8 +210,12 @@ class TestReparation:
             t.lyrics.synced_source = "YouTube Music"
             t.observations.append(_obs("ytmusic", LRC_G5))
             ids.append(data_manager.save_track(t))
-        retirees, change = data_manager.reverifier_lrc(ids[0])
-        assert retirees >= 1 and change
+        # Depuis le chantier A (lot 4), `save_track` calcule déjà le verdict :
+        # le LRC démenti par les paroles n'atteint jamais la colonne. La
+        # réparation n'a plus de colonne à changer, mais retire toujours les
+        # observations démenties — l'état final est le même.
+        retirees, _ = data_manager.reverifier_lrc(ids[0])
+        assert retirees >= 1
         with data_manager.engine.connect() as conn:
             assert conn.execute(
                 text("SELECT lyrics_synced FROM tracks WHERE genius_id = 77")

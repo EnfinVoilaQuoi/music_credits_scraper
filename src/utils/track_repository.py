@@ -739,15 +739,8 @@ class TrackRepository:
                 # de la fiche morceau n'avait donc jamais pu s'afficher).
                 spotify_ids_by_track = self._spotify_ids_by_artist(conn, artist_id)
 
-                # Volume des LRC bruts chargés (`lyrics_synced`) : champ lourd
-                # (~3-10 Ko × sources × morceaux), cible désignée de l'optim E7d.
+                # (Les LRC bruts ne sont plus chargés : verdict lu en colonne.)
                 _n_obs = sum(len(v) for v in observations_by_track.values())
-                _lyrics_bytes = sum(
-                    len(o.value or "")
-                    for v in observations_by_track.values()
-                    for o in v
-                    if o.field == "lyrics_synced"
-                )
 
                 # Création des objets Track via le mapper (coercitions centralisées ;
                 # `row` est une RowMapping, indexable par nom comme sqlite3.Row).
@@ -796,11 +789,10 @@ class TrackRepository:
 
                 _t_end = time.monotonic()
                 logger.info(
-                    "⏱ get_artist_tracks: %d tracks, %d obs dont %.0f Ko lyrics_synced "
+                    "⏱ get_artist_tracks: %d tracks, %d obs "
                     "en %.2fs (rows %.2fs, obs %.2fs, map+crédits %.2fs)",
                     len(result),
                     _n_obs,
-                    _lyrics_bytes / 1024,
                     _t_end - _t0,
                     _t_rows - _t0,
                     _t_obs - _t_rows,
@@ -888,13 +880,19 @@ class TrackRepository:
 
     def _observations_by_artist(self, conn, artist_id: int) -> dict[int, list[Observation]]:
         """Observations de tous les morceaux d'un artiste, groupées par track_id
-        (1 requête, pour la bascule lecture E6). `value`/`seen_at` en brut."""
+        (1 requête, pour la bascule lecture E6). `value`/`seen_at` en brut.
+
+        SANS les LRC bruts (`lyrics_synced`, chantier A lot 4, 2026-10-12) :
+        leur verdict est calculé à l'ÉCRITURE (`_rearbitrer_lrc`) et lu en
+        colonne — la lecture le recalculait à chaque chargement (3,2 s sur 6,4
+        chez Kanye) et montrait un verdict que la colonne, lue par SQL, l'audit
+        et le studio, n'avait pas (34 fiches)."""
         rows = (
             conn.execute(
                 text(
                     "SELECT o.track_id, o.field, o.value, o.source, o.confidence, o.seen_at "
                     "FROM observations o JOIN tracks t ON t.id = o.track_id "
-                    "WHERE t.artist_id = :aid"
+                    "WHERE t.artist_id = :aid AND o.field != 'lyrics_synced'"
                 ),
                 {"aid": artist_id},
             )
@@ -2805,7 +2803,67 @@ class TrackRepository:
         "spotify_streams",
         "ytm_streams",
         "has_lyrics",
+        "lyrics_synced",
+        "lyrics_synced_source",
     )
+
+    def _rearbitrer_lrc(self, conn, track_id: int) -> None:
+        """Le verdict LRC (`reconcile._reconcile_lyrics_synced` — la MÊME
+        fonction que la lecture appliquait : départage par la durée, démenti
+        par les paroles Genius, rien pour un instrumental constaté) écrit en
+        colonne (chantier A, lot 4). Sans observation, ou si le moteur ne
+        conclut pas, la colonne reste."""
+        from src.enrichment.reconcile import _reconcile_lyrics_synced
+        from src.utils.concordance_paroles import paroles_de_reference
+
+        obs = [
+            Observation("lyrics_synced", r[1], r[0])
+            for r in conn.execute(
+                text(
+                    "SELECT source, value FROM observations "
+                    "WHERE track_id = :t AND field = 'lyrics_synced'"
+                ),
+                {"t": track_id},
+            )
+        ]
+        if not obs:
+            return
+        ligne = (
+            conn.execute(
+                text(
+                    "SELECT lyrics, lyrics_source, duration, instrumental, lyrics_synced, "
+                    "lyrics_synced_source, lyrics_synced_confidence FROM tracks WHERE id = :t"
+                ),
+                {"t": track_id},
+            )
+            .mappings()
+            .first()
+        )
+        if ligne is None:
+            return
+        res = _reconcile_lyrics_synced(
+            obs,
+            _clean_duration(ligne["duration"]),
+            paroles_de_reference(ligne["lyrics"], ligne["lyrics_source"]),
+            bool(ligne["instrumental"]),
+        )
+        if res is None:
+            return
+        conf = int(res.confidence) if res.confidence is not None else None
+        actuel = (
+            ligne["lyrics_synced"],
+            ligne["lyrics_synced_source"],
+            ligne["lyrics_synced_confidence"],
+        )
+        if (res.value, res.source, conf) == actuel:
+            return
+        conn.execute(
+            text(
+                "UPDATE tracks SET lyrics_synced = :v, lyrics_synced_source = :s, "
+                "lyrics_synced_confidence = :c WHERE id = :t"
+            ),
+            {"v": res.value, "s": res.source, "c": conf, "t": track_id},
+        )
 
     # ── Chantier A : recalcul en fin de transaction ─────────────────────────────
     #: Clé de `Connection.info` : les fiches dont un FAIT a bougé dans la
@@ -2907,6 +2965,8 @@ class TrackRepository:
             ),
             {"t": track_id},
         )
+        # Après la durée et les paroles : le verdict LRC en dépend.
+        self._rearbitrer_lrc(conn, track_id)
         conn.execute(
             text(
                 "UPDATE track_spotify_ids SET is_primary = "

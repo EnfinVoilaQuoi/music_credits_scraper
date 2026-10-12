@@ -51,6 +51,7 @@ lib/*
 # Tests
 .coverage
 .pytest_cache/
+.hypothesis/
 # Fixtures de parsers : pages réelles enregistrées (.html/.json), à VERSIONNER
 # malgré les règles *.json / *.html ci-dessus (offline, rejouées par les tests).
 !tests/fixtures/**

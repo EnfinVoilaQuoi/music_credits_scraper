@@ -1165,7 +1165,18 @@ class TrackRepository:
     def delete_track(self, track_id: int) -> bool:
         """Supprime définitivement un morceau et ses données associées"""
         try:
-            with self.engine.begin() as conn:
+            # Chantier A : les AUTRES fiches de l'artiste qui portaient ses
+            # vidéos les voient cesser d'être partagées — leur total suit au
+            # commit (trouvé par le test property-based, 2026-10-12).
+            with self._ecrire() as conn:
+                videos = [
+                    r[0]
+                    for r in conn.execute(
+                        text("SELECT video_id FROM track_videos WHERE track_id = :tid"),
+                        {"tid": track_id},
+                    )
+                ]
+                self._toucher(conn, *self._porteurs_des_videos(conn, track_id, videos))
                 conn.execute(text("DELETE FROM credits WHERE track_id = :tid"), {"tid": track_id})
                 conn.execute(
                     text("DELETE FROM scraping_errors WHERE track_id = :tid"), {"tid": track_id}

@@ -65,6 +65,7 @@ httpx==0.28.1
 huggingface_hub==1.19.0
 humanfriendly==10.0
 humanize==4.15.0
+hypothesis==6.140.2
 hyperframe==6.1.0
 idna==3.18
 importlib_metadata==9.0.0

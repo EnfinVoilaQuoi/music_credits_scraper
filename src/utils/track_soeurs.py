@@ -330,6 +330,14 @@ def _unir_observations(conn, ids: list[int]) -> int:
     ecrites = 0
     for obs in meilleures:
         for track_id in ids:
+            params_obs = {
+                "tid": track_id,
+                "field": obs["field"],
+                "value": obs["value"],
+                "source": obs["source"],
+                "conf": obs["confidence"],
+                "seen": obs["seen_at"],
+            }
             ecrites += conn.execute(
                 text(
                     "INSERT INTO observations "
@@ -338,14 +346,21 @@ def _unir_observations(conn, ids: list[int]) -> int:
                     "WHERE NOT EXISTS (SELECT 1 FROM observations o "
                     "  WHERE o.track_id = :tid AND o.field = :field AND o.source = :source)"
                 ),
-                {
-                    "tid": track_id,
-                    "field": obs["field"],
-                    "value": obs["value"],
-                    "source": obs["source"],
-                    "conf": obs["confidence"],
-                    "seen": obs["seen_at"],
-                },
+                params_obs,
+            ).rowcount
+            # Une sœur qui a DÉJÀ une observation de cette source, plus ancienne
+            # et différente, reçoit la plus fraîche : la même source a remesuré
+            # le même enregistrement. Sans ce geste, les deux lignes gardaient
+            # chacune la sienne et leurs verdicts divergeaient pour toujours
+            # (290 conflits mesurés le 2026-10-11 ; LRC `ytmusic` trouvé par le
+            # test property-based le 2026-10-12).
+            ecrites += conn.execute(
+                text(
+                    "UPDATE observations SET value = :value, confidence = :conf, seen_at = :seen "
+                    "WHERE track_id = :tid AND field = :field AND source = :source "
+                    "AND value IS NOT :value AND (seen_at IS NULL OR seen_at <= :seen)"
+                ),
+                params_obs,
             ).rowcount
     return ecrites
 

@@ -105,12 +105,10 @@ def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -
         if not mesurees:
             continue
 
+        # Le total `ytm_streams` EST la somme de ces vues : l'écrivain le
+        # recalcule lui-même (chantier A) — avant lui, la colonne gardait celle
+        # du relevé précédent (2026-10-12, 10 fiches décalées de quelques vues).
         data_manager.record_track_videos(track.id, mesurees)
-        # Le total `ytm_streams` EST la somme de ces vues (règles du run YTM,
-        # `recalculer_vues_ytm`) : sans ce recalcul, la colonne gardait celle
-        # du relevé précédent — 10 fiches décalées de quelques vues
-        # (2026-10-12, invariant `colonne_verdict` de l'audit).
-        data_manager.recalculer_vues_ytm(track.id)
         # Colonnes `tracks.youtube_video_*` : la vidéo PRINCIPALE, c'est-à-dire
         # la première de la liste (cf. `videos_a_mesurer`).
         principale = mesurees[0]

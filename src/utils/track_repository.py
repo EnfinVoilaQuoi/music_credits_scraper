@@ -5310,24 +5310,6 @@ class TrackRepository:
             logger.error(f"Erreur record_track_videos (track_id={track_id}): {e}")
             return 0
 
-    def fiches_mesurant_video(self, video_id: str, track_id: int) -> list[int]:
-        """Les AUTRES fiches du même artiste qui portent cette vidéo, mesurée.
-        Quand elle quitte une fiche, elle cesse d'être partagée : leur total,
-        qui l'excluait, doit être recalculé (2026-10-10, « All of the Lights »
-        après le rejet de la vidéo de l'original sur le remix)."""
-        with self.engine.connect() as conn:
-            return [
-                r[0]
-                for r in conn.execute(
-                    text(
-                        "SELECT v.track_id FROM track_videos v JOIN tracks t ON t.id = v.track_id "
-                        "WHERE v.video_id = :vid AND v.track_id != :tid AND v.views IS NOT NULL "
-                        "AND t.artist_id = (SELECT artist_id FROM tracks WHERE id = :tid)"
-                    ),
-                    {"vid": video_id, "tid": track_id},
-                )
-            ]
-
     def forget_track_video(self, track_id: int, video_id: str) -> bool:
         """Retire UNE vidéo d'un morceau (rejet d'un lien automatique erroné).
 

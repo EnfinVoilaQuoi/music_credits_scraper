@@ -82,10 +82,10 @@ def donner_aux_interpretes(dm, track: Track, proprietaire: Artist) -> list[str]:
         dm.upsert_observations(ligne.id, dm.get_observations(track.id))
         videos = dm.get_track_videos(track.id)
         if videos:
+            # Le total YouTube Music suit les vidéos reçues : l'écrivain le
+            # recalcule lui-même (chantier A ; 2026-10-11, les lignes SDM de
+            # « Dolce Camara » restaient sans total).
             dm.record_track_videos(ligne.id, videos)
-            # Le total YouTube Music suit les vidéos reçues (2026-10-11 : les
-            # lignes SDM de « Dolce Camara » restaient sans total).
-            dm.recalculer_vues_ytm(ligne.id)
         faits.append(f"« {track.title} » ajouté chez {artiste.name} (crédité sur la fiche)")
         logger.info(f"👥 {faits[-1]}")
     return faits

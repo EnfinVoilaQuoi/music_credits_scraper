@@ -148,9 +148,10 @@ def test_les_deux_videos_dun_morceau_sont_mesurees(monkeypatch):
     assert dm.video_writes == [(1, [("dQw4w9WgXcQ", "clip", 1000), ("aaaaaaaaaaa", "audio", 400)])]
     # Les colonnes du morceau décrivent la vidéo PRINCIPALE, celle du lien.
     assert dm.calls == [(1, 1000, "clip")]
-    # Le total `ytm_streams` suit les vues relevées (2026-10-12 : il gardait
-    # celles du relevé précédent, 10 fiches décalées).
-    assert dm.ordre == [("videos", 1), ("total", 1)]
+    # Le total `ytm_streams` suit les vues relevées : c'est `record_track_videos`
+    # qui le recalcule (chantier A, testé dans `test_invariants_ecrivains`) —
+    # plus de recalcul à la main ici, qui ferait double emploi.
+    assert dm.ordre == [("videos", 1)]
 
 
 def test_la_mutation_memoire_ne_perd_pas_url_ni_provenance(monkeypatch):

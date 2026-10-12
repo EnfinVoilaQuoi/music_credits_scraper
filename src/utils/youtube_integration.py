@@ -48,8 +48,10 @@ def set_youtube_link(data_manager, track, url: str, *, source: str = "manual") -
     if not video_id:
         return False
 
-    mesuree = _vues_mesurees(track, video_id)
     data_manager.update_track_youtube_url(track.id, url, source)
+    # Une vidéo déjà mesurée qui change de provenance (✔️ d'un lien Genius qui
+    # ne nommait pas le morceau) compte désormais : l'écrivain recalcule le
+    # total lui-même (chantier A).
     data_manager.record_track_videos(
         track.id, [TrackVideo(video_id=video_id, url=url, source=source)]
     )
@@ -57,30 +59,16 @@ def set_youtube_link(data_manager, track, url: str, *, source: str = "manual") -
     track.youtube_url_source = source
     if not any(v.video_id == video_id for v in track.videos):
         track.videos.append(TrackVideo(video_id=video_id, url=url, source=source))
-    if mesuree:
-        # Une vidéo déjà mesurée qui change de provenance (✔️ d'un lien Genius
-        # qui ne nommait pas le morceau) compte désormais : le total suit.
-        data_manager.recalculer_vues_ytm(track.id)
     logger.info(f"🔗 Lien YouTube {source} : '{track.title}' → {url}")
     return True
 
 
-def _vues_mesurees(track, video_id) -> bool:
-    return any(v.video_id == video_id and v.views for v in track.videos)
-
-
 def _oublier_video(data_manager, track, video_id) -> None:
-    """Oublie la vidéo de la fiche ET recalcule les totaux qui en dépendent : le
-    sien si elle était mesurée, et celui des autres fiches de l'artiste qui la
-    portent — elle cesse d'être partagée, elles l'excluaient."""
-    mesuree = _vues_mesurees(track, video_id)
-    autres = data_manager.fiches_mesurant_video(video_id, track.id)
+    """Oublie la vidéo de la fiche. Les totaux qui en dépendent — le sien, et
+    celui des autres fiches de l'artiste qui la portent (elle cesse d'être
+    partagée) — sont recalculés par l'écrivain lui-même (chantier A)."""
     data_manager.forget_track_video(track.id, video_id)
     track.videos = [v for v in track.videos if v.video_id != video_id]
-    if mesuree:
-        data_manager.recalculer_vues_ytm(track.id)
-    for tid in autres:
-        data_manager.recalculer_vues_ytm(tid)
 
 
 def clear_youtube_link(data_manager, track) -> None:

@@ -9,7 +9,8 @@ Trois sources de paires (titres seulement — aucune parole) :
   · fiche ↔ fiche d'un même artiste : même socle, même graphie compacte, ou
     titres proches (≥ 0,85) qu'on pourrait confondre (« Seul » / « Seuil ») ;
   · fiche ↔ titre de ses vidéos (échantillon stable) ;
-  · titre Kworb ↔ fiche CONFIRMÉS à la main (table `kworb_decisions`).
+  · titre Kworb ↔ fiche CONFIRMÉS à la main (table `kworb_decisions`) ;
+  · fiche ↔ certification que `cert_matcher` lui propose (portier `certif_du_morceau`).
 
     python scripts/corpus_paires_titres.py            # résumé, rien écrit
     python scripts/corpus_paires_titres.py --ecrire   # réécrit le fixture
@@ -35,6 +36,7 @@ SEUIL_PROCHES = 0.85
 def verdicts(a: str, b: str, alb_a=None, alb_b=None) -> dict:
     """Les réponses des prédicats de titre sur une paire — `a` est la fiche."""
     from src.utils import version_descriptors as vd
+    from src.utils.cert_titres import certif_du_morceau
 
     return {
         "equivalents": vd.titres_equivalents(a, b),
@@ -43,6 +45,7 @@ def verdicts(a: str, b: str, alb_a=None, alb_b=None) -> dict:
         "version": vd.meme_version(a, b),
         "version_publiee": vd.meme_version_publiee(a, b),
         "doublons": vd.doublons_evidents([(a, alb_a), (b, alb_b)]),
+        "certif": certif_du_morceau(a, b),
     }
 
 
@@ -110,6 +113,21 @@ def paires_de_la_base(dm) -> list[dict]:
         ajouter("video", fiche, video)
     for titre_kworb, fiche in kworb:
         ajouter("kworb_confirme", fiche, titre_kworb)
+    # Fiche ↔ certification candidate (ce que `cert_matcher` ramène pour elle) :
+    # le portier `certif_du_morceau` tranche, son verdict est figé.
+    from src.utils.cert_matcher import get_cert_matcher
+
+    cm = get_cert_matcher()
+    with dm.engine.connect() as c:
+        lignes = c.execute(
+            text(
+                "SELECT a.name, t.title, t.primary_artist_name FROM tracks t "
+                "JOIN artists a ON a.id = t.artist_id WHERE t.title <> ''"
+            )
+        ).all()
+    for artiste, titre, principal in lignes:
+        for cert in cm.get_track_certifications(artiste, titre, [principal] if principal else []):
+            ajouter("certif", titre, cert["title"])
     return sorted(
         paires.values(),
         key=lambda p: (p["source"], p["a"], p["b"], str(p["album_a"]), str(p["album_b"])),

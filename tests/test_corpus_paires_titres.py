@@ -2,7 +2,7 @@
 
 Chantier D (2026-10-12). `tests/fixtures/paires_titres.json` porte ~7 600 paires
 tirées de la base (fiche ↔ fiche d'un même artiste, fiche ↔ vidéo, titre Kworb ↔
-fiche confirmés à la main) avec la réponse de chaque prédicat de titre. Une
+fiche confirmés à la main, fiche ↔ certification) avec la réponse de chaque prédicat de titre. Une
 règle qui bouge change des verdicts : ce test les NOMME. Si le changement est
 voulu, relancer `python scripts/corpus_paires_titres.py --ecrire` — le diff git
 du fixture montre exactement quelles paires ont basculé.
@@ -25,7 +25,7 @@ def paires():
 
 def test_le_corpus_couvre_les_trois_sources(paires):
     sources = {p["source"] for p in paires}
-    assert sources == {"fiches", "video", "kworb_confirme"}
+    assert sources == {"fiches", "video", "kworb_confirme", "certif"}
     assert len(paires) > 5000
 
 

@@ -118,3 +118,18 @@ def test_une_place_dans_le_projet_n_est_pas_un_sous_titre():
 
     assert not certif_du_morceau("All of the Lights", "ALL OF THE LIGHTS (INTERLUDE)")
     assert certif_du_morceau("Make Her Say (I Poke Her Face)", "MAKE HER SAY")
+
+
+@pytest.mark.parametrize(
+    "fiche, certif",
+    [
+        ("Father Stretch My Hands Pt. 1 & Pt. 2", "FATHER STRETCH MY HANDS PT 1"),
+        ("Father Stretch My Hands Pt. 1 & Pt. 2", "FATHER STRETCH MY HANDS PT. 1"),
+    ],
+)
+def test_deux_numeros_de_partie_deux_morceaux(fiche, certif):
+    """Garde du juge (chantier D, 2026-10-12) : l'enchaînement des deux parties
+    ne prend pas la certif de la partie 1 — mesuré sur 1 600 paires réelles,
+    3 rattachements retirés, tous faux."""
+    assert not certif_du_morceau(fiche, certif)
+    assert certif_du_morceau("Father Stretch My Hands, Pt. 1", certif)

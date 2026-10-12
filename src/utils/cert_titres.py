@@ -32,6 +32,7 @@ from src.utils.version_descriptors import (
     Kind,
     est_edition_de_diffusion,
     parse_variant,
+    parties_du_morceau,
     titre_generique,
     titres_equivalents,
 )
@@ -84,6 +85,14 @@ def certif_du_morceau(titre_fiche: str | None, titre_certif: str | None) -> bool
         return f == c
     if f == c or titres_equivalents(titre_fiche, titre_certif):
         return True
+    # Garde du JUGE (chantier D, 2026-10-12) : deux numéros de partie, deux
+    # morceaux — « Father Stretch My Hands Pt. 1 & Pt. 2 » (l'enchaînement) ne
+    # prend pas la certif de « PT 1 ». Mesuré sur 1 600 paires fiche ↔ certif
+    # réelles : 3 rattachements retirés, tous faux. `_PARTIE` reste : il juge
+    # le RESTE d'un titre coupé (« 2.0 », « II », « (2023) »), que le juge ne
+    # voit pas comme une partie.
+    if parties_du_morceau(titre_fiche) != parties_du_morceau(titre_certif):
+        return False
     vc = parse_variant(titre_certif)
     if vc.kind != Kind.NONE and parse_variant(titre_fiche).kind == Kind.NONE:
         # Certif d'une VERSION (« SUZY (LIVE 2006) ») sur l'ORIGINAL : gardée

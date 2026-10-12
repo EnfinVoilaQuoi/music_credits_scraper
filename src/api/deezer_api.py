@@ -7,6 +7,7 @@ l'`AsyncHttpSession` partagée (httpx + rate-limit par domaine) ; la logique
 pure (extraction, vérifications) est commune aux deux voies.
 """
 
+import json
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -103,9 +104,17 @@ class DeezerAPI:
         Returns:
             Réponse JSON ou None en cas d'erreur
         """
-        self._check_rate_limit()
-
         url = f"{self.BASE_URL}/{endpoint}"
+        if brut.rejeu_actif():
+            # Rejeu hors ligne (chantier E) : la dernière lecture gardée.
+            lu = brut.servir(_SOURCE, url, params)
+            if lu is None:
+                return None
+            try:
+                return self._payload_or_none(json.loads(lu[1]))
+            except ValueError:
+                return None
+        self._check_rate_limit()
 
         try:
             response = self.session.get(url, params=params, timeout=10)

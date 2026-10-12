@@ -560,6 +560,12 @@ def record_response(
 
 # ── Tampon et vidage ──────────────────────────────────────────────────────────
 def _emit(verdict: Verdict) -> None:
+    from src.persistence import brut
+
+    if brut.rejeu_actif():
+        # Un rejeu hors ligne (chantier E) n'est pas une observation de la
+        # source : sa santé n'en apprend rien.
+        return
     try:
         with _lock:
             _buffer.append(verdict)
@@ -606,6 +612,17 @@ def requests_get(source_key: str, url: str, **kwargs):
     """
     import requests
 
+    from src.persistence import brut
+
+    if brut.rejeu_actif():
+        # Rejeu hors ligne (chantier E) : la dernière lecture gardée, ou une
+        # erreur de connexion — jamais le réseau.
+        lu = brut.servir(source_key, url, kwargs.get("params"))
+        if lu is None:
+            raise requests.ConnectionError(f"brut absent (rejeu hors ligne) : {url}")
+        resp = requests.models.Response()
+        resp.status_code, resp._content, resp.url = lu[0], lu[1], url
+        return resp
     start = time.monotonic()
     try:
         resp = requests.get(url, **kwargs)
@@ -626,8 +643,6 @@ def requests_get(source_key: str, url: str, **kwargs):
     )
     if 200 <= resp.status_code < 300:
         # Le BRUT des sources activées (chantier E) : rejouable hors ligne.
-        from src.persistence import brut
-
         brut.consigner(
             source_key, url, resp.status_code, getattr(resp, "content", None), kwargs.get("params")
         )

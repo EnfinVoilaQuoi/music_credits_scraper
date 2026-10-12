@@ -168,6 +168,12 @@ def _deezer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--creer", action="store_true", help="créer les écarts cochés d'office")
     p.add_argument("--versions", action="store_true", help="avec --creer : toutes les versions")
     p.add_argument("--apparitions", action="store_true", help="avec --creer : les apparitions")
+    p.add_argument(
+        "--rejeu",
+        action="store_true",
+        help="rejouer HORS LIGNE depuis le brut gardé (aucun réseau, aucune écriture)",
+    )
+    p.add_argument("--sortie", help="avec --rejeu : écrire les écarts en JSON (pour comparer)")
 
 
 def _credits_args(p: argparse.ArgumentParser) -> None:
@@ -669,6 +675,8 @@ def _executer_deezer(a: argparse.Namespace, runtime: Runtime, hooks) -> int:
     from src.services import deezer_identite, ecarts_deezer
 
     art = _charger(runtime, a, creer=False)
+    if a.rejeu:
+        return _rejouer_deezer(a, runtime, art)
     enricher = runtime.data_enricher
     with source_usage.run_scope(Flow.DISCO, artist_id=art.id):
         deezer_id = async_loop.run_sync(
@@ -708,6 +716,50 @@ def _executer_deezer(a: argparse.Namespace, runtime: Runtime, hooks) -> int:
             )
             _imprimer_bilan("Deezer — création", "\n".join(comptes) or "rien à créer")
     return code_de(bilan)
+
+
+def _rejouer_deezer(a: argparse.Namespace, runtime: Runtime, art) -> int:
+    """Les écarts Deezer de l'artiste rejoués HORS LIGNE depuis le brut gardé
+    (chantier E) : aucun appel réseau, aucune écriture — l'ID Deezer de
+    l'artiste doit déjà être en base. Sert à juger une règle changée."""
+    import json
+
+    from src.concurrency import async_loop
+    from src.persistence import brut
+    from src.services import ecarts_deezer
+
+    deezer_id = a.deezer_id or art.deezer_id
+    if not deezer_id:
+        print(f"❌ {art.name} : aucun ID Deezer en base — un run Deezer d'abord")
+        return ERREUR
+    enricher = runtime.data_enricher
+    with brut.rejeu() as compte:
+        bilan = async_loop.run_sync(
+            ecarts_deezer.detecter_async(
+                enricher.deezer_client,
+                enricher.http,
+                runtime.data_manager,
+                art,
+                deezer_id=int(deezer_id),
+            )
+        )
+    _imprimer_bilan("Deezer — écarts REJOUÉS hors ligne", ecarts_deezer.resume(bilan, art.name))
+    lignes = [f"{compte['servies']} réponse(s) servie(s) depuis le brut"]
+    if compte["absentes"]:
+        lignes.append(
+            f"{len(compte['absentes'])} absente(s) — jamais lues depuis que le brut est gardé :"
+        )
+        lignes += [f"   {x}" for x in compte["absentes"][:10]]
+    _imprimer_bilan("Brut", "\n".join(lignes))
+    if a.sortie:
+        ecarts = sorted(
+            (ecarts_deezer.ecart_vers_dict(e) for e in bilan.ecarts),
+            key=lambda d: json.dumps(d, sort_keys=True, default=str),
+        )
+        with open(a.sortie, "w", encoding="utf-8") as f:
+            json.dump(ecarts, f, ensure_ascii=False, indent=1, sort_keys=True, default=str)
+        print(f"→ {a.sortie}")
+    return COMPLET if not compte["absentes"] else PARTIEL
 
 
 def main(argv: list[str] | None = None) -> int:

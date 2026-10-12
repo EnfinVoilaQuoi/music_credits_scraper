@@ -92,3 +92,129 @@ class TestPointsDePassage:
 
         asyncio.run(appel())
         assert brut.lectures("deezer", "https://api.deezer.com/track/1")[0]["corps"] == b'{"id": 1}'
+
+
+class TestRejeu:
+    """Lot 2 : servir les sources depuis le brut, sans réseau."""
+
+    @staticmethod
+    def _session_qui_interdit_le_reseau():
+        from src.api.async_http import AsyncHttpSession
+
+        def interdit(request):
+            raise AssertionError(f"appel réseau pendant un rejeu : {request.url}")
+
+        return AsyncHttpSession(min_delay=0, transport=httpx.MockTransport(interdit))
+
+    def test_session_async_servie_sans_reseau(self):
+        brut.consigner("deezer", "https://api.deezer.com/track/1", 200, b'{"id": 1}')
+        session = self._session_qui_interdit_le_reseau()
+
+        async def appel():
+            return await session.get("https://api.deezer.com/track/1")
+
+        with brut.rejeu() as compte:
+            reponse = asyncio.run(appel())
+        assert reponse.json() == {"id": 1}
+        assert compte["servies"] == 1 and compte["absentes"] == []
+
+    def test_absente_ou_source_non_gardee_jamais_le_reseau(self):
+        session = self._session_qui_interdit_le_reseau()
+
+        async def appel(url):
+            return await session.get(url)
+
+        with brut.rejeu() as compte:
+            for url in ("https://api.deezer.com/track/2", "https://api.genius.com/songs/1"):
+                with pytest.raises(httpx.ConnectError):
+                    asyncio.run(appel(url))
+        assert len(compte["absentes"]) == 2
+
+    def test_shim_requests_et_session_deezer(self, monkeypatch):
+        import requests
+
+        from src.api.deezer_api import DeezerAPI
+        from src.observability.source_usage import requests_get
+
+        brut.consigner("deezer", URL, 200, b'{"data": [1]}', {"q": "x"})
+
+        def interdit(*a, **k):
+            raise AssertionError("appel réseau pendant un rejeu")
+
+        monkeypatch.setattr(requests, "get", interdit)
+        api = DeezerAPI()
+        monkeypatch.setattr(api.session, "get", interdit)
+        with brut.rejeu():
+            assert requests_get("deezer", URL, params={"q": "x"}).json() == {"data": [1]}
+            assert api._make_request("search", {"q": "x"}) == {"data": [1]}
+            with pytest.raises(requests.ConnectionError):
+                requests_get("deezer", URL, params={"q": "absent"})
+        assert not brut.rejeu_actif()
+
+
+def test_une_detection_enregistree_puis_rejouee_donne_le_meme_bilan(data_manager):
+    """LE contrat du chantier E : ce qu'un run a lu, un rejeu le relit à
+    l'identique, sans réseau — une règle changée se juge hors ligne."""
+    from src.api.async_http import AsyncHttpSession
+    from src.api.deezer_api import DeezerAPI
+    from src.models import Artist
+    from src.services import ecarts_deezer
+
+    artiste = Artist(name="Booba")
+    artiste.id = data_manager.save_artist(artiste)
+    reponses = {
+        "/artist/390/albums": {"data": [{"id": 10, "title": "Ultra"}], "total": 1},
+        "/album/10": {
+            "id": 10,
+            "title": "Ultra",
+            "record_type": "album",
+            "artist": {"id": 390, "name": "Booba"},
+            "release_date": "2021-03-05",
+        },
+        "/album/10/tracks": {
+            "data": [
+                {
+                    "id": 100,
+                    "title": "Mona Lisa",
+                    "title_short": "Mona Lisa",
+                    "isrc": "FR0000000001",
+                    "duration": 200,
+                    "track_position": 1,
+                    "artist": {"id": 390, "name": "Booba"},
+                }
+            ],
+            "total": 1,
+        },
+    }
+
+    def servir(request):
+        import json as _json
+
+        corps = reponses.get(request.url.path, {"data": [], "total": 0})
+        return httpx.Response(200, content=_json.dumps(corps).encode())
+
+    def interdit(request):
+        raise AssertionError(f"appel réseau pendant un rejeu : {request.url}")
+
+    def detecter(transport):
+        http = AsyncHttpSession(min_delay=0, transport=httpx.MockTransport(transport))
+
+        async def run():
+            try:
+                return await ecarts_deezer.detecter_async(
+                    DeezerAPI(), http, data_manager, artiste, deezer_id=390
+                )
+            finally:
+                await http.aclose()
+
+        return asyncio.run(run())
+
+    enregistre = detecter(servir)
+    with brut.rejeu() as compte:
+        rejoue = detecter(interdit)
+    assert compte["absentes"] == [] and compte["servies"] >= 3
+
+    def resume(b):
+        return sorted((e.nature, e.titre, e.piste.id) for e in b.ecarts)
+
+    assert resume(enregistre) == resume(rejoue) and resume(rejoue)

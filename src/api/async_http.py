@@ -64,8 +64,16 @@ class AsyncHttpSession:
         lecture explicite de `status_code`, un `except httpx.HTTPError` ne
         verrait rien de ces codes.
         """
-        client = self._ensure_client()
         netloc = urlsplit(url).netloc
+        if brut.rejeu_actif():
+            # Rejeu hors ligne (chantier E) : la dernière lecture gardée, ou
+            # une erreur de connexion — jamais le réseau.
+            requete = httpx.Request("GET", url, params=params)
+            lu = brut.servir(key_for_domain(netloc), url, params)
+            if lu is None:
+                raise httpx.ConnectError("brut absent (rejeu hors ligne)", request=requete)
+            return httpx.Response(lu[0], content=lu[1], request=requete)
+        client = self._ensure_client()
         start = time.monotonic()
         async with self._limiter.limit(netloc):
             try:

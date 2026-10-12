@@ -24,6 +24,7 @@ import hashlib
 import sqlite3
 import threading
 import zlib
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -181,3 +182,42 @@ def bilan() -> dict:
         s: {"requetes": r, "lectures": n, "octets": o or 0, "octets_bruts": t or 0}
         for s, r, n, o, t in lignes
     }
+
+
+# ── Le REJEU : servir les sources depuis le brut, sans réseau (lot 2) ─────────
+#
+# Pendant `with rejeu():`, les points de passage réseau (AsyncHttpSession, le
+# shim `requests_get`, la session synchrone de Deezer) ne sortent PAS : ils
+# servent la dernière lecture gardée, ou lèvent « brut absent » — une source
+# non conservée aussi, pour qu'un rejeu soit hors ligne de bout en bout. Un
+# drapeau de MODULE (pas une ContextVar) : la boucle async vit sur un autre
+# thread que l'appelant.
+
+_rejeu: dict = {"actif": False, "servies": 0, "absentes": []}
+
+
+@contextmanager
+def rejeu():
+    """Rejeu hors ligne ; rend le compteur `{servies, absentes}` (mis à jour
+    au fil du rejeu)."""
+    _rejeu.update(actif=True, servies=0, absentes=[])
+    try:
+        yield _rejeu
+    finally:
+        _rejeu["actif"] = False
+
+
+def rejeu_actif() -> bool:
+    return _rejeu["actif"]
+
+
+def servir(source: str | None, url: str, params=None) -> tuple[int, bytes] | None:
+    """En rejeu : `(statut, corps)` de la dernière lecture gardée, ou None (et
+    l'absence est comptée) — jamais d'appel réseau."""
+    if source in SOURCES_ACTIVES:
+        lus = lectures(source, url, params)
+        if lus:
+            _rejeu["servies"] += 1
+            return lus[0]["statut"] or 200, lus[0]["corps"]
+    _rejeu["absentes"].append(f"{source or '?'} {url_sans_secret(url, params)}")
+    return None

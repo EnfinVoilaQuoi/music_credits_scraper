@@ -638,6 +638,36 @@ class TestDonneesDePageLaPlusRecenteGagne:
         data_manager.save_track(relu)
         assert _colonne(data_manager, chez_swing.id, "lyrics") == "v2"
 
+    def test_une_relation_manuelle_survit_a_la_page_relue(self, data_manager, famille):
+        """2026-10-12 : Kanye « Sky City » avait perdu « version de SKY CITY »,
+        posée à la main, quand la ligne de Kid Cudi a relu la page — la page ne
+        la porte pas. La relation manuelle reste, et gagne toute la famille."""
+        import json
+
+        chez_swing, chez_isha = famille
+        manuelle = {"type": "version_of", "title": "SKY CITY", "track_id": 9, "origine": "manuel"}
+        page = [{"type": "samples", "title": "Dope Man"}]
+        self._poser(
+            data_manager,
+            chez_swing.id,
+            relationships=json.dumps([manuelle]),
+            genius_detail_checked_at="2026-09-01T10:00:00",
+        )
+        self._poser(
+            data_manager,
+            chez_isha.id,
+            relationships=json.dumps(page),
+            genius_detail_checked_at="2026-10-03T10:00:00",
+        )
+        with data_manager.engine.begin() as conn:
+            from src.utils.track_soeurs import synchroniser_soeurs
+
+            synchroniser_soeurs(conn, chez_swing.id, _GENIUS)
+            synchroniser_soeurs(conn, chez_swing.id, _GENIUS)  # idempotent
+        for tid in (chez_swing.id, chez_isha.id):
+            rels = json.loads(_colonne(data_manager, tid, "relationships"))
+            assert rels == [*page, manuelle]
+
 
 def test_une_identite_divergente_entre_soeurs_va_au_panneau(data_manager, famille):
     """Deux ID Spotify différents sur le même enregistrement : aucune n'est

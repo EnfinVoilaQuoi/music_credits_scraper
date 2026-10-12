@@ -28,6 +28,8 @@ tranche et non l'ordre : `source_lien_retenue` pour le lien YouTube,
 paroles et — depuis le lot B — la durée, la date et l'ISRC.
 """
 
+import json
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -185,6 +187,42 @@ DONNEES_DE_PAGE = (
 )
 
 
+#: Marque d'une relation posée À LA MAIN (`appliquer_corrections_fiches`) :
+#: elle n'est pas sur la page Genius, la relecture de la page ne la redonne pas.
+ORIGINE_MANUELLE = "manuel"
+
+
+def avec_relations_manuelles(relations_json: str | None, toutes: list) -> str | None:
+    """PUR. Les relations de la page qui gagne, PLUS les relations manuelles de
+    toute la famille qu'elles n'ont pas déjà (même type, même titre). Sans
+    quoi « la lecture la plus récente gagne » effaçait la relation posée à la
+    main sur une sœur (2026-10-12 : Kanye « Sky City » version de « SKY CITY »,
+    perdue quand la ligne de Kid Cudi a relu la page)."""
+    from src.utils.title_matching import normalize_title
+
+    def lire(brut):
+        try:
+            return json.loads(brut) if brut else []
+        except (TypeError, ValueError):
+            return []
+
+    def cle(r):
+        return (r.get("type"), normalize_title(r.get("title") or ""))
+
+    relations = lire(relations_json)
+    vues = {cle(r) for r in relations}
+    ajout = False
+    for brut in toutes:
+        for r in lire(brut):
+            if r.get("origine") == ORIGINE_MANUELLE and cle(r) not in vues:
+                relations.append(r)
+                vues.add(cle(r))
+                ajout = True
+    if not ajout:
+        return relations_json
+    return json.dumps(relations, ensure_ascii=False)
+
+
 def _aligner_sur_la_lecture_la_plus_recente(conn, famille: list[int]) -> int:
     """Pour chaque groupe de `DONNEES_DE_PAGE`, la ligne renseignée dont la
     lecture est la plus récente transmet sa valeur aux autres. Un REMPLACEMENT,
@@ -219,10 +257,16 @@ def _aligner_sur_la_lecture_la_plus_recente(conn, famille: list[int]) -> int:
 
         gagnante = max(candidates, key=lambda r: (horloge(r), -r["id"]))
         valeurs = {c: gagnante[c] for c in colonnes}
+        if colonnes[0] == "relationships":
+            valeurs["relationships"] = avec_relations_manuelles(
+                gagnante["relationships"], [r["relationships"] for r in lignes]
+            )
         for r in lignes:
             # Même valeur (seule l'horloge ou la provenance diffère) : rien à
             # transmettre — ce serait du bruit, pas une divergence.
-            if r["id"] == gagnante["id"] or r[colonnes[0]] == valeurs[colonnes[0]]:
+            if r[colonnes[0]] == valeurs[colonnes[0]]:
+                continue
+            if r["id"] == gagnante["id"] and colonnes[0] != "relationships":
                 continue
             conn.execute(
                 text(

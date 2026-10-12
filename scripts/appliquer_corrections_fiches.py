@@ -33,6 +33,8 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from src.utils import corrections_fiches as cf
+from src.utils.title_matching import normalize_title
+from src.utils.track_soeurs import ORIGINE_MANUELLE
 
 _RELATIONS = {
     "version_de": "version_of",
@@ -194,7 +196,7 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
         if apply:
             dm.record_unreleased(track.id, True)
         fait("marquée inédite")
-    rels = list(track.relationships or [])
+    rels = [dict(r) for r in track.relationships or []]
     for cle, type_rel in _RELATIONS.items():
         if not entree.get(cle):
             continue
@@ -202,7 +204,27 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
         if cible is None:
             journal.append(f"   ⚠️ {nom} : cible de « {cle} » {m}")
             continue
-        if any(r.get("type") == type_rel and r.get("track_id") == cible.id for r in rels):
+        # Déjà là ? Même type et même fiche, ou même TITRE : la page Genius la
+        # donne souvent sans fiche, l'alignement des sœurs avec la fiche d'une
+        # autre ligne (« Pressure » → « CAN U BE » de Travis). On la complète
+        # (fiche, marque manuelle) au lieu de la doubler.
+        existante = next(
+            (
+                r
+                for r in rels
+                if r.get("type") == type_rel
+                and (
+                    r.get("track_id") == cible.id
+                    or normalize_title(r.get("title") or "") == normalize_title(cible.title)
+                )
+            ),
+            None,
+        )
+        if existante is not None:
+            if existante.get("origine") != ORIGINE_MANUELLE:
+                existante["origine"] = ORIGINE_MANUELLE
+                existante["track_id"] = existante.get("track_id") or cible.id
+                fait(f"{type_rel} → « {cible.title} » : déjà là, marquée manuelle")
             continue
         rels.append(
             {
@@ -211,6 +233,8 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
                 "artist": cible.primary_artist_name or artiste,
                 "url": cible.genius_url,
                 "track_id": cible.id,
+                # Survit à l'alignement des sœurs sur la page relue (track_soeurs).
+                "origine": ORIGINE_MANUELLE,
             }
         )
         fait(f"{type_rel} → « {cible.title} » ({cible.id})")

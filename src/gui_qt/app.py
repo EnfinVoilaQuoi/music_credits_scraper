@@ -27,22 +27,6 @@ def creer_application(argv=None):
     return app
 
 
-def _verifier_ollama(fenetre) -> None:
-    """Ollama lancé s'il ne tourne pas, SIGNALÉ s'il reste absent (comme la GUI
-    CustomTkinter : un run entier avait tourné sans, seul le log le disait)."""
-    from PyQt6.QtWidgets import QMessageBox
-
-    from src.gui_qt.pont import en_fond
-    from src.utils.ollama_demarrage import assurer_ollama
-
-    def apres(etat) -> None:
-        if not etat.pret:
-            logger.warning(f"🦙 {etat.message}")
-            QMessageBox.warning(fenetre, "Ollama", etat.message)
-
-    en_fond(assurer_ollama, apres, nom="ollama-demarrage")
-
-
 def main(argv=None) -> int:
     configurer_journaux()
     from src.config import GENIUS_API_KEY
@@ -60,7 +44,6 @@ def main(argv=None) -> int:
     usage_repository.attach(runtime.data_manager.engine)
     fenetre = FenetrePrincipale(runtime)
     fenetre.show()
-    _verifier_ollama(fenetre)
     logger.info("Interface PyQt6 lancée")
     try:
         return app.exec()

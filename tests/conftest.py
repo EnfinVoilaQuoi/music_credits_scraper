@@ -96,24 +96,6 @@ def _gate_spotify_sans_fournisseur(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _aucun_test_ne_parle_a_ollama(monkeypatch):
-    """AUCUN test n'interroge ni ne lance le vrai Ollama (2026-10-12) : sur le
-    poste, avec un Ollama démarré, les replis LLM (SongBPM, Kworb, Spotify)
-    chargeaient llama3.2 — résultats dépendants de la machine, et des fenêtres
-    console qui s'ouvraient en pleine suite. Les tests du LLM réinitialisent
-    eux-mêmes ce singleton ; ceux du démarrage injectent leurs dépendances."""
-    from src.utils import llm_extractor, ollama_demarrage
-
-    monkeypatch.setattr(llm_extractor, "_shared_extractor", None)
-    monkeypatch.setattr(llm_extractor, "_shared_available", False)
-    monkeypatch.setattr(
-        ollama_demarrage,
-        "assurer_ollama",
-        lambda *a, **k: ollama_demarrage.EtatOllama(True, False, ""),
-    )
-
-
-@pytest.fixture(autouse=True)
 def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
     """AUCUN test ne lit `data/corrections/fiches.json` réel : il est relu par le
     gate Spotify, `save_track` et l'import discographie (2026-09-24)."""

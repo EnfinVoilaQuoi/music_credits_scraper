@@ -20,11 +20,6 @@ import requests
 from bs4 import BeautifulSoup
 
 from src.observability import source_usage
-from src.utils.llm_extractor import (
-    build_streams_table_prompt,
-    get_shared_extractor,
-    secours_apres_panne,
-)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -116,16 +111,13 @@ class KworbScraper:
 
             if not page["entries"]:
                 # 0 entrée sur une page servie : la structure a changé. C'est un
-                # scrape cassé, pas une absence de donnée — le repli LLM ne doit
-                # pas masquer le signal. La règle porte désormais un NOM, pour
-                # que l'ordre (signaler PUIS sauver) ne dépende plus d'un
-                # commentaire qu'on peut oublier de recopier ailleurs.
-                texte = soup.get_text(separator="\n", strip=True)
-                page["entries"] = secours_apres_panne(
-                    obs,
-                    "0 entrée parsée (structure de table changée ?)",
-                    lambda: self._extract_with_llm(texte),
-                )
+                # scrape CASSÉ, pas une absence de donnée — signalé tel quel. Le
+                # repli LLM qui suivait est retiré (décision utilisateur
+                # 2026-10-12) : essayé en réel sur la page cassée, il ne sauvait
+                # rien (réponse coupée) ; c'est le signal qui fait réparer.
+                detail = "0 entrée parsée (structure de table changée ?)"
+                obs.parse_error(detail)
+                logger.error(f"❌ Kworb : {detail} — {url}")
 
             logger.info(
                 f"Kworb: {len(page['entries'])} entrées pour "
@@ -218,63 +210,6 @@ class KworbScraper:
                         "is_feature": is_feature,
                     }
                 )
-        return results
-
-    # ── Fallback LLM (structure de page changée) ───────────────────────────────
-
-    def _extract_with_llm(self, page_text: str) -> list[dict]:
-        """
-        Fallback LLM : extrait les lignes titre/streams du texte de la page.
-        Anti-hallucination : chaque nombre doit exister tel quel dans la page.
-        Pas d'IDs Spotify ni de flag feature par cette voie (texte brut).
-        """
-        llm = get_shared_extractor()
-        if not llm or not page_text:
-            return []
-
-        # Pas de troncature ici : `extract_json` plafonne le prompt ENTIER, et
-        # le 5500 qui figurait là était au-dessus du budget réel (5449) — il ne
-        # coupait donc jamais rien.
-        data = llm.extract_json(build_streams_table_prompt(page_text))
-        if not data or not isinstance(data.get("tracks"), list):
-            return []
-
-        # Un nombre de la page, séparateurs de milliers compris (« 146,677,701 »)
-        # — mais PAS par-dessus un retour à la ligne : l'ancien motif
-        # (`\d[\d,.\s]*\d`) collait toutes les cellules d'une ligne en un seul
-        # nombre géant, et le garde-fou rejetait TOUT, la vraie ligne comprise
-        # (trouvé le 2026-10-12 par le test sur page cassée : ce secours n'avait
-        # jamais pu rien sauver).
-        page_numbers = {
-            re.sub(r"\D", "", n)
-            for n in re.findall(r"\d{1,3}(?:[,.   ]\d{3})+(?!\d)|\d+", page_text)
-        }
-
-        results = []
-        for entry in data["tracks"]:
-            if not isinstance(entry, dict):
-                continue
-            title = str(entry.get("title", "")).strip()
-            streams = entry.get("streams")
-            daily = entry.get("daily")
-            if not title or not isinstance(streams, int):
-                continue
-            if str(streams) not in page_numbers:
-                logger.debug(f"Kworb LLM: streams {streams} absent de la page — rejeté")
-                continue
-            if not (isinstance(daily, int) and str(daily) in page_numbers):
-                daily = 0
-            results.append(
-                {
-                    "title": title.lstrip("* ").strip(),
-                    "streams": streams,
-                    "daily_streams": daily,
-                    "spotify_id": None,
-                    "is_feature": title.startswith("*"),
-                }
-            )
-
-        logger.info(f"🤖 Kworb LLM: {len(results)} entrée(s) validée(s)")
         return results
 
     @staticmethod

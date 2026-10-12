@@ -5,7 +5,7 @@ rejouent les extracteurs BS4 sur une vraie page de morceau capturée.
 Re-capture : scripts/capture_fixtures.py --only genius.
 Sentinelle : Josman — Dans le vide (album Matrix).
 
-Le fallback LLM (_extract_with_llm, Ollama) n'est volontairement PAS testé.
+Le repli LLM de Genius est retiré (2026-10-11).
 """
 
 import pytest
@@ -20,8 +20,7 @@ FIXTURE = "genius/song_page.html"
 
 @pytest.fixture(scope="module")
 def scraper():
-    # __init__ sonde Ollama (LLMExtractor.is_available) et construit la config
-    # navigateur → esquivé : les extracteurs BS4 n'utilisent aucun état d'instance.
+    # __init__ construit la config navigateur → esquivé : les extracteurs BS4 n'utilisent aucun état d'instance.
     return GeniusScraperV3.__new__(GeniusScraperV3)
 
 

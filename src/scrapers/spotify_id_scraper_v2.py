@@ -29,7 +29,6 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.fichiers_json import ecrire_atomique, lire_cache
-from src.utils.llm_extractor import build_spotify_match_prompt, get_shared_extractor
 from src.utils.logger import get_logger
 from src.utils.title_matching import contains_as_words, names_match_as_words, normalize_name
 
@@ -381,29 +380,20 @@ class SpotifyIDScraper:
         if not found_tracks:
             return self._rien_trouve(obs, title, had_errors, timeouts)
         found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
-        llm_choice = None
-        if self._arbitrage_llm_utile(found_tracks):
-            llm_choice = self._select_track_with_llm(artist, title, found_tracks)
-        return self._retenir(obs, title, cache_key, found_tracks[0], llm_choice)
+        return self._retenir(obs, title, cache_key, found_tracks[0])
 
     # ── Fin de recherche : PARTAGÉE par les jumeaux sync et async ────────────
     # (2026-09-28 : le jumeau async, celui que l'app emprunte, n'avait ni le
     # plancher de pertinence ni le filtre du choix LLM — posés sur la seule
     # voie sync par c0fbd50. La logique ne vit plus qu'ici.)
 
-    @staticmethod
-    def _arbitrage_llm_utile(found_tracks: list) -> bool:
-        """Choix heuristique ambigu (candidats TRIÉS) : on demande au LLM."""
-        return len(found_tracks) > 1 and found_tracks[0]["relevance"] < 0.8
+    def _retenir(self, obs, title: str, cache_key: str, best: dict) -> str | None:
+        """Le candidat retenu, ou un refus MOTIVÉ (absence constatée).
 
-    def _retenir(self, obs, title: str, cache_key: str, best: dict, llm_choice) -> str | None:
-        """Le candidat retenu, ou un refus MOTIVÉ (absence constatée)."""
-        # Le choix du LLM franchit le plancher LUI AUSSI. Sans cette condition il
-        # réintroduirait par la bande ce que le seuil vient d'écarter — il choisit
-        # un INDEX parmi les candidats présentés, y compris les mauvais.
-        if llm_choice is not None and llm_choice["relevance"] >= _MIN_RELEVANCE:
-            best = llm_choice
-            logger.info(f"🤖 SpotifyID LLM: choix affiné → {best['id']}")
+        L'arbitrage LLM des candidats ambigus est RETIRÉ (décision utilisateur
+        2026-10-12) : mesuré sur 300 fiches, il se déclenchait 13 fois, en
+        corrigeait 1 et en cassait 2 — et son verdict dépendait de ce
+        qu'Ollama tourne ou non."""
         # PLANCHER de pertinence. La recherche Spotify rend TOUJOURS quelque
         # chose — titres voisins, recommandations — donc `found_tracks` n'est
         # jamais vide et, sans plancher, un identifiant était toujours produit :
@@ -452,31 +442,6 @@ class SpotifyIDScraper:
             obs.fail(IssueKind.TIMEOUT, f"aucune page de résultats rendue ({timeouts} délai(s))")
         else:
             obs.fail(IssueKind.PARSE, "pages rendues sans lien de piste lisible")
-        return None
-
-    def _select_track_with_llm(self, artist: str, title: str, found_tracks: list) -> dict | None:
-        """
-        Fallback LLM : choisit le bon résultat parmi les candidats ambigus.
-        Retourne le candidat choisi, ou None si LLM indisponible/sans réponse valide.
-        L'ID retourné vient toujours d'un candidat réel (jamais généré par le LLM).
-        """
-        llm = get_shared_extractor()
-        if not llm:
-            return None
-
-        candidates = [
-            {"index": i, "text": (t.get("text") or "")[:150].strip() or t["id"]}
-            for i, t in enumerate(found_tracks[:8])
-        ]
-        data = llm.extract_json(
-            build_spotify_match_prompt(artist, title, candidates), max_tokens=32
-        )
-        if not data:
-            return None
-
-        idx = data.get("best_index")
-        if isinstance(idx, int) and 0 <= idx < len(found_tracks[:8]):
-            return found_tracks[idx]
         return None
 
     # ── Artistes d'un track via la page EMBED (server-rendered, fiable) ───────

@@ -65,7 +65,7 @@ ignore = [
 "src/gui/**" = ["BLE001"]
 # Les 13 modules `src/utils` du cliquet ont été SOLDÉS le 2026-09-04 : leurs 29
 # `except Exception` sont resserrés par domaine (pandas, JSON, sqlite3,
-# SQLAlchemy, ollama, formes de hit Deezer). Seul `source_health` garde un
+# SQLAlchemy, formes de hit Deezer). Seul `source_health` garde un
 # dernier ressort, sous `noqa` commenté : une sonde appelle du code arbitraire
 # propre à chaque source et ne doit jamais crasher l'app.
 "src/utils/update_kworb.py" = ["E402"]

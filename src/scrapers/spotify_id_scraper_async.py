@@ -1,11 +1,11 @@
 """Scraper Spotify ID — variante ASYNC (Phase F3b), vivant dans la boucle asyncio.
 
 Sous-classe de `SpotifyIDScraper` : toute la logique PURE est héritée (patterns
-d'ID, cache, scoring de pertinence, parsing embed, choix LLM) ; seules les
+d'ID, cache, scoring de pertinence, parsing embed) ; seules les
 méthodes touchant Playwright sont réécrites en async (API `playwright.async_api`,
 mêmes sélecteurs, mêmes timeouts, même séquence). Le browser naît, travaille et
 meurt DANS la boucle (`get_playwright_async`), fermé par `aclose()` en fin de
-batch. Le LLM (Ollama, bloquant ~secondes) passe par `asyncio.to_thread`.
+batch.
 
 Le périmètre couvre le flux d'enrichissement (get_spotify_id + page title) ;
 les méthodes de vote d'ID artiste (streams/Kworb) restent sync et migreront
@@ -13,7 +13,6 @@ avec leurs workers (F5). Les méthodes sync héritées touchant Playwright sont
 neutralisées (RuntimeError) pour éviter tout usage accidentel.
 """
 
-import asyncio
 import urllib.parse
 
 from playwright.async_api import Error as PlaywrightError
@@ -230,17 +229,11 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
                 continue
 
         # Fin de recherche PARTAGÉE avec la voie sync (plancher de pertinence,
-        # filtre du choix LLM, « rien lu » ≠ absence) — seul le LLM, bloquant,
-        # passe ici par un thread.
+        # « rien lu » ≠ absence).
         if not found_tracks:
             return self._rien_trouve(obs, title, had_errors, timeouts)
         found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
-        llm_choice = None
-        if self._arbitrage_llm_utile(found_tracks):
-            llm_choice = await asyncio.to_thread(
-                self._select_track_with_llm, artist, title, found_tracks
-            )
-        return self._retenir(obs, title, cache_key, found_tracks[0], llm_choice)
+        return self._retenir(obs, title, cache_key, found_tracks[0])
 
     # ── Titre de page (miroir async) ────────────────────────────────────────
 

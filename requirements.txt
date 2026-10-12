@@ -45,10 +45,10 @@ schedule
 # Logging (optionnel, mais utile)
 python-dateutil==2.9.0.post0
 
-# IA locale (Crawl4AI + Ollama)
+# Crawl4AI (navigateur des scrapers Genius / RIAA). Ollama et ses replis LLM
+# sont retirés (décision utilisateur 2026-10-12 : mesurés inutiles ou nuisibles).
 crawl4ai>=0.5.0
-ollama>=0.4.0
 
 # Concurrence async (phase F) — client HTTP des providers async (boucle unique).
-# Déjà présent en transitif (crawl4ai, ollama) ; dépendance directe désormais.
+# Déjà présent en transitif (crawl4ai) ; dépendance directe désormais.
 httpx>=0.28.1

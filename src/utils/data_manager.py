@@ -40,6 +40,11 @@ class DataManager(ArtistRepository, TrackRepository, RevueRepository):
 
         spotify_identity.fournisseur_titres = self.titres_des_fiches
         spotify_identity.fournisseur_propres = self.titres_des_fiches_propres
+        # Les refus décidés à la main vivent en base (table `refus`, e48) ;
+        # `corrections_fiches` garde son API par morceau et lit ce moteur.
+        from src.utils import corrections_fiches
+
+        corrections_fiches.moteur = self.engine
 
     @property
     def db_path(self) -> str:

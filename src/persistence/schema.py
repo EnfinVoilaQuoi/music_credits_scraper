@@ -670,6 +670,30 @@ source_track_absences = Table(
 )
 
 
+# Refus décidés À LA MAIN (e48, chantier C lot 2, 2026-10-12) — ex-clés
+# `retirer_*` de `data/corrections/fiches.json`. Fiche désignée par sa page
+# Genius (`cle_fiche` = « g<id> »), sinon titre + album sous un artiste ;
+# `valeur` = CLÉ normalisée de la nature (unicité), `detail` = l'entrée
+# d'origine. Lus et écrits par `src/utils/corrections_fiches.py` seulement.
+refus = Table(
+    "refus",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("cle_fiche", Text, nullable=False),
+    Column("genius_id", Integer),
+    Column("artiste", Text, nullable=False),
+    Column("titre", Text),
+    Column("album", Text),
+    Column("nature", Text, nullable=False),
+    Column("valeur", Text, nullable=False),
+    Column("detail", Text),
+    Column("decide_le", TIMESTAMP),
+    UniqueConstraint("cle_fiche", "artiste", "nature", "valeur"),
+    sqlite_autoincrement=True,
+)
+Index("ix_refus_genius_nature", refus.c.genius_id, refus.c.nature)
+
+
 # Panneau « À trancher », étape 3 (e38, 2026-09-27). Deux notions distinctes :
 # - `revue_verdicts` : la mémoire des DÉCISIONS de l'utilisateur sur un cas
 #   (« c'est normal »). Clé = (artiste, détecteur, clé du cas) ; la clé du cas

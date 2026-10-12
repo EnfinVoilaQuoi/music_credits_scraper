@@ -1,7 +1,9 @@
 """Applique `data/corrections/fiches.json` (étape 3 du plan streams, 2026-09-24).
 
-Le fichier porte les décisions humaines par fiche ; il est aussi la MÉMOIRE que
-relisent les producteurs (cf. `src/utils/corrections_fiches.py`). Ce script est
+Le fichier porte les décisions humaines par fiche. Depuis le chantier C (lot 2,
+2026-10-12), les REFUS (clés `retirer_*`) n'y restent pas : appliqués, ils sont
+versés dans la table `refus`, que relisent les producteurs
+(`src/utils/corrections_fiches.py`), et retirés du fichier. Ce script est
 IDEMPOTENT : une action déjà faite est constatée, pas refaite.
 
 Actions d'une entrée (toutes optionnelles) :
@@ -24,7 +26,6 @@ Désignation : {"genius_id": N}, sinon {"titre": …, "album": …} (fiche Deeze
 """
 
 import argparse
-import json
 import sys
 
 if sys.platform == "win32" and "pytest" not in sys.modules:
@@ -174,7 +175,7 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
                 continue
             if apply:
                 dm.clear_track_spotify_id(perdant.id, sid)
-                _memoriser_refus(artiste, perdant, sid)
+                cf.memoriser_id_refuse(perdant, sid)
             fait(f"ID {sid} retiré de « {perdant.title} » ({perdant.id}) — {raison}")
     if entree.get("retirer_lien_youtube"):
         if apply:
@@ -232,25 +233,6 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
         fait(f"crédit retiré : {c['nom']} — {c['role']} ({n})")
 
 
-def _memoriser_refus(artiste: str, perdant, sid: str) -> None:
-    """Le résultat d'un départage devient une décision EXPLICITE du fichier."""
-    donnees = json.loads(cf.FICHIER.read_text(encoding="utf-8"))
-    designation = (
-        {"genius_id": perdant.genius_id}
-        if perdant.genius_id
-        else {"titre": perdant.title, "album": perdant.album}
-    )
-    entrees = donnees.setdefault(artiste, [])
-    cible = next((e for e in entrees if e.get("fiche") == designation), None)
-    if cible is None:
-        cible = {"fiche": designation}
-        entrees.append(cible)
-    refus = cible.setdefault("retirer_id_spotify", [])
-    if sid not in refus:
-        refus.append(sid)
-    cf.FICHIER.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", "utf-8")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="écrire (défaut : dry-run)")
@@ -272,6 +254,13 @@ def main() -> int:
         if journal:
             print(f"== {artiste}")
             print("\n".join(journal))
+    if args.apply:
+        # Les refus écrits à la main dans le fichier (clés `retirer_*`) sont
+        # appliqués ci-dessus, puis VERSÉS en base, où les producteurs les
+        # lisent (chantier C, lot 2) — et retirés du fichier.
+        verses = cf.migrer_refus_vers_la_base()
+        if verses:
+            print(f"🗂️ Refus versés en base : {verses}")
     if not args.apply:
         print("\n(dry-run — relancer avec --apply pour écrire)")
     return 0

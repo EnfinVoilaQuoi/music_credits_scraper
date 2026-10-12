@@ -95,51 +95,172 @@ def entrees_du_morceau(track) -> list[dict]:
     ]
 
 
-def entrees_de_l_enregistrement(track) -> list[dict]:
-    """Les entrées de la fiche ET celles qui désignent la même page Genius chez
-    un AUTRE artiste (ses lignes sœurs). Sert aux refus de ce que les sœurs
-    PARTAGENT (ID, vidéos, LRC, crédits) : un refus décidé sur la ligne de
-    Kanye protège aussi celle de Kid Cudi, sans quoi l'union des sœurs rendait
-    la valeur refusée (chantier C, 2026-10-12 : 40 refus sur des
-    enregistrements à lignes sœurs ne protégeaient que leur ligne). Pas pour
-    les certifications : elles sont recalculées PAR ARTISTE."""
-    entrees = list(entrees_du_morceau(track))
-    if track.genius_id is None:
-        return entrees
+# ── Les REFUS, en base (table `refus`, e48 — chantier C lot 2, 2026-10-12) ─────
+
+#: Moteur de la base, posé par `DataManager` à sa construction (même motif que
+#: `spotify_identity.fournisseur_titres`). Sans lui (aucune base ouverte), les
+#: lectures valent « aucun refus » et les écritures ne font rien.
+moteur = None
+
+#: Clé historique de `fiches.json` → nature en base.
+NATURES = {
+    "retirer_id_spotify": "id_spotify",
+    "retirer_id_deezer": "id_deezer",
+    "retirer_videos": "video",
+    "retirer_lrc": "lrc",
+    "retirer_credits": "credit",
+    "retirer_certifs": "certif",
+    "retirer_lien_youtube": "lien_youtube",
+}
+
+#: Ce que les lignes sœurs PARTAGENT : le refus vaut pour tout l'enregistrement
+#: (même page Genius, tout artiste) — un refus décidé sur la ligne de Kanye
+#: protège celle de Kid Cudi (chantier C lot 1). Les certifications, recalculées
+#: PAR ARTISTE, gardent leur refus à la ligne.
+PAR_ENREGISTREMENT = frozenset(set(NATURES.values()) - {"certif"})
+
+
+def _cle_fiche(designation: dict) -> str:
+    if designation.get("genius_id") is not None:
+        return f"g{int(designation['genius_id'])}"
+    return f"t{(designation.get('titre') or '').strip()}|{normalize_title(designation.get('album') or '')}"
+
+
+def _cle(nature: str, valeur) -> str:
+    """La CLÉ normalisée d'un refus (unicité en base) ; l'entrée d'origine va
+    dans `detail`."""
+    if nature == "certif":
+        return json.dumps(list(cle_certif(valeur)), ensure_ascii=False)
+    if nature == "credit":
+        return json.dumps([normalize_name(valeur["nom"]), valeur["role"]], ensure_ascii=False)
+    if nature == "id_deezer":
+        return str(int(valeur))
+    return str(valeur)
+
+
+def _lignes(track, nature: str) -> list[dict]:
+    """Les refus de `nature` qui visent la fiche — et, pour une donnée que les
+    sœurs partagent, la même page Genius chez tout artiste."""
     artiste = track.artist.name if track.artist else None
-    for autre, liste in charger().items():
-        if autre == artiste:
+    if moteur is None or not artiste:
+        return []
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with moteur.connect() as conn:
+            lignes = (
+                conn.execute(
+                    text(
+                        "SELECT genius_id, artiste, titre, album, valeur, detail FROM refus "
+                        "WHERE nature = :n AND (artiste = :a OR genius_id = :g)"
+                    ),
+                    {"n": nature, "a": artiste, "g": track.genius_id},
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as e:
+        logger.warning(f"Refus illisibles ({nature}) : {e} — aucun refus appliqué")
+        return []
+    gardees = []
+    for r in lignes:
+        if r["genius_id"] is not None:
+            if track.genius_id is None or int(r["genius_id"]) != int(track.genius_id):
+                continue
+            if r["artiste"] != artiste and nature not in PAR_ENREGISTREMENT:
+                continue
+        elif r["artiste"] != artiste or not designe(
+            {"titre": r["titre"], "album": r["album"]},
+            genius_id=track.genius_id,
+            titre=track.title,
+            album=track.album,
+        ):
             continue
-        entrees += [
-            e
-            for e in liste
-            if (e.get("fiche") or {}).get("genius_id") is not None
-            and int(e["fiche"]["genius_id"]) == int(track.genius_id)
-        ]
-    return entrees
+        gardees.append(dict(r))
+    return gardees
+
+
+def _memoriser(track, nature: str, valeur) -> bool:
+    """Consigne un refus pour la fiche. Rend False s'il y était déjà."""
+    artiste = track.artist.name if track.artist else None
+    if moteur is None or not artiste or valeur in (None, ""):
+        return False
+    from datetime import datetime
+
+    designation = designation_de(track)
+    return _inserer(
+        designation,
+        artiste,
+        track.title,
+        track.album,
+        nature,
+        valeur,
+        datetime.now().isoformat(timespec="seconds"),
+    )
+
+
+def _inserer(designation, artiste, titre, album, nature, valeur, le, conn=None) -> bool:
+    from sqlalchemy import text
+
+    params = {
+        "cle_fiche": _cle_fiche(designation),
+        "gid": designation.get("genius_id"),
+        "artiste": artiste,
+        "titre": titre,
+        "album": album,
+        "nature": nature,
+        "valeur": _cle(nature, valeur),
+        "detail": json.dumps(valeur, ensure_ascii=False) if isinstance(valeur, dict) else None,
+        "le": le,
+    }
+    sql = text(
+        "INSERT OR IGNORE INTO refus (cle_fiche, genius_id, artiste, titre, album, nature, "
+        "valeur, detail, decide_le) VALUES (:cle_fiche, :gid, :artiste, :titre, :album, "
+        ":nature, :valeur, :detail, :le)"
+    )
+    if conn is not None:
+        return bool(conn.execute(sql, params).rowcount)
+    with moteur.begin() as c:
+        return bool(c.execute(sql, params).rowcount)
+
+
+def _oublier(track, nature: str, valeur) -> bool:
+    """Pendant de `_memoriser` : retire le refus de la fiche (une correction
+    automatique qu'on RÉTABLIT). Rend False s'il n'y était pas."""
+    artiste = track.artist.name if track.artist else None
+    if moteur is None or not artiste:
+        return False
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "DELETE FROM refus WHERE cle_fiche = :c AND artiste = :a "
+                    "AND nature = :n AND valeur = :v"
+                ),
+                {
+                    "c": _cle_fiche(designation_de(track)),
+                    "a": artiste,
+                    "n": nature,
+                    "v": _cle(nature, valeur),
+                },
+            ).rowcount
+        )
 
 
 def ids_refuses(track) -> set[str]:
-    return {
-        sid for e in entrees_de_l_enregistrement(track) for sid in e.get("retirer_id_spotify") or []
-    }
+    return {r["valeur"] for r in _lignes(track, "id_spotify")}
 
 
 def deezer_refuses(track) -> set[int]:
-    return {
-        int(did)
-        for e in entrees_de_l_enregistrement(track)
-        for did in e.get("retirer_id_deezer") or []
-    }
+    return {int(r["valeur"]) for r in _lignes(track, "id_deezer")}
 
 
 def credits_refuses(track) -> set[tuple[str, str]]:
     """{(nom normalisé, rôle)} — le rôle est la valeur de `CreditRole`."""
-    return {
-        (normalize_name(c["nom"]), c["role"])
-        for e in entrees_de_l_enregistrement(track)
-        for c in e.get("retirer_credits") or []
-    }
+    return {tuple(json.loads(r["valeur"])) for r in _lignes(track, "credit")}
 
 
 def genius_ids_absorbes(artiste: str) -> set[int]:
@@ -172,63 +293,22 @@ def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
     ecrire_atomique(FICHIER, donnees, fin="\n")
 
 
-def _ajouter_a_la_fiche(track, cle: str, valeur, meme=None) -> bool:
-    """Ajoute `valeur` à la liste `cle` de l'entrée de la fiche (créée au besoin).
-    Rend False si elle y était déjà (`meme(a, b)` décide de l'égalité)."""
-    artiste = track.artist.name if track.artist else None
-    if not artiste or valeur in (None, ""):
-        return False
-    meme = meme or (lambda a, b: a == b)
-    donnees = _relire_pour_ecrire()
-    if donnees is None:
-        return False
-    entrees = donnees.setdefault(artiste, [])
-    fiche = designation_de(track)
-    ligne = next((e for e in entrees if e.get("fiche") == fiche), None)
-    if ligne is None:
-        ligne = {"fiche": fiche}
-        entrees.append(ligne)
-    liste = ligne.setdefault(cle, [])
-    if any(meme(x, valeur) for x in liste):
-        return False
-    liste.append(valeur)
-    ecrire_atomique(FICHIER, donnees, fin="\n")
-    return True
-
-
-def _retirer_de_la_fiche(track, cle: str, valeur, meme=None) -> bool:
-    """Pendant de `_ajouter_a_la_fiche` : oublie `valeur` de la liste `cle` (une
-    correction automatique qu'on RÉTABLIT). Rend False si elle n'y était pas."""
-    artiste = track.artist.name if track.artist else None
-    if not artiste:
-        return False
-    meme = meme or (lambda a, b: a == b)
-    donnees = _relire_pour_ecrire()
-    if donnees is None:
-        return False
-    ligne = next(
-        (e for e in donnees.get(artiste, []) if e.get("fiche") == designation_de(track)), None
-    )
-    if ligne is None or not any(meme(x, valeur) for x in ligne.get(cle) or []):
-        return False
-    ligne[cle] = [x for x in ligne[cle] if not meme(x, valeur)]
-    if not ligne[cle]:
-        del ligne[cle]
-    ecrire_atomique(FICHIER, donnees, fin="\n")
-    return True
-
-
 def memoriser_id_refuse(track, spotify_id: str) -> None:
     """Consigne un ID Spotify retiré À LA MAIN (panneau « À trancher ») : relu par
     le gate d'identité (`ids_refuses`), sans quoi Kworb ou le scraper le
     reposeraient au prochain run."""
-    _ajouter_a_la_fiche(track, "retirer_id_spotify", spotify_id)
+    _memoriser(track, "id_spotify", spotify_id)
 
 
 def memoriser_deezer_refuse(track, deezer_id: int) -> None:
-    """Consigne une piste Deezer DÉLIÉE de la fiche (`deezer_refuses`) : ni les
-    écarts Deezer ni le provider par morceau ne la reposent."""
-    _ajouter_a_la_fiche(track, "retirer_id_deezer", int(deezer_id))
+    """Consigne une piste Deezer DÉLIÉE : relue par les écarts Deezer et le
+    provider par morceau (`deezer_refuses`)."""
+    _memoriser(track, "id_deezer", int(deezer_id))
+
+
+def memoriser_credit_refuse(track, nom: str, role: str) -> None:
+    """Consigne un crédit retiré : `save_track` ne l'écrit plus (`credits_refuses`)."""
+    _memoriser(track, "credit", {"nom": nom, "role": role})
 
 
 def cle_certif(entree: dict) -> tuple:
@@ -242,42 +322,34 @@ def cle_certif(entree: dict) -> tuple:
     )
 
 
+def _sous_entree_certif(entree: dict) -> dict:
+    return {k: entree.get(k) for k in ("body", "title", "certification", "certification_date")}
+
+
 def certifs_refusees(track) -> set[tuple]:
     """Certifications retirées À LA MAIN de cette fiche (panneau « À trancher ») :
     `apply_certifications` ne les rattache plus, sans quoi le matcher les
-    reposerait au prochain « Appliquer les certifs »."""
-    return {
-        cle_certif(c) for e in entrees_du_morceau(track) for c in e.get("retirer_certifs") or []
-    }
+    reposerait au prochain « Appliquer les certifs ». PAR ARTISTE."""
+    return {tuple(json.loads(r["valeur"])) for r in _lignes(track, "certif")}
 
 
 def memoriser_certif_refusee(track, entree: dict) -> None:
-    _ajouter_a_la_fiche(
-        track,
-        "retirer_certifs",
-        {k: entree.get(k) for k in ("body", "title", "certification", "certification_date")},
-        meme=lambda a, b: cle_certif(a) == cle_certif(b),
-    )
+    _memoriser(track, "certif", _sous_entree_certif(entree))
 
 
 def oublier_certif_refusee(track, entree: dict) -> bool:
-    return _retirer_de_la_fiche(
-        track,
-        "retirer_certifs",
-        entree,
-        meme=lambda a, b: cle_certif(a) == cle_certif(b),
-    )
+    return _oublier(track, "certif", _sous_entree_certif(entree))
 
 
 def videos_refusees(track) -> set[str]:
     """Vidéos rejetées À LA MAIN (✖️ de la fiche ou du panneau) : ni Genius, ni la
     recherche, ni le canal YTM ne les rattachent plus à cette fiche (2026-09-27 —
     avant, le run discographie reposait le lien Genius rejeté)."""
-    return {v for e in entrees_de_l_enregistrement(track) for v in e.get("retirer_videos") or []}
+    return {r["valeur"] for r in _lignes(track, "video")}
 
 
 def memoriser_video_refusee(track, video_id: str) -> None:
-    _ajouter_a_la_fiche(track, "retirer_videos", video_id)
+    _memoriser(track, "video", video_id)
 
 
 def empreinte_lrc(lrc: str | None) -> str:
@@ -292,12 +364,82 @@ def empreinte_lrc(lrc: str | None) -> str:
 
 def lrc_refuses(track) -> set[str]:
     """Empreintes des LRC retirés À LA MAIN : le résolveur ne les retient plus."""
-    return {x for e in entrees_de_l_enregistrement(track) for x in e.get("retirer_lrc") or []}
+    return {r["valeur"] for r in _lignes(track, "lrc")}
 
 
 def memoriser_lrc_refuse(track, lrc: str) -> None:
-    _ajouter_a_la_fiche(track, "retirer_lrc", empreinte_lrc(lrc))
+    _memoriser(track, "lrc", empreinte_lrc(lrc))
 
 
 def oublier_lrc_refuse(track, lrc: str) -> bool:
-    return _retirer_de_la_fiche(track, "retirer_lrc", empreinte_lrc(lrc))
+    return _oublier(track, "lrc", empreinte_lrc(lrc))
+
+
+# ── Verser les refus de `fiches.json` dans la base ────────────────────────────
+
+
+def _valeurs_de(cle: str, brut) -> list:
+    """Les valeurs d'une clé `retirer_*` du fichier (une liste, ou un seul
+    élément pour `retirer_lien_youtube`)."""
+    if brut in (None, "", []):
+        return []
+    valeurs = brut if isinstance(brut, list) else [brut]
+    if cle == "retirer_certifs":
+        return [_sous_entree_certif(v) for v in valeurs]
+    return valeurs
+
+
+def migrer_refus_vers_la_base() -> dict[str, int]:
+    """Verse dans la table `refus` les clés `retirer_*` de `fiches.json`, puis
+    les RETIRE du fichier (décision utilisateur 2026-10-12 : une seule source de
+    vérité) — une copie horodatée du fichier est gardée à côté. Une entrée qui
+    ne garde que sa désignation disparaît. IDEMPOTENT : sans clé `retirer_*`,
+    rien n'est écrit. Sert la migration initiale ET le script de saisie à la
+    main (`appliquer_corrections_fiches`), où l'on peut encore écrire un refus
+    dans le fichier. Rend `{nature: refus versés}`."""
+    if moteur is None:
+        raise RuntimeError("aucune base ouverte (construire un DataManager d'abord)")
+    donnees = _relire_pour_ecrire()
+    if not donnees:
+        return {}
+    a_verser = [
+        (artiste, entree, cle)
+        for artiste, entrees in donnees.items()
+        for entree in entrees
+        for cle in NATURES
+        if entree.get(cle)
+    ]
+    if not a_verser:
+        return {}
+    import shutil
+    from datetime import datetime
+
+    maintenant = datetime.now()
+    copie = FICHIER.with_name(f"{FICHIER.stem}.avant_refus_{maintenant:%Y%m%d_%H%M%S}.json")
+    shutil.copy2(FICHIER, copie)
+    comptes: dict[str, int] = {}
+    with moteur.begin() as conn:
+        for artiste, entree, cle in a_verser:
+            designation = entree.get("fiche") or {}
+            for valeur in _valeurs_de(cle, entree[cle]):
+                nature = NATURES[cle]
+                if _inserer(
+                    designation,
+                    artiste,
+                    designation.get("titre"),
+                    designation.get("album"),
+                    nature,
+                    valeur,
+                    maintenant.isoformat(timespec="seconds"),
+                    conn=conn,
+                ):
+                    comptes[nature] = comptes.get(nature, 0) + 1
+    for _artiste, entree, cle in a_verser:
+        entree.pop(cle, None)
+    for artiste in list(donnees):
+        donnees[artiste] = [e for e in donnees[artiste] if set(e) - {"fiche"}]
+        if not donnees[artiste]:
+            del donnees[artiste]
+    ecrire_atomique(FICHIER, donnees, fin="\n")
+    logger.info(f"🗂️ Refus versés en base : {comptes} (copie du fichier : {copie.name})")
+    return comptes

@@ -17,12 +17,16 @@ from src.utils.spotify_identity import valider_identite
 
 
 @pytest.fixture
-def fichier(tmp_path, monkeypatch):
+def fichier(tmp_path, monkeypatch, data_manager):
+    """Écrit `fiches.json` PUIS le verse en base — le chemin de saisie à la
+    main (le script `appliquer_corrections_fiches` fait de même) : depuis le
+    chantier C (lot 2), les refus se lisent dans la table `refus`."""
     chemin = tmp_path / "fiches.json"
     monkeypatch.setattr(cf, "FICHIER", chemin)
 
     def ecrire(donnees):
         chemin.write_text(json.dumps(donnees, ensure_ascii=False), encoding="utf-8")
+        cf.migrer_refus_vers_la_base()
 
     return ecrire
 
@@ -217,3 +221,46 @@ def test_un_refus_vaut_pour_les_lignes_soeurs(fichier):
     assert cf.lrc_refuses(soeur) == {"abc"}
     assert cf.certifs_refusees(soeur) == set()
     assert cf.ids_refuses(_t("Sky City", artiste="Kid Cudi", genius_id=8)) == set()
+
+
+def test_les_refus_quittent_le_fichier_pour_la_base(tmp_path, monkeypatch, data_manager):
+    """Chantier C, lot 2 (décisions utilisateur 2026-10-12) : les clés
+    `retirer_*` sont versées dans la table `refus` et RETIRÉES du fichier (une
+    copie horodatée est gardée) ; les corrections (fusions…) y restent ; un
+    second passage ne fait rien."""
+    chemin = tmp_path / "fiches.json"
+    monkeypatch.setattr(cf, "FICHIER", chemin)
+    chemin.write_text(
+        json.dumps(
+            {
+                "A2H": [
+                    {"fiche": {"genius_id": 1}, "retirer_id_spotify": ["SP1"], "inedit": True},
+                    {"fiche": {"titre": "Boss", "album": None}, "retirer_videos": ["v" * 11]},
+                    {"fiche": {"genius_id": 2}, "fusionner_dans": {"genius_id": 1}},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cf.migrer_refus_vers_la_base() == {"id_spotify": 1, "video": 1}
+    reste = json.loads(chemin.read_text(encoding="utf-8"))
+    assert reste == {
+        "A2H": [
+            {"fiche": {"genius_id": 1}, "inedit": True},
+            {"fiche": {"genius_id": 2}, "fusionner_dans": {"genius_id": 1}},
+        ]
+    }
+    assert list(tmp_path.glob("fiches.avant_refus_*.json"))
+    assert cf.ids_refuses(_t("x", genius_id=1)) == {"SP1"}
+    assert cf.videos_refusees(_t("Boss")) == {"v" * 11}
+    assert cf.migrer_refus_vers_la_base() == {}
+
+
+def test_un_refus_se_retablit(fichier):
+    lrc = "[00:01.00] a"
+    fiche = _t("X", genius_id=3)
+    cf.memoriser_lrc_refuse(fiche, lrc)
+    assert cf.lrc_refuses(fiche) == {cf.empreinte_lrc(lrc)}
+    assert cf.oublier_lrc_refuse(fiche, lrc) is True
+    assert cf.lrc_refuses(fiche) == set()
+    assert cf.oublier_lrc_refuse(fiche, lrc) is False

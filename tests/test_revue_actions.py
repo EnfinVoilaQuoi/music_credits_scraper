@@ -1,6 +1,5 @@
 """Panneau « À trancher », étape 2 : les actions (`services/revue_actions`)."""
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -109,9 +108,8 @@ def test_retirer_un_id_spotify_le_memorise(data_manager, artiste, monkeypatch, t
     (action,) = revue_actions.actions_pour(cas)
     revue_actions.executer(action, _ctx(data_manager, artiste), cas)
     assert data_manager.get_artist_tracks(artiste.id)[0].spotify_id is None
-    memoire = json.loads((tmp_path / "fiches.json").read_text(encoding="utf-8"))
-    assert memoire["Booba"] == [{"fiche": {"genius_id": 77}, "retirer_id_spotify": ["SPM"]}]
-    corrections_fiches._cache.update(chemin=None)  # relu depuis le fichier temporaire
+    # Le refus vit en base depuis le chantier C (lot 2) : le fichier n'est pas touché.
+    assert not (tmp_path / "fiches.json").exists()
     assert corrections_fiches.ids_refuses(t) == {"SPM"}
 
 

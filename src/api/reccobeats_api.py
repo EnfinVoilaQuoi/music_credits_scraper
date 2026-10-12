@@ -13,6 +13,7 @@ import requests
 from src.config import BASE_DIR, RECCOBEATS_NOT_FOUND_TTL_DAYS
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.persistence import brut
 from src.utils.fichiers_json import ecrire_atomique, lire_cache
 from src.utils.logger import get_logger
 
@@ -48,6 +49,8 @@ class ReccoBeatsIntegratedClient:
         # Configuration ReccoBeats API
         self.recco_base_url = "https://api.reccobeats.com/v1"
         self.recco_session = requests.Session()
+        # Le brut (chantier E) : gardé, rejouable hors ligne.
+        brut.garder_session(self.recco_session, _SOURCE)
         self.recco_session.headers.update(
             {"Accept": "application/json", "User-Agent": "ReccoBeats-Python-Client/3.0"}
         )

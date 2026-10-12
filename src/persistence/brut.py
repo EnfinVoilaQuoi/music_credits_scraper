@@ -49,6 +49,12 @@ SOURCES_ACTIVES: frozenset[str] = frozenset(
         # normalisée) ; Spotify : les pages embed lues par le gate d'identité.
         "kworb",
         "spotify_embed",
+        # Audio, timestamps, liens (lot 4) : petites réponses JSON.
+        "getsongbpm",
+        "reccobeats",
+        "lrclib",
+        "musicbrainz",
+        "itunes",
     }
 )
 #: Lectures DIFFÉRENTES gardées par requête.

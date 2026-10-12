@@ -37,6 +37,7 @@ from src.api._text_match import (  # noqa: F401 — ré-export
     _title_match,
 )
 from src.observability import source_usage
+from src.persistence import brut
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -110,6 +111,8 @@ class LRCLIBAPI:
 
     def __init__(self, timeout: int = 12):
         self.session = requests.Session()
+        # Le brut (chantier E) : gardé, rejouable hors ligne.
+        brut.garder_session(self.session, _SOURCE)
         self.session.headers.update({"User-Agent": _USER_AGENT})
         self.timeout = timeout
 

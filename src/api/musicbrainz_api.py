@@ -40,6 +40,7 @@ import requests
 
 from src.observability import source_usage
 from src.observability.issues import IssueKind, SansReponse
+from src.persistence import brut as magasin_brut
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
 
@@ -304,6 +305,8 @@ class MusicBrainzAPI:
     def __init__(self, timeout: int = 15):
         self.timeout = timeout
         self.session = requests.Session()
+        # Le brut (chantier E) : gardé, rejouable hors ligne.
+        magasin_brut.garder_session(self.session, _SOURCE)
         self.session.headers.update({"User-Agent": _USER_AGENT})
         self._dernier_appel = 0.0
 

@@ -24,6 +24,7 @@ if sys.platform == "win32" and "pytest" not in sys.modules:
 
 from src.config import BASE_DIR
 from src.observability import source_usage
+from src.persistence import brut
 from src.utils.fichiers_json import ecrire_atomique, lire_cache
 
 # Import logger
@@ -92,6 +93,8 @@ class GetSongBPMFetcher:
         self.cache_file = cache_file or str(BASE_DIR / "getsongbpm_cache.json")
         self.cache = self._load_cache()
         self.session = requests.Session()
+        # Le brut (chantier E) : gardé, rejouable hors ligne.
+        brut.garder_session(self.session, _SOURCE)
 
         # NB : l'auth passe UNIQUEMENT par le paramètre d'URL `api_key` (vérifié).
         # Le header `X-API-KEY` seul renvoie 401 → inutile, retiré pour éviter la confusion.

@@ -694,6 +694,28 @@ refus = Table(
 Index("ix_refus_genius_nature", refus.c.genius_id, refus.c.nature)
 
 
+# Les CORRECTIONS de fiches décidées à la main (e49, chantier C lot 3) : le
+# reste de `fiches.json` après les refus — fusions, suppressions, départages,
+# liens YouTube, inédits, relations, versions d'un tiers. Une ligne par action ;
+# `fiche` garde la désignation EXACTE (JSON : un titre sans album vaut pour
+# tout album), `valeur` la valeur de l'action (JSON).
+corrections = Table(
+    "corrections",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("cle_fiche", Text, nullable=False),
+    Column("genius_id", Integer),
+    Column("artiste", Text, nullable=False),
+    Column("fiche", Text, nullable=False),
+    Column("action", Text, nullable=False),
+    Column("valeur", Text, nullable=False),
+    Column("decide_le", TIMESTAMP),
+    UniqueConstraint("cle_fiche", "artiste", "action"),
+    sqlite_autoincrement=True,
+)
+Index("ix_corrections_artiste_action", corrections.c.artiste, corrections.c.action)
+
+
 # Panneau « À trancher », étape 3 (e38, 2026-09-27). Deux notions distinctes :
 # - `revue_verdicts` : la mémoire des DÉCISIONS de l'utilisateur sur un cas
 #   (« c'est normal »). Clé = (artiste, détecteur, clé du cas) ; la clé du cas

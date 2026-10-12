@@ -1,10 +1,11 @@
-"""Applique `data/corrections/fiches.json` (étape 3 du plan streams, 2026-09-24).
+"""Applique les corrections de fiches (étape 3 du plan streams, 2026-09-24).
 
-Le fichier porte les décisions humaines par fiche. Depuis le chantier C (lot 2,
-2026-10-12), les REFUS (clés `retirer_*`) n'y restent pas : appliqués, ils sont
-versés dans la table `refus`, que relisent les producteurs
-(`src/utils/corrections_fiches.py`), et retirés du fichier. Ce script est
-IDEMPOTENT : une action déjà faite est constatée, pas refaite.
+Les décisions humaines par fiche vivent EN BASE depuis le chantier C (2026-10-12) :
+les refus (clés `retirer_*`) dans la table `refus` (lot 2), les autres actions
+dans la table `corrections` (lot 3). `data/corrections/fiches.json` ne sert plus
+qu'à la SAISIE à la main : ce qu'on y écrit est appliqué avec le reste, puis
+versé en base et retiré du fichier. Ce script est IDEMPOTENT : une action déjà
+faite est constatée, pas refaite.
 
 Actions d'une entrée (toutes optionnelles) :
   supprimer: true                      fiche supprimée (et mémorisée comme telle)
@@ -261,6 +262,11 @@ def main() -> int:
         verses = cf.migrer_refus_vers_la_base()
         if verses:
             print(f"🗂️ Refus versés en base : {verses}")
+        # Les autres actions aussi (lot 3) : la base est la mémoire, le fichier
+        # ne sert plus qu'à la saisie à la main.
+        versees = cf.migrer_corrections_vers_la_base()
+        if versees:
+            print(f"🗂️ Corrections versées en base : {versees}")
     if not args.apply:
         print("\n(dry-run — relancer avec --apply pour écrire)")
     return 0

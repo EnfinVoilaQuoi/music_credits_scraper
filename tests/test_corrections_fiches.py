@@ -178,6 +178,7 @@ def test_le_premier_credite_departage():
 
 
 def test_une_fusion_par_regle_est_memorisee_une_fois():
+    """Sans base ouverte : dans le fichier (la prochaine migration la versera)."""
     from src.utils import corrections_fiches as cf
 
     cf.memoriser_fusion("SCH", {"genius_id": 10207486}, {"genius_id": 5363682})
@@ -192,6 +193,8 @@ def test_un_fichier_illisible_n_est_JAMAIS_ecrase(fichier):
     cf.FICHIER.write_text('{"A2H": [{"fiche": {"genius_id": 1}', encoding="utf-8")
     cf.memoriser_id_refuse(_t("x", genius_id=2), "ABC")
     cf.memoriser_fusion("A2H", {"genius_id": 3}, {"genius_id": 4})
+    assert cf.migrer_corrections_vers_la_base() == {}
+    assert cf.migrer_refus_vers_la_base() == {}
     assert cf.FICHIER.read_text(encoding="utf-8") == '{"A2H": [{"fiche": {"genius_id": 1}'
     assert list(cf.FICHIER.parent.glob("fiches.json.illisible-*"))
 
@@ -264,3 +267,61 @@ def test_un_refus_se_retablit(fichier):
     assert cf.oublier_lrc_refuse(fiche, lrc) is True
     assert cf.lrc_refuses(fiche) == set()
     assert cf.oublier_lrc_refuse(fiche, lrc) is False
+
+
+def test_une_fusion_par_regle_va_en_base(data_manager):
+    """Chantier C, lot 3 : base ouverte, la fusion décidée par une règle
+    (import discographie) s'écrit dans la table `corrections`, pas le fichier."""
+    cf.memoriser_fusion("SCH", {"genius_id": 10207486}, {"genius_id": 5363682})
+    cf.memoriser_fusion("SCH", {"genius_id": 10207486}, {"genius_id": 5363682})
+    assert not cf.FICHIER.exists()
+    assert cf.genius_ids_absorbes("SCH") == {10207486}
+    assert cf.charger() == {
+        "SCH": [{"fiche": {"genius_id": 10207486}, "fusionner_dans": {"genius_id": 5363682}}]
+    }
+
+
+def test_les_corrections_quittent_le_fichier_pour_la_base(tmp_path, monkeypatch, data_manager):
+    """Chantier C, lot 3 (décision utilisateur 2026-10-12 : comme les refus) :
+    chaque action est versée dans `corrections`, RETIRÉE du fichier (copie
+    horodatée gardée) ; ce que relisent le script et l'import est INCHANGÉ ;
+    une clé inconnue reste dans le fichier ; un second passage ne fait rien."""
+    chemin = tmp_path / "fiches.json"
+    monkeypatch.setattr(cf, "FICHIER", chemin)
+    avant = {
+        "A2H": [
+            {"fiche": {"genius_id": 2}, "fusionner_dans": {"genius_id": 1}},
+            {
+                "fiche": {"titre": "Boss"},
+                "inedit": True,
+                "lien_youtube": "https://youtu.be/" + "v" * 11,
+                "version_de": {"genius_id": 1},
+            },
+            {"fiche": {"genius_id": 3}, "tiers": {"role": "remix", "principal": "X"}},
+            {"fiche": {"genius_id": 4}, "cle_inconnue": 1},
+        ],
+        "SCH": [{"fiche": {"genius_id": 9}, "supprimer": True}],
+    }
+    chemin.write_text(json.dumps(avant, ensure_ascii=False), encoding="utf-8")
+    lu_avant = cf.charger()
+    assert cf.migrer_corrections_vers_la_base() == {
+        "fusionner_dans": 1,
+        "inedit": 1,
+        "lien_youtube": 1,
+        "version_de": 1,
+        "tiers": 1,
+        "supprimer": 1,
+    }
+    assert json.loads(chemin.read_text(encoding="utf-8")) == {
+        "A2H": [{"fiche": {"genius_id": 4}, "cle_inconnue": 1}]
+    }
+    assert list(tmp_path.glob("fiches.avant_corrections_*.json"))
+
+    def par_fiche(donnees):
+        return {
+            (a, json.dumps(e["fiche"], sort_keys=True)): e for a, es in donnees.items() for e in es
+        }
+
+    assert par_fiche(cf.charger()) == par_fiche(lu_avant)
+    assert cf.genius_ids_absorbes("A2H") == {2}
+    assert cf.migrer_corrections_vers_la_base() == {}

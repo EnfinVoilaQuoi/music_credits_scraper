@@ -1,10 +1,11 @@
 """Corrections de fiches décidées à la main — et leur MÉMOIRE (étape 3, 2026-09-24).
 
-`data/corrections/fiches.json` (VERSIONNÉ : la base en dépend, comme
-`manual_fixes.json` des certifs) : `{artiste: [entrée, …]}`. Une entrée désigne
-UNE fiche (`{"genius_id": N}`, sinon `{"titre": …, "album": …}` pour une fiche
-Deezer / Kworb) et porte ses actions ; `scripts/appliquer_corrections_fiches.py`
-les applique.
+Une entrée désigne UNE fiche (`{"genius_id": N}`, sinon `{"titre": …, "album":
+…}` pour une fiche Deezer / Kworb) et porte ses actions ;
+`scripts/appliquer_corrections_fiches.py` les applique. Depuis le chantier C
+(2026-10-12) elles vivent EN BASE : les refus dans la table `refus` (lot 2), le
+reste dans `corrections` (lot 3). `data/corrections/fiches.json` ne sert plus
+qu'à la SAISIE à la main — versé en base par le script, puis retiré du fichier.
 
 Corriger en base ne tient qu'un tour : le run suivant réécrit ce que sa source
 dit. Le fichier est donc relu par les PRODUCTEURS, à trois endroits :
@@ -41,7 +42,19 @@ _cache: dict = {"chemin": None, "mtime": None, "donnees": {}}
 
 
 def charger() -> dict:
-    """Le fichier, relu seulement s'il a changé (appelé par morceau et par crédit)."""
+    """Toutes les corrections, `{artiste: [entrée, …]}` : celles de la BASE
+    (table `corrections`, chantier C lot 3), puis celles encore saisies à la
+    main dans le fichier et pas encore versées."""
+    donnees: dict[str, list] = {}
+    for artiste, entrees in corrections_en_base().items():
+        donnees.setdefault(artiste, []).extend(entrees)
+    for artiste, entrees in _charger_fichier().items():
+        donnees.setdefault(artiste, []).extend(entrees)
+    return donnees
+
+
+def _charger_fichier() -> dict:
+    """Le fichier, relu seulement s'il a changé."""
     try:
         mtime = FICHIER.stat().st_mtime
     except OSError:
@@ -264,7 +277,8 @@ def credits_refuses(track) -> set[tuple[str, str]]:
 
 
 def genius_ids_absorbes(artiste: str) -> set[int]:
-    """Pages Genius fusionnées dans une autre fiche de `artiste`."""
+    """Pages Genius fusionnées dans une autre fiche de `artiste` (relu par
+    l'import discographie : une page absorbée n'est pas recréée)."""
     return {
         int(e["fiche"]["genius_id"])
         for e in charger().get(artiste, [])
@@ -282,7 +296,22 @@ def designation_de(track) -> dict:
 
 def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
     """Consigne une fusion décidée par une RÈGLE (pas à la main) : sans elle, le
-    prochain import recréerait la page absorbée (`genius_ids_absorbes`)."""
+    prochain import recréerait la page absorbée (`genius_ids_absorbes`). En
+    base quand elle est ouverte ; sinon dans le fichier, d'où la prochaine
+    migration la versera."""
+    if moteur is not None:
+        from datetime import datetime
+
+        with moteur.begin() as conn:
+            _inserer_correction(
+                conn,
+                artiste,
+                absorbee,
+                "fusionner_dans",
+                gardee,
+                datetime.now().isoformat(timespec="seconds"),
+            )
+        return
     donnees = _relire_pour_ecrire()
     if donnees is None:
         return
@@ -442,4 +471,123 @@ def migrer_refus_vers_la_base() -> dict[str, int]:
             del donnees[artiste]
     ecrire_atomique(FICHIER, donnees, fin="\n")
     logger.info(f"🗂️ Refus versés en base : {comptes} (copie du fichier : {copie.name})")
+    return comptes
+
+
+# ── Les CORRECTIONS, en base (table `corrections`, e49 — chantier C lot 3) ─────
+
+#: Les actions d'une entrée que la table garde (les `retirer_*` sont des refus,
+#: table `refus`).
+ACTIONS = (
+    "supprimer",
+    "fusionner_dans",
+    "departager_id_avec",
+    "lien_youtube",
+    "inedit",
+    "version_de",
+    "cover_de",
+    "remix_de",
+    "sample_de",
+    "tiers",
+)
+
+
+def corrections_en_base() -> dict[str, list[dict]]:
+    """`{artiste: [entrée, …]}` reconstruit depuis la table, une entrée par fiche
+    désignée (ses actions réunies), dans l'ordre où elles ont été décidées.
+    Sans base ouverte, ou illisible : rien (c'est dit au log)."""
+    if moteur is None:
+        return {}
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with moteur.connect() as conn:
+            lignes = conn.execute(
+                text("SELECT artiste, fiche, action, valeur FROM corrections ORDER BY id")
+            ).all()
+    except SQLAlchemyError as e:
+        logger.warning(f"Corrections illisibles en base : {e} — aucune appliquée")
+        return {}
+    donnees: dict[str, list[dict]] = {}
+    index: dict[tuple[str, str], dict] = {}
+    for artiste, fiche, action, valeur in lignes:
+        cle = (artiste, fiche)
+        if cle not in index:
+            index[cle] = {"fiche": json.loads(fiche)}
+            donnees.setdefault(artiste, []).append(index[cle])
+        index[cle][action] = json.loads(valeur)
+    return donnees
+
+
+def _inserer_correction(conn, artiste: str, designation: dict, action: str, valeur, le) -> bool:
+    from sqlalchemy import text
+
+    return bool(
+        conn.execute(
+            text(
+                "INSERT OR IGNORE INTO corrections (cle_fiche, genius_id, artiste, fiche, "
+                "action, valeur, decide_le) VALUES (:cle, :gid, :artiste, :fiche, :action, "
+                ":valeur, :le)"
+            ),
+            {
+                "cle": _cle_fiche(designation),
+                "gid": designation.get("genius_id"),
+                "artiste": artiste,
+                "fiche": json.dumps(designation, ensure_ascii=False, sort_keys=True),
+                "action": action,
+                "valeur": json.dumps(valeur, ensure_ascii=False, sort_keys=True),
+                "le": le,
+            },
+        ).rowcount
+    )
+
+
+def migrer_corrections_vers_la_base() -> dict[str, int]:
+    """Verse dans la table `corrections` les actions de `fiches.json` (hors
+    refus), puis les RETIRE du fichier — même règle que les refus (décision
+    utilisateur 2026-10-12) : copie horodatée gardée à côté, une entrée réduite
+    à sa désignation disparaît. IDEMPOTENT. Rend `{action: lignes versées}`.
+
+    Une clé inconnue reste dans le fichier (rien ne se perd en silence)."""
+    if moteur is None:
+        raise RuntimeError("aucune base ouverte (construire un DataManager d'abord)")
+    donnees = _relire_pour_ecrire()
+    if not donnees:
+        return {}
+    a_verser = [
+        (artiste, entree, action)
+        for artiste, entrees in donnees.items()
+        for entree in entrees
+        for action in ACTIONS
+        if action in entree
+    ]
+    if not a_verser:
+        return {}
+    import shutil
+    from datetime import datetime
+
+    maintenant = datetime.now()
+    copie = FICHIER.with_name(f"{FICHIER.stem}.avant_corrections_{maintenant:%Y%m%d_%H%M%S}.json")
+    shutil.copy2(FICHIER, copie)
+    comptes: dict[str, int] = {}
+    with moteur.begin() as conn:
+        for artiste, entree, action in a_verser:
+            if _inserer_correction(
+                conn,
+                artiste,
+                entree.get("fiche") or {},
+                action,
+                entree[action],
+                maintenant.isoformat(timespec="seconds"),
+            ):
+                comptes[action] = comptes.get(action, 0) + 1
+    for _artiste, entree, action in a_verser:
+        entree.pop(action, None)
+    for artiste in list(donnees):
+        donnees[artiste] = [e for e in donnees[artiste] if set(e) - {"fiche"}]
+        if not donnees[artiste]:
+            del donnees[artiste]
+    ecrire_atomique(FICHIER, donnees, fin="\n")
+    logger.info(f"🗂️ Corrections versées en base : {comptes} (copie du fichier : {copie.name})")
     return comptes

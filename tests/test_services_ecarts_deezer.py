@@ -694,7 +694,7 @@ class TestMemoireDesRefus:
     """2026-10-10 : un ID Deezer délié n'avait AUCUNE mémoire — « L.U.N.A.T.I.C. »
     et « Par Amour » le reprenaient au run suivant."""
 
-    def test_piste_deliee_ne_revient_pas_sur_la_fiche(self):
+    def test_piste_deliee_ne_revient_pas_sur_la_fiche(self, data_manager):
         from src.models import Artist
         from src.utils.corrections_fiches import memoriser_deezer_refuse
 
@@ -708,7 +708,7 @@ class TestMemoireDesRefus:
         # Plus rattachée : la piste redevient un écart (à créer ou non, au choix).
         assert all(e.existing_track is None for e in ecarts)
 
-    def test_provider_ignore_une_piste_refusee(self):
+    def test_provider_ignore_une_piste_refusee(self, data_manager):
         from types import SimpleNamespace
 
         from src.enrichment.providers.deezer import DeezerProvider

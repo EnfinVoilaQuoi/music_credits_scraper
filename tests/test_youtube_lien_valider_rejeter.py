@@ -149,7 +149,7 @@ class TestRejectYoutubeLink:
         assert chercheur.purges == [("Isha", "Magot")]  # la recherche est purgée
         assert track.videos == []
 
-    def test_le_rejet_est_memorise(self):
+    def test_le_rejet_est_memorise(self, data_manager):
         """2026-09-27 : sans mémoire, le run discographie reposait le lien
         Genius rejeté ; désormais ni Genius, ni la recherche ne le reposent."""
         from src.utils.corrections_fiches import videos_refusees

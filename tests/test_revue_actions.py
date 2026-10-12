@@ -299,7 +299,7 @@ class TestRefusMemorises:
         assert relue.lyrics.synced is None
         assert empreinte_lrc(faux) in lrc_refuses(relue)
 
-    def test_le_resolveur_ecarte_un_lrc_refuse(self):
+    def test_le_resolveur_ecarte_un_lrc_refuse(self, data_manager):
         from src.utils.corrections_fiches import memoriser_lrc_refuse
         from src.utils.synced_lyrics_resolver import resolve_track_synced_lyrics
 

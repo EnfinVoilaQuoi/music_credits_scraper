@@ -9,10 +9,11 @@
 - Récupère **Nombre de Streams** (**Spotify** et **YouTubeMusic**), avec plusieurs vidéos YouTube par morceau et plusieurs éditions Spotify
 - Détecte et propose les **Groupes & Collectifs** d'un artiste (MusicBrainz + confirmation Discogs), à valider manuellement
 - Génère des **visuels de discographie** (réseau des producteurs, structure des morceaux, frise chronologique des streams) exportables vers Illustrator
-- **Exporte** en plusieurs formats selon besoin (**.csv**, **SQL**)
+- **Exporte** les données en **JSON**
 
 ## Fonctionnalités
-- **Gestion** de **plusieurs Base de Données** (une par artiste)
+- **Une seule Base de Données** (`data/music_credits.db`, SQLite) qui rassemble tous les artistes
+- **Deux interfaces** : customtkinter (`python src/main.py`) et PyQt6 en cours (`python -m src.gui_qt`)
 - **Pilotage sans GUI** via `python -m src.cli` (mêmes flux que l'interface, un flag par case à cocher)
 - **Fenetre principale** :
   - Vue "**Morceaux**" : Tableau rassemblant tous les morceaux et leurs informations (Artiste Principal, Date de Sortie, Album, Credits, Paroles, BPM, Durée, Certifications, Nb de Streams et Statut, avec **systeme de tri par colonne**)
@@ -31,6 +32,15 @@
 - Récupération automatique de **liens Spotify** pour chaque morceaux, infobulle preview titre, avec **vérification d'identité** (bon artiste / bonne durée, pas seulement un ID unique)
 - **Base de Données** des **Certifications** Mise à Jour Automatique et Manuelle
 
+## Installation et lancement
+```bash
+python -m venv venv
+venv/Scripts/pip install -r requirements.txt
+venv/Scripts/pip install -e .
+venv/Scripts/python src/main.py
+```
+Pilotage en ligne de commande : `venv/Scripts/python -m src.cli --help`. Tests : `venv/Scripts/python -m pytest -q`.
+
 ## APIs utilisées
 - [GetSongBPM](https://getsongbpm.com/)                             - Données **BPM**, **Key**, **Mode** et **Time Signature**
 - [Genius](https://docs.genius.com/)                                - Liste de **Morceaux** d'un Artiste
@@ -38,6 +48,8 @@
 - [YouTubeMusic](https://ytmusicapi.readthedocs.io/en/stable/#)     - Lien **YouTube** pour chaque Morceau et **Nb de Streams**
 - [Deezer](https://developers.deezer.com/api)                       - Données **Durée**, **ISRC**, Explicit Lyrics, **Picture**, **Date de Sortie**, **Type d'album** (Album/EP/Single)
 - [LRCLIB](https://lrclib.net/)                                     - **Paroles synchronisées** (timestamps LRC)
+- [Musixmatch](https://www.musixmatch.com/)                          - **Paroles synchronisées** (dernier recours, option `--musixmatch`)
+- [iTunes Search](https://performance-partners.apple.com/search-api) - Contrôle des identifiants **Apple Music** (**Durée**, **Date de Sortie**)
 - [MusicBrainz](https://musicbrainz.org/)                           - **Groupes & Alias** d'un artiste
 
 ## Données utilisées
@@ -49,7 +61,6 @@
 - [RIAA](https://www.riaa.com/gold-platinum/)                       - **Certifications RIAA** (USA, dont le programme latin)
 - [Ultratop](https://www.ultratop.be)                               - **Certifications BRMA** (Belgique)
 - [BPI](https://www.bpi.co.uk/)                                     - **Certifications BPI** (Royaume-Uni)
-- [AlbumOfTheYear](https://www.albumoftheyear.org/)                 - **Notation** d'Album
 - [Spotify](https://open.spotify.com/intl-fr)                       - **Track ID** pour Reccobeats, **Nb de Streams** et **Auditeurs mensuels**
 - [Kworb](https://kworb.net/)                                       - **Nb de Streams** sur Spotify (quotidien, ventilation lead/solo/feature)
 

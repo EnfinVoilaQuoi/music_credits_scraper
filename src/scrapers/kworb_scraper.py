@@ -239,8 +239,16 @@ class KworbScraper:
         if not data or not isinstance(data.get("tracks"), list):
             return []
 
-        page_numbers = set(re.findall(r"\d[\d,.\s]*\d|\d", page_text))
-        page_numbers = {re.sub(r"[^\d]", "", n) for n in page_numbers}
+        # Un nombre de la page, séparateurs de milliers compris (« 146,677,701 »)
+        # — mais PAS par-dessus un retour à la ligne : l'ancien motif
+        # (`\d[\d,.\s]*\d`) collait toutes les cellules d'une ligne en un seul
+        # nombre géant, et le garde-fou rejetait TOUT, la vraie ligne comprise
+        # (trouvé le 2026-10-12 par le test sur page cassée : ce secours n'avait
+        # jamais pu rien sauver).
+        page_numbers = {
+            re.sub(r"\D", "", n)
+            for n in re.findall(r"\d{1,3}(?:[,.   ]\d{3})+(?!\d)|\d+", page_text)
+        }
 
         results = []
         for entry in data["tracks"]:

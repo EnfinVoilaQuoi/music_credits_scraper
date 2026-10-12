@@ -35,6 +35,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 
 from src.utils.title_matching import normalize_title, strip_featuring
 
@@ -577,6 +578,88 @@ def memes_parties(a: str | None, b: str | None) -> bool:
     return parties_du_morceau(a) == parties_du_morceau(b)
 
 
+# ── Le JUGE : une clé par titre, des questions sur deux clés (chantier D) ──────
+#
+# Chaque prédicat de titre recalculait de son côté la normalisation, le socle,
+# la version, les parties — et chacun les combinait à sa façon. La clé les
+# calcule UNE fois ; les questions sont des fonctions pures sur deux clés, et
+# les prédicats historiques (`titres_equivalents`, `meme_socle`…) n'en sont plus
+# que des appels. Le corpus de paires réelles (`tests/fixtures/paires_titres.json`)
+# fige leurs verdicts : aucune paire ne change sans être nommée.
+
+
+def _sans_parentheses(titre: str) -> str:
+    return re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre).strip()
+
+
+@dataclass(frozen=True)
+class CleTitre:
+    #: Le titre tel que reçu (vide si None).
+    titre: str
+    #: `normalize_title(titre)`.
+    norme: str
+    #: `norme` sans espaces : « 3 G » / « 3G », « A V L D » / « AVLD ».
+    compact: str
+    variant: Variant
+    #: Socle normalisé (titre sans son descripteur de version).
+    socle: str
+    #: Numéros de PARTIE (« Pt. 1 », « Chapitre II ») — deux parties, deux morceaux.
+    parties: frozenset[int]
+    #: Titre générique hors parenthèses (« Intro », « Interlude », « Skit »).
+    generique: bool
+
+
+@lru_cache(maxsize=1 << 16)
+def cle_titre(titre: str | None) -> CleTitre:
+    """PUR (et mis en cache). La clé de jugement d'un titre."""
+    t = titre or ""
+    v = parse_variant(t)
+    norme = normalize_title(t)
+    return CleTitre(
+        titre=t,
+        norme=norme,
+        compact=norme.replace(" ", ""),
+        variant=v,
+        socle=normalize_title(v.socle),
+        parties=parties_du_morceau(t),
+        generique=titre_generique(_sans_parentheses(t)),
+    )
+
+
+def meme_enregistrement(a: CleTitre, b: CleTitre) -> bool:
+    """Le MÊME morceau dans la MÊME version (voir `titres_equivalents`)."""
+    if not a.titre or not b.titre:
+        return False
+    if a.norme and a.norme == b.norme:
+        return True
+    if a.parties != b.parties or a.socle != b.socle:
+        return False
+    return meme_famille(a.variant, b.variant)
+
+
+def meme_oeuvre(a: CleTitre, b: CleTitre) -> bool:
+    """Le même MORCEAU, en une version ou une autre (voir `meme_socle`)."""
+    if meme_enregistrement(a, b):
+        return True
+    return a.parties == b.parties and bool(a.socle) and a.socle == b.socle
+
+
+def meme_graphie(a: CleTitre, b: CleTitre) -> bool:
+    """`meme_enregistrement`, ou les mêmes lettres sans les espaces (voir
+    `titres_confondus`) — pour retrouver une fiche, jamais pour une identité."""
+    return meme_enregistrement(a, b) or (bool(a.compact) and a.compact == b.compact)
+
+
+def meme_version_cherchee(a: CleTitre, b: CleTitre) -> bool:
+    """Un résultat de RECHERCHE au titre proche est la même version (voir
+    `meme_version`) — le socle n'a pas à être égal, l'appelant juge le reste."""
+    if not meme_famille(a.variant, b.variant):
+        return False
+    if a.generique or b.generique:
+        return a.norme == b.norme
+    return True
+
+
 def titres_equivalents(a: str | None, b: str | None) -> bool:
     """Deux titres désignent-ils le MÊME morceau dans la MÊME version ?
 
@@ -587,17 +670,7 @@ def titres_equivalents(a: str | None, b: str | None) -> bool:
     déclaration YTM) — vit ici et non dans `title_matching`, que ce module
     importe déjà (cycle sinon).
     """
-    if not a or not b:
-        return False
-    na, nb = normalize_title(a), normalize_title(b)
-    if na and na == nb:
-        return True
-    if not memes_parties(a, b):
-        return False
-    va, vb = parse_variant(a), parse_variant(b)
-    if normalize_title(va.socle) != normalize_title(vb.socle):
-        return False
-    return meme_famille(va, vb)
+    return meme_enregistrement(cle_titre(a), cle_titre(b))
 
 
 def titres_confondus(a: str | None, b: str | None) -> bool:
@@ -607,10 +680,7 @@ def titres_confondus(a: str | None, b: str | None) -> bool:
     « 3G », « A V L D » / « AVLD », « POL-AK » / « Polak ») — jamais pour juger
     une identité de plateforme : les gates gardent `titres_equivalents`.
     """
-    if titres_equivalents(a, b):
-        return True
-    ca = normalize_title(a or "").replace(" ", "")
-    return bool(ca) and ca == normalize_title(b or "").replace(" ", "")
+    return meme_graphie(cle_titre(a), cle_titre(b))
 
 
 def meme_socle(a: str | None, b: str | None) -> bool:
@@ -622,12 +692,7 @@ def meme_socle(a: str | None, b: str | None) -> bool:
     Mesuré sur 200 recherches YTM (2026-09-26) : garde 64 LRC justes sur 69,
     refuse 96 faux sur 98 — là où l'équivalence stricte n'en gardait que 43.
     """
-    if titres_equivalents(a, b):
-        return True
-    if not memes_parties(a, b):
-        return False
-    sa = normalize_title(parse_variant(a or "").socle)
-    return bool(sa) and sa == normalize_title(parse_variant(b or "").socle)
+    return meme_oeuvre(cle_titre(a), cle_titre(b))
 
 
 def meme_version(a: str | None, b: str | None) -> bool:
@@ -642,12 +707,7 @@ def meme_version(a: str | None, b: str | None) -> bool:
     `titres_equivalents` à dessein : le socle n'a pas à être égal, l'appelant
     juge le reste du titre.
     """
-    a, b = a or "", b or ""
-    if not meme_famille(parse_variant(a), parse_variant(b)):
-        return False
-    if titre_generique(_sans_parentheses(a)) or titre_generique(_sans_parentheses(b)):
-        return normalize_title(a) == normalize_title(b)
-    return True
+    return meme_version_cherchee(cle_titre(a), cle_titre(b))
 
 
 def meme_version_publiee(a: str | None, b: str | None) -> bool:
@@ -683,10 +743,6 @@ def meme_version_publiee(a: str | None, b: str | None) -> bool:
     return va.kind == Kind.NONE and performance(vb)
 
 
-def _sans_parentheses(titre: str) -> str:
-    return re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre).strip()
-
-
 def doublons_evidents(fiches) -> bool:
     """Ces fiches d'un même artiste sont-elles À L'ÉVIDENCE le même enregistrement ?
 
@@ -708,15 +764,16 @@ def doublons_evidents(fiches) -> bool:
     if len(fiches) < 2:
         return False
     for i, (a, alb_a) in enumerate(fiches):
+        ka = cle_titre(a)
         for b, alb_b in fiches[i + 1 :]:
-            if normalize_title(a) == normalize_title(b):
+            kb = cle_titre(b)
+            if ka.norme == kb.norme:
                 if not alb_a or not alb_b or cle_album(alb_a) == cle_album(alb_b):
                     continue
                 return False
-            if not memes_parties(a, b):
+            if ka.parties != kb.parties:
                 return False
-            va, vb = parse_variant(a), parse_variant(b)
-            if normalize_title(va.socle) == normalize_title(vb.socle) and meme_prise(va, vb):
+            if ka.socle == kb.socle and meme_prise(ka.variant, kb.variant):
                 continue
             return False
     return True

@@ -36,6 +36,9 @@ class _Track:
         self.title = title
         self.album = album
         self.secondary_role = None
+        # Les refus se lisent par enregistrement (page Genius) depuis le
+        # chantier C : un vrai `Track` a toujours ce champ.
+        self.genius_id = None
         self.streams = SimpleNamespace(spotify_streams=streams)
 
 

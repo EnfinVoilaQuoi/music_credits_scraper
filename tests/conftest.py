@@ -123,6 +123,9 @@ def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
     # Le moteur est posé par chaque `DataManager` construit : sans remise à
     # zéro, un test SANS base lirait et écrirait la base d'un test précédent.
     monkeypatch.setattr(corrections_fiches, "moteur", None)
+    from src.utils import kworb_links_manager
+
+    monkeypatch.setattr(kworb_links_manager, "moteur", None)
 
 
 @pytest.fixture(autouse=True)

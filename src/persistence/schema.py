@@ -716,6 +716,25 @@ corrections = Table(
 Index("ix_corrections_artiste_action", corrections.c.artiste, corrections.c.action)
 
 
+# Les décisions de rapprochement Kworb (e50, chantier C lot 3), naguère
+# `data/kworb_links/<artiste>.json`. Clé : (artiste, titre Kworb normalisé,
+# nature) ; nature `lien` (statut `confirme` + `track_id`, ou `rejete`) ou
+# `decision` (statut = la taxonomie des variantes, qui l'emporte).
+kworb_decisions = Table(
+    "kworb_decisions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artiste", Text, nullable=False),
+    Column("titre", Text, nullable=False),
+    Column("nature", Text, nullable=False),
+    Column("statut", Text, nullable=False),
+    Column("track_id", Integer),
+    Column("decide_le", TIMESTAMP),
+    UniqueConstraint("artiste", "titre", "nature"),
+    sqlite_autoincrement=True,
+)
+
+
 # Panneau « À trancher », étape 3 (e38, 2026-09-27). Deux notions distinctes :
 # - `revue_verdicts` : la mémoire des DÉCISIONS de l'utilisateur sur un cas
 #   (« c'est normal »). Clé = (artiste, détecteur, clé du cas) ; la clé du cas

@@ -310,6 +310,9 @@ class ArtistRepository:
                     "OR track_id IN {morceaux}",
                     "DELETE FROM revue_corrections WHERE artist_id = :aid "
                     "OR track_id IN {morceaux}",
+                    # Décisions Kworb (e50) : rangées par NOM d'artiste.
+                    "DELETE FROM kworb_decisions WHERE track_id IN {morceaux} "
+                    "OR artiste = (SELECT name FROM artists WHERE id = :aid)",
                 ):
                     conn.execute(
                         text(sql.format(morceaux="(SELECT id FROM tracks WHERE artist_id = :aid)")),

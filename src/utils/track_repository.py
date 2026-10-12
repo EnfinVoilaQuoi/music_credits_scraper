@@ -1228,7 +1228,9 @@ class TrackRepository:
                     ),
                     {"tid": track_id},
                 )
-                for table in ("revue_signalements", "revue_corrections"):
+                # Une ligne Kworb confirmée vers une fiche supprimée n'a plus de
+                # cible : la décision part, la question sera reposée.
+                for table in ("revue_signalements", "revue_corrections", "kworb_decisions"):
                     conn.execute(
                         text(f"DELETE FROM {table} WHERE track_id = :tid"),  # noqa: S608
                         {"tid": track_id},
@@ -1508,6 +1510,8 @@ class TrackRepository:
                 # gardée, un signalement de l'absorbée sera recalculé sur elle.
                 for sql in (
                     "UPDATE revue_corrections SET track_id = :keep_id WHERE track_id = :delete_id",
+                    # Une ligne Kworb confirmée vers l'absorbée vaut pour la gardée.
+                    "UPDATE kworb_decisions SET track_id = :keep_id WHERE track_id = :delete_id",
                     "DELETE FROM revue_signalements WHERE track_id = :delete_id",
                     "UPDATE track_spotify_ids SET variant_track_id = :keep_id "
                     "WHERE variant_track_id = :delete_id",

@@ -76,6 +76,15 @@ class TestLecture:
 
 
 class TestDecisions:
+    @pytest.fixture(params=["fichier", "base"])
+    def manager(self, request, tmp_path):
+        """Les deux stockages : fichier (sans base) et table `kworb_decisions`
+        (e50) — même sens des décisions."""
+        if request.param == "base":
+            request.getfixturevalue("data_manager")
+            return KworbLinksManager()
+        return KworbLinksManager(str(tmp_path / "kworb_links"))
+
     def test_confirmation_memorisee(self, manager):
         manager.confirm("Jul", "Bande organisée", 42)
         assert manager.load("Jul")["confirmed"] == {normalize_title("Bande organisée"): 42}
@@ -131,7 +140,8 @@ class TestDecisions:
         d'« Angèle » se retrouve bien au run suivant. Les CLÉS, elles, sont des
         titres normalisés donc toujours ASCII."""
         manager.confirm("Angèle", "Balance ton quoi", 1)
-        assert (manager.base_dir / "Angèle.json").exists()
+        if manager.moteur is None:
+            assert (manager.base_dir / "Angèle.json").exists()
         assert manager.load("Angèle")["confirmed"] == {"balance ton quoi": 1}
 
 
@@ -149,6 +159,15 @@ def test_ecriture_impossible_journalisee(manager, monkeypatch, caplog):
 class TestTaxonomie:
     """`decide` (2026-09-21) : la décision de variante remplace un rejet ou une
     confirmation antérieurs, qui répondaient à une autre question."""
+
+    @pytest.fixture(params=["fichier", "base"])
+    def manager(self, request, tmp_path):
+        """Les deux stockages : fichier (sans base) et table `kworb_decisions`
+        (e50) — même sens des décisions."""
+        if request.param == "base":
+            request.getfixturevalue("data_manager")
+            return KworbLinksManager()
+        return KworbLinksManager(str(tmp_path / "kworb_links"))
 
     def test_decision_memorisee(self, manager):
         manager.decide("Booba", "Dolce Camara - Snight B Remix", "tiers", 99)
@@ -187,3 +206,60 @@ def test_le_dossier_par_defaut_ne_depend_pas_du_dossier_courant(monkeypatch, tmp
     m = KworbLinksManager.__new__(KworbLinksManager)
     KworbLinksManager.__init__(m)
     assert m.base_dir == DATA_DIR / "kworb_links"
+
+
+def test_en_base_par_defaut_quand_une_base_est_ouverte(data_manager, tmp_path):
+    """Chantier C, lot 3 : le gestionnaire par défaut écrit dans la table, plus
+    dans `data/kworb_links/` (ignoré par git, hors des sauvegardes)."""
+    m = KworbLinksManager()
+    assert m.moteur is data_manager.engine
+    m.confirm("Jul", "Matrix", 7)
+    assert KworbLinksManager().load("Jul")["confirmed"] == {"matrix": 7}
+
+
+def test_migration_des_fichiers_vers_la_base(data_manager, tmp_path):
+    """Décision utilisateur 2026-10-12 (comme les refus) : versés, puis les
+    fichiers DÉPLACÉS dans une copie ; relus identiques ; un fichier d'artiste
+    inconnu reste en place ; un second passage ne fait rien."""
+    from src.models import Artist
+    from src.utils.kworb_links_manager import migrer_vers_la_base
+
+    data_manager.save_artist(Artist(name="Jul"))
+    dossier = tmp_path / "kworb_links"
+    fichiers = KworbLinksManager(str(dossier))
+    fichiers.confirm("Jul", "Bande organisée", 1)
+    fichiers.reject("Jul", "Matrix (Intro)")
+    fichiers.decide("Jul", "DKR - Bonus Track", "edition", 3)
+    fichiers.confirm("Inconnu", "X", 2)
+    avant = fichiers.load("Jul")
+
+    assert migrer_vers_la_base(str(dossier)) == {
+        "confirme": 1,
+        "rejete": 1,
+        "decision": 1,
+        "fichiers": 1,
+    }
+    assert KworbLinksManager().load("Jul") == avant
+    assert not (dossier / "Jul.json").exists()
+    assert (dossier / "Inconnu.json").exists()
+    assert list(tmp_path.glob("kworb_links.avant_base_*/Jul.json"))
+    assert migrer_vers_la_base(str(dossier)) == {
+        "confirme": 0,
+        "rejete": 0,
+        "decision": 0,
+        "fichiers": 0,
+    }
+
+
+def test_une_fusion_fait_suivre_la_decision(data_manager):
+    """Une ligne Kworb confirmée vers une fiche absorbée vaut pour la gardée."""
+    from src.models import Artist, Track
+
+    a = Artist(name="Jul")
+    a.id = data_manager.save_artist(a)
+    garde, absorbee = Track(title="Matrix", artist=a), Track(title="Matrix (Intro)", artist=a)
+    data_manager.save_track(garde)
+    data_manager.save_track(absorbee)
+    KworbLinksManager().confirm("Jul", "Matrix (Intro)", absorbee.id)
+    data_manager.merge_tracks(garde.id, absorbee.id)
+    assert KworbLinksManager().load("Jul")["confirmed"] == {"matrix intro": garde.id}

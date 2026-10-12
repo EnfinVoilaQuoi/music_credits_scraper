@@ -45,6 +45,10 @@ class DataManager(ArtistRepository, TrackRepository, RevueRepository):
         from src.utils import corrections_fiches
 
         corrections_fiches.moteur = self.engine
+        # Les décisions de rapprochement Kworb aussi (table `kworb_decisions`, e50).
+        from src.utils import kworb_links_manager
+
+        kworb_links_manager.moteur = self.engine
 
     @property
     def db_path(self) -> str:

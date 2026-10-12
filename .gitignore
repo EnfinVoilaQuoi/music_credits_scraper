@@ -171,6 +171,8 @@ archive/
 data/.bpmfinder_session.json
 # Décisions de rapprochement Kworb (confirmé/rejeté par artiste)
 data/kworb_links/*
+# Copie des fichiers versés en base (chantier C lot 3, table kworb_decisions)
+data/kworb_links.avant_base_*/
 
 # Docs de mise en page Illustrator : même raison que les .jsx ci-dessus — elles
 # détaillent la maquette et le tour de main, elles restent locales.

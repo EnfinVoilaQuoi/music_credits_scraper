@@ -524,7 +524,10 @@ class SpotifyIDScraper:
         url = self._url_embed(track_spotify_id)
 
         try:
-            resp = requests.get(url, timeout=15, headers={"User-Agent": _UA})
+            # Par le point de passage : gardé brut, rejouable (chantier E).
+            resp = source_usage.requests_get(
+                "spotify_embed", url, timeout=15, headers={"User-Agent": _UA}
+            )
             if resp.ok:
                 resp.encoding = "utf-8"  # noms d'artistes accentués (anti-mojibake)
                 artists = self._parse_embed_artists(resp.text)

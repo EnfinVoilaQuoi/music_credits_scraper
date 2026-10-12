@@ -45,6 +45,10 @@ SOURCES_ACTIVES: frozenset[str] = frozenset(
         # ~70 Ko gardée : ~775 Mo par lecture des 11 000 pages.
         "genius_api",
         "genius_scrape",
+        # Kworb : les titres BRUTS des lignes (le corpus D n'a que leur forme
+        # normalisée) ; Spotify : les pages embed lues par le gate d'identité.
+        "kworb",
+        "spotify_embed",
     }
 )
 #: Lectures DIFFÉRENTES gardées par requête.

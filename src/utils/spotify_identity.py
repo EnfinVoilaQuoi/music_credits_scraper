@@ -272,10 +272,13 @@ def lire_identite_http(spotify_id: str) -> dict | None:
     """
     import requests
 
+    from src.observability import source_usage
     from src.scrapers.spotify_id_scraper_v2 import _UA, SpotifyIDScraper
 
     try:
-        resp = requests.get(
+        # Par le point de passage : gardé brut, rejouable (chantier E).
+        resp = source_usage.requests_get(
+            "spotify_embed",
             f"https://open.spotify.com/embed/track/{spotify_id}",
             timeout=15,
             headers={"User-Agent": _UA},

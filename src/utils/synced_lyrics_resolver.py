@@ -227,6 +227,12 @@ def resolve_track_synced_lyrics(
     if need_text and track.lyrics.a_chercher():
         txt = ytm_res.get("lyrics") if ytm_res else None
         if txt:
+            from src.utils.corrections_fiches import paroles_refusees
+
+            if empreinte_lrc(txt) in paroles_refusees(track):
+                logger.info(f"⏭ {track.title}: paroles YTM écartées — refusées à la main")
+                txt = None
+        if txt:
             out.text = txt
             out.text_source = (ytm_res.get("source") if ytm_res else None) or "YouTube Music"
 

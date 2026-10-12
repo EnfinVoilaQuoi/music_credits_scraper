@@ -202,6 +202,32 @@ def _retirer_lrc(ctx: ContexteAction, cas: Cas) -> str:
     return f"LRC retiré de « {track.title} » ({n} observation(s))"
 
 
+def refuser_paroles_ytm(dm, track) -> str:
+    """Les paroles de SECOURS (texte YouTube Music / LyricFind / Musixmatch) et
+    le LRC YTM qui les accompagne sont ceux d'un AUTRE morceau : refusés (le
+    résolveur ne les reprend plus, quelle que soit la source qui les
+    resservirait) puis oubliés — sœurs comprises (`oublier_paroles_ytm`). Ne
+    touche jamais des paroles Genius. Cas type : A2H « Pardonne moi » portait
+    celles de « Pardonnez-moi » (2026-10-12)."""
+    from src.utils.corrections_fiches import memoriser_lrc_refuse, memoriser_paroles_refusees
+
+    source = (track.lyrics.source or "").lower()
+    if not track.lyrics.text or not (source.startswith("source:") or source == "youtube music"):
+        raise LookupError("la fiche n'a pas de paroles de secours YouTube Music")
+    memoriser_paroles_refusees(track, track.lyrics.text)
+    lrc_ytm = (track.lyrics.synced_source or "").lower().startswith("youtube")
+    if track.lyrics.synced and lrc_ytm:
+        memoriser_lrc_refuse(track, track.lyrics.synced)
+    if not dm.oublier_paroles_ytm(track.id):
+        raise RuntimeError("paroles non oubliées (voir le log)")
+    track.lyrics.text = None
+    if lrc_ytm:
+        track.lyrics.synced = None
+    return f"paroles de secours retirées de « {track.title} »" + (
+        " (et leur LRC)" if lrc_ytm else ""
+    )
+
+
 def _deezer_appliquer(ctx: ContexteAction, cas: Cas) -> str:
     """Crée la fiche, rattache ou délie — exactement ce que fait la fenêtre des
     écarts, via `creer_lignes`, sur l'écart reconstruit depuis le signalement."""

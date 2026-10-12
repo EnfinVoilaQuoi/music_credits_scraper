@@ -124,6 +124,7 @@ NATURES = {
     "retirer_credits": "credit",
     "retirer_certifs": "certif",
     "retirer_lien_youtube": "lien_youtube",
+    "retirer_paroles": "paroles",
 }
 
 #: Ce que les lignes sœurs PARTAGENT : le refus vaut pour tout l'enregistrement
@@ -402,6 +403,17 @@ def memoriser_lrc_refuse(track, lrc: str) -> None:
 
 def oublier_lrc_refuse(track, lrc: str) -> bool:
     return _oublier(track, "lrc", empreinte_lrc(lrc))
+
+
+def paroles_refusees(track) -> set[str]:
+    """Empreintes (même calcul que les LRC : le TEXTE, espaces normalisés) des
+    paroles de SECOURS retirées à la main : le résolveur ne les reprend plus —
+    A2H « Pardonne moi » portait celles de « Pardonnez-moi » (2026-10-12)."""
+    return {r["valeur"] for r in _lignes(track, "paroles")}
+
+
+def memoriser_paroles_refusees(track, texte: str) -> None:
+    _memoriser(track, "paroles", empreinte_lrc(texte))
 
 
 # ── Verser les refus de `fiches.json` dans la base ────────────────────────────

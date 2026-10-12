@@ -353,3 +353,33 @@ def test_retirer_les_streams_d_une_source_re_arbitre_la_colonne(data_manager):
             "SELECT spotify_streams, spotify_daily_streams FROM tracks WHERE id = ?", (t.id,)
         ).one()
     assert tuple(ligne) == (None, None)
+
+
+def test_refuser_des_paroles_de_secours(data_manager):
+    """Refus PUIS oubli : texte et LRC YTM partent, la mémoire les garde partis ;
+    des paroles Genius ne sont jamais touchées."""
+    import pytest
+
+    from src.models import Artist, Track
+    from src.services.revue_actions import refuser_paroles_ytm
+    from src.utils.corrections_fiches import lrc_refuses, paroles_refusees
+
+    a = Artist(name="A2H")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Pardonne moi", artist=a)
+    t.genius_id = 4593113
+    t.lyrics.text, t.lyrics.source = "texte de Pardonnez-moi", "Source: Musixmatch"
+    t.lyrics.synced, t.lyrics.synced_source = "[00:01.00] ligne", "YouTube Music"
+    data_manager.save_track(t)
+    fiche = data_manager.get_artist_tracks(a.id)[0]
+
+    assert "retirées" in refuser_paroles_ytm(data_manager, fiche)
+    assert paroles_refusees(fiche) and lrc_refuses(fiche)
+    relue = data_manager.get_artist_tracks(a.id)[0]
+    assert not relue.lyrics.text and not relue.lyrics.synced
+
+    genius = Track(title="Autre", artist=a)
+    genius.lyrics.text, genius.lyrics.source = "paroles", "genius"
+    data_manager.save_track(genius)
+    with pytest.raises(LookupError):
+        refuser_paroles_ytm(data_manager, genius)

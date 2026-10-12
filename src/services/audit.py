@@ -566,12 +566,14 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return valeur in videos[t["id"]]
         if nature == "lrc":
             return bool(t["lyrics_synced"]) and empreinte_lrc(t["lyrics_synced"]) == valeur
+        if nature == "paroles":
+            return bool(t["lyrics"]) and empreinte_lrc(t["lyrics"]) == valeur
         return False
 
     cas = []
     for r in c.execute(
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
-        "WHERE nature IN ('id_spotify', 'id_deezer', 'video', 'lrc')"
+        "WHERE nature IN ('id_spotify', 'id_deezer', 'video', 'lrc', 'paroles')"
     ):
         if r["genius_id"] is not None:
             visees = par_genius.get(int(r["genius_id"]), [])

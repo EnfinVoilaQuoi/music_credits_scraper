@@ -259,3 +259,29 @@ def test_need_sync_false_pas_de_synchro():
     )
     assert out.lyrics_synced is None
     assert out.observations == []
+
+
+def test_paroles_de_secours_refusees_ne_reviennent_pas(data_manager):
+    """2026-10-12 : A2H « Pardonne moi » portait les paroles de « Pardonnez-moi »
+    servies par YTM. Refusées à la main, le résolveur ne les reprend plus — un
+    AUTRE texte, lui, passe."""
+    from src.utils.corrections_fiches import memoriser_paroles_refusees
+
+    fiche = _track(has_lyrics=False, lyrics=None)
+    fiche.artist = Artist(name="A2H")
+    memoriser_paroles_refusees(fiche, "les paroles  d'un autre\nmorceau")
+
+    def resoudre(texte):
+        return resolve_track_synced_lyrics(
+            fiche,
+            "A2H",
+            lrclib=None,
+            ytm=_FakeYTM(text=texte, source="Source: Musixmatch"),
+            mxm=None,
+            need_sync=False,
+            need_text=True,
+            sync_ytm=True,
+        )
+
+    assert resoudre("les paroles d'un autre morceau").text is None  # espaces normalisés
+    assert resoudre("les vraies paroles").text == "les vraies paroles"

@@ -1,0 +1,4501 @@
+{
+ "albums": [
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 699310021,
+   "label": "Offsiderz",
+   "link": "https://www.deezer.com/album/699310021",
+   "nb_tracks": 10,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 101,
+     "explicit": true,
+     "id": 3190896571,
+     "isrc": "FRP252400010",
+     "link": "https://www.deezer.com/track/3190896571",
+     "position": 1,
+     "title": "ENCORE CHAUD",
+     "title_short": "ENCORE CHAUD",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 174,
+     "explicit": true,
+     "id": 3190896581,
+     "isrc": "FRP252400020",
+     "link": "https://www.deezer.com/track/3190896581",
+     "position": 2,
+     "title": "HUIT CHIFFRES",
+     "title_short": "HUIT CHIFFRES",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 204,
+     "explicit": true,
+     "id": 3190896591,
+     "isrc": "FRP252400030",
+     "link": "https://www.deezer.com/track/3190896591",
+     "position": 3,
+     "title": "HISTOIRES VRAIES",
+     "title_short": "HISTOIRES VRAIES",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 197,
+     "explicit": true,
+     "id": 3190896601,
+     "isrc": "FRP252400040",
+     "link": "https://www.deezer.com/track/3190896601",
+     "position": 4,
+     "title": "V15",
+     "title_short": "V15",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 204,
+     "explicit": true,
+     "id": 3190896611,
+     "isrc": "FRP252400050",
+     "link": "https://www.deezer.com/track/3190896611",
+     "position": 5,
+     "title": "MAUVAIS POUR LE BUSINESS",
+     "title_short": "MAUVAIS POUR LE BUSINESS",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 151,
+     "explicit": true,
+     "id": 3190896621,
+     "isrc": "FRP252400060",
+     "link": "https://www.deezer.com/track/3190896621",
+     "position": 6,
+     "title": "BIZI",
+     "title_short": "BIZI",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 180,
+     "explicit": true,
+     "id": 3190896631,
+     "isrc": "FRP252400070",
+     "link": "https://www.deezer.com/track/3190896631",
+     "position": 7,
+     "title": "MEILLEUR SPOT",
+     "title_short": "MEILLEUR SPOT",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 166,
+     "explicit": true,
+     "id": 3190896641,
+     "isrc": "FRP252400080",
+     "link": "https://www.deezer.com/track/3190896641",
+     "position": 8,
+     "title": "C'EST PAS MON STYLE",
+     "title_short": "C'EST PAS MON STYLE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 179,
+     "explicit": true,
+     "id": 3190896651,
+     "isrc": "FRP252400090",
+     "link": "https://www.deezer.com/track/3190896651",
+     "position": 9,
+     "title": "MONSIEUR JULIEN",
+     "title_short": "MONSIEUR JULIEN",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 110,
+     "explicit": true,
+     "id": 3190896661,
+     "isrc": "FRP252400100",
+     "link": "https://www.deezer.com/track/3190896661",
+     "position": 10,
+     "title": "MICHEL MONTANA",
+     "title_short": "MICHEL MONTANA",
+     "title_version": ""
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2025-02-07",
+   "title": "MONSIEUR JULIEN"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 72573182,
+   "label": "OFFsiderz",
+   "link": "https://www.deezer.com/album/72573182",
+   "nb_tracks": 12,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 229,
+     "explicit": false,
+     "id": 551704692,
+     "isrc": "FRP251800010",
+     "link": "https://www.deezer.com/track/551704692",
+     "position": 1,
+     "title": "Joga Bonito",
+     "title_short": "Joga Bonito",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 267,
+     "explicit": false,
+     "id": 551704702,
+     "isrc": "FRP251800030",
+     "link": "https://www.deezer.com/track/551704702",
+     "position": 2,
+     "title": "Dos rond",
+     "title_short": "Dos rond",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 218,
+     "explicit": false,
+     "id": 551704712,
+     "isrc": "FRP251800040",
+     "link": "https://www.deezer.com/track/551704712",
+     "position": 3,
+     "title": "Ça va bien s'passer (Avec Jeanjass)",
+     "title_short": "Ça va bien s'passer",
+     "title_version": "(Avec Jeanjass)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 220,
+     "explicit": false,
+     "id": 551704722,
+     "isrc": "FRP251800050",
+     "link": "https://www.deezer.com/track/551704722",
+     "position": 4,
+     "title": "Page blanche, nuits roses",
+     "title_short": "Page blanche, nuits roses",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 214,
+     "explicit": false,
+     "id": 551704732,
+     "isrc": "FRP251800060",
+     "link": "https://www.deezer.com/track/551704732",
+     "position": 5,
+     "title": "Lutèce",
+     "title_short": "Lutèce",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 201,
+     "explicit": false,
+     "id": 551704742,
+     "isrc": "FRP251800070",
+     "link": "https://www.deezer.com/track/551704742",
+     "position": 6,
+     "title": "Végas",
+     "title_short": "Végas",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 208,
+     "explicit": false,
+     "id": 551704752,
+     "isrc": "FRP251800090",
+     "link": "https://www.deezer.com/track/551704752",
+     "position": 7,
+     "title": "D.A (Avec Sopico, Hash24)",
+     "title_short": "D.A",
+     "title_version": "(Avec Sopico, Hash24)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 203,
+     "explicit": false,
+     "id": 551704762,
+     "isrc": "FRP251800080",
+     "link": "https://www.deezer.com/track/551704762",
+     "position": 8,
+     "title": "Calme et posé (Avec Nasme)",
+     "title_short": "Calme et posé",
+     "title_version": "(Avec Nasme)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 201,
+     "explicit": false,
+     "id": 551704772,
+     "isrc": "FRP251800020",
+     "link": "https://www.deezer.com/track/551704772",
+     "position": 9,
+     "title": "À partir d'aujourd'hui",
+     "title_short": "À partir d'aujourd'hui",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 211,
+     "explicit": false,
+     "id": 551704782,
+     "isrc": "FRP251800100",
+     "link": "https://www.deezer.com/track/551704782",
+     "position": 10,
+     "title": "Chanson pour ton fils",
+     "title_short": "Chanson pour ton fils",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 235,
+     "explicit": false,
+     "id": 551704792,
+     "isrc": "FRP251800110",
+     "link": "https://www.deezer.com/track/551704792",
+     "position": 11,
+     "title": "Avant les regrets",
+     "title_short": "Avant les regrets",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 216,
+     "explicit": false,
+     "id": 551704802,
+     "isrc": "FRP251800120",
+     "link": "https://www.deezer.com/track/551704802",
+     "position": 12,
+     "title": "Champions du monde",
+     "title_short": "Champions du monde",
+     "title_version": ""
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2018-10-26",
+   "title": "Ça va bien s'passer"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 7013399,
+   "label": "Flynt / Offsiderz",
+   "link": "https://www.deezer.com/album/7013399",
+   "nb_tracks": 21,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 156,
+     "explicit": false,
+     "id": 71419435,
+     "isrc": "FR0U91204186",
+     "link": "https://www.deezer.com/track/71419435",
+     "position": 1,
+     "title": "Rétroduction",
+     "title_short": "Rétroduction",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 134,
+     "explicit": false,
+     "id": 71419436,
+     "isrc": "FR0U91204187",
+     "link": "https://www.deezer.com/track/71419436",
+     "position": 2,
+     "title": "Haut la main (Saï Remix)",
+     "title_short": "Haut la main",
+     "title_version": "(Saï Remix)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 116,
+     "explicit": false,
+     "id": 71419437,
+     "isrc": "FR0U91204188",
+     "link": "https://www.deezer.com/track/71419437",
+     "position": 3,
+     "title": "Vers le bas + Freestyle",
+     "title_short": "Vers le bas + Freestyle",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 248,
+     "explicit": false,
+     "id": 71419438,
+     "isrc": "FR0U91204189",
+     "link": "https://www.deezer.com/track/71419438",
+     "position": 4,
+     "title": "1 pour la plume (Saï Remix) + Freestyle",
+     "title_short": "1 pour la plume (Saï Remix) + Freestyle",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 292,
+     "explicit": false,
+     "id": 71419439,
+     "isrc": "FR0U91204190",
+     "link": "https://www.deezer.com/track/71419439",
+     "position": 5,
+     "title": "La gueule de l'emploi",
+     "title_short": "La gueule de l'emploi",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 63,
+     "explicit": false,
+     "id": 71419440,
+     "isrc": "FR0U91204191",
+     "link": "https://www.deezer.com/track/71419440",
+     "position": 6,
+     "title": "Marche arrière",
+     "title_short": "Marche arrière",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 217,
+     "explicit": false,
+     "id": 71419441,
+     "isrc": "FR0U91204192",
+     "link": "https://www.deezer.com/track/71419441",
+     "position": 7,
+     "title": "Fidèle à son contexte + J'voulais",
+     "title_short": "Fidèle à son contexte + J'voulais",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 137,
+     "explicit": false,
+     "id": 71419442,
+     "isrc": "FR0U91204193",
+     "link": "https://www.deezer.com/track/71419442",
+     "position": 8,
+     "title": "Choc frontal",
+     "title_short": "Choc frontal",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 206,
+     "explicit": false,
+     "id": 71419443,
+     "isrc": "FR0U91204194",
+     "link": "https://www.deezer.com/track/71419443",
+     "position": 9,
+     "title": "Splifflife (Le peu qu'on s'offre) + Open bar",
+     "title_short": "Splifflife (Le peu qu'on s'offre) + Open bar",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 196,
+     "explicit": false,
+     "id": 71419444,
+     "isrc": "FR0U91204195",
+     "link": "https://www.deezer.com/track/71419444",
+     "position": 10,
+     "title": "Comme sur un playground",
+     "title_short": "Comme sur un playground",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 102,
+     "explicit": false,
+     "id": 71419445,
+     "isrc": "FR0U91204196",
+     "link": "https://www.deezer.com/track/71419445",
+     "position": 11,
+     "title": "Mille fois dans le même trou",
+     "title_short": "Mille fois dans le même trou",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 143,
+     "explicit": false,
+     "id": 71419446,
+     "isrc": "FR0U91204197",
+     "link": "https://www.deezer.com/track/71419446",
+     "position": 12,
+     "title": "Compte à rebours + Vieux avant l'âge",
+     "title_short": "Compte à rebours + Vieux avant l'âge",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 159,
+     "explicit": false,
+     "id": 71419447,
+     "isrc": "FR0U91204198",
+     "link": "https://www.deezer.com/track/71419447",
+     "position": 13,
+     "title": "J'éclaire ma ville",
+     "title_short": "J'éclaire ma ville",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 184,
+     "explicit": false,
+     "id": 71419448,
+     "isrc": "FR0U91204199",
+     "link": "https://www.deezer.com/track/71419448",
+     "position": 14,
+     "title": "Crazy + 6G",
+     "title_short": "Crazy + 6G",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 204,
+     "explicit": false,
+     "id": 71419449,
+     "isrc": "FR0U91204200",
+     "link": "https://www.deezer.com/track/71419449",
+     "position": 15,
+     "title": "Mon pote",
+     "title_short": "Mon pote",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 204,
+     "explicit": false,
+     "id": 71419450,
+     "isrc": "FR0U91204201",
+     "link": "https://www.deezer.com/track/71419450",
+     "position": 16,
+     "title": "Les clichés ont la peau dure + Retour aux fondamentaux",
+     "title_short": "Les clichés ont la peau dure + Retour aux fondamentaux",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 198,
+     "explicit": false,
+     "id": 71419451,
+     "isrc": "FR0U91204202",
+     "link": "https://www.deezer.com/track/71419451",
+     "position": 17,
+     "title": "Rap Théorie",
+     "title_short": "Rap Théorie",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 140,
+     "explicit": false,
+     "id": 71419452,
+     "isrc": "FR0U91204203",
+     "link": "https://www.deezer.com/track/71419452",
+     "position": 18,
+     "title": "En froid + Relativise + Prouesses",
+     "title_short": "En froid + Relativise + Prouesses",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 338,
+     "explicit": false,
+     "id": 71419453,
+     "isrc": "FR0U91204204",
+     "link": "https://www.deezer.com/track/71419453",
+     "position": 19,
+     "title": "Itinéraire bis + J’éclaire ma ville (Live au New Morning)",
+     "title_short": "Itinéraire bis + J’éclaire ma ville",
+     "title_version": "(Live au New Morning)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 219,
+     "explicit": false,
+     "id": 71419454,
+     "isrc": "FR0U91204205",
+     "link": "https://www.deezer.com/track/71419454",
+     "position": 20,
+     "title": "Haut la main (Instrumental par Nodey)",
+     "title_short": "Haut la main",
+     "title_version": "(Instrumental par Nodey)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 172,
+     "explicit": false,
+     "id": 71419455,
+     "isrc": "FR0U91204206",
+     "link": "https://www.deezer.com/track/71419455",
+     "position": 21,
+     "title": "Haut la main (Acapella)",
+     "title_short": "Haut la main",
+     "title_version": "(Acapella)"
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2013-10-28",
+   "title": "Rétrographie (Mixtape)"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 6642499,
+   "label": "Flynt / Offsiderz",
+   "link": "https://www.deezer.com/album/6642499",
+   "nb_tracks": 12,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 172,
+     "explicit": false,
+     "id": 67844563,
+     "isrc": "FRP251200010",
+     "link": "https://www.deezer.com/track/67844563",
+     "position": 1,
+     "title": "J'ai choisi mon camp",
+     "title_short": "J'ai choisi mon camp",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 212,
+     "explicit": false,
+     "id": 67844564,
+     "isrc": "FRP251200020",
+     "link": "https://www.deezer.com/track/67844564",
+     "position": 2,
+     "title": "Haut la main",
+     "title_short": "Haut la main",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 248,
+     "explicit": false,
+     "id": 67844565,
+     "isrc": "FRP251200030",
+     "link": "https://www.deezer.com/track/67844565",
+     "position": 3,
+     "title": "Les clichés ont la peau dure",
+     "title_short": "Les clichés ont la peau dure",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 239,
+     "explicit": false,
+     "id": 67844566,
+     "isrc": "FRP251200040",
+     "link": "https://www.deezer.com/track/67844566",
+     "position": 4,
+     "title": "En froid",
+     "title_short": "En froid",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 232,
+     "explicit": false,
+     "id": 67844567,
+     "isrc": "FRP251200050",
+     "link": "https://www.deezer.com/track/67844567",
+     "position": 5,
+     "title": "Homeboy",
+     "title_short": "Homeboy",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 211,
+     "explicit": false,
+     "id": 67844568,
+     "isrc": "FRP251200060",
+     "link": "https://www.deezer.com/track/67844568",
+     "position": 6,
+     "title": "Mon pote",
+     "title_short": "Mon pote",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 243,
+     "explicit": false,
+     "id": 67844569,
+     "isrc": "FRP251200070",
+     "link": "https://www.deezer.com/track/67844569",
+     "position": 7,
+     "title": "Quand tu s'ras mort (Chanson de haine)",
+     "title_short": "Quand tu s'ras mort",
+     "title_version": "(Chanson de haine)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 210,
+     "explicit": false,
+     "id": 67844570,
+     "isrc": "FRP251200080",
+     "link": "https://www.deezer.com/track/67844570",
+     "position": 8,
+     "title": "Itinéraire bis",
+     "title_short": "Itinéraire bis",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 257,
+     "explicit": false,
+     "id": 67844571,
+     "isrc": "FRP251200090",
+     "link": "https://www.deezer.com/track/67844571",
+     "position": 9,
+     "title": "La balade des indépendants",
+     "title_short": "La balade des indépendants",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 267,
+     "explicit": false,
+     "id": 67844572,
+     "isrc": "FRP251200100",
+     "link": "https://www.deezer.com/track/67844572",
+     "position": 10,
+     "title": "Toujours authentique",
+     "title_short": "Toujours authentique",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 282,
+     "explicit": false,
+     "id": 67844573,
+     "isrc": "FRP251200110",
+     "link": "https://www.deezer.com/track/67844573",
+     "position": 11,
+     "title": "J'en ai marre de voir ta gueule",
+     "title_short": "J'en ai marre de voir ta gueule",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 186,
+     "explicit": false,
+     "id": 67844574,
+     "isrc": "FRP251200120",
+     "link": "https://www.deezer.com/track/67844574",
+     "position": 12,
+     "title": "Le dernier seize (Yin & Yang)",
+     "title_short": "Le dernier seize",
+     "title_version": "(Yin & Yang)"
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2012-10-15",
+   "title": "Itinéraire bis"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 298437,
+   "label": "OFFsiderz",
+   "link": "https://www.deezer.com/album/298437",
+   "nb_tracks": 15,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 249,
+     "explicit": true,
+     "id": 3080189,
+     "isrc": "FR6V80727452",
+     "link": "https://www.deezer.com/track/3080189",
+     "position": 1,
+     "title": "1 pour la plume",
+     "title_short": "1 pour la plume",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 265,
+     "explicit": true,
+     "id": 3080190,
+     "isrc": "FR6V80727453",
+     "link": "https://www.deezer.com/track/3080190",
+     "position": 2,
+     "title": "J'éclaire ma ville",
+     "title_short": "J'éclaire ma ville",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 265,
+     "explicit": true,
+     "id": 3080191,
+     "isrc": "FR6V80727454",
+     "link": "https://www.deezer.com/track/3080191",
+     "position": 3,
+     "title": "Mes sources",
+     "title_short": "Mes sources",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 35,
+     "explicit": true,
+     "id": 3080192,
+     "isrc": "FR6V80727455",
+     "link": "https://www.deezer.com/track/3080192",
+     "position": 4,
+     "title": "Skit",
+     "title_short": "Skit",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 320,
+     "explicit": true,
+     "id": 3080193,
+     "isrc": "FR6V80727456",
+     "link": "https://www.deezer.com/track/3080193",
+     "position": 5,
+     "title": "Ca fait du bien d'le dire",
+     "title_short": "Ca fait du bien d'le dire",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 307,
+     "explicit": true,
+     "id": 3080194,
+     "isrc": "FR6V80727457",
+     "link": "https://www.deezer.com/track/3080194",
+     "position": 6,
+     "title": "La gueule de l'emploi (feat. Sidi Omar)",
+     "title_short": "La gueule de l'emploi (feat. Sidi Omar)",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 207,
+     "explicit": true,
+     "id": 3080195,
+     "isrc": "FR6V80727458",
+     "link": "https://www.deezer.com/track/3080195",
+     "position": 7,
+     "title": "Notre existence",
+     "title_short": "Notre existence",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 214,
+     "explicit": true,
+     "id": 3080196,
+     "isrc": "FR6V80727459",
+     "link": "https://www.deezer.com/track/3080196",
+     "position": 8,
+     "title": "J'ai trouvé ma place",
+     "title_short": "J'ai trouvé ma place",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 273,
+     "explicit": true,
+     "id": 3080197,
+     "isrc": "FR6V80727460",
+     "link": "https://www.deezer.com/track/3080197",
+     "position": 9,
+     "title": "Les moyens du bord",
+     "title_short": "Les moyens du bord",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 97,
+     "explicit": true,
+     "id": 3080198,
+     "isrc": "FR6V80727461",
+     "link": "https://www.deezer.com/track/3080198",
+     "position": 10,
+     "title": "Retour aux fondamentaux",
+     "title_short": "Retour aux fondamentaux",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 226,
+     "explicit": true,
+     "id": 3080199,
+     "isrc": "FR6V80727462",
+     "link": "https://www.deezer.com/track/3080199",
+     "position": 11,
+     "title": "Comme sur un playground",
+     "title_short": "Comme sur un playground",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 203,
+     "explicit": true,
+     "id": 3080200,
+     "isrc": "FR6V80727463",
+     "link": "https://www.deezer.com/track/3080200",
+     "position": 12,
+     "title": "Le bif' (à chacun ses motivations)",
+     "title_short": "Le bif' (à chacun ses motivations)",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 256,
+     "explicit": true,
+     "id": 3080201,
+     "isrc": "FR6V80727464",
+     "link": "https://www.deezer.com/track/3080201",
+     "position": 13,
+     "title": "1 pour la plume (version équipe)[feat. Ekoué de La Rumeur, JP Mapaula, Aki & Mokless de la Scred Connexion]",
+     "title_short": "1 pour la plume (version équipe)[feat. Ekoué de La Rumeur, JP Mapaula, Aki & Mokless de la Scred Connexion]",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 250,
+     "explicit": true,
+     "id": 3080202,
+     "isrc": "FR6V80727465",
+     "link": "https://www.deezer.com/track/3080202",
+     "position": 14,
+     "title": "Rien ne nous appartient",
+     "title_short": "Rien ne nous appartient",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 299,
+     "explicit": true,
+     "id": 3080203,
+     "isrc": "FR6V80727466",
+     "link": "https://www.deezer.com/track/3080203",
+     "position": 15,
+     "title": "Tourner la page",
+     "title_short": "Tourner la page",
+     "title_version": ""
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2007-05-28",
+   "title": "J'éclaire ma ville"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 6944218,
+   "label": "Flynt / Offsiderz",
+   "link": "https://www.deezer.com/album/6944218",
+   "nb_tracks": 5,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 203,
+     "explicit": false,
+     "id": 70725365,
+     "isrc": "FR0U91203626",
+     "link": "https://www.deezer.com/track/70725365",
+     "position": 1,
+     "title": "Fidèle à son contexte",
+     "title_short": "Fidèle à son contexte",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 203,
+     "explicit": false,
+     "id": 70725366,
+     "isrc": "FR0U91203627",
+     "link": "https://www.deezer.com/track/70725366",
+     "position": 2,
+     "title": "Fidèle à son contexte (Instrumental)",
+     "title_short": "Fidèle à son contexte",
+     "title_version": "(Instrumental)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 196,
+     "explicit": false,
+     "id": 70725367,
+     "isrc": "FR0U91203628",
+     "link": "https://www.deezer.com/track/70725367",
+     "position": 3,
+     "title": "Fidèle à son contexte (Acapella)",
+     "title_short": "Fidèle à son contexte",
+     "title_version": "(Acapella)"
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 195,
+     "explicit": false,
+     "id": 70725368,
+     "isrc": "FR0U91203629",
+     "link": "https://www.deezer.com/track/70725368",
+     "position": 4,
+     "title": "Choc frontal",
+     "title_short": "Choc frontal",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 204,
+     "explicit": false,
+     "id": 70725369,
+     "isrc": "FR0U91203630",
+     "link": "https://www.deezer.com/track/70725369",
+     "position": 5,
+     "title": "Choc Frontal (Instrumental)",
+     "title_short": "Choc Frontal",
+     "title_version": "(Instrumental)"
+    }
+   ],
+   "record_type": "ep",
+   "release_date": "2013-09-30",
+   "title": "Fidèle à son contexte"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 701044831,
+   "label": "Offsiderz",
+   "link": "https://www.deezer.com/album/701044831",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 101,
+     "explicit": true,
+     "id": 3196150201,
+     "isrc": "FRP252400010",
+     "link": "https://www.deezer.com/track/3196150201",
+     "position": 1,
+     "title": "ENCORE CHAUD",
+     "title_short": "ENCORE CHAUD",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2025-01-30",
+   "title": "ENCORE CHAUD"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ],
+    [
+     244534102,
+     "Don Choa"
+    ]
+   ],
+   "id": 460788465,
+   "label": "OFFSIDERZ / BELIEVE",
+   "link": "https://www.deezer.com/album/460788465",
+   "nb_tracks": 2,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 183,
+     "explicit": false,
+     "id": 2353890075,
+     "isrc": "FRP252300060",
+     "link": "https://www.deezer.com/track/2353890075",
+     "position": 1,
+     "title": "DE BONNE HUMEUR",
+     "title_short": "DE BONNE HUMEUR",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 175,
+     "explicit": false,
+     "id": 2353890085,
+     "isrc": "FRP252300070",
+     "link": "https://www.deezer.com/track/2353890085",
+     "position": 2,
+     "title": "LA PISCINE",
+     "title_short": "LA PISCINE",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2023-07-21",
+   "title": "FLYNT / DON CHOA"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 704396061,
+   "label": "Offsiderz",
+   "link": "https://www.deezer.com/album/704396061",
+   "nb_tracks": 2,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 204,
+     "explicit": true,
+     "id": 3206644951,
+     "isrc": "FRP252300020",
+     "link": "https://www.deezer.com/track/3206644951",
+     "position": 1,
+     "title": "MAUVAIS POUR LE BUSINESS",
+     "title_short": "MAUVAIS POUR LE BUSINESS",
+     "title_version": ""
+    },
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 202,
+     "explicit": false,
+     "id": 3206644961,
+     "isrc": "FRP252300050",
+     "link": "https://www.deezer.com/track/3206644961",
+     "position": 2,
+     "title": "MAUVAIS POUR LE BUSINESS (Instrumental)",
+     "title_short": "MAUVAIS POUR LE BUSINESS",
+     "title_version": "(Instrumental)"
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2023-04-14",
+   "title": "MAUVAIS POUR LE BUSINESS"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 406313477,
+   "label": "OFFsiderz",
+   "link": "https://www.deezer.com/album/406313477",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 176,
+     "explicit": false,
+     "id": 2145322657,
+     "isrc": "FRP252300010",
+     "link": "https://www.deezer.com/track/2145322657",
+     "position": 1,
+     "title": "OEUVRESDART",
+     "title_short": "OEUVRESDART",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2023-02-23",
+   "title": "OEUVRESDART"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ],
+    [
+     5838830,
+     "Jeanjass"
+    ]
+   ],
+   "id": 72289002,
+   "label": "OFFsiderz",
+   "link": "https://www.deezer.com/album/72289002",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 218,
+     "explicit": false,
+     "id": 549971552,
+     "isrc": "FRP251800040",
+     "link": "https://www.deezer.com/track/549971552",
+     "position": 1,
+     "title": "Ça va bien s'passer",
+     "title_short": "Ça va bien s'passer",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2018-09-14",
+   "title": "Ça va bien s'passer"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 65074422,
+   "label": "OFFsiderz",
+   "link": "https://www.deezer.com/album/65074422",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 228,
+     "explicit": false,
+     "id": 508615292,
+     "isrc": "FRP251800010",
+     "link": "https://www.deezer.com/track/508615292",
+     "position": 1,
+     "title": "Joga Bonito",
+     "title_short": "Joga Bonito",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2018-06-08",
+   "title": "Joga Bonito"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ],
+    [
+     259467,
+     "Orelsan"
+    ]
+   ],
+   "id": 513011301,
+   "label": "Flynt / Offsiderz",
+   "link": "https://www.deezer.com/album/513011301",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 211,
+     "explicit": false,
+     "id": 2543916441,
+     "isrc": "FRP251200060",
+     "link": "https://www.deezer.com/track/2543916441",
+     "position": 1,
+     "title": "Mon pote",
+     "title_short": "Mon pote",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2012-10-15",
+   "title": "Mon pote"
+  },
+  {
+   "artist_id": 90901,
+   "artist_name": "Flynt",
+   "contributors": [
+    [
+     90901,
+     "Flynt"
+    ]
+   ],
+   "id": 512878331,
+   "label": "OFFsiderz",
+   "link": "https://www.deezer.com/album/512878331",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 90901,
+     "artist_name": "Flynt",
+     "contributors": [],
+     "disk": 1,
+     "duration": 249,
+     "explicit": true,
+     "id": 2543399721,
+     "isrc": "FR6V80727452",
+     "link": "https://www.deezer.com/track/2543399721",
+     "position": 1,
+     "title": "1 pour la plume",
+     "title_short": "1 pour la plume",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2007-06-12",
+   "title": "1 pour la plume"
+  }
+ ],
+ "albums_base": [
+  {
+   "deezer_album_id": 12362094,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:56.186406",
+   "spotify_album_ids": "1jA81tHjPtcgywLvZ3nvFD",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"1jA81tHjPtcgywLvZ3nvFD\": 36537903}",
+   "spotify_streams": 36537903,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:21:11.091351",
+   "title": "Libre",
+   "ytm_streams": 22192
+  },
+  {
+   "deezer_album_id": 81982532,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:49.482248",
+   "spotify_album_ids": "2pCD5bj7FytEEgD6Kxw2uA",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"2pCD5bj7FytEEgD6Kxw2uA\": 27474578}",
+   "spotify_streams": 27474578,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:25:03.003958",
+   "title": "Destroy",
+   "ytm_streams": 805898
+  },
+  {
+   "deezer_album_id": 784701261,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:17:02.833229",
+   "spotify_album_ids": "6Dsmx40NLWGdzWrNwqkx6e",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"6Dsmx40NLWGdzWrNwqkx6e\": 10406436}",
+   "spotify_streams": 10406436,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:22:28.169165",
+   "title": "Scred Selexion 2",
+   "ytm_streams": 428044
+  },
+  {
+   "deezer_album_id": 7013399,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:17:01.716612",
+   "spotify_album_ids": "1XQDgwwu8oDAmiJjF0lSQN",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"1XQDgwwu8oDAmiJjF0lSQN\": 5440678}",
+   "spotify_streams": 5440678,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:18:09.619645",
+   "title": "Rétrographie (Mixtape)",
+   "ytm_streams": 24113
+  },
+  {
+   "deezer_album_id": 6642499,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:55.003145",
+   "spotify_album_ids": "6ZWROJwII5fGm1z5BppW64",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"6ZWROJwII5fGm1z5BppW64\": 4535121}",
+   "spotify_streams": 4535121,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:16:12.068326",
+   "title": "Itinéraire bis",
+   "ytm_streams": 4575247
+  },
+  {
+   "deezer_album_id": 72573182,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:17:09.875244",
+   "spotify_album_ids": "6HU0hXSfDdP7FZuEHZn3Rz,07oBYIglPlc1g2ExgTwBfB",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"6HU0hXSfDdP7FZuEHZn3Rz\": 2516667, \"07oBYIglPlc1g2ExgTwBfB\": 1064910}",
+   "spotify_streams": 3581577,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:19:29.929606",
+   "title": "Ça va bien s’passer",
+   "ytm_streams": 1274027
+  },
+  {
+   "deezer_album_id": 298437,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:55.027194",
+   "spotify_album_ids": "6v6QqhPT9zMWJ6oVgxFhEr",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"6v6QqhPT9zMWJ6oVgxFhEr\": 2819702}",
+   "spotify_streams": 2819702,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:15:01.367555",
+   "title": "J’éclaire ma ville",
+   "ytm_streams": 1281511
+  },
+  {
+   "deezer_album_id": 699310021,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:56.211886",
+   "spotify_album_ids": "1Meq5LA4k1a8SGLL4PelYB",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"1Meq5LA4k1a8SGLL4PelYB\": 2496463}",
+   "spotify_streams": 2496463,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:14:09.547187",
+   "title": "MONSIEUR JULIEN",
+   "ytm_streams": 586380
+  },
+  {
+   "deezer_album_id": 460788465,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:50.571546",
+   "spotify_album_ids": "6C5h9EJ7LvLP4QNttBgGhH",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"6C5h9EJ7LvLP4QNttBgGhH\": 451418}",
+   "spotify_streams": 451418,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:18:16.152247",
+   "title": "FLYNT / DON CHOA",
+   "ytm_streams": 95310
+  },
+  {
+   "deezer_album_id": 72573182,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:17:09.860528",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Ça va bien s'passer",
+   "ytm_streams": 1274027
+  },
+  {
+   "deezer_album_id": 298437,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:55.016988",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "J'éclaire ma ville",
+   "ytm_streams": 1247372
+  },
+  {
+   "deezer_album_id": 942459051,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:39.408164",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "ALL STAR GAME - Tornado Bees",
+   "ytm_streams": 426197
+  },
+  {
+   "deezer_album_id": 9461274,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:42.764108",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Appelle-moi MC Vol. 2",
+   "ytm_streams": 137845
+  },
+  {
+   "deezer_album_id": 704396061,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:56.202005",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "MAUVAIS POUR LE BUSINESS",
+   "ytm_streams": 1724
+  },
+  {
+   "deezer_album_id": 138349842,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:57.289682",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Marche avec nous",
+   "ytm_streams": null
+  },
+  {
+   "deezer_album_id": 54726812,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:58.366125",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "No Name 2.0",
+   "ytm_streams": 2037
+  },
+  {
+   "deezer_album_id": 49887482,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:59.485756",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Pejmaxx",
+   "ytm_streams": null
+  },
+  {
+   "deezer_album_id": 1052035192,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:17:00.582118",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Pieces to the Puzzle",
+   "ytm_streams": 81931
+  },
+  {
+   "deezer_album_id": 797561711,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:17:06.320390",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Seul(s)",
+   "ytm_streams": 30617
+  },
+  {
+   "deezer_album_id": 6944218,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:37.224220",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "1 pour la plume",
+   "ytm_streams": 721118
+  },
+  {
+   "deezer_album_id": 298437,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:38.328646",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "10 ans de rap Vol. 3",
+   "ytm_streams": null
+  },
+  {
+   "deezer_album_id": 70239,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:43.862237",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Barillet plein",
+   "ytm_streams": 2905
+  },
+  {
+   "deezer_album_id": 7013399,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:16:50.556391",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Extrait d’amertume",
+   "ytm_streams": 2731
+  },
+  {
+   "deezer_album_id": 11228114,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-02 12:17:01.703544",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Rétrographie",
+   "ytm_streams": 196857
+  }
+ ],
+ "artiste": "Flynt",
+ "attendu": {
+  "ecarts": [
+   "{\"album\": 298437, \"coche\": false, \"fiche\": 1226, \"motifs\": [\"lien existant : Deezer 265 s / fiche 159 s (youtube) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 3080190, \"socle\": null, \"titre\": \"J'éclaire ma ville\"}",
+   "{\"album\": 298437, \"coche\": false, \"fiche\": 1248, \"motifs\": [\"lien existant : Deezer 307 s / fiche 292 s (discogs) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 3080194, \"socle\": null, \"titre\": \"La gueule de l'emploi (feat. Sidi Omar)\"}",
+   "{\"album\": 298437, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 3080189, \"socle\": null, \"titre\": \"1 pour la plume\"}",
+   "{\"album\": 512878331, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 2543399721, \"socle\": null, \"titre\": \"1 pour la plume\"}",
+   "{\"album\": 513011301, \"coche\": false, \"fiche\": 1222, \"motifs\": [\"lien existant : Deezer 211 s / fiche 203 s (spotify_web) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 2543916441, \"socle\": null, \"titre\": \"Mon pote\"}",
+   "{\"album\": 6642499, \"coche\": false, \"fiche\": 1222, \"motifs\": [\"lien existant : Deezer 211 s / fiche 203 s (spotify_web) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 67844568, \"socle\": null, \"titre\": \"Mon pote\"}",
+   "{\"album\": 6944218, \"coche\": false, \"fiche\": 9720, \"motifs\": [\"même titre, durée différente (Deezer 195 s / base 137 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 70725368, \"socle\": null, \"titre\": \"Choc frontal\"}",
+   "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Choc frontal »\"], \"nature\": \"version\", \"piste\": 70725369, \"socle\": 9720, \"titre\": \"Choc Frontal (Instrumental)\"}",
+   "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Fidèle à son contexte »\"], \"nature\": \"version\", \"piste\": 70725366, \"socle\": 1237, \"titre\": \"Fidèle à son contexte (Instrumental)\"}",
+   "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Fidèle à son contexte »\"], \"nature\": \"version\", \"piste\": 70725367, \"socle\": 1237, \"titre\": \"Fidèle à son contexte (Acapella)\"}",
+   "{\"album\": 7013399, \"coche\": false, \"fiche\": 1222, \"motifs\": [\"même titre, durée différente (Deezer 204 s / base 211 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 71419449, \"socle\": null, \"titre\": \"Mon pote\"}",
+   "{\"album\": 7013399, \"coche\": false, \"fiche\": 1226, \"motifs\": [\"même titre, durée différente (Deezer 159 s / base 265 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 71419447, \"socle\": null, \"titre\": \"J'éclaire ma ville\"}",
+   "{\"album\": 7013399, \"coche\": false, \"fiche\": 1251, \"motifs\": [\"lien existant : Deezer 196 s / fiche 226 s (discogs) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 71419444, \"socle\": null, \"titre\": \"Comme sur un playground\"}",
+   "{\"album\": 7013399, \"coche\": false, \"fiche\": 1273, \"motifs\": [\"même titre, durée différente (Deezer 198 s / base 262 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 71419451, \"socle\": null, \"titre\": \"Rap Théorie\"}",
+   "{\"album\": 7013399, \"coche\": false, \"fiche\": 9720, \"motifs\": [\"lien existant : Deezer 137 s / fiche 195 s (ytmusic) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 71419442, \"socle\": null, \"titre\": \"Choc frontal\"}",
+   "{\"album\": 7013399, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 71419443, \"socle\": null, \"titre\": \"Splifflife (Le peu qu'on s'offre) + Open bar\"}",
+   "{\"album\": 7013399, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 71419448, \"socle\": null, \"titre\": \"Crazy + 6G\"}"
+  ],
+  "editions_jumelles": [
+   "ENCORE CHAUD",
+   "Joga Bonito",
+   "Mon pote",
+   "OEUVRESDART"
+  ]
+ },
+ "base": [
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419438,
+   "duration": 248,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 248,
+    "reccobeats": 248,
+    "songbpm": 248,
+    "spotify_web": 248,
+    "youtube": 249,
+    "ytmusic": 249
+   },
+   "genius_id": null,
+   "id": 9717,
+   "is_featuring": false,
+   "isrc": "FR0U91204189",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "1 pour la plume (Saï Remix) + Freestyle",
+   "unreleased": null
+  },
+  {
+   "album": "Pejmaxx",
+   "deezer_id": 417624402,
+   "duration": 226,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 226,
+    "legacy": 226,
+    "reccobeats": 226,
+    "songbpm": 226,
+    "spotify_web": 226
+   },
+   "genius_id": 3311311,
+   "id": 1263,
+   "is_featuring": true,
+   "isrc": "FR9W11720743",
+   "primary_artist_name": "Pejmaxx",
+   "release_date": "2017-11-24",
+   "secondary_role": null,
+   "title": "ADN",
+   "unreleased": null
+  },
+  {
+   "album": "Appelle-moi MC Vol. 2",
+   "deezer_id": 93168320,
+   "duration": 245,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 245,
+    "deezer": 245,
+    "legacy": 245,
+    "reccobeats": 245,
+    "songbpm": 245,
+    "spotify_web": 245,
+    "youtube": 246,
+    "ytmusic": 246
+   },
+   "genius_id": 708790,
+   "id": 1241,
+   "is_featuring": true,
+   "isrc": "FR10S1508408",
+   "primary_artist_name": "Lino",
+   "release_date": "2015-02-23",
+   "secondary_role": null,
+   "title": "Appelle-moi MC",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704792,
+   "duration": 235,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 235,
+    "deezer": 235,
+    "discogs": 235,
+    "legacy": 235,
+    "reccobeats": 235,
+    "songbpm": 235,
+    "spotify_web": 235,
+    "youtube": 236,
+    "ytmusic": 236
+   },
+   "genius_id": 4036826,
+   "id": 1247,
+   "is_featuring": false,
+   "isrc": "FRP251800110",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Avant les regrets",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896621,
+   "duration": 151,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 151,
+    "discogs": 151,
+    "reccobeats": 151,
+    "songbpm": 152,
+    "spotify_web": 151,
+    "ytmusic": 152
+   },
+   "genius_id": 11401211,
+   "id": 9711,
+   "is_featuring": false,
+   "isrc": "FRP252400060",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "BIZI",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704762,
+   "duration": 203,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 204,
+    "deezer": 203,
+    "discogs": 203,
+    "legacy": 203,
+    "reccobeats": 203,
+    "songbpm": 204,
+    "spotify_web": 203,
+    "youtube": 204,
+    "ytmusic": 204
+   },
+   "genius_id": 4041546,
+   "id": 1277,
+   "is_featuring": false,
+   "isrc": "FRP251800080",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Calme et posé",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s'passer",
+   "deezer_id": 551704802,
+   "duration": 216,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 216,
+    "discogs": 215,
+    "reccobeats": 216,
+    "songbpm": 216,
+    "spotify_web": 216,
+    "ytmusic": 217
+   },
+   "genius_id": null,
+   "id": 9713,
+   "is_featuring": false,
+   "isrc": "FRP251800120",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Champions du monde",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": null,
+   "duration": 217,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "discogs": 215,
+    "youtube": 217
+   },
+   "genius_id": 4041550,
+   "id": 1265,
+   "is_featuring": false,
+   "isrc": null,
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Champions du monde (Bonus Track)",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704782,
+   "duration": 211,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 211,
+    "deezer": 211,
+    "discogs": 211,
+    "legacy": 211,
+    "reccobeats": 211,
+    "songbpm": 211,
+    "spotify_web": 211,
+    "youtube": 212,
+    "ytmusic": 212
+   },
+   "genius_id": 4041548,
+   "id": 1239,
+   "is_featuring": false,
+   "isrc": "FRP251800100",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Chanson pour ton fils",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419442,
+   "duration": 137,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 137,
+    "reccobeats": 137,
+    "songbpm": 137,
+    "spotify_web": 137,
+    "ytmusic": 195
+   },
+   "genius_id": null,
+   "id": 9720,
+   "is_featuring": false,
+   "isrc": "FR0U91204193",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Choc frontal",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080199,
+   "duration": 226,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 226,
+    "discogs": 226,
+    "reccobeats": 226,
+    "songbpm": 226,
+    "spotify_web": 226,
+    "ytmusic": 227
+   },
+   "genius_id": 104868,
+   "id": 1251,
+   "is_featuring": false,
+   "isrc": "FR6V80727462",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Comme sur un playground",
+   "unreleased": null
+  },
+  {
+   "album": "1 pour la plume",
+   "deezer_id": 943778812,
+   "duration": 210,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 211,
+    "deezer": 210,
+    "legacy": 210,
+    "reccobeats": 210,
+    "songbpm": 211,
+    "spotify_web": 211,
+    "youtube": 212,
+    "ytmusic": 212
+   },
+   "genius_id": 376915,
+   "id": 1257,
+   "is_featuring": false,
+   "isrc": "FR6V82002605",
+   "primary_artist_name": null,
+   "release_date": "2012-10-28",
+   "secondary_role": null,
+   "title": "Compte à rebours",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419446,
+   "duration": 143,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 143,
+    "reccobeats": 143,
+    "songbpm": 143,
+    "spotify_web": 143,
+    "youtube": 144,
+    "ytmusic": 144
+   },
+   "genius_id": null,
+   "id": 9721,
+   "is_featuring": false,
+   "isrc": "FR0U91204197",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Compte à rebours + Vieux avant l'âge",
+   "unreleased": null
+  },
+  {
+   "album": "1 pour la plume",
+   "deezer_id": null,
+   "duration": 185,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "songbpm": 184,
+    "youtube": 185
+   },
+   "genius_id": 376912,
+   "id": 1264,
+   "is_featuring": false,
+   "isrc": null,
+   "primary_artist_name": null,
+   "release_date": "2003-01-01",
+   "secondary_role": null,
+   "title": "Crazy",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896641,
+   "duration": 166,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 166,
+    "deezer": 166,
+    "discogs": 166,
+    "legacy": 166,
+    "reccobeats": 166,
+    "songbpm": 166,
+    "spotify_web": 166,
+    "ytmusic": 166
+   },
+   "genius_id": 11401213,
+   "id": 1269,
+   "is_featuring": false,
+   "isrc": "FRP252400080",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "C’EST PAS MON STYLE",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704752,
+   "duration": 208,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 208,
+    "discogs": 208,
+    "legacy": 208,
+    "reccobeats": 208,
+    "spotify_web": 208,
+    "youtube": 209
+   },
+   "genius_id": 4041545,
+   "id": 1268,
+   "is_featuring": false,
+   "isrc": "FRP251800090",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "D.A",
+   "unreleased": null
+  },
+  {
+   "album": "FLYNT / DON CHOA",
+   "deezer_id": 2353890075,
+   "duration": 183,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 184,
+    "deezer": 183,
+    "legacy": 183,
+    "reccobeats": 183,
+    "songbpm": 184,
+    "spotify_web": 183
+   },
+   "genius_id": 9339491,
+   "id": 1283,
+   "is_featuring": false,
+   "isrc": "FRP252300060",
+   "primary_artist_name": null,
+   "release_date": "2023-07-21",
+   "secondary_role": null,
+   "title": "DE BONNE HUMEUR",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704702,
+   "duration": 267,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 267,
+    "deezer": 267,
+    "discogs": 267,
+    "legacy": 267,
+    "reccobeats": 267,
+    "songbpm": 267,
+    "spotify_web": 267,
+    "ytmusic": 268
+   },
+   "genius_id": 4036788,
+   "id": 1245,
+   "is_featuring": false,
+   "isrc": "FRP251800030",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Dos rond",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896571,
+   "duration": 101,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 101,
+    "deezer": 101,
+    "discogs": 100,
+    "legacy": 101,
+    "reccobeats": 101,
+    "songbpm": 101,
+    "spotify_web": 101
+   },
+   "genius_id": 11400708,
+   "id": 1280,
+   "is_featuring": false,
+   "isrc": "FRP252400010",
+   "primary_artist_name": null,
+   "release_date": "2025-01-30",
+   "secondary_role": null,
+   "title": "ENCORE CHAUD",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844566,
+   "duration": 239,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 239,
+    "deezer": 239,
+    "legacy": 239,
+    "reccobeats": 239,
+    "songbpm": 239,
+    "spotify_web": 239
+   },
+   "genius_id": 1783099,
+   "id": 1274,
+   "is_featuring": false,
+   "isrc": "FRP251200040",
+   "primary_artist_name": null,
+   "release_date": "2010-10-15",
+   "secondary_role": null,
+   "title": "En froid",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419452,
+   "duration": 140,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 140,
+    "reccobeats": 139,
+    "songbpm": 140,
+    "spotify_web": 139,
+    "youtube": 140,
+    "ytmusic": 140
+   },
+   "genius_id": null,
+   "id": 9723,
+   "is_featuring": false,
+   "isrc": "FR0U91204203",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "En froid + Relativise + Prouesses",
+   "unreleased": null
+  },
+  {
+   "album": "Tracklist 5th birthday",
+   "deezer_id": null,
+   "duration": 240,
+   "duration_source": "ytmusic",
+   "durations_observees": {
+    "apple_music": 240,
+    "legacy": 239,
+    "reccobeats": 239,
+    "songbpm": 240,
+    "spotify_web": 239,
+    "youtube": 240,
+    "ytmusic": 240
+   },
+   "genius_id": 7279477,
+   "id": 1297,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "C.Sen",
+   "release_date": "2006-01-01",
+   "secondary_role": null,
+   "title": "Fallait pas confondre",
+   "unreleased": null
+  },
+  {
+   "album": "1 pour la plume",
+   "deezer_id": 70725365,
+   "duration": 203,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 203,
+    "reccobeats": 203,
+    "songbpm": 203,
+    "spotify_web": 203,
+    "youtube": 204,
+    "ytmusic": 204
+   },
+   "genius_id": 79231,
+   "id": 1237,
+   "is_featuring": false,
+   "isrc": "FR0U91203626",
+   "primary_artist_name": null,
+   "release_date": "2013-09-30",
+   "secondary_role": null,
+   "title": "Fidèle à son contexte",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419441,
+   "duration": 217,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 217,
+    "reccobeats": 217,
+    "songbpm": 217,
+    "spotify_web": 217,
+    "youtube": 218,
+    "ytmusic": 218
+   },
+   "genius_id": null,
+   "id": 9719,
+   "is_featuring": false,
+   "isrc": "FR0U91204192",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Fidèle à son contexte + J'voulais",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie",
+   "deezer_id": null,
+   "duration": 85,
+   "duration_source": "songbpm",
+   "durations_observees": {
+    "legacy": 85,
+    "reccobeats": 85,
+    "songbpm": 85,
+    "spotify_web": 85
+   },
+   "genius_id": 233161,
+   "id": 1255,
+   "is_featuring": false,
+   "isrc": null,
+   "primary_artist_name": null,
+   "release_date": "2013-10-07",
+   "secondary_role": null,
+   "title": "Flynt - Marche Arrière",
+   "unreleased": null
+  },
+  {
+   "album": "Can I Kick It ? #3",
+   "deezer_id": null,
+   "duration": 51,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 51
+   },
+   "genius_id": 146988,
+   "id": 1295,
+   "is_featuring": false,
+   "isrc": null,
+   "primary_artist_name": null,
+   "release_date": null,
+   "secondary_role": null,
+   "title": "Freestyle Flynt pour Can I Kick It ? #3",
+   "unreleased": null
+  },
+  {
+   "album": "Grünt",
+   "deezer_id": null,
+   "duration": 1800,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 1800
+   },
+   "genius_id": 13222777,
+   "id": 1235,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Grünt",
+   "release_date": "2026-03-10",
+   "secondary_role": null,
+   "title": "Grünt #75",
+   "unreleased": null
+  },
+  {
+   "album": "ALL STAR GAME - Tornado Bees",
+   "deezer_id": 3908306961,
+   "duration": 208,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 208,
+    "legacy": 208,
+    "reccobeats": 208,
+    "songbpm": 208,
+    "spotify_web": 208,
+    "ytmusic": 209
+   },
+   "genius_id": 7436774,
+   "id": 1230,
+   "is_featuring": true,
+   "isrc": "FR9W12137463",
+   "primary_artist_name": "Mani Deïz",
+   "release_date": "2021-12-03",
+   "secondary_role": null,
+   "title": "Gunners",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896591,
+   "duration": 204,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 204,
+    "deezer": 204,
+    "discogs": 204,
+    "legacy": 204,
+    "reccobeats": 204,
+    "songbpm": 204,
+    "spotify_web": 204,
+    "ytmusic": 204
+   },
+   "genius_id": 11401206,
+   "id": 1282,
+   "is_featuring": false,
+   "isrc": "FRP252400030",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "HISTOIRES VRAIES",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896581,
+   "duration": 174,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 174,
+    "deezer": 174,
+    "discogs": 174,
+    "legacy": 174,
+    "reccobeats": 174,
+    "songbpm": 174,
+    "spotify_web": 174,
+    "ytmusic": 175
+   },
+   "genius_id": 11401205,
+   "id": 1260,
+   "is_featuring": false,
+   "isrc": "FRP252400020",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "HUIT CHIFFRES",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844564,
+   "duration": 212,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 212,
+    "deezer": 212,
+    "reccobeats": 211,
+    "songbpm": 212,
+    "spotify_web": 211
+   },
+   "genius_id": 86660,
+   "id": 1229,
+   "is_featuring": false,
+   "isrc": "FRP251200020",
+   "primary_artist_name": null,
+   "release_date": "2015-10-15",
+   "secondary_role": null,
+   "title": "Haut la main",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419455,
+   "duration": 172,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 172,
+    "reccobeats": 172,
+    "songbpm": 172,
+    "spotify_web": 172,
+    "youtube": 173,
+    "ytmusic": 173
+   },
+   "genius_id": null,
+   "id": 9726,
+   "is_featuring": false,
+   "isrc": "FR0U91204206",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Haut la main (Acapella)",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419454,
+   "duration": 219,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 219,
+    "reccobeats": 218,
+    "songbpm": 219,
+    "spotify_web": 218,
+    "youtube": 219,
+    "ytmusic": 219
+   },
+   "genius_id": null,
+   "id": 9725,
+   "is_featuring": false,
+   "isrc": "FR0U91204205",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Haut la main (Instrumental par Nodey)",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419436,
+   "duration": 134,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 134,
+    "reccobeats": 134,
+    "songbpm": 134,
+    "spotify_web": 134,
+    "youtube": 135,
+    "ytmusic": 135
+   },
+   "genius_id": null,
+   "id": 9715,
+   "is_featuring": false,
+   "isrc": "FR0U91204187",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Haut la main (Saï Remix)",
+   "unreleased": null
+  },
+  {
+   "album": "City Light",
+   "deezer_id": null,
+   "duration": 196,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 196
+   },
+   "genius_id": 5289426,
+   "id": 1298,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "2spee Gonzales",
+   "release_date": "2017-11-30",
+   "secondary_role": null,
+   "title": "Hier c’est déjà loin",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844567,
+   "duration": 232,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 232,
+    "deezer": 232,
+    "legacy": 232,
+    "reccobeats": 231,
+    "songbpm": 232,
+    "spotify_web": 231,
+    "ytmusic": 232
+   },
+   "genius_id": 5182744,
+   "id": 1286,
+   "is_featuring": false,
+   "isrc": "FRP251200050",
+   "primary_artist_name": null,
+   "release_date": "2012-10-15",
+   "secondary_role": null,
+   "title": "Homeboy",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844570,
+   "duration": 210,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 210,
+    "deezer": 210,
+    "legacy": 210,
+    "reccobeats": 209,
+    "spotify_web": 209
+   },
+   "genius_id": 88390,
+   "id": 1236,
+   "is_featuring": false,
+   "isrc": "FRP251200080",
+   "primary_artist_name": null,
+   "release_date": "2010-10-15",
+   "secondary_role": null,
+   "title": "Itinéraire bis",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419453,
+   "duration": 338,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 338,
+    "reccobeats": 337,
+    "songbpm": 338,
+    "spotify_web": 337,
+    "youtube": 338,
+    "ytmusic": 338
+   },
+   "genius_id": null,
+   "id": 9724,
+   "is_featuring": false,
+   "isrc": "FR0U91204204",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Itinéraire bis + J’éclaire ma ville (Live au New Morning)",
+   "unreleased": null
+  },
+  {
+   "album": "Barillet plein",
+   "deezer_id": 524446,
+   "duration": 247,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 247,
+    "legacy": 247,
+    "reccobeats": 247,
+    "songbpm": 247,
+    "spotify_web": 247,
+    "youtube": 248
+   },
+   "genius_id": 560729,
+   "id": 1259,
+   "is_featuring": true,
+   "isrc": "FR6V80721122",
+   "primary_artist_name": "Seth Gueko",
+   "release_date": "2005-05-14",
+   "secondary_role": null,
+   "title": "Je voulais",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704692,
+   "duration": 229,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 230,
+    "deezer": 229,
+    "discogs": 229,
+    "legacy": 229,
+    "reccobeats": 229,
+    "songbpm": 230,
+    "spotify_web": 229,
+    "ytmusic": 230
+   },
+   "genius_id": 3770892,
+   "id": 1234,
+   "is_featuring": false,
+   "isrc": "FRP251800010",
+   "primary_artist_name": null,
+   "release_date": "2018-06-08",
+   "secondary_role": null,
+   "title": "Joga Bonito",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844563,
+   "duration": 172,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 172,
+    "deezer": 172,
+    "discogs": 172,
+    "legacy": 172,
+    "reccobeats": 171,
+    "songbpm": 172,
+    "spotify_web": 171
+   },
+   "genius_id": 525338,
+   "id": 1281,
+   "is_featuring": false,
+   "isrc": "FRP251200010",
+   "primary_artist_name": null,
+   "release_date": "2012-10-15",
+   "secondary_role": null,
+   "title": "J’ai choisi mon camp",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080196,
+   "duration": 214,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 215,
+    "deezer": 214,
+    "legacy": 214,
+    "reccobeats": 214,
+    "songbpm": 215,
+    "spotify_web": 214
+   },
+   "genius_id": 116114,
+   "id": 1227,
+   "is_featuring": false,
+   "isrc": "FR6V80727459",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "J’ai trouvé ma place",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844573,
+   "duration": 282,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 282,
+    "deezer": 282,
+    "legacy": 282,
+    "reccobeats": 281,
+    "spotify_web": 281,
+    "ytmusic": 282
+   },
+   "genius_id": 118370,
+   "id": 1240,
+   "is_featuring": false,
+   "isrc": "FRP251200110",
+   "primary_artist_name": null,
+   "release_date": "2010-10-15",
+   "secondary_role": null,
+   "title": "J’en ai marre de voir ta gueule",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080190,
+   "duration": 265,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 265,
+    "deezer": 265,
+    "discogs": 265,
+    "legacy": 265,
+    "reccobeats": 265,
+    "songbpm": 265,
+    "spotify_web": 265,
+    "youtube": 159
+   },
+   "genius_id": 86779,
+   "id": 1226,
+   "is_featuring": false,
+   "isrc": "FR6V80727453",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "J’éclaire ma ville",
+   "unreleased": null
+  },
+  {
+   "album": "FLYNT / DON CHOA",
+   "deezer_id": 2353890085,
+   "duration": 175,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 176,
+    "deezer": 175,
+    "legacy": 175,
+    "reccobeats": 175,
+    "songbpm": 176,
+    "spotify_web": 175,
+    "ytmusic": 176
+   },
+   "genius_id": 9339494,
+   "id": 1289,
+   "is_featuring": false,
+   "isrc": "FRP252300070",
+   "primary_artist_name": null,
+   "release_date": "2023-07-21",
+   "secondary_role": null,
+   "title": "LA PISCINE",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844571,
+   "duration": 257,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 257,
+    "deezer": 257,
+    "legacy": 257,
+    "reccobeats": 256,
+    "songbpm": 257,
+    "spotify_web": 256,
+    "ytmusic": 257
+   },
+   "genius_id": 5182745,
+   "id": 1285,
+   "is_featuring": false,
+   "isrc": "FRP251200090",
+   "primary_artist_name": null,
+   "release_date": "2012-10-15",
+   "secondary_role": null,
+   "title": "La balade des indépendants",
+   "unreleased": null
+  },
+  {
+   "album": "Ah Souhait Vol.1",
+   "deezer_id": null,
+   "duration": 257,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "legacy": 399,
+    "reccobeats": 399,
+    "spotify_web": 399,
+    "youtube": 257
+   },
+   "genius_id": 741806,
+   "id": 1261,
+   "is_featuring": false,
+   "isrc": "FR5R00904725",
+   "primary_artist_name": null,
+   "release_date": "2015-04-07",
+   "secondary_role": null,
+   "title": "La balade des indépendants (Remix)",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 71419439,
+   "duration": 292,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 292,
+    "discogs": 292,
+    "legacy": 292,
+    "reccobeats": 292,
+    "songbpm": 292,
+    "spotify_web": 292,
+    "ytmusic": 293
+   },
+   "genius_id": 203746,
+   "id": 1248,
+   "is_featuring": false,
+   "isrc": "FR0U91204190",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "La gueule de l’emploi",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080200,
+   "duration": 203,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 204,
+    "deezer": 203,
+    "discogs": 204,
+    "legacy": 203,
+    "reccobeats": 203,
+    "songbpm": 204,
+    "spotify_web": 203,
+    "ytmusic": 204
+   },
+   "genius_id": 331993,
+   "id": 1278,
+   "is_featuring": false,
+   "isrc": "FR6V80727463",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Le Bif’ (A chacun ses motivations)",
+   "unreleased": null
+  },
+  {
+   "album": "1 pour la plume",
+   "deezer_id": null,
+   "duration": 181,
+   "duration_source": "songbpm",
+   "durations_observees": {
+    "legacy": 181,
+    "reccobeats": 181,
+    "songbpm": 181,
+    "spotify_web": 181
+   },
+   "genius_id": 159686,
+   "id": 1256,
+   "is_featuring": false,
+   "isrc": null,
+   "primary_artist_name": null,
+   "release_date": null,
+   "secondary_role": null,
+   "title": "Le choc frontal",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844574,
+   "duration": 186,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 186,
+    "deezer": 186,
+    "legacy": 186,
+    "reccobeats": 186,
+    "spotify_web": 186,
+    "ytmusic": 187
+   },
+   "genius_id": 93147,
+   "id": 1272,
+   "is_featuring": false,
+   "isrc": "FRP251200120",
+   "primary_artist_name": null,
+   "release_date": "2010-10-15",
+   "secondary_role": null,
+   "title": "Le dernier seize (Yin & Yang)",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844565,
+   "duration": 248,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 248,
+    "deezer": 248,
+    "legacy": 248,
+    "reccobeats": 247,
+    "spotify_web": 247,
+    "ytmusic": 248
+   },
+   "genius_id": 93161,
+   "id": 1249,
+   "is_featuring": false,
+   "isrc": "FRP251200030",
+   "primary_artist_name": null,
+   "release_date": "2010-10-15",
+   "secondary_role": null,
+   "title": "Les clichés ont la peau dure",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419450,
+   "duration": 204,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 204,
+    "reccobeats": 204,
+    "songbpm": 204,
+    "spotify_web": 204,
+    "youtube": 205,
+    "ytmusic": 205
+   },
+   "genius_id": null,
+   "id": 9722,
+   "is_featuring": false,
+   "isrc": "FR0U91204201",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Les clichés ont la peau dure + Retour aux fondamentaux",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080197,
+   "duration": 273,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 274,
+    "deezer": 273,
+    "discogs": 273,
+    "legacy": 273,
+    "reccobeats": 273,
+    "songbpm": 274,
+    "spotify_web": 273
+   },
+   "genius_id": 79226,
+   "id": 1267,
+   "is_featuring": false,
+   "isrc": "FR6V80727460",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Les moyens du bord",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704732,
+   "duration": 214,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 214,
+    "deezer": 214,
+    "discogs": 214,
+    "legacy": 214,
+    "reccobeats": 214,
+    "songbpm": 214,
+    "spotify_web": 214,
+    "youtube": 215,
+    "ytmusic": 215
+   },
+   "genius_id": 4041543,
+   "id": 1250,
+   "is_featuring": false,
+   "isrc": "FRP251800060",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Lutèce",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896611,
+   "duration": 204,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 204,
+    "discogs": 204,
+    "legacy": 204,
+    "reccobeats": 204,
+    "songbpm": 205,
+    "spotify_web": 204,
+    "ytmusic": 205
+   },
+   "genius_id": 9015772,
+   "id": 1276,
+   "is_featuring": false,
+   "isrc": "FRP252400050",
+   "primary_artist_name": null,
+   "release_date": "2023-04-14",
+   "secondary_role": null,
+   "title": "MAUVAIS POUR LE BUSINESS",
+   "unreleased": null
+  },
+  {
+   "album": "MAUVAIS POUR LE BUSINESS",
+   "deezer_id": 3206644961,
+   "duration": 202,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 202,
+    "legacy": 202,
+    "reccobeats": 202,
+    "songbpm": 202,
+    "spotify_web": 202,
+    "youtube": 203
+   },
+   "genius_id": 9015777,
+   "id": 1299,
+   "is_featuring": false,
+   "isrc": "FRP252300050",
+   "primary_artist_name": null,
+   "release_date": "2023-04-14",
+   "secondary_role": null,
+   "title": "MAUVAIS POUR LE BUSINESS (Instrumental)",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896631,
+   "duration": 180,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 180,
+    "discogs": 180,
+    "reccobeats": 180,
+    "songbpm": 181,
+    "spotify_web": 180,
+    "ytmusic": 181
+   },
+   "genius_id": 11401212,
+   "id": 9712,
+   "is_featuring": false,
+   "isrc": "FRP252400070",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "MEILLEUR SPOT",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896661,
+   "duration": 110,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 111,
+    "deezer": 110,
+    "discogs": 110,
+    "legacy": 110,
+    "reccobeats": 110,
+    "songbpm": 111,
+    "spotify_web": 110,
+    "ytmusic": 111
+   },
+   "genius_id": 11401215,
+   "id": 1290,
+   "is_featuring": false,
+   "isrc": "FRP252400100",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "MICHEL MONTANA",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896651,
+   "duration": 179,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 180,
+    "deezer": 179,
+    "discogs": 180,
+    "legacy": 179,
+    "reccobeats": 179,
+    "songbpm": 180,
+    "spotify_web": 179,
+    "ytmusic": 180
+   },
+   "genius_id": 11401214,
+   "id": 1293,
+   "is_featuring": false,
+   "isrc": "FRP252400090",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "MONSIEUR JULIEN",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419440,
+   "duration": 63,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 63,
+    "reccobeats": 63,
+    "songbpm": 63,
+    "spotify_web": 63,
+    "youtube": 64,
+    "ytmusic": 64
+   },
+   "genius_id": null,
+   "id": 9718,
+   "is_featuring": false,
+   "isrc": "FR0U91204191",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Marche arrière",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080191,
+   "duration": 265,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 266,
+    "deezer": 265,
+    "discogs": 266,
+    "legacy": 265,
+    "reccobeats": 265,
+    "songbpm": 266,
+    "spotify_web": 265,
+    "ytmusic": 266
+   },
+   "genius_id": 246241,
+   "id": 1258,
+   "is_featuring": false,
+   "isrc": "FR6V80727454",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Mes sources",
+   "unreleased": null
+  },
+  {
+   "album": "Extrait d’amertume",
+   "deezer_id": 71419445,
+   "duration": 102,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 102,
+    "legacy": 102,
+    "reccobeats": 102,
+    "spotify_web": 102,
+    "youtube": 103
+   },
+   "genius_id": 6251112,
+   "id": 1294,
+   "is_featuring": true,
+   "isrc": "FR0U91204196",
+   "primary_artist_name": "Sidi Omar",
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Mille fois dans le même trou",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844568,
+   "duration": 211,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 211,
+    "deezer": 211,
+    "legacy": 211,
+    "reccobeats": 211,
+    "spotify_web": 203,
+    "ytmusic": 212
+   },
+   "genius_id": 93206,
+   "id": 1222,
+   "is_featuring": false,
+   "isrc": "FRP251200060",
+   "primary_artist_name": null,
+   "release_date": "2013-05-30",
+   "secondary_role": null,
+   "title": "Mon pote",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080195,
+   "duration": 207,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 207,
+    "deezer": 207,
+    "discogs": 204,
+    "legacy": 207,
+    "reccobeats": 207,
+    "songbpm": 207,
+    "spotify_web": 207
+   },
+   "genius_id": 331968,
+   "id": 1271,
+   "is_featuring": false,
+   "isrc": "FR6V80727458",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Notre existence",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": 2145322657,
+   "duration": 176,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 176,
+    "deezer": 176,
+    "legacy": 176,
+    "reccobeats": 176,
+    "songbpm": 176,
+    "spotify_web": 176,
+    "youtube": 177
+   },
+   "genius_id": 8852165,
+   "id": 1292,
+   "is_featuring": false,
+   "isrc": "FRP252300010",
+   "primary_artist_name": null,
+   "release_date": "2023-02-24",
+   "secondary_role": null,
+   "title": "OEUVRESDART",
+   "unreleased": null
+  },
+  {
+   "album": "No Name 2.0",
+   "deezer_id": 448357032,
+   "duration": 199,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 199,
+    "deezer": 199,
+    "legacy": 199,
+    "reccobeats": 199,
+    "songbpm": 199,
+    "spotify_web": 199,
+    "youtube": 200
+   },
+   "genius_id": 3432042,
+   "id": 1279,
+   "is_featuring": true,
+   "isrc": "FRX281741153",
+   "primary_artist_name": "Joe Lucazz",
+   "release_date": "2018-01-12",
+   "secondary_role": null,
+   "title": "On l’a fait",
+   "unreleased": null
+  },
+  {
+   "album": "Sessions perdues, vol. 3",
+   "deezer_id": null,
+   "duration": null,
+   "duration_source": null,
+   "durations_observees": {},
+   "genius_id": 4185173,
+   "id": 1296,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "La fabri-k",
+   "release_date": null,
+   "secondary_role": null,
+   "title": "Open Bar",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704722,
+   "duration": 220,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 221,
+    "deezer": 220,
+    "discogs": 220,
+    "legacy": 220,
+    "reccobeats": 220,
+    "songbpm": 221,
+    "spotify_web": 220,
+    "youtube": 221
+   },
+   "genius_id": 4036813,
+   "id": 1262,
+   "is_featuring": false,
+   "isrc": "FRP251800050",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Page blanche, nuits roses",
+   "unreleased": null
+  },
+  {
+   "album": "Destroy",
+   "deezer_id": 605587702,
+   "duration": 278,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 279,
+    "deezer": 278,
+    "legacy": 278,
+    "reccobeats": 278,
+    "songbpm": 279,
+    "spotify_web": 278,
+    "youtube": 279
+   },
+   "genius_id": 4174367,
+   "id": 1224,
+   "is_featuring": true,
+   "isrc": "FRX201847459",
+   "primary_artist_name": "Seth Gueko",
+   "release_date": "2019-01-25",
+   "secondary_role": null,
+   "title": "Paris Street",
+   "unreleased": null
+  },
+  {
+   "album": "Marche avec nous",
+   "deezer_id": null,
+   "duration": null,
+   "duration_source": null,
+   "durations_observees": {},
+   "genius_id": 2429357,
+   "id": 1288,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Joe & Cross",
+   "release_date": "2005-01-01",
+   "secondary_role": null,
+   "title": "Prouesse",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844569,
+   "duration": 243,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 243,
+    "deezer": 243,
+    "legacy": 243,
+    "reccobeats": 243,
+    "spotify_web": 243
+   },
+   "genius_id": 100973,
+   "id": 1238,
+   "is_featuring": false,
+   "isrc": "FRP251200070",
+   "primary_artist_name": null,
+   "release_date": "2010-10-15",
+   "secondary_role": null,
+   "title": "Quand tu s’ras mort (Chanson de haine)",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie",
+   "deezer_id": 107696856,
+   "duration": 262,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 262,
+    "discogs": 198,
+    "legacy": 262,
+    "reccobeats": 262,
+    "spotify_web": 197,
+    "youtube": 198,
+    "ytmusic": 198
+   },
+   "genius_id": 88458,
+   "id": 1273,
+   "is_featuring": false,
+   "isrc": "FRP2K1000220",
+   "primary_artist_name": null,
+   "release_date": "2010-01-18",
+   "secondary_role": null,
+   "title": "Rap théorie",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080198,
+   "duration": 97,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 97,
+    "deezer": 97,
+    "discogs": 97,
+    "legacy": 97,
+    "reccobeats": 97,
+    "songbpm": 97,
+    "spotify_web": 97,
+    "youtube": 98
+   },
+   "genius_id": 331983,
+   "id": 1275,
+   "is_featuring": false,
+   "isrc": "FR6V80727461",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Retour aux fondamentaux",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080202,
+   "duration": 250,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 250,
+    "deezer": 250,
+    "discogs": 249,
+    "legacy": 250,
+    "reccobeats": 250,
+    "songbpm": 250,
+    "spotify_web": 250,
+    "youtube": 251
+   },
+   "genius_id": 331998,
+   "id": 1242,
+   "is_featuring": false,
+   "isrc": "FR6V80727465",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Rien ne nous appartient",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419435,
+   "duration": 156,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 156,
+    "reccobeats": 156,
+    "songbpm": 156,
+    "spotify_web": 156,
+    "ytmusic": 157
+   },
+   "genius_id": null,
+   "id": 9714,
+   "is_featuring": false,
+   "isrc": "FR0U91204186",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Rétroduction",
+   "unreleased": null
+  },
+  {
+   "album": "Seul(s)",
+   "deezer_id": 3487140541,
+   "duration": 186,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 186,
+    "legacy": 186,
+    "reccobeats": 186,
+    "songbpm": 187,
+    "spotify_web": 186,
+    "youtube": 187,
+    "ytmusic": 187
+   },
+   "genius_id": 9756436,
+   "id": 1243,
+   "is_featuring": true,
+   "isrc": "FRIDO2314070",
+   "primary_artist_name": "Sheldon",
+   "release_date": "2023-11-24",
+   "secondary_role": null,
+   "title": "Seul(s)",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080192,
+   "duration": 35,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 36,
+    "deezer": 35,
+    "discogs": 36,
+    "legacy": 35,
+    "reccobeats": 35,
+    "songbpm": 36,
+    "spotify_web": 35,
+    "youtube": 36
+   },
+   "genius_id": 378661,
+   "id": 1244,
+   "is_featuring": false,
+   "isrc": "FR6V80727455",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Skit",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie",
+   "deezer_id": null,
+   "duration": 206,
+   "duration_source": "songbpm",
+   "durations_observees": {
+    "legacy": 206,
+    "reccobeats": 205,
+    "songbpm": 206,
+    "spotify_web": 205
+   },
+   "genius_id": 470833,
+   "id": 1254,
+   "is_featuring": false,
+   "isrc": null,
+   "primary_artist_name": null,
+   "release_date": null,
+   "secondary_role": null,
+   "title": "Splifflife",
+   "unreleased": null
+  },
+  {
+   "album": "Pieces to the Puzzle",
+   "deezer_id": 4218190422,
+   "duration": 315,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 315,
+    "reccobeats": 315,
+    "spotify_web": 315,
+    "ytmusic": 316
+   },
+   "genius_id": 364821,
+   "id": 1266,
+   "is_featuring": true,
+   "isrc": "DEPI82212580",
+   "primary_artist_name": "Crown",
+   "release_date": "2014-02-17",
+   "secondary_role": null,
+   "title": "The Message",
+   "unreleased": null
+  },
+  {
+   "album": "Itinéraire bis",
+   "deezer_id": 67844572,
+   "duration": 267,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 267,
+    "deezer": 267,
+    "legacy": 267,
+    "reccobeats": 267,
+    "spotify_web": 267,
+    "ytmusic": 268
+   },
+   "genius_id": 160023,
+   "id": 1253,
+   "is_featuring": false,
+   "isrc": "FRP251200100",
+   "primary_artist_name": null,
+   "release_date": "2010-10-15",
+   "secondary_role": null,
+   "title": "Toujours authentique",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080203,
+   "duration": 299,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 300,
+    "deezer": 299,
+    "discogs": 300,
+    "legacy": 299,
+    "reccobeats": 299,
+    "songbpm": 300,
+    "spotify_web": 299,
+    "ytmusic": 300
+   },
+   "genius_id": 343515,
+   "id": 1231,
+   "is_featuring": false,
+   "isrc": "FR6V80727466",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Tourner la page",
+   "unreleased": null
+  },
+  {
+   "album": "Ground Zero",
+   "deezer_id": null,
+   "duration": 229,
+   "duration_source": "ytmusic",
+   "durations_observees": {
+    "apple_music": 229,
+    "ytmusic": 229
+   },
+   "genius_id": 2307799,
+   "id": 1291,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Gino (FRA)",
+   "release_date": "2014-11-03",
+   "secondary_role": null,
+   "title": "Tête haute",
+   "unreleased": null
+  },
+  {
+   "album": "1 pour la plume",
+   "deezer_id": null,
+   "duration": 249,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 249,
+    "deezer": 249,
+    "legacy": 249,
+    "reccobeats": 249,
+    "spotify_web": 249,
+    "youtube": 250,
+    "ytmusic": 250
+   },
+   "genius_id": 61280,
+   "id": 1233,
+   "is_featuring": false,
+   "isrc": "FR6V80727452",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Un pour la plume",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080201,
+   "duration": 256,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 256,
+    "reccobeats": 256,
+    "songbpm": 257,
+    "spotify_web": 256,
+    "ytmusic": 257
+   },
+   "genius_id": 343518,
+   "id": 1252,
+   "is_featuring": false,
+   "isrc": "FR6V80727464",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Un pour la plume (Version équipe)",
+   "unreleased": null
+  },
+  {
+   "album": "MONSIEUR JULIEN",
+   "deezer_id": 3190896601,
+   "duration": 197,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 198,
+    "deezer": 197,
+    "discogs": 197,
+    "legacy": 197,
+    "reccobeats": 197,
+    "songbpm": 198,
+    "spotify_web": 197,
+    "ytmusic": 198
+   },
+   "genius_id": 11401207,
+   "id": 1287,
+   "is_featuring": false,
+   "isrc": "FRP252400040",
+   "primary_artist_name": null,
+   "release_date": "2025-02-07",
+   "secondary_role": null,
+   "title": "V15",
+   "unreleased": null
+  },
+  {
+   "album": "Rétrographie (Mixtape)",
+   "deezer_id": 71419437,
+   "duration": 116,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 116,
+    "reccobeats": 116,
+    "songbpm": 116,
+    "spotify_web": 116,
+    "youtube": 117,
+    "ytmusic": 117
+   },
+   "genius_id": null,
+   "id": 9716,
+   "is_featuring": false,
+   "isrc": "FR0U91204188",
+   "primary_artist_name": null,
+   "release_date": "2013-10-28",
+   "secondary_role": null,
+   "title": "Vers le bas + Freestyle",
+   "unreleased": null
+  },
+  {
+   "album": "Scred Selexion 2",
+   "deezer_id": 3449965251,
+   "duration": 207,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 207,
+    "legacy": 207,
+    "reccobeats": 207,
+    "spotify_web": 207,
+    "youtube": 208,
+    "ytmusic": 208
+   },
+   "genius_id": 5111,
+   "id": 1223,
+   "is_featuring": true,
+   "isrc": "FR6V80371961",
+   "primary_artist_name": "Scred Connexion",
+   "release_date": "2002-01-01",
+   "secondary_role": null,
+   "title": "Vieux avant l’âge",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704742,
+   "duration": 201,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 202,
+    "deezer": 201,
+    "discogs": 201,
+    "legacy": 201,
+    "reccobeats": 201,
+    "songbpm": 202,
+    "spotify_web": 201,
+    "youtube": 202,
+    "ytmusic": 202
+   },
+   "genius_id": 4041544,
+   "id": 1270,
+   "is_featuring": false,
+   "isrc": "FRP251800070",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "Végas",
+   "unreleased": null
+  },
+  {
+   "album": "Libre",
+   "deezer_id": 118821202,
+   "duration": 270,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 271,
+    "deezer": 270,
+    "discogs": 271,
+    "legacy": 270,
+    "reccobeats": 270,
+    "spotify_web": 270,
+    "youtube": 271
+   },
+   "genius_id": 2448080,
+   "id": 1232,
+   "is_featuring": true,
+   "isrc": "FRPJQ1500300",
+   "primary_artist_name": "A2H",
+   "release_date": "2016-04-15",
+   "secondary_role": null,
+   "title": "À la base",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 551704772,
+   "duration": 201,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 202,
+    "deezer": 201,
+    "legacy": 201,
+    "reccobeats": 201,
+    "songbpm": 202,
+    "spotify_web": 201,
+    "youtube": 202,
+    "ytmusic": 202
+   },
+   "genius_id": 4041547,
+   "id": 1246,
+   "is_featuring": false,
+   "isrc": "FRP251800020",
+   "primary_artist_name": null,
+   "release_date": "2018-10-26",
+   "secondary_role": null,
+   "title": "À partir d’aujourd’hui",
+   "unreleased": null
+  },
+  {
+   "album": "J’éclaire ma ville",
+   "deezer_id": 3080193,
+   "duration": 320,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 320,
+    "deezer": 320,
+    "legacy": 320,
+    "reccobeats": 320,
+    "songbpm": 320,
+    "spotify_web": 320,
+    "ytmusic": 321
+   },
+   "genius_id": 81274,
+   "id": 1225,
+   "is_featuring": false,
+   "isrc": "FR6V80727456",
+   "primary_artist_name": null,
+   "release_date": "2007-05-28",
+   "secondary_role": null,
+   "title": "Ça fait du bien d’le dire",
+   "unreleased": null
+  },
+  {
+   "album": "Ça va bien s’passer",
+   "deezer_id": 549971552,
+   "duration": 218,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 218,
+    "deezer": 218,
+    "discogs": 218,
+    "legacy": 218,
+    "reccobeats": 218,
+    "songbpm": 218,
+    "spotify_web": 218,
+    "youtube": 219
+   },
+   "genius_id": 3957351,
+   "id": 1228,
+   "is_featuring": false,
+   "isrc": "FRP251800040",
+   "primary_artist_name": null,
+   "release_date": "2018-09-14",
+   "secondary_role": null,
+   "title": "Ça va bien s’passer",
+   "unreleased": null
+  }
+ ],
+ "deezer_id": 90901,
+ "liens_connus": [
+  [
+   70239,
+   1259
+  ],
+  [
+   298437,
+   1225
+  ],
+  [
+   298437,
+   1226
+  ],
+  [
+   298437,
+   1227
+  ],
+  [
+   298437,
+   1231
+  ],
+  [
+   298437,
+   1233
+  ],
+  [
+   298437,
+   1242
+  ],
+  [
+   298437,
+   1244
+  ],
+  [
+   298437,
+   1248
+  ],
+  [
+   298437,
+   1251
+  ],
+  [
+   298437,
+   1252
+  ],
+  [
+   298437,
+   1258
+  ],
+  [
+   298437,
+   1267
+  ],
+  [
+   298437,
+   1271
+  ],
+  [
+   298437,
+   1275
+  ],
+  [
+   298437,
+   1278
+  ],
+  [
+   6642499,
+   1222
+  ],
+  [
+   6642499,
+   1229
+  ],
+  [
+   6642499,
+   1236
+  ],
+  [
+   6642499,
+   1238
+  ],
+  [
+   6642499,
+   1240
+  ],
+  [
+   6642499,
+   1249
+  ],
+  [
+   6642499,
+   1253
+  ],
+  [
+   6642499,
+   1272
+  ],
+  [
+   6642499,
+   1274
+  ],
+  [
+   6642499,
+   1281
+  ],
+  [
+   6642499,
+   1285
+  ],
+  [
+   6642499,
+   1286
+  ],
+  [
+   6944218,
+   1237
+  ],
+  [
+   7013399,
+   1248
+  ],
+  [
+   7013399,
+   1251
+  ],
+  [
+   7013399,
+   1294
+  ],
+  [
+   7013399,
+   9714
+  ],
+  [
+   7013399,
+   9715
+  ],
+  [
+   7013399,
+   9716
+  ],
+  [
+   7013399,
+   9717
+  ],
+  [
+   7013399,
+   9718
+  ],
+  [
+   7013399,
+   9719
+  ],
+  [
+   7013399,
+   9720
+  ],
+  [
+   7013399,
+   9721
+  ],
+  [
+   7013399,
+   9722
+  ],
+  [
+   7013399,
+   9723
+  ],
+  [
+   7013399,
+   9724
+  ],
+  [
+   7013399,
+   9725
+  ],
+  [
+   7013399,
+   9726
+  ],
+  [
+   9461274,
+   1241
+  ],
+  [
+   11228114,
+   1273
+  ],
+  [
+   12362094,
+   1232
+  ],
+  [
+   49887482,
+   1263
+  ],
+  [
+   54726812,
+   1279
+  ],
+  [
+   65074422,
+   1234
+  ],
+  [
+   72289002,
+   1228
+  ],
+  [
+   72289002,
+   1234
+  ],
+  [
+   72289002,
+   1239
+  ],
+  [
+   72289002,
+   1245
+  ],
+  [
+   72289002,
+   1246
+  ],
+  [
+   72289002,
+   1247
+  ],
+  [
+   72289002,
+   1250
+  ],
+  [
+   72289002,
+   1262
+  ],
+  [
+   72289002,
+   1265
+  ],
+  [
+   72289002,
+   1268
+  ],
+  [
+   72289002,
+   1270
+  ],
+  [
+   72289002,
+   1277
+  ],
+  [
+   72289002,
+   9713
+  ],
+  [
+   72573182,
+   1228
+  ],
+  [
+   72573182,
+   1234
+  ],
+  [
+   72573182,
+   1239
+  ],
+  [
+   72573182,
+   1245
+  ],
+  [
+   72573182,
+   1246
+  ],
+  [
+   72573182,
+   1247
+  ],
+  [
+   72573182,
+   1250
+  ],
+  [
+   72573182,
+   1262
+  ],
+  [
+   72573182,
+   1265
+  ],
+  [
+   72573182,
+   1268
+  ],
+  [
+   72573182,
+   1270
+  ],
+  [
+   72573182,
+   1277
+  ],
+  [
+   72573182,
+   9713
+  ],
+  [
+   81982532,
+   1224
+  ],
+  [
+   144890052,
+   1257
+  ],
+  [
+   406313477,
+   1292
+  ],
+  [
+   460788465,
+   1283
+  ],
+  [
+   460788465,
+   1289
+  ],
+  [
+   512878331,
+   1233
+  ],
+  [
+   512878331,
+   1237
+  ],
+  [
+   512878331,
+   1256
+  ],
+  [
+   512878331,
+   1257
+  ],
+  [
+   512878331,
+   1264
+  ],
+  [
+   513011301,
+   1222
+  ],
+  [
+   699310021,
+   1260
+  ],
+  [
+   699310021,
+   1269
+  ],
+  [
+   699310021,
+   1276
+  ],
+  [
+   699310021,
+   1280
+  ],
+  [
+   699310021,
+   1282
+  ],
+  [
+   699310021,
+   1287
+  ],
+  [
+   699310021,
+   1290
+  ],
+  [
+   699310021,
+   1293
+  ],
+  [
+   699310021,
+   9711
+  ],
+  [
+   699310021,
+   9712
+  ],
+  [
+   701044831,
+   1280
+  ],
+  [
+   704396061,
+   1276
+  ],
+  [
+   704396061,
+   1299
+  ],
+  [
+   784701261,
+   1223
+  ],
+  [
+   797561711,
+   1243
+  ],
+  [
+   942459051,
+   1230
+  ],
+  [
+   1052035192,
+   1266
+  ]
+ ]
+}

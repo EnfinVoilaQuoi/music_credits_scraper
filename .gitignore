@@ -103,6 +103,7 @@ scripts/*
 !scripts/restore_from_backup.py
 !scripts/check_observations.py
 !scripts/corpus_paires_titres.py
+!scripts/cassette_deezer.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

@@ -505,6 +505,24 @@ class TestSignalementsDesRuns:
         }
         assert revue._cas_des_signalements([s], {1, 2}) == []
 
+    def test_id_partage_qui_ne_l_est_plus_ignore(self):
+        """A2H 2026-10-12 : « L'histoire est simple » restait « ID porté aussi
+        par « L'histoire est simple » » après la fusion des deux fiches."""
+        sid = "1R5AQU9f3kh5bM2cY4KKX7"
+        s = {
+            "detecteur": "kworb_id_partage",
+            "track_id": 1,
+            "morceau": "L’histoire est simple",
+            "motif": "",
+            "impact": 0,
+            "preuves": {"spotify_id": sid},
+            "cle": "k",
+        }
+        seule = [_t("L’histoire est simple", 1, spotify_id=sid), _t("Pornostar", 2)]
+        assert revue._cas_des_signalements([s], {1, 2}, seule) == []
+        deux = [*seule, _t("L'histoire est simple (Remix)", 3, spotify_id=sid)]
+        assert len(revue._cas_des_signalements([s], {1, 2, 3}, deux)) == 1
+
 
 def test_fenetre_se_construit(racine_tk):
     """La fenêtre affiche les cas, filtre par détecteur, et « ✓ Normal » les masque."""

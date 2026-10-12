@@ -1370,9 +1370,37 @@ class Revue:
     masques: list[Cas]
 
 
-def _cas_des_signalements(signalements, ids_disco: set) -> list[Cas]:
+#: Signalements Kworb qui disent « cet ID Spotify est porté par plusieurs
+#: fiches » : ils ne valent que tant que c'est vrai.
+_CODES_ID_PARTAGE = ("kworb_id_partage", "kworb_doublon")
+
+
+def ids_spotify_encore_partages(tracks) -> set[str]:
+    """Les ID Spotify que plusieurs fiches portent AUJOURD'HUI — même index que
+    le run Kworb. Une fusion faite depuis (A2H « J'observe et je retiens »,
+    « L'histoire est simple », « Pornostar », runs du 2026-10-01) laissait le
+    signalement de la fiche gardée au panneau jusqu'au run suivant."""
+    from src.utils.update_kworb import construire_index
+
+    index = construire_index(tracks)
+    return set(index.ids_partages) | set(index.doublons)
+
+
+def _cas_des_signalements(signalements, ids_disco: set, tracks=None) -> list[Cas]:
     """Un signalement dont la fiche a disparu depuis le run (fusion,
-    suppression) n'a plus d'objet."""
+    suppression) n'a plus d'objet ; un ID partagé qui ne l'est plus non plus
+    (`tracks` donné)."""
+    partages = None
+    if tracks is not None and any(s["detecteur"] in _CODES_ID_PARTAGE for s in signalements):
+        partages = ids_spotify_encore_partages(tracks)
+
+    def vivant(s) -> bool:
+        if s["track_id"] is not None and s["track_id"] not in ids_disco:
+            return False
+        if partages is not None and s["detecteur"] in _CODES_ID_PARTAGE:
+            return (s["preuves"] or {}).get("spotify_id") in partages
+        return True
+
     return [
         Cas(
             s["detecteur"],
@@ -1384,7 +1412,7 @@ def _cas_des_signalements(signalements, ids_disco: set) -> list[Cas]:
             s["cle"],
         )
         for s in signalements
-        if s["track_id"] is None or s["track_id"] in ids_disco
+        if vivant(s)
     ]
 
 
@@ -1400,7 +1428,7 @@ def analyser(data_manager, artiste) -> Revue:
     ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
     cas = detecter(ctx)
     cas += _cas_des_signalements(
-        data_manager.signalements_revue(artiste.id), {t.id for t in tracks}
+        data_manager.signalements_revue(artiste.id), {t.id for t in tracks}, tracks
     )
     cas.sort(key=lambda c: (-c.impact, c.detecteur, c.morceau))
     tranches = data_manager.verdicts_revue(artiste.id)

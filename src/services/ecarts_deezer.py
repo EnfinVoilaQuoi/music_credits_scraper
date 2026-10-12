@@ -1295,7 +1295,10 @@ def enregistrer_signalements(data_manager, artist, bilan, *, traites=()) -> int:
         for e in bilan.ecarts:
             if e.nature != nature or id(e) in deja:
                 continue
-            motif = f"{LIBELLES[nature]} — « {e.album.title} »"
+            # « disque » : le titre de l'ALBUM se lisait comme celui d'un autre
+            # morceau (A2H « Pourquoi » — « Les hommes pleurent en hiver
+            # (Winter Tape) », 2026-10-12).
+            motif = f"{LIBELLES[nature]} — disque « {e.album.title} »"
             if e.motifs:
                 motif += " (" + ", ".join(e.motifs) + ")"
             cas.append(

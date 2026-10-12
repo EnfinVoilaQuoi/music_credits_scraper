@@ -144,6 +144,21 @@ class TestApresChaqueEcrivain:
         assert _invariants(data_manager) == {}
         assert not _ytm(data_manager, base["durag"].id)
 
+    def test_une_video_rejetee_ne_revient_pas_par_une_soeur(self, data_manager, base):
+        """✖️ sur la ligne d'Isha : la vidéo quitte aussi la ligne sœur de Swing,
+        et la synchronisation suivante ne la rend pas (refus_vivant)."""
+        from src.utils import corrections_fiches as cf
+
+        video = TrackVideo(video_id="CCCCCCCCCCC", source="genius_media", views=10, title="x")
+        data_manager.record_track_videos(base["swing"].id, [video])
+        data_manager.save_track(base["isha"])  # union : Isha reçoit la vidéo
+        cf.memoriser_video_refusee(base["isha"], "CCCCCCCCCCC")
+        data_manager.forget_track_video(base["isha"].id, "CCCCCCCCCCC")
+        data_manager.save_track(base["swing"])  # une synchronisation de plus
+        assert _invariants(data_manager) == {}
+        for t in (base["swing"], base["isha"]):
+            assert not [v for v in data_manager.get_track_videos(t.id) if v.video_id == "C" * 11]
+
     def test_ids_spotify_puis_retrait(self, data_manager, base):
         tid = base["isha"].id
         base["isha"].spotify_id = "3VXzVGAWFSrH47dBtTOPws"

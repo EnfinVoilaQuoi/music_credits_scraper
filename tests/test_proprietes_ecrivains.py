@@ -58,6 +58,7 @@ def _gestes():
             st.integers(0, 10**6),
         ),
         st.tuples(st.just("oubli_video"), fiche, st.sampled_from(["AAAAAAAAAAA", "BBBBBBBBBBB"])),
+        st.tuples(st.just("rejet_video"), fiche, st.sampled_from(["AAAAAAAAAAA", "BBBBBBBBBBB"])),
         st.tuples(
             st.just("lrc"), fiche, st.sampled_from(["lrclib", "ytmusic"]), st.sampled_from("ab")
         ),
@@ -131,6 +132,12 @@ def _jouer(dm, ids, geste) -> bool:
         )
     elif nom == "oubli_video":
         dm.forget_track_video(tid, geste[2])
+    elif nom == "rejet_video":
+        # Le ✖️ de l'app : mémoriser le refus, puis oublier la vidéo.
+        from src.utils import corrections_fiches as cf
+
+        cf.memoriser_video_refusee(_fiche(dm, tid), geste[2])
+        dm.forget_track_video(tid, geste[2])
     elif nom == "lrc":
         dm.upsert_observations(tid, [Observation("lyrics_synced", _LRC[geste[3]], geste[2])])
     elif nom == "retrait_deezer":
@@ -146,6 +153,14 @@ def _jouer(dm, ids, geste) -> bool:
     return False
 
 
+def _fiche(dm, tid):
+    for artiste_id in _artistes(dm):
+        for t in dm.get_artist_tracks(artiste_id):
+            if t.id == tid:
+                return t
+    raise LookupError(tid)
+
+
 def _artistes(dm):
     with dm.engine.connect() as conn:
         from sqlalchemy import text
@@ -159,6 +174,9 @@ def _violations(dm, *, soeurs: bool) -> dict:
     if decroche:
         v["colonne_verdict"] = decroche
     with closing(audit._connexion(dm.db_path)) as c:
+        pistes = audit._pistes(c, None)
+        if audit.refus_vivants(c, pistes):
+            v["refus_vivant"] = [x.libelle for x in audit.refus_vivants(c, pistes)]
         if audit.orphelins(c):
             v["orphelin"] = [x.libelle for x in audit.orphelins(c)]
         if soeurs:

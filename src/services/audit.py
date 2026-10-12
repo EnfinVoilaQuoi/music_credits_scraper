@@ -104,10 +104,11 @@ FAMILLES = {
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
     "orphelin": "INVARIANT — ligne liée à une fiche qui n'existe plus",
     "schema": "INVARIANT — colonne de la base ≠ schema.py",
+    "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
 }
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
-INVARIANTS = ("colonne_verdict", "soeurs_divergentes", "orphelin", "schema")
+INVARIANTS = ("colonne_verdict", "soeurs_divergentes", "orphelin", "schema", "refus_vivant")
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
 
@@ -532,6 +533,72 @@ def orphelins(c) -> list[Cas]:
     return cas
 
 
+def refus_vivants(c, pistes) -> list[Cas]:
+    """Une valeur REFUSÉE à la main (table `refus`, e48) encore portée : ID
+    Spotify ou Deezer, vidéo, LRC — sur la fiche désignée ou, pour ce que les
+    sœurs partagent, sur toute ligne de la même page Genius. Un écrivain de
+    retrait qui oublie une ligne, ou un producteur qui ne relit pas le refus,
+    se voit ici (CORRECTIFS : « valeur refusée encore vivante chez une sœur »)."""
+    from src.utils.corrections_fiches import designe, empreinte_lrc
+
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if "refus" not in tables:
+        return []
+    par_genius = collections.defaultdict(list)
+    par_artiste = collections.defaultdict(list)
+    for t in pistes:
+        if t["genius_id"]:
+            par_genius[int(t["genius_id"])].append(t)
+        par_artiste[t["artiste"]].append(t)
+    spotify = collections.defaultdict(set)
+    for r in c.execute("SELECT track_id, spotify_id FROM track_spotify_ids"):
+        spotify[r["track_id"]].add(r["spotify_id"])
+    videos = collections.defaultdict(set)
+    for r in c.execute("SELECT track_id, video_id FROM track_videos"):
+        videos[r["track_id"]].add(r["video_id"])
+
+    def porte(t, nature, valeur) -> bool:
+        if nature == "id_spotify":
+            return t["spotify_id"] == valeur or valeur in spotify[t["id"]]
+        if nature == "id_deezer":
+            return str(t["deezer_id"] or "") == valeur
+        if nature == "video":
+            return valeur in videos[t["id"]]
+        if nature == "lrc":
+            return bool(t["lyrics_synced"]) and empreinte_lrc(t["lyrics_synced"]) == valeur
+        return False
+
+    cas = []
+    for r in c.execute(
+        "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
+        "WHERE nature IN ('id_spotify', 'id_deezer', 'video', 'lrc')"
+    ):
+        if r["genius_id"] is not None:
+            visees = par_genius.get(int(r["genius_id"]), [])
+        else:
+            visees = [
+                t
+                for t in par_artiste.get(r["artiste"], [])
+                if designe(
+                    {"titre": r["titre"], "album": r["album"]},
+                    genius_id=t["genius_id"],
+                    titre=t["title"],
+                    album=t["album"],
+                )
+            ]
+        for t in visees:
+            if porte(t, r["nature"], r["valeur"]):
+                cas.append(
+                    Cas(
+                        "refus_vivant",
+                        t["artiste"],
+                        [t["id"]],
+                        f"{_lib(t)} porte encore {r['nature']} {r['valeur'][:24]} refusé",
+                    )
+                )
+    return cas
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -615,6 +682,7 @@ def auditer(
         audit.cas += echecs(c, pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
+            audit.cas += refus_vivants(c, pistes)
             if not noms:
                 audit.cas += orphelins(c)
     if persistance:

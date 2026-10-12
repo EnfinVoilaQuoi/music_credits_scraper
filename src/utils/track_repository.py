@@ -5315,20 +5315,29 @@ class TrackRepository:
 
         Pendant explicite de l'additivité de `record_track_videos` : c'est le
         seul chemin par lequel une vidéo quitte la table.
+
+        La vidéo quitte aussi les lignes SŒURS (même page Genius chez un autre
+        artiste) : laissée là, l'union des sœurs la rendait à la fiche au
+        prochain `save_track` — un rejet ✖️ qui ne tenait pas (invariant d'audit
+        `refus_vivant`, 2026-10-12).
         """
         try:
-            # Chantier A : son total et celui des autres fiches de l'artiste qui
-            # la portaient (elle cesse d'être partagée) suivent, en fin de
-            # transaction.
+            # Chantier A : son total, celui des sœurs, et celui des autres
+            # fiches de chaque artiste qui la portaient (elle cesse d'être
+            # partagée) suivent, en fin de transaction.
             with self._ecrire() as conn:
-                self._toucher(
-                    conn, track_id, *self._porteurs_des_videos(conn, track_id, [video_id])
-                )
-                supprimees = conn.execute(
-                    text("DELETE FROM track_videos WHERE track_id = :tid AND video_id = :vid"),
-                    {"tid": track_id, "vid": video_id},
-                ).rowcount
-            return supprimees > 0
+                supprimees = [0]
+
+                def oublier(tid):
+                    self._toucher(conn, tid, *self._porteurs_des_videos(conn, tid, [video_id]))
+                    supprimees[0] += conn.execute(
+                        text("DELETE FROM track_videos WHERE track_id = :tid AND video_id = :vid"),
+                        {"tid": tid, "vid": video_id},
+                    ).rowcount
+
+                oublier(track_id)
+                effacer_chez_les_soeurs(conn, track_id, oublier)
+            return supprimees[0] > 0
         except SQLAlchemyError as e:
             logger.error(f"Erreur forget_track_video({track_id}, {video_id!r}): {e}")
             return False

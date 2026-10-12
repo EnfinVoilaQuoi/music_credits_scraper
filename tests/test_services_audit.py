@@ -69,6 +69,31 @@ class TestInvariants:
         assert au._volatile("lyrics_scraped_at") and au._volatile("youtube_video_views")
         assert not au._volatile("lyrics_synced")
 
+    def test_refus_vivant(self, data_manager, isha):
+        """Une vidéo refusée à la main, revenue en contournant le filtre des
+        écrivains : l'invariant la voit — chez la fiche ET chez une sœur."""
+        from src.utils import corrections_fiches as cf
+
+        a, t = isha
+        swing = Artist(name="Swing")
+        swing.id = data_manager.save_artist(swing)
+        soeur = Track(title="Durag", artist=swing)
+        soeur.genius_id = 4242
+        data_manager.save_track(soeur)
+        cf.memoriser_video_refusee(t, "V" * 11)
+        assert not _familles(au.auditer(data_manager, persistance=True, revue=False)).get(
+            "refus_vivant"
+        )
+        _sql(
+            data_manager,
+            "INSERT INTO track_videos (track_id, video_id) VALUES (:t, :v)",
+            t=soeur.id,
+            v="V" * 11,
+        )
+        audit = au.auditer(data_manager, ["Swing"], revue=False)
+        (cas,) = [c for c in audit.cas if c.famille == "refus_vivant"]
+        assert cas.pistes == [soeur.id] and "video" in cas.libelle
+
     def test_orphelin_et_schema_sur_la_base_entiere(self, data_manager, isha):
         _sql(
             data_manager,

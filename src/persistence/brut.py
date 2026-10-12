@@ -37,7 +37,16 @@ logger = get_logger(__name__)
 #: Le fichier du magasin. Redirigé par les tests (`conftest`).
 CHEMIN = Path(DATA_DIR) / "brut" / "brut.db"
 #: Les sources dont le brut est gardé — on en ajoute une à la fois.
-SOURCES_ACTIVES: frozenset[str] = frozenset({"deezer"})
+SOURCES_ACTIVES: frozenset[str] = frozenset(
+    {
+        "deezer",
+        # Genius (lot 3) : l'API passe par `requests_get` ; les pages par
+        # `crawl4ai_scraper_base._acrawl_page_body`. Une page pèse ~250 Ko,
+        # ~70 Ko gardée : ~775 Mo par lecture des 11 000 pages.
+        "genius_api",
+        "genius_scrape",
+    }
+)
 #: Lectures DIFFÉRENTES gardées par requête.
 LECTURES_GARDEES = 2
 #: Paramètres d'URL qui ne doivent JAMAIS être écrits.

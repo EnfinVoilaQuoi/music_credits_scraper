@@ -276,6 +276,37 @@ class CrawlAIScraperBase:
         delay_before_return: float,
         passes: "_Passes",
     ) -> str | None:
+        """Point de passage des pages (chantier E) : en REJEU, la page gardée
+        (jamais le navigateur) ; sinon le crawl, et le HTML d'une source
+        activée est gardé brut."""
+        from src.persistence import brut
+
+        if brut.rejeu_actif():
+            lu = brut.servir(self.health_key, url)
+            return lu[1].decode("utf-8") if lu else None
+        html = await self._acrawl_page_reseau(
+            url,
+            js_before_wait,
+            wait_for,
+            wait_timeout,
+            page_timeout,
+            delay_before_return,
+            passes,
+        )
+        if html:
+            brut.consigner(self.health_key, url, 200, html.encode("utf-8"))
+        return html
+
+    async def _acrawl_page_reseau(
+        self,
+        url: str,
+        js_before_wait: str | None,
+        wait_for: str | None,
+        wait_timeout: int,
+        page_timeout: int,
+        delay_before_return: float,
+        passes: "_Passes",
+    ) -> str | None:
         """L'échelle CDP → headless → fenêtre visible. Chaque passe est une
         TENTATIVE relevée dans `passes` — rejouée par l'appelant dans SON
         observation —, l'appel reste unique : bloqué en headless puis servi en

@@ -218,3 +218,28 @@ def test_une_detection_enregistree_puis_rejouee_donne_le_meme_bilan(data_manager
         return sorted((e.nature, e.titre, e.piste.id) for e in b.ecarts)
 
     assert resume(enregistre) == resume(rejoue) and resume(rejoue)
+
+
+def test_les_pages_genius_sont_gardees_puis_rejouees():
+    """Lot 3 : une page crawlée d'une source activée (`genius_scrape`) est
+    gardée ; en rejeu, elle est servie sans navigateur."""
+    from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
+
+    class _Stub(CrawlAIScraperBase):
+        def __init__(self):
+            super().__init__(headless=True)
+            self.crawls = 0
+
+        async def _acrawl_page_reseau(self, url, *args):
+            self.crawls += 1
+            return "<html>Ratpi World</html>"
+
+    url = "https://genius.com/Booba-ratpi-world-lyrics"
+    stub = _Stub()
+    assert stub._crawl_page(url) == (None, "<html>Ratpi World</html>")
+    assert brut.lectures("genius_scrape", url)[0]["corps"] == b"<html>Ratpi World</html>"
+    with brut.rejeu() as compte:
+        assert stub._crawl_page(url) == (None, "<html>Ratpi World</html>")
+        assert stub._crawl_page(url + "-absente") == (None, None)
+    assert stub.crawls == 1
+    assert compte["servies"] == 1 and len(compte["absentes"]) == 1

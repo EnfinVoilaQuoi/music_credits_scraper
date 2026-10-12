@@ -1,7 +1,12 @@
 """Ollama au démarrage (2026-09-29) : lancé s'il ne tourne pas, signalé s'il
 reste absent. Aucun test ne parle à Ollama ni ne lance de processus."""
 
-from src.utils.ollama_demarrage import assurer_ollama
+import subprocess
+import sys
+
+import pytest
+
+from src.utils.ollama_demarrage import assurer_ollama, drapeaux_de_lancement
 
 
 class _Horloge:
@@ -71,3 +76,12 @@ def test_lancement_impossible():
 def test_modele_absent():
     etat, _ = _assurer([True], modele=False)
     assert not etat.pret and "ollama pull llama3.2" in etat.message
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drapeaux de création Windows")
+def test_le_serveur_a_une_console_cachee_pas_aucune_console():
+    """Sans console (DETACHED_PROCESS), chaque processus qu'Ollama lance ouvre
+    sa propre fenêtre visible : la boucle de fenêtres du 2026-10-12."""
+    drapeaux = drapeaux_de_lancement()
+    assert drapeaux & subprocess.CREATE_NO_WINDOW
+    assert not drapeaux & subprocess.DETACHED_PROCESS

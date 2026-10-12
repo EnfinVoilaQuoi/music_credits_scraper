@@ -80,10 +80,17 @@ def modele_present(modele: str = MODELE) -> bool:
         return False
 
 
+def drapeaux_de_lancement() -> int:
+    """Une console CACHÉE, pas d'absence de console : Ollama lance lui-même des
+    processus console (détection du GPU au démarrage, puis le runner du
+    modèle) ; sans console à hériter, Windows en ouvre une VISIBLE pour chacun
+    — des fenêtres qui s'ouvrent et se ferment en boucle (2026-10-12). Avec
+    DETACHED_PROCESS, CREATE_NO_WINDOW est ignoré : il ne faut que le second."""
+    return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
 def _lancer_serveur(executable: str) -> None:
-    drapeaux = 0
-    if sys.platform == "win32":
-        drapeaux = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+    drapeaux = drapeaux_de_lancement()
     subprocess.Popen(  # exécutable local, sans shell
         [executable, "serve"],
         stdin=subprocess.DEVNULL,

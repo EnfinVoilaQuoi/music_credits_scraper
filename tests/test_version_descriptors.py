@@ -9,10 +9,13 @@ import pytest
 from src.utils.title_matching import strip_featuring
 from src.utils.version_descriptors import (
     Kind,
+    doublons_evidents,
     indice_meme_morceau,
     meme_famille,
     meme_prise,
+    meme_socle,
     parse_variant,
+    parties_du_morceau,
     socle_normalise,
     titre_sans_edition,
     titres_equivalents,
@@ -246,3 +249,36 @@ class TestEditionsDeDiffusion:
         """Le gate Spotify ne doit plus refuser l'ID explicit pour la fiche nue."""
         assert titres_equivalents("Forever", "Forever (Explicit Version)")
         assert not titres_equivalents("X", "X (Remix)")
+
+
+class TestPartiesDuMorceau:
+    """Chantier D (2026-10-12) : `parse_variant` avale le numéro de partie dans
+    le descripteur — « La Boulette - Pt. 1- Live 2006 » et « Pt. 2 » avaient
+    le même socle et passaient pour le même morceau. Mesuré sur la base : 3
+    paires, toutes fausses ; les numéros de VERSION (« Radio Edit #2 »,
+    « Vol. 2 Remix ») ne sont pas des parties."""
+
+    @pytest.mark.parametrize(
+        "titre, parties",
+        [
+            ("La Boulette - Pt. 1- Live 2006", {1}),
+            ("Father Stretch My Hands, Pt. 1", {1}),
+            ("Chapitre II", {2}),
+            ("Episode 3 (Remix)", {3}),
+            ("La boulette", set()),
+            ("You Don't Know My Name (Radio Edit #2)", set()),
+            ("X (Vol. 2 Remix)", set()),
+        ],
+    )
+    def test_numeros(self, titre, parties):
+        assert parties_du_morceau(titre) == frozenset(parties)
+
+    def test_deux_parties_ne_sont_pas_le_meme_morceau(self):
+        a, b = "La Boulette - Pt. 1- Live 2006", "La Boulette - Pt. 2 - Live 2006"
+        assert not titres_equivalents(a, b)
+        assert not meme_socle(a, b)
+        assert not doublons_evidents([(a, "Live"), (b, "Live")])
+        assert not titres_equivalents("La boulette", a)
+
+    def test_un_numero_de_version_ne_separe_pas(self):
+        assert meme_socle("You Don't Know My Name", "You Don't Know My Name (Radio Edit #2)")

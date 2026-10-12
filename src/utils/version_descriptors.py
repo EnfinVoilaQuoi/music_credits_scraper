@@ -470,6 +470,54 @@ def meme_famille(a: Variant, b: Variant) -> bool:
     return True
 
 
+#: Marqueur d'une PARTIE du morceau (« Pt. 1 », « Partie 2 », « Episode 4 »).
+#: Pas « Vol », ni « # » : dans un descripteur de version, ils numérotent la
+#: VERSION (« Radio Edit #2 », « Demo #2 », « Jeanius Level Musik Vol. 2 Remix »)
+#: — mesuré le 2026-10-12, les compter séparait 30 paires qui ont les mêmes
+#: paroles. (La garde de la recherche YouTube, `youtube_searcher.
+#: numeros_de_partie`, est plus large à dessein : elle compare un titre de
+#: VIDÉO à une fiche, où « Vol. 2 » distingue deux vidéos.)
+_PARTIE_DU_MORCEAU = re.compile(
+    r"\b(?:part|pt|partie|chapitre|chapter|episode|épisode)\b\.?\s*(\d{1,3}|[ivx]{1,4})\b",
+    re.IGNORECASE,
+)
+_ROMAINS = {
+    "i": 1,
+    "ii": 2,
+    "iii": 3,
+    "iv": 4,
+    "v": 5,
+    "vi": 6,
+    "vii": 7,
+    "viii": 8,
+    "ix": 9,
+    "x": 10,
+}
+
+
+def parties_du_morceau(titre: str | None) -> frozenset[int]:
+    """PUR. Les numéros de PARTIE d'un titre : après « Pt », « Part »,
+    « Partie », « Chapitre », « Épisode » — où qu'ils soient, descripteur
+    compris —, plus un nombre isolé en FIN de titre principal (« Le chill 2 »)."""
+    texte = titre or ""
+    numeros = set()
+    for m in _PARTIE_DU_MORCEAU.finditer(texte):
+        brut = m.group(1).lower()
+        numeros.add(_ROMAINS[brut] if brut in _ROMAINS else int(brut))
+    principal = re.split(r"\s[-–]\s|[(\[]", texte, maxsplit=1)[0].strip()
+    if m := re.search(r"\s(\d{1,3})$", principal):
+        numeros.add(int(m.group(1)))
+    return frozenset(numeros)
+
+
+def memes_parties(a: str | None, b: str | None) -> bool:
+    """Deux titres désignent-ils la même PARTIE (ou aucune) ? Garde commune des
+    prédicats de titre : `parse_variant` détache « Pt. 1- Live 2006 » EN ENTIER
+    comme descripteur, le numéro de partie partait avec, et « La Boulette -
+    Pt. 1 - Live 2006 » valait sa « Pt. 2 » (2026-10-12, chantier D)."""
+    return parties_du_morceau(a) == parties_du_morceau(b)
+
+
 def titres_equivalents(a: str | None, b: str | None) -> bool:
     """Deux titres désignent-ils le MÊME morceau dans la MÊME version ?
 
@@ -485,6 +533,8 @@ def titres_equivalents(a: str | None, b: str | None) -> bool:
     na, nb = normalize_title(a), normalize_title(b)
     if na and na == nb:
         return True
+    if not memes_parties(a, b):
+        return False
     va, vb = parse_variant(a), parse_variant(b)
     if normalize_title(va.socle) != normalize_title(vb.socle):
         return False
@@ -515,6 +565,8 @@ def meme_socle(a: str | None, b: str | None) -> bool:
     """
     if titres_equivalents(a, b):
         return True
+    if not memes_parties(a, b):
+        return False
     sa = normalize_title(parse_variant(a or "").socle)
     return bool(sa) and sa == normalize_title(parse_variant(b or "").socle)
 
@@ -601,6 +653,8 @@ def doublons_evidents(fiches) -> bool:
             if normalize_title(a) == normalize_title(b):
                 if not alb_a or not alb_b or cle_album(alb_a) == cle_album(alb_b):
                     continue
+                return False
+            if not memes_parties(a, b):
                 return False
             va, vb = parse_variant(a), parse_variant(b)
             if normalize_title(va.socle) == normalize_title(vb.socle) and meme_prise(va, vb):

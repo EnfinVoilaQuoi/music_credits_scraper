@@ -1386,19 +1386,60 @@ def ids_spotify_encore_partages(tracks) -> set[str]:
     return set(index.ids_partages) | set(index.doublons)
 
 
+#: Écarts Deezer qui disent « cette piste n'est sur aucune fiche ».
+_CODES_DEEZER_PISTE_ORPHELINE = (
+    "deezer_absent",
+    "deezer_version",
+    "deezer_apparition",
+    "deezer_link_candidate",
+)
+
+
+def _signalement_deezer_resolu(s, par_id: dict, ids_deezer: set) -> bool:
+    """Un écart Deezer que l'état PRÉSENT dément (2026-10-12, A2H) : la piste
+    « absente » est aujourd'hui l'ID Deezer d'une fiche (« Yatch Music » —
+    l'ID de « Yacht Music », perdu par une fusion puis rétabli) ; le « lien à
+    revoir » n'a plus de durée indépendante qui le contredise (« Pardonne
+    moi » : la durée SongBPM, d'un autre morceau, a été retirée)."""
+    preuves = s["preuves"] or {}
+    if s["detecteur"] in _CODES_DEEZER_PISTE_ORPHELINE:
+        piste = preuves.get("piste_deezer")
+        if s["track_id"] is not None:
+            # Un rattachement PROPOSÉ à une fiche : résolu seulement si c'est
+            # elle qui porte la piste, pas une autre.
+            track = par_id.get(s["track_id"])
+            return track is not None and piste is not None and track.deezer_id == piste
+        return piste in ids_deezer
+    if s["detecteur"] == "deezer_link_review":
+        from types import SimpleNamespace
+
+        from src.services.ecarts_deezer import _lien_a_revoir
+
+        track = par_id.get(s["track_id"])
+        duree = ((preuves.get("ecart") or {}).get("piste") or {}).get("duration")
+        if track is None or duree is None:
+            return False
+        return _lien_a_revoir(SimpleNamespace(duration=duree), track) is None
+    return False
+
+
 def _cas_des_signalements(signalements, ids_disco: set, tracks=None) -> list[Cas]:
     """Un signalement dont la fiche a disparu depuis le run (fusion,
-    suppression) n'a plus d'objet ; un ID partagé qui ne l'est plus non plus
-    (`tracks` donné)."""
+    suppression) n'a plus d'objet ; avec `tracks`, ceux que l'état présent
+    dément non plus (`_signalement_resolu`)."""
     partages = None
     if tracks is not None and any(s["detecteur"] in _CODES_ID_PARTAGE for s in signalements):
         partages = ids_spotify_encore_partages(tracks)
+    par_id = {t.id: t for t in tracks or []}
+    ids_deezer = {t.deezer_id for t in tracks or [] if t.deezer_id}
 
     def vivant(s) -> bool:
         if s["track_id"] is not None and s["track_id"] not in ids_disco:
             return False
         if partages is not None and s["detecteur"] in _CODES_ID_PARTAGE:
             return (s["preuves"] or {}).get("spotify_id") in partages
+        if tracks is not None:
+            return not _signalement_deezer_resolu(s, par_id, ids_deezer)
         return True
 
     return [

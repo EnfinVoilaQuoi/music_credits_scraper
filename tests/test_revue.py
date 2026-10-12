@@ -523,6 +523,45 @@ class TestSignalementsDesRuns:
         deux = [*seule, _t("L'histoire est simple (Remix)", 3, spotify_id=sid)]
         assert len(revue._cas_des_signalements([s], {1, 2, 3}, deux)) == 1
 
+    @staticmethod
+    def _deezer(detecteur, track_id, preuves):
+        return {
+            "detecteur": detecteur,
+            "track_id": track_id,
+            "morceau": "M",
+            "motif": "",
+            "impact": 0,
+            "preuves": preuves,
+            "cle": "k",
+        }
+
+    def test_piste_deezer_absente_devenue_l_id_d_une_fiche(self):
+        """A2H « Yatch Music » : l'ID de « Yacht Music », perdu par une fusion
+        puis rétabli — le « morceau absent » du run d'avant ne l'est plus."""
+        s = self._deezer("deezer_absent", None, {"piste_deezer": 128748177})
+        sans = [_t("Yacht Music", 1)]
+        assert len(revue._cas_des_signalements([s], {1}, sans)) == 1
+        avec = [_t("Yacht Music", 1, deezer_id=128748177)]
+        assert revue._cas_des_signalements([s], {1}, avec) == []
+
+    def test_candidat_resolu_seulement_sur_sa_fiche(self):
+        s = self._deezer("deezer_link_candidate", 1, {"piste_deezer": 70})
+        ailleurs = [_t("A", 1), _t("B", 2, deezer_id=70)]
+        assert len(revue._cas_des_signalements([s], {1, 2}, ailleurs)) == 1
+        chez_elle = [_t("A", 1, deezer_id=70), _t("B", 2)]
+        assert revue._cas_des_signalements([s], {1, 2}, chez_elle) == []
+
+    def test_lien_a_revoir_sans_duree_qui_le_contredise(self):
+        """A2H « Pardonne moi » : la durée SongBPM (268 s, celle d'un autre
+        morceau) retirée, Deezer 186 s n'est plus contredit."""
+        s = self._deezer(
+            "deezer_link_review", 1, {"ecart": {"piste": {"id": 81385490, "duration": 186}}}
+        )
+        contredit = [_t("Pardonne moi", 1, durations_observees={"songbpm": 268, "youtube": 187})]
+        assert len(revue._cas_des_signalements([s], {1}, contredit)) == 1
+        apres = [_t("Pardonne moi", 1, durations_observees={"youtube": 187})]
+        assert revue._cas_des_signalements([s], {1}, apres) == []
+
 
 def test_fenetre_se_construit(racine_tk):
     """La fenêtre affiche les cas, filtre par détecteur, et « ✓ Normal » les masque."""

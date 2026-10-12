@@ -24,10 +24,6 @@ logger = get_logger(__name__)
 _DEFAULT_MAX_INPUT_CHARS = 6000  # ≈ 1500 tokens
 _DEFAULT_MAX_TOKENS = 512
 
-#: Budget de texte de SongBPM, délibérément SOUS le plafond : la réponse
-#: attendue est minuscule (`max_tokens=128`) et la page très bavarde.
-BUDGET_TEXTE_SONGBPM = 4000
-
 
 class LLMExtractor:
     """Wrapper Ollama réutilisable pour extraire des données structurées en JSON."""
@@ -188,32 +184,6 @@ def secours_apres_panne(obs, detail: str, extraire):
 # ──────────────────────────────────────────────────────────────────────────────
 # Prompts spécialisés par scraper (fallbacks quand le parsing classique échoue)
 # ──────────────────────────────────────────────────────────────────────────────
-
-
-def build_songbpm_prompt(page_text: str) -> str:
-    """Prompt pour extraire BPM/key/mode/signature depuis le texte d'une page SongBPM."""
-    return f"""Extract song metadata from the text below (from songbpm.com).
-Return ONLY a JSON object with this exact structure:
-{{"bpm": number or null, "key": "string or null", "mode": "major" or "minor" or null, "time_signature": number or null, "duration_seconds": number or null}}
-
-Rules:
-- "bpm" is the tempo in beats per minute (a number, usually 60-200)
-- "key" is the musical key (like "C", "F#", "Bb")
-- "mode" is "major" or "minor"
-- "time_signature" is beats per bar (usually 3 or 4)
-- "duration_seconds" is the track duration converted to seconds (e.g. "3:25" -> 205)
-- Use null for any value not present in the text
-- Never invent values
-
-Example input:
-Song Title is a song by Artist with a tempo of 140 BPM. It can also be used half-time at 70 BPM.
-The track runs 3 minutes and 25 seconds long with a F#/Gb key and a minor mode. It has a time signature of 4 beats per bar.
-
-Example output:
-{{"bpm": 140, "key": "F#/Gb", "mode": "minor", "time_signature": 4, "duration_seconds": 205}}
-
-Now extract from:
-{page_text}"""
 
 
 def build_spotify_match_prompt(artist: str, title: str, candidates: list) -> str:

@@ -22,11 +22,6 @@ from playwright.sync_api import (
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright
-from src.utils.llm_extractor import (
-    BUDGET_TEXTE_SONGBPM,
-    build_songbpm_prompt,
-    get_shared_extractor,
-)
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import either_contains_as_words
 from src.utils.version_descriptors import meme_version
@@ -314,7 +309,10 @@ class SongBPMScraper:
 
     def _details_from_text(self, clean_text: str) -> dict[str, Any]:
         """Mode/key/time_signature depuis le texte de la page de détail
-        (regex + fallback LLM) — logique PURE, commune sync/async (F3c)."""
+        (regex) — logique PURE, commune sync/async (F3c). Le repli LLM est
+        retiré (2026-10-12) : il comblait `key_from_paragraph` et
+        `time_signature`, que le fournisseur ne relit pas ; le mode, seul champ
+        utile, est lu par regex."""
         details: dict[str, Any] = {}
 
         mode_match = re.search(r"key\s+and\s+a\s+(major|minor)\s+mode", clean_text, re.IGNORECASE)
@@ -323,7 +321,13 @@ class SongBPMScraper:
         if mode_match:
             details["mode"] = mode_match.group(1).lower()
 
-        key_match = re.search(r"with\s+a\s+([A-G][\#b♯♭/]+)\s+key", clean_text, re.IGNORECASE)
+        # Toutes les formes : naturelle (« C »), altérée (« F# »), double
+        # (« C#/Db »). L'ancien motif exigeait une altération et refusait la
+        # double notation — le repli LLM faisait son travail, 4 446 fois, pour
+        # un champ que rien ne relit (retiré le 2026-10-12).
+        key_match = re.search(
+            r"with\s+a\s+([A-G][#b♯♭]?(?:\s*/\s*[A-G][#b♯♭]?)?)\s+key", clean_text, re.IGNORECASE
+        )
         if key_match:
             details["key_from_paragraph"] = key_match.group(1).strip()
 
@@ -332,45 +336,6 @@ class SongBPMScraper:
         )
         if time_sig_match:
             details["time_signature"] = int(time_sig_match.group(1))
-
-        # Fallback LLM : complète les champs que les regex n'ont pas trouvés
-        missing = {"mode", "key_from_paragraph", "time_signature"} - set(details)
-        if missing:
-            llm_details = self._extract_details_with_llm(clean_text)
-            for key, value in llm_details.items():
-                if key in missing:
-                    details[key] = value
-                    logger.info(f"🤖 SongBPM LLM: {key} = {value}")
-
-        return details
-
-    def _extract_details_with_llm(self, clean_text: str) -> dict[str, Any]:
-        """
-        Fallback LLM : extrait mode/key/time_signature du texte de la page
-        quand les regex échouent. Valeurs validées strictement (pas d'hallucination).
-        """
-        details: dict[str, Any] = {}
-        llm = get_shared_extractor()
-        if not llm or not clean_text:
-            return details
-
-        data = llm.extract_json(
-            build_songbpm_prompt(clean_text[:BUDGET_TEXTE_SONGBPM]), max_tokens=128
-        )
-        if not data:
-            return details
-
-        mode = data.get("mode")
-        if isinstance(mode, str) and mode.lower() in ("major", "minor"):
-            details["mode"] = mode.lower()
-
-        key = data.get("key")
-        if isinstance(key, str) and re.fullmatch(r"[A-G][#b♯♭]?(?:/[A-G][#b♯♭]?)?", key.strip()):
-            details["key_from_paragraph"] = key.strip()
-
-        ts = data.get("time_signature")
-        if isinstance(ts, int) and 2 <= ts <= 12:
-            details["time_signature"] = ts
 
         return details
 

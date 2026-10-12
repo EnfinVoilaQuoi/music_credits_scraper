@@ -17,7 +17,6 @@ from src.utils.llm_extractor import (
     LLMExtractor,
     build_certifications_prompt,
     build_credits_prompt,
-    build_songbpm_prompt,
     build_spotify_match_prompt,
     build_streams_table_prompt,
 )
@@ -199,10 +198,6 @@ class TestPrompts:
         assert "credits" in p
         assert "Kore" in p
 
-    def test_songbpm(self):
-        p = build_songbpm_prompt("a major mode")
-        assert "a major mode" in p
-
     def test_certifications(self):
         assert build_certifications_prompt("texte") is not None
 
@@ -227,7 +222,6 @@ class TestPrompts:
         "fabrique",
         [
             build_credits_prompt,
-            build_songbpm_prompt,
             build_certifications_prompt,
             build_streams_table_prompt,
         ],

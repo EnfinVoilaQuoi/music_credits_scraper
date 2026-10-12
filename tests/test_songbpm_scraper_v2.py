@@ -211,97 +211,33 @@ class TestRapprochement:
 # ────────────────────────────────────────────────── page de détail (texte)
 
 
-@pytest.fixture
-def sans_llm(monkeypatch):
-    """Neutralise le repli LLM (Ollama n'est pas disponible en test)."""
-    monkeypatch.setattr("src.scrapers.songbpm_scraper_v2.get_shared_extractor", lambda: None)
-
-
 class TestDetailsDepuisLeTexte:
-    def test_mode_phrase_complete(self, scraper, sans_llm):
+    def test_mode_phrase_complete(self, scraper):
         texte = "This song has a F key and a major mode."
         assert scraper._details_from_text(texte)["mode"] == "major"
 
-    def test_mode_forme_courte(self, scraper, sans_llm):
+    def test_mode_forme_courte(self, scraper):
         assert scraper._details_from_text("It has a minor mode")["mode"] == "minor"
 
-    def test_tonalite(self, scraper, sans_llm):
-        """Le motif n'attrape que les tonalités ALTÉRÉES (dièse/bémol/slash)."""
-        texte = "with a F# key and stuff"
-        assert scraper._details_from_text(texte)["key_from_paragraph"] == "F#"
+    @pytest.mark.parametrize("cle", ["C", "G", "F#", "Bb", "C#/Db", "C♯/D♭"])
+    def test_tonalite(self, scraper, cle):
+        """Toutes les formes (2026-10-12) : l'ancien motif exigeait une
+        altération et refusait la double notation — « C », « G », « C#/Db »
+        partaient au LLM, pour un champ que rien ne relit."""
+        texte = f"runs 3 minutes long with a {cle} key and a minor mode"
+        assert scraper._details_from_text(texte)["key_from_paragraph"] == cle
 
-    def test_signature_rythmique(self, scraper, sans_llm):
+    def test_aucun_appel_au_llm(self, scraper, monkeypatch):
+        """Le repli LLM est retiré : un texte muet reste muet."""
+        assert not hasattr(scraper, "_extract_details_with_llm")
+        assert scraper._details_from_text("rien d'exploitable ici") == {}
+
+    def test_signature_rythmique(self, scraper):
         texte = "a time signature of 4 beats per bar"
         assert scraper._details_from_text(texte)["time_signature"] == 4
 
-    def test_texte_muet(self, scraper, sans_llm):
+    def test_texte_muet(self, scraper):
         assert scraper._details_from_text("rien d'exploitable ici") == {}
-
-    def test_llm_complete_les_manques(self, scraper, monkeypatch):
-        """Le repli LLM ne comble QUE ce que les regex ont raté."""
-
-        class _Llm:
-            def extract_json(self, prompt, max_tokens=None):
-                return {"mode": "minor", "key": "Bb", "time_signature": 3}
-
-        monkeypatch.setattr("src.scrapers.songbpm_scraper_v2.get_shared_extractor", lambda: _Llm())
-        details = scraper._details_from_text("This song has a major mode.")
-        assert details["mode"] == "major"  # trouvé par regex : le LLM ne l'écrase pas
-        assert details["key_from_paragraph"] == "Bb"
-        assert details["time_signature"] == 3
-
-
-class TestReplLLM:
-    def _scraper_avec_llm(self, monkeypatch, payload):
-        class _Llm:
-            def extract_json(self, prompt, max_tokens=None):
-                return payload
-
-        monkeypatch.setattr("src.scrapers.songbpm_scraper_v2.get_shared_extractor", lambda: _Llm())
-        return SongBPMScraper(headless=True)
-
-    def test_valeurs_valides(self, monkeypatch):
-        s = self._scraper_avec_llm(monkeypatch, {"mode": "MINOR", "key": "F#", "time_signature": 4})
-        assert s._extract_details_with_llm("texte") == {
-            "mode": "minor",
-            "key_from_paragraph": "F#",
-            "time_signature": 4,
-        }
-
-    @pytest.mark.parametrize("mode", ["lydien", "", 42, None])
-    def test_mode_hallucine_rejete(self, monkeypatch, mode):
-        """Un 3B invente : chaque valeur est validée STRICTEMENT avant d'entrer."""
-        s = self._scraper_avec_llm(monkeypatch, {"mode": mode})
-        assert "mode" not in s._extract_details_with_llm("texte")
-
-    @pytest.mark.parametrize("key", ["H", "Do dièse", "F##", 7])
-    def test_tonalite_hallucinee_rejetee(self, monkeypatch, key):
-        s = self._scraper_avec_llm(monkeypatch, {"key": key})
-        assert "key_from_paragraph" not in s._extract_details_with_llm("texte")
-
-    @pytest.mark.parametrize("key", ["C", "F#", "Bb", "C/D"])
-    def test_tonalites_acceptees(self, monkeypatch, key):
-        s = self._scraper_avec_llm(monkeypatch, {"key": key})
-        assert s._extract_details_with_llm("texte")["key_from_paragraph"] == key
-
-    @pytest.mark.parametrize("ts", [1, 13, "4", 4.0])
-    def test_signature_hors_bornes_rejetee(self, monkeypatch, ts):
-        s = self._scraper_avec_llm(monkeypatch, {"time_signature": ts})
-        assert "time_signature" not in s._extract_details_with_llm("texte")
-
-    def test_llm_indisponible(self, scraper, sans_llm):
-        assert scraper._extract_details_with_llm("texte") == {}
-
-    def test_texte_vide(self, monkeypatch):
-        s = self._scraper_avec_llm(monkeypatch, {"mode": "minor"})
-        assert s._extract_details_with_llm("") == {}
-
-    def test_llm_muet(self, monkeypatch):
-        s = self._scraper_avec_llm(monkeypatch, None)
-        assert s._extract_details_with_llm("texte") == {}
-
-
-# ───────────────────────────────────────────────── parseur de la page de résultats
 
 
 class TestParseurDeResultats:

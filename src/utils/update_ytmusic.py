@@ -15,6 +15,7 @@ porte un videoId DIFFÉRENT de sa version audio et ne vit pas sur le canal
 vues du clip d'un morceau d'album n'étaient donc comptées nulle part.
 """
 
+import re
 import sys
 from types import SimpleNamespace
 
@@ -295,6 +296,69 @@ def titre_d_une_autre_fiche(fiche, titre: str | None, fiches) -> bool:
         autre is not fiche and autre.id != fiche.id and titres_equivalents(autre.title, titre)
         for autre in fiches
     )
+
+
+_MARQUEURS_VIDEO = re.compile(
+    r"\s*[\(\[][^\)\]]*\b(?:audio|clip|official|officiel|video|vid[ée]o|lyrics?|paroles"
+    r"|visuali[sz]er)\b[^\)\]]*[\)\]]",
+    re.IGNORECASE,
+)
+
+
+_INVITE_NU = re.compile(r"\s+(?:feat|ft)\.?\s+[^\(\[]*?(?=\s*[\(\[]|\s+[-–]\s|$)", re.IGNORECASE)
+
+
+def titre_de_la_video(titre: str | None, artiste: str) -> str:
+    """PUR. Le titre du MORCEAU dans un titre de vidéo : sans « Artiste - »
+    en tête, sans « (Audio officiel) », « [Clip] », « (Lyrics) »."""
+    from src.utils.title_matching import names_match_as_words
+
+    t = _MARQUEURS_VIDEO.sub("", titre or "")
+    # « Diam's Feat. X - Titre », « Titre Feat. X (Live …) » : l'invité part
+    # SEUL — `strip_featuring` couperait jusqu'au bout du titre, groupes compris.
+    t = _INVITE_NU.sub("", t)
+    tete, sep, reste = t.partition(" - ")
+    if sep and names_match_as_words(artiste, tete):
+        t = reste
+    return t.strip()
+
+
+def fiche_que_la_video_nomme(fiche, titre_video: str | None, artiste: str, index: dict):
+    """PUR. L'AUTRE fiche que le titre de la vidéo nomme — titres ÉQUIVALENTS,
+    versions comprises (« (Live Au tour de ma bulle) » ne nomme pas l'original) —
+    quand il ne nomme pas `fiche` ; seule de son titre, sinon None. `index` :
+    titre normalisé → fiches."""
+    from src.utils.version_descriptors import titres_equivalents
+
+    titre = titre_de_la_video(titre_video, artiste)
+    if not titre or titres_equivalents(fiche.title, titre):
+        return None
+    autres = [
+        f
+        for f in index.get(_normalize_title(titre), [])
+        if f is not fiche and titres_equivalents(f.title, titre)
+    ]
+    return autres[0] if len(autres) == 1 else None
+
+
+def videos_echangees(rangements, titres: dict, artiste: str, index: dict) -> dict:
+    """PUR. La page d'album YTM range parfois deux vidéos chacune sous la piste
+    de L'AUTRE : Diam's « Face au vide » portait « Diam's - À l'ombre de la
+    lune (Audio officiel) », et inversement (2026-10-13). `rangements` :
+    `[(fiche, video_id)]` de la page ; rend `{video_id: fiche}` pour les seuls
+    échanges MUTUELS — mesuré, déplacer toute vidéo qui nomme une autre fiche
+    envoyait les clips studio des lives et l'audio d'une a cappella sur
+    l'original."""
+    nomme = {}
+    for fiche, video_id in rangements:
+        autre = fiche_que_la_video_nomme(fiche, titres.get(video_id), artiste, index)
+        if autre is not None:
+            nomme[video_id] = (fiche, autre)
+    sortie = {}
+    for video_id, (fiche, autre) in nomme.items():
+        if any(f is autre and a is fiche for f, a in nomme.values()):
+            sortie[video_id] = autre
+    return sortie
 
 
 def rattachements_de_recherche_a_retirer(vid_counts: dict, sources: dict) -> list:
@@ -664,6 +728,19 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     # vu, pas la liste complète : l'écrivain est additif.
     videos_vues: dict[int, dict[str, TrackVideo]] = {}
 
+    echanges = videos_echangees(
+        [
+            (candidats[0], entry["video_id"])
+            for raw_tracks in tracks_by_album.values()
+            for entry in raw_tracks
+            if entry.get("video_id")
+            for candidats in [track_index.get(_normalize_title(entry["title"]), [])]
+            if len(candidats) == 1
+        ],
+        {v: (d or {}).get("title") for v, d in details_videos.items()},
+        artist.name,
+        track_index,
+    )
     for album_title, raw_tracks in tracks_by_album.items():
         for entry in raw_tracks:
             streams = api.resolve_streams(entry, view_counts)
@@ -683,6 +760,12 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                 continue
 
             matched_track = candidates[0] if candidates else None
+            if matched_track and entry.get("video_id") in echanges:
+                logger.info(
+                    f"↔ Vidéo de « {entry['title']} » rendue à « "
+                    f"{echanges[entry['video_id']].title} » (la page d'album les a échangées)"
+                )
+                matched_track = echanges[entry["video_id"]]
             if matched_track:
                 if streams is not None and retenu(matched_track.id):
                     video_id = entry.get("video_id")

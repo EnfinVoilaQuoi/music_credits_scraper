@@ -558,3 +558,47 @@ class TestRechercheDUneAutreFiche:
     def test_sans_autre_fiche_la_tolerance_reste(self):
         champions, _ = self._fiches()
         assert not mod.titre_d_une_autre_fiche(champions, "Champion", [champions])
+
+
+class TestVideosEchangees:
+    """Diam's (2026-10-13) : la page d'album YTM rangeait chacune des deux
+    vidéos sous la piste de l'autre. Seul l'échange MUTUEL est corrigé."""
+
+    def _index(self, *fiches):
+        from collections import defaultdict
+
+        from src.utils.title_matching import normalize_title
+
+        index = defaultdict(list)
+        for f in fiches:
+            index[normalize_title(f.title)].append(f)
+        return index
+
+    def test_l_echange_mutuel_est_rendu(self):
+        face = SimpleNamespace(id=1, title="Face au vide")
+        ombre = SimpleNamespace(id=2, title="À l’ombre de la lune")
+        titres = {
+            "A": "Diam's - À l'ombre de la lune (Audio officiel)",
+            "B": "Diam's - Face au vide (Audio officiel)",
+        }
+        echanges = mod.videos_echangees(
+            [(face, "A"), (ombre, "B")], titres, "Diam’s", self._index(face, ombre)
+        )
+        assert echanges == {"A": ombre, "B": face}
+
+    def test_une_seule_vidéo_qui_nomme_une_autre_fiche_reste(self):
+        """Le clip studio sur la piste live d'un album live : pas un échange."""
+        live = SimpleNamespace(id=1, title="Dans ma bulle - Live 2006")
+        studio = SimpleNamespace(id=2, title="Dans ma bulle")
+        titres = {"C": "Diam's - Dans ma bulle (Clip officiel)"}
+        assert (
+            mod.videos_echangees([(live, "C")], titres, "Diam’s", self._index(live, studio)) == {}
+        )
+
+    def test_une_version_n_est_pas_nommee_par_l_original(self):
+        live = SimpleNamespace(id=1, title="Confessions nocturnes - Live 2006")
+        studio = SimpleNamespace(id=2, title="Confessions nocturnes")
+        titre = "Diam's - Confessions nocturnes Feat. Vitaa (Live Au tour de ma bulle)"
+        assert (
+            mod.fiche_que_la_video_nomme(live, titre, "Diam’s", self._index(live, studio)) is None
+        )

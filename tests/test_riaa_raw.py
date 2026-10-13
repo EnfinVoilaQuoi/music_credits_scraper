@@ -717,3 +717,11 @@ def test_ajouts_au_brut_jamais_negatifs(riaa_tmp):
     assert added == 0
     _, added = u._merge_certif_csv([_row("B", "U")])
     assert added == 1
+
+
+def test_un_genre_none_affiche_par_le_site_est_vide_au_clean():
+    """La timeline écrit « Genre: None » (Trisha Yearwood, 2026-10-11) : le brut
+    le garde, le clean le vide — la ligne relue ne double plus la connue."""
+    connu, relu = _row(), {**_row(), "Genre": "None"}
+    clean = u._clean_from_raw(u._align_columns(pd.DataFrame([connu, relu])))
+    assert list(clean["Genre"]) == [""]

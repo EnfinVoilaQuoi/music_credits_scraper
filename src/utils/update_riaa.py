@@ -592,6 +592,10 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
             for r in vides.head(20).itertuples()
         ]
     df = df[(df["Artist"].str.strip() != "") & (df["Title"].str.strip() != "")]
+    # La timeline affiche « Genre: None » quand il n'y en a pas : le brut le garde
+    # tel que servi, le clean le vide — sans quoi la ligne relue doublait celle
+    # déjà connue (21 paliers de Trisha Yearwood, mise à jour du 2026-10-11).
+    df["Genre"] = df["Genre"].replace({"None": ""})
 
     if report is not None:
         report["format_changes"] = _compter_changements(df["Format_Type"], _norm_format)

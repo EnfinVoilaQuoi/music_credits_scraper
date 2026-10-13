@@ -345,3 +345,69 @@ def test_fiches_propres_excluent_invites_et_roles_secondaires(data_manager):
     for t in (propre, invite, second):
         data_manager.save_track(t)
     assert data_manager.titres_des_fiches_propres(a.id) == [(propre.id, "Par amour")]
+
+
+class TestTitreGeneriqueEtDisque:
+    """2026-10-13 : un titre générique ne désigne une piste que dans SON disque
+    (Diam's « Intro » de *Premier mandat* portait celle de *Brut de femme*)."""
+
+    def _fiche(self, titre="Intro", album="Premier mandat"):
+        from src.models import Artist, Track
+
+        t = Track(title=titre, artist=Artist(name="Diam's"))
+        t.album = album
+        return t
+
+    def _identite(self):
+        return {"name": "Intro", "artists": ["Diam's"], "duration": None}
+
+    def test_le_disque_d_une_autre_parution_est_refuse(self):
+        from src.utils.spotify_identity import valider_identite
+
+        assert not valider_identite(
+            self._fiche(),
+            "X" * 22,
+            lambda sid: self._identite(),
+            lire_album=lambda sid: "Brut de femme",
+        )
+
+    def test_le_meme_disque_passe_editions_comprises(self):
+        from src.utils.spotify_identity import memes_disques, valider_identite
+
+        assert valider_identite(
+            self._fiche(),
+            "X" * 22,
+            lambda sid: self._identite(),
+            lire_album=lambda sid: "Premier mandat",
+        )
+        assert memes_disques("Temps mort (Réédition)", "Temps mort")
+        assert memes_disques("Adamant-ium", "Adamant-ium - Deluxe")
+        assert not memes_disques("Memoria", "Private Club")
+
+    def test_sans_disque_lisible_rien_n_est_prouve(self):
+        from src.utils.spotify_identity import valider_identite
+
+        assert not valider_identite(
+            self._fiche(), "X" * 22, lambda sid: self._identite(), lire_album=lambda sid: None
+        )
+
+    def test_un_titre_non_generique_ne_lit_pas_la_page(self):
+        from src.utils.spotify_identity import valider_identite
+
+        def jamais(sid):
+            raise AssertionError("page lue pour un titre non générique")
+
+        identite = {"name": "Marine", "artists": ["Diam's"], "duration": None}
+        assert valider_identite(
+            self._fiche("Marine", "Dans ma bulle"),
+            "X" * 22,
+            lambda sid: identite,
+            lire_album=jamais,
+        )
+
+    def test_le_disque_porte_par_l_identite_suffit(self):
+        """Le run streams lit déjà la page titre : son identité porte le disque."""
+        from src.utils.spotify_identity import valider_identite
+
+        identite = {**self._identite(), "album": "Premier mandat"}
+        assert valider_identite(self._fiche(), "X" * 22, lambda sid: identite)

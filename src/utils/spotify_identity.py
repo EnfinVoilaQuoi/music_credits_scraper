@@ -21,6 +21,8 @@ server-rendered : ni Playwright, ni patchright, ni navigateur.
 
 from __future__ import annotations
 
+import re
+
 from src.utils.logger import get_logger
 from src.utils.title_matching import (
     either_contains_as_words,
@@ -28,7 +30,12 @@ from src.utils.title_matching import (
     normalize_title,
 )
 from src.utils.track_mapper import _clean_duration
-from src.utils.version_descriptors import meme_famille, parse_variant, titres_equivalents
+from src.utils.version_descriptors import (
+    meme_famille,
+    parse_variant,
+    titre_generique,
+    titres_equivalents,
+)
 
 logger = get_logger(__name__)
 
@@ -292,8 +299,55 @@ def lire_identite_http(spotify_id: str) -> dict | None:
     return SpotifyIDScraper._identite_depuis_embed(resp.text)
 
 
+def lire_album_page(spotify_id: str) -> str | None:
+    """Lecteur par DÉFAUT du disque d'un ID : la page titre complète (l'embed ne
+    le donne pas). Une page de navigateur par appel — réservé aux titres
+    génériques. Neutralisé en test (conftest)."""
+    from src.scrapers.spotify_web_scraper import lire_identite_page
+
+    try:
+        return (lire_identite_page(spotify_id) or {}).get("album")
+    except Exception as e:  # noqa: BLE001 — une page illisible ne prouve rien
+        logger.debug(f"Disque Spotify illisible ({spotify_id}) : {e}")
+        return None
+
+
+_GROUPE_DE_DISQUE = re.compile(r"\s*(?:[\(\[][^\)\]]*[\)\]]|\s[-–]\s.*$)")
+
+
+def memes_disques(a: str | None, b: str | None) -> bool:
+    """PUR. Deux titres de disque désignent-ils le même album, éditions
+    comprises (« Temps mort » / « Temps mort (Réédition) », « Adamant-ium »
+    2016 / 2020) ?"""
+    if not a or not b:
+        return False
+    nus = [normalize_title(_GROUPE_DE_DISQUE.sub("", x)) for x in (a, b)]
+    return bool(nus[0]) and (nus[0] == nus[1] or either_contains_as_words(nus[0], nus[1]))
+
+
+def motif_titre_generique(track, identite: dict | None, album: str | None) -> str | None:
+    """PUR. Un titre GÉNÉRIQUE (« Intro », « Interlude », « Outro ») ne désigne
+    une piste que dans SON disque (2026-10-13) : Diam's « Intro » (*Premier
+    mandat*) portait l'Intro de *Brut de femme*, Josman « Outro » (*Reste
+    Calme*) « Outro Cypher » de 2024. Même règle que le gate Deezer. Sans disque
+    lisible, rien ne prouve que c'est la bonne : refus."""
+    if not titre_generique(track.title or "") or not getattr(track, "album", None):
+        return None
+    album = (identite or {}).get("album") or album
+    if not album:
+        return f"titre générique : le disque Spotify est illisible, attendu « {track.album} »"
+    if not memes_disques(album, track.album):
+        return f"titre générique : piste du disque « {album} », attendu « {track.album} »"
+    return None
+
+
 def _juger(
-    track, spotify_id: str, identite: dict | None, tolerance: int, titres_tranches: bool = False
+    track,
+    spotify_id: str,
+    identite: dict | None,
+    tolerance: int,
+    titres_tranches: bool = False,
+    album: str | None = None,
 ) -> bool:
     """Décision COMMUNE aux voies sync et async : seul le transport diffère.
 
@@ -323,6 +377,9 @@ def _juger(
     accepte, motif = identite_concorde(
         track, identite, tolerance=tolerance, titres_tranches=titres_tranches
     )
+    if accepte:
+        motif = motif_titre_generique(track, identite, album)
+        accepte = motif is None
     if not accepte:
         logger.warning(f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — {motif}")
     return accepte
@@ -335,6 +392,7 @@ def valider_identite(
     *,
     tolerance=TOLERANCE_DUREE,
     titres_tranches: bool = False,
+    lire_album=None,
 ):
     """Vérifie qu'un ID désigne bien ce morceau avant de l'accepter (voie sync).
 
@@ -345,13 +403,34 @@ def valider_identite(
     if not spotify_id:
         return False
     lecteur = lire_identite or lire_identite_http
-    return _juger(track, spotify_id, lecteur(spotify_id), tolerance, titres_tranches)
+    identite = lecteur(spotify_id)
+    album = None
+    if _disque_a_lire(track, identite):
+        album = (lire_album or lire_album_page)(spotify_id)
+    return _juger(track, spotify_id, identite, tolerance, titres_tranches, album)
+
+
+def _disque_a_lire(track, identite) -> bool:
+    """La page titre ne se lit que pour un titre générique d'une fiche à
+    disque connu, quand l'identité ne porte pas déjà le disque."""
+    return bool(
+        titre_generique(track.title or "")
+        and getattr(track, "album", None)
+        and not (identite or {}).get("album")
+    )
 
 
 async def valider_identite_async(
-    track, spotify_id: str, lire_identite, *, tolerance=TOLERANCE_DUREE
+    track, spotify_id: str, lire_identite, *, tolerance=TOLERANCE_DUREE, lire_album=None
 ):
-    """Miroir async : même décision, transport différent."""
+    """Miroir async : même décision, transport différent. La page titre (titre
+    générique) se lit hors de la boucle : son pont sync l'exige."""
     if not spotify_id:
         return False
-    return _juger(track, spotify_id, await lire_identite(spotify_id), tolerance)
+    import asyncio
+
+    identite = await lire_identite(spotify_id)
+    album = None
+    if _disque_a_lire(track, identite):
+        album = await asyncio.to_thread(lire_album or lire_album_page, spotify_id)
+    return _juger(track, spotify_id, identite, tolerance, album=album)

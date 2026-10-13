@@ -54,6 +54,8 @@ def _oracle_spotify_hors_ligne(monkeypatch):
     lecteur (ou appelle `identite_concorde`, qui est pur).
     """
     monkeypatch.setattr("src.utils.spotify_identity.lire_identite_http", lambda spotify_id: None)
+    # La page titre (disque d'un titre générique) ouvrirait un navigateur.
+    monkeypatch.setattr("src.utils.spotify_identity.lire_album_page", lambda spotify_id: None)
     # Même règle pour l'oracle Deezer de l'audit des ids (2026-09-22) et de
     # l'audit des ISRC hérités (2026-09-23).
     monkeypatch.setattr("src.utils.deezer_identity.lire_piste_http", lambda deezer_id: None)

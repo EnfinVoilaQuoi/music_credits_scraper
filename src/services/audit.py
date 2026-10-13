@@ -41,7 +41,7 @@ from src.utils.concordance_paroles import (
     paroles_de_reference,
     recouvrement_bigrammes,
 )
-from src.utils.duree_youtube import NON_MORCEAU
+from src.utils.duree_youtube import NON_MORCEAU, est_un_clip
 from src.utils.title_matching import cle_album, normalize_title
 from src.utils.version_descriptors import (
     Kind,
@@ -334,7 +334,12 @@ def durees(c, pistes) -> list[Cas]:
         # La MÊME règle que le run YTM (`duree_youtube`, CORRECTIFS 1.10).
         fiche = SimpleNamespace(title=t["title"])
         vids = videos.get(t["id"], [])
-        if not any(not NON_MORCEAU.search(v.title) and video_nomme(fiche, v) for v in vids):
+        if not any(
+            not NON_MORCEAU.search(v.title)
+            and not est_un_clip(v.title, fiche.title)
+            and video_nomme(fiche, v)
+            for v in vids
+        ):
             cas.append(
                 Cas(
                     "duree_video",

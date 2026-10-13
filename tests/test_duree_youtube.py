@@ -154,3 +154,33 @@ def test_un_lien_coupe_est_refuse(data_manager):
     apres = {t.title: t for t in data_manager.get_artist_tracks(booba.id)}
     assert apres["HLM 3"].deezer_id is None and apres["Destinée"].deezer_id == 111
     assert 504992422 in deezer_refuses(apres["HLM 3"])
+
+
+class TestClips:
+    """« La mention Clip officiel doit bloquer la durée » (décision utilisateur
+    2026-10-13) — une captation aussi, sauf pour une fiche qui en est une."""
+
+    def test_un_clip_ne_donne_pas_sa_duree_hors_plateformes(self):
+        clip = {"duration": 252, "channel": "X", "title": "Josman - Crise (Clip Officiel)"}
+        assert duree_a_declarer([clip], True) is None
+
+    def test_une_captation_de_freestyle_est_la_publication(self):
+        video = {
+            "duration": 298,
+            "channel": "Mouv'",
+            "title": "SADEK : Freestyle (Live @ Mouv' studios)",
+        }
+        assert duree_a_declarer([video], True, titre_fiche="Freestyle Le Mouv") == (
+            298,
+            "youtube_video",
+        )
+        assert duree_a_declarer([video], True, titre_fiche="Khameuj") is None
+
+    def test_est_un_clip(self):
+        from src.utils.duree_youtube import est_un_clip
+
+        assert est_un_clip("Kid Cudi - Company [Official Video]")
+        assert est_un_clip("PLK - peur de me tromper (CLIP)")
+        assert not est_un_clip("Qui sème le vent récolte le tempo")
+        assert est_un_clip("Orelsan - Basique en LIVE !", "Basique (Acoustic)")
+        assert not est_un_clip("Lunatic - Le crime paie - live rare", "Le crime paie (Live)")

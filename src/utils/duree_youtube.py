@@ -75,13 +75,31 @@ FICHE_EMISSION = re.compile(
 )
 
 
-#: Une vidéo de chaîne officielle qui est un CLIP (ou une captation) : son
-#: montage diffère de l'album (« On contrôle la zone » : clip 4:04, CD 4:48).
+#: Un CLIP a son propre montage (« On contrôle la zone » : clip 4:04, CD 4:48 ;
+#: décision utilisateur 2026-10-13 : « la mention Clip officiel doit bloquer
+#: la durée »).
 CLIP = re.compile(
     r"\bclip\b|official\s+(?:music\s+)?video|vid[ée]o\s+(?:officielle|clip)|music\s+video|"
-    r"\bteaser\b|\btrailer\b|making\s+of|\blive\b|\bconcert\b",
+    r"\bteaser\b|\btrailer\b|making\s+of",
     re.IGNORECASE,
 )
+#: Une CAPTATION (live, concert) : autre prise que le studio — sauf pour une
+#: fiche qui EST une captation (freestyle, session, live), dont elle est la
+#: publication.
+CAPTATION = re.compile(r"\blive\b|\bconcert\b", re.IGNORECASE)
+
+
+def est_un_clip(titre_video: str | None, titre_fiche: str | None = None) -> bool:
+    """PUR. La vidéo est-elle un clip ou une captation dont la durée n'est pas
+    celle de la fiche ?"""
+    if not titre_video:
+        return False
+    if CLIP.search(titre_video):
+        return True
+    return bool(CAPTATION.search(titre_video)) and not (
+        titre_fiche and FICHE_EMISSION.search(titre_fiche)
+    )
+
 
 #: Un lien de plateforme plus court que la vidéo officielle d'au moins
 #: max(15 s, 10 %) en est un extrait ou une version coupée.
@@ -125,7 +143,6 @@ def duree_a_declarer(
     from src.utils.chaines_youtube import LEAKS, OFFICIELLE
 
     nature = nature or (lambda v: None)
-    live_attendu = bool(titre_fiche and re.search(r"\blive\b", titre_fiche, re.IGNORECASE))
     officielles = [
         v["duration"]
         for v in videos
@@ -133,7 +150,7 @@ def duree_a_declarer(
         and v.get("title")
         and nature(v) == OFFICIELLE
         and not NON_MORCEAU.search(v["title"])
-        and not (CLIP.search(v["title"]) and not (live_attendu and "live" in v["title"].lower()))
+        and not est_un_clip(v["title"], titre_fiche)
         and (recevable is None or recevable(v))
         and v["duration"] <= DUREE_MAX_MORCEAU
     ]
@@ -149,9 +166,10 @@ def duree_a_declarer(
     autres = [
         v["duration"]
         for v in videos
-        if v.get("duration")
-        and v.get("title")
-        and not NON_MORCEAU.search(v["title"])
+        if v.get("duration") and v.get("title") and not NON_MORCEAU.search(v["title"])
+        # Un clip a son propre montage (décision utilisateur 2026-10-13 : « la
+        # mention Clip officiel doit bloquer la durée ») — même hors plateformes.
+        and not est_un_clip(v["title"], titre_fiche)
         and (recevable is None or recevable(v) or nature(v) == LEAKS)
         and (
             v["duration"] <= DUREE_MAX_MORCEAU

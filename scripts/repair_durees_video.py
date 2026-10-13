@@ -23,7 +23,7 @@ from sqlalchemy import text
 from src.services.revue import video_nomme
 from src.utils.data_manager import DataManager
 from src.utils.database_backup import get_backup_manager
-from src.utils.duree_youtube import NON_MORCEAU, SOURCE_VIDEO
+from src.utils.duree_youtube import NON_MORCEAU, SOURCE_VIDEO, est_un_clip
 
 
 def candidates(dm) -> list[dict]:
@@ -51,7 +51,12 @@ def candidates(dm) -> list[dict]:
     for r in lignes:
         fiche = SimpleNamespace(title=r["title"])
         vids = videos.get(r["id"], [])
-        if not any(not NON_MORCEAU.search(v.title) and video_nomme(fiche, v) for v in vids):
+        if not any(
+            not NON_MORCEAU.search(v.title)
+            and not est_un_clip(v.title, fiche.title)
+            and video_nomme(fiche, v)
+            for v in vids
+        ):
             faits.append({**r, "video": vids[0].title if vids else None})
     return faits
 

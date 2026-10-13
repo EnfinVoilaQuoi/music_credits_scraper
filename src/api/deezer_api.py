@@ -166,6 +166,7 @@ class DeezerAPI:
         previous_duration=None,
         artist_deezer_id: int | None = None,
         album: str | None = None,
+        autres_albums: frozenset = frozenset(),
     ) -> dict | None:
         """Le hit de recherche qui EST ce morceau, ou None.
 
@@ -179,7 +180,9 @@ class DeezerAPI:
         pour « Durag » (5 % d'ids faux en base). Refuser est un bon résultat.
         """
         data = self._make_request("search", self._search_params(artist, title))
-        return self._choisir_hit(data, artist, title, previous_duration, artist_deezer_id, album)
+        return self._choisir_hit(
+            data, artist, title, previous_duration, artist_deezer_id, album, autres_albums
+        )
 
     async def search_track_async(
         self,
@@ -190,10 +193,13 @@ class DeezerAPI:
         previous_duration=None,
         artist_deezer_id: int | None = None,
         album: str | None = None,
+        autres_albums: frozenset = frozenset(),
     ) -> dict | None:
         """Jumeau async de `search_track` (mêmes params, même gate)."""
         data = await self._make_request_async(http, "search", self._search_params(artist, title))
-        return self._choisir_hit(data, artist, title, previous_duration, artist_deezer_id, album)
+        return self._choisir_hit(
+            data, artist, title, previous_duration, artist_deezer_id, album, autres_albums
+        )
 
     @staticmethod
     def _search_params(artist: str, title: str) -> dict:
@@ -203,7 +209,13 @@ class DeezerAPI:
 
     @staticmethod
     def _choisir_hit(
-        data: dict | None, artist: str, title: str, previous_duration, artist_deezer_id, album=None
+        data: dict | None,
+        artist: str,
+        title: str,
+        previous_duration,
+        artist_deezer_id,
+        album=None,
+        autres_albums=frozenset(),
     ) -> dict | None:
         """Le gate, UNE fois pour les deux voies (« corriger un jumeau, c'est
         corriger les deux »). Jamais `data[0]`."""
@@ -215,6 +227,7 @@ class DeezerAPI:
             previous_duration=previous_duration,
             artist_deezer_id=artist_deezer_id,
             album=album,
+            autres_albums=autres_albums,
         )
         if hit is None:
             logger.info(f"Deezer : aucun hit concordant pour {artist} - {title} ({len(hits)} lus)")
@@ -596,6 +609,7 @@ class DeezerAPI:
         artist_deezer_id: int | None = None,
         deezer_id: int | None = None,
         album: str | None = None,
+        autres_albums: frozenset = frozenset(),
     ) -> dict[str, Any]:
         """
         Enrichit les données d'un track avec vérifications
@@ -624,6 +638,7 @@ class DeezerAPI:
                     previous_duration=previous_duration,
                     artist_deezer_id=artist_deezer_id,
                     album=album,
+                    autres_albums=autres_albums,
                 )
             if track_data is None:
                 obs.absent("aucun hit concordant")
@@ -642,6 +657,7 @@ class DeezerAPI:
         artist_deezer_id: int | None = None,
         deezer_id: int | None = None,
         album: str | None = None,
+        autres_albums: frozenset = frozenset(),
     ) -> dict[str, Any]:
         """Jumeau async d'`enrich_track` (mêmes vérifications, même forme de retour)."""
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
@@ -658,6 +674,7 @@ class DeezerAPI:
                     previous_duration=previous_duration,
                     artist_deezer_id=artist_deezer_id,
                     album=album,
+                    autres_albums=autres_albums,
                 )
             if track_data is None:
                 obs.absent("aucun hit concordant")

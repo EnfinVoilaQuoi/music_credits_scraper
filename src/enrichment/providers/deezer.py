@@ -16,6 +16,7 @@ from src.models import ReleaseObservation, Track
 from src.observability.issues import SansReponse
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.corrections_fiches import deezer_refuses
+from src.utils.deezer_identity import albums_des_homonymes
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -85,6 +86,7 @@ class DeezerProvider:
                 # B0 : la piste déjà liée se LIT par son id.
                 deezer_id=track.deezer_id,
                 album=track.album,
+                autres_albums=albums_des_homonymes(track, ctx.artist_tracks),
             )
             # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
             track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")
@@ -124,6 +126,7 @@ class DeezerProvider:
                 # B0 : la piste déjà liée se LIT par son id.
                 deezer_id=track.deezer_id,
                 album=track.album,
+                autres_albums=albums_des_homonymes(track, ctx.artist_tracks),
             )
             # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
             track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")

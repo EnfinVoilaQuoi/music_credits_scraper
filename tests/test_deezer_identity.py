@@ -206,3 +206,40 @@ def test_un_titre_generique_exige_le_meme_disque():
     # Un titre qui n'est pas générique ne dépend pas du disque (best-of, single).
     hit["title"] = "Tallac"
     assert hit_concorde(hit, artist_name="Booba", title="Tallac", album="Autopsie Vol. 3")[0]
+
+
+def test_la_piste_du_disque_d_une_autre_fiche_est_la_sienne():
+    """Kanye, 2026-10-13 : « GONE » (VULTURES 3) portait la « Gone » de *Late
+    Registration*, « KING » (VULTURES 1) celle de *BULLY* — une autre fiche au
+    même titre a sa place sur ce disque."""
+    from types import SimpleNamespace
+
+    from src.utils.deezer_identity import albums_des_homonymes, hit_concorde
+
+    gone = SimpleNamespace(id=1, title="GONE", album="VULTURES 3")
+    fiches = [
+        gone,
+        SimpleNamespace(id=2, title="Gone", album="Late Registration"),
+        SimpleNamespace(id=3, title="Heard 'Em Say", album="Late Registration"),
+    ]
+    autres = albums_des_homonymes(gone, fiches)
+    hit = {
+        "title": "Gone",
+        "duration": 333,
+        "artist": {"id": 1, "name": "Kanye West"},
+        "album": {"title": "Late Registration"},
+    }
+    ok, motif = hit_concorde(
+        hit, artist_name="Kanye West", title="GONE", album="VULTURES 3", autres_albums=autres
+    )
+    assert not ok and "autre fiche" in motif
+    # La fiche du disque garde sa piste ; sans homonyme, rien ne change.
+    gone_lr = fiches[1]
+    assert hit_concorde(
+        hit,
+        artist_name="Kanye West",
+        title="Gone",
+        album="Late Registration",
+        autres_albums=albums_des_homonymes(gone_lr, fiches),
+    )[0]
+    assert hit_concorde(hit, artist_name="Kanye West", title="GONE", album="VULTURES 3")[0]

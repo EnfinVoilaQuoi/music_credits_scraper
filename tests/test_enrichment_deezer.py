@@ -30,10 +30,12 @@ class _FakeDeezerClient:
         artist_deezer_id=None,
         deezer_id=None,
         album=None,
+        autres_albums=frozenset(),
     ):
         self.calls.append((artist, title, previous_duration, scraped_release_date))
         self.ids = getattr(self, "ids", []) + [artist_deezer_id]
         self.piste_ids = getattr(self, "piste_ids", []) + [deezer_id]
+        self.autres_albums = autres_albums
         return self._result
 
     async def enrich_track_async(
@@ -46,6 +48,7 @@ class _FakeDeezerClient:
         artist_deezer_id=None,
         deezer_id=None,
         album=None,
+        autres_albums=frozenset(),
     ):
         """Jumeau async : même signature au `http` près (session partagée)."""
         self.calls.append((artist, title, previous_duration, scraped_release_date))
@@ -409,3 +412,16 @@ class TestIdDeezerDeLArtiste:
         track.is_featuring, track.primary_artist_name = True, "Swing"
         DeezerProvider(client).enrich(track, EnrichmentContext())
         assert client.ids == [None]
+
+
+def test_les_disques_des_homonymes_sont_transmis_au_gate():
+    """Kanye « GONE » : le disque d'une autre fiche au même titre est passé
+    au gate (`hit_concorde`), qui en écarte la piste (2026-10-13)."""
+    client = _FakeDeezerClient({"success": False, "error": "not found"})
+    track = Track(title="GONE", artist=Artist(name="Kanye West"))
+    track.album = "VULTURES 3"
+    autre = Track(title="Gone", artist=Artist(name="Kanye West"))
+    autre.album = "Late Registration"
+    autre.id = 2
+    DeezerProvider(client).enrich(track, EnrichmentContext(artist_tracks=[track, autre]))
+    assert client.autres_albums == {"late registration"}

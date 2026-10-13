@@ -125,6 +125,7 @@ def hit_concorde(
     noms_acceptes=(),
     tolerance: int = TOLERANCE_DUREE,
     album: str | None = None,
+    autres_albums: frozenset = frozenset(),
 ) -> tuple[bool, str]:
     """Le hit est-il le morceau cherché ? → `(verdict, motif)`.
 
@@ -132,7 +133,9 @@ def hit_concorde(
        FORMATIONS et alias confirmés (`noms_acceptes`) — cf. `artiste_etranger`.
     2. **Titre** — OBLIGATOIRE : `titres_equivalents` (mêmes titres normalisés,
        ou même socle avec descripteurs de version de la même famille).
-    3. **Durée** — seulement quand la fiche en a une (`previous_duration`) :
+    3. **Disque** — un hit du disque d'une AUTRE fiche au titre équivalent
+       (`autres_albums`, clés `cle_album`) est la piste de cette fiche-là.
+    4. **Durée** — seulement quand la fiche en a une (`previous_duration`) :
        au-delà de `tolerance`, c'est un autre enregistrement.
 
     `hit=None` rend `(False, "aucun hit")` : contrairement à Spotify, on ne juge
@@ -156,11 +159,34 @@ def hit_concorde(
     disque = ((hit.get("album") or {}).get("title")) or ""
     if album and disque and titre_generique(title) and cle_album(disque) != cle_album(album):
         return False, f"titre générique : piste du disque « {disque} », attendu « {album} »"
+    # La piste d'un disque où une AUTRE fiche au titre équivalent a sa place
+    # est la sienne : Kanye « GONE » (VULTURES 3) portait la « Gone » de *Late
+    # Registration*, « KING » (VULTURES 1) celle de *BULLY* (2026-10-13).
+    if (
+        album
+        and disque
+        and cle_album(disque) != cle_album(album)
+        and cle_album(disque) in autres_albums
+    ):
+        return False, f"piste du disque « {disque} », celui d'une autre fiche au même titre"
     duree_base = _clean_duration(previous_duration)
     duree_hit = _clean_duration(hit.get("duration"))
     if duree_base and duree_hit and abs(duree_base - duree_hit) > tolerance:
         return False, f"durée : {duree_base} s attendus, {duree_hit} s chez Deezer"
     return True, ""
+
+
+def albums_des_homonymes(track, fiches) -> frozenset:
+    """PUR. Les disques (`cle_album`) des AUTRES fiches de l'artiste au titre
+    équivalent à celui de `track` — critère `autres_albums` de `hit_concorde`."""
+    return frozenset(
+        cle_album(f.album)
+        for f in fiches or ()
+        if f is not track
+        and (track.id is None or f.id != track.id)
+        and f.album
+        and titres_equivalents(f.title, track.title)
+    )
 
 
 def choisir_hit(hits, **criteres) -> dict | None:

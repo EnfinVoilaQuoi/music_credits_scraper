@@ -220,8 +220,32 @@ def test_un_poste_de_tournage_n_est_pas_un_producteur():
     assert [(c.name, c.role.value) for c in parse_description_clip(texte)] == [
         ("Julien Gauthier", "Video Director"),
         ("Dtweezer", "Producer"),
-        ("Kore", "Producer"),
+        # « Production : X » est la boîte qui a tourné le clip — mesuré le
+        # 2026-10-13 : 53 producteurs justes pour 310 faux sous cette forme.
     ]
+
+
+def test_la_production_du_clip_n_est_pas_celle_du_morceau():
+    """2026-10-13, mesuré sur 8 226 descriptions réelles."""
+    from src.utils.credits_description import parse_description_clip
+
+    def producteurs(texte):
+        return [c.name for c in parse_description_clip(texte) if c.role.value == "Producer"]
+
+    # Société, coproduction, post-production, exécutive : jamais.
+    assert producteurs("Production : Solab\nCoproduction : Abyssal\nPost-production : Firm") == []
+    assert producteurs("Prod exe sous-marine : Splashprod") == []
+    # « Produit par » quand l'équipe de tournage est créditée = la vidéo…
+    assert producteurs("Réalisé par Victor Ohmer\nProduit par Mind") == []
+    # … sauf si la ligne parle de musique.
+    assert producteurs("Réalisé par X\nComposé et produit par Narco Verra Beatz") == [
+        "Narco Verra Beatz"
+    ]
+    # Les formes du rap FR restent.
+    assert producteurs("Prod : KobéBeats") == ["KobéBeats"]
+    assert producteurs("Josman - Dans le Vide (Prod. Eazy Dew)") == ["Eazy Dew"]
+    # La prose des pages de fuites n'est pas un nom.
+    assert producteurs("produced by has all of the original verses from Travis") == []
 
 
 # Description réelle (Jazzy Bazz « 1989 Freestyle », clip officiel, relevée le

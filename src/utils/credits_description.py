@@ -197,11 +197,71 @@ _POSTES_DE_TOURNAGE = re.compile(
 )
 
 
+#: Production qui n'est pas celle du MORCEAU : coproduction, post-production,
+#: production exécutive (« Prod exe sous-marine : Splashprod », « Production
+#: exécutive : 386 Lab »).
+_PRODUCTION_NON_MUSICALE = re.compile(
+    r"\b(?:co-?production|post[- ]?prod(?:uction)?|prod(?:uction)?\.?\s*ex[ée]c?(?:utive)?"
+    r"|ex[ée]cutive)\b",
+    re.IGNORECASE,
+)
+#: « Production : Solab », « Production - Beaucartel » : la boîte qui a tourné le clip.
+_LIGNE_PRODUCTION = re.compile(r"\bproduction\s*[:\-–]", re.IGNORECASE)
+#: L'équipe de TOURNAGE est créditée dans la description : « Produit par » /
+#: « Produced by » y désigne le producteur de la vidéo, sauf si la ligne parle
+#: de musique.
+_EQUIPE_DE_TOURNAGE = re.compile(
+    r"\b(?:r[ée]alis[ée]e?|r[ée]alisation|directed|director|dop|chef op\w*|montage|"
+    r"[ée]talonnage|cam[ée]ra|steadicam|stylis\w*|maquillage|make.?up|gaffer|editor|"
+    r"edited by|colorist|vfx)\b",
+    re.IGNORECASE,
+)
+_PRODUIT_PAR = re.compile(r"\b(?:produced by|produit par|production by)\b", re.IGNORECASE)
+_MOT_DE_MUSIQUE = re.compile(
+    r"\b(?:compos\w*|beat|instru\w*|son|music|musique|song|morceau|titre|mix\w*|master\w*"
+    r"|enregistr\w*|recorded)\b",
+    re.IGNORECASE,
+)
+#: Un nom de SOCIÉTÉ de production vidéo, pas un beatmaker.
+_SOCIETE = re.compile(
+    r"(?:prod\b|prods\b|production|studio|films?\b|\blab\b|pictures|m[ée]dia|agency|collective)",
+    re.IGNORECASE,
+)
+#: De la prose ou un débris, pas un nom (« has all of the original verses from
+#: Travis », « enregistré », « 2020 », « Asst. / Runner: … »).
+_PROSE = re.compile(
+    r"\b(?:the|was|is|are|of|with|from|later|original|verses?|leak(?:ed)?|version|"
+    r"track(?:list)?|enregistr\w*|mix(?:ed)?|scratch|runner|asst\.?|assistant|which|this|"
+    r"that|en|et|le|la|les|des|du|une?|par|by|pour)\b|\d{4}",
+    re.IGNORECASE,
+)
+
+
+def _producteur_plausible(nom: str) -> bool:
+    mots = nom.split()
+    return (
+        1 <= len(mots) <= 4
+        and (nom[:1].isalnum() or nom[:1] == "$")  # « $herwood »
+        and not nom.isdigit()
+        and not _SOCIETE.search(nom)
+        and not _PROSE.search(nom)
+    )
+
+
 def parse_description_clip(text: str) -> list[Credit]:
-    """Parse une description de clip officiel avec des motifs fermés FR/EN."""
+    """Parse une description de clip officiel avec des motifs fermés FR/EN.
+
+    Le PRODUCTEUR d'un clip est souvent celui de la vidéo : mesuré le
+    2026-10-13 sur 8 226 descriptions réelles contre Genius, Discogs et les
+    Topic, 949 justes pour 969 faux. Écartés : la production non musicale
+    (coproduction, post-production, exécutive), les lignes « Production : »,
+    « Produit par / Produced by » quand l'équipe de tournage est créditée, les
+    noms de société et la prose — 743 justes pour 258 faux, dont une bonne part
+    sont de vrais producteurs que la référence ignore (« Prod : KobéBeats »)."""
     if not text:
         return []
 
+    tournage = bool(_EQUIPE_DE_TOURNAGE.search(text))
     credits: list[Credit] = []
     for line in text.splitlines():
         line = line.strip()
@@ -209,8 +269,17 @@ def parse_description_clip(text: str) -> list[Credit]:
             continue
         for pattern, role in _CLIP_PATTERNS:
             m = pattern.search(line)
-            if m:
-                for name in _split_names(m.group(1)):
-                    credits.append(Credit(name=name, role=role, source="youtube_clip"))
-                break
+            if not m:
+                continue
+            if role is CreditRole.PRODUCER and (
+                _PRODUCTION_NON_MUSICALE.search(line)
+                or _LIGNE_PRODUCTION.search(line)
+                or (tournage and _PRODUIT_PAR.search(line) and not _MOT_DE_MUSIQUE.search(line))
+            ):
+                continue  # la ligne peut nommer un autre poste (« … / Mastering : X »)
+            for name in _split_names(m.group(1)):
+                if role is CreditRole.PRODUCER and not _producteur_plausible(name):
+                    continue
+                credits.append(Credit(name=name, role=role, source="youtube_clip"))
+            break
     return credits

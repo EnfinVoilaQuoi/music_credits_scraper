@@ -173,3 +173,24 @@ class TestATrancher:
             data_manager.save_track(Track(title=titre, artist=a))
         audit = au.auditer(data_manager, ["Isha"], persistance=False, revue=False)
         assert not any(c.famille.startswith("revue:") for c in audit.cas)
+
+
+@pytest.mark.parametrize(
+    "titre, court",
+    [
+        ("Interlude : Lucien", True),
+        ("YZY SND (Skit)", True),
+        ("Hasta La Vista (Intro)", True),
+        ("Intro", True),
+        ("ISABELLA", False),
+        ("RXN", False),
+        ("Introspection", False),
+    ],
+)
+def test_un_titre_qui_annonce_un_morceau_court(titre, court):
+    """2026-10-13 : les « Interlude : … » des Cool Sessions de MC Solaar (15-24 s)
+    criaient « durée aberrante » ; un titre qui annonce un morceau court n'est
+    pas suspect sous 25 s — « ISABELLA » à 9 s, si."""
+    from src.services.audit import court_par_nature
+
+    assert court_par_nature(titre) is court

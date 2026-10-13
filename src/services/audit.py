@@ -293,9 +293,23 @@ def durees(c, pistes) -> list[Cas]:
             d = int(t["duration"]) if t["duration"] is not None else None
         except (TypeError, ValueError):
             d = None
-        if d is not None and (d < 25 or d > 900):
+        if d is not None and (d < 25 and not court_par_nature(t["title"]) or d > 900):
             cas.append(Cas("duree_aberrante", t["artiste"], [t["id"]], f"{_lib(t)} {d}s"))
     return cas
+
+
+_COURT = re.compile(r"\b(?:intro|interlude|skit|outro|prelude|prélude)\b", re.IGNORECASE)
+
+
+def court_par_nature(titre: str | None) -> bool:
+    """PUR. Un titre qui ANNONCE un morceau court (intro, interlude, skit,
+    outro) : moins de 25 s n'y est pas aberrant. Mesuré le 2026-10-13 : 20 des
+    26 durées sous 25 s de la base (les « Interlude : … » des Cool Sessions de
+    MC Solaar, 15-24 s, arrivés avec le lot de streams) ; restent les vrais
+    suspects (« ISABELLA » 9 s, « RXN » 7 s, « SICKO MODE (ref. CyHi) » 12 s)."""
+    t = titre or ""
+    principal = re.split(r"[:(\[]", t, maxsplit=1)[0]
+    return titre_generique(principal) or bool(_COURT.search(t))
 
 
 def certifs(pistes) -> list[Cas]:

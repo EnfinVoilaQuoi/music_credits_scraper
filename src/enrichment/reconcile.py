@@ -143,7 +143,12 @@ DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
     # n'ont pas : les deux ne se croisent pas) (2026-09-27).
     # `apple_music` (lot B6, 2026-09-29) : la fiche iTunes d'un identifiant
     # VÉRIFIÉ — le fichier du distributeur, comme l'audio Topic (mesuré à ±1 s).
+    # `youtube_officiel` (2026-10-13) : la vidéo, hors clip, d'une chaîne
+    # OFFICIELLE déclarée (`chaines_youtube`) — décision utilisateur : elle fait
+    # foi, devant Deezer, dont le fichier peut être l'extrait d'une compilation
+    # (« HLM 3 » : 128 s pour 319 s).
     "duration": (
+        "youtube_officiel",
         "deezer",
         "ytmusic",
         "youtube",

@@ -5348,7 +5348,8 @@ class TrackRepository:
                         conn.execute(
                             text(
                                 "DELETE FROM observations WHERE track_id = :tid "
-                                "AND field = 'duration' AND source IN ('youtube', 'youtube_video')"
+                                "AND field = 'duration' AND source IN "
+                                "('youtube', 'youtube_video', 'youtube_officiel')"
                             ),
                             {"tid": tid},
                         )

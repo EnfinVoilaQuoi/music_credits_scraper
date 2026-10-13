@@ -50,7 +50,16 @@ logger = get_logger(__name__)
 #: Sources de durée INDÉPENDANTES de l'ID Spotify (`DISCOGRAPHY_PRIORITIES`
 #: hors spotify_web et reccobeats, qui lisent la durée PAR l'ID).
 DUREES_INDEPENDANTES = frozenset(
-    {"deezer", "ytmusic", "youtube", "apple_music", "songbpm", "youtube_video", "manual"}
+    {
+        "deezer",
+        "ytmusic",
+        "youtube",
+        "youtube_officiel",
+        "apple_music",
+        "songbpm",
+        "youtube_video",
+        "manual",
+    }
 )
 
 

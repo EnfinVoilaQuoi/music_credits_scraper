@@ -24,6 +24,9 @@ import re
 
 SOURCE_AUDIO = "youtube"
 SOURCE_VIDEO = "youtube_video"
+#: Vidéo (hors clip) d'une chaîne OFFICIELLE de l'artiste ou de son label
+#: (`chaines_youtube`, 2026-10-13) : la référence, en tête de l'arbitrage.
+SOURCE_OFFICIEL = "youtube_officiel"
 
 #: Écart toléré entre deux vidéos d'un même morceau pour les dire d'accord.
 TOLERANCE_S = 2
@@ -72,8 +75,37 @@ FICHE_EMISSION = re.compile(
 )
 
 
+#: Une vidéo de chaîne officielle qui est un CLIP (ou une captation) : son
+#: montage diffère de l'album (« On contrôle la zone » : clip 4:04, CD 4:48).
+CLIP = re.compile(
+    r"\bclip\b|official\s+(?:music\s+)?video|vid[ée]o\s+(?:officielle|clip)|music\s+video|"
+    r"\bteaser\b|\btrailer\b|making\s+of|\blive\b|\bconcert\b",
+    re.IGNORECASE,
+)
+
+#: Un lien de plateforme plus court que la vidéo officielle d'au moins
+#: max(15 s, 10 %) en est un extrait ou une version coupée.
+COUPE_MIN_S = 15
+COUPE_MIN_PART = 0.10
+
+
+def lien_coupe(duree_lien: int | None, duree_officielle: int | None) -> bool:
+    """PUR. Le lien (Deezer, Spotify) est-il un BOUT du morceau publié par
+    la chaîne officielle ? « HLM 3 » : 128 s dans une compilation, 319 s
+    chez Lunatic (2026-10-13). Plus LONG, ce n'est pas un extrait : on ne
+    conclut pas."""
+    if not duree_lien or not duree_officielle:
+        return False
+    manque = int(duree_officielle) - int(duree_lien)
+    return manque > max(COUPE_MIN_S, COUPE_MIN_PART * int(duree_officielle))
+
+
 def duree_a_declarer(
-    videos: list[dict], hors_plateformes: bool, recevable=None, titre_fiche: str | None = None
+    videos: list[dict],
+    hors_plateformes: bool,
+    recevable=None,
+    titre_fiche: str | None = None,
+    nature=None,
 ) -> tuple[int, str] | None:
     """`videos` : `{"duration": s, "channel": nom, "title": titre}` des vidéos
     PROPRES à la fiche. Rend `(secondes, source)` ou None — plusieurs vidéos du
@@ -82,7 +114,32 @@ def duree_a_declarer(
     Une vidéo ORDINAIRE ne donne sa durée que si son titre est connu, n'est ni
     un extrait ni une émission (`NON_MORCEAU`), et que `recevable(video)` —
     le juge « la vidéo nomme-t-elle le morceau ? » de l'appelant — l'accepte
-    (décision utilisateur 2026-10-09, CORRECTIFS 1.10)."""
+    (décision utilisateur 2026-10-09, CORRECTIFS 1.10).
+
+    `nature(video)` (`chaines_youtube.nature_de`, 2026-10-13) : une vidéo
+    d'une chaîne `officielle` qui n'est pas un clip donne la durée de
+    référence, plateformes ou non, AVANT l'audio Topic (dont le fichier peut
+    être celui d'une compilation qui n'en garde qu'un bout). Une chaîne de
+    `leaks` est recevable pour une fiche hors plateformes même quand le titre
+    de sa vidéo ne nomme pas la page Genius."""
+    from src.utils.chaines_youtube import LEAKS, OFFICIELLE
+
+    nature = nature or (lambda v: None)
+    live_attendu = bool(titre_fiche and re.search(r"\blive\b", titre_fiche, re.IGNORECASE))
+    officielles = [
+        v["duration"]
+        for v in videos
+        if v.get("duration")
+        and v.get("title")
+        and nature(v) == OFFICIELLE
+        and not NON_MORCEAU.search(v["title"])
+        and not (CLIP.search(v["title"]) and not (live_attendu and "live" in v["title"].lower()))
+        and (recevable is None or recevable(v))
+        and v["duration"] <= DUREE_MAX_MORCEAU
+    ]
+    d = _accord(officielles)
+    if d:
+        return d, SOURCE_OFFICIEL
     topic = [v["duration"] for v in videos if v.get("duration") and est_topic(v.get("channel"))]
     if topic:
         d = _accord(topic)
@@ -95,7 +152,7 @@ def duree_a_declarer(
         if v.get("duration")
         and v.get("title")
         and not NON_MORCEAU.search(v["title"])
-        and (recevable is None or recevable(v))
+        and (recevable is None or recevable(v) or nature(v) == LEAKS)
         and (
             v["duration"] <= DUREE_MAX_MORCEAU
             or titre_fiche is None

@@ -624,6 +624,9 @@ class YTMusicAPI:
                                 item.get("contentDetails", {}).get("duration")
                             ),
                             "channel": item.get("snippet", {}).get("channelTitle"),
+                            # Identifiant stable : reconnaît une chaîne
+                            # officielle déclarée (`chaines_youtube`).
+                            "channel_id": item.get("snippet", {}).get("channelId"),
                             # Le titre dit ce que la vidéo COUVRE : une durée ne
                             # se prend qu'à une vidéo qui nomme le morceau.
                             "title": item.get("snippet", {}).get("title"),

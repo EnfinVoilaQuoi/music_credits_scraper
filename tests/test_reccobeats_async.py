@@ -134,11 +134,6 @@ class TestParIsrc:
         assert _run(client.get_track_info_by_isrc_async(_Http(), "FR2")) is None
         assert [v.issue for v in source_usage.flush()] == [IssueKind.CRASH]
 
-    def test_jumeau_sync_meme_verdict_absent(self, client, monkeypatch):
-        monkeypatch.setattr(client, "get_track_by_isrc", lambda isrc: None)
-        assert client.get_track_info_by_isrc("FR3") is None
-        assert [v.issue for v in source_usage.flush()] == [IssueKind.ABSENT]
-
 
 class TestCycleDeVie:
     def test_context_manager_ferme_la_session(self, client):

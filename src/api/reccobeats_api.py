@@ -100,47 +100,10 @@ class ReccoBeatsIntegratedClient:
 
         return track
 
-    def get_track_from_reccobeats(self, spotify_id: str) -> dict | None:
-        """
-        Récupère les données d'un track depuis ReccoBeats
-
-        Args:
-            spotify_id: L'ID Spotify du track
-
-        Returns:
-            Dictionnaire avec les données du track ou None
-        """
-        try:
-            url = f"{self.recco_base_url}/track"
-            params = {"ids": spotify_id}
-
-            logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
-
-            response = self.recco_session.get(url, params=params, timeout=15)
-            source_usage.record_response(url, response.status_code, headers=response.headers)
-
-            logger.debug(f"📡 Response: Status {response.status_code}")
-
-            if response.status_code == 200:
-                return self._pick_track_from_response(response.json())
-
-            elif response.status_code == 404:
-                logger.warning(f"❌ Track {spotify_id} non trouvé (404)")
-            elif response.status_code == 429:
-                logger.warning("⏰ Rate limit atteint")
-            else:
-                logger.error(f"❌ Erreur {response.status_code}: {response.text[:200]}")
-
-        except (requests.RequestException, ValueError) as e:
-            source_usage.note_failure(_SOURCE, e)
-            logger.error(f"❌ Exception ReccoBeats: {e}")
-
-        return None
-
     async def get_track_from_reccobeats_async(
         self, http: "AsyncHttpSession", spotify_id: str
     ) -> dict | None:
-        """Jumeau async de `get_track_from_reccobeats`."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `get_track_from_reccobeats` est retirée)."""
         try:
             url = f"{self.recco_base_url}/track"
             logger.info(f"🎵 ReccoBeats: Requête pour ID {spotify_id}")
@@ -162,41 +125,10 @@ class ReccoBeatsIntegratedClient:
 
         return None
 
-    def get_track_audio_features(self, reccobeats_id: str) -> dict | None:
-        """
-        Récupère les audio features (BPM, Key, Mode, etc.)
-
-        Args:
-            reccobeats_id: L'ID ReccoBeats du track (différent de l'ID Spotify)
-
-        Returns:
-            Dictionnaire avec les audio features ou None
-        """
-        try:
-            url = f"{self.recco_base_url}/track/{reccobeats_id}/audio-features"
-
-            logger.debug(f"🎼 Audio features: {url}")
-
-            response = self.recco_session.get(url, timeout=15)
-            source_usage.record_response(url, response.status_code, headers=response.headers)
-
-            if response.status_code == 200:
-                features = response.json()
-                logger.info(f"✅ BPM récupéré: {features.get('tempo', 'N/A')}")
-                return features
-            else:
-                logger.warning(f"❌ Audio features erreur {response.status_code}")
-
-        except (requests.RequestException, ValueError) as e:
-            source_usage.note_failure(_SOURCE, e)
-            logger.error(f"❌ Exception audio features: {e}")
-
-        return None
-
     async def get_track_audio_features_async(
         self, http: "AsyncHttpSession", reccobeats_id: str
     ) -> dict | None:
-        """Jumeau async de `get_track_audio_features`."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `get_track_audio_features` est retirée)."""
         try:
             url = f"{self.recco_base_url}/track/{reccobeats_id}/audio-features"
             logger.debug(f"🎼 Audio features: {url}")
@@ -213,63 +145,6 @@ class ReccoBeatsIntegratedClient:
 
         return None
 
-    def get_track_info(
-        self, spotify_id: str, use_cache: bool = True, force_refresh: bool = False
-    ) -> dict | None:
-        """
-        Récupère les informations complètes d'un track (données + audio features)
-
-        Args:
-            spotify_id: L'ID Spotify du track
-            use_cache: Utiliser le cache
-            force_refresh: Forcer un rafraîchissement
-
-        Returns:
-            Dictionnaire avec toutes les données ou None
-        """
-        logger.info(f"🎵 get_track_info pour Spotify ID: {spotify_id}")
-
-        cache_key = self._get_cache_key(spotify_id)
-        cached = self._cached_spotify_info(cache_key, spotify_id, use_cache, force_refresh)
-        if cached is not None:
-            return cached  # servi par le cache : aucune sollicitation de la source
-
-        if self._not_found_is_fresh(cache_key):
-            # Absence deja constatee et non perimee : on ne resollicite pas la source.
-            logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
-            return None
-
-        # UNE observation pour la chaîne track + audio features : c'est un seul
-        # appel logique à ReccoBeats, même s'il coûte deux requêtes.
-        with source_usage.observe(_SOURCE, label=f"spotify:{spotify_id}") as obs:
-            try:
-                # Étape 1: Récupérer les données du track
-                track_data = self.get_track_from_reccobeats(spotify_id)
-
-                if not track_data:
-                    obs.absent(f"Spotify ID {spotify_id} inconnu de ReccoBeats")
-                    self._cache_not_found(cache_key, f"Spotify ID {spotify_id}", obs)
-                    return None
-
-                # Durée + audio features (BPM/Key/Mode...) via helper partagé
-                result = self._enrich_result_with_features(
-                    self._base_spotify_result(spotify_id, track_data), track_data
-                )
-
-                # Sauvegarder en cache
-                self.cache[cache_key] = result
-                self._save_cache()
-
-                logger.info(f"✅ Succès complet pour Spotify ID: {spotify_id}")
-                return result
-
-            except Exception as e:
-                # Dernier ressort : les appels internes gèrent déjà leurs frontières
-                # réseau/parse ; un bug d'orchestration remonte ici → trace complète.
-                obs.fail(IssueKind.CRASH, f"{type(e).__name__}: {e}")
-                logger.exception("❌ Erreur générale get_track_info")
-                return None
-
     async def get_track_info_async(
         self,
         http: "AsyncHttpSession",
@@ -277,7 +152,7 @@ class ReccoBeatsIntegratedClient:
         use_cache: bool = True,
         force_refresh: bool = False,
     ) -> dict | None:
-        """Jumeau async de `get_track_info` (même cache, même forme de retour)."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `get_track_info` est retirée) (même cache, même forme de retour)."""
         logger.info(f"🎵 get_track_info pour Spotify ID: {spotify_id}")
 
         cache_key = self._get_cache_key(spotify_id)
@@ -407,24 +282,10 @@ class ReccoBeatsIntegratedClient:
             except (ValueError, TypeError, KeyError, IndexError) as e:
                 logger.warning(f"⚠️ Erreur conversion musical_key: {e}")
 
-    def _enrich_result_with_features(self, result: dict, track_data: dict) -> dict:
-        """
-        Complète un result de base avec la durée et les audio features
-        (BPM, Key, Mode, energy, danceability, valence, musical_key).
-        Partagé entre la voie Spotify ID et la voie ISRC.
-        """
-        self._apply_duration(result, track_data)
-
-        reccobeats_id = track_data.get("id")
-        if reccobeats_id:
-            logger.debug(f"🎼 Récupération audio features pour ID: {reccobeats_id}")
-            self._apply_audio_features(result, self.get_track_audio_features(reccobeats_id))
-        return result
-
     async def _enrich_result_with_features_async(
         self, http: "AsyncHttpSession", result: dict, track_data: dict
     ) -> dict:
-        """Jumeau async de `_enrich_result_with_features`."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `_enrich_result_with_features` est retirée)."""
         self._apply_duration(result, track_data)
 
         reccobeats_id = track_data.get("id")
@@ -434,27 +295,6 @@ class ReccoBeatsIntegratedClient:
                 result, await self.get_track_audio_features_async(http, reccobeats_id)
             )
         return result
-
-    def get_track_by_isrc(self, isrc: str) -> dict | None:
-        """
-        Récupère le track ReccoBeats correspondant à un ISRC.
-        L'endpoint /track?ids=<isrc> peut renvoyer PLUSIEURS entrées (pressings
-        Spotify distincts) -> on garde la plus populaire.
-        """
-        try:
-            url = f"{self.recco_base_url}/track"
-            response = self.recco_session.get(url, params={"ids": isrc}, timeout=15)
-            logger.info(f"🎵 ReccoBeats: requête ISRC {isrc} (status {response.status_code})")
-
-            if response.status_code != 200:
-                if response.status_code == 429:
-                    logger.warning("⏰ Rate limit ReccoBeats")
-                return None
-
-            return self._best_isrc_hit(response.json().get("content", []))
-        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-            logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
-            return None
 
     @staticmethod
     def spotify_id_du_href(href: str | None) -> str | None:
@@ -528,7 +368,7 @@ class ReccoBeatsIntegratedClient:
         return best
 
     async def get_track_by_isrc_async(self, http: "AsyncHttpSession", isrc: str) -> dict | None:
-        """Jumeau async de `get_track_by_isrc`."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `get_track_by_isrc` est retirée)."""
         try:
             url = f"{self.recco_base_url}/track"
             response = await http.get(url, params={"ids": isrc}, headers=_ASYNC_HEADERS, timeout=15)
@@ -544,51 +384,6 @@ class ReccoBeatsIntegratedClient:
             logger.error(f"❌ Exception ReccoBeats ISRC: {e}")
             return None
 
-    def get_track_info_by_isrc(
-        self, isrc: str, use_cache: bool = True, force_refresh: bool = False
-    ) -> dict | None:
-        """
-        Équivalent de get_track_info mais à partir d'un ISRC (pas de Spotify ID).
-        Même forme de retour (success, bpm, key, mode, musical_key, duration...).
-        """
-        if not isrc:
-            return None
-
-        logger.info(f"🎵 get_track_info_by_isrc pour ISRC: {isrc}")
-        cache_key = f"isrc::{isrc}"
-        cached = self._cached_isrc_info(cache_key, use_cache, force_refresh)
-        if cached is not None:
-            return cached  # servi par le cache : aucune sollicitation de la source
-
-        if self._not_found_is_fresh(cache_key):
-            # Absence deja constatee et non perimee : on ne resollicite pas la source.
-            logger.debug(f"Absence ReccoBeats memorisee, non perimee : {cache_key}")
-            return None
-
-        # Observée comme la voie Spotify ID : sans `observe`, chaque aller-retour
-        # devenait son propre verdict et un ISRC inconnu (200, `content: []`)
-        # comptait comme un OK — or l'ISRC est tenté EN PREMIER (2026-09-15).
-        with source_usage.observe(_SOURCE, label=f"isrc:{isrc}") as obs:
-            try:
-                track_data = self.get_track_by_isrc(isrc)
-                if not track_data:
-                    obs.absent(f"ISRC {isrc} inconnu de ReccoBeats")
-                    self._cache_not_found(cache_key, f"ISRC {isrc}", obs)
-                    return None
-
-                result = self._enrich_result_with_features(
-                    self._base_isrc_result(isrc, track_data), track_data
-                )
-
-                self.cache[cache_key] = result
-                self._save_cache()
-                logger.info(f"✅ Succès complet pour ISRC: {isrc}")
-                return result
-            except Exception as e:
-                obs.fail(IssueKind.CRASH, f"{type(e).__name__}: {e}")
-                logger.exception("❌ Erreur get_track_info_by_isrc")
-                return None
-
     async def get_track_info_by_isrc_async(
         self,
         http: "AsyncHttpSession",
@@ -596,7 +391,7 @@ class ReccoBeatsIntegratedClient:
         use_cache: bool = True,
         force_refresh: bool = False,
     ) -> dict | None:
-        """Jumeau async de `get_track_info_by_isrc` (même cache, même retour)."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `get_track_info_by_isrc` est retirée) (même cache, même retour)."""
         if not isrc:
             return None
 
@@ -661,89 +456,6 @@ class ReccoBeatsIntegratedClient:
             **track_data,
         }
 
-    def get_audio_features_batch(self, reccobeats_ids: list[str]) -> dict[str, dict]:
-        """
-        Récupère les audio features de plusieurs tracks EN UN SEUL appel
-        (GET /audio-features?ids=...), au lieu de N appels /track/{id}/audio-features.
-
-        Args:
-            reccobeats_ids: liste d'IDs ReccoBeats (max 40)
-
-        Returns:
-            Mapping { reccobeats_id: features }
-        """
-        result: dict[str, dict] = {}
-        if not reccobeats_ids:
-            return result
-        try:
-            url = f"{self.recco_base_url}/audio-features"
-            params = {"ids": ",".join(reccobeats_ids[:40])}
-            response = self.recco_session.get(url, params=params, timeout=30)
-            if response.status_code != 200:
-                logger.warning(f"❌ audio-features batch: status {response.status_code}")
-                return result
-            content = response.json().get("content", [])
-            for feat in content:
-                fid = feat.get("id")
-                if fid:
-                    result[fid] = feat
-        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-            logger.error(f"❌ audio-features batch error: {e}")
-        return result
-
-    def get_multiple_tracks_with_bpm(self, ids: list[str]) -> list[dict]:
-        """Récupère plusieurs tracks + audio features EN BATCH (1 appel /track?ids=
-        + 1 appel /audio-features?ids=). `ids` accepte Spotify IDs, ReccoBeats IDs
-        ou ISRC (max 40 — limite API).
-
-        NON câblé à l'orchestrateur GUI (le flux par morceau suffit) : bloc prêt
-        pour un futur « mode d'enrichissement par lots » — cf. WIP.md et
-        OPTIMISATION API.md §4. Retourne la liste de tracks (chacun enrichi de
-        'bpm' + 'audio_features' si dispo)."""
-        try:
-            # Doc ReccoBeats : 1 à 40 valeurs par requête /track?ids=
-            ids = ids[:40]
-            url = f"{self.recco_base_url}/track"
-            params = {"ids": ",".join(ids)}
-            logger.info(f"🎵 Batch request pour {len(ids)} tracks")
-            response = self.recco_session.get(url, params=params, timeout=30)
-            if response.status_code != 200:
-                logger.error(f"❌ Batch request failed: {response.status_code}")
-                return []
-
-            # La réponse est wrappée dans {'content': [...]}
-            tracks = response.json().get("content", [])
-            if not tracks:
-                return []
-
-            # Audio features en UN appel batch, puis mapping par ID ReccoBeats
-            reccobeats_ids = [t["id"] for t in tracks if t.get("id")]
-            features_map = self.get_audio_features_batch(reccobeats_ids)
-            for track in tracks:
-                feats = features_map.get(track.get("id"))
-                if feats:
-                    track["bpm"] = feats.get("tempo")
-                    track["audio_features"] = feats
-
-            logger.info(f"✅ {len(tracks)} tracks enrichis (audio-features en 1 appel)")
-            return tracks
-        except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-            logger.error(f"❌ Batch processing error: {e}")
-            return []
-
-    def get_cache_stats(self) -> dict:
-        """Statistiques du cache"""
-        total = len(self.cache)
-        errors = len([v for v in self.cache.values() if isinstance(v, dict) and "error" in v])
-        success = len([v for v in self.cache.values() if isinstance(v, dict) and v.get("success")])
-
-        return {
-            "total_entries": total,
-            "successful_entries": success,
-            "error_entries": errors,
-            "cache_file": self.cache_file,
-        }
-
     def close(self):
         """Ferme les connexions"""
         try:
@@ -763,39 +475,3 @@ class ReccoBeatsIntegratedClient:
 
 
 # Test simple
-if __name__ == "__main__":
-    from src.utils.logger import configurer_journaux
-
-    configurer_journaux(console="tout")
-
-    client = ReccoBeatsIntegratedClient()
-
-    try:
-        # Test avec un ID Spotify connu
-        test_spotify_id = "3KkXRkHbMCARz0aVfEt68P"  # PNL - Au DD
-
-        print("\n=== Test ReccoBeats ===")
-        print(f"Spotify ID: {test_spotify_id}")
-
-        result = client.get_track_info(test_spotify_id)
-
-        if result:
-            print("\n✅ Succès!")
-            print(f"  - Titre: {result.get('trackTitle', 'N/A')}")
-            print(f"  - Artiste: {result.get('artistName', 'N/A')}")
-            print(f"  - BPM: {result.get('bpm', 'N/A')}")
-            print(f"  - Key: {result.get('key', 'N/A')}")
-            print(f"  - Mode: {result.get('mode', 'N/A')}")
-            print(f"  - Musical Key: {result.get('musical_key', 'N/A')}")
-            print(f"  - Duration: {result.get('duration', 'N/A')}s")
-        else:
-            print("\n❌ Échec")
-
-        # Stats du cache
-        print("\n=== Stats du cache ===")
-        stats = client.get_cache_stats()
-        for key, value in stats.items():
-            print(f"  {key}: {value}")
-
-    finally:
-        client.close()

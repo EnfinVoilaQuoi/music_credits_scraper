@@ -272,8 +272,7 @@ class TestDeezer:
             DeezerAPI._payload_or_none({"error": {"code": 800, "type": "DataException"}})
         assert obs.attempts == []
 
-    @pytest.mark.parametrize("voie", ["sync", "async"])
-    def test_enrich_track_leve_sans_reponse(self, monkeypatch, voie):
+    def test_enrich_track_leve_sans_reponse(self, monkeypatch):
         from src.api.deezer_api import DeezerAPI
 
         api = DeezerAPI()
@@ -287,21 +286,18 @@ class TestDeezer:
         monkeypatch.setattr(api, "search_track", _panne)
         monkeypatch.setattr(api, "search_track_async", _panne_async)
         with pytest.raises(SansReponse):
-            if voie == "sync":
-                api.enrich_track("Isha", "Durag")
-            else:
-                asyncio.run(api.enrich_track_async(None, "Isha", "Durag"))
+            asyncio.run(api.enrich_track_async(None, "Isha", "Durag"))
 
     def test_enrich_track_absence_rend_un_resultat(self, monkeypatch):
         from src.api.deezer_api import DeezerAPI
 
         api = DeezerAPI()
 
-        def _vide(*a, **k):
+        async def _vide(*a, **k):
             source_usage.record_attempt("deezer", IssueKind.OK)
 
-        monkeypatch.setattr(api, "search_track", _vide)
-        assert isinstance(api.enrich_track("Isha", "Durag"), dict)
+        monkeypatch.setattr(api, "search_track_async", _vide)
+        assert isinstance(asyncio.run(api.enrich_track_async(None, "Isha", "Durag")), dict)
 
     def test_provider_attrape_sans_reponse(self):
         from src.enrichment.providers.deezer import DeezerProvider

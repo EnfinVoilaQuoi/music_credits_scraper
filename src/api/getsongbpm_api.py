@@ -8,7 +8,6 @@ IMPORTANT: Backlink obligatoire vers getsongbpm.com pour usage gratuit
 import asyncio
 import os
 import sys
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -236,61 +235,10 @@ class GetSongBPMFetcher:
         # Pas de résultats ou structure inattendue
         return None
 
-    def _search_track(self, artist: str, title: str) -> dict | None:
-        """
-        Recherche un morceau via l'endpoint /search/ et VÉRIFIE le hit.
-
-        Args:
-            artist: Nom de l'artiste
-            title: Titre du morceau
-
-        Returns:
-            Le hit 'song' validé (artiste+titre) ou None
-        """
-        artist, title, params = self._lookup_params(artist, title)
-        url = f"{self.BASE_URL}/search/"
-
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                response = self.session.get(url, params=params, timeout=15)
-                source_usage.record_response(url, response.status_code, headers=response.headers)
-
-                if response.status_code == 200:
-                    return self._selected_from_response(response.json(), artist, title)
-
-                elif response.status_code == 429:
-                    # Rate limit atteint
-                    wait_time = 10 * (attempt + 1)
-                    logger.warning(f"⏰ GetSongBPM : rate limit (429), attente {wait_time} s")
-                    time.sleep(wait_time)
-                    continue
-
-                elif response.status_code == 401:
-                    logger.error("❌ GetSongBPM : clé API invalide ou expirée (401)")
-                    return None
-
-                elif response.status_code == 404:
-                    return None
-
-                else:
-                    logger.warning(f"GetSongBPM : erreur API (HTTP {response.status_code})")
-                    return None
-
-            except requests.exceptions.RequestException as e:
-                source_usage.note_failure(_SOURCE, e)
-                logger.warning(
-                    f"GetSongBPM : erreur réseau (tentative {attempt + 1}/{self.MAX_RETRIES}) : {e}"
-                )
-                if attempt < self.MAX_RETRIES - 1:
-                    time.sleep(2**attempt)
-                continue
-
-        return None
-
     async def _search_track_async(
         self, http: "AsyncHttpSession", artist: str, title: str
     ) -> dict | None:
-        """Jumeau async de `_search_track` (mêmes retries/backoffs, sleep non bloquant)."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `_search_track` est retirée) (mêmes retries/backoffs, sleep non bloquant)."""
         artist, title, params = self._lookup_params(artist, title)
         url = f"{self.BASE_URL}/search/"
 
@@ -381,31 +329,10 @@ class GetSongBPMFetcher:
 
         return song
 
-    def fetch_track_bpm(self, artist: str, title: str) -> SongData:
-        """
-        Récupère BPM et métadonnées pour un morceau
-
-        Args:
-            artist: Nom de l'artiste
-            title: Titre du morceau
-
-        Returns:
-            Objet SongData avec toutes les métadonnées
-        """
-        cached = self._cached_song(artist, title)
-        if cached is not None:
-            return cached  # servi par le cache : aucune sollicitation de la source
-
-        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = self._search_track(artist, title)
-            if track_data is None:
-                obs.absent("aucun hit validé")
-            return self._song_from_track_data(artist, title, track_data)
-
     async def fetch_track_bpm_async(
         self, http: "AsyncHttpSession", artist: str, title: str
     ) -> SongData:
-        """Jumeau async de `fetch_track_bpm` (même cache, même sélection)."""
+        """Voie async (seule voie depuis le 2026-10-13, la sync `fetch_track_bpm` est retirée) (même cache, même sélection)."""
         cached = self._cached_song(artist, title)
         if cached is not None:
             return cached  # servi par le cache : aucune sollicitation de la source

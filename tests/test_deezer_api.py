@@ -9,6 +9,8 @@ Aucun appel réseau : `_make_request` est stubbé, et les fonctions pures sont
 appelées directement.
 """
 
+import asyncio
+
 import pytest
 import requests
 
@@ -238,20 +240,25 @@ class TestVerificationDeDate:
 
 class TestEnrichissementComplet:
     def _stub_recherche(self, client, monkeypatch, reponse):
-        monkeypatch.setattr(client, "_make_request", lambda *a, **k: reponse)
+        async def _req(*a, **k):
+            return reponse
+
+        monkeypatch.setattr(client, "_make_request_async", _req)
 
     def test_morceau_introuvable(self, client, monkeypatch):
         self._stub_recherche(client, monkeypatch, {"data": []})
 
-        res = client.enrich_track("ISHA", "Inconnu")
+        res = asyncio.run(client.enrich_track_async(None, "ISHA", "Inconnu"))
         assert res["success"] is False
         assert res["data"] is None and res["verifications"] is None
 
     def test_enrichissement_avec_verifications(self, client, monkeypatch):
         self._stub_recherche(client, monkeypatch, {"data": [_hit()]})
 
-        res = client.enrich_track(
-            "ISHA", "Titre", previous_duration=230, scraped_release_date="2021-06-15"
+        res = asyncio.run(
+            client.enrich_track_async(
+                None, "ISHA", "Titre", previous_duration=230, scraped_release_date="2021-06-15"
+            )
         )
 
         assert res["success"] is True
@@ -263,20 +270,22 @@ class TestEnrichissementComplet:
         """« 0000-00-00 » ayant été neutralisée, il n'y a rien à comparer."""
         self._stub_recherche(client, monkeypatch, {"data": [_hit(release_date="0000-00-00")]})
 
-        res = client.enrich_track("ISHA", "Titre", scraped_release_date="2021-06-15")
+        res = asyncio.run(
+            client.enrich_track_async(None, "ISHA", "Titre", scraped_release_date="2021-06-15")
+        )
         assert "release_date" not in res["verifications"]
 
     def test_isrc_recupere(self, client, monkeypatch):
         self._stub_recherche(client, monkeypatch, {"data": [_hit()]})
-        assert client.get_isrc("ISHA", "Titre") == "FR1234500001"
+        assert asyncio.run(client.get_isrc_async(None, "ISHA", "Titre")) == "FR1234500001"
 
     def test_isrc_absent_du_hit(self, client, monkeypatch):
         self._stub_recherche(client, monkeypatch, {"data": [_hit(isrc=None)]})
-        assert client.get_isrc("ISHA", "Titre") is None
+        assert asyncio.run(client.get_isrc_async(None, "ISHA", "Titre")) is None
 
     def test_isrc_sans_hit(self, client, monkeypatch):
         self._stub_recherche(client, monkeypatch, None)
-        assert client.get_isrc("ISHA", "Titre") is None
+        assert asyncio.run(client.get_isrc_async(None, "ISHA", "Titre")) is None
 
 
 class TestRecherchesMedia:
@@ -456,7 +465,7 @@ class TestRechercheParIdArtiste:
         « premier hit de l'artiste » prenait « Tueur de dragon » pour « Durag »."""
         appels = []
 
-        def _req(endpoint, params=None):
+        async def _req(http, endpoint, params=None):
             appels.append(params["q"])
             return {
                 "data": [
@@ -468,16 +477,14 @@ class TestRechercheParIdArtiste:
                 ]
             }
 
-        monkeypatch.setattr(client, "_make_request", _req)
-        r = client.enrich_track("Isha", "Durag", artist_deezer_id=1236609)
+        monkeypatch.setattr(client, "_make_request_async", _req)
+        r = asyncio.run(client.enrich_track_async(None, "Isha", "Durag", artist_deezer_id=1236609))
         assert not r["success"] and r["data"] is None
         assert appels == ["Isha Durag"]
 
     def test_get_isrc_refuse_un_hit_etranger(self, client, monkeypatch):
-        monkeypatch.setattr(
-            client,
-            "_make_request",
-            lambda *a, **k: {
+        async def _req(*a, **k):
+            return {
                 "data": [
                     {
                         "id": 1,
@@ -486,6 +493,7 @@ class TestRechercheParIdArtiste:
                         "artist": {"name": "Vitamin String Quartet"},
                     }
                 ]
-            },
-        )
-        assert client.get_isrc("Kanye West", "Heartless") is None
+            }
+
+        monkeypatch.setattr(client, "_make_request_async", _req)
+        assert asyncio.run(client.get_isrc_async(None, "Kanye West", "Heartless")) is None

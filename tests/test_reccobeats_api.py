@@ -1,4 +1,4 @@
-"""Client ReccoBeats : formats de réponse variables, cache, sélection, batch.
+"""Client ReccoBeats : formats de réponse variables, cache, sélection.
 
 ReccoBeats est la 2ᵉ source BPM/key/mode et exige un pivot en entrée (Spotify
 Track ID ou ISRC). Son client était le moins couvert des clients d'API (44 %),
@@ -10,12 +10,10 @@ Aucun appel réseau : la session HTTP est stubbée. Le cache est toujours écrit
 dans `tmp_path` — jamais dans le dépôt.
 """
 
-import json
+import asyncio
 import time
-from pathlib import Path
 
 import pytest
-import requests
 
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 
@@ -37,20 +35,19 @@ class _Reponse:
         return self._charge
 
 
-def _stub_get(client, monkeypatch, *reponses):
-    """Sert les réponses dans l'ordre ; mémorise les URL demandées."""
-    vues = []
+class _HttpAsync:
+    """Session async : sert la DERNIÈRE réponse en boucle, mémorise les URL."""
 
-    def fake_get(url, **kwargs):
-        vues.append((url, kwargs.get("params")))
-        i = len(vues) - 1
-        rep = reponses[i] if i < len(reponses) else reponses[-1]
+    def __init__(self, *reponses):
+        self.reponses = list(reponses)
+        self.vues = []
+
+    async def get(self, url, params=None, headers=None, timeout=None):
+        self.vues.append((url, params))
+        rep = self.reponses[min(len(self.vues), len(self.reponses)) - 1]
         if isinstance(rep, Exception):
             raise rep
         return rep
-
-    monkeypatch.setattr(client.recco_session, "get", fake_get)
-    return vues
 
 
 class TestExtractionDuTrack:
@@ -257,258 +254,40 @@ class TestPeremptionDuCacheNegatif:
     def test_la_source_n_est_plus_sollicitee(self, client, monkeypatch):
         """Le bout en bout : 1ʳᵉ passe → une requête et l'absence mémorisée ;
         2ᵉ passe → aucune requête."""
-        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
+        http = _HttpAsync(_Reponse({"content": []}))
 
-        assert client.get_track_info("sp1") is None
-        assert len(vues) == 1
+        assert asyncio.run(client.get_track_info_async(http, "sp1")) is None
+        assert len(http.vues) == 1
 
-        assert client.get_track_info("sp1") is None
-        assert len(vues) == 1  # rien de plus
+        assert asyncio.run(client.get_track_info_async(http, "sp1")) is None
+        assert len(http.vues) == 1  # rien de plus
 
     def test_absence_perimee_redemande(self, client, monkeypatch):
         import src.api.reccobeats_api as mod
 
-        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
-        client.get_track_info("sp1")
+        http = _HttpAsync(_Reponse({"content": []}))
+        asyncio.run(client.get_track_info_async(http, "sp1"))
 
         client.cache[client._get_cache_key("sp1")]["timestamp"] = (
             time.time() - (mod.RECCOBEATS_NOT_FOUND_TTL_DAYS + 1) * 86_400
         )
-        client.get_track_info("sp1")
+        asyncio.run(client.get_track_info_async(http, "sp1"))
 
-        assert len(vues) == 2
+        assert len(http.vues) == 2
 
     def test_force_refresh_redemande(self, client, monkeypatch):
-        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
-        client.get_track_info("sp1")
-        client.get_track_info("sp1", force_refresh=True)
+        http = _HttpAsync(_Reponse({"content": []}))
+        asyncio.run(client.get_track_info_async(http, "sp1"))
+        asyncio.run(client.get_track_info_async(http, "sp1", force_refresh=True))
 
-        assert len(vues) == 2
+        assert len(http.vues) == 2
 
     def test_voie_isrc_aussi(self, client, monkeypatch):
         """La voie ISRC portait EXACTEMENT le même trou (82 entrées chacune)."""
-        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
+        http = _HttpAsync(_Reponse({"content": []}))
 
-        assert client.get_track_info_by_isrc("FR1234500001") is None
-        assert len(vues) == 1
+        assert asyncio.run(client.get_track_info_by_isrc_async(http, "FR1234500001")) is None
+        assert len(http.vues) == 1
 
-        assert client.get_track_info_by_isrc("FR1234500001") is None
-        assert len(vues) == 1
-
-    def test_statistiques(self, client):
-        client.cache = {
-            "a": {"bpm": 142, "success": True},
-            "b": {"error": "not_found"},
-            "c": {"audio_features": {}},
-        }
-        stats = client.get_cache_stats()
-
-        assert stats["total_entries"] == 3
-        assert stats["successful_entries"] == 1
-        assert stats["error_entries"] == 1
-
-
-class TestRecuperationParSpotifyId:
-    def test_chaine_complete(self, client, monkeypatch):
-        """Deux requêtes (track puis audio-features) pour UN appel logique."""
-        _stub_get(
-            client,
-            monkeypatch,
-            _Reponse({"content": [{"id": "r1", "trackTitle": "T", "durationMs": 228_000}]}),
-            _Reponse({"tempo": 142.0, "key": 0, "mode": 1}),
-        )
-
-        res = client.get_track_info("sp1")
-
-        assert res["success"] is True
-        assert res["spotify_id"] == "sp1" and res["source"] == "reccobeats"
-        assert res["duration"] == 228 and res["bpm"] == 142.0
-
-    def test_resultat_mis_en_cache(self, client, monkeypatch):
-        _stub_get(
-            client,
-            monkeypatch,
-            _Reponse({"content": [{"id": "r1", "durationMs": 1000}]}),
-            _Reponse({"tempo": 142.0}),
-        )
-        client.get_track_info("sp1")
-
-        sur_disque = json.loads(Path(client.cache_file).read_text(encoding="utf-8"))
-        assert sur_disque[client._get_cache_key("sp1")]["bpm"] == 142.0
-
-    def test_second_appel_servi_par_le_cache(self, client, monkeypatch):
-        vues = _stub_get(
-            client,
-            monkeypatch,
-            _Reponse({"content": [{"id": "r1", "durationMs": 1000}]}),
-            _Reponse({"tempo": 142.0}),
-        )
-        client.get_track_info("sp1")
-        appels_apres_le_premier = len(vues)
-
-        client.get_track_info("sp1")
-        assert len(vues) == appels_apres_le_premier  # aucune requête de plus
-
-    def test_id_inconnu_memorise_lechec(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({"content": []}))
-
-        assert client.get_track_info("sp1") is None
-        assert client.cache[client._get_cache_key("sp1")]["error"] == "not_found"
-
-    def test_statut_non_200(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({}, statut=429))
-        assert client.get_track_info("sp1") is None
-
-    def test_panne_reseau(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, requests.RequestException("coupure"))
-        assert client.get_track_info("sp1") is None
-
-
-class TestRecuperationParIsrc:
-    def test_pressing_le_plus_populaire(self, client, monkeypatch):
-        _stub_get(
-            client,
-            monkeypatch,
-            _Reponse({"content": [{"id": "a", "popularity": 1}, {"id": "b", "popularity": 99}]}),
-        )
-        assert client.get_track_by_isrc("FR1234500001")["id"] == "b"
-
-    def test_isrc_inconnu(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({"content": []}))
-        assert client.get_track_by_isrc("FR1234500001") is None
-
-    def test_statut_non_200(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({}, statut=500))
-        assert client.get_track_by_isrc("FR1234500001") is None
-
-    def test_json_illisible(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse(ValueError("pas du JSON")))
-        assert client.get_track_by_isrc("FR1234500001") is None
-
-
-class TestAudioFeaturesEnLot:
-    """`/audio-features?ids=` : 40 IDs par requête, mappés par ID ReccoBeats."""
-
-    def test_mapping_par_id(self, client, monkeypatch):
-        _stub_get(
-            client,
-            monkeypatch,
-            _Reponse({"content": [{"id": "a", "tempo": 100}, {"id": "b", "tempo": 200}]}),
-        )
-        res = client.get_audio_features_batch(["a", "b"])
-
-        assert res["a"]["tempo"] == 100 and res["b"]["tempo"] == 200
-
-    def test_liste_vide_sans_requete(self, client, monkeypatch):
-        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
-        assert client.get_audio_features_batch([]) == {}
-        assert vues == []
-
-    def test_plafond_a_40_ids(self, client, monkeypatch):
-        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
-        client.get_audio_features_batch([f"id{i}" for i in range(60)])
-
-        assert len(vues[0][1]["ids"].split(",")) == 40
-
-    def test_entree_sans_id_ignoree(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({"content": [{"tempo": 100}]}))
-        assert client.get_audio_features_batch(["a"]) == {}
-
-    def test_statut_non_200(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({}, statut=503))
-        assert client.get_audio_features_batch(["a"]) == {}
-
-
-class TestLotDeTracks:
-    """`get_multiple_tracks_with_bpm` : prêt mais NON câblé à l'orchestrateur
-    (cf. WIP). À garder testé pour qu'il soit branchable sans surprise."""
-
-    def test_deux_requetes_pour_un_lot(self, client, monkeypatch):
-        vues = _stub_get(
-            client,
-            monkeypatch,
-            _Reponse({"content": [{"id": "a"}, {"id": "b"}]}),
-            _Reponse({"content": [{"id": "a", "tempo": 100}]}),
-        )
-
-        tracks = client.get_multiple_tracks_with_bpm(["sp1", "sp2"])
-
-        assert len(vues) == 2
-        assert tracks[0]["bpm"] == 100
-        assert "bpm" not in tracks[1]  # pas de features pour b
-
-    def test_plafond_a_40_ids(self, client, monkeypatch):
-        vues = _stub_get(client, monkeypatch, _Reponse({"content": []}))
-        client.get_multiple_tracks_with_bpm([f"id{i}" for i in range(60)])
-
-        assert len(vues[0][1]["ids"].split(",")) == 40
-
-    def test_lot_vide(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({"content": []}))
-        assert client.get_multiple_tracks_with_bpm(["sp1"]) == []
-
-    def test_statut_non_200(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({}, statut=500))
-        assert client.get_multiple_tracks_with_bpm(["sp1"]) == []
-
-
-# ── Miettes de branches de la voie SYNC ──────────────────────────────────────
-class TestMiettesSync:
-    @pytest.mark.parametrize("statut", [404, 500])
-    def test_track_statuts_non_200(self, client, monkeypatch, statut):
-        rep = _Reponse({}, statut=statut)
-        rep.text = "erreur"
-        _stub_get(client, monkeypatch, rep)
-        assert client.get_track_from_reccobeats("sp") is None
-
-    def test_audio_features_non_200_et_reseau(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({}, statut=500))
-        assert client.get_track_audio_features("r") is None
-        _stub_get(client, monkeypatch, requests.ConnectionError("x"))
-        assert client.get_track_audio_features("r") is None
-
-    def test_crash_dans_get_track_info_est_consigne(self, client, monkeypatch):
-        from src.observability import source_usage
-        from src.observability.issues import IssueKind
-
-        source_usage.reset()
-
-        def casse(sid):
-            raise RuntimeError("bug")
-
-        monkeypatch.setattr(client, "get_track_from_reccobeats", casse)
-        assert client.get_track_info("sp9") is None
-        assert [v.issue for v in source_usage.flush()] == [IssueKind.CRASH]
-
-    def test_musical_key_inconvertible_est_signalee_sans_casser(self, client, caplog, monkeypatch):
-        def casse(key, mode):
-            raise ValueError("hors gamme")
-
-        monkeypatch.setattr("src.utils.music_theory.key_mode_to_french", casse)
-        result = {}
-        with caplog.at_level("WARNING"):
-            client._apply_audio_features(result, {"tempo": 100, "key": 0, "mode": 1})
-        assert result["bpm"] == 100 and "musical_key" not in result
-        assert any("musical_key" in r.message for r in caplog.records)
-
-    def test_isrc_429_puis_chaine_complete_puis_force_refresh(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, _Reponse({}, statut=429))
-        assert client.get_track_by_isrc("FR") is None
-        assert client.get_track_info_by_isrc("") is None
-        vues = _stub_get(
-            client,
-            monkeypatch,
-            _Reponse({"content": [{"id": "b", "popularity": 9}]}),
-            _Reponse({"tempo": 120}),
-            _Reponse({"content": [{"id": "b", "popularity": 9}]}),
-            _Reponse({"tempo": 121}),
-        )
-        assert client.get_track_info_by_isrc("FR1")["bpm"] == 120
-        assert client.get_track_info_by_isrc("FR1")["bpm"] == 120 and len(vues) == 2  # cache
-        assert client.get_track_info_by_isrc("FR1", force_refresh=True)["bpm"] == 121
-        assert len(vues) == 4
-
-    def test_lots_sur_reseau_coupe(self, client, monkeypatch):
-        _stub_get(client, monkeypatch, requests.ConnectionError("x"))
-        assert client.get_audio_features_batch(["a"]) == {}
-        assert client.get_multiple_tracks_with_bpm(["sp"]) == []
+        assert asyncio.run(client.get_track_info_by_isrc_async(http, "FR1234500001")) is None
+        assert len(http.vues) == 1

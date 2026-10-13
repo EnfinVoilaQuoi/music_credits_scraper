@@ -65,12 +65,10 @@ class _Api(DeezerAPI):
 
 
 def _appel(api, voie, **kw):
-    if voie == "sync":
-        return api.enrich_track("Booba", "DKR", **kw)
     return asyncio.run(api.enrich_track_async(None, "Booba", "DKR", **kw))
 
 
-@pytest.fixture(params=["sync", "async"])
+@pytest.fixture(params=["async"])
 def voie(request):
     return request.param
 

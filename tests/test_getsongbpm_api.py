@@ -236,25 +236,6 @@ class TestCache:
 
 
 class TestFetchTrackBpm:
-    def test_recherche_puis_mise_en_cache(self, client, monkeypatch):
-        appels = []
-
-        def fake_search(artist, title):
-            appels.append((artist, title))
-            return _song()
-
-        monkeypatch.setattr(client, "_search_track", fake_search)
-
-        assert client.fetch_track_bpm("ISHA", "Titre").bpm == 142
-        client.fetch_track_bpm("ISHA", "Titre")
-        assert len(appels) == 1  # le 2e passage est servi par le cache
-
-    def test_morceau_introuvable(self, client, monkeypatch):
-        monkeypatch.setattr(client, "_search_track", lambda *a: None)
-
-        song = client.fetch_track_bpm("ISHA", "Inconnu")
-        assert song.bpm is None and song.error
-
     def test_jumeau_async_meme_cache_meme_verdict(self, client, monkeypatch):
         """La voie ASYNC est celle de l'app : elle n'était pas couverte alors que
         la sync l'était — le symptôme de divergence à chercher (2026-09-05)."""
@@ -311,22 +292,6 @@ class TestSearchTrackJumeaux:
     """Le piège des jumeaux (2026-09-05) : une correction posée sur une seule
     voie ne corrige rien. Chaque cas est joué sur les DEUX."""
 
-    def _sync(self, client, monkeypatch, reponses):
-        import src.api.getsongbpm_api as mod
-
-        attentes = []
-        monkeypatch.setattr(mod.time, "sleep", attentes.append)
-        it = iter(reponses)
-
-        def get(url, params=None, timeout=None):
-            r = next(it)
-            if isinstance(r, Exception):
-                raise r
-            return r
-
-        client.session = type("S", (), {"get": staticmethod(get)})()
-        return client._search_track("ISHA", "Titre"), attentes
-
     def _async(self, client, monkeypatch, reponses):
         import asyncio
 
@@ -349,37 +314,28 @@ class TestSearchTrackJumeaux:
 
         return asyncio.run(client._search_track_async(_Http(), "ISHA", "Titre")), attentes
 
-    @pytest.mark.parametrize("voie", ["sync", "async"])
+    @pytest.mark.parametrize("voie", ["async"])
     def test_200_rend_le_hit_valide(self, client, monkeypatch, voie):
         hit, _ = getattr(self, f"_{voie}")(client, monkeypatch, [_Reponse(200, _hit_isha())])
         assert hit and hit["title"] == "Titre"
 
-    @pytest.mark.parametrize("voie", ["sync", "async"])
+    @pytest.mark.parametrize("voie", ["async"])
     def test_429_attend_puis_reessaie(self, client, monkeypatch, voie):
         hit, attentes = getattr(self, f"_{voie}")(
             client, monkeypatch, [_Reponse(429), _Reponse(429), _Reponse(200, _hit_isha())]
         )
         assert hit and attentes == [10, 20]  # 10 s × (tentative + 1)
 
-    @pytest.mark.parametrize("voie", ["sync", "async"])
+    @pytest.mark.parametrize("voie", ["async"])
     def test_429_epuise_rend_none(self, client, monkeypatch, voie):
         hit, attentes = getattr(self, f"_{voie}")(client, monkeypatch, [_Reponse(429)] * 3)
         assert hit is None and attentes == [10, 20, 30]
 
-    @pytest.mark.parametrize("voie", ["sync", "async"])
+    @pytest.mark.parametrize("voie", ["async"])
     @pytest.mark.parametrize("status", [401, 404, 500])
     def test_autres_statuts_sortent_sans_reessayer(self, client, monkeypatch, voie, status):
         hit, attentes = getattr(self, f"_{voie}")(client, monkeypatch, [_Reponse(status)])
         assert hit is None and attentes == []
-
-    def test_reseau_backoff_exponentiel_sync(self, client, monkeypatch):
-        import requests
-
-        erreurs = [requests.ConnectionError("x")] * 2 + [_Reponse(200, _hit_isha())]
-        hit, attentes = self._sync(client, monkeypatch, erreurs)
-        assert hit and attentes == [1, 2]
-        hit, attentes = self._sync(client, monkeypatch, [requests.ConnectionError("x")] * 3)
-        assert hit is None and attentes == [1, 2]  # pas d'attente après le dernier
 
     def test_reseau_backoff_exponentiel_async(self, client, monkeypatch):
         import httpx

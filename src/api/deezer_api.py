@@ -237,35 +237,6 @@ class DeezerAPI:
         """`GET /artist/{id}` (sync) — la fiche : nom, `picture_xl`, nb_album, nb_fan."""
         return self._make_request(f"artist/{artist_id}")
 
-    @staticmethod
-    def _first_search_hit(data: dict | None, artist: str, title: str) -> dict | None:
-        """Premier résultat (meilleur match) ou None (commun sync/async)."""
-        if not data or "data" not in data or not data["data"]:
-            logger.warning(f"Aucun résultat trouvé pour: {artist} - {title}")
-            return None
-        return data["data"][0]
-
-    def get_isrc(self, artist: str, title: str) -> str | None:
-        """
-        Récupère rapidement l'ISRC d'un morceau (recherche Deezer).
-        Utilisé pour alimenter ReccoBeats sans scraper de Spotify ID.
-
-        Returns:
-            L'ISRC (str) ou None si non trouvé.
-        """
-        # Le réseau/JSON est déjà géré par _make_request (retourne None) : ce garde
-        # ne couvre plus qu'un accès inattendu sur le hit → warning, pas de silence.
-        with source_usage.observe(_SOURCE, label=f"ISRC {artist} — {title}") as obs:
-            try:
-                track_data = self.search_track(artist, title)
-                if track_data and track_data.get("isrc"):
-                    return track_data["isrc"]
-                obs.absent("pas d'ISRC sur le hit")
-            except (AttributeError, TypeError) as e:
-                obs.parse_error(f"hit inexploitable : {e}")
-                logger.warning(f"get_isrc échec pour {artist} - {title}: {e}")
-            return None
-
     async def get_isrc_async(self, http: "AsyncHttpSession", artist: str, title: str) -> str | None:
         """Jumeau async de `get_isrc`."""
         with source_usage.observe(_SOURCE, label=f"ISRC {artist} — {title}") as obs:
@@ -600,53 +571,6 @@ class DeezerAPI:
         except ValueError as e:
             return {"is_valid": False, "message": f"Erreur de parsing: {e}", "dates_match": False}
 
-    def enrich_track(
-        self,
-        artist: str,
-        title: str,
-        previous_duration: int | None = None,
-        scraped_release_date: str | None = None,
-        artist_deezer_id: int | None = None,
-        deezer_id: int | None = None,
-        album: str | None = None,
-        autres_albums: frozenset = frozenset(),
-    ) -> dict[str, Any]:
-        """
-        Enrichit les données d'un track avec vérifications
-
-        Args:
-            artist: Nom de l'artiste
-            title: Titre de la chanson
-            previous_duration: Durée depuis les enrichissements précédents
-            scraped_release_date: Date de sortie depuis le scraping
-            artist_deezer_id: id Deezer de l'artiste (e30) — quand il est connu,
-                le gate d'identité juge l'artiste par id plutôt que par nom.
-            deezer_id: id Deezer de la PISTE déjà liée à la fiche — lue par id
-                (`_comme_un_hit`), la recherche libre n'est plus qu'un repli.
-
-        Returns:
-            Données enrichies avec vérifications
-        """
-        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = None
-            if deezer_id:
-                track_data = self._comme_un_hit(self._make_request(f"track/{deezer_id}"))
-            if track_data is None and self._chercher_apres_id(deezer_id, obs):
-                track_data = self.search_track(
-                    artist,
-                    title,
-                    previous_duration=previous_duration,
-                    artist_deezer_id=artist_deezer_id,
-                    album=album,
-                    autres_albums=autres_albums,
-                )
-            if track_data is None:
-                obs.absent("aucun hit concordant")
-        if track_data is None:
-            # « Aucun hit » n'est une absence que si Deezer a RÉPONDU.
-            source_usage.exiger_reponse(obs)
-        return self._build_enrichment_result(track_data, previous_duration, scraped_release_date)
-
     async def enrich_track_async(
         self,
         http: "AsyncHttpSession",
@@ -753,35 +677,6 @@ class DeezerAPI:
 if __name__ == "__main__":
     # Initialiser le client
     deezer = DeezerAPI()
-
-    # Exemple 1: Enrichir un track avec vérifications
-    print("=== Exemple 1: Enrichissement avec vérifications ===")
-    result = deezer.enrich_track(
-        artist="Eminem",
-        title="Lose Yourself",
-        previous_duration=326,  # Durée depuis SongBPM/Reccobeats
-        scraped_release_date="2002-10-28",  # Date depuis le scraping
-    )
-
-    if result["success"]:
-        print("\n✓ Track trouvé!")
-        print(f"  ID Deezer: {result['data']['deezer_track_id']}")
-        print(f"  Durée: {result['data']['deezer_duration']}s")
-        print(f"  Explicit: {result['data']['deezer_explicit_lyrics']}")
-        print(f"  Readable: {result['data']['deezer_readable']}")
-        print(f"  Date de sortie: {result['data']['deezer_release_date']}")
-        print(f"  Image: {result['data']['deezer_picture'][:50]}...")
-
-        print("\n--- Vérifications ---")
-        if "duration" in result["verifications"]:
-            dur_check = result["verifications"]["duration"]
-            print(f"  Durée: {dur_check['message']}")
-
-        if "release_date" in result["verifications"]:
-            date_check = result["verifications"]["release_date"]
-            print(f"  Date: {date_check['message']}")
-    else:
-        print(f"✗ Erreur: {result['error']}")
 
     # Exemple 2: Recherche simple
     print("\n\n=== Exemple 2: Recherche simple ===")

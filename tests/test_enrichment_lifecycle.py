@@ -95,9 +95,11 @@ def test_provider_ferme_son_client_cree_par_factory():
 
     recco = ReccoBeatsProvider(client_factory=factory)
     track = Track(title="Solo", artist=Artist(name="X"))
+    import asyncio
+
     from src.enrichment.context import EnrichmentContext
 
-    recco.try_by_isrc(track, EnrichmentContext())  # 1er usage → création
+    asyncio.run(recco.try_by_isrc_async(track, EnrichmentContext()))  # 1er usage → création
     assert len(created) == 1
     recco.close()
     assert created[0].closed == 1

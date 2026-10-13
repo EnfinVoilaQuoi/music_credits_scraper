@@ -3,7 +3,7 @@
 Corps historique de `DataEnricher._apply_reccobeats_result` /
 `_try_reccobeats_by_isrc` / `_enrich_with_reccobeats`, déplacé sans changement de
 logique. Deux points d'entrée pour l'orchestrateur :
-  - `try_by_isrc(track, ctx)` : voie ISRC (appelée AVANT le scrape Spotify pour
+  - `try_by_isrc_async(track, ctx)` : voie ISRC (appelée AVANT le scrape Spotify pour
     l'éviter si l'ISRC suffit) ;
   - `enrich(track, ctx)` : voie Spotify ID (ISRC déjà tentée en amont).
 Le BPM alimente le scrutin partagé (§8.3) ; l'unicité d'ID passe par le contexte.
@@ -111,51 +111,10 @@ class ReccoBeatsProvider:
 
         return applied
 
-    def try_by_isrc(
-        self, track: Track, ctx: EnrichmentContext, artist_name: str | None = None
-    ) -> bool:
-        """Voie ISRC : ISRC (track ou Deezer) → ReccoBeats SANS scraper de Spotify ID."""
-        client = self._resource.get()
-        if not client:
-            return False
-
-        if artist_name is None:
-            artist_name = self._artist_name(track)
-
-        isrc = track.isrc
-        if not isrc and self._deezer:
-            try:
-                isrc = self._deezer.get_isrc(artist_name, track.title)
-                if isrc:
-                    track.isrc = isrc
-                    logger.info(f"🔑 ISRC récupéré via Deezer: {isrc}")
-            except (AttributeError, TypeError) as e:
-                logger.debug(f"Deezer get_isrc échec: {e}")
-
-        if not isrc:
-            return False
-
-        try:
-            info = client.get_track_info_by_isrc(isrc)
-        except (AttributeError, TypeError, KeyError) as e:
-            logger.error(f"❌ ReccoBeats ISRC API: {e}")
-            info = None
-
-        if info and info.get("success") and self._apply_result(track, info, ctx, resolution="isrc"):
-            logger.info(
-                f"ReccoBeats: ✅ SUCCÈS via ISRC pour '{track.title}' (scrape Spotify évité)"
-            )
-            return True
-
-        logger.info(
-            f"ReccoBeats: ISRC sans audio-features pour '{track.title}' → fallback Spotify ID"
-        )
-        return False
-
     async def try_by_isrc_async(
         self, track: Track, ctx: EnrichmentContext, artist_name: str | None = None
     ) -> bool:
-        """Voie async (F2) de `try_by_isrc` : Deezer + ReccoBeats via httpx partagé."""
+        """Voie ISRC (seule voie depuis le 2026-10-13) : Deezer + ReccoBeats via httpx partagé."""
         client = self._resource.get()
         if not client:
             return False
@@ -201,43 +160,6 @@ class ReccoBeatsProvider:
         n'avait simplement pas de quoi le vérifier. Règle partagée avec SongBPM.
         """
         return ctx.spotify_id_utilisable(track, "ReccoBeats")
-
-    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Voie Spotify ID (ISRC déjà tentée en amont par l'orchestrateur)."""
-        try:
-            client = self._resource.get()
-            if not client:
-                logger.error("ReccoBeats client non initialisé")
-                return False
-
-            artist_name = self._artist_name(track)
-            logger.info(f"ReccoBeats: DÉBUT traitement '{artist_name}' - '{track.title}'")
-
-            # La voie ISRC a déjà été tentée en amont (enrich_track) : on ne la
-            # rejoue pas ici (équivalent skip_isrc=True de l'historique).
-
-            # ÉTAPE 1 : l'ID posé par l'étape Identité (jamais cherché ici).
-            spotify_id = self._existing_spotify_id(track, ctx)
-            if not spotify_id:
-                logger.info(f"∅ ReccoBeats: aucun Spotify ID disponible pour '{track.title}'")
-                return False
-
-            # ÉTAPE 2 : appeler ReccoBeats avec l'ID
-            logger.info(f"🎵 Appel ReccoBeats API avec Spotify ID: {spotify_id}")
-
-            try:
-                track_info = client.get_track_info(spotify_id)
-            except (AttributeError, TypeError, KeyError) as e:
-                logger.error(f"❌ Erreur ReccoBeats API: {e}")
-                return False
-
-            return self._apply_spotify_info(track, track_info, ctx, spotify_id)
-
-        except Exception:
-            # Dernier ressort : scrape ID + client + _apply gèrent leurs frontières ;
-            # un bug d'orchestration remonte ici → trace complète, ÉCHEC.
-            logger.exception("ReccoBeats: ❌ Erreur générale")
-            return False
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Voie async (F2) : API via httpx partagé, application identique à la

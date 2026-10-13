@@ -54,7 +54,13 @@ class _FakeDeezerClient:
         self.calls.append((artist, title, previous_duration, scraped_release_date))
         self.ids = getattr(self, "ids", []) + [artist_deezer_id]
         self.piste_ids = getattr(self, "piste_ids", []) + [deezer_id]
+        self.autres_albums = autres_albums
         return self._result
+
+
+def _enrich(provider, track, ctx):
+    """La voie de production (async) — la voie sync est retirée (2026-10-13)."""
+    return asyncio.run(provider.enrich_async(track, ctx))
 
 
 def _track():
@@ -81,7 +87,7 @@ def test_enrich_pose_duration_isrc_et_candidat_bpm():
     ctx = EnrichmentContext()
     track = _track()
 
-    assert provider.enrich(track, ctx) is True
+    assert _enrich(provider, track, ctx) is True
     assert track.duration == 195
     assert track.isrc == "FRX9820001"
     # Le BPM Deezer est un CANDIDAT du scrutin, pas une valeur imposée
@@ -97,7 +103,7 @@ def test_enrich_bpm_opportuniste_candidat():
     provider = DeezerProvider(_FakeDeezerClient(result))
     track = _track()
     ctx = EnrichmentContext()
-    provider.enrich(track, ctx)
+    _enrich(provider, track, ctx)
     # E7 : le BPM Deezer est un CANDIDAT du scrutin (plus de pose legacy directe)
     assert ("deezer", 100) in ctx.bpm_ballot.candidates
 
@@ -105,7 +111,7 @@ def test_enrich_bpm_opportuniste_candidat():
 def test_enrich_echec_client_renvoie_false():
     provider = DeezerProvider(_FakeDeezerClient({"success": False, "error": "not found"}))
     track = _track()
-    assert provider.enrich(track, EnrichmentContext()) is False
+    assert _enrich(provider, track, EnrichmentContext()) is False
     assert track.duration is None
 
 
@@ -116,12 +122,12 @@ def test_enrich_utilise_artiste_principal_si_featuring():
     track = Track(title="Feat", artist=Artist(name="Cherché"))
     track.is_featuring = True
     track.primary_artist_name = "Principal"
-    provider.enrich(track, EnrichmentContext())
+    _enrich(provider, track, EnrichmentContext())
     assert client.calls[0][0] == "Principal"  # artist passé à l'API Deezer
 
 
 def test_provider_non_disponible_renvoie_false():
-    assert DeezerProvider(None).enrich(_track(), EnrichmentContext()) is False
+    assert _enrich(DeezerProvider(None), _track(), EnrichmentContext()) is False
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -151,7 +157,7 @@ class TestDuree:
         )
         track = _track()
         track.duration = 195
-        assert p.enrich(track, EnrichmentContext()) is False
+        assert _enrich(p, track, EnrichmentContext()) is False
         assert track.duration == 195
 
     def test_incoherente_mais_force_update(self):
@@ -160,7 +166,7 @@ class TestDuree:
         )
         track = _track()
         track.duration = 195
-        assert p.enrich(track, EnrichmentContext(force_update=True)) is True
+        assert _enrich(p, track, EnrichmentContext(force_update=True)) is True
         assert track.duration == 300
 
     def test_aucune_duree_prealable_accepte_sans_verification(self):
@@ -169,7 +175,7 @@ class TestDuree:
             _resultat({"deezer_duration": 300}, {"duration": {"is_valid": False, "message": "x"}})
         )
         track = _track()
-        assert p.enrich(track, EnrichmentContext()) is True
+        assert _enrich(p, track, EnrichmentContext()) is True
         assert track.duration == 300
 
     @pytest.mark.parametrize(
@@ -185,7 +191,7 @@ class TestDuree:
         empruntées : un `KeyError` dans l'une d'elles ferait échouer tout le
         provider par son filet d'exception."""
         p = _provider(_resultat({"deezer_duration": 300}, {"duration": verif}))
-        assert p.enrich(_track(), EnrichmentContext(force_update=True)) is True
+        assert _enrich(p, _track(), EnrichmentContext(force_update=True)) is True
 
 
 class TestDateDeSortie:
@@ -205,7 +211,7 @@ class TestDateDeSortie:
         )
         track = _track()
         track.release_date = "2020-01-10"
-        assert p.enrich(track, EnrichmentContext()) is False
+        assert _enrich(p, track, EnrichmentContext()) is False
         assert track.release_date == "2020-01-10"
 
     def test_divergente_mais_force_update(self):
@@ -217,7 +223,7 @@ class TestDateDeSortie:
         )
         track = _track()
         track.release_date = "2020-01-10"
-        assert p.enrich(track, EnrichmentContext(force_update=True)) is True
+        assert _enrich(p, track, EnrichmentContext(force_update=True)) is True
         assert track.release_date == "2019-05-01"
 
     def test_coherente_ecrite(self):
@@ -229,7 +235,7 @@ class TestDateDeSortie:
         )
         track = _track()
         track.release_date = "2020-01-10"
-        assert p.enrich(track, EnrichmentContext()) is True
+        assert _enrich(p, track, EnrichmentContext()) is True
 
     def test_indeterminee_sans_date_prealable_acceptee(self):
         p = _provider(
@@ -245,7 +251,7 @@ class TestDateDeSortie:
             )
         )
         track = _track()
-        assert p.enrich(track, EnrichmentContext()) is True
+        assert _enrich(p, track, EnrichmentContext()) is True
         assert track.release_date == "2020-01-10"
 
     def test_verdict_invalide_journalise(self):
@@ -255,7 +261,7 @@ class TestDateDeSortie:
                 {"release_date": {"is_valid": False, "message": "date Deezer illisible"}},
             )
         )
-        assert p.enrich(_track(), EnrichmentContext()) is True
+        assert _enrich(p, _track(), EnrichmentContext()) is True
 
 
 class TestIsrcEtMetadonnees:
@@ -265,25 +271,25 @@ class TestIsrcEtMetadonnees:
         p = _provider(_resultat({"deezer_isrc": "FRAAA9900001"}))
         track = _track()
         track.isrc = "FRX9820001"
-        assert p.enrich(track, EnrichmentContext()) is False
+        assert _enrich(p, track, EnrichmentContext()) is False
         assert track.isrc == "FRX9820001"
 
     def test_isrc_existant_ecrase_si_force(self):
         p = _provider(_resultat({"deezer_isrc": "FRAAA9900001"}))
         track = _track()
         track.isrc = "FRX9820001"
-        assert p.enrich(track, EnrichmentContext(force_update=True)) is True
+        assert _enrich(p, track, EnrichmentContext(force_update=True)) is True
         assert track.isrc == "FRAAA9900001"
 
     def test_bpm_zero_ou_absent_ne_vote_pas(self):
         """Deezer renvoie très souvent 0 : `sanitize_bpm` l'écarte, et un
         candidat nul fausserait le scrutin."""
         ctx = EnrichmentContext()
-        assert _provider(_resultat({"deezer_bpm": 0})).enrich(_track(), ctx) is False
+        assert _enrich(_provider(_resultat({"deezer_bpm": 0})), _track(), ctx) is False
         assert ctx.bpm_ballot.candidates == []
 
     def test_aucune_donnee_utile(self):
-        assert _provider(_resultat({})).enrich(_track(), EnrichmentContext()) is False
+        assert _enrich(_provider(_resultat({})), _track(), EnrichmentContext()) is False
 
     def test_identifiants_deezer_poses(self):
         """e19 : ces valeurs ont enfin des colonnes. Jusqu'au 2026-09-06 elles
@@ -295,7 +301,7 @@ class TestIsrcEtMetadonnees:
             "deezer_explicit_lyrics": True,
         }
         track = _track()
-        assert _provider(_resultat(data)).enrich(track, EnrichmentContext()) is True
+        assert _enrich(_provider(_resultat(data)), track, EnrichmentContext()) is True
         assert track.deezer_id == 3135556
         assert track.deezer_url == "https://www.deezer.com/track/3135556"
         assert track.lyrics.explicit is True
@@ -305,7 +311,7 @@ class TestIsrcEtMetadonnees:
         track = _track()
         track.deezer_id = 42
         track.deezer_url = "https://ancien"
-        assert _provider(_resultat(data)).enrich(track, EnrichmentContext()) is False
+        assert _enrich(_provider(_resultat(data)), track, EnrichmentContext()) is False
         assert (track.deezer_id, track.deezer_url) == (42, "https://ancien")
 
     def test_explicite_faux_est_une_mesure_qui_ne_se_refait_pas(self):
@@ -314,9 +320,9 @@ class TestIsrcEtMetadonnees:
         track = _track()
         track.lyrics.explicit = False
         p = _provider(_resultat({"deezer_explicit_lyrics": True}))
-        assert p.enrich(track, EnrichmentContext()) is False
+        assert _enrich(p, track, EnrichmentContext()) is False
         assert track.lyrics.explicit is False
-        assert p.enrich(track, EnrichmentContext(force_update=True)) is True
+        assert _enrich(p, track, EnrichmentContext(force_update=True)) is True
         assert track.lyrics.explicit is True
 
     def test_pochette_deezer_non_posee_sur_le_track(self):
@@ -326,7 +332,7 @@ class TestIsrcEtMetadonnees:
         `media_enricher`, ce n'est pas le champ API qui disparaît."""
         data = {"deezer_picture": "https://img/medium.jpg"}
         track = _track()
-        assert _provider(_resultat(data)).enrich(track, EnrichmentContext()) is False
+        assert _enrich(_provider(_resultat(data)), track, EnrichmentContext()) is False
         assert not hasattr(track, "deezer_picture_url")
 
 
@@ -343,7 +349,7 @@ class TestVoieAsync:
         sync_track, async_track = _track(), _track()
         ctx_sync, ctx_async = EnrichmentContext(), EnrichmentContext()
 
-        assert _provider(result).enrich(sync_track, ctx_sync) is True
+        assert _enrich(_provider(result), sync_track, ctx_sync) is True
         assert (
             asyncio.run(
                 DeezerProvider(_FakeDeezerClient(result)).enrich_async(async_track, ctx_async)
@@ -378,7 +384,7 @@ class TestFiletDException:
     def test_result_malforme_donne_false_et_trace(self, caplog):
         p = _provider({"success": True})  # ni 'data' ni 'verifications'
         with caplog.at_level("ERROR"):
-            assert p.enrich(_track(), EnrichmentContext()) is False
+            assert _enrich(p, _track(), EnrichmentContext()) is False
         assert "Deezer" in caplog.text
 
     def test_result_malforme_en_async_aussi(self):
@@ -399,7 +405,7 @@ class TestIdDeezerDeLArtiste:
         artist = Artist(name="Isha")
         artist.deezer_id = 1236609
         track = Track(title="Durag", artist=artist)
-        DeezerProvider(client).enrich(track, EnrichmentContext())
+        _enrich(DeezerProvider(client), track, EnrichmentContext())
         assert client.ids == [1236609]
 
     def test_pas_d_id_pour_un_featuring(self):
@@ -410,7 +416,7 @@ class TestIdDeezerDeLArtiste:
         artist.deezer_id = 1236609
         track = Track(title="Grünt #33", artist=artist)
         track.is_featuring, track.primary_artist_name = True, "Swing"
-        DeezerProvider(client).enrich(track, EnrichmentContext())
+        _enrich(DeezerProvider(client), track, EnrichmentContext())
         assert client.ids == [None]
 
 
@@ -423,5 +429,5 @@ def test_les_disques_des_homonymes_sont_transmis_au_gate():
     autre = Track(title="Gone", artist=Artist(name="Kanye West"))
     autre.album = "Late Registration"
     autre.id = 2
-    DeezerProvider(client).enrich(track, EnrichmentContext(artist_tracks=[track, autre]))
+    _enrich(DeezerProvider(client), track, EnrichmentContext(artist_tracks=[track, autre]))
     assert client.autres_albums == {"late registration"}

@@ -143,7 +143,7 @@ def test_get_album_async_reads_fiche_and_absent():
 
 def test_provider_stashes_album_id_without_marking_updated():
     class _Api:
-        def enrich_track(self, **kw):
+        async def enrich_track_async(self, http, **kw):
             return {
                 "success": True,
                 "data": {"deezer_album_id": 77},
@@ -153,7 +153,7 @@ def test_provider_stashes_album_id_without_marking_updated():
 
     track = Track(id=1, title="x", album="A")
     ctx = EnrichmentContext()
-    updated = DeezerProvider(_Api()).enrich(track, ctx)
+    updated = asyncio.run(DeezerProvider(_Api()).enrich_async(track, ctx))
     assert track._deezer_album_id == 77
     assert updated is False
 

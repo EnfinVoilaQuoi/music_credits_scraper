@@ -321,3 +321,51 @@ def test_ce_que_la_passe_genius_declare_survit_au_run():
     _run(enricher, track)
 
     assert ("apple_music_id_propose", "genius") in {(o.field, o.source) for o in track.observations}
+
+
+# ── Portés de la voie sync, retirée le 2026-10-13 (sans appelant en production) ──
+
+
+def test_force_update_rappelle_le_scraper_spotify_meme_avec_id_valide():
+    track_id = "A" * 22
+
+    enricher, fakes, _ = _enricher()
+    _run(enricher, _track(spotify_id=track_id), force_update=False)
+    assert fakes["spotify_id"].enrich_calls == 0  # ID valide → not_needed
+
+    enricher, fakes, _ = _enricher()
+    results = _run(enricher, _track(spotify_id=track_id), force_update=True)
+    assert fakes["spotify_id"].enrich_calls == 1
+    assert results["spotify_id"] is True
+
+
+def test_observations_bpm_seul_si_aucune_key_mode():
+    def _vote(track, ctx):
+        ctx.bpm_ballot.add("deezer", 120)
+        return True
+
+    enricher, fakes, _ = _enricher()
+    fakes["deezer"]._on_enrich = _vote
+    track = _track()  # aucune source n'émet de key/mode
+    _run(enricher, track)
+    assert {o.field for o in track.observations} == {"bpm"}
+
+
+def test_observations_vides_si_aucun_candidat():
+    calls = []
+    enricher, _, _ = _enricher(
+        **{
+            nom: cls(calls, result=False)
+            for nom, cls in (
+                ("spotify_id", _FakeSpotify),
+                ("reccobeats", _FakeRecco),
+                ("getsongbpm", _FakeGetSongBpm),
+                ("songbpm", _FakeSongBpm),
+                ("deezer", _FakeDeezer),
+                ("discogs", _FakeDiscogs),
+            )
+        }
+    )
+    track = _track()
+    _run(enricher, track)
+    assert track.observations == []

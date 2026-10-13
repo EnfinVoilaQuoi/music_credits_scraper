@@ -122,8 +122,13 @@ class EnrichmentProvider(Protocol):
         """
         ...
 
-    def enrich(self, track: "Track", ctx: "EnrichmentContext") -> bool:
-        """Enrichit `track`. Renvoie True si au moins une donnée a été posée."""
+    async def enrich_async(self, track: "Track", ctx: "EnrichmentContext") -> bool:
+        """Enrichit `track`. Renvoie True si au moins une donnée a été posée.
+
+        Seule voie appelée par l'orchestrateur (`DataEnricher.enrich_track_async`).
+        Les scrapers bloquants (Spotify, SongBPM, Discogs) gardent un `enrich()`
+        sync, exécuté sur le thread dédié du run (`ctx.sync_runner`) ; les
+        sources API pures n'en ont plus (retiré le 2026-10-13)."""
         ...
 
     def close(self) -> None:

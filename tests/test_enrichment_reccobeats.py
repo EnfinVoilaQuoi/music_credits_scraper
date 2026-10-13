@@ -1,7 +1,10 @@
 """Tests du provider ReccoBeats (src/enrichment/providers/reccobeats) — sans réseau.
 
-Deux voies : ISRC (try_by_isrc) et Spotify ID (enrich). Clients mockés.
+Deux voies : ISRC (try_by_isrc_async) et Spotify ID (enrich_async). Clients
+mockés. La voie sync, sans appelant en production, est retirée (2026-10-13).
 """
+
+import asyncio
 
 import pytest
 
@@ -16,10 +19,10 @@ class _FakeReccoClient:
         self._isrc_info = isrc_info
         self._track_info = track_info
 
-    def get_track_info_by_isrc(self, isrc):
+    async def get_track_info_by_isrc_async(self, http, isrc):
         return self._isrc_info
 
-    def get_track_info(self, spotify_id):
+    async def get_track_info_async(self, http, spotify_id):
         return self._track_info
 
 
@@ -44,6 +47,14 @@ def _track():
     return Track(title="Solo", artist=Artist(name="Sofiane Pamart"))
 
 
+def _enrich(provider, track, ctx):
+    return asyncio.run(provider.enrich_async(track, ctx))
+
+
+def _isrc(provider, track, ctx):
+    return asyncio.run(provider.try_by_isrc_async(track, ctx))
+
+
 def test_is_available():
     assert ReccoBeatsProvider(None).is_available() is False
     assert ReccoBeatsProvider(_FakeReccoClient()).is_available() is True
@@ -55,14 +66,14 @@ def test_try_by_isrc_applique_bpm_et_resolution():
     track = _track()
     track.isrc = "FRX9820001"
     ctx = EnrichmentContext()
-    assert provider.try_by_isrc(track, ctx) is True
+    assert _isrc(provider, track, ctx) is True
     assert ("reccobeats", 120) in ctx.bpm_ballot.candidates
     assert track.audio.reccobeats_resolution == "isrc"
 
 
 def test_try_by_isrc_sans_isrc_renvoie_false():
     provider = ReccoBeatsProvider(_FakeReccoClient())
-    assert provider.try_by_isrc(_track(), EnrichmentContext()) is False
+    assert _isrc(provider, _track(), EnrichmentContext()) is False
 
 
 def test_gate_skip_avec_resultat_true_si_isrc_satisfaite():
@@ -87,7 +98,7 @@ def test_enrich_par_spotify_id_existant_valide():
         artist_tracks=[Track(title="Autre")],
         validate_spotify_id_unique=lambda sid, t, tracks: True,
     )
-    assert provider.enrich(track, ctx) is True
+    assert _enrich(provider, track, ctx) is True
     assert ("reccobeats", 140) in ctx.bpm_ballot.candidates
     assert track.audio.reccobeats_resolution == "spotify_id"
     assert track.duration == 200
@@ -96,7 +107,7 @@ def test_enrich_par_spotify_id_existant_valide():
 def test_enrich_sans_id_ne_cherche_rien_et_renvoie_false():
     """Depuis le 2026-09-28 ReccoBeats CONSOMME l'ID posé par l'étape Identité :
     sans ID, il ne cherche pas (plus de repli scraper) et rend un échec."""
-    assert ReccoBeatsProvider(_FakeReccoClient()).enrich(_track(), EnrichmentContext()) is False
+    assert _enrich(ReccoBeatsProvider(_FakeReccoClient()), _track(), EnrichmentContext()) is False
 
 
 def test_try_by_isrc_emet_observation_provenance():
@@ -108,7 +119,7 @@ def test_try_by_isrc_emet_observation_provenance():
     track = _track()
     track.isrc = "FRX9820001"
     ctx = EnrichmentContext()
-    provider.try_by_isrc(track, ctx)
+    _isrc(provider, track, ctx)
     assert Observation("reccobeats_resolution", "isrc", "reccobeats") in ctx.observations
 
 
@@ -131,8 +142,6 @@ def test_reccobeats_resolution_repose_au_chargement():
 # Ce qu'on vérifie ici, c'est que la voie async aboutit au MÊME état de track
 # depuis les mêmes payloads — et qu'elle sait retomber sur le pont sync quand
 # aucun scraper async n'est configuré.
-
-import asyncio  # noqa: E402
 
 
 class _FakeReccoClientAsync:
@@ -186,22 +195,6 @@ class _SyncRunner:
     async def run(self, fn, *args):
         self.appels += 1
         return fn(*args)
-
-
-def test_try_by_isrc_async_applique_le_meme_resultat_que_le_sync():
-    payload = {"success": True, "bpm": 120, "key": 5, "mode": 1}
-    track_sync, track_async = _track(), _track()
-    track_sync.isrc = track_async.isrc = "FRX9820001"
-
-    ctx_sync, ctx_async = EnrichmentContext(), EnrichmentContext()
-    ReccoBeatsProvider(_FakeReccoClient(isrc_info=payload)).try_by_isrc(track_sync, ctx_sync)
-    asyncio.run(
-        ReccoBeatsProvider(_FakeReccoClientAsync(isrc_info=payload)).try_by_isrc_async(
-            track_async, ctx_async
-        )
-    )
-    assert ctx_async.bpm_ballot.candidates == ctx_sync.bpm_ballot.candidates
-    assert track_async.audio.reccobeats_resolution == track_sync.audio.reccobeats_resolution
 
 
 def test_try_by_isrc_async_recupere_l_isrc_via_deezer():
@@ -316,78 +309,78 @@ class TestApplicationSpotifyId:
     def test_les_trois_emplacements_du_bpm(self, info):
         ctx = _ctx_id_valide()
         provider = ReccoBeatsProvider(_FakeReccoClient(track_info=info))
-        assert provider.enrich(_avec_id(), ctx) is True
+        assert _enrich(provider, _avec_id(), ctx) is True
         assert ("reccobeats", 120) in ctx.bpm_ballot.candidates
 
     @pytest.mark.parametrize("info", [None, {"success": False}])
     def test_reponse_sans_donnees(self, info):
         provider = ReccoBeatsProvider(_FakeReccoClient(track_info=info))
-        assert provider.enrich(_avec_id(), _ctx_id_valide()) is False
+        assert _enrich(provider, _avec_id(), _ctx_id_valide()) is False
 
     def test_succes_partiel_sans_bpm(self):
         """Un ID sans BPM reste un SUCCÈS : l'ID est la donnée que la source
         devait fournir. Le compter en échec déclencherait le nettoyage du
         morceau par l'orchestrateur."""
         provider = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True}))
-        assert provider.enrich(_avec_id(), _ctx_id_valide()) is True
+        assert _enrich(provider, _avec_id(), _ctx_id_valide()) is True
 
     def test_duree_valide_posee(self):
         info = {"success": True, "bpm": 120, "duration": 195}
         track = _avec_id()
-        ReccoBeatsProvider(_FakeReccoClient(track_info=info)).enrich(track, _ctx_id_valide())
+        _enrich(ReccoBeatsProvider(_FakeReccoClient(track_info=info)), track, _ctx_id_valide())
         assert track.duration == 195
 
     @pytest.mark.parametrize("duree", [0, -5, "trois minutes"])
     def test_duree_invalide_signalee_et_ignoree(self, duree):
         info = {"success": True, "bpm": 120, "duration": duree}
         track = _avec_id()
-        ReccoBeatsProvider(_FakeReccoClient(track_info=info)).enrich(track, _ctx_id_valide())
+        _enrich(ReccoBeatsProvider(_FakeReccoClient(track_info=info)), track, _ctx_id_valide())
         assert track.duration is None
 
     def test_key_et_mode_journalises_et_observes(self):
         info = {"success": True, "bpm": 120, "key": 5, "mode": 1}
         ctx = _ctx_id_valide()
-        ReccoBeatsProvider(_FakeReccoClient(track_info=info)).enrich(_avec_id(), ctx)
+        _enrich(ReccoBeatsProvider(_FakeReccoClient(track_info=info)), _avec_id(), ctx)
         champs = {o.field for o in ctx.observations if o.source == "reccobeats"}
         assert {"key", "mode", "reccobeats_resolution"} <= champs
 
 
-class TestVoieIsrcSync:
+class TestVoieIsrc:
     def test_isrc_recupere_via_deezer(self):
         class _Deezer:
-            def get_isrc(self, artist, title):
+            async def get_isrc_async(self, http, artist, title):
                 return "FRX9820001"
 
         client = _FakeReccoClient(isrc_info={"success": True, "bpm": 120})
         provider = ReccoBeatsProvider(client, deezer_client=_Deezer())
         track = _track()
-        assert provider.try_by_isrc(track, EnrichmentContext()) is True
+        assert _isrc(provider, track, EnrichmentContext()) is True
         assert track.isrc == "FRX9820001"
 
     def test_deezer_muet_puis_aucun_isrc(self):
         class _Deezer:
-            def get_isrc(self, artist, title):
+            async def get_isrc_async(self, http, artist, title):
                 return None
 
         provider = ReccoBeatsProvider(_FakeReccoClient(), deezer_client=_Deezer())
-        assert provider.try_by_isrc(_track(), EnrichmentContext()) is False
+        assert _isrc(provider, _track(), EnrichmentContext()) is False
 
     def test_deezer_en_erreur_n_empeche_pas_la_suite(self):
         class _Deezer:
-            def get_isrc(self, artist, title):
+            async def get_isrc_async(self, http, artist, title):
                 raise TypeError("réponse illisible")
 
         provider = ReccoBeatsProvider(_FakeReccoClient(), deezer_client=_Deezer())
-        assert provider.try_by_isrc(_track(), EnrichmentContext()) is False
+        assert _isrc(provider, _track(), EnrichmentContext()) is False
 
     def test_api_isrc_en_erreur(self):
         class _Leve(_FakeReccoClient):
-            def get_track_info_by_isrc(self, isrc):
+            async def get_track_info_by_isrc_async(self, http, isrc):
                 raise KeyError("payload inattendu")
 
         track = _track()
         track.isrc = "FRX9820001"
-        assert ReccoBeatsProvider(_Leve()).try_by_isrc(track, EnrichmentContext()) is False
+        assert _isrc(ReccoBeatsProvider(_Leve()), track, EnrichmentContext()) is False
 
     def test_isrc_sans_audio_features_bascule_sur_spotify_id(self):
         """Réponse valide mais vide de mesures : l'ISRC n'a pas suffi, le
@@ -395,48 +388,37 @@ class TestVoieIsrcSync:
         client = _FakeReccoClient(isrc_info={"success": True})
         track = _track()
         track.isrc = "FRX9820001"
-        assert ReccoBeatsProvider(client).try_by_isrc(track, EnrichmentContext()) is False
+        assert _isrc(ReccoBeatsProvider(client), track, EnrichmentContext()) is False
 
     def test_sans_client(self):
-        assert ReccoBeatsProvider(None).try_by_isrc(_track(), EnrichmentContext()) is False
+        assert _isrc(ReccoBeatsProvider(None), _track(), EnrichmentContext()) is False
 
     def test_artiste_principal_si_featuring(self):
         vus = []
 
         class _Deezer:
-            def get_isrc(self, artist, title):
+            async def get_isrc_async(self, http, artist, title):
                 vus.append(artist)
                 return None
 
         track = _track()
         track.is_featuring = True
         track.primary_artist_name = "Principal"
-        ReccoBeatsProvider(_FakeReccoClient(), deezer_client=_Deezer()).try_by_isrc(
-            track, EnrichmentContext()
+        _isrc(
+            ReccoBeatsProvider(_FakeReccoClient(), deezer_client=_Deezer()),
+            track,
+            EnrichmentContext(),
         )
         assert vus == ["Principal"]
 
 
-class TestEchecsSync:
+class TestEchecs:
     def test_echec_complet_sans_id(self):
         """Ni ID existant ni ID scrapé : `_apply_spotify_info` conclut à l'ÉCHEC
         (branche distincte du succès partiel)."""
         p = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True, "bpm": 120}))
         track = _track()
         assert p._apply_spotify_info(track, {"success": True}, EnrichmentContext(), "SP1") is False
-
-    def test_erreur_inattendue_tracee(self, caplog):
-        """Dernier ressort du provider : un bug d'orchestration doit laisser un
-        traceback, pas disparaître."""
-
-        class _Client(_FakeReccoClient):
-            def get_track_info(self, spotify_id):
-                raise RuntimeError("bug interne")
-
-        p = ReccoBeatsProvider(_Client())
-        with caplog.at_level("ERROR"):
-            assert p.enrich(_avec_id(), _ctx_id_valide()) is False
-        assert [r for r in caplog.records if r.exc_info], "traceback attendu"
 
 
 class TestEchecsAsync:
@@ -504,16 +486,16 @@ class TestIdExistantUtilisable:
             validate_spotify_id_unique=lambda sid, t, tr: vus.append(tr) or True
         )
         provider = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True, "bpm": 120}))
-        assert provider.enrich(_avec_id(), ctx) is True
+        assert _enrich(provider, _avec_id(), ctx) is True
         assert vus == [[]]
 
     def test_sans_validateur_l_id_est_garde(self):
         provider = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True, "bpm": 120}))
-        assert provider.enrich(_avec_id(), EnrichmentContext()) is True
+        assert _enrich(provider, _avec_id(), EnrichmentContext()) is True
 
     def test_id_revendique_ignore_sans_etre_efface(self):
         track = _avec_id("PRIS")
         ctx = EnrichmentContext(validate_spotify_id_unique=lambda *a: False)
         provider = ReccoBeatsProvider(_FakeReccoClient(track_info={"success": True, "bpm": 120}))
-        assert provider.enrich(track, ctx) is False
+        assert _enrich(provider, track, ctx) is False
         assert track.spotify_id == "PRIS"

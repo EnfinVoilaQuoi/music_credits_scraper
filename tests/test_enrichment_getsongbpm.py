@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import httpx
 import pytest
-import requests
 
 from src.enrichment.context import EnrichmentContext
 from src.enrichment.providers.getsongbpm import GetSongBpmProvider
@@ -27,9 +26,14 @@ class _FakeFetcher:
         self._song_data = song_data
         self.calls = []
 
-    def fetch_track_bpm(self, artist, title):
+    async def fetch_track_bpm_async(self, http, artist, title):
         self.calls.append((artist, title))
         return self._song_data
+
+
+def _enrich(provider, track, ctx):
+    """La voie de production (async) — la voie sync est retirée (2026-10-13)."""
+    return asyncio.run(provider.enrich_async(track, ctx))
 
 
 def _track():
@@ -55,7 +59,7 @@ def test_bpm_devient_candidat_et_key_mode_observes():
     provider = GetSongBpmProvider(_FakeFetcher(song))
     track = _track()
     ctx = EnrichmentContext()
-    assert provider.enrich(track, ctx) is True
+    assert _enrich(provider, track, ctx) is True
     assert ("getsongbpm", 142) in ctx.bpm_ballot.candidates
     keys = [o for o in ctx.observations if o.field == "key" and o.source == "getsongbpm"]
     modes = [o for o in ctx.observations if o.field == "mode" and o.source == "getsongbpm"]
@@ -65,26 +69,19 @@ def test_bpm_devient_candidat_et_key_mode_observes():
 
 def test_erreur_api_renvoie_false():
     provider = GetSongBpmProvider(_FakeFetcher(_FakeSongData(error="not found")))
-    assert provider.enrich(_track(), EnrichmentContext()) is False
+    assert _enrich(provider, _track(), EnrichmentContext()) is False
 
 
 def test_indisponible_renvoie_false():
-    assert GetSongBpmProvider(None).enrich(_track(), EnrichmentContext()) is False
+    assert _enrich(GetSongBpmProvider(None), _track(), EnrichmentContext()) is False
 
 
 class _RaisingFetcher:
     def __init__(self, exc):
         self._exc = exc
 
-    def fetch_track_bpm(self, artist, title):
+    async def fetch_track_bpm_async(self, http, artist, title):
         raise self._exc
-
-
-def test_erreur_reseau_api_renvoie_false():
-    """Frontière réseau resserrée : une RequestException de l'API est catchée →
-    repli False (le BPM manquant est journalisé, pas avalé en silence)."""
-    provider = GetSongBpmProvider(_RaisingFetcher(requests.ConnectionError("réseau")))
-    assert provider.enrich(_track(), EnrichmentContext()) is False
 
 
 def test_erreur_inattendue_absorbee_mais_tracee(caplog):
@@ -93,7 +90,7 @@ def test_erreur_inattendue_absorbee_mais_tracee(caplog):
     traceback (fini le debug muet qui masquait les bugs)."""
     provider = GetSongBpmProvider(_RaisingFetcher(RuntimeError("bug interne")))
     with caplog.at_level("ERROR"):
-        assert provider.enrich(_track(), EnrichmentContext()) is False
+        assert _enrich(provider, _track(), EnrichmentContext()) is False
     trace_records = [r for r in caplog.records if r.exc_info and "GetSongBPM" in r.getMessage()]
     assert trace_records, "le dernier ressort doit émettre un traceback (logger.exception)"
 
@@ -135,15 +132,8 @@ def test_gate_journalise_un_motif_explicite(caplog, etat, attendu):
     assert attendu in caplog.text
 
 
-class _FakeFetcherAsync(_FakeFetcher):
-    async def fetch_track_bpm_async(self, http, artist, title):
-        self.calls.append((artist, title))
-        return self._song_data
-
-
-class _RaisingFetcherAsync(_RaisingFetcher):
-    async def fetch_track_bpm_async(self, http, artist, title):
-        raise self._exc
+_FakeFetcherAsync = _FakeFetcher
+_RaisingFetcherAsync = _RaisingFetcher
 
 
 class TestApplicationDesDonnees:
@@ -161,25 +151,27 @@ class TestApplicationDesDonnees:
         ],
     )
     def test_un_seul_champ_mesure_suffit(self, song):
-        assert GetSongBpmProvider(_FakeFetcher(song)).enrich(_track(), EnrichmentContext()) is True
+        assert (
+            _enrich(GetSongBpmProvider(_FakeFetcher(song)), _track(), EnrichmentContext()) is True
+        )
 
     def test_time_signature_devient_une_observation(self):
         ctx = EnrichmentContext()
         song = _FakeSongData(time_signature="3/4")
-        GetSongBpmProvider(_FakeFetcher(song)).enrich(_track(), ctx)
+        _enrich(GetSongBpmProvider(_FakeFetcher(song)), _track(), ctx)
         ts = [o for o in ctx.observations if o.field == "time_signature"]
         assert ts and ts[0].value == "3/4" and ts[0].source == "getsongbpm"
 
     def test_reponse_entierement_vide_est_un_echec(self):
         p = GetSongBpmProvider(_FakeFetcher(_FakeSongData()))
-        assert p.enrich(_track(), EnrichmentContext()) is False
+        assert _enrich(p, _track(), EnrichmentContext()) is False
 
     def test_artiste_principal_si_featuring(self):
         fetcher = _FakeFetcher(_FakeSongData(bpm=142))
         track = _track()
         track.is_featuring = True
         track.primary_artist_name = "Principal"
-        GetSongBpmProvider(fetcher).enrich(track, EnrichmentContext())
+        _enrich(GetSongBpmProvider(fetcher), track, EnrichmentContext())
         assert fetcher.calls[0][0] == "Principal"
 
 
@@ -187,21 +179,6 @@ class TestVoieAsync:
     """Le jumeau async partage `_apply_song_data` : ce sont les gardes AUTOUR
     (indisponibilité, frontière httpx, dernier ressort) qui doivent être
     vérifiées des deux côtés — c'est là que le défaut Musixmatch avait survécu."""
-
-    def test_meme_issue_que_la_voie_sync(self):
-        song = _FakeSongData(bpm=142, key="F#m", mode="minor")
-        ctx_sync, ctx_async = EnrichmentContext(), EnrichmentContext()
-        assert GetSongBpmProvider(_FakeFetcher(song)).enrich(_track(), ctx_sync) is True
-        assert (
-            asyncio.run(
-                GetSongBpmProvider(_FakeFetcherAsync(song)).enrich_async(_track(), ctx_async)
-            )
-            is True
-        )
-        assert ctx_sync.bpm_ballot.candidates == ctx_async.bpm_ballot.candidates
-        assert [(o.field, o.value) for o in ctx_sync.observations] == [
-            (o.field, o.value) for o in ctx_async.observations
-        ]
 
     def test_indisponible(self):
         p = GetSongBpmProvider(None)

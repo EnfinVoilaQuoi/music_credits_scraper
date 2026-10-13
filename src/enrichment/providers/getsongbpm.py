@@ -6,7 +6,6 @@ fournir un 2ᵉ vote BPM (§8.3). Backlink getsongbpm.com obligatoire côté cli
 """
 
 import httpx
-import requests
 
 from src.enrichment.audio_normalize import key_mode_observations
 from src.enrichment.base import Capability, LazyResource
@@ -74,35 +73,10 @@ class GetSongBpmProvider:
             return track.primary_artist_name
         return track.artist.name if hasattr(track.artist, "name") else str(track.artist)
 
-    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Récupère BPM/Key/Mode/Time Signature ; le BPM rejoint le scrutin."""
-        try:
-            fetcher = self._resource.get()
-            if not fetcher:
-                logger.debug("GetSongBPM API non disponible")
-                return False
-
-            artist_name = self._artist_name(track)
-            logger.info(f"GetSongBPM: DÉBUT traitement '{artist_name}' - '{track.title}'")
-
-            # Appeler l'API
-            try:
-                song_data = fetcher.fetch_track_bpm(artist_name, track.title)
-            except (requests.RequestException, ValueError) as api_error:
-                logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
-                return False
-
-            return self._apply_song_data(track, ctx, song_data)
-
-        except Exception:
-            # Dernier ressort : l'appel API est déjà catché ci-dessus ; ce qui
-            # remonte est un bug d'_apply_song_data → trace complète, ÉCHEC.
-            logger.exception("GetSongBPM: ❌ Erreur")
-            return False
-
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Voie async (F2) : appel API via la session httpx partagée du contexte,
-        application des résultats strictement identique à la voie sync."""
+        application des résultats par `_apply_song_data` (voie sync retirée le
+        2026-10-13, sans appelant en production)."""
         try:
             fetcher = self._resource.get()
             if not fetcher:

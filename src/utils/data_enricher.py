@@ -329,56 +329,6 @@ class DataEnricher:
         """Retourne la liste des sources disponibles"""
         return [k for k, v in self.apis_available.items() if v]
 
-    def enrich_track(
-        self,
-        track: Track,
-        sources: list[str] | None = None,
-        force_update: bool = False,
-        artist_tracks: list[Track] | None = None,
-    ) -> dict[str, bool]:
-        """
-        Enrichit un morceau : boucle ordonnée de providers (gate → enrich).
-
-        Pré-étapes d'orchestrateur : Genius media (feats) puis voie ISRC (évite
-        le scrape Spotify si l'ISRC suffit — lue par les gates spotify_id et
-        reccobeats). Le vote BPM est arbitré entre Deezer et Discogs (position
-        historique). Le gating et la valeur d'échec de chaque source vivent
-        dans son provider (gate() / error_result).
-        """
-        sources, ctx, ballot, results = self._start_run(track, sources, force_update, artist_tracks)
-
-        n_avant = len(track.observations)
-        self._apply_genius_feat_metadata(track)
-        pre_etape = track.observations[n_avant:]
-
-        # VOIE ISRC PRIORITAIRE (avant tout scrape Playwright) : si l'ISRC
-        # fournit BPM/Key via ReccoBeats, les gates spotify_id/reccobeats skippent.
-        if "reccobeats" in sources and self.apis_available.get("reccobeats"):
-            try:
-                ctx.isrc_satisfied = self._reccobeats_provider.try_by_isrc(track, ctx)
-                if ctx.isrc_satisfied:
-                    logger.info(
-                        f"⚡ ISRC a fourni les données audio pour '{track.title}' → scrape Spotify évité"
-                    )
-            except Exception:
-                # Pré-étape hors _run_step : le provider gère déjà ses frontières,
-                # ce qui remonte est un bug → trace complète (la voie ISRC est
-                # opportuniste, le pipeline retentera).
-                logger.exception("Voie ISRC échec")
-
-        # Boucle ordonnée : gate() décide (skip → valeur posée telle quelle),
-        # enrich() tourne derrière la frontière d'exception de _run_step.
-        for provider in self._pipeline:
-            self._run_step(provider, track, ctx, sources, results)
-
-        # Réconciliation (§8.3) — le MOTEUR pilote les colonnes legacy, AVANT Discogs
-        self._finalize_run(track, ballot, ctx, pre_etape)
-
-        self._run_step(self._discogs_provider, track, ctx, sources, results)
-
-        self._log_run_summary(track, results)
-        return results
-
     async def enrich_track_async(
         self,
         track: Track,
@@ -386,7 +336,8 @@ class DataEnricher:
         force_update: bool = False,
         artist_tracks: list[Track] | None = None,
     ) -> dict[str, bool]:
-        """Jumeau async d'`enrich_track` (Phase F2) — même orchestration, mêmes
+        """L'orchestrateur (Phase F2 ; la voie sync `enrich_track`, sans appelant en
+        production, est retirée le 2026-10-13) — mêmes
         gates, mêmes valeurs de résultat.
 
         Providers API purs (deezer, getsongbpm, reccobeats) via la session
@@ -401,7 +352,7 @@ class DataEnricher:
         await ctx.sync_runner.run(self._apply_genius_feat_metadata, track)
         pre_etape = track.observations[n_avant:]
 
-        # VOIE ISRC PRIORITAIRE (même gating que la voie sync)
+        # VOIE ISRC PRIORITAIRE (lue par les gates spotify_id et reccobeats)
         if "reccobeats" in sources and self.apis_available.get("reccobeats"):
             try:
                 ctx.isrc_satisfied = await self._reccobeats_provider.try_by_isrc_async(track, ctx)
@@ -529,39 +480,14 @@ class DataEnricher:
             self._deezer_provider,
         ]
 
-    def _run_step(self, provider, track, ctx, sources: list[str], results: dict) -> None:
-        """Exécute une source si demandée et disponible : gate() puis enrich().
-
-        Frontière d'exception du batch : un provider qui lève ne stoppe pas le
-        run, la valeur d'échec posée est déclarée par le provider
-        (`error_result` : False = pas de données, None = crash/timeout).
-        """
-        name = provider.name
-        if name not in sources or not self.apis_available.get(name):
-            return
-
-        verdict = provider.gate(track, ctx)
-        if verdict is not None:
-            results[name] = verdict
-            return
-
-        try:
-            outcome = provider.enrich(track, ctx)
-            results[name] = outcome
-            if outcome is True:
-                logger.info(f"✅ {name} SUCCÈS pour '{track.title}'")
-            elif outcome is False:
-                logger.info(f"∅ {name} : rien d'appliqué pour '{track.title}'")
-        except Exception:
-            # Frontière d'exception du batch (dernier ressort) : un provider qui
-            # lève ne stoppe pas le run. logger.exception = trace complète.
-            logger.exception(f"❌ Erreur {name} pour {track.title}")
-            results[name] = provider.error_result
-
     async def _run_step_async(
         self, provider, track, ctx, sources: list[str], results: dict
     ) -> None:
-        """Jumeau async de `_run_step` : mêmes gates, même frontière d'exception."""
+        """Exécute une source si demandée et disponible : gate() puis enrich_async().
+
+        Frontière d'exception du batch : un provider qui lève ne stoppe pas le
+        run, la valeur d'échec posée est déclarée par le provider
+        (`error_result` : False = pas de données, None = crash/timeout)."""
         name = provider.name
         if name not in sources or not self.apis_available.get(name):
             return
@@ -579,7 +505,7 @@ class DataEnricher:
             elif outcome is False:
                 logger.info(f"∅ {name} : rien d'appliqué pour '{track.title}'")
         except Exception:
-            # Frontière d'exception du batch (dernier ressort), cf. jumeau sync.
+            # Frontière d'exception du batch (dernier ressort).
             logger.exception(f"❌ Erreur {name} pour {track.title}")
             results[name] = provider.error_result
 

@@ -62,49 +62,10 @@ class DeezerProvider:
             return track.primary_artist_name
         return track.artist.name if hasattr(track.artist, "name") else str(track.artist)
 
-    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Vérifie la cohérence des données Deezer avec l'existant et enrichit."""
-        if not self._client:
-            logger.warning("❌ Deezer API non disponible")
-            return False
-
-        try:
-            artist_name = self._artist_name(track)
-            logger.debug(f"🎵 Deezer: Recherche pour '{artist_name}' - '{track.title}'")
-
-            # Récupérer les données existantes pour vérification
-            previous_duration = track.duration
-            scraped_release_date = track.release_date
-
-            # Appeler l'API Deezer avec vérifications
-            result = self._client.enrich_track(
-                artist=artist_name,
-                title=track.title,
-                previous_duration=previous_duration,
-                scraped_release_date=scraped_release_date,
-                artist_deezer_id=self._artist_deezer_id(track),
-                # B0 : la piste déjà liée se LIT par son id.
-                deezer_id=track.deezer_id,
-                album=track.album,
-                autres_albums=albums_des_homonymes(track, ctx.artist_tracks),
-            )
-            # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
-            track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")
-            return self._apply_result(track, ctx, result, previous_duration, scraped_release_date)
-
-        except SansReponse as e:
-            # Deezer n'a pas répondu : ni absence constatée, ni écriture.
-            logger.warning(f"⚠️ Deezer: sans réponse pour '{track.title}' ({e.kind})")
-            return False
-        except Exception:
-            # Dernier ressort : DeezerAPI.enrich_track gère déjà le réseau/JSON ;
-            # ce qui remonte est un bug d'_apply_result → trace complète, ÉCHEC.
-            logger.exception(f"❌ Deezer: Erreur pour '{track.title}'")
-            return False
-
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
         """Voie async (F2) : recherche via la session httpx partagée du contexte,
-        application des résultats strictement identique à la voie sync."""
+        application des résultats par `_apply_result`. (La voie sync, sans appelant
+        en production, est retirée le 2026-10-13.)"""
         if not self._client:
             logger.warning("❌ Deezer API non disponible")
             return False
@@ -136,7 +97,7 @@ class DeezerProvider:
             logger.warning(f"⚠️ Deezer: sans réponse pour '{track.title}' ({e.kind})")
             return False
         except Exception:
-            # Dernier ressort : DeezerAPI.enrich_track gère déjà le réseau/JSON ;
+            # Dernier ressort : DeezerAPI.enrich_track_async gère déjà le réseau/JSON ;
             # ce qui remonte est un bug d'_apply_result → trace complète, ÉCHEC.
             logger.exception(f"❌ Deezer: Erreur pour '{track.title}'")
             return False

@@ -105,6 +105,7 @@ scripts/*
 !scripts/corpus_paires_titres.py
 !scripts/cassette_deezer.py
 !scripts/cassette_kworb.py
+!scripts/invariants_apres_rejeu.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

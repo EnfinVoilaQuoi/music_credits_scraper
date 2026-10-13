@@ -255,6 +255,13 @@ def _texte_compare(texte: str) -> str:
     return "\n".join(ligne for ligne in lignes if ligne and not _INDICATION.match(ligne))
 
 
+def _sans_groupes(titre: str | None) -> str:
+    """Le titre sans ses parenthèses ni crochets : « Cudi the Kid (Kissy Sell
+    Out's Style From the Dark Side) » et « (TAI remix) » sont deux versions
+    d'un même morceau, même quand le descripteur n'est pas reconnu."""
+    return normalize_title(re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre or ""))
+
+
 def paroles_identiques(par) -> list[Cas]:
     """Le même texte sur deux fiches d'un artiste aux titres NON équivalents
     (chantier D, 2026-10-13) : le pendant de `lrc_emprunte` pour les paroles
@@ -273,8 +280,10 @@ def paroles_identiques(par) -> list[Cas]:
                 for b in g[i + 1 :]:
                     if a["genius_id"] and a["genius_id"] == b["genius_id"]:
                         continue
-                    if titres_equivalents(a["title"], b["title"]) or meme_socle(
-                        a["title"], b["title"]
+                    if (
+                        titres_equivalents(a["title"], b["title"])
+                        or meme_socle(a["title"], b["title"])
+                        or _sans_groupes(a["title"]) == _sans_groupes(b["title"])
                     ):
                         continue
                     cas.append(

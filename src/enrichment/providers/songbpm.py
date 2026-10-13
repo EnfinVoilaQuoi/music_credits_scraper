@@ -19,6 +19,7 @@ from src.utils.bpm_vote import sanitize_bpm
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import CHAMP_ID_PROPOSE
 from src.utils.track_mapper import _clean_duration
+from src.utils.version_descriptors import titre_generique
 
 logger = get_logger(__name__)
 # playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
@@ -37,6 +38,25 @@ def fiche_du_meme_id(track: Track, spotify_id: str | None, artist_tracks) -> Tra
         if t.spotify_id == spotify_id or spotify_id in t.spotify_ids:
             return t
     return None
+
+
+def page_generique_douteuse(track: Track, track_data: dict) -> str | None:
+    """PUR. Un titre GÉNÉRIQUE (« Intro », « Outro ») trouvé par recherche de
+    titre n'est la bonne page que si elle porte l'ID Spotify de la fiche, ou à
+    défaut sa durée (±3 s) : SongBPM n'affiche pas l'album. Motif du refus,
+    sinon None (2026-10-13, même règle que les gates Deezer et Spotify)."""
+    if not titre_generique(track.title or ""):
+        return None
+    page_id = track_data.get("spotify_id")
+    if page_id and page_id in track.get_all_spotify_ids():
+        return None
+    page_duree = _clean_duration(track_data.get("duration"))
+    if page_duree and track.duration and abs(page_duree - track.duration) <= 3:
+        return None
+    return (
+        f"titre générique : page sans l'ID Spotify de la fiche, durée "
+        f"{page_duree or '?'} s contre {track.duration or '?'} s"
+    )
 
 
 class SongBpmProvider:
@@ -201,6 +221,11 @@ class SongBpmProvider:
                 f"⚠️ SongBPM : la page retenue pour '{track.title}' est celle de "
                 f"'{autre.title}' (même ID Spotify) — mesures écartées"
             )
+            return False
+
+        motif = page_generique_douteuse(track, track_data)
+        if motif:
+            logger.warning(f"⚠️ SongBPM : page écartée pour '{track.title}' — {motif}")
             return False
 
         # BPM → candidat pour le vote (§8.3). E7 : plus de pose legacy directe —

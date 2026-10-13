@@ -393,3 +393,36 @@ class TestPageDUneAutreFiche:
         original, live = self._fiches()
         original.genius_id = live.genius_id = 42
         assert fiche_du_meme_id(live, "15Fc", [original, live]) is None
+
+
+class TestTitreGenerique:
+    """« Intro », « Outro » : SongBPM n'affiche pas l'album, la page n'est la bonne
+    que si elle porte l'ID Spotify de la fiche, ou sa durée (2026-10-13)."""
+
+    def _intro(self, **champs):
+        return Track(title="Outro", artist=Artist(name="Josman"), album="Reste Calme", **champs)
+
+    def test_page_sans_preuve_ecartee(self):
+        track = self._intro(duration=120)
+        data = {"bpm": 97, "duration": 200, "spotify_id": "autre"}
+        ctx = EnrichmentContext(artist_tracks=[track])
+        assert SongBpmProvider(_FakeScraper(data)).enrich(track, ctx) is False
+        assert not ctx.bpm_ballot.candidates and not ctx.observations
+
+    def test_meme_id_spotify_retenu(self):
+        track = self._intro(spotify_id="bon")
+        data = {"bpm": 119, "spotify_id": "bon"}
+        ctx = EnrichmentContext(artist_tracks=[track])
+        assert SongBpmProvider(_FakeScraper(data)).enrich(track, ctx) is True
+
+    def test_meme_duree_retenue(self):
+        from src.enrichment.providers.songbpm import page_generique_douteuse
+
+        assert page_generique_douteuse(self._intro(duration=120), {"duration": "2:02"}) is None
+        assert page_generique_douteuse(self._intro(duration=120), {"duration": "2:04"})
+        assert page_generique_douteuse(self._intro(), {"duration": "2:00"})
+
+    def test_titre_ordinaire_non_concerne(self):
+        from src.enrichment.providers.songbpm import page_generique_douteuse
+
+        assert page_generique_douteuse(_track(), {"spotify_id": "x"}) is None

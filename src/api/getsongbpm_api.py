@@ -29,7 +29,7 @@ from src.utils.fichiers_json import ecrire_atomique, lire_cache
 # Import logger
 from src.utils.logger import get_logger
 from src.utils.title_matching import either_contains_as_words, normalize_name
-from src.utils.version_descriptors import meme_version
+from src.utils.version_descriptors import meme_version, titre_generique
 
 logger = get_logger(__name__)
 
@@ -125,9 +125,16 @@ class GetSongBPMFetcher:
         except (OSError, TypeError) as e:
             logger.warning(f"GetSongBPM : échec de sauvegarde du cache : {e}")
 
-    def _get_cache_key(self, artist: str, title: str) -> str:
-        """Génère une clé de cache unique"""
-        return f"{artist.lower().strip()}::{title.lower().strip()}"
+    def _get_cache_key(self, artist: str, title: str, album: str | None = None) -> str:
+        """Génère une clé de cache unique.
+
+        Un titre GÉNÉRIQUE y ajoute son disque : « josman::intro » servait la
+        même entrée — celle de « Doigt d'honneur (Intro) » — à toutes les Intro
+        de Josman (2026-10-13)."""
+        cle = f"{artist.lower().strip()}::{title.lower().strip()}"
+        if titre_generique(title):
+            cle += f"::{(album or '').lower().strip()}"
+        return cle
 
     def _extract_mode_from_key(self, key_of: str) -> str:
         """
@@ -160,12 +167,22 @@ class GetSongBPMFetcher:
         s = "".join(c for c in s if not unicodedata.combining(c))
         return " ".join(s.lower().strip().split())
 
-    def _select_hit(self, hits: list, artist: str, title: str) -> dict | None:
+    def _select_hit(
+        self, hits: list, artist: str, title: str, album: str | None = None
+    ) -> dict | None:
         """
         Choisit le meilleur hit 'song' dont l'ARTISTE correspond (ancre stricte).
         Évite le `search[0]` aveugle : avec type='both', le 1er résultat peut être
         un objet artiste (sans tempo) → BPM None / mauvais morceau.
+
+        Un titre GÉNÉRIQUE (« Intro », « Skit #1 ») ne désigne une piste que dans
+        SON disque : le hit doit porter l'album de la fiche. Mesuré le
+        2026-10-13 : 5 des 13 titres génériques vérifiables avaient le BPM d'un
+        homonyme (les Skit de Kanye, l'Intro de Josman).
         """
+        from src.utils.spotify_identity import memes_disques
+
+        generique = titre_generique(title)
         na, nt = self._norm(artist), self._norm(title)
         best = None
         for h in hits:
@@ -189,6 +206,11 @@ class GetSongBPMFetcher:
             # « Doigt D'Honneur (Intro) », et à « Blues » celui de son live.
             if not meme_version(title, h.get("title", "")):
                 continue
+            if generique:
+                disque = h.get("album")
+                disque = disque.get("title") if isinstance(disque, dict) else None
+                if not memes_disques(disque, album):
+                    continue
             ht = self._norm(h.get("title", ""))
             if ht == nt:
                 return h  # match parfait titre + artiste
@@ -219,14 +241,16 @@ class GetSongBPMFetcher:
         }
         return artist, title, params
 
-    def _selected_from_response(self, data: dict, artist: str, title: str) -> dict | None:
+    def _selected_from_response(
+        self, data: dict, artist: str, title: str, album: str | None = None
+    ) -> dict | None:
         """Sélection du hit validé dans une réponse 200 (commun sync/async).
 
         Structure de réponse: {"search": [...]}.
         """
         hits = data.get("search")
         if isinstance(hits, list) and hits:
-            selected = self._select_hit(hits, artist, title)
+            selected = self._select_hit(hits, artist, title, album)
             if selected is None:
                 logger.debug(
                     f"GetSongBPM: {len(hits)} hit(s) mais aucun match artiste+titre pour {artist} - {title}"
@@ -236,7 +260,7 @@ class GetSongBPMFetcher:
         return None
 
     async def _search_track_async(
-        self, http: "AsyncHttpSession", artist: str, title: str
+        self, http: "AsyncHttpSession", artist: str, title: str, album: str | None = None
     ) -> dict | None:
         """Voie async (seule voie depuis le 2026-10-13, la sync `_search_track` est retirée) (mêmes retries/backoffs, sleep non bloquant)."""
         artist, title, params = self._lookup_params(artist, title)
@@ -247,7 +271,7 @@ class GetSongBPMFetcher:
                 response = await http.get(url, params=params, headers=_ASYNC_HEADERS, timeout=15)
 
                 if response.status_code == 200:
-                    return self._selected_from_response(response.json(), artist, title)
+                    return self._selected_from_response(response.json(), artist, title, album)
 
                 elif response.status_code == 429:
                     wait_time = 10 * (attempt + 1)
@@ -276,10 +300,10 @@ class GetSongBPMFetcher:
 
         return None
 
-    def _cached_song(self, artist: str, title: str) -> SongData | None:
+    def _cached_song(self, artist: str, title: str, album: str | None = None) -> SongData | None:
         """Hit de cache exploitable, ou None (les échecs cachés ne sont PAS
         définitifs → on retente). Commun sync/async."""
-        cache_key = self._get_cache_key(artist, title)
+        cache_key = self._get_cache_key(artist, title, album)
         if cache_key in self.cache:
             cached = self.cache[cache_key]
             if not cached.get("error"):
@@ -288,7 +312,9 @@ class GetSongBPMFetcher:
             logger.debug(f"Cache (échec précédent, on retente): {artist} - {title}")
         return None
 
-    def _song_from_track_data(self, artist: str, title: str, track_data: dict | None) -> SongData:
+    def _song_from_track_data(
+        self, artist: str, title: str, track_data: dict | None, album: str | None = None
+    ) -> SongData:
         """SongData depuis un hit validé (ou l'échec « introuvable ») + mise en
         cache. Commun sync/async."""
         if track_data:
@@ -324,24 +350,24 @@ class GetSongBPMFetcher:
             logger.debug(f"Non trouvé: {artist} - {title}")
 
         # Mettre en cache
-        self.cache[self._get_cache_key(artist, title)] = song.__dict__
+        self.cache[self._get_cache_key(artist, title, album)] = song.__dict__
         self._save_cache()
 
         return song
 
     async def fetch_track_bpm_async(
-        self, http: "AsyncHttpSession", artist: str, title: str
+        self, http: "AsyncHttpSession", artist: str, title: str, album: str | None = None
     ) -> SongData:
         """Voie async (seule voie depuis le 2026-10-13, la sync `fetch_track_bpm` est retirée) (même cache, même sélection)."""
-        cached = self._cached_song(artist, title)
+        cached = self._cached_song(artist, title, album)
         if cached is not None:
             return cached  # servi par le cache : aucune sollicitation de la source
 
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = await self._search_track_async(http, artist, title)
+            track_data = await self._search_track_async(http, artist, title, album)
             if track_data is None:
                 obs.absent("aucun hit validé")
-            return self._song_from_track_data(artist, title, track_data)
+            return self._song_from_track_data(artist, title, track_data, album)
 
     def get_attribution_html(self) -> str:
         """

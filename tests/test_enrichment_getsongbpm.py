@@ -26,7 +26,7 @@ class _FakeFetcher:
         self._song_data = song_data
         self.calls = []
 
-    async def fetch_track_bpm_async(self, http, artist, title):
+    async def fetch_track_bpm_async(self, http, artist, title, album=None):
         self.calls.append((artist, title))
         return self._song_data
 
@@ -80,7 +80,7 @@ class _RaisingFetcher:
     def __init__(self, exc):
         self._exc = exc
 
-    async def fetch_track_bpm_async(self, http, artist, title):
+    async def fetch_track_bpm_async(self, http, artist, title, album=None):
         raise self._exc
 
 

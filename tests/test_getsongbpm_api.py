@@ -113,8 +113,31 @@ class TestSelectionDuHit:
         assert client._select_hit(hits, "ISHA", cherche) is None
 
     def test_titre_generique_identique_retenu(self, client):
-        hits = [_song(titre="Doigt D'Honneur (Intro)"), _song(titre="Intro")]
-        assert client._select_hit(hits, "ISHA", "Intro")["title"] == "Intro"
+        hits = [
+            _song(titre="Doigt D'Honneur (Intro)", album={"title": "Disque"}),
+            _song(titre="Intro", album={"title": "Disque"}),
+        ]
+        assert client._select_hit(hits, "ISHA", "Intro", "Disque")["title"] == "Intro"
+
+    def test_titre_generique_d_un_autre_disque_ecarte(self, client):
+        """Les Skit de *Late Registration* recevaient le BPM de ceux de *The
+        College Dropout* : un titre générique ne désigne une piste que dans SON
+        disque (2026-10-13)."""
+        hits = [_song(titre="Skit #1", album={"title": "The College Dropout"})]
+        assert client._select_hit(hits, "ISHA", "Skit #1", "Late Registration") is None
+
+    def test_titre_generique_de_son_disque_retenu_edition_comprise(self, client):
+        hits = [_song(titre="Skit #1", album={"title": "Late Registration (Deluxe)"})]
+        assert client._select_hit(hits, "ISHA", "Skit #1", "Late Registration") is not None
+
+    def test_titre_generique_sans_disque_ecarte(self, client):
+        assert client._select_hit([_song(titre="Intro")], "ISHA", "Intro", "Disque") is None
+        hits = [_song(titre="Intro", album={"title": "Disque"})]
+        assert client._select_hit(hits, "ISHA", "Intro") is None
+
+    def test_titre_ordinaire_ignore_le_disque(self, client):
+        hits = [_song(titre="Titre", album={"title": "Autre"})]
+        assert client._select_hit(hits, "ISHA", "Titre", "Disque") is not None
 
     def test_match_parfait_prime_sur_le_repli(self, client):
         hits = [_song(titre="Titre Bonus"), _song(titre="Titre")]
@@ -214,6 +237,13 @@ class TestCache:
     def test_cle_insensible_a_la_casse_et_aux_espaces(self, client):
         assert client._get_cache_key(" ISHA ", "Titre") == client._get_cache_key("isha", "titre")
 
+    def test_titre_generique_cle_par_disque(self, client):
+        """« josman::intro » servait la même entrée à toutes les Intro de Josman."""
+        assert client._get_cache_key("Josman", "Intro", "A") != client._get_cache_key(
+            "Josman", "Intro", "B"
+        )
+        assert client._get_cache_key("ISHA", "Titre", "A") == client._get_cache_key("ISHA", "Titre")
+
     def test_fichier_illisible_donne_un_cache_vide(self, tmp_path):
         chemin = tmp_path / "casse.json"
         chemin.write_text("{ pas du json", encoding="utf-8")
@@ -247,7 +277,7 @@ class TestFetchTrackBpm:
         source_usage.reset()
         appels = []
 
-        async def fake_search(http, artist, title):
+        async def fake_search(http, artist, title, album=None):
             appels.append(title)
             return _song(titre=title) if title == "Titre" else None
 

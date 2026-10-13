@@ -87,7 +87,9 @@ class GetSongBpmProvider:
             logger.info(f"GetSongBPM: DÉBUT traitement '{artist_name}' - '{track.title}'")
 
             try:
-                song_data = await fetcher.fetch_track_bpm_async(ctx.http, artist_name, track.title)
+                song_data = await fetcher.fetch_track_bpm_async(
+                    ctx.http, artist_name, track.title, track.album
+                )
             except (httpx.HTTPError, ValueError) as api_error:
                 logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
                 return False

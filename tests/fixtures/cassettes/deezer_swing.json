@@ -1,0 +1,4995 @@
+{
+ "albums": [
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 1034637592,
+   "label": "Labrique Publishing",
+   "link": "https://www.deezer.com/album/1034637592",
+   "nb_tracks": 10,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 108,
+     "explicit": true,
+     "id": 4168333022,
+     "isrc": "BEEN92600015",
+     "link": "https://www.deezer.com/track/4168333022",
+     "position": 1,
+     "title": "MON CŒUR",
+     "title_short": "MON CŒUR",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 121,
+     "explicit": true,
+     "id": 4168333032,
+     "isrc": "BEEN92600016",
+     "link": "https://www.deezer.com/track/4168333032",
+     "position": 2,
+     "title": "DIS MOI",
+     "title_short": "DIS MOI",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 199,
+     "explicit": true,
+     "id": 4168333042,
+     "isrc": "BEEN92600002",
+     "link": "https://www.deezer.com/track/4168333042",
+     "position": 3,
+     "title": "DÉLUGE",
+     "title_short": "DÉLUGE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 176,
+     "explicit": false,
+     "id": 4168333052,
+     "isrc": "BEEN92600003",
+     "link": "https://www.deezer.com/track/4168333052",
+     "position": 4,
+     "title": "ILY",
+     "title_short": "ILY",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 142,
+     "explicit": true,
+     "id": 4168333062,
+     "isrc": "BEEN92600017",
+     "link": "https://www.deezer.com/track/4168333062",
+     "position": 5,
+     "title": "ALL EYES ON ME",
+     "title_short": "ALL EYES ON ME",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 197,
+     "explicit": true,
+     "id": 4168333072,
+     "isrc": "BEEN92600018",
+     "link": "https://www.deezer.com/track/4168333072",
+     "position": 6,
+     "title": "LES MÊMES PRIÈRES",
+     "title_short": "LES MÊMES PRIÈRES",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 185,
+     "explicit": true,
+     "id": 4168333082,
+     "isrc": "BEEN92600019",
+     "link": "https://www.deezer.com/track/4168333082",
+     "position": 7,
+     "title": "AMOUR&MANQUE",
+     "title_short": "AMOUR&MANQUE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 152,
+     "explicit": true,
+     "id": 4168333092,
+     "isrc": "BEEN92600020",
+     "link": "https://www.deezer.com/track/4168333092",
+     "position": 8,
+     "title": "MA FAUTE",
+     "title_short": "MA FAUTE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 146,
+     "explicit": false,
+     "id": 4168333102,
+     "isrc": "BEEN92510013",
+     "link": "https://www.deezer.com/track/4168333102",
+     "position": 9,
+     "title": "L'ENFER",
+     "title_short": "L'ENFER",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 182,
+     "explicit": false,
+     "id": 4168333112,
+     "isrc": "BEEN92600021",
+     "link": "https://www.deezer.com/track/4168333112",
+     "position": 10,
+     "title": "LA MAISON",
+     "title_short": "LA MAISON",
+     "title_version": ""
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2026-10-02",
+   "title": "F5"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 498836831,
+   "label": "labrique / naïve",
+   "link": "https://www.deezer.com/album/498836831",
+   "nb_tracks": 15,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 176,
+     "explicit": false,
+     "id": 2493901801,
+     "isrc": "BEEN92300021",
+     "link": "https://www.deezer.com/track/2493901801",
+     "position": 1,
+     "title": "MALADRESSE",
+     "title_short": "MALADRESSE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 56,
+     "explicit": true,
+     "id": 2493901811,
+     "isrc": "BEEN92300022",
+     "link": "https://www.deezer.com/track/2493901811",
+     "position": 2,
+     "title": "GIGI",
+     "title_short": "GIGI",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 177,
+     "explicit": true,
+     "id": 2493901821,
+     "isrc": "BEEN92300023",
+     "link": "https://www.deezer.com/track/2493901821",
+     "position": 3,
+     "title": "KOBE",
+     "title_short": "KOBE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 222,
+     "explicit": true,
+     "id": 2493901831,
+     "isrc": "BEEN92300024",
+     "link": "https://www.deezer.com/track/2493901831",
+     "position": 4,
+     "title": "UN SEUL CIEL",
+     "title_short": "UN SEUL CIEL",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 169,
+     "explicit": true,
+     "id": 2493901841,
+     "isrc": "BEEN92300025",
+     "link": "https://www.deezer.com/track/2493901841",
+     "position": 5,
+     "title": "2YEUX",
+     "title_short": "2YEUX",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 171,
+     "explicit": true,
+     "id": 2493901851,
+     "isrc": "BEEN92300026",
+     "link": "https://www.deezer.com/track/2493901851",
+     "position": 6,
+     "title": "MOSAÏQUE",
+     "title_short": "MOSAÏQUE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 49,
+     "explicit": true,
+     "id": 2493901861,
+     "isrc": "BEEN92300027",
+     "link": "https://www.deezer.com/track/2493901861",
+     "position": 7,
+     "title": "REC030221",
+     "title_short": "REC030221",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 204,
+     "explicit": true,
+     "id": 2493901871,
+     "isrc": "BEEN92300028",
+     "link": "https://www.deezer.com/track/2493901871",
+     "position": 8,
+     "title": "MAGRITTE",
+     "title_short": "MAGRITTE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 181,
+     "explicit": true,
+     "id": 2493901881,
+     "isrc": "BEEN92300029",
+     "link": "https://www.deezer.com/track/2493901881",
+     "position": 9,
+     "title": "REYKJAVIK",
+     "title_short": "REYKJAVIK",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 172,
+     "explicit": true,
+     "id": 2493901891,
+     "isrc": "BEEN92300030",
+     "link": "https://www.deezer.com/track/2493901891",
+     "position": 10,
+     "title": "NO FUTURE",
+     "title_short": "NO FUTURE",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 194,
+     "explicit": true,
+     "id": 2493901901,
+     "isrc": "BEEN92300031",
+     "link": "https://www.deezer.com/track/2493901901",
+     "position": 11,
+     "title": "MELANOME",
+     "title_short": "MELANOME",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 198,
+     "explicit": true,
+     "id": 2493901911,
+     "isrc": "BEEN92300032",
+     "link": "https://www.deezer.com/track/2493901911",
+     "position": 12,
+     "title": "MAFIA",
+     "title_short": "MAFIA",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 179,
+     "explicit": true,
+     "id": 2493901921,
+     "isrc": "BEEN92300033",
+     "link": "https://www.deezer.com/track/2493901921",
+     "position": 13,
+     "title": ".WAV",
+     "title_short": ".WAV",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 196,
+     "explicit": true,
+     "id": 2493901931,
+     "isrc": "BEEN92300034",
+     "link": "https://www.deezer.com/track/2493901931",
+     "position": 14,
+     "title": "VISION",
+     "title_short": "VISION",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 142,
+     "explicit": true,
+     "id": 2493901941,
+     "isrc": "BEEN92300035",
+     "link": "https://www.deezer.com/track/2493901941",
+     "position": 15,
+     "title": "2:22",
+     "title_short": "2:22",
+     "title_version": ""
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2023-12-01",
+   "title": "AU REVOIR SIMEON"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 55110712,
+   "label": "Urban",
+   "link": "https://www.deezer.com/album/55110712",
+   "nb_tracks": 10,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 278,
+     "explicit": false,
+     "id": 450565532,
+     "isrc": "BEEN91701002",
+     "link": "https://www.deezer.com/track/450565532",
+     "position": 1,
+     "title": "Richesse",
+     "title_short": "Richesse",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 227,
+     "explicit": false,
+     "id": 450565542,
+     "isrc": "BEEN91701003",
+     "link": "https://www.deezer.com/track/450565542",
+     "position": 2,
+     "title": "Corbeaux",
+     "title_short": "Corbeaux",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 194,
+     "explicit": false,
+     "id": 450565552,
+     "isrc": "BEEN91701004",
+     "link": "https://www.deezer.com/track/450565552",
+     "position": 3,
+     "title": "Canopée",
+     "title_short": "Canopée",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 203,
+     "explicit": false,
+     "id": 450565562,
+     "isrc": "BEEN91701005",
+     "link": "https://www.deezer.com/track/450565562",
+     "position": 4,
+     "title": "Mama",
+     "title_short": "Mama",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 175,
+     "explicit": false,
+     "id": 450565572,
+     "isrc": "BEEN91701006",
+     "link": "https://www.deezer.com/track/450565572",
+     "position": 5,
+     "title": "Interlude",
+     "title_short": "Interlude",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 182,
+     "explicit": false,
+     "id": 450565582,
+     "isrc": "BEEN91701007",
+     "link": "https://www.deezer.com/track/450565582",
+     "position": 6,
+     "title": "Cours de danse",
+     "title_short": "Cours de danse",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 210,
+     "explicit": false,
+     "id": 450565592,
+     "isrc": "BEEN91701008",
+     "link": "https://www.deezer.com/track/450565592",
+     "position": 7,
+     "title": "Planer",
+     "title_short": "Planer",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 246,
+     "explicit": false,
+     "id": 450565602,
+     "isrc": "BEEN91701009",
+     "link": "https://www.deezer.com/track/450565602",
+     "position": 8,
+     "title": "Cercle",
+     "title_short": "Cercle",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 228,
+     "explicit": false,
+     "id": 450565612,
+     "isrc": "BEEN91701010",
+     "link": "https://www.deezer.com/track/450565612",
+     "position": 9,
+     "title": "Rivage",
+     "title_short": "Rivage",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 144,
+     "explicit": false,
+     "id": 450565622,
+     "isrc": "BEEN91701011",
+     "link": "https://www.deezer.com/track/450565622",
+     "position": 10,
+     "title": "Outro",
+     "title_short": "Outro",
+     "title_version": ""
+    }
+   ],
+   "record_type": "album",
+   "release_date": "2018-01-19",
+   "title": "Marabout"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 129186662,
+   "label": "Urban",
+   "link": "https://www.deezer.com/album/129186662",
+   "nb_tracks": 7,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 229,
+     "explicit": false,
+     "id": 863454762,
+     "isrc": "BEEN91991001",
+     "link": "https://www.deezer.com/track/863454762",
+     "position": 1,
+     "title": "N.",
+     "title_short": "N.",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 223,
+     "explicit": false,
+     "id": 863454772,
+     "isrc": "BEEN92091004",
+     "link": "https://www.deezer.com/track/863454772",
+     "position": 2,
+     "title": "Brousse",
+     "title_short": "Brousse",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 264,
+     "explicit": false,
+     "id": 863454782,
+     "isrc": "BEEN92091001",
+     "link": "https://www.deezer.com/track/863454782",
+     "position": 3,
+     "title": "S'en aller",
+     "title_short": "S'en aller",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 214,
+     "explicit": false,
+     "id": 863454792,
+     "isrc": "BEEN92091002",
+     "link": "https://www.deezer.com/track/863454792",
+     "position": 4,
+     "title": "Pas besoin de raison",
+     "title_short": "Pas besoin de raison",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 172,
+     "explicit": false,
+     "id": 863454802,
+     "isrc": "BEEN91991003",
+     "link": "https://www.deezer.com/track/863454802",
+     "position": 5,
+     "title": "Gris",
+     "title_short": "Gris",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 241,
+     "explicit": false,
+     "id": 863454812,
+     "isrc": "BEEN91991002",
+     "link": "https://www.deezer.com/track/863454812",
+     "position": 6,
+     "title": "Soon",
+     "title_short": "Soon",
+     "title_version": ""
+    },
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 206,
+     "explicit": false,
+     "id": 863454822,
+     "isrc": "BEEN92091003",
+     "link": "https://www.deezer.com/track/863454822",
+     "position": 7,
+     "title": "Indélébile",
+     "title_short": "Indélébile",
+     "title_version": ""
+    }
+   ],
+   "record_type": "ep",
+   "release_date": "2020-02-07",
+   "title": "ALT F4"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ],
+    [
+     312734,
+     "Mandy"
+    ]
+   ],
+   "id": 1035457732,
+   "label": "Labrique Publishing",
+   "link": "https://www.deezer.com/album/1035457732",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 182,
+     "explicit": false,
+     "id": 4170441802,
+     "isrc": "BEEN92600021",
+     "link": "https://www.deezer.com/track/4170441802",
+     "position": 1,
+     "title": "LA MAISON",
+     "title_short": "LA MAISON",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2026-10-01",
+   "title": "LA MAISON"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ],
+    [
+     436723,
+     "CRC"
+    ],
+    [
+     63454922,
+     "Lafleyne"
+    ]
+   ],
+   "id": 1035457872,
+   "label": "Labrique Publishing",
+   "link": "https://www.deezer.com/album/1035457872",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 197,
+     "explicit": true,
+     "id": 4170442492,
+     "isrc": "BEEN92600018",
+     "link": "https://www.deezer.com/track/4170442492",
+     "position": 1,
+     "title": "LES MÊMES PRIÈRES",
+     "title_short": "LES MÊMES PRIÈRES",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2026-10-01",
+   "title": "LES MÊMES PRIÈRES"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ],
+    [
+     152058642,
+     "aupinard"
+    ]
+   ],
+   "id": 1035457842,
+   "label": "Labrique Publishing",
+   "link": "https://www.deezer.com/album/1035457842",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 185,
+     "explicit": true,
+     "id": 4170442462,
+     "isrc": "BEEN92600019",
+     "link": "https://www.deezer.com/track/4170442462",
+     "position": 1,
+     "title": "AMOUR&MANQUE",
+     "title_short": "AMOUR&MANQUE",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2026-09-08",
+   "title": "AMOUR&MANQUE"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 992305001,
+   "label": "DEMAIN",
+   "link": "https://www.deezer.com/album/992305001",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 174,
+     "explicit": false,
+     "id": 4047868591,
+     "isrc": "BEEN92600003",
+     "link": "https://www.deezer.com/track/4047868591",
+     "position": 1,
+     "title": "ILY",
+     "title_short": "ILY",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2026-06-19",
+   "title": "ILY"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 911069751,
+   "label": "Labrique Publishing",
+   "link": "https://www.deezer.com/album/911069751",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 199,
+     "explicit": true,
+     "id": 3820681791,
+     "isrc": "BEEN92600002",
+     "link": "https://www.deezer.com/track/3820681791",
+     "position": 1,
+     "title": "DÉLUGE",
+     "title_short": "DÉLUGE",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2026-02-20",
+   "title": "DÉLUGE"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 825449651,
+   "label": "Labrique Publishing",
+   "link": "https://www.deezer.com/album/825449651",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 146,
+     "explicit": false,
+     "id": 3567102291,
+     "isrc": "BEEN92510013",
+     "link": "https://www.deezer.com/track/3567102291",
+     "position": 1,
+     "title": "L'ENFER",
+     "title_short": "L'ENFER",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2025-10-03",
+   "title": "L'ENFER"
+  },
+  {
+   "artist_id": 86157752,
+   "artist_name": "Dajak",
+   "contributors": [
+    [
+     86157752,
+     "Dajak"
+    ],
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 657158081,
+   "label": "Bleu Bandits",
+   "link": "https://www.deezer.com/album/657158081",
+   "nb_tracks": 2,
+   "pistes": [
+    {
+     "artist_id": 86157752,
+     "artist_name": "Dajak",
+     "contributors": [],
+     "disk": 1,
+     "duration": 356,
+     "explicit": false,
+     "id": 3046620941,
+     "isrc": "FRX852410490",
+     "link": "https://www.deezer.com/track/3046620941",
+     "position": 1,
+     "title": "RAYONS (Version électrique)",
+     "title_short": "RAYONS",
+     "title_version": "(Version électrique)"
+    },
+    {
+     "artist_id": 86157752,
+     "artist_name": "Dajak",
+     "contributors": [],
+     "disk": 1,
+     "duration": 325,
+     "explicit": false,
+     "id": 3046620951,
+     "isrc": "FR9W12436292",
+     "link": "https://www.deezer.com/track/3046620951",
+     "position": 2,
+     "title": "RAYONS",
+     "title_short": "RAYONS",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2024-10-18",
+   "title": "RAYONS"
+  },
+  {
+   "artist_id": 86157752,
+   "artist_name": "Dajak",
+   "contributors": [
+    [
+     86157752,
+     "Dajak"
+    ],
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 616932271,
+   "label": "Bleu Bandits",
+   "link": "https://www.deezer.com/album/616932271",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 86157752,
+     "artist_name": "Dajak",
+     "contributors": [],
+     "disk": 1,
+     "duration": 325,
+     "explicit": false,
+     "id": 2894731301,
+     "isrc": "FR9W12436292",
+     "link": "https://www.deezer.com/track/2894731301",
+     "position": 1,
+     "title": "RAYONS",
+     "title_short": "RAYONS",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2024-08-02",
+   "title": "RAYONS"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 604473232,
+   "label": "labrique / naïve",
+   "link": "https://www.deezer.com/album/604473232",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 156,
+     "explicit": true,
+     "id": 2857030122,
+     "isrc": "BEEN92400014",
+     "link": "https://www.deezer.com/track/2857030122",
+     "position": 1,
+     "title": "Mérite",
+     "title_short": "Mérite",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2024-07-05",
+   "title": "Mérite"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ],
+    [
+     6745115,
+     "Prince Waly"
+    ]
+   ],
+   "id": 498836861,
+   "label": "labrique / naïve",
+   "link": "https://www.deezer.com/album/498836861",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 222,
+     "explicit": true,
+     "id": 2493902021,
+     "isrc": "BEEN92300024",
+     "link": "https://www.deezer.com/track/2493902021",
+     "position": 1,
+     "title": "UN SEUL CIEL",
+     "title_short": "UN SEUL CIEL",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2023-11-30",
+   "title": "UN SEUL CIEL"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ],
+    [
+     49557342,
+     "YG Pablo"
+    ]
+   ],
+   "id": 498836871,
+   "label": "labrique / naïve",
+   "link": "https://www.deezer.com/album/498836871",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 181,
+     "explicit": true,
+     "id": 2493902081,
+     "isrc": "BEEN92300029",
+     "link": "https://www.deezer.com/track/2493902081",
+     "position": 1,
+     "title": "REYKJAVIK",
+     "title_short": "REYKJAVIK",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2023-11-30",
+   "title": "REYKJAVIK"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 484617705,
+   "label": "labrique / naïve",
+   "link": "https://www.deezer.com/album/484617705",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 176,
+     "explicit": false,
+     "id": 2441755395,
+     "isrc": "BEEN92300021",
+     "link": "https://www.deezer.com/track/2441755395",
+     "position": 1,
+     "title": "MALADRESSE",
+     "title_short": "MALADRESSE",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2023-09-27",
+   "title": "MALADRESSE"
+  },
+  {
+   "artist_id": 8847786,
+   "artist_name": "Le Motel",
+   "contributors": [
+    [
+     8847786,
+     "Le Motel"
+    ],
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 322528657,
+   "label": "Top Notch Music",
+   "link": "https://www.deezer.com/album/322528657",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 8847786,
+     "artist_name": "Le Motel",
+     "contributors": [],
+     "disk": 1,
+     "duration": 260,
+     "explicit": false,
+     "id": 1768868387,
+     "isrc": "BEUM72200133",
+     "link": "https://www.deezer.com/track/1768868387",
+     "position": 1,
+     "title": "Séisme (From \"Fils De\")",
+     "title_short": "Séisme",
+     "title_version": "(From \"Fils De\")"
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2022-06-03",
+   "title": "Séisme"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ],
+    [
+     1042268,
+     "Angèle"
+    ]
+   ],
+   "id": 128211392,
+   "label": "Urban",
+   "link": "https://www.deezer.com/album/128211392",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 264,
+     "explicit": false,
+     "id": 859133902,
+     "isrc": "BEEN92091001",
+     "link": "https://www.deezer.com/track/859133902",
+     "position": 1,
+     "title": "S'en aller",
+     "title_short": "S'en aller",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2020-01-31",
+   "title": "S'en aller"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 125184062,
+   "label": "Urban",
+   "link": "https://www.deezer.com/album/125184062",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 171,
+     "explicit": false,
+     "id": 845381502,
+     "isrc": "BEEN91991003",
+     "link": "https://www.deezer.com/track/845381502",
+     "position": 1,
+     "title": "Gris",
+     "title_short": "Gris",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2020-01-14",
+   "title": "Gris"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 116239682,
+   "label": "Urban",
+   "link": "https://www.deezer.com/album/116239682",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 227,
+     "explicit": false,
+     "id": 783743682,
+     "isrc": "BEEN91901001",
+     "link": "https://www.deezer.com/track/783743682",
+     "position": 1,
+     "title": "N",
+     "title_short": "N",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2019-11-06",
+   "title": "N"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 227694732,
+   "label": "COLORSxSTUDIOS",
+   "link": "https://www.deezer.com/album/227694732",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 192,
+     "explicit": true,
+     "id": 1362847942,
+     "isrc": "DEXC81900008",
+     "link": "https://www.deezer.com/track/1362847942",
+     "position": 1,
+     "title": "Canopée - A COLORS SHOW",
+     "title_short": "Canopée - A COLORS SHOW",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2018-03-06",
+   "title": "Canopée - A COLORS SHOW"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 54453092,
+   "label": "Urban",
+   "link": "https://www.deezer.com/album/54453092",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 227,
+     "explicit": false,
+     "id": 446857972,
+     "isrc": "BEEN91701003",
+     "link": "https://www.deezer.com/track/446857972",
+     "position": 1,
+     "title": "Corbeaux",
+     "title_short": "Corbeaux",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2018-01-07",
+   "title": "Corbeaux"
+  },
+  {
+   "artist_id": 293826,
+   "artist_name": "Swing",
+   "contributors": [
+    [
+     293826,
+     "Swing"
+    ]
+   ],
+   "id": 53399642,
+   "label": "Urban",
+   "link": "https://www.deezer.com/album/53399642",
+   "nb_tracks": 1,
+   "pistes": [
+    {
+     "artist_id": 293826,
+     "artist_name": "Swing",
+     "contributors": [],
+     "disk": 1,
+     "duration": 246,
+     "explicit": false,
+     "id": 440382302,
+     "isrc": "BEEN91701009",
+     "link": "https://www.deezer.com/track/440382302",
+     "position": 1,
+     "title": "Cercle",
+     "title_short": "Cercle",
+     "title_version": ""
+    }
+   ],
+   "record_type": "single",
+   "release_date": "2017-12-14",
+   "title": "Cercle"
+  }
+ ],
+ "albums_base": [
+  {
+   "deezer_album_id": 140506202,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:52.755516",
+   "spotify_album_ids": "111flDuviWjU26hDiYUvrY",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"111flDuviWjU26hDiYUvrY\": 95553316}",
+   "spotify_streams": 95553316,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:16:27.574984",
+   "title": "High & Fines Herbes",
+   "ytm_streams": 833387
+  },
+  {
+   "deezer_album_id": 129186662,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:30.260347",
+   "spotify_album_ids": "30eY1ExUxqKvCOCQIixXxn",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"30eY1ExUxqKvCOCQIixXxn\": 48102919}",
+   "spotify_streams": 48102919,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:17:05.869990",
+   "title": "ALT F4",
+   "ytm_streams": 6043475
+  },
+  {
+   "deezer_album_id": 55110712,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:03.148872",
+   "spotify_album_ids": "5QM5PNuseOuzOxerjcbrXB",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"5QM5PNuseOuzOxerjcbrXB\": 31723328}",
+   "spotify_streams": 31723328,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:17:55.309057",
+   "title": "Marabout",
+   "ytm_streams": 7502917
+  },
+  {
+   "deezer_album_id": 136016742,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:55.112875",
+   "spotify_album_ids": "5SCpPAXLERpGRtQpM6d1MR",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"5SCpPAXLERpGRtQpM6d1MR\": 25113256}",
+   "spotify_streams": 25113256,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:19:13.499675",
+   "title": "Hundred Fifty Roses",
+   "ytm_streams": 43373
+  },
+  {
+   "deezer_album_id": 352495597,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:25.869237",
+   "spotify_album_ids": "7m4F3qwKXPTDm8ONo0zLIn",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"7m4F3qwKXPTDm8ONo0zLIn\": 11372829}",
+   "spotify_streams": 11372829,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:20:45.956983",
+   "title": "Fragments",
+   "ytm_streams": 125483
+  },
+  {
+   "deezer_album_id": 407066467,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:24.893531",
+   "spotify_album_ids": "6mZScaQNqoMn89hPorVTwY",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"6mZScaQNqoMn89hPorVTwY\": 7164888}",
+   "spotify_streams": 7164888,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:21:56.772680",
+   "title": "Zayon",
+   "ytm_streams": 123981
+  },
+  {
+   "deezer_album_id": 498836831,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-22 03:49:58.495074",
+   "spotify_album_ids": "1HhZFt1UjtsZaQZCHwoMaR",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"1HhZFt1UjtsZaQZCHwoMaR\": 7020443}",
+   "spotify_streams": 7020443,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:23:27.356743",
+   "title": "AU REVOIR SIMEON",
+   "ytm_streams": 1269004
+  },
+  {
+   "deezer_album_id": 778318301,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:53.912091",
+   "spotify_album_ids": "3GFmt7dRnlztVJOl4qKkzz",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"3GFmt7dRnlztVJOl4qKkzz\": 3521443}",
+   "spotify_streams": 3521443,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-13 04:24:32.374155",
+   "title": "Home Safe",
+   "ytm_streams": 5697
+  },
+  {
+   "deezer_album_id": 839898832,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:17.961243",
+   "spotify_album_ids": "63CNNQAFo5dLHPV70fU1ed",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"63CNNQAFo5dLHPV70fU1ed\": 1563476}",
+   "spotify_streams": 1563476,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-10 12:08:24.866788",
+   "title": "SOLAR STEREO",
+   "ytm_streams": 28891
+  },
+  {
+   "deezer_album_id": 1035457842,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-22 03:49:59.649737",
+   "spotify_album_ids": "0c3ZKGL5zDkycoHR1Y5Ieh",
+   "spotify_daily_streams": null,
+   "spotify_editions_json": "{\"0c3ZKGL5zDkycoHR1Y5Ieh\": 296395}",
+   "spotify_streams": 296395,
+   "spotify_streams_source": "spotify_web",
+   "spotify_streams_updated": "2026-10-12 05:18:49.523924",
+   "title": "AMOUR&MANQUE",
+   "ytm_streams": 106423
+  },
+  {
+   "deezer_album_id": 227694732,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-22 03:50:00.823477",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Canopée - A COLORS SHOW",
+   "ytm_streams": 1259
+  },
+  {
+   "deezer_album_id": 14410700,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:33.687957",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Bruxelles c’est devenu la jungle",
+   "ytm_streams": 145815
+  },
+  {
+   "deezer_album_id": 511594881,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:34.830596",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "C’est le 77",
+   "ytm_streams": 105367
+  },
+  {
+   "deezer_album_id": 274785982,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:35.994093",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Delta Plane",
+   "ytm_streams": 429579
+  },
+  {
+   "deezer_album_id": 108383,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:37.214917",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Don’t Hold Back",
+   "ytm_streams": 103188
+  },
+  {
+   "deezer_album_id": 922898371,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:40.768284",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Famille nombreuse",
+   "ytm_streams": 47464
+  },
+  {
+   "deezer_album_id": 212548932,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:28.373876",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Grand romantisme",
+   "ytm_streams": 2320
+  },
+  {
+   "deezer_album_id": 519054172,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:47:51.588953",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Gucci Sushi",
+   "ytm_streams": 37266
+  },
+  {
+   "deezer_album_id": 214182202,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:04.298356",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Mignon",
+   "ytm_streams": 218664
+  },
+  {
+   "deezer_album_id": 12401130,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:05.450805",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Morale",
+   "ytm_streams": 130741
+  },
+  {
+   "deezer_album_id": 97655222,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:06.576641",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Pas de pluie, pas de fleurs",
+   "ytm_streams": 1273033
+  },
+  {
+   "deezer_album_id": 679887591,
+   "record_type": "ep",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:12.267776",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Pleurez! (Acte II)",
+   "ytm_streams": 2029
+  },
+  {
+   "deezer_album_id": 171963172,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-09-23 02:48:23.728719",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Yellockdown Project",
+   "ytm_streams": 16852
+  },
+  {
+   "deezer_album_id": 305105697,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:50.005925",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "tentacle",
+   "ytm_streams": 74667
+  },
+  {
+   "deezer_album_id": 222543542,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:22.133663",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Avant la nuit",
+   "ytm_streams": 2823710
+  },
+  {
+   "deezer_album_id": 1034637592,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:22.146722",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "F5",
+   "ytm_streams": 452574
+  },
+  {
+   "deezer_album_id": 176155742,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:27.126726",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "GORE",
+   "ytm_streams": 487319
+  },
+  {
+   "deezer_album_id": 515346842,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:36.791579",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "L’Origine",
+   "ytm_streams": 525547
+  },
+  {
+   "deezer_album_id": 111316312,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:40.376485",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Pleine Lune 2",
+   "ytm_streams": 201769
+  },
+  {
+   "deezer_album_id": 60528542,
+   "record_type": "single",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:43.882790",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Règlement Freestyle : Saison 1",
+   "ytm_streams": 946970
+  },
+  {
+   "deezer_album_id": 75116772,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:45.085006",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Sapiens",
+   "ytm_streams": 9205113
+  },
+  {
+   "deezer_album_id": 1445536,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:46.328321",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Scared Of The Dark",
+   "ytm_streams": 164691
+  },
+  {
+   "deezer_album_id": 515346542,
+   "record_type": "album",
+   "record_type_source": "deezer",
+   "record_type_updated": "2026-10-12 19:05:48.817443",
+   "spotify_album_ids": null,
+   "spotify_daily_streams": null,
+   "spotify_editions_json": null,
+   "spotify_streams": null,
+   "spotify_streams_source": null,
+   "spotify_streams_updated": null,
+   "title": "Zeppelin",
+   "ytm_streams": 12945560
+  }
+ ],
+ "artiste": "Swing",
+ "attendu": {
+  "ecarts": [
+   "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333022, \"socle\": null, \"titre\": \"MON CŒUR\"}",
+   "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333032, \"socle\": null, \"titre\": \"DIS MOI\"}",
+   "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333062, \"socle\": null, \"titre\": \"ALL EYES ON ME\"}",
+   "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333072, \"socle\": null, \"titre\": \"LES MÊMES PRIÈRES\"}",
+   "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333092, \"socle\": null, \"titre\": \"MA FAUTE\"}",
+   "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333112, \"socle\": null, \"titre\": \"LA MAISON\"}",
+   "{\"album\": 1035457732, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"album_absent\", \"piste\": 4170441802, \"socle\": null, \"titre\": \"LA MAISON\"}",
+   "{\"album\": 1035457872, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"album_absent\", \"piste\": 4170442492, \"socle\": null, \"titre\": \"LES MÊMES PRIÈRES\"}",
+   "{\"album\": 498836831, \"coche\": false, \"fiche\": 686, \"motifs\": [\"lien existant : Deezer 196 s / fiche 61 s (legacy) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 2493901931, \"socle\": null, \"titre\": \"VISION\"}"
+  ],
+  "editions_jumelles": [
+   "Cercle",
+   "Corbeaux",
+   "DÉLUGE",
+   "Gris",
+   "ILY",
+   "L'ENFER",
+   "MALADRESSE",
+   "Mérite",
+   "N",
+   "RAYONS",
+   "RAYONS",
+   "REYKJAVIK",
+   "S'en aller",
+   "Séisme",
+   "UN SEUL CIEL"
+  ]
+ },
+ "base": [
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901921,
+   "duration": 179,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 179,
+    "legacy": 179,
+    "spotify_web": 179
+   },
+   "genius_id": 9567110,
+   "id": 672,
+   "is_featuring": false,
+   "isrc": "BEEN92300033",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": ".WAV",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074452,
+   "duration": 263,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 263,
+    "legacy": 263,
+    "spotify_web": 263,
+    "youtube": 264
+   },
+   "genius_id": 3075005,
+   "id": 579,
+   "is_featuring": true,
+   "isrc": "BEEN91620003",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "1000",
+   "unreleased": null
+  },
+  {
+   "album": "Mignon",
+   "deezer_id": null,
+   "duration": 239,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "spotify_web": 238,
+    "youtube": 239
+   },
+   "genius_id": 6523306,
+   "id": 649,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Peet (BEL)",
+   "release_date": "2021-03-19",
+   "secondary_role": null,
+   "title": "2 sens",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901941,
+   "duration": 142,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 142,
+    "legacy": 142,
+    "spotify_web": 142
+   },
+   "genius_id": 9567108,
+   "id": 682,
+   "is_featuring": false,
+   "isrc": "BEEN92300035",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "2:22",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901841,
+   "duration": 169,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 169,
+    "legacy": 169,
+    "spotify_web": 169
+   },
+   "genius_id": 9567064,
+   "id": 681,
+   "is_featuring": false,
+   "isrc": "BEEN92300025",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "2YEUX",
+   "unreleased": null
+  },
+  {
+   "album": "AMOUR&MANQUE",
+   "deezer_id": 4170442462,
+   "duration": 185,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 185,
+    "spotify_web": 185
+   },
+   "genius_id": 14184997,
+   "id": 9891,
+   "is_featuring": false,
+   "isrc": "BEEN92600019",
+   "primary_artist_name": null,
+   "release_date": "2026-09-08",
+   "secondary_role": null,
+   "title": "AMOUR&MANQUE",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 189,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 189
+   },
+   "genius_id": 13400465,
+   "id": 641,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "EDGE",
+   "release_date": "2025-12-22",
+   "secondary_role": null,
+   "title": "Aller-Retour",
+   "unreleased": null
+  },
+  {
+   "album": "Fragments",
+   "deezer_id": 1895932557,
+   "duration": 214,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 215,
+    "deezer": 214,
+    "legacy": 214,
+    "spotify_web": 214,
+    "youtube": 215
+   },
+   "genius_id": 8485336,
+   "id": 656,
+   "is_featuring": true,
+   "isrc": "BEEN92100114",
+   "primary_artist_name": "Primero",
+   "release_date": "2022-11-04",
+   "secondary_role": null,
+   "title": "Allers simples",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393662,
+   "duration": 242,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 242,
+    "deezer": 242,
+    "legacy": 242,
+    "spotify_web": 242,
+    "youtube": 243
+   },
+   "genius_id": 4010669,
+   "id": 598,
+   "is_featuring": true,
+   "isrc": "BEEN91820004",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-16",
+   "secondary_role": "Writer",
+   "title": "Antilope",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074512,
+   "duration": 321,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 321,
+    "legacy": 321,
+    "spotify_web": 321,
+    "youtube": 322
+   },
+   "genius_id": 3075086,
+   "id": 574,
+   "is_featuring": true,
+   "isrc": "BEEN91620009",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "Apollo",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113202,
+   "duration": 220,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 220,
+    "deezer": 220,
+    "legacy": 220,
+    "spotify_web": 220,
+    "youtube": 221
+   },
+   "genius_id": 6725717,
+   "id": 619,
+   "is_featuring": true,
+   "isrc": "BEEN92100024",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Banane",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 206,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "legacy": 259,
+    "youtube_video": 206
+   },
+   "genius_id": 2482233,
+   "id": 622,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2016-05-29",
+   "secondary_role": "Writer",
+   "title": "Boîte à Gants",
+   "unreleased": null
+  },
+  {
+   "album": "ALT F4",
+   "deezer_id": 863454772,
+   "duration": 223,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 223,
+    "legacy": 223,
+    "spotify_web": 223
+   },
+   "genius_id": 5186940,
+   "id": 604,
+   "is_featuring": false,
+   "isrc": "BEEN92091004",
+   "primary_artist_name": null,
+   "release_date": "2020-02-07",
+   "secondary_role": null,
+   "title": "Brousse",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": null,
+   "duration": null,
+   "duration_source": null,
+   "durations_observees": {},
+   "genius_id": 3069846,
+   "id": 624,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "Bâton rouge",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565552,
+   "duration": 194,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 194,
+    "legacy": 194,
+    "spotify_web": 194,
+    "youtube": 195
+   },
+   "genius_id": 3439110,
+   "id": 597,
+   "is_featuring": false,
+   "isrc": "BEEN91701004",
+   "primary_artist_name": null,
+   "release_date": "2018-01-19",
+   "secondary_role": null,
+   "title": "Canopée",
+   "unreleased": null
+  },
+  {
+   "album": "Canopée - A COLORS SHOW",
+   "deezer_id": 1362847942,
+   "duration": 192,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 192,
+    "spotify_web": 192,
+    "youtube": 192
+   },
+   "genius_id": null,
+   "id": 9894,
+   "is_featuring": false,
+   "isrc": "DEXC81900008",
+   "primary_artist_name": null,
+   "release_date": "2018-03-06",
+   "secondary_role": null,
+   "title": "Canopée - A COLORS SHOW",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 72,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 72
+   },
+   "genius_id": 7965534,
+   "id": 696,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Tuxninja",
+   "release_date": "2022-05-20",
+   "secondary_role": null,
+   "title": "Canta-me o swing",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113242,
+   "duration": 194,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 194,
+    "deezer": 194,
+    "legacy": 194,
+    "spotify_web": 194,
+    "youtube": 195
+   },
+   "genius_id": 6725742,
+   "id": 635,
+   "is_featuring": true,
+   "isrc": "BEEN92100028",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Cassé",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074502,
+   "duration": 222,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 222,
+    "legacy": 222,
+    "spotify_web": 222,
+    "youtube": 223
+   },
+   "genius_id": 3076443,
+   "id": 616,
+   "is_featuring": true,
+   "isrc": "BEEN91620008",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "Cendres et Pollen",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565602,
+   "duration": 246,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 246,
+    "legacy": 246,
+    "spotify_web": 246
+   },
+   "genius_id": 3360313,
+   "id": 585,
+   "is_featuring": false,
+   "isrc": "BEEN91701009",
+   "primary_artist_name": null,
+   "release_date": "2017-12-14",
+   "secondary_role": null,
+   "title": "Cercle",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113282,
+   "duration": 241,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 241,
+    "deezer": 241,
+    "legacy": 241,
+    "spotify_web": 241,
+    "youtube": 242
+   },
+   "genius_id": 6725772,
+   "id": 645,
+   "is_featuring": true,
+   "isrc": "BEEN92100032",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Ciel rouge",
+   "unreleased": null
+  },
+  {
+   "album": "Morale",
+   "deezer_id": 119132330,
+   "duration": 178,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 178,
+    "legacy": 178,
+    "spotify_web": 178
+   },
+   "genius_id": 2436500,
+   "id": 599,
+   "is_featuring": true,
+   "isrc": "BEEO51600002",
+   "primary_artist_name": "Roméo Elvis",
+   "release_date": "2016-02-28",
+   "secondary_role": null,
+   "title": "Copain",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565542,
+   "duration": 227,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 227,
+    "legacy": 227,
+    "spotify_web": 227
+   },
+   "genius_id": 3419170,
+   "id": 588,
+   "is_featuring": false,
+   "isrc": "BEEN91701003",
+   "primary_artist_name": null,
+   "release_date": "2018-01-07",
+   "secondary_role": null,
+   "title": "Corbeaux",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074522,
+   "duration": 193,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 193,
+    "legacy": 193,
+    "spotify_web": 193,
+    "youtube": 194
+   },
+   "genius_id": 3076453,
+   "id": 605,
+   "is_featuring": true,
+   "isrc": "BEEN91620010",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "Cordes métalliques",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 185,
+   "duration_source": "apple_music",
+   "durations_observees": {
+    "apple_music": 185,
+    "youtube_video": 185
+   },
+   "genius_id": 748097,
+   "id": 677,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "Costards et pièces jaunes",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565582,
+   "duration": 182,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 182,
+    "legacy": 182,
+    "spotify_web": 182,
+    "youtube": 183
+   },
+   "genius_id": 3439112,
+   "id": 631,
+   "is_featuring": false,
+   "isrc": "BEEN91701007",
+   "primary_artist_name": null,
+   "release_date": "2018-01-19",
+   "secondary_role": null,
+   "title": "Cours de danse",
+   "unreleased": null
+  },
+  {
+   "album": "Home Safe",
+   "deezer_id": 3431300701,
+   "duration": 150,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 150,
+    "deezer": 150,
+    "legacy": 150,
+    "spotify_web": 150,
+    "youtube": 151
+   },
+   "genius_id": 12362779,
+   "id": 691,
+   "is_featuring": true,
+   "isrc": "GBWZD2517509",
+   "primary_artist_name": "Crayon",
+   "release_date": "2025-10-24",
+   "secondary_role": null,
+   "title": "Cristaux Liquides",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113212,
+   "duration": 179,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 180,
+    "deezer": 179,
+    "legacy": 179,
+    "spotify_web": 179,
+    "youtube": 180
+   },
+   "genius_id": 6725722,
+   "id": 637,
+   "is_featuring": true,
+   "isrc": "BEEN92100025",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "C’est dingue",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113252,
+   "duration": 211,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 212,
+    "deezer": 211,
+    "legacy": 211,
+    "spotify_web": 211,
+    "youtube": 212
+   },
+   "genius_id": 6725769,
+   "id": 642,
+   "is_featuring": true,
+   "isrc": "BEEN92100029",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Descente",
+   "unreleased": null
+  },
+  {
+   "album": "Don’t Hold Back",
+   "deezer_id": null,
+   "duration": 218,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "apple_music": 218,
+    "legacy": 217,
+    "spotify_web": 217,
+    "youtube": 218
+   },
+   "genius_id": 32214,
+   "id": 669,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Public Announcement",
+   "release_date": "2001-02-06",
+   "secondary_role": null,
+   "title": "Don’t Hold Back",
+   "unreleased": null
+  },
+  {
+   "album": "Pleurez! (Acte II)",
+   "deezer_id": null,
+   "duration": 151,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "legacy": 150,
+    "spotify_web": 150,
+    "youtube": 151
+   },
+   "genius_id": 10471766,
+   "id": 692,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "CRC (BEL)",
+   "release_date": "2024-05-24",
+   "secondary_role": null,
+   "title": "Décembre",
+   "unreleased": null
+  },
+  {
+   "album": "F5",
+   "deezer_id": 4168333042,
+   "duration": 199,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 199,
+    "legacy": 199,
+    "spotify_web": 199
+   },
+   "genius_id": 13161447,
+   "id": 673,
+   "is_featuring": false,
+   "isrc": "BEEN92600002",
+   "primary_artist_name": null,
+   "release_date": "2026-02-20",
+   "secondary_role": null,
+   "title": "Déluge",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 277,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 277
+   },
+   "genius_id": 749307,
+   "id": 684,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "Edgar Lespri",
+   "unreleased": null
+  },
+  {
+   "album": "Grand romantisme",
+   "deezer_id": 1265599012,
+   "duration": 245,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 246,
+    "deezer": 245,
+    "legacy": 245,
+    "spotify_web": 245,
+    "youtube": 246
+   },
+   "genius_id": 6641923,
+   "id": 675,
+   "is_featuring": true,
+   "isrc": "FR2X42148485",
+   "primary_artist_name": "PH Trigano",
+   "release_date": "2021-03-26",
+   "secondary_role": null,
+   "title": "Escroc",
+   "unreleased": null
+  },
+  {
+   "album": "Delta Plane",
+   "deezer_id": null,
+   "duration": 267,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 267
+   },
+   "genius_id": 2468877,
+   "id": 577,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Le Dé (BEL)",
+   "release_date": "2016-03-20",
+   "secondary_role": null,
+   "title": "Espace Temps",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 275,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 275
+   },
+   "genius_id": 1884151,
+   "id": 660,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Give Me Five Prod",
+   "release_date": "2015-05-20",
+   "secondary_role": "Writer",
+   "title": "Freestyle - La Brique",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901811,
+   "duration": 56,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 56,
+    "legacy": 56,
+    "spotify_web": 56
+   },
+   "genius_id": 9567103,
+   "id": 683,
+   "is_featuring": false,
+   "isrc": "BEEN92300022",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "GIGI",
+   "unreleased": null
+  },
+  {
+   "album": "ALT F4",
+   "deezer_id": 863454802,
+   "duration": 171,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 171,
+    "legacy": 172,
+    "spotify_web": 172
+   },
+   "genius_id": 5170540,
+   "id": 589,
+   "is_featuring": false,
+   "isrc": "BEEN91991003",
+   "primary_artist_name": null,
+   "release_date": "2020-01-14",
+   "secondary_role": null,
+   "title": "Gris",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 253,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 253
+   },
+   "genius_id": 513817,
+   "id": 664,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2014-09-05",
+   "secondary_role": "Writer",
+   "title": "Griseville",
+   "unreleased": null
+  },
+  {
+   "album": "Grünt",
+   "deezer_id": null,
+   "duration": 2893,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 2893
+   },
+   "genius_id": 3019800,
+   "id": 573,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Grünt",
+   "release_date": "2017-03-27",
+   "secondary_role": null,
+   "title": "Grünt #33",
+   "unreleased": null
+  },
+  {
+   "album": "Pas de pluie, pas de fleurs",
+   "deezer_id": 683254412,
+   "duration": 274,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 274,
+    "legacy": 274,
+    "spotify_web": 274,
+    "youtube": 275
+   },
+   "genius_id": 3515429,
+   "id": 580,
+   "is_featuring": true,
+   "isrc": "QZARB1839126",
+   "primary_artist_name": "Moka Boka",
+   "release_date": "2018-02-11",
+   "secondary_role": null,
+   "title": "Heracles",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393672,
+   "duration": 257,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 257,
+    "deezer": 257,
+    "legacy": 257,
+    "spotify_web": 257,
+    "youtube": 258
+   },
+   "genius_id": 4010671,
+   "id": 593,
+   "is_featuring": true,
+   "isrc": "BEEN91820005",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-12",
+   "secondary_role": "Writer",
+   "title": "Homosapiens",
+   "unreleased": null
+  },
+  {
+   "album": "F5",
+   "deezer_id": 4168333052,
+   "duration": 174,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 174,
+    "legacy": 174,
+    "spotify_web": 174
+   },
+   "genius_id": 13760888,
+   "id": 674,
+   "is_featuring": false,
+   "isrc": "BEEN92600003",
+   "primary_artist_name": null,
+   "release_date": "2026-06-19",
+   "secondary_role": null,
+   "title": "ILY",
+   "unreleased": null
+  },
+  {
+   "album": "ALT F4",
+   "deezer_id": 863454822,
+   "duration": 206,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 206,
+    "legacy": 206,
+    "spotify_web": 206,
+    "youtube": 207
+   },
+   "genius_id": 5186948,
+   "id": 614,
+   "is_featuring": false,
+   "isrc": "BEEN92091003",
+   "primary_artist_name": null,
+   "release_date": "2020-02-07",
+   "secondary_role": null,
+   "title": "Indélébile",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113222,
+   "duration": 197,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 198,
+    "deezer": 197,
+    "legacy": 197,
+    "spotify_web": 197,
+    "youtube": 198
+   },
+   "genius_id": 6725728,
+   "id": 630,
+   "is_featuring": true,
+   "isrc": "BEEN92100026",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Inertie",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565572,
+   "duration": 175,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 175,
+    "legacy": 175,
+    "spotify_web": 175,
+    "youtube": 176
+   },
+   "genius_id": 3414696,
+   "id": 629,
+   "is_featuring": false,
+   "isrc": "BEEN91701006",
+   "primary_artist_name": null,
+   "release_date": "2017-12-27",
+   "secondary_role": null,
+   "title": "Interlude",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 87,
+   "duration_source": "apple_music",
+   "durations_observees": {
+    "apple_music": 87,
+    "youtube_video": 86
+   },
+   "genius_id": 1062931,
+   "id": 1882,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "Introduction",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074492,
+   "duration": 203,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 203,
+    "legacy": 203,
+    "spotify_web": 203,
+    "youtube": 204
+   },
+   "genius_id": 3069875,
+   "id": 603,
+   "is_featuring": true,
+   "isrc": "BEEN91620007",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "Jeu",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901821,
+   "duration": 177,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 177,
+    "legacy": 177,
+    "spotify_web": 177
+   },
+   "genius_id": 9567113,
+   "id": 670,
+   "is_featuring": false,
+   "isrc": "BEEN92300023",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "KOBE",
+   "unreleased": null
+  },
+  {
+   "album": "La poignée de punchlines#Bonus",
+   "deezer_id": null,
+   "duration": 239,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 239
+   },
+   "genius_id": 532642,
+   "id": 623,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Give Me Five Prod",
+   "release_date": "2013-11-20",
+   "secondary_role": "Writer",
+   "title": "La Poignée de Punchlines #Bonus",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393702,
+   "duration": 63,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 63,
+    "deezer": 63,
+    "legacy": 63,
+    "spotify_web": 63,
+    "youtube": 64
+   },
+   "genius_id": 4010675,
+   "id": 662,
+   "is_featuring": true,
+   "isrc": "BEEN91820008",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-16",
+   "secondary_role": "Writer",
+   "title": "Lambda (Interlude)",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 187,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 187
+   },
+   "genius_id": 374061,
+   "id": 602,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2014-03-02",
+   "secondary_role": "Writer",
+   "title": "Le chill",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 325,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 325
+   },
+   "genius_id": 2925832,
+   "id": 601,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2016-12-06",
+   "secondary_role": "Writer",
+   "title": "Le chill 2",
+   "unreleased": null
+  },
+  {
+   "album": "L’Origine",
+   "deezer_id": 2553075202,
+   "duration": 228,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 228,
+    "legacy": 228,
+    "spotify_web": 228,
+    "youtube": 228
+   },
+   "genius_id": 284570,
+   "id": 618,
+   "is_featuring": true,
+   "isrc": "BEEN92211101",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2013-09-29",
+   "secondary_role": "Writer",
+   "title": "Les Daltons",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 73,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 73
+   },
+   "genius_id": 760536,
+   "id": 688,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "Les maux du village - Interlude",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 143,
+   "duration_source": "legacy",
+   "durations_observees": {
+    "legacy": 143
+   },
+   "genius_id": 733868,
+   "id": 626,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-03-29",
+   "secondary_role": "Writer",
+   "title": "Les sales gosses",
+   "unreleased": null
+  },
+  {
+   "album": "Scared Of The Dark",
+   "deezer_id": 15652756,
+   "duration": 190,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 190,
+    "legacy": 190,
+    "spotify_web": 190,
+    "youtube": 191
+   },
+   "genius_id": 1628812,
+   "id": 679,
+   "is_featuring": true,
+   "isrc": "SEYWK1000804",
+   "primary_artist_name": "Adam Tensta",
+   "release_date": "2010-12-17",
+   "secondary_role": "Additional Vocals",
+   "title": "Like A Punk",
+   "unreleased": null
+  },
+  {
+   "album": "Bruxelles c’est devenu la jungle",
+   "deezer_id": 135028378,
+   "duration": 176,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 177,
+    "deezer": 176,
+    "legacy": 176,
+    "spotify_web": 176,
+    "youtube": 177
+   },
+   "genius_id": 490643,
+   "id": 615,
+   "is_featuring": true,
+   "isrc": "TCACS1653502",
+   "primary_artist_name": "Roméo Elvis",
+   "release_date": "2013-12-15",
+   "secondary_role": null,
+   "title": "Linkebrousse",
+   "unreleased": null
+  },
+  {
+   "album": "L’Origine",
+   "deezer_id": 2553075262,
+   "duration": 209,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 209,
+    "legacy": 209,
+    "spotify_web": 209,
+    "youtube": 209
+   },
+   "genius_id": 360560,
+   "id": 621,
+   "is_featuring": true,
+   "isrc": "BEEN92211107",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2013-07-07",
+   "secondary_role": "Writer",
+   "title": "Lotus bleu",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074442,
+   "duration": 246,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 246,
+    "legacy": 246,
+    "spotify_web": 246,
+    "youtube": 247
+   },
+   "genius_id": 3058563,
+   "id": 578,
+   "is_featuring": true,
+   "isrc": "BEEN91620002",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-04-18",
+   "secondary_role": "Writer",
+   "title": "Léon",
+   "unreleased": null
+  },
+  {
+   "album": "F5",
+   "deezer_id": 4168333102,
+   "duration": 146,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 146,
+    "legacy": 146,
+    "spotify_web": 146
+   },
+   "genius_id": 12490001,
+   "id": 678,
+   "is_featuring": false,
+   "isrc": "BEEN92510013",
+   "primary_artist_name": null,
+   "release_date": "2025-10-03",
+   "secondary_role": null,
+   "title": "L’enfer",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 288,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 288
+   },
+   "genius_id": 1229727,
+   "id": 654,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2014-07-26",
+   "secondary_role": "Writer",
+   "title": "L’escale",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901911,
+   "duration": 198,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 198,
+    "legacy": 198,
+    "spotify_web": 198
+   },
+   "genius_id": 9567071,
+   "id": 687,
+   "is_featuring": false,
+   "isrc": "BEEN92300032",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "MAFIA",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901871,
+   "duration": 204,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 204,
+    "legacy": 204,
+    "spotify_web": 204
+   },
+   "genius_id": 9567095,
+   "id": 680,
+   "is_featuring": false,
+   "isrc": "BEEN92300028",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "MAGRITTE",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901801,
+   "duration": 176,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 176,
+    "legacy": 176,
+    "spotify_web": 176
+   },
+   "genius_id": 9557094,
+   "id": 648,
+   "is_featuring": false,
+   "isrc": "BEEN92300021",
+   "primary_artist_name": null,
+   "release_date": "2023-09-27",
+   "secondary_role": null,
+   "title": "MALADRESSE",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901901,
+   "duration": 194,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 194,
+    "legacy": 194,
+    "spotify_web": 194,
+    "youtube": 195
+   },
+   "genius_id": 9567056,
+   "id": 657,
+   "is_featuring": false,
+   "isrc": "BEEN92300031",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "MELANOME",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901851,
+   "duration": 171,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 171,
+    "legacy": 171,
+    "spotify_web": 171
+   },
+   "genius_id": 9567137,
+   "id": 653,
+   "is_featuring": false,
+   "isrc": "BEEN92300026",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "MOSAÏQUE",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565562,
+   "duration": 203,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 203,
+    "legacy": 203,
+    "spotify_web": 203,
+    "youtube": 204
+   },
+   "genius_id": 3439111,
+   "id": 611,
+   "is_featuring": false,
+   "isrc": "BEEN91701005",
+   "primary_artist_name": null,
+   "release_date": "2018-01-19",
+   "secondary_role": null,
+   "title": "Mama",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 291,
+   "duration_source": "apple_music",
+   "durations_observees": {
+    "apple_music": 291,
+    "youtube_video": 291
+   },
+   "genius_id": 741446,
+   "id": 640,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "MellowMan",
+   "unreleased": null
+  },
+  {
+   "album": "GORE",
+   "deezer_id": 1093330182,
+   "duration": 191,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 195,
+    "deezer": 191,
+    "legacy": 191,
+    "spotify_web": 194,
+    "youtube": 192
+   },
+   "genius_id": 5963430,
+   "id": 609,
+   "is_featuring": true,
+   "isrc": "FRZ051900627",
+   "primary_artist_name": "Lous and The Yakuza",
+   "release_date": "2020-10-16",
+   "secondary_role": "Choir",
+   "title": "Messes basses",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074462,
+   "duration": 329,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 329,
+    "legacy": 329,
+    "spotify_web": 329,
+    "youtube": 330
+   },
+   "genius_id": 3077166,
+   "id": 595,
+   "is_featuring": true,
+   "isrc": "BEEN91620004",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "Mets la gomme",
+   "unreleased": null
+  },
+  {
+   "album": "L’Origine",
+   "deezer_id": 2553075212,
+   "duration": 245,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 245,
+    "legacy": 245,
+    "spotify_web": 245,
+    "youtube": 245
+   },
+   "genius_id": 231361,
+   "id": 636,
+   "is_featuring": true,
+   "isrc": "BEEN92211102",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2013-10-01",
+   "secondary_role": "Writer",
+   "title": "Mon voisin",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 333,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 333
+   },
+   "genius_id": 2820549,
+   "id": 671,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2016-02-29",
+   "secondary_role": "Writer",
+   "title": "Mouton noir",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": 2857030122,
+   "duration": 156,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 156,
+    "legacy": 156,
+    "spotify_web": 156,
+    "youtube": 157
+   },
+   "genius_id": 10619556,
+   "id": 658,
+   "is_featuring": false,
+   "isrc": "BEEN92400014",
+   "primary_artist_name": null,
+   "release_date": "2024-07-04",
+   "secondary_role": null,
+   "title": "Mérite",
+   "unreleased": null
+  },
+  {
+   "album": "ALT F4",
+   "deezer_id": 863454762,
+   "duration": 227,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 227,
+    "legacy": 227,
+    "spotify_web": 229
+   },
+   "genius_id": 4998927,
+   "id": 582,
+   "is_featuring": false,
+   "isrc": "BEEN91901001",
+   "primary_artist_name": null,
+   "release_date": "2019-11-06",
+   "secondary_role": null,
+   "title": "N",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901891,
+   "duration": 172,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 172,
+    "legacy": 172,
+    "spotify_web": 172
+   },
+   "genius_id": 9567129,
+   "id": 638,
+   "is_featuring": false,
+   "isrc": "BEEN92300030",
+   "primary_artist_name": null,
+   "release_date": "2023-11-02",
+   "secondary_role": null,
+   "title": "NO FUTURE",
+   "unreleased": null
+  },
+  {
+   "album": "Zayon",
+   "deezer_id": 2147853697,
+   "duration": 217,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 217,
+    "deezer": 217,
+    "legacy": 217,
+    "spotify_web": 217,
+    "youtube": 218
+   },
+   "genius_id": 8834749,
+   "id": 694,
+   "is_featuring": true,
+   "isrc": "CAH682300017",
+   "primary_artist_name": "FouKi",
+   "release_date": "2023-02-17",
+   "secondary_role": null,
+   "title": "No stress",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393722,
+   "duration": 259,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 260,
+    "deezer": 259,
+    "legacy": 259,
+    "reccobeats": 259,
+    "spotify_web": 259,
+    "youtube": 260
+   },
+   "genius_id": 4010678,
+   "id": 586,
+   "is_featuring": true,
+   "isrc": "BEEN91820010",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-16",
+   "secondary_role": "Writer",
+   "title": "Nos gènes",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113182,
+   "duration": 214,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 214,
+    "deezer": 214,
+    "legacy": 214,
+    "spotify_web": 214,
+    "youtube": 215
+   },
+   "genius_id": 6725706,
+   "id": 627,
+   "is_featuring": true,
+   "isrc": "BEEN92100022",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Nuit d’hotel",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 223,
+   "duration_source": "apple_music",
+   "durations_observees": {
+    "apple_music": 223,
+    "youtube_video": 224
+   },
+   "genius_id": 748006,
+   "id": 663,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "Nulle Part",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113172,
+   "duration": 245,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 245,
+    "deezer": 245,
+    "legacy": 245,
+    "spotify_web": 245,
+    "youtube": 246
+   },
+   "genius_id": 6676936,
+   "id": 600,
+   "is_featuring": true,
+   "isrc": "BEEN92100021",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-04-09",
+   "secondary_role": "Writer",
+   "title": "Négatif",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 236,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "youtube": 236
+   },
+   "genius_id": 5615693,
+   "id": 665,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "True Enuff",
+   "release_date": "2002-07-02",
+   "secondary_role": null,
+   "title": "On My Momma",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565622,
+   "duration": 144,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 144,
+    "legacy": 144,
+    "spotify_web": 144,
+    "youtube": 145
+   },
+   "genius_id": 3439115,
+   "id": 632,
+   "is_featuring": false,
+   "isrc": "BEEN91701011",
+   "primary_artist_name": null,
+   "release_date": "2018-01-19",
+   "secondary_role": null,
+   "title": "Outro",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113262,
+   "duration": 192,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 193,
+    "deezer": 192,
+    "legacy": 192,
+    "spotify_web": 192,
+    "youtube": 193
+   },
+   "genius_id": 6725770,
+   "id": 643,
+   "is_featuring": true,
+   "isrc": "BEEN92100030",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Pansement",
+   "unreleased": null
+  },
+  {
+   "album": "ALT F4",
+   "deezer_id": 863454792,
+   "duration": 214,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 214,
+    "legacy": 214,
+    "spotify_web": 214
+   },
+   "genius_id": 5186945,
+   "id": 612,
+   "is_featuring": false,
+   "isrc": "BEEN92091002",
+   "primary_artist_name": null,
+   "release_date": "2020-02-07",
+   "secondary_role": null,
+   "title": "Pas besoin de raison",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113272,
+   "duration": 240,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 240,
+    "deezer": 240,
+    "legacy": 240,
+    "spotify_web": 240,
+    "youtube": 241
+   },
+   "genius_id": 6725771,
+   "id": 650,
+   "is_featuring": true,
+   "isrc": "BEEN92100031",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-04-14",
+   "secondary_role": "Writer",
+   "title": "Pas de regrets",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565592,
+   "duration": 210,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 210,
+    "legacy": 210,
+    "spotify_web": 210,
+    "youtube": 211
+   },
+   "genius_id": 3439113,
+   "id": 617,
+   "is_featuring": false,
+   "isrc": "BEEN91701008",
+   "primary_artist_name": null,
+   "release_date": "2018-01-19",
+   "secondary_role": null,
+   "title": "Planer",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113292,
+   "duration": 192,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 192,
+    "deezer": 192,
+    "legacy": 192,
+    "spotify_web": 192,
+    "youtube": 193
+   },
+   "genius_id": 6725773,
+   "id": 633,
+   "is_featuring": true,
+   "isrc": "BEEN92100033",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "Pollen",
+   "unreleased": null
+  },
+  {
+   "album": "L’Origine",
+   "deezer_id": 2553075222,
+   "duration": 265,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 265,
+    "legacy": 265,
+    "spotify_web": 265,
+    "youtube": 265
+   },
+   "genius_id": 282510,
+   "id": 655,
+   "is_featuring": true,
+   "isrc": "BEEN92211103",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2013-09-29",
+   "secondary_role": "Writer",
+   "title": "Port d’Anvers",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393732,
+   "duration": 252,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 253,
+    "deezer": 252,
+    "legacy": 252,
+    "spotify_web": 252,
+    "youtube": 252
+   },
+   "genius_id": 3815753,
+   "id": 584,
+   "is_featuring": true,
+   "isrc": "FRX851801416",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-07-02",
+   "secondary_role": "Writer",
+   "title": "Prison vide",
+   "unreleased": null
+  },
+  {
+   "album": "Hundred Fifty Roses",
+   "deezer_id": null,
+   "duration": 219,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "apple_music": 218,
+    "spotify_web": 218,
+    "youtube": 219,
+    "youtube_video": 221
+   },
+   "genius_id": 5736044,
+   "id": 676,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Duñe (FRA)",
+   "release_date": "2020-05-22",
+   "secondary_role": null,
+   "title": "Ps",
+   "unreleased": null
+  },
+  {
+   "album": "SOLAR STEREO",
+   "deezer_id": 2894731301,
+   "duration": 325,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 325,
+    "legacy": 323,
+    "spotify_web": 323,
+    "youtube": 326
+   },
+   "genius_id": 10667480,
+   "id": 652,
+   "is_featuring": true,
+   "isrc": "FR9W12436292",
+   "primary_artist_name": "Dajak",
+   "release_date": "2024-08-02",
+   "secondary_role": null,
+   "title": "RAYONS",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": 3046620941,
+   "duration": 356,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 356,
+    "reccobeats": 356,
+    "spotify_web": 356,
+    "youtube": 357
+   },
+   "genius_id": null,
+   "id": 9892,
+   "is_featuring": true,
+   "isrc": "FRX852410490",
+   "primary_artist_name": "Dajak",
+   "release_date": "2024-10-18",
+   "secondary_role": null,
+   "title": "RAYONS (Version électrique)",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901861,
+   "duration": 49,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 49,
+    "legacy": 49,
+    "spotify_web": 49,
+    "youtube": 50
+   },
+   "genius_id": 9567155,
+   "id": 689,
+   "is_featuring": false,
+   "isrc": "BEEN92300027",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "RECO30221",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901881,
+   "duration": 181,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 181,
+    "legacy": 181,
+    "spotify_web": 181
+   },
+   "genius_id": 9567153,
+   "id": 651,
+   "is_featuring": false,
+   "isrc": "BEEN92300029",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "REYKJAVIK",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 148,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 148
+   },
+   "genius_id": 373395,
+   "id": 685,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2013-03-10",
+   "secondary_role": "Writer",
+   "title": "Rendez-vous avec mon flingue",
+   "unreleased": null
+  },
+  {
+   "album": "Rentre dans le Cercle - Saison 1",
+   "deezer_id": null,
+   "duration": 2314,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 2314
+   },
+   "genius_id": 3365192,
+   "id": 596,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Rentre dans le Cercle",
+   "release_date": "2017-12-15",
+   "secondary_role": null,
+   "title": "Rentre dans le Cercle - Belgique #1",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565532,
+   "duration": 278,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 278,
+    "legacy": 278,
+    "spotify_web": 278,
+    "youtube": 279
+   },
+   "genius_id": 3414567,
+   "id": 608,
+   "is_featuring": false,
+   "isrc": "BEEN91701002",
+   "primary_artist_name": null,
+   "release_date": "2018-01-19",
+   "secondary_role": null,
+   "title": "Richesse",
+   "unreleased": null
+  },
+  {
+   "album": "Marabout",
+   "deezer_id": 450565612,
+   "duration": 228,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 228,
+    "legacy": 228,
+    "spotify_web": 228
+   },
+   "genius_id": 3439114,
+   "id": 575,
+   "is_featuring": false,
+   "isrc": "BEEN91701010",
+   "primary_artist_name": null,
+   "release_date": "2018-01-19",
+   "secondary_role": null,
+   "title": "Rivage",
+   "unreleased": null
+  },
+  {
+   "album": "L’Origine",
+   "deezer_id": null,
+   "duration": null,
+   "duration_source": null,
+   "durations_observees": {},
+   "genius_id": 283609,
+   "id": 1883,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2013-09-29",
+   "secondary_role": "Writer",
+   "title": "Rouge Mississippi",
+   "unreleased": null
+  },
+  {
+   "album": "Règlement Freestyle : Saison 1",
+   "deezer_id": 481862692,
+   "duration": 154,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 154,
+    "deezer": 154,
+    "legacy": 154,
+    "spotify_web": 154,
+    "youtube": 154
+   },
+   "genius_id": 3493602,
+   "id": 591,
+   "is_featuring": true,
+   "isrc": "FR10S1802177",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-02-02",
+   "secondary_role": "Writer",
+   "title": "Règlement Freestyle #12",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113192,
+   "duration": 196,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 196,
+    "deezer": 196,
+    "legacy": 196,
+    "spotify_web": 196,
+    "youtube": 197
+   },
+   "genius_id": 6725713,
+   "id": 613,
+   "is_featuring": true,
+   "isrc": "BEEN92100023",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-07",
+   "secondary_role": "Writer",
+   "title": "Sable",
+   "unreleased": null
+  },
+  {
+   "album": "Famille nombreuse",
+   "deezer_id": 3855320101,
+   "duration": 185,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 185,
+    "legacy": 185,
+    "spotify_web": 185,
+    "youtube": 186
+   },
+   "genius_id": 637412,
+   "id": 634,
+   "is_featuring": true,
+   "isrc": "TCACS1653563",
+   "primary_artist_name": "Roméo Elvis",
+   "release_date": "2014-12-14",
+   "secondary_role": null,
+   "title": "Sablier",
+   "unreleased": null
+  },
+  {
+   "album": "Planète Rap Roméo Elvis #Chocolat",
+   "deezer_id": null,
+   "duration": null,
+   "duration_source": null,
+   "durations_observees": {},
+   "genius_id": 4441829,
+   "id": 661,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Roméo Elvis",
+   "release_date": "2019-04-01",
+   "secondary_role": "Writer",
+   "title": "Session Freestyle avec L’Or du Commun, Moka Boka & Lord Gasmique #PlanèteRap",
+   "unreleased": null
+  },
+  {
+   "album": "Yellockdown Project",
+   "deezer_id": 1074034152,
+   "duration": 218,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 218,
+    "deezer": 218,
+    "legacy": 218,
+    "spotify_web": 218,
+    "youtube": 219
+   },
+   "genius_id": 5930836,
+   "id": 644,
+   "is_featuring": true,
+   "isrc": "BE1JB2000003",
+   "primary_artist_name": "YellowStraps",
+   "release_date": "2020-09-04",
+   "secondary_role": "Producer",
+   "title": "Si tu savais",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 569935372,
+   "duration": 301,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 301,
+    "deezer": 301,
+    "legacy": 301,
+    "spotify_web": 301,
+    "youtube": 302
+   },
+   "genius_id": 4010672,
+   "id": 587,
+   "is_featuring": true,
+   "isrc": "BEEN91820007",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-10-29",
+   "secondary_role": "Writer",
+   "title": "Slalom",
+   "unreleased": null
+  },
+  {
+   "album": "ALT F4",
+   "deezer_id": 863454812,
+   "duration": 241,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 241,
+    "legacy": 241,
+    "spotify_web": 241
+   },
+   "genius_id": 5186947,
+   "id": 583,
+   "is_featuring": false,
+   "isrc": "BEEN91991002",
+   "primary_artist_name": null,
+   "release_date": "2020-02-07",
+   "secondary_role": null,
+   "title": "Soon",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393632,
+   "duration": 185,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 186,
+    "deezer": 185,
+    "legacy": 185,
+    "spotify_web": 185,
+    "youtube": 186
+   },
+   "genius_id": 4010663,
+   "id": 607,
+   "is_featuring": true,
+   "isrc": "BEEN91820001",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-16",
+   "secondary_role": "Writer",
+   "title": "Sous les pavés",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393682,
+   "duration": 238,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 239,
+    "deezer": 238,
+    "legacy": 237,
+    "spotify_web": 238,
+    "youtube": 238
+   },
+   "genius_id": 3978236,
+   "id": 581,
+   "is_featuring": true,
+   "isrc": "BEEN91899001",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-09-28",
+   "secondary_role": "Writer",
+   "title": "Sur ma vie",
+   "unreleased": null
+  },
+  {
+   "album": "Fils de (B.O)",
+   "deezer_id": null,
+   "duration": 261,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "youtube": 261
+   },
+   "genius_id": 8959661,
+   "id": 693,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "Le Motel",
+   "release_date": "2022-06-03",
+   "secondary_role": null,
+   "title": "Séisme",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": 1768868387,
+   "duration": 260,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 260,
+    "spotify_web": 260
+   },
+   "genius_id": null,
+   "id": 9893,
+   "is_featuring": true,
+   "isrc": "BEUM72200133",
+   "primary_artist_name": "Le Motel",
+   "release_date": "2022-06-03",
+   "secondary_role": null,
+   "title": "Séisme (From \"Fils De\")",
+   "unreleased": null
+  },
+  {
+   "album": "ALT F4",
+   "deezer_id": 863454782,
+   "duration": 264,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 264,
+    "legacy": 264,
+    "spotify_web": 264
+   },
+   "genius_id": 5186943,
+   "id": 576,
+   "is_featuring": false,
+   "isrc": "BEEN92091001",
+   "primary_artist_name": null,
+   "release_date": "2020-01-31",
+   "secondary_role": null,
+   "title": "S’en aller",
+   "unreleased": null
+  },
+  {
+   "album": "Gucci Sushi",
+   "deezer_id": 2567420322,
+   "duration": 276,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 276,
+    "legacy": 276,
+    "spotify_web": 276,
+    "youtube": 277
+   },
+   "genius_id": 4768424,
+   "id": 690,
+   "is_featuring": true,
+   "isrc": "BEEN91801805",
+   "primary_artist_name": "Phasm",
+   "release_date": "2018-08-31",
+   "secondary_role": null,
+   "title": "TLJ",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 204,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 204
+   },
+   "genius_id": 2832761,
+   "id": 668,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2016-07-24",
+   "secondary_role": "Writer",
+   "title": "Tonic dans l’gin (Freestyle)",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393712,
+   "duration": 255,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 256,
+    "deezer": 255,
+    "legacy": 255,
+    "spotify_web": 255,
+    "youtube": 256
+   },
+   "genius_id": 4010677,
+   "id": 606,
+   "is_featuring": true,
+   "isrc": "BEEN91820009",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-16",
+   "secondary_role": "Writer",
+   "title": "Truman Show",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 298,
+   "duration_source": "youtube_video",
+   "durations_observees": {
+    "youtube_video": 298
+   },
+   "genius_id": 748712,
+   "id": 639,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "Trèfle d’Or",
+   "unreleased": null
+  },
+  {
+   "album": null,
+   "deezer_id": null,
+   "duration": 202,
+   "duration_source": "legacy",
+   "durations_observees": {
+    "legacy": 202
+   },
+   "genius_id": 7332557,
+   "id": 697,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2016-04-24",
+   "secondary_role": "Writer",
+   "title": "Trèfle d’Or (Version clip)",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": 565393642,
+   "duration": 260,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 260,
+    "deezer": 260,
+    "legacy": 260,
+    "spotify_web": 260,
+    "youtube": 261
+   },
+   "genius_id": 3978312,
+   "id": 592,
+   "is_featuring": true,
+   "isrc": "BEEN91820002",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-16",
+   "secondary_role": "Writer",
+   "title": "Téléphone",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901831,
+   "duration": 222,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 222,
+    "legacy": 222,
+    "spotify_web": 222
+   },
+   "genius_id": 9567053,
+   "id": 646,
+   "is_featuring": false,
+   "isrc": "BEEN92300024",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "UN SEUL CIEL",
+   "unreleased": null
+  },
+  {
+   "album": "Victory",
+   "deezer_id": 140587199,
+   "duration": 346,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 346,
+    "legacy": 346,
+    "reccobeats": 346,
+    "spotify_web": 346,
+    "youtube": 347
+   },
+   "genius_id": 17592,
+   "id": 666,
+   "is_featuring": true,
+   "isrc": "USXQS1617718",
+   "primary_artist_name": "Do or Die",
+   "release_date": "2000-09-27",
+   "secondary_role": "Background Vocals",
+   "title": "V.I.P.",
+   "unreleased": null
+  },
+  {
+   "album": "AU REVOIR SIMEON",
+   "deezer_id": 2493901931,
+   "duration": 196,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 196,
+    "legacy": 61,
+    "spotify_web": 196
+   },
+   "genius_id": 9567061,
+   "id": 686,
+   "is_featuring": false,
+   "isrc": "BEEN92300034",
+   "primary_artist_name": null,
+   "release_date": "2023-12-01",
+   "secondary_role": null,
+   "title": "VISION",
+   "unreleased": null
+  },
+  {
+   "album": "L’Origine",
+   "deezer_id": 2553075242,
+   "duration": 250,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 250,
+    "legacy": 250,
+    "spotify_web": 249,
+    "youtube": 250
+   },
+   "genius_id": 244840,
+   "id": 667,
+   "is_featuring": true,
+   "isrc": "BEEN92211105",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2013-09-22",
+   "secondary_role": "Writer",
+   "title": "Vade Retro",
+   "unreleased": null
+  },
+  {
+   "album": "C’est le 77",
+   "deezer_id": null,
+   "duration": 210,
+   "duration_source": "spotify_web",
+   "durations_observees": {
+    "legacy": 210,
+    "spotify_web": 210
+   },
+   "genius_id": 2916244,
+   "id": 620,
+   "is_featuring": true,
+   "isrc": "BEEN91660009",
+   "primary_artist_name": "Le 77",
+   "release_date": "2016-11-10",
+   "secondary_role": null,
+   "title": "Vicecity",
+   "unreleased": null
+  },
+  {
+   "album": "High & Fines Herbes",
+   "deezer_id": 923677212,
+   "duration": 229,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 229,
+    "deezer": 229,
+    "legacy": 229,
+    "spotify_web": 229,
+    "youtube": 230
+   },
+   "genius_id": 5386767,
+   "id": 594,
+   "is_featuring": true,
+   "isrc": "BEEO72000008",
+   "primary_artist_name": "Caballero & JeanJass",
+   "release_date": "2020-04-10",
+   "secondary_role": null,
+   "title": "Vie ordinaire",
+   "unreleased": null
+  },
+  {
+   "album": "Sapiens",
+   "deezer_id": null,
+   "duration": 234,
+   "duration_source": "youtube",
+   "durations_observees": {
+    "apple_music": 233,
+    "legacy": 233,
+    "spotify_web": 233,
+    "youtube": 234
+   },
+   "genius_id": 4010666,
+   "id": 590,
+   "is_featuring": true,
+   "isrc": "BEEN91820003",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2018-11-16",
+   "secondary_role": "Writer",
+   "title": "Vrai",
+   "unreleased": null
+  },
+  {
+   "album": "Pleine Lune 2",
+   "deezer_id": 755630992,
+   "duration": 264,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 265,
+    "deezer": 264,
+    "legacy": 264,
+    "spotify_web": 264,
+    "youtube": 265
+   },
+   "genius_id": 4916798,
+   "id": 625,
+   "is_featuring": true,
+   "isrc": "FR9W11919257",
+   "primary_artist_name": "Scylla",
+   "release_date": "2019-10-25",
+   "secondary_role": "Writer",
+   "title": "iRobot",
+   "unreleased": null
+  },
+  {
+   "album": "tentacle",
+   "deezer_id": 1694711407,
+   "duration": 254,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 254,
+    "deezer": 254,
+    "legacy": 254,
+    "spotify_web": 253,
+    "youtube": 254
+   },
+   "genius_id": 7858874,
+   "id": 628,
+   "is_featuring": true,
+   "isrc": "BE1JB2200001",
+   "primary_artist_name": "YellowStraps",
+   "release_date": "2022-03-30",
+   "secondary_role": null,
+   "title": "merci",
+   "unreleased": null
+  },
+  {
+   "album": "Avant la nuit",
+   "deezer_id": 1342113232,
+   "duration": 159,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "apple_music": 160,
+    "deezer": 159,
+    "legacy": 159,
+    "spotify_web": 159,
+    "youtube": 160
+   },
+   "genius_id": 6725735,
+   "id": 647,
+   "is_featuring": true,
+   "isrc": "BEEN92100027",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2021-05-14",
+   "secondary_role": "Writer",
+   "title": "À l’aube",
+   "unreleased": null
+  },
+  {
+   "album": "L’Odyssée",
+   "deezer_id": null,
+   "duration": 232,
+   "duration_source": "apple_music",
+   "durations_observees": {
+    "apple_music": 232,
+    "youtube_video": 233
+   },
+   "genius_id": 748546,
+   "id": 659,
+   "is_featuring": true,
+   "isrc": null,
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2015-04-05",
+   "secondary_role": "Writer",
+   "title": "À notre époque",
+   "unreleased": null
+  },
+  {
+   "album": "Zeppelin",
+   "deezer_id": 2553074472,
+   "duration": 233,
+   "duration_source": "deezer",
+   "durations_observees": {
+    "deezer": 233,
+    "legacy": 233,
+    "spotify_web": 233,
+    "youtube": 234
+   },
+   "genius_id": 3076080,
+   "id": 610,
+   "is_featuring": true,
+   "isrc": "BEEN91620005",
+   "primary_artist_name": "L’Or du Commun",
+   "release_date": "2017-05-03",
+   "secondary_role": "Writer",
+   "title": "Étrangers",
+   "unreleased": null
+  }
+ ],
+ "deezer_id": 293826,
+ "liens_connus": [
+  [
+   1445536,
+   679
+  ],
+  [
+   12401130,
+   599
+  ],
+  [
+   14410700,
+   615
+  ],
+  [
+   15141907,
+   666
+  ],
+  [
+   53399642,
+   585
+  ],
+  [
+   54453092,
+   588
+  ],
+  [
+   55110712,
+   575
+  ],
+  [
+   55110712,
+   585
+  ],
+  [
+   55110712,
+   588
+  ],
+  [
+   55110712,
+   597
+  ],
+  [
+   55110712,
+   608
+  ],
+  [
+   55110712,
+   611
+  ],
+  [
+   55110712,
+   617
+  ],
+  [
+   55110712,
+   629
+  ],
+  [
+   55110712,
+   631
+  ],
+  [
+   55110712,
+   632
+  ],
+  [
+   60528542,
+   591
+  ],
+  [
+   75116772,
+   581
+  ],
+  [
+   75116772,
+   584
+  ],
+  [
+   75116772,
+   586
+  ],
+  [
+   75116772,
+   587
+  ],
+  [
+   75116772,
+   590
+  ],
+  [
+   75116772,
+   592
+  ],
+  [
+   75116772,
+   593
+  ],
+  [
+   75116772,
+   598
+  ],
+  [
+   75116772,
+   606
+  ],
+  [
+   75116772,
+   607
+  ],
+  [
+   75116772,
+   662
+  ],
+  [
+   75941082,
+   587
+  ],
+  [
+   97655222,
+   580
+  ],
+  [
+   111316312,
+   625
+  ],
+  [
+   116239682,
+   582
+  ],
+  [
+   125184062,
+   589
+  ],
+  [
+   128211392,
+   576
+  ],
+  [
+   129186662,
+   576
+  ],
+  [
+   129186662,
+   582
+  ],
+  [
+   129186662,
+   583
+  ],
+  [
+   129186662,
+   589
+  ],
+  [
+   129186662,
+   604
+  ],
+  [
+   129186662,
+   612
+  ],
+  [
+   129186662,
+   614
+  ],
+  [
+   140506202,
+   594
+  ],
+  [
+   171963172,
+   644
+  ],
+  [
+   176155742,
+   609
+  ],
+  [
+   212548932,
+   675
+  ],
+  [
+   222543542,
+   600
+  ],
+  [
+   222543542,
+   613
+  ],
+  [
+   222543542,
+   619
+  ],
+  [
+   222543542,
+   627
+  ],
+  [
+   222543542,
+   630
+  ],
+  [
+   222543542,
+   633
+  ],
+  [
+   222543542,
+   635
+  ],
+  [
+   222543542,
+   637
+  ],
+  [
+   222543542,
+   642
+  ],
+  [
+   222543542,
+   643
+  ],
+  [
+   222543542,
+   645
+  ],
+  [
+   222543542,
+   647
+  ],
+  [
+   222543542,
+   650
+  ],
+  [
+   227694732,
+   9894
+  ],
+  [
+   305105697,
+   628
+  ],
+  [
+   322528657,
+   9893
+  ],
+  [
+   352495597,
+   656
+  ],
+  [
+   407066467,
+   694
+  ],
+  [
+   484617705,
+   648
+  ],
+  [
+   498836831,
+   638
+  ],
+  [
+   498836831,
+   646
+  ],
+  [
+   498836831,
+   648
+  ],
+  [
+   498836831,
+   651
+  ],
+  [
+   498836831,
+   653
+  ],
+  [
+   498836831,
+   657
+  ],
+  [
+   498836831,
+   670
+  ],
+  [
+   498836831,
+   672
+  ],
+  [
+   498836831,
+   680
+  ],
+  [
+   498836831,
+   681
+  ],
+  [
+   498836831,
+   682
+  ],
+  [
+   498836831,
+   683
+  ],
+  [
+   498836831,
+   686
+  ],
+  [
+   498836831,
+   687
+  ],
+  [
+   498836831,
+   689
+  ],
+  [
+   498836861,
+   646
+  ],
+  [
+   498836871,
+   651
+  ],
+  [
+   515346542,
+   574
+  ],
+  [
+   515346542,
+   578
+  ],
+  [
+   515346542,
+   579
+  ],
+  [
+   515346542,
+   595
+  ],
+  [
+   515346542,
+   603
+  ],
+  [
+   515346542,
+   605
+  ],
+  [
+   515346542,
+   610
+  ],
+  [
+   515346542,
+   616
+  ],
+  [
+   515346542,
+   624
+  ],
+  [
+   515346842,
+   618
+  ],
+  [
+   515346842,
+   621
+  ],
+  [
+   515346842,
+   636
+  ],
+  [
+   515346842,
+   655
+  ],
+  [
+   515346842,
+   667
+  ],
+  [
+   515346842,
+   1883
+  ],
+  [
+   519054172,
+   690
+  ],
+  [
+   604473232,
+   658
+  ],
+  [
+   616932271,
+   652
+  ],
+  [
+   657158081,
+   652
+  ],
+  [
+   657158081,
+   9892
+  ],
+  [
+   778318301,
+   691
+  ],
+  [
+   825449651,
+   678
+  ],
+  [
+   911069751,
+   673
+  ],
+  [
+   922898371,
+   634
+  ],
+  [
+   992305001,
+   674
+  ],
+  [
+   1034637592,
+   673
+  ],
+  [
+   1034637592,
+   674
+  ],
+  [
+   1034637592,
+   678
+  ],
+  [
+   1034637592,
+   9891
+  ],
+  [
+   1035457842,
+   9891
+  ]
+ ]
+}

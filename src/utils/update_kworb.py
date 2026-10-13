@@ -1069,25 +1069,28 @@ def rapprochements(artist, data_manager, scraper=None, lire_identite=None) -> li
     except (OSError, ValueError):
         decisions = {"confirmed": {}, "rejected": [], "decisions": {}}
 
+    return [
+        verdict_vers_dict(entry, rapprocher(entry, index, artist, decisions, lire_identite))
+        for entry in page["entries"]
+    ]
+
+
+def verdict_vers_dict(entry, r: "Rapprochement") -> dict:
+    """PUR. Le verdict d'une ligne, comparable d'un rejeu à l'autre."""
+
     def fiche(t):
         return {"id": t.id, "titre": t.title} if t is not None else None
 
-    sortie = []
-    for entry in page["entries"]:
-        r = rapprocher(entry, index, artist, decisions, lire_identite)
-        sortie.append(
-            {
-                "titre": entry["title"],
-                "spotify_id": entry.get("spotify_id"),
-                "streams": entry.get("streams"),
-                "fiche": fiche(r.track),
-                "via": r.via,
-                "rendition_de": fiche(r.rendition_de),
-                "suggestion": bool(r.suggestion),
-                "motif": r.motif,
-            }
-        )
-    return sortie
+    return {
+        "titre": entry["title"],
+        "spotify_id": entry.get("spotify_id"),
+        "streams": entry.get("streams"),
+        "fiche": fiche(r.track),
+        "via": r.via,
+        "rendition_de": fiche(r.rendition_de),
+        "suggestion": bool(r.suggestion),
+        "motif": r.motif,
+    }
 
 
 def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None) -> dict:

@@ -42,3 +42,28 @@ def test_une_cassette_ne_porte_jamais_de_paroles():
         cassette = json.loads(fichier.read_text(encoding="utf-8"))
         for fiche in cassette["base"]:
             assert set(fiche) <= set(cassettes.CHAMPS_FICHE)
+
+
+KWORB = sorted(DOSSIER.glob("kworb_*.json"))
+
+
+@pytest.mark.parametrize("fichier", KWORB, ids=lambda f: f.stem)
+def test_le_rapprochement_kworb_rejoue_donne_le_meme_resultat(fichier):
+    """Kworb (2026-10-13) : chaque ligne de la page va à la même fiche, par la
+    même voie, que dans le run enregistré (`scripts/cassette_kworb.py`)."""
+    cassette = json.loads(fichier.read_text(encoding="utf-8"))
+    obtenu = cassettes.rejouer_kworb(cassette)
+    attendu = cassette["attendu"]
+    cle = lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True)  # noqa: E731
+    en_moins = sorted({cle(x) for x in attendu} - {cle(x) for x in obtenu})
+    en_plus = sorted({cle(x) for x in obtenu} - {cle(x) for x in attendu})
+    assert not en_moins and not en_plus, "\n".join(
+        [f"- {x}" for x in en_moins[:10]] + [f"+ {x}" for x in en_plus[:10]]
+    )
+
+
+def test_une_cassette_kworb_ne_porte_que_l_identite_des_fiches():
+    for fichier in KWORB:
+        cassette = json.loads(fichier.read_text(encoding="utf-8"))
+        for fiche in cassette["base"]:
+            assert set(fiche) <= {*cassettes.CHAMPS_KWORB, "spotify_id_entries"}

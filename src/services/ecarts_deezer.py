@@ -600,7 +600,11 @@ def _lien_a_revoir(piste: PisteDeezer, track: Track) -> str | None:
     ]
     if not contredisent:
         return None
-    vote = voter({**independantes, "deezer": piste.duration}, piste.duration)
+    vote = voter(
+        {**independantes, "deezer": piste.duration},
+        piste.duration,
+        editions=getattr(track, "durees_editions", ()) or (),
+    )
     if vote and vote.nature in (SOUTENUE, MAJORITAIRE):
         return None
     # Le motif nomme d'abord une source solide, s'il y en a une.
@@ -929,6 +933,27 @@ def _renseigner_fiche(dm, e: Ecart, track: Track) -> list[str]:
             duration=p.duration or None,
         )
         return [f"édition « {edition} »"]
+    deja = (track.durations_observees or {}).get("deezer")
+    if track.deezer_id and int(track.deezer_id) != int(p.id) and deja:
+        # Une AUTRE page Deezer du même enregistrement (single et album d'A2H
+        # « Pourquoi » : même ISRC, 232 s et 226 s). Les deux sont gardées : la
+        # seconde est notée en édition avec SA durée — versée en `deezer`, elle
+        # remplaçait celle de la piste liée (la dernière lue gagnait), et sa
+        # durée explique un témoin qui la porte (`vote_durees`, 2026-10-14).
+        from src.services.editions import rattacher
+
+        disque = getattr(getattr(e, "album", None), "title", None)
+        rattacher(
+            dm,
+            track,
+            p.title,
+            "deezer",
+            label=disque,
+            deezer_id=p.id,
+            isrc=p.isrc or None,
+            duration=p.duration or None,
+        )
+        return [f"autre édition Deezer « {disque or p.title} »"]
     isrc_compatible = bool(p.isrc) and (
         not track.isrc or str(track.isrc).strip().upper() == p.isrc.strip().upper()
     )

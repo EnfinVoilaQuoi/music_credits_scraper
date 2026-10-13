@@ -576,3 +576,20 @@ def test_un_lien_connu_qui_n_a_rien_donne_est_repropose(data_manager):
     assert (relue.deezer_id, relue.isrc, relue.duration) == (91, "FRDDD0000004", 203)
     # Plus rien à donner : le run suivant est muet.
     assert ed.classer([album], [relue], [], artist.deezer_id, liens_connus=liens)[0] == []
+
+
+def test_une_autre_page_deezer_devient_une_edition(data_manager):
+    """A2H « Pourquoi » (2026-10-14) : la fiche porte la piste de l'album
+    (226 s) ; la page du single (même ISRC, 232 s) est gardée en ÉDITION avec
+    sa durée — elle ne remplace plus celle de la piste liée."""
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist, deezer_id=1, isrc="FRAAA0000001")
+    data_manager.record_duration_observation(track.id, 226, "deezer")
+    relue = next(t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id)
+    piste = _piste(2, track.title, duration=232, isrc="FRAAA0000001")
+    ecarts, _ = ed.classer([_album(85, "Single", [piste], artist)], [relue], [], artist.deezer_id)
+    ed.rattacher_liens_confirmes(data_manager, artist, ed.BilanEcarts(ecarts=ecarts))
+    col = _colonnes(data_manager, track.id)
+    assert (col["deezer_id"], col["duration"]) == (1, 226)
+    (edition,) = data_manager.get_track_editions(track.id)
+    assert (edition["label"], edition["deezer_id"], edition["duration"]) == ("Single", 2, 232)

@@ -41,3 +41,12 @@ def test_un_catalogue_qui_se_contredit_ne_soutient_pas():
     """Booba « Garcimore » : ReccoBeats 181 s, page Spotify 210 s, Deezer 182 s."""
     durees = {"deezer": 182, "reccobeats": 181, "spotify_web": 210}
     assert voter(durees, 182).nature == INDECISE
+
+
+def test_une_edition_connue_explique_le_temoin():
+    """A2H « Pourquoi » : album 226 s (Deezer, Spotify), single 232 s (même
+    ISRC, noté en édition) — l'audio Topic du single n'est pas isolé."""
+    durees = {"deezer": 226, "spotify_web": 226, "youtube": 232}
+    assert voter(durees, 232).nature == ISOLEE
+    assert voter(durees, 232, editions=(232,)).nature == SOUTENUE
+    assert voter(durees, 226, editions=(232,)).nature == SOUTENUE

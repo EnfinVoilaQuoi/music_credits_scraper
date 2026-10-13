@@ -5450,6 +5450,26 @@ class TrackRepository:
             logger.error(f"Erreur record_track_edition({track_id}, {label}): {e}")
             return False
 
+    def get_artist_edition_durations(self, artist_id: int) -> dict[int, tuple[int, ...]]:
+        """`{track_id: (durées des éditions connues)}` des fiches de l'artiste."""
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT e.track_id, e.duration FROM track_editions e "
+                        "JOIN tracks t ON t.id = e.track_id "
+                        "WHERE t.artist_id = :a AND e.duration IS NOT NULL"
+                    ),
+                    {"a": artist_id},
+                ).fetchall()
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_artist_edition_durations({artist_id}): {e}")
+            return {}
+        durees: dict[int, list[int]] = {}
+        for tid, d in rows:
+            durees.setdefault(tid, []).append(int(d))
+        return {tid: tuple(v) for tid, v in durees.items()}
+
     def get_track_editions(self, track_id: int) -> list[dict]:
         try:
             with self.engine.connect() as conn:

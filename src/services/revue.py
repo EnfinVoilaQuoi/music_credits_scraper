@@ -176,6 +176,12 @@ def _mesures(ctx: Contexte, track, champ: str) -> dict[str, str]:
 # ── Durées ──────────────────────────────────────────────────────────────────
 
 
+def _editions(track) -> tuple:
+    """Durées des AUTRES éditions connues de la fiche (`track_editions`), posées
+    par `analyser` : elles expliquent un témoin au lieu de l'accuser."""
+    return tuple(getattr(track, "durees_editions", ()) or ())
+
+
 def _duree_youtube(track) -> int | None:
     return (track.durations_observees or {}).get(SOURCE_AUDIO)
 
@@ -186,7 +192,7 @@ def duree_songbpm_dementie(track, _ctx=None):
     « Blues (Live at AK Studios) » → page de « Blues »)."""
     yt, sb = _duree_youtube(track), (track.durations_observees or {}).get("songbpm")
     if yt and sb and abs(yt - sb) > ECART_DUREE_S:
-        if voter(track.durations_observees, yt).nature == ISOLEE:
+        if voter(track.durations_observees, yt, editions=_editions(track)).nature == ISOLEE:
             return None  # c'est l'audio YouTube que les catalogues démentent (`duree_isolee`)
         return (
             f"durée SongBPM {sb} s ≠ audio YouTube {yt} s — page d'une autre version ? "
@@ -255,7 +261,7 @@ def duree_spotify_dementie(track, _ctx=None):
         for src in _SOURCES_PAR_ID_SPOTIFY:
             d = durees.get(src)
             if ref and d and abs(ref - d) > ecart:
-                vote = voter(durees, d)
+                vote = voter(durees, d, editions=_editions(track))
                 if vote.nature in (SOUTENUE, MAJORITAIRE):
                     return None  # le témoin est l'isolé (`duree_isolee`)
                 if vote.nature == ISOLEE:
@@ -282,7 +288,7 @@ def duree_deezer_dementie(track, _ctx=None):
     for temoin, ecart in _DUREES_TEMOINS:
         ref = durees.get(temoin)
         if temoin != "deezer" and ref and abs(ref - dz) > ecart:
-            vote = voter(durees, dz)
+            vote = voter(durees, dz, editions=_editions(track))
             if vote.nature in (SOUTENUE, MAJORITAIRE):
                 return None  # le témoin est l'isolé (`duree_isolee`)
             if vote.nature == ISOLEE:
@@ -306,7 +312,7 @@ def duree_isolee(track, _ctx=None):
     durees = track.durations_observees or {}
     for source in _TEMOINS_ISOLABLES:
         d = durees.get(source)
-        vote = voter(durees, d)
+        vote = voter(durees, d, editions=_editions(track))
         if vote and vote.nature == ISOLEE:
             return (
                 f"durée {source} {d} s démentie par {vote.dementie_par()} — "
@@ -1511,7 +1517,9 @@ def _vote_de_parution(s, par_id: dict) -> str:
     duree = ((preuves.get("ecart") or {}).get("piste") or {}).get("duration")
     if track is None or not duree:
         return ""
-    vote = voter({**(track.durations_observees or {}), "deezer": duree}, duree)
+    vote = voter(
+        {**(track.durations_observees or {}), "deezer": duree}, duree, editions=_editions(track)
+    )
     if vote.nature == SOUTENUE and len(vote.pour) >= 2:
         return f" — durée confirmée par {', '.join(sorted(vote.pour))} : rattachement sûr"
     if vote.nature == ISOLEE:
@@ -1523,6 +1531,9 @@ def analyser(data_manager, artiste) -> Revue:
     """Détecteurs hors ligne + signalements des runs, moins ce que
     l'utilisateur a déjà tranché. Quatre lectures, aucune écriture."""
     tracks = artiste.tracks or []
+    durees_editions = data_manager.get_artist_edition_durations(artiste.id)
+    for t in tracks:
+        t.durees_editions = durees_editions.get(t.id, ())
     ctx = contexte(
         tracks,
         data_manager.get_artist_observations(artiste.id),

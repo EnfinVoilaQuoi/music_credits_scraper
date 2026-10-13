@@ -70,10 +70,12 @@ def absorber(dm, socle, fiche) -> bool:
     return dm.merge_tracks(socle.id, fiche.id)
 
 
-def rattacher(dm, socle, titre: str, source: str, **identifiants) -> bool:
-    """Une source a vu une édition de l'original : notée sur sa fiche."""
+def rattacher(dm, socle, titre: str, source: str, label: str | None = None, **identifiants) -> bool:
+    """Une source a vu une édition de l'original : notée sur sa fiche. `label`
+    distingue une édition au MÊME titre (le disque Deezer d'une autre page du
+    même enregistrement), que `libelle(titre)` confondrait avec la fiche."""
     return dm.record_track_edition(
-        socle.id, libelle(titre), title=titre, source=source, **identifiants
+        socle.id, label or libelle(titre), title=titre, source=source, **identifiants
     )
 
 

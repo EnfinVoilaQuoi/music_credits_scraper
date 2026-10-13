@@ -37,6 +37,10 @@ HORS_VOTE = frozenset({"heritage"})
 #: Écart toléré entre deux catalogues (éditions, encodages).
 TOLERANCE_S = 5
 
+#: Une durée à ±2 s d'une ÉDITION connue de la fiche (autre page Deezer du même
+#: enregistrement, radio edit noté) est expliquée : ni accusée, ni accusatrice.
+TOLERANCE_EDITION_S = 2
+
 SOUTENUE = "soutenue"  # ≥ 2 catalogues pour, aucun catalogue solide contre
 MAJORITAIRE = "majoritaire"  # ≥ 2 pour, UN seul catalogue solide contre
 ISOLEE = "isolee"  # ≥ 2 catalogues solides contre, au plus un pour (elle-même)
@@ -59,18 +63,33 @@ class Vote:
         return ", ".join(f"{f} {d} s" for f, d in sorted(self.contre.items()))
 
 
-def voter(durees: dict, valeur: int | None, tolerance: int = TOLERANCE_S) -> Vote | None:
+def voter(
+    durees: dict, valeur: int | None, tolerance: int = TOLERANCE_S, editions=()
+) -> Vote | None:
     """PUR. Le vote des catalogues de `durees` ({source: secondes}) sur `valeur`.
-    None si `valeur` est absente."""
+    None si `valeur` est absente.
+
+    `editions` : durées des AUTRES éditions connues de la fiche (2026-10-14,
+    A2H « Pourquoi » : album 226 s, single 232 s, même ISRC). Une valeur qui
+    en est une est soutenue ; un témoin qui en porte une ne contredit rien."""
     if not valeur:
         return None
     valeur = int(valeur)
+    connues = [int(e) for e in editions or () if e]
+
+    def edition(d: int) -> bool:
+        return any(abs(int(d) - e) <= TOLERANCE_EDITION_S for e in connues)
+
+    if edition(valeur):
+        return Vote(SOUTENUE)
     pour, contre, fragiles = set(), {}, {}
     manuelle = durees.get("manual")
     for source, d in durees.items():
         if not d or source in HORS_VOTE or source == "manual":
             continue
         accord = abs(int(d) - valeur) <= tolerance
+        if not accord and edition(d):
+            continue  # le témoin porte une autre édition connue : il ne dément rien
         if source in FRAGILES:
             if not accord:
                 fragiles[source] = int(d)

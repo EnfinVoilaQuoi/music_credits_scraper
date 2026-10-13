@@ -595,6 +595,7 @@ def test_fenetre_se_construit(racine_tk):
     tranches = []
     dm = SimpleNamespace(
         get_artist_observations=lambda _id: {},
+        get_artist_edition_durations=lambda _id: {},
         get_artist_relations=lambda _id, status: [],
         divergences_identite_soeurs=lambda _id: [],
         signalements_revue=lambda _id: [],
@@ -923,3 +924,14 @@ class TestVoteDesCatalogues:
         )
         assert revue.duree_songbpm_dementie(t) is None
         assert revue.duree_isolee(t)
+
+
+def test_le_temoin_d_une_edition_connue_n_est_pas_accuse():
+    t = _t(
+        "Pourquoi",
+        1,
+        durations_observees={"deezer": 226, "spotify_web": 226, "youtube": 232},
+    )
+    assert revue.duree_isolee(t)
+    t.durees_editions = (232,)
+    assert revue.duree_isolee(t) is None

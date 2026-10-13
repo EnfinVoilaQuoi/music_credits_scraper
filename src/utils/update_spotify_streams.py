@@ -354,9 +354,19 @@ def _declarer_durees(durees: dict | None, data_manager, id_map: dict, result: di
     """
     if not durees:
         return
+    # Seul l'ID PRINCIPAL dit la durée de la fiche (2026-10-14). Une fiche
+    # porte aussi ses autres éditions (`track_spotify_ids`), d'une autre durée
+    # parfois, et la source n'a qu'UNE valeur : la dernière page lue gagnait.
+    # Diam's « Jeune demoiselle - Live 2006 » (233 s) prenait les 294 s de
+    # l'album live de 2007, dont l'ID lui était venu par son ISRC.
+    principaux = data_manager.get_principal_spotify_ids(
+        tid for sid in durees for tid, _owner in id_map.get(sid) or []
+    )
     seen_at = datetime.now()
     for spotify_id, secondes in durees.items():
         for track_id, _owner in id_map.get(spotify_id) or []:
+            if principaux.get(track_id) != spotify_id:
+                continue
             if data_manager.record_duration_observation(track_id, secondes, _SOURCE, seen_at):
                 result["durees"] += 1
 

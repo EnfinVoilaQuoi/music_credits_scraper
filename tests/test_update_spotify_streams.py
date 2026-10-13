@@ -66,6 +66,11 @@ class _DataManager:
     def get_stream_observation_dates(self, source):
         return {}
 
+    def get_principal_spotify_ids(self, track_ids):
+        principaux = {10: _ID_A, 11: _ID_B, 99: _ID_ETRANGER}
+        principaux.update(getattr(self, "principaux", {}))
+        return {t: principaux[t] for t in track_ids if principaux.get(t)}
+
     def get_artist_tracks(self, artist_id):
         return self._tracks
 
@@ -701,3 +706,17 @@ def test_un_morceau_sans_aucun_compteur_passe_en_tete():
     dm = _DataManager(tracks=[_Track(10, _ID_A), sans])
     dates = {11: (now - timedelta(days=30)).isoformat()}  # A jamais vu, B vu
     assert _build_queue(_Artist(), dm, dates, now, set()) == [_ID_B, _ID_A]
+
+
+def test_une_edition_secondaire_ne_donne_pas_sa_duree():
+    """Diam's « Jeune demoiselle - Live 2006 » (2026-10-14) : l'ID de l'album
+    live de 2007 (294 s), porté en édition secondaire, écrasait la durée de
+    l'ID principal (233 s) — seul l'ID principal dit la durée de la fiche."""
+    dm = _DataManager()
+    dm.principaux = {10: "autre_id_principal"}
+    scraper = _Scraper(
+        _page_artiste(),
+        track_pages={_ID_A: {"playcounts": {_ID_A: 100}, "durations": {_ID_A: 294}}},
+    )
+    result = _run(dm, scraper)
+    assert dm.duration_calls == [] and result["durees"] == 0

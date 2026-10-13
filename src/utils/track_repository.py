@@ -1695,6 +1695,19 @@ class TrackRepository:
         except (TypeError, ValueError):
             return None
 
+    def get_principal_spotify_ids(self, track_ids) -> dict[int, str]:
+        """`{track_id: spotify_id PRINCIPAL}` des fiches demandées (sans ID : absentes)."""
+        ids = sorted({int(t) for t in track_ids or ()})
+        if not ids:
+            return {}
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(tracks.c.id, tracks.c.spotify_id).where(
+                    tracks.c.id.in_(ids), tracks.c.spotify_id.is_not(None)
+                )
+            ).fetchall()
+        return {r.id: r.spotify_id for r in rows if r.spotify_id}
+
     def get_track_ids_by_spotify_id(self) -> dict[str, list[tuple[int, int]]]:
         """Carte `spotify_id → [(track_id, artist_id), …]` sur TOUTE la base.
 

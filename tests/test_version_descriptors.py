@@ -384,3 +384,18 @@ class TestTitreDeVideo:
         )
         assert meme_version_publiee("Mes frères", "A2H Ft. 3010 - Mes frères (prod KobéBeats)")
         assert not meme_version_publiee("ZOOM", "ZOOM - TRAVIS SCOTT FT. GUNNA (OG)")
+
+
+def test_un_numero_de_partie_n_est_pas_un_qualificatif_de_plus():
+    """Diam's (2026-10-13) : Spotify écrit « La Boulette - Pt. 1; Live 2006 »,
+    Genius « La Boulette - Pt. 1- Live 2006 » — seule la ponctuation change."""
+    from src.utils.version_descriptors import qualificatifs_incompatibles
+
+    v = parse_variant
+    assert not qualificatifs_incompatibles(
+        v("La Boulette - Pt. 1- Live 2006"), v("La Boulette - Pt. 1; Live 2006")
+    )
+    # Un vrai qualificatif de plus sépare toujours (« Version Yann Tiersen; Live 2006 »).
+    assert qualificatifs_incompatibles(
+        v("Ma France à Moi (Version Yann Tiersen; Live 2006)"), v("Ma France à Moi - Live 2006")
+    )

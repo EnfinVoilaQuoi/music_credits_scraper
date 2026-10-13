@@ -557,6 +557,19 @@ _REMIX = re.compile(r"\bremix\b", re.IGNORECASE)
 _EXTENDED = re.compile(r"\bextended\b", re.IGNORECASE)
 
 
+def _nombre_de_qualificatifs(descripteur: str) -> int:
+    """Les segments « ; » d'un descripteur, hors numéro de PARTIE — jugé à
+    part (`memes_parties`) : Diam's « La Boulette - Pt. 1; Live 2006 » (Spotify)
+    est « - Pt. 1- Live 2006 » (Genius), un seul qualificatif (2026-10-13)."""
+    return len(
+        [
+            s
+            for s in descripteur.split(";")
+            if s.strip() and not _PARTIE_DU_MORCEAU.fullmatch(s.strip())
+        ]
+    )
+
+
 def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
     """PUR. Deux descripteurs d'une même famille qui désignent pourtant deux
     enregistrements — décisions utilisateur du 2026-10-12, chacune mesurée
@@ -584,7 +597,7 @@ def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
     da, db = a.descriptor or "", b.descriptor or ""
     if bool(_EXTENDED.search(da)) != bool(_EXTENDED.search(db)):
         return True
-    if len([s for s in da.split(";") if s.strip()]) != len([s for s in db.split(";") if s.strip()]):
+    if _nombre_de_qualificatifs(da) != _nombre_de_qualificatifs(db):
         return True
     ya, yb = set(_ANNEE.findall(da)), set(_ANNEE.findall(db))
     if ya and yb and ya != yb:

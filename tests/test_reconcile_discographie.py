@@ -98,8 +98,7 @@ class TestOrdresDeclares:
         PAR le Track ID Spotify et rend la durée du morceau que cet ID désigne.
         La mettre en tête referait le dégât que le lot A-bis vient de réparer."""
         ordre = DISCOGRAPHY_PRIORITIES["duration"]
-        # Seule la chaîne officielle déclarée passe devant Deezer (2026-10-13).
-        assert ordre[:2] == ("youtube_officiel", "deezer")
+        assert ordre[0] == "deezer"
         assert ordre.index("reccobeats") == len(ordre) - 1
 
     def test_deezer_devant_ytm(self):

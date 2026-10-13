@@ -118,42 +118,10 @@ class TestChainesDeConfiance:
         assert duree_a_declarer([leak], False, recevable=lambda v: False, nature=kanye) is None
 
     def test_rang_de_l_arbitrage(self):
-        assert DISCOGRAPHY_PRIORITIES["duration"][0] == "youtube_officiel"
-
-
-def test_lien_coupe():
-    from src.utils.duree_youtube import lien_coupe
-
-    assert lien_coupe(128, 319)  # extrait de compilation
-    assert lien_coupe(178, 288)  # mixtape coupée
-    assert not lien_coupe(312, 319)  # écart de quelques secondes
-    assert not lien_coupe(340, 319)  # plus long : pas un extrait
-    assert not lien_coupe(None, 319) and not lien_coupe(128, None)
-
-
-def test_un_lien_coupe_est_refuse(data_manager):
-    """« HLM 3 » : le lien Deezer est l'extrait de 128 s d'une compilation, la
-    chaîne Lunatic publie 319 s — le lien part, refusé ; un lien juste reste."""
-    from src.enrichment.observation import Observation
-    from src.models import Artist, Track
-    from src.utils.corrections_fiches import deezer_refuses
-    from src.utils.update_ytmusic import refuser_liens_coupes
-
-    booba = Artist(name="Booba")
-    booba.id = data_manager.save_artist(booba)
-    hlm = Track(title="HLM 3", artist=booba, deezer_id=504992422)
-    juste = Track(title="Destinée", artist=booba, deezer_id=111)
-    for t in (hlm, juste):
-        data_manager.save_track(t)
-    data_manager.record_discography_observations(hlm.id, [Observation("duration", 128, "deezer")])
-    data_manager.record_discography_observations(juste.id, [Observation("duration", 317, "deezer")])
-    fiches = {t.title: t for t in data_manager.get_artist_tracks(booba.id)}
-
-    assert refuser_liens_coupes(data_manager, fiches["HLM 3"], 319) == 1
-    assert refuser_liens_coupes(data_manager, fiches["Destinée"], 319) == 0
-    apres = {t.title: t for t in data_manager.get_artist_tracks(booba.id)}
-    assert apres["HLM 3"].deezer_id is None and apres["Destinée"].deezer_id == 111
-    assert 504992422 in deezer_refuses(apres["HLM 3"])
+        """Ramenée avec les vidéos ordinaires (2026-10-14) : témoin, pas référence."""
+        ordre = DISCOGRAPHY_PRIORITIES["duration"]
+        assert ordre.index("spotify_web") < ordre.index("youtube_officiel")
+        assert ordre.index("youtube_officiel") < ordre.index("youtube_video")
 
 
 class TestClips:
@@ -184,3 +152,20 @@ class TestClips:
         assert not est_un_clip("Qui sème le vent récolte le tempo")
         assert est_un_clip("Orelsan - Basique en LIVE !", "Basique (Acoustic)")
         assert not est_un_clip("Lunatic - Le crime paie - live rare", "Le crime paie (Live)")
+
+
+class TestCataloguesEtTypeBeats:
+    def test_un_catalogue_ne_vaut_que_s_il_nomme_l_artiste(self):
+        from src.utils.chaines_youtube import OFFICIELLE, nature_de
+
+        video = {"channel_id": "UCGHR77It-MJi_tPL-mACryQ", "title": "Mala - Ennemi (Audio)"}
+        assert nature_de("Mala", video) == OFFICIELLE
+        assert nature_de("Booba", video) is None
+
+    def test_un_type_beat_n_est_jamais_le_morceau(self):
+        video = {
+            "duration": 180,
+            "channel": "Addictive Music",
+            "title": "[FREE] Booba Type Beat - Ipséité",
+        }
+        assert duree_a_declarer([video], True) is None

@@ -25,7 +25,8 @@ import re
 SOURCE_AUDIO = "youtube"
 SOURCE_VIDEO = "youtube_video"
 #: Vidéo (hors clip) d'une chaîne OFFICIELLE de l'artiste ou de son label
-#: (`chaines_youtube`, 2026-10-13) : la référence, en tête de l'arbitrage.
+#: (`chaines_youtube`, 2026-10-13) : la publication d'une fiche hors
+#: plateformes, un témoin au vote ailleurs.
 SOURCE_OFFICIEL = "youtube_officiel"
 
 #: Écart toléré entre deux vidéos d'un même morceau pour les dire d'accord.
@@ -58,7 +59,9 @@ def _accord(durees: list[int]) -> int | None:
 #: « Hella » 15 s = un extrait, « Pas de boulot » 1 610 s = une mixtape).
 NON_MORCEAU = re.compile(
     r"snippet|extrait|mixtape|mix-tape|mix[eé] par|plan[eè]te ?rap|full album|"
-    r"int[ée]gral|\(\d ?- ?\d\)|best of|meilleur de",
+    r"int[ée]gral|\(\d ?- ?\d\)|best of|meilleur de|"
+    # « [FREE] … type beat » : des instrumentaux à vendre, jamais le morceau.
+    r"\[free\]|type ?beat",
     re.IGNORECASE,
 )
 
@@ -101,23 +104,6 @@ def est_un_clip(titre_video: str | None, titre_fiche: str | None = None) -> bool
     )
 
 
-#: Un lien de plateforme plus court que la vidéo officielle d'au moins
-#: max(15 s, 10 %) en est un extrait ou une version coupée.
-COUPE_MIN_S = 15
-COUPE_MIN_PART = 0.10
-
-
-def lien_coupe(duree_lien: int | None, duree_officielle: int | None) -> bool:
-    """PUR. Le lien (Deezer, Spotify) est-il un BOUT du morceau publié par
-    la chaîne officielle ? « HLM 3 » : 128 s dans une compilation, 319 s
-    chez Lunatic (2026-10-13). Plus LONG, ce n'est pas un extrait : on ne
-    conclut pas."""
-    if not duree_lien or not duree_officielle:
-        return False
-    manque = int(duree_officielle) - int(duree_lien)
-    return manque > max(COUPE_MIN_S, COUPE_MIN_PART * int(duree_officielle))
-
-
 def duree_a_declarer(
     videos: list[dict],
     hors_plateformes: bool,
@@ -135,9 +121,10 @@ def duree_a_declarer(
     (décision utilisateur 2026-10-09, CORRECTIFS 1.10).
 
     `nature(video)` (`chaines_youtube.nature_de`, 2026-10-13) : une vidéo
-    d'une chaîne `officielle` qui n'est pas un clip donne la durée de
-    référence, plateformes ou non, AVANT l'audio Topic (dont le fichier peut
-    être celui d'une compilation qui n'en garde qu'un bout). Une chaîne de
+    d'une chaîne `officielle` qui n'est pas un clip est déclarée sous
+    `youtube_officiel`, plateformes ou non, AVANT l'audio Topic (dont le
+    fichier peut être celui d'une compilation qui n'en garde qu'un bout) ;
+    l'arbitrage la range avec les vidéos ordinaires. Une chaîne de
     `leaks` est recevable pour une fiche hors plateformes même quand le titre
     de sa vidéo ne nomme pas la page Genius."""
     from src.utils.chaines_youtube import LEAKS, OFFICIELLE

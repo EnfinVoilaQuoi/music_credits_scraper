@@ -25,6 +25,7 @@ FAMILLE_DE_DUREE = {
     "spotify_web": "spotify",
     "reccobeats": "spotify",
     "youtube_video": "youtube",
+    "youtube_officiel": "youtube",
     "ytmusic": "youtube",
 }
 

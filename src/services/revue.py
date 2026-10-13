@@ -301,7 +301,7 @@ def duree_deezer_dementie(track, _ctx=None):
 
 #: Témoins de durée qu'aucun autre détecteur n'accuse (Spotify et Deezer ont
 #: le leur, qui porte l'action sur leur identifiant).
-_TEMOINS_ISOLABLES = (SOURCE_AUDIO, "ytmusic", "youtube_video", "apple_music")
+_TEMOINS_ISOLABLES = (SOURCE_AUDIO, "ytmusic", "youtube_officiel", "youtube_video", "apple_music")
 
 
 def duree_isolee(track, _ctx=None):

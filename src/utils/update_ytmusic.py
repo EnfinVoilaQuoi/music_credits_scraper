@@ -26,7 +26,7 @@ from ytmusicapi.exceptions import YTMusicError
 from src.api.ytmusic_api import YTMusicAPI
 from src.config import YTM_IDENTITY_MIN_MATCHED, YTM_IDENTITY_MIN_RATIO
 from src.models import TrackVideo
-from src.utils.duree_youtube import SOURCE_OFFICIEL, duree_a_declarer, lien_coupe
+from src.utils.duree_youtube import duree_a_declarer
 from src.utils.logger import get_logger
 
 # Extraction du video id : helper partagé (factorisé, cf. youtube_utils). Alias
@@ -123,38 +123,6 @@ def _infer_channel_from_youtube_links(
 # module (l'alias local reste lu par `_identity_suspect` + monkeypatchable).
 _IDENTITY_MIN_MATCHED = YTM_IDENTITY_MIN_MATCHED  # plancher absolu de titres communs
 _IDENTITY_MIN_RATIO = YTM_IDENTITY_MIN_RATIO  # part des titres YTM retrouvés en base
-
-
-def refuser_liens_coupes(data_manager, fiche, duree_officielle: int) -> int:
-    """Les liens Deezer / Spotify de `fiche` nettement plus COURTS que le morceau
-    publié par la chaîne officielle en sont un extrait ou une version coupée
-    (« HLM 3 » : 128 s dans une compilation, 319 s chez Lunatic ; « On contrôle
-    la zone » : 178 s dans une mixtape de Mala) : retirés et refusés, comme à
-    la main (décision utilisateur 2026-10-13). Rend le nombre de liens refusés."""
-    from src.utils.corrections_fiches import memoriser_deezer_refuse, memoriser_id_refuse
-    from src.utils.spotify_audit import rejeter_spotify_id
-
-    vues = fiche.durations_observees or {}
-    refuses = 0
-    if fiche.deezer_id and lien_coupe(vues.get("deezer"), duree_officielle):
-        logger.warning(
-            f"✂️ « {fiche.title} » : Deezer {fiche.deezer_id} dure {vues.get('deezer')} s, "
-            f"la chaîne officielle {duree_officielle} s — lien refusé"
-        )
-        data_manager.clear_track_deezer_id(fiche.id, int(fiche.deezer_id))
-        memoriser_deezer_refuse(fiche, int(fiche.deezer_id))
-        refuses += 1
-    duree_spotify = vues.get("spotify_web") or vues.get("reccobeats")
-    if fiche.spotify_id and lien_coupe(duree_spotify, duree_officielle):
-        logger.warning(
-            f"✂️ « {fiche.title} » : Spotify {fiche.spotify_id} dure {duree_spotify} s, "
-            f"la chaîne officielle {duree_officielle} s — lien refusé"
-        )
-        sid = fiche.spotify_id
-        rejeter_spotify_id(data_manager, fiche, sid)
-        memoriser_id_refuse(fiche, sid)
-        refuses += 1
-    return refuses
 
 
 def _channel_identity_report(
@@ -1081,7 +1049,6 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     from src.utils.chaines_youtube import nature_de
 
     result["durees_youtube"] = 0
-    result["liens_coupes"] = 0
     for track_id, vids in vid_counts.items():
         fiche = tracks_par_id.get(track_id)
         if fiche is None:
@@ -1104,15 +1071,8 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         )
         if verdict and data_manager.record_duration_observation(track_id, *verdict):
             result["durees_youtube"] += 1
-        if verdict and verdict[1] == SOURCE_OFFICIEL:
-            result["liens_coupes"] += refuser_liens_coupes(data_manager, fiche, verdict[0])
     if result["durees_youtube"]:
         logger.info(f"⏱️ Durée YouTube déclarée pour {result['durees_youtube']} morceau(x)")
-    if result["liens_coupes"]:
-        logger.warning(
-            f"✂️ {result['liens_coupes']} lien(s) de plateforme refusé(s) : extrait ou "
-            "version coupée du morceau publié par la chaîne officielle"
-        )
 
     logger.info(
         f"YTMusic terminé : {result['matched']} matchés, "

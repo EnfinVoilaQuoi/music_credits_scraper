@@ -7,9 +7,11 @@ rendent alors le morceau voisin (« Fin » ← « Histoire sans fin », « Love 
 « NO LOVE » : 51 fiches mesurées). Cette garde regarde les AUTRES fiches de
 l'artiste — ce que le résolveur, qui ne voit qu'un morceau, ne peut pas faire.
 
-Trois refus, du plus net au plus fin :
+Quatre refus, du plus net au plus fin :
 
 - **instrumental** (titre ou constat) : aucun LRC, jamais ;
+- **trop long** : un LRC minuté au-delà de la durée CONFIRMÉE de la fiche
+  (deux catalogues indépendants) est celui d'un autre audio (2026-10-13) ;
 - **version** : le LRC exact d'une autre fiche du MÊME socle n'est gardé que
   pour le même enregistrement (remaster, explicit/clean, album version, bonus,
   version promo) — retiré pour radio edit, live, acoustique, remix, chopped,
@@ -71,6 +73,43 @@ def _autre_enregistrement(titre: str) -> bool:
 ECART_DUREE_S = 5
 
 
+#: Durées qui ne MESURENT pas l'audio de la fiche : valeur d'avant la
+#: provenance, page SongBPM trouvée par titre.
+_DUREES_SANS_PREUVE = frozenset({"legacy", "songbpm"})
+#: Sources qui lisent le même catalogue : deux d'entre elles ne font qu'UNE
+#: confirmation (ReccoBeats rend la durée Spotify, YTM celle de la vidéo).
+_FAMILLE_DE_DUREE = {
+    "spotify_web": "spotify",
+    "reccobeats": "spotify",
+    "youtube_video": "youtube",
+    "ytmusic": "youtube",
+}
+_HORODATAGE = re.compile(r"\[(\d+):(\d{1,2})(?:[.:]\d+)?\]")
+
+
+def duree_confirmee(track) -> int | None:
+    """PUR. La durée de la fiche si DEUX catalogues indépendants la donnent
+    (±3 s), sinon None : une durée isolée peut être celle du faux rapprochement
+    que le LRC trahit (« Swagger Like Us » à 167 s)."""
+    try:
+        duree = int(track.duration)
+    except (TypeError, ValueError):
+        return None
+    familles = set()
+    for source, valeur in (getattr(track, "durations_observees", None) or {}).items():
+        if source in _DUREES_SANS_PREUVE or not valeur:
+            continue
+        if abs(int(valeur) - duree) <= 3:
+            familles.add(_FAMILLE_DE_DUREE.get(source, source))
+    return duree if len(familles) >= 2 else None
+
+
+def fin_du_lrc(lrc: str | None) -> int | None:
+    """PUR. Le dernier horodatage d'un LRC, en secondes."""
+    fins = [int(m) * 60 + int(s) for m, s in _HORODATAGE.findall(lrc or "")]
+    return max(fins) if fins else None
+
+
 def _durees_dementent(track, autre) -> bool:
     try:
         a, b = int(track.duration), int(autre.duration)
@@ -99,6 +138,12 @@ class GardeLrc:
             return None
         if sans_lrc(track):
             return "instrumental : aucun LRC"
+        # Un LRC ne court pas après la fin du morceau : au-delà de la durée
+        # CONFIRMÉE, il minute un autre audio (30 fiches mesurées le 2026-10-13 :
+        # « Pharaon revient » 66 s portait un LRC de 8 min 34).
+        duree, fin = duree_confirmee(track), fin_du_lrc(lrc)
+        if duree and fin and fin > duree + ECART_DUREE_S:
+            return f"LRC minuté jusqu'à {fin} s, fiche de {duree} s (durée confirmée)"
         for autre in self._par_lrc.get(_cle(lrc), []):
             if autre is track or (track.id is not None and autre.id == track.id):
                 continue

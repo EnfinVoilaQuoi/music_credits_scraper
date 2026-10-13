@@ -253,3 +253,42 @@ class TestDementiParLaDuree:
         promo = _t("FRANCHISE (Physical Version)", tid=2, gid=2)
         promo.duration = 203
         assert GardeLrc([original]).motif(promo, _LRC) is None
+
+
+class TestTropLong:
+    """Un LRC minuté au-delà de la durée CONFIRMÉE de la fiche est celui d'un
+    autre audio (2026-10-13 : « Pharaon revient » 66 s, LRC de 8 min 34)."""
+
+    _LONG = "[00:00.00] ♪\n[03:19.00] fin"
+
+    def _interlude(self, **durees):
+        t = _t("Interlude", tid=1)
+        t.duration = 38
+        t.durations_observees = durees
+        return t
+
+    def test_duree_confirmee_refuse_le_lrc(self):
+        t = self._interlude(deezer=38, spotify_web=38)
+        assert "199 s" in GardeLrc().motif(t, self._LONG)
+
+    def test_duree_isolee_ne_tranche_pas(self):
+        """« Swagger Like Us » à 167 s : c'est peut-être la durée qui ment."""
+        t = self._interlude(apple_music=38)
+        assert GardeLrc().motif(t, self._LONG) is None
+
+    def test_un_meme_catalogue_ne_confirme_qu_une_fois(self):
+        assert GardeLrc().motif(self._interlude(spotify_web=38, reccobeats=38), self._LONG) is None
+        assert GardeLrc().motif(self._interlude(youtube_video=38, ytmusic=38), self._LONG) is None
+
+    def test_sources_sans_preuve_ignorees(self):
+        assert GardeLrc().motif(self._interlude(legacy=38, songbpm=38), self._LONG) is None
+
+    def test_lrc_dans_la_duree_accepte(self):
+        t = self._interlude(deezer=38, spotify_web=38)
+        assert GardeLrc().motif(t, "[00:00.00] début\n[00:41.50] fin") is None
+
+    def test_fin_du_lrc(self):
+        from src.utils.lrc_garde import fin_du_lrc
+
+        assert fin_du_lrc(self._LONG) == 199
+        assert fin_du_lrc("pas de minutage") is None

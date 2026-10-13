@@ -224,3 +224,24 @@ def test_paroles_identiques_sur_deux_titres_non_equivalents():
     cas = au.paroles_identiques(par)
     assert {tuple(c.pistes) for c in cas} == {(1, 2), (1, 3), (2, 4), (3, 4)}
     assert all(c.famille == "paroles_identiques" for c in cas)
+
+
+def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
+    """Un LRC qui court après la fin du morceau : l'un des deux est faux, et
+    l'audit dit si la durée était confirmée (2026-10-13)."""
+    from src.enrichment.observation import Observation
+
+    _, t = isha
+    data_manager.record_discography_observations(
+        t.id, [Observation("duration", 38, "deezer"), Observation("duration", 38, "spotify_web")]
+    )
+    _sql(
+        data_manager,
+        "UPDATE tracks SET lyrics_synced = '[00:00.00] a\n[03:19.00] b' WHERE id = :t",
+        t=t.id,
+    )
+    (cas,) = [c for c in au.auditer(data_manager, ["Isha"]).cas if c.famille == "lrc_trop_long"]
+    assert cas.pistes == [t.id] and "199s" in cas.libelle and "(confirmée)" in cas.libelle
+
+    _sql(data_manager, "UPDATE tracks SET lyrics_synced = '[00:30.00] a' WHERE id = :t", t=t.id)
+    assert not _familles(au.auditer(data_manager, ["Isha"])).get("lrc_trop_long")

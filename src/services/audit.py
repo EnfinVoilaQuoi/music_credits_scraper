@@ -92,6 +92,7 @@ FAMILLES = {
     "instrumental_lrc": "instrumental (constaté ou titre) avec LRC ou paroles",
     "duree_video": "durée tirée d'une vidéo qui n'est pas le morceau",
     "duree_aberrante": "durée < 25 s ou > 15 min",
+    "lrc_trop_long": "LRC minuté au-delà de la durée de la fiche (l'un des deux est faux)",
     "certif_plus_long": "certif dont le titre a des mots EN PLUS",
     "certif_album": "certif de catégorie album sur un morceau",
     "certif_version": "certif de l'original sur une version à descripteur",
@@ -349,6 +350,42 @@ def durees(c, pistes) -> list[Cas]:
             d = None
         if d is not None and (d < 25 and not court_par_nature(t["title"]) or d > 900):
             cas.append(Cas("duree_aberrante", t["artiste"], [t["id"]], f"{_lib(t)} {d}s"))
+    cas += lrc_trop_longs(c, pistes)
+    return cas
+
+
+def lrc_trop_longs(c, pistes) -> list[Cas]:
+    """Un LRC minuté au-delà de la durée : l'un des deux est faux (2026-10-13).
+    Durée CONFIRMÉE, la garde du résolveur le refuse — le voir ici dit qu'il a
+    échappé à la garde ; durée isolée, c'est peut-être elle qui ment (« Swagger
+    Like Us » à 167 s) : à trancher."""
+    from src.utils.lrc_garde import ECART_DUREE_S, duree_confirmee, fin_du_lrc
+    from src.utils.track_mapper import _clean_duration
+
+    avec_lrc = {t["id"]: t for t in pistes if t["lyrics_synced"] and t["duration"]}
+    durees_vues = collections.defaultdict(dict)
+    for r in c.execute("SELECT track_id, source, value FROM observations WHERE field='duration'"):
+        if r["track_id"] in avec_lrc:
+            durees_vues[r["track_id"]][r["source"]] = _clean_duration(r["value"])
+    cas = []
+    for tid, t in avec_lrc.items():
+        fin = fin_du_lrc(t["lyrics_synced"])
+        try:
+            d = int(t["duration"])
+        except (TypeError, ValueError):
+            continue
+        if not fin or fin <= d + ECART_DUREE_S:
+            continue
+        fiche = SimpleNamespace(duration=d, durations_observees=durees_vues[tid])
+        etat = "confirmée" if duree_confirmee(fiche) else "non confirmée"
+        cas.append(
+            Cas(
+                "lrc_trop_long",
+                t["artiste"],
+                [tid],
+                f"{_lib(t)} LRC jusqu'à {fin}s, durée {d}s ({etat})",
+            )
+        )
     return cas
 
 

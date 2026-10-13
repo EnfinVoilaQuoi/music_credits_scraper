@@ -8,6 +8,7 @@ les invariants avant / après. Un invariant qui apparaît = un écrivain fautif.
     python scripts/invariants_apres_rejeu.py Flynt Swing Josman
 """
 
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -92,7 +93,7 @@ def main(artistes: list[str]) -> int:
                     print("     ", cas.famille, cas.libelle)
     finally:
         fermer(runtime)
-        copie.unlink(missing_ok=True)
+        shutil.rmtree(copie.parent, ignore_errors=True)
     return 1 if fautif else 0
 
 

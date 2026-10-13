@@ -5334,10 +5334,24 @@ class TrackRepository:
 
                 def oublier(tid):
                     self._toucher(conn, tid, *self._porteurs_des_videos(conn, tid, [video_id]))
-                    supprimees[0] += conn.execute(
+                    n = conn.execute(
                         text("DELETE FROM track_videos WHERE track_id = :tid AND video_id = :vid"),
                         {"tid": tid, "vid": video_id},
                     ).rowcount
+                    supprimees[0] += n
+                    if n:
+                        # La durée tirée des vidéos ne dit pas de QUELLE vidéo
+                        # elle vient (cause n°4 de l'audit) : elle part avec le
+                        # rejet, la colonne est ré-arbitrée au commit, et le run
+                        # YTM suivant la redéclare si les vidéos restantes la
+                        # justifient (Kid Cudi « Whatever U Want (Remix) », 2026-10-13).
+                        conn.execute(
+                            text(
+                                "DELETE FROM observations WHERE track_id = :tid "
+                                "AND field = 'duration' AND source IN ('youtube', 'youtube_video')"
+                            ),
+                            {"tid": tid},
+                        )
 
                 oublier(track_id)
                 effacer_chez_les_soeurs(conn, track_id, oublier)

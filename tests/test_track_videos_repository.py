@@ -129,6 +129,28 @@ class TestRecordTrackVideos:
         # Rejouer ne rend pas True : il n'y avait plus rien à retirer.
         assert data_manager.forget_track_video(track.id, "aaaaaaaaaaa") is False
 
+    def test_le_rejet_retire_la_duree_tiree_des_videos(self, data_manager):
+        """Cause n°4 de l'audit (2026-10-13) : la durée `youtube_video` ne dit
+        pas de quelle vidéo elle vient — elle part avec le rejet, et la colonne
+        retombe sur une source indépendante (ici Deezer)."""
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="aaaaaaaaaaa")])
+        data_manager.record_duration_observation(track.id, 157, "youtube_video")
+        data_manager.record_duration_observation(track.id, 200, "deezer")
+        data_manager.forget_track_video(track.id, "aaaaaaaaaaa")
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert "youtube_video" not in (relue.durations_observees or {})
+        assert relue.duration == 200
+
+    def test_oublier_une_video_absente_ne_touche_pas_la_duree(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_duration_observation(track.id, 157, "youtube_video")
+        assert data_manager.forget_track_video(track.id, "bbbbbbbbbbb") is False
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert (relue.durations_observees or {}).get("youtube_video") == 157
+
 
 class TestLectureAvecLesMorceaux:
     def test_get_artist_tracks_peuple_videos(self, data_manager):

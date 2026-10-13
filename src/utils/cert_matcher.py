@@ -422,11 +422,10 @@ class CertMatcher:
         # serait une tautologie. Seul `ac == a`, plus STRICT que l'ancrage,
         # garde un sens — c'est ce qui distingue la branche exacte du repli.
 
-        # S1 : exact (artiste+titre), sinon titre en MOTS ENTIERS
-        s1 = df[(ac == a) & (tc == t)]
-        if s1.empty:
-            s1 = df[_contient_en_mots(tc, t)]
-        add(s1)
+        # S1 : exact (artiste+titre). Son repli « titre en mots entiers » était
+        # celui de S3 (audit 2026-10-11 §9.3) : retiré le 2026-10-13, mesuré sur
+        # les 11 568 fiches de la base — aucun résultat ne change.
+        add(df[(ac == a) & (tc == t)])
 
         # S2 : si le titre contient un featuring, retenter avec la partie principale
         m = _FEAT_RE.match(t)

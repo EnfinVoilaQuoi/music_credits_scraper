@@ -51,6 +51,8 @@ SOURCES_ACTIVES: frozenset[str] = frozenset(
         "spotify_embed",
         # Audio, timestamps, liens (lot 4) : petites réponses JSON.
         "getsongbpm",
+        # SongBPM se lit par le DOM (Playwright) : la page RENDUE est gardée.
+        "songbpm",
         "reccobeats",
         "lrclib",
         "musicbrainz",

@@ -490,3 +490,38 @@ class TestVerdictDUsage:
         monkeypatch.setattr(s, "_perform_search_async", _trouve)
         asyncio.run(s.search_track_async("Titre", "Jul"))
         assert self._issues() == [IssueKind.OK]
+
+
+class TestBrutGarde:
+    """Chantier E : SongBPM se lit par le DOM — la page RENDUE va au brut."""
+
+    def test_la_page_de_detail_est_gardee(self, scraper):
+        from src.persistence import brut
+
+        html = "<main>with a F key and a minor mode, time signature of 4 beats per bar</main>"
+
+        class _Reponse:
+            status = 200
+            url = "https://songbpm.com/@jul/bande-organisee"
+
+        class _PageDetail:
+            url = _Reponse.url
+
+            def goto(self, *a, **k):
+                return _Reponse()
+
+            def query_selector(self, selecteur):
+                return _Element(texte=html) if selecteur == "main" else None
+
+            def content(self):
+                return html
+
+        _Element.is_visible = lambda self: True
+        try:
+            scraper.page = _PageDetail()
+            details = scraper._extract_track_details("/@jul/bande-organisee")
+        finally:
+            del _Element.is_visible
+        assert details["mode"] == "minor"
+        (lecture,) = brut.lectures("songbpm", _Reponse.url)
+        assert lecture["statut"] == 200 and lecture["corps"] == html.encode("utf-8")

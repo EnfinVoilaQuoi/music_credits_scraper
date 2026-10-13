@@ -21,6 +21,7 @@ from playwright.sync_api import (
 
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.persistence import brut
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import either_contains_as_words
@@ -147,6 +148,14 @@ class SongBPMScraper:
         Commun aux deux jumeaux : `goto` rend la réponse, ou `None`."""
         if reponse is not None:
             source_usage.record_response(reponse.url, reponse.status, source_key=_SOURCE)
+
+    @staticmethod
+    def _garder(url: str, statut: int | None, html: str | None) -> None:
+        """La page rendue va au brut (chantier E) : SongBPM se lit par le DOM,
+        sans réponse HTTP à intercepter — c'est le HTML que les sélecteurs ont
+        lu qui est gardé. Commun aux deux jumeaux ; ne lève jamais."""
+        if html:
+            brut.consigner(_SOURCE, url, statut, html.encode("utf-8"))
 
     def _remove_parentheses_and_brackets(self, title: str) -> str:
         cleaned = re.sub(r"\s*\([^)]*\)", "", title)
@@ -277,9 +286,11 @@ class SongBPMScraper:
             if detail_url.startswith("/"):
                 detail_url = "https://songbpm.com" + detail_url
             logger.info(f"📄 Navigation détails: {detail_url}")
-            self._noter_reponse(
-                self.page.goto(detail_url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            reponse = self.page.goto(
+                detail_url, wait_until="domcontentloaded", timeout=timeout * 1000
             )
+            self._noter_reponse(reponse)
+            self._garder(self.page.url, reponse.status if reponse else None, self.page.content())
 
             content_selectors = [
                 "div.lg\\:prose-xl",
@@ -474,6 +485,7 @@ class SongBPMScraper:
                 logger.warning(f"❌ Aucun résultat pour '{track_title}'")
                 return None
 
+            self._garder(self.page.url, None, self.page.content())
             results = self._get_search_results()
             if not results:
                 return None

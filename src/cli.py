@@ -249,6 +249,12 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
 
+    k = sub.add_parser(
+        "kworb", help="rapprochements Kworb REJOUÉS hors ligne depuis le brut (aucune écriture)"
+    )
+    _artiste_args(k)
+    k.add_argument("--sortie", help="écrire les rapprochements en JSON (pour comparer)")
+
     c = sub.add_parser(
         "credits", help="crédits, paroles, timestamps (sans forcer : manquants et échecs)"
     )
@@ -576,6 +582,9 @@ def _executer_commande(a: argparse.Namespace, runtime: Runtime) -> tuple[int, ob
     if a.commande == "deezer":
         return _executer_deezer(a, runtime, hooks), None
 
+    if a.commande == "kworb":
+        return _rejouer_kworb(a, runtime), None
+
     if a.commande == "revue":
         return _executer_revue(a, runtime), None
 
@@ -758,6 +767,40 @@ def _rejouer_deezer(a: argparse.Namespace, runtime: Runtime, art) -> int:
         )
         with open(a.sortie, "w", encoding="utf-8") as f:
             json.dump(ecarts, f, ensure_ascii=False, indent=1, sort_keys=True, default=str)
+        print(f"→ {a.sortie}")
+    return COMPLET if not compte["absentes"] else PARTIEL
+
+
+def _rejouer_kworb(a: argparse.Namespace, runtime: Runtime) -> int:
+    """Le rapprochement ligne Kworb → fiche rejoué HORS LIGNE (chantier E) :
+    la page et les lectures d'identité Spotify viennent du brut, rien n'est
+    écrit. Sert à juger une règle changée (`--sortie` avant / après)."""
+    import json
+    from collections import Counter
+
+    from src.persistence import brut
+    from src.utils import update_kworb
+
+    art = _charger(runtime, a, creer=False)
+    with brut.rejeu() as compte:
+        lignes = update_kworb.rapprochements(art, runtime.data_manager)
+    if lignes is None:
+        print(f"❌ {art.name} : aucune page Kworb dans le brut (ou pas d'ID Spotify d'artiste)")
+        return ERREUR
+    vias = Counter(
+        x["via"] or ("rendition" if x["rendition_de"] else x["motif"] or "aucun") for x in lignes
+    )
+    resume = [f"{len(lignes)} ligne(s) : " + ", ".join(f"{k} {n}" for k, n in vias.most_common())]
+    resume.append(f"{compte['servies']} réponse(s) servie(s) depuis le brut")
+    if compte["absentes"]:
+        resume.append(
+            f"{len(compte['absentes'])} lecture(s) d'identité absente(s) du brut — "
+            "leurs lignes sont jugées sans elles"
+        )
+    _imprimer_bilan("Kworb — rapprochements REJOUÉS hors ligne", "\n".join(resume))
+    if a.sortie:
+        with open(a.sortie, "w", encoding="utf-8") as f:
+            json.dump(lignes, f, ensure_ascii=False, indent=1, sort_keys=True)
         print(f"→ {a.sortie}")
     return COMPLET if not compte["absentes"] else PARTIEL
 

@@ -139,10 +139,12 @@ class SongBPMScraperAsync(SongBPMScraper):
             if detail_url.startswith("/"):
                 detail_url = "https://songbpm.com" + detail_url
             logger.info(f"📄 Navigation détails: {detail_url}")
-            self._noter_reponse(
-                await self.page.goto(
-                    detail_url, wait_until="domcontentloaded", timeout=timeout * 1000
-                )
+            reponse = await self.page.goto(
+                detail_url, wait_until="domcontentloaded", timeout=timeout * 1000
+            )
+            self._noter_reponse(reponse)
+            self._garder(
+                self.page.url, reponse.status if reponse else None, await self.page.content()
             )
 
             content_selectors = [
@@ -313,6 +315,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                 logger.warning(f"❌ Aucun résultat pour '{track_title}'")
                 return None
 
+            self._garder(self.page.url, None, await self.page.content())
             results = await self._get_search_results_async()
             if not results:
                 return None

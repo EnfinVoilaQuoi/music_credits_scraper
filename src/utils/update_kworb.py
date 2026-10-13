@@ -1047,6 +1047,49 @@ def relier_ids_kworb(artist, data_manager, scraper=None, lire_identite=None) -> 
     return res
 
 
+def rapprochements(artist, data_manager, scraper=None, lire_identite=None) -> list[dict] | None:
+    """Le verdict de `rapprocher` pour CHAQUE ligne de la page Kworb, sans rien
+    écrire (chantier E, 2026-10-13) : sous `brut.rejeu()`, la page et les
+    lectures d'identité Spotify viennent du brut gardé — une règle changée se
+    juge en comparant deux sorties. Même page validée (sans re-vote), même
+    index, mêmes décisions mémorisées que le comptage. None sans page."""
+    spotify_artist_id = getattr(artist, "spotify_id", None)
+    if not spotify_artist_id:
+        return None
+    scraper = scraper or KworbScraper()
+    page, _ = _scrape_validated(scraper, artist, data_manager, spotify_artist_id, revoter=False)
+    if not page:
+        return None
+    index = construire_index(data_manager.get_artist_tracks(artist.id))
+    lire_identite = lire_identite or spotify_identity.lire_identite_http
+    try:
+        from src.utils.kworb_links_manager import KworbLinksManager
+
+        decisions = KworbLinksManager().load(artist.name)
+    except (OSError, ValueError):
+        decisions = {"confirmed": {}, "rejected": [], "decisions": {}}
+
+    def fiche(t):
+        return {"id": t.id, "titre": t.title} if t is not None else None
+
+    sortie = []
+    for entry in page["entries"]:
+        r = rapprocher(entry, index, artist, decisions, lire_identite)
+        sortie.append(
+            {
+                "titre": entry["title"],
+                "spotify_id": entry.get("spotify_id"),
+                "streams": entry.get("streams"),
+                "fiche": fiche(r.track),
+                "via": r.via,
+                "rendition_de": fiche(r.rendition_de),
+                "suggestion": bool(r.suggestion),
+                "motif": r.motif,
+            }
+        )
+    return sortie
+
+
 def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None) -> dict:
     """Scrape kworb.net et met à jour les streams des morceaux et albums de l'artiste.
 

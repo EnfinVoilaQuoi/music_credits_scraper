@@ -497,6 +497,27 @@ class TestAgregationEtBackfill:
         assert res == {"ids_poses": 1, "editions": 0, "lignes": 1, "page": True}
         assert dm.streams_writes == []  # l'identité ne compte rien
 
+    def test_le_rejeu_juge_chaque_ligne_sans_rien_ecrire(self):
+        """`kworb <artiste>` (chantier E, 2026-10-13) : le verdict de chaque
+        ligne, aucune écriture — ni ID, ni streams."""
+        dm = _DataManager([_track(1, "Titre"), _track(2, "Autre", spotify_id="SPA")])
+        page = _page(
+            [
+                _entry("Titre", spotify_id="SP9"),
+                _entry("Autre", spotify_id="SPA"),
+                _entry("Inconnue", spotify_id="SPX"),
+            ]
+        )
+        lignes = uk.rapprochements(_Artist(), dm, scraper=_Scraper(songs=page))
+        assert dm.track_spotify_ids == [] and dm.streams_writes == []
+        par_titre = {x["titre"]: x for x in lignes}
+        assert par_titre["Titre"]["fiche"] == {"id": 1, "titre": "Titre"}
+        assert par_titre["Autre"]["via"] == "id"
+        assert par_titre["Inconnue"]["fiche"] is None
+
+    def test_le_rejeu_sans_page_rend_none(self):
+        assert uk.rapprochements(_Artist(), _DataManager([]), scraper=_Scraper(songs=None)) is None
+
     def test_id_existant_jamais_ecrase(self):
         dm = _DataManager([_track(1, "Titre", spotify_id="DEJA")])
         uk.relier_ids_kworb(

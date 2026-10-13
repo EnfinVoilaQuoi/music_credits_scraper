@@ -854,6 +854,103 @@ def meme_version(a: str | None, b: str | None) -> bool:
     return meme_version_cherchee(cle_titre(a), cle_titre(b))
 
 
+#: Un groupe de titre de VIDÉO qui ne dit rien de la version : la nature de la
+#: vidéo, sa qualité, son album, son producteur (« (Clip Officiel) », « [4K
+#: Remastered] », « (Réédition album "L'AMOUR") », « (prod. klm) »).
+_GROUPE_DE_VIDEO = re.compile(r"\s*[\(\[]([^\(\)\[\]]*)[\)\]]")
+_MARQUEUR_DE_VIDEO = re.compile(
+    r"\b(?:audio|clip|official|officiel|officielle|video|vid[ée]o|lyrics?|paroles"
+    r"|visuali[sz]er|hd|hq|4k)\b",
+    re.IGNORECASE,
+)
+#: Un crédit (« Prod By Akhenaton », « Produced by Caliveli, Mixed by TMK »),
+#: ou une année seule (« (2009) ») : jamais une version.
+_CREDIT_DE_VIDEO = re.compile(
+    r"^\s*(?:prod\b|produced\b|mixed\s+by\b|(?:19|20)\d\d\s*$)", re.IGNORECASE
+)
+#: « ft. X » nu, jusqu'au groupe ou au séparateur suivant — `strip_featuring`
+#: coupe jusqu'au bout du titre (« A2H Ft. 3010 - Mes frères » → « A2H »).
+_INVITE_DE_VIDEO = re.compile(
+    r"\s+(?:feat|ft)\b\.?\s*:?\s+[^\(\)\[\]\|]*?(?=\s*[\(\)\[\]]|\s+[-–|]\s|$)", re.IGNORECASE
+)
+_SEPARATEUR_DE_VIDEO = re.compile(r"\s+[-–|]\s+")
+#: Mention de qualité nue en fin de segment (« - HD VERSION »).
+_QUALITE_DE_VIDEO = re.compile(r"^(?:hd|hq|4k)(?:\s+version)?$", re.IGNORECASE)
+
+
+def _groupe_sans_version(m: re.Match) -> str:
+    """Un groupe de titre de vidéo part s'il ne dit rien de la VERSION : la
+    nature de la vidéo (« (Clip Officiel) », « [4K] ») ou un crédit — mais
+    « (Video Version) », « [Official Remix] », « (Official Instrumental) »
+    restent."""
+    contenu = m.group(1)
+    mots = set(_tokens(contenu))
+    if not mots or _CREDIT_DE_VIDEO.match(contenu) or mots & {"hd", "hq", "4k"}:
+        return ""  # vide (invités retirés), crédit, qualité (« [4K Remastered] »)
+    porte_une_version = any(
+        t in RENDITION_WORDS or t in REMIX_WORDS or _NUMERO_DE_VERSION.match(t) for t in mots
+    )
+    if (_MARQUEUR_DE_VIDEO.search(contenu) or "album" in mots) and not porte_une_version:
+        return ""  # « (Clip Officiel) », « (Réédition album "L'AMOUR") »
+    return m.group(0)
+
+
+def _segments_hors_groupes(titre: str) -> list[str]:
+    """Le titre coupé à ses séparateurs « - », « – », « | » HORS parenthèses
+    (« FRANCHISE (REMIX - Official Audio) » reste entier)."""
+    segments, courant, profondeur, i = [], [], 0, 0
+    while i < len(titre):
+        c = titre[i]
+        if c in "([":
+            profondeur += 1
+        elif c in ")]" and profondeur:
+            profondeur -= 1
+        elif profondeur == 0:
+            m = _SEPARATEUR_DE_VIDEO.match(titre, i)
+            if m:
+                segments.append("".join(courant))
+                courant, i = [], m.end()
+                continue
+        courant.append(c)
+        i += 1
+    segments.append("".join(courant))
+    return [s.strip() for s in segments if s.strip()]
+
+
+def titre_de_video_pour(fiche: str | None, video: str | None) -> str:
+    """PUR. Le titre de VIDÉO réduit à ce qui juge la version, pour la fiche
+    `fiche` (2026-10-13) : sans marqueurs de vidéo, sans invité nu, et à partir
+    du segment qui porte le titre de la fiche — « A2H Ft. 3010 - Mes frères
+    (prod KobéBeats) » → « Mes frères », « Travis Scott feat. Future - FRANCHISE
+    (REMIX - Official Audio) » → « FRANCHISE (REMIX - Official Audio) », « Weird
+    Little Flute ft. Kid Cudi - SNL » → « Weird Little Flute - SNL ». Sans
+    segment qui porte ce titre, le titre nettoyé tel quel."""
+    from src.utils.title_matching import (
+        _FEAT_DANS_UN_GROUPE,
+        _GROUPE_D_INVITES,
+        _retirer_si_invites,
+    )
+
+    t = _GROUPE_D_INVITES.sub(_retirer_si_invites, video or "")
+    t = _FEAT_DANS_UN_GROUPE.sub(r"\1", t)
+    t = _GROUPE_DE_VIDEO.sub(_groupe_sans_version, t)
+    t = _INVITE_DE_VIDEO.sub("", t)
+    segments = [
+        s
+        for s in _segments_hors_groupes(t)
+        if not _QUALITE_DE_VIDEO.match(s)
+        and not re.match(r"(?i)(?:feat|ft)\b", s)
+        and not _CREDIT_DE_VIDEO.match(s)
+    ]
+    if not segments:
+        return (video or "").strip()
+    socle = normalize_title(parse_variant(fiche or "").socle)
+    for i, s in enumerate(segments):
+        if socle and normalize_title(parse_variant(s).socle) == socle:
+            return " - ".join(segments[i:])
+    return " - ".join(segments)
+
+
 def meme_version_publiee(a: str | None, b: str | None) -> bool:
     """La vidéo `b` peut-elle compter pour la fiche `a` ? ASYMÉTRIQUE.
 
@@ -868,7 +965,10 @@ def meme_version_publiee(a: str | None, b: str | None) -> bool:
     soit la version, compte pour ce morceau » (décision utilisateur 2026-10-10,
     option 2) — ses vues vont à la fiche du titre. Jamais un remix, une démo,
     un instrumental ni un autre montage. Un concert entier ou une émission ne
-    nomme pas un seul morceau : la ressemblance du titre les écarte."""
+    nomme pas un seul morceau : la ressemblance du titre les écarte.
+
+    Le titre de la vidéo est jugé NETTOYÉ (`titre_de_video_pour`, 2026-10-13)."""
+    b = titre_de_video_pour(a, b)
     if meme_version(a, b):
         return True
     va, vb = parse_variant(a or ""), parse_variant(b or "")

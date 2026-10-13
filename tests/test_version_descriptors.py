@@ -329,3 +329,58 @@ class TestQualificatifsIncompatibles:
     )
     def test_le_meme_enregistrement(self, a, b):
         assert titres_equivalents(a, b)
+
+
+class TestTitreDeVideo:
+    """2026-10-13 : un titre de VIDÉO est jugé nettoyé (`titre_de_video_pour`)."""
+
+    @pytest.mark.parametrize(
+        "fiche, video, attendu",
+        [
+            ("Mes frères", "A2H Ft. 3010 - Mes frères (prod KobéBeats)", "Mes frères"),
+            (
+                "FRANCHISE (REMIX)",
+                "Travis Scott feat. Future, Young Thug & M.I.A. - FRANCHISE (REMIX - Official Audio)",
+                "FRANCHISE (REMIX - Official Audio)",
+            ),
+            (
+                "Weird Little Flute",
+                "Weird Little Flute ft. Kid Cudi - SNL",
+                "Weird Little Flute - SNL",
+            ),
+            (
+                "Hot Shit (Instrumental)",
+                "Cardi B - Hot Shit feat. Kanye West [Instrumental]",
+                "Hot Shit [Instrumental]",
+            ),
+            (
+                "Last Call (Instrumental)",
+                "Kanye West - Last Call (Official Instrumental)",
+                "Last Call (Official Instrumental)",
+            ),
+            (
+                "Talk About Our Love",
+                "Brandy ft. Kanye West - Talk About Our Love (Official Video) [4K Remastered]",
+                "Talk About Our Love",
+            ),
+            ("Brûle", 'A2H - Brûle (audio officiel) (Réédition album "L\'AMOUR")', "Brûle"),
+            (
+                "Can’t Tell Me Nothing (Remix)",
+                "Can't Tell Me Nothing (Remix feat. Young Jeezy)",
+                "Can't Tell Me Nothing (Remix)",
+            ),
+        ],
+    )
+    def test_nettoyage(self, fiche, video, attendu):
+        from src.utils.version_descriptors import titre_de_video_pour
+
+        assert titre_de_video_pour(fiche, video) == attendu
+
+    def test_la_version_se_lit_dans_le_titre_nettoye(self):
+        from src.utils.version_descriptors import meme_version_publiee
+
+        assert meme_version_publiee(
+            "FRANCHISE (REMIX)", "Travis Scott feat. Future - FRANCHISE (REMIX - Official Audio)"
+        )
+        assert meme_version_publiee("Mes frères", "A2H Ft. 3010 - Mes frères (prod KobéBeats)")
+        assert not meme_version_publiee("ZOOM", "ZOOM - TRAVIS SCOTT FT. GUNNA (OG)")

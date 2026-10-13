@@ -557,10 +557,30 @@ class TestSignalementsDesRuns:
         s = self._deezer(
             "deezer_link_review", 1, {"ecart": {"piste": {"id": 81385490, "duration": 186}}}
         )
-        contredit = [_t("Pardonne moi", 1, durations_observees={"songbpm": 268, "youtube": 187})]
+        contredit = [_t("Pardonne moi", 1, durations_observees={"songbpm": 268})]
         assert len(revue._cas_des_signalements([s], {1}, contredit)) == 1
         apres = [_t("Pardonne moi", 1, durations_observees={"youtube": 187})]
         assert revue._cas_des_signalements([s], {1}, apres) == []
+
+    def test_lien_a_revoir_delie_depuis(self):
+        """A2H « Blues » : la piste du single a été remplacée par celle de
+        l'album — le signalement sur l'ancienne piste n'a plus d'objet."""
+        s = self._deezer(
+            "deezer_link_review",
+            1,
+            {"piste_deezer": 537739642, "ecart": {"piste": {"duration": 181}}},
+        )
+        actuel = [_t("Blues", 1, deezer_id=566925602, durations_observees={"spotify_web": 175})]
+        assert revue._cas_des_signalements([s], {1}, actuel) == []
+
+    def test_une_source_fragile_seule_ne_dement_pas_un_lien_confirme(self):
+        """Vote des catalogues (2026-10-13) : Deezer et l'audio YouTube d'accord,
+        SongBPM seul contre — le lien n'est plus mis en doute."""
+        s = self._deezer(
+            "deezer_link_review", 1, {"ecart": {"piste": {"id": 81385490, "duration": 186}}}
+        )
+        confirme = [_t("Pardonne moi", 1, durations_observees={"songbpm": 268, "youtube": 187})]
+        assert revue._cas_des_signalements([s], {1}, confirme) == []
 
 
 def test_fenetre_se_construit(racine_tk):
@@ -861,3 +881,45 @@ class TestDesaccordsExpliques:
             > BPM_SOURCE_RANK["songbpm"]
             > BPM_SOURCE_RANK["getsongbpm"]
         )
+
+
+class TestVoteDesCatalogues:
+    """Les détecteurs de durée accusent la valeur que les catalogues démentent
+    (2026-10-13)."""
+
+    def test_le_temoin_isole_est_accuse_pas_l_id(self):
+        t = _t(
+            "Vice Versa",
+            1,
+            spotify_id="x",
+            deezer_id=1,
+            durations_observees={
+                "deezer": 240,
+                "spotify_web": 240,
+                "apple_music": 240,
+                "youtube": 277,
+            },
+        )
+        assert revue.duree_spotify_dementie(t) is None
+        assert revue.duree_deezer_dementie(t) is None
+        motif, preuves = revue.duree_isolee(t)
+        assert "youtube 277 s" in motif and preuves["youtube"] == 277
+
+    def test_l_id_isole_reste_accuse(self):
+        t = _t(
+            "Hold On",
+            1,
+            spotify_id="x",
+            durations_observees={"spotify_web": 285, "deezer": 201, "youtube": 201},
+        )
+        motif, _ = revue.duree_spotify_dementie(t)
+        assert "démentie par" in motif and revue.duree_isolee(t) is None
+
+    def test_songbpm_contre_un_audio_youtube_isole(self):
+        t = _t(
+            "Choc frontal",
+            1,
+            durations_observees={"songbpm": 137, "deezer": 137, "spotify_web": 137, "youtube": 195},
+        )
+        assert revue.duree_songbpm_dementie(t) is None
+        assert revue.duree_isolee(t)

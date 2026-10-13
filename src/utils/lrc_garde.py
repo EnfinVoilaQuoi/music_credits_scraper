@@ -33,6 +33,7 @@ import re
 from src.utils.concordance_paroles import jugeable, paroles_de_reference, recouvrement_bigrammes
 from src.utils.version_descriptors import meme_socle, parse_variant, titres_confondus
 from src.utils.version_heritage import est_instrumental, famille_de
+from src.utils.vote_durees import FRAGILES, HORS_VOTE, famille
 
 #: Familles d'un MÊME enregistrement : le minutage de l'original y vaut.
 MEME_ENREGISTREMENT = frozenset({"edition", "remaster"})
@@ -73,17 +74,6 @@ def _autre_enregistrement(titre: str) -> bool:
 ECART_DUREE_S = 5
 
 
-#: Durées qui ne MESURENT pas l'audio de la fiche : valeur d'avant la
-#: provenance, page SongBPM trouvée par titre.
-_DUREES_SANS_PREUVE = frozenset({"legacy", "songbpm"})
-#: Sources qui lisent le même catalogue : deux d'entre elles ne font qu'UNE
-#: confirmation (ReccoBeats rend la durée Spotify, YTM celle de la vidéo).
-_FAMILLE_DE_DUREE = {
-    "spotify_web": "spotify",
-    "reccobeats": "spotify",
-    "youtube_video": "youtube",
-    "ytmusic": "youtube",
-}
 _HORODATAGE = re.compile(r"\[(\d+):(\d{1,2})(?:[.:]\d+)?\]")
 
 
@@ -97,10 +87,10 @@ def duree_confirmee(track) -> int | None:
         return None
     familles = set()
     for source, valeur in (getattr(track, "durations_observees", None) or {}).items():
-        if source in _DUREES_SANS_PREUVE or not valeur:
+        if source in FRAGILES or source in HORS_VOTE or not valeur:
             continue
         if abs(int(valeur) - duree) <= 3:
-            familles.add(_FAMILLE_DE_DUREE.get(source, source))
+            familles.add(famille(source))
     return duree if len(familles) >= 2 else None
 
 

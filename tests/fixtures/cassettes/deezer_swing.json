@@ -1882,8 +1882,7 @@
    "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333092, \"socle\": null, \"titre\": \"MA FAUTE\"}",
    "{\"album\": 1034637592, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 4168333112, \"socle\": null, \"titre\": \"LA MAISON\"}",
    "{\"album\": 1035457732, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"album_absent\", \"piste\": 4170441802, \"socle\": null, \"titre\": \"LA MAISON\"}",
-   "{\"album\": 1035457872, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"album_absent\", \"piste\": 4170442492, \"socle\": null, \"titre\": \"LES MÊMES PRIÈRES\"}",
-   "{\"album\": 498836831, \"coche\": false, \"fiche\": 686, \"motifs\": [\"lien existant : Deezer 196 s / fiche 61 s (legacy) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 2493901931, \"socle\": null, \"titre\": \"VISION\"}"
+   "{\"album\": 1035457872, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"album_absent\", \"piste\": 4170442492, \"socle\": null, \"titre\": \"LES MÊMES PRIÈRES\"}"
   ],
   "editions_jumelles": [
    "Cercle",

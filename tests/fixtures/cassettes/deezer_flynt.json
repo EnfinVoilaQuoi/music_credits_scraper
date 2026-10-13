@@ -1895,21 +1895,17 @@
  "artiste": "Flynt",
  "attendu": {
   "ecarts": [
-   "{\"album\": 298437, \"coche\": false, \"fiche\": 1226, \"motifs\": [\"lien existant : Deezer 265 s / fiche 159 s (youtube) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 3080190, \"socle\": null, \"titre\": \"J'éclaire ma ville\"}",
-   "{\"album\": 298437, \"coche\": false, \"fiche\": 1248, \"motifs\": [\"lien existant : Deezer 307 s / fiche 292 s (discogs) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 3080194, \"socle\": null, \"titre\": \"La gueule de l'emploi (feat. Sidi Omar)\"}",
+   "{\"album\": 298437, \"coche\": false, \"fiche\": 1248, \"motifs\": [\"lien existant : Deezer 307 s / fiche 292 s (reccobeats) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 3080194, \"socle\": null, \"titre\": \"La gueule de l'emploi (feat. Sidi Omar)\"}",
    "{\"album\": 298437, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 3080189, \"socle\": null, \"titre\": \"1 pour la plume\"}",
    "{\"album\": 512878331, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 2543399721, \"socle\": null, \"titre\": \"1 pour la plume\"}",
-   "{\"album\": 513011301, \"coche\": false, \"fiche\": 1222, \"motifs\": [\"lien existant : Deezer 211 s / fiche 203 s (spotify_web) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 2543916441, \"socle\": null, \"titre\": \"Mon pote\"}",
-   "{\"album\": 6642499, \"coche\": false, \"fiche\": 1222, \"motifs\": [\"lien existant : Deezer 211 s / fiche 203 s (spotify_web) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 67844568, \"socle\": null, \"titre\": \"Mon pote\"}",
    "{\"album\": 6944218, \"coche\": false, \"fiche\": 9720, \"motifs\": [\"même titre, durée différente (Deezer 195 s / base 137 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 70725368, \"socle\": null, \"titre\": \"Choc frontal\"}",
    "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Choc frontal »\"], \"nature\": \"version\", \"piste\": 70725369, \"socle\": 9720, \"titre\": \"Choc Frontal (Instrumental)\"}",
    "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Fidèle à son contexte »\"], \"nature\": \"version\", \"piste\": 70725366, \"socle\": 1237, \"titre\": \"Fidèle à son contexte (Instrumental)\"}",
    "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Fidèle à son contexte »\"], \"nature\": \"version\", \"piste\": 70725367, \"socle\": 1237, \"titre\": \"Fidèle à son contexte (Acapella)\"}",
    "{\"album\": 7013399, \"coche\": false, \"fiche\": 1222, \"motifs\": [\"même titre, durée différente (Deezer 204 s / base 211 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 71419449, \"socle\": null, \"titre\": \"Mon pote\"}",
    "{\"album\": 7013399, \"coche\": false, \"fiche\": 1226, \"motifs\": [\"même titre, durée différente (Deezer 159 s / base 265 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 71419447, \"socle\": null, \"titre\": \"J'éclaire ma ville\"}",
-   "{\"album\": 7013399, \"coche\": false, \"fiche\": 1251, \"motifs\": [\"lien existant : Deezer 196 s / fiche 226 s (discogs) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 71419444, \"socle\": null, \"titre\": \"Comme sur un playground\"}",
+   "{\"album\": 7013399, \"coche\": false, \"fiche\": 1251, \"motifs\": [\"lien existant : Deezer 196 s / fiche 226 s (reccobeats) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 71419444, \"socle\": null, \"titre\": \"Comme sur un playground\"}",
    "{\"album\": 7013399, \"coche\": false, \"fiche\": 1273, \"motifs\": [\"même titre, durée différente (Deezer 198 s / base 262 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 71419451, \"socle\": null, \"titre\": \"Rap Théorie\"}",
-   "{\"album\": 7013399, \"coche\": false, \"fiche\": 9720, \"motifs\": [\"lien existant : Deezer 137 s / fiche 195 s (ytmusic) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 71419442, \"socle\": null, \"titre\": \"Choc frontal\"}",
    "{\"album\": 7013399, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 71419443, \"socle\": null, \"titre\": \"Splifflife (Le peu qu'on s'offre) + Open bar\"}",
    "{\"album\": 7013399, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 71419448, \"socle\": null, \"titre\": \"Crazy + 6G\"}"
   ],

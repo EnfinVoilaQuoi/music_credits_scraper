@@ -53,6 +53,7 @@ from src.utils.title_matching import cle_album, developper_ligatures, names_matc
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
+from src.utils.vote_durees import ISOLEE, MAJORITAIRE, SOUTENUE, voter
 
 #: Écart de durée au-delà duquel deux sources ne décrivent plus le même fichier
 #: (2 s = même fichier ; 5 s = tolérance inter-plateformes, comme la revue des
@@ -185,6 +186,8 @@ def duree_songbpm_dementie(track, _ctx=None):
     « Blues (Live at AK Studios) » → page de « Blues »)."""
     yt, sb = _duree_youtube(track), (track.durations_observees or {}).get("songbpm")
     if yt and sb and abs(yt - sb) > ECART_DUREE_S:
+        if voter(track.durations_observees, yt).nature == ISOLEE:
+            return None  # c'est l'audio YouTube que les catalogues démentent (`duree_isolee`)
         return (
             f"durée SongBPM {sb} s ≠ audio YouTube {yt} s — page d'une autre version ? "
             "(BPM et tonalité SongBPM suspects)",
@@ -252,11 +255,20 @@ def duree_spotify_dementie(track, _ctx=None):
         for src in _SOURCES_PAR_ID_SPOTIFY:
             d = durees.get(src)
             if ref and d and abs(ref - d) > ecart:
-                return (
-                    f"durée de l'ID Spotify ({src}) {d} s ≠ {temoin} {ref} s — "
-                    "autre enregistrement ?",
-                    {temoin: ref, src: d, "spotify_id": track.spotify_id},
-                )
+                vote = voter(durees, d)
+                if vote.nature in (SOUTENUE, MAJORITAIRE):
+                    return None  # le témoin est l'isolé (`duree_isolee`)
+                if vote.nature == ISOLEE:
+                    motif = (
+                        f"durée de l'ID Spotify ({src}) {d} s démentie par "
+                        f"{vote.dementie_par()} — autre enregistrement"
+                    )
+                else:
+                    motif = (
+                        f"durée de l'ID Spotify ({src}) {d} s ≠ {temoin} {ref} s — "
+                        "autre enregistrement ?"
+                    )
+                return motif, {temoin: ref, src: d, "spotify_id": track.spotify_id}
     return None
 
 
@@ -270,9 +282,36 @@ def duree_deezer_dementie(track, _ctx=None):
     for temoin, ecart in _DUREES_TEMOINS:
         ref = durees.get(temoin)
         if temoin != "deezer" and ref and abs(ref - dz) > ecart:
+            vote = voter(durees, dz)
+            if vote.nature in (SOUTENUE, MAJORITAIRE):
+                return None  # le témoin est l'isolé (`duree_isolee`)
+            if vote.nature == ISOLEE:
+                motif = f"durée Deezer {dz} s démentie par {vote.dementie_par()} — autre version"
+            else:
+                motif = f"durée Deezer {dz} s ≠ {temoin} {ref} s — autre version ?"
+            return motif, {temoin: ref, "deezer": dz, "deezer_id": track.deezer_id}
+    return None
+
+
+#: Témoins de durée qu'aucun autre détecteur n'accuse (Spotify et Deezer ont
+#: le leur, qui porte l'action sur leur identifiant).
+_TEMOINS_ISOLABLES = (SOURCE_AUDIO, "ytmusic", "youtube_video", "apple_music")
+
+
+def duree_isolee(track, _ctx=None):
+    """Un témoin de durée que les autres catalogues démentent : la vidéo, la
+    piste YTM ou la fiche Apple est celle d'une autre version (2026-10-13).
+    Diam's « Vice Versa » : Spotify, Deezer et Apple à 240 s, l'audio YouTube
+    à 277 s — avant le vote, c'est l'ID Spotify qu'on accusait."""
+    durees = track.durations_observees or {}
+    for source in _TEMOINS_ISOLABLES:
+        d = durees.get(source)
+        vote = voter(durees, d)
+        if vote and vote.nature == ISOLEE:
             return (
-                f"durée Deezer {dz} s ≠ {temoin} {ref} s — autre version ?",
-                {temoin: ref, "deezer": dz, "deezer_id": track.deezer_id},
+                f"durée {source} {d} s démentie par {vote.dementie_par()} — "
+                "vidéo ou piste d'une autre version ?",
+                {source: d, **vote.contre},
             )
     return None
 
@@ -1226,6 +1265,7 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("duree_songbpm", "Durée SongBPM démentie par YouTube", "⏱️", duree_songbpm_dementie),
     Detecteur("duree_spotify", "Durée de l'ID Spotify démentie", "🎧", duree_spotify_dementie),
     Detecteur("duree_deezer", "Durée de l'ID Deezer démentie", "🎧", duree_deezer_dementie),
+    Detecteur("duree_isolee", "Durée d'un témoin démentie par les catalogues", "⏱️", duree_isolee),
     Detecteur(
         "id_spotify_version", "ID Spotify d'une autre version", "🔀", id_spotify_autre_version
     ),
@@ -1419,6 +1459,9 @@ def _signalement_deezer_resolu(s, par_id: dict, ids_deezer: set) -> bool:
         duree = ((preuves.get("ecart") or {}).get("piste") or {}).get("duration")
         if track is None or duree is None:
             return False
+        piste = preuves.get("piste_deezer")
+        if piste is not None and track.deezer_id != piste:
+            return True  # le lien a été délié ou remplacé depuis (A2H « Blues »)
         return _lien_a_revoir(SimpleNamespace(duration=duree), track) is None
     return False
 
@@ -1447,7 +1490,7 @@ def _cas_des_signalements(signalements, ids_disco: set, tracks=None) -> list[Cas
             s["detecteur"],
             s["track_id"],
             s["morceau"] or "",
-            s["motif"] or "",
+            (s["motif"] or "") + _vote_de_parution(s, par_id),
             s["impact"] or 0,
             s["preuves"] or {},
             s["cle"],
@@ -1455,6 +1498,25 @@ def _cas_des_signalements(signalements, ids_disco: set, tracks=None) -> list[Cas
         for s in signalements
         if vivant(s)
     ]
+
+
+def _vote_de_parution(s, par_id: dict) -> str:
+    """Le vote des catalogues sur une PARUTION Deezer à confirmer, ajouté au
+    motif (2026-10-13) : confirmée par deux catalogues, le rattachement est
+    sûr ; démentie par deux, c'est une autre version."""
+    if s["detecteur"] != "deezer_link_candidate":
+        return ""
+    track = par_id.get(s["track_id"])
+    preuves = s["preuves"] or {}
+    duree = ((preuves.get("ecart") or {}).get("piste") or {}).get("duration")
+    if track is None or not duree:
+        return ""
+    vote = voter({**(track.durations_observees or {}), "deezer": duree}, duree)
+    if vote.nature == SOUTENUE and len(vote.pour) >= 2:
+        return f" — durée confirmée par {', '.join(sorted(vote.pour))} : rattachement sûr"
+    if vote.nature == ISOLEE:
+        return f" — durée Deezer démentie par {vote.dementie_par()} : autre version probable"
+    return ""
 
 
 def analyser(data_manager, artiste) -> Revue:

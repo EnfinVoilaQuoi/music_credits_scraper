@@ -5151,7 +5151,6 @@
  "artiste": "Josman",
  "attendu": {
   "ecarts": [
-   "{\"album\": 133497362, \"coche\": false, \"fiche\": 226, \"motifs\": [\"lien existant : Deezer 195 s / fiche 275 s (legacy) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 887338852, \"socle\": null, \"titre\": \"Argent, Drogue et Sexe\"}",
    "{\"album\": 221376332, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 1331100012, \"socle\": null, \"titre\": \"Matrix\"}",
    "{\"album\": 9503256, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 93553762, \"socle\": null, \"titre\": \"R.A.P. (Rhythm and Poetry)\"}"
   ],

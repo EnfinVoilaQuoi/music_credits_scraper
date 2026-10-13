@@ -577,7 +577,15 @@ def _lien_a_revoir(piste: PisteDeezer, track: Track) -> str | None:
     `durations_observees` (mapper), c'est là qu'on regarde ; à défaut, la
     colonne arbitrée quand sa source est indépendante. `legacy` compte —
     origine inconnue, ça vaut un regard.
+
+    Le VOTE des catalogues tranche ensuite (2026-10-13, `vote_durees`) : un
+    lien que deux catalogues confirment n'est pas mis en doute par une source
+    fragile seule (« 100-8 Zoo » : Discogs 402 s, Deezer, Spotify, Apple et
+    YouTube 274 s), ni par UN catalogue contre tous — c'est alors ce témoin
+    que le panneau accuse (`revue.duree_isolee`).
     """
+    from src.utils.vote_durees import FRAGILES, MAJORITAIRE, SOUTENUE, voter
+
     if piste.duration is None:
         return None
     independantes = {
@@ -585,13 +593,22 @@ def _lien_a_revoir(piste: PisteDeezer, track: Track) -> str | None:
     }
     if not independantes and track.duration and track.duration_source not in (None, "deezer"):
         independantes = {track.duration_source: track.duration}
-    for source, duree in sorted(independantes.items()):
-        if abs(int(piste.duration) - int(duree)) > ECART_DUREE_LIEN_A_REVOIR:
-            return (
-                f"lien existant : Deezer {piste.duration} s / fiche {duree} s "
-                f"({source}) — cocher pour délier"
-            )
-    return None
+    contredisent = [
+        (source, duree)
+        for source, duree in sorted(independantes.items())
+        if abs(int(piste.duration) - int(duree)) > ECART_DUREE_LIEN_A_REVOIR
+    ]
+    if not contredisent:
+        return None
+    vote = voter({**independantes, "deezer": piste.duration}, piste.duration)
+    if vote and vote.nature in (SOUTENUE, MAJORITAIRE):
+        return None
+    # Le motif nomme d'abord une source solide, s'il y en a une.
+    source, duree = min(contredisent, key=lambda sd: sd[0] in FRAGILES)
+    return (
+        f"lien existant : Deezer {piste.duration} s / fiche {duree} s "
+        f"({source}) — cocher pour délier"
+    )
 
 
 def _reste_a_renseigner(piste: PisteDeezer, track: Track) -> str:

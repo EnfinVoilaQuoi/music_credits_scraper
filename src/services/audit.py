@@ -88,6 +88,7 @@ FAMILLES = {
     "id_partage": "même ID Spotify/Deezer/ISRC/Apple sur deux pages Genius",
     "lrc_emprunte": "LRC d'une autre fiche qui le confirme (titres non équivalents)",
     "lrc_version": "version (remix, live…) au LRC exact de son original",
+    "paroles_identiques": "mêmes paroles sur deux fiches aux titres non équivalents",
     "instrumental_lrc": "instrumental (constaté ou titre) avec LRC ou paroles",
     "duree_video": "durée tirée d'une vidéo qui n'est pas le morceau",
     "duree_aberrante": "durée < 25 s ou > 15 min",
@@ -240,6 +241,50 @@ def lrc(par) -> list[Cas]:
                                 )
                             )
                             break
+    return cas
+
+
+_INDICATION = re.compile(
+    r"^(?:couplet|refrain|verse|chorus|intro|outro|hook|pont|bridge|pre-chorus)\b"
+)
+
+
+def _texte_compare(texte: str) -> str:
+    """Les lignes de paroles, ponctuation et indications de structure retirées."""
+    lignes = (re.sub(r"\W+", " ", ligne).strip().lower() for ligne in texte.splitlines())
+    return "\n".join(ligne for ligne in lignes if ligne and not _INDICATION.match(ligne))
+
+
+def paroles_identiques(par) -> list[Cas]:
+    """Le même texte sur deux fiches d'un artiste aux titres NON équivalents
+    (chantier D, 2026-10-13) : le pendant de `lrc_emprunte` pour les paroles
+    — mesuré, 11 paires dont Josman « Fais le vide » / « Tous Les Jours ».
+    Les lignes sœurs (même page Genius) et les versions d'un même socle n'en
+    sont pas."""
+    cas = []
+    for ts in par.values():
+        groupes = collections.defaultdict(list)
+        for t in ts:
+            ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
+            if ref and len(ref) > 200 and jugeable(ref):
+                groupes[_texte_compare(ref)].append(t)
+        for g in groupes.values():
+            for i, a in enumerate(g):
+                for b in g[i + 1 :]:
+                    if a["genius_id"] and a["genius_id"] == b["genius_id"]:
+                        continue
+                    if titres_equivalents(a["title"], b["title"]) or meme_socle(
+                        a["title"], b["title"]
+                    ):
+                        continue
+                    cas.append(
+                        Cas(
+                            "paroles_identiques",
+                            a["artiste"],
+                            [a["id"], b["id"]],
+                            f"{_lib(a)} et {_lib(b)} : mêmes paroles",
+                        )
+                    )
     return cas
 
 
@@ -691,6 +736,7 @@ def auditer(
         audit.cas += doublons_equivalents(par)
         audit.cas += ids_partages(par)
         audit.cas += lrc(par)
+        audit.cas += paroles_identiques(par)
         audit.cas += instrumentaux(pistes)
         audit.cas += durees(c, pistes)
         audit.cas += certifs(pistes)

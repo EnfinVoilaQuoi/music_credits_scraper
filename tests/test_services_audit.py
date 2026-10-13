@@ -194,3 +194,33 @@ def test_un_titre_qui_annonce_un_morceau_court(titre, court):
     from src.services.audit import court_par_nature
 
     assert court_par_nature(titre) is court
+
+
+def test_paroles_identiques_sur_deux_titres_non_equivalents():
+    """Chantier D, 2026-10-13 : le pendant de `lrc_emprunte` pour les paroles."""
+    texte = "\n".join(
+        f"[Couplet {i}]\nligne numéro {i} du texte qui parle de la ville et du temps qui passe"
+        for i in range(12)
+    )
+
+    def fiche(id_, titre, genius_id, paroles=texte):
+        return {
+            "id": id_,
+            "title": titre,
+            "genius_id": genius_id,
+            "lyrics": paroles,
+            "lyrics_source": "genius",
+            "artiste": "Josman",
+        }
+
+    par = {
+        1: [
+            fiche(1, "Fais le vide", 10),
+            fiche(2, "Tous Les Jours", 11),
+            fiche(3, "Tous Les Jours (Remix)", 12),  # version de 2 : pas d'emprunt entre elles
+            fiche(4, "Fais le vide", 10),  # ligne sœur : même page
+        ]
+    }
+    cas = au.paroles_identiques(par)
+    assert {tuple(c.pistes) for c in cas} == {(1, 2), (1, 3), (2, 4), (3, 4)}
+    assert all(c.famille == "paroles_identiques" for c in cas)

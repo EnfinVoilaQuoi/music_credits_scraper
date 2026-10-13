@@ -37,9 +37,11 @@ HORS_VOTE = frozenset({"heritage"})
 #: Écart toléré entre deux catalogues (éditions, encodages).
 TOLERANCE_S = 5
 
-#: Une durée à ±2 s d'une ÉDITION connue de la fiche (autre page Deezer du même
-#: enregistrement, radio edit noté) est expliquée : ni accusée, ni accusatrice.
-TOLERANCE_EDITION_S = 2
+#: Une durée à la tolérance du vote d'une ÉDITION connue de la fiche (autre page
+#: Deezer du même enregistrement, radio edit noté) est expliquée : ni accusée,
+#: ni accusatrice. Même tolérance que l'accord de deux catalogues — 2, 3 ou 5 s
+#: donnaient exactement le même panneau (mesuré le 2026-10-14).
+TOLERANCE_EDITION_S = TOLERANCE_S
 
 SOUTENUE = "soutenue"  # ≥ 2 catalogues pour, aucun catalogue solide contre
 MAJORITAIRE = "majoritaire"  # ≥ 2 pour, UN seul catalogue solide contre

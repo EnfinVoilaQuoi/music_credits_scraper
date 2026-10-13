@@ -209,6 +209,17 @@ class TestMemePrise:
         )
         assert meme_famille(parse_variant("X - Bonus Track"), parse_variant("X (Version)"))
 
+    def test_versions_nommees(self):
+        """Règle revue le 2026-10-13 : deux versions NOMMÉES autrement sont deux
+        enregistrements ; support et montage restent une fiche, le mix d'un DJ non."""
+        v = parse_variant
+        assert not meme_famille(v("Hurricane (Big Sean Version)"), v("Hurricane (Rihanna Version)"))
+        assert not meme_famille(v("Heads Off (Version 2)"), v("Heads Off (Version 3)"))
+        assert not meme_famille(v("Famous (Original Version)"), v("Famous (Video Version)"))
+        assert not meme_famille(v("KICK OUT (Mixed)"), v("KICK OUT (Physical Version)"))
+        assert meme_famille(v("X (Big Sean Version)"), v("X - Big Sean Version"))
+        assert meme_famille(v("X (Physical Version)"), v("X (Video Edit)"))
+
 
 class TestEditionsDeDiffusion:
     """Décision utilisateur 2026-09-24 : original, radio edit, clean, explicit,

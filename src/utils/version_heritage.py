@@ -75,6 +75,9 @@ class Regle:
 #: Familles de rendition (`version_descriptors._FAMILLES_RENDITION`) et remix.
 REGLES: dict[str, Regle] = {
     "edition": Regle(paroles=True, ecriture=True, production=True),
+    # La même prise, autre minutage (edit, extended, mix DJ) : tout, sauf le
+    # LRC (`lrc_garde.MEME_ENREGISTREMENT`).
+    "montage": Regle(paroles=True, ecriture=True, production=True),
     "remaster": Regle(paroles=True, ecriture=True, production=True),
     "chopped": Regle(paroles=True, ecriture=True, production=True),
     "vitesse": Regle(paroles=True, ecriture=True, production=True),
@@ -115,7 +118,7 @@ def est_instrumental(titre: str | None) -> bool:
 
 def famille_de(titre: str) -> str | None:
     """La famille d'héritage d'un titre de version, None si ce n'est pas une version."""
-    from src.utils.version_descriptors import _familles_de_rendition
+    from src.utils.version_descriptors import _familles_de_rendition, nature_d_edition
 
     v = parse_variant(titre)
     if v.kind == Kind.NONE:
@@ -145,11 +148,14 @@ def famille_de(titre: str) -> str | None:
         "chopped",
         "vitesse",
         "remaster",
-        "edition",
     ):
         if nom in familles:
             return nom
-    return "edition"
+    # « Version », « Edit », « Bonus », « Mixed » — ou aucun mot de version :
+    # ce que le descripteur NOMME décide (règle revue le 2026-10-13).
+    if _SANS_VOIX.search(titre):
+        return "instrumental"  # « (Version Instrumentale) », « (Instrumental - BTB Version) »
+    return nature_d_edition(v)
 
 
 @dataclass

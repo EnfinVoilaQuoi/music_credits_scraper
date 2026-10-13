@@ -281,6 +281,22 @@ def porteurs_d_une_autre_version(vid_counts: dict, titres: dict, fiches: dict) -
     return retraits
 
 
+def titre_d_une_autre_fiche(fiche, titre: str | None, fiches) -> bool:
+    """PUR. Le résultat de recherche porte-t-il le titre EXACT d'une AUTRE
+    fiche de l'artiste, et pas celui de `fiche` ? Mesuré le 2026-10-13 : la
+    recherche de Kanye « Champions » a rendu l'audio de « Champion »
+    (Graduation, 27 M de vues) — à une lettre près, la tolérance aux coquilles
+    l'acceptait ; partagée, la vidéo n'était plus comptée par personne."""
+    from src.utils.version_descriptors import titres_equivalents
+
+    if not titre or titres_equivalents(fiche.title, titre):
+        return False
+    return any(
+        autre is not fiche and autre.id != fiche.id and titres_equivalents(autre.title, titre)
+        for autre in fiches
+    )
+
+
 def rattachements_de_recherche_a_retirer(vid_counts: dict, sources: dict) -> list:
     """PUR. `[(track_id, video_id)]` : une vidéo partagée par plusieurs fiches,
     que l'une tient par un rattachement AFFIRMÉ et les autres par la seule
@@ -770,6 +786,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                     and not best.get("is_search_url")
                     and best.get("relevance_score", 0) >= YOUTUBE_CONFIDENCE_THRESHOLD
                     and best.get("video_id")
+                    and not titre_d_une_autre_fiche(t, best.get("title"), db_tracks)
                 ):
                     video_id = best["video_id"]
                     extras.setdefault(t.id, {}).setdefault(

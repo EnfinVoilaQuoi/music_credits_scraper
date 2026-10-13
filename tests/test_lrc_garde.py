@@ -144,6 +144,17 @@ class TestVersions:
             "3500 (Sped Up)",
             "3500 (Acapella)",
             "3500 (Radio Edit)",
+            # Une « Version » NOMMÉE, un autre montage (règle revue le
+            # 2026-10-13, paquet 3) : « FRANCHISE (Promo CD Version) » a une
+            # ligne de plus, « Parking Lot (Mixed) » est mixée par un DJ.
+            "3500 (Promo CD Version)",
+            "3500 (2 Chainz Version)",
+            "3500 (UnCut 9 Min Version)",
+            "3500 (Mixed)",
+            "3500 (Extended)",
+            "3500 (Edit)",
+            "3500 (Twinsmatic Edit)",
+            "3500 (Version 2)",
         ],
     )
     def test_une_autre_prise_ne_garde_pas_le_lrc_de_l_original(self, version):
@@ -153,7 +164,15 @@ class TestVersions:
         assert motif and "original" in motif
 
     @pytest.mark.parametrize(
-        "version", ["3500 (Remastered 2016)", "3500 (Promo CD Version)", "3500 (Bonus Track)"]
+        "version",
+        [
+            "3500 (Remastered 2016)",
+            "3500 (Bonus Track)",
+            "3500 - Bonus",
+            "3500 (Physical Version)",
+            "3500 (CD Version)",
+            "3500 (Version physique)",
+        ],
     )
     def test_le_meme_enregistrement_garde_le_lrc_de_l_original(self, version):
         original = _t("3500", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
@@ -231,6 +250,6 @@ class TestDementiParLaDuree:
     def test_meme_duree_meme_enregistrement(self):
         original = _t("FRANCHISE", tid=1, gid=1, paroles=_PAROLES, lrc=_LRC)
         original.duration = 202
-        promo = _t("FRANCHISE (Promo CD Version)", tid=2, gid=2)
+        promo = _t("FRANCHISE (Physical Version)", tid=2, gid=2)
         promo.duration = 203
         assert GardeLrc([original]).motif(promo, _LRC) is None

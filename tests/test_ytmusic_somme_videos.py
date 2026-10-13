@@ -537,3 +537,24 @@ def test_une_video_partagee_va_a_la_fiche_qu_elle_designe():
         )
         == []
     )
+
+
+class TestRechercheDUneAutreFiche:
+    """Kanye « Champions » : la recherche rendait l'audio de « Champion »
+    (Graduation), une autre fiche de l'artiste (2026-10-13)."""
+
+    def _fiches(self):
+        return [SimpleNamespace(id=1, title="Champions"), SimpleNamespace(id=2, title="Champion")]
+
+    def test_le_titre_exact_d_une_autre_fiche_est_ecarte(self):
+        champions, champion = self._fiches()
+        assert mod.titre_d_une_autre_fiche(champions, "Champion", [champions, champion])
+
+    def test_le_titre_de_la_fiche_reste(self):
+        champions, champion = self._fiches()
+        assert not mod.titre_d_une_autre_fiche(champions, "Champions", [champions, champion])
+        assert not mod.titre_d_une_autre_fiche(champion, "Champion", [champions, champion])
+
+    def test_sans_autre_fiche_la_tolerance_reste(self):
+        champions, _ = self._fiches()
+        assert not mod.titre_d_une_autre_fiche(champions, "Champion", [champions])

@@ -432,6 +432,124 @@ def _familles_de_rendition(v: Variant) -> set[str]:
     return {nom for nom, membres in _FAMILLES_RENDITION.items() if mots & membres}
 
 
+#: Ce qu'une « édition » nomme sans changer d'enregistrement : le SUPPORT ou
+#: la sortie (« Bonus Track », « Physical Version », « CD Version », « Studio
+#: Version » face au live, « Non-Album Version »).
+_MOTS_DU_SUPPORT = frozenset(
+    {
+        "bonus",
+        "track",
+        "physical",
+        "physique",
+        "cd",
+        "digital",
+        "streaming",
+        "album",
+        "non",
+        "explicit",
+        "clean",
+        "dirty",
+        "censored",
+        "uncensored",
+        "main",
+        "lp",
+        "single",
+        "studio",
+        "deluxe",
+    }
+)
+#: La même prise, autre MONTAGE : coupée, rallongée, celle du clip, mixée par
+#: un DJ (« Edit », « Extended », « Version longue », « UnCut 9 Min », « Video
+#: Version », « Version clip », « [Mixed] »).
+_MOTS_DU_MONTAGE = frozenset(
+    {
+        "edit",
+        "edited",
+        "radio",
+        "extended",
+        "long",
+        "longue",
+        "full",
+        "uncut",
+        "min",
+        "video",
+        "visual",
+        "clip",
+        "mv",
+        "music",
+        "ig",
+        "mixed",
+        "outro",
+        "uk",
+        "u",
+        "k",
+    }
+)
+_MOTS_DE_LIAISON = frozenset({"version", "the", "a", "of", "and", "de", "la", "le", "du", "des"})
+#: Une captation nommée par son événement (« Yeezus Tour Version », « Free
+#: Larry Hoover Benefit Concert Version », « Grammy Version »).
+_MOTS_DE_CAPTATION = frozenset(
+    {"tour", "concert", "benefit", "festival", "grammy", "grammys", "bet", "awards"}
+)
+
+
+_GROUPE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
+
+
+def _qualificatif(v: Variant) -> str:
+    """Le qualificatif de version du descripteur : ses groupes entre
+    parenthèses ou crochets qui portent un mot de version, s'il en a — un titre
+    de VIDÉO « Kanye West - The New Workout Plan (Long Version) » a pour
+    descripteur tout ce qui suit « - », titre compris."""
+    d = v.descriptor or ""
+    groupes = [g for g in _GROUPE.findall(d) if _mots_de_rendition_texte(g)]
+    return " ".join(groupes) if groupes else d
+
+
+def _mots_de_rendition_texte(texte: str) -> bool:
+    return any(t in RENDITION_WORDS for t in _tokens(texte))
+
+
+def _noms_d_edition(v: Variant) -> frozenset[str]:
+    """Les mots qui NOMMENT une édition (« 2 Chainz », « Stem Player »)."""
+    return frozenset(
+        m for m in _tokens(_qualificatif(v)) if m not in _MOTS_DE_LIAISON and not m.isdigit()
+    )
+
+
+def nature_d_edition(v: Variant) -> str:
+    """PUR. Ce que désigne VRAIMENT une rendition de la famille « edition »
+    (règle revue le 2026-10-13, paquet 3 : « 2 Chainz Version », « UnCut 9 Min
+    Version », « Promo CD Version », « Parking Lot (Mixed) » passaient pour le
+    même enregistrement que l'original et en recevaient le LRC) :
+
+    - ``edition`` : le même enregistrement, sur un autre support (« Bonus
+      Track » — Booba « DKR », Isha « Dans la tête » —, « Physical Version ») ;
+    - ``montage`` : la même prise, autre minutage (edit, extended, clip, mix DJ) ;
+    - ``remix_named`` : l'edit d'un producteur (« Twinsmatic Edit ») ;
+    - ``performance`` : une captation nommée par son événement ;
+    - ``vitesse`` : « Nightcore Version » ;
+    - ``alternate`` : tout autre nom — une personne (« 2 Chainz Version »), un
+      numéro (« Version 2 »), une langue, un genre, un projet (« Stem Player »,
+      « LP2 »), une date, ou rien d'autre que « Version ».
+    """
+    mots = _tokens(_qualificatif(v))
+    noms = _noms_d_edition(v)
+    if not noms and not any(m.isdigit() for m in mots):
+        return "edition"  # « (Version) » seul ne nomme rien
+    if noms and noms <= _MOTS_DU_SUPPORT:
+        return "edition"
+    if noms and noms <= _MOTS_DU_SUPPORT | _MOTS_DU_MONTAGE:
+        return "montage"
+    if "edit" in mots and "version" not in mots:
+        return "remix_named"
+    if _MOTS_DE_CAPTATION & noms or _LIEU.search(_qualificatif(v)):
+        return "performance"
+    if "nightcore" in noms:
+        return "vitesse"
+    return "alternate"
+
+
 _ANNEE = re.compile(r"\b(?:19|20)\d\d\b")
 _LIEU = re.compile(r"\b(?:at|au|aux|à|from|in|@)\s+\S", re.IGNORECASE)
 _MIX_SEUL = re.compile(r"\bmix\b", re.IGNORECASE)
@@ -456,6 +574,12 @@ def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
     - un MIX n'est pas un remix (Kanye « Paranoid (NEW Mix) » ≠ « (Remix) »,
       « Rough Mix », « Club Mix », « E-Mix ») sauf même remixeur nommé
       (« Tiësto's Birthday Treatment Mix » / « … Remix »).
+    - deux ÉDITIONS de natures différentes (`nature_d_edition` : autre prise,
+      edit de producteur, captation… — support et montage restent une fiche,
+      le mix d'un DJ non), ou deux versions NOMMÉES autrement
+      (Kanye « Hurricane (Big Sean Version) » ≠ « (Sunday Service Choir
+      Version) », « Heads Off (Version 2) » ≠ « (Version 3) ») — règle revue
+      le 2026-10-13, mesurée sur le corpus : 44 paires de fiches basculées.
     """
     da, db = a.descriptor or "", b.descriptor or ""
     if bool(_EXTENDED.search(da)) != bool(_EXTENDED.search(db)):
@@ -484,7 +608,27 @@ def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
         )
         if mix_seul(da) != mix_seul(db) and not meme_remixeur:
             return True
+    if (
+        a.kind == Kind.RENDITION
+        and b.kind == Kind.RENDITION
+        and _familles_de_rendition(a) & _familles_de_rendition(b) == {"edition"}
+    ):
+        # Support et montage restent une même fiche (« Bonus Track » ≈ « Edit »,
+        # décision du 2026-09-24 sur les éditions de diffusion) — sauf le mix
+        # d'un DJ, une autre piste ; c'est la garde LRC qui les sépare.
+        na, nb = nature_d_edition(a), nature_d_edition(b)
+        if na != nb and not {na, nb} <= {"edition", "montage"}:
+            return True
+        if ("mixed" in _mots_de_rendition(a)) != ("mixed" in _mots_de_rendition(b)):
+            return True
+        if na == nb == "alternate" and _mots_nommes(a) != _mots_nommes(b):
+            return True
     return False
+
+
+def _mots_nommes(v: Variant) -> frozenset[str]:
+    """Les mots d'une édition nommée, numéros compris (« Version 2 » ≠ « 3 »)."""
+    return frozenset(m for m in _tokens(_qualificatif(v)) if m not in _MOTS_DE_LIAISON)
 
 
 def meme_prise(a: Variant, b: Variant) -> bool:

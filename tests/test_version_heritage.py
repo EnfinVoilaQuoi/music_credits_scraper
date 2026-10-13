@@ -51,6 +51,47 @@ class TestFamille:
         # « Original Mix » : le même enregistrement, pas une version.
         assert vh.famille_de("Suzy (Original Mix)") is None
 
+    def test_ce_que_l_edition_nomme(self):
+        """Règle revue le 2026-10-13 (paquet 3) : « Version », « Edit »,
+        « Mixed » ne disent pas, seuls, le même enregistrement."""
+        attendu = {
+            # Le même enregistrement, sur un autre support (Booba « DKR »).
+            "Suzy (Bonus Track)": "edition",
+            "Suzy - Bonus": "edition",
+            "Suzy (Physical Version)": "edition",
+            "Suzy (Version physique)": "edition",
+            "Suzy (Studio Version)": "edition",
+            # La même prise, autre minutage.
+            "Suzy (Edit)": "montage",
+            "Suzy (Extended Version)": "montage",
+            "Suzy (Version longue)": "montage",
+            "Suzy (UnCut 9 Min Version)": "montage",
+            "Suzy (Music Video Version)": "montage",
+            "Suzy (Version clip)": "montage",
+            "Suzy (Mixed)": "montage",
+            # L'edit d'un producteur, une captation, un audio accéléré.
+            "Suzy (Twinsmatic Edit)": "remix_named",
+            "Suzy (Yeezus Tour Version)": "performance",
+            "Suzy (Big Day Out in Melbourne Version)": "performance",
+            "Suzy (Nightcore Version)": "vitesse",
+            "Suzy (Version Instrumentale)": "instrumental",
+            "Suzy (Instrumental - BTB Version)": "instrumental",
+            # Tout autre nom : une autre prise.
+            "Suzy (2 Chainz Version)": "alternate",
+            "Suzy (Promo CD Version)": "alternate",
+            "Suzy (Stem Player Version)": "alternate",
+            "Suzy (Version 2)": "alternate",
+            "Suzy (Spanish Version)": "alternate",
+            "Suzy (Version 2013)": "alternate",
+        }
+        assert {t: vh.famille_de(t) for t in attendu} == attendu
+
+    def test_un_montage_herite_tout(self):
+        v = _version("Suzy (Mixed)")
+        h = vh.heriter(v, _socle())
+        assert h.famille == "montage" and h.paroles
+        assert {c.name for c in v.credits} == {"Diam's", "Tefa", "Nk.F"}
+
 
 class TestHeriter:
     def test_live_herite_paroles_et_ecriture_pas_la_production(self):

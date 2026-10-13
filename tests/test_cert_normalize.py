@@ -251,3 +251,27 @@ class TestUneCertifUnLibelle:
     )
     def test_les_multiples_de_dix(self, brut, canon):
         assert riaa_level(brut) == canon
+
+
+class TestReparerEncodage:
+    """2026-10-13 : libellés mal décodés réparés au clean (BPI, BRMA)."""
+
+    @pytest.mark.parametrize(
+        "abime, sain",
+        [
+            ("2 AM PARADISE CAFÃ\x89", "2 AM PARADISE CAFÉ"),
+            ("THE GREATEST LOVE 6 - WITH LOVE FROMâ\x80¦", "THE GREATEST LOVE 6 - WITH LOVE FROM…"),
+            ("The E\x95N\x95D", "The E•N•D"),
+            ("Petite s\x9cur", "Petite sœur"),
+        ],
+    )
+    def test_repare(self, abime, sain):
+        from src.utils.cert_normalize import reparer_encodage
+
+        assert reparer_encodage(abime) == sain
+
+    @pytest.mark.parametrize("sain", ["Beyoncé", "ÂME", "Ça va", "Lââm", "", "HORS SERIE, VOL.1"])
+    def test_un_libelle_sain_reste(self, sain):
+        from src.utils.cert_normalize import reparer_encodage
+
+        assert reparer_encodage(sain) == sain

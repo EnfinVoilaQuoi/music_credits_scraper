@@ -22,7 +22,7 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.ultratop_fetch import preparer_route_cdp
 from src.utils import cert_clean_report, cert_store
-from src.utils.cert_normalize import reperer_fantomes
+from src.utils.cert_normalize import reparer_encodage, reperer_fantomes
 from src.utils.logger import ajouter_journal_fichier, get_logger
 
 # Lancé en direct (python src/utils/update_brma.py) ou via la GUI : sys.path[0]
@@ -797,8 +797,20 @@ class UltratopUpdater:
         reset_cert_matcher()
 
     def _clean_from(self, raw_df, report: dict | None = None):
-        """Dérive le clean depuis un brut : dédup métier + tri (date desc)."""
-        return self._dedup_df(raw_df, report).sort_values(
+        """Dérive le clean depuis un brut : libellés mal décodés réparés (« The
+        END » → « The E•N•D », 2026-10-13), dédup métier + tri (date desc)."""
+        import pandas as pd
+
+        repare = raw_df.copy()
+        for col in ("artist", "title"):
+            repare[col] = repare[col].map(
+                lambda v: reparer_encodage(v) if isinstance(v, str) else v
+            )
+        # Une ligne réparée passe APRÈS les lignes saines : sa copie saine (le
+        # même scrape relu proprement) l'emporte à la dédup, rien d'autre ne bouge.
+        touchee = (repare["artist"] != raw_df["artist"]) | (repare["title"] != raw_df["title"])
+        repare = pd.concat([repare[~touchee], repare[touchee]])
+        return self._dedup_df(repare, report).sort_values(
             ["certification_date", "artist", "title"], ascending=[False, True, True]
         )
 

@@ -229,6 +229,32 @@ def contient_caractere_corrompu(s: str) -> bool:
     return bool(_CORRUPTION_RE.search(s or ""))
 
 
+_MOJIBAKE_UTF8 = re.compile(r"[ÃÂâ][\x80-\xbf]")
+_CONTROLE_C1 = re.compile(r"[\x80-\x9f]")
+
+
+def reparer_encodage(s: str) -> str:
+    """PUR. Répare un libellé mal décodé (2026-10-13), ou le rend tel quel :
+
+    - de l'UTF-8 lu en Latin-1 — BPI « 2 AM PARADISE CAFÃ\\x89 » → « CAFÉ »,
+      « WITH LOVE FROMâ\\x80¦ » → « … » ;
+    - un caractère Windows-1252 resté en contrôle C1 — BRMA « The E\\x95N\\x95D »
+      → « The E•N•D » (ses deux lignes sans niveau n'étaient pas reconnues
+      comme les copies de « The E•N•D », faute du même titre).
+    Un texte sain n'a ni l'un ni l'autre ; une réparation qui échoue rend
+    l'original."""
+    if not s:
+        return s
+    if _MOJIBAKE_UTF8.search(s):
+        try:
+            s = s.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    if _CONTROLE_C1.search(s):
+        s = _CONTROLE_C1.sub(lambda m: m.group(0).encode("latin-1").decode("cp1252", "ignore"), s)
+    return s
+
+
 #: Mots qui ANNONCENT un nom : après eux, une lettre seule est un mot coupé.
 #: « LA MAIN SUR LE C », « Les plus grandes chansons du si », « LA TOUR DE M ».
 #: « a » en est délibérément ABSENT — il ferait de « A A A » (un vrai titre, des

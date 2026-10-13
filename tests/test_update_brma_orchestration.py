@@ -148,9 +148,12 @@ class TestDedupDatabase:
         )
         raw.to_csv(updater.raw_path, index=False, encoding="utf-8-sig")
         report = updater.dedup_database(apply=True)
-        assert report["fantomes_retires"] == 1
+        # Depuis le 2026-10-13 le libellé est RÉPARÉ au clean (`reparer_encodage`) :
+        # la ligne cassée devient le doublon de la saine, et la cassée seule
+        # garde sa certification sous le bon nom.
+        assert report["duplicates_removed"] == 1
         clean = pd.read_csv(updater.database_path, encoding="utf-8-sig")
-        assert sorted(clean["artist"]) == sorted([sain, casse])
+        assert sorted(clean["artist"]) == [sain, sain]
 
 
 class TestEcritureAtomique:

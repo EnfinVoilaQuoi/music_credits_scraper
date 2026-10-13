@@ -42,7 +42,14 @@ from src.observability import repository as usage_repository
 from src.observability.registry import Flow
 from src.scrapers.bpi_scraper import BpiScraper
 from src.utils import cert_clean_report, cert_store
-from src.utils.cert_normalize import FORMAT_JOUR_CLI, bpi_level, bpi_units, jour_cli, lire_jour_cli
+from src.utils.cert_normalize import (
+    FORMAT_JOUR_CLI,
+    bpi_level,
+    bpi_units,
+    jour_cli,
+    lire_jour_cli,
+    reparer_encodage,
+)
 from src.utils.cert_recherche import CODE_ECHEC, Issue, Verdict, conclure
 from src.utils.logger import get_logger
 
@@ -200,6 +207,11 @@ def _clean_from_raw(raw_df: pd.DataFrame, report: dict | None = None) -> pd.Data
             for r in vides.head(8).itertuples()
         ]
     df = df.drop(vides.index)
+
+    # Libellés mal décodés (« CAFÃ » → « CAFÉ ») : réparés au clean, le brut
+    # garde ce que le site a servi (2026-10-13).
+    for col in ("artist", "title"):
+        df[col] = df[col].map(reparer_encodage)
 
     if report is not None:
         report["level_changes"] = _compter_changements(df["certification_level"], bpi_level)

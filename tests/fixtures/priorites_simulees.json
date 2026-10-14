@@ -1,0 +1,33 @@
+{
+ "priorites": {
+  "duration": [
+   "deezer",
+   "ytmusic",
+   "youtube",
+   "apple_music",
+   "songbpm",
+   "discogs",
+   "spotify_web",
+   "youtube_officiel",
+   "youtube_video",
+   "reccobeats"
+  ],
+  "release_date": [
+   "genius",
+   "deezer",
+   "spotify_web"
+  ],
+  "isrc": [
+   "deezer"
+  ]
+ },
+ "simulation": {
+  "date": "2026-10-14",
+  "resultat": {
+   "duration": {
+    "fiches_changees": 0,
+    "exemples": []
+   }
+  }
+ }
+}

@@ -106,6 +106,7 @@ scripts/*
 !scripts/cassette_deezer.py
 !scripts/cassette_kworb.py
 !scripts/invariants_apres_rejeu.py
+!scripts/simuler_priorites.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

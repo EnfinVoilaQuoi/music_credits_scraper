@@ -683,6 +683,11 @@ def meme_famille(a: Variant, b: Variant) -> bool:
     if a.kind != b.kind:
         return False
     if a.kind == Kind.RENDITION:
+        # Le MÊME descripteur des deux côtés est la même version, même hors du
+        # vocabulaire des familles : « Intro (Black Album) » face à lui-même
+        # était refusé comme « autre version » (2026-10-14, Lunatic).
+        if normalize_title(a.descriptor or "") == normalize_title(b.descriptor or "") != "":
+            return True
         return bool(_familles_de_rendition(a) & _familles_de_rendition(b))
     return True
 

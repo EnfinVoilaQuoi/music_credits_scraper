@@ -479,9 +479,9 @@ class SpotifyIDScraper:
         entity = cls._parse_embed_entity(html) or {}
         out = []
         for a in entity.get("artists") or []:
-            uri = a.get("uri") or ""
-            if uri.startswith("spotify:artist:"):
-                out.append({"name": (a.get("name") or "").strip(), "id": uri.rsplit(":", 1)[-1]})
+            sid = cls._id_artiste(a.get("uri"))
+            if sid:
+                out.append({"name": (a.get("name") or "").strip(), "id": sid})
         return out
 
     @classmethod
@@ -497,11 +497,23 @@ class SpotifyIDScraper:
         if not entity or not entity.get("name"):
             return None
         ms = entity.get("duration")
+        credites = [a for a in entity.get("artists") or [] if isinstance(a, dict)]
         return {
             "name": (entity.get("name") or "").strip(),
-            "artists": [(a.get("name") or "").strip() for a in entity.get("artists") or []],
+            "artists": [(a.get("name") or "").strip() for a in credites],
+            # ALIGNÉ sur `artists` (None quand l'URI manque) : le NOM ne
+            # distingue pas deux homonymes, l'URI si (2026-10-14, Lunatic).
+            "artist_ids": [cls._id_artiste(a.get("uri")) for a in credites],
             "duration": round(ms / 1000) if isinstance(ms, (int, float)) and ms > 0 else None,
         }
+
+    @staticmethod
+    def _id_artiste(uri) -> str | None:
+        """`spotify:artist:XYZ` → `XYZ` ; toute autre forme → None."""
+        uri = str(uri or "")
+        if not uri.startswith("spotify:artist:"):
+            return None
+        return uri.rsplit(":", 1)[-1] or None
 
     @staticmethod
     def _titre_de_page(identite: dict | None) -> str | None:

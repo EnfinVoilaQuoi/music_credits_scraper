@@ -816,6 +816,27 @@ class ArtistRepository:
             logger.error(f"Erreur get_artist_relations({artist_id}): {e}")
             return []
 
+    def ids_spotify_des_alias(self, artist_id: int) -> set[str]:
+        """IDs Spotify des ALIAS confirmés de l'artiste qui sont en base (gate
+        d'identité Spotify, `ids_artiste_attendus`). Les formations n'en sont
+        pas : leur URI ne prouve pas qu'un morceau est à l'artiste."""
+        ids_alias = [
+            r.related_artist_id
+            for r in self.get_artist_relations(artist_id)
+            if r.kind == "alias" and r.related_artist_id
+        ]
+        if not ids_alias:
+            return set()
+        try:
+            with self.engine.connect() as conn:
+                lignes = conn.execute(
+                    select(artists.c.spotify_id).where(artists.c.id.in_(ids_alias))
+                ).scalars()
+                return {s for s in lignes if s}
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur ids_spotify_des_alias({artist_id}): {e}")
+            return set()
+
     def nature_connue_pour(self, related_name: str) -> str | None:
         """Nature déjà choisie pour CETTE formation, quel qu'en soit le membre.
 

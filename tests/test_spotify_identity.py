@@ -411,3 +411,95 @@ class TestTitreGeneriqueEtDisque:
 
         identite = {**self._identite(), "album": "Premier mandat"}
         assert valider_identite(self._fiche(), "X" * 22, lambda sid: identite)
+
+
+class TestHomonymes:
+    """Le NOM ne distingue pas deux homonymes, l'URI si (2026-10-14).
+    *Intro (Black Album)* de Lunatic portait l'ID d'un autre « Lunatic »
+    (spotify:artist:2X3LaSoc110Uv1m0PtzLPh) — mesuré : 1 sur 27 couples."""
+
+    VRAI, AUTRE = "0wNxmIGMOHdCqfFWlDOLV0", "2X3LaSoc110Uv1m0PtzLPh"
+
+    def _lunatic(self, spotify_id=VRAI, **kw):
+        t = _track(titre="Intro (Black Album)", artiste="Lunatic", **kw)
+        t.artist.spotify_id = spotify_id
+        return t
+
+    def _id(self, artistes, ids, nom="Intro (Black Album)"):
+        return {"name": nom, "artists": artistes, "artist_ids": ids, "duration": None}
+
+    def test_l_homonyme_est_refuse_quand_l_id_est_connu(self):
+        ok, motif = identite_concorde(self._lunatic(), self._id(["Lunatic"], [self.AUTRE]))
+        assert ok is False
+        assert "homonyme" in motif and self.AUTRE in motif
+
+    def test_la_bonne_uri_passe(self):
+        ok, _ = identite_concorde(self._lunatic(), self._id(["Lunatic"], [self.VRAI]))
+        assert ok is True
+
+    def test_sans_id_connu_le_nom_suffit_encore(self):
+        """Rien ne distingue deux homonymes sans référence : c'est le panneau
+        qui les montre (`profils_homonymes`), le garde ne refuse pas."""
+        ok, _ = identite_concorde(self._lunatic(None), self._id(["Lunatic"], [self.AUTRE]))
+        assert ok is True
+
+    def test_identite_sans_uri_ne_refuse_rien(self):
+        """Un lecteur ancien (ou un double) sans `artist_ids` : règle inactive."""
+        ok, _ = identite_concorde(self._lunatic(), _identite("Intro (Black Album)", ["Lunatic"]))
+        assert ok is True
+
+    def test_l_uri_connue_l_emporte_sur_un_nom_change(self):
+        """Artiste renommé chez Spotify : son URI le désigne mieux que le nom."""
+        ok, _ = identite_concorde(self._lunatic(), self._id(["LUNATIC (FR)!"], [self.VRAI]))
+        assert ok is True
+
+    def test_l_alias_confirme_compte(self, monkeypatch):
+        from src.utils import spotify_identity as si
+
+        t = self._lunatic()
+        t.artist.id = 7
+        monkeypatch.setattr(si, "fournisseur_ids_artiste", lambda aid: {"ALIAS"})
+        assert si.ids_artiste_attendus(t) == {self.VRAI, "ALIAS"}
+        ok, _ = identite_concorde(t, self._id(["Lunatic"], ["ALIAS"]))
+        assert ok is True
+
+    def test_featuring_le_principal_credite_suffit(self):
+        """Sur une ligne d'invité, c'est le principal qui juge : un homonyme de
+        l'invité chez Spotify ne fait pas de l'ID un faux."""
+        t = self._lunatic(is_featuring=True, primary_artist_name="Booba")
+        ok, _ = identite_concorde(t, self._id(["Booba", "Lunatic"], ["B00BA", self.AUTRE]))
+        assert ok is True
+
+    def test_featuring_sans_principal_l_homonyme_refuse(self):
+        t = self._lunatic(is_featuring=True, primary_artist_name="Booba")
+        ok, motif = identite_concorde(t, self._id(["Lunatic"], [self.AUTRE]))
+        assert ok is False and "homonyme" in motif
+
+    def test_profils_homonymes_ne_regarde_que_les_id_inconnus(self):
+        from src.utils.spotify_identity import profils_homonymes
+
+        lectures = [
+            ("Lunatic", None, "Le Crime paie", self._id(["Lunatic"], [self.VRAI])),
+            ("Lunatic", None, "Civilisé", self._id(["Lunatic"], [self.VRAI])),
+            ("Lunatic", None, "Intro (Black Album)", self._id(["Lunatic"], [self.AUTRE])),
+            ("Swing", "SW", "Mouton noir", self._id(["Swing"], ["X"])),
+            ("Swing", "SW", "Nulle part", self._id(["Swing"], ["Y"])),
+            ("Isha", None, "Idole", self._id(["Isha", "Limsa d'Aulnay"], ["I", "L"])),
+        ]
+        assert profils_homonymes(lectures) == [
+            {
+                "artiste": "Lunatic",
+                "uris": {
+                    self.VRAI: ["Le Crime paie", "Civilisé"],
+                    self.AUTRE: ["Intro (Black Album)"],
+                },
+            }
+        ]
+
+
+def test_le_meme_descripteur_inconnu_est_la_meme_version():
+    """« Intro (Black Album) » des deux côtés : un descripteur hors du
+    vocabulaire des familles ne fait pas d'un titre identique une autre version."""
+    t = _track(titre="Intro (Black Album)", artiste="Lunatic")
+    assert variante_etrangere(t, _identite("Intro (Black Album)", ["Lunatic"])) is False
+    assert variante_etrangere(t, _identite("Intro", ["Lunatic"])) is True

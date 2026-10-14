@@ -53,7 +53,7 @@ class TestLeBalayagePartage:
 
     def test_un_identifiant_juste_ne_sort_pas_du_balayage(self):
         rapport = verifier_lignes([_ligne()], lambda sid: _embed(), pause=0)
-        assert rapport == {"verifies": 1, "illisibles": 0, "ecarts": []}
+        assert rapport == {"verifies": 1, "illisibles": 0, "ecarts": [], "homonymes": []}
 
     def test_un_artiste_etranger_est_marque_comme_tel(self):
         rapport = verifier_lignes(
@@ -83,7 +83,7 @@ class TestLeBalayagePartage:
         """Même règle qu'`absent` côté observabilité : ne pas savoir lire n'est
         pas un verdict de faute. Elle est comptée à part, jamais en écart."""
         rapport = verifier_lignes([_ligne()], lambda sid: None, pause=0)
-        assert rapport == {"verifies": 0, "illisibles": 1, "ecarts": []}
+        assert rapport == {"verifies": 0, "illisibles": 1, "ecarts": [], "homonymes": []}
 
     def test_l_avancement_est_rapporte_ligne_par_ligne(self):
         """La fenêtre a besoin d'une barre : sans ce rappel, un balayage de 330

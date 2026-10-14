@@ -39,12 +39,13 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
     params = {"artiste": artiste} if artiste else {}
     requete = f"""
         SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
-               a.name AS artiste, t.spotify_id AS sid, 1 AS principal
+               a.name AS artiste, t.spotify_id AS sid, 1 AS principal,
+               a.id AS artist_id, a.spotify_id AS artiste_spotify_id
           FROM tracks t JOIN artists a ON a.id = t.artist_id
          WHERE t.spotify_id IS NOT NULL AND t.spotify_id != '' {filtre}
          UNION
         SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
-               a.name, s.spotify_id, 0
+               a.name, s.spotify_id, 0, a.id, a.spotify_id
           FROM track_spotify_ids s
           JOIN tracks t ON t.id = s.track_id
           JOIN artists a ON a.id = t.artist_id
@@ -75,7 +76,14 @@ def track_de_la_ligne(ligne: dict) -> Track:
     `is_featuring` et `primary_artist_name` comptent autant que le titre —
     c'est sur l'artiste PRINCIPAL qu'un featuring se juge.
     """
-    track = Track(title=ligne["title"], artist=Artist(name=ligne["artiste"]))
+    # L'ID de l'ARTISTE compte aussi (2026-10-14) : c'est lui qui distingue
+    # deux homonymes (`artiste_homonyme`). `.get` : des lignes de test n'en ont pas.
+    artiste = Artist(
+        id=ligne.get("artist_id"),
+        name=ligne["artiste"],
+        spotify_id=ligne.get("artiste_spotify_id"),
+    )
+    track = Track(title=ligne["title"], artist=artiste)
     track.id = ligne["id"]
     track.duration = ligne["duration"]
     track.is_featuring = bool(ligne["is_featuring"])
@@ -157,14 +165,17 @@ def verifier_lignes(
             requêtes — jamais au milieu d'une.
 
     Returns:
-        `{"verifies", "illisibles", "ecarts": [...]}`. Une page illisible
-        n'accuse personne : elle est comptée à part, comme `absent`.
+        `{"verifies", "illisibles", "ecarts": [...], "homonymes": [...]}`. Une
+        page illisible n'accuse personne : elle est comptée à part, comme
+        `absent`.
     """
     from src.utils.spotify_identity import (
         TOLERANCE_DUREE,
         artiste_etranger,
+        artiste_homonyme,
         identite_concorde,
         lire_identite_http,
+        profils_homonymes,
         variante_etrangere,
     )
 
@@ -172,6 +183,7 @@ def verifier_lignes(
     tolerance = TOLERANCE_DUREE if tolerance is None else tolerance
 
     ecarts: list[dict] = []
+    lectures: list[tuple] = []
     illisibles = 0
     faits = 0
     for ligne in lignes:
@@ -183,6 +195,9 @@ def verifier_lignes(
             illisibles += 1
         else:
             track = track_de_la_ligne(ligne)
+            lectures.append(
+                (ligne["artiste"], ligne.get("artiste_spotify_id"), ligne["title"], identite)
+            )
             ok, motif = identite_concorde(track, identite, tolerance=tolerance)
             if not ok:
                 ecarts.append(
@@ -194,6 +209,7 @@ def verifier_lignes(
                         "principal": bool(ligne["principal"]),
                         "motif": motif,
                         "artiste_etranger": artiste_etranger(track, identite),
+                        "artiste_homonyme": bool(artiste_homonyme(track, identite)),
                         "variante_etrangere": variante_etrangere(track, identite),
                         "spotify": identite,
                     }
@@ -203,4 +219,10 @@ def verifier_lignes(
         if pause:
             time.sleep(pause)
 
-    return {"verifies": faits - illisibles, "illisibles": illisibles, "ecarts": ecarts}
+    return {
+        "verifies": faits - illisibles,
+        "illisibles": illisibles,
+        "ecarts": ecarts,
+        # Artistes à l'ID inconnu crédités sous plusieurs URI (`profils_homonymes`).
+        "homonymes": profils_homonymes(lectures),
+    }

@@ -1358,6 +1358,7 @@ DETECTEURS_DE_RUN: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("deezer_link_candidate", "Deezer : parution à confirmer", "❓", None),
     DetecteurArtiste("deezer_link_review", "Deezer : lien à revoir", "🔓", None),
     DetecteurArtiste("spotify_audit", "Spotify : identifiant démenti", "🔍", None),
+    DetecteurArtiste("spotify_homonymes", "Spotify : homonymes de l'artiste", "👤", None),
     DetecteurArtiste("discogs_contredit", "Discogs : MusicBrainz contredit", "💽", None),
 )
 CODES_KWORB = tuple(d.code for d in DETECTEURS_DE_RUN if d.code.startswith("kworb_"))
@@ -1374,7 +1375,11 @@ def enregistrer_audit_spotify(data_manager, artiste, ecarts, *, retires=()) -> i
     for e in ecarts:
         if (e["track_id"], e["spotify_id"]) in enleves:
             continue
-        marque = "🚨 " if e["artiste_etranger"] else ("🔀 " if e.get("variante_etrangere") else "")
+        marque = (
+            "🚨 "
+            if e["artiste_etranger"] or e.get("artiste_homonyme")
+            else ("🔀 " if e.get("variante_etrangere") else "")
+        )
         track = par_id.get(e["track_id"])
         preuves = {"spotify_id": e["spotify_id"], "spotify_sert": e["spotify"]["name"]}
         motif = f"{marque}{e['motif']} — Spotify sert « {e['spotify']['name']} »"
@@ -1395,6 +1400,33 @@ def enregistrer_audit_spotify(data_manager, artiste, ecarts, *, retires=()) -> i
                 cas_de_run("spotify_audit", track, e["titre"], motif, preuves, impact(track))
             )
     return data_manager.remplacer_signalements(artiste.id, "spotify_audit", cas)
+
+
+def enregistrer_homonymes_spotify(data_manager, artiste, homonymes) -> int:
+    """Les profils Spotify HOMONYMES vus par un audit complet (`profils_homonymes`)
+    : l'ID Spotify de l'artiste n'est pas connu, Spotify crédite son nom sous
+    plusieurs URI. À trancher : poser le bon ID de l'artiste — le garde
+    d'identité refusera alors les morceaux de l'autre (`artiste_homonyme`)."""
+    cas = []
+    for h in homonymes:
+        if h["artiste"] != artiste.name:
+            continue
+        detail = " ; ".join(
+            f"spotify:artist:{uri} ({len(titres)} : {', '.join(titres[:3])}"
+            + ("…" if len(titres) > 3 else "")
+            + ")"
+            for uri, titres in h["uris"].items()
+        )
+        cas.append(
+            cas_de_run(
+                "spotify_homonymes",
+                None,
+                h["artiste"],
+                f"{len(h['uris'])} profils Spotify au nom « {h['artiste']} » — {detail}",
+                {"uris": sorted(h["uris"])},
+            )
+        )
+    return data_manager.remplacer_signalements(artiste.id, "spotify_homonymes", cas)
 
 
 def cas_de_run(detecteur: str, track, morceau: str, motif: str, preuves, impact=0) -> Cas:

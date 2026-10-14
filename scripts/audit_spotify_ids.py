@@ -75,12 +75,19 @@ def main() -> int:
     print(f"Vérifiés : {rapport['verifies']}   ·   illisibles : {illisibles}")
     print(f"Écarts : {len(ecarts)}   ·   dont ARTISTE ÉTRANGER : {len(etrangers)}\n")
     for e in ecarts:
-        marque = "🚨" if e["artiste_etranger"] else "  "
+        marque = "🚨" if e["artiste_etranger"] or e.get("artiste_homonyme") else "  "
         artistes = ", ".join(e["spotify"]["artists"])
         print(f"{marque} #{e['track_id']:<6} {e['artiste']} — « {e['titre']} »")
         print(f"         id {e['spotify_id']}" + ("" if e["principal"] else "  (édition)"))
         print(f"         Spotify sert : « {e['spotify']['name']} » — {artistes}")
         print(f"         → {e['motif']}\n")
+
+    for h in rapport["homonymes"]:
+        # ID d'artiste inconnu : seul le nombre de profils au même nom alerte.
+        print(f"👤 {h['artiste']} — {len(h['uris'])} profils Spotify à ce nom :")
+        for uri, titres in h["uris"].items():
+            print(f"         spotify:artist:{uri}  ({len(titres)}) {', '.join(titres[:5])}")
+        print()
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:

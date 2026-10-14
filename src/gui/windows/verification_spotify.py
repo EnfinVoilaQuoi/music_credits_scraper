@@ -22,7 +22,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from src.concurrency.lifecycle import start_worker, stop_requested
-from src.services.revue import enregistrer_audit_spotify
+from src.services.revue import enregistrer_audit_spotify, enregistrer_homonymes_spotify
 from src.utils.logger import get_logger
 from src.utils.spotify_audit import (
     lignes_a_verifier,
@@ -123,6 +123,9 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
         artiste = self.app.current_artist
         if not stop_requested() and artiste is not None and artiste.name == self.artiste:
             enregistrer_audit_spotify(self.app.data_manager, artiste, self.ecarts)
+            enregistrer_homonymes_spotify(
+                self.app.data_manager, artiste, rapport.get("homonymes") or []
+            )
         etrangers = sum(1 for e in self.ecarts if e["artiste_etranger"])
         variantes = sum(1 for e in self.ecarts if e.get("variante_etrangere"))
         self.statut.configure(

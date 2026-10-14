@@ -44,7 +44,12 @@ class TestOracleEmbed:
 
     def test_identite_lue_sur_lembed(self):
         identite = SpotifyIDScraper._identite_depuis_embed(_EMBED)
-        assert identite == {"name": "13 Organisé", "artists": ["SCH", "Jul"], "duration": 1471}
+        assert identite == {
+            "name": "13 Organisé",
+            "artists": ["SCH", "Jul"],
+            "artist_ids": ["AAA", "BBB"],
+            "duration": 1471,
+        }
 
     def test_la_duree_compte_autant_que_le_titre(self):
         """Un titre s'écrit de dix façons ; une durée est objective. C'est elle

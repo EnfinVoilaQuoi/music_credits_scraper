@@ -59,6 +59,98 @@ fournisseur_titres = None
 #: `artist_id -> [(track_id, titre)]`. Même contrat que `fournisseur_titres`.
 fournisseur_propres = None
 
+#: IDs Spotify d'ARTISTE de ses ALIAS confirmés : `artist_id -> set[str]`.
+#: Même contrat que `fournisseur_titres` ; l'ID de l'artiste lui-même vient de
+#: la fiche (`track.artist.spotify_id`). Les formations n'en sont PAS : Lunatic
+#: n'est pas Booba, son URI ne prouve pas qu'un morceau est à Booba.
+fournisseur_ids_artiste = None
+
+
+def ids_artiste_attendus(track) -> frozenset[str]:
+    """Les URI Spotify (IDs) sous lesquels l'artiste de la fiche peut être
+    crédité : le sien, et ceux de ses alias confirmés. Vide ⇒ inconnu."""
+    artiste = track.artist
+    ids = {getattr(artiste, "spotify_id", None)}
+    artist_id = getattr(artiste, "id", None)
+    if fournisseur_ids_artiste is not None and artist_id:
+        try:
+            ids |= set(fournisseur_ids_artiste(artist_id) or ())
+        except Exception:  # noqa: BLE001 — garde-fou : un fournisseur en panne ne refuse rien
+            logger.exception("Fournisseur d'IDs d'artiste en échec")
+    return frozenset(i for i in ids if i)
+
+
+def _credites(identite: dict | None) -> list[tuple[str, str | None]]:
+    """`[(nom, id)]` des artistes crédités ; l'id est None quand l'identité ne
+    porte pas d'URI (lecteur ancien, double de test)."""
+    noms = (identite or {}).get("artists") or []
+    ids = list((identite or {}).get("artist_ids") or [])
+    ids += [None] * (len(noms) - len(ids))
+    return [(n, i) for n, i in zip(noms, ids, strict=False) if n]
+
+
+def uri_attendue_creditee(track, identite: dict | None) -> bool:
+    """Spotify crédite l'artiste par son URI CONNUE — preuve plus forte que le
+    nom, qui peut avoir changé chez Spotify (renommage) ou s'écrire autrement."""
+    connus = ids_artiste_attendus(track)
+    return bool(connus) and any(i in connus for _, i in _credites(identite))
+
+
+def artiste_homonyme(track, identite: dict | None) -> str | None:
+    """PUR (hors fournisseur). Spotify crédite un artiste au NOM de celui de la
+    fiche, mais sous une AUTRE URI que la sienne → motif, sinon None.
+
+    Le garde d'identité compare par NOM (`names_match_as_words`) : un homonyme
+    passe. Mesuré le 2026-09-26 : *Intro (Black Album)* de Lunatic portait l'ID
+    d'un autre « Lunatic » (spotify:artist:2X3LaSoc110Uv1m0PtzLPh) — 1 ID sur
+    27 couples Lunatic. L'embed expose l'URI de CHAQUE artiste crédité.
+
+    Ne juge que si l'ID de l'artiste est CONNU (sinon rien ne distingue deux
+    homonymes : c'est le panneau qui les montre). Sur une ligne d'INVITÉ, le
+    principal crédité par son nom suffit — son ID n'est pas connu, et c'est
+    sur lui qu'un featuring se juge (`noms_attendus`)."""
+    connus = ids_artiste_attendus(track)
+    credites = _credites(identite)
+    if not connus or any(i in connus for _, i in credites):
+        return None
+    artiste = track.artist
+    nom = artiste.name if hasattr(artiste, "name") else str(artiste or "")
+    homonymes = [(n, i) for n, i in credites if i and names_match_as_words(nom, n)]
+    if not homonymes:
+        return None
+    autres = [n for n in noms_attendus(track) if not names_match_as_words(n, nom)]
+    if any(names_match_as_words(p, n) for p in autres for n, _ in credites):
+        return None
+    n, i = homonymes[0]
+    return (
+        f"homonyme : Spotify crédite « {n} » (spotify:artist:{i}), "
+        f"pas l'artiste de la fiche (spotify:artist:{', '.join(sorted(connus))})"
+    )
+
+
+def profils_homonymes(lectures) -> list[dict]:
+    """PUR. Les artistes à l'ID Spotify INCONNU que Spotify crédite sous
+    PLUSIEURS URI à leur nom — l'homonyme que `artiste_homonyme` ne peut pas
+    juger faute d'ID de référence, montré au panneau « À trancher ».
+
+    `lectures` : `[(nom, spotify_id_artiste, titre, identite)]`, une par ID lu.
+    Rend `[{"artiste", "uris": {uri: [titres]}}]`, l'URI la plus créditée en
+    tête : c'est souvent le vrai profil, et l'autre un homonyme (Lunatic,
+    2026-09-26 : 26 couples sur un profil, 1 sur l'autre)."""
+    par_nom: dict[str, dict[str, list[str]]] = {}
+    for nom, sid_artiste, titre, identite in lectures:
+        if sid_artiste or not nom:
+            continue
+        uris = par_nom.setdefault(nom, {})
+        for n, i in _credites(identite):
+            if i and names_match_as_words(nom, n):
+                uris.setdefault(i, []).append(titre)
+    return [
+        {"artiste": nom, "uris": dict(sorted(uris.items(), key=lambda kv: -len(kv[1])))}
+        for nom, uris in par_nom.items()
+        if len(uris) >= 2
+    ]
+
 
 def fiche_du_titre_spotify(track, identite: dict | None) -> str | None:
     """Le titre d'une AUTRE fiche de l'artiste que l'ID désigne, ou None.
@@ -152,6 +244,9 @@ def identite_concorde(
     1. **Artiste** — au moins un nom attendu doit apparaître, par MOTS ENTIERS
        (`names_match_as_words`). Jamais par sous-chaîne nue : « IAM » ⊂
        « Williams », « SCH » ⊂ « ScHoolboy Q » (JOURNAL 2026-09-04).
+       Quand l'ID Spotify de l'artiste est CONNU, l'URI tranche (2026-10-14) :
+       créditée, elle suffit ; un crédité au même NOM sous une autre URI est
+       un homonyme, refusé (`artiste_homonyme`).
     2. **Durée** — au-delà de la tolérance, c'est un autre enregistrement. C'est
        le signal OBJECTIF, et le seul qui attrape certains cas : Flynt « Rap
        théorie » avait le bon titre, le bon artiste, et 64 secondes d'écart.
@@ -186,11 +281,15 @@ def identite_concorde(
     if (
         artistes
         and attendus
+        and not uri_attendue_creditee(track, identite)
         and not any(names_match_as_words(n, a) for n in attendus for a in artistes)
     ):
         return False, (
             f"artiste : Spotify crédite {', '.join(artistes)}, attendu {' ou '.join(attendus)}"
         )
+    homonyme = artiste_homonyme(track, identite)
+    if homonyme:
+        return False, homonyme
 
     titre_spotify = identite.get("name") or ""
     if not titres_tranches and variante_etrangere(track, identite):
@@ -243,7 +342,7 @@ def artiste_etranger(track, identite: dict | None) -> bool:
         return False
     artistes = [a for a in identite.get("artists") or [] if a]
     attendus = noms_attendus(track)
-    if not artistes or not attendus:
+    if not artistes or not attendus or uri_attendue_creditee(track, identite):
         return False
     return not any(names_match_as_words(n, a) for n in attendus for a in artistes)
 

@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from src.models import Artist, Track
 from src.utils.logger import etape_de_flux, get_logger
+from src.utils.track_mapper import _clean_duration
 
 logger = get_logger(__name__)
 
@@ -65,7 +66,30 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
         if connue is None or ligne["principal"] > connue["principal"]:
             par_cle[cle] = ligne
     uniques = list(par_cle.values())
-    return uniques[:limite] if limite else uniques
+    uniques = uniques[:limite] if limite else uniques
+    # Les durées OBSERVÉES, par source (2026-10-14) : le gate ne laisse
+    # corroborer un titre différent que par une durée qui ne doit rien à l'ID
+    # (`spotify_identity.duree_temoin`). Sans elles, l'audit prendrait chaque
+    # colonne pour un témoin indépendant et jugerait plus large que le gate.
+    ids = sorted({ligne["id"] for ligne in uniques})
+    durees: dict[int, dict[str, int]] = {}
+    with engine.connect() as conn:
+        for i in range(0, len(ids), 500):
+            lot = ids[i : i + 500]
+            marques = ", ".join(f":t{n}" for n in range(len(lot)))
+            for r in conn.execute(
+                text(
+                    "SELECT track_id, source, value FROM observations "
+                    f"WHERE field = 'duration' AND track_id IN ({marques})"
+                ),
+                {f"t{n}": tid for n, tid in enumerate(lot)},
+            ):
+                d = _clean_duration(r[2])
+                if d:
+                    durees.setdefault(int(r[0]), {})[r[1]] = d
+    for ligne in uniques:
+        ligne["durations_observees"] = durees.get(ligne["id"], {})
+    return uniques
 
 
 def track_de_la_ligne(ligne: dict) -> Track:
@@ -88,6 +112,7 @@ def track_de_la_ligne(ligne: dict) -> Track:
     track.duration = ligne["duration"]
     track.is_featuring = bool(ligne["is_featuring"])
     track.primary_artist_name = ligne["primary_artist_name"]
+    track.durations_observees = dict(ligne.get("durations_observees") or {})
     return track
 
 

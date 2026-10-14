@@ -20,6 +20,7 @@ from src.utils.version_descriptors import (
     titre_sans_edition,
     titres_equivalents,
 )
+from src.utils.version_heritage import famille_de
 
 CAS = [
     # titre, kind, socle, remixeur
@@ -399,3 +400,50 @@ def test_un_numero_de_partie_n_est_pas_un_qualificatif_de_plus():
     assert qualificatifs_incompatibles(
         v("Ma France à Moi (Version Yann Tiersen; Live 2006)"), v("Ma France à Moi - Live 2006")
     )
+
+
+class TestVocabulaireDu20261014:
+    """Trois trous trouvés en rejouant les faux probables du gate Spotify
+    (CORRECTIFS, relecture du 2026-10-11), mesurés sur le corpus de paires
+    réelles : 12 paires basculent (toutes une démo, un snippet, un live, un
+    instrumental ou une prise numérotée d'un remix) + les reprises."""
+
+    def test_freemix_est_un_remix_nomme(self):
+        v = parse_variant("Know no Better (Afrojack Freemix)")
+        assert (v.kind, v.remixer) == (Kind.REMIX_NAMED, "Afrojack")
+        assert not meme_famille(v, parse_variant("Know No Better"))
+
+    @pytest.mark.parametrize(
+        ("version", "remix"),
+        [
+            ("Tiimmy Turner (Remix) (Demo)", "Tiimmy Turner - Remix"),
+            ("Because of You (Remix) [Snippet]", "Because of You (Remix)"),
+            ("Hold On (Remix Instrumental)", "Hold On (Remix)"),
+            ("Black Skinhead (Remix) [V1]", "Black Skinhead (Remix)"),
+            ("Apprentissage (Remix Légendaire Live)", "Apprentissage (Remix)"),
+        ],
+    )
+    def test_la_prise_d_un_remix_n_est_pas_le_remix(self, version, remix):
+        assert not meme_famille(parse_variant(version), parse_variant(remix))
+
+    def test_original_remix_reste_le_remix(self):
+        assert meme_famille(
+            parse_variant("In Common (Original Remix)"), parse_variant("In Common (Remix)")
+        )
+
+    def test_edition_d_un_remix_reste_le_remix(self):
+        assert meme_famille(
+            parse_variant("Big Shot (Remix) [Mixed]"), parse_variant("Big Shot (Remix)")
+        )
+
+    def test_une_reprise_est_une_autre_prise_du_meme_morceau(self):
+        cover = "Paradise (Jeremih Cover)"
+        assert not titres_equivalents(cover, "Paradise")
+        assert meme_socle(cover, "Paradise")
+        assert famille_de(cover) == "performance"
+
+    def test_freestyle_reste_un_titre(self):
+        """Écarté après mesure : « Freestyle » NOMME le morceau bien plus
+        souvent qu'il ne décrit une version (« Freestyle CKO », « Bonnie &
+        Clyde Freestyle ») — 170 appariements de vidéos auraient sauté."""
+        assert parse_variant("Hurricane (Car Freestyle)").kind == Kind.NONE

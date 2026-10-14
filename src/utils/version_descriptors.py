@@ -120,6 +120,9 @@ RENDITION_WORDS = frozenset(
         "firstedition",
         "firstpressing",
         "colors",  # « Loup noir - A COLORS SHOW » : la session live d'un morceau
+        # 2026-10-14 — une REPRISE : Kanye « Paradise (Jeremih Cover) »
+        # portait l'ID de « Paradise ». Autre voix, autre production.
+        "cover",
     }
 )
 
@@ -141,7 +144,9 @@ _NUMERO_DE_VERSION = re.compile(r"^v\d{1,2}$")
 
 #: Un retravail par quelqu'un. Le mot se lit en FIN de descripteur, le remixeur
 #: étant ce qui le précède.
-REMIX_WORDS = ("remix", "rmx", "dub", "mix", "bootleg", "rework", "flip", "refix")
+#: « Freemix » (2026-10-14) : un couplet posé sur le remix d'un autre — Travis
+#: Scott « Know No Better (Afrojack Freemix) » passait pour l'original.
+REMIX_WORDS = ("remix", "rmx", "dub", "mix", "bootleg", "rework", "flip", "refix", "freemix")
 
 #: Mots qui précèdent « Remix » sans nommer personne (« Club Remix », « Radio
 #: Mix », « 2021 Remix Extended ») : un remix ainsi qualifié reste NU.
@@ -387,6 +392,7 @@ _FAMILLES_RENDITION = {
     ),
     "acoustique": frozenset({"acoustic", "acoustique", "unplugged", "stripped", "piano"}),
     "solo": frozenset({"solo"}),
+    "reprise": frozenset({"cover"}),
     # Le beat seul et la voix seule sont deux enregistrements DIFFÉRENTS
     # (2026-09-27 : ils partageaient une famille « sans voix », si bien qu'une
     # a cappella héritait du BPM et d'un constat « instrumental »).
@@ -570,6 +576,15 @@ def _nombre_de_qualificatifs(descripteur: str) -> int:
     )
 
 
+def _prises(v: Variant) -> set[str]:
+    """Les familles de PRISE d'un descripteur (démo, live, instrumental…),
+    hors mentions d'édition et de remaster. « Original Remix » est le remix
+    lui-même : « original » n'y nomme pas une autre prise."""
+    mots = _mots_de_rendition(v) - {"original"}
+    familles = {nom for nom, membres in _FAMILLES_RENDITION.items() if mots & membres}
+    return familles - {"edition", "remaster"}
+
+
 def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
     """PUR. Deux descripteurs d'une même famille qui désignent pourtant deux
     enregistrements — décisions utilisateur du 2026-10-12, chacune mesurée
@@ -620,6 +635,11 @@ def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
             a.remixer and b.remixer and normalize_title(a.remixer) == normalize_title(b.remixer)
         )
         if mix_seul(da) != mix_seul(db) and not meme_remixeur:
+            return True
+        # La DÉMO, le live ou l'instrumental d'un remix n'est pas le remix
+        # (2026-10-14) : Kanye « Tiimmy Turner (Remix) (Demo) » portait l'ID de
+        # « Tiimmy Turner - Remix ». Les mentions d'édition ne comptent pas.
+        if _prises(a) != _prises(b):
             return True
     if (
         a.kind == Kind.RENDITION

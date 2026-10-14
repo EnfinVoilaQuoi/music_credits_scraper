@@ -130,7 +130,7 @@ def famille_de(titre: str) -> str | None:
     familles = _familles_de_rendition(v)
     # Live, acoustique et solo sont des prises distinctes entre elles, mais
     # héritent de la même façon : une autre prise du même texte.
-    if familles & {"live", "acoustique", "solo"}:
+    if familles & {"live", "acoustique", "solo", "reprise"}:
         familles.add("performance")
     # Une prise (live/acoustique) l'emporte sur une mention d'édition (« Live
     # Version ») : c'est elle qui décide si la production est la même.

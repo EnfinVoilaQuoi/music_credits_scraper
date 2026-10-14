@@ -206,3 +206,23 @@ def test_la_fiche_piste_deezer_porte_sa_place():
 def test_un_hit_de_recherche_n_invente_pas_de_place():
     data = DeezerAPI.extract_enrichment_data(None, {"id": 1, "track_position": 0})
     assert data["deezer_track_position"] is None and data["deezer_disk_number"] is None
+
+
+def test_le_script_de_mesure_tourne_sur_une_base(data_manager, capsys):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("mp", "scripts/mesurer_positions.py")
+    mp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mp)
+    artist, a = _fiche(data_manager, "RECO30221")
+    b = Track(title="RECO 30221", artist=artist)
+    b.id = data_manager.save_track(b)
+    for t in (a, b):
+        data_manager.record_release_observations(t.id, [_obs("deezer", 7, 1)])
+    liens = mp._liens(data_manager, "A2H")
+    mp.densite(liens)
+    mp.places_partagees(liens)
+    mp.panneau(data_manager, "A2H")
+    sortie = capsys.readouterr().out
+    assert "dont à source égale et comparable (preuve d'appoint) : 1" in sortie
+    assert "avec une place en appoint : 1" in sortie

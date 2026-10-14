@@ -22,9 +22,16 @@ Usage :
     python scripts/audit_spotify_ids.py                      # toute la base
     python scripts/audit_spotify_ids.py --artiste SCH
     python scripts/audit_spotify_ids.py --json ecarts.json   # pour la réparation
+    python scripts/audit_spotify_ids.py --hors-ligne         # rejoue le brut, sans réseau
+
+`--hors-ligne` rejoue les pages embed GARDÉES (`data/brut/brut.db`, chantier E) :
+une règle changée (l'URI d'artiste des homonymes, 2026-10-14) se mesure sur
+toute la base sans une requête. Un ID dont l'embed n'a jamais été gardé est
+compté « illisible ».
 """
 
 import argparse
+import contextlib
 import json
 import sys
 
@@ -50,6 +57,11 @@ def main() -> int:
     )
     parser.add_argument("--pause", type=float, default=0.2, help="Pause entre deux requêtes")
     parser.add_argument("--json", help="Écrit les écarts dans ce fichier (pour la réparation)")
+    parser.add_argument(
+        "--hors-ligne",
+        action="store_true",
+        help="Rejoue les pages embed gardées (brut) au lieu d'interroger Spotify",
+    )
     args = parser.parse_args()
 
     dm = DataManager()
@@ -64,16 +76,26 @@ def main() -> int:
     # identifiants Spotify » l'emprunte aussi, et deux copies d'un verdict
     # divergent. Une page illisible n'accuse personne — elle est comptée à
     # part, même raisonnement qu'`absent` côté observabilité.
-    rapport = verifier_lignes(
-        lignes, tolerance=args.tolerance, pause=args.pause, progression=avancement
-    )
+    from src.persistence import brut
+
+    with brut.rejeu() if args.hors_ligne else contextlib.nullcontext():
+        rapport = verifier_lignes(
+            lignes,
+            tolerance=args.tolerance,
+            pause=0 if args.hors_ligne else args.pause,
+            progression=avancement,
+        )
     ecarts = rapport["ecarts"]
     illisibles = rapport["illisibles"]
 
     etrangers = [e for e in ecarts if e["artiste_etranger"]]
+    homonymes = [e for e in ecarts if e.get("artiste_homonyme")]
     print(f"\n{'─' * 78}")
     print(f"Vérifiés : {rapport['verifies']}   ·   illisibles : {illisibles}")
-    print(f"Écarts : {len(ecarts)}   ·   dont ARTISTE ÉTRANGER : {len(etrangers)}\n")
+    print(
+        f"Écarts : {len(ecarts)}   ·   dont ARTISTE ÉTRANGER : {len(etrangers)}"
+        f"   ·   dont HOMONYME : {len(homonymes)}\n"
+    )
     for e in ecarts:
         marque = "🚨" if e["artiste_etranger"] or e.get("artiste_homonyme") else "  "
         artistes = ", ".join(e["spotify"]["artists"])

@@ -510,9 +510,9 @@ class SpotifyIDScraper:
             # deux pistes qui la partagent sont sur la même parution.
             "pochette": cls._pochette(entity),
             "release_date": cls._date_de_sortie(entity),
-            "explicit": entity.get("isExplicit")
-            if isinstance(entity.get("isExplicit"), bool)
-            else None,
+            "explicit": (
+                entity.get("isExplicit") if isinstance(entity.get("isExplicit"), bool) else None
+            ),
         }
 
     _POCHETTE_RE = re.compile(r"/image/ab67616d[0-9a-f]{8}([0-9a-f]{16,})")

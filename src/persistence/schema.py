@@ -286,6 +286,9 @@ releases = Table(
     # (e54) Code-barres UPC/EAN : désigne l'ÉDITION chez toutes les sources
     # (Deezer `upc`, Discogs et MusicBrainz `barcode`) — clé inter-sources.
     Column("upc", Text),
+    # (e56) Dernière recherche RÉPONDUE de l'album Apple par le code-barres
+    # (trouvé ou non) : refaite seulement à expiration (`constat_perime`).
+    Column("apple_checked_at", TIMESTAMP),
     UniqueConstraint("artist_id", "identity_key"),
     sqlite_autoincrement=True,
 )

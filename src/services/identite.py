@@ -107,6 +107,8 @@ class BilanIdentite(Bilan):
     #: 3c : ID Apple Music proposés par Genius, vérifiés / démentis par iTunes.
     apple_ids: int = 0
     apple_dementis: int = 0
+    #: 3c code-barres : albums Apple rattachés aux parutions, ID proposés.
+    apple_parutions: object = None  # apple_parutions.BilanApple
     #: 3d : ID Spotify tirés de l'ISRC (ReccoBeats), gate d'identité passé.
     isrc_spotify: int = 0
     types_albums: int = 0
@@ -359,6 +361,23 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
                 panne("Deezer par morceau", b.motif)
             # Les hits d'album du provider sont TRANSITOIRES : gardés pour 2b.
             hits_albums = {t.id: t._deezer_album_id for t in tracks if t._deezer_album_id}
+        _recharger(runtime, artist)
+
+    # 3c (code-barres, 2026-10-15) — l'album Apple de chaque parution Deezer
+    # lue au 2a, par son UPC ; la piste à la même place PROPOSE son ID, que la
+    # vérification 3c ci-dessous juge dans le même run.
+    albums_deezer = getattr(getattr(bilan.catalogue, "ecarts", None), "albums", None) or []
+    if options.apple and albums_deezer and not arret("Apple Music (code-barres)"):
+        from src.services.apple_parutions import rattacher_parutions_apple
+
+        hooks.progress(0, 1, "Albums par code-barres", "Apple Music")
+        try:
+            bilan.apple_parutions = rattacher_parutions_apple(
+                dm, artist, albums_deezer, force=options.force, should_stop=hooks.should_stop
+            )
+        except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
+            logger.exception("Identité (Apple par code-barres) : échec")
+            panne("Apple Music (code-barres)", str(e))
         _recharger(runtime, artist)
 
     # 3c — Apple Music (lot B6) : les ID que Genius PROPOSE, vérifiés par

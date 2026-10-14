@@ -3308,6 +3308,44 @@ class TrackRepository:
             logger.error(f"Erreur fill_track_identities (track_id={track_id}): {e}")
             return {}
 
+    def etat_parution_apple(self, release_id: int) -> tuple[str | None, Any]:
+        """`(collectionId Apple rattaché ou None, date de la dernière recherche
+        par code-barres ou None)` d'une parution (e56)."""
+        with self.engine.connect() as conn:
+            collection = conn.execute(
+                text(
+                    "SELECT external_id FROM release_identifiers "
+                    "WHERE release_id = :r AND source = 'apple_music' LIMIT 1"
+                ),
+                {"r": release_id},
+            ).scalar()
+            vu = conn.execute(
+                text("SELECT apple_checked_at FROM releases WHERE id = :r"), {"r": release_id}
+            ).scalar()
+        return (str(collection) if collection is not None else None), vu
+
+    def noter_parution_apple(
+        self, release_id: int, artist_id: int, collection_id: str | int | None
+    ) -> None:
+        """Une recherche Apple par code-barres a RÉPONDU : datée ; l'album
+        trouvé devient un identifiant de la parution (les fiches iTunes de ses
+        pistes la rejoignent alors par `_release_par_identifiant`)."""
+        now = datetime.now()
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE releases SET apple_checked_at = :now WHERE id = :r"),
+                {"now": now, "r": release_id},
+            )
+            if collection_id is not None:
+                conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO release_identifiers "
+                        "(release_id, artist_id, source, external_id, created_at) "
+                        "VALUES (:r, :a, 'apple_music', :ext, :now)"
+                    ),
+                    {"r": release_id, "a": artist_id, "ext": str(collection_id), "now": now},
+                )
+
     def get_release_id_for_deezer_album(self, artist_id: int, deezer_album_id: int) -> int | None:
         try:
             with self.engine.connect() as conn:

@@ -25,7 +25,7 @@ from src.utils.version_heritage import famille_de
 CAS = [
     # titre, kind, socle, remixeur
     ("Le cœur des filles - Unplugged", Kind.RENDITION, "Le cœur des filles", None),
-    ("DKR - Bonus Track", Kind.RENDITION, "DKR", None),
+    ("DKR - Bonus Track", Kind.NONE, "DKR", None),  # édition de diffusion (2026-10-15)
     ("Dolce Camara - Snight B Remix", Kind.REMIX_NAMED, "Dolce Camara", "Snight B"),
     ("Dolce Camara - Dee Mad x Akalex Remix", Kind.REMIX_NAMED, "Dolce Camara", "Dee Mad x Akalex"),
     ("Dolce Camara - Solo", Kind.RENDITION, "Dolce Camara", None),
@@ -151,7 +151,7 @@ class TestMemeFamille:
         )
 
     def test_renditions_par_mot_commun(self):
-        assert meme_famille(parse_variant("X - Bonus Track"), parse_variant("X (Edit)"))
+        assert meme_famille(parse_variant("X - Physical Version"), parse_variant("X (Edit)"))
         assert meme_famille(
             parse_variant("Suzy - Live 2006"), parse_variant("Suzy (Live au Zénith)")
         )
@@ -208,7 +208,7 @@ class TestMemePrise:
         assert not meme_famille(
             parse_variant("X - Chopped & $crewed"), parse_variant("X (Video Edit)")
         )
-        assert meme_famille(parse_variant("X - Bonus Track"), parse_variant("X (Version)"))
+        assert meme_famille(parse_variant("X - Physical Version"), parse_variant("X (Version)"))
 
     def test_versions_nommees(self):
         """Règle revue le 2026-10-13 : deux versions NOMMÉES autrement sont deux
@@ -452,13 +452,15 @@ class TestVocabulaireDu20261014:
 class TestGraphiesDesPlateformes:
     """2026-10-14 : Deezer et Apple, même place d'un même code-barres, 2 520
     pistes — 99,9 % le même morceau. Parmi les 28 titres écrits autrement,
-    deux écarts que `titres_equivalents` refusait à tort. (« (Bonus Track) »
-    face au titre nu reste une VERSION qui hérite de tout — décision du
-    2026-09-24 : en faire une édition de diffusion est une autre décision.)"""
+    trois écarts que `titres_equivalents` refusait à tort, dont « (Bonus
+    Track) » face au titre nu (même place ; décision utilisateur 2026-10-15)."""
 
     @pytest.mark.parametrize(
         ("a", "b"),
         [
+            ("Enfant du hall (Bonus Track)", "Enfant du hall"),
+            ("convaincu (Bonus)", "convaincu"),
+            ("DKR", "DKR - Bonus Track"),
             ("Bouge de là (Part. 1)", "Bouge de là, Pt. 1"),
             ("Solo Dolo Part II (Explicit Version)", "Solo Dolo, Pt. II (feat. Kendrick Lamar)"),
             ("Fucked Up 3", "F****d Up 3"),

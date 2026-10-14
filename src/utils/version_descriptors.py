@@ -195,13 +195,19 @@ DIFFUSION_FORTS = frozenset(
         "remaster",
         "remastered",
         "remast",  # abréviation du SNEP (« JE DANSE LE MIA REMAST 2016 »)
+        # « (Bonus Track) » : le même enregistrement rangé en fin de disque
+        # (décision utilisateur 2026-10-15). Mesuré le 2026-10-14 : Deezer et
+        # Apple le placent comme le titre nu (PLK « Enfant du hall (Bonus
+        # Track) » / « Enfant du hall », même place du même UPC) ; le corpus
+        # de paires en montrait 4 paires de fiches doublons.
+        "bonus",
         "mono",
         "stereo",
         "censored",
         "uncensored",
     }
 )
-_DIFFUSION_COMPAGNONS = frozenset({"version", "edit", "mix", "the"})
+_DIFFUSION_COMPAGNONS = frozenset({"version", "edit", "mix", "the", "track"})
 
 _VOCABULAIRE = RENDITION_WORDS | frozenset(REMIX_WORDS) | DIFFUSION_FORTS
 

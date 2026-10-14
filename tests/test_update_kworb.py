@@ -1123,14 +1123,12 @@ class TestIdsPartages:
 
 class TestRenditions:
     def test_bonus_track_rattache_au_socle(self):
-        """« DKR - Bonus Track » (108 M) : rendition de « DKR », rattachée
+        """« DKR - Live » (108 M) : rendition de « DKR », rattachée
         automatiquement — hors colonne, hors total."""
-        res, dm = _run(
-            [_track(1, "DKR", spotify_id="SP1")], [_entry("DKR - Bonus Track", 108, 1, "SPB")]
-        )
+        res, dm = _run([_track(1, "DKR", spotify_id="SP1")], [_entry("DKR - Live", 108, 1, "SPB")])
         assert dm.streams_writes == []
-        assert dm.variant_writes == [(1, "SPB", 108, 1, "DKR - Bonus Track")]
-        assert res["renditions_rattachees"] == [("DKR - Bonus Track", "DKR", 108)]
+        assert dm.variant_writes == [(1, "SPB", 108, 1, "DKR - Live")]
+        assert res["renditions_rattachees"] == [("DKR - Live", "DKR", 108)]
         assert res["unmatched"] == 0
 
     def test_un_id_connu_comme_rendition_va_sur_la_variante(self):
@@ -1139,11 +1137,22 @@ class TestRenditions:
             TrackSpotifyId(spotify_id="SP1", source="genius_media"),
             TrackSpotifyId(spotify_id="SPB", source="kworb", kind="rendition"),
         ]
-        res, dm = _run(
-            [t], [_entry("DKR", 1000, 10, "SP1"), _entry("DKR - Bonus Track", 108, 1, "SPB")]
-        )
+        res, dm = _run([t], [_entry("DKR", 1000, 10, "SP1"), _entry("DKR - Live", 108, 1, "SPB")])
         assert dm.streams_writes == [(1, 1000, 10, datetime(2026, 9, 1))]
-        assert dm.variant_writes == [(1, "SPB", 108, 1, "DKR - Bonus Track")]
+        assert dm.variant_writes == [(1, "SPB", 108, 1, "DKR - Live")]
+
+    def test_bonus_track_est_le_morceau_ses_streams_comptent(self):
+        """Décision utilisateur 2026-10-15 : « DKR - Bonus Track » est DKR (même
+        enregistrement rangé en fin de disque) — ses streams s'ajoutent au
+        total, comme ceux d'un « Radio Edit ». Avant : rendition hors total
+        (Booba « E.L.E.P.H.A.N.T - Bonus Track », 41 M, sur la cassette)."""
+        res, dm = _run(
+            [_track(1, "DKR", spotify_id="SP1")],
+            [_entry("DKR", 1000, 10, "SP1"), _entry("DKR - Bonus Track", 108, 1, "SPB")],
+        )
+        assert dm.variant_writes == []
+        assert dm.streams_writes == [(1, 1108, 11, datetime(2026, 9, 1))]
+        assert res["renditions_rattachees"] == []
 
     def test_une_variante_devenue_morceau_reprend_son_id(self):
         """La rendition a depuis sa propre ligne en base : l'ID est à elle."""
@@ -1151,8 +1160,8 @@ class TestRenditions:
         parent.spotify_id_entries = [
             TrackSpotifyId(spotify_id="SPB", source="kworb", kind="rendition")
         ]
-        propre = _track(2, "DKR (Bonus Track)")
-        res, dm = _run([parent, propre], [_entry("DKR - Bonus Track", 108, 1, "SPB")])
+        propre = _track(2, "DKR (Live)")
+        res, dm = _run([parent, propre], [_entry("DKR - Live", 108, 1, "SPB")])
         assert dm.variant_writes == []
         assert dm.streams_writes == [(2, 108, 1, datetime(2026, 9, 1))]
 

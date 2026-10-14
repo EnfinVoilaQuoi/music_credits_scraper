@@ -240,14 +240,12 @@ class TestCocherParDefaut:
     def test_version_cochee_si_kworb_la_connait(self):
         socle = _track("DKR")
         socle.spotify_id_entries = [
-            TrackSpotifyId(
-                spotify_id="SPB", kind="rendition", label="DKR - Bonus Track", streams=108
-            )
+            TrackSpotifyId(spotify_id="SPB", kind="rendition", label="DKR - Live", streams=108)
         ]
         e = ed.Ecart(
             "version",
             _album(1, "Ultra", []),
-            _piste(1, "DKR (Bonus Track)", "DKR", "(Bonus Track)"),
+            _piste(1, "DKR (Live)", "DKR", "(Live)"),
             socle=socle,
         )
         ed.cocher_par_defaut([e], [socle])
@@ -512,11 +510,9 @@ class TestCreerLignes:
         socle = Track(title="DKR", artist=artist)
         socle.spotify_id = "0QLjm2PNqKRJfWsxDPa9Ra"
         data_manager.save_track(socle)
-        data_manager.record_variant_streams(
-            socle.id, "SPBONUS", 108, 3, None, label="DKR - Bonus Track"
-        )
+        data_manager.record_variant_streams(socle.id, "SPBONUS", 108, 3, None, label="DKR - Live")
         (socle,) = data_manager.get_artist_tracks(artist.id)
-        piste = _piste(80, "DKR (Bonus Track)", "DKR", "(Bonus Track)")
+        piste = _piste(80, "DKR (Live)", "DKR", "(Live)")
         e = ed.Ecart("version", _album(8, "Ultra (Bonus)", [piste]), piste, socle=socle)
         ed.cocher_par_defaut([e], [socle])
         assert e.coche and e.kworb_spotify_id == "SPBONUS"
@@ -524,7 +520,7 @@ class TestCreerLignes:
         ed.creer_lignes(data_manager, artist, [e])
 
         lignes = {t.title: t for t in data_manager.get_artist_tracks(artist.id)}
-        fiche = lignes["DKR (Bonus Track)"]
+        fiche = lignes["DKR (Live)"]
         assert fiche.streams.spotify_streams == 108 and fiche.spotify_id == "SPBONUS"
         (var,) = [x for x in lignes["DKR"].spotify_id_entries if x.est_rendition]
         assert var.variant_track_id == fiche.id

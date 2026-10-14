@@ -27,7 +27,10 @@ def _version(titre):
 class TestFamille:
     def test_familles(self):
         assert vh.famille_de("Suzy - Live 2006") == "performance"
-        assert vh.famille_de("Suzy (Bonus Track)") == "edition"
+        # « (Bonus Track) » est le titre nu (décision utilisateur 2026-10-15) :
+        # même fiche, pas une version — rien à hériter.
+        assert vh.famille_de("Suzy (Bonus Track)") is None
+        assert vh.famille_de("Suzy (Physical Version)") == "edition"
         # Édition de DIFFUSION (2026-09-24) : pas une version, une édition de
         # la même fiche — rien à hériter.
         assert vh.famille_de("Suzy (Version Radio)") is None
@@ -55,9 +58,8 @@ class TestFamille:
         """Règle revue le 2026-10-13 (paquet 3) : « Version », « Edit »,
         « Mixed » ne disent pas, seuls, le même enregistrement."""
         attendu = {
-            # Le même enregistrement, sur un autre support (Booba « DKR »).
-            "Suzy (Bonus Track)": "edition",
-            "Suzy - Bonus": "edition",
+            # Le même enregistrement, sur un autre support. (« Bonus Track »
+            # n'est plus une version du tout : édition de diffusion, 2026-10-15.)
             "Suzy (Physical Version)": "edition",
             "Suzy (Version physique)": "edition",
             "Suzy (Studio Version)": "edition",
@@ -105,7 +107,7 @@ class TestHeriter:
         assert v.lyrics.synced is None  # jamais la synchro
 
     def test_radio_edit_herite_tout_sauf_la_video(self):
-        v = _version("Suzy (Bonus Track)")
+        v = _version("Suzy (Physical Version)")
         vh.heriter(v, _socle())
         assert {c.role for c in v.credits} == {
             CreditRole.WRITER,

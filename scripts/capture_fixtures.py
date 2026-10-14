@@ -191,6 +191,15 @@ CAPTURES: list[dict] = [
         "method": "spotify_web",
     },
     {
+        # Page ALBUM virtualisée (2026-10-14) : OrelSan *Civilisation Édition
+        # Ultime*, 25 pistes annoncées, 23 rendues après déroulement, aucun
+        # numéro de disque — d'où `spotify_web` hors des places comparables.
+        "name": "spotify_web_album",
+        "path": "spotify_web/album_incomplet.html",
+        "url": "https://open.spotify.com/intl-fr/album/41zFwISc8IsYEATo4qi1mU",
+        "method": "spotify_web",
+    },
+    {
         "name": "spotify_web_artist",
         "path": "spotify_web/artist.html",
         "url": f"https://open.spotify.com/intl-fr/artist/{_SPOTIFY_WEB_ARTIST_ID}",

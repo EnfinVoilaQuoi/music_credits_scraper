@@ -1,0 +1,8 @@
+{
+  "name": "spotify_web_album",
+  "url": "https://open.spotify.com/intl-fr/album/41zFwISc8IsYEATo4qi1mU",
+  "method": "spotify_web",
+  "captured_at": "2026-10-14T04:40:00",
+  "size_bytes": 538218,
+  "note": "rendue par Chromium nu (conteneur cloud), même déroulement que _EXPAND_JS : 23 pistes rendues sur 25 annoncées"
+}

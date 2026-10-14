@@ -225,3 +225,30 @@ def test_une_page_non_rendue_ne_donne_pas_d_identite():
 )
 def test_date_en_toutes_lettres(texte, attendu):
     assert parse.parse_date_fr(texte) == attendu
+
+
+# ── Page ALBUM : virtualisée, sans disque (2026-10-14) ───────────────────────
+
+
+@pytest.fixture(scope="module")
+def page_album() -> str:
+    return _fixture("album_incomplet.html")
+
+
+def test_page_album_incomplete_le_dit(page_album):
+    """OrelSan *Civilisation Édition Ultime* : 25 pistes annoncées, 23 rendues
+    APRÈS déroulement — la liste seule mentirait sur le disque, `announced`
+    permet à l'appelant de le savoir."""
+    pistes = parse.parse_album_tracks(page_album)
+    assert parse.parse_album_title(page_album) == "Civilisation Édition Ultime"
+    assert parse.parse_album_track_count(page_album) == 25
+    assert len(pistes) == 23
+
+
+def test_page_album_ne_dit_pas_le_disque(page_album):
+    """L'ordre seulement : « Shonen » est la 11ᵉ ligne, mais la piste 1 du
+    disque 2 chez Deezer (et du disque 1 sur le CD Discogs) — d'où
+    `spotify_web` hors des places comparables (`positions_disque`)."""
+    titres = [t for _, t in parse.parse_album_tracks(page_album)]
+    assert titres[0].startswith("CP_001") and titres[10] == "Shonen"
+    assert "Disque 2" not in page_album and "Disc 2" not in page_album

@@ -3346,6 +3346,45 @@ class TrackRepository:
                     {"r": release_id, "a": artist_id, "ext": str(collection_id), "now": now},
                 )
 
+    def etat_parution_spotify(self, release_id: int) -> tuple[str | None, Any]:
+        """`(ID d'album Spotify de la parution ou None, date de la dernière
+        recherche MusicBrainz ou None)` (e57). L'album Spotify est un
+        identifiant `spotify_web`, la source des parutions Spotify."""
+        with self.engine.connect() as conn:
+            album = conn.execute(
+                text(
+                    "SELECT external_id FROM release_identifiers "
+                    "WHERE release_id = :r AND source = 'spotify_web' LIMIT 1"
+                ),
+                {"r": release_id},
+            ).scalar()
+            vu = conn.execute(
+                text("SELECT mb_checked_at FROM releases WHERE id = :r"), {"r": release_id}
+            ).scalar()
+        return (str(album) if album is not None else None), vu
+
+    def noter_parution_musicbrainz(
+        self, release_id: int, artist_id: int, spotify_album_id: str | None
+    ) -> None:
+        """Une recherche MusicBrainz par code-barres a RÉPONDU : datée ; l'album
+        Spotify retenu (garde : lien Deezer = notre album) devient un
+        identifiant `spotify_web` de la parution."""
+        now = datetime.now()
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE releases SET mb_checked_at = :now WHERE id = :r"),
+                {"now": now, "r": release_id},
+            )
+            if spotify_album_id:
+                conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO release_identifiers "
+                        "(release_id, artist_id, source, external_id, created_at) "
+                        "VALUES (:r, :a, 'spotify_web', :ext, :now)"
+                    ),
+                    {"r": release_id, "a": artist_id, "ext": str(spotify_album_id), "now": now},
+                )
+
     def get_release_id_for_deezer_album(self, artist_id: int, deezer_album_id: int) -> int | None:
         try:
             with self.engine.connect() as conn:

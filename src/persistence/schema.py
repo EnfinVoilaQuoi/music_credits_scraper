@@ -289,6 +289,9 @@ releases = Table(
     # (e56) Dernière recherche RÉPONDUE de l'album Apple par le code-barres
     # (trouvé ou non) : refaite seulement à expiration (`constat_perime`).
     Column("apple_checked_at", TIMESTAMP),
+    # (e57) Dernière recherche RÉPONDUE de la parution MusicBrainz par le
+    # code-barres (album Spotify de l'édition) — refaite à expiration.
+    Column("mb_checked_at", TIMESTAMP),
     UniqueConstraint("artist_id", "identity_key"),
     sqlite_autoincrement=True,
 )

@@ -269,3 +269,31 @@ def lire_identite_page(track_id: str, scraper: "SpotifyWebScraper | None" = None
     finally:
         if own:
             scraper.close()
+
+
+def lire_albums_page(
+    album_ids, scraper: "SpotifyWebScraper | None" = None
+) -> dict[str, dict | None]:
+    """Pont SYNC : la composition de plusieurs pages ALBUM, en UNE session
+    navigateur (`afetch_album`). `{album_id: composition ou None}` — None pour
+    une page non rendue (le verdict est dans l'observabilité)."""
+    from src.concurrency import async_loop
+
+    ids = list(dict.fromkeys(i for i in album_ids if i))
+    if not ids:
+        return {}
+    own = scraper is None
+    scraper = scraper or SpotifyWebScraper(headless=True)
+
+    async def _pages():
+        out = {}
+        async with scraper.session() as sess:
+            for album_id in ids:
+                out[album_id] = await scraper.afetch_album(sess, album_id)
+        return out
+
+    try:
+        return async_loop.run_sync(_pages())
+    finally:
+        if own:
+            scraper.close()

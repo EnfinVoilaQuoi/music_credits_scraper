@@ -13,6 +13,8 @@ les fonctions EXISTANTES dans l'ordre de la force de la preuve, et rien d'autre
     1c artiste Spotify     (vote sur les IDs des non-feats — Kworb en a besoin)
     2c catalogue Kworb     (le vrai catalogue Spotify de l'artiste, ID compris ;
        déménagé du run Streams le 2026-09-28, qui ne fait plus que compter)
+    2d Spotify par la parution (album par MusicBrainz, garde Deezer ; ID par la
+       PLACE sur l'album, gate `valider_identite`) — 2026-10-15
     3b Spotify par morceau (scraper + LLM, gate `valider_identite`, pour ce que
        Kworb n'a pas relié) — APRÈS 3a, pour qu'une durée INDÉPENDANTE existe au
        moment du jugement (73 variantes avaient hérité de l'ID de l'original
@@ -60,6 +62,7 @@ class OptionsIdentite:
     spotify_artiste: bool = True  # 1c
     kworb: bool = True  # 2c
     apple: bool = True  # 3c
+    parutions_spotify: bool = True  # 2d
     isrc: bool = True  # 3d
     nature_disques: bool = True  # 2b
     force: bool = False
@@ -109,6 +112,8 @@ class BilanIdentite(Bilan):
     apple_dementis: int = 0
     #: 3c code-barres : albums Apple rattachés aux parutions, ID proposés.
     apple_parutions: object = None  # apple_parutions.BilanApple
+    #: 2d : album Spotify par MusicBrainz, ID des pistes par la place.
+    spotify_parutions: object = None  # spotify_parutions.BilanSpotifyParutions
     #: 3d : ID Spotify tirés de l'ISRC (ReccoBeats), gate d'identité passé.
     isrc_spotify: int = 0
     types_albums: int = 0
@@ -432,6 +437,23 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
             logger.exception("Identité (Kworb) : échec")
             bilan.artistes["kworb"] = f"panne — {e}"
             panne("Kworb", str(e))
+        _recharger(runtime, artist)
+
+    # 2d — Spotify par la PARUTION (2026-10-15) : l'album Spotify de l'édition
+    # par MusicBrainz (garde : lien Deezer = notre album), puis l'ID de chaque
+    # piste par sa PLACE, jugé par le gate — AVANT le scraper par titre, qui ne
+    # cherche plus que le reste.
+    if options.parutions_spotify and albums_deezer and not arret("Spotify par la parution"):
+        from src.services.spotify_parutions import relier_par_parution
+
+        hooks.progress(0, 1, "Albums par code-barres", "Spotify (MusicBrainz)")
+        try:
+            bilan.spotify_parutions = relier_par_parution(
+                dm, artist, albums_deezer, force=options.force, should_stop=hooks.should_stop
+            )
+        except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
+            logger.exception("Identité (Spotify par la parution) : échec")
+            panne("Spotify par la parution", str(e))
         _recharger(runtime, artist)
 
     # 3b — Spotify par morceau (APRÈS 3a : une durée indépendante existe)

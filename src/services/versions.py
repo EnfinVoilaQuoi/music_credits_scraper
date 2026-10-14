@@ -10,14 +10,20 @@ et à chaque run discographie pour les suivantes.
 
 from __future__ import annotations
 
+from src.models import Credit, CreditRole
 from src.utils.logger import get_logger
+from src.utils.title_matching import names_match_as_words
 from src.utils.version_heritage import (
     IndexSocles,
     est_instrumental,
     famille_de,
     heriter,
+    remixeurs_du_titre,
     socle_parmi,
 )
+
+#: Source d'un crédit lu dans le TITRE de la fiche (le remixeur d'un remix nommé).
+SOURCE_TITRE = "titre"
 
 logger = get_logger(__name__)
 
@@ -41,6 +47,30 @@ def heriter_versions(dm, tracks) -> int:
         n += 1
     if n:
         logger.info(f"↩ Héritage appliqué à {n} fiche(s) de version")
+    return n
+
+
+def crediter_remixeurs(dm, tracks) -> int:
+    """Le remixeur que NOMME le titre d'un remix est crédité « Remixer »
+    (source `titre`) quand aucune source ne le crédite déjà (2026-10-14, WIP
+    « producteur des remix » : 337 remix sans producteur). Le remixeur est le
+    producteur du remix : la validation le compte comme tel
+    (`track_validation.credits_valides`). Rend le nombre de fiches touchées."""
+    n = 0
+    for t in tracks:
+        noms = remixeurs_du_titre(t.title)
+        if not noms or t.id is None:
+            continue
+        deja = [c.name for c in t.credits if c.role == CreditRole.REMIXER]
+        nouveaux = [nom for nom in noms if not any(names_match_as_words(nom, d) for d in deja)]
+        if not nouveaux:
+            continue
+        for nom in nouveaux:
+            t.add_credit(Credit(name=nom, role=CreditRole.REMIXER, source=SOURCE_TITRE))
+        dm.save_track(t)
+        n += 1
+    if n:
+        logger.info(f"🎚️ Remixeur crédité depuis le titre sur {n} remix")
     return n
 
 

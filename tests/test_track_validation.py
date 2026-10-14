@@ -312,3 +312,30 @@ def test_une_fiche_mal_formee_ne_casse_pas_la_table():
     constat = tv.evaluer(_Cassee())
     assert constat.verdict is tv.Verdict.INCOMPLET
     assert any("Validation impossible" in d for d in constat.details)
+
+
+class TestRemixeurProducteur:
+    """2026-10-14 (WIP « producteur des remix ») : le remixeur EST le
+    producteur d'un remix — mesuré, quand MusicBrainz connaît le remixeur d'un
+    remix nommé, c'est celui du titre, 10 fois sur 10."""
+
+    def _t(self, titre, *credits):
+        t = Track(title=titre, artist=Artist(name="Booba"))
+        t.credits = [Credit(name=n, role=r, source="genius") for n, r in credits]
+        return t
+
+    def test_remix_avec_remixeur_et_auteur_est_valide(self):
+        t = self._t(
+            "Dolce Camara (Snight B Remix)",
+            ("Snight B", CreditRole.REMIXER),
+            ("Booba", CreditRole.WRITER),
+        )
+        assert tv.credits_valides(t)
+
+    def test_le_remixeur_ne_produit_pas_un_original(self):
+        t = self._t("Dolce Camara", ("Snight B", CreditRole.REMIXER), ("Booba", CreditRole.WRITER))
+        assert not tv.credits_valides(t)
+
+    def test_le_titre_seul_ne_suffit_pas(self):
+        t = self._t("Dolce Camara (Snight B Remix)", ("Booba", CreditRole.WRITER))
+        assert not tv.credits_valides(t)

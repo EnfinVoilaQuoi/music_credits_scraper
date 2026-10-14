@@ -482,12 +482,17 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     bilan.fusions_inedits = fusionner_doublons_inedits(dm, artist, artist.tracks)
     if bilan.fusions_inedits:
         artist.tracks = dm.get_artist_tracks(artist.id)
-    from src.services.versions import constater_instrumentaux, heriter_versions
+    from src.services.versions import (
+        constater_instrumentaux,
+        crediter_remixeurs,
+        heriter_versions,
+    )
 
     bilan.heritages = heriter_versions(dm, artist.tracks)
     if bilan.heritages:
         artist.tracks = dm.get_artist_tracks(artist.id)
     constater_instrumentaux(dm, artist.tracks)
+    crediter_remixeurs(dm, artist.tracks)
     # Fiches sans page Genius où chante un autre artiste de la base : sa ligne
     # (CORRECTIFS 1.17) — rattrape aussi celles créées avant la règle.
     from src.services.lignes_tiers import rattraper

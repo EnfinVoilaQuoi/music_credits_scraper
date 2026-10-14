@@ -116,6 +116,20 @@ def est_instrumental(titre: str | None) -> bool:
     return bool(_SANS_VOIX.search(titre))
 
 
+_SEPARATEURS_DE_REMIXEURS = re.compile(r"\s+(?:x|&|and|et|vs\.?)\s+|\s*,\s*", re.IGNORECASE)
+
+
+def remixeurs_du_titre(titre: str | None) -> list[str]:
+    """PUR. Les remixeurs que NOMME un titre de remix (« Dolce Camara - Snight
+    B Remix » → Snight B ; « Boulbi (Jaykill & SubLife Remix) » → Jaykill,
+    SubLife), [] sinon. Mesuré le 2026-10-14 : quand MusicBrainz connaît le
+    remixeur d'un remix nommé, c'est celui du titre, 10 fois sur 10."""
+    v = parse_variant(titre or "")
+    if v.kind != Kind.REMIX_NAMED or not v.remixer:
+        return []
+    return [n.strip() for n in _SEPARATEURS_DE_REMIXEURS.split(v.remixer) if n.strip()]
+
+
 def famille_de(titre: str) -> str | None:
     """La famille d'héritage d'un titre de version, None si ce n'est pas une version."""
     from src.utils.version_descriptors import _familles_de_rendition, nature_d_edition

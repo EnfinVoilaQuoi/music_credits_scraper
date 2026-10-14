@@ -264,3 +264,13 @@ def test_spotify_web_ne_dit_pas_le_disque():
     assert position_retenue((2, 1, "deezer"), (1, 11, "spotify_web")) == (2, 1, "deezer")
     assert position_retenue((None, 3, "discogs"), (1, 11, "spotify_web")) == (None, 3, "discogs")
     assert appoint_emplacement([_p(1, 11, "spotify_web")], [_p(1, 11, "spotify_web")]) is None
+
+
+def test_deezer_et_apple_se_comparent_entre_eux():
+    """2026-10-14 : même code-barres, même place ⇒ même morceau 2 519 fois
+    sur 2 520 (Deezer / Apple)."""
+    dit = appoint_emplacement([_p(1, 7, "deezer")], [_p(1, 7, "apple_music")])
+    assert dit and "un seul morceau" in dit
+    dit = appoint_emplacement([_p(1, 7, "deezer")], [_p(1, 8, "apple_music")])
+    assert dit and "deux morceaux" in dit
+    assert appoint_emplacement([_p(1, 7, "deezer")], [_p(1, 7, "musicbrainz")]) is None

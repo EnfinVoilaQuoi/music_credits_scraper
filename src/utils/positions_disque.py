@@ -49,6 +49,17 @@ RANG_POSITION: dict[str, int] = {
 #: Sources dont deux numéros, sur le même disque, se COMPARENT.
 SOURCES_COMPARABLES = frozenset({"manual", "deezer", "apple_music", "musicbrainz"})
 
+#: Sources qui numérotent PAREIL et se comparent ENTRE ELLES. Mesuré le
+#: 2026-10-14 : Deezer et Apple, même code-barres (232 albums, 2 520 pistes),
+#: même place ⇒ même morceau 2 519 fois — les 28 titres écrits autrement
+#: sont des graphies (« F****d Up », « Pt. 1 »), un seul vrai désaccord
+#: (Diam's *S.O.S.*, piste 15, deux instrumentaux).
+_MEME_NUMEROTATION = {"deezer": "plateforme", "apple_music": "plateforme"}
+
+
+def _numerotation(source: str | None) -> str | None:
+    return _MEME_NUMEROTATION.get(source or "", source)
+
 
 def rang(source: str | None) -> int:
     return RANG_POSITION.get(source or "legacy", 0)
@@ -79,8 +90,8 @@ def appoint_emplacement(a: list[dict], b: list[dict]) -> str | None:
     """PUR. Ce que les places de deux fiches disent d'elles, ou None.
 
     `a`, `b` : `[{release_id, title, disc_number, track_number,
-    position_source}]`. Seuls deux numéros d'une MÊME source comparable sur
-    une MÊME parution parlent ; la première preuve trouvée est rendue —
+    position_source}]`. Seuls deux numéros d'une MÊME numérotation (même
+    source comparable, ou Deezer face à Apple) sur une MÊME parution parlent ; la première preuve trouvée est rendue —
     « un seul morceau » (même place) l'emporte sur « deux morceaux »."""
     places_b = [_place(p) for p in b if p.get("track_number") is not None]
     deux = None
@@ -89,7 +100,7 @@ def appoint_emplacement(a: list[dict], b: list[dict]) -> str | None:
             continue
         ra, da, na, sa = _place(p)
         for rb, db, nb, sb in places_b:
-            if rb != ra or sb != sa:
+            if rb != ra or _numerotation(sb) != _numerotation(sa):
                 continue
             if (db, nb) == (da, na):
                 return f"même place sur « {p['title']} » (piste {na}, {sa}) : un seul morceau"

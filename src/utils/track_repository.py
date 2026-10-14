@@ -4377,6 +4377,22 @@ class TrackRepository:
             logger.error(f"Erreur get_deezer_release_links({artist_id}): {e}")
             return set()
 
+    def track_ids_avec_parution(self, artist_id: int, source: str) -> set[int]:
+        """Fiches de l'artiste qu'une SOURCE a déjà rattachées à une parution
+        (`release_track_sources`) — ce qu'une relecture n'a pas à refaire."""
+        with self.engine.connect() as conn:
+            return set(
+                conn.execute(
+                    text(
+                        "SELECT DISTINCT rt.track_id FROM release_track_sources s "
+                        "JOIN release_tracks rt ON rt.id = s.release_track_id "
+                        "JOIN tracks t ON t.id = rt.track_id "
+                        "WHERE t.artist_id = :a AND s.source = :s"
+                    ),
+                    {"a": artist_id, "s": source},
+                ).scalars()
+            )
+
     def get_artist_positions(self, artist_id: int) -> dict[int, list[dict[str, Any]]]:
         """`{track_id: [{release_id, title, disc_number, track_number,
         position_source}]}` des fiches de l'artiste, liens NUMÉROTÉS seuls —

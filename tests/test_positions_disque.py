@@ -243,3 +243,12 @@ def test_les_ids_du_disque_excluent_les_titres_generiques(data_manager):
         t.spotify_id = sid
         data_manager.save_track(t)
     assert data_manager.ids_spotify_du_disque(artist.id, "PREMIER MANDAT") == ["M" * 22]
+
+
+def test_fiches_deja_rattachees_par_une_source(data_manager):
+    artist, track = _fiche(data_manager)
+    autre = Track(title="Autre", artist=artist)
+    autre.id = data_manager.save_track(autre)
+    data_manager.record_release_observations(track.id, [_obs("apple_music", 4, 1, release_id=9)])
+    data_manager.record_release_observations(autre.id, [_obs("deezer", 5, 1)])
+    assert data_manager.track_ids_avec_parution(artist.id, "apple_music") == {track.id}

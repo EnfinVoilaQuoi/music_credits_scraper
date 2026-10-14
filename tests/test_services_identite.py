@@ -591,6 +591,9 @@ class TestAppleMusic:
         def record_release_observations(self, tid, observations):
             self.parutions[tid] = observations
 
+        def track_ids_avec_parution(self, artist_id, source):
+            return set()
+
     class _Client:
         def __init__(self, fiches):
             self.fiches, self.demandes = fiches, None
@@ -653,6 +656,34 @@ class TestAppleMusic:
         assert client.demandes == {"11", "22"}
         identite.verifier_apple_music(rt, artist, client=client, force=True)
         assert "33" in client.demandes
+
+    def test_un_id_deja_verifie_recoit_sa_parution_sans_etre_rejuge(self):
+        """Les ID posés avant 2026-10-14 n'ont pas de parution iTunes : relus
+        dans le même lot, ils la reçoivent ; l'ID et la date ne bougent pas."""
+        from src.models import Artist
+
+        artist = Artist(name="Kanye West")
+        artist.id = 1
+        t = Track(title="Stronger", artist=artist)
+        t.id, t.apple_music_id = 1, "11"
+        artist.tracks = [t]
+        dm = self._DMApple({})
+        client = self._Client(
+            {
+                "11": {
+                    "artistName": "Kanye West",
+                    "trackName": "Stronger",
+                    "collectionId": 900,
+                    "collectionName": "Graduation",
+                    "trackNumber": 3,
+                    "discNumber": 1,
+                }
+            }
+        )
+        rt = SimpleNamespace(data_manager=dm)
+        assert identite.verifier_apple_music(rt, artist, client=client) == (0, 0)
+        assert dm.parutions[1][0].track_number == 3
+        assert dm.ecrits == {} and dm.durees == {}
 
     def test_une_fiche_inedite_ne_recoit_pas_l_id_du_titre_sorti(self):
         """Booba, 2026-10-10 : la page de « Cavaliero (Feat. Koba LaD) » (première

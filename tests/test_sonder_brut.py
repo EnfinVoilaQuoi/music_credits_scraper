@@ -54,3 +54,18 @@ def test_lecture_de_la_base_la_plus_recente_par_requete(tmp_path):
     conn.commit()
     conn.close()
     assert sb.lire(str(base), "deezer", r"/album/\d+$", None) == [{"upc": "recent"}]
+
+
+def test_concordance_par_isrc():
+    docs = [
+        {"isrc": "FR1", "gain": -9.4, "id": 1},
+        {"isrc": "FR1", "gain": -9.4, "id": 2},
+        {"isrc": "FR2", "gain": -8.0, "id": 3},
+        {"isrc": "FR2", "gain": -9.1, "id": 4},
+        {"isrc": "FR3", "gain": -7.0, "id": 5},
+        {"gain": -6.0},
+    ]
+    r = sb.concordance(docs, "isrc", ["gain", "id"])
+    assert (r["gain"]["groupes"], r["gain"]["concordants"]) == (2, 1)
+    assert r["gain"]["divergents"] == [('"FR2"', ["[-8.0]", "[-9.1]"])]
+    assert r["id"]["concordants"] == 0

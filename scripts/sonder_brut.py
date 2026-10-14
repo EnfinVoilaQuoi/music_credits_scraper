@@ -15,6 +15,7 @@ Usage :
     python scripts/sonder_brut.py --bilan
     python scripts/sonder_brut.py deezer --url "/album/\\d+$" upc nb_tracks label record_type
     python scripts/sonder_brut.py deezer --url "/track/\\d+$" gain track_position disk_number
+    python scripts/sonder_brut.py deezer --url "/track/\\d+$" --par isrc gain duration id
     python scripts/sonder_brut.py itunes results[].trackNumber results[].trackExplicitness
     python scripts/sonder_brut.py musicbrainz --url "/artist/" relations[].url.resource \\
         --motif open.spotify.com
@@ -77,6 +78,33 @@ def sonder(corps: list, chemins: list[str], motif: str | None = None) -> dict:
     return rapport
 
 
+def concordance(corps: list, cle: str, chemins: list[str]) -> dict:
+    """PUR. Les réponses regroupées par la valeur de `cle` (ISRC, UPC…) : pour
+    chaque chemin, groupes de 2 réponses ou plus où il CONCORDE ou DIVERGE.
+    Un champ qui concorde à ISRC égal et diverge ailleurs est une empreinte."""
+    groupes: dict[str, list] = {}
+    for doc in corps:
+        vs = [v for v in valeurs(doc, cle) if v not in (None, "")]
+        if vs:
+            groupes.setdefault(json.dumps(vs[0], ensure_ascii=False), []).append(doc)
+    multiples = {k: g for k, g in groupes.items() if len(g) >= 2}
+    rapport = {}
+    for chemin in chemins:
+        concordants, divergents = 0, []
+        for k, g in multiples.items():
+            vus = {json.dumps(valeurs(d, chemin), ensure_ascii=False)[:80] for d in g}
+            if len(vus) == 1:
+                concordants += 1
+            else:
+                divergents.append((k, sorted(vus)))
+        rapport[chemin] = {
+            "groupes": len(multiples),
+            "concordants": concordants,
+            "divergents": divergents,
+        }
+    return rapport
+
+
 def lire(chemin_base: str, source: str, url: str | None, limite: int | None) -> list:
     """Les réponses JSON les plus RÉCENTES de la source (une par requête)."""
     conn = sqlite3.connect(f"file:{chemin_base}?mode=ro", uri=True)
@@ -113,6 +141,9 @@ def main() -> int:
     parser.add_argument("--limite", type=int, help="nombre maximum de réponses lues")
     parser.add_argument("--top", type=int, default=8, help="valeurs les plus fréquentes montrées")
     parser.add_argument("--bilan", action="store_true", help="ce que garde le brut, par source")
+    parser.add_argument(
+        "--par", help="regrouper par ce chemin (isrc, upc…) et dire si les autres concordent"
+    )
     args = parser.parse_args()
 
     if args.bilan or not args.source:
@@ -123,6 +154,15 @@ def main() -> int:
     print(
         f"{len(docs)} réponse(s) JSON de « {args.source} »" + (f" ({args.url})" if args.url else "")
     )
+    if args.par:
+        for chemin, r in concordance(docs, args.par, args.chemins).items():
+            print(
+                f"\n{chemin} — {r['groupes']} groupe(s) de même {args.par} : "
+                f"{r['concordants']} concordent, {len(r['divergents'])} divergent"
+            )
+            for cle, vus in r["divergents"][: args.top]:
+                print(f"   {cle} : {' | '.join(vus)}")
+        return 0
     for chemin, r in sonder(docs, args.chemins, args.motif).items():
         print(f"\n{chemin}\n   présent : {r['present']}   ·   renseigné : {r['renseigne']}")
         for valeur, n in r["valeurs"].most_common(args.top):

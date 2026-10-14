@@ -483,10 +483,25 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
         for o in obs.get(t.id, []):
             if o.field == CHAMP_APPLE_PROPOSE and o.value:
                 proposes[t.id] = str(o.value)
+    # Les ID DÉJÀ vérifiés sans parution iTunes (posés avant 2026-10-14) : leur
+    # fiche porte la place de la piste. Relus dans le même lot, l'ID n'est pas
+    # rejugé — seule la parution est versée.
+    avec_parution = dm.track_ids_avec_parution(artist.id, SOURCE_APPLE)
+    a_completer = {
+        t.id: t.apple_music_id
+        for t in artist.tracks
+        if t.apple_music_id and t.id not in avec_parution
+    }
+    if not proposes and not a_completer:
+        return 0, 0
+    fiches = (client or ITunesAPI()).lookup(set(proposes.values()) | set(a_completer.values()))
+    par_id = {t.id: t for t in artist.tracks}
+    for tid, am in a_completer.items():
+        parution = parution_de(par_id[tid], fiches.get(am))
+        if parution is not None:
+            dm.record_release_observations(tid, [parution])
     if not proposes:
         return 0, 0
-    fiches = (client or ITunesAPI()).lookup(set(proposes.values()))
-    par_id = {t.id: t for t in artist.tracks}
     # Un identifiant de boutique désigne UN enregistrement publié (2026-10-10,
     # Booba : la page de « Cavaliero (Feat. Koba LaD) », première version
     # jamais sortie, déclarait l'ID du « CAVALIERO » sorti — et la fiche iTunes

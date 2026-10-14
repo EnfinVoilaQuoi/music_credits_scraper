@@ -49,13 +49,17 @@ CHAINES: dict[str, list[tuple[str, str, str]]] = {
     "Keny Arkana": [("UC0fFj_FgksTyPJzGoUVFBqw", "Keny Arkana", OFFICIELLE)],
 }
 
-#: Chaînes CATALOGUE (label, producteur) : valables pour tout artiste, quand le
-#: titre de la vidéo NOMME l'artiste — un catalogue publie mille morceaux,
-#: dont des homonymes (« Intro ») d'autres artistes.
+#: Chaînes PARTAGÉES : valables pour tout artiste, quand le titre de la vidéo
+#: NOMME l'artiste — elles publient les morceaux de beaucoup d'autres, dont des
+#: homonymes (« Intro »).
 CATALOGUES: list[tuple[str, str]] = [
+    # Catalogues de label : rap français d'avant les plateformes.
+    ("UC23Q7PnQFG_dlTkBwiPaS5Q", "FULL CLIP"),  # ~770 titres (Sniper, Kery James, Psy4…)
     # Mala, Booba, L'Skadrille, La Fouine… (~400 titres ; « [FREE] » = type beats).
     ("UCGHR77It-MJi_tPL-mACryQ", "Addictive Music"),
-    # Beatmaker : les morceaux qu'il a produits (« Gunners », All Star Game).
+    # Chaîne d'ARTISTE d'un producteur : ses morceaux en featuring avec des
+    # rappeurs de la base (Lucio Bukowski, Limsa, « Gunners » de Flynt) — le
+    # morceau peut appartenir à l'un ou l'autre (correction utilisateur 2026-10-14).
     ("UCaG37kVuqCDOvJtcio88k9Q", "Mani Deïz"),
 ]
 

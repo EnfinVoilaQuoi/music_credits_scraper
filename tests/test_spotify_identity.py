@@ -323,6 +323,34 @@ class TestTitreContenu:
         assert ok is False
         assert "durée indépendante" in motif
 
+    @pytest.mark.parametrize(
+        ("fiche", "servi", "artiste"),
+        [
+            # Audit de la base du 2026-10-15 : 13 ID justes que la première
+            # version de la règle refusait — le mot en plus n'est qu'une
+            # ANNOTATION hors du titre principal.
+            ("Outro (Labrador bleu)", "Outro", "Isha"),
+            ("Armand Assante", "Armand Assante (Prod by Kanye West)", "Kanye West"),
+            (
+                "Do You Have the Stamina?",
+                "Do you have the Stamina (feat. Kanye West) [prod. B.o.B]",
+                "Kanye West",
+            ),
+            ("I Love It", "I Love It (& Lil Pump)", "Kanye West"),
+            ("Wouldn’t You Like to Ride", "Wouldn't You Like To…", "Kanye West"),
+            ("Miraculeuse liqueur", "Miraculeuse liqueur (scratches DJ Syr)", "Lucio Bukowski"),
+            ("Tchouen (La difficulté initiale)", "Tchouen", "Lucio Bukowski"),
+            ("Today is a good day", "Today Is a Good Day - Darina", "MC Solaar"),
+            ("CLOSE", "CLOSE (feat. Travis Scott) - From SR3MM", "Travis Scott"),
+            ("FLORIDA FLOW (Physical Edition)", "FLORIDA FLOW", "Travis Scott"),
+        ],
+    )
+    def test_une_annotation_hors_du_titre_principal_ne_refuse_pas(self, fiche, servi, artiste):
+        ok, motif = identite_concorde(
+            _track(titre=fiche, artiste=artiste), _identite(servi, [artiste], 200)
+        )
+        assert ok, motif
+
     def test_contenu_corrobore_par_une_duree_independante(self):
         track = _track(titre="Civilisé", artiste="Booba", durations_observees={"deezer": 199})
         assert identite_concorde(track, _identite("Civilisé, partie 1", ["Booba"], 200))[0]

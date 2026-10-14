@@ -28,6 +28,7 @@ from src.utils.title_matching import (
     either_contains_as_words,
     names_match_as_words,
     normalize_title,
+    strip_featuring,
 )
 from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import (
@@ -395,7 +396,16 @@ def identite_concorde(
         # Killer », Diam's « L'amour Véritable » ← « L'AMOUR ». Le mot en plus
         # fait souvent un AUTRE morceau ; seule une durée indépendante
         # concordante dit que c'est le même.
+        #
+        # Mesuré le lendemain sur la base (audit, 6 325 ID) : 16 titres
+        # contenus, 3 faux seulement. Les 13 justes n'ajoutaient qu'une
+        # ANNOTATION hors du titre principal — « (& Lil Pump) », « (Prod by
+        # Kanye West) », « - Darina », « (Physical Edition) », « - From
+        # SR3MM », « To… » tronqué. Seul un mot en plus DANS le titre principal
+        # exige la durée (`memes_titres_principaux`).
         if either_contains_as_words(a, b):
+            if memes_titres_principaux(track.title, titre_spotify):
+                return True, ""
             return False, (
                 f"titre : Spotify sert « {titre_spotify} », non corroboré par une "
                 "durée indépendante"
@@ -414,6 +424,34 @@ def identite_concorde(
         return False, f"titre : Spotify sert « {titre_spotify} »"
 
     return True, ""
+
+
+_GROUPES = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
+_SEGMENT = re.compile(r"\s+[-–—]\s+.*$")
+_POINTS_DE_SUSPENSION = re.compile(r"\s*(?:…|\.\.\.)\s*$")
+
+
+def _titre_principal(titre: str) -> tuple[str, bool]:
+    """`(titre principal normalisé, coupé ?)` : sans featuring, sans groupes
+    entre parenthèses ou crochets, sans segment « - … », sans « … » final
+    (coupé = la plateforme a tronqué le titre)."""
+    t = strip_featuring(titre or "")
+    t = _GROUPES.sub(" ", t)
+    t = _SEGMENT.sub("", t)
+    coupe = bool(_POINTS_DE_SUSPENSION.search(t))
+    return normalize_title(_POINTS_DE_SUSPENSION.sub("", t)), coupe
+
+
+def memes_titres_principaux(a: str | None, b: str | None) -> bool:
+    """PUR. Les deux titres ont le même titre PRINCIPAL — ce qui les sépare
+    n'est qu'une annotation (crédit, sous-titre, provenance, support) — ou
+    l'un est le début tronqué (« … ») de l'autre."""
+    (pa, ca), (pb, cb) = _titre_principal(a or ""), _titre_principal(b or "")
+    if not pa or not pb:
+        return False
+    if pa == pb:
+        return True
+    return (ca and pb.startswith(pa + " ")) or (cb and pa.startswith(pb + " "))
 
 
 def artiste_etranger(track, identite: dict | None) -> bool:

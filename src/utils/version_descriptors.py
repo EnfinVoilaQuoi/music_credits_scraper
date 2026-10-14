@@ -774,6 +774,21 @@ def _sans_parentheses(titre: str) -> str:
     return re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre).strip()
 
 
+#: Lettres MASQUÉES par la plateforme (« F****d Up », « Sh!t », « N**** ») :
+#: étoiles ou « ! » DANS un mot, ou au moins deux étoiles en fin de mot —
+#: jamais l'astérisque seule et finale d'un inédit (« Drugs 2* », `inedits`).
+_CENSURE = re.compile(r"(?<=\w)(?:[*!]+(?=\w)|\*{2,})")
+_JOKER = "qzxjqzxj"
+
+
+def _motif_censure(titre: str) -> re.Pattern | None:
+    """Le titre normalisé où chaque masque vaut « des lettres », ou None."""
+    if not _CENSURE.search(titre):
+        return None
+    norme = normalize_title(_CENSURE.sub(_JOKER, titre))
+    return re.compile(re.escape(norme).replace(_JOKER, r"\w+"))
+
+
 @dataclass(frozen=True)
 class CleTitre:
     #: Le titre tel que reçu (vide si None).
@@ -789,6 +804,8 @@ class CleTitre:
     parties: frozenset[int]
     #: Titre générique hors parenthèses (« Intro », « Interlude », « Skit »).
     generique: bool
+    #: Le titre aux lettres masquées, en motif (`_motif_censure`), ou None.
+    censure: re.Pattern | None = None
 
 
 @lru_cache(maxsize=1 << 16)
@@ -802,9 +819,14 @@ def cle_titre(titre: str | None) -> CleTitre:
         norme=norme,
         compact=norme.replace(" ", ""),
         variant=v,
-        socle=normalize_title(v.socle),
+        # Le marqueur de PARTIE sort du socle : les numéros se comparent à part
+        # (`parties`), et « Bouge de là (Part. 1) » / « Bouge de là, Pt. 1 »
+        # (Deezer / Apple, même place du même disque) donnaient « part1 » /
+        # « pt1 » (2026-10-14).
+        socle=normalize_title(_PARTIE_DU_MORCEAU.sub(" ", v.socle)),
         parties=parties_du_morceau(t),
         generique=titre_generique(_sans_parentheses(t)),
+        censure=_motif_censure(t),
     )
 
 
@@ -813,6 +835,10 @@ def meme_enregistrement(a: CleTitre, b: CleTitre) -> bool:
     if not a.titre or not b.titre:
         return False
     if a.norme and a.norme == b.norme:
+        return True
+    # Apple masque les gros mots (« F****d Up 3 ») que Deezer et Genius
+    # écrivent en clair — même place du même disque (2026-10-14, Josman).
+    if (a.censure and a.censure.fullmatch(b.norme)) or (b.censure and b.censure.fullmatch(a.norme)):
         return True
     if a.parties != b.parties or a.socle != b.socle:
         return False

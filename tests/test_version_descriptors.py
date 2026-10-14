@@ -447,3 +447,35 @@ class TestVocabulaireDu20261014:
         souvent qu'il ne décrit une version (« Freestyle CKO », « Bonnie &
         Clyde Freestyle ») — 170 appariements de vidéos auraient sauté."""
         assert parse_variant("Hurricane (Car Freestyle)").kind == Kind.NONE
+
+
+class TestGraphiesDesPlateformes:
+    """2026-10-14 : Deezer et Apple, même place d'un même code-barres, 2 520
+    pistes — 99,9 % le même morceau. Parmi les 28 titres écrits autrement,
+    deux écarts que `titres_equivalents` refusait à tort. (« (Bonus Track) »
+    face au titre nu reste une VERSION qui hérite de tout — décision du
+    2026-09-24 : en faire une édition de diffusion est une autre décision.)"""
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("Bouge de là (Part. 1)", "Bouge de là, Pt. 1"),
+            ("Solo Dolo Part II (Explicit Version)", "Solo Dolo, Pt. II (feat. Kendrick Lamar)"),
+            ("Fucked Up 3", "F****d Up 3"),
+            ("New Hares (Same Sh!t)", "New Hares (Same Shit)"),
+            ("Illest Motherf***** Alive", "Illest Motherfucker Alive"),
+        ],
+    )
+    def test_meme_morceau(self, a, b):
+        assert titres_equivalents(a, b)
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("Bouge de là (Part. 1)", "Bouge de là, Pt. 2"),
+            ("Fucked Up 3", "F****d Up 4"),
+            ("Drugs 2*", "Drugs"),  # l'astérisque d'inédit n'est pas un masque
+        ],
+    )
+    def test_toujours_distincts(self, a, b):
+        assert not titres_equivalents(a, b)
